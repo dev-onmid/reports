@@ -31,11 +31,12 @@ export function Sidebar() {
   return (
     <aside className="w-64 bg-background border-r border-border h-screen flex flex-col sticky top-0 relative z-20">
       <div className="h-20 flex items-center px-6 border-b border-border">
-        <Link href="/dashboard" className="flex items-center gap-2">
-          <span className="text-3xl font-heading tracking-wider text-foreground">ONMID</span>
-          <div className="w-9 h-4.5 bg-[#55F52F] rounded-full flex items-center p-[2px] relative shadow-[0_0_10px_rgba(85,245,47,0.3)]">
-            <div className="w-3.5 h-3.5 bg-[#111] rounded-full absolute right-[2px]"></div>
-          </div>
+        <Link href="/dashboard" className="flex items-center">
+          <img
+            src="/brand/onmid-logo-white.png"
+            alt="Onmid"
+            className="h-8 w-auto max-w-[160px] object-contain"
+          />
         </Link>
       </div>
 

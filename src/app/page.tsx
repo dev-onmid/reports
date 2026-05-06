@@ -16,12 +16,11 @@ export default function LoginPage() {
 
       <div className="w-full max-w-md bg-card/80 backdrop-blur-2xl border border-primary/30 rounded-2xl p-10 shadow-[0_0_40px_rgba(85,245,47,0.05)] relative z-10">
         <div className="flex flex-col items-center mb-10">
-          <div className="flex items-center gap-2 mb-6">
-            <span className="text-4xl font-heading tracking-wider text-foreground">ONMID</span>
-            <div className="w-10 h-5 bg-[#55F52F] rounded-full flex items-center p-[2px] relative shadow-[0_0_15px_rgba(85,245,47,0.4)]">
-              <div className="w-4 h-4 bg-[#111] rounded-full absolute right-[2px]"></div>
-            </div>
-          </div>
+          <img
+            src="/brand/onmid-logo-white.png"
+            alt="Onmid"
+            className="mb-6 h-14 w-auto max-w-[260px] object-contain"
+          />
           <h1 className="text-3xl font-heading tracking-wider text-foreground uppercase">Acesso Restrito</h1>
           <p className="text-sm text-muted-foreground mt-2 font-medium">Plataforma de Relatórios Estratégicos</p>
         </div>
