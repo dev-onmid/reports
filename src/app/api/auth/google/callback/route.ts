@@ -7,7 +7,11 @@ let pool: Pool | null = null;
 function getPool(): Pool {
   if (!pool) {
     pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
+      host: 'db.iremmorsgwiqrorzoihx.supabase.co',
+      port: 5432,
+      database: 'postgres',
+      user: 'postgres',
+      password: process.env.SUPABASE_DB_PASSWORD,
       ssl: { rejectUnauthorized: false },
       max: 1,
     });
