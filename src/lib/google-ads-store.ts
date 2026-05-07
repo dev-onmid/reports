@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { assertSupabaseConfigured, supabase } from '@/lib/supabase';
 
 const GOOGLE_ADS_UPDATED_EVENT = 'google-ads-updated';
+export const GOOGLE_ADS_DEVELOPER_TOKEN = '1vR8GhAk4UMZoPaqo7Qq8Q';
 
 export type GoogleAdsMetrics = {
   cost: number;
