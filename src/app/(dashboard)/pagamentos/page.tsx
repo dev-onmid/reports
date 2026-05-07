@@ -15,6 +15,7 @@ import {
   Send,
   Trash2,
   WalletCards,
+  ChevronDown,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -74,7 +75,9 @@ function CriticalBalanceAlerts({
   lastUpdated: Date | null;
   onRefresh: () => void;
 }) {
+  const [expanded, setExpanded] = useState(true);
   const critical = balances.filter(b => b.balance !== null && b.balance < LOW_BALANCE_THRESHOLD);
+  const visibleCritical = expanded ? critical : critical.slice(0, 4);
 
   if (!loading && critical.length === 0) return null;
 
@@ -88,6 +91,16 @@ function CriticalBalanceAlerts({
           </h2>
         </div>
         <div className="flex items-center gap-2">
+          {critical.length > 4 && (
+            <button
+              type="button"
+              onClick={() => setExpanded((value) => !value)}
+              className="flex items-center gap-1 rounded-md border border-red-500/30 px-2 py-1 text-[10px] font-bold text-red-300 transition-colors hover:bg-red-500/10"
+            >
+              {expanded ? 'Minimizar' : `Ver ${critical.length}`}
+              <ChevronDown className={cn('h-3 w-3 transition-transform', expanded && 'rotate-180')} />
+            </button>
+          )}
           {lastUpdated && (
             <span className="text-[10px] text-muted-foreground">
               {lastUpdated.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
@@ -105,33 +118,35 @@ function CriticalBalanceAlerts({
       </div>
 
       {loading && critical.length === 0 ? (
-        <div className="space-y-2">
-          {[1, 2].map(i => <div key={i} className="h-10 bg-red-500/10 rounded-lg animate-pulse" />)}
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          {[1, 2, 3, 4].map(i => <div key={i} className="h-24 bg-red-500/10 rounded-lg animate-pulse" />)}
         </div>
       ) : (
-        <div className="space-y-2">
-          {critical.map(account => (
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          {visibleCritical.map(account => (
             <div
               key={account.id}
-              className="flex items-center gap-3 rounded-lg bg-red-500/10 border border-red-500/30 px-3 py-2"
+              className="rounded-lg bg-red-500/10 border border-red-500/30 p-3"
             >
-              <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold truncate">{account.name}</p>
-                <p className="text-[10px] font-mono text-muted-foreground">{account.id}</p>
+              <div className="flex items-start justify-between gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                <p className="text-lg font-bold text-red-400 shrink-0 tabular-nums leading-none">
+                  {formatCurrencyBRL(account.balance ?? 0)}
+                </p>
               </div>
-              <p className="text-lg font-bold text-red-400 shrink-0 tabular-nums">
-                {formatCurrencyBRL(account.balance ?? 0)}
-              </p>
+              <div className="mt-2 min-w-0">
+                <p className="text-sm font-semibold truncate">{account.name}</p>
+                <p className="text-[10px] font-mono text-muted-foreground truncate">{account.id}</p>
+              </div>
               <a
                 href={`https://business.facebook.com/ads/manager/billing/?act=${account.id.replace('act_', '')}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-1 text-[10px] font-bold px-2.5 py-1.5 rounded-lg bg-red-500 text-white hover:bg-red-600 transition-colors shrink-0"
+                className="mt-3 flex h-8 items-center justify-center gap-1 rounded-md bg-red-500 px-2 text-[10px] font-bold text-white transition-colors hover:bg-red-600"
                 title="Adicionar saldo no Meta Ads Manager"
               >
                 <PlusCircle className="w-3 h-3" />
-                Adicionar saldo
+                Saldo
                 <ExternalLink className="w-3 h-3 ml-0.5" />
               </a>
             </div>

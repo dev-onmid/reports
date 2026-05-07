@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { useClients } from '@/lib/client-store';
 import { loadIntegrations, loadCachedAdAccounts, readIntegrations, type CachedAdAccount } from '@/lib/integration-store';
 import { useMetaAdsConnections } from '@/lib/meta-ads-store';
+import { saveReport } from '@/lib/report-store';
 import { Sparkles, AlertTriangle, Users, RefreshCw, Check, BarChart3 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -162,6 +163,32 @@ const PLATFORM_LABELS: Record<string, string> = { facebook: 'Facebook', instagra
 const GENDER_LABELS: Record<string, string> = { male: 'Masculino', female: 'Feminino', unknown: 'Desconhecido' };
 const PLATFORM_COLORS: Record<string, string> = { Facebook: '#1877F2', Instagram: '#E1306C', 'Audience Network': '#f59e0b', Messenger: '#00B2FF' };
 const GENDER_COLORS: Record<string, string> = { Masculino: '#3b82f6', Feminino: '#ec4899', Desconhecido: '#94a3b8' };
+
+function buildReportHtml(report: FullAccountReport) {
+  const cur = report.currency;
+  const campaigns = report.campaigns.slice(0, 8).map((campaign) => `
+    <tr>
+      <td>${campaign.name}</td>
+      <td>${fmt(campaign.spend, cur)}</td>
+      <td>${fmtN(campaign.impressions)}</td>
+      <td>${fmtN(campaign.clicks)}</td>
+      <td>${campaign.resultLabel}: ${fmtN(campaign.resultValue)}</td>
+    </tr>
+  `).join('');
+
+  return `
+    <h2>Resumo</h2>
+    <table>
+      <tr><th>Investimento</th><td>${fmt(report.spend, cur)}</td></tr>
+      <tr><th>Alcance</th><td>${fmtN(report.reach)}</td></tr>
+      <tr><th>Impressões</th><td>${fmtN(report.impressions)}</td></tr>
+      <tr><th>Cliques</th><td>${fmtN(report.clicks)}</td></tr>
+      <tr><th>CTR</th><td>${fmtP(report.ctr)}</td></tr>
+      <tr><th>${report.mainConversionLabel}</th><td>${fmtN(report.mainConversionCount)}</td></tr>
+    </table>
+    ${campaigns ? `<h2>Campanhas</h2><table><thead><tr><th>Campanha</th><th>Investimento</th><th>Impressões</th><th>Cliques</th><th>Resultado</th></tr></thead><tbody>${campaigns}</tbody></table>` : ''}
+  `;
+}
 
 async function fetchFullReport(
   accountId: string, accountName: string, currency: string,
@@ -645,6 +672,23 @@ export default function NovoRelatorioPage() {
         accountsForReport.map(a => fetchFullReport(a.id, a.name, a.currency, token, period, dateFrom, dateTo)),
       );
       setReports(results);
+      const clientName = source === 'client'
+        ? clients.find((client) => client.id === selectedClientId)?.name ?? 'Cliente'
+        : 'Conta avulsa';
+      const clientId = source === 'client' ? selectedClientId : `account-${accountsForReport[0]?.id ?? Date.now()}`;
+      const date = new Date().toLocaleDateString('pt-BR');
+      results.forEach((report) => {
+        saveReport({
+          id: `report-${report.accountId}-${Date.now()}`,
+          title: `Relatório Meta Ads - ${report.accountName}`,
+          clientId,
+          client: clientName,
+          date,
+          status: 'Gerado',
+          summary: `${PERIOD_LABELS[period]} · ${fmt(report.spend, report.currency)} investidos · ${fmtN(report.clicks)} cliques · ${fmtN(report.mainConversionCount)} ${report.mainConversionLabel.toLowerCase()}.`,
+          html: buildReportHtml(report),
+        });
+      });
     } catch (err) {
       setGenerateError(err instanceof Error ? err.message : 'Erro ao gerar relatório');
     } finally {

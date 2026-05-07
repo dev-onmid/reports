@@ -1,21 +1,30 @@
 "use client";
 
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Plus, Download, Eye, MoreVertical } from 'lucide-react';
-import { mockClients } from '@/lib/mock-data';
+import { Plus, Download, Eye, Trash2 } from 'lucide-react';
 import { useClients } from '@/lib/client-store';
-
-const mockReports = [
-  { id: 1, title: 'Relatório Mensal - Abril 2026', clientId: mockClients[0].id, client: mockClients[0].name, date: '01/05/2026', status: 'Gerado' },
-  { id: 2, title: 'Performance Campanhas Q1', clientId: mockClients[1].id, client: mockClients[1].name, date: '15/04/2026', status: 'Enviado' },
-  { id: 3, title: 'Análise de Social Media', clientId: mockClients[2].id, client: mockClients[2].name, date: '10/04/2026', status: 'Rascunho' },
-];
+import { deleteReport, downloadReportPdf, readReports, subscribeReports, type StoredReport } from '@/lib/report-store';
 
 export default function RelatoriosPage() {
   const { clients } = useClients();
+  const [libraryReports, setLibraryReports] = useState<StoredReport[]>([]);
+
+  useEffect(() => {
+    setLibraryReports(readReports());
+    return subscribeReports(() => setLibraryReports(readReports()));
+  }, []);
+
   const visibleClientIds = new Set(clients.map((client) => client.id));
-  const reports = mockReports.filter((report) => visibleClientIds.has(report.clientId));
+  const reports = libraryReports.filter((report) => visibleClientIds.has(report.clientId));
+
+  function handleDelete(report: StoredReport) {
+    const confirmed = window.confirm(`Excluir o relatório "${report.title}"? Essa ação não pode ser desfeita.`);
+    if (!confirmed) return;
+    deleteReport(report.id);
+    setLibraryReports(readReports());
+  }
 
   return (
     <div className="space-y-6">
@@ -64,11 +73,17 @@ export default function RelatoriosPage() {
                   <Button variant="ghost" size="icon" title="Visualizar">
                     <Eye className="w-4 h-4" />
                   </Button>
-                  <Button variant="ghost" size="icon" title="Baixar PDF">
+                  <Button variant="ghost" size="icon" title="Baixar PDF" onClick={() => downloadReportPdf(report)}>
                     <Download className="w-4 h-4" />
                   </Button>
-                  <Button variant="ghost" size="icon">
-                    <MoreVertical className="w-4 h-4" />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    title="Excluir relatório"
+                    className="text-red-500 hover:text-red-400 hover:bg-red-500/10"
+                    onClick={() => handleDelete(report)}
+                  >
+                    <Trash2 className="w-4 h-4" />
                   </Button>
                 </td>
               </tr>
