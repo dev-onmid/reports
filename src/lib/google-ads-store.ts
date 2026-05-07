@@ -5,6 +5,8 @@ import { assertSupabaseConfigured, supabase } from '@/lib/supabase';
 
 const GOOGLE_ADS_UPDATED_EVENT = 'google-ads-updated';
 export const GOOGLE_ADS_DEVELOPER_TOKEN = '1vR8GhAk4UMZoPaqo7Qq8Q';
+export const GOOGLE_ADS_LOGIN_EMAIL = 'matheus.onmid@gmail.com';
+export const GOOGLE_ADS_DEFAULT_MANAGER_ID = 'mcc-8493021188';
 
 export type GoogleAdsMetrics = {
   cost: number;

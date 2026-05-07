@@ -4,7 +4,14 @@ import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, XCircle, ExternalLink, X, AlertCircle, ChevronDown, RefreshCw, Building2, Megaphone, Camera } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { GOOGLE_ADS_DEVELOPER_TOKEN, GOOGLE_ADS_MANAGERS, useGoogleAds, type GoogleAdsIntegration } from '@/lib/google-ads-store';
+import {
+  GOOGLE_ADS_DEFAULT_MANAGER_ID,
+  GOOGLE_ADS_DEVELOPER_TOKEN,
+  GOOGLE_ADS_LOGIN_EMAIL,
+  GOOGLE_ADS_MANAGERS,
+  useGoogleAds,
+  type GoogleAdsIntegration,
+} from '@/lib/google-ads-store';
 import {
   loadIntegrations,
   readIntegrations,
@@ -479,27 +486,30 @@ function GoogleAdsConnectModal({
   onClose: () => void;
   onConnected: (google: GoogleAdsIntegration) => void;
 }) {
-  const { integration, connect } = useGoogleAds();
-  const [email, setEmail] = useState(integration.email);
-  const [managerId, setManagerId] = useState(integration.managerId || GOOGLE_ADS_MANAGERS[0].id);
+  const { connect } = useGoogleAds();
   const [showGuide, setShowGuide] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const backdropRef = useRef<HTMLDivElement>(null);
+  const managerName = GOOGLE_ADS_MANAGERS.find((manager) => manager.id === GOOGLE_ADS_DEFAULT_MANAGER_ID)?.name ?? 'MCC Onmid';
 
   function handleBackdrop(e: React.MouseEvent) {
     if (e.target === backdropRef.current) onClose();
   }
 
   async function handleConnect() {
-    if (!email.trim()) { setError('Informe o Gmail que acessa o Google Ads ou MCC.'); return; }
     setError('');
     setLoading(true);
     try {
-      const saved = await connect({ email, managerId, developerToken: GOOGLE_ADS_DEVELOPER_TOKEN });
+      const saved = await connect({
+        email: GOOGLE_ADS_LOGIN_EMAIL,
+        managerId: GOOGLE_ADS_DEFAULT_MANAGER_ID,
+        developerToken: GOOGLE_ADS_DEVELOPER_TOKEN,
+      });
       onConnected(saved);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Erro ao conectar Google Ads.');
+      const message = e instanceof Error ? e.message : 'Erro ao conectar Google Ads.';
+      setError(`${message} Se persistir, confirme se a migration do Google Ads foi rodada no Supabase.`);
     } finally {
       setLoading(false);
     }
@@ -530,31 +540,18 @@ function GoogleAdsConnectModal({
         <div className="px-6 py-5 space-y-4">
           <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20 text-xs text-blue-300 leading-relaxed space-y-1">
             <p className="font-semibold">Como funciona</p>
-            <p className="text-blue-300/80">Informe o Gmail/MCC com acesso às contas. Depois, em cada cliente, escolha quais contas Google Ads alimentam dashboards e relatórios.</p>
+            <p className="text-blue-300/80">Clique para usar a conta Google configurada no sistema. Depois, em cada cliente, escolha quais contas Google Ads alimentam dashboards e relatórios.</p>
           </div>
 
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Gmail de acesso</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => { setEmail(e.target.value); setError(''); }}
-              placeholder="exemplo@gmail.com"
-              className="w-full h-10 rounded-lg bg-background border border-border px-3 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/50 transition"
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">MCC / Conta gerente</label>
-            <select
-              value={managerId}
-              onChange={(e) => setManagerId(e.target.value)}
-              className="w-full h-10 rounded-lg bg-background border border-border px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/50 transition"
-            >
-              {GOOGLE_ADS_MANAGERS.map((manager) => (
-                <option key={manager.id} value={manager.id}>{manager.name}</option>
-              ))}
-            </select>
+          <div className="grid gap-3 rounded-lg border border-border bg-background/70 p-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Conta Google</p>
+              <p className="mt-1 text-sm font-semibold text-foreground">{GOOGLE_ADS_LOGIN_EMAIL}</p>
+            </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">MCC configurada</p>
+              <p className="mt-1 text-sm font-semibold text-foreground">{managerName}</p>
+            </div>
           </div>
 
           <div className="rounded-lg border border-primary/20 bg-primary/10 px-3 py-2.5">
@@ -575,6 +572,7 @@ function GoogleAdsConnectModal({
               <div className="px-3 py-3 bg-muted/10 text-xs text-muted-foreground leading-relaxed space-y-2">
                 <ol className="list-decimal list-inside space-y-1">
                   <li>O Gmail precisa ter acesso ao Google Ads ou ao MCC.</li>
+                  <li>A conta Google e a MCC já estão fixadas no sistema.</li>
                   <li>O developer token já está fixado no sistema.</li>
                   <li>Para login real com Gmail, ainda precisamos configurar Client ID, Client Secret e callback no backend.</li>
                 </ol>
