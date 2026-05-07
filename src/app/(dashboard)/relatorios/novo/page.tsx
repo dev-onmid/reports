@@ -7,8 +7,7 @@ import {
   ResponsiveContainer, PieChart, Pie, Cell, Legend,
 } from 'recharts';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Label } from '@/components/ui/label';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useClients } from '@/lib/client-store';
 import { loadIntegrations, loadCachedAdAccounts, readIntegrations, type CachedAdAccount } from '@/lib/integration-store';
 import { useMetaAdsConnections } from '@/lib/meta-ads-store';
@@ -19,7 +18,7 @@ import {
   type UnifiedMetric, type MetricSource,
   SOURCE_LABELS, SOURCE_COLORS, formatMetricValue,
 } from '@/lib/metrics-registry';
-import { Sparkles, AlertTriangle, Users, RefreshCw, Check, BarChart3, Search } from 'lucide-react';
+import { Sparkles, AlertTriangle, Users, RefreshCw, Check, BarChart3, Search, X } from 'lucide-react';
 
 // ─── Account avatar helpers ───────────────────────────────────────────────────
 
@@ -940,14 +939,25 @@ const SOURCE_OPTIONS: { key: MetricSource; title: string; desc: string }[] = [
   { key: 'crm',        title: 'CRM / Resultados',    desc: 'Leads, vendas e ROI.' },
 ];
 
+function SidebarStep({ num, title }: { num: number; title: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground text-[10px] font-bold shrink-0">{num}</span>
+      <span className="text-xs font-bold uppercase tracking-wider">{title}</span>
+    </div>
+  );
+}
+
 function MetricPicker({
   selectedSources,
   selectedKeys,
   onToggle,
+  columns = 2,
 }: {
   selectedSources: MetricSource[];
   selectedKeys: Set<string>;
   onToggle: (metric: UnifiedMetric) => void;
+  columns?: 1 | 2;
 }) {
   const [search, setSearch] = useState('');
 
@@ -982,7 +992,7 @@ function MetricPicker({
         return (
           <div key={group}>
             <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-2">{group}</p>
-            <div className="grid gap-2 md:grid-cols-2">
+            <div className={`grid gap-2 ${columns === 2 ? 'md:grid-cols-2' : 'grid-cols-1'}`}>
               {metrics.map(metric => {
                 const selected = selectedKeys.has(metric.key);
                 return (
@@ -1171,88 +1181,82 @@ export default function NovoRelatorioPage() {
   }
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Criar Novo Relatório</h1>
-        <p className="text-muted-foreground mt-1">Escolha fontes e widgets para montar relatórios personalizados.</p>
-      </div>
+    <div className="-m-6 flex" style={{ height: 'calc(100vh - 64px)' }}>
 
-      <div className="grid gap-6">
-        {/* Section 1: Source */}
-        <Card>
-          <CardHeader>
-            <CardTitle>1. Fonte do Relatório</CardTitle>
-            <CardDescription>Contas da conexão global ou por cliente cadastrado</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label>Plataformas</Label>
-              <div className="flex flex-wrap gap-2">
-                {SOURCE_OPTIONS.map(item => {
-                  const selected = selectedSources.includes(item.key);
-                  return (
-                    <button
-                      key={item.key}
-                      type="button"
-                      onClick={() => toggleSource(item.key)}
-                      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-all ${selected ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-primary/50 hover:text-foreground'}`}
-                    >
-                      {selected && <Check className="h-3 w-3" />}
-                      {item.title}
-                    </button>
-                  );
-                })}
-              </div>
+      {/* ── SIDEBAR ── */}
+      <aside className="w-[320px] shrink-0 border-r border-border bg-card flex flex-col overflow-hidden">
+
+        {/* Header */}
+        <div className="px-4 py-3 border-b border-border shrink-0 flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <h1 className="text-sm font-bold uppercase tracking-wider truncate">Novo Relatório</h1>
+            <p className="text-[11px] text-muted-foreground mt-0.5">Configure e visualize ao lado</p>
+          </div>
+          <Link href="/relatorios">
+            <button className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-muted transition-colors shrink-0">
+              <X className="w-4 h-4 text-muted-foreground" />
+            </button>
+          </Link>
+        </div>
+
+        {/* Scrollable steps */}
+        <div className="flex-1 overflow-y-auto divide-y divide-border">
+
+          {/* ── Step 1: Fonte ── */}
+          <div className="px-4 py-4 space-y-3">
+            <SidebarStep num={1} title="Fonte do Relatório" />
+
+            {/* Platforms */}
+            <div className="flex flex-wrap gap-1.5">
+              {SOURCE_OPTIONS.map(item => {
+                const selected = selectedSources.includes(item.key);
+                return (
+                  <button key={item.key} type="button" onClick={() => toggleSource(item.key)}
+                    className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-all ${selected ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-primary/50'}`}>
+                    {selected && <Check className="h-2.5 w-2.5" />}
+                    {item.title}
+                  </button>
+                );
+              })}
             </div>
 
-            <div className="flex gap-3">
+            {/* Account / Client toggle */}
+            <div className="grid grid-cols-2 gap-2">
               {[
-                { key: 'account', icon: <BarChart3 className="w-5 h-5 text-primary shrink-0" />, title: 'Contas de Anúncios', desc: 'Qualquer conta da conexão global' },
-                { key: 'client', icon: <Users className="w-5 h-5 text-primary shrink-0" />, title: 'Por Cliente', desc: 'Contas vinculadas a um cliente' },
+                { key: 'account', icon: <BarChart3 className="w-4 h-4 text-primary" />, title: 'Contas', desc: 'Conexão global' },
+                { key: 'client', icon: <Users className="w-4 h-4 text-primary" />, title: 'Por Cliente', desc: 'Conta vinculada' },
               ].map(opt => (
-                <button key={opt.key} onClick={() => { setSource(opt.key as 'account' | 'client'); if (opt.key === 'account') setSelectedClientId(''); else setSelectedAccountIds([]); }}
-                  className={`flex-1 flex items-center gap-3 p-4 rounded-lg border-2 transition-all text-left ${source === opt.key ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40'}`}>
+                <button key={opt.key}
+                  onClick={() => { setSource(opt.key as 'account' | 'client'); if (opt.key === 'account') setSelectedClientId(''); else setSelectedAccountIds([]); }}
+                  className={`flex items-center gap-2 p-2.5 rounded-lg border transition-all text-left ${source === opt.key ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40'}`}>
                   {opt.icon}
-                  <div><p className="font-semibold text-sm">{opt.title}</p><p className="text-xs text-muted-foreground">{opt.desc}</p></div>
+                  <div><p className="font-semibold text-xs">{opt.title}</p><p className="text-[10px] text-muted-foreground leading-tight">{opt.desc}</p></div>
                 </button>
               ))}
             </div>
 
+            {/* Account list */}
             {source === 'account' && (
-              <div className="space-y-3">
-                {/* Search + sort controls */}
-                <div className="flex gap-2">
+              <div className="space-y-2">
+                <div className="flex gap-1.5">
                   <div className="relative flex-1">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-                    <input
-                      type="text"
-                      placeholder="Buscar conta…"
-                      value={accountSearch}
-                      onChange={e => setAccountSearch(e.target.value)}
-                      className="flex h-8 w-full rounded-md border border-input bg-background pl-8 pr-3 text-sm"
-                    />
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
+                    <input type="text" placeholder="Buscar conta…" value={accountSearch} onChange={e => setAccountSearch(e.target.value)}
+                      className="flex h-7 w-full rounded-md border border-input bg-background pl-7 pr-2 text-xs" />
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setAccountSortDir(d => d === 'asc' ? 'desc' : 'asc')}
-                    className="flex items-center gap-1 rounded-md border border-border px-3 h-8 text-xs font-medium text-muted-foreground hover:border-primary/50 hover:text-foreground transition-colors shrink-0"
-                    title="Ordenar A-Z / Z-A"
-                  >
+                  <button type="button" onClick={() => setAccountSortDir(d => d === 'asc' ? 'desc' : 'asc')}
+                    className="flex items-center rounded-md border border-border px-2 h-7 text-[10px] font-medium text-muted-foreground hover:border-primary/50 shrink-0">
                     {accountSortDir === 'asc' ? 'A→Z' : 'Z→A'}
                   </button>
                 </div>
 
                 {selectedSources.includes('meta_ads') && (
-                  <div className="space-y-1.5">
-                    <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Meta Ads</p>
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Meta Ads</p>
                     {!isMetaConnected ? (
-                      <p className="text-sm text-muted-foreground p-3 rounded-lg bg-muted/30 text-center">
-                        Não conectado. <Link href="/integracoes" className="underline font-medium text-primary">Conectar →</Link>
-                      </p>
+                      <p className="text-xs text-muted-foreground p-2 rounded-lg bg-muted/30 text-center">Não conectado. <Link href="/integracoes" className="underline font-medium text-primary">Conectar →</Link></p>
                     ) : cachedAccounts.length === 0 ? (
-                      <p className="text-sm text-muted-foreground p-3 rounded-lg bg-muted/30 text-center">
-                        Nenhuma conta. <Link href="/integracoes" className="underline font-medium text-primary">Carregar ativos →</Link>
-                      </p>
+                      <p className="text-xs text-muted-foreground p-2 rounded-lg bg-muted/30 text-center">Nenhuma conta. <Link href="/integracoes" className="underline font-medium text-primary">Carregar →</Link></p>
                     ) : (() => {
                       const q = accountSearch.toLowerCase();
                       const list = [...cachedAccounts]
@@ -1262,23 +1266,20 @@ export default function NovoRelatorioPage() {
                       return list.length === 0 ? (
                         <p className="text-xs text-muted-foreground px-1">Nenhuma conta encontrada.</p>
                       ) : (
-                        <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+                        <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
                           {list.map(account => {
                             const sel = selectedAccountIds.includes(account.id);
                             return (
                               <button key={account.id} onClick={() => toggleAccount(account.id)}
-                                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg border transition-all text-left ${sel ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40'}`}>
-                                <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 ${sel ? 'bg-primary border-primary' : 'border-muted-foreground'}`}>
-                                  {sel && <Check className="w-2.5 h-2.5 text-white" />}
+                                className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg border transition-all text-left ${sel ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40'}`}>
+                                <div className={`w-3.5 h-3.5 rounded border-2 flex items-center justify-center shrink-0 ${sel ? 'bg-primary border-primary' : 'border-muted-foreground'}`}>
+                                  {sel && <Check className="w-2 h-2 text-white" />}
                                 </div>
-                                <div className={`w-6 h-6 rounded flex items-center justify-center text-white text-[10px] font-bold shrink-0 ${accountColorClass(account.id)}`}>
+                                <div className={`w-5 h-5 rounded flex items-center justify-center text-white text-[9px] font-bold shrink-0 ${accountColorClass(account.id)}`}>
                                   {accountInitials(account.name)}
                                 </div>
-                                <div className="flex-1 min-w-0">
-                                  <p className="font-medium text-sm truncate">{account.name}</p>
-                                  <p className="text-[11px] text-muted-foreground font-mono leading-tight">{account.id}</p>
-                                </div>
-                                <span className="text-xs text-muted-foreground shrink-0">{account.currency}</span>
+                                <p className="font-medium text-xs truncate flex-1">{account.name}</p>
+                                <span className="text-[10px] text-muted-foreground shrink-0">{account.currency}</span>
                               </button>
                             );
                           })}
@@ -1289,16 +1290,12 @@ export default function NovoRelatorioPage() {
                 )}
 
                 {selectedSources.includes('google_ads') && (
-                  <div className="space-y-1.5">
-                    <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Google Ads</p>
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Google Ads</p>
                     {googleAds.integration.status !== 'connected' ? (
-                      <p className="text-sm text-muted-foreground p-3 rounded-lg bg-muted/30 text-center">
-                        Não conectado. <Link href="/integracoes" className="underline font-medium text-primary">Conectar →</Link>
-                      </p>
+                      <p className="text-xs text-muted-foreground p-2 rounded-lg bg-muted/30 text-center">Não conectado. <Link href="/integracoes" className="underline font-medium text-primary">Conectar →</Link></p>
                     ) : googleAds.accounts.length === 0 ? (
-                      <p className="text-sm text-muted-foreground p-3 rounded-lg bg-muted/30 text-center">
-                        Nenhuma conta. <Link href="/integracoes" className="underline font-medium text-primary">Adicionar contas →</Link>
-                      </p>
+                      <p className="text-xs text-muted-foreground p-2 rounded-lg bg-muted/30 text-center">Nenhuma conta. <Link href="/integracoes" className="underline font-medium text-primary">Adicionar →</Link></p>
                     ) : (() => {
                       const q = accountSearch.toLowerCase();
                       const list = [...googleAds.accounts]
@@ -1307,23 +1304,20 @@ export default function NovoRelatorioPage() {
                       return list.length === 0 ? (
                         <p className="text-xs text-muted-foreground px-1">Nenhuma conta encontrada.</p>
                       ) : (
-                        <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+                        <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
                           {list.map(account => {
                             const sel = selectedAccountIds.includes(account.id);
                             return (
                               <button key={account.id} onClick={() => toggleAccount(account.id)}
-                                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg border transition-all text-left ${sel ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40'}`}>
-                                <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 ${sel ? 'bg-primary border-primary' : 'border-muted-foreground'}`}>
-                                  {sel && <Check className="w-2.5 h-2.5 text-white" />}
+                                className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg border transition-all text-left ${sel ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40'}`}>
+                                <div className={`w-3.5 h-3.5 rounded border-2 flex items-center justify-center shrink-0 ${sel ? 'bg-primary border-primary' : 'border-muted-foreground'}`}>
+                                  {sel && <Check className="w-2 h-2 text-white" />}
                                 </div>
-                                <div className={`w-6 h-6 rounded flex items-center justify-center text-white text-[10px] font-bold shrink-0 ${accountColorClass(account.id)}`}>
+                                <div className={`w-5 h-5 rounded flex items-center justify-center text-white text-[9px] font-bold shrink-0 ${accountColorClass(account.id)}`}>
                                   {accountInitials(account.name)}
                                 </div>
-                                <div className="flex-1 min-w-0">
-                                  <p className="font-medium text-sm truncate">{account.name}</p>
-                                  <p className="text-[11px] text-muted-foreground font-mono leading-tight">{account.id}</p>
-                                </div>
-                                <span className="text-xs text-muted-foreground shrink-0">{account.currency}</span>
+                                <p className="font-medium text-xs truncate flex-1">{account.name}</p>
+                                <span className="text-[10px] text-muted-foreground shrink-0">{account.currency}</span>
                               </button>
                             );
                           })}
@@ -1334,51 +1328,43 @@ export default function NovoRelatorioPage() {
                 )}
 
                 {selectedAccountIds.length > 0 && (
-                  <p className="text-xs text-muted-foreground">{selectedAccountIds.length} conta(s) selecionada(s)</p>
+                  <p className="text-[10px] text-muted-foreground">{selectedAccountIds.length} conta(s) selecionada(s)</p>
                 )}
               </div>
             )}
 
+            {/* Client select */}
             {source === 'client' && (
-              <div className="space-y-3">
-                <div className="space-y-2">
-                  <Label>Cliente</Label>
-                  <select value={selectedClientId} onChange={e => setSelectedClientId(e.target.value)}
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
-                    <option value="" disabled>Selecione um cliente</option>
-                    {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
-                </div>
+              <div className="space-y-2">
+                <select value={selectedClientId} onChange={e => setSelectedClientId(e.target.value)}
+                  className="flex h-8 w-full rounded-md border border-input bg-background px-2.5 text-xs">
+                  <option value="" disabled>Selecione um cliente</option>
+                  {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
                 {selectedClientId && (
-                  <div className="space-y-3">
+                  <div className="space-y-2">
                     {selectedSources.includes('meta_ads') && (
                       <div className="space-y-1">
-                        <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Meta Ads</p>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Meta Ads</p>
                         {clientLinkedMetaAccounts.length === 0 ? (
-                          <p className="text-sm text-muted-foreground p-3 rounded-lg bg-muted/30">
-                            Sem contas Meta vinculadas. <Link href={`/clientes/${selectedClientId}`} className="text-primary underline">Configurar →</Link>
-                          </p>
+                          <p className="text-xs text-muted-foreground p-2 rounded-lg bg-muted/30">Sem contas Meta. <Link href={`/clientes/${selectedClientId}`} className="text-primary underline">Configurar →</Link></p>
                         ) : clientLinkedMetaAccounts.map(a => (
-                          <div key={a.id} className="flex items-center gap-2 p-2 rounded-md bg-muted/30 text-sm">
-                            <Check className="w-4 h-4 text-primary shrink-0" />
-                            <span className="font-medium flex-1">{a.name}</span>
-                            <span className="text-xs text-muted-foreground font-mono">{a.id}</span>
+                          <div key={a.id} className="flex items-center gap-2 p-1.5 rounded-md bg-muted/30">
+                            <Check className="w-3 h-3 text-primary shrink-0" />
+                            <span className="font-medium text-xs flex-1 truncate">{a.name}</span>
                           </div>
                         ))}
                       </div>
                     )}
                     {selectedSources.includes('google_ads') && (
                       <div className="space-y-1">
-                        <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Google Ads</p>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Google Ads</p>
                         {clientLinkedGoogleAccounts.length === 0 ? (
-                          <p className="text-sm text-muted-foreground p-3 rounded-lg bg-muted/30">
-                            Sem contas Google vinculadas. <Link href={`/clientes/${selectedClientId}`} className="text-primary underline">Configurar →</Link>
-                          </p>
+                          <p className="text-xs text-muted-foreground p-2 rounded-lg bg-muted/30">Sem contas Google. <Link href={`/clientes/${selectedClientId}`} className="text-primary underline">Configurar →</Link></p>
                         ) : clientLinkedGoogleAccounts.map(a => (
-                          <div key={a.id} className="flex items-center gap-2 p-2 rounded-md bg-muted/30 text-sm">
-                            <Check className="w-4 h-4 text-primary shrink-0" />
-                            <span className="font-medium flex-1">{a.name}</span>
-                            <span className="text-xs text-muted-foreground font-mono">{a.id}</span>
+                          <div key={a.id} className="flex items-center gap-2 p-1.5 rounded-md bg-muted/30">
+                            <Check className="w-3 h-3 text-primary shrink-0" />
+                            <span className="font-medium text-xs flex-1 truncate">{a.name}</span>
                           </div>
                         ))}
                       </div>
@@ -1387,87 +1373,100 @@ export default function NovoRelatorioPage() {
                 )}
               </div>
             )}
-          </CardContent>
-        </Card>
+          </div>
 
-        {/* Section 2: Period */}
-        <Card>
-          <CardHeader><CardTitle>2. Período</CardTitle></CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex flex-wrap gap-2">
+          {/* ── Step 2: Período ── */}
+          <div className="px-4 py-4 space-y-3">
+            <SidebarStep num={2} title="Período" />
+            <div className="flex flex-wrap gap-1.5">
               {(Object.entries(PERIOD_LABELS) as [Period, string][]).map(([v, l]) => (
                 <button key={v} onClick={() => setPeriod(v)}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium border transition-all ${period === v ? 'bg-primary text-primary-foreground border-primary' : 'border-border hover:border-primary/50'}`}>
+                  className={`px-3 py-1 rounded-lg text-xs font-medium border transition-all ${period === v ? 'bg-primary text-primary-foreground border-primary' : 'border-border hover:border-primary/50'}`}>
                   {l}
                 </button>
               ))}
             </div>
             {period === 'custom' && (
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2"><Label>De</Label><input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /></div>
-                <div className="space-y-2"><Label>Até</Label><input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /></div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <p className="text-[10px] text-muted-foreground font-medium">De</p>
+                  <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="flex h-7 w-full rounded-md border border-input bg-background px-2 text-xs" />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-[10px] text-muted-foreground font-medium">Até</p>
+                  <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="flex h-7 w-full rounded-md border border-input bg-background px-2 text-xs" />
+                </div>
               </div>
             )}
-          </CardContent>
-        </Card>
+          </div>
 
-        {/* Section 3: Widgets */}
-        <Card>
-          <CardHeader>
-            <CardTitle>3. Widgets do Relatório</CardTitle>
-            <CardDescription>
-              {ALL_UNIFIED_METRICS.filter(m => selectedSources.includes(m.source)).length} métricas disponíveis · {selectedWidgetMetricKeys.size} selecionada(s)
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
+          {/* ── Step 3: Widgets ── */}
+          <div className="px-4 py-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <SidebarStep num={3} title="Widgets" />
+              <span className="text-[10px] text-muted-foreground tabular-nums">{selectedWidgetMetricKeys.size} selecionada(s)</span>
+            </div>
             <MetricPicker
               selectedSources={selectedSources}
               selectedKeys={selectedWidgetMetricKeys}
               onToggle={toggleReportWidget}
+              columns={1}
             />
             {widgetsForSelectedSources.length === 0 && (
-              <p className="rounded-lg bg-yellow-500/10 border border-yellow-500/20 p-3 text-sm text-yellow-600 dark:text-yellow-400">
-                Selecione pelo menos um widget para gerar o relatório.
+              <p className="rounded-lg bg-yellow-500/10 border border-yellow-500/20 p-2 text-xs text-yellow-600 dark:text-yellow-400">
+                Selecione pelo menos um widget.
               </p>
             )}
-          </CardContent>
-        </Card>
-
-        {generateError && (
-          <div className="flex items-start gap-3 p-4 rounded-lg bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400">
-            <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              {/session has expired|access token|OAuthException/i.test(generateError) ? (
-                <>
-                  <p className="text-sm font-semibold">Token do Meta Ads expirado</p>
-                  <p className="text-sm">Sua sessão com o Meta expirou. Reconecte o Meta Ads e tente novamente.</p>
-                  <Link href="/integracoes" className="inline-block mt-1 text-sm font-medium underline underline-offset-2">
-                    Ir para Integrações e reconectar →
-                  </Link>
-                </>
-              ) : (
-                <p className="text-sm">{generateError}</p>
-              )}
-            </div>
           </div>
-        )}
-
-        <div className="flex justify-end gap-3">
-          <Button render={<Link href="/relatorios" />} nativeButton={false} variant="outline">Cancelar</Button>
-          <Button onClick={handleGenerate} disabled={!canGenerate || isGenerating}>
-            {isGenerating ? <><RefreshCw className="w-4 h-4 mr-2 animate-spin" />Montando relatório...</> : <><Sparkles className="w-4 h-4 mr-2" />Gerar Relatório</>}
-          </Button>
         </div>
 
-        {hasGeneratedPreview && (
-          <ReportWidgetPreview widgets={widgetsForSelectedSources} reports={reports} />
-        )}
+        {/* Generate button */}
+        <div className="px-4 py-3 border-t border-border shrink-0 space-y-2">
+          {generateError && (
+            <div className="flex items-start gap-2 p-2.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              <p className="text-xs leading-snug">
+                {/session has expired|access token|OAuthException/i.test(generateError)
+                  ? <><span>Token expirado. </span><Link href="/integracoes" className="underline font-medium">Reconectar →</Link></>
+                  : generateError}
+              </p>
+            </div>
+          )}
+          <Button onClick={handleGenerate} disabled={!canGenerate || isGenerating} className="w-full">
+            {isGenerating
+              ? <><RefreshCw className="w-4 h-4 mr-2 animate-spin" />Montando...</>
+              : <><Sparkles className="w-4 h-4 mr-2" />Gerar Relatório</>}
+          </Button>
+        </div>
+      </aside>
 
-        {reports.map((report, i) => (
-          <div key={report.accountId} className={i > 0 ? 'pt-8 border-t-2 border-border' : ''}>
-            <AccountReport report={report} />
+      {/* ── PREVIEW AREA ── */}
+      <div className="flex-1 overflow-y-auto bg-background">
+        {isGenerating ? (
+          <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
+            <RefreshCw className="w-8 h-8 animate-spin text-primary" />
+            <p className="text-sm font-medium">Gerando relatório...</p>
           </div>
-        ))}
+        ) : !hasGeneratedPreview ? (
+          <div className="flex flex-col items-center justify-center h-full gap-4 text-center px-10">
+            <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center">
+              <BarChart3 className="w-8 h-8 text-primary" />
+            </div>
+            <div className="space-y-1.5">
+              <p className="font-bold text-base">Pré-visualização</p>
+              <p className="text-sm text-muted-foreground">Configure as opções na barra lateral e clique em <strong>Gerar Relatório</strong> para visualizar aqui.</p>
+            </div>
+          </div>
+        ) : (
+          <div className="p-6 space-y-8">
+            <ReportWidgetPreview widgets={widgetsForSelectedSources} reports={reports} />
+            {reports.map((report, i) => (
+              <div key={report.accountId} className={i > 0 ? 'pt-8 border-t-2 border-border' : ''}>
+                <AccountReport report={report} />
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

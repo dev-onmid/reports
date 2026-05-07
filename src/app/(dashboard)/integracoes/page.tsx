@@ -96,22 +96,42 @@ async function fetchMetaAssets(token: string): Promise<MetaAssets> {
 
   const t = `access_token=${token}`;
 
-  // Fetch from the logged-in user's perspective (/me) — same as Reportei/Dashgo
-  const [adAccounts, pages, igFromPages] = await Promise.allSettled([
+  const [adAccounts, pages, businesses] = await Promise.allSettled([
     fetchAll<MetaAdAccount>(
       `${base}/me/adaccounts?limit=100&fields=id,name,account_status,currency,amount_spent&${t}`
     ),
     fetchAll<MetaPage & { instagram_business_account?: { id: string; username: string; name: string; followers_count: number; profile_picture_url: string } }>(
       `${base}/me/accounts?limit=100&fields=id,name,category,fan_count,picture,instagram_business_account{id,username,name,followers_count,profile_picture_url}&${t}`
     ),
-    Promise.resolve([] as MetaInstagram[]),
+    fetchAll<{ id: string; name: string }>(
+      `${base}/me/businesses?fields=id,name&${t}`
+    ),
   ]);
 
   function settled<T>(r: PromiseSettledResult<T[]>): T[] {
     return r.status === 'fulfilled' ? r.value : [];
   }
 
-  const pagesData = settled(adAccounts).length >= 0 ? settled(pages) : [];
+  // Also fetch ad accounts via Business Manager (for users who access accounts through BM)
+  const bmAccounts: MetaAdAccount[] = [];
+  for (const bm of settled(businesses)) {
+    const [owned, client] = await Promise.allSettled([
+      fetchAll<MetaAdAccount>(`${base}/${bm.id}/owned_ad_accounts?limit=100&fields=id,name,account_status,currency,amount_spent&${t}`),
+      fetchAll<MetaAdAccount>(`${base}/${bm.id}/client_ad_accounts?limit=100&fields=id,name,account_status,currency,amount_spent&${t}`),
+    ]);
+    for (const a of [...(owned.status === 'fulfilled' ? owned.value : []), ...(client.status === 'fulfilled' ? client.value : [])]) {
+      if (!bmAccounts.some(x => x.id === a.id)) bmAccounts.push(a);
+    }
+  }
+
+  // Merge /me/adaccounts with BM accounts, deduplicated
+  const directAccounts = settled(adAccounts);
+  const allAdAccounts = [...directAccounts];
+  for (const a of bmAccounts) {
+    if (!allAdAccounts.some(x => x.id === a.id)) allAdAccounts.push(a);
+  }
+
+  const pagesData = settled(pages);
 
   // Extract Instagram accounts linked to pages
   const instagramMap = new Map<string, MetaInstagram>();
@@ -122,7 +142,7 @@ async function fetchMetaAssets(token: string): Promise<MetaAssets> {
   });
 
   return {
-    adAccounts: settled(adAccounts),
+    adAccounts: allAdAccounts,
     pages: pagesData.map(({ instagram_business_account: _, ...p }) => p) as MetaPage[],
     instagram: [...instagramMap.values()],
   };
@@ -148,13 +168,18 @@ function MetaAssetsPanel({ meta }: { meta: MetaIntegration }) {
       cached.forEach((a) => { existingEnabled[a.id] = a.enabled; });
 
       const data = await fetchMetaAssets(meta.accessToken);
-      setAssets(data);
+
+      // Fall back to cached accounts if the live API returned none
+      const finalAdAccounts = data.adAccounts.length > 0 ? data.adAccounts : cached;
+      setAssets({ ...data, adAccounts: finalAdAccounts });
 
       const newMap: Record<string, boolean> = {};
-      data.adAccounts.forEach((a) => { newMap[a.id] = existingEnabled[a.id] ?? true; });
+      finalAdAccounts.forEach((a) => { newMap[a.id] = existingEnabled[a.id] ?? true; });
       setEnabledMap(newMap);
 
-      await saveCachedAdAccounts(data.adAccounts.map((a) => ({ ...a, enabled: newMap[a.id] ?? true })));
+      if (data.adAccounts.length > 0) {
+        await saveCachedAdAccounts(finalAdAccounts.map((a) => ({ ...a, enabled: newMap[a.id] ?? true })));
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erro ao buscar ativos.');
     } finally {
