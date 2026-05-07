@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from 'react';
-import { Plus, Pencil, Trash2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Plus, Pencil, Trash2, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -34,44 +34,166 @@ const MODULES: { key: keyof Permission; label: string }[] = [
 
 const ROLES = ['Administrador', 'Usuário', 'Visualizador'];
 
-const emptyForm = { name: '', email: '', role: 'Usuário' };
+const USERS_STORAGE_KEY = 'onmid-users';
+const PERMISSIONS_STORAGE_KEY = 'onmid-user-permissions';
+const defaultPermission: Permission = { dashboard: true, clientes: false, relatorios: false, configuracoes: false, integracoes: false };
+const emptyForm = { name: '', email: '', password: '', role: 'Usuário', status: 'Ativo' };
+
+function readUsers(): User[] {
+  if (typeof window === 'undefined') return initialUsers;
+
+  const stored = window.localStorage.getItem(USERS_STORAGE_KEY);
+  if (!stored) return initialUsers;
+
+  try {
+    const parsed = JSON.parse(stored) as Partial<User>[];
+    if (!Array.isArray(parsed)) return initialUsers;
+
+    return parsed.map((user) => ({
+      id: user.id ?? `user-${Date.now()}`,
+      name: user.name ?? '',
+      email: user.email === 'matheus' ? 'matheus@onmid.com.br' : user.email ?? '',
+      password: user.password ?? initialUsers.find((item) => item.email === user.email || (user.email === 'matheus' && item.email === 'matheus@onmid.com.br'))?.password ?? '',
+      role: user.role ?? 'Usuário',
+      status: user.status ?? 'Ativo',
+    }));
+  } catch {
+    return initialUsers;
+  }
+}
+
+function readPermissions(): Record<string, Permission> {
+  if (typeof window === 'undefined') return initialPermissions;
+
+  const stored = window.localStorage.getItem(PERMISSIONS_STORAGE_KEY);
+  if (!stored) return initialPermissions;
+
+  try {
+    const parsed = JSON.parse(stored) as Record<string, Permission>;
+    return parsed && typeof parsed === 'object' ? { ...initialPermissions, ...parsed } : initialPermissions;
+  } catch {
+    return initialPermissions;
+  }
+}
+
+function persistUsers(users: User[]) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users));
+}
+
+function persistPermissions(permissions: Record<string, Permission>) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(PERMISSIONS_STORAGE_KEY, JSON.stringify(permissions));
+}
 
 export default function ConfiguracoesPage() {
-  const [users, setUsers] = useState<User[]>(initialUsers);
-  const [permissions, setPermissions] = useState<Record<string, Permission>>(initialPermissions);
+  const [users, setUsers] = useState<User[]>(readUsers);
+  const [permissions, setPermissions] = useState<Record<string, Permission>>(readPermissions);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState(emptyForm);
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
 
-  function handleCreateUser() {
-    if (!form.name.trim() || !form.email.trim()) return;
-    const id = String(Date.now());
-    const user: User = { id, name: form.name, email: form.email, role: form.role, status: 'Ativo' };
-    setUsers((prev) => [...prev, user]);
-    setPermissions((prev) => ({
-      ...prev,
-      [id]: { dashboard: true, clientes: false, relatorios: false, configuracoes: false, integracoes: false },
-    }));
+  useEffect(() => {
+    persistUsers(users);
+  }, [users]);
+
+  useEffect(() => {
+    persistPermissions(permissions);
+  }, [permissions]);
+
+  useEffect(() => {
+    function handleStorage(event: StorageEvent) {
+      if (event.key === USERS_STORAGE_KEY) setUsers(readUsers());
+      if (event.key === PERMISSIONS_STORAGE_KEY) setPermissions(readPermissions());
+    }
+
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, []);
+
+  function openCreateDialog() {
+    setEditingUserId(null);
     setForm(emptyForm);
+    setDialogOpen(true);
+  }
+
+  function openEditDialog(user: User) {
+    setEditingUserId(user.id);
+    setForm({
+      name: user.name,
+      email: user.email,
+      password: user.password,
+      role: user.role,
+      status: user.status,
+    });
+    setDialogOpen(true);
+  }
+
+  function handleSaveUser() {
+    if (!form.name.trim() || !form.email.trim() || !form.password.trim()) return;
+
+    if (editingUserId) {
+      setUsers((prev) => {
+        const next = prev.map((user) => (
+          user.id === editingUserId
+            ? { ...user, name: form.name.trim(), email: form.email.trim(), password: form.password, role: form.role, status: form.status }
+            : user
+        ));
+        persistUsers(next);
+        return next;
+      });
+      setForm(emptyForm);
+      setEditingUserId(null);
+      setDialogOpen(false);
+      return;
+    }
+
+    const id = String(Date.now());
+    const user: User = { id, name: form.name.trim(), email: form.email.trim(), password: form.password, role: form.role, status: form.status };
+    setUsers((prev) => {
+      const next = [...prev, user];
+      persistUsers(next);
+      return next;
+    });
+    setPermissions((prev) => {
+      const next = {
+        ...prev,
+        [id]: defaultPermission,
+      };
+      persistPermissions(next);
+      return next;
+    });
+    setForm(emptyForm);
+    setEditingUserId(null);
     setDialogOpen(false);
   }
 
   function handleDeleteUser(id: string) {
-    setUsers((prev) => prev.filter((u) => u.id !== id));
+    setUsers((prev) => {
+      const next = prev.filter((u) => u.id !== id);
+      persistUsers(next);
+      return next;
+    });
     setPermissions((prev) => {
       const next = { ...prev };
       delete next[id];
+      persistPermissions(next);
       return next;
     });
   }
 
   function togglePermission(userId: string, module: keyof Permission) {
-    setPermissions((prev) => ({
-      ...prev,
-      [userId]: {
-        ...prev[userId],
-        [module]: !prev[userId]?.[module],
-      },
-    }));
+    setPermissions((prev) => {
+      const next = {
+        ...prev,
+        [userId]: {
+          ...(prev[userId] ?? defaultPermission),
+          [module]: !(prev[userId]?.[module] ?? defaultPermission[module]),
+        },
+      };
+      persistPermissions(next);
+      return next;
+    });
   }
 
   return (
@@ -85,13 +207,14 @@ export default function ConfiguracoesPage() {
         <TabsList>
           <TabsTrigger value="usuarios">Usuários</TabsTrigger>
           <TabsTrigger value="permissoes">Permissões</TabsTrigger>
+          <TabsTrigger value="legal">Legal</TabsTrigger>
         </TabsList>
 
         {/* ── USUÁRIOS ── */}
         <TabsContent value="usuarios" className="mt-6 space-y-4">
           <div className="flex justify-end">
             <Button
-              onClick={() => setDialogOpen(true)}
+              onClick={openCreateDialog}
               className="bg-primary text-primary-foreground hover:bg-primary/90"
             >
               <Plus className="w-4 h-4 mr-2" />
@@ -143,7 +266,7 @@ export default function ConfiguracoesPage() {
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex justify-end gap-2">
-                        <Button variant="ghost" size="icon" title="Editar">
+                        <Button variant="ghost" size="icon" title="Editar" onClick={() => openEditDialog(user)}>
                           <Pencil className="w-4 h-4" />
                         </Button>
                         <Button
@@ -186,7 +309,7 @@ export default function ConfiguracoesPage() {
                       <div className="text-xs text-muted-foreground">{user.role}</div>
                     </td>
                     {MODULES.map((m) => {
-                      const enabled = permissions[user.id]?.[m.key] ?? false;
+                      const enabled = permissions[user.id]?.[m.key] ?? defaultPermission[m.key];
                       return (
                         <td key={m.key} className="px-6 py-4 text-center">
                           <button
@@ -213,13 +336,62 @@ export default function ConfiguracoesPage() {
             </table>
           </div>
         </TabsContent>
+        {/* ── LEGAL ── */}
+        <TabsContent value="legal" className="mt-6 space-y-6">
+          {[
+            {
+              title: 'Política de Privacidade',
+              description: 'Descreve como coletamos, usamos e protegemos os dados dos usuários.',
+              url: 'https://post.onmid.app/privacy',
+            },
+            {
+              title: 'Exclusão de Dados da Conta',
+              description: 'Instruções e procedimento para solicitação de exclusão de dados pessoais.',
+              url: 'https://post.onmid.app/data-deletion',
+            },
+          ].map(({ title, description, url }) => (
+            <div key={url} className="bg-card border border-border rounded-xl overflow-hidden">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+                <div>
+                  <p className="text-sm font-bold">{title}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
+                </div>
+                <a
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  Abrir em nova aba
+                </a>
+              </div>
+              <iframe
+                src={url}
+                title={title}
+                className="w-full border-0 bg-white"
+                style={{ height: '480px' }}
+                loading="lazy"
+              />
+            </div>
+          ))}
+        </TabsContent>
       </Tabs>
 
-      {/* ── DIALOG: Novo Usuário ── */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      {/* ── DIALOG: Novo/Editar Usuário ── */}
+      <Dialog
+        open={dialogOpen}
+        onOpenChange={(open) => {
+          setDialogOpen(open);
+          if (!open) {
+            setForm(emptyForm);
+            setEditingUserId(null);
+          }
+        }}
+      >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Criar Novo Usuário</DialogTitle>
+            <DialogTitle>{editingUserId ? 'Editar Usuário' : 'Criar Novo Usuário'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
@@ -242,6 +414,16 @@ export default function ConfiguracoesPage() {
               />
             </div>
             <div className="space-y-1.5">
+              <Label htmlFor="user-password">Senha</Label>
+              <Input
+                id="user-password"
+                type="password"
+                value={form.password}
+                onChange={(e) => setForm({ ...form, password: e.target.value })}
+                placeholder="Defina a senha de acesso"
+              />
+            </div>
+            <div className="space-y-1.5">
               <Label>Perfil</Label>
               <Select value={form.role} onValueChange={(role) => role && setForm({ ...form, role })}>
                 <SelectTrigger className="w-full">
@@ -256,13 +438,35 @@ export default function ConfiguracoesPage() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="space-y-1.5">
+              <Label>Status</Label>
+              <select
+                value={form.status}
+                onChange={(event) => setForm({ ...form, status: event.target.value })}
+                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                <option value="Ativo">Ativo</option>
+                <option value="Inativo">Inativo</option>
+              </select>
+            </div>
           </div>
           <DialogFooter>
             <Button
-              onClick={handleCreateUser}
+              variant="outline"
+              onClick={() => {
+                setDialogOpen(false);
+                setForm(emptyForm);
+                setEditingUserId(null);
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleSaveUser}
+              disabled={!form.name.trim() || !form.email.trim() || !form.password.trim()}
               className="bg-primary text-primary-foreground hover:bg-primary/90"
             >
-              Criar Usuário
+              {editingUserId ? 'Salvar Usuário' : 'Criar Usuário'}
             </Button>
           </DialogFooter>
         </DialogContent>

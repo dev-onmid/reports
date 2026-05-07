@@ -5,6 +5,7 @@ import { ArrowRight, TrendingUp, Users, Wallet, Target } from 'lucide-react';
 import { useInvestmentPayments } from '@/lib/payment-store';
 import { clientResults, type ClientFunnel } from '@/lib/client-results-store';
 import { mockClients } from '@/lib/mock-data';
+import { useClients } from '@/lib/client-store';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 
 // For "higher is better": pct = atual / meta * 100
@@ -56,9 +57,11 @@ const FUNNEL_KEYS: (keyof ClientFunnel)[] = [
 const FUNNEL_LABELS = ['Cont.', 'Qualif.', 'Agend.', 'Comp.', 'Fecha.'];
 
 export default function ResultadosPage() {
+  const { clients } = useClients();
   const { payments } = useInvestmentPayments();
+  const visibleClientIds = new Set(clients.map((client) => client.id));
 
-  const rows = clientResults.map((r) => {
+  const rows = clientResults.filter((r) => visibleClientIds.has(r.clientId)).map((r) => {
     const client = mockClients.find((c) => c.id === r.clientId)!;
 
     const clientPayments = payments.filter((p) => p.clientId === r.clientId);

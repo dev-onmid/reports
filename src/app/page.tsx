@@ -1,10 +1,34 @@
+"use client";
+
 import Link from 'next/link';
+import { useState } from 'react';
+import type { FormEvent } from 'react';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Sparkles } from 'lucide-react';
+import { authenticateUser } from '@/lib/auth-store';
 
 export default function LoginPage() {
+  const router = useRouter();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const session = authenticateUser(email, password);
+
+    if (!session) {
+      setError('E-mail ou senha inválidos, ou usuário inativo.');
+      return;
+    }
+
+    setError('');
+    router.push('/dashboard');
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4 relative overflow-hidden font-sans">
       {/* Gradients and glow as per brand manual */}
@@ -25,27 +49,46 @@ export default function LoginPage() {
           <p className="text-sm text-muted-foreground mt-2 font-medium">Plataforma de Relatórios Estratégicos</p>
         </div>
 
-        <div className="space-y-5">
+        <form onSubmit={handleSubmit} className="space-y-5">
           <div className="space-y-2">
             <Label htmlFor="email" className="text-foreground/80 uppercase text-xs tracking-wider">E-mail corporativo</Label>
-            <Input id="email" type="email" placeholder="nome@onmid.com.br" className="bg-background border-border/50 focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-primary h-12" />
+            <Input
+              id="email"
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="nome@onmid.com.br"
+              className="bg-background border-border/50 focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-primary h-12"
+            />
           </div>
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label htmlFor="password" className="text-foreground/80 uppercase text-xs tracking-wider">Senha</Label>
               <Link href="#" className="text-xs text-primary hover:underline transition-all">Esqueci minha senha</Link>
             </div>
-            <Input id="password" type="password" className="bg-background border-border/50 focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-primary h-12" />
+            <Input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              className="bg-background border-border/50 focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-primary h-12"
+            />
           </div>
+
+          {error && (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {error}
+            </div>
+          )}
           
           <Button
-            render={<Link href="/dashboard" />}
-            nativeButton={false}
+            type="submit"
+            disabled={!email.trim() || !password.trim()}
             className="w-full h-12 mt-8 bg-primary text-primary-foreground hover:bg-primary/90 font-bold uppercase tracking-wider shadow-[0_0_15px_rgba(85,245,47,0.3)] hover:shadow-[0_0_25px_rgba(85,245,47,0.5)] transition-all rounded-lg border-none"
           >
             Entrar
           </Button>
-        </div>
+        </form>
       </div>
 
       <div className="absolute bottom-8 left-8 flex items-center gap-3 text-xs font-medium text-muted-foreground z-10">

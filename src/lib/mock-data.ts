@@ -10,23 +10,35 @@ export type User = {
   id: string;
   name: string;
   email: string;
+  password: string;
   role: string;
   status: string;
 };
 
 export const mockUsers: User[] = [
-  { id: '1', name: 'Admin', email: 'admin@onmid.com', role: 'Administrador', status: 'Ativo' },
-  { id: '2', name: 'Maria Silva', email: 'maria@onmid.com', role: 'Usuário', status: 'Ativo' },
-  { id: '3', name: 'João Costa', email: 'joao@onmid.com', role: 'Visualizador', status: 'Inativo' },
+  { id: '1', name: 'Admin', email: 'admin@onmid.com', password: 'admin123', role: 'Administrador', status: 'Ativo' },
+  { id: '4', name: 'Matheus', email: 'matheus@onmid.com.br', password: '1234', role: 'Administrador', status: 'Ativo' },
+  { id: '2', name: 'Maria Silva', email: 'maria@onmid.com', password: 'maria123', role: 'Usuário', status: 'Ativo' },
+  { id: '3', name: 'João Costa', email: 'joao@onmid.com', password: 'joao123', role: 'Visualizador', status: 'Inativo' },
 ];
 
 export const mockPermissions: Record<string, Permission> = {
   '1': { dashboard: true, clientes: true, relatorios: true, configuracoes: true, integracoes: true },
+  '4': { dashboard: true, clientes: true, relatorios: true, configuracoes: true, integracoes: true },
   '2': { dashboard: true, clientes: true, relatorios: true, configuracoes: false, integracoes: false },
   '3': { dashboard: true, clientes: false, relatorios: false, configuracoes: false, integracoes: false },
 };
 
-export const mockClients = [
+export type ClientStatus = 'Ativo' | 'Alerta' | 'Arquivado';
+
+export type Client = {
+  id: string;
+  name: string;
+  segment: string;
+  status: ClientStatus;
+};
+
+export const mockClients: Client[] = [
   { id: '1', name: 'Tech Solutions', segment: 'Tecnologia', status: 'Ativo' },
   { id: '2', name: 'OdontoPrime', segment: 'Saúde', status: 'Ativo' },
   { id: '3', name: 'Bella Imóveis', segment: 'Imobiliária', status: 'Alerta' },

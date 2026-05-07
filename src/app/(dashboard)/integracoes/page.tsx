@@ -1,18 +1,298 @@
 "use client";
 
-import { useState } from 'react';
-import { CheckCircle2, XCircle, ExternalLink } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { CheckCircle2, XCircle, ExternalLink, X, AlertCircle, ChevronDown, RefreshCw, Building2, Megaphone, Camera } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import {
+  readIntegrations,
+  connectMeta,
+  disconnectMeta,
+  fbLogin,
+  fbLogout,
+  type MetaIntegration,
+} from '@/lib/integration-store';
 
-type Integration = {
+// ─── Meta Graph API types ─────────────────────────────────────────────────────
+
+type MetaAdAccount = {
   id: string;
   name: string;
-  description: string;
-  category: string;
-  status: 'conectado' | 'desconectado';
-  logo: React.ReactNode;
+  account_status: number; // 1=Ativa, 2=Desativada, 3=Não gasta, 7=Cancelada
+  currency: string;
+  amount_spent?: string;
 };
+
+type MetaPage = {
+  id: string;
+  name: string;
+  category: string;
+  fan_count?: number;
+  picture?: { data: { url: string } };
+};
+
+type MetaInstagram = {
+  id: string;
+  username: string;
+  name?: string;
+  profile_picture_url?: string;
+  followers_count?: number;
+};
+
+type MetaAssets = {
+  adAccounts: MetaAdAccount[];
+  pages: MetaPage[];
+  instagram: MetaInstagram[];
+};
+
+const AD_ACCOUNT_STATUS: Record<number, { label: string; color: string }> = {
+  1: { label: 'Ativa',        color: 'text-emerald-400' },
+  2: { label: 'Desativada',   color: 'text-red-400'     },
+  3: { label: 'Não gasta',    color: 'text-yellow-400'  },
+  7: { label: 'Cancelada',    color: 'text-red-400'     },
+};
+
+async function fetchMetaAssets(token: string): Promise<MetaAssets> {
+  const base = 'https://graph.facebook.com/v21.0';
+
+  async function fetchAll<T>(url: string): Promise<T[]> {
+    const results: T[] = [];
+    let nextUrl: string | null = url;
+    while (nextUrl) {
+      const res = await fetch(nextUrl);
+      const json = await res.json() as { data?: T[]; paging?: { next?: string }; error?: { message: string } };
+      if (json.error) throw new Error(json.error.message);
+      results.push(...(json.data ?? []));
+      nextUrl = json.paging?.next ?? null;
+    }
+    return results;
+  }
+
+  const t = `access_token=${token}`;
+
+  // Fetch from the logged-in user's perspective (/me) — same as Reportei/Dashgo
+  const [adAccounts, pages, igFromPages] = await Promise.allSettled([
+    fetchAll<MetaAdAccount>(
+      `${base}/me/adaccounts?limit=100&fields=id,name,account_status,currency,amount_spent&${t}`
+    ),
+    fetchAll<MetaPage & { instagram_business_account?: { id: string; username: string; name: string; followers_count: number; profile_picture_url: string } }>(
+      `${base}/me/accounts?limit=100&fields=id,name,category,fan_count,picture,instagram_business_account{id,username,name,followers_count,profile_picture_url}&${t}`
+    ),
+    Promise.resolve([] as MetaInstagram[]),
+  ]);
+
+  function settled<T>(r: PromiseSettledResult<T[]>): T[] {
+    return r.status === 'fulfilled' ? r.value : [];
+  }
+
+  const pagesData = settled(adAccounts).length >= 0 ? settled(pages) : [];
+
+  // Extract Instagram accounts linked to pages
+  const instagramMap = new Map<string, MetaInstagram>();
+  pagesData.forEach((p) => {
+    if (p.instagram_business_account) {
+      instagramMap.set(p.instagram_business_account.id, p.instagram_business_account);
+    }
+  });
+
+  return {
+    adAccounts: settled(adAccounts),
+    pages: pagesData.map(({ instagram_business_account: _, ...p }) => p) as MetaPage[],
+    instagram: [...instagramMap.values()],
+  };
+}
+
+// ─── Meta Assets Panel ────────────────────────────────────────────────────────
+
+type AssetTab = 'adAccounts' | 'pages' | 'instagram';
+
+function MetaAssetsPanel({ meta }: { meta: MetaIntegration }) {
+  const [assets, setAssets] = useState<MetaAssets | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [tab, setTab] = useState<AssetTab>('adAccounts');
+
+  async function load() {
+    setLoading(true);
+    setError('');
+    try {
+      const data = await fetchMetaAssets(meta.accessToken);
+      setAssets(data);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erro ao buscar ativos.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const tabs: { key: AssetTab; label: string; icon: React.ElementType; count: number }[] = [
+    { key: 'adAccounts', label: 'Contas de Anúncio', icon: Megaphone,  count: assets?.adAccounts.length ?? 0 },
+    { key: 'pages',      label: 'Páginas',           icon: Building2,  count: assets?.pages.length ?? 0      },
+    { key: 'instagram',  label: 'Instagram',         icon: Camera,  count: assets?.instagram.length ?? 0  },
+  ];
+
+  return (
+    <div className="bg-card border border-border rounded-xl overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+        <div>
+          <p className="text-sm font-bold">Ativos acessíveis</p>
+          <p className="text-xs text-muted-foreground mt-0.5">Perfil: {meta.userName}</p>
+        </div>
+        <button
+          onClick={load}
+          disabled={loading}
+          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+        >
+          <RefreshCw className={cn('w-3.5 h-3.5', loading && 'animate-spin')} />
+          Atualizar
+        </button>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex border-b border-border px-5 gap-1">
+        {tabs.map(({ key, label, icon: Icon, count }) => (
+          <button
+            key={key}
+            onClick={() => setTab(key)}
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-3 text-xs font-semibold border-b-2 transition-colors',
+              tab === key
+                ? 'border-primary text-primary'
+                : 'border-transparent text-muted-foreground hover:text-foreground',
+            )}
+          >
+            <Icon className="w-3.5 h-3.5" />
+            {label}
+            {!loading && assets && (
+              <span className={cn(
+                'ml-1 rounded-full px-1.5 py-0.5 text-[10px] font-bold',
+                tab === key ? 'bg-primary/20 text-primary' : 'bg-muted text-muted-foreground',
+              )}>
+                {count}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* Content */}
+      <div className="p-5">
+        {loading && (
+          <div className="py-10 text-center">
+            <RefreshCw className="w-5 h-5 text-muted-foreground/40 animate-spin mx-auto mb-2" />
+            <p className="text-sm text-muted-foreground">Buscando ativos no Meta...</p>
+          </div>
+        )}
+
+        {!loading && error && (
+          <div className="flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-xs text-red-400">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold">Erro ao carregar ativos</p>
+              <p className="mt-0.5 text-red-400/70">{error}</p>
+            </div>
+          </div>
+        )}
+
+        {!loading && !error && assets && (
+          <>
+            {/* Ad Accounts */}
+            {tab === 'adAccounts' && (
+              <div className="divide-y divide-border">
+                {assets.adAccounts.length === 0 && (
+                  <p className="py-8 text-center text-sm text-muted-foreground">Nenhuma conta de anúncio encontrada.</p>
+                )}
+                {assets.adAccounts.map((acc) => {
+                  const statusInfo = AD_ACCOUNT_STATUS[acc.account_status] ?? { label: 'Desconhecido', color: 'text-muted-foreground' };
+                  const spent = acc.amount_spent ? (Number(acc.amount_spent) / 100) : null;
+                  return (
+                    <div key={acc.id} className="flex items-center justify-between py-3 gap-4">
+                      <div>
+                        <p className="text-sm font-semibold">{acc.name}</p>
+                        <p className="text-xs font-mono text-muted-foreground mt-0.5">{acc.id} · {acc.currency}</p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className={cn('text-xs font-bold', statusInfo.color)}>{statusInfo.label}</p>
+                        {spent !== null && (
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {spent.toLocaleString('pt-BR', { style: 'currency', currency: acc.currency })} gasto
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Pages */}
+            {tab === 'pages' && (
+              <div className="divide-y divide-border">
+                {assets.pages.length === 0 && (
+                  <p className="py-8 text-center text-sm text-muted-foreground">Nenhuma página encontrada.</p>
+                )}
+                {assets.pages.map((page) => (
+                  <div key={page.id} className="flex items-center gap-3 py-3">
+                    {page.picture?.data?.url ? (
+                      <img src={page.picture.data.url} alt={page.name} className="w-9 h-9 rounded-full object-cover shrink-0" />
+                    ) : (
+                      <div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center shrink-0">
+                        <Building2 className="w-4 h-4 text-muted-foreground" />
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold truncate">{page.name}</p>
+                      <p className="text-xs text-muted-foreground">{page.category}</p>
+                    </div>
+                    {page.fan_count !== undefined && (
+                      <p className="text-xs text-muted-foreground shrink-0">
+                        {page.fan_count.toLocaleString('pt-BR')} seguidores
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Instagram */}
+            {tab === 'instagram' && (
+              <div className="divide-y divide-border">
+                {assets.instagram.length === 0 && (
+                  <p className="py-8 text-center text-sm text-muted-foreground">Nenhuma conta Instagram encontrada.</p>
+                )}
+                {assets.instagram.map((ig) => (
+                  <div key={ig.id} className="flex items-center gap-3 py-3">
+                    {ig.profile_picture_url ? (
+                      <img src={ig.profile_picture_url} alt={ig.username} className="w-9 h-9 rounded-full object-cover shrink-0" />
+                    ) : (
+                      <div className="w-9 h-9 rounded-full bg-gradient-to-br from-fuchsia-500 to-orange-400 flex items-center justify-center shrink-0">
+                        <Camera className="w-4 h-4 text-white" />
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold">@{ig.username}</p>
+                      {ig.name && <p className="text-xs text-muted-foreground truncate">{ig.name}</p>}
+                    </div>
+                    {ig.followers_count !== undefined && (
+                      <p className="text-xs text-muted-foreground shrink-0">
+                        {ig.followers_count.toLocaleString('pt-BR')} seguidores
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Logos ────────────────────────────────────────────────────────────────────
 
 const LogoMeta = () => (
   <svg viewBox="0 0 24 24" className="w-7 h-7" fill="#0668E1">
@@ -70,14 +350,176 @@ const LogoWebsite = () => (
   </svg>
 );
 
-const initialIntegrations: Integration[] = [
+// ─── Meta Connect Modal (OAuth flow) ─────────────────────────────────────────
+
+function MetaConnectModal({
+  onClose,
+  onConnected,
+}: {
+  onClose: () => void;
+  onConnected: (meta: MetaIntegration) => void;
+}) {
+  const [appId, setAppId] = useState(() => readIntegrations().meta.appId || '');
+  const [showGuide, setShowGuide] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const backdropRef = useRef<HTMLDivElement>(null);
+
+  function handleBackdrop(e: React.MouseEvent) {
+    if (e.target === backdropRef.current) onClose();
+  }
+
+  async function handleFBLogin() {
+    const id = appId.trim();
+    if (!id) { setError('Informe o App ID antes de continuar.'); return; }
+    setError('');
+    setLoading(true);
+    try {
+      const { accessToken, userId } = await fbLogin(id);
+
+      // Fetch user profile
+      const meRes = await fetch(
+        `https://graph.facebook.com/v21.0/me?fields=id,name,picture.width(80)&access_token=${accessToken}`
+      );
+      const me = await meRes.json() as { id: string; name: string; picture?: { data: { url: string } }; error?: { message: string } };
+      if (me.error) throw new Error(me.error.message);
+
+      const data: Omit<MetaIntegration, 'status' | 'connectedAt'> = {
+        appId: id,
+        accessToken,
+        userId,
+        userName: me.name,
+        userPicture: me.picture?.data?.url,
+      };
+      connectMeta(data);
+      onConnected({ ...data, status: 'connected', connectedAt: new Date().toISOString() });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erro ao conectar.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div
+      ref={backdropRef}
+      onClick={handleBackdrop}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+    >
+      <div className="w-full max-w-md bg-card border border-border rounded-2xl shadow-2xl overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-5 border-b border-border">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-background border border-border flex items-center justify-center">
+              <LogoMeta />
+            </div>
+            <div>
+              <h2 className="font-bold text-sm">Conectar Meta Ads</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">Login via Facebook — vale para todos os clientes</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="px-6 py-5 space-y-4">
+          {/* How it works */}
+          <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20 text-xs text-blue-300 leading-relaxed space-y-1">
+            <p className="font-semibold">Como funciona</p>
+            <p className="text-blue-300/80">Você entra com o Facebook e o sistema acessa automaticamente as contas de anúncio, páginas e perfis Instagram que seu perfil tem permissão — igual ao Reportei e Dashgo.</p>
+          </div>
+
+          {/* App ID */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              App ID do Meta for Developers
+            </label>
+            <input
+              type="text"
+              value={appId}
+              onChange={(e) => { setAppId(e.target.value); setError(''); }}
+              placeholder="Ex: 1234567890123456"
+              className="w-full h-10 rounded-lg bg-background border border-border px-3 text-sm font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/50 transition"
+            />
+          </div>
+
+          {/* Guide accordion */}
+          <div className="rounded-lg border border-border overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setShowGuide((v) => !v)}
+              className="w-full flex items-center justify-between px-3 py-2.5 bg-muted/30 text-xs text-muted-foreground font-semibold hover:bg-muted/50 transition-colors"
+            >
+              <span>Como obter o App ID?</span>
+              <ChevronDown className={cn('w-4 h-4 transition-transform', showGuide && 'rotate-180')} />
+            </button>
+            {showGuide && (
+              <div className="px-3 py-3 bg-muted/10 text-xs text-muted-foreground leading-relaxed space-y-2">
+                <ol className="list-decimal list-inside space-y-1">
+                  <li>Acesse <span className="font-mono text-foreground/70">developers.facebook.com/apps</span></li>
+                  <li>Selecione o app <strong className="text-foreground/80">ON_REPORT</strong> que você criou</li>
+                  <li>No painel do app, o <strong className="text-foreground/80">ID do aplicativo</strong> aparece no topo</li>
+                  <li>Certifique-se que o domínio <span className="font-mono text-foreground/70">localhost:3000</span> está em <strong className="text-foreground/80">Configurações → Básico → Domínios do app</strong></li>
+                </ol>
+                <p className="text-muted-foreground/60 pt-1">O app precisa estar no modo <strong>Desenvolvimento</strong> para funcionar no localhost.</p>
+              </div>
+            )}
+          </div>
+
+          {error && (
+            <div className="flex items-center gap-2 text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+              {error}
+            </div>
+          )}
+
+          <div className="flex gap-3 pt-1">
+            <Button type="button" variant="outline" className="flex-1 text-xs font-bold uppercase h-10" onClick={onClose}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleFBLogin}
+              disabled={loading}
+              className="flex-1 h-10 font-bold text-xs uppercase bg-[#1877F2] hover:bg-[#1565C0] text-white disabled:opacity-50"
+            >
+              {loading ? (
+                <span className="flex items-center gap-2"><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Conectando...</span>
+              ) : (
+                <span className="flex items-center gap-2"><LogoMeta /> Entrar com Facebook</span>
+              )}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type IntegrationId = 'meta-ads' | 'instagram' | 'google-ads' | 'google-my-business' | 'whatsapp' | 'tiktok-ads' | 'website';
+
+type Integration = {
+  id: IntegrationId;
+  name: string;
+  description: string;
+  category: string;
+  status: 'conectado' | 'desconectado';
+  logo: React.ReactNode;
+  hasCustomConnect?: boolean;
+};
+
+const BASE_INTEGRATIONS: Integration[] = [
   {
     id: 'meta-ads',
     name: 'Meta Ads',
     description: 'Facebook e Instagram Ads — sincronize campanhas, leads e métricas.',
     category: 'Anúncios',
-    status: 'conectado',
+    status: 'desconectado',
     logo: <LogoMeta />,
+    hasCustomConnect: true,
   },
   {
     id: 'instagram',
@@ -131,11 +573,52 @@ const initialIntegrations: Integration[] = [
 
 const CATEGORIES = ['Todos', 'Anúncios', 'Social', 'Presença Digital', 'Comunicação'];
 
-export default function IntegracoesPage() {
-  const [integrations, setIntegrations] = useState<Integration[]>(initialIntegrations);
-  const [activeCategory, setActiveCategory] = useState('Todos');
+// ─── Page ─────────────────────────────────────────────────────────────────────
 
-  function toggleConnection(id: string) {
+export default function IntegracoesPage() {
+  const [integrations, setIntegrations] = useState<Integration[]>(BASE_INTEGRATIONS);
+  const [activeCategory, setActiveCategory] = useState('Todos');
+  const [metaModal, setMetaModal] = useState(false);
+  const [metaInfo, setMetaInfo] = useState<MetaIntegration | null>(null);
+
+  // Load persisted Meta connection on mount
+  useEffect(() => {
+    const store = readIntegrations();
+    if (store.meta.status === 'connected') {
+      setMetaInfo(store.meta);
+      setIntegrations((prev) =>
+        prev.map((i) => (i.id === 'meta-ads' ? { ...i, status: 'conectado' } : i))
+      );
+    }
+  }, []);
+
+  function handleMetaConnected(meta: MetaIntegration) {
+    setMetaInfo(meta);
+    setMetaModal(false);
+    setIntegrations((prev) =>
+      prev.map((i) => (i.id === 'meta-ads' ? { ...i, status: 'conectado' } : i))
+    );
+  }
+
+  async function handleMetaDisconnect() {
+    await fbLogout().catch(() => {});
+    disconnectMeta();
+    setMetaInfo(null);
+    setIntegrations((prev) =>
+      prev.map((i) => (i.id === 'meta-ads' ? { ...i, status: 'desconectado' } : i))
+    );
+  }
+
+  function toggleConnection(id: IntegrationId) {
+    if (id === 'meta-ads') {
+      const current = integrations.find((i) => i.id === 'meta-ads');
+      if (current?.status === 'conectado') {
+        handleMetaDisconnect();
+      } else {
+        setMetaModal(true);
+      }
+      return;
+    }
     setIntegrations((prev) =>
       prev.map((i) =>
         i.id === id
@@ -153,106 +636,143 @@ export default function IntegracoesPage() {
   const connected = integrations.filter((i) => i.status === 'conectado').length;
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-4xl font-heading tracking-wider uppercase">Integrações</h1>
-          <p className="text-muted-foreground mt-1">
-            Conecte suas plataformas para sincronizar dados automaticamente.
-          </p>
-        </div>
-        <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary/10 border border-primary/20">
-          <CheckCircle2 className="w-4 h-4 text-primary" />
-          <span className="text-sm font-semibold text-primary">
-            {connected} de {integrations.length} conectadas
-          </span>
-        </div>
-      </div>
+    <>
+      {metaModal && (
+        <MetaConnectModal
+          onClose={() => setMetaModal(false)}
+          onConnected={handleMetaConnected}
+        />
+      )}
 
-      {/* Category filter */}
-      <div className="flex gap-2 flex-wrap">
-        {CATEGORIES.map((cat) => (
-          <button
-            key={cat}
-            onClick={() => setActiveCategory(cat)}
-            className={cn(
-              'px-3 py-1.5 rounded-full text-xs font-semibold transition-colors',
-              activeCategory === cat
-                ? 'bg-primary text-primary-foreground'
-                : 'bg-muted text-muted-foreground hover:bg-card hover:text-foreground'
-            )}
-          >
-            {cat}
-          </button>
-        ))}
-      </div>
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-4xl font-heading tracking-wider uppercase">Integrações</h1>
+            <p className="text-muted-foreground mt-1">
+              Conecte suas plataformas para sincronizar dados automaticamente.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary/10 border border-primary/20">
+            <CheckCircle2 className="w-4 h-4 text-primary" />
+            <span className="text-sm font-semibold text-primary">
+              {connected} de {integrations.length} conectadas
+            </span>
+          </div>
+        </div>
 
-      {/* Integration cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {filtered.map((integration) => {
-          const isConnected = integration.status === 'conectado';
-          return (
-            <div
-              key={integration.id}
+        {/* Category filter */}
+        <div className="flex gap-2 flex-wrap">
+          {CATEGORIES.map((cat) => (
+            <button
+              key={cat}
+              onClick={() => setActiveCategory(cat)}
               className={cn(
-                'bg-card border rounded-xl p-5 flex flex-col gap-4 transition-colors',
-                isConnected ? 'border-primary/30' : 'border-border'
+                'px-3 py-1.5 rounded-full text-xs font-semibold transition-colors',
+                activeCategory === cat
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-muted text-muted-foreground hover:bg-card hover:text-foreground'
               )}
             >
-              <div className="flex items-start justify-between">
-                <div className="w-12 h-12 rounded-xl bg-background border border-border flex items-center justify-center shadow-sm">
-                  {integration.logo}
+              {cat}
+            </button>
+          ))}
+        </div>
+
+        {/* Integration cards */}
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {filtered.map((integration) => {
+            const isConnected = integration.status === 'conectado';
+            const isMeta = integration.id === 'meta-ads';
+
+            return (
+              <div
+                key={integration.id}
+                className={cn(
+                  'bg-card border rounded-xl p-5 flex flex-col gap-4 transition-colors',
+                  isConnected ? 'border-primary/30' : 'border-border'
+                )}
+              >
+                <div className="flex items-start justify-between">
+                  <div className="w-12 h-12 rounded-xl bg-background border border-border flex items-center justify-center shadow-sm">
+                    {integration.logo}
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {isConnected ? (
+                      <CheckCircle2 className="w-4 h-4 text-primary" />
+                    ) : (
+                      <XCircle className="w-4 h-4 text-muted-foreground" />
+                    )}
+                    <span
+                      className={cn(
+                        'text-[10px] font-bold uppercase tracking-wider',
+                        isConnected ? 'text-primary' : 'text-muted-foreground'
+                      )}
+                    >
+                      {isConnected ? 'Conectado' : 'Desconectado'}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  {isConnected ? (
-                    <CheckCircle2 className="w-4 h-4 text-primary" />
-                  ) : (
-                    <XCircle className="w-4 h-4 text-muted-foreground" />
+
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-1">
+                    <h3 className="font-semibold text-sm">{integration.name}</h3>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-medium">
+                      {integration.category}
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    {integration.description}
+                  </p>
+
+                  {/* Meta connected details */}
+                  {isMeta && isConnected && metaInfo && (
+                    <div className="mt-3 p-2.5 rounded-lg bg-primary/5 border border-primary/15 flex items-center gap-2.5">
+                      {metaInfo.userPicture ? (
+                        <img src={metaInfo.userPicture} alt={metaInfo.userName} className="w-8 h-8 rounded-full shrink-0" />
+                      ) : (
+                        <div className="w-8 h-8 rounded-full bg-[#1877F2] flex items-center justify-center shrink-0">
+                          <LogoMeta />
+                        </div>
+                      )}
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold text-foreground truncate">{metaInfo.userName}</p>
+                        {metaInfo.connectedAt && (
+                          <p className="text-[10px] text-muted-foreground/60">
+                            Conectado em {new Date(metaInfo.connectedAt).toLocaleDateString('pt-BR')}
+                          </p>
+                        )}
+                      </div>
+                    </div>
                   )}
-                  <span
+                </div>
+
+                <div className="flex gap-2">
+                  <Button
+                    onClick={() => toggleConnection(integration.id)}
+                    variant={isConnected ? 'outline' : 'default'}
                     className={cn(
-                      'text-[10px] font-bold uppercase tracking-wider',
-                      isConnected ? 'text-primary' : 'text-muted-foreground'
+                      'flex-1 text-xs font-bold uppercase h-9',
+                      !isConnected && 'bg-primary text-primary-foreground hover:bg-primary/90'
                     )}
                   >
-                    {isConnected ? 'Conectado' : 'Desconectado'}
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex-1">
-                <div className="flex items-center gap-2 mb-1">
-                  <h3 className="font-semibold text-sm">{integration.name}</h3>
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-medium">
-                    {integration.category}
-                  </span>
-                </div>
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  {integration.description}
-                </p>
-              </div>
-
-              <div className="flex gap-2">
-                <Button
-                  onClick={() => toggleConnection(integration.id)}
-                  variant={isConnected ? 'outline' : 'default'}
-                  className={cn(
-                    'flex-1 text-xs font-bold uppercase h-9',
-                    !isConnected && 'bg-primary text-primary-foreground hover:bg-primary/90'
-                  )}
-                >
-                  {isConnected ? 'Desconectar' : 'Conectar'}
-                </Button>
-                {isConnected && (
-                  <Button variant="ghost" size="icon" title="Configurações da integração">
-                    <ExternalLink className="w-4 h-4" />
+                    {isConnected ? 'Desconectar' : 'Conectar'}
                   </Button>
-                )}
+                  {isConnected && (
+                    <Button variant="ghost" size="icon" title="Configurações da integração">
+                      <ExternalLink className="w-4 h-4" />
+                    </Button>
+                  )}
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
+
+        {/* Meta Assets Panel — shown when connected */}
+        {metaInfo && metaInfo.status === 'connected' && (
+          <MetaAssetsPanel meta={metaInfo} />
+        )}
       </div>
-    </div>
+    </>
   );
 }

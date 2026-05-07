@@ -1,8 +1,14 @@
 "use client";
 
-import { use, useState, type ComponentType } from 'react';
+import { use, useEffect, useState, type ComponentType } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { mockDashboardData, mockClients } from '@/lib/mock-data';
+import { useClients } from '@/lib/client-store';
+import {
+  type MetaAdsMetrics,
+  useMetaAdsConnections,
+} from '@/lib/meta-ads-store';
+import { readIntegrations } from '@/lib/integration-store';
 import {
   Calendar, Users, BarChart3, TrendingUp, UploadCloud,
   Link as LinkIcon, Plus, X, ChevronDown, LayoutGrid,
@@ -746,6 +752,13 @@ type ClientGoalConfig = {
   realized: number;
   format: 'currency' | 'number';
 };
+type TodayProgress = {
+  revenue: number;
+  enrollments: number;
+  ticket: number;
+  cpl: number;
+  funnel: number[];
+};
 
 const PLANNING_GOALS = {
   revenue: 150000,
@@ -754,12 +767,31 @@ const PLANNING_GOALS = {
   stages: DEFAULT_STAGES,
 };
 
-const TODAY_PROGRESS = {
+const TODAY_PROGRESS: TodayProgress = {
   revenue: 38250,
   enrollments: 9,
   ticket: 8500,
   cpl: 34,
   funnel: [42, 25, 13, 7, 4],
+};
+
+const ZERO_TODAY_PROGRESS: TodayProgress = {
+  revenue: 0,
+  enrollments: 0,
+  ticket: 0,
+  cpl: 0,
+  funnel: [0, 0, 0, 0, 0],
+};
+
+const ZERO_DASHBOARD_DATA: typeof mockDashboardData = {
+  salesTargets: {
+    marketing: { value: 0, max: 0, label: 'Marketing Channels', color: 'bg-secondary' },
+    leads: { value: 0, max: 0, label: 'Leads & Conversions', color: 'bg-primary' },
+    reasons: { value: 0, max: 0, label: 'Reasons Not Booked', color: 'bg-orange-500' },
+  },
+  newLeadsData: mockDashboardData.newLeadsData.map((item) => ({ ...item, facebook: 0, instagram: 0 })),
+  marketingChannelData: mockDashboardData.marketingChannelData.map((item) => ({ ...item, value: 0 })),
+  statsData: mockDashboardData.statsData.map((item) => ({ ...item, value: 0 })),
 };
 
 const GOAL_TYPE_OPTIONS: { type: ClientGoalType; label: string; format: ClientGoalConfig['format'] }[] = [
@@ -777,6 +809,73 @@ const DEFAULT_CLIENT_GOAL: ClientGoalConfig = {
   realized: TODAY_PROGRESS.revenue,
   format: 'currency',
 };
+
+const ZERO_CLIENT_GOAL: ClientGoalConfig = {
+  type: 'revenue',
+  label: 'Faturamento',
+  target: 0,
+  partial: 0,
+  realized: 0,
+  format: 'currency',
+};
+
+function buildDashboardDataFromMetaAds(metrics: MetaAdsMetrics): typeof mockDashboardData {
+  const facebookLeads = Math.round(metrics.leads * 0.62);
+  const instagramLeads = Math.max(metrics.leads - facebookLeads, 0);
+  const dayWeights = [0.14, 0.11, 0.18, 0.16, 0.2, 0.21];
+
+  return {
+    salesTargets: {
+      marketing: {
+        value: Math.round(metrics.impressions / 100),
+        max: Math.max(Math.round(metrics.impressions / 80), 1),
+        label: 'Impressões Meta Ads',
+        color: 'bg-secondary',
+      },
+      leads: {
+        value: metrics.leads,
+        max: Math.max(Math.round(metrics.leads * 1.25), 1),
+        label: 'Leads Meta Ads',
+        color: 'bg-primary',
+      },
+      reasons: {
+        value: Math.round(metrics.cpl),
+        max: Math.max(Math.round(metrics.cpl * 1.4), 1),
+        label: 'CPL Meta Ads',
+        color: 'bg-red-500',
+      },
+    },
+    newLeadsData: mockDashboardData.newLeadsData.map((item, index) => ({
+      ...item,
+      facebook: Math.round(facebookLeads * dayWeights[index]),
+      instagram: Math.round(instagramLeads * dayWeights[index]),
+    })),
+    marketingChannelData: [
+      { name: 'Facebook', value: 62, fill: '#55F52F' },
+      { name: 'Instagram', value: 38, fill: '#7B2CFF' },
+    ],
+    statsData: mockDashboardData.statsData.map((item, index) => ({
+      ...item,
+      value: Math.max(0, Math.round(metrics.clicks * dayWeights[index] / 10)),
+    })),
+  };
+}
+
+function buildTodayProgressFromMetaAds(metrics: MetaAdsMetrics): TodayProgress {
+  return {
+    revenue: 0,
+    enrollments: 0,
+    ticket: 0,
+    cpl: Math.round(metrics.cpl),
+    funnel: [
+      metrics.leads,
+      Math.round(metrics.leads * 0.62),
+      Math.round(metrics.leads * 0.35),
+      Math.round(metrics.leads * 0.18),
+      Math.round(metrics.leads * 0.08),
+    ],
+  };
+}
 
 function formatClientGoalValue(value: number, format: ClientGoalConfig['format']) {
   return format === 'currency' ? fmtBRL(value) : value.toLocaleString('pt-BR');
@@ -1000,11 +1099,12 @@ function ClientGoalSettings({ goal, onChange }: {
 
   function handleTypeChange(type: ClientGoalType) {
     const option = GOAL_TYPE_OPTIONS.find((item) => item.type === type) ?? GOAL_TYPE_OPTIONS[0];
+    const keepZeroDefaults = goal.target === 0 && goal.partial === 0 && goal.realized === 0;
     const defaults: Record<ClientGoalType, Pick<ClientGoalConfig, 'target' | 'partial' | 'realized'>> = {
-      revenue: { target: 150000, partial: 53000, realized: TODAY_PROGRESS.revenue },
-      leads: { target: 300, partial: 60, realized: TODAY_PROGRESS.funnel[0] },
-      enrollments: { target: 25, partial: 8, realized: TODAY_PROGRESS.enrollments },
-      custom: { target: 100, partial: 25, realized: 18 },
+      revenue: keepZeroDefaults ? { target: 0, partial: 0, realized: 0 } : { target: 150000, partial: 53000, realized: TODAY_PROGRESS.revenue },
+      leads: keepZeroDefaults ? { target: 0, partial: 0, realized: 0 } : { target: 300, partial: 60, realized: TODAY_PROGRESS.funnel[0] },
+      enrollments: keepZeroDefaults ? { target: 0, partial: 0, realized: 0 } : { target: 25, partial: 8, realized: TODAY_PROGRESS.enrollments },
+      custom: keepZeroDefaults ? { target: 0, partial: 0, realized: 0 } : { target: 100, partial: 25, realized: 18 },
     };
 
     onChange({
@@ -1056,14 +1156,14 @@ function ClientGoalSettings({ goal, onChange }: {
   );
 }
 
-function PlanningGoalsDashboard({ goalConfig }: { goalConfig: ClientGoalConfig }) {
+function PlanningGoalsDashboard({ goalConfig, todayProgress }: { goalConfig: ClientGoalConfig; todayProgress: TodayProgress }) {
   const plannedFunnel = plannedFunnelFromGoal(goalConfig, PLANNING_GOALS.stages);
   const leadsGoal = plannedFunnel[0] ?? 0;
   const goals: GoalProgress[] = [
     { label: goalConfig.label, realized: goalConfig.realized, partial: goalConfig.partial, target: goalConfig.target, format: goalConfig.format },
-    ...(goalConfig.type === 'leads' ? [] : [{ label: 'Leads', realized: TODAY_PROGRESS.funnel[0], partial: 60, target: leadsGoal, format: 'number' as const }]),
-    { label: 'Ticket Médio', realized: TODAY_PROGRESS.ticket, partial: PLANNING_GOALS.ticket, target: PLANNING_GOALS.ticket, format: 'currency' },
-    { label: 'CPL', realized: TODAY_PROGRESS.cpl, partial: PLANNING_GOALS.cpl, target: PLANNING_GOALS.cpl, format: 'currency', inverse: true },
+    ...(goalConfig.type === 'leads' ? [] : [{ label: 'Leads', realized: todayProgress.funnel[0], partial: 60, target: leadsGoal, format: 'number' as const }]),
+    { label: 'Ticket Médio', realized: todayProgress.ticket, partial: PLANNING_GOALS.ticket, target: PLANNING_GOALS.ticket, format: 'currency' },
+    { label: 'CPL', realized: todayProgress.cpl, partial: PLANNING_GOALS.cpl, target: PLANNING_GOALS.cpl, format: 'currency', inverse: true },
   ];
 
   return (
@@ -1088,7 +1188,7 @@ function PlanningGoalsDashboard({ goalConfig }: { goalConfig: ClientGoalConfig }
         <CardContent>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
             {PLANNING_GOALS.stages.map((stage, idx) => {
-              const current = TODAY_PROGRESS.funnel[idx] ?? 0;
+              const current = todayProgress.funnel[idx] ?? 0;
               const target = plannedFunnel[idx] ?? 0;
               const partial = Math.ceil(target * 0.16);
               const progress = goalPercent(current, partial);
@@ -1728,6 +1828,8 @@ function AddClientWidgetDialog({ open, onClose, onAdd }: {
 function ClientDashboardTab({
   editable = false,
   goalConfig,
+  dashboardData,
+  todayProgress,
   customBlocks,
   onAddCustomBlock,
   onRemoveCustomBlock,
@@ -1735,14 +1837,16 @@ function ClientDashboardTab({
 }: {
   editable?: boolean;
   goalConfig: ClientGoalConfig;
+  dashboardData: typeof mockDashboardData;
+  todayProgress: TodayProgress;
   customBlocks: ClientDashboardWidget[];
   onAddCustomBlock: (widget: Omit<ClientDashboardWidget, 'id'>) => void;
   onRemoveCustomBlock: (id: string) => void;
   onEditToggle: () => void;
 }) {
   const [addDialogOpen, setAddDialogOpen] = useState(false);
-  const facebookLeads = mockDashboardData.newLeadsData.reduce((sum, item) => sum + item.facebook, 0);
-  const instagramLeads = mockDashboardData.newLeadsData.reduce((sum, item) => sum + item.instagram, 0);
+  const facebookLeads = dashboardData.newLeadsData.reduce((sum, item) => sum + item.facebook, 0);
+  const instagramLeads = dashboardData.newLeadsData.reduce((sum, item) => sum + item.instagram, 0);
   const totalLeads = facebookLeads + instagramLeads;
 
   return (
@@ -1786,10 +1890,10 @@ function ClientDashboardTab({
         onAdd={onAddCustomBlock}
       />
 
-      <PlanningGoalsDashboard goalConfig={goalConfig} />
+      <PlanningGoalsDashboard goalConfig={goalConfig} todayProgress={todayProgress} />
 
       <div className="grid gap-5 md:grid-cols-3">
-        {Object.entries(mockDashboardData.salesTargets).map(([key, target]) => (
+        {Object.entries(dashboardData.salesTargets).map(([key, target]) => (
           <TargetSummaryCard key={key} label={target.label} value={target.value} max={target.max} />
         ))}
       </div>
@@ -1835,7 +1939,7 @@ function ClientDashboardTab({
               </CardHeader>
               <CardContent>
                 <div className="mt-2 grid gap-3 sm:grid-cols-2">
-                  {mockDashboardData.marketingChannelData.map((channel) => (
+                  {dashboardData.marketingChannelData.map((channel) => (
                     <DataHighlightCard
                       key={channel.name}
                       label={channel.name}
@@ -1865,15 +1969,252 @@ function ClientDashboardTab({
   );
 }
 
+function MetaAdsConnectionDialog({
+  open,
+  onClose,
+  clientId,
+  clientName,
+}: {
+  open: boolean;
+  onClose: () => void;
+  clientId: string;
+  clientName: string;
+}) {
+  const { getConnection, saveConnection, disconnectClient } = useMetaAdsConnections();
+  const connection = getConnection(clientId);
+
+  const [globalMeta, setGlobalMeta] = useState(() => readIntegrations().meta);
+  const [adAccountId, setAdAccountId] = useState('');
+  const [adAccountName, setAdAccountName] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!open) return;
+    setGlobalMeta(readIntegrations().meta);
+    setAdAccountId(connection?.accountIds[0] ?? '');
+    setAdAccountName(connection?.profileId ?? '');
+    setError('');
+  }, [open, connection]);
+
+  const globalConnected = globalMeta.status === 'connected';
+
+  function handleSave() {
+    const trimmedId = adAccountId.trim();
+    if (!trimmedId) { setError('Informe o Ad Account ID.'); return; }
+    if (!trimmedId.startsWith('act_') && !/^\d+$/.test(trimmedId)) {
+      setError('O ID deve começar com "act_" ou ser numérico (ex: act_123456789).');
+      return;
+    }
+    const normalizedId = trimmedId.startsWith('act_') ? trimmedId : `act_${trimmedId}`;
+    saveConnection(clientId, adAccountName.trim() || normalizedId, [normalizedId]);
+    onClose();
+  }
+
+  function handleDisconnect() {
+    disconnectClient(clientId);
+    setAdAccountId('');
+    setAdAccountName('');
+    onClose();
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
+      <DialogContent className="max-w-lg border-border bg-card">
+        <DialogHeader>
+          <DialogTitle className="font-heading text-2xl uppercase tracking-wider">Configurar Meta Ads</DialogTitle>
+          <p className="text-sm text-muted-foreground">
+            Vincule a conta de anúncio de <strong>{clientName}</strong> usando a integração global.
+          </p>
+        </DialogHeader>
+
+        <div className="grid gap-4">
+          {/* Global connection status */}
+          {globalConnected ? (
+            <div className="flex items-start gap-3 rounded-lg border border-primary/25 bg-primary/5 p-3">
+              <CheckCircle2 className="w-4 h-4 text-primary mt-0.5 shrink-0" />
+              <div className="text-xs leading-relaxed">
+                <p className="font-semibold text-foreground">{globalMeta.userName}</p>
+                <p className="text-muted-foreground/60 mt-0.5">Integração global ativa</p>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-start gap-3 rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-3">
+              <AlertTriangle className="w-4 h-4 text-yellow-400 mt-0.5 shrink-0" />
+              <div className="text-xs text-yellow-300 leading-relaxed">
+                <p className="font-semibold">Meta Ads não conectado globalmente.</p>
+                <p className="text-yellow-300/70 mt-0.5">Vá em <strong>Integrações</strong> no menu lateral e conecte o Meta Ads primeiro.</p>
+              </div>
+            </div>
+          )}
+
+          {globalConnected && (
+            <>
+              <div className="grid gap-1.5">
+                <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                  Ad Account ID do cliente
+                </Label>
+                <Input
+                  value={adAccountId}
+                  onChange={(e) => { setAdAccountId(e.target.value); setError(''); }}
+                  placeholder="act_1234567890123"
+                  className="font-mono text-sm"
+                />
+                <p className="text-[11px] text-muted-foreground/60">
+                  Encontre em business.facebook.com → Contas de anúncio. Começa com <span className="font-mono">act_</span>
+                </p>
+              </div>
+
+              <div className="grid gap-1.5">
+                <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                  Nome da conta (opcional)
+                </Label>
+                <Input
+                  value={adAccountName}
+                  onChange={(e) => setAdAccountName(e.target.value)}
+                  placeholder={`Ex: ${clientName} - Tráfego`}
+                  className="text-sm"
+                />
+              </div>
+
+              {error && (
+                <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+                  {error}
+                </p>
+              )}
+
+              {connection && (
+                <div className="rounded-lg border border-primary/30 bg-primary/10 p-3 text-xs text-muted-foreground">
+                  <span className="font-bold text-primary">Vinculado: </span>
+                  {connection.accountIds[0]} {connection.profileId !== connection.accountIds[0] ? `— ${connection.profileId}` : ''}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <DialogFooter className="gap-2 sm:justify-between">
+          <div>
+            {connection && (
+              <Button variant="outline" onClick={handleDisconnect} className="border-red-500/40 text-red-400 hover:bg-red-500/10">
+                Desvincular
+              </Button>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={onClose}>Cancelar</Button>
+            <Button
+              onClick={handleSave}
+              disabled={!globalConnected}
+              className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
+            >
+              Salvar vínculo
+            </Button>
+          </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ClientIntegrationsTab({ clientId, clientName }: { clientId: string; clientName: string }) {
+  const { getConnection, getClientAccounts, getClientMetrics } = useMetaAdsConnections();
+  const [metaDialogOpen, setMetaDialogOpen] = useState(false);
+  const metaConnection = getConnection(clientId);
+  const metaAccounts = getClientAccounts(clientId);
+  const metaMetrics = getClientMetrics(clientId);
+
+  return (
+    <>
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 pt-1">
+        {integracoes.map((int) => {
+          const isMetaAds = int.name === 'Meta Ads';
+          const status = isMetaAds
+            ? metaConnection ? 'Conectado' : 'Desconectado'
+            : int.status;
+          const connected = status === 'Conectado';
+
+          return (
+            <Card key={int.id} className="bg-card border-border">
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div className="w-11 h-11 rounded-xl bg-background border border-border flex items-center justify-center">
+                    {int.logo}
+                  </div>
+                  <span className={cn(
+                    'text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-full border',
+                    connected ? 'bg-primary/20 text-primary border-primary/30' : 'bg-muted text-muted-foreground border-border',
+                  )}>
+                    {status}
+                  </span>
+                </div>
+                <CardTitle className="mt-3">{int.name}</CardTitle>
+                <CardDescription>Sincronização de {clientName} com {int.name}</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {isMetaAds && metaConnection && (
+                  <div className="grid gap-2 rounded-lg border border-border bg-background p-3 text-xs text-muted-foreground">
+                    <div className="flex items-center justify-between gap-3">
+                      <span>Contas vinculadas</span>
+                      <strong className="text-foreground">{metaAccounts.length}</strong>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span>Leads Meta Ads</span>
+                      <strong className="text-primary">{metaMetrics.leads.toLocaleString('pt-BR')}</strong>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span>CPL médio</span>
+                      <strong className={metaMetrics.cpl > 25 ? 'text-red-400' : 'text-primary'}>
+                        {formatCurrencyBRL(metaMetrics.cpl)}
+                      </strong>
+                    </div>
+                  </div>
+                )}
+                <Button
+                  variant={connected ? 'outline' : 'default'}
+                  className="w-full text-xs font-bold uppercase h-9"
+                  onClick={() => isMetaAds && setMetaDialogOpen(true)}
+                  disabled={!isMetaAds}
+                >
+                  {connected ? 'Configurar / Desconectar' : 'Conectar Conta'}
+                </Button>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+
+      <MetaAdsConnectionDialog
+        open={metaDialogOpen}
+        onClose={() => setMetaDialogOpen(false)}
+        clientId={clientId}
+        clientName={clientName}
+      />
+    </>
+  );
+}
+
 // ── Page ───────────────────────────────────────────────────────────────────────
 const TABS = ['planejamento', 'dashboard', 'time', 'pagamentos', 'integracoes', 'importar'] as const;
 type Tab = typeof TABS[number];
 
 export default function ClientPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const client = mockClients.find((c) => c.id === id) ?? { name: 'Cliente', segment: '', status: 'Ativo' };
+  const { allClients } = useClients();
+  const { getConnection, getClientMetrics } = useMetaAdsConnections();
+  const baseClient = mockClients.find((c) => c.id === id);
+  const storedClient = allClients.find((c) => c.id === id);
+  const client = storedClient ?? { name: 'Cliente', segment: '', status: 'Ativo' };
+  const isNewClient = !baseClient || !storedClient;
+  const metaConnection = getConnection(id);
+  const metaMetrics = getClientMetrics(id);
+  const dashboardData = metaConnection
+    ? buildDashboardDataFromMetaAds(metaMetrics)
+    : isNewClient ? ZERO_DASHBOARD_DATA : mockDashboardData;
+  const todayProgress = metaConnection
+    ? buildTodayProgressFromMetaAds(metaMetrics)
+    : isNewClient ? ZERO_TODAY_PROGRESS : TODAY_PROGRESS;
   const [tab, setTab] = useState<Tab>('planejamento');
-  const [clientGoal, setClientGoal] = useState<ClientGoalConfig>(DEFAULT_CLIENT_GOAL);
+  const [clientGoal, setClientGoal] = useState<ClientGoalConfig>(() => isNewClient ? ZERO_CLIENT_GOAL : DEFAULT_CLIENT_GOAL);
   const [dashboardEditMode, setDashboardEditMode] = useState(false);
   const [customDashboardBlocks, setCustomDashboardBlocks] = useState<ClientDashboardWidget[]>([]);
 
@@ -1945,6 +2286,8 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
         <ClientDashboardTab
           editable={dashboardEditMode}
           goalConfig={clientGoal}
+          dashboardData={dashboardData}
+          todayProgress={todayProgress}
           customBlocks={customDashboardBlocks}
           onAddCustomBlock={addCustomDashboardBlock}
           onRemoveCustomBlock={removeCustomDashboardBlock}
@@ -1956,31 +2299,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
 
       {tab === 'pagamentos' && <InvestmentPaymentsTab clientId={id} clientName={client.name} />}
 
-      {tab === 'integracoes' && (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 pt-1">
-          {integracoes.map((int) => (
-            <Card key={int.id} className="bg-card border-border">
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div className="w-11 h-11 rounded-xl bg-background border border-border flex items-center justify-center">
-                    {int.logo}
-                  </div>
-                  <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-full ${int.status === 'Conectado' ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-muted text-muted-foreground border border-border'}`}>
-                    {int.status}
-                  </span>
-                </div>
-                <CardTitle className="mt-3">{int.name}</CardTitle>
-                <CardDescription>Sincronização de {client.name} com {int.name}</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Button variant={int.status === 'Conectado' ? 'outline' : 'default'} className="w-full text-xs font-bold uppercase h-9">
-                  {int.status === 'Conectado' ? 'Configurar / Desconectar' : 'Conectar Conta'}
-                </Button>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
+      {tab === 'integracoes' && <ClientIntegrationsTab clientId={id} clientName={client.name} />}
 
       {tab === 'importar' && (
         <div className="grid gap-5 md:grid-cols-2 pt-1">

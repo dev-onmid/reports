@@ -1,11 +1,15 @@
+"use client";
+
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
-import { mockClients } from '@/lib/mock-data';
+import { useClients } from '@/lib/client-store';
 import { Check, Sparkles } from 'lucide-react';
 
 export default function NovoRelatorioPage() {
+  const { clients } = useClients();
+
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
       <div>
@@ -24,7 +28,7 @@ export default function NovoRelatorioPage() {
                 <Label>Cliente</Label>
                 <select defaultValue="" className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50">
                   <option value="" disabled>Selecione um cliente</option>
-                  {mockClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
               <div className="space-y-2">

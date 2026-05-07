@@ -27,6 +27,7 @@ import {
 } from 'recharts';
 import { Button } from '@/components/ui/button';
 import { mockClients, mockDashboardData } from '@/lib/mock-data';
+import { useClients } from '@/lib/client-store';
 import { PAYMENT_STATUS_OPTIONS, useInvestmentPayments, wasDispatched } from '@/lib/payment-store';
 import type { PaymentStatus } from '@/lib/payment-store';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
@@ -58,6 +59,8 @@ const CLIENT_RESULT_GOALS = [
   { type: 'Matrículas', target: 25, realized: 9, format: 'number' as const },
   { type: 'Leads', target: 300, realized: 128, format: 'number' as const },
 ];
+
+const ZERO_CLIENT_RESULT_GOAL = { type: 'Faturamento', target: 0, realized: 0, format: 'currency' as const };
 
 function formatDateBR(date: string): string {
   const [year, month, day] = date.split('-');
@@ -106,20 +109,24 @@ function MetricCard({
 }
 
 export default function GeneralDashboard() {
+  const { clients } = useClients();
   const { payments } = useInvestmentPayments();
+  const visibleClientIds = new Set(clients.map((client) => client.id));
+  const visiblePayments = payments.filter((payment) => visibleClientIds.has(payment.clientId));
 
-  const totalInvestment = payments.reduce((sum, payment) => sum + payment.amount, 0);
-  const paidInvestment = payments
+  const totalInvestment = visiblePayments.reduce((sum, payment) => sum + payment.amount, 0);
+  const paidInvestment = visiblePayments
     .filter((payment) => payment.status === 'Pago')
     .reduce((sum, payment) => sum + payment.amount, 0);
-  const overduePayments = payments.filter((payment) => payment.status === 'Em atraso');
-  const pendingPayments = payments.filter((payment) => payment.status === 'Pendente');
-  const activeClients = mockClients.filter((client) => client.status === 'Ativo').length;
-  const clientResultSummary = mockClients.map((client, index) => {
-    const goal = CLIENT_RESULT_GOALS[index % CLIENT_RESULT_GOALS.length];
+  const overduePayments = visiblePayments.filter((payment) => payment.status === 'Em atraso');
+  const pendingPayments = visiblePayments.filter((payment) => payment.status === 'Pendente');
+  const activeClients = clients.filter((client) => client.status === 'Ativo').length;
+  const clientResultSummary = clients.map((client, index) => {
+    const isNewClient = !mockClients.some((item) => item.id === client.id);
+    const goal = isNewClient ? ZERO_CLIENT_RESULT_GOAL : CLIENT_RESULT_GOALS[index % CLIENT_RESULT_GOALS.length];
     const clientPayments = payments.filter((payment) => payment.clientId === client.id);
     const investment = clientPayments.reduce((sum, payment) => sum + payment.amount, 0);
-    const progress = Math.min(Math.round((goal.realized / goal.target) * 100), 100);
+    const progress = goal.target > 0 ? Math.min(Math.round((goal.realized / goal.target) * 100), 100) : 0;
     const status =
       progress >= 75 ? { label: 'No ritmo', color: '#55F52F', text: 'text-primary' } :
       progress >= 45 ? { label: 'Atenção', color: '#7B2CFF', text: 'text-secondary' } :
@@ -130,8 +137,8 @@ export default function GeneralDashboard() {
 
   const paymentStatusData = PAYMENT_STATUS_OPTIONS.map((status) => ({
     name: status,
-    value: payments.filter((payment) => payment.status === status).length,
-    amount: payments.filter((payment) => payment.status === status).reduce((sum, payment) => sum + payment.amount, 0),
+    value: visiblePayments.filter((payment) => payment.status === status).length,
+    amount: visiblePayments.filter((payment) => payment.status === status).reduce((sum, payment) => sum + payment.amount, 0),
     fill:
       status === 'Pago' ? '#55F52F' :
       status === 'Enviado' ? '#38BDF8' :
@@ -139,7 +146,7 @@ export default function GeneralDashboard() {
       '#F59E0B',
   }));
 
-  const clientInvestmentData = mockClients.map((client) => {
+  const clientInvestmentData = clients.map((client) => {
     const clientPayments = payments.filter((payment) => payment.clientId === client.id);
     return {
       name: client.name,
@@ -150,7 +157,7 @@ export default function GeneralDashboard() {
     };
   });
 
-  const nextPayments = [...payments]
+  const nextPayments = [...visiblePayments]
     .filter((payment) => payment.status !== 'Pago')
     .sort((a, b) => a.date.localeCompare(b.date))
     .slice(0, 5);
@@ -179,7 +186,7 @@ export default function GeneralDashboard() {
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard
           title="Clientes Ativos"
-          value={`${activeClients}/${mockClients.length}`}
+          value={`${activeClients}/${clients.length}`}
           detail="Base em operação com dashboards individuais."
           icon={Users}
           tone="primary"

@@ -1,15 +1,22 @@
+"use client";
+
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Plus, Download, Eye, MoreVertical } from 'lucide-react';
 import { mockClients } from '@/lib/mock-data';
+import { useClients } from '@/lib/client-store';
 
 const mockReports = [
-  { id: 1, title: 'Relatório Mensal - Abril 2026', client: mockClients[0].name, date: '01/05/2026', status: 'Gerado' },
-  { id: 2, title: 'Performance Campanhas Q1', client: mockClients[1].name, date: '15/04/2026', status: 'Enviado' },
-  { id: 3, title: 'Análise de Social Media', client: mockClients[2].name, date: '10/04/2026', status: 'Rascunho' },
+  { id: 1, title: 'Relatório Mensal - Abril 2026', clientId: mockClients[0].id, client: mockClients[0].name, date: '01/05/2026', status: 'Gerado' },
+  { id: 2, title: 'Performance Campanhas Q1', clientId: mockClients[1].id, client: mockClients[1].name, date: '15/04/2026', status: 'Enviado' },
+  { id: 3, title: 'Análise de Social Media', clientId: mockClients[2].id, client: mockClients[2].name, date: '10/04/2026', status: 'Rascunho' },
 ];
 
 export default function RelatoriosPage() {
+  const { clients } = useClients();
+  const visibleClientIds = new Set(clients.map((client) => client.id));
+  const reports = mockReports.filter((report) => visibleClientIds.has(report.clientId));
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -39,7 +46,7 @@ export default function RelatoriosPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {mockReports.map((report) => (
+            {reports.map((report) => (
               <tr key={report.id} className="hover:bg-muted/50 transition-colors">
                 <td className="px-6 py-4 font-medium">{report.title}</td>
                 <td className="px-6 py-4">{report.client}</td>
@@ -68,6 +75,11 @@ export default function RelatoriosPage() {
             ))}
           </tbody>
         </table>
+        {reports.length === 0 && (
+          <div className="py-14 text-center text-sm text-muted-foreground">
+            Nenhum relatório para clientes ativos.
+          </div>
+        )}
       </div>
     </div>
   );

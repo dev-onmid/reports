@@ -1,7 +1,7 @@
 "use client";
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   AlertTriangle,
   CalendarDays,
@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { mockClients } from '@/lib/mock-data';
+import { useClients } from '@/lib/client-store';
 import {
   type InvestmentPayment,
   type PaymentChannel,
@@ -259,42 +259,62 @@ function CurrencyInput({ value, onChange, className }: {
 }
 
 export default function PagamentosPage() {
+  const { clients } = useClients();
   const { payments, addPayment, updatePaymentStatus, deletePayment } = useInvestmentPayments();
+  const visibleClientIds = new Set(clients.map((client) => client.id));
+  const visiblePayments = payments.filter((payment) => visibleClientIds.has(payment.clientId));
   const [selectedDate, setSelectedDate] = useState(makeDate(6));
   const [viewMode, setViewMode] = useState<ViewMode>('dia');
   const [statusFilter, setStatusFilter] = useState<PaymentStatus | 'Todos'>('Todos');
   const [channelFilter, setChannelFilter] = useState<PaymentChannel | 'Todos'>('Todos');
   const [newPayment, setNewPayment] = useState<Omit<InvestmentPayment, 'id'>>({
-    clientId: mockClients[0]?.id ?? '1',
-    clientName: mockClients[0]?.name ?? 'Cliente',
+    clientId: clients[0]?.id ?? '',
+    clientName: clients[0]?.name ?? '',
     date: makeDate(6),
-    destination: `${mockClients[0]?.name ?? 'Cliente'} - Novo investimento`,
+    destination: clients[0] ? `${clients[0].name} - Novo investimento` : '',
     amount: 500,
     channel: 'Meta ADS',
     status: 'Pendente',
   });
 
-  const filteredPayments = payments.filter((payment) => {
+  const filteredPayments = visiblePayments.filter((payment) => {
     const dateMatches = isDateInView(payment.date, selectedDate, viewMode);
     const statusMatches = statusFilter === 'Todos' || payment.status === statusFilter;
     const channelMatches = channelFilter === 'Todos' || payment.channel === channelFilter;
     return dateMatches && statusMatches && channelMatches;
   });
 
-  const selectedScopePayments = payments.filter((payment) => isDateInView(payment.date, selectedDate, viewMode));
+  const selectedScopePayments = visiblePayments.filter((payment) => isDateInView(payment.date, selectedDate, viewMode));
   const totalDay = selectedScopePayments.reduce((sum, payment) => sum + payment.amount, 0);
   const pendingDay = selectedScopePayments.filter((payment) => payment.status === 'Pendente').reduce((sum, payment) => sum + payment.amount, 0);
   const sentDay = selectedScopePayments.filter((payment) => payment.status === 'Enviado').reduce((sum, payment) => sum + payment.amount, 0);
   const paidDay = selectedScopePayments.filter((payment) => payment.status === 'Pago').reduce((sum, payment) => sum + payment.amount, 0);
   const overdueDay = selectedScopePayments.filter((payment) => payment.status === 'Em atraso').reduce((sum, payment) => sum + payment.amount, 0);
 
-  const availableDates = Array.from(new Set(payments.map((payment) => payment.date))).sort();
+  const availableDates = Array.from(new Set(visiblePayments.map((payment) => payment.date))).sort();
   const weekDates = getWeekDates(selectedDate);
   const monthWeeks = getMonthBusinessWeeks(selectedDate);
   const summaryLabel = viewMode === 'dia' ? 'do dia' : 'do período';
 
+  useEffect(() => {
+    if (clients.length === 0) {
+      setNewPayment((prev) => ({ ...prev, clientId: '', clientName: '', destination: '' }));
+      return;
+    }
+
+    if (!clients.some((client) => client.id === newPayment.clientId)) {
+      const firstClient = clients[0];
+      setNewPayment((prev) => ({
+        ...prev,
+        clientId: firstClient.id,
+        clientName: firstClient.name,
+        destination: `${firstClient.name} - Novo investimento`,
+      }));
+    }
+  }, [clients, newPayment.clientId]);
+
   function handleClientChange(clientId: string) {
-    const client = mockClients.find((item) => item.id === clientId);
+    const client = clients.find((item) => item.id === clientId);
     if (!client) return;
 
     setNewPayment((prev) => ({
@@ -360,7 +380,7 @@ export default function PagamentosPage() {
               onChange={(e) => handleClientChange(e.target.value)}
               className="h-9 min-w-44 rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
             >
-              {mockClients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
+              {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
             </select>
           </div>
           <div className="space-y-1.5">
@@ -437,7 +457,7 @@ export default function PagamentosPage() {
 
       <div className="flex gap-2 overflow-x-auto pb-2">
         {availableDates.map((date) => {
-          const count = payments.filter((payment) => payment.date === date).length;
+          const count = visiblePayments.filter((payment) => payment.date === date).length;
           const selected = viewMode === 'dia' ? date === selectedDate : isDateInView(date, selectedDate, viewMode);
           const holiday = getHoliday(date);
 

@@ -16,6 +16,10 @@ const bebas = Bebas_Neue({
 export const metadata: Metadata = {
   title: "ONMID Reports",
   description: "Gerador Inteligente de Relatórios de Marketing",
+  icons: {
+    icon: "/brand/onmid-favicon.svg",
+    shortcut: "/brand/onmid-favicon.svg",
+  },
 };
 
 import { ThemeProvider } from "@/components/theme-provider";

@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { clearAuthSession } from '@/lib/auth-store';
 import {
   LayoutDashboard,
   Users,
@@ -75,6 +76,7 @@ export function Sidebar() {
         </Link>
         <Link
           href="/"
+          onClick={() => clearAuthSession()}
           className="flex items-center gap-3 px-3 py-3 rounded-md text-sm font-medium text-destructive/80 hover:text-destructive hover:bg-destructive/10 transition-all"
         >
           <LogOut className="w-5 h-5" />
