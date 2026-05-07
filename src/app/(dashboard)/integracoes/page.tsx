@@ -608,7 +608,10 @@ function MetaConnectModal({
       const savedMeta = await connectMeta(data);
       onConnected(savedMeta);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Erro ao conectar.');
+      const msg = e instanceof Error
+        ? e.message
+        : (e as { message?: string })?.message ?? JSON.stringify(e) ?? 'Erro ao conectar.';
+      setError(msg);
     } finally {
       setLoading(false);
     }
