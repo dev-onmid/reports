@@ -1,31 +1,41 @@
 "use client";
 
 import { useEffect, useRef, useState } from 'react';
-import { CheckCircle2, XCircle, ExternalLink, X, AlertCircle, ChevronDown, RefreshCw, Building2, Megaphone, Camera, Plus, Trash2 } from 'lucide-react';
+import {
+  AlertCircle,
+  Building2,
+  Camera,
+  ChevronDown,
+  CheckCircle2,
+  ExternalLink,
+  Megaphone,
+  Plus,
+  RefreshCw,
+  Trash2,
+  X,
+  XCircle,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
   GOOGLE_ADS_DEFAULT_MANAGER_ID,
   GOOGLE_ADS_DEVELOPER_TOKEN,
   GOOGLE_ADS_LOGIN_EMAIL,
-  type GoogleAdsAccount,
   GOOGLE_ADS_MANAGERS,
-  useGoogleAds,
+  type GoogleAdsAccount,
   type GoogleAdsIntegration,
+  useGoogleAds,
 } from '@/lib/google-ads-store';
 import {
-  loadIntegrations,
-  readIntegrations,
-  connectMeta,
-  disconnectMeta,
   fbLogin,
   fbLogout,
   loadCachedAdAccounts,
   saveCachedAdAccounts,
   setAccountEnabled,
-  type MetaIntegration,
   type CachedAdAccount,
 } from '@/lib/integration-store';
+import { useMetaConnections, type MetaConnection } from '@/lib/meta-connections-store';
+import { useGoogleConnections, type GoogleConnection } from '@/lib/google-connections-store';
 
 // ─── Account avatar helpers ───────────────────────────────────────────────────
 
@@ -112,7 +122,6 @@ async function fetchMetaAssets(token: string): Promise<MetaAssets> {
     return r.status === 'fulfilled' ? r.value : [];
   }
 
-  // Also fetch ad accounts via Business Manager (for users who access accounts through BM)
   const bmAccounts: MetaAdAccount[] = [];
   for (const bm of settled(businesses)) {
     const [owned, client] = await Promise.allSettled([
@@ -124,7 +133,6 @@ async function fetchMetaAssets(token: string): Promise<MetaAssets> {
     }
   }
 
-  // Merge /me/adaccounts with BM accounts, deduplicated
   const directAccounts = settled(adAccounts);
   const allAdAccounts = [...directAccounts];
   for (const a of bmAccounts) {
@@ -132,8 +140,6 @@ async function fetchMetaAssets(token: string): Promise<MetaAssets> {
   }
 
   const pagesData = settled(pages);
-
-  // Extract Instagram accounts linked to pages
   const instagramMap = new Map<string, MetaInstagram>();
   pagesData.forEach((p) => {
     if (p.instagram_business_account) {
@@ -152,7 +158,7 @@ async function fetchMetaAssets(token: string): Promise<MetaAssets> {
 
 type AssetTab = 'adAccounts' | 'pages' | 'instagram';
 
-function MetaAssetsPanel({ meta }: { meta: MetaIntegration }) {
+function MetaAssetsPanel({ connection }: { connection: MetaConnection }) {
   const [assets, setAssets] = useState<MetaAssets | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -167,9 +173,7 @@ function MetaAssetsPanel({ meta }: { meta: MetaIntegration }) {
       const existingEnabled: Record<string, boolean> = {};
       cached.forEach((a) => { existingEnabled[a.id] = a.enabled; });
 
-      const data = await fetchMetaAssets(meta.accessToken);
-
-      // Fall back to cached accounts if the live API returned none
+      const data = await fetchMetaAssets(connection.accessToken);
       const finalAdAccounts = data.adAccounts.length > 0 ? data.adAccounts : cached;
       setAssets({ ...data, adAccounts: finalAdAccounts });
 
@@ -207,16 +211,15 @@ function MetaAssetsPanel({ meta }: { meta: MetaIntegration }) {
   const tabs: { key: AssetTab; label: string; icon: React.ElementType; count: number }[] = [
     { key: 'adAccounts', label: 'Contas de Anúncio', icon: Megaphone,  count: assets?.adAccounts.length ?? 0 },
     { key: 'pages',      label: 'Páginas',           icon: Building2,  count: assets?.pages.length ?? 0      },
-    { key: 'instagram',  label: 'Instagram',         icon: Camera,  count: assets?.instagram.length ?? 0  },
+    { key: 'instagram',  label: 'Instagram',         icon: Camera,     count: assets?.instagram.length ?? 0  },
   ];
 
   return (
     <div className="bg-card border border-border rounded-xl overflow-hidden">
-      {/* Header */}
       <div className="flex items-center justify-between px-5 py-4 border-b border-border">
         <div>
           <p className="text-sm font-bold">Ativos acessíveis</p>
-          <p className="text-xs text-muted-foreground mt-0.5">Perfil: {meta.userName}</p>
+          <p className="text-xs text-muted-foreground mt-0.5">Perfil: {connection.userName}</p>
         </div>
         <button
           onClick={load}
@@ -228,7 +231,6 @@ function MetaAssetsPanel({ meta }: { meta: MetaIntegration }) {
         </button>
       </div>
 
-      {/* Tabs */}
       <div className="flex border-b border-border px-5 gap-1">
         {tabs.map(({ key, label, icon: Icon, count }) => (
           <button
@@ -255,7 +257,6 @@ function MetaAssetsPanel({ meta }: { meta: MetaIntegration }) {
         ))}
       </div>
 
-      {/* Content */}
       <div className="p-5">
         {loading && (
           <div className="py-10 text-center">
@@ -276,7 +277,6 @@ function MetaAssetsPanel({ meta }: { meta: MetaIntegration }) {
 
         {!loading && !error && assets && (
           <>
-            {/* Ad Accounts */}
             {tab === 'adAccounts' && (
               <div className="divide-y divide-border">
                 {assets.adAccounts.length === 0 && (
@@ -324,7 +324,6 @@ function MetaAssetsPanel({ meta }: { meta: MetaIntegration }) {
               </div>
             )}
 
-            {/* Pages */}
             {tab === 'pages' && (
               <div className="divide-y divide-border">
                 {assets.pages.length === 0 && (
@@ -353,7 +352,6 @@ function MetaAssetsPanel({ meta }: { meta: MetaIntegration }) {
               </div>
             )}
 
-            {/* Instagram */}
             {tab === 'instagram' && (
               <div className="divide-y divide-border">
                 {assets.instagram.length === 0 && (
@@ -557,17 +555,11 @@ const LogoMeta = () => (
   <svg viewBox="0 0 24 24" className="w-7 h-7" fill="none">
     <path
       d="M4.15 15.45c0-3.92 1.98-7.03 4.34-7.03 1.38 0 2.47 1.03 3.52 2.68 1.05-1.65 2.14-2.68 3.52-2.68 2.36 0 4.34 3.11 4.34 7.03 0 2.5-1.08 4.13-2.8 4.13-1.46 0-2.54-.95-4.96-5.18-2.42 4.23-3.5 5.18-4.96 5.18-1.72 0-3-1.63-3-4.13Z"
-      stroke="#0668E1"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
+      stroke="#0668E1" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"
     />
     <path
       d="M12.01 11.1c2.4 3.78 3.45 5.47 5.06 5.47.74 0 1.19-.53 1.19-1.23 0-2.32-1.28-4.58-2.72-4.58-1.05 0-1.85.94-3.53 3.64-1.68-2.7-2.48-3.64-3.53-3.64-1.44 0-2.72 2.26-2.72 4.58 0 .7.45 1.23 1.19 1.23 1.61 0 2.66-1.69 5.06-5.47Z"
-      stroke="#0668E1"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
+      stroke="#0668E1" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"
     />
   </svg>
 );
@@ -595,7 +587,7 @@ const LogoWebsite = () => (
   </svg>
 );
 
-// ─── Meta Connect Modal (OAuth flow) ─────────────────────────────────────────
+// ─── Meta Connect Modal ───────────────────────────────────────────────────────
 
 const META_APP_ID = '4523722054582315';
 
@@ -604,8 +596,9 @@ function MetaConnectModal({
   onConnected,
 }: {
   onClose: () => void;
-  onConnected: (meta: MetaIntegration) => void;
+  onConnected: (conn: MetaConnection) => void;
 }) {
+  const { add } = useMetaConnections();
   const [showGuide, setShowGuide] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -621,22 +614,22 @@ function MetaConnectModal({
     try {
       const { accessToken, userId } = await fbLogin(META_APP_ID);
 
-      // Fetch user profile
       const meRes = await fetch(
         `https://graph.facebook.com/v21.0/me?fields=id,name,picture&access_token=${encodeURIComponent(accessToken)}`
       );
       const me = await meRes.json() as { id: string; name: string; picture?: { data: { url: string } }; error?: { message: string } };
       if (me.error) throw new Error(me.error.message);
 
-      const data: Omit<MetaIntegration, 'status' | 'connectedAt'> = {
+      const saved = await add({
         appId: META_APP_ID,
         accessToken,
         userId,
         userName: me.name,
         userPicture: me.picture?.data?.url,
-      };
-      const savedMeta = await connectMeta(data);
-      onConnected(savedMeta);
+        status: 'connected',
+        label: '',
+      });
+      onConnected(saved);
     } catch (e) {
       const msg = e instanceof Error
         ? e.message
@@ -654,15 +647,14 @@ function MetaConnectModal({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
     >
       <div className="w-full max-w-md bg-card border border-border rounded-2xl shadow-2xl overflow-hidden">
-        {/* Header */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-border">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-background border border-border flex items-center justify-center">
               <LogoMeta />
             </div>
             <div>
-              <h2 className="font-bold text-sm">Conectar Meta Ads</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">Login via Facebook — vale para todos os clientes</p>
+              <h2 className="font-bold text-sm">Conectar conta Meta</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">Login via Facebook — pode conectar várias contas</p>
             </div>
           </div>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
@@ -670,12 +662,10 @@ function MetaConnectModal({
           </button>
         </div>
 
-        {/* Body */}
         <div className="px-6 py-5 space-y-4">
-          {/* How it works */}
           <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20 text-xs text-blue-300 leading-relaxed space-y-1">
             <p className="font-semibold">Como funciona</p>
-            <p className="text-blue-300/80">Você entra com o Facebook e o sistema acessa automaticamente as contas de anúncio, páginas e perfis Instagram que seu perfil tem permissão — igual ao Reportei e Dashgo.</p>
+            <p className="text-blue-300/80">Clique em &quot;Entrar com Facebook&quot; para adicionar uma conta. Você pode repetir o processo com perfis diferentes para conectar múltiplas contas Meta.</p>
           </div>
 
           <div className="rounded-lg border border-primary/20 bg-primary/10 px-3 py-2.5">
@@ -683,7 +673,6 @@ function MetaConnectModal({
             <p className="mt-1 text-sm font-mono text-foreground">{META_APP_ID}</p>
           </div>
 
-          {/* Guide accordion */}
           <div className="rounded-lg border border-border overflow-hidden">
             <button
               type="button"
@@ -700,7 +689,6 @@ function MetaConnectModal({
                   <li>Certifique-se que o domínio do sistema está liberado no app da Meta.</li>
                   <li>Use um perfil Facebook com permissão nas contas de anúncio dos clientes.</li>
                 </ol>
-                <p className="text-muted-foreground/60 pt-1">O app precisa estar no modo <strong>Desenvolvimento</strong> para funcionar no localhost.</p>
               </div>
             )}
           </div>
@@ -733,6 +721,8 @@ function MetaConnectModal({
     </div>
   );
 }
+
+// ─── Google Ads Connect Modal ─────────────────────────────────────────────────
 
 function GoogleAdsConnectModal({
   onClose,
@@ -829,7 +819,6 @@ function GoogleAdsConnectModal({
                   <li>O Gmail precisa ter acesso ao Google Ads ou ao MCC.</li>
                   <li>A conta Google e a MCC já estão fixadas no sistema.</li>
                   <li>O developer token já está fixado no sistema.</li>
-                  <li>Para login real com Gmail, ainda precisamos configurar Client ID, Client Secret e callback no backend.</li>
                 </ol>
               </div>
             )}
@@ -864,6 +853,210 @@ function GoogleAdsConnectModal({
   );
 }
 
+// ─── Meta Connections Panel ───────────────────────────────────────────────────
+
+function MetaConnectionsPanel({
+  connections,
+  onRemove,
+  onAdd,
+  selectedId,
+  onSelect,
+}: {
+  connections: MetaConnection[];
+  onRemove: (id: string) => Promise<void>;
+  onAdd: () => void;
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  async function handleRemove(conn: MetaConnection) {
+    if (!window.confirm(`Desconectar a conta "${conn.userName}"?`)) return;
+    await onRemove(conn.id);
+  }
+
+  return (
+    <div className="bg-card border border-border rounded-xl overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-background border border-border flex items-center justify-center shrink-0">
+            <LogoMeta />
+          </div>
+          <div>
+            <p className="text-sm font-bold">Contas Meta conectadas</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {connections.length} conta{connections.length === 1 ? '' : 's'} · Clique para ver ativos
+            </p>
+          </div>
+        </div>
+        <Button size="sm" onClick={onAdd} className="bg-primary text-primary-foreground hover:bg-primary/90 h-8 gap-1.5 text-xs">
+          <Plus className="w-3.5 h-3.5" />
+          Adicionar conta
+        </Button>
+      </div>
+
+      <div className="divide-y divide-border px-5">
+        {connections.map((conn) => {
+          const isSelected = conn.id === selectedId;
+          return (
+            <div
+              key={conn.id}
+              onClick={() => onSelect(conn.id)}
+              className={cn(
+                'flex items-center gap-3 py-3 cursor-pointer rounded-lg transition-colors -mx-2 px-2',
+                isSelected ? 'bg-primary/5' : 'hover:bg-muted/30',
+              )}
+            >
+              {conn.userPicture ? (
+                <img src={conn.userPicture} alt={conn.userName} className="w-9 h-9 rounded-full shrink-0 object-cover" />
+              ) : (
+                <div className="w-9 h-9 rounded-full bg-[#1877F2] flex items-center justify-center shrink-0">
+                  <LogoMeta />
+                </div>
+              )}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-semibold truncate">{conn.userName}</p>
+                  {isSelected && (
+                    <span className="shrink-0 rounded-full bg-primary/20 px-1.5 py-0.5 text-[10px] font-bold text-primary">selecionada</span>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {conn.connectedAt ? `Conectada em ${new Date(conn.connectedAt).toLocaleDateString('pt-BR')}` : 'Meta Ads'}
+                </p>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <CheckCircle2 className="w-3.5 h-3.5 text-primary" />
+                <button
+                  onClick={(e) => { e.stopPropagation(); void handleRemove(conn); }}
+                  className="ml-1 rounded-lg p-1.5 text-muted-foreground hover:bg-red-500/10 hover:text-red-400 transition-colors"
+                  title="Desconectar conta"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Google Connections Panel ─────────────────────────────────────────────────
+
+function GoogleConnectionsPanel({
+  connections,
+  onRemove,
+  onAddGoogleAds,
+  onAddGMB,
+}: {
+  connections: GoogleConnection[];
+  onRemove: (id: string) => Promise<void>;
+  onAddGoogleAds: () => void;
+  onAddGMB: () => void;
+}) {
+  const gmbConns = connections.filter((c) => c.accountType === 'gmb');
+  const adsConns = connections.filter((c) => c.accountType === 'google_ads');
+
+  async function handleRemove(conn: GoogleConnection) {
+    const label = conn.accountType === 'gmb' ? 'Google Meu Negócio' : 'Google Ads';
+    if (!window.confirm(`Desconectar "${conn.email}" (${label})?`)) return;
+    await onRemove(conn.id);
+  }
+
+  function ConnectionRow({ conn }: { conn: GoogleConnection }) {
+    return (
+      <div className="flex items-center gap-3 py-3">
+        {conn.picture ? (
+          <img src={conn.picture} alt={conn.displayName} className="w-9 h-9 rounded-full shrink-0 object-cover" />
+        ) : (
+          <div className="w-9 h-9 rounded-full bg-background border border-border flex items-center justify-center shrink-0">
+            <LogoGoogle />
+          </div>
+        )}
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold truncate">{conn.displayName || conn.email}</p>
+          <p className="text-xs text-muted-foreground truncate">{conn.email}</p>
+          <p className="text-[10px] text-muted-foreground/60 mt-0.5">
+            {conn.connectedAt ? new Date(conn.connectedAt).toLocaleDateString('pt-BR') : '—'}
+          </p>
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          <CheckCircle2 className="w-3.5 h-3.5 text-primary" />
+          <button
+            onClick={() => void handleRemove(conn)}
+            className="ml-1 rounded-lg p-1.5 text-muted-foreground hover:bg-red-500/10 hover:text-red-400 transition-colors"
+            title="Desconectar conta"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-card border border-border rounded-xl overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-background border border-border flex items-center justify-center shrink-0">
+            <LogoGoogle />
+          </div>
+          <div>
+            <p className="text-sm font-bold">Contas Google conectadas</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {connections.length} conta{connections.length === 1 ? '' : 's'} — {gmbConns.length} GMB · {adsConns.length} Ads
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button size="sm" onClick={onAddGMB} variant="outline" className="h-8 gap-1.5 text-xs">
+            <Plus className="w-3.5 h-3.5" />
+            GMB
+          </Button>
+          <Button size="sm" onClick={onAddGoogleAds} className="bg-primary text-primary-foreground hover:bg-primary/90 h-8 gap-1.5 text-xs">
+            <Plus className="w-3.5 h-3.5" />
+            Google Ads
+          </Button>
+        </div>
+      </div>
+
+      <div className="px-5">
+        {gmbConns.length > 0 && (
+          <>
+            <p className="pt-4 pb-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+              <LogoGoogleMyBusiness />
+              Google Meu Negócio
+            </p>
+            <div className="divide-y divide-border">
+              {gmbConns.map((c) => <ConnectionRow key={c.id} conn={c} />)}
+            </div>
+          </>
+        )}
+
+        {adsConns.length > 0 && (
+          <>
+            <p className={cn('pb-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2', gmbConns.length > 0 ? 'pt-4 border-t border-border mt-2' : 'pt-4')}>
+              <LogoGoogle />
+              Google Ads
+            </p>
+            <div className="divide-y divide-border">
+              {adsConns.map((c) => <ConnectionRow key={c.id} conn={c} />)}
+            </div>
+          </>
+        )}
+
+        {connections.length === 0 && (
+          <p className="py-8 text-center text-sm text-muted-foreground">
+            Nenhuma conta Google conectada.
+          </p>
+        )}
+
+        <div className="pb-4" />
+      </div>
+    </div>
+  );
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type IntegrationId = 'meta-ads' | 'google-ads' | 'google-my-business' | 'website';
@@ -873,9 +1066,7 @@ type Integration = {
   name: string;
   description: string;
   category: string;
-  status: 'conectado' | 'desconectado';
   logo: React.ReactNode;
-  hasCustomConnect?: boolean;
 };
 
 const BASE_INTEGRATIONS: Integration[] = [
@@ -884,16 +1075,13 @@ const BASE_INTEGRATIONS: Integration[] = [
     name: 'Meta Ads',
     description: 'Meta Ads — sincronize campanhas, leads e métricas.',
     category: 'Anúncios',
-    status: 'desconectado',
     logo: <LogoMeta />,
-    hasCustomConnect: true,
   },
   {
     id: 'google-ads',
     name: 'Google Ads',
     description: 'Importe campanhas, palavras-chave e conversões do Google Ads.',
     category: 'Anúncios',
-    status: 'desconectado',
     logo: <LogoGoogle />,
   },
   {
@@ -901,7 +1089,6 @@ const BASE_INTEGRATIONS: Integration[] = [
     name: 'Google Meu Negócio',
     description: 'Avaliações, buscas e desempenho do perfil do Google.',
     category: 'Presença Digital',
-    status: 'desconectado',
     logo: <LogoGoogleMyBusiness />,
   },
   {
@@ -909,7 +1096,6 @@ const BASE_INTEGRATIONS: Integration[] = [
     name: 'Website / Analytics',
     description: 'Conecte o Google Analytics ou GTM para rastrear visitas e conversões.',
     category: 'Presença Digital',
-    status: 'desconectado',
     logo: <LogoWebsite />,
   },
 ];
@@ -919,125 +1105,109 @@ const CATEGORIES = ['Todos', 'Anúncios', 'Presença Digital'];
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function IntegracoesPage() {
-  const [integrations, setIntegrations] = useState<Integration[]>(BASE_INTEGRATIONS);
+  const { connections: metaConns, loading: metaLoading, remove: removeMeta } = useMetaConnections();
+  const { connections: googleConns, loading: googleLoading, remove: removeGoogle, reload: reloadGoogle } = useGoogleConnections();
+  const { integration: googleAdsInfo, disconnect: disconnectGoogleAds } = useGoogleAds();
+
   const [activeCategory, setActiveCategory] = useState('Todos');
   const [metaModal, setMetaModal] = useState(false);
   const [googleModal, setGoogleModal] = useState(false);
-  const [metaInfo, setMetaInfo] = useState<MetaIntegration | null>(null);
   const [googleDisplayInfo, setGoogleDisplayInfo] = useState<GoogleAdsIntegration | null>(null);
-  const { integration: googleInfo, disconnect: disconnectGoogle } = useGoogleAds();
+  const [selectedMetaId, setSelectedMetaId] = useState<string | null>(null);
+  const [oauthBanner, setOauthBanner] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
 
-  // Load persisted Meta connection on mount
+  const selectedMetaConn = metaConns.find((c) => c.id === selectedMetaId) ?? metaConns[0] ?? null;
+
+  // Connection status derived from hooks
+  const metaConnected = !metaLoading && metaConns.length > 0;
+  const googleAdsConnected = !googleLoading && googleConns.some((c) => c.accountType === 'google_ads');
+  const gmbConnected = !googleLoading && googleConns.some((c) => c.accountType === 'gmb');
+
+  // Handle OAuth callback URL params
   useEffect(() => {
-    loadIntegrations().then((store) => {
-      if (store.meta.status === 'connected') {
-        setMetaInfo(store.meta);
-        setIntegrations((prev) =>
-          prev.map((i) => (i.id === 'meta-ads' ? { ...i, status: 'conectado' } : i))
-        );
-      }
-    }).catch(() => {});
-  }, []);
+    const params = new URLSearchParams(window.location.search);
+    const connected = params.get('google_connected');
+    const errParam = params.get('google_error');
+    const connType = params.get('type');
+
+    if (connected) {
+      const label = connType === 'google_ads' ? 'Google Ads' : 'Google Meu Negócio';
+      setOauthBanner({ type: 'success', msg: `${label} conectado com sucesso!` });
+      void reloadGoogle();
+      window.history.replaceState({}, '', '/integracoes');
+    } else if (errParam) {
+      setOauthBanner({ type: 'error', msg: `Erro ao conectar Google: ${decodeURIComponent(errParam)}` });
+      window.history.replaceState({}, '', '/integracoes');
+    }
+  }, [reloadGoogle]);
 
   useEffect(() => {
-    if (googleInfo.status === 'connected') {
-      setGoogleDisplayInfo(googleInfo);
-      setIntegrations((prev) =>
-        prev.map((i) => (i.id === 'google-ads' ? { ...i, status: 'conectado' } : i))
-      );
+    if (googleAdsInfo.status === 'connected') {
+      setGoogleDisplayInfo(googleAdsInfo);
     }
-  }, [googleInfo]);
+  }, [googleAdsInfo]);
 
-  function handleMetaConnected(meta: MetaIntegration) {
-    setMetaInfo(meta);
-    setMetaModal(false);
-    setIntegrations((prev) =>
-      prev.map((i) => (i.id === 'meta-ads' ? { ...i, status: 'conectado' } : i))
-    );
-  }
-
-  async function handleMetaDisconnect() {
-    await fbLogout().catch(() => {});
+  async function handleGoogleAdsDisconnect() {
     try {
-      await disconnectMeta();
-      setMetaInfo(null);
-      setIntegrations((prev) =>
-        prev.map((i) => (i.id === 'meta-ads' ? { ...i, status: 'desconectado' } : i))
-      );
-    } catch (error) {
-      console.error('Erro ao desconectar Meta Ads:', error);
-      alert(error instanceof Error ? error.message : 'Erro ao salvar desconexão no Supabase.');
-    }
-  }
-
-  function handleGoogleConnected(google: GoogleAdsIntegration) {
-    setGoogleDisplayInfo(google);
-    setGoogleModal(false);
-    setIntegrations((prev) =>
-      prev.map((i) => (i.id === 'google-ads' ? { ...i, status: 'conectado' } : i))
-    );
-  }
-
-  async function handleGoogleDisconnect() {
-    try {
-      await disconnectGoogle();
+      await disconnectGoogleAds();
       setGoogleDisplayInfo(null);
-      setIntegrations((prev) =>
-        prev.map((i) => (i.id === 'google-ads' ? { ...i, status: 'desconectado' } : i))
-      );
     } catch (error) {
       console.error('Erro ao desconectar Google Ads:', error);
       alert(error instanceof Error ? error.message : 'Erro ao salvar desconexão no Supabase.');
     }
   }
 
-  function toggleConnection(id: IntegrationId) {
+  function handleCardAction(id: IntegrationId) {
     if (id === 'meta-ads') {
-      const current = integrations.find((i) => i.id === 'meta-ads');
-      if (current?.status === 'conectado') {
-        handleMetaDisconnect();
-      } else {
-        setMetaModal(true);
-      }
+      setMetaModal(true);
       return;
     }
     if (id === 'google-ads') {
-      const current = integrations.find((i) => i.id === 'google-ads');
-      if (current?.status === 'conectado') {
-        handleGoogleDisconnect();
-      } else {
-        setGoogleModal(true);
-      }
+      window.location.href = '/api/auth/google?type=google_ads';
       return;
     }
-    setIntegrations((prev) =>
-      prev.map((i) =>
-        i.id === id
-          ? { ...i, status: i.status === 'conectado' ? 'desconectado' : 'conectado' }
-          : i
-      )
-    );
+    if (id === 'google-my-business') {
+      window.location.href = '/api/auth/google?type=gmb';
+      return;
+    }
   }
 
   const filtered =
     activeCategory === 'Todos'
-      ? integrations
-      : integrations.filter((i) => i.category === activeCategory);
+      ? BASE_INTEGRATIONS
+      : BASE_INTEGRATIONS.filter((i) => i.category === activeCategory);
 
-  const connected = integrations.filter((i) => i.status === 'conectado').length;
+  const totalConnected =
+    (metaConnected ? 1 : 0) +
+    (googleAdsConnected ? 1 : 0) +
+    (gmbConnected ? 1 : 0);
+
+  function isConnected(id: IntegrationId): boolean {
+    if (id === 'meta-ads') return metaConnected;
+    if (id === 'google-ads') return googleAdsConnected;
+    if (id === 'google-my-business') return gmbConnected;
+    return false;
+  }
+
+  function connectionCount(id: IntegrationId): number {
+    if (id === 'meta-ads') return metaConns.length;
+    if (id === 'google-ads') return googleConns.filter((c) => c.accountType === 'google_ads').length;
+    if (id === 'google-my-business') return googleConns.filter((c) => c.accountType === 'gmb').length;
+    return 0;
+  }
 
   return (
     <>
       {metaModal && (
         <MetaConnectModal
           onClose={() => setMetaModal(false)}
-          onConnected={handleMetaConnected}
+          onConnected={() => setMetaModal(false)}
         />
       )}
       {googleModal && (
         <GoogleAdsConnectModal
           onClose={() => setGoogleModal(false)}
-          onConnected={handleGoogleConnected}
+          onConnected={(g) => { setGoogleDisplayInfo(g); setGoogleModal(false); }}
         />
       )}
 
@@ -1052,10 +1222,32 @@ export default function IntegracoesPage() {
           <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary/10 border border-primary/20">
             <CheckCircle2 className="w-4 h-4 text-primary" />
             <span className="text-sm font-semibold text-primary">
-              {connected} de {integrations.length} conectadas
+              {totalConnected} plataforma{totalConnected === 1 ? '' : 's'} conectada{totalConnected === 1 ? '' : 's'}
             </span>
           </div>
         </div>
+
+        {/* OAuth feedback banner */}
+        {oauthBanner && (
+          <div className={cn(
+            'flex items-center justify-between gap-3 rounded-xl border px-4 py-3 text-sm',
+            oauthBanner.type === 'success'
+              ? 'border-primary/30 bg-primary/10 text-primary'
+              : 'border-red-500/20 bg-red-500/10 text-red-400',
+          )}>
+            <div className="flex items-center gap-2">
+              {oauthBanner.type === 'success' ? (
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+              ) : (
+                <AlertCircle className="w-4 h-4 shrink-0" />
+              )}
+              {oauthBanner.msg}
+            </div>
+            <button onClick={() => setOauthBanner(null)} className="opacity-60 hover:opacity-100 transition-opacity">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
 
         {/* Category filter */}
         <div className="flex gap-2 flex-wrap">
@@ -1078,16 +1270,16 @@ export default function IntegracoesPage() {
         {/* Integration cards */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {filtered.map((integration) => {
-            const isConnected = integration.status === 'conectado';
-            const isMeta = integration.id === 'meta-ads';
-            const isGoogleAds = integration.id === 'google-ads';
+            const connected = isConnected(integration.id);
+            const count = connectionCount(integration.id);
+            const isWebsite = integration.id === 'website';
 
             return (
               <div
                 key={integration.id}
                 className={cn(
                   'bg-card border rounded-xl p-5 flex flex-col gap-4 transition-colors',
-                  isConnected ? 'border-primary/30' : 'border-border'
+                  connected ? 'border-primary/30' : 'border-border'
                 )}
               >
                 <div className="flex items-start justify-between">
@@ -1095,18 +1287,16 @@ export default function IntegracoesPage() {
                     {integration.logo}
                   </div>
                   <div className="flex items-center gap-1.5">
-                    {isConnected ? (
+                    {connected ? (
                       <CheckCircle2 className="w-4 h-4 text-primary" />
                     ) : (
                       <XCircle className="w-4 h-4 text-muted-foreground" />
                     )}
-                    <span
-                      className={cn(
-                        'text-[10px] font-bold uppercase tracking-wider',
-                        isConnected ? 'text-primary' : 'text-muted-foreground'
-                      )}
-                    >
-                      {isConnected ? 'Conectado' : 'Desconectado'}
+                    <span className={cn(
+                      'text-[10px] font-bold uppercase tracking-wider',
+                      connected ? 'text-primary' : 'text-muted-foreground'
+                    )}>
+                      {connected ? `${count} conectada${count === 1 ? '' : 's'}` : 'Desconectado'}
                     </span>
                   </div>
                 </div>
@@ -1121,57 +1311,34 @@ export default function IntegracoesPage() {
                   <p className="text-xs text-muted-foreground leading-relaxed">
                     {integration.description}
                   </p>
-
-                  {/* Meta connected details */}
-                  {isMeta && isConnected && metaInfo && (
-                    <div className="mt-3 p-2.5 rounded-lg bg-primary/5 border border-primary/15 flex items-center gap-2.5">
-                      {metaInfo.userPicture ? (
-                        <img src={metaInfo.userPicture} alt={metaInfo.userName} className="w-8 h-8 rounded-full shrink-0" />
-                      ) : (
-                        <div className="w-8 h-8 rounded-full bg-[#1877F2] flex items-center justify-center shrink-0">
-                          <LogoMeta />
-                        </div>
-                      )}
-                      <div className="min-w-0">
-                        <p className="text-xs font-semibold text-foreground truncate">{metaInfo.userName}</p>
-                        {metaInfo.connectedAt && (
-                          <p className="text-[10px] text-muted-foreground/60">
-                            Conectado em {new Date(metaInfo.connectedAt).toLocaleDateString('pt-BR')}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                  {isGoogleAds && isConnected && googleDisplayInfo && (
-                    <div className="mt-3 p-2.5 rounded-lg bg-primary/5 border border-primary/15 flex items-center gap-2.5">
-                      <div className="w-8 h-8 rounded-full bg-background border border-border flex items-center justify-center shrink-0">
-                        <LogoGoogle />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-xs font-semibold text-foreground truncate">{googleDisplayInfo.email}</p>
-                        <p className="text-[10px] text-muted-foreground/60">
-                          MCC {googleDisplayInfo.managerId}
-                        </p>
-                      </div>
-                    </div>
-                  )}
                 </div>
 
                 <div className="flex gap-2">
-                  <Button
-                    onClick={() => toggleConnection(integration.id)}
-                    variant={isConnected ? 'outline' : 'default'}
-                    className={cn(
-                      'flex-1 text-xs font-bold uppercase h-9',
-                      !isConnected && 'bg-primary text-primary-foreground hover:bg-primary/90'
-                    )}
-                  >
-                    {isConnected ? 'Desconectar' : 'Conectar'}
-                  </Button>
-                  {isConnected && (
-                    <Button variant="ghost" size="icon" title="Configurações da integração">
-                      <ExternalLink className="w-4 h-4" />
+                  {isWebsite ? (
+                    <Button variant="outline" className="flex-1 text-xs font-bold uppercase h-9" disabled>
+                      Em breve
                     </Button>
+                  ) : (
+                    <>
+                      <Button
+                        onClick={() => handleCardAction(integration.id)}
+                        variant={connected ? 'outline' : 'default'}
+                        className={cn(
+                          'flex-1 text-xs font-bold uppercase h-9 gap-1.5',
+                          !connected && 'bg-primary text-primary-foreground hover:bg-primary/90'
+                        )}
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        {connected ? 'Adicionar conta' : 'Conectar'}
+                      </Button>
+                      {connected && (
+                        <Button variant="ghost" size="icon" title="Configurações" onClick={() => {
+                          if (integration.id === 'google-ads' && googleDisplayInfo) handleGoogleAdsDisconnect();
+                        }}>
+                          <ExternalLink className="w-4 h-4" />
+                        </Button>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
@@ -1179,11 +1346,33 @@ export default function IntegracoesPage() {
           })}
         </div>
 
-        {/* Meta Assets Panel — shown when connected */}
-        {metaInfo && metaInfo.status === 'connected' && (
-          <MetaAssetsPanel meta={metaInfo} />
+        {/* Meta connections panel */}
+        {(metaConnected || metaLoading) && (
+          <MetaConnectionsPanel
+            connections={metaConns}
+            onRemove={removeMeta}
+            onAdd={() => setMetaModal(true)}
+            selectedId={selectedMetaId ?? metaConns[0]?.id ?? null}
+            onSelect={setSelectedMetaId}
+          />
         )}
 
+        {/* Meta assets panel for selected connection */}
+        {selectedMetaConn && (
+          <MetaAssetsPanel connection={selectedMetaConn} />
+        )}
+
+        {/* Google connections panel */}
+        {(googleConns.length > 0 || googleLoading) && (
+          <GoogleConnectionsPanel
+            connections={googleConns}
+            onRemove={removeGoogle}
+            onAddGoogleAds={() => { window.location.href = '/api/auth/google?type=google_ads'; }}
+            onAddGMB={() => { window.location.href = '/api/auth/google?type=gmb'; }}
+          />
+        )}
+
+        {/* Legacy Google Ads accounts panel — shown when google ads connected via old flow */}
         {googleDisplayInfo && googleDisplayInfo.status === 'connected' && (
           <GoogleAdsAssetsPanel google={googleDisplayInfo} />
         )}

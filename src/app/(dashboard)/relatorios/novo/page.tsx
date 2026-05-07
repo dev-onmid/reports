@@ -1054,7 +1054,7 @@ function WidgetCard({
               <BarChart data={chartData} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
                 <Bar dataKey="v" fill={metric.color} radius={[2, 2, 0, 0]} />
                 <XAxis dataKey="label" tick={{ fontSize: 8 }} axisLine={false} tickLine={false} />
-                <Tooltip formatter={(v: number) => formatMetricValue(v, metric.format)} labelStyle={{ fontSize: 10 }} />
+                <Tooltip formatter={(v) => formatMetricValue(v as number, metric.format)} labelStyle={{ fontSize: 10 }} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -1064,7 +1064,7 @@ function WidgetCard({
               <LineChart data={chartData} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
                 <Line type="monotone" dataKey="v" stroke={metric.color} strokeWidth={2} dot={false} />
                 <XAxis dataKey="label" tick={{ fontSize: 8 }} axisLine={false} tickLine={false} />
-                <Tooltip formatter={(v: number) => formatMetricValue(v, metric.format)} labelStyle={{ fontSize: 10 }} />
+                <Tooltip formatter={(v) => formatMetricValue(v as number, metric.format)} labelStyle={{ fontSize: 10 }} />
               </LineChart>
             </ResponsiveContainer>
           </div>
