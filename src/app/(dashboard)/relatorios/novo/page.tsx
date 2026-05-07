@@ -1032,6 +1032,7 @@ export default function NovoRelatorioPage() {
   const metaAds = useMetaAdsConnections();
   const googleAds = useGoogleAds();
 
+  const [reportName, setReportName] = useState('');
   const [selectedSources, setSelectedSources] = useState<MetricSource[]>(['meta_ads', 'google_ads']);
   const [source, setSource] = useState<'account' | 'client'>('account');
   const [selectedClientId, setSelectedClientId] = useState('');
@@ -1165,7 +1166,7 @@ export default function NovoRelatorioPage() {
 
       saveReport({
         id: `report-builder-${Date.now()}`,
-        title: `Relatório Personalizado - ${clientName}`,
+        title: reportName.trim() || `Relatório - ${clientName}`,
         clientId,
         client: clientName,
         date,
@@ -1186,12 +1187,16 @@ export default function NovoRelatorioPage() {
       {/* ── SIDEBAR ── */}
       <aside className="w-[320px] shrink-0 border-r border-border bg-card flex flex-col overflow-hidden">
 
-        {/* Header */}
-        <div className="px-4 py-3 border-b border-border shrink-0 flex items-center justify-between gap-2">
-          <div className="min-w-0">
-            <h1 className="text-sm font-bold uppercase tracking-wider truncate">Novo Relatório</h1>
-            <p className="text-[11px] text-muted-foreground mt-0.5">Configure e visualize ao lado</p>
-          </div>
+        {/* Header — report name input */}
+        <div className="px-4 py-3 border-b border-border shrink-0 flex items-center gap-2">
+          <input
+            type="text"
+            value={reportName}
+            onChange={e => setReportName(e.target.value)}
+            placeholder="Nome do relatório..."
+            className="flex-1 min-w-0 bg-transparent text-sm font-bold placeholder:text-muted-foreground/50 placeholder:font-normal focus:outline-none"
+            autoFocus
+          />
           <Link href="/relatorios">
             <button className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-muted transition-colors shrink-0">
               <X className="w-4 h-4 text-muted-foreground" />
@@ -1442,25 +1447,74 @@ export default function NovoRelatorioPage() {
 
       {/* ── PREVIEW AREA ── */}
       <div className="flex-1 overflow-y-auto bg-background">
-        {isGenerating ? (
-          <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
-            <RefreshCw className="w-8 h-8 animate-spin text-primary" />
-            <p className="text-sm font-medium">Gerando relatório...</p>
-          </div>
-        ) : !hasGeneratedPreview ? (
+        {widgetsForSelectedSources.length === 0 && !hasGeneratedPreview ? (
           <div className="flex flex-col items-center justify-center h-full gap-4 text-center px-10">
             <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center">
               <BarChart3 className="w-8 h-8 text-primary" />
             </div>
             <div className="space-y-1.5">
               <p className="font-bold text-base">Pré-visualização</p>
-              <p className="text-sm text-muted-foreground">Configure as opções na barra lateral e clique em <strong>Gerar Relatório</strong> para visualizar aqui.</p>
+              <p className="text-sm text-muted-foreground">Selecione métricas na barra lateral para visualizar o relatório aqui.</p>
             </div>
           </div>
         ) : (
-          <div className="p-6 space-y-8">
-            <ReportWidgetPreview widgets={widgetsForSelectedSources} reports={reports} />
-            {reports.map((report, i) => (
+          <div className="p-6 space-y-6">
+            {/* Report header — live */}
+            <div className="border-b border-border pb-4">
+              <h2 className="text-2xl font-bold tracking-tight">
+                {reportName.trim() || <span className="text-muted-foreground font-normal italic">Relatório sem título</span>}
+              </h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                {PERIOD_LABELS[period]}
+                {(period === 'custom' && dateFrom && dateTo) ? `: ${dateFrom} → ${dateTo}` : ''}
+                {' · '}{selectedSourceLabels}
+              </p>
+            </div>
+
+            {/* Widget cards — live structure, real values after generation */}
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-3">Métricas selecionadas</p>
+              <div className="grid gap-3 md:grid-cols-3">
+                {widgetsForSelectedSources.map(widget => {
+                  const metric = METRIC_BY_KEY[widget.metricKey];
+                  if (!metric) return null;
+                  const value = hasGeneratedPreview ? resolveReportMetric(metric, reports) : null;
+                  return (
+                    <div key={widget.id} className="rounded-xl border border-border bg-card p-4 overflow-hidden relative">
+                      <div className="absolute inset-x-0 top-0 h-1" style={{ background: metric.color }} />
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{SOURCE_LABELS[metric.source]}</p>
+                      <h3 className="mt-1 text-sm font-bold">{widget.title}</h3>
+                      <p className="mt-3 text-2xl font-bold tabular-nums" style={{ color: value !== null ? metric.color : undefined }}>
+                        {isGenerating
+                          ? <span className="inline-block w-20 h-7 rounded bg-muted animate-pulse" />
+                          : value !== null
+                            ? formatMetricValue(value, metric.format)
+                            : <span className="text-muted-foreground/40">—</span>}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">{metric.description}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* CTA when not yet generated */}
+            {!hasGeneratedPreview && !isGenerating && (
+              <div className="rounded-xl border border-dashed border-border/60 bg-muted/20 p-6 text-center space-y-3">
+                <p className="text-sm text-muted-foreground">Clique em <strong>Gerar Relatório</strong> para buscar os dados e preencher os valores.</p>
+              </div>
+            )}
+
+            {/* Loading indicator */}
+            {isGenerating && (
+              <div className="flex items-center justify-center gap-2 py-4 text-muted-foreground">
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                <p className="text-sm">Buscando dados...</p>
+              </div>
+            )}
+
+            {/* Full account reports after generation */}
+            {hasGeneratedPreview && reports.map((report, i) => (
               <div key={report.accountId} className={i > 0 ? 'pt-8 border-t-2 border-border' : ''}>
                 <AccountReport report={report} />
               </div>
