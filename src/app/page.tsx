@@ -16,9 +16,9 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const session = authenticateUser(email, password);
+    const session = await authenticateUser(email, password);
 
     if (!session) {
       setError('E-mail ou senha inválidos, ou usuário inativo.');

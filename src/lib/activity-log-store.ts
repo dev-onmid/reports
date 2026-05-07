@@ -1,5 +1,8 @@
 "use client";
 
+import { supabase } from '@/lib/supabase';
+import { getAuthSession } from '@/lib/auth-store';
+
 export type ActivityType = 'payment_added' | 'payment_deleted' | 'client_created';
 
 export type ActivityEntry = {
@@ -10,42 +13,38 @@ export type ActivityEntry = {
   timestamp: string;
 };
 
-const STORAGE_KEY = 'onmid-activity-log';
-
-// Current user is hardcoded until auth is implemented
 export const CURRENT_USER = 'Matheus Campos';
 
 export function logActivity(type: ActivityType, description: string): void {
-  if (typeof window === 'undefined') return;
+  const session = typeof window !== 'undefined' ? getAuthSession() : null;
+  const actor = session?.name ?? CURRENT_USER;
 
-  const stored = window.localStorage.getItem(STORAGE_KEY);
-  const entries: ActivityEntry[] = stored ? (JSON.parse(stored) as ActivityEntry[]) : [];
-
-  entries.unshift({
+  void supabase.from('activity_logs').insert({
     id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     type,
-    actor: CURRENT_USER,
+    actor,
     description,
-    timestamp: new Date().toISOString(),
+    created_at: new Date().toISOString(),
   });
-
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
 }
 
-export function readActivityLog(): ActivityEntry[] {
-  if (typeof window === 'undefined') return [];
+export async function readActivityLog(): Promise<ActivityEntry[]> {
+  const { data } = await supabase
+    .from('activity_logs')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(200);
 
-  const stored = window.localStorage.getItem(STORAGE_KEY);
-  if (!stored) return [];
-
-  try {
-    return JSON.parse(stored) as ActivityEntry[];
-  } catch {
-    return [];
-  }
+  if (!data) return [];
+  return data.map((r) => ({
+    id: r.id,
+    type: r.type as ActivityType,
+    actor: r.actor,
+    description: r.description,
+    timestamp: r.created_at,
+  }));
 }
 
-export function clearActivityLog(): void {
-  if (typeof window === 'undefined') return;
-  window.localStorage.removeItem(STORAGE_KEY);
+export async function clearActivityLog(): Promise<void> {
+  await supabase.from('activity_logs').delete().neq('id', 'none');
 }

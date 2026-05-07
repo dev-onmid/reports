@@ -1,8 +1,8 @@
 "use client";
 
 import { mockUsers, type User } from '@/lib/mock-data';
+import { supabase } from '@/lib/supabase';
 
-const USERS_STORAGE_KEY = 'onmid-users';
 const SESSION_STORAGE_KEY = 'onmid-session';
 
 export type AuthSession = {
@@ -12,48 +12,32 @@ export type AuthSession = {
   role: string;
 };
 
-function readUsers(): User[] {
-  if (typeof window === 'undefined') return mockUsers;
-
-  const stored = window.localStorage.getItem(USERS_STORAGE_KEY);
-  if (!stored) return mockUsers;
-
-  try {
-    const parsed = JSON.parse(stored) as Partial<User>[];
-    if (!Array.isArray(parsed)) return mockUsers;
-
-    return parsed.map((user) => ({
-      id: user.id ?? `user-${Date.now()}`,
-      name: user.name ?? '',
-      email: user.email === 'matheus' ? 'matheus@onmid.com.br' : user.email ?? '',
-      password: user.password ?? mockUsers.find((item) => item.email === user.email || (user.email === 'matheus' && item.email === 'matheus@onmid.com.br'))?.password ?? '',
-      role: user.role ?? 'Usuário',
-      status: user.status ?? 'Ativo',
-    }));
-  } catch {
-    return mockUsers;
-  }
-}
-
-export function authenticateUser(email: string, password: string): AuthSession | null {
+export async function authenticateUser(email: string, password: string): Promise<AuthSession | null> {
   if (typeof window === 'undefined') return null;
 
   const normalizedEmail = email.trim().toLowerCase();
-  const user = readUsers().find((item) => (
-    item.email.trim().toLowerCase() === normalizedEmail &&
-    item.password === password &&
-    item.status === 'Ativo'
+
+  let users: User[] = [];
+  try {
+    const { data } = await supabase.from('users').select('*');
+    if (data && data.length > 0) {
+      users = data.map((u) => ({ id: u.id, name: u.name, email: u.email, password: u.password, role: u.role, status: u.status }));
+    }
+  } catch {
+    // fall back to mock users if Supabase not available
+  }
+
+  if (users.length === 0) users = mockUsers;
+
+  const user = users.find((u) => (
+    u.email.trim().toLowerCase() === normalizedEmail &&
+    u.password === password &&
+    u.status === 'Ativo'
   ));
 
   if (!user) return null;
 
-  const session = {
-    userId: user.id,
-    name: user.name,
-    email: user.email,
-    role: user.role,
-  };
-
+  const session: AuthSession = { userId: user.id, name: user.name, email: user.email, role: user.role };
   window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
   return session;
 }

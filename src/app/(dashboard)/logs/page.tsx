@@ -57,17 +57,17 @@ export default function LogsPage() {
   const [confirmClear, setConfirmClear] = useState(false);
 
   useEffect(() => {
-    setEntries(readActivityLog());
+    readActivityLog().then(setEntries).catch(() => {});
   }, []);
 
   const filtered = filter === 'Todos' ? entries : entries.filter((e) => e.type === filter);
 
-  function handleClear() {
+  async function handleClear() {
     if (!confirmClear) {
       setConfirmClear(true);
       return;
     }
-    clearActivityLog();
+    await clearActivityLog().catch(() => {});
     setEntries([]);
     setConfirmClear(false);
   }

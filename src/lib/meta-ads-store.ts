@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from 'react';
-
-const STORAGE_KEY = 'onmid-meta-ads-connections';
+import { supabase } from '@/lib/supabase';
 
 export type MetaAdsMetrics = {
   spend: number;
@@ -76,25 +75,6 @@ export const META_ADS_ACCOUNTS: MetaAdsAccount[] = [
   },
 ];
 
-function readConnections(): ClientMetaAdsConnection[] {
-  if (typeof window === 'undefined') return [];
-
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeConnections(connections: ClientMetaAdsConnection[]) {
-  if (typeof window === 'undefined') return;
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(connections));
-  window.dispatchEvent(new Event('meta-ads-connections-updated'));
-}
-
 function sumMetrics(accounts: MetaAdsAccount[]): MetaAdsMetrics {
   const metrics = accounts.reduce(
     (total, account) => ({
@@ -106,47 +86,42 @@ function sumMetrics(accounts: MetaAdsAccount[]): MetaAdsMetrics {
     }),
     { spend: 0, impressions: 0, clicks: 0, leads: 0, cpl: 0 },
   );
-
-  return {
-    ...metrics,
-    cpl: metrics.leads > 0 ? metrics.spend / metrics.leads : 0,
-  };
+  return { ...metrics, cpl: metrics.leads > 0 ? metrics.spend / metrics.leads : 0 };
 }
 
 export function useMetaAdsConnections() {
   const [connections, setConnections] = useState<ClientMetaAdsConnection[]>([]);
 
   useEffect(() => {
-    setConnections(readConnections());
-
-    function sync() {
-      setConnections(readConnections());
-    }
-
-    window.addEventListener('storage', sync);
-    window.addEventListener('meta-ads-connections-updated', sync);
-
-    return () => {
-      window.removeEventListener('storage', sync);
-      window.removeEventListener('meta-ads-connections-updated', sync);
-    };
+    (async () => {
+      try {
+        const { data } = await supabase.from('meta_ads_connections').select('*');
+        if (!data) return;
+        setConnections(
+          data.map((row) => ({
+            clientId: row.client_id,
+            profileId: row.profile_id ?? '',
+            accountIds: row.account_ids ?? [],
+            status: row.status as 'connected' | 'disconnected',
+            connectedAt: row.connected_at ?? new Date().toISOString(),
+            lastSync: row.last_sync ?? new Date().toISOString(),
+          }))
+        );
+      } catch {
+        // silently ignore
+      }
+    })();
   }, []);
 
   return useMemo(() => {
-    function persist(next: ClientMetaAdsConnection[]) {
-      setConnections(next);
-      writeConnections(next);
-    }
-
     function getConnection(clientId: string) {
-      return connections.find((connection) => connection.clientId === clientId && connection.status === 'connected') ?? null;
+      return connections.find((c) => c.clientId === clientId && c.status === 'connected') ?? null;
     }
 
     function getClientAccounts(clientId: string) {
       const connection = getConnection(clientId);
       if (!connection) return [];
-
-      return META_ADS_ACCOUNTS.filter((account) => connection.accountIds.includes(account.id));
+      return META_ADS_ACCOUNTS.filter((a) => connection.accountIds.includes(a.id));
     }
 
     function getClientMetrics(clientId: string) {
@@ -155,32 +130,30 @@ export function useMetaAdsConnections() {
 
     function saveConnection(clientId: string, profileId: string, accountIds: string[]) {
       const now = new Date().toISOString();
-      const nextConnection: ClientMetaAdsConnection = {
+      const conn: ClientMetaAdsConnection = {
         clientId,
         profileId,
         accountIds,
         status: 'connected',
-        connectedAt: connections.find((connection) => connection.clientId === clientId)?.connectedAt ?? now,
+        connectedAt: connections.find((c) => c.clientId === clientId)?.connectedAt ?? now,
         lastSync: now,
       };
-
-      persist([
-        ...connections.filter((connection) => connection.clientId !== clientId),
-        nextConnection,
-      ]);
+      setConnections((prev) => [...prev.filter((c) => c.clientId !== clientId), conn]);
+      void supabase.from('meta_ads_connections').upsert({
+        client_id: conn.clientId,
+        profile_id: conn.profileId,
+        account_ids: conn.accountIds,
+        status: conn.status,
+        connected_at: conn.connectedAt,
+        last_sync: conn.lastSync,
+      });
     }
 
     function disconnectClient(clientId: string) {
-      persist(connections.filter((connection) => connection.clientId !== clientId));
+      setConnections((prev) => prev.filter((c) => c.clientId !== clientId));
+      void supabase.from('meta_ads_connections').delete().eq('client_id', clientId);
     }
 
-    return {
-      connections,
-      getConnection,
-      getClientAccounts,
-      getClientMetrics,
-      saveConnection,
-      disconnectClient,
-    };
+    return { connections, getConnection, getClientAccounts, getClientMetrics, saveConnection, disconnectClient };
   }, [connections]);
 }

@@ -27,7 +27,7 @@ import {
   PAYMENT_STATUS_OPTIONS,
   useInvestmentPayments,
 } from '@/lib/payment-store';
-import { readIntegrations, readCachedAdAccounts, type CachedAdAccount } from '@/lib/integration-store';
+import { loadIntegrations, loadCachedAdAccounts, type CachedAdAccount } from '@/lib/integration-store';
 import { useMetaAdsConnections } from '@/lib/meta-ads-store';
 import { getHoliday, previousBusinessDay, formatDateBR as formatHolidayDateBR } from '@/lib/holidays';
 import { cn, formatCurrencyBRL, formatCurrencyInputBRL, parseCurrencyBRL } from '@/lib/utils';
@@ -505,10 +505,9 @@ export default function PagamentosPage() {
   const [isMetaConnected, setIsMetaConnected] = useState(false);
 
   const loadBalances = useCallback(async () => {
-    const integrations = readIntegrations();
+    const [integrations, accounts] = await Promise.all([loadIntegrations(), loadCachedAdAccounts()]);
     if (integrations.meta.status !== 'connected') { setIsMetaConnected(false); return; }
     setIsMetaConnected(true);
-    const accounts = readCachedAdAccounts();
     if (accounts.length === 0) return;
     setBalancesLoading(true);
     try {

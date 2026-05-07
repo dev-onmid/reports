@@ -8,7 +8,7 @@ import {
   type MetaAdsMetrics,
   useMetaAdsConnections,
 } from '@/lib/meta-ads-store';
-import { readIntegrations, readCachedAdAccounts, type CachedAdAccount } from '@/lib/integration-store';
+import { loadIntegrations, loadCachedAdAccounts, readIntegrations, type CachedAdAccount } from '@/lib/integration-store';
 import {
   Calendar, Users, BarChart3, TrendingUp, UploadCloud,
   Link as LinkIcon, Plus, X, ChevronDown, LayoutGrid,
@@ -2038,17 +2038,18 @@ function MetaAdsConnectionDialog({
   const { getConnection, saveConnection, disconnectClient } = useMetaAdsConnections();
   const connection = getConnection(clientId);
 
-  const [globalMeta, setGlobalMeta] = useState(() => readIntegrations().meta);
+  const [globalMeta, setGlobalMeta] = useState(readIntegrations().meta);
   const [cachedAccounts, setCachedAccounts] = useState<CachedAdAccount[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   useEffect(() => {
     if (!open) return;
-    setGlobalMeta(readIntegrations().meta);
-    const accounts = readCachedAdAccounts();
-    setCachedAccounts(accounts);
-    setSelectedIds(connection?.accountIds ?? []);
-  }, [open, connection]);
+    Promise.all([loadIntegrations(), loadCachedAdAccounts()]).then(([store, accounts]) => {
+      setGlobalMeta(store.meta);
+      setCachedAccounts(accounts);
+      setSelectedIds(connection?.accountIds ?? []);
+    }).catch(() => {});
+  }, [open, connection]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const globalConnected = globalMeta.status === 'connected';
   const hasAccounts = cachedAccounts.length > 0;
@@ -2286,16 +2287,15 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
 
   useEffect(() => {
     const connection = getConnection(id);
-    const integrations = readIntegrations();
-    if (!connection || integrations.meta.status !== 'connected' || connection.accountIds.length === 0) {
-      setRealMetrics(null);
-      return;
-    }
-    setMetricsLoading(true);
-    fetchClientMetaMetrics(connection.accountIds, integrations.meta.accessToken, period)
-      .then(m => setRealMetrics(m))
-      .catch(() => setRealMetrics(null))
-      .finally(() => setMetricsLoading(false));
+    if (!connection || connection.accountIds.length === 0) { setRealMetrics(null); return; }
+    loadIntegrations().then((integrations) => {
+      if (integrations.meta.status !== 'connected') { setRealMetrics(null); return; }
+      setMetricsLoading(true);
+      fetchClientMetaMetrics(connection.accountIds, integrations.meta.accessToken, period)
+        .then(m => setRealMetrics(m))
+        .catch(() => setRealMetrics(null))
+        .finally(() => setMetricsLoading(false));
+    }).catch(() => setRealMetrics(null));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, period, connections]);
 

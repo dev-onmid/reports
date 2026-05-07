@@ -1,0 +1,9 @@
+-- Desabilita RLS em todas as tabelas (sistema interno, todos os usuários compartilham dados)
+ALTER TABLE users DISABLE ROW LEVEL SECURITY;
+ALTER TABLE user_permissions DISABLE ROW LEVEL SECURITY;
+ALTER TABLE clients DISABLE ROW LEVEL SECURITY;
+ALTER TABLE payments DISABLE ROW LEVEL SECURITY;
+ALTER TABLE meta_integration DISABLE ROW LEVEL SECURITY;
+ALTER TABLE meta_ads_connections DISABLE ROW LEVEL SECURITY;
+ALTER TABLE meta_assets_cache DISABLE ROW LEVEL SECURITY;
+ALTER TABLE activity_logs DISABLE ROW LEVEL SECURITY;

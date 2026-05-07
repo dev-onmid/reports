@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { logActivity } from '@/lib/activity-log-store';
 import { mockClients, type Client, type ClientStatus } from '@/lib/mock-data';
+import { supabase } from '@/lib/supabase';
 
-const STORAGE_KEY = 'onmid-clients';
 export const CURRENT_USER_ROLE = 'Administrador';
 
 export type NewClientInput = {
@@ -17,36 +17,24 @@ export function canManageClients(role = CURRENT_USER_ROLE): boolean {
   return role === 'Administrador';
 }
 
-function readStoredClients(): Client[] {
-  if (typeof window === 'undefined') return mockClients;
-
-  const stored = window.localStorage.getItem(STORAGE_KEY);
-  if (!stored) return mockClients;
-
-  try {
-    const parsed = JSON.parse(stored) as Client[];
-    return Array.isArray(parsed) ? parsed : mockClients;
-  } catch {
-    return mockClients;
-  }
-}
-
 export function useClients() {
-  const [clients, setClients] = useState<Client[]>(readStoredClients);
-  const visibleClients = useMemo(() => clients.filter((client) => client.status !== 'Arquivado'), [clients]);
-  const archivedClients = useMemo(() => clients.filter((client) => client.status === 'Arquivado'), [clients]);
+  const [clients, setClients] = useState<Client[]>([]);
+  const visibleClients = useMemo(() => clients.filter((c) => c.status !== 'Arquivado'), [clients]);
+  const archivedClients = useMemo(() => clients.filter((c) => c.status === 'Arquivado'), [clients]);
 
   useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(clients));
-  }, [clients]);
-
-  useEffect(() => {
-    function handleStorage(event: StorageEvent) {
-      if (event.key === STORAGE_KEY) setClients(readStoredClients());
-    }
-
-    window.addEventListener('storage', handleStorage);
-    return () => window.removeEventListener('storage', handleStorage);
+    (async () => {
+      try {
+        const { data } = await supabase.from('clients').select('*').order('name');
+        if (data && data.length > 0) {
+          setClients(data.map((r) => ({ id: r.id, name: r.name, segment: r.segment, status: r.status as ClientStatus })));
+        } else {
+          setClients(mockClients);
+        }
+      } catch {
+        setClients(mockClients);
+      }
+    })();
   }, []);
 
   return useMemo(() => ({
@@ -60,23 +48,22 @@ export function useClients() {
         segment: input.segment.trim(),
         status: input.status,
       };
-
       setClients((prev) => [...prev, client]);
+      void supabase.from('clients').upsert({ id: client.id, name: client.name, segment: client.segment, status: client.status });
       logActivity('client_created', `Cliente ${client.name} criado no segmento ${client.segment}`);
       return client;
     },
     archiveClient(id: string) {
-      setClients((prev) => prev.map((client) => (
-        client.id === id ? { ...client, status: 'Arquivado' } : client
-      )));
+      setClients((prev) => prev.map((c) => c.id === id ? { ...c, status: 'Arquivado' as ClientStatus } : c));
+      void supabase.from('clients').update({ status: 'Arquivado' }).eq('id', id);
     },
     restoreClient(id: string) {
-      setClients((prev) => prev.map((client) => (
-        client.id === id ? { ...client, status: 'Ativo' } : client
-      )));
+      setClients((prev) => prev.map((c) => c.id === id ? { ...c, status: 'Ativo' as ClientStatus } : c));
+      void supabase.from('clients').update({ status: 'Ativo' }).eq('id', id);
     },
     deleteClient(id: string) {
-      setClients((prev) => prev.filter((client) => client.id !== id));
+      setClients((prev) => prev.filter((c) => c.id !== id));
+      void supabase.from('clients').delete().eq('id', id);
     },
   }), [archivedClients, clients, visibleClients]);
 }

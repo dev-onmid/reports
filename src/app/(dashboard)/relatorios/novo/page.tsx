@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { useClients } from '@/lib/client-store';
-import { readCachedAdAccounts, readIntegrations, type CachedAdAccount } from '@/lib/integration-store';
+import { loadIntegrations, loadCachedAdAccounts, readIntegrations, type CachedAdAccount } from '@/lib/integration-store';
 import { useMetaAdsConnections } from '@/lib/meta-ads-store';
 import { Sparkles, AlertTriangle, Users, RefreshCw, Check, BarChart3 } from 'lucide-react';
 
@@ -606,9 +606,10 @@ export default function NovoRelatorioPage() {
   const [generateError, setGenerateError] = useState('');
 
   useEffect(() => {
-    const integrations = readIntegrations();
-    setIsMetaConnected(integrations.meta.status === 'connected');
-    setCachedAccounts(readCachedAdAccounts());
+    Promise.all([loadIntegrations(), loadCachedAdAccounts()]).then(([store, accounts]) => {
+      setIsMetaConnected(store.meta.status === 'connected');
+      setCachedAccounts(accounts);
+    }).catch(() => {});
   }, []);
 
   const clientLinkedAccounts: CachedAdAccount[] = (() => {

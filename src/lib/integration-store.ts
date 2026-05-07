@@ -1,11 +1,9 @@
-const STORAGE_KEY = 'onmid-integrations';
-const ASSETS_STORAGE_KEY = 'onmid-meta-assets-cache';
+import { supabase } from '@/lib/supabase';
 
 export type MetaConnectionStatus = 'disconnected' | 'connected' | 'error';
 
-// Shared ad account type (used by integrations page and client dialog)
 export type CachedAdAccount = {
-  id: string;        // act_XXXXXXXXX
+  id: string;
   name: string;
   account_status: number;
   currency: string;
@@ -38,55 +36,134 @@ const DEFAULT_META: MetaIntegration = {
 
 const DEFAULT_STORE: IntegrationStore = { meta: DEFAULT_META };
 
+// ─── In-memory cache ──────────────────────────────────────────────────────────
+
+let _cache: IntegrationStore = DEFAULT_STORE;
+let _assetsCache: CachedAdAccount[] = [];
+let _loadPromise: Promise<IntegrationStore> | null = null;
+let _assetsLoadPromise: Promise<CachedAdAccount[]> | null = null;
+
+// ─── Integration ─────────────────────────────────────────────────────────────
+
+export async function loadIntegrations(): Promise<IntegrationStore> {
+  if (_loadPromise) return _loadPromise;
+
+  _loadPromise = (async () => {
+    try {
+      const { data } = await supabase
+        .from('meta_integration')
+        .select('*')
+        .eq('id', 'global')
+        .single();
+
+      if (data) {
+        _cache = {
+          meta: {
+            status: data.status as MetaConnectionStatus,
+            appId: data.app_id ?? '',
+            accessToken: data.access_token ?? '',
+            userId: data.meta_user_id ?? '',
+            userName: data.meta_user_name ?? '',
+            userPicture: data.meta_user_picture ?? undefined,
+            connectedAt: data.connected_at ?? null,
+          },
+        };
+      }
+    } catch {
+      // fall back to default
+    }
+    return _cache;
+  })();
+
+  return _loadPromise;
+}
+
 export function readIntegrations(): IntegrationStore {
-  if (typeof window === 'undefined') return DEFAULT_STORE;
-  try {
-    const stored = window.localStorage.getItem(STORAGE_KEY);
-    if (!stored) return DEFAULT_STORE;
-    const parsed = JSON.parse(stored) as Partial<IntegrationStore>;
-    return { meta: { ...DEFAULT_META, ...(parsed.meta ?? {}) } };
-  } catch {
-    return DEFAULT_STORE;
-  }
+  return _cache;
 }
 
 export function saveIntegrations(store: IntegrationStore): void {
-  if (typeof window === 'undefined') return;
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+  _cache = store;
+  const meta = store.meta;
+  void supabase.from('meta_integration').upsert({
+    id: 'global',
+    status: meta.status,
+    app_id: meta.appId,
+    access_token: meta.accessToken,
+    meta_user_id: meta.userId,
+    meta_user_name: meta.userName,
+    meta_user_picture: meta.userPicture ?? null,
+    connected_at: meta.connectedAt,
+  });
 }
 
 export function connectMeta(data: Omit<MetaIntegration, 'status' | 'connectedAt'>): void {
-  const store = readIntegrations();
-  store.meta = { ...data, status: 'connected', connectedAt: new Date().toISOString() };
-  saveIntegrations(store);
+  const newMeta: MetaIntegration = { ...data, status: 'connected', connectedAt: new Date().toISOString() };
+  _cache = { meta: newMeta };
+  _loadPromise = null;
+  saveIntegrations(_cache);
 }
 
 export function disconnectMeta(): void {
-  const store = readIntegrations();
-  store.meta = DEFAULT_META;
-  saveIntegrations(store);
+  _cache = DEFAULT_STORE;
+  _loadPromise = null;
+  saveIntegrations(_cache);
+  _assetsCache = [];
+  _assetsLoadPromise = null;
+  void supabase.from('meta_assets_cache').delete().neq('id', 'none');
   if (typeof window !== 'undefined') {
-    window.localStorage.removeItem(ASSETS_STORAGE_KEY);
+    window.dispatchEvent(new Event('meta-assets-updated'));
   }
 }
 
-// ─── Cached assets (ad accounts fetched from Meta API) ───────────────────────
+// ─── Cached assets ────────────────────────────────────────────────────────────
 
-export function saveCachedAdAccounts(accounts: CachedAdAccount[]): void {
-  if (typeof window === 'undefined') return;
-  window.localStorage.setItem(ASSETS_STORAGE_KEY, JSON.stringify(accounts));
-  window.dispatchEvent(new Event('meta-assets-updated'));
+export async function loadCachedAdAccounts(): Promise<CachedAdAccount[]> {
+  if (_assetsLoadPromise) return _assetsLoadPromise;
+
+  _assetsLoadPromise = (async () => {
+    try {
+      const { data } = await supabase.from('meta_assets_cache').select('*');
+      if (data && data.length > 0) {
+        _assetsCache = data.map((r) => ({
+          id: r.id,
+          name: r.name ?? '',
+          account_status: r.account_status ?? 1,
+          currency: r.currency ?? 'BRL',
+          amount_spent: r.amount_spent ?? undefined,
+        }));
+      }
+    } catch {
+      // fall back
+    }
+    return _assetsCache;
+  })();
+
+  return _assetsLoadPromise;
 }
 
 export function readCachedAdAccounts(): CachedAdAccount[] {
-  if (typeof window === 'undefined') return [];
-  try {
-    const stored = window.localStorage.getItem(ASSETS_STORAGE_KEY);
-    if (!stored) return [];
-    const parsed = JSON.parse(stored);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
+  return _assetsCache;
+}
+
+export function saveCachedAdAccounts(accounts: CachedAdAccount[]): void {
+  _assetsCache = accounts;
+  _assetsLoadPromise = null;
+
+  if (accounts.length > 0) {
+    void supabase.from('meta_assets_cache').upsert(
+      accounts.map((a) => ({
+        id: a.id,
+        name: a.name,
+        account_status: a.account_status,
+        currency: a.currency,
+        amount_spent: a.amount_spent ?? null,
+      }))
+    );
+  }
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('meta-assets-updated'));
   }
 }
 

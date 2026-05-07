@@ -23,6 +23,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { mockUsers as initialUsers, mockPermissions as initialPermissions } from '@/lib/mock-data';
 import type { User, Permission } from '@/lib/mock-data';
 import { cn } from '@/lib/utils';
+import { supabase } from '@/lib/supabase';
 
 const MODULES: { key: keyof Permission; label: string }[] = [
   { key: 'dashboard', label: 'Dashboard' },
@@ -34,81 +35,45 @@ const MODULES: { key: keyof Permission; label: string }[] = [
 
 const ROLES = ['Administrador', 'Usuário', 'Visualizador'];
 
-const USERS_STORAGE_KEY = 'onmid-users';
-const PERMISSIONS_STORAGE_KEY = 'onmid-user-permissions';
 const defaultPermission: Permission = { dashboard: true, clientes: false, relatorios: false, configuracoes: false, integracoes: false };
 const emptyForm = { name: '', email: '', password: '', role: 'Usuário', status: 'Ativo' };
 
-function readUsers(): User[] {
-  if (typeof window === 'undefined') return initialUsers;
-
-  const stored = window.localStorage.getItem(USERS_STORAGE_KEY);
-  if (!stored) return initialUsers;
-
-  try {
-    const parsed = JSON.parse(stored) as Partial<User>[];
-    if (!Array.isArray(parsed)) return initialUsers;
-
-    return parsed.map((user) => ({
-      id: user.id ?? `user-${Date.now()}`,
-      name: user.name ?? '',
-      email: user.email === 'matheus' ? 'matheus@onmid.com.br' : user.email ?? '',
-      password: user.password ?? initialUsers.find((item) => item.email === user.email || (user.email === 'matheus' && item.email === 'matheus@onmid.com.br'))?.password ?? '',
-      role: user.role ?? 'Usuário',
-      status: user.status ?? 'Ativo',
-    }));
-  } catch {
-    return initialUsers;
-  }
+function persistUser(user: User) {
+  void supabase.from('users').upsert({ id: user.id, name: user.name, email: user.email, password: user.password, role: user.role, status: user.status });
 }
 
-function readPermissions(): Record<string, Permission> {
-  if (typeof window === 'undefined') return initialPermissions;
-
-  const stored = window.localStorage.getItem(PERMISSIONS_STORAGE_KEY);
-  if (!stored) return initialPermissions;
-
-  try {
-    const parsed = JSON.parse(stored) as Record<string, Permission>;
-    return parsed && typeof parsed === 'object' ? { ...initialPermissions, ...parsed } : initialPermissions;
-  } catch {
-    return initialPermissions;
-  }
+function removeUser(id: string) {
+  void supabase.from('users').delete().eq('id', id);
 }
 
-function persistUsers(users: User[]) {
-  if (typeof window === 'undefined') return;
-  window.localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users));
-}
-
-function persistPermissions(permissions: Record<string, Permission>) {
-  if (typeof window === 'undefined') return;
-  window.localStorage.setItem(PERMISSIONS_STORAGE_KEY, JSON.stringify(permissions));
+function persistPermission(userId: string, permission: Permission) {
+  void supabase.from('user_permissions').upsert({ user_id: userId, ...permission });
 }
 
 export default function ConfiguracoesPage() {
-  const [users, setUsers] = useState<User[]>(readUsers);
-  const [permissions, setPermissions] = useState<Record<string, Permission>>(readPermissions);
+  const [users, setUsers] = useState<User[]>(initialUsers);
+  const [permissions, setPermissions] = useState<Record<string, Permission>>(initialPermissions);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
 
+  // Load from database on mount
   useEffect(() => {
-    persistUsers(users);
-  }, [users]);
+    (async () => {
+      try {
+        const { data: usersData } = await supabase.from('users').select('*');
+        if (usersData && usersData.length > 0) setUsers(usersData as User[]);
+      } catch { /* ignore */ }
 
-  useEffect(() => {
-    persistPermissions(permissions);
-  }, [permissions]);
-
-  useEffect(() => {
-    function handleStorage(event: StorageEvent) {
-      if (event.key === USERS_STORAGE_KEY) setUsers(readUsers());
-      if (event.key === PERMISSIONS_STORAGE_KEY) setPermissions(readPermissions());
-    }
-
-    window.addEventListener('storage', handleStorage);
-    return () => window.removeEventListener('storage', handleStorage);
+      try {
+        const { data: permsData } = await supabase.from('user_permissions').select('*');
+        if (permsData) {
+          const map: Record<string, Permission> = { ...initialPermissions };
+          permsData.forEach((r) => { map[r.user_id] = { dashboard: r.dashboard, clientes: r.clientes, relatorios: r.relatorios, configuracoes: r.configuracoes, integracoes: r.integracoes }; });
+          setPermissions(map);
+        }
+      } catch { /* ignore */ }
+    })();
   }, []);
 
   function openCreateDialog() {
@@ -133,15 +98,9 @@ export default function ConfiguracoesPage() {
     if (!form.name.trim() || !form.email.trim() || !form.password.trim()) return;
 
     if (editingUserId) {
-      setUsers((prev) => {
-        const next = prev.map((user) => (
-          user.id === editingUserId
-            ? { ...user, name: form.name.trim(), email: form.email.trim(), password: form.password, role: form.role, status: form.status }
-            : user
-        ));
-        persistUsers(next);
-        return next;
-      });
+      const updated: User = { id: editingUserId, name: form.name.trim(), email: form.email.trim(), password: form.password, role: form.role, status: form.status };
+      setUsers((prev) => prev.map((u) => u.id === editingUserId ? updated : u));
+      persistUser(updated);
       setForm(emptyForm);
       setEditingUserId(null);
       setDialogOpen(false);
@@ -150,48 +109,26 @@ export default function ConfiguracoesPage() {
 
     const id = String(Date.now());
     const user: User = { id, name: form.name.trim(), email: form.email.trim(), password: form.password, role: form.role, status: form.status };
-    setUsers((prev) => {
-      const next = [...prev, user];
-      persistUsers(next);
-      return next;
-    });
-    setPermissions((prev) => {
-      const next = {
-        ...prev,
-        [id]: defaultPermission,
-      };
-      persistPermissions(next);
-      return next;
-    });
+    setUsers((prev) => [...prev, user]);
+    setPermissions((prev) => ({ ...prev, [id]: defaultPermission }));
+    persistUser(user);
+    persistPermission(id, defaultPermission);
     setForm(emptyForm);
     setEditingUserId(null);
     setDialogOpen(false);
   }
 
   function handleDeleteUser(id: string) {
-    setUsers((prev) => {
-      const next = prev.filter((u) => u.id !== id);
-      persistUsers(next);
-      return next;
-    });
-    setPermissions((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      persistPermissions(next);
-      return next;
-    });
+    setUsers((prev) => prev.filter((u) => u.id !== id));
+    setPermissions((prev) => { const next = { ...prev }; delete next[id]; return next; });
+    removeUser(id);
   }
 
   function togglePermission(userId: string, module: keyof Permission) {
     setPermissions((prev) => {
-      const next = {
-        ...prev,
-        [userId]: {
-          ...(prev[userId] ?? defaultPermission),
-          [module]: !(prev[userId]?.[module] ?? defaultPermission[module]),
-        },
-      };
-      persistPermissions(next);
+      const current = prev[userId] ?? defaultPermission;
+      const next = { ...prev, [userId]: { ...current, [module]: !current[module] } };
+      persistPermission(userId, next[userId]);
       return next;
     });
   }

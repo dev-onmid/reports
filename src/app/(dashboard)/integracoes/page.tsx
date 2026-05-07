@@ -5,6 +5,7 @@ import { CheckCircle2, XCircle, ExternalLink, X, AlertCircle, ChevronDown, Refre
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
+  loadIntegrations,
   readIntegrations,
   connectMeta,
   disconnectMeta,
@@ -357,7 +358,11 @@ function MetaConnectModal({
   onClose: () => void;
   onConnected: (meta: MetaIntegration) => void;
 }) {
-  const [appId, setAppId] = useState(() => readIntegrations().meta.appId || '');
+  const [appId, setAppId] = useState('');
+
+  useEffect(() => {
+    loadIntegrations().then((s) => setAppId(s.meta.appId || '')).catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [showGuide, setShowGuide] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -581,13 +586,14 @@ export default function IntegracoesPage() {
 
   // Load persisted Meta connection on mount
   useEffect(() => {
-    const store = readIntegrations();
-    if (store.meta.status === 'connected') {
-      setMetaInfo(store.meta);
-      setIntegrations((prev) =>
-        prev.map((i) => (i.id === 'meta-ads' ? { ...i, status: 'conectado' } : i))
-      );
-    }
+    loadIntegrations().then((store) => {
+      if (store.meta.status === 'connected') {
+        setMetaInfo(store.meta);
+        setIntegrations((prev) =>
+          prev.map((i) => (i.id === 'meta-ads' ? { ...i, status: 'conectado' } : i))
+        );
+      }
+    }).catch(() => {});
   }, []);
 
   function handleMetaConnected(meta: MetaIntegration) {
