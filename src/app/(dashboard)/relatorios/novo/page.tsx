@@ -21,6 +21,24 @@ import {
 } from '@/lib/metrics-registry';
 import { Sparkles, AlertTriangle, Users, RefreshCw, Check, BarChart3, Search } from 'lucide-react';
 
+// ─── Account avatar helpers ───────────────────────────────────────────────────
+
+const AVATAR_COLORS = [
+  'bg-blue-500', 'bg-violet-500', 'bg-emerald-500', 'bg-amber-500',
+  'bg-rose-500', 'bg-cyan-500', 'bg-orange-500', 'bg-pink-500',
+];
+
+function accountInitials(name: string): string {
+  const words = name.trim().split(/\s+/);
+  return words.slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('');
+}
+
+function accountColorClass(id: string): string {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0;
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+}
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 type Period = 'last_7d' | 'last_30d' | 'last_month' | 'this_month' | 'custom';
@@ -1018,6 +1036,8 @@ export default function NovoRelatorioPage() {
   const [reports, setReports] = useState<FullAccountReport[]>([]);
   const [hasGeneratedPreview, setHasGeneratedPreview] = useState(false);
   const [generateError, setGenerateError] = useState('');
+  const [accountSearch, setAccountSearch] = useState('');
+  const [accountSortDir, setAccountSortDir] = useState<'asc' | 'desc'>('asc');
 
   useEffect(() => {
     Promise.all([loadIntegrations(), loadCachedAdAccounts()]).then(([store, accounts]) => {
@@ -1167,7 +1187,7 @@ export default function NovoRelatorioPage() {
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label>Plataformas</Label>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+              <div className="flex flex-wrap gap-2">
                 {SOURCE_OPTIONS.map(item => {
                   const selected = selectedSources.includes(item.key);
                   return (
@@ -1175,15 +1195,10 @@ export default function NovoRelatorioPage() {
                       key={item.key}
                       type="button"
                       onClick={() => toggleSource(item.key)}
-                      className={`rounded-lg border-2 p-3 text-left transition-all ${selected ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40'}`}
+                      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-all ${selected ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-primary/50 hover:text-foreground'}`}
                     >
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-sm font-semibold">{item.title}</p>
-                        <div className={`flex h-5 w-5 items-center justify-center rounded border-2 ${selected ? 'border-primary bg-primary' : 'border-muted-foreground'}`}>
-                          {selected && <Check className="h-3 w-3 text-white" />}
-                        </div>
-                      </div>
-                      <p className="mt-1 text-xs text-muted-foreground">{item.desc}</p>
+                      {selected && <Check className="h-3 w-3" />}
+                      {item.title}
                     </button>
                   );
                 })}
@@ -1204,9 +1219,31 @@ export default function NovoRelatorioPage() {
             </div>
 
             {source === 'account' && (
-              <div className="space-y-4">
+              <div className="space-y-3">
+                {/* Search + sort controls */}
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                    <input
+                      type="text"
+                      placeholder="Buscar conta…"
+                      value={accountSearch}
+                      onChange={e => setAccountSearch(e.target.value)}
+                      className="flex h-8 w-full rounded-md border border-input bg-background pl-8 pr-3 text-sm"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setAccountSortDir(d => d === 'asc' ? 'desc' : 'asc')}
+                    className="flex items-center gap-1 rounded-md border border-border px-3 h-8 text-xs font-medium text-muted-foreground hover:border-primary/50 hover:text-foreground transition-colors shrink-0"
+                    title="Ordenar A-Z / Z-A"
+                  >
+                    {accountSortDir === 'asc' ? 'A→Z' : 'Z→A'}
+                  </button>
+                </div>
+
                 {selectedSources.includes('meta_ads') && (
-                  <div className="space-y-2">
+                  <div className="space-y-1.5">
                     <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Meta Ads</p>
                     {!isMetaConnected ? (
                       <p className="text-sm text-muted-foreground p-3 rounded-lg bg-muted/30 text-center">
@@ -1216,31 +1253,43 @@ export default function NovoRelatorioPage() {
                       <p className="text-sm text-muted-foreground p-3 rounded-lg bg-muted/30 text-center">
                         Nenhuma conta. <Link href="/integracoes" className="underline font-medium text-primary">Carregar ativos →</Link>
                       </p>
-                    ) : (
-                      <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                        {cachedAccounts.map(account => {
-                          const sel = selectedAccountIds.includes(account.id);
-                          return (
-                            <button key={account.id} onClick={() => toggleAccount(account.id)}
-                              className={`w-full flex items-center gap-3 p-3 rounded-lg border transition-all text-left ${sel ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40'}`}>
-                              <div className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 ${sel ? 'bg-primary border-primary' : 'border-muted-foreground'}`}>
-                                {sel && <Check className="w-3 h-3 text-white" />}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="font-medium text-sm truncate">{account.name}</p>
-                                <p className="text-xs text-muted-foreground font-mono">{account.id}</p>
-                              </div>
-                              <span className="text-xs text-muted-foreground shrink-0">{account.currency}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
+                    ) : (() => {
+                      const q = accountSearch.toLowerCase();
+                      const list = [...cachedAccounts]
+                        .filter(a => a.enabled !== false)
+                        .filter(a => !q || a.name.toLowerCase().includes(q) || a.id.toLowerCase().includes(q))
+                        .sort((a, b) => accountSortDir === 'asc' ? a.name.localeCompare(b.name, 'pt') : b.name.localeCompare(a.name, 'pt'));
+                      return list.length === 0 ? (
+                        <p className="text-xs text-muted-foreground px-1">Nenhuma conta encontrada.</p>
+                      ) : (
+                        <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+                          {list.map(account => {
+                            const sel = selectedAccountIds.includes(account.id);
+                            return (
+                              <button key={account.id} onClick={() => toggleAccount(account.id)}
+                                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg border transition-all text-left ${sel ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40'}`}>
+                                <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 ${sel ? 'bg-primary border-primary' : 'border-muted-foreground'}`}>
+                                  {sel && <Check className="w-2.5 h-2.5 text-white" />}
+                                </div>
+                                <div className={`w-6 h-6 rounded flex items-center justify-center text-white text-[10px] font-bold shrink-0 ${accountColorClass(account.id)}`}>
+                                  {accountInitials(account.name)}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="font-medium text-sm truncate">{account.name}</p>
+                                  <p className="text-[11px] text-muted-foreground font-mono leading-tight">{account.id}</p>
+                                </div>
+                                <span className="text-xs text-muted-foreground shrink-0">{account.currency}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
 
                 {selectedSources.includes('google_ads') && (
-                  <div className="space-y-2">
+                  <div className="space-y-1.5">
                     <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Google Ads</p>
                     {googleAds.integration.status !== 'connected' ? (
                       <p className="text-sm text-muted-foreground p-3 rounded-lg bg-muted/30 text-center">
@@ -1250,26 +1299,37 @@ export default function NovoRelatorioPage() {
                       <p className="text-sm text-muted-foreground p-3 rounded-lg bg-muted/30 text-center">
                         Nenhuma conta. <Link href="/integracoes" className="underline font-medium text-primary">Adicionar contas →</Link>
                       </p>
-                    ) : (
-                      <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                        {googleAds.accounts.map(account => {
-                          const sel = selectedAccountIds.includes(account.id);
-                          return (
-                            <button key={account.id} onClick={() => toggleAccount(account.id)}
-                              className={`w-full flex items-center gap-3 p-3 rounded-lg border transition-all text-left ${sel ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40'}`}>
-                              <div className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 ${sel ? 'bg-primary border-primary' : 'border-muted-foreground'}`}>
-                                {sel && <Check className="w-3 h-3 text-white" />}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="font-medium text-sm truncate">{account.name}</p>
-                                <p className="text-xs text-muted-foreground font-mono">{account.id}</p>
-                              </div>
-                              <span className="text-xs text-muted-foreground shrink-0">{account.currency}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
+                    ) : (() => {
+                      const q = accountSearch.toLowerCase();
+                      const list = [...googleAds.accounts]
+                        .filter(a => !q || a.name.toLowerCase().includes(q) || a.id.toLowerCase().includes(q))
+                        .sort((a, b) => accountSortDir === 'asc' ? a.name.localeCompare(b.name, 'pt') : b.name.localeCompare(a.name, 'pt'));
+                      return list.length === 0 ? (
+                        <p className="text-xs text-muted-foreground px-1">Nenhuma conta encontrada.</p>
+                      ) : (
+                        <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+                          {list.map(account => {
+                            const sel = selectedAccountIds.includes(account.id);
+                            return (
+                              <button key={account.id} onClick={() => toggleAccount(account.id)}
+                                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg border transition-all text-left ${sel ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40'}`}>
+                                <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 ${sel ? 'bg-primary border-primary' : 'border-muted-foreground'}`}>
+                                  {sel && <Check className="w-2.5 h-2.5 text-white" />}
+                                </div>
+                                <div className={`w-6 h-6 rounded flex items-center justify-center text-white text-[10px] font-bold shrink-0 ${accountColorClass(account.id)}`}>
+                                  {accountInitials(account.name)}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="font-medium text-sm truncate">{account.name}</p>
+                                  <p className="text-[11px] text-muted-foreground font-mono leading-tight">{account.id}</p>
+                                </div>
+                                <span className="text-xs text-muted-foreground shrink-0">{account.currency}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
 

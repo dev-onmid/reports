@@ -20,10 +20,30 @@ import {
   disconnectMeta,
   fbLogin,
   fbLogout,
+  loadCachedAdAccounts,
   saveCachedAdAccounts,
+  setAccountEnabled,
   type MetaIntegration,
   type CachedAdAccount,
 } from '@/lib/integration-store';
+
+// ─── Account avatar helpers ───────────────────────────────────────────────────
+
+const AVATAR_COLORS = [
+  'bg-blue-500', 'bg-violet-500', 'bg-emerald-500', 'bg-amber-500',
+  'bg-rose-500', 'bg-cyan-500', 'bg-orange-500', 'bg-pink-500',
+];
+
+function accountInitials(name: string): string {
+  const words = name.trim().split(/\s+/);
+  return words.slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('');
+}
+
+function accountColorClass(id: string): string {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0;
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+}
 
 // ─── Meta Graph API types ─────────────────────────────────────────────────────
 
@@ -117,15 +137,24 @@ function MetaAssetsPanel({ meta }: { meta: MetaIntegration }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [tab, setTab] = useState<AssetTab>('adAccounts');
+  const [enabledMap, setEnabledMap] = useState<Record<string, boolean>>({});
 
   async function load() {
     setLoading(true);
     setError('');
     try {
+      const cached = await loadCachedAdAccounts();
+      const existingEnabled: Record<string, boolean> = {};
+      cached.forEach((a) => { existingEnabled[a.id] = a.enabled; });
+
       const data = await fetchMetaAssets(meta.accessToken);
       setAssets(data);
-      // Persist ad accounts so client pages can use them for selection
-      await saveCachedAdAccounts(data.adAccounts);
+
+      const newMap: Record<string, boolean> = {};
+      data.adAccounts.forEach((a) => { newMap[a.id] = existingEnabled[a.id] ?? true; });
+      setEnabledMap(newMap);
+
+      await saveCachedAdAccounts(data.adAccounts.map((a) => ({ ...a, enabled: newMap[a.id] ?? true })));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erro ao buscar ativos.');
     } finally {
@@ -134,6 +163,16 @@ function MetaAssetsPanel({ meta }: { meta: MetaIntegration }) {
   }
 
   useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleToggleAccount(id: string) {
+    const newEnabled = !(enabledMap[id] ?? true);
+    setEnabledMap((prev) => ({ ...prev, [id]: newEnabled }));
+    try {
+      await setAccountEnabled(id, newEnabled);
+    } catch {
+      setEnabledMap((prev) => ({ ...prev, [id]: !newEnabled }));
+    }
+  }
 
   const tabs: { key: AssetTab; label: string; icon: React.ElementType; count: number }[] = [
     { key: 'adAccounts', label: 'Contas de Anúncio', icon: Megaphone,  count: assets?.adAccounts.length ?? 0 },
@@ -216,13 +255,17 @@ function MetaAssetsPanel({ meta }: { meta: MetaIntegration }) {
                 {assets.adAccounts.map((acc) => {
                   const statusInfo = AD_ACCOUNT_STATUS[acc.account_status] ?? { label: 'Desconhecido', color: 'text-muted-foreground' };
                   const spent = acc.amount_spent ? (Number(acc.amount_spent) / 100) : null;
+                  const enabled = enabledMap[acc.id] ?? true;
                   return (
-                    <div key={acc.id} className="flex items-center justify-between py-3 gap-4">
-                      <div>
-                        <p className="text-sm font-semibold">{acc.name}</p>
+                    <div key={acc.id} className={cn('flex items-center gap-3 py-3 transition-opacity', !enabled && 'opacity-50')}>
+                      <div className={cn('w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold shrink-0', accountColorClass(acc.id))}>
+                        {accountInitials(acc.name)}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold truncate">{acc.name}</p>
                         <p className="text-xs font-mono text-muted-foreground mt-0.5">{acc.id} · {acc.currency}</p>
                       </div>
-                      <div className="text-right shrink-0">
+                      <div className="text-right shrink-0 mr-2">
                         <p className={cn('text-xs font-bold', statusInfo.color)}>{statusInfo.label}</p>
                         {spent !== null && (
                           <p className="text-xs text-muted-foreground mt-0.5">
@@ -230,6 +273,21 @@ function MetaAssetsPanel({ meta }: { meta: MetaIntegration }) {
                           </p>
                         )}
                       </div>
+                      <button
+                        role="switch"
+                        aria-checked={enabled}
+                        title={enabled ? 'Desativar conta' : 'Ativar conta'}
+                        onClick={() => handleToggleAccount(acc.id)}
+                        className={cn(
+                          'relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none',
+                          enabled ? 'bg-primary' : 'bg-muted',
+                        )}
+                      >
+                        <span className={cn(
+                          'pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform',
+                          enabled ? 'translate-x-4' : 'translate-x-0',
+                        )} />
+                      </button>
                     </div>
                   );
                 })}

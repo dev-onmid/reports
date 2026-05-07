@@ -8,6 +8,7 @@ export type CachedAdAccount = {
   account_status: number;
   currency: string;
   amount_spent?: string;
+  enabled: boolean;
 };
 
 export type MetaIntegration = {
@@ -138,6 +139,7 @@ export async function loadCachedAdAccounts(): Promise<CachedAdAccount[]> {
           account_status: r.account_status ?? 1,
           currency: r.currency ?? 'BRL',
           amount_spent: r.amount_spent ?? undefined,
+          enabled: r.enabled ?? true,
         }));
       }
     } catch (error) {
@@ -166,11 +168,23 @@ export async function saveCachedAdAccounts(accounts: CachedAdAccount[]): Promise
         account_status: a.account_status,
         currency: a.currency,
         amount_spent: a.amount_spent ?? null,
+        enabled: a.enabled,
       }))
     );
     if (error) throw error;
   }
 
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('meta-assets-updated'));
+  }
+}
+
+export async function setAccountEnabled(id: string, enabled: boolean): Promise<void> {
+  assertSupabaseConfigured();
+  _assetsCache = _assetsCache.map((a) => a.id === id ? { ...a, enabled } : a);
+  _assetsLoadPromise = null;
+  const { error } = await supabase.from('meta_assets_cache').update({ enabled }).eq('id', id);
+  if (error) throw error;
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new Event('meta-assets-updated'));
   }
