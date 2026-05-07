@@ -38,11 +38,10 @@ const ROLES = ['Administrador', 'Usuário', 'Visualizador'];
 const defaultPermission: Permission = { dashboard: true, clientes: false, relatorios: false, configuracoes: false, integracoes: false };
 const emptyForm = { name: '', email: '', password: '', role: 'Usuário', status: 'Ativo' };
 
-function persistUser(user: User) {
-  void (async () => {
-    const { error } = await supabase.from('users').upsert({ id: user.id, name: user.name, email: user.email, password: user.password, role: user.role, status: user.status });
-    if (error) console.error('Erro ao salvar usuário no Supabase:', error);
-  })();
+async function persistUser(user: User): Promise<boolean> {
+  const { error } = await supabase.from('users').upsert({ id: user.id, name: user.name, email: user.email, password: user.password, role: user.role, status: user.status });
+  if (error) { console.error('Erro ao salvar usuário no Supabase:', error); return false; }
+  return true;
 }
 
 function persistPermission(userId: string, permission: Permission) {
@@ -53,8 +52,8 @@ function persistPermission(userId: string, permission: Permission) {
 }
 
 export default function ConfiguracoesPage() {
-  const [users, setUsers] = useState<User[]>([]);
-  const [permissions, setPermissions] = useState<Record<string, Permission>>({});
+  const [users, setUsers] = useState<User[]>(initialUsers);
+  const [permissions, setPermissions] = useState<Record<string, Permission>>(initialPermissions);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
@@ -64,8 +63,8 @@ export default function ConfiguracoesPage() {
     (async () => {
       try {
         assertSupabaseConfigured();
-        const { data: usersData } = await supabase.from('users').select('*');
-        if (usersData !== null) setUsers(usersData as User[]);
+        const { data: usersData, error: usersError } = await supabase.from('users').select('*');
+        if (!usersError && usersData && usersData.length > 0) setUsers(usersData as User[]);
       } catch (error) { console.error('Erro ao carregar usuários do Supabase:', error); }
 
       try {
@@ -103,23 +102,27 @@ export default function ConfiguracoesPage() {
 
     if (editingUserId) {
       const updated: User = { id: editingUserId, name: form.name.trim(), email: form.email.trim(), password: form.password, role: form.role, status: form.status };
+      const snapshot = users;
       setUsers((prev) => prev.map((u) => u.id === editingUserId ? updated : u));
-      persistUser(updated);
       setForm(emptyForm);
       setEditingUserId(null);
       setDialogOpen(false);
+      void persistUser(updated).then((ok) => { if (!ok) setUsers(snapshot); });
       return;
     }
 
     const id = String(Date.now());
     const user: User = { id, name: form.name.trim(), email: form.email.trim(), password: form.password, role: form.role, status: form.status };
+    const snapshot = users;
     setUsers((prev) => [...prev, user]);
     setPermissions((prev) => ({ ...prev, [id]: defaultPermission }));
-    persistUser(user);
-    persistPermission(id, defaultPermission);
     setForm(emptyForm);
     setEditingUserId(null);
     setDialogOpen(false);
+    void persistUser(user).then((ok) => {
+      if (!ok) { setUsers(snapshot); return; }
+      persistPermission(id, defaultPermission);
+    });
   }
 
   function handleDeleteUser(id: string) {
