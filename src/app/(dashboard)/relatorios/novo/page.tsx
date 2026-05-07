@@ -19,7 +19,7 @@ import {
   SOURCE_LABELS, SOURCE_COLORS, formatMetricValue,
   generateMockSeries, computeMockKpi,
 } from '@/lib/metrics-registry';
-import { Sparkles, AlertTriangle, Users, RefreshCw, Check, BarChart3, Search, X } from 'lucide-react';
+import { Sparkles, AlertTriangle, Users, RefreshCw, Check, BarChart3, Search, X, Settings2, Trash2, TrendingUp, Table2, Hash } from 'lucide-react';
 
 // ─── Account avatar helpers ───────────────────────────────────────────────────
 
@@ -43,6 +43,7 @@ function accountColorClass(id: string): string {
 
 type Period = 'last_7d' | 'last_30d' | 'last_month' | 'this_month' | 'custom';
 type ReportWidgetType = 'kpi' | 'bar' | 'line' | 'table';
+type ReportWidgetSize = '1' | '2' | '3';
 
 type ReportWidget = {
   id: string;
@@ -50,6 +51,7 @@ type ReportWidget = {
   title: string;
   source: MetricSource;
   type: ReportWidgetType;
+  size: ReportWidgetSize;
 };
 
 const PERIOD_LABELS: Record<Period, string> = {
@@ -126,9 +128,9 @@ type FullAccountReport = {
 };
 
 const DEFAULT_REPORT_WIDGETS: ReportWidget[] = [
-  { id: 'rw-meta-spend', metricKey: 'meta_spend', title: 'Investimento Meta Ads', source: 'meta_ads', type: 'kpi' },
-  { id: 'rw-google-conversions', metricKey: 'google_conversions', title: 'Conversões Google Ads', source: 'google_ads', type: 'kpi' },
-  { id: 'rw-crm-leads', metricKey: 'crm_leads', title: 'Leads capturados', source: 'crm', type: 'kpi' },
+  { id: 'rw-meta-spend', metricKey: 'meta_spend', title: 'Investimento Meta Ads', source: 'meta_ads', type: 'kpi', size: '1' },
+  { id: 'rw-google-conversions', metricKey: 'google_conversions', title: 'Conversões Google Ads', source: 'google_ads', type: 'kpi', size: '1' },
+  { id: 'rw-crm-leads', metricKey: 'crm_leads', title: 'Leads capturados', source: 'crm', type: 'kpi', size: '1' },
 ];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -940,6 +942,193 @@ const SOURCE_OPTIONS: { key: MetricSource; title: string; desc: string }[] = [
   { key: 'crm',        title: 'CRM / Resultados',    desc: 'Leads, vendas e ROI.' },
 ];
 
+// ─── Widget Card (editable preview) ──────────────────────────────────────────
+
+const WIDGET_TYPES: { type: ReportWidgetType; icon: React.ReactNode; label: string }[] = [
+  { type: 'kpi',   icon: <Hash className="w-3.5 h-3.5" />,       label: 'Número'  },
+  { type: 'bar',   icon: <BarChart3 className="w-3.5 h-3.5" />,  label: 'Barra'   },
+  { type: 'line',  icon: <TrendingUp className="w-3.5 h-3.5" />, label: 'Linha'   },
+  { type: 'table', icon: <Table2 className="w-3.5 h-3.5" />,     label: 'Tabela'  },
+];
+
+const WIDGET_SIZES: { size: ReportWidgetSize; label: string; cols: string }[] = [
+  { size: '1', label: '1/3', cols: 'md:col-span-1' },
+  { size: '2', label: '2/3', cols: 'md:col-span-2' },
+  { size: '3', label: 'Full', cols: 'md:col-span-3' },
+];
+
+function WidgetCard({
+  widget,
+  metric,
+  value,
+  mockSeries,
+  isGenerating,
+  hasRealData,
+  onUpdate,
+  onRemove,
+}: {
+  widget: ReportWidget;
+  metric: UnifiedMetric;
+  value: number;
+  mockSeries: ReturnType<typeof generateMockSeries>;
+  isGenerating: boolean;
+  hasRealData: boolean;
+  onUpdate: (patch: Partial<Pick<ReportWidget, 'type' | 'size' | 'title'>>) => void;
+  onRemove: () => void;
+}) {
+  const [showMenu, setShowMenu] = useState(false);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(widget.title);
+
+  const chartData = mockSeries.map(p => ({ label: p.label, v: Number(p[metric.key] ?? 0) }));
+
+  function commitTitle() {
+    const t = titleDraft.trim();
+    if (t) onUpdate({ title: t });
+    else setTitleDraft(widget.title);
+    setEditingTitle(false);
+  }
+
+  const colSpan = WIDGET_SIZES.find(s => s.size === widget.size)?.cols ?? 'md:col-span-1';
+
+  return (
+    <div className={`relative rounded-xl border border-border bg-card overflow-hidden group ${colSpan}`}>
+      {/* color accent bar */}
+      <div className="absolute inset-x-0 top-0 h-1" style={{ background: metric.color }} />
+
+      {/* Card content */}
+      <div className="p-4">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex-1 min-w-0">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{SOURCE_LABELS[metric.source]}</p>
+            {editingTitle ? (
+              <input
+                autoFocus
+                value={titleDraft}
+                onChange={e => setTitleDraft(e.target.value)}
+                onBlur={commitTitle}
+                onKeyDown={e => { if (e.key === 'Enter') commitTitle(); if (e.key === 'Escape') { setTitleDraft(widget.title); setEditingTitle(false); } }}
+                className="mt-0.5 w-full bg-transparent text-sm font-bold border-b border-primary outline-none"
+              />
+            ) : (
+              <h3
+                className="mt-0.5 text-sm font-bold truncate cursor-text hover:text-primary transition-colors"
+                onClick={() => setEditingTitle(true)}
+                title="Clique para renomear"
+              >
+                {widget.title}
+              </h3>
+            )}
+          </div>
+          {/* Controls — visible on hover */}
+          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+            <button
+              type="button"
+              onClick={() => setShowMenu(v => !v)}
+              className="flex h-6 w-6 items-center justify-center rounded hover:bg-muted transition-colors"
+              title="Configurar widget"
+            >
+              <Settings2 className="w-3.5 h-3.5 text-muted-foreground" />
+            </button>
+            <button
+              type="button"
+              onClick={onRemove}
+              className="flex h-6 w-6 items-center justify-center rounded hover:bg-destructive/10 transition-colors"
+              title="Remover widget"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-muted-foreground" />
+            </button>
+          </div>
+        </div>
+
+        {/* Value / Chart */}
+        {widget.type === 'kpi' ? (
+          <p className="mt-3 text-2xl font-bold tabular-nums" style={{ color: metric.color }}>
+            {isGenerating
+              ? <span className="inline-block w-24 h-7 rounded bg-muted animate-pulse" />
+              : formatMetricValue(value, metric.format)}
+          </p>
+        ) : widget.type === 'bar' ? (
+          <div className="mt-3 h-20">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+                <Bar dataKey="v" fill={metric.color} radius={[2, 2, 0, 0]} />
+                <XAxis dataKey="label" tick={{ fontSize: 8 }} axisLine={false} tickLine={false} />
+                <Tooltip formatter={(v: number) => formatMetricValue(v, metric.format)} labelStyle={{ fontSize: 10 }} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        ) : widget.type === 'line' ? (
+          <div className="mt-3 h-20">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartData} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+                <Line type="monotone" dataKey="v" stroke={metric.color} strokeWidth={2} dot={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 8 }} axisLine={false} tickLine={false} />
+                <Tooltip formatter={(v: number) => formatMetricValue(v, metric.format)} labelStyle={{ fontSize: 10 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (
+          /* table */
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full text-xs">
+              <tbody>
+                {chartData.slice(0, 4).map(d => (
+                  <tr key={d.label} className="border-t border-border/50">
+                    <td className="py-1 text-muted-foreground">{d.label}</td>
+                    <td className="py-1 text-right font-medium tabular-nums" style={{ color: metric.color }}>{formatMetricValue(d.v, metric.format)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <p className="mt-2 text-xs text-muted-foreground line-clamp-1">{metric.description}</p>
+        {!hasRealData && <p className="mt-1 text-[9px] text-muted-foreground/40 italic">ilustrativo</p>}
+      </div>
+
+      {/* Settings popover */}
+      {showMenu && (
+        <div className="absolute top-8 right-2 z-10 bg-card border border-border rounded-xl shadow-xl p-3 space-y-3 min-w-[180px]">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5">Tipo de widget</p>
+            <div className="grid grid-cols-4 gap-1">
+              {WIDGET_TYPES.map(wt => (
+                <button
+                  key={wt.type}
+                  type="button"
+                  title={wt.label}
+                  onClick={() => { onUpdate({ type: wt.type }); setShowMenu(false); }}
+                  className={`flex flex-col items-center gap-0.5 p-1.5 rounded-lg border text-[10px] transition-colors ${widget.type === wt.type ? 'border-primary bg-primary/10 text-primary' : 'border-border hover:border-primary/50'}`}
+                >
+                  {wt.icon}
+                  <span>{wt.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5">Largura</p>
+            <div className="grid grid-cols-3 gap-1">
+              {WIDGET_SIZES.map(ws => (
+                <button
+                  key={ws.size}
+                  type="button"
+                  onClick={() => { onUpdate({ size: ws.size }); setShowMenu(false); }}
+                  className={`p-1.5 rounded-lg border text-[10px] font-medium transition-colors ${widget.size === ws.size ? 'border-primary bg-primary/10 text-primary' : 'border-border hover:border-primary/50'}`}
+                >
+                  {ws.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SidebarStep({ num, title }: { num: number; title: string }) {
   return (
     <div className="flex items-center gap-2">
@@ -1206,10 +1395,15 @@ export default function NovoRelatorioPage() {
           title: metric.label,
           source: metric.source,
           type: 'kpi',
+          size: '1',
         },
       ];
     });
     setHasGeneratedPreview(false);
+  }
+
+  function updateWidget(id: string, patch: Partial<Pick<ReportWidget, 'type' | 'size' | 'title'>>) {
+    setReportWidgets(prev => prev.map(w => w.id === id ? { ...w, ...patch } : w));
   }
 
   const hasMetaSelection = source === 'client' ? clientLinkedMetaAccounts.length > 0 : metaAccountsForReport.length > 0;
@@ -1566,12 +1760,7 @@ export default function NovoRelatorioPage() {
 
             {/* Widget cards — immediate mock values, real values after generation */}
             <div>
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Métricas selecionadas</p>
-                {!hasGeneratedPreview && (
-                  <span className="text-[10px] text-muted-foreground/60 italic">valores ilustrativos</span>
-                )}
-              </div>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-3">Métricas selecionadas</p>
               <div className="grid gap-3 md:grid-cols-3">
                 {widgetsForSelectedSources.map(widget => {
                   const metric = METRIC_BY_KEY[widget.metricKey];
@@ -1580,17 +1769,17 @@ export default function NovoRelatorioPage() {
                     ? resolveReportMetric(metric, reports)
                     : computeMockKpi(metric, mockSeries);
                   return (
-                    <div key={widget.id} className="rounded-xl border border-border bg-card p-4 overflow-hidden relative">
-                      <div className="absolute inset-x-0 top-0 h-1" style={{ background: metric.color }} />
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{SOURCE_LABELS[metric.source]}</p>
-                      <h3 className="mt-1 text-sm font-bold">{widget.title}</h3>
-                      <p className="mt-3 text-2xl font-bold tabular-nums" style={{ color: metric.color }}>
-                        {isGenerating
-                          ? <span className="inline-block w-20 h-7 rounded bg-muted animate-pulse" />
-                          : formatMetricValue(value, metric.format)}
-                      </p>
-                      <p className="mt-1 text-xs text-muted-foreground">{metric.description}</p>
-                    </div>
+                    <WidgetCard
+                      key={widget.id}
+                      widget={widget}
+                      metric={metric}
+                      value={value}
+                      mockSeries={mockSeries}
+                      isGenerating={isGenerating}
+                      hasRealData={hasGeneratedPreview}
+                      onUpdate={patch => updateWidget(widget.id, patch)}
+                      onRemove={() => setReportWidgets(prev => prev.filter(w => w.id !== widget.id))}
+                    />
                   );
                 })}
               </div>
