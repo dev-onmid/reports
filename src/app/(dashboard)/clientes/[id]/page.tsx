@@ -8,7 +8,7 @@ import {
   type MetaAdsMetrics,
   useMetaAdsConnections,
 } from '@/lib/meta-ads-store';
-import { GOOGLE_ADS_ACCOUNTS, GOOGLE_ADS_MANAGERS, type GoogleAdsMetrics, useGoogleAds } from '@/lib/google-ads-store';
+import { GOOGLE_ADS_MANAGERS, type GoogleAdsMetrics, useGoogleAds } from '@/lib/google-ads-store';
 import { loadIntegrations, loadCachedAdAccounts, readIntegrations, type CachedAdAccount } from '@/lib/integration-store';
 import {
   Calendar, Users, BarChart3, TrendingUp, UploadCloud,
@@ -2275,6 +2275,7 @@ function GoogleAdsConnectionDialog({
 }) {
   const {
     integration,
+    accounts: allGoogleAccounts,
     getConnection,
     saveClientConnection,
     disconnectClient,
@@ -2290,8 +2291,8 @@ function GoogleAdsConnectionDialog({
   }, [connection, integration.managerId, open]);
 
   const globalConnected = integration.status === 'connected';
-  const accounts = GOOGLE_ADS_ACCOUNTS.filter((account) => account.managerId === managerId);
-  const selectedMetrics = GOOGLE_ADS_ACCOUNTS
+  const accounts = allGoogleAccounts.filter((account) => account.managerId === managerId);
+  const selectedMetrics = allGoogleAccounts
     .filter((account) => selectedIds.includes(account.id))
     .reduce(
       (total, account) => ({
