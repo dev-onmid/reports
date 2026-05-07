@@ -593,7 +593,7 @@ function MetaConnectModal({
 
       // Fetch user profile
       const meRes = await fetch(
-        `https://graph.facebook.com/v21.0/me?fields=id,name,picture.width(80)&access_token=${accessToken}`
+        `https://graph.facebook.com/v21.0/me?fields=id,name,picture&access_token=${encodeURIComponent(accessToken)}`
       );
       const me = await meRes.json() as { id: string; name: string; picture?: { data: { url: string } }; error?: { message: string } };
       if (me.error) throw new Error(me.error.message);
