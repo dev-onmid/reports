@@ -1157,17 +1157,41 @@ export default function IntegracoesPage() {
     }
   }
 
+  function openGoogleOAuth(type: 'gmb' | 'google_ads') {
+    const popup = window.open(
+      `/api/auth/google?type=${type}`,
+      'google-oauth',
+      'width=520,height=660,scrollbars=yes,resizable=yes'
+    );
+
+    function handleMessage(event: MessageEvent) {
+      if (event.data?.type === 'google_oauth_success') {
+        window.removeEventListener('message', handleMessage);
+        popup?.close();
+        void reloadGoogle();
+        const label = event.data.accountType === 'gmb' ? 'Google Meu Negócio' : 'Google Ads';
+        setOauthBanner({ type: 'success', msg: `${label} conectado com sucesso!` });
+      } else if (event.data?.type === 'google_oauth_error') {
+        window.removeEventListener('message', handleMessage);
+        popup?.close();
+        setOauthBanner({ type: 'error', msg: `Erro ao conectar Google: ${event.data.error}` });
+      }
+    }
+
+    window.addEventListener('message', handleMessage);
+  }
+
   function handleCardAction(id: IntegrationId) {
     if (id === 'meta-ads') {
       setMetaModal(true);
       return;
     }
     if (id === 'google-ads') {
-      window.location.href = '/api/auth/google?type=google_ads';
+      openGoogleOAuth('google_ads');
       return;
     }
     if (id === 'google-my-business') {
-      window.location.href = '/api/auth/google?type=gmb';
+      openGoogleOAuth('gmb');
       return;
     }
   }
@@ -1367,8 +1391,8 @@ export default function IntegracoesPage() {
           <GoogleConnectionsPanel
             connections={googleConns}
             onRemove={removeGoogle}
-            onAddGoogleAds={() => { window.location.href = '/api/auth/google?type=google_ads'; }}
-            onAddGMB={() => { window.location.href = '/api/auth/google?type=gmb'; }}
+            onAddGoogleAds={() => openGoogleOAuth('google_ads')}
+            onAddGMB={() => openGoogleOAuth('gmb')}
           />
         )}
 

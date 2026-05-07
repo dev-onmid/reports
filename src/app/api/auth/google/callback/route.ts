@@ -1,6 +1,28 @@
 import type { NextRequest } from 'next/server';
 import { google } from 'googleapis';
-import { createClient } from '@supabase/supabase-js';
+import { Pool } from 'pg';
+
+let pool: Pool | null = null;
+
+function getPool(): Pool {
+  if (!pool) {
+    pool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false },
+      max: 1,
+    });
+  }
+  return pool;
+}
+
+function popupHtml(script: string, message: string) {
+  return new Response(
+    `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Google OAuth</title>
+    <style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#0a0a0a;color:#fff;font-size:14px;}</style>
+    </head><body><p>${message}</p><script>${script}<\/script></body></html>`,
+    { headers: { 'Content-Type': 'text/html' } }
+  );
+}
 
 export async function GET(request: NextRequest) {
   const code = request.nextUrl.searchParams.get('code');
@@ -10,7 +32,10 @@ export async function GET(request: NextRequest) {
 
   if (oauthError || !code) {
     const msg = oauthError ?? 'cancelled';
-    return Response.redirect(`${appUrl}/integracoes?google_error=${encodeURIComponent(msg)}`);
+    return popupHtml(
+      `if(window.opener){window.opener.postMessage({type:'google_oauth_error',error:${JSON.stringify(msg)}},'*');window.close();}else{window.location.href=${JSON.stringify(appUrl + '/integracoes?google_error=' + encodeURIComponent(msg))}}`,
+      'Erro na conexão. Fechando...'
+    );
   }
 
   try {
@@ -29,40 +54,33 @@ export async function GET(request: NextRequest) {
     const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
     const { data: profile } = await oauth2.userinfo.get();
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const supabaseKey =
-      process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    const db = getPool();
+    await db.query(
+      `INSERT INTO public.google_connections
+        (email, display_name, picture, access_token, refresh_token, token_expiry, scope, account_type, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'connected')`,
+      [
+        profile.email ?? '',
+        profile.name ?? '',
+        profile.picture ?? null,
+        tokens.access_token ?? '',
+        tokens.refresh_token ?? '',
+        tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null,
+        tokens.scope ?? '',
+        state,
+      ]
+    );
 
-    const { error: dbError } = await supabase.from('google_connections').insert({
-      email: profile.email ?? '',
-      display_name: profile.name ?? '',
-      picture: profile.picture ?? null,
-      access_token: tokens.access_token ?? '',
-      refresh_token: tokens.refresh_token ?? '',
-      token_expiry: tokens.expiry_date
-        ? new Date(tokens.expiry_date).toISOString()
-        : null,
-      scope: tokens.scope ?? '',
-      account_type: state,
-      status: 'connected',
-    });
-
-    if (dbError) {
-      console.error('Erro ao salvar conexão Google:', dbError);
-      return Response.redirect(
-        `${appUrl}/integracoes?google_error=${encodeURIComponent(dbError.message)}`
-      );
-    }
-
-    return Response.redirect(
-      `${appUrl}/integracoes?google_connected=1&type=${encodeURIComponent(state)}`
+    return popupHtml(
+      `if(window.opener){window.opener.postMessage({type:'google_oauth_success',accountType:${JSON.stringify(state)}},'*');window.close();}else{window.location.href=${JSON.stringify(appUrl + '/integracoes?google_connected=1&type=' + encodeURIComponent(state))}}`,
+      'Conectado com sucesso! Fechando...'
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Erro desconhecido';
     console.error('Erro no callback Google OAuth:', err);
-    return Response.redirect(
-      `${appUrl}/integracoes?google_error=${encodeURIComponent(msg)}`
+    return popupHtml(
+      `if(window.opener){window.opener.postMessage({type:'google_oauth_error',error:${JSON.stringify(msg)}},'*');window.close();}else{window.location.href=${JSON.stringify(appUrl + '/integracoes?google_error=' + encodeURIComponent(msg))}}`,
+      'Erro inesperado. Fechando...'
     );
   }
 }
