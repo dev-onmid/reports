@@ -45,15 +45,16 @@ export async function GET(request: NextRequest) {
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
     const db = createClient(supabaseUrl, supabaseKey);
 
-    const { error: dbError } = await db.rpc('save_google_connection', {
-      p_email: profile.email ?? '',
-      p_display_name: profile.name ?? '',
-      p_picture: profile.picture ?? null,
-      p_access_token: tokens.access_token ?? '',
-      p_refresh_token: tokens.refresh_token ?? '',
-      p_token_expiry: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null,
-      p_scope: tokens.scope ?? '',
-      p_account_type: state,
+    const { error: dbError } = await db.from('google_connections').insert({
+      email: profile.email ?? '',
+      display_name: profile.name ?? '',
+      picture: profile.picture ?? null,
+      access_token: tokens.access_token ?? '',
+      refresh_token: tokens.refresh_token ?? '',
+      token_expiry: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null,
+      scope: tokens.scope ?? '',
+      account_type: state,
+      status: 'connected',
     });
 
     if (dbError) throw new Error(dbError.message);
