@@ -8,7 +8,7 @@ import {
   type MetaAdsMetrics,
   useMetaAdsConnections,
 } from '@/lib/meta-ads-store';
-import { readIntegrations } from '@/lib/integration-store';
+import { readIntegrations, readCachedAdAccounts, type CachedAdAccount } from '@/lib/integration-store';
 import {
   Calendar, Users, BarChart3, TrendingUp, UploadCloud,
   Link as LinkIcon, Plus, X, ChevronDown, LayoutGrid,
@@ -1969,6 +1969,10 @@ function ClientDashboardTab({
   );
 }
 
+const AD_ACCOUNT_STATUS_LABEL: Record<number, string> = {
+  1: 'Ativa', 2: 'Desativada', 3: 'Não gasta', 7: 'Cancelada',
+};
+
 function MetaAdsConnectionDialog({
   open,
   onClose,
@@ -1984,36 +1988,36 @@ function MetaAdsConnectionDialog({
   const connection = getConnection(clientId);
 
   const [globalMeta, setGlobalMeta] = useState(() => readIntegrations().meta);
-  const [adAccountId, setAdAccountId] = useState('');
-  const [adAccountName, setAdAccountName] = useState('');
-  const [error, setError] = useState('');
+  const [cachedAccounts, setCachedAccounts] = useState<CachedAdAccount[]>([]);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   useEffect(() => {
     if (!open) return;
     setGlobalMeta(readIntegrations().meta);
-    setAdAccountId(connection?.accountIds[0] ?? '');
-    setAdAccountName(connection?.profileId ?? '');
-    setError('');
+    const accounts = readCachedAdAccounts();
+    setCachedAccounts(accounts);
+    setSelectedIds(connection?.accountIds ?? []);
   }, [open, connection]);
 
   const globalConnected = globalMeta.status === 'connected';
+  const hasAccounts = cachedAccounts.length > 0;
+
+  function toggle(id: string) {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  }
 
   function handleSave() {
-    const trimmedId = adAccountId.trim();
-    if (!trimmedId) { setError('Informe o Ad Account ID.'); return; }
-    if (!trimmedId.startsWith('act_') && !/^\d+$/.test(trimmedId)) {
-      setError('O ID deve começar com "act_" ou ser numérico (ex: act_123456789).');
-      return;
-    }
-    const normalizedId = trimmedId.startsWith('act_') ? trimmedId : `act_${trimmedId}`;
-    saveConnection(clientId, adAccountName.trim() || normalizedId, [normalizedId]);
+    if (selectedIds.length === 0) return;
+    const firstName = cachedAccounts.find((a) => a.id === selectedIds[0])?.name ?? selectedIds[0];
+    saveConnection(clientId, firstName, selectedIds);
     onClose();
   }
 
   function handleDisconnect() {
     disconnectClient(clientId);
-    setAdAccountId('');
-    setAdAccountName('');
+    setSelectedIds([]);
     onClose();
   }
 
@@ -2023,70 +2027,87 @@ function MetaAdsConnectionDialog({
         <DialogHeader>
           <DialogTitle className="font-heading text-2xl uppercase tracking-wider">Configurar Meta Ads</DialogTitle>
           <p className="text-sm text-muted-foreground">
-            Vincule a conta de anúncio de <strong>{clientName}</strong> usando a integração global.
+            Selecione a(s) conta(s) de anúncio de <strong>{clientName}</strong>.
           </p>
         </DialogHeader>
 
         <div className="grid gap-4">
-          {/* Global connection status */}
-          {globalConnected ? (
-            <div className="flex items-start gap-3 rounded-lg border border-primary/25 bg-primary/5 p-3">
-              <CheckCircle2 className="w-4 h-4 text-primary mt-0.5 shrink-0" />
-              <div className="text-xs leading-relaxed">
-                <p className="font-semibold text-foreground">{globalMeta.userName}</p>
-                <p className="text-muted-foreground/60 mt-0.5">Integração global ativa</p>
-              </div>
-            </div>
-          ) : (
+          {/* Global status */}
+          {!globalConnected ? (
             <div className="flex items-start gap-3 rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-3">
               <AlertTriangle className="w-4 h-4 text-yellow-400 mt-0.5 shrink-0" />
               <div className="text-xs text-yellow-300 leading-relaxed">
                 <p className="font-semibold">Meta Ads não conectado globalmente.</p>
-                <p className="text-yellow-300/70 mt-0.5">Vá em <strong>Integrações</strong> no menu lateral e conecte o Meta Ads primeiro.</p>
+                <p className="text-yellow-300/70 mt-0.5">Vá em <strong>Integrações</strong> e conecte o Meta Ads primeiro.</p>
               </div>
             </div>
-          )}
-
-          {globalConnected && (
+          ) : !hasAccounts ? (
+            <div className="flex items-start gap-3 rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-3">
+              <AlertTriangle className="w-4 h-4 text-yellow-400 mt-0.5 shrink-0" />
+              <div className="text-xs text-yellow-300 leading-relaxed">
+                <p className="font-semibold">Nenhuma conta de anúncio encontrada.</p>
+                <p className="text-yellow-300/70 mt-0.5">Vá em <strong>Integrações → Meta Ads</strong> e aguarde o painel de ativos carregar as contas.</p>
+              </div>
+            </div>
+          ) : (
             <>
-              <div className="grid gap-1.5">
-                <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                  Ad Account ID do cliente
-                </Label>
-                <Input
-                  value={adAccountId}
-                  onChange={(e) => { setAdAccountId(e.target.value); setError(''); }}
-                  placeholder="act_1234567890123"
-                  className="font-mono text-sm"
-                />
-                <p className="text-[11px] text-muted-foreground/60">
-                  Encontre em business.facebook.com → Contas de anúncio. Começa com <span className="font-mono">act_</span>
-                </p>
+              {/* Connected as */}
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <CheckCircle2 className="w-3.5 h-3.5 text-primary shrink-0" />
+                <span>Conectado como <strong className="text-foreground">{globalMeta.userName}</strong> · {cachedAccounts.length} conta(s) disponíve{cachedAccounts.length === 1 ? 'l' : 'is'}</span>
               </div>
 
-              <div className="grid gap-1.5">
-                <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                  Nome da conta (opcional)
-                </Label>
-                <Input
-                  value={adAccountName}
-                  onChange={(e) => setAdAccountName(e.target.value)}
-                  placeholder={`Ex: ${clientName} - Tráfego`}
-                  className="text-sm"
-                />
+              {/* Account list */}
+              <div className="grid gap-2 max-h-72 overflow-y-auto pr-1">
+                {cachedAccounts.map((acc) => {
+                  const selected = selectedIds.includes(acc.id);
+                  const statusLabel = AD_ACCOUNT_STATUS_LABEL[acc.account_status] ?? 'Desconhecido';
+                  const isActive = acc.account_status === 1;
+                  const spent = acc.amount_spent ? (Number(acc.amount_spent) / 100) : null;
+
+                  return (
+                    <button
+                      key={acc.id}
+                      type="button"
+                      onClick={() => toggle(acc.id)}
+                      className={cn(
+                        'flex items-center justify-between gap-4 rounded-lg border p-3.5 text-left transition-colors',
+                        selected
+                          ? 'border-primary/60 bg-primary/10'
+                          : 'border-border bg-background hover:border-primary/30 hover:bg-muted/30',
+                      )}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className={cn(
+                          'flex h-5 w-5 shrink-0 items-center justify-center rounded border',
+                          selected ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground/40',
+                        )}>
+                          {selected && <Check className="h-3 w-3" />}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold truncate">{acc.name}</p>
+                          <p className="text-xs font-mono text-muted-foreground mt-0.5">{acc.id} · {acc.currency}</p>
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0 space-y-0.5">
+                        <p className={cn('text-[11px] font-bold', isActive ? 'text-emerald-400' : 'text-yellow-400')}>
+                          {statusLabel}
+                        </p>
+                        {spent !== null && (
+                          <p className="text-[11px] text-muted-foreground">
+                            {spent.toLocaleString('pt-BR', { style: 'currency', currency: acc.currency })}
+                          </p>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
 
-              {error && (
-                <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
-                  {error}
+              {selectedIds.length > 0 && (
+                <p className="text-xs text-primary font-semibold">
+                  {selectedIds.length} conta(s) selecionada(s)
                 </p>
-              )}
-
-              {connection && (
-                <div className="rounded-lg border border-primary/30 bg-primary/10 p-3 text-xs text-muted-foreground">
-                  <span className="font-bold text-primary">Vinculado: </span>
-                  {connection.accountIds[0]} {connection.profileId !== connection.accountIds[0] ? `— ${connection.profileId}` : ''}
-                </div>
               )}
             </>
           )}
@@ -2104,7 +2125,7 @@ function MetaAdsConnectionDialog({
             <Button variant="outline" onClick={onClose}>Cancelar</Button>
             <Button
               onClick={handleSave}
-              disabled={!globalConnected}
+              disabled={!globalConnected || !hasAccounts || selectedIds.length === 0}
               className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
             >
               Salvar vínculo

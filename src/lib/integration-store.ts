@@ -1,6 +1,16 @@
 const STORAGE_KEY = 'onmid-integrations';
+const ASSETS_STORAGE_KEY = 'onmid-meta-assets-cache';
 
 export type MetaConnectionStatus = 'disconnected' | 'connected' | 'error';
+
+// Shared ad account type (used by integrations page and client dialog)
+export type CachedAdAccount = {
+  id: string;        // act_XXXXXXXXX
+  name: string;
+  account_status: number;
+  currency: string;
+  amount_spent?: string;
+};
 
 export type MetaIntegration = {
   status: MetaConnectionStatus;
@@ -55,6 +65,29 @@ export function disconnectMeta(): void {
   const store = readIntegrations();
   store.meta = DEFAULT_META;
   saveIntegrations(store);
+  if (typeof window !== 'undefined') {
+    window.localStorage.removeItem(ASSETS_STORAGE_KEY);
+  }
+}
+
+// ─── Cached assets (ad accounts fetched from Meta API) ───────────────────────
+
+export function saveCachedAdAccounts(accounts: CachedAdAccount[]): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(ASSETS_STORAGE_KEY, JSON.stringify(accounts));
+  window.dispatchEvent(new Event('meta-assets-updated'));
+}
+
+export function readCachedAdAccounts(): CachedAdAccount[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const stored = window.localStorage.getItem(ASSETS_STORAGE_KEY);
+    if (!stored) return [];
+    const parsed = JSON.parse(stored);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 // ─── Facebook JS SDK ──────────────────────────────────────────────────────────

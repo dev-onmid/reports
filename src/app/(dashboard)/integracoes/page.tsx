@@ -10,18 +10,14 @@ import {
   disconnectMeta,
   fbLogin,
   fbLogout,
+  saveCachedAdAccounts,
   type MetaIntegration,
+  type CachedAdAccount,
 } from '@/lib/integration-store';
 
 // ─── Meta Graph API types ─────────────────────────────────────────────────────
 
-type MetaAdAccount = {
-  id: string;
-  name: string;
-  account_status: number; // 1=Ativa, 2=Desativada, 3=Não gasta, 7=Cancelada
-  currency: string;
-  amount_spent?: string;
-};
+type MetaAdAccount = CachedAdAccount;
 
 type MetaPage = {
   id: string;
@@ -118,6 +114,8 @@ function MetaAssetsPanel({ meta }: { meta: MetaIntegration }) {
     try {
       const data = await fetchMetaAssets(meta.accessToken);
       setAssets(data);
+      // Persist ad accounts so client pages can use them for selection
+      saveCachedAdAccounts(data.adAccounts);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erro ao buscar ativos.');
     } finally {
