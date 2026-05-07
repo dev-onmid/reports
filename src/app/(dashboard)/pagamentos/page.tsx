@@ -7,8 +7,11 @@ import {
   CalendarDays,
   CheckCircle2,
   Clock3,
+  ExternalLink,
   Eye,
   Filter,
+  PlusCircle,
+  RefreshCw,
   Send,
   Trash2,
   WalletCards,
@@ -25,6 +28,7 @@ import {
   useInvestmentPayments,
 } from '@/lib/payment-store';
 import { readIntegrations, readCachedAdAccounts, type CachedAdAccount } from '@/lib/integration-store';
+import { useMetaAdsConnections } from '@/lib/meta-ads-store';
 import { getHoliday, previousBusinessDay, formatDateBR as formatHolidayDateBR } from '@/lib/holidays';
 import { cn, formatCurrencyBRL, formatCurrencyInputBRL, parseCurrencyBRL } from '@/lib/utils';
 
@@ -58,117 +62,199 @@ async function fetchAdAccountBalances(accounts: CachedAdAccount[], token: string
 
 const LOW_BALANCE_THRESHOLD = 100; // R$100
 
-function AdAccountBalances() {
-  const [balances, setBalances] = useState<AdAccountBalance[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [isMetaConnected, setIsMetaConnected] = useState(false);
+// ── Low-balance alerts (list, only below threshold) ───────────────────────────
+function CriticalBalanceAlerts({
+  balances,
+  loading,
+  lastUpdated,
+  onRefresh,
+}: {
+  balances: AdAccountBalance[];
+  loading: boolean;
+  lastUpdated: Date | null;
+  onRefresh: () => void;
+}) {
+  const critical = balances.filter(b => b.balance !== null && b.balance < LOW_BALANCE_THRESHOLD);
 
-  const load = useCallback(async () => {
-    const integrations = readIntegrations();
-    if (integrations.meta.status !== 'connected') {
-      setIsMetaConnected(false);
-      return;
-    }
-    setIsMetaConnected(true);
-    const accounts = readCachedAdAccounts();
-    if (accounts.length === 0) return;
-    setLoading(true);
-    try {
-      const result = await fetchAdAccountBalances(accounts, integrations.meta.accessToken);
-      setBalances(result);
-      setLastUpdated(new Date());
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  if (!isMetaConnected) return null;
-  if (balances.length === 0 && !loading) return null;
-
-  const urgentCount = balances.filter(b => b.balance !== null && b.balance < LOW_BALANCE_THRESHOLD).length;
+  if (!loading && critical.length === 0) return null;
 
   return (
-    <div className="space-y-3">
+    <div className="rounded-xl border border-red-500/40 bg-red-500/5 p-4 space-y-3">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <h2 className="font-bold text-sm uppercase tracking-wider">Saldo das Contas de Anúncios</h2>
-          {urgentCount > 0 && (
-            <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-red-400 bg-red-500/10 border border-red-500/30 px-2 py-0.5 rounded-full">
-              <AlertTriangle className="w-3 h-3" />
-              {urgentCount} conta{urgentCount > 1 ? 's' : ''} com saldo crítico
-            </span>
-          )}
+          <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+          <h2 className="font-bold text-sm text-red-400 uppercase tracking-wider">
+            {loading && critical.length === 0 ? 'Verificando saldos...' : `${critical.length} conta${critical.length > 1 ? 's' : ''} com saldo crítico`}
+          </h2>
         </div>
         <div className="flex items-center gap-2">
           {lastUpdated && (
-            <span className="text-[10px] text-muted-foreground">Atualizado às {lastUpdated.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
+            <span className="text-[10px] text-muted-foreground">
+              {lastUpdated.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+            </span>
           )}
           <button
-            onClick={load}
+            onClick={onRefresh}
             disabled={loading}
-            className="text-[10px] font-bold uppercase tracking-wider text-primary hover:text-primary/80 disabled:opacity-50 flex items-center gap-1"
+            className="flex items-center gap-1 text-[10px] font-bold text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors"
           >
-            <Eye className="w-3 h-3" />
-            {loading ? 'Atualizando...' : 'Atualizar'}
+            <RefreshCw className={cn('w-3 h-3', loading && 'animate-spin')} />
+            Atualizar
           </button>
         </div>
       </div>
 
-      <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-        {loading && balances.length === 0 ? (
-          Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="bg-card border border-border rounded-xl p-4 animate-pulse">
-              <div className="h-3 bg-muted rounded w-3/4 mb-3" />
-              <div className="h-7 bg-muted rounded w-1/2" />
-            </div>
-          ))
-        ) : (
-          balances.map(account => {
-            const isLow = account.balance !== null && account.balance < LOW_BALANCE_THRESHOLD;
-            const isWarning = account.balance !== null && account.balance >= LOW_BALANCE_THRESHOLD && account.balance < LOW_BALANCE_THRESHOLD * 2;
-            return (
-              <div
-                key={account.id}
-                className={cn(
-                  'rounded-xl p-4 border transition-colors',
-                  isLow
-                    ? 'bg-red-500/10 border-red-500/40'
-                    : isWarning
-                    ? 'bg-yellow-500/10 border-yellow-500/40'
-                    : 'bg-card border-border',
-                )}
-              >
-                <div className="flex items-start justify-between gap-2 mb-2">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground leading-tight truncate flex-1" title={account.name}>
-                    {account.name}
-                  </p>
-                  {isLow && <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />}
-                </div>
-                {account.balance !== null ? (
-                  <p className={cn(
-                    'text-2xl font-bold font-heading',
-                    isLow ? 'text-red-400' : isWarning ? 'text-yellow-400' : 'text-foreground',
-                  )}>
-                    {formatCurrencyBRL(account.balance)}
-                  </p>
-                ) : (
-                  <p className="text-sm text-muted-foreground">Erro ao carregar</p>
-                )}
-                <p className="text-[10px] font-mono text-muted-foreground mt-1">{account.id}</p>
-                {isLow && (
-                  <p className="text-[10px] font-bold text-red-400 mt-2 flex items-center gap-1">
-                    <AlertTriangle className="w-3 h-3" /> Saldo crítico — recarregue
-                  </p>
-                )}
+      {loading && critical.length === 0 ? (
+        <div className="space-y-2">
+          {[1, 2].map(i => <div key={i} className="h-10 bg-red-500/10 rounded-lg animate-pulse" />)}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {critical.map(account => (
+            <div
+              key={account.id}
+              className="flex items-center gap-3 rounded-lg bg-red-500/10 border border-red-500/30 px-3 py-2"
+            >
+              <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold truncate">{account.name}</p>
+                <p className="text-[10px] font-mono text-muted-foreground">{account.id}</p>
               </div>
-            );
-          })
-        )}
+              <p className="text-lg font-bold text-red-400 shrink-0 tabular-nums">
+                {formatCurrencyBRL(account.balance ?? 0)}
+              </p>
+              <a
+                href={`https://business.facebook.com/ads/manager/billing/?act=${account.id.replace('act_', '')}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 text-[10px] font-bold px-2.5 py-1.5 rounded-lg bg-red-500 text-white hover:bg-red-600 transition-colors shrink-0"
+                title="Adicionar saldo no Meta Ads Manager"
+              >
+                <PlusCircle className="w-3 h-3" />
+                Adicionar saldo
+                <ExternalLink className="w-3 h-3 ml-0.5" />
+              </a>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Per-client investment summary ─────────────────────────────────────────────
+type ClientSummaryRow = {
+  clientId: string;
+  clientName: string;
+  metaTotal: number;
+  googleTotal: number;
+  tiktokTotal: number;
+  metaBalance: number | null;
+};
+
+function ClientInvestmentSummary({
+  payments,
+  balances,
+}: {
+  payments: InvestmentPayment[];
+  balances: AdAccountBalance[];
+}) {
+  const { connections } = useMetaAdsConnections();
+
+  if (payments.length === 0) return null;
+
+  // Group payments by client
+  const map = new Map<string, ClientSummaryRow>();
+  for (const p of payments) {
+    if (!map.has(p.clientId)) {
+      map.set(p.clientId, { clientId: p.clientId, clientName: p.clientName, metaTotal: 0, googleTotal: 0, tiktokTotal: 0, metaBalance: null });
+    }
+    const row = map.get(p.clientId)!;
+    if (p.channel === 'Meta ADS') row.metaTotal += p.amount;
+    else if (p.channel === 'Google ADS') row.googleTotal += p.amount;
+    else if (p.channel === 'TikTok ADS') row.tiktokTotal += p.amount;
+  }
+
+  // Attach Meta balance per client via linked accounts
+  for (const conn of connections) {
+    const row = map.get(conn.clientId);
+    if (!row) continue;
+    const linked = balances.filter(b => conn.accountIds.includes(b.id) && b.balance !== null);
+    if (linked.length > 0) {
+      row.metaBalance = linked.reduce((sum, b) => sum + (b.balance ?? 0), 0);
+    }
+  }
+
+  const rows = Array.from(map.values()).sort((a, b) => (b.metaTotal + b.googleTotal) - (a.metaTotal + a.googleTotal));
+
+  return (
+    <div className="space-y-3">
+      <h2 className="font-bold text-sm uppercase tracking-wider">Compilado por Cliente</h2>
+      <div className="rounded-xl border border-border bg-card overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-muted text-muted-foreground text-[10px] uppercase tracking-widest">
+            <tr>
+              <th className="px-4 py-3 text-left">Cliente</th>
+              <th className="px-4 py-3 text-right">
+                <span className="flex items-center justify-end gap-1">
+                  <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" />
+                  Meta ADS
+                </span>
+              </th>
+              <th className="px-4 py-3 text-right text-muted-foreground/70">Saldo Meta</th>
+              <th className="px-4 py-3 text-right">
+                <span className="flex items-center justify-end gap-1">
+                  <span className="w-2 h-2 rounded-full bg-red-500 inline-block" />
+                  Google ADS
+                </span>
+              </th>
+              {rows.some(r => r.tiktokTotal > 0) && (
+                <th className="px-4 py-3 text-right">
+                  <span className="flex items-center justify-end gap-1">
+                    <span className="w-2 h-2 rounded-full bg-foreground/50 inline-block" />
+                    TikTok ADS
+                  </span>
+                </th>
+              )}
+              <th className="px-4 py-3 text-right font-bold text-foreground">Total</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {rows.map(row => {
+              const total = row.metaTotal + row.googleTotal + row.tiktokTotal;
+              const balanceLow = row.metaBalance !== null && row.metaBalance < LOW_BALANCE_THRESHOLD;
+              return (
+                <tr key={row.clientId} className="hover:bg-muted/30 transition-colors">
+                  <td className="px-4 py-3 font-semibold">{row.clientName}</td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    {row.metaTotal > 0 ? (
+                      <span className="text-blue-400">{formatCurrencyBRL(row.metaTotal)}</span>
+                    ) : <span className="text-muted-foreground/40">—</span>}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    {row.metaBalance !== null ? (
+                      <span className={cn('font-medium', balanceLow ? 'text-red-400' : 'text-muted-foreground')}>
+                        {balanceLow && <AlertTriangle className="w-3 h-3 inline mr-1" />}
+                        {formatCurrencyBRL(row.metaBalance)}
+                      </span>
+                    ) : <span className="text-muted-foreground/40 text-xs">sem dados</span>}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    {row.googleTotal > 0 ? (
+                      <span className="text-red-400">{formatCurrencyBRL(row.googleTotal)}</span>
+                    ) : <span className="text-muted-foreground/40">—</span>}
+                  </td>
+                  {rows.some(r => r.tiktokTotal > 0) && (
+                    <td className="px-4 py-3 text-right tabular-nums">
+                      {row.tiktokTotal > 0 ? formatCurrencyBRL(row.tiktokTotal) : <span className="text-muted-foreground/40">—</span>}
+                    </td>
+                  )}
+                  <td className="px-4 py-3 text-right font-bold tabular-nums">{formatCurrencyBRL(total)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   );
@@ -408,8 +494,42 @@ function CurrencyInput({ value, onChange, className }: {
 export default function PagamentosPage() {
   const { clients } = useClients();
   const { payments, addPayment, updatePaymentStatus, deletePayment } = useInvestmentPayments();
+  const { getConnection } = useMetaAdsConnections();
   const visibleClientIds = new Set(clients.map((client) => client.id));
   const visiblePayments = payments.filter((payment) => visibleClientIds.has(payment.clientId));
+
+  // ── Lifted balance state ──────────────────────────────────────────────────
+  const [balances, setBalances] = useState<AdAccountBalance[]>([]);
+  const [balancesLoading, setBalancesLoading] = useState(false);
+  const [balancesLastUpdated, setBalancesLastUpdated] = useState<Date | null>(null);
+  const [isMetaConnected, setIsMetaConnected] = useState(false);
+
+  const loadBalances = useCallback(async () => {
+    const integrations = readIntegrations();
+    if (integrations.meta.status !== 'connected') { setIsMetaConnected(false); return; }
+    setIsMetaConnected(true);
+    const accounts = readCachedAdAccounts();
+    if (accounts.length === 0) return;
+    setBalancesLoading(true);
+    try {
+      const result = await fetchAdAccountBalances(accounts, integrations.meta.accessToken);
+      setBalances(result);
+      setBalancesLastUpdated(new Date());
+    } finally {
+      setBalancesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadBalances(); }, [loadBalances]);
+
+  // Helper: get total Meta balance for a client
+  function getClientMetaBalance(clientId: string): number | null {
+    const connection = getConnection(clientId);
+    if (!connection) return null;
+    const linked = balances.filter(b => connection.accountIds.includes(b.id) && b.balance !== null);
+    if (linked.length === 0) return null;
+    return linked.reduce((sum, b) => sum + (b.balance ?? 0), 0);
+  }
   const [selectedDate, setSelectedDate] = useState(makeDate(6));
   const [viewMode, setViewMode] = useState<ViewMode>('dia');
   const [statusFilter, setStatusFilter] = useState<PaymentStatus | 'Todos'>('Todos');
@@ -584,7 +704,16 @@ export default function PagamentosPage() {
         </div>
       </div>
 
-      <AdAccountBalances />
+      {isMetaConnected && (
+        <CriticalBalanceAlerts
+          balances={balances}
+          loading={balancesLoading}
+          lastUpdated={balancesLastUpdated}
+          onRefresh={loadBalances}
+        />
+      )}
+
+      <ClientInvestmentSummary payments={visiblePayments} balances={balances} />
 
       <div className="grid gap-3 md:grid-cols-5">
         {[
@@ -760,18 +889,22 @@ export default function PagamentosPage() {
 
       {viewMode === 'dia' && (
       <div className="bg-card border border-border rounded-xl overflow-hidden">
-        <div className="grid grid-cols-[minmax(180px,1.3fr)_110px_130px_130px_112px] gap-3 px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-muted-foreground border-b border-border">
+        <div className="grid grid-cols-[minmax(200px,1.5fr)_110px_130px_130px_140px_112px] gap-3 px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-muted-foreground border-b border-border">
           <span>Cliente</span>
           <span>Canal</span>
-          <span>Valor</span>
+          <span>Valor Pix</span>
           <span>Status</span>
+          <span>Saldo Conta</span>
           <span className="text-right">Ações</span>
         </div>
 
         {filteredPayments.length > 0 ? (
           <div className="divide-y divide-border">
-            {filteredPayments.map((payment) => (
-              <div key={payment.id} className="grid grid-cols-[minmax(180px,1.3fr)_110px_130px_130px_112px] gap-3 px-4 py-3 items-center text-sm hover:bg-muted/35 transition-colors">
+            {filteredPayments.map((payment) => {
+              const metaBalance = payment.channel === 'Meta ADS' ? getClientMetaBalance(payment.clientId) : null;
+              const balanceLow = metaBalance !== null && metaBalance < LOW_BALANCE_THRESHOLD;
+              return (
+              <div key={payment.id} className="grid grid-cols-[minmax(200px,1.5fr)_110px_130px_130px_140px_112px] gap-3 px-4 py-3 items-center text-sm hover:bg-muted/35 transition-colors">
                 <div>
                   <p className="font-bold">{payment.clientName}</p>
                   <p className="text-xs text-muted-foreground">{formatDateBR(payment.date)}</p>
@@ -785,6 +918,25 @@ export default function PagamentosPage() {
                   value={payment.status}
                   onChange={(status) => updatePaymentStatus(payment.id, status)}
                 />
+                <div>
+                  {payment.channel === 'Meta ADS' ? (
+                    metaBalance !== null ? (
+                      <span className={cn(
+                        'inline-flex items-center gap-1 text-xs font-semibold tabular-nums px-2 py-0.5 rounded-lg',
+                        balanceLow
+                          ? 'bg-red-500/15 text-red-400 border border-red-500/30'
+                          : 'bg-muted text-muted-foreground',
+                      )}>
+                        {balanceLow && <AlertTriangle className="w-3 h-3 shrink-0" />}
+                        {formatCurrencyBRL(metaBalance)}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground/50">—</span>
+                    )
+                  ) : (
+                    <span className="text-xs text-muted-foreground/50">—</span>
+                  )}
+                </div>
                 <div className="flex justify-end gap-1">
                   <Button
                     render={<Link href={`/clientes/${payment.clientId}`} />}
@@ -806,7 +958,8 @@ export default function PagamentosPage() {
                   </Button>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <div className="py-16 text-center">
