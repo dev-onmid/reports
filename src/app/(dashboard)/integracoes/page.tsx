@@ -178,10 +178,15 @@ function MetaAssetsPanel({ meta }: { meta: MetaIntegration }) {
       setEnabledMap(newMap);
 
       if (data.adAccounts.length > 0) {
-        await saveCachedAdAccounts(finalAdAccounts.map((a) => ({ ...a, enabled: newMap[a.id] ?? true })));
+        try {
+          await saveCachedAdAccounts(finalAdAccounts.map((a) => ({ ...a, enabled: newMap[a.id] ?? true })));
+        } catch (saveErr) {
+          console.error('Erro ao salvar cache de contas Meta:', saveErr);
+        }
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Erro ao buscar ativos.');
+      const msg = e instanceof Error ? e.message : (e as { message?: string })?.message ?? 'Erro ao buscar ativos.';
+      setError(msg);
     } finally {
       setLoading(false);
     }
