@@ -28,14 +28,18 @@ export function useClients() {
     async function load() {
       try {
         assertSupabaseConfigured();
-        const { data } = await supabase.from('clients').select('*').order('name');
-        if (data && data.length > 0) {
-          setClients(data.map((r) => ({ id: r.id, name: r.name, segment: r.segment, status: r.status as ClientStatus })));
-        } else {
-          setClients(mockClients);
-          void supabase.from('clients').upsert(
-            mockClients.map((c) => ({ id: c.id, name: c.name, segment: c.segment, status: c.status }))
-          );
+        const { data, error } = await supabase.from('clients').select('*').order('name');
+        if (error) throw error;
+        if (data !== null) {
+          if (data.length > 0) {
+            setClients(data.map((r) => ({ id: r.id, name: r.name, segment: r.segment, status: r.status as ClientStatus })));
+          } else {
+            // Supabase is empty — seed mock clients once so future deletes persist
+            setClients(mockClients);
+            void supabase.from('clients').upsert(
+              mockClients.map((c) => ({ id: c.id, name: c.name, segment: c.segment, status: c.status }))
+            );
+          }
         }
       } catch (error) {
         console.error('Erro ao carregar clientes do Supabase:', error);
@@ -73,7 +77,7 @@ export function useClients() {
       void (async () => {
         const { error } = await supabase.from('clients').update({ status: 'Arquivado' }).eq('id', id);
         if (error) console.error('Erro ao arquivar cliente no Supabase:', error);
-        else window.dispatchEvent(new Event(CLIENTS_UPDATED_EVENT));
+        window.dispatchEvent(new Event(CLIENTS_UPDATED_EVENT));
       })();
     },
     restoreClient(id: string) {
@@ -81,15 +85,23 @@ export function useClients() {
       void (async () => {
         const { error } = await supabase.from('clients').update({ status: 'Ativo' }).eq('id', id);
         if (error) console.error('Erro ao restaurar cliente no Supabase:', error);
-        else window.dispatchEvent(new Event(CLIENTS_UPDATED_EVENT));
+        window.dispatchEvent(new Event(CLIENTS_UPDATED_EVENT));
       })();
     },
     deleteClient(id: string) {
       setClients((prev) => prev.filter((c) => c.id !== id));
       void (async () => {
         const { error } = await supabase.from('clients').delete().eq('id', id);
-        if (error) console.error('Erro ao excluir cliente no Supabase:', error);
-        else window.dispatchEvent(new Event(CLIENTS_UPDATED_EVENT));
+        if (error) {
+          console.error('Erro ao excluir cliente no Supabase:', error);
+          // Revert: restore client list from DB instead of dispatching (which would re-add)
+          const { data: refreshed } = await supabase.from('clients').select('*').order('name');
+          if (refreshed) {
+            setClients(refreshed.map((r) => ({ id: r.id, name: r.name, segment: r.segment, status: r.status as ClientStatus })));
+          }
+        } else {
+          window.dispatchEvent(new Event(CLIENTS_UPDATED_EVENT));
+        }
       })();
     },
   }), [archivedClients, clients, visibleClients]);
