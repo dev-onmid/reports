@@ -45,13 +45,6 @@ function persistUser(user: User) {
   })();
 }
 
-function removeUser(id: string) {
-  void (async () => {
-    const { error } = await supabase.from('users').delete().eq('id', id);
-    if (error) console.error('Erro ao remover usuário no Supabase:', error);
-  })();
-}
-
 function persistPermission(userId: string, permission: Permission) {
   void (async () => {
     const { error } = await supabase.from('user_permissions').upsert({ user_id: userId, ...permission });
@@ -60,8 +53,8 @@ function persistPermission(userId: string, permission: Permission) {
 }
 
 export default function ConfiguracoesPage() {
-  const [users, setUsers] = useState<User[]>(initialUsers);
-  const [permissions, setPermissions] = useState<Record<string, Permission>>(initialPermissions);
+  const [users, setUsers] = useState<User[]>([]);
+  const [permissions, setPermissions] = useState<Record<string, Permission>>({});
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
@@ -72,7 +65,7 @@ export default function ConfiguracoesPage() {
       try {
         assertSupabaseConfigured();
         const { data: usersData } = await supabase.from('users').select('*');
-        if (usersData && usersData.length > 0) setUsers(usersData as User[]);
+        if (usersData !== null) setUsers(usersData as User[]);
       } catch (error) { console.error('Erro ao carregar usuários do Supabase:', error); }
 
       try {
@@ -130,9 +123,16 @@ export default function ConfiguracoesPage() {
   }
 
   function handleDeleteUser(id: string) {
+    const snapshot = users;
     setUsers((prev) => prev.filter((u) => u.id !== id));
     setPermissions((prev) => { const next = { ...prev }; delete next[id]; return next; });
-    removeUser(id);
+    void (async () => {
+      const { error } = await supabase.from('users').delete().eq('id', id);
+      if (error) {
+        console.error('Erro ao remover usuário no Supabase:', error);
+        setUsers(snapshot);
+      }
+    })();
   }
 
   function togglePermission(userId: string, module: keyof Permission) {
