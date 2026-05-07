@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from 'react';
-import { Plus, X, BarChart2, TrendingUp, Layers, Hash, Check } from 'lucide-react';
+import type React from 'react';
+import { useMemo, useState } from 'react';
+import { Plus, X, BarChart2, TrendingUp, Layers, Hash, Check, Search } from 'lucide-react';
 import {
   BarChart, Bar, LineChart, Line, AreaChart, Area,
   XAxis, YAxis, Tooltip, ResponsiveContainer, Legend,
@@ -10,31 +11,24 @@ import { Button } from '@/components/ui/button';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
-import { cn, formatCurrencyBRL } from '@/lib/utils';
+import { cn } from '@/lib/utils';
+import {
+  ALL_UNIFIED_METRICS,
+  METRIC_BY_KEY,
+  METRIC_GROUPS,
+  SOURCE_LABELS,
+  SOURCE_COLORS,
+  generateMockSeries,
+  computeMockKpi,
+  formatMetricValue,
+  type UnifiedMetric,
+  type MockPoint,
+} from '@/lib/metrics-registry';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-type DataSource = 'meta' | 'crm';
 type ChartType = 'kpi' | 'bar' | 'line' | 'area';
 type Period = '7d' | '30d' | '90d';
 type WidgetSize = 1 | 2 | 3;
-
-type DataPoint = {
-  label: string;
-  ml: number; sp: number; im: number;           // Meta
-  ql: number; ag: number; cv: number; rv: number; // CRM
-  mg: number; ld: number; ou: number;            // Cidades
-};
-
-type MetricDef = {
-  key: string;
-  source: DataSource;
-  group: string;
-  label: string;
-  dataKey: keyof DataPoint | null;
-  kpiCompute: (data: DataPoint[]) => number;
-  format: 'number' | 'currency' | 'percent' | 'times';
-  color: string;
-};
 
 type Widget = {
   id: string;
@@ -44,123 +38,53 @@ type Widget = {
   size: WidgetSize;
 };
 
-// ── Mock data ─────────────────────────────────────────────────────────────────
-const DATA: Record<Period, DataPoint[]> = {
-  '7d': [
-    { label: 'Seg', ml: 9,  sp: 140, im: 3800, ql: 5,  ag: 3,  cv: 1, rv: 1800,  mg: 5,  ld: 3,  ou: 1  },
-    { label: 'Ter', ml: 11, sp: 155, im: 4100, ql: 6,  ag: 4,  cv: 1, rv: 2200,  mg: 7,  ld: 3,  ou: 1  },
-    { label: 'Qua', ml: 8,  sp: 135, im: 3500, ql: 5,  ag: 3,  cv: 1, rv: 1600,  mg: 5,  ld: 2,  ou: 1  },
-    { label: 'Qui', ml: 13, sp: 165, im: 4500, ql: 8,  ag: 5,  cv: 2, rv: 4000,  mg: 8,  ld: 4,  ou: 1  },
-    { label: 'Sex', ml: 15, sp: 170, im: 5000, ql: 9,  ag: 6,  cv: 2, rv: 4500,  mg: 9,  ld: 4,  ou: 2  },
-    { label: 'Sáb', ml: 10, sp: 145, im: 3800, ql: 6,  ag: 4,  cv: 1, rv: 2000,  mg: 6,  ld: 3,  ou: 1  },
-    { label: 'Dom', ml: 7,  sp: 130, im: 3200, ql: 4,  ag: 2,  cv: 1, rv: 1400,  mg: 4,  ld: 2,  ou: 1  },
-  ],
-  '30d': [
-    { label: 'Sem 1', ml: 60,  sp: 900,  im: 24000, ql: 36, ag: 22, cv: 8,  rv: 16000, mg: 36, ld: 18, ou: 6  },
-    { label: 'Sem 2', ml: 80,  sp: 1100, im: 30000, ql: 47, ag: 30, cv: 11, rv: 22000, mg: 48, ld: 22, ou: 10 },
-    { label: 'Sem 3', ml: 95,  sp: 1250, im: 36000, ql: 57, ag: 36, cv: 13, rv: 26000, mg: 57, ld: 28, ou: 10 },
-    { label: 'Sem 4', ml: 107, sp: 1570, im: 45000, ql: 65, ag: 42, cv: 15, rv: 30000, mg: 64, ld: 32, ou: 11 },
-  ],
-  '90d': [
-    { label: 'S1',  ml: 55,  sp: 820,  im: 22000, ql: 33, ag: 20, cv: 7,  rv: 13000, mg: 33, ld: 16, ou: 6  },
-    { label: 'S2',  ml: 60,  sp: 870,  im: 24000, ql: 36, ag: 22, cv: 8,  rv: 14500, mg: 36, ld: 18, ou: 6  },
-    { label: 'S3',  ml: 62,  sp: 900,  im: 25000, ql: 37, ag: 23, cv: 8,  rv: 15000, mg: 37, ld: 19, ou: 6  },
-    { label: 'S4',  ml: 68,  sp: 950,  im: 27000, ql: 40, ag: 25, cv: 9,  rv: 17000, mg: 41, ld: 20, ou: 7  },
-    { label: 'S5',  ml: 73,  sp: 1020, im: 28300, ql: 43, ag: 27, cv: 9,  rv: 17500, mg: 44, ld: 22, ou: 7  },
-    { label: 'S6',  ml: 78,  sp: 1050, im: 30000, ql: 46, ag: 29, cv: 10, rv: 19000, mg: 47, ld: 23, ou: 8  },
-    { label: 'S7',  ml: 83,  sp: 1090, im: 31500, ql: 49, ag: 31, cv: 11, rv: 21000, mg: 50, ld: 25, ou: 8  },
-    { label: 'S8',  ml: 80,  sp: 1100, im: 30000, ql: 47, ag: 30, cv: 11, rv: 22000, mg: 48, ld: 22, ou: 10 },
-    { label: 'S9',  ml: 88,  sp: 1140, im: 33000, ql: 52, ag: 33, cv: 12, rv: 24000, mg: 53, ld: 26, ou: 9  },
-    { label: 'S10', ml: 95,  sp: 1250, im: 36000, ql: 57, ag: 36, cv: 13, rv: 26000, mg: 57, ld: 28, ou: 10 },
-    { label: 'S11', ml: 100, sp: 1280, im: 38000, ql: 60, ag: 38, cv: 14, rv: 28500, mg: 60, ld: 30, ou: 10 },
-    { label: 'S12', ml: 105, sp: 1340, im: 41000, ql: 63, ag: 40, cv: 14, rv: 29000, mg: 63, ld: 31, ou: 11 },
-    { label: 'S13', ml: 107, sp: 1570, im: 45000, ql: 65, ag: 42, cv: 15, rv: 30000, mg: 64, ld: 32, ou: 11 },
-  ],
-};
-
-// ── Metrics registry ─────────────────────────────────────────────────────────
-const ALL_METRICS: MetricDef[] = [
-  // Meta Ads
-  { key: 'ml',  source: 'meta', group: 'Meta Ads', label: 'Leads Capturados (Meta)', dataKey: 'ml', kpiCompute: (d) => d.reduce((s, r) => s + r.ml, 0), format: 'number',   color: '#55F52F' },
-  { key: 'sp',  source: 'meta', group: 'Meta Ads', label: 'Investimento',             dataKey: 'sp', kpiCompute: (d) => d.reduce((s, r) => s + r.sp, 0), format: 'currency',  color: '#F59E0B' },
-  { key: 'im',  source: 'meta', group: 'Meta Ads', label: 'Impressões',               dataKey: 'im', kpiCompute: (d) => d.reduce((s, r) => s + r.im, 0), format: 'number',   color: '#8B5CF6' },
-  { key: 'cpl', source: 'meta', group: 'Meta Ads', label: 'CPL (Custo por Lead)',     dataKey: null, kpiCompute: (d) => { const sp = d.reduce((a, r) => a + r.sp, 0); const ml = d.reduce((a, r) => a + r.ml, 0); return ml ? sp / ml : 0; }, format: 'currency', color: '#EF4444' },
-  { key: 'ctr', source: 'meta', group: 'Meta Ads', label: 'CTR (%)',                  dataKey: null, kpiCompute: () => 2.68, format: 'percent', color: '#EC4899' },
-  // CRM
-  { key: 'ql',  source: 'crm',  group: 'CRM',      label: 'Leads Qualificados',       dataKey: 'ql', kpiCompute: (d) => d.reduce((s, r) => s + r.ql, 0), format: 'number',   color: '#7B2CFF' },
-  { key: 'ag',  source: 'crm',  group: 'CRM',      label: 'Agendamentos',             dataKey: 'ag', kpiCompute: (d) => d.reduce((s, r) => s + r.ag, 0), format: 'number',   color: '#3B82F6' },
-  { key: 'cv',  source: 'crm',  group: 'CRM',      label: 'Conversões (Vendas)',      dataKey: 'cv', kpiCompute: (d) => d.reduce((s, r) => s + r.cv, 0), format: 'number',   color: '#10B981' },
-  { key: 'rv',  source: 'crm',  group: 'CRM',      label: 'Receita (R$)',             dataKey: 'rv', kpiCompute: (d) => d.reduce((s, r) => s + r.rv, 0), format: 'currency',  color: '#22D3EE' },
-  { key: 'cr',  source: 'crm',  group: 'CRM',      label: 'Taxa de Conversão (%)',    dataKey: null, kpiCompute: (d) => { const ql = d.reduce((a, r) => a + r.ql, 0); const cv = d.reduce((a, r) => a + r.cv, 0); return ql ? (cv / ql) * 100 : 0; }, format: 'percent', color: '#F97316' },
-  { key: 'roi', source: 'crm',  group: 'CRM',      label: 'ROI',                      dataKey: null, kpiCompute: (d) => { const sp = d.reduce((a, r) => a + r.sp, 0); const rv = d.reduce((a, r) => a + r.rv, 0); return sp ? rv / sp : 0; }, format: 'times', color: '#FCD34D' },
-  // Cidades
-  { key: 'mg',  source: 'crm',  group: 'Cidades',  label: 'Leads — Maringá',          dataKey: 'mg', kpiCompute: (d) => d.reduce((s, r) => s + r.mg, 0), format: 'number',   color: '#F472B6' },
-  { key: 'ld',  source: 'crm',  group: 'Cidades',  label: 'Leads — Londrina',         dataKey: 'ld', kpiCompute: (d) => d.reduce((s, r) => s + r.ld, 0), format: 'number',   color: '#FB923C' },
-  { key: 'ou',  source: 'crm',  group: 'Cidades',  label: 'Leads — Outras Cidades',   dataKey: 'ou', kpiCompute: (d) => d.reduce((s, r) => s + r.ou, 0), format: 'number',   color: '#A3E635' },
-];
-
-const METRIC_MAP = Object.fromEntries(ALL_METRICS.map((m) => [m.key, m])) as Record<string, MetricDef>;
-const METRIC_GROUPS = ['Meta Ads', 'CRM', 'Cidades'];
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
-const SOURCE_BADGE: Record<DataSource, string> = {
-  meta: 'bg-blue-500/20 text-blue-400',
-  crm:  'bg-purple-500/20 text-purple-400',
-};
-const SOURCE_LABEL: Record<DataSource, string> = { meta: 'Meta', crm: 'CRM' };
-
-function fmt(value: number, format: MetricDef['format']): string {
-  switch (format) {
-    case 'currency':
-      return formatCurrencyBRL(value);
-    case 'percent': return `${value.toFixed(2)}%`;
-    case 'times':   return `${value.toFixed(1)}x`;
-    default:
-      return value >= 1000 ? `${(value / 1000).toFixed(1)}K` : value.toLocaleString('pt-BR');
-  }
-}
-
-const SHORT: Record<string, string> = {
-  ml: 'Leads Meta', ql: 'Qualificados', ag: 'Agendamentos', cv: 'Conversões',
-  rv: 'Receita', sp: 'Investimento', im: 'Impressões', cpl: 'CPL',
-  ctr: 'CTR', cr: 'Conv.%', roi: 'ROI', mg: 'Maringá', ld: 'Londrina', ou: 'Outras',
-};
-function autoTitle(keys: string[]): string {
-  if (keys.length === 0) return 'Novo Bloco';
-  return keys.map((k) => SHORT[k] ?? METRIC_MAP[k]?.label ?? k).join(' vs. ');
-}
-
 const TOOLTIP_STYLE = { backgroundColor: '#1B1D24', borderColor: '#2A2D3A', borderRadius: '8px', color: '#F5F5F5', fontSize: '12px' };
 const AXIS_TICK = { fill: '#A0AEC0', fontSize: 11 };
 
+function autoTitle(keys: string[]): string {
+  if (keys.length === 0) return 'Novo Bloco';
+  return keys.map((k) => METRIC_BY_KEY[k]?.shortLabel ?? k).join(' vs. ');
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function tooltipFormatter(series: MetricDef[]): (...args: any[]) => any {
-  return (value: unknown, name: unknown, item: { dataKey?: string | number }) => {
-    const metric = series.find((m) => m.dataKey === item?.dataKey);
+function tooltipFormatter(series: UnifiedMetric[]): (...args: any[]) => any {
+  return (value: unknown, _name: unknown, item: { dataKey?: string | number }) => {
+    const metric = series.find((m) => m.key === item?.dataKey);
     const n = typeof value === 'number' ? value : Number(value ?? 0);
-    return [Number.isFinite(n) ? fmt(n, metric?.format ?? 'number') : String(value ?? ''), name];
+    return [Number.isFinite(n) ? formatMetricValue(n, metric?.format ?? 'number') : String(value ?? ''), metric?.shortLabel ?? _name];
   };
 }
 
-// ── Widget chart ───────────────────────────────────────────────────────────────
-function WidgetChart({ widget, data }: { widget: Widget; data: DataPoint[] }) {
-  const metrics = widget.metrics.map((k) => METRIC_MAP[k]).filter((m): m is MetricDef => !!m);
-  const series  = metrics.filter((m) => m.dataKey !== null);
+function sourceBadgeClass(source: string): string {
+  const map: Record<string, string> = {
+    meta_ads:  'bg-blue-500/20 text-blue-400',
+    google_ads:'bg-violet-500/20 text-violet-400',
+    facebook:  'bg-blue-600/20 text-blue-300',
+    instagram: 'bg-pink-500/20 text-pink-400',
+    crm:       'bg-emerald-500/20 text-emerald-400',
+  };
+  return map[source] ?? 'bg-muted text-muted-foreground';
+}
+
+// ── Widget chart ──────────────────────────────────────────────────────────────
+function WidgetChart({ widget, data }: { widget: Widget; data: MockPoint[] }) {
+  const metrics = widget.metrics.map((k) => METRIC_BY_KEY[k]).filter((m): m is UnifiedMetric => !!m);
+  const series  = metrics.filter((m) => m.hasTimeSeries);
   const h = widget.size === 1 ? 120 : 160;
-  const yAxisFormatter = series.length > 0 && series.every((m) => m.format === 'currency')
-    ? (value: number) => fmt(value, 'currency')
-    : undefined;
+  const allCurrency = series.length > 0 && series.every((m) => m.format === 'currency');
+  const yFmt = allCurrency ? (v: number) => formatMetricValue(v, 'currency') : undefined;
 
   if (widget.chartType === 'kpi') {
     return (
       <div className={cn('flex py-4', metrics.length === 1 ? 'flex-col items-center justify-center gap-2' : 'flex-row items-center justify-around gap-4 flex-wrap')}>
         {metrics.map((m) => {
-          const value = m.kpiCompute(data);
+          const value = computeMockKpi(m, data);
           return (
             <div key={m.key} className="flex flex-col items-center gap-0.5 text-center">
               <div className="w-2 h-2 rounded-full mb-1" style={{ backgroundColor: m.color }} />
               <p className={cn('font-bold font-heading', metrics.length === 1 ? 'text-4xl' : 'text-2xl')} style={{ color: m.color }}>
-                {fmt(value, m.format)}
+                {formatMetricValue(value, m.format)}
               </p>
               <p className="text-[11px] text-muted-foreground leading-tight">{m.label}</p>
             </div>
@@ -170,74 +94,64 @@ function WidgetChart({ widget, data }: { widget: Widget; data: DataPoint[] }) {
     );
   }
 
-  if (series.length === 0) return null;
+  if (series.length === 0) return (
+    <p className="py-6 text-center text-xs text-muted-foreground">Métricas calculadas só exibem como número (KPI).</p>
+  );
 
-  if (widget.chartType === 'bar') {
-    return (
-      <ResponsiveContainer width="100%" height={h}>
-        <BarChart data={data} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
-          <XAxis dataKey="label" tick={AXIS_TICK} axisLine={false} tickLine={false} />
-          <YAxis tick={AXIS_TICK} axisLine={false} tickLine={false} tickFormatter={yAxisFormatter} />
-          <Tooltip contentStyle={TOOLTIP_STYLE} formatter={tooltipFormatter(series)} />
-          {series.length > 1 && <Legend iconType="circle" wrapperStyle={{ fontSize: 11 }} />}
-          {series.map((m) => (
-            <Bar key={m.key} dataKey={m.dataKey!} fill={m.color} radius={[4, 4, 0, 0]} name={m.label} />
-          ))}
-        </BarChart>
-      </ResponsiveContainer>
-    );
-  }
+  if (widget.chartType === 'bar') return (
+    <ResponsiveContainer width="100%" height={h}>
+      <BarChart data={data} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
+        <XAxis dataKey="label" tick={AXIS_TICK} axisLine={false} tickLine={false} />
+        <YAxis tick={AXIS_TICK} axisLine={false} tickLine={false} tickFormatter={yFmt} />
+        <Tooltip contentStyle={TOOLTIP_STYLE} formatter={tooltipFormatter(series)} />
+        {series.length > 1 && <Legend iconType="circle" wrapperStyle={{ fontSize: 11 }} />}
+        {series.map((m) => <Bar key={m.key} dataKey={m.key} fill={m.color} radius={[4, 4, 0, 0]} name={m.shortLabel} />)}
+      </BarChart>
+    </ResponsiveContainer>
+  );
 
-  if (widget.chartType === 'line') {
-    return (
-      <ResponsiveContainer width="100%" height={h}>
-        <LineChart data={data} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
-          <XAxis dataKey="label" tick={AXIS_TICK} axisLine={false} tickLine={false} />
-          <YAxis tick={AXIS_TICK} axisLine={false} tickLine={false} tickFormatter={yAxisFormatter} />
-          <Tooltip contentStyle={TOOLTIP_STYLE} formatter={tooltipFormatter(series)} />
-          {series.length > 1 && <Legend iconType="circle" wrapperStyle={{ fontSize: 11 }} />}
-          {series.map((m) => (
-            <Line key={m.key} type="monotone" dataKey={m.dataKey!} stroke={m.color} strokeWidth={2} dot={false} name={m.label} />
-          ))}
-        </LineChart>
-      </ResponsiveContainer>
-    );
-  }
+  if (widget.chartType === 'line') return (
+    <ResponsiveContainer width="100%" height={h}>
+      <LineChart data={data} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
+        <XAxis dataKey="label" tick={AXIS_TICK} axisLine={false} tickLine={false} />
+        <YAxis tick={AXIS_TICK} axisLine={false} tickLine={false} tickFormatter={yFmt} />
+        <Tooltip contentStyle={TOOLTIP_STYLE} formatter={tooltipFormatter(series)} />
+        {series.length > 1 && <Legend iconType="circle" wrapperStyle={{ fontSize: 11 }} />}
+        {series.map((m) => <Line key={m.key} type="monotone" dataKey={m.key} stroke={m.color} strokeWidth={2} dot={false} name={m.shortLabel} />)}
+      </LineChart>
+    </ResponsiveContainer>
+  );
 
-  if (widget.chartType === 'area') {
-    return (
-      <ResponsiveContainer width="100%" height={h}>
-        <AreaChart data={data} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
-          <defs>
-            {series.map((m) => (
-              <linearGradient key={m.key} id={`g-${widget.id}-${m.key}`} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%"  stopColor={m.color} stopOpacity={0.4} />
-                <stop offset="95%" stopColor={m.color} stopOpacity={0}   />
-              </linearGradient>
-            ))}
-          </defs>
-          <XAxis dataKey="label" tick={AXIS_TICK} axisLine={false} tickLine={false} />
-          <YAxis tick={AXIS_TICK} axisLine={false} tickLine={false} tickFormatter={yAxisFormatter} />
-          <Tooltip contentStyle={TOOLTIP_STYLE} formatter={tooltipFormatter(series)} />
-          {series.length > 1 && <Legend iconType="circle" wrapperStyle={{ fontSize: 11 }} />}
+  if (widget.chartType === 'area') return (
+    <ResponsiveContainer width="100%" height={h}>
+      <AreaChart data={data} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
+        <defs>
           {series.map((m) => (
-            <Area key={m.key} type="monotone" dataKey={m.dataKey!} stroke={m.color} strokeWidth={2}
-              fillOpacity={1} fill={`url(#g-${widget.id}-${m.key})`} name={m.label} />
+            <linearGradient key={m.key} id={`g-${widget.id}-${m.key}`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%"  stopColor={m.color} stopOpacity={0.4} />
+              <stop offset="95%" stopColor={m.color} stopOpacity={0}   />
+            </linearGradient>
           ))}
-        </AreaChart>
-      </ResponsiveContainer>
-    );
-  }
+        </defs>
+        <XAxis dataKey="label" tick={AXIS_TICK} axisLine={false} tickLine={false} />
+        <YAxis tick={AXIS_TICK} axisLine={false} tickLine={false} tickFormatter={yFmt} />
+        <Tooltip contentStyle={TOOLTIP_STYLE} formatter={tooltipFormatter(series)} />
+        {series.length > 1 && <Legend iconType="circle" wrapperStyle={{ fontSize: 11 }} />}
+        {series.map((m) => (
+          <Area key={m.key} type="monotone" dataKey={m.key} stroke={m.color} strokeWidth={2}
+            fillOpacity={1} fill={`url(#g-${widget.id}-${m.key})`} name={m.shortLabel} />
+        ))}
+      </AreaChart>
+    </ResponsiveContainer>
+  );
 
   return null;
 }
 
-// ── Widget card ────────────────────────────────────────────────────────────────
-function WidgetCard({ widget, data, onRemove }: {
-  widget: Widget; data: DataPoint[]; onRemove: () => void;
-}) {
-  const metrics = widget.metrics.map((k) => METRIC_MAP[k]).filter((m): m is MetricDef => !!m);
-  const primarySource = metrics[0]?.source ?? 'meta';
+// ── Widget card ───────────────────────────────────────────────────────────────
+function WidgetCard({ widget, data, onRemove }: { widget: Widget; data: MockPoint[]; onRemove: () => void }) {
+  const metrics = widget.metrics.map((k) => METRIC_BY_KEY[k]).filter((m): m is UnifiedMetric => !!m);
+  const primarySource = metrics[0]?.source ?? 'meta_ads';
   const hasMixed = metrics.some((m) => m.source !== primarySource);
 
   return (
@@ -253,8 +167,8 @@ function WidgetCard({ widget, data, onRemove }: {
           {hasMixed ? (
             <span className="text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider shrink-0 bg-violet-500/20 text-violet-400">Cruzado</span>
           ) : (
-            <span className={cn('text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider shrink-0', SOURCE_BADGE[primarySource])}>
-              {SOURCE_LABEL[primarySource]}
+            <span className={cn('text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider shrink-0', sourceBadgeClass(primarySource))}>
+              {SOURCE_LABELS[primarySource as keyof typeof SOURCE_LABELS] ?? primarySource}
             </span>
           )}
         </div>
@@ -269,7 +183,7 @@ function WidgetCard({ widget, data, onRemove }: {
   );
 }
 
-// ── Add widget dialog ──────────────────────────────────────────────────────────
+// ── Add widget dialog ─────────────────────────────────────────────────────────
 const CHART_TYPE_OPTIONS: { key: ChartType; label: string; Icon: React.ComponentType<{ className?: string }> }[] = [
   { key: 'kpi',  label: 'Número(s)', Icon: Hash      },
   { key: 'bar',  label: 'Barras',    Icon: BarChart2  },
@@ -280,29 +194,44 @@ const CHART_TYPE_OPTIONS: { key: ChartType; label: string; Icon: React.Component
 function AddWidgetDialog({ open, onClose, onAdd }: {
   open: boolean; onClose: () => void; onAdd: (w: Omit<Widget, 'id'>) => void;
 }) {
-  const [selected, setSelected] = useState<string[]>([]);
-  const [chart,    setChart]    = useState<ChartType>('bar');
-  const [size,     setSize]     = useState<WidgetSize>(2);
+  const [selected,    setSelected]    = useState<string[]>([]);
+  const [chart,       setChart]       = useState<ChartType>('bar');
+  const [size,        setSize]        = useState<WidgetSize>(2);
   const [customTitle, setCustomTitle] = useState('');
+  const [search,      setSearch]      = useState('');
+  const [activeGroup, setActiveGroup] = useState<string | null>(null);
 
-  const allHaveDataKey = selected.length > 0 && selected.every((k) => METRIC_MAP[k]?.dataKey !== null);
-  const availableCharts: ChartType[] = allHaveDataKey ? ['kpi', 'bar', 'line', 'area'] : ['kpi'];
+  const filteredMetrics = useMemo(() => {
+    const q = search.toLowerCase();
+    return ALL_UNIFIED_METRICS.filter((m) => {
+      const matchGroup = !activeGroup || m.group === activeGroup;
+      const matchSearch = !q || m.label.toLowerCase().includes(q) || m.shortLabel.toLowerCase().includes(q) || m.description.toLowerCase().includes(q);
+      return matchGroup && matchSearch;
+    });
+  }, [search, activeGroup]);
+
+  const groupsInView = useMemo(() => {
+    return METRIC_GROUPS.filter((g) => filteredMetrics.some((m) => m.group === g));
+  }, [filteredMetrics]);
+
+  const allHaveTimeSeries = selected.length > 0 && selected.every((k) => METRIC_BY_KEY[k]?.hasTimeSeries);
+  const availableCharts: ChartType[] = allHaveTimeSeries ? ['kpi', 'bar', 'line', 'area'] : ['kpi'];
 
   function toggle(key: string) {
     if (selected.includes(key)) {
       const next = selected.filter((k) => k !== key);
       setSelected(next);
-      const nextAllHaveDataKey = next.length > 0 && next.every((k) => METRIC_MAP[k]?.dataKey !== null);
-      if (!nextAllHaveDataKey && chart !== 'kpi') setChart('kpi');
+      const nextAllTime = next.length > 0 && next.every((k) => METRIC_BY_KEY[k]?.hasTimeSeries);
+      if (!nextAllTime && chart !== 'kpi') setChart('kpi');
     } else {
       if (selected.length >= 3) return;
       setSelected([...selected, key]);
-      if (!METRIC_MAP[key]?.dataKey && chart !== 'kpi') setChart('kpi');
+      if (!METRIC_BY_KEY[key]?.hasTimeSeries && chart !== 'kpi') setChart('kpi');
     }
   }
 
   function handleClose() {
-    setSelected([]); setChart('bar'); setSize(2); setCustomTitle('');
+    setSelected([]); setChart('bar'); setSize(2); setCustomTitle(''); setSearch(''); setActiveGroup(null);
     onClose();
   }
 
@@ -319,17 +248,18 @@ function AddWidgetDialog({ open, onClose, onAdd }: {
           <DialogTitle>Adicionar Bloco ao Dashboard</DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-5 py-1 max-h-[62vh] overflow-y-auto pr-1">
+        <div className="space-y-4 py-1 max-h-[65vh] overflow-y-auto pr-1">
+
           {/* Selected chips */}
           {selected.length > 0 && (
             <div className="flex items-center gap-2 flex-wrap p-3 bg-muted/40 rounded-lg">
               <span className="text-[11px] text-muted-foreground font-semibold uppercase tracking-wider">Comparando:</span>
               {selected.map((k) => {
-                const m = METRIC_MAP[k];
+                const m = METRIC_BY_KEY[k];
                 return (
                   <span key={k} className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-medium"
                     style={{ borderColor: `${m?.color}66`, color: m?.color, backgroundColor: `${m?.color}18` }}>
-                    {SHORT[k] ?? m?.label}
+                    {m?.shortLabel ?? k}
                     <button onClick={() => toggle(k)} className="opacity-60 hover:opacity-100 ml-0.5">×</button>
                   </span>
                 );
@@ -343,13 +273,55 @@ function AddWidgetDialog({ open, onClose, onAdd }: {
           {/* 1 — Metrics */}
           <div>
             <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-3">
-              1. Selecione as Métricas <span className="normal-case text-muted-foreground/50 font-normal">(até 3 para comparar)</span>
+              1. Selecione as Métricas <span className="normal-case font-normal text-muted-foreground/50">(até 3 para comparar / cruzar)</span>
             </p>
-            {METRIC_GROUPS.map((group) => {
-              const groupMetrics = ALL_METRICS.filter((m) => m.group === group);
+
+            {/* Search */}
+            <div className="relative mb-3">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Buscar métrica..."
+                className="w-full h-8 pl-8 pr-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+            </div>
+
+            {/* Platform filter pills */}
+            <div className="flex gap-1.5 flex-wrap mb-3">
+              <button
+                onClick={() => setActiveGroup(null)}
+                className={cn('px-2.5 py-1 rounded-full text-[11px] font-bold border transition-colors',
+                  !activeGroup ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:border-primary/50')}
+              >
+                Todas
+              </button>
+              {METRIC_GROUPS.map((g) => {
+                const src = ALL_UNIFIED_METRICS.find((m) => m.group === g)?.source;
+                const color = src ? SOURCE_COLORS[src as keyof typeof SOURCE_COLORS] : '#888';
+                return (
+                  <button key={g} onClick={() => setActiveGroup(activeGroup === g ? null : g)}
+                    className={cn('px-2.5 py-1 rounded-full text-[11px] font-bold border transition-colors',
+                      activeGroup === g ? 'text-white border-transparent' : 'border-border text-muted-foreground hover:border-primary/50')}
+                    style={activeGroup === g ? { backgroundColor: color, borderColor: color } : {}}>
+                    {g}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Metric list grouped */}
+            {groupsInView.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">Nenhuma métrica encontrada.</p>
+            ) : groupsInView.map((group) => {
+              const groupMetrics = filteredMetrics.filter((m) => m.group === group);
+              const src = groupMetrics[0]?.source;
+              const color = src ? SOURCE_COLORS[src as keyof typeof SOURCE_COLORS] : '#888';
               return (
                 <div key={group} className="mb-4">
-                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground/60 mb-2 px-0.5">{group}</p>
+                  <p className="text-[10px] uppercase tracking-widest font-bold mb-2 px-0.5" style={{ color }}>
+                    {group}
+                  </p>
                   <div className="grid grid-cols-2 gap-1.5">
                     {groupMetrics.map((m) => {
                       const isSelected = selected.includes(m.key);
@@ -359,20 +331,26 @@ function AddWidgetDialog({ open, onClose, onAdd }: {
                           key={m.key}
                           onClick={() => !isDisabled && toggle(m.key)}
                           disabled={isDisabled}
+                          title={m.description}
                           className={cn(
-                            'flex items-center gap-2.5 p-2.5 rounded-lg border text-left transition-colors',
+                            'flex items-start gap-2.5 p-2.5 rounded-lg border text-left transition-colors',
                             isSelected  ? 'border-primary/60 bg-primary/10' : 'border-border bg-card',
                             isDisabled  ? 'opacity-30 cursor-not-allowed' : 'hover:bg-muted/50',
                           )}
                         >
                           <div
-                            className={cn('w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-colors')}
+                            className="w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 mt-0.5 transition-colors"
                             style={isSelected ? { backgroundColor: m.color, borderColor: m.color } : { borderColor: '#4B5563' }}
                           >
-                            {isSelected && <Check className="w-2.5 h-2.5 text-black font-bold" />}
+                            {isSelected && <Check className="w-2.5 h-2.5 text-black" />}
                           </div>
-                          <p className="font-medium text-xs leading-tight flex-1 truncate">{m.label}</p>
-                          <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: m.color }} />
+                          <div className="min-w-0 flex-1">
+                            <p className="font-medium text-xs leading-tight truncate">{m.label}</p>
+                            {!m.hasTimeSeries && (
+                              <p className="text-[10px] text-muted-foreground/50 mt-0.5">Só KPI</p>
+                            )}
+                          </div>
+                          <div className="w-2 h-2 rounded-full shrink-0 mt-1" style={{ backgroundColor: m.color }} />
                         </button>
                       );
                     })}
@@ -390,18 +368,16 @@ function AddWidgetDialog({ open, onClose, onAdd }: {
                 {CHART_TYPE_OPTIONS.filter((o) => availableCharts.includes(o.key)).map(({ key, label, Icon }) => (
                   <button key={key} onClick={() => setChart(key)}
                     className={cn('flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm font-medium transition-colors',
-                      chart === key
-                        ? 'border-primary bg-primary/10 text-primary'
-                        : 'border-border bg-card hover:bg-muted/50 text-muted-foreground'
+                      chart === key ? 'border-primary bg-primary/10 text-primary' : 'border-border bg-card hover:bg-muted/50 text-muted-foreground'
                     )}>
                     <Icon className="w-4 h-4" />
                     {label}
                   </button>
                 ))}
               </div>
-              {!allHaveDataKey && (
+              {!allHaveTimeSeries && (
                 <p className="text-[11px] text-muted-foreground/60 mt-1.5">
-                  Métricas calculadas (CPL, CTR, ROI, Taxa Conv.) só exibem como número.
+                  Métricas calculadas (CPL, CTR, ROI…) só exibem como número.
                 </p>
               )}
             </div>
@@ -433,9 +409,7 @@ function AddWidgetDialog({ open, onClose, onAdd }: {
                 ]).map((s) => (
                   <button key={s.key} onClick={() => setSize(s.key)}
                     className={cn('flex-1 p-2 rounded-lg border text-center transition-colors',
-                      size === s.key
-                        ? 'border-primary bg-primary/10 text-primary'
-                        : 'border-border bg-card hover:bg-muted/50 text-muted-foreground'
+                      size === s.key ? 'border-primary bg-primary/10 text-primary' : 'border-border bg-card hover:bg-muted/50 text-muted-foreground'
                     )}>
                     <p className="font-semibold text-xs">{s.label}</p>
                     <p className="text-[10px] text-muted-foreground">{s.sub}</p>
@@ -448,11 +422,7 @@ function AddWidgetDialog({ open, onClose, onAdd }: {
 
         <DialogFooter>
           <Button variant="outline" onClick={handleClose}>Cancelar</Button>
-          <Button
-            onClick={handleAdd}
-            disabled={selected.length === 0}
-            className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
-          >
+          <Button onClick={handleAdd} disabled={selected.length === 0} className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40">
             <Plus className="w-4 h-4 mr-1" />
             Adicionar Bloco
           </Button>
@@ -462,23 +432,23 @@ function AddWidgetDialog({ open, onClose, onAdd }: {
   );
 }
 
-// ── Default widgets ────────────────────────────────────────────────────────────
+// ── Default widgets ───────────────────────────────────────────────────────────
 const DEFAULT_WIDGETS: Widget[] = [
-  { id: 'w1', title: 'Leads Meta vs. Qualificados',   metrics: ['ml', 'ql'],       chartType: 'bar',  size: 2 },
-  { id: 'w2', title: 'Receita',                        metrics: ['rv'],             chartType: 'kpi',  size: 1 },
-  { id: 'w3', title: 'Leads Capturados vs. Agendamentos vs. Conversões', metrics: ['ml', 'ag', 'cv'], chartType: 'line', size: 3 },
-  { id: 'w4', title: 'CPL + ROI',                     metrics: ['cpl', 'roi'],     chartType: 'kpi',  size: 1 },
-  { id: 'w5', title: 'Leads por Cidade',               metrics: ['mg', 'ld', 'ou'], chartType: 'bar',  size: 2 },
-  { id: 'w6', title: 'Investimento vs. Receita',       metrics: ['sp', 'rv'],       chartType: 'area', size: 2 },
+  { id: 'w1', title: 'Leads Meta vs. Qualificados CRM',    metrics: ['meta_leads', 'crm_qualified'],                chartType: 'bar',  size: 2 },
+  { id: 'w2', title: 'Receita',                             metrics: ['crm_revenue'],                               chartType: 'kpi',  size: 1 },
+  { id: 'w3', title: 'Leads → Agendamentos → Vendas',       metrics: ['crm_leads', 'crm_appointments', 'crm_sales'], chartType: 'line', size: 3 },
+  { id: 'w4', title: 'CPL + ROI',                          metrics: ['meta_cpl', 'crm_roi'],                        chartType: 'kpi',  size: 1 },
+  { id: 'w5', title: 'Investimento Meta vs. Google',        metrics: ['meta_spend', 'google_spend'],                 chartType: 'bar',  size: 2 },
+  { id: 'w6', title: 'Alcance Instagram vs. Facebook',      metrics: ['ig_reach', 'fb_page_reach'],                  chartType: 'area', size: 2 },
 ];
 
-// ── Page ───────────────────────────────────────────────────────────────────────
+// ── Page ──────────────────────────────────────────────────────────────────────
 export default function ConstruitorPage() {
   const [period,     setPeriod]     = useState<Period>('30d');
   const [widgets,    setWidgets]    = useState<Widget[]>(DEFAULT_WIDGETS);
   const [dialogOpen, setDialogOpen] = useState(false);
 
-  const data = DATA[period];
+  const data = useMemo(() => generateMockSeries(period), [period]);
 
   function addWidget(config: Omit<Widget, 'id'>) {
     setWidgets((prev) => [...prev, { ...config, id: `w${Date.now()}` }]);
@@ -494,7 +464,7 @@ export default function ConstruitorPage() {
         <div>
           <h1 className="text-4xl font-heading tracking-wider uppercase">Construtor de Dashboard</h1>
           <p className="text-muted-foreground mt-1">
-            Combine até 3 métricas em qualquer bloco. Cruze Meta Ads, CRM e cidades livremente.
+            60+ métricas de Meta Ads, Google Ads, Facebook, Instagram e CRM. Cruze qualquer combinação.
           </p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
