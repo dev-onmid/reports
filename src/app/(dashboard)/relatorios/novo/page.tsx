@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -14,9 +14,10 @@ import { useMetaAdsConnections } from '@/lib/meta-ads-store';
 import { type GoogleAdsAccount, useGoogleAds } from '@/lib/google-ads-store';
 import { saveReport } from '@/lib/report-store';
 import {
-  ALL_UNIFIED_METRICS, METRIC_BY_KEY, METRIC_GROUPS,
+  ALL_UNIFIED_METRICS, METRIC_BY_KEY,
   type UnifiedMetric, type MetricSource,
   SOURCE_LABELS, SOURCE_COLORS, formatMetricValue,
+  generateMockSeries, computeMockKpi,
 } from '@/lib/metrics-registry';
 import { Sparkles, AlertTriangle, Users, RefreshCw, Check, BarChart3, Search, X } from 'lucide-react';
 
@@ -948,76 +949,168 @@ function SidebarStep({ num, title }: { num: number; title: string }) {
   );
 }
 
+// ─── Platform logo SVGs ───────────────────────────────────────────────────────
+
+function PlatformLogo({ source }: { source: MetricSource }) {
+  if (source === 'meta_ads') return (
+    <svg viewBox="0 0 32 32" className="w-full h-full">
+      <rect width="32" height="32" rx="7" fill="#0668E1"/>
+      <path d="M16 7c-3 0-5 2.2-7 5.5C7 15.5 6 18 6 20c0 2.4 1.2 4 3 4s3-1.5 4.5-4c.8-1.4 1.5-3 2.5-3s1.7 1.6 2.5 3C20 22.5 21.2 24 23 24s3-1.6 3-4c0-2-.9-4.5-3-7.5-2-3.3-4-5.5-7-5.5z" fill="white"/>
+    </svg>
+  );
+  if (source === 'google_ads') return (
+    <svg viewBox="0 0 32 32" className="w-full h-full">
+      <rect width="32" height="32" rx="7" fill="#fff"/>
+      <path d="M26 16.2c0-.7-.1-1.4-.2-2H16v3.8h5.6c-.2 1.3-1 2.4-2.1 3.1v2.6h3.4c2-1.8 3.1-4.5 3.1-7.5z" fill="#4285F4"/>
+      <path d="M16 27c2.7 0 5-.9 6.7-2.4l-3.4-2.6c-.9.6-2 1-3.3 1-2.5 0-4.7-1.7-5.4-4H7v2.7C8.7 24.8 12.1 27 16 27z" fill="#34A853"/>
+      <path d="M10.6 19c-.2-.6-.3-1.3-.3-2s.1-1.4.3-2V13H7c-.7 1.3-1 2.9-1 4.5s.3 3.1 1 4.2l3.6-2.7z" fill="#FBBC05"/>
+      <path d="M16 9.5c1.4 0 2.6.5 3.6 1.4l2.7-2.7C20.4 6.7 18.4 6 16 6c-3.9 0-7.3 2.2-9 5.5l3.6 2.7c.7-2.3 2.9-4 5.4-4.7z" fill="#EA4335"/>
+    </svg>
+  );
+  if (source === 'facebook') return (
+    <svg viewBox="0 0 32 32" className="w-full h-full">
+      <rect width="32" height="32" rx="7" fill="#1877F2"/>
+      <path d="M22 16h-3.5v-2c0-.9.5-1.5 1.5-1.5H22V9h-2.5C17 9 15 11 15 13.5V16h-3v3.5h3V27h4v-7.5h3l.5-3.5z" fill="white"/>
+    </svg>
+  );
+  if (source === 'instagram') return (
+    <svg viewBox="0 0 32 32" className="w-full h-full">
+      <defs>
+        <linearGradient id="ig-grad" x1="0%" y1="100%" x2="100%" y2="0%">
+          <stop offset="0%" stopColor="#F77737"/>
+          <stop offset="40%" stopColor="#E1306C"/>
+          <stop offset="100%" stopColor="#833AB4"/>
+        </linearGradient>
+      </defs>
+      <rect width="32" height="32" rx="7" fill="url(#ig-grad)"/>
+      <rect x="9" y="9" width="14" height="14" rx="4" fill="none" stroke="white" strokeWidth="1.8"/>
+      <circle cx="16" cy="16" r="3.5" fill="none" stroke="white" strokeWidth="1.8"/>
+      <circle cx="22" cy="10" r="1.2" fill="white"/>
+    </svg>
+  );
+  // crm
+  return (
+    <svg viewBox="0 0 32 32" className="w-full h-full">
+      <rect width="32" height="32" rx="7" fill="#10B981"/>
+      <rect x="8" y="18" width="4" height="7" rx="1" fill="white"/>
+      <rect x="14" y="13" width="4" height="12" rx="1" fill="white"/>
+      <rect x="20" y="8" width="4" height="17" rx="1" fill="white"/>
+    </svg>
+  );
+}
+
+const SOURCE_ORDER: MetricSource[] = ['meta_ads', 'google_ads', 'facebook', 'instagram', 'crm'];
+
+const SOURCE_DESCRIPTIONS: Record<MetricSource, string> = {
+  meta_ads:   'Campanhas e anúncios no Facebook e Instagram',
+  google_ads: 'Campanhas de pesquisa e display no Google',
+  facebook:   'Alcance orgânico e engajamento da página',
+  instagram:  'Perfil, Reels, Stories e engajamento',
+  crm:        'Leads, vendas, ROI e resultados comerciais',
+};
+
 function MetricPicker({
   selectedSources,
   selectedKeys,
   onToggle,
-  columns = 2,
 }: {
   selectedSources: MetricSource[];
   selectedKeys: Set<string>;
   onToggle: (metric: UnifiedMetric) => void;
-  columns?: 1 | 2;
 }) {
   const [search, setSearch] = useState('');
+  const [collapsed, setCollapsed] = useState<Set<MetricSource>>(new Set());
 
-  const filtered = ALL_UNIFIED_METRICS.filter(m => {
-    if (!selectedSources.includes(m.source)) return false;
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return m.label.toLowerCase().includes(q) || m.shortLabel.toLowerCase().includes(q) || m.description.toLowerCase().includes(q);
-  });
+  function toggleCollapse(src: MetricSource) {
+    setCollapsed(prev => {
+      const next = new Set(prev);
+      next.has(src) ? next.delete(src) : next.add(src);
+      return next;
+    });
+  }
 
-  const groups = METRIC_GROUPS.filter(g => filtered.some(m => m.group === g));
+  const visibleSources = SOURCE_ORDER.filter(s => selectedSources.includes(s));
 
   return (
-    <div className="space-y-3">
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+    <div className="space-y-1">
+      <div className="relative mb-3">
+        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
         <input
           type="text"
           placeholder="Buscar métricas…"
           value={search}
           onChange={e => setSearch(e.target.value)}
-          className="flex h-9 w-full rounded-md border border-input bg-background pl-9 pr-3 py-2 text-sm"
+          className="flex h-7 w-full rounded-md border border-input bg-background pl-7 pr-2 text-xs"
         />
       </div>
 
-      {groups.length === 0 && (
-        <p className="text-sm text-muted-foreground text-center py-4">Nenhuma métrica encontrada.</p>
+      {visibleSources.length === 0 && (
+        <p className="text-xs text-muted-foreground text-center py-4">Selecione uma plataforma acima.</p>
       )}
 
-      {groups.map(group => {
-        const metrics = filtered.filter(m => m.group === group);
+      {visibleSources.map(src => {
+        const metrics = ALL_UNIFIED_METRICS.filter(m => {
+          if (m.source !== src) return false;
+          if (!search) return true;
+          const q = search.toLowerCase();
+          return m.label.toLowerCase().includes(q) || m.description.toLowerCase().includes(q);
+        });
+        if (metrics.length === 0) return null;
+        const selectedCount = metrics.filter(m => selectedKeys.has(m.key)).length;
+        const isCollapsed = collapsed.has(src);
+
         return (
-          <div key={group}>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-2">{group}</p>
-            <div className={`grid gap-2 ${columns === 2 ? 'md:grid-cols-2' : 'grid-cols-1'}`}>
-              {metrics.map(metric => {
-                const selected = selectedKeys.has(metric.key);
-                return (
-                  <button
-                    key={metric.key}
-                    type="button"
-                    onClick={() => onToggle(metric)}
-                    className={`rounded-lg border p-3 text-left transition-colors ${selected ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40'}`}
-                  >
-                    <div className="flex items-start gap-3">
-                      <div className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 ${selected ? 'border-primary bg-primary' : 'border-muted-foreground'}`}>
-                        {selected && <Check className="h-3 w-3 text-white" />}
+          <div key={src} className="rounded-xl border border-border overflow-hidden">
+            {/* Source group header */}
+            <button
+              type="button"
+              onClick={() => toggleCollapse(src)}
+              className="w-full flex items-center gap-3 px-3 py-2.5 bg-muted/40 hover:bg-muted/70 transition-colors text-left"
+            >
+              <div className="w-7 h-7 rounded-lg overflow-hidden shrink-0">
+                <PlatformLogo source={src} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-bold leading-tight">{SOURCE_LABELS[src]}</p>
+                <p className="text-[10px] text-muted-foreground leading-tight truncate">{SOURCE_DESCRIPTIONS[src]}</p>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {selectedCount > 0 && (
+                  <span className="flex h-4 min-w-[16px] items-center justify-center rounded-full bg-primary text-primary-foreground text-[9px] font-bold px-1">
+                    {selectedCount}
+                  </span>
+                )}
+                <svg viewBox="0 0 16 16" className={`w-3 h-3 text-muted-foreground transition-transform ${isCollapsed ? '' : 'rotate-180'}`} fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M4 6l4 4 4-4"/>
+                </svg>
+              </div>
+            </button>
+
+            {/* Metrics list */}
+            {!isCollapsed && (
+              <div className="divide-y divide-border">
+                {metrics.map(metric => {
+                  const selected = selectedKeys.has(metric.key);
+                  return (
+                    <button
+                      key={metric.key}
+                      type="button"
+                      onClick={() => onToggle(metric)}
+                      className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors ${selected ? 'bg-primary/5' : 'hover:bg-muted/30'}`}
+                    >
+                      <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${selected ? 'border-primary bg-primary' : 'border-muted-foreground/50'}`}>
+                        {selected && <Check className="h-2.5 w-2.5 text-white" />}
                       </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="h-2 w-2 rounded-full shrink-0" style={{ background: metric.color }} />
-                          <p className="text-sm font-bold truncate">{metric.label}</p>
-                        </div>
-                        <p className="mt-0.5 text-xs text-muted-foreground line-clamp-1">{metric.description}</p>
+                      <span className="h-2 w-2 rounded-full shrink-0" style={{ background: metric.color }} />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium truncate leading-tight">{metric.label}</p>
+                        <p className="text-[10px] text-muted-foreground leading-tight truncate">{metric.description}</p>
                       </div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         );
       })}
@@ -1033,6 +1126,7 @@ export default function NovoRelatorioPage() {
   const googleAds = useGoogleAds();
 
   const [reportName, setReportName] = useState('');
+  const mockSeries = useMemo(() => generateMockSeries('30d'), []);
   const [selectedSources, setSelectedSources] = useState<MetricSource[]>(['meta_ads', 'google_ads']);
   const [source, setSource] = useState<'account' | 'client'>('account');
   const [selectedClientId, setSelectedClientId] = useState('');
@@ -1415,7 +1509,6 @@ export default function NovoRelatorioPage() {
               selectedSources={selectedSources}
               selectedKeys={selectedWidgetMetricKeys}
               onToggle={toggleReportWidget}
-              columns={1}
             />
             {widgetsForSelectedSources.length === 0 && (
               <p className="rounded-lg bg-yellow-500/10 border border-yellow-500/20 p-2 text-xs text-yellow-600 dark:text-yellow-400">
@@ -1471,25 +1564,30 @@ export default function NovoRelatorioPage() {
               </p>
             </div>
 
-            {/* Widget cards — live structure, real values after generation */}
+            {/* Widget cards — immediate mock values, real values after generation */}
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-3">Métricas selecionadas</p>
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Métricas selecionadas</p>
+                {!hasGeneratedPreview && (
+                  <span className="text-[10px] text-muted-foreground/60 italic">valores ilustrativos</span>
+                )}
+              </div>
               <div className="grid gap-3 md:grid-cols-3">
                 {widgetsForSelectedSources.map(widget => {
                   const metric = METRIC_BY_KEY[widget.metricKey];
                   if (!metric) return null;
-                  const value = hasGeneratedPreview ? resolveReportMetric(metric, reports) : null;
+                  const value = hasGeneratedPreview
+                    ? resolveReportMetric(metric, reports)
+                    : computeMockKpi(metric, mockSeries);
                   return (
                     <div key={widget.id} className="rounded-xl border border-border bg-card p-4 overflow-hidden relative">
                       <div className="absolute inset-x-0 top-0 h-1" style={{ background: metric.color }} />
                       <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{SOURCE_LABELS[metric.source]}</p>
                       <h3 className="mt-1 text-sm font-bold">{widget.title}</h3>
-                      <p className="mt-3 text-2xl font-bold tabular-nums" style={{ color: value !== null ? metric.color : undefined }}>
+                      <p className="mt-3 text-2xl font-bold tabular-nums" style={{ color: metric.color }}>
                         {isGenerating
                           ? <span className="inline-block w-20 h-7 rounded bg-muted animate-pulse" />
-                          : value !== null
-                            ? formatMetricValue(value, metric.format)
-                            : <span className="text-muted-foreground/40">—</span>}
+                          : formatMetricValue(value, metric.format)}
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">{metric.description}</p>
                     </div>
@@ -1498,18 +1596,11 @@ export default function NovoRelatorioPage() {
               </div>
             </div>
 
-            {/* CTA when not yet generated */}
-            {!hasGeneratedPreview && !isGenerating && (
-              <div className="rounded-xl border border-dashed border-border/60 bg-muted/20 p-6 text-center space-y-3">
-                <p className="text-sm text-muted-foreground">Clique em <strong>Gerar Relatório</strong> para buscar os dados e preencher os valores.</p>
-              </div>
-            )}
-
             {/* Loading indicator */}
             {isGenerating && (
               <div className="flex items-center justify-center gap-2 py-4 text-muted-foreground">
                 <RefreshCw className="w-4 h-4 animate-spin" />
-                <p className="text-sm">Buscando dados...</p>
+                <p className="text-sm">Buscando dados reais...</p>
               </div>
             )}
 
