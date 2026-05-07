@@ -1,23 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { google } from 'googleapis';
-import { Pool } from 'pg';
-
-let pool: Pool | null = null;
-
-function getPool(): Pool {
-  if (!pool) {
-    pool = new Pool({
-      host: 'db.iremmorsgwiqrorzoihx.supabase.co',
-      port: 5432,
-      database: 'postgres',
-      user: 'postgres',
-      password: process.env.SUPABASE_DB_PASSWORD,
-      ssl: { rejectUnauthorized: false },
-      max: 1,
-    });
-  }
-  return pool;
-}
+import { createClient } from '@supabase/supabase-js';
 
 function popupHtml(script: string, message: string) {
   return new Response(
@@ -58,22 +41,22 @@ export async function GET(request: NextRequest) {
     const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
     const { data: profile } = await oauth2.userinfo.get();
 
-    const db = getPool();
-    await db.query(
-      `INSERT INTO public.google_connections
-        (email, display_name, picture, access_token, refresh_token, token_expiry, scope, account_type, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'connected')`,
-      [
-        profile.email ?? '',
-        profile.name ?? '',
-        profile.picture ?? null,
-        tokens.access_token ?? '',
-        tokens.refresh_token ?? '',
-        tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null,
-        tokens.scope ?? '',
-        state,
-      ]
-    );
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    const db = createClient(supabaseUrl, supabaseKey);
+
+    const { error: dbError } = await db.rpc('save_google_connection', {
+      p_email: profile.email ?? '',
+      p_display_name: profile.name ?? '',
+      p_picture: profile.picture ?? null,
+      p_access_token: tokens.access_token ?? '',
+      p_refresh_token: tokens.refresh_token ?? '',
+      p_token_expiry: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null,
+      p_scope: tokens.scope ?? '',
+      p_account_type: state,
+    });
+
+    if (dbError) throw new Error(dbError.message);
 
     return popupHtml(
       `if(window.opener){window.opener.postMessage({type:'google_oauth_success',accountType:${JSON.stringify(state)}},'*');window.close();}else{window.location.href=${JSON.stringify(appUrl + '/integracoes?google_connected=1&type=' + encodeURIComponent(state))}}`,
