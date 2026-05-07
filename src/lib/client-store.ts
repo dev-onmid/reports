@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { logActivity } from '@/lib/activity-log-store';
-import { mockClients, type Client, type ClientStatus } from '@/lib/mock-data';
+import { type Client, type ClientStatus } from '@/lib/mock-data';
 import { assertSupabaseConfigured, supabase } from '@/lib/supabase';
 
 const CLIENTS_UPDATED_EVENT = 'clients-updated';
@@ -31,19 +31,10 @@ export function useClients() {
         const { data, error } = await supabase.from('clients').select('*').order('name');
         if (error) throw error;
         if (data !== null) {
-          if (data.length > 0) {
-            setClients(data.map((r) => ({ id: r.id, name: r.name, segment: r.segment, status: r.status as ClientStatus })));
-          } else {
-            // Supabase is empty — seed mock clients once so future deletes persist
-            setClients(mockClients);
-            void supabase.from('clients').upsert(
-              mockClients.map((c) => ({ id: c.id, name: c.name, segment: c.segment, status: c.status }))
-            );
-          }
+          setClients(data.map((r) => ({ id: r.id, name: r.name, segment: r.segment, status: r.status as ClientStatus })));
         }
       } catch (error) {
         console.error('Erro ao carregar clientes do Supabase:', error);
-        setClients(mockClients);
       }
     }
 
