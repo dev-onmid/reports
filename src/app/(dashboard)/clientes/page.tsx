@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { Archive, RotateCcw, ShieldAlert, Trash2, Plus, Link2 } from 'lucide-react';
+import { Archive, RotateCcw, ShieldAlert, Trash2, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -18,6 +18,7 @@ import { getAuthSession } from '@/lib/auth-store';
 import { useInvestmentPayments } from '@/lib/payment-store';
 import type { ClientStatus } from '@/lib/mock-data';
 import { LinkAccountsDialog } from '@/components/link-accounts-dialog';
+import { PlatformIconButton, ALL_PLATFORMS, type PlatformId } from '@/components/platform-icons';
 
 export default function ClientesPage() {
   const {
@@ -36,6 +37,7 @@ export default function ClientesPage() {
   const [selectedClient, setSelectedClient] = useState<{ id: string; name: string } | null>(null);
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
   const [linkDialogClient, setLinkDialogClient] = useState<{ id: string; name: string } | null>(null);
+  const [linkDialogPlatform, setLinkDialogPlatform] = useState<PlatformId>('google_ads');
   const [currentRole, setCurrentRole] = useState('');
   const [name, setName] = useState('');
   const [segment, setSegment] = useState('');
@@ -129,14 +131,21 @@ export default function ClientesPage() {
                 </span>
                 {!showArchived && <Link href={`/clientes/${cliente.id}`} className="text-sm text-muted-foreground hover:text-primary">Ver dashboard &rarr;</Link>}
                 {!showArchived && (
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    title="Vincular contas"
-                    onClick={() => { setLinkDialogClient(cliente); setLinkDialogOpen(true); }}
-                  >
-                    <Link2 className="w-4 h-4" />
-                  </Button>
+                  <div className="flex items-center gap-1">
+                    {ALL_PLATFORMS.map((p) => (
+                      <PlatformIconButton
+                        key={p}
+                        platform={p}
+                        size="sm"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          setLinkDialogClient(cliente);
+                          setLinkDialogPlatform(p);
+                          setLinkDialogOpen(true);
+                        }}
+                      />
+                    ))}
+                  </div>
                 )}
                 {isAdmin && !showArchived && (
                   <>
@@ -276,6 +285,7 @@ export default function ClientesPage() {
         <LinkAccountsDialog
           clientId={linkDialogClient.id}
           clientName={linkDialogClient.name}
+          platform={linkDialogPlatform}
           open={linkDialogOpen}
           onOpenChange={(v) => {
             setLinkDialogOpen(v);
