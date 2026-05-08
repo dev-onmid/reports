@@ -50,6 +50,10 @@ function mapToMetaPeriod(p: string): string {
   return map[p] ?? 'last_30_days';
 }
 
+function toMetaAccountNodeId(accountId: string) {
+  return accountId.startsWith('act_') ? accountId : `act_${accountId}`;
+}
+
 const DEV_TOKEN = process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? '1vR8GhAk4UMZoPaqo7Qq8Q';
 
 function gadsHeaders(accessToken: string, loginCustomerId?: string) {
@@ -149,7 +153,7 @@ const CONVERSATION_ACTIONS = [
 
 async function fetchMetaAccountMetrics(accountId: string, accessToken: string, metaPeriod: string) {
   const fields = 'spend,impressions,clicks,actions';
-  const url = `https://graph.facebook.com/v21.0/${accountId}/insights?fields=${fields}&level=account&date_preset=${metaPeriod}&access_token=${accessToken}`;
+  const url = `https://graph.facebook.com/v21.0/${toMetaAccountNodeId(accountId)}/insights?fields=${fields}&level=account&date_preset=${metaPeriod}&access_token=${accessToken}`;
   const res = await fetch(url);
   if (!res.ok) return null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -173,6 +177,18 @@ async function fetchMetaAccountMetrics(accountId: string, accessToken: string, m
   };
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function safeRows(pool: Pool, query: string, params: unknown[] = []): Promise<any[]> {
+  try {
+    const { rows } = await pool.query(query, params);
+    return rows;
+  } catch (error) {
+    const code = (error as { code?: string }).code;
+    if (code === '42P01' || code === '42703') return [];
+    throw error;
+  }
+}
+
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id: clientId } = await params;
   const period = request.nextUrl.searchParams.get('period') ?? 'last_30d';
@@ -183,12 +199,30 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let links: any[], googleConns: any[], metaConns: any[];
   try {
-    const [l, g, m] = await Promise.all([
-      pool.query('SELECT * FROM public.client_account_links WHERE client_id = $1', [clientId]),
-      pool.query('SELECT * FROM public.google_connections'),
-      pool.query('SELECT * FROM public.meta_connections'),
+    const [newLinks, g, m, legacyMetaLinks, legacyMetaIntegration] = await Promise.all([
+      safeRows(pool, 'SELECT * FROM public.client_account_links WHERE client_id = $1', [clientId]),
+      safeRows(pool, 'SELECT * FROM public.google_connections'),
+      safeRows(pool, 'SELECT * FROM public.meta_connections'),
+      safeRows(pool, 'SELECT * FROM public.meta_ads_connections WHERE client_id = $1', [clientId]),
+      safeRows(pool, "SELECT * FROM public.meta_integration WHERE id = 'global' AND status = 'connected'"),
     ]);
-    links = l.rows; googleConns = g.rows; metaConns = m.rows;
+    links = newLinks;
+    googleConns = g;
+    metaConns = m;
+
+    const legacyMeta = legacyMetaIntegration[0];
+    if (legacyMeta?.access_token) {
+      metaConns.push({ id: 'legacy-meta-global', access_token: legacyMeta.access_token });
+      for (const legacyLink of legacyMetaLinks) {
+        for (const accountId of legacyLink.account_ids ?? []) {
+          links.push({
+            platform: 'meta_ads',
+            connection_id: 'legacy-meta-global',
+            account_id: accountId,
+          });
+        }
+      }
+    }
   } finally {
     await pool.end();
   }

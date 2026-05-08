@@ -49,8 +49,24 @@ function normalizeMetaAccountId(accountId: string) {
   return accountId.replace(/^act_/, '');
 }
 
+function toMetaAccountNodeId(accountId: string) {
+  return accountId.startsWith('act_') ? accountId : `act_${accountId}`;
+}
+
 function accountMatches(a: string, b: string) {
   return normalizeMetaAccountId(a) === normalizeMetaAccountId(b);
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function safeRows(pool: Pool, query: string, params: unknown[] = []): Promise<any[]> {
+  try {
+    const { rows } = await pool.query(query, params);
+    return rows;
+  } catch (error) {
+    const code = (error as { code?: string }).code;
+    if (code === '42P01' || code === '42703') return [];
+    throw error;
+  }
 }
 
 export type TopCreative = {
@@ -87,29 +103,49 @@ export async function GET(request: NextRequest) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let links: any[] = [];
   try {
-    const [connectionsResult, linksResult] = await Promise.all([
-      pool.query("SELECT * FROM public.meta_connections WHERE status = 'connected'"),
+    const [connectionsRows, linksRows, legacyLinks, legacyIntegration] = await Promise.all([
+      safeRows(pool, "SELECT * FROM public.meta_connections WHERE status = 'connected'"),
       shouldFilterByClient
-        ? pool.query(
+        ? safeRows(
+          pool,
           `SELECT client_id, connection_id, account_id
            FROM public.client_account_links
            WHERE platform = 'meta_ads'
              AND client_id = ANY($1::text[])`,
           [requestedClientIds],
         )
-        : Promise.resolve({ rows: [] }),
+        : Promise.resolve([]),
+      shouldFilterByClient
+        ? safeRows(pool, 'SELECT * FROM public.meta_ads_connections WHERE client_id = ANY($1::text[])', [requestedClientIds])
+        : Promise.resolve([]),
+      safeRows(pool, "SELECT * FROM public.meta_integration WHERE id = 'global' AND status = 'connected'"),
     ]);
-    conns = connectionsResult.rows;
-    links = linksResult.rows;
+    conns = connectionsRows;
+    links = linksRows;
+
+    const legacyMeta = legacyIntegration[0];
+    if (legacyMeta?.access_token) {
+      conns.push({ id: 'legacy-meta-global', access_token: legacyMeta.access_token });
+      for (const legacyLink of legacyLinks) {
+        for (const accountId of legacyLink.account_ids ?? []) {
+          links.push({
+            client_id: legacyLink.client_id,
+            connection_id: 'legacy-meta-global',
+            account_id: accountId,
+            account_name: accountId,
+          });
+        }
+      }
+    }
   } finally {
     await pool.end();
   }
 
-  const allowedByConnection = new Map<string, string[]>();
+  const allowedByConnection = new Map<string, Array<{ id: string; name: string }>>();
   for (const link of links) {
     if (!link.connection_id || !link.account_id) continue;
     const list = allowedByConnection.get(link.connection_id) ?? [];
-    list.push(link.account_id);
+    list.push({ id: link.account_id, name: link.account_name ?? link.account_id });
     allowedByConnection.set(link.connection_id, list);
   }
 
@@ -125,21 +161,29 @@ export async function GET(request: NextRequest) {
       const allowedAccounts = shouldFilterByClient ? allowedByConnection.get(conn.id) ?? [] : [];
       if (shouldFilterByClient && allowedAccounts.length === 0) return;
 
-      // Get all ad accounts accessible by this connection
-      const acctRes = await fetch(
-        `https://graph.facebook.com/v21.0/me/adaccounts?fields=id,name&limit=50&access_token=${token}`
-      );
-      if (!acctRes.ok) return;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const acctData = await acctRes.json() as { data?: any[] };
-      const accounts: Array<{ id: string; name: string }> = shouldFilterByClient
-        ? (acctData.data ?? []).filter((account) => allowedAccounts.some((id) => accountMatches(id, account.id)))
-        : acctData.data ?? [];
+      let accounts: Array<{ id: string; name: string }> = allowedAccounts;
+      if (!shouldFilterByClient) {
+        const acctRes = await fetch(
+          `https://graph.facebook.com/v21.0/me/adaccounts?fields=id,name&limit=100&access_token=${token}`
+        );
+        if (!acctRes.ok) return;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const acctData = await acctRes.json() as { data?: any[] };
+        accounts = acctData.data ?? [];
+      }
+
+      const seenAccounts = new Set<string>();
+      accounts = accounts.filter((account) => {
+        const normalized = normalizeMetaAccountId(account.id);
+        if (seenAccounts.has(normalized)) return false;
+        seenAccounts.add(normalized);
+        return shouldFilterByClient || allowedAccounts.some((allowed) => accountMatches(allowed.id, account.id));
+      });
 
       await Promise.allSettled(
         accounts.map(async (account) => {
           // Fetch top ads insights sorted by spend
-          const insightsUrl = new URL(`https://graph.facebook.com/v21.0/${account.id}/insights`);
+          const insightsUrl = new URL(`https://graph.facebook.com/v21.0/${toMetaAccountNodeId(account.id)}/insights`);
           insightsUrl.searchParams.set('level', 'ad');
           insightsUrl.searchParams.set('fields', 'ad_id,ad_name,spend,impressions,clicks,actions');
           insightsUrl.searchParams.set('date_preset', metaPeriod);

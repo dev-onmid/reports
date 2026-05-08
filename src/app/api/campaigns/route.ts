@@ -124,6 +124,10 @@ function normalizeMetaAccountId(accountId: string) {
   return accountId.replace(/^act_/, '');
 }
 
+function toMetaAccountNodeId(accountId: string) {
+  return accountId.startsWith('act_') ? accountId : `act_${accountId}`;
+}
+
 function accountMatches(a: string, b: string) {
   return normalizeMetaAccountId(a) === normalizeMetaAccountId(b);
 }
@@ -143,6 +147,18 @@ const META_RESULT_ACTIONS = [
   'onsite_conversion.messaging_first_reply',
 ];
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function safeRows(pool: Pool, query: string, params: unknown[] = []): Promise<any[]> {
+  try {
+    const { rows } = await pool.query(query, params);
+    return rows;
+  } catch (error) {
+    const code = (error as { code?: string }).code;
+    if (code === '42P01' || code === '42703') return [];
+    throw error;
+  }
+}
+
 export async function GET(request: NextRequest) {
   const period = request.nextUrl.searchParams.get('period') ?? 'last_30d';
   const sortBy = (request.nextUrl.searchParams.get('sortBy') ?? 'spend') as SortKey;
@@ -157,22 +173,42 @@ export async function GET(request: NextRequest) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let metaConns: any[], googleConns: any[], links: any[];
   try {
-    const [m, g, l] = await Promise.all([
-      pool.query("SELECT * FROM public.meta_connections WHERE status = 'connected'"),
-      pool.query("SELECT * FROM public.google_connections WHERE status = 'connected'"),
+    const [m, g, l, legacyMetaLinks, legacyMetaIntegration] = await Promise.all([
+      safeRows(pool, "SELECT * FROM public.meta_connections WHERE status = 'connected'"),
+      safeRows(pool, "SELECT * FROM public.google_connections WHERE status = 'connected'"),
       shouldFilterByClient
-        ? pool.query(
+        ? safeRows(
+          pool,
           `SELECT client_id, platform, connection_id, account_id
            FROM public.client_account_links
            WHERE client_id = ANY($1::text[])
              AND platform IN ('meta_ads', 'google_ads')`,
           [requestedClientIds],
         )
-        : Promise.resolve({ rows: [] }),
+        : Promise.resolve([]),
+      shouldFilterByClient
+        ? safeRows(pool, 'SELECT * FROM public.meta_ads_connections WHERE client_id = ANY($1::text[])', [requestedClientIds])
+        : Promise.resolve([]),
+      safeRows(pool, "SELECT * FROM public.meta_integration WHERE id = 'global' AND status = 'connected'"),
     ]);
-    metaConns = m.rows;
-    googleConns = g.rows;
-    links = l.rows;
+    metaConns = m;
+    googleConns = g;
+    links = l;
+
+    const legacyMeta = legacyMetaIntegration[0];
+    if (legacyMeta?.access_token) {
+      metaConns.push({ id: 'legacy-meta-global', access_token: legacyMeta.access_token });
+      for (const legacyLink of legacyMetaLinks) {
+        for (const accountId of legacyLink.account_ids ?? []) {
+          links.push({
+            platform: 'meta_ads',
+            connection_id: 'legacy-meta-global',
+            account_id: accountId,
+            account_name: accountId,
+          });
+        }
+      }
+    }
   } finally {
     await pool.end();
   }
@@ -183,11 +219,11 @@ export async function GET(request: NextRequest) {
   const metaPeriod = mapToMetaPeriod(period);
   const gaqlPeriod = mapToGaqlPeriod(period);
 
-  const linksByPlatformAndConn = new Map<string, string[]>();
+  const linksByPlatformAndConn = new Map<string, Array<{ id: string; name: string }>>();
   for (const link of links) {
     const key = `${link.platform}:${link.connection_id}`;
     const list = linksByPlatformAndConn.get(key) ?? [];
-    list.push(link.account_id);
+    list.push({ id: link.account_id, name: link.account_name ?? link.account_id });
     linksByPlatformAndConn.set(key, list);
   }
 
@@ -197,17 +233,26 @@ export async function GET(request: NextRequest) {
       const allowed = shouldFilterByClient ? linksByPlatformAndConn.get(`meta_ads:${conn.id}`) ?? [] : [];
       if (shouldFilterByClient && allowed.length === 0) return;
 
-      const acctRes = await fetch(`https://graph.facebook.com/v21.0/me/adaccounts?fields=id,name&limit=100&access_token=${token}`);
-      if (!acctRes.ok) return;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const acctData = await acctRes.json() as { data?: any[] };
-      const accounts = shouldFilterByClient
-        ? (acctData.data ?? []).filter((account) => allowed.some((id) => accountMatches(id, account.id)))
-        : acctData.data ?? [];
+      let accounts: Array<{ id: string; name: string }> = allowed;
+      if (!shouldFilterByClient) {
+        const acctRes = await fetch(`https://graph.facebook.com/v21.0/me/adaccounts?fields=id,name&limit=100&access_token=${token}`);
+        if (!acctRes.ok) return;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const acctData = await acctRes.json() as { data?: any[] };
+        accounts = acctData.data ?? [];
+      }
+
+      const seenAccounts = new Set<string>();
+      accounts = accounts.filter((account) => {
+        const normalized = normalizeMetaAccountId(account.id);
+        if (seenAccounts.has(normalized)) return false;
+        seenAccounts.add(normalized);
+        return shouldFilterByClient || allowed.some((item) => accountMatches(item.id, account.id));
+      });
 
       await Promise.allSettled(
         accounts.map(async (account) => {
-          const url = new URL(`https://graph.facebook.com/v21.0/${account.id}/insights`);
+          const url = new URL(`https://graph.facebook.com/v21.0/${toMetaAccountNodeId(account.id)}/insights`);
           url.searchParams.set('level', 'campaign');
           url.searchParams.set('fields', 'campaign_id,campaign_name,spend,impressions,clicks,actions');
           url.searchParams.set('date_preset', metaPeriod);
@@ -254,7 +299,7 @@ export async function GET(request: NextRequest) {
 
       const accessToken = await getFreshGoogleToken(conn);
       const mccMap = await buildMccMap(accessToken);
-      const accountIds = shouldFilterByClient ? allowed : Object.keys(mccMap);
+      const accountIds = shouldFilterByClient ? allowed.map((account) => account.id) : Object.keys(mccMap);
 
       await Promise.allSettled(
         accountIds.map(async (accountId) => {
