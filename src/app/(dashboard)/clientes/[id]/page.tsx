@@ -299,11 +299,77 @@ const integracoes = [
   { id: 6, name: 'Google Sheets (CRM)', status: 'Desconectado', logo: <svg viewBox="0 0 24 24" className="w-6 h-6" fill="#34A853"><path d="M11.318 12.545H7.91v-1.909h3.41v1.91zm1.364 0v-1.909h3.408v1.91h-3.408zm0 1.364h3.408v1.909h-3.408v-1.909zm-1.364 0H7.91v1.909h3.41v-1.909zM24 4.364v15.272A4.368 4.368 0 0 1 19.636 24H4.364A4.368 4.368 0 0 1 0 19.636V4.364A4.368 4.368 0 0 1 4.364 0h15.272A4.368 4.368 0 0 1 24 4.364zm-4.363 4.5H4.363v11.772h15.273V8.864z"/></svg> },
 ];
 
+type ClientPlanningConfig = {
+  tkm: number;
+  cplMeta: number;
+  stages: FunnelStage[];
+};
+
+const DEFAULT_CLIENT_PLANNING: ClientPlanningConfig = {
+  tkm: 9000,
+  cplMeta: 30,
+  stages: DEFAULT_STAGES,
+};
+
+function sanitizePlanningStages(stages: unknown): FunnelStage[] {
+  if (!Array.isArray(stages)) return DEFAULT_STAGES;
+  const valid = stages
+    .map((stage, index) => {
+      if (!stage || typeof stage !== 'object') return null;
+      const item = stage as Partial<FunnelStage>;
+      const conversion = Number(item.conversion ?? 50);
+      return {
+        id: item.id || `stage-${index + 1}`,
+        name: item.name || `${index + 1}º — Etapa`,
+        conversion: Math.min(100, Math.max(0, Number.isFinite(conversion) ? conversion : 50)),
+      };
+    })
+    .filter(Boolean) as FunnelStage[];
+  return valid.length >= 2 ? valid.slice(0, 7) : DEFAULT_STAGES;
+}
+
+function readSavedClientPlanning(clientId: string): ClientPlanningConfig {
+  if (typeof window === 'undefined') return DEFAULT_CLIENT_PLANNING;
+  try {
+    const raw = window.localStorage.getItem(`clientPlanning_${clientId}`);
+    if (!raw) return DEFAULT_CLIENT_PLANNING;
+    const parsed = JSON.parse(raw) as Partial<ClientPlanningConfig>;
+    const tkm = Number(parsed.tkm ?? DEFAULT_CLIENT_PLANNING.tkm);
+    const cplMeta = Number(parsed.cplMeta ?? DEFAULT_CLIENT_PLANNING.cplMeta);
+    return {
+      tkm: Number.isFinite(tkm) ? tkm : DEFAULT_CLIENT_PLANNING.tkm,
+      cplMeta: Number.isFinite(cplMeta) ? cplMeta : DEFAULT_CLIENT_PLANNING.cplMeta,
+      stages: sanitizePlanningStages(parsed.stages),
+    };
+  } catch {
+    return DEFAULT_CLIENT_PLANNING;
+  }
+}
+
+function saveClientPlanning(clientId: string, planning: ClientPlanningConfig) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(`clientPlanning_${clientId}`, JSON.stringify(planning));
+}
+
 // ── Funnel planning tab ────────────────────────────────────────────────────────
-function FunnelTab({ clientName, goalConfig }: { clientName: string; goalConfig: ClientGoalConfig }) {
-  const [tkm,      setTkm]      = useState(9000);
-  const [cplMeta,  setCplMeta]  = useState(30);
-  const [stages,   setStages]   = useState<FunnelStage[]>(DEFAULT_STAGES);
+function FunnelTab({ clientId, clientName, goalConfig }: { clientId: string; clientName: string; goalConfig: ClientGoalConfig }) {
+  const [planningLoadedFor, setPlanningLoadedFor] = useState(clientId);
+  const [tkm, setTkm] = useState(() => readSavedClientPlanning(clientId).tkm);
+  const [cplMeta, setCplMeta] = useState(() => readSavedClientPlanning(clientId).cplMeta);
+  const [stages, setStages] = useState<FunnelStage[]>(() => readSavedClientPlanning(clientId).stages);
+
+  useEffect(() => {
+    const saved = readSavedClientPlanning(clientId);
+    setTkm(saved.tkm);
+    setCplMeta(saved.cplMeta);
+    setStages(saved.stages);
+    setPlanningLoadedFor(clientId);
+  }, [clientId]);
+
+  useEffect(() => {
+    if (planningLoadedFor !== clientId) return;
+    saveClientPlanning(clientId, { tkm, cplMeta, stages });
+  }, [clientId, planningLoadedFor, tkm, cplMeta, stages]);
 
   const cplPlanejado = cplMeta;
   const vols     = plannedFunnelFromGoal(goalConfig, stages, tkm);
@@ -368,10 +434,10 @@ function FunnelTab({ clientName, goalConfig }: { clientName: string; goalConfig:
       </div>
 
       {/* Funnel + Summary side by side */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-stretch">
 
         {/* LEFT — Funnel stages */}
-        <div className="bg-card border border-border rounded-xl p-5">
+        <div className="flex h-full flex-col bg-card border border-border rounded-xl p-5">
           <div className="flex items-center justify-between mb-5">
             <div>
               <h3 className="font-bold text-sm uppercase tracking-wider">Funil de Conversão</h3>
@@ -406,21 +472,37 @@ function FunnelTab({ clientName, goalConfig }: { clientName: string; goalConfig:
                           onChange={(e) => updateName(idx, e.target.value)}
                           className="flex-1 text-sm font-semibold focus:outline-none border-b border-transparent hover:border-border focus:border-primary transition-colors bg-transparent"
                         />
-                        <span className="text-xl font-bold font-heading shrink-0" style={{ color }}>
-                          {vol.toLocaleString('pt-BR')}
-                        </span>
-                        <span className="text-xs text-muted-foreground shrink-0 w-9 text-right">{pct}%</span>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <div className="rounded-lg bg-background/70 px-2.5 py-1 text-right">
+                            <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground">Volume</p>
+                            <p className="text-lg font-bold font-heading leading-none" style={{ color }}>
+                              {vol.toLocaleString('pt-BR')}
+                            </p>
+                          </div>
+                          <div className="w-14 rounded-lg bg-background/70 px-2.5 py-1 text-right">
+                            <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground">%</p>
+                            <p className="text-lg font-bold font-heading leading-none text-muted-foreground">{pct}%</p>
+                          </div>
+                        </div>
                         {stages.length > 2 && (
                           <button onClick={() => removeStage(idx)} className="text-muted-foreground/30 hover:text-muted-foreground transition-colors">
                             <X className="w-3.5 h-3.5" />
                           </button>
                         )}
                       </div>
-                      <div className="h-7 rounded-lg bg-muted/30 overflow-hidden">
+                      <div className="relative h-8 rounded-lg bg-muted/30 overflow-hidden">
                         <div
                           className="h-full rounded-lg transition-all duration-500"
                           style={{ width: `${pct}%`, backgroundColor: color, opacity: 0.75 }}
                         />
+                        <div className="absolute inset-0 flex items-center justify-between px-3 text-[11px] font-bold">
+                          <span className="rounded-md bg-black/25 px-2 py-0.5 text-foreground shadow-sm">
+                            {vol.toLocaleString('pt-BR')} planejados
+                          </span>
+                          <span className="rounded-md bg-black/25 px-2 py-0.5 text-foreground shadow-sm">
+                            {pct}% do topo
+                          </span>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -2538,7 +2620,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
       {tab === 'planejamento' && (
         <div className="space-y-5">
           <ClientGoalSettings goal={clientGoal} onChange={setClientGoal} />
-          <FunnelTab clientName={client.name} goalConfig={clientGoal} />
+          <FunnelTab clientId={id} clientName={client.name} goalConfig={clientGoal} />
         </div>
       )}
 
