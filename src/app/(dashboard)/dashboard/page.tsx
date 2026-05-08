@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import Link from 'next/link';
 import {
   AlertTriangle, CheckCircle2, ChevronDown, ImageIcon, RefreshCw,
   Search, TrendingDown,
 } from 'lucide-react';
 import { useClients } from '@/lib/client-store';
-import { clientResults } from '@/lib/client-results-store';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 import type { TopCreative } from '@/app/api/meta/top-creatives/route';
 
@@ -16,7 +16,9 @@ type ApiMetrics = {
   meta: { spend: number; impressions: number; clicks: number; leads: number; formLeads?: number; conversations?: number; cpl: number } | null;
   google: { cost: number; impressions: number; clicks: number; cpc: number; conversions: number; cpa: number } | null;
 };
-type GoalConfig = { type: string; target: number };
+type GoalConfig = { type: string; target: number; label?: string; format?: 'currency' | 'number' };
+type FunnelStage = { id: string; name: string; conversion: number };
+type PlanningConfig = { tkm: number; cplMeta: number; stages: FunnelStage[] };
 type SortKey = 'spend' | 'leads' | 'impressions' | 'clicks' | 'cpl' | 'ctr';
 
 const PERIODS: { value: Period; label: string }[] = [
@@ -35,11 +37,99 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'ctr', label: 'CTR' },
 ];
 
+const DEFAULT_STAGES: FunnelStage[] = [
+  { id: 's5', name: '5º — Contatos (Leads)', conversion: 50 },
+  { id: 's4', name: '4º — Qualificados', conversion: 100 },
+  { id: 's3', name: '3º — Agendamentos', conversion: 50 },
+  { id: 's2', name: '2º — Comparecimentos', conversion: 47 },
+  { id: 's1', name: '1º — Fechamentos (Vendas)', conversion: 0 },
+];
+
+const DEFAULT_PLANNING: PlanningConfig = { tkm: 9000, cplMeta: 30, stages: DEFAULT_STAGES };
+
 function readGoalFromStorage(clientId: string): GoalConfig | null {
   try {
     const stored = localStorage.getItem(`clientGoal_${clientId}`);
     return stored ? JSON.parse(stored) as GoalConfig : null;
   } catch { return null; }
+}
+
+function readPlanningFromStorage(clientId: string): PlanningConfig {
+  try {
+    const stored = localStorage.getItem(`clientPlanning_${clientId}`);
+    if (!stored) return DEFAULT_PLANNING;
+    const parsed = JSON.parse(stored) as Partial<PlanningConfig>;
+    const tkm = Number(parsed.tkm ?? DEFAULT_PLANNING.tkm);
+    const cplMeta = Number(parsed.cplMeta ?? DEFAULT_PLANNING.cplMeta);
+    const stages = Array.isArray(parsed.stages) && parsed.stages.length >= 2
+      ? parsed.stages.map((stage, index) => ({
+        id: stage.id || `stage-${index + 1}`,
+        name: stage.name || `${index + 1}º — Etapa`,
+        conversion: Math.min(100, Math.max(0, Number(stage.conversion ?? 50))),
+      }))
+      : DEFAULT_STAGES;
+    return {
+      tkm: Number.isFinite(tkm) ? tkm : DEFAULT_PLANNING.tkm,
+      cplMeta: Number.isFinite(cplMeta) ? cplMeta : DEFAULT_PLANNING.cplMeta,
+      stages,
+    };
+  } catch {
+    return DEFAULT_PLANNING;
+  }
+}
+
+function computeFunnel(stages: FunnelStage[], revenueTarget: number, ticket: number): number[] {
+  const volumes = new Array<number>(stages.length).fill(0);
+  if (stages.length === 0 || revenueTarget <= 0 || ticket <= 0) return volumes;
+  volumes[stages.length - 1] = Math.ceil(revenueTarget / ticket);
+  for (let i = stages.length - 2; i >= 0; i--) {
+    const rate = stages[i].conversion / 100;
+    volumes[i] = rate > 0 ? Math.ceil(volumes[i + 1] / rate) : 0;
+  }
+  return volumes;
+}
+
+function plannedFunnelFromGoal(goal: GoalConfig | null, planning: PlanningConfig): number[] {
+  const volumes = new Array<number>(planning.stages.length).fill(0);
+  if (!goal || goal.target <= 0 || planning.stages.length === 0) return volumes;
+
+  if (goal.type === 'leads') {
+    volumes[0] = Math.ceil(goal.target);
+    for (let i = 1; i < planning.stages.length; i++) {
+      const rate = planning.stages[i - 1].conversion / 100;
+      volumes[i] = rate > 0 ? Math.ceil(volumes[i - 1] * rate) : 0;
+    }
+    return volumes;
+  }
+
+  if (goal.type === 'revenue') {
+    return computeFunnel(planning.stages, goal.target, planning.tkm);
+  }
+
+  volumes[planning.stages.length - 1] = Math.ceil(goal.target);
+  for (let i = planning.stages.length - 2; i >= 0; i--) {
+    const rate = planning.stages[i].conversion / 100;
+    volumes[i] = rate > 0 ? Math.ceil(volumes[i + 1] / rate) : 0;
+  }
+  return volumes;
+}
+
+function MetaMark() {
+  return (
+    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#0B84FF] align-[-3px]">
+      <svg viewBox="0 0 20 20" fill="none" className="h-3.5 w-3.5">
+        <path d="M2.5 12.5C2.5 9.5 4 7 6 7c1.3 0 2.4 1.1 4 3.8C11.6 8.1 12.7 7 14 7c2 0 3.5 2.5 3.5 5.5" stroke="white" strokeWidth="2" strokeLinecap="round" />
+      </svg>
+    </span>
+  );
+}
+
+function GoogleMark() {
+  return (
+    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#4285F4] text-[11px] font-black text-white align-[-3px]">
+      G
+    </span>
+  );
 }
 
 function autoPartial(target: number, period: Period): number {
@@ -52,14 +142,19 @@ function autoPartial(target: number, period: Period): number {
 // ── KPI Card ────────────────────────────────────────────────────────────────
 function KpiCard({
   title, value, meta, partial, format = 'number', inverse = false, loading = false, prefix,
+  showMeta = true, showPartial = true, showProgress = true, description = 'Realizado contra a meta do período.',
+  metaLabel = 'Meta', partialLabel = 'Parcial',
 }: {
-  title: string; value: number; meta: number; partial: number;
-  format?: 'currency' | 'number' | 'percent'; inverse?: boolean;
+  title: ReactNode; value: number; meta: number; partial: number;
+  format?: 'currency' | 'number' | 'percent' | 'times'; inverse?: boolean;
   loading?: boolean; prefix?: string;
+  showMeta?: boolean; showPartial?: boolean; showProgress?: boolean; description?: string;
+  metaLabel?: string; partialLabel?: string;
 }) {
   const fmt = (v: number) =>
     format === 'currency' ? formatCurrencyBRL(v)
     : format === 'percent' ? `${v.toFixed(1)}%`
+    : format === 'times' ? `${v.toFixed(1)}x`
     : v.toLocaleString('pt-BR');
 
   const target = partial > 0 ? partial : meta;
@@ -69,14 +164,19 @@ function KpiCard({
       ? 100
       : Math.round((target / value) * 100)
     : 0;
+  const hasTarget = target > 0;
   const progress = Math.max(0, Math.min(inverse ? inverseProgress : regularProgress, 100));
   const status = progress > 75 ? 'good' : progress >= 36 ? 'warning' : 'critical';
 
-  const statusColor = status === 'critical' ? 'text-red-400' : status === 'good' ? 'text-emerald-400' : 'text-orange-400';
+  const statusColor = !showProgress || !hasTarget ? 'text-foreground' : status === 'critical' ? 'text-red-400' : status === 'good' ? 'text-emerald-400' : 'text-orange-400';
   const barColor = status === 'critical' ? 'bg-red-500' : status === 'good' ? 'bg-emerald-500' : 'bg-orange-400';
-  const borderColor = status === 'critical' ? 'border-red-500/40' : status === 'good' ? 'border-primary/30' : 'border-orange-400/30';
-  const topColor = status === 'critical' ? 'bg-red-500' : status === 'good' ? 'bg-primary' : 'bg-orange-400';
+  const borderColor = !showProgress || !hasTarget ? 'border-border' : status === 'critical' ? 'border-red-500/40' : status === 'good' ? 'border-primary/30' : 'border-orange-400/30';
+  const topColor = !showProgress || !hasTarget ? 'bg-muted' : status === 'critical' ? 'bg-red-500' : status === 'good' ? 'bg-primary' : 'bg-orange-400';
   const statusLabel = status === 'critical' ? 'Crítico' : status === 'good' ? 'No ritmo' : 'Atenção';
+  const bottomItems = [
+    ...(showMeta ? [{ label: metaLabel, value: meta > 0 ? fmt(meta) : prefix ? prefix : 'Sem meta' }] : []),
+    ...(showPartial ? [{ label: partialLabel, value: partial > 0 ? fmt(partial) : '—' }] : []),
+  ];
 
   return (
     <div className={cn('relative overflow-hidden rounded-xl border bg-card p-4 space-y-3', borderColor)}>
@@ -84,18 +184,20 @@ function KpiCard({
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className={cn('font-bold text-lg', statusColor)}>{title}</p>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">Realizado contra a meta do período.</p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">{description}</p>
         </div>
-        <span className={cn(
-          'rounded-lg border px-2 py-1 text-[10px] font-bold uppercase tracking-wider',
-          status === 'critical'
-            ? 'border-red-500/40 bg-red-500/10 text-red-300'
-            : status === 'good'
-            ? 'border-primary/40 bg-primary/10 text-primary'
-            : 'border-orange-400/40 bg-orange-400/10 text-orange-300',
-        )}>
-          {statusLabel}
-        </span>
+        {showProgress && hasTarget && (
+          <span className={cn(
+            'rounded-lg border px-2 py-1 text-[10px] font-bold uppercase tracking-wider',
+            status === 'critical'
+              ? 'border-red-500/40 bg-red-500/10 text-red-300'
+              : status === 'good'
+              ? 'border-primary/40 bg-primary/10 text-primary'
+              : 'border-orange-400/40 bg-orange-400/10 text-orange-300',
+          )}>
+            {statusLabel}
+          </span>
+        )}
       </div>
       {loading ? (
         <div className="flex min-h-28 items-center justify-center gap-2 rounded-lg border border-border bg-background/70 text-muted-foreground/50">
@@ -105,7 +207,7 @@ function KpiCard({
       ) : (
         <>
           <div className="relative overflow-hidden rounded-lg border border-border bg-background/70 min-h-24">
-            {progress > 0 && (
+            {showProgress && hasTarget && progress > 0 && (
               <div
                 className={cn('absolute inset-y-0 left-0 opacity-80 transition-all', barColor)}
                 style={{ width: `${Math.max(0, Math.min(progress, 100))}%` }}
@@ -116,29 +218,31 @@ function KpiCard({
                 <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Realizado</p>
                 <p className="mt-1 font-heading text-2xl font-bold tracking-wide leading-none text-foreground">{fmt(value)}</p>
               </div>
-              <div className="rounded-lg bg-black/25 px-3 py-2 text-right shadow-[0_12px_30px_rgba(0,0,0,0.3)]">
-                <p className={cn('font-heading text-2xl font-bold leading-none', statusColor)}>{progress}%</p>
-                <p className={cn('mt-1 flex items-center justify-end gap-1 text-[10px] font-bold uppercase tracking-wider', statusColor)}>
-                  {status === 'good'
-                    ? <CheckCircle2 className="w-3 h-3" />
-                    : status === 'critical'
-                    ? <TrendingDown className="w-3 h-3" />
-                    : <AlertTriangle className="w-3 h-3" />}
-                  {statusLabel}
-                </p>
-              </div>
+              {showProgress && hasTarget && (
+                <div className="rounded-lg bg-black/25 px-3 py-2 text-right shadow-[0_12px_30px_rgba(0,0,0,0.3)]">
+                  <p className={cn('font-heading text-2xl font-bold leading-none', statusColor)}>{progress}%</p>
+                  <p className={cn('mt-1 flex items-center justify-end gap-1 text-[10px] font-bold uppercase tracking-wider', statusColor)}>
+                    {status === 'good'
+                      ? <CheckCircle2 className="w-3 h-3" />
+                      : status === 'critical'
+                      ? <TrendingDown className="w-3 h-3" />
+                      : <AlertTriangle className="w-3 h-3" />}
+                    {statusLabel}
+                  </p>
+                </div>
+              )}
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div className="rounded-lg bg-background/70 px-3 py-2 text-center">
-              <p className="text-sm font-bold">{meta > 0 ? fmt(meta) : prefix ? prefix : 'Sem meta'}</p>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Meta</p>
+          {bottomItems.length > 0 && (
+            <div className={cn('grid gap-2', bottomItems.length === 1 ? 'grid-cols-1' : 'grid-cols-2')}>
+              {bottomItems.map((item) => (
+                <div key={item.label} className="rounded-lg bg-background/70 px-3 py-2 text-center">
+                  <p className="text-sm font-bold">{item.value}</p>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{item.label}</p>
+                </div>
+              ))}
             </div>
-            <div className="rounded-lg bg-background/70 px-3 py-2 text-center">
-              <p className="text-sm font-bold">{partial > 0 ? fmt(partial) : meta > 0 ? fmt(meta) : '—'}</p>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Parcial</p>
-            </div>
-          </div>
+          )}
         </>
       )}
     </div>
@@ -422,26 +526,24 @@ export default function GeneralDashboard() {
   const avgCpl = metaLeads > 0 ? metaSpend / metaLeads : 0;
   const avgCpa = googleConv > 0 ? googleCost / googleConv : 0;
 
-  // ── Aggregate goals ──────────────────────────────────────────────────────
-  let leadsGoal = 0, metaLeadsGoal = 0, googleConvGoal = 0;
-  let revenueGoal = 0, revenue = 0;
-  let cplGoal = 0, cpaGoal = 0;
+  // ── Aggregate planning ───────────────────────────────────────────────────
+  let leadsGoal = 0;
+  let plannedInvestment = 0;
+  let revenueGoal = 0;
+  const revenue = 0; // Futuro: realizado vindo da planilha/Google Sheets de vendas.
 
   for (const id of selectedIds) {
     const goal = goalsByClient[id];
-    const h = clientResults.find(r => r.clientId === id);
-    if (goal?.type === 'leads') { leadsGoal += goal.target; metaLeadsGoal += goal.target; }
-    else if (h) { leadsGoal += h.metaLeads; metaLeadsGoal += h.metaLeads; }
+    const planning = readPlanningFromStorage(id);
+    const plannedFunnel = plannedFunnelFromGoal(goal, planning);
+    const topVolume = plannedFunnel[0] ?? 0;
+    leadsGoal += topVolume;
+    plannedInvestment += topVolume * planning.cplMeta;
     if (goal?.type === 'revenue') revenueGoal += goal.target;
-    else if (h) revenueGoal += h.meta;
-    if (h) { revenue += h.resultado; cplGoal += h.metaCpl; cpaGoal += h.metaCac; }
   }
 
-  const leadsPartial = autoPartial(leadsGoal, period);
-  const metaLeadsPartial = autoPartial(metaLeadsGoal, period);
-  const googleConvPartial = autoPartial(googleConvGoal, period);
   const revenuePartial = autoPartial(revenueGoal, period);
-  const roi = totalSpend > 0 && revenue > 0 ? ((revenue - totalSpend) / totalSpend * 100) : 0;
+  const roi = totalSpend > 0 ? revenue / totalSpend : 0;
 
   // ── Alerts ───────────────────────────────────────────────────────────────
   type Alert = { clientId: string; clientName: string; msg: string; severity: 'warning' | 'critical' };
@@ -451,13 +553,13 @@ export default function GeneralDashboard() {
     const client = clients.find(c => c.id === id);
     if (!client) continue;
     const m = metricsByClient[id];
-    const h = clientResults.find(r => r.clientId === id);
     const goal = goalsByClient[id];
+    const planning = readPlanningFromStorage(id);
+    const clientPlannedLeads = plannedFunnelFromGoal(goal, planning)[0] ?? 0;
     const clientLeads = (m?.meta?.leads ?? 0) + (m?.google?.conversions ?? 0);
-    const clientLeadsGoal = goal?.type === 'leads' ? goal.target : (h?.metaLeads ?? 0);
-    const clientLeadsPartial = autoPartial(clientLeadsGoal, period);
+    const clientLeadsPartial = autoPartial(clientPlannedLeads, period);
     const clientCpl = m?.meta?.cpl ?? 0;
-    const clientCplGoal = h?.metaCpl ?? 0;
+    const clientCplGoal = planning.cplMeta;
 
     if (clientLeadsPartial > 0 && clientLeads < clientLeadsPartial * 0.5) {
       alerts.push({ clientId: id, clientName: client.name, msg: `Leads muito abaixo do esperado (${clientLeads} / ${clientLeadsPartial} parcial)`, severity: 'critical' });
@@ -543,62 +645,82 @@ export default function GeneralDashboard() {
           value={roi}
           meta={0}
           partial={0}
-          format="percent"
+          format="times"
           loading={metricsLoading}
-          prefix={roi >= 0 ? '▲' : '▼'}
+          showMeta={false}
+          showPartial={false}
+          showProgress={false}
+          description="Resultado realizado dividido pelo total gasto."
         />
         <KpiCard
           title="Leads Total"
           value={totalLeads}
           meta={leadsGoal}
-          partial={leadsPartial}
+          partial={0}
           loading={metricsLoading}
+          showPartial={false}
+          description="Meta Ads formulários + conversas e conversões Google Ads."
         />
         <KpiCard
           title="Total Gasto"
           value={totalSpend}
-          meta={0}
+          meta={plannedInvestment}
           partial={0}
           format="currency"
           loading={metricsLoading}
+          showPartial={false}
+          description="Gasto real em campanhas Meta Ads e Google Ads."
         />
       </div>
 
       {/* KPI Cards — Row 2 */}
       <div className="grid gap-4 lg:grid-cols-2">
         <KpiCard
-          title="Meta Leads + Conversas"
+          title={<span className="inline-flex items-center gap-2"><MetaMark /> Leads Meta Ads</span>}
           value={metaLeads}
-          meta={metaLeadsGoal}
-          partial={metaLeadsPartial}
+          meta={0}
+          partial={0}
           prefix={`${metaFormLeads.toLocaleString('pt-BR')} formulários · ${metaConversations.toLocaleString('pt-BR')} conversas`}
           loading={metricsLoading}
+          showMeta={false}
+          showPartial={false}
+          showProgress={false}
+          description="Conversas iniciadas + formulários vindos apenas do Meta Ads."
         />
         <KpiCard
-          title="Conversões Google Ads"
+          title={<span className="inline-flex items-center gap-2"><GoogleMark /> Leads Google Ads</span>}
           value={googleConv}
-          meta={googleConvGoal}
-          partial={googleConvPartial}
-          prefix="Google"
+          meta={0}
+          partial={0}
           loading={metricsLoading}
+          showMeta={false}
+          showPartial={false}
+          showProgress={false}
+          description="Total de conversões vindas apenas do Google Ads."
         />
         <KpiCard
           title="CPL Meta Ads"
           value={avgCpl}
-          meta={cplGoal}
+          meta={0}
           partial={0}
           format="currency"
-          inverse
           loading={metricsLoading}
+          showMeta={false}
+          showPartial={false}
+          showProgress={false}
+          description="Custo médio por lead do Meta Ads no período selecionado."
         />
         <KpiCard
-          title="Custo/Conv. Google"
+          title="CPC Google Ads"
           value={avgCpa}
-          meta={cpaGoal}
+          meta={0}
           partial={0}
           format="currency"
-          inverse
           loading={metricsLoading}
+          showMeta={false}
+          showPartial={false}
+          showProgress={false}
+          description="Custo médio por conversão do Google Ads no período selecionado."
         />
       </div>
 
@@ -611,9 +733,8 @@ export default function GeneralDashboard() {
               const m = metricsByClient[client.id];
               const leads = (m?.meta?.leads ?? 0) + (m?.google?.conversions ?? 0);
               const spend = (m?.meta?.spend ?? 0) + (m?.google?.cost ?? 0);
-              const h = clientResults.find(r => r.clientId === client.id);
               const goal = goalsByClient[client.id];
-              const clientLeadsGoal = goal?.type === 'leads' ? goal.target : (h?.metaLeads ?? 0);
+              const clientLeadsGoal = plannedFunnelFromGoal(goal, readPlanningFromStorage(client.id))[0] ?? 0;
               const pct = clientLeadsGoal > 0 ? Math.min(100, Math.round(leads / clientLeadsGoal * 100)) : null;
 
               return (

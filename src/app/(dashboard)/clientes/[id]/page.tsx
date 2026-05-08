@@ -465,23 +465,23 @@ function FunnelTab({ clientId, clientName, goalConfig }: { clientId: string; cli
                 <div key={stage.id}>
                   <div className="flex items-center gap-3">
                     <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1.5">
+                      <div className="flex flex-wrap items-center gap-3 mb-2">
                         <input
                           type="text"
                           value={stage.name}
                           onChange={(e) => updateName(idx, e.target.value)}
-                          className="flex-1 text-sm font-semibold focus:outline-none border-b border-transparent hover:border-border focus:border-primary transition-colors bg-transparent"
+                          className="min-w-[220px] flex-1 text-sm font-semibold focus:outline-none border-b border-transparent hover:border-border focus:border-primary transition-colors bg-transparent"
                         />
-                        <div className="flex shrink-0 items-center gap-2">
-                          <div className="rounded-lg bg-background/70 px-2.5 py-1 text-right">
-                            <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground">Volume</p>
-                            <p className="text-lg font-bold font-heading leading-none" style={{ color }}>
+                        <div className="grid shrink-0 grid-cols-2 overflow-hidden rounded-lg border border-border bg-background/70 min-w-[190px]">
+                          <div className="px-3 py-2 text-right">
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Volume</p>
+                            <p className="mt-1 text-xl font-bold font-heading leading-none" style={{ color }}>
                               {vol.toLocaleString('pt-BR')}
                             </p>
                           </div>
-                          <div className="w-14 rounded-lg bg-background/70 px-2.5 py-1 text-right">
-                            <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground">%</p>
-                            <p className="text-lg font-bold font-heading leading-none text-muted-foreground">{pct}%</p>
+                          <div className="border-l border-border px-3 py-2 text-right">
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">% do topo</p>
+                            <p className="mt-1 text-xl font-bold font-heading leading-none text-foreground">{pct}%</p>
                           </div>
                         </div>
                         {stages.length > 2 && (
