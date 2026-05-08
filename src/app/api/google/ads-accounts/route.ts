@@ -66,43 +66,89 @@ export async function GET(request: NextRequest) {
 
   const { resourceNames = [] } = await listRes.json() as { resourceNames?: string[] };
 
-  const accounts = (
-    await Promise.allSettled(
-      resourceNames.map(async (resourceName: string) => {
-        const customerId = resourceName.replace('customers/', '');
-        const res = await fetch(
-          `https://googleads.googleapis.com/v20/customers/${customerId}/googleAds:search`,
-          {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${accessToken}`,
-              'developer-token': developerToken,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              query: 'SELECT customer.id, customer.descriptive_name, customer.currency_code, customer.status, customer.manager FROM customer LIMIT 1',
-            }),
-          }
-        );
-        if (!res.ok) return null;
-        const data = await res.json() as { results?: { customer?: { id?: string; descriptiveName?: string; currencyCode?: string; status?: string; manager?: boolean } }[] };
-        const row = data.results?.[0]?.customer;
-        if (!row) return null;
-        return {
-          id: customerId,
-          name: row.descriptiveName ?? `Conta ${customerId}`,
-          currency: row.currencyCode ?? 'BRL',
-          status: row.status ?? 'ENABLED',
-          isManager: row.manager ?? false,
-        };
-      })
-    )
+  type AdsAccount = { id: string; name: string; currency: string; status: string; isManager: boolean; mccId?: string };
+
+  async function fetchCustomerInfo(customerId: string, loginCustomerId?: string): Promise<AdsAccount | null> {
+    const headers: Record<string, string> = {
+      'Authorization': `Bearer ${accessToken}`,
+      'developer-token': developerToken,
+      'Content-Type': 'application/json',
+    };
+    if (loginCustomerId) headers['login-customer-id'] = loginCustomerId;
+
+    const res = await fetch(
+      `https://googleads.googleapis.com/v20/customers/${customerId}/googleAds:search`,
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          query: 'SELECT customer.id, customer.descriptive_name, customer.currency_code, customer.status, customer.manager FROM customer LIMIT 1',
+        }),
+      }
+    );
+    if (!res.ok) return null;
+    const data = await res.json() as { results?: { customer?: { id?: string; descriptiveName?: string; currencyCode?: string; status?: string; manager?: boolean } }[] };
+    const row = data.results?.[0]?.customer;
+    if (!row) return null;
+    return {
+      id: customerId,
+      name: row.descriptiveName ?? `Conta ${customerId}`,
+      currency: row.currencyCode ?? 'BRL',
+      status: row.status ?? 'ENABLED',
+      isManager: row.manager ?? false,
+    };
+  }
+
+  async function fetchMccSubAccounts(mccId: string): Promise<AdsAccount[]> {
+    const res = await fetch(
+      `https://googleads.googleapis.com/v20/customers/${mccId}/googleAds:search`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'developer-token': developerToken,
+          'login-customer-id': mccId,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          query: `SELECT customer_client.id, customer_client.descriptive_name, customer_client.currency_code,
+                         customer_client.status, customer_client.manager, customer_client.level
+                  FROM customer_client
+                  WHERE customer_client.level = 1`,
+        }),
+      }
+    );
+    if (!res.ok) return [];
+    const data = await res.json() as { results?: { customerClient?: { id?: string; descriptiveName?: string; currencyCode?: string; status?: string; manager?: boolean } }[] };
+    return (data.results ?? [])
+      .map((r) => r.customerClient)
+      .filter(Boolean)
+      .map((c) => ({
+        id: String(c!.id ?? ''),
+        name: c!.descriptiveName ?? `Conta ${c!.id}`,
+        currency: c!.currencyCode ?? 'BRL',
+        status: c!.status ?? 'ENABLED',
+        isManager: c!.manager ?? false,
+        mccId,
+      }));
+  }
+
+  const topLevel = (
+    await Promise.allSettled(resourceNames.map((r: string) => fetchCustomerInfo(r.replace('customers/', ''))))
   )
-    .filter(
-      (r): r is PromiseFulfilledResult<{ id: string; name: string; currency: string; status: string; isManager: boolean }> =>
-        r.status === 'fulfilled' && r.value !== null
-    )
+    .filter((r): r is PromiseFulfilledResult<AdsAccount> => r.status === 'fulfilled' && r.value !== null)
     .map((r) => r.value);
 
-  return Response.json(accounts);
+  const subAccountArrays = await Promise.allSettled(
+    topLevel.filter((a) => a.isManager).map((a) => fetchMccSubAccounts(a.id))
+  );
+
+  const subAccounts = subAccountArrays
+    .filter((r): r is PromiseFulfilledResult<AdsAccount[]> => r.status === 'fulfilled')
+    .flatMap((r) => r.value);
+
+  const allIds = new Set(topLevel.map((a) => a.id));
+  const newSubAccounts = subAccounts.filter((a) => !allIds.has(a.id));
+
+  return Response.json([...topLevel, ...newSubAccounts]);
 }
