@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from 'react';
-import { assertSupabaseConfigured, supabase } from '@/lib/supabase';
 
 export type GoogleAccountType = 'gmb' | 'google_ads';
 
@@ -19,37 +18,15 @@ export type GoogleConnection = {
   connectedAt: string;
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function rowToConnection(r: any): GoogleConnection {
-  return {
-    id: r.id,
-    email: r.email ?? '',
-    displayName: r.display_name ?? '',
-    picture: r.picture ?? undefined,
-    accessToken: r.access_token ?? '',
-    refreshToken: r.refresh_token ?? '',
-    tokenExpiry: r.token_expiry ?? undefined,
-    scope: r.scope ?? '',
-    accountType: (r.account_type ?? 'gmb') as GoogleAccountType,
-    status: r.status ?? 'connected',
-    connectedAt: r.connected_at ?? new Date().toISOString(),
-  };
-}
-
 export async function loadGoogleConnections(): Promise<GoogleConnection[]> {
-  assertSupabaseConfigured();
-  const { data, error } = await supabase
-    .from('google_connections')
-    .select('*')
-    .order('connected_at', { ascending: false });
-  if (error) throw error;
-  return (data ?? []).map(rowToConnection);
+  const res = await fetch('/api/google/connections');
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<GoogleConnection[]>;
 }
 
 export async function removeGoogleConnection(id: string): Promise<void> {
-  assertSupabaseConfigured();
-  const { error } = await supabase.from('google_connections').delete().eq('id', id);
-  if (error) throw error;
+  const res = await fetch(`/api/google/connections?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error(await res.text());
 }
 
 export function useGoogleConnections() {
