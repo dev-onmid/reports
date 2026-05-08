@@ -990,8 +990,11 @@ function GoogleConnectionsPanel({
           setAdsAccounts(data as AdsAccount[]);
         } else if (isGmb) {
           const res = await fetch(`/api/google/business-locations?connectionId=${conn.id}&noMetrics=true`);
-          const data = await res.json() as { error?: string } | GmbLocation[];
-          if (!res.ok) throw new Error((data as { error?: string }).error ?? 'Erro ao buscar locais');
+          const data = await res.json() as { error?: string; detail?: string } | GmbLocation[];
+          if (!res.ok) {
+            const d = data as { error?: string; detail?: string };
+            throw new Error([d.error, d.detail].filter(Boolean).join(' — '));
+          }
           setGmbLocations(data as GmbLocation[]);
         }
         setShowItems(true);
