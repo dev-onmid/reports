@@ -964,28 +964,42 @@ function GoogleConnectionsPanel({
   }
 
   type AdsAccount = { id: string; name: string; status: string; isManager: boolean; mccId?: string };
+  type GmbLocation = { locationId: string; accountId: string; name: string; address?: string; phone?: string; websiteUrl?: string; metrics?: { impressions: number; websiteClicks: number; callClicks: number; directionRequests: number } };
 
   function ConnectionRow({ conn }: { conn: GoogleConnection }) {
-    const [adsAccounts, setAdsAccounts] = useState<AdsAccount[]>([]);
-    const [loadingAds, setLoadingAds] = useState(false);
-    const [adsError, setAdsError] = useState<string | null>(null);
-    const [showAccounts, setShowAccounts] = useState(false);
+    const isAds = conn.accountType === 'google_ads';
+    const isGmb = conn.accountType === 'gmb';
 
-    async function loadAdsAccounts() {
-      if (adsAccounts.length > 0) { setShowAccounts((v) => !v); return; }
-      setLoadingAds(true);
-      setAdsError(null);
+    const [adsAccounts, setAdsAccounts] = useState<AdsAccount[]>([]);
+    const [gmbLocations, setGmbLocations] = useState<GmbLocation[]>([]);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [showItems, setShowItems] = useState(false);
+
+    async function loadItems() {
+      if ((isAds && adsAccounts.length > 0) || (isGmb && gmbLocations.length > 0)) {
+        setShowItems((v) => !v); return;
+      }
+      setLoading(true);
+      setError(null);
       try {
-        const res = await fetch(`/api/google/ads-accounts?connectionId=${conn.id}&period=THIS_MONTH`);
-        const data = await res.json() as { error?: string } | AdsAccount[];
-        if (!res.ok) throw new Error((data as { error?: string }).error ?? 'Erro ao buscar contas');
-        setAdsAccounts(data as AdsAccount[]);
-        setShowAccounts(true);
+        if (isAds) {
+          const res = await fetch(`/api/google/ads-accounts?connectionId=${conn.id}&period=THIS_MONTH`);
+          const data = await res.json() as { error?: string } | AdsAccount[];
+          if (!res.ok) throw new Error((data as { error?: string }).error ?? 'Erro ao buscar contas');
+          setAdsAccounts(data as AdsAccount[]);
+        } else if (isGmb) {
+          const res = await fetch(`/api/google/business-locations?connectionId=${conn.id}&noMetrics=true`);
+          const data = await res.json() as { error?: string } | GmbLocation[];
+          if (!res.ok) throw new Error((data as { error?: string }).error ?? 'Erro ao buscar locais');
+          setGmbLocations(data as GmbLocation[]);
+        }
+        setShowItems(true);
       } catch (e) {
-        setAdsError(e instanceof Error ? e.message : 'Erro');
-        setShowAccounts(true);
+        setError(e instanceof Error ? e.message : 'Erro');
+        setShowItems(true);
       } finally {
-        setLoadingAds(false);
+        setLoading(false);
       }
     }
 
@@ -1004,17 +1018,19 @@ function GoogleConnectionsPanel({
             <p className="text-xs text-muted-foreground truncate">{conn.email}</p>
             <p className="text-[10px] text-muted-foreground/60 mt-0.5">
               {conn.connectedAt ? new Date(conn.connectedAt).toLocaleDateString('pt-BR') : '—'}
+              {isGmb && <span className="ml-2 font-bold text-[#34A853]">GMB</span>}
+              {isAds && <span className="ml-2 font-bold text-[#4285F4]">Ads</span>}
             </p>
           </div>
           <div className="flex items-center gap-1 shrink-0">
-            {conn.accountType === 'google_ads' && (
+            {(isAds || isGmb) && (
               <button
-                onClick={() => void loadAdsAccounts()}
-                disabled={loadingAds}
+                onClick={() => void loadItems()}
+                disabled={loading}
                 className="rounded-lg px-2 py-1 text-[10px] font-medium text-muted-foreground hover:bg-muted transition-colors flex items-center gap-1"
               >
-                {loadingAds ? <RefreshCw className="w-3 h-3 animate-spin" /> : <ChevronDown className={cn('w-3 h-3 transition-transform', showAccounts && 'rotate-180')} />}
-                Ver contas
+                {loading ? <RefreshCw className="w-3 h-3 animate-spin" /> : <ChevronDown className={cn('w-3 h-3 transition-transform', showItems && 'rotate-180')} />}
+                {isGmb ? 'Ver locais' : 'Ver contas'}
               </button>
             )}
             <CheckCircle2 className="w-3.5 h-3.5 text-primary" />
@@ -1024,19 +1040,34 @@ function GoogleConnectionsPanel({
           </div>
         </div>
 
-        {showAccounts && (
+        {showItems && (
           <div className="pl-12 pb-3 space-y-1.5">
-            {adsError && <p className="text-xs text-red-400">{adsError}</p>}
-            {adsAccounts.length === 0 && !adsError && (
+            {error && <p className="text-xs text-red-400">{error}</p>}
+            {/* Google Ads accounts */}
+            {isAds && !error && adsAccounts.length === 0 && (
               <p className="text-xs text-muted-foreground">Nenhuma conta encontrada.</p>
             )}
-            {adsAccounts.map((a) => (
+            {isAds && adsAccounts.map((a) => (
               <div key={a.id} className="flex items-center gap-2 text-xs bg-muted/30 rounded-lg px-3 py-2">
                 <span className={cn('w-1.5 h-1.5 rounded-full shrink-0', a.status === 'ENABLED' ? 'bg-primary' : 'bg-muted-foreground')} />
                 <span className="font-medium truncate flex-1">{a.name}</span>
                 <span className="text-muted-foreground font-mono shrink-0">{a.id}</span>
                 {a.isManager && <span className="text-[9px] bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded font-bold">MCC</span>}
                 {a.mccId && !a.isManager && <span className="text-[9px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded">via MCC</span>}
+              </div>
+            ))}
+            {/* GMB locations */}
+            {isGmb && !error && gmbLocations.length === 0 && (
+              <p className="text-xs text-muted-foreground">Nenhum local encontrado.</p>
+            )}
+            {isGmb && gmbLocations.map((loc) => (
+              <div key={loc.locationId} className="text-xs bg-muted/30 rounded-lg px-3 py-2 space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#34A853] shrink-0" />
+                  <span className="font-medium truncate flex-1">{loc.name}</span>
+                  <span className="text-muted-foreground font-mono shrink-0">{loc.locationId}</span>
+                </div>
+                {loc.address && <p className="text-muted-foreground pl-3.5 truncate">{loc.address}</p>}
               </div>
             ))}
           </div>

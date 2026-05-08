@@ -15,10 +15,11 @@ import type { GoogleConnection } from '@/lib/google-connections-store';
 import { type PlatformId, PLATFORM_INFO, PlatformIconButton } from '@/components/platform-icons';
 
 type AdsAccount = { id: string; name: string; status: string; isManager: boolean; mccId?: string; currency?: string };
+type GmbLocation = { locationId: string; accountId: string; name: string; address?: string; phone?: string };
 
 const PLATFORM_LABEL = (p: PlatformId) => PLATFORM_INFO[p].label;
 
-const COMING_SOON_PLATFORMS: PlatformId[] = ['meta_ads', 'facebook', 'instagram', 'google_business', 'google_sheets'];
+const COMING_SOON_PLATFORMS: PlatformId[] = ['meta_ads', 'facebook', 'instagram', 'google_sheets'];
 
 function GoogleAdsContent({
   clientId,
@@ -184,6 +185,159 @@ function GoogleAdsContent({
   );
 }
 
+function GmbContent({ clientId, onDone, onCancel }: { clientId: string; onDone: () => void; onCancel: () => void }) {
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [gmbConns, setGmbConns] = useState<GoogleConnection[]>([]);
+  const [locationsByConn, setLocationsByConn] = useState<Record<string, GmbLocation[]>>({});
+  const [existingLinks, setExistingLinks] = useState<{ locationId: string; linkId: string }[]>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    void loadData();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId]);
+
+  async function loadData() {
+    setLoading(true);
+    try {
+      const [linksRes, connsRes] = await Promise.all([
+        fetch(`/api/clients/${clientId}/links`),
+        fetch('/api/google/connections'),
+      ]);
+      const links: Array<{ id: string; platform: string; accountId: string }> = linksRes.ok ? await linksRes.json() : [];
+      const conns: GoogleConnection[] = connsRes.ok ? await connsRes.json() : [];
+
+      const gmbLinks = links.filter((l) => l.platform === 'google_business');
+      setExistingLinks(gmbLinks.map((l) => ({ locationId: l.accountId, linkId: l.id })));
+      setSelected(new Set(gmbLinks.map((l) => l.accountId)));
+
+      const filtered = conns.filter((c) => c.accountType === 'gmb');
+      setGmbConns(filtered);
+
+      const locMap: Record<string, GmbLocation[]> = {};
+      await Promise.allSettled(
+        filtered.map(async (conn) => {
+          const res = await fetch(`/api/google/business-locations?connectionId=${conn.id}&noMetrics=true`);
+          if (res.ok) locMap[conn.id] = await res.json() as GmbLocation[];
+        })
+      );
+      setLocationsByConn(locMap);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function toggle(locationId: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(locationId)) next.delete(locationId); else next.add(locationId);
+      return next;
+    });
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      const existingIds = new Set(existingLinks.map((l) => l.locationId));
+      await Promise.allSettled(
+        [...selected]
+          .filter((id) => !existingIds.has(id))
+          .map((locationId) => {
+            let location: GmbLocation | undefined;
+            let conn: GoogleConnection | undefined;
+            for (const [connId, locs] of Object.entries(locationsByConn)) {
+              const found = locs.find((l) => l.locationId === locationId);
+              if (found) { location = found; conn = gmbConns.find((c) => c.id === connId); break; }
+            }
+            if (!location || !conn) return Promise.resolve();
+            return addClientLink(clientId, {
+              platform: 'google_business',
+              connectionId: conn.id,
+              accountId: location.locationId,
+              accountName: location.name,
+              currency: 'BRL',
+            });
+          })
+      );
+      await Promise.allSettled(
+        existingLinks
+          .filter((l) => !selected.has(l.locationId))
+          .map((l) => removeClientLink(clientId, l.linkId))
+      );
+      onDone();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const allLocations = Object.entries(locationsByConn).flatMap(([connId, locs]) =>
+    locs.map((l) => ({ ...l, connId }))
+  );
+
+  if (loading) {
+    return (
+      <>
+        <div className="flex items-center justify-center py-10 gap-2 text-muted-foreground text-sm">
+          <RefreshCw className="w-4 h-4 animate-spin" /> Carregando locais...
+        </div>
+        <DialogFooter><Button variant="outline" onClick={onCancel}>Cancelar</Button></DialogFooter>
+      </>
+    );
+  }
+
+  if (allLocations.length === 0) {
+    return (
+      <>
+        <p className="text-sm text-muted-foreground py-6 text-center">
+          Nenhum local Google Meu Negócio disponível. Conecte uma conta GMB em Integrações primeiro.
+        </p>
+        <DialogFooter><Button variant="outline" onClick={onCancel}>Fechar</Button></DialogFooter>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+        {gmbConns.map((conn) => {
+          const locs = locationsByConn[conn.id] ?? [];
+          if (locs.length === 0) return null;
+          return (
+            <div key={conn.id}>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5 px-1">
+                Google Meu Negócio · {conn.email}
+              </p>
+              <div className="space-y-1">
+                {locs.map((loc) => (
+                  <button
+                    key={loc.locationId}
+                    onClick={() => toggle(loc.locationId)}
+                    className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-muted/50 transition-colors text-left"
+                  >
+                    {selected.has(loc.locationId)
+                      ? <CheckSquare className="w-4 h-4 text-primary shrink-0" />
+                      : <Square className="w-4 h-4 text-muted-foreground shrink-0" />}
+                    <span className="text-sm flex-1 truncate">{loc.name}</span>
+                    {loc.address && <span className="text-[10px] text-muted-foreground truncate max-w-[140px]">{loc.address}</span>}
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <DialogFooter>
+        <Button variant="outline" onClick={onCancel}>Cancelar</Button>
+        <Button onClick={() => void handleSave()} disabled={saving} className="bg-primary text-primary-foreground hover:bg-primary/90">
+          {saving ? <RefreshCw className="w-3.5 h-3.5 animate-spin mr-1" /> : <Link2 className="w-3.5 h-3.5 mr-1" />}
+          Salvar vínculos
+        </Button>
+      </DialogFooter>
+    </>
+  );
+}
+
 function ComingSoonContent({ platform, onCancel }: { platform: PlatformId; onCancel: () => void }) {
   return (
     <>
@@ -239,6 +393,12 @@ export function LinkAccountsDialog({
 
         {COMING_SOON_PLATFORMS.includes(platform) ? (
           <ComingSoonContent platform={platform} onCancel={() => onOpenChange(false)} />
+        ) : platform === 'google_business' ? (
+          <GmbContent
+            clientId={clientId}
+            onDone={() => onOpenChange(false)}
+            onCancel={() => onOpenChange(false)}
+          />
         ) : (
           <GoogleAdsContent
             clientId={clientId}
