@@ -160,6 +160,7 @@ async function fetchMccSubAccounts(mccId: string, accessToken: string, developer
 export async function GET(request: NextRequest) {
   const connectionId = request.nextUrl.searchParams.get('connectionId');
   const period = request.nextUrl.searchParams.get('period') ?? 'THIS_MONTH';
+  const noMetrics = request.nextUrl.searchParams.get('noMetrics') === 'true';
   if (!connectionId) return Response.json({ error: 'Missing connectionId' }, { status: 400 });
 
   const pool = makePool();
@@ -203,6 +204,8 @@ export async function GET(request: NextRequest) {
 
   const topIds = new Set(topLevel.map((a) => a.id));
   const allAccounts = [...topLevel, ...subAccounts.filter((a) => !topIds.has(a.id))];
+
+  if (noMetrics) return Response.json(allAccounts);
 
   // Fetch metrics for all accounts in parallel
   const withMetrics = await Promise.allSettled(
