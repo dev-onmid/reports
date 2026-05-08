@@ -12,7 +12,7 @@ import { GOOGLE_ADS_MANAGERS, type GoogleAdsMetrics, useGoogleAds } from '@/lib/
 import { loadIntegrations, loadCachedAdAccounts, readIntegrations, type CachedAdAccount } from '@/lib/integration-store';
 import {
   Calendar, Users, BarChart3, TrendingUp, UploadCloud,
-  Link as LinkIcon, Plus, X, ChevronDown, LayoutGrid,
+  Link as LinkIcon, Link2, Plus, X, ChevronDown, LayoutGrid,
   WalletCards, Send, CheckCircle2, Clock3, AlertTriangle, Filter, Trash2,
   UserRound, Phone, Mail, Briefcase, SlidersHorizontal, Check, Hash, BarChart2, Layers,
 } from 'lucide-react';
@@ -37,6 +37,7 @@ import {
 } from '@/lib/payment-store';
 import { getHoliday, previousBusinessDay, formatDateBR as formatHolidayDateBR } from '@/lib/holidays';
 import { cn, formatCurrencyBRL, formatCurrencyInputBRL, parseCurrencyBRL } from '@/lib/utils';
+import { LinkAccountsDialog } from '@/components/link-accounts-dialog';
 
 // ── Funnel types & logic ───────────────────────────────────────────────────────
 type FunnelStage = { id: string; name: string; conversion: number };
@@ -2541,7 +2542,7 @@ function ClientIntegrationsTab({ clientId, clientName }: { clientId: string; cli
 }
 
 // ── Page ───────────────────────────────────────────────────────────────────────
-const TABS = ['planejamento', 'dashboard', 'time', 'pagamentos', 'integracoes', 'importar'] as const;
+const TABS = ['planejamento', 'dashboard', 'time', 'pagamentos', 'importar'] as const;
 type Tab = typeof TABS[number];
 
 export default function ClientPage({ params }: { params: Promise<{ id: string }> }) {
@@ -2555,8 +2556,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
   const isNewClient = !baseClient || !storedClient;
   const metaConnection = getConnection(id);
 
-  const [period, setPeriod] = useState<MetaInsightsPeriod>('last_30d');
-  const [periodMenuOpen, setPeriodMenuOpen] = useState(false);
+  const [period] = useState<MetaInsightsPeriod>('last_30d');
   const [realMetrics, setRealMetrics] = useState<MetaAdsMetrics | null>(null);
   const [metricsLoading, setMetricsLoading] = useState(false);
 
@@ -2587,6 +2587,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
     : isNewClient ? ZERO_TODAY_PROGRESS : TODAY_PROGRESS;
 
   const [tab, setTab] = useState<Tab>('planejamento');
+  const [linkDialogOpen, setLinkDialogOpen] = useState(false);
   const [clientGoal, setClientGoal] = useState<ClientGoalConfig>(() => isNewClient ? ZERO_CLIENT_GOAL : DEFAULT_CLIENT_GOAL);
   const [dashboardEditMode, setDashboardEditMode] = useState(false);
   const [customDashboardBlocks, setCustomDashboardBlocks] = useState<ClientDashboardWidget[]>([]);
@@ -2604,7 +2605,6 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
     dashboard:    'Dashboard',
     time:         'Time',
     pagamentos:   'Pagamentos',
-    integracoes:  'Integrações',
     importar:     'Importar Dados',
   };
 
@@ -2622,35 +2622,13 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
           <p className="text-sm text-muted-foreground mt-1 uppercase tracking-wide">{client.segment}</p>
         </div>
         <div className="flex items-center gap-3">
-          <div className="relative">
-            <Button
-              variant="outline"
-              className="border-border h-9 text-xs font-bold uppercase tracking-wider gap-2"
-              onClick={() => setPeriodMenuOpen(prev => !prev)}
-            >
-              <Calendar className="w-4 h-4 text-primary" />
-              {metricsLoading ? 'Carregando...' : PERIOD_LABELS_CLIENT[period]}
-              <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
-            </Button>
-            {periodMenuOpen && (
-              <div className="absolute right-0 top-full mt-1 z-50 bg-card border border-border rounded-lg shadow-lg p-1 min-w-[160px]">
-                {(Object.entries(PERIOD_LABELS_CLIENT) as [MetaInsightsPeriod, string][]).map(([value, label]) => (
-                  <button
-                    key={value}
-                    onClick={() => { setPeriod(value); setPeriodMenuOpen(false); }}
-                    className={cn(
-                      'w-full text-left px-3 py-2 rounded-md text-xs font-medium transition-colors',
-                      period === value ? 'bg-primary/10 text-primary' : 'hover:bg-muted text-foreground',
-                    )}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          <Button className="bg-primary text-primary-foreground hover:bg-primary/90 h-9 text-xs font-bold uppercase tracking-wider">
-            Exportar PDF
+          <Button
+            variant="outline"
+            className="border-border h-9 text-xs font-bold uppercase tracking-wider gap-2"
+            onClick={() => setLinkDialogOpen(true)}
+          >
+            <Link2 className="w-4 h-4 text-primary" />
+            Vincular Contas
           </Button>
         </div>
       </div>
@@ -2695,7 +2673,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
 
       {tab === 'pagamentos' && <InvestmentPaymentsTab clientId={id} clientName={client.name} />}
 
-      {tab === 'integracoes' && <ClientIntegrationsTab clientId={id} clientName={client.name} />}
+
 
       {tab === 'importar' && (
         <div className="grid gap-5 md:grid-cols-2 pt-1">
@@ -2737,6 +2715,13 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
           </Card>
         </div>
       )}
+
+      <LinkAccountsDialog
+        clientId={id}
+        clientName={client.name}
+        open={linkDialogOpen}
+        onOpenChange={setLinkDialogOpen}
+      />
     </div>
   );
 }
