@@ -52,7 +52,7 @@ export async function GET(request: NextRequest) {
   const accessToken = await getFreshAccessToken(conn);
   const developerToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? '1vR8GhAk4UMZoPaqo7Qq8Q';
 
-  const listRes = await fetch('https://googleads.googleapis.com/v19/customers:listAccessibleCustomers', {
+  const listRes = await fetch('https://googleads.googleapis.com/v20/customers:listAccessibleCustomers', {
     headers: {
       'Authorization': `Bearer ${accessToken}`,
       'developer-token': developerToken,
@@ -71,7 +71,7 @@ export async function GET(request: NextRequest) {
       resourceNames.map(async (resourceName: string) => {
         const customerId = resourceName.replace('customers/', '');
         const res = await fetch(
-          `https://googleads.googleapis.com/v19/customers/${customerId}/googleAds:search`,
+          `https://googleads.googleapis.com/v20/customers/${customerId}/googleAds:search`,
           {
             method: 'POST',
             headers: {
