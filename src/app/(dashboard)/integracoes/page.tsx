@@ -1045,7 +1045,7 @@ function GoogleConnectionsPanel({
 
         {showItems && (
           <div className="pl-12 pb-3 space-y-1.5">
-            {error && <p className="text-xs text-red-400">{error}</p>}
+            {error && <p className="text-xs text-red-400 break-all">{error}</p>}
             {/* Google Ads accounts */}
             {isAds && !error && adsAccounts.length === 0 && (
               <p className="text-xs text-muted-foreground">Nenhuma conta encontrada.</p>
