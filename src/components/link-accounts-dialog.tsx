@@ -23,6 +23,7 @@ type MetaConn = { id: string; label: string; userName: string; userPicture?: str
 const PLATFORM_LABEL = (p: PlatformId) => PLATFORM_INFO[p].label;
 
 const COMING_SOON_PLATFORMS: PlatformId[] = ['google_sheets'];
+const LINKABLE_PLATFORMS: PlatformId[] = ['meta_ads', 'google_ads', 'google_business', 'google_sheets'];
 
 type SortDirection = 'az' | 'za';
 
@@ -830,10 +831,59 @@ function ComingSoonContent({ platform, onCancel }: { platform: PlatformId; onCan
   );
 }
 
+function PlatformChooser({
+  onSelect,
+  onCancel,
+}: {
+  onSelect: (platform: PlatformId) => void;
+  onCancel: () => void;
+}) {
+  return (
+    <>
+      <div className="grid gap-2">
+        {LINKABLE_PLATFORMS.map((platform) => {
+          const info = PLATFORM_INFO[platform];
+          return (
+            <div
+              key={platform}
+              role="button"
+              tabIndex={0}
+              onClick={() => onSelect(platform)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') onSelect(platform);
+              }}
+              className="flex items-center gap-3 rounded-xl border border-border bg-background/60 p-3 text-left transition-colors hover:border-primary/50 hover:bg-muted/40"
+            >
+              <PlatformIconButton
+                platform={platform}
+                size="md"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onSelect(platform);
+                }}
+              />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold">{info.label}</p>
+                <p className="text-xs text-muted-foreground">
+                  Escolher ativos e contas vinculadas deste canal.
+                </p>
+              </div>
+              <Link2 className="h-4 w-4 text-muted-foreground" />
+            </div>
+          );
+        })}
+      </div>
+      <DialogFooter>
+        <Button variant="outline" onClick={onCancel}>Cancelar</Button>
+      </DialogFooter>
+    </>
+  );
+}
+
 export function LinkAccountsDialog({
   clientId,
   clientName,
-  platform = 'google_ads',
+  platform,
   open,
   onOpenChange,
 }: {
@@ -843,35 +893,61 @@ export function LinkAccountsDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
-  const info = PLATFORM_INFO[platform];
+  const [selectedPlatform, setSelectedPlatform] = useState<PlatformId | null>(platform ?? null);
+  const activePlatform = platform ?? selectedPlatform;
+  const info = activePlatform ? PLATFORM_INFO[activePlatform] : null;
+
+  useEffect(() => {
+    if (open) setSelectedPlatform(platform ?? null);
+  }, [open, platform]);
+
+  function handleOpenChange(nextOpen: boolean) {
+    onOpenChange(nextOpen);
+    if (!nextOpen) setSelectedPlatform(platform ?? null);
+  }
+
+  function closeDialog() {
+    handleOpenChange(false);
+  }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2.5">
-            <div
-              className="w-6 h-6 rounded-full flex items-center justify-center shrink-0"
-              style={{ backgroundColor: info.bg }}
-            >
-              <PlatformIconButton platform={platform} size="sm" onClick={() => {}} />
-            </div>
-            {info.label} — {clientName}
+            {info ? (
+              <>
+                <div
+                  className="w-6 h-6 rounded-full flex items-center justify-center shrink-0"
+                  style={{ backgroundColor: info.bg }}
+                >
+                  <PlatformIconButton platform={activePlatform!} size="sm" onClick={() => {}} />
+                </div>
+                {info.label} — {clientName}
+              </>
+            ) : (
+              <>
+                <Link2 className="h-5 w-5 text-primary" />
+                Vincular contas — {clientName}
+              </>
+            )}
           </DialogTitle>
         </DialogHeader>
 
-        {COMING_SOON_PLATFORMS.includes(platform) ? (
-          <ComingSoonContent platform={platform} onCancel={() => onOpenChange(false)} />
-        ) : platform === 'google_business' ? (
-          <GmbContent clientId={clientId} onDone={() => onOpenChange(false)} onCancel={() => onOpenChange(false)} />
-        ) : platform === 'meta_ads' ? (
-          <MetaAdsContent clientId={clientId} onDone={() => onOpenChange(false)} onCancel={() => onOpenChange(false)} />
-        ) : platform === 'facebook' ? (
-          <MetaPagesContent platform="facebook" clientId={clientId} onDone={() => onOpenChange(false)} onCancel={() => onOpenChange(false)} />
-        ) : platform === 'instagram' ? (
-          <MetaPagesContent platform="instagram" clientId={clientId} onDone={() => onOpenChange(false)} onCancel={() => onOpenChange(false)} />
+        {!activePlatform ? (
+          <PlatformChooser onSelect={setSelectedPlatform} onCancel={closeDialog} />
+        ) : COMING_SOON_PLATFORMS.includes(activePlatform) ? (
+          <ComingSoonContent platform={activePlatform} onCancel={closeDialog} />
+        ) : activePlatform === 'google_business' ? (
+          <GmbContent clientId={clientId} onDone={closeDialog} onCancel={closeDialog} />
+        ) : activePlatform === 'meta_ads' ? (
+          <MetaAdsContent clientId={clientId} onDone={closeDialog} onCancel={closeDialog} />
+        ) : activePlatform === 'facebook' ? (
+          <MetaPagesContent platform="facebook" clientId={clientId} onDone={closeDialog} onCancel={closeDialog} />
+        ) : activePlatform === 'instagram' ? (
+          <MetaPagesContent platform="instagram" clientId={clientId} onDone={closeDialog} onCancel={closeDialog} />
         ) : (
-          <GoogleAdsContent clientId={clientId} onDone={() => onOpenChange(false)} onCancel={() => onOpenChange(false)} />
+          <GoogleAdsContent clientId={clientId} onDone={closeDialog} onCancel={closeDialog} />
         )}
       </DialogContent>
     </Dialog>

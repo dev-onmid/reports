@@ -303,14 +303,13 @@ const integracoes = [
 function FunnelTab({ clientName, goalConfig }: { clientName: string; goalConfig: ClientGoalConfig }) {
   const [tkm,      setTkm]      = useState(9000);
   const [cplMeta,  setCplMeta]  = useState(30);
-  const [cplAtual, setCplAtual] = useState(30);
   const [stages,   setStages]   = useState<FunnelStage[]>(DEFAULT_STAGES);
 
-  const cplMedio = cplMeta > 0 && cplAtual > 0 ? (cplMeta + cplAtual) / 2 : (cplMeta || cplAtual);
+  const cplPlanejado = cplMeta;
   const vols     = plannedFunnelFromGoal(goalConfig, stages, tkm);
   const topVol   = vols[0] ?? 0;
   const botVol   = vols[stages.length - 1] ?? 0;
-  const invPla   = topVol * cplMedio;
+  const invPla   = topVol * cplPlanejado;
   const cac      = botVol > 0 ? invPla / botVol : 0;
   const roi      = goalConfig.type === 'revenue' && invPla > 0 ? goalConfig.target / invPla : 0;
   const maxVol   = topVol || 1;
@@ -339,11 +338,11 @@ function FunnelTab({ clientName, goalConfig }: { clientName: string; goalConfig:
       {/* Client context */}
       <p className="text-sm text-muted-foreground">
         Configuração do funil de planejamento para <strong className="text-foreground">{clientName}</strong>.
-        A meta principal atual é <strong className="text-foreground">{goalConfig.label}</strong>; ajuste as taxas de conversão para recalcular o plano.
+        A meta principal é <strong className="text-foreground">{goalConfig.label}</strong>; ajuste as taxas de conversão para recalcular o plano.
       </p>
 
       {/* Config row */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="bg-card border border-border rounded-xl p-4">
           <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">META ({goalConfig.label})</p>
           <p className="text-2xl font-bold font-heading text-foreground">{goalValue}</p>
@@ -351,8 +350,7 @@ function FunnelTab({ clientName, goalConfig }: { clientName: string; goalConfig:
         </div>
         {[
           { label: 'TKM (Ticket Médio)',        value: tkm,      set: setTkm,      color: 'text-foreground', desc: 'Valor médio por venda'     },
-          { label: 'CPL META (Custo/Lead)',     value: cplMeta,  set: setCplMeta,  color: 'text-primary',    desc: 'CPL alvo'                  },
-          { label: 'CPL ATUAL',                 value: cplAtual, set: setCplAtual, color: 'text-foreground', desc: `CPL médio: ${fmtBRL(cplMedio)}` },
+          { label: 'CPL META (Custo/Lead)',     value: cplMeta,  set: setCplMeta,  color: 'text-primary',    desc: 'CPL planejado'             },
         ].map(({ label, value, set, color, desc }) => (
           <div key={label} className="bg-card border border-border rounded-xl p-4">
             <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">{label}</p>
@@ -463,7 +461,7 @@ function FunnelTab({ clientName, goalConfig }: { clientName: string; goalConfig:
           <div className="bg-primary/10 border border-primary/30 rounded-xl p-5">
             <p className="text-[9px] font-bold uppercase tracking-widest text-primary mb-2">INV. PLANEJADO</p>
             <p className="text-4xl font-bold font-heading text-primary">{fmtBRL(invPla)}</p>
-            <p className="text-xs text-muted-foreground mt-2">{topVol} leads × {fmtBRL(cplMedio)} CPL médio</p>
+            <p className="text-xs text-muted-foreground mt-2">{topVol} leads × {fmtBRL(cplPlanejado)} CPL planejado</p>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -876,6 +874,33 @@ const ZERO_CLIENT_GOAL: ClientGoalConfig = {
   realized: 0,
   format: 'currency',
 };
+
+function readSavedClientGoal(clientId: string, fallback: ClientGoalConfig): ClientGoalConfig {
+  if (typeof window === 'undefined') return fallback;
+  try {
+    const raw = window.localStorage.getItem(`clientGoal_${clientId}`);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw) as Partial<ClientGoalConfig>;
+    const option = GOAL_TYPE_OPTIONS.find((item) => item.type === parsed.type);
+    if (!option) return fallback;
+    const target = Number(parsed.target ?? fallback.target);
+    return {
+      type: option.type,
+      label: option.label,
+      format: option.format,
+      target,
+      partial: autoPartial(target),
+      realized: Number(parsed.realized ?? fallback.realized ?? 0),
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function saveClientGoal(clientId: string, goal: ClientGoalConfig) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(`clientGoal_${clientId}`, JSON.stringify(goal));
+}
 
 function buildDashboardDataFromMetaAds(metrics: MetaAdsMetrics): typeof mockDashboardData {
   const facebookLeads = Math.round(metrics.leads * 0.62);
@@ -2405,49 +2430,47 @@ function ClientIntegrationsTab({ clientId, clientName }: { clientId: string; cli
 }
 
 // ── Page ───────────────────────────────────────────────────────────────────────
-const TABS = ['planejamento', 'dashboard', 'pagamentos', 'dna', 'importar'] as const;
+const TABS = ['planejamento', 'pagamentos', 'dna', 'importar'] as const;
 type Tab = typeof TABS[number];
 
 export default function ClientPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const { allClients } = useClients();
-  const { getConnection, connections } = useMetaAdsConnections();
   const googleAds = useGoogleAds();
   const baseClient = mockClients.find((c) => c.id === id);
   const storedClient = allClients.find((c) => c.id === id);
   const client = storedClient ?? { name: 'Cliente', segment: '', status: 'Ativo' };
   const isNewClient = !baseClient || !storedClient;
-  const metaConnection = getConnection(id);
 
   const [realMetrics, setRealMetrics] = useState<MetaAdsMetrics | null>(null);
   const [apiGoogleMetrics, setApiGoogleMetrics] = useState<GoogleAdsMetrics | null>(null);
-  const [metricsLoading, setMetricsLoading] = useState(false);
 
   useEffect(() => {
-    setMetricsLoading(true);
     fetch(`/api/clients/${id}/metrics`)
       .then(res => res.ok ? res.json() as Promise<{ meta: MetaAdsMetrics | null; google: GoogleAdsMetrics | null }> : null)
       .then(data => { setRealMetrics(data?.meta ?? null); setApiGoogleMetrics(data?.google ?? null); })
-      .catch(() => { setRealMetrics(null); setApiGoogleMetrics(null); })
-      .finally(() => setMetricsLoading(false));
+      .catch(() => { setRealMetrics(null); setApiGoogleMetrics(null); });
   }, [id]);
 
-  const hasRealData = !!realMetrics;
-  const effectiveMetrics: MetaAdsMetrics = realMetrics ?? { spend: 0, impressions: 0, clicks: 0, leads: 0, cpl: 0 };
   const googleConnection = googleAds.getConnection(id);
   const googleMetrics: GoogleAdsMetrics | null = apiGoogleMetrics ?? (googleConnection ? googleAds.getClientMetrics(id) : null);
-  const hasGoogleData = !!googleMetrics && (googleMetrics.cost > 0 || googleMetrics.conversions > 0);
-  const dashboardData = hasRealData || hasGoogleData
-    ? buildDashboardDataFromPaidMedia(hasRealData ? effectiveMetrics : null, hasGoogleData ? googleMetrics : null)
-    : isNewClient ? ZERO_DASHBOARD_DATA : mockDashboardData;
-  const todayProgress = hasRealData || hasGoogleData
-    ? buildTodayProgressFromPaidMedia(hasRealData ? effectiveMetrics : null, hasGoogleData ? googleMetrics : null)
-    : isNewClient ? ZERO_TODAY_PROGRESS : TODAY_PROGRESS;
 
   const [tab, setTab] = useState<Tab>('planejamento');
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
-  const [clientGoal, setClientGoal] = useState<ClientGoalConfig>(() => isNewClient ? ZERO_CLIENT_GOAL : DEFAULT_CLIENT_GOAL);
-  const [dashboardEditMode, setDashboardEditMode] = useState(false);
+  const [clientGoal, setClientGoal] = useState<ClientGoalConfig>(() =>
+    readSavedClientGoal(id, isNewClient ? ZERO_CLIENT_GOAL : DEFAULT_CLIENT_GOAL)
+  );
+  const [clientGoalLoadedFor, setClientGoalLoadedFor] = useState(id);
+
+  useEffect(() => {
+    setClientGoal(readSavedClientGoal(id, isNewClient ? ZERO_CLIENT_GOAL : DEFAULT_CLIENT_GOAL));
+    setClientGoalLoadedFor(id);
+  }, [id, isNewClient]);
+
+  useEffect(() => {
+    if (clientGoalLoadedFor !== id) return;
+    saveClientGoal(id, clientGoal);
+  }, [id, clientGoal, clientGoalLoadedFor]);
 
   useEffect(() => {
     setClientGoal((prev) => ({
@@ -2461,19 +2484,8 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
     }));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [realMetrics, googleMetrics]);
-  const [customDashboardBlocks, setCustomDashboardBlocks] = useState<ClientDashboardWidget[]>([]);
-
-  function addCustomDashboardBlock(widget: Omit<ClientDashboardWidget, 'id'>) {
-    setCustomDashboardBlocks((prev) => [...prev, { ...widget, id: `client-widget-${Date.now()}` }]);
-  }
-
-  function removeCustomDashboardBlock(id: string) {
-    setCustomDashboardBlocks((prev) => prev.filter((item) => item.id !== id));
-  }
-
   const tabLabel: Record<Tab, string> = {
     planejamento: 'Planejamento',
-    dashboard:    'Dashboard',
     pagamentos:   'Pagamentos',
     dna:          'DNA do Cliente',
     importar:     'Importar Dados',
@@ -2528,19 +2540,6 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
           <ClientGoalSettings goal={clientGoal} onChange={setClientGoal} />
           <FunnelTab clientName={client.name} goalConfig={clientGoal} />
         </div>
-      )}
-
-      {tab === 'dashboard' && (
-        <ClientDashboardTab
-          editable={dashboardEditMode}
-          goalConfig={clientGoal}
-          dashboardData={dashboardData}
-          todayProgress={todayProgress}
-          customBlocks={customDashboardBlocks}
-          onAddCustomBlock={addCustomDashboardBlock}
-          onRemoveCustomBlock={removeCustomDashboardBlock}
-          onEditToggle={() => setDashboardEditMode((prev) => !prev)}
-        />
       )}
 
       {tab === 'dna' && <ClientDnaTab clientId={id} clientName={client.name} />}
