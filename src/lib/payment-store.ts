@@ -2,7 +2,6 @@
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { logActivity } from '@/lib/activity-log-store';
-import { assertSupabaseConfigured, supabase } from '@/lib/supabase';
 
 export type PaymentChannel = 'Meta ADS' | 'Google ADS' | 'TikTok ADS';
 export type PaymentStatus = 'Pendente' | 'Enviado' | 'Pago' | 'Em atraso';
@@ -44,27 +43,17 @@ export function PaymentProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    (async () => {
+    void (async () => {
       try {
-        assertSupabaseConfigured();
-        const { data } = await supabase.from('payments').select('*').order('date');
-        if (!data) return setPayments([]);
+        const res = await fetch('/api/payments');
+        if (!res.ok) { setPayments([]); return; }
+        const data: InvestmentPayment[] = await res.json();
         const today = new Date().toISOString().split('T')[0];
-        const mapped = data.map((r) => ({
-          id: r.id,
-          clientId: r.client_id,
-          clientName: r.client_name,
-          date: r.date,
-          destination: r.destination,
-          amount: Number(r.amount),
-          channel: r.channel as PaymentChannel,
-          status: r.status as PaymentStatus,
-        }));
-        setPayments(mapped.map((p) =>
+        setPayments(data.map((p) =>
           p.status === 'Enviado' && p.date < today ? { ...p, status: 'Em atraso' as PaymentStatus } : p
         ));
       } catch (error) {
-        console.error('Erro ao carregar pagamentos do Supabase:', error);
+        console.error('Erro ao carregar pagamentos:', error);
         setPayments([]);
       } finally {
         setLoading(false);
@@ -75,29 +64,23 @@ export function PaymentProvider({ children }: { children: React.ReactNode }) {
   function addPayment(payment: Omit<InvestmentPayment, 'id'>) {
     const newPayment = { ...payment, id: `pay-${Date.now()}` };
     setPayments((prev) => [...prev, newPayment]);
-    void (async () => {
-      const { error } = await supabase.from('payments').insert({
-        id: newPayment.id,
-        client_id: newPayment.clientId,
-        client_name: newPayment.clientName,
-        date: newPayment.date,
-        destination: newPayment.destination,
-        amount: newPayment.amount,
-        channel: newPayment.channel,
-        status: newPayment.status,
-      });
-      if (error) console.error('Erro ao salvar pagamento no Supabase:', error);
-    })();
+    void fetch('/api/payments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newPayment),
+    }).catch((e) => console.error('Erro ao salvar pagamento:', e));
+
     const dateFormatted = payment.date.split('-').reverse().join('/');
     logActivity('payment_added', `Pix de ${fmtBRL(payment.amount)} adicionado para ${payment.clientName} (${payment.channel}) em ${dateFormatted}`);
   }
 
   function updatePaymentStatus(id: string, status: PaymentStatus) {
     setPayments((prev) => prev.map((p) => p.id === id ? { ...p, status } : p));
-    void (async () => {
-      const { error } = await supabase.from('payments').update({ status }).eq('id', id);
-      if (error) console.error('Erro ao atualizar pagamento no Supabase:', error);
-    })();
+    void fetch(`/api/payments?id=${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    }).catch((e) => console.error('Erro ao atualizar pagamento:', e));
   }
 
   function deletePayment(id: string) {
@@ -109,10 +92,8 @@ export function PaymentProvider({ children }: { children: React.ReactNode }) {
       }
       return prev.filter((p) => p.id !== id);
     });
-    void (async () => {
-      const { error } = await supabase.from('payments').delete().eq('id', id);
-      if (error) console.error('Erro ao excluir pagamento no Supabase:', error);
-    })();
+    void fetch(`/api/payments?id=${id}`, { method: 'DELETE' })
+      .catch((e) => console.error('Erro ao excluir pagamento:', e));
   }
 
   return React.createElement(

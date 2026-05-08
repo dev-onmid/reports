@@ -28,9 +28,6 @@ import {
   PAYMENT_STATUS_OPTIONS,
   useInvestmentPayments,
 } from '@/lib/payment-store';
-import { loadIntegrations, loadCachedAdAccounts, type CachedAdAccount } from '@/lib/integration-store';
-import { useMetaAdsConnections } from '@/lib/meta-ads-store';
-import { type GoogleAdsAccount, useGoogleAds } from '@/lib/google-ads-store';
 import { getHoliday, previousBusinessDay, formatDateBR as formatHolidayDateBR } from '@/lib/holidays';
 import { cn, formatCurrencyBRL, formatCurrencyInputBRL, parseCurrencyBRL } from '@/lib/utils';
 
@@ -47,60 +44,16 @@ type AdAccountBalance = {
   paymentUrl: string;
 };
 
-async function fetchAdAccountBalances(accounts: CachedAdAccount[], token: string): Promise<AdAccountBalance[]> {
-  return Promise.all(
-    accounts.map(async (account) => {
-      try {
-        const res = await fetch(
-          `https://graph.facebook.com/v21.0/${account.id}?fields=balance,currency,name&access_token=${token}`,
-        );
-        const data = await res.json();
-        if (data.error) return {
-          id: account.id,
-          name: account.name,
-          currency: account.currency,
-          balance: null,
-          error: data.error.message,
-          platform: 'meta',
-          paymentUrl: `https://business.facebook.com/ads/manager/billing/?act=${account.id.replace('act_', '')}`,
-        };
-        // Meta returns balance as integer in the currency's smallest unit (cents)
-        const balance = parseInt(data.balance || '0', 10) / 100;
-        return {
-          id: account.id,
-          name: account.name,
-          currency: data.currency || account.currency,
-          balance,
-          error: null,
-          platform: 'meta',
-          paymentUrl: `https://business.facebook.com/ads/manager/billing/?act=${account.id.replace('act_', '')}`,
-        };
-      } catch (e) {
-        return {
-          id: account.id,
-          name: account.name,
-          currency: account.currency,
-          balance: null,
-          error: String(e),
-          platform: 'meta',
-          paymentUrl: `https://business.facebook.com/ads/manager/billing/?act=${account.id.replace('act_', '')}`,
-        };
-      }
-    }),
-  );
-}
-
-function buildGoogleAdAccountBalances(accounts: GoogleAdsAccount[]): AdAccountBalance[] {
-  return accounts.map((account) => ({
-    id: account.id,
-    name: account.name,
-    currency: account.currency,
-    balance: account.balance,
-    error: null,
-    platform: 'google',
-    paymentUrl: `https://ads.google.com/aw/billing/summary?ocid=${account.id.replace(/\D/g, '')}`,
-  }));
-}
+type ClientAccountLink = {
+  id: string;
+  clientId: string;
+  platform: string;
+  connectionId?: string;
+  accountId: string;
+  accountName?: string;
+  currency: string;
+  createdAt: string;
+};
 
 const LOW_BALANCE_THRESHOLD = 100; // R$100
 
@@ -293,13 +246,12 @@ type ClientSummaryRow = {
 function ClientInvestmentSummary({
   payments,
   balances,
+  clientLinks,
 }: {
   payments: InvestmentPayment[];
   balances: AdAccountBalance[];
+  clientLinks: ClientAccountLink[];
 }) {
-  const { connections } = useMetaAdsConnections();
-  const googleAds = useGoogleAds();
-
   if (payments.length === 0) return null;
 
   // Group payments by client
@@ -314,23 +266,17 @@ function ClientInvestmentSummary({
     else if (p.channel === 'TikTok ADS') row.tiktokTotal += p.amount;
   }
 
-  // Attach Meta balance per client via linked accounts
-  for (const conn of connections) {
-    const row = map.get(conn.clientId);
+  // Attach balances per client via linked accounts
+  for (const link of clientLinks) {
+    const row = map.get(link.clientId);
     if (!row) continue;
-    const linked = balances.filter(b => b.platform === 'meta' && conn.accountIds.includes(b.id) && b.balance !== null);
-    if (linked.length > 0) {
-      row.metaBalance = linked.reduce((sum, b) => sum + (b.balance ?? 0), 0);
+    if (link.platform === 'meta_ads') {
+      const balance = balances.find(b => b.platform === 'meta' && b.id === link.accountId && b.balance !== null);
+      if (balance) row.metaBalance = (row.metaBalance ?? 0) + (balance.balance ?? 0);
     }
-  }
-
-  // Attach Google Ads balance per client via linked accounts
-  for (const conn of googleAds.connections) {
-    const row = map.get(conn.clientId);
-    if (!row) continue;
-    const linked = balances.filter(b => b.platform === 'google' && conn.accountIds.includes(b.id) && b.balance !== null);
-    if (linked.length > 0) {
-      row.googleBalance = linked.reduce((sum, b) => sum + (b.balance ?? 0), 0);
+    if (link.platform === 'google_ads') {
+      const balance = balances.find(b => b.platform === 'google' && b.id === link.accountId && b.balance !== null);
+      if (balance) row.googleBalance = (row.googleBalance ?? 0) + (balance.balance ?? 0);
     }
   }
 
@@ -653,60 +599,64 @@ function CurrencyInput({ value, onChange, className }: {
 export default function PagamentosPage() {
   const { clients } = useClients();
   const { payments, addPayment, updatePaymentStatus, deletePayment } = useInvestmentPayments();
-  const { getConnection } = useMetaAdsConnections();
-  const googleAds = useGoogleAds();
   const visibleClientIds = new Set(clients.map((client) => client.id));
   const visiblePayments = payments.filter((payment) => visibleClientIds.has(payment.clientId));
 
   // ── Lifted balance state ──────────────────────────────────────────────────
   const [balances, setBalances] = useState<AdAccountBalance[]>([]);
+  const [clientLinks, setClientLinks] = useState<ClientAccountLink[]>([]);
   const [balancesLoading, setBalancesLoading] = useState(false);
   const [balancesLastUpdated, setBalancesLastUpdated] = useState<Date | null>(null);
-  const [isMetaConnected, setIsMetaConnected] = useState(false);
 
   const loadBalances = useCallback(async () => {
-    const googleBalances = googleAds.integration.status === 'connected'
-      ? buildGoogleAdAccountBalances(googleAds.accounts)
-      : [];
-
-    const [integrations, accounts] = await Promise.all([loadIntegrations(), loadCachedAdAccounts()]);
-    if (integrations.meta.status !== 'connected') {
-      setIsMetaConnected(false);
-      setBalances(googleBalances);
-      if (googleBalances.length > 0) setBalancesLastUpdated(new Date());
-      return;
-    }
-    setIsMetaConnected(true);
-    if (accounts.length === 0) {
-      setBalances(googleBalances);
-      if (googleBalances.length > 0) setBalancesLastUpdated(new Date());
-      return;
-    }
     setBalancesLoading(true);
     try {
-      const metaBalances = await fetchAdAccountBalances(accounts, integrations.meta.accessToken);
+      const [metaRes, googleRes, linksRes] = await Promise.all([
+        fetch('/api/meta/account-balances'),
+        fetch('/api/google/account-balances'),
+        fetch('/api/clients/links'),
+      ]);
+
+      const metaRaw: Array<Omit<AdAccountBalance, 'platform' | 'paymentUrl'>> = metaRes.ok ? await metaRes.json() : [];
+      const googleRaw: Array<Omit<AdAccountBalance, 'platform' | 'paymentUrl'>> = googleRes.ok ? await googleRes.json() : [];
+      const links: ClientAccountLink[] = linksRes.ok ? await linksRes.json() : [];
+
+      const metaBalances: AdAccountBalance[] = metaRaw.map((account) => ({
+        ...account,
+        platform: 'meta',
+        paymentUrl: `https://business.facebook.com/ads/manager/billing/?act=${account.id.replace('act_', '')}`,
+      }));
+      const googleBalances: AdAccountBalance[] = googleRaw.map((account) => ({
+        ...account,
+        platform: 'google',
+        paymentUrl: `https://ads.google.com/aw/billing/summary?ocid=${account.id.replace(/\D/g, '')}`,
+      }));
+
+      setClientLinks(links);
       setBalances([...metaBalances, ...googleBalances]);
       setBalancesLastUpdated(new Date());
     } finally {
       setBalancesLoading(false);
     }
-  }, [googleAds.accounts, googleAds.integration.status]);
+  }, []);
 
   useEffect(() => { loadBalances(); }, [loadBalances]);
 
   // Helper: get total Meta balance for a client
   function getClientMetaBalance(clientId: string): number | null {
-    const connection = getConnection(clientId);
-    if (!connection) return null;
-    const linked = balances.filter(b => b.platform === 'meta' && connection.accountIds.includes(b.id) && b.balance !== null);
+    const accountIds = clientLinks
+      .filter((link) => link.clientId === clientId && link.platform === 'meta_ads')
+      .map((link) => link.accountId);
+    const linked = balances.filter(b => b.platform === 'meta' && accountIds.includes(b.id) && b.balance !== null);
     if (linked.length === 0) return null;
     return linked.reduce((sum, b) => sum + (b.balance ?? 0), 0);
   }
 
   function getClientGoogleBalance(clientId: string): number | null {
-    const connection = googleAds.getConnection(clientId);
-    if (!connection) return null;
-    const linked = balances.filter(b => b.platform === 'google' && connection.accountIds.includes(b.id) && b.balance !== null);
+    const accountIds = clientLinks
+      .filter((link) => link.clientId === clientId && link.platform === 'google_ads')
+      .map((link) => link.accountId);
+    const linked = balances.filter(b => b.platform === 'google' && accountIds.includes(b.id) && b.balance !== null);
     if (linked.length === 0) return null;
     return linked.reduce((sum, b) => sum + (b.balance ?? 0), 0);
   }
@@ -884,7 +834,7 @@ export default function PagamentosPage() {
         </div>
       </div>
 
-      {(isMetaConnected || googleAds.integration.status === 'connected') && (
+      {(balances.length > 0 || balancesLoading) && (
         <CriticalBalanceAlerts
           balances={balances}
           loading={balancesLoading}
@@ -893,7 +843,7 @@ export default function PagamentosPage() {
         />
       )}
 
-      <ClientInvestmentSummary payments={visiblePayments} balances={balances} />
+      <ClientInvestmentSummary payments={visiblePayments} balances={balances} clientLinks={clientLinks} />
 
       <div className="grid gap-3 md:grid-cols-5">
         {[
