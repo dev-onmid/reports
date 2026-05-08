@@ -2419,29 +2419,24 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
   const isNewClient = !baseClient || !storedClient;
   const metaConnection = getConnection(id);
 
-  const [period] = useState<MetaInsightsPeriod>('last_30d');
   const [realMetrics, setRealMetrics] = useState<MetaAdsMetrics | null>(null);
+  const [apiGoogleMetrics, setApiGoogleMetrics] = useState<GoogleAdsMetrics | null>(null);
   const [metricsLoading, setMetricsLoading] = useState(false);
 
   useEffect(() => {
-    const connection = getConnection(id);
-    if (!connection || connection.accountIds.length === 0) { setRealMetrics(null); return; }
-    loadIntegrations().then((integrations) => {
-      if (integrations.meta.status !== 'connected') { setRealMetrics(null); return; }
-      setMetricsLoading(true);
-      fetchClientMetaMetrics(connection.accountIds, integrations.meta.accessToken, period)
-        .then(m => setRealMetrics(m))
-        .catch(() => setRealMetrics(null))
-        .finally(() => setMetricsLoading(false));
-    }).catch(() => setRealMetrics(null));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, period, connections]);
+    setMetricsLoading(true);
+    fetch(`/api/clients/${id}/metrics`)
+      .then(res => res.ok ? res.json() as Promise<{ meta: MetaAdsMetrics | null; google: GoogleAdsMetrics | null }> : null)
+      .then(data => { setRealMetrics(data?.meta ?? null); setApiGoogleMetrics(data?.google ?? null); })
+      .catch(() => { setRealMetrics(null); setApiGoogleMetrics(null); })
+      .finally(() => setMetricsLoading(false));
+  }, [id]);
 
   const hasRealData = !!realMetrics;
   const effectiveMetrics: MetaAdsMetrics = realMetrics ?? { spend: 0, impressions: 0, clicks: 0, leads: 0, cpl: 0 };
   const googleConnection = googleAds.getConnection(id);
-  const googleMetrics = googleConnection ? googleAds.getClientMetrics(id) : null;
-  const hasGoogleData = !!googleConnection && !!googleMetrics && googleConnection.accountIds.length > 0;
+  const googleMetrics: GoogleAdsMetrics | null = apiGoogleMetrics ?? (googleConnection ? googleAds.getClientMetrics(id) : null);
+  const hasGoogleData = !!googleMetrics && (googleMetrics.cost > 0 || googleMetrics.conversions > 0);
   const dashboardData = hasRealData || hasGoogleData
     ? buildDashboardDataFromPaidMedia(hasRealData ? effectiveMetrics : null, hasGoogleData ? googleMetrics : null)
     : isNewClient ? ZERO_DASHBOARD_DATA : mockDashboardData;
