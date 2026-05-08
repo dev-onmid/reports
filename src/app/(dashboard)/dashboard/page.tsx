@@ -485,15 +485,23 @@ function CreativeCard({ creative, sortBy }: { creative: TopCreative; sortBy: Sor
   return (
     <div className="rounded-xl border border-border bg-card overflow-hidden hover:border-primary/30 transition-colors">
       {/* Creative preview */}
-      <div className="aspect-[4/3] bg-muted/30 flex items-center justify-center overflow-hidden relative">
+      <div className="relative flex aspect-[9/16] items-center justify-center overflow-hidden bg-muted/30">
         {imgUrl && !imgError ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={imgUrl}
-            alt={creative.adName}
-            className="w-full h-full object-cover"
-            onError={() => setImgError(true)}
-          />
+          <a
+            href={imgUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block h-full w-full cursor-zoom-in"
+            title={`Abrir preview de ${creative.adName}`}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={imgUrl}
+              alt={creative.adName}
+              className="h-full w-full object-cover"
+              onError={() => setImgError(true)}
+            />
+          </a>
         ) : (
           <ImageIcon className="w-8 h-8 text-muted-foreground/30" />
         )}
@@ -995,7 +1003,7 @@ export default function GeneralDashboard() {
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
             {Array.from({ length: 8 }).map((_, i) => (
               <div key={i} className="rounded-xl border border-border bg-card overflow-hidden animate-pulse">
-                <div className="aspect-[4/3] bg-muted/30" />
+                <div className="aspect-[9/16] bg-muted/30" />
                 <div className="p-3 space-y-2">
                   <div className="h-3 bg-muted/40 rounded w-3/4" />
                   <div className="h-2 bg-muted/30 rounded w-full" />
