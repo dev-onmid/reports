@@ -519,7 +519,7 @@ function CreativeCard({ creative, sortBy }: { creative: TopCreative; sortBy: Sor
         )}
 
         {/* Metrics row */}
-        <div className="grid grid-cols-3 gap-1 pt-1 border-t border-border">
+        <div className="grid grid-cols-4 gap-1 pt-1 border-t border-border">
           <div className="text-center">
             <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Invest.</p>
             <p className="text-[11px] font-bold">{formatCurrencyBRL(creative.spend)}</p>
@@ -527,6 +527,10 @@ function CreativeCard({ creative, sortBy }: { creative: TopCreative; sortBy: Sor
           <div className="text-center">
             <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Leads</p>
             <p className="text-[11px] font-bold">{creative.leads > 0 ? creative.leads : '—'}</p>
+          </div>
+          <div className="text-center">
+            <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Custo/Res.</p>
+            <p className="text-[11px] font-bold">{creative.cpl > 0 ? formatCurrencyBRL(creative.cpl) : '—'}</p>
           </div>
           <div className="text-center">
             <p className="text-[9px] uppercase tracking-wider text-muted-foreground">CTR</p>
