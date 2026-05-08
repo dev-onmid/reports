@@ -38,6 +38,7 @@ import {
 import { getHoliday, previousBusinessDay, formatDateBR as formatHolidayDateBR } from '@/lib/holidays';
 import { cn, formatCurrencyBRL, formatCurrencyInputBRL, parseCurrencyBRL } from '@/lib/utils';
 import { LinkAccountsDialog } from '@/components/link-accounts-dialog';
+import { ClientAvatar } from '@/components/client-avatar';
 
 // ── Funnel types & logic ───────────────────────────────────────────────────────
 type FunnelStage = { id: string; name: string; conversion: number };
@@ -2489,12 +2490,15 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
 
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-border pb-5">
-        <div>
-          <div className="px-2 py-0.5 rounded text-[10px] font-bold tracking-widest bg-primary/20 text-primary border border-primary/30 uppercase w-fit mb-2">
-            {client.status}
+        <div className="flex items-center gap-4">
+          <ClientAvatar clientId={id} name={client.name} size="lg" />
+          <div>
+            <div className="px-2 py-0.5 rounded text-[10px] font-bold tracking-widest bg-primary/20 text-primary border border-primary/30 uppercase w-fit mb-2">
+              {client.status}
+            </div>
+            <h1 className="text-4xl font-heading tracking-wider uppercase">{client.name}</h1>
+            <p className="text-sm text-muted-foreground mt-1 uppercase tracking-wide">{client.segment}</p>
           </div>
-          <h1 className="text-4xl font-heading tracking-wider uppercase">{client.name}</h1>
-          <p className="text-sm text-muted-foreground mt-1 uppercase tracking-wide">{client.segment}</p>
         </div>
         <div className="flex items-center gap-3">
           <Button

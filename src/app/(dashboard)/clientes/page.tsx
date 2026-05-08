@@ -19,6 +19,7 @@ import { useInvestmentPayments } from '@/lib/payment-store';
 import type { ClientStatus } from '@/lib/mock-data';
 import { LinkAccountsDialog } from '@/components/link-accounts-dialog';
 import { PlatformIconButton, ALL_PLATFORMS, type PlatformId } from '@/components/platform-icons';
+import { ClientAvatar } from '@/components/client-avatar';
 
 export default function ClientesPage() {
   const {
@@ -113,10 +114,11 @@ export default function ClientesPage() {
       <div className="grid gap-4">
         {displayedClients.map((cliente) => (
           <div key={cliente.id} className="flex items-center justify-between gap-4 p-4 bg-card border border-border rounded-lg hover:border-primary/50 transition-colors">
-            <Link href={`/clientes/${cliente.id}`} className="min-w-0 flex-1">
-              <div>
-                <h3 className="font-semibold">{cliente.name}</h3>
-                <p className="text-sm text-muted-foreground">{cliente.segment}</p>
+            <Link href={`/clientes/${cliente.id}`} className="min-w-0 flex-1 flex items-center gap-3">
+              <ClientAvatar clientId={cliente.id} name={cliente.name} size="md" />
+              <div className="min-w-0">
+                <h3 className="font-semibold truncate">{cliente.name}</h3>
+                <p className="text-sm text-muted-foreground truncate">{cliente.segment}</p>
               </div>
             </Link>
             <div className="flex items-center gap-3">
