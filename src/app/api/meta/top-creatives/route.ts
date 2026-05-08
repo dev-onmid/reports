@@ -76,6 +76,7 @@ export type TopCreative = {
   accountName: string;
   imageUrl?: string;
   thumbnailUrl?: string;
+  videoUrl?: string;
   headline?: string;
   body?: string;
   spend: number;
@@ -202,14 +203,34 @@ export async function GET(request: NextRequest) {
           // Batch-fetch creative details
           const adIds = adsInsights.map(a => a.ad_id as string).filter(Boolean);
           const batchRes = await fetch(
-            `https://graph.facebook.com/v21.0/?ids=${adIds.join(',')}&fields=name,creative{body,title,image_url,thumbnail_url}&access_token=${token}`
+            `https://graph.facebook.com/v21.0/?ids=${adIds.join(',')}&fields=name,creative{body,title,image_url,thumbnail_url,object_story_spec}&access_token=${token}`
           );
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const batchData: Record<string, any> = batchRes.ok ? await batchRes.json() : {};
+          const videoIds = [...new Set(
+            Object.values(batchData)
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              .map((ad: any) => ad.creative?.object_story_spec?.video_data?.video_id as string | undefined)
+              .filter(Boolean)
+          )];
+          const videoBatchRes = videoIds.length > 0
+            ? await fetch(`https://graph.facebook.com/v21.0/?ids=${videoIds.join(',')}&fields=source,picture&access_token=${token}`)
+            : null;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const videoBatchData: Record<string, any> = videoBatchRes?.ok ? await videoBatchRes.json() : {};
 
           for (const insight of adsInsights) {
             const adData = batchData[insight.ad_id] ?? {};
             const creative = adData.creative ?? {};
+            const storySpec = creative.object_story_spec ?? {};
+            const videoId = storySpec.video_data?.video_id as string | undefined;
+            const videoInfo = videoId ? videoBatchData[videoId] ?? {} : {};
+            const storyImageUrl =
+              storySpec.video_data?.image_url ??
+              videoInfo.picture ??
+              storySpec.photo_data?.url ??
+              storySpec.link_data?.picture ??
+              undefined;
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const leads = ((insight.actions ?? []) as { action_type: string; value: string }[])
               .filter(a => LEAD_ACTIONS.includes(a.action_type))
@@ -223,8 +244,9 @@ export async function GET(request: NextRequest) {
               adName: insight.ad_name ?? adData.name ?? `Ad ${insight.ad_id}`,
               accountId: account.id,
               accountName: account.name,
-              imageUrl: creative.image_url ?? undefined,
+              imageUrl: storyImageUrl ?? creative.image_url ?? undefined,
               thumbnailUrl: creative.thumbnail_url ?? undefined,
+              videoUrl: videoInfo.source ?? undefined,
               headline: creative.title ?? undefined,
               body: creative.body ?? undefined,
               spend,

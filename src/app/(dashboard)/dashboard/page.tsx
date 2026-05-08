@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import {
-  AlertTriangle, CheckCircle2, ChevronDown, ImageIcon, RefreshCw,
+  AlertTriangle, CheckCircle2, ChevronDown, ImageIcon, Play, RefreshCw,
   Search, TrendingDown,
 } from 'lucide-react';
 import { useClients } from '@/lib/client-store';
@@ -467,7 +467,15 @@ function ClientSelector({
 }
 
 // ── Creative Card ────────────────────────────────────────────────────────────
-function CreativeCard({ creative, sortBy }: { creative: TopCreative; sortBy: SortKey }) {
+function CreativeCard({
+  creative,
+  sortBy,
+  onPreview,
+}: {
+  creative: TopCreative;
+  sortBy: SortKey;
+  onPreview: (creative: TopCreative) => void;
+}) {
   const [imgError, setImgError] = useState(false);
   const imgUrl = creative.imageUrl ?? creative.thumbnailUrl;
 
@@ -487,12 +495,11 @@ function CreativeCard({ creative, sortBy }: { creative: TopCreative; sortBy: Sor
       {/* Creative preview */}
       <div className="relative flex aspect-[9/16] items-center justify-center overflow-hidden bg-muted/30">
         {imgUrl && !imgError ? (
-          <a
-            href={imgUrl}
-            target="_blank"
-            rel="noopener noreferrer"
+          <button
+            type="button"
+            onClick={() => onPreview(creative)}
             className="block h-full w-full cursor-zoom-in"
-            title={`Abrir preview de ${creative.adName}`}
+            title={`Ampliar preview de ${creative.adName}`}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
@@ -501,7 +508,12 @@ function CreativeCard({ creative, sortBy }: { creative: TopCreative; sortBy: Sor
               className="h-full w-full object-cover"
               onError={() => setImgError(true)}
             />
-          </a>
+            {creative.videoUrl && (
+              <span className="absolute left-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/70 text-white">
+                <Play className="h-3.5 w-3.5 fill-current" />
+              </span>
+            )}
+          </button>
         ) : (
           <ImageIcon className="w-8 h-8 text-muted-foreground/30" />
         )}
@@ -548,6 +560,72 @@ function CreativeCard({ creative, sortBy }: { creative: TopCreative; sortBy: Sor
 
         {/* Account name */}
         <p className="text-[9px] text-muted-foreground/50 truncate">{creative.accountName}</p>
+      </div>
+    </div>
+  );
+}
+
+function CreativePreviewOverlay({
+  creative,
+  onClose,
+}: {
+  creative: TopCreative | null;
+  onClose: () => void;
+}) {
+  if (!creative) return null;
+  const imgUrl = creative.imageUrl ?? creative.thumbnailUrl;
+
+  return (
+    <div className="fixed inset-0 z-[100] bg-black/90 p-4 backdrop-blur-sm" onClick={onClose}>
+      <button
+        type="button"
+        onClick={onClose}
+        className="absolute right-4 top-4 rounded-lg border border-white/15 bg-white/10 px-3 py-2 text-xs font-bold uppercase tracking-wider text-white hover:bg-white/20"
+      >
+        Fechar
+      </button>
+      <div className="mx-auto flex h-full max-w-6xl items-center justify-center gap-6">
+        <div className="flex h-full max-h-[88vh] w-full max-w-[min(56vh,520px)] items-center justify-center">
+          {creative.videoUrl ? (
+            <video
+              src={creative.videoUrl}
+              poster={imgUrl}
+              controls
+              autoPlay
+              className="max-h-full w-full rounded-xl border border-white/15 bg-black object-contain"
+              onClick={(event) => event.stopPropagation()}
+            />
+          ) : imgUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={imgUrl}
+              alt={creative.adName}
+              className="max-h-full w-full rounded-xl border border-white/15 bg-black object-contain"
+              onClick={(event) => event.stopPropagation()}
+            />
+          ) : (
+            <div className="flex aspect-[9/16] w-full items-center justify-center rounded-xl border border-white/15 bg-white/5">
+              <ImageIcon className="h-10 w-10 text-white/30" />
+            </div>
+          )}
+        </div>
+        <div className="hidden w-80 shrink-0 rounded-xl border border-white/15 bg-white/10 p-4 text-white lg:block" onClick={(event) => event.stopPropagation()}>
+          <p className="text-xs font-bold uppercase tracking-widest text-white/50">Criativo</p>
+          <h3 className="mt-2 text-lg font-bold leading-snug">{creative.adName}</h3>
+          {creative.headline && <p className="mt-3 text-sm font-semibold text-white/80">{creative.headline}</p>}
+          {creative.body && <p className="mt-2 text-sm text-white/60">{creative.body}</p>}
+          <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
+            <div className="rounded-lg bg-black/30 p-3">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-white/50">Invest.</p>
+              <p className="mt-1 font-bold">{formatCurrencyBRL(creative.spend)}</p>
+            </div>
+            <div className="rounded-lg bg-black/30 p-3">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-white/50">Leads</p>
+              <p className="mt-1 font-bold">{creative.leads > 0 ? creative.leads : '—'}</p>
+            </div>
+          </div>
+          <p className="mt-4 text-xs text-white/40">{creative.accountName}</p>
+        </div>
       </div>
     </div>
   );
@@ -631,6 +709,7 @@ export default function GeneralDashboard() {
   const [goalsByClient, setGoalsByClient] = useState<Record<string, GoalConfig | null>>({});
   const [campaigns, setCampaigns] = useState<CampaignPerformance[]>([]);
   const [creatives, setCreatives] = useState<TopCreative[]>([]);
+  const [previewCreative, setPreviewCreative] = useState<TopCreative | null>(null);
   const [campaignSortBy, setCampaignSortBy] = useState<SortKey>('spend');
   const [sortBy, setSortBy] = useState<SortKey>('spend');
   const [metricsLoading, setMetricsLoading] = useState(false);
@@ -1021,11 +1100,12 @@ export default function GeneralDashboard() {
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
             {creatives.map(c => (
-              <CreativeCard key={c.adId} creative={c} sortBy={sortBy} />
+              <CreativeCard key={c.adId} creative={c} sortBy={sortBy} onPreview={setPreviewCreative} />
             ))}
           </div>
         )}
       </div>
+      <CreativePreviewOverlay creative={previewCreative} onClose={() => setPreviewCreative(null)} />
     </div>
   );
 }
