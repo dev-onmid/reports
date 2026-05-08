@@ -963,42 +963,23 @@ function GoogleConnectionsPanel({
     await onRemove(conn.id);
   }
 
-  type AdsAccountWithMetrics = {
-    id: string; name: string; currency: string; status: string; isManager: boolean; mccId?: string;
-    metrics?: { spend: number; impressions: number; clicks: number; ctr: number; cpc: number; conversions: number; conversionValue: number; cpa: number; roas: number };
-  };
-
-  function fmt(value: number, type: 'currency' | 'number' | 'percent' | 'decimal', currency = 'BRL') {
-    if (type === 'currency') return new Intl.NumberFormat('pt-BR', { style: 'currency', currency, minimumFractionDigits: 2 }).format(value);
-    if (type === 'percent') return `${value.toFixed(2)}%`;
-    if (type === 'decimal') return value.toFixed(2);
-    return new Intl.NumberFormat('pt-BR').format(Math.round(value));
-  }
-
-  function MetricCell({ label, value }: { label: string; value: string }) {
-    return (
-      <div className="flex flex-col gap-0.5">
-        <span className="text-[9px] uppercase tracking-wider text-muted-foreground">{label}</span>
-        <span className="text-xs font-semibold text-foreground">{value}</span>
-      </div>
-    );
-  }
+  type AdsAccount = { id: string; name: string; status: string; isManager: boolean; mccId?: string };
 
   function ConnectionRow({ conn }: { conn: GoogleConnection }) {
-    const [adsAccounts, setAdsAccounts] = useState<AdsAccountWithMetrics[]>([]);
+    const [adsAccounts, setAdsAccounts] = useState<AdsAccount[]>([]);
     const [loadingAds, setLoadingAds] = useState(false);
     const [adsError, setAdsError] = useState<string | null>(null);
     const [showAccounts, setShowAccounts] = useState(false);
-    const [period, setPeriod] = useState('THIS_MONTH');
 
-    async function loadAdsAccounts(p = period) {
+    async function loadAdsAccounts() {
+      if (adsAccounts.length > 0) { setShowAccounts((v) => !v); return; }
       setLoadingAds(true);
       setAdsError(null);
       try {
-        const res = await fetch(`/api/google/ads-accounts?connectionId=${conn.id}&period=${p}`);
-        const data = await res.json() as { error?: string } | AdsAccountWithMetrics[];
+        const res = await fetch(`/api/google/ads-accounts?connectionId=${conn.id}&period=THIS_MONTH`);
+        const data = await res.json() as { error?: string } | AdsAccount[];
         if (!res.ok) throw new Error((data as { error?: string }).error ?? 'Erro ao buscar contas');
-        setAdsAccounts(data as AdsAccountWithMetrics[]);
+        setAdsAccounts(data as AdsAccount[]);
         setShowAccounts(true);
       } catch (e) {
         setAdsError(e instanceof Error ? e.message : 'Erro');
@@ -1007,24 +988,6 @@ function GoogleConnectionsPanel({
         setLoadingAds(false);
       }
     }
-
-    function handleToggle() {
-      if (showAccounts && adsAccounts.length > 0) { setShowAccounts(false); return; }
-      void loadAdsAccounts();
-    }
-
-    function handlePeriodChange(p: string) {
-      setPeriod(p);
-      void loadAdsAccounts(p);
-    }
-
-    const PERIODS = [
-      { value: 'THIS_MONTH', label: 'Este mês' },
-      { value: 'LAST_MONTH', label: 'Mês anterior' },
-      { value: 'LAST_7_DAYS', label: 'Últimos 7 dias' },
-      { value: 'LAST_30_DAYS', label: 'Últimos 30 dias' },
-      { value: 'THIS_YEAR', label: 'Este ano' },
-    ];
 
     return (
       <div>
@@ -1046,7 +1009,7 @@ function GoogleConnectionsPanel({
           <div className="flex items-center gap-1 shrink-0">
             {conn.accountType === 'google_ads' && (
               <button
-                onClick={handleToggle}
+                onClick={() => void loadAdsAccounts()}
                 disabled={loadingAds}
                 className="rounded-lg px-2 py-1 text-[10px] font-medium text-muted-foreground hover:bg-muted transition-colors flex items-center gap-1"
               >
@@ -1062,83 +1025,20 @@ function GoogleConnectionsPanel({
         </div>
 
         {showAccounts && (
-          <div className="pb-4 space-y-3">
-            {adsError && <p className="text-xs text-red-400 pl-12">{adsError}</p>}
-
-            {!adsError && adsAccounts.length > 0 && (
-              <div className="pl-12 flex items-center gap-2">
-                <span className="text-[10px] text-muted-foreground">Período:</span>
-                <div className="flex gap-1 flex-wrap">
-                  {PERIODS.map((p) => (
-                    <button
-                      key={p.value}
-                      onClick={() => handlePeriodChange(p.value)}
-                      disabled={loadingAds}
-                      className={cn(
-                        'text-[10px] px-2 py-0.5 rounded-full border transition-colors',
-                        period === p.value
-                          ? 'bg-primary text-primary-foreground border-primary'
-                          : 'border-border text-muted-foreground hover:border-primary/50'
-                      )}
-                    >
-                      {p.label}
-                    </button>
-                  ))}
-                </div>
-                {loadingAds && <RefreshCw className="w-3 h-3 animate-spin text-muted-foreground" />}
-              </div>
-            )}
-
+          <div className="pl-12 pb-3 space-y-1.5">
+            {adsError && <p className="text-xs text-red-400">{adsError}</p>}
             {adsAccounts.length === 0 && !adsError && (
-              <p className="text-xs text-muted-foreground pl-12">Nenhuma conta encontrada.</p>
+              <p className="text-xs text-muted-foreground">Nenhuma conta encontrada.</p>
             )}
-
-            <div className="space-y-2 pl-4">
-              {adsAccounts.map((a) => (
-                <div key={a.id} className="border border-border rounded-xl overflow-hidden">
-                  <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/20">
-                    <span className={cn('w-2 h-2 rounded-full shrink-0', a.status === 'ENABLED' ? 'bg-primary' : 'bg-muted-foreground')} />
-                    <span className="text-sm font-semibold flex-1 truncate">{a.name}</span>
-                    <span className="text-[10px] text-muted-foreground font-mono">{a.id}</span>
-                    {a.isManager && <span className="text-[9px] bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded font-bold">MCC</span>}
-                    {a.mccId && <span className="text-[9px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded">via MCC</span>}
-                  </div>
-
-                  {a.metrics && (
-                    <div className="grid grid-cols-4 gap-px bg-border">
-                      <div className="bg-card px-4 py-3">
-                        <MetricCell label="Investimento" value={fmt(a.metrics.spend, 'currency', a.currency)} />
-                      </div>
-                      <div className="bg-card px-4 py-3">
-                        <MetricCell label="Impressões" value={fmt(a.metrics.impressions, 'number')} />
-                      </div>
-                      <div className="bg-card px-4 py-3">
-                        <MetricCell label="Cliques" value={fmt(a.metrics.clicks, 'number')} />
-                      </div>
-                      <div className="bg-card px-4 py-3">
-                        <MetricCell label="CTR" value={fmt(a.metrics.ctr, 'percent')} />
-                      </div>
-                      <div className="bg-card px-4 py-3">
-                        <MetricCell label="CPC médio" value={fmt(a.metrics.cpc, 'currency', a.currency)} />
-                      </div>
-                      <div className="bg-card px-4 py-3">
-                        <MetricCell label="Conversões" value={fmt(a.metrics.conversions, 'decimal')} />
-                      </div>
-                      <div className="bg-card px-4 py-3">
-                        <MetricCell label="CPA" value={a.metrics.conversions > 0 ? fmt(a.metrics.cpa, 'currency', a.currency) : '—'} />
-                      </div>
-                      <div className="bg-card px-4 py-3">
-                        <MetricCell label="ROAS" value={a.metrics.spend > 0 ? `${a.metrics.roas.toFixed(2)}x` : '—'} />
-                      </div>
-                    </div>
-                  )}
-
-                  {!a.metrics && !a.isManager && (
-                    <div className="px-4 py-3 text-xs text-muted-foreground">Sem dados no período.</div>
-                  )}
-                </div>
-              ))}
-            </div>
+            {adsAccounts.map((a) => (
+              <div key={a.id} className="flex items-center gap-2 text-xs bg-muted/30 rounded-lg px-3 py-2">
+                <span className={cn('w-1.5 h-1.5 rounded-full shrink-0', a.status === 'ENABLED' ? 'bg-primary' : 'bg-muted-foreground')} />
+                <span className="font-medium truncate flex-1">{a.name}</span>
+                <span className="text-muted-foreground font-mono shrink-0">{a.id}</span>
+                {a.isManager && <span className="text-[9px] bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded font-bold">MCC</span>}
+                {a.mccId && !a.isManager && <span className="text-[9px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded">via MCC</span>}
+              </div>
+            ))}
           </div>
         )}
       </div>
