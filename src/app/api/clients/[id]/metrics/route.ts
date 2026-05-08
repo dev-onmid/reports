@@ -13,10 +13,10 @@ function makePool() {
   }
 
   return new Pool({
-    host: process.env.POSTGRES_HOST,
-    port: Number(process.env.POSTGRES_PORT ?? 5432),
+    host: process.env.POSTGRES_HOST ?? 'aws-1-us-east-2.pooler.supabase.com',
+    port: Number(process.env.POSTGRES_PORT ?? 6543),
     database: process.env.POSTGRES_DATABASE ?? 'postgres',
-    user: process.env.POSTGRES_USER,
+    user: process.env.POSTGRES_USER ?? 'postgres.iremmorsgwiqrorzoihx',
     password: process.env.SUPABASE_DB_PASSWORD ?? process.env.POSTGRES_PASSWORD,
     ssl: { rejectUnauthorized: false },
     max: 1,

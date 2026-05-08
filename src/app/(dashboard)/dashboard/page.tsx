@@ -62,26 +62,21 @@ function KpiCard({
     : format === 'percent' ? `${v.toFixed(1)}%`
     : v.toLocaleString('pt-BR');
 
-  const pct = meta > 0 ? Math.min(Math.round((value / meta) * 100), 100) : 0;
-  const partialPct = partial > 0 ? Math.min(Math.round((value / partial) * 100), 100) : 0;
-  const hasTarget = meta > 0 || partial > 0;
+  const target = partial > 0 ? partial : meta;
+  const regularProgress = target > 0 ? Math.round((value / target) * 100) : 0;
+  const inverseProgress = target > 0
+    ? value <= 0
+      ? 100
+      : Math.round((target / value) * 100)
+    : 0;
+  const progress = Math.max(0, Math.min(inverse ? inverseProgress : regularProgress, 100));
+  const status = progress > 75 ? 'good' : progress >= 36 ? 'warning' : 'critical';
 
-  const onTrack = !hasTarget
-    ? true
-    : partial > 0
-    ? (inverse ? value <= partial * 1.1 : value >= partial * 0.85)
-    : (inverse ? (meta > 0 ? value <= meta * 1.1 : true) : pct >= 75);
-
-  const critical = hasTarget && (partial > 0
-    ? (inverse ? value > partial * 1.5 : value < partial * 0.5)
-    : (!inverse && pct < 30));
-
-  const statusColor = critical ? 'text-red-400' : onTrack ? 'text-emerald-400' : 'text-orange-400';
-  const barColor = critical ? 'bg-red-500' : onTrack ? 'bg-emerald-500' : 'bg-orange-400';
-  const borderColor = critical ? 'border-red-500/40' : onTrack ? 'border-primary/30' : 'border-orange-400/30';
-  const topColor = critical ? 'bg-red-500' : onTrack ? 'bg-primary' : 'bg-orange-400';
-  const progress = hasTarget ? partial > 0 ? partialPct : pct : value > 0 ? 100 : 0;
-  const statusLabel = !hasTarget ? 'Atual' : critical ? 'Crítico' : onTrack ? 'No ritmo' : 'Atenção';
+  const statusColor = status === 'critical' ? 'text-red-400' : status === 'good' ? 'text-emerald-400' : 'text-orange-400';
+  const barColor = status === 'critical' ? 'bg-red-500' : status === 'good' ? 'bg-emerald-500' : 'bg-orange-400';
+  const borderColor = status === 'critical' ? 'border-red-500/40' : status === 'good' ? 'border-primary/30' : 'border-orange-400/30';
+  const topColor = status === 'critical' ? 'bg-red-500' : status === 'good' ? 'bg-primary' : 'bg-orange-400';
+  const statusLabel = status === 'critical' ? 'Crítico' : status === 'good' ? 'No ritmo' : 'Atenção';
 
   return (
     <div className={cn('relative overflow-hidden rounded-xl border bg-card p-4 space-y-3', borderColor)}>
@@ -93,9 +88,9 @@ function KpiCard({
         </div>
         <span className={cn(
           'rounded-lg border px-2 py-1 text-[10px] font-bold uppercase tracking-wider',
-          critical
+          status === 'critical'
             ? 'border-red-500/40 bg-red-500/10 text-red-300'
-            : onTrack
+            : status === 'good'
             ? 'border-primary/40 bg-primary/10 text-primary'
             : 'border-orange-400/40 bg-orange-400/10 text-orange-300',
         )}>
@@ -124,9 +119,9 @@ function KpiCard({
               <div className="rounded-lg bg-black/25 px-3 py-2 text-right shadow-[0_12px_30px_rgba(0,0,0,0.3)]">
                 <p className={cn('font-heading text-2xl font-bold leading-none', statusColor)}>{progress}%</p>
                 <p className={cn('mt-1 flex items-center justify-end gap-1 text-[10px] font-bold uppercase tracking-wider', statusColor)}>
-                  {onTrack
+                  {status === 'good'
                     ? <CheckCircle2 className="w-3 h-3" />
-                    : critical
+                    : status === 'critical'
                     ? <TrendingDown className="w-3 h-3" />
                     : <AlertTriangle className="w-3 h-3" />}
                   {statusLabel}
