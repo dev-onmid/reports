@@ -31,8 +31,18 @@ function mapToMetaPeriod(p: string): string {
 }
 
 const LEAD_ACTIONS = [
-  'lead', 'offsite_conversion.fb_pixel_lead', 'onsite_conversion.lead_grouped',
-  'onsite_conversion.messaging_conversation_started_7d', 'onsite_conversion.total_messaging_connection',
+  'lead',
+  'onsite_conversion.lead_grouped',
+  'offsite_conversion.fb_pixel_lead',
+  'offsite_conversion.lead',
+  'onsite_conversion.lead',
+  'onsite_web_lead',
+  'onsite_web_app_lead',
+  'onsite_conversion.messaging_conversation_started_7d',
+  'onsite_conversion.total_messaging_connection',
+  'messaging_conversation_started_7d',
+  'total_messaging_connection',
+  'onsite_conversion.messaging_first_reply',
 ];
 
 function normalizeMetaAccountId(accountId: string) {

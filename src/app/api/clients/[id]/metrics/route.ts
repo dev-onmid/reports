@@ -3,12 +3,21 @@ import { Pool } from 'pg';
 import { google } from 'googleapis';
 
 function makePool() {
+  const connectionString = process.env.POSTGRES_URL_NON_POOLING ?? process.env.POSTGRES_URL ?? process.env.POSTGRES_PRISMA_URL;
+  if (connectionString) {
+    return new Pool({
+      connectionString,
+      ssl: { rejectUnauthorized: false },
+      max: 1,
+    });
+  }
+
   return new Pool({
-    host: 'aws-1-us-east-2.pooler.supabase.com',
-    port: 6543,
-    database: 'postgres',
-    user: 'postgres.iremmorsgwiqrorzoihx',
-    password: process.env.SUPABASE_DB_PASSWORD,
+    host: process.env.POSTGRES_HOST,
+    port: Number(process.env.POSTGRES_PORT ?? 5432),
+    database: process.env.POSTGRES_DATABASE ?? 'postgres',
+    user: process.env.POSTGRES_USER,
+    password: process.env.SUPABASE_DB_PASSWORD ?? process.env.POSTGRES_PASSWORD,
     ssl: { rejectUnauthorized: false },
     max: 1,
   });
@@ -120,9 +129,22 @@ async function buildMccMap(accessToken: string): Promise<Record<string, string>>
   return mccMap;
 }
 
-const LEAD_ACTIONS = [
-  'lead', 'offsite_conversion.fb_pixel_lead', 'onsite_conversion.lead_grouped',
-  'onsite_conversion.messaging_conversation_started_7d', 'onsite_conversion.total_messaging_connection',
+const FORM_LEAD_ACTIONS = [
+  'lead',
+  'onsite_conversion.lead_grouped',
+  'offsite_conversion.fb_pixel_lead',
+  'offsite_conversion.lead',
+  'onsite_conversion.lead',
+  'onsite_web_lead',
+  'onsite_web_app_lead',
+];
+
+const CONVERSATION_ACTIONS = [
+  'onsite_conversion.messaging_conversation_started_7d',
+  'onsite_conversion.total_messaging_connection',
+  'messaging_conversation_started_7d',
+  'total_messaging_connection',
+  'onsite_conversion.messaging_first_reply',
 ];
 
 async function fetchMetaAccountMetrics(accountId: string, accessToken: string, metaPeriod: string) {
@@ -135,14 +157,19 @@ async function fetchMetaAccountMetrics(accountId: string, accessToken: string, m
   if (data.error) return null;
   const row = data.data?.[0] ?? {};
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const leads = ((row.actions as { action_type: string; value: string }[]) ?? [])
-    .filter(a => LEAD_ACTIONS.includes(a.action_type))
+  const actions = ((row.actions as { action_type: string; value: string }[]) ?? []);
+  const sumActions = (types: string[]) => actions
+    .filter(a => types.includes(a.action_type))
     .reduce((sum, a) => sum + parseInt(a.value || '0', 10), 0);
+  const formLeads = sumActions(FORM_LEAD_ACTIONS);
+  const conversations = sumActions(CONVERSATION_ACTIONS);
   return {
     spend: parseFloat(row.spend || '0'),
     impressions: parseInt(row.impressions || '0', 10),
     clicks: parseInt(row.clicks || '0', 10),
-    leads,
+    leads: formLeads + conversations,
+    formLeads,
+    conversations,
   };
 }
 
@@ -210,11 +237,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   // ── Meta Ads ───────────────────────────────────────────────────────────────
-  type MResult = { spend: number; impressions: number; clicks: number; leads: number; cpl: number };
+  type MResult = { spend: number; impressions: number; clicks: number; leads: number; formLeads: number; conversations: number; cpl: number };
   let metaResult: MResult | null = null;
 
   if (metaLinks.length > 0) {
-    const allMetrics: Array<{ spend: number; impressions: number; clicks: number; leads: number }> = [];
+    const allMetrics: Array<{ spend: number; impressions: number; clicks: number; leads: number; formLeads: number; conversations: number }> = [];
     await Promise.allSettled(
       metaLinks.map(async (link) => {
         const conn = metaConns.find(c => c.id === link.connection_id);
@@ -227,8 +254,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     if (allMetrics.length > 0) {
       const agg = allMetrics.reduce((a, m) => ({
         spend: a.spend + m.spend, impressions: a.impressions + m.impressions,
-        clicks: a.clicks + m.clicks, leads: a.leads + m.leads, cpl: 0,
-      }), { spend: 0, impressions: 0, clicks: 0, leads: 0, cpl: 0 });
+        clicks: a.clicks + m.clicks, leads: a.leads + m.leads,
+        formLeads: a.formLeads + m.formLeads, conversations: a.conversations + m.conversations, cpl: 0,
+      }), { spend: 0, impressions: 0, clicks: 0, leads: 0, formLeads: 0, conversations: 0, cpl: 0 });
       agg.cpl = agg.leads > 0 ? agg.spend / agg.leads : 0;
       metaResult = agg;
     }

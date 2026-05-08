@@ -4,17 +4,16 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   AlertTriangle, CheckCircle2, ChevronDown, ImageIcon, RefreshCw,
-  Search, TrendingDown, TrendingUp,
+  Search, TrendingDown,
 } from 'lucide-react';
 import { useClients } from '@/lib/client-store';
 import { clientResults } from '@/lib/client-results-store';
-import { useInvestmentPayments } from '@/lib/payment-store';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 import type { TopCreative } from '@/app/api/meta/top-creatives/route';
 
 type Period = 'last_7d' | 'last_30d' | 'this_month' | 'last_month';
 type ApiMetrics = {
-  meta: { spend: number; impressions: number; clicks: number; leads: number; cpl: number } | null;
+  meta: { spend: number; impressions: number; clicks: number; leads: number; formLeads?: number; conversations?: number; cpl: number } | null;
   google: { cost: number; impressions: number; clicks: number; cpc: number; conversions: number; cpa: number } | null;
 };
 type GoalConfig = { type: string; target: number };
@@ -65,21 +64,24 @@ function KpiCard({
 
   const pct = meta > 0 ? Math.min(Math.round((value / meta) * 100), 100) : 0;
   const partialPct = partial > 0 ? Math.min(Math.round((value / partial) * 100), 100) : 0;
+  const hasTarget = meta > 0 || partial > 0;
 
-  const onTrack = partial > 0
+  const onTrack = !hasTarget
+    ? true
+    : partial > 0
     ? (inverse ? value <= partial * 1.1 : value >= partial * 0.85)
     : (inverse ? (meta > 0 ? value <= meta * 1.1 : true) : pct >= 75);
 
-  const critical = partial > 0
+  const critical = hasTarget && (partial > 0
     ? (inverse ? value > partial * 1.5 : value < partial * 0.5)
-    : (!inverse && pct < 30);
+    : (!inverse && pct < 30));
 
   const statusColor = critical ? 'text-red-400' : onTrack ? 'text-emerald-400' : 'text-orange-400';
   const barColor = critical ? 'bg-red-500' : onTrack ? 'bg-emerald-500' : 'bg-orange-400';
   const borderColor = critical ? 'border-red-500/40' : onTrack ? 'border-primary/30' : 'border-orange-400/30';
   const topColor = critical ? 'bg-red-500' : onTrack ? 'bg-primary' : 'bg-orange-400';
-  const progress = partial > 0 ? partialPct : pct;
-  const statusLabel = critical ? 'Crítico' : onTrack ? 'No ritmo' : 'Atenção';
+  const progress = hasTarget ? partial > 0 ? partialPct : pct : value > 0 ? 100 : 0;
+  const statusLabel = !hasTarget ? 'Atual' : critical ? 'Crítico' : onTrack ? 'No ritmo' : 'Atenção';
 
   return (
     <div className={cn('relative overflow-hidden rounded-xl border bg-card p-4 space-y-3', borderColor)}>
@@ -108,7 +110,7 @@ function KpiCard({
       ) : (
         <>
           <div className="relative overflow-hidden rounded-lg border border-border bg-background/70 min-h-24">
-            {meta > 0 && (
+            {progress > 0 && (
               <div
                 className={cn('absolute inset-y-0 left-0 opacity-80 transition-all', barColor)}
                 style={{ width: `${Math.max(0, Math.min(progress, 100))}%` }}
@@ -134,7 +136,7 @@ function KpiCard({
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div className="rounded-lg bg-background/70 px-3 py-2 text-center">
-              <p className="text-sm font-bold">{meta > 0 ? fmt(meta) : prefix ? prefix : '—'}</p>
+              <p className="text-sm font-bold">{meta > 0 ? fmt(meta) : prefix ? prefix : 'Sem meta'}</p>
               <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Meta</p>
             </div>
             <div className="rounded-lg bg-background/70 px-3 py-2 text-center">
@@ -340,7 +342,6 @@ function CreativeCard({ creative, sortBy }: { creative: TopCreative; sortBy: Sor
 // ── Main Dashboard ───────────────────────────────────────────────────────────
 export default function GeneralDashboard() {
   const { clients } = useClients();
-  const { payments } = useInvestmentPayments();
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [period, setPeriod] = useState<Period>('this_month');
@@ -405,12 +406,19 @@ export default function GeneralDashboard() {
   }, [period, sortBy, selectedIds]);
 
   // ── Aggregate metrics ────────────────────────────────────────────────────
-  let metaLeads = 0, metaSpend = 0, metaImpressions = 0, metaClicks = 0;
+  let metaLeads = 0, metaFormLeads = 0, metaConversations = 0, metaSpend = 0, metaImpressions = 0, metaClicks = 0;
   let googleConv = 0, googleCost = 0;
 
   for (const id of selectedIds) {
     const m = metricsByClient[id];
-    if (m?.meta) { metaLeads += m.meta.leads; metaSpend += m.meta.spend; metaImpressions += m.meta.impressions; metaClicks += m.meta.clicks; }
+    if (m?.meta) {
+      metaLeads += m.meta.leads;
+      metaFormLeads += m.meta.formLeads ?? 0;
+      metaConversations += m.meta.conversations ?? 0;
+      metaSpend += m.meta.spend;
+      metaImpressions += m.meta.impressions;
+      metaClicks += m.meta.clicks;
+    }
     if (m?.google) { googleConv += m.google.conversions; googleCost += m.google.cost; }
   }
 
@@ -439,11 +447,6 @@ export default function GeneralDashboard() {
   const googleConvPartial = autoPartial(googleConvGoal, period);
   const revenuePartial = autoPartial(revenueGoal, period);
   const roi = totalSpend > 0 && revenue > 0 ? ((revenue - totalSpend) / totalSpend * 100) : 0;
-
-  // ── Investment ───────────────────────────────────────────────────────────
-  const selPayments = payments.filter(p => selectedIds.has(p.clientId));
-  const investBudget = selPayments.reduce((s, p) => s + p.amount, 0);
-  const investDone = selPayments.filter(p => p.status === 'Pago' || p.status === 'Enviado').reduce((s, p) => s + p.amount, 0);
 
   // ── Alerts ───────────────────────────────────────────────────────────────
   type Alert = { clientId: string; clientName: string; msg: string; severity: 'warning' | 'critical' };
@@ -557,9 +560,9 @@ export default function GeneralDashboard() {
           loading={metricsLoading}
         />
         <KpiCard
-          title="Investimento no Período"
-          value={investDone}
-          meta={investBudget}
+          title="Total Gasto"
+          value={totalSpend}
+          meta={0}
           partial={0}
           format="currency"
           loading={metricsLoading}
@@ -569,11 +572,11 @@ export default function GeneralDashboard() {
       {/* KPI Cards — Row 2 */}
       <div className="grid gap-4 lg:grid-cols-2">
         <KpiCard
-          title="Leads Meta Ads"
+          title="Meta Leads + Conversas"
           value={metaLeads}
           meta={metaLeadsGoal}
           partial={metaLeadsPartial}
-          prefix="Meta"
+          prefix={`${metaFormLeads.toLocaleString('pt-BR')} formulários · ${metaConversations.toLocaleString('pt-BR')} conversas`}
           loading={metricsLoading}
         />
         <KpiCard
