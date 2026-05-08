@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   AlertTriangle, CheckCircle2, ChevronDown, ImageIcon, RefreshCw,
-  TrendingDown, TrendingUp, X,
+  Search, TrendingDown, TrendingUp,
 } from 'lucide-react';
 import { useClients } from '@/lib/client-store';
 import { clientResults } from '@/lib/client-results-store';
@@ -76,49 +76,71 @@ function KpiCard({
 
   const statusColor = critical ? 'text-red-400' : onTrack ? 'text-emerald-400' : 'text-orange-400';
   const barColor = critical ? 'bg-red-500' : onTrack ? 'bg-emerald-500' : 'bg-orange-400';
-  const borderColor = critical ? 'border-red-500/40' : onTrack ? 'border-border' : 'border-orange-400/30';
+  const borderColor = critical ? 'border-red-500/40' : onTrack ? 'border-primary/30' : 'border-orange-400/30';
+  const topColor = critical ? 'bg-red-500' : onTrack ? 'bg-primary' : 'bg-orange-400';
+  const progress = partial > 0 ? partialPct : pct;
+  const statusLabel = critical ? 'Crítico' : onTrack ? 'No ritmo' : 'Atenção';
 
   return (
-    <div className={cn('rounded-xl border bg-card p-4 space-y-3', borderColor)}>
-      <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{prefix && <span className="mr-1 opacity-60">{prefix}</span>}{title}</p>
+    <div className={cn('relative overflow-hidden rounded-xl border bg-card p-4 space-y-3', borderColor)}>
+      <div className={cn('absolute inset-x-0 top-0 h-1', topColor)} />
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className={cn('font-bold text-lg', statusColor)}>{title}</p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">Realizado contra a meta do período.</p>
+        </div>
+        <span className={cn(
+          'rounded-lg border px-2 py-1 text-[10px] font-bold uppercase tracking-wider',
+          critical
+            ? 'border-red-500/40 bg-red-500/10 text-red-300'
+            : onTrack
+            ? 'border-primary/40 bg-primary/10 text-primary'
+            : 'border-orange-400/40 bg-orange-400/10 text-orange-300',
+        )}>
+          {statusLabel}
+        </span>
+      </div>
       {loading ? (
-        <div className="flex items-center gap-2 text-muted-foreground/50">
+        <div className="flex min-h-28 items-center justify-center gap-2 rounded-lg border border-border bg-background/70 text-muted-foreground/50">
           <RefreshCw className="w-3.5 h-3.5 animate-spin" />
           <span className="text-sm">Carregando...</span>
         </div>
       ) : (
         <>
-          <p className={cn('font-heading text-3xl font-bold tracking-wide leading-none', value > 0 ? statusColor : 'text-foreground')}>
-            {fmt(value)}
-          </p>
-          <div className="space-y-1.5">
+          <div className="relative overflow-hidden rounded-lg border border-border bg-background/70 min-h-24">
             {meta > 0 && (
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="text-muted-foreground">Meta</span>
-                <span className="font-semibold">{fmt(meta)}</span>
-              </div>
+              <div
+                className={cn('absolute inset-y-0 left-0 opacity-80 transition-all', barColor)}
+                style={{ width: `${Math.max(0, Math.min(progress, 100))}%` }}
+              />
             )}
-            {partial > 0 && (
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="text-muted-foreground">Parcial hoje</span>
-                <span className={cn('font-bold flex items-center gap-1', statusColor)}>
+            <div className="relative z-10 flex items-center justify-between gap-4 p-4">
+              <div className="rounded-lg bg-black/25 px-3 py-2 shadow-[0_12px_30px_rgba(0,0,0,0.3)]">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Realizado</p>
+                <p className="mt-1 font-heading text-2xl font-bold tracking-wide leading-none text-foreground">{fmt(value)}</p>
+              </div>
+              <div className="rounded-lg bg-black/25 px-3 py-2 text-right shadow-[0_12px_30px_rgba(0,0,0,0.3)]">
+                <p className={cn('font-heading text-2xl font-bold leading-none', statusColor)}>{progress}%</p>
+                <p className={cn('mt-1 flex items-center justify-end gap-1 text-[10px] font-bold uppercase tracking-wider', statusColor)}>
                   {onTrack
                     ? <CheckCircle2 className="w-3 h-3" />
                     : critical
                     ? <TrendingDown className="w-3 h-3" />
                     : <AlertTriangle className="w-3 h-3" />}
-                  {fmt(partial)}
-                </span>
+                  {statusLabel}
+                </p>
               </div>
-            )}
-            {meta > 0 && (
-              <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                <div
-                  className={cn('h-full rounded-full transition-all', barColor)}
-                  style={{ width: `${partial > 0 ? partialPct : pct}%` }}
-                />
-              </div>
-            )}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="rounded-lg bg-background/70 px-3 py-2 text-center">
+              <p className="text-sm font-bold">{meta > 0 ? fmt(meta) : prefix ? prefix : '—'}</p>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Meta</p>
+            </div>
+            <div className="rounded-lg bg-background/70 px-3 py-2 text-center">
+              <p className="text-sm font-bold">{partial > 0 ? fmt(partial) : meta > 0 ? fmt(meta) : '—'}</p>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Parcial</p>
+            </div>
           </div>
         </>
       )}
@@ -135,8 +157,18 @@ function ClientSelector({
   onChange: (ids: Set<string>) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [sort, setSort] = useState<'az' | 'za'>('az');
   const ref = useRef<HTMLDivElement>(null);
-  const allSelected = selected.size === clients.length;
+  const hasMultipleClients = clients.length > 1;
+  const allClientsSelected = clients.length > 0 && selected.size === clients.length;
+  const showingAllClients = hasMultipleClients && allClientsSelected;
+  const visibleClients = [...clients]
+    .filter(c => c.name.toLowerCase().includes(search.trim().toLowerCase()))
+    .sort((a, b) => {
+      const result = a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' });
+      return sort === 'az' ? result : -result;
+    });
 
   useEffect(() => {
     function onOutside(e: MouseEvent) {
@@ -147,6 +179,10 @@ function ClientSelector({
   }, []);
 
   function toggle(id: string) {
+    if (showingAllClients) {
+      onChange(new Set([id]));
+      return;
+    }
     const next = new Set(selected);
     if (next.has(id)) { next.delete(id); } else { next.add(id); }
     if (next.size === 0) onChange(new Set(clients.map(c => c.id)));
@@ -154,10 +190,14 @@ function ClientSelector({
   }
 
   function toggleAll() {
-    onChange(allSelected ? new Set() : new Set(clients.map(c => c.id)));
+    onChange(new Set(clients.map(c => c.id)));
   }
 
-  const label = allSelected ? 'Todos os clientes' : `${selected.size} cliente${selected.size > 1 ? 's' : ''}`;
+  const label = showingAllClients
+    ? 'Todos os clientes'
+    : selected.size === 1
+    ? clients.find(c => selected.has(c.id))?.name ?? '1 cliente'
+    : `${selected.size} clientes`;
 
   return (
     <div ref={ref} className="relative">
@@ -170,18 +210,40 @@ function ClientSelector({
       </button>
       {open && (
         <div className="absolute left-0 top-full mt-1.5 z-50 w-64 rounded-xl border border-border bg-card shadow-xl p-1">
-          <button
-            onClick={toggleAll}
-            className="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-muted/50 transition-colors"
-          >
-            <span className={cn('w-4 h-4 rounded border flex items-center justify-center text-[10px] shrink-0',
-              allSelected ? 'bg-primary border-primary text-black' : 'border-border'
-            )}>{allSelected && '✓'}</span>
-            <span className="font-semibold">Todos</span>
-          </button>
-          <div className="my-1 border-t border-border" />
+          <div className="grid gap-1 p-1">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Buscar cliente..."
+                className="h-8 w-full rounded-lg border border-border bg-background pl-8 pr-2 text-xs outline-none focus:border-primary"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => setSort(sort === 'az' ? 'za' : 'az')}
+              className="h-7 rounded-lg border border-border bg-background px-2 text-[10px] font-bold text-muted-foreground hover:text-foreground"
+            >
+              Ordem {sort === 'az' ? 'A-Z' : 'Z-A'}
+            </button>
+          </div>
+          {hasMultipleClients && (
+            <>
+              <button
+                onClick={toggleAll}
+                className="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-muted/50 transition-colors"
+              >
+                <span className={cn('w-4 h-4 rounded border flex items-center justify-center text-[10px] shrink-0',
+                  allClientsSelected ? 'bg-primary border-primary text-black' : 'border-border'
+                )}>{allClientsSelected && '✓'}</span>
+                <span className="font-semibold">Todos</span>
+              </button>
+              <div className="my-1 border-t border-border" />
+            </>
+          )}
           <div className="max-h-48 overflow-y-auto space-y-0.5">
-            {clients.map(c => (
+            {visibleClients.map(c => (
               <button
                 key={c.id}
                 onClick={() => toggle(c.id)}
@@ -291,7 +353,13 @@ export default function GeneralDashboard() {
 
   // Initialize: all clients selected
   useEffect(() => {
-    if (clients.length > 0) setSelectedIds(new Set(clients.map(c => c.id)));
+    if (clients.length === 0) return;
+    const clientIds = new Set(clients.map(c => c.id));
+    setSelectedIds((current) => {
+      if (current.size === 0) return new Set(clientIds);
+      const valid = [...current].filter((id) => clientIds.has(id));
+      return valid.length > 0 ? new Set(valid) : new Set(clientIds);
+    });
   }, [clients]);
 
   // Read goals from localStorage
@@ -321,13 +389,20 @@ export default function GeneralDashboard() {
 
   // Fetch top creatives
   useEffect(() => {
+    if (selectedIds.size === 0) return;
     setCreativesLoading(true);
-    fetch(`/api/meta/top-creatives?period=${period}&sortBy=${sortBy}&limit=20`)
+    const params = new URLSearchParams({
+      period,
+      sortBy,
+      limit: '20',
+      clientIds: [...selectedIds].join(','),
+    });
+    fetch(`/api/meta/top-creatives?${params.toString()}`)
       .then(res => res.ok ? res.json() as Promise<TopCreative[]> : [])
       .then(setCreatives)
       .catch(() => setCreatives([]))
       .finally(() => setCreativesLoading(false));
-  }, [period, sortBy]);
+  }, [period, sortBy, selectedIds]);
 
   // ── Aggregate metrics ────────────────────────────────────────────────────
   let metaLeads = 0, metaSpend = 0, metaImpressions = 0, metaClicks = 0;
@@ -456,7 +531,7 @@ export default function GeneralDashboard() {
       )}
 
       {/* KPI Cards — Row 1 */}
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 lg:grid-cols-2">
         <KpiCard
           title="Resultado"
           value={revenue}
@@ -492,7 +567,7 @@ export default function GeneralDashboard() {
       </div>
 
       {/* KPI Cards — Row 2 */}
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 lg:grid-cols-2">
         <KpiCard
           title="Leads Meta Ads"
           value={metaLeads}

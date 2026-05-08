@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import { Link2, RefreshCw, CheckSquare, Square, AlertCircle } from 'lucide-react';
+import { Link2, RefreshCw, CheckSquare, Square, AlertCircle, Search, ArrowUpDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -24,6 +24,60 @@ const PLATFORM_LABEL = (p: PlatformId) => PLATFORM_INFO[p].label;
 
 const COMING_SOON_PLATFORMS: PlatformId[] = ['google_sheets'];
 
+type SortDirection = 'az' | 'za';
+
+function normalizeSearch(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function sortByName<T>(items: T[], getName: (item: T) => string, direction: SortDirection) {
+  return [...items].sort((a, b) => {
+    const result = getName(a).localeCompare(getName(b), 'pt-BR', { sensitivity: 'base' });
+    return direction === 'az' ? result : -result;
+  });
+}
+
+function filterBySearch<T>(items: T[], search: string, getValues: (item: T) => Array<string | undefined>) {
+  const q = normalizeSearch(search);
+  if (!q) return items;
+  return items.filter((item) => getValues(item).some((value) => value?.toLowerCase().includes(q)));
+}
+
+function AccountListControls({
+  search,
+  onSearchChange,
+  sortDirection,
+  onSortDirectionChange,
+}: {
+  search: string;
+  onSearchChange: (value: string) => void;
+  sortDirection: SortDirection;
+  onSortDirectionChange: (value: SortDirection) => void;
+}) {
+  return (
+    <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <input
+          value={search}
+          onChange={(event) => onSearchChange(event.target.value)}
+          placeholder="Pesquisar conta ou ID..."
+          className="h-9 w-full rounded-lg border border-border bg-background pl-9 pr-3 text-sm outline-none transition-colors focus:border-primary"
+        />
+      </div>
+      <button
+        type="button"
+        onClick={() => onSortDirectionChange(sortDirection === 'az' ? 'za' : 'az')}
+        className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 text-xs font-bold text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
+        title="Alterar ordem"
+      >
+        <ArrowUpDown className="h-3.5 w-3.5" />
+        {sortDirection === 'az' ? 'A-Z' : 'Z-A'}
+      </button>
+    </div>
+  );
+}
+
 function GoogleAdsContent({
   clientId,
   onDone,
@@ -39,6 +93,8 @@ function GoogleAdsContent({
   const [accountsByConn, setAccountsByConn] = useState<Record<string, AdsAccount[]>>({});
   const [existingLinks, setExistingLinks] = useState<ClientAccountLink[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [search, setSearch] = useState('');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('az');
 
   useEffect(() => {
     void loadData();
@@ -149,9 +205,19 @@ function GoogleAdsContent({
 
   return (
     <>
+      <AccountListControls
+        search={search}
+        onSearchChange={setSearch}
+        sortDirection={sortDirection}
+        onSortDirectionChange={setSortDirection}
+      />
       <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
         {googleConns.map((conn) => {
-          const accs = accountsByConn[conn.id] ?? [];
+          const accs = sortByName(
+            filterBySearch(accountsByConn[conn.id] ?? [], search, (account) => [account.name, account.id]),
+            (account) => account.name,
+            sortDirection,
+          );
           if (accs.length === 0) return null;
           return (
             <div key={conn.id}>
@@ -196,6 +262,8 @@ function GmbContent({ clientId, onDone, onCancel }: { clientId: string; onDone: 
   const [locationsByConn, setLocationsByConn] = useState<Record<string, GmbLocation[]>>({});
   const [existingLinks, setExistingLinks] = useState<{ locationId: string; linkId: string }[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [search, setSearch] = useState('');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('az');
 
   useEffect(() => {
     void loadData();
@@ -323,9 +391,19 @@ function GmbContent({ clientId, onDone, onCancel }: { clientId: string; onDone: 
 
   return (
     <>
+      <AccountListControls
+        search={search}
+        onSearchChange={setSearch}
+        sortDirection={sortDirection}
+        onSortDirectionChange={setSortDirection}
+      />
       <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
         {gmbConns.map((conn) => {
-          const locs = locationsByConn[conn.id] ?? [];
+          const locs = sortByName(
+            filterBySearch(locationsByConn[conn.id] ?? [], search, (location) => [location.name, location.locationId, location.address, location.phone]),
+            (location) => location.name,
+            sortDirection,
+          );
           if (locs.length === 0) return null;
           return (
             <div key={conn.id}>
@@ -370,6 +448,8 @@ function MetaAdsContent({ clientId, onDone, onCancel }: { clientId: string; onDo
   const [accountsByConn, setAccountsByConn] = useState<Record<string, MetaAdAccount[]>>({});
   const [existingLinks, setExistingLinks] = useState<ClientAccountLink[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [search, setSearch] = useState('');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('az');
 
   useEffect(() => { void loadData(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [clientId]);
 
@@ -478,9 +558,19 @@ function MetaAdsContent({ clientId, onDone, onCancel }: { clientId: string; onDo
           {loadError}
         </div>
       )}
+      <AccountListControls
+        search={search}
+        onSearchChange={setSearch}
+        sortDirection={sortDirection}
+        onSortDirectionChange={setSortDirection}
+      />
       <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
         {metaConns.map((conn) => {
-          const accs = accountsByConn[conn.id] ?? [];
+          const accs = sortByName(
+            filterBySearch(accountsByConn[conn.id] ?? [], search, (account) => [account.name, account.id, account.id.replace('act_', '')]),
+            (account) => account.name,
+            sortDirection,
+          );
           if (accs.length === 0) return null;
           return (
             <div key={conn.id}>
@@ -529,6 +619,8 @@ function MetaPagesContent({
   const [pagesByConn, setPagesByConn] = useState<Record<string, MetaPage[]>>({});
   const [existingLinks, setExistingLinks] = useState<ClientAccountLink[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [search, setSearch] = useState('');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('az');
 
   useEffect(() => { void loadData(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [clientId, platform]);
 
@@ -654,9 +746,26 @@ function MetaPagesContent({
           {loadError}
         </div>
       )}
+      <AccountListControls
+        search={search}
+        onSearchChange={setSearch}
+        sortDirection={sortDirection}
+        onSortDirectionChange={setSortDirection}
+      />
       <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
         {metaConns.map((conn) => {
-          const items = pagesByConn[conn.id] ?? [];
+          const items = sortByName(
+            filterBySearch(pagesByConn[conn.id] ?? [], search, (item) => [
+              item.name,
+              item.id,
+              item.instagramAccountId,
+              item.instagramUsername,
+            ]),
+            (item) => platform === 'instagram'
+              ? (item.instagramUsername ? `@${item.instagramUsername}` : item.name)
+              : item.name,
+            sortDirection,
+          );
           if (items.length === 0) return null;
           return (
             <div key={conn.id}>

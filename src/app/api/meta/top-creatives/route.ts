@@ -2,12 +2,21 @@ import type { NextRequest } from 'next/server';
 import { Pool } from 'pg';
 
 function makePool() {
+  const connectionString = process.env.POSTGRES_URL_NON_POOLING ?? process.env.POSTGRES_URL ?? process.env.POSTGRES_PRISMA_URL;
+  if (connectionString) {
+    return new Pool({
+      connectionString,
+      ssl: { rejectUnauthorized: false },
+      max: 1,
+    });
+  }
+
   return new Pool({
-    host: 'aws-1-us-east-2.pooler.supabase.com',
-    port: 6543,
-    database: 'postgres',
-    user: 'postgres.iremmorsgwiqrorzoihx',
-    password: process.env.SUPABASE_DB_PASSWORD,
+    host: process.env.POSTGRES_HOST,
+    port: Number(process.env.POSTGRES_PORT ?? 5432),
+    database: process.env.POSTGRES_DATABASE ?? 'postgres',
+    user: process.env.POSTGRES_USER,
+    password: process.env.SUPABASE_DB_PASSWORD ?? process.env.POSTGRES_PASSWORD,
     ssl: { rejectUnauthorized: false },
     max: 1,
   });
@@ -25,6 +34,14 @@ const LEAD_ACTIONS = [
   'lead', 'offsite_conversion.fb_pixel_lead', 'onsite_conversion.lead_grouped',
   'onsite_conversion.messaging_conversation_started_7d', 'onsite_conversion.total_messaging_connection',
 ];
+
+function normalizeMetaAccountId(accountId: string) {
+  return accountId.replace(/^act_/, '');
+}
+
+function accountMatches(a: string, b: string) {
+  return normalizeMetaAccountId(a) === normalizeMetaAccountId(b);
+}
 
 export type TopCreative = {
   adId: string;
@@ -48,15 +65,46 @@ export async function GET(request: NextRequest) {
   const sortBy = request.nextUrl.searchParams.get('sortBy') ?? 'spend';
   const limit = Math.min(parseInt(request.nextUrl.searchParams.get('limit') ?? '20'), 50);
   const metaPeriod = mapToMetaPeriod(period);
+  const requestedClientIds = (request.nextUrl.searchParams.get('clientIds') ?? '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
+  const shouldFilterByClient = requestedClientIds.length > 0;
 
   const pool = makePool();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let conns: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let links: any[] = [];
   try {
-    const { rows } = await pool.query("SELECT * FROM public.meta_connections WHERE status = 'connected'");
-    conns = rows;
+    const [connectionsResult, linksResult] = await Promise.all([
+      pool.query("SELECT * FROM public.meta_connections WHERE status = 'connected'"),
+      shouldFilterByClient
+        ? pool.query(
+          `SELECT client_id, connection_id, account_id
+           FROM public.client_account_links
+           WHERE platform = 'meta_ads'
+             AND client_id = ANY($1::text[])`,
+          [requestedClientIds],
+        )
+        : Promise.resolve({ rows: [] }),
+    ]);
+    conns = connectionsResult.rows;
+    links = linksResult.rows;
   } finally {
     await pool.end();
+  }
+
+  const allowedByConnection = new Map<string, string[]>();
+  for (const link of links) {
+    if (!link.connection_id || !link.account_id) continue;
+    const list = allowedByConnection.get(link.connection_id) ?? [];
+    list.push(link.account_id);
+    allowedByConnection.set(link.connection_id, list);
+  }
+
+  if (shouldFilterByClient && allowedByConnection.size === 0) {
+    return Response.json([]);
   }
 
   const allCreatives: TopCreative[] = [];
@@ -64,6 +112,8 @@ export async function GET(request: NextRequest) {
   await Promise.allSettled(
     conns.map(async (conn) => {
       const token = conn.access_token as string;
+      const allowedAccounts = shouldFilterByClient ? allowedByConnection.get(conn.id) ?? [] : [];
+      if (shouldFilterByClient && allowedAccounts.length === 0) return;
 
       // Get all ad accounts accessible by this connection
       const acctRes = await fetch(
@@ -72,7 +122,9 @@ export async function GET(request: NextRequest) {
       if (!acctRes.ok) return;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const acctData = await acctRes.json() as { data?: any[] };
-      const accounts: Array<{ id: string; name: string }> = acctData.data ?? [];
+      const accounts: Array<{ id: string; name: string }> = shouldFilterByClient
+        ? (acctData.data ?? []).filter((account) => allowedAccounts.some((id) => accountMatches(id, account.id)))
+        : acctData.data ?? [];
 
       await Promise.allSettled(
         accounts.map(async (account) => {
