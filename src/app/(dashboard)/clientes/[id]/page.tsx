@@ -1332,14 +1332,11 @@ type ClientTeamRole =
 type ClientTeamMember = {
   id: string;
   name: string;
-  role: ClientTeamRole;
-  department: string;
-  email: string;
+  role: string;
   phone: string;
-  notes: string;
 };
 
-const TEAM_ROLES: ClientTeamRole[] = [
+const TEAM_ROLES = [
   'Responsável',
   'Atendimento',
   'Vendas',
@@ -1350,7 +1347,7 @@ const TEAM_ROLES: ClientTeamRole[] = [
   'Operacional',
 ];
 
-const ROLE_COLORS: Record<ClientTeamRole, string> = {
+const ROLE_COLORS: Record<string, string> = {
   Responsável: '#55F52F',
   Atendimento: '#7B2CFF',
   Vendas: '#55F52F',
@@ -1361,162 +1358,57 @@ const ROLE_COLORS: Record<ClientTeamRole, string> = {
   Operacional: '#F59E0B',
 };
 
-const emptyTeamForm: Omit<ClientTeamMember, 'id'> = {
-  name: '',
-  role: 'Responsável',
-  department: '',
-  email: '',
-  phone: '',
-  notes: '',
-};
+const DNA_STORAGE_KEY = (clientId: string) => `dna-members-${clientId}`;
 
-function seedClientTeam(clientName: string): ClientTeamMember[] {
-  return [
-    {
-      id: 'team-1',
-      name: 'Ana Paula',
-      role: 'Responsável',
-      department: 'Diretoria',
-      email: `ana@${clientName.toLowerCase().replace(/\s+/g, '')}.com.br`,
-      phone: '(44) 99999-0101',
-      notes: 'Decide prioridades, aprova orçamento e centraliza alinhamentos estratégicos.',
-    },
-    {
-      id: 'team-2',
-      name: 'Marcos Lima',
-      role: 'Atendimento aos leads',
-      department: 'Comercial',
-      email: '',
-      phone: '(44) 99999-0202',
-      notes: 'Recebe leads novos, qualifica oportunidades e registra retornos no CRM.',
-    },
-    {
-      id: 'team-3',
-      name: 'Camila Rocha',
-      role: 'Gerente',
-      department: 'Operação',
-      email: '',
-      phone: '',
-      notes: 'Acompanha rotina da equipe, gargalos de atendimento e demandas internas.',
-    },
-  ];
-}
-
-function TeamMemberCard({ member, onRemove }: {
-  member: ClientTeamMember;
-  onRemove: () => void;
-}) {
-  const color = ROLE_COLORS[member.role];
-  const initials = member.name
-    .split(' ')
-    .map((part) => part[0])
-    .join('')
-    .slice(0, 2)
-    .toUpperCase();
-
-  return (
-    <div className="overflow-hidden rounded-xl border border-border bg-card">
-      <div className="h-1.5" style={{ backgroundColor: color }} />
-      <div className="p-5">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex min-w-0 items-start gap-3">
-            <div
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border font-heading text-2xl"
-              style={{ borderColor: `${color}55`, backgroundColor: `${color}14`, color }}
-            >
-              {initials || <UserRound className="h-5 w-5" />}
-            </div>
-            <div className="min-w-0">
-              <h4 className="truncate text-lg font-bold">{member.name}</h4>
-              <p className="mt-1 text-[10px] font-bold uppercase tracking-widest" style={{ color }}>
-                {member.role}
-              </p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onRemove}
-            className="text-muted-foreground/60 transition-colors hover:text-destructive"
-            title="Remover membro"
-          >
-            <Trash2 className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="mt-4 grid gap-2 text-sm">
-          <div className="flex items-center gap-2 rounded-lg bg-background/60 px-3 py-2">
-            <Briefcase className="h-4 w-4 text-muted-foreground" />
-            <span className="text-muted-foreground">Área:</span>
-            <span className="font-semibold">{member.department || 'Não informado'}</span>
-          </div>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <div className="flex min-w-0 items-center gap-2 rounded-lg bg-background/60 px-3 py-2">
-              <Mail className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <span className="truncate text-xs">{member.email || 'Email não informado'}</span>
-            </div>
-            <div className="flex min-w-0 items-center gap-2 rounded-lg bg-background/60 px-3 py-2">
-              <Phone className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <span className="truncate text-xs">{member.phone || 'Telefone não informado'}</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-4 rounded-lg border border-border bg-background/60 p-3">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Biografia operacional</p>
-          <p className="mt-2 text-sm leading-relaxed text-foreground/85">
-            {member.notes || 'Sem observações cadastradas.'}
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ClientTeamTab({ clientName }: { clientName: string }) {
-  const [members, setMembers] = useState<ClientTeamMember[]>(() => seedClientTeam(clientName));
-  const [form, setForm] = useState<Omit<ClientTeamMember, 'id'>>(emptyTeamForm);
+function ClientDnaTab({ clientId, clientName }: { clientId: string; clientName: string }) {
+  const [members, setMembers] = useState<ClientTeamMember[]>(() => {
+    try {
+      const raw = localStorage.getItem(DNA_STORAGE_KEY(clientId));
+      return raw ? (JSON.parse(raw) as ClientTeamMember[]) : [];
+    } catch { return []; }
+  });
+  const [form, setForm] = useState({ name: '', role: TEAM_ROLES[0], phone: '' });
+  const [saved, setSaved] = useState(false);
 
   function addMember() {
     if (!form.name.trim()) return;
-
-    setMembers((prev) => [
-      ...prev,
-      {
-        ...form,
-        id: `team-${Date.now()}`,
-        name: form.name.trim(),
-        department: form.department.trim(),
-        email: form.email.trim(),
-        phone: form.phone.trim(),
-        notes: form.notes.trim(),
-      },
-    ]);
-    setForm(emptyTeamForm);
+    setMembers((prev) => [...prev, { id: `team-${Date.now()}`, name: form.name.trim(), role: form.role, phone: form.phone.trim() }]);
+    setForm({ name: '', role: TEAM_ROLES[0], phone: '' });
+    setSaved(false);
   }
 
-  const roleCoverage = TEAM_ROLES.filter((role) => members.some((member) => member.role === role));
+  function removeMember(id: string) {
+    setMembers((prev) => prev.filter((m) => m.id !== id));
+    setSaved(false);
+  }
+
+  function handleSave() {
+    localStorage.setItem(DNA_STORAGE_KEY(clientId), JSON.stringify(members));
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  }
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h3 className="font-bold text-sm uppercase tracking-wider">Time do Cliente</h3>
+          <h3 className="font-bold text-sm uppercase tracking-wider">DNA do Cliente</h3>
           <p className="mt-1 text-xs text-muted-foreground">
-            Mapeie responsáveis, atendimento, vendas, leads, gerência e contatos-chave de {clientName}.
+            Mapeie os contatos-chave de {clientName}.
           </p>
         </div>
-        <div className="rounded-lg border border-primary/20 bg-primary/10 px-3 py-2 text-xs font-bold uppercase tracking-widest text-primary">
-          {members.length} pessoas cadastradas
-        </div>
+        <Button
+          onClick={handleSave}
+          className="bg-primary text-primary-foreground hover:bg-primary/90 h-9 text-xs font-bold uppercase tracking-wider"
+        >
+          {saved ? <Check className="mr-1.5 h-3.5 w-3.5" /> : null}
+          {saved ? 'Salvo!' : 'Salvar DNA'}
+        </Button>
       </div>
 
       <Card className="bg-card border-border">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Cadastrar funcionário do cliente</CardTitle>
-          <CardDescription>Inclua quem faz o que para o time da ONMID consultar rápido.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-3 md:grid-cols-[minmax(180px,1fr)_180px_minmax(160px,0.7fr)]">
+        <CardContent className="pt-4">
+          <div className="grid gap-3 sm:grid-cols-[1fr_180px_180px_auto]">
             <div className="space-y-1.5">
               <Label>Nome</Label>
               <Input
@@ -1524,95 +1416,78 @@ function ClientTeamTab({ clientName }: { clientName: string }) {
                 onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
                 placeholder="Nome do funcionário"
                 className="bg-background"
+                onKeyDown={(e) => { if (e.key === 'Enter') addMember(); }}
               />
             </div>
             <div className="space-y-1.5">
               <Label>Função</Label>
               <select
                 value={form.role}
-                onChange={(e) => setForm((prev) => ({ ...prev, role: e.target.value as ClientTeamRole }))}
+                onChange={(e) => setForm((prev) => ({ ...prev, role: e.target.value }))}
                 className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
               >
                 {TEAM_ROLES.map((role) => <option key={role} value={role}>{role}</option>)}
               </select>
             </div>
             <div className="space-y-1.5">
-              <Label>Área</Label>
-              <Input
-                value={form.department}
-                onChange={(e) => setForm((prev) => ({ ...prev, department: e.target.value }))}
-                placeholder="Comercial, atendimento..."
-                className="bg-background"
-              />
-            </div>
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label>Email</Label>
-              <Input
-                type="email"
-                value={form.email}
-                onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))}
-                placeholder="email@cliente.com"
-                className="bg-background"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Telefone / WhatsApp</Label>
+              <Label>Telefone</Label>
               <Input
                 value={form.phone}
                 onChange={(e) => setForm((prev) => ({ ...prev, phone: e.target.value }))}
                 placeholder="(00) 00000-0000"
                 className="bg-background"
+                onKeyDown={(e) => { if (e.key === 'Enter') addMember(); }}
               />
             </div>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label>Resumo da função</Label>
-            <textarea
-              value={form.notes}
-              onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
-              placeholder="Ex: aprova campanhas, atende leads do WhatsApp, acompanha vendas, passa feedbacks..."
-              className="min-h-24 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-            />
-          </div>
-
-          <div className="flex justify-end">
-            <Button onClick={addMember} className="bg-primary text-primary-foreground hover:bg-primary/90">
-              <Plus className="mr-2 h-4 w-4" />
-              Adicionar ao time
-            </Button>
+            <div className="flex items-end">
+              <Button onClick={addMember} disabled={!form.name.trim()} className="bg-primary text-primary-foreground hover:bg-primary/90 h-9 w-9 p-0">
+                <Plus className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>
 
-      <div className="grid gap-3 md:grid-cols-4">
-        {TEAM_ROLES.slice(0, 6).map((role) => {
-          const covered = roleCoverage.includes(role);
-          const color = ROLE_COLORS[role];
-
-          return (
-            <div key={role} className="rounded-lg border border-border bg-card p-3">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{role}</p>
-              <p className="mt-2 text-sm font-bold" style={{ color: covered ? color : undefined }}>
-                {covered ? 'Mapeado' : 'Pendente'}
-              </p>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        {members.map((member) => (
-          <TeamMemberCard
-            key={member.id}
-            member={member}
-            onRemove={() => setMembers((prev) => prev.filter((item) => item.id !== member.id))}
-          />
-        ))}
-      </div>
+      {members.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border bg-card/50 p-10 text-center">
+          <UserRound className="mx-auto h-8 w-8 text-muted-foreground/40 mb-3" />
+          <p className="text-sm text-muted-foreground">Nenhum contato cadastrado ainda.</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {members.map((member) => {
+            const color = ROLE_COLORS[member.role] ?? '#8B8B8B';
+            const initials = member.name.split(' ').map((p) => p[0]).join('').slice(0, 2).toUpperCase();
+            return (
+              <div key={member.id} className="flex items-center gap-4 rounded-lg border border-border bg-card px-4 py-3">
+                <div
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border font-heading text-sm font-bold"
+                  style={{ borderColor: `${color}55`, backgroundColor: `${color}14`, color }}
+                >
+                  {initials || <UserRound className="h-4 w-4" />}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold truncate">{member.name}</p>
+                  <p className="text-[10px] font-bold uppercase tracking-widest mt-0.5" style={{ color }}>{member.role}</p>
+                </div>
+                {member.phone && (
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <Phone className="h-3.5 w-3.5 shrink-0" />
+                    <span>{member.phone}</span>
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => removeMember(member.id)}
+                  className="text-muted-foreground/60 hover:text-destructive transition-colors ml-2"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -2529,7 +2404,7 @@ function ClientIntegrationsTab({ clientId, clientName }: { clientId: string; cli
 }
 
 // ── Page ───────────────────────────────────────────────────────────────────────
-const TABS = ['planejamento', 'dashboard', 'time', 'pagamentos', 'importar'] as const;
+const TABS = ['planejamento', 'dashboard', 'pagamentos', 'dna', 'importar'] as const;
 type Tab = typeof TABS[number];
 
 export default function ClientPage({ params }: { params: Promise<{ id: string }> }) {
@@ -2603,8 +2478,8 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
   const tabLabel: Record<Tab, string> = {
     planejamento: 'Planejamento',
     dashboard:    'Dashboard',
-    time:         'Time',
     pagamentos:   'Pagamentos',
+    dna:          'DNA do Cliente',
     importar:     'Importar Dados',
   };
 
@@ -2669,7 +2544,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
         />
       )}
 
-      {tab === 'time' && <ClientTeamTab clientName={client.name} />}
+      {tab === 'dna' && <ClientDnaTab clientId={id} clientName={client.name} />}
 
       {tab === 'pagamentos' && <InvestmentPaymentsTab clientId={id} clientName={client.name} />}
 
