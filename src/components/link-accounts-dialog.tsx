@@ -188,6 +188,7 @@ function GoogleAdsContent({
 function GmbContent({ clientId, onDone, onCancel }: { clientId: string; onDone: () => void; onCancel: () => void }) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [gmbConns, setGmbConns] = useState<GoogleConnection[]>([]);
   const [locationsByConn, setLocationsByConn] = useState<Record<string, GmbLocation[]>>({});
   const [existingLinks, setExistingLinks] = useState<{ locationId: string; linkId: string }[]>([]);
@@ -216,12 +217,20 @@ function GmbContent({ clientId, onDone, onCancel }: { clientId: string; onDone: 
       setGmbConns(filtered);
 
       const locMap: Record<string, GmbLocation[]> = {};
+      const errors: string[] = [];
       await Promise.allSettled(
         filtered.map(async (conn) => {
           const res = await fetch(`/api/google/business-locations?connectionId=${conn.id}&noMetrics=true`);
-          if (res.ok) locMap[conn.id] = await res.json() as GmbLocation[];
+          if (res.ok) {
+            locMap[conn.id] = await res.json() as GmbLocation[];
+          } else {
+            const body = await res.json().catch(() => ({})) as { error?: string; detail?: string };
+            const detail = body.detail ? ` — ${body.detail.slice(0, 200)}` : '';
+            errors.push(`${conn.email ?? conn.id}: ${body.error ?? 'Erro'}${detail}`);
+          }
         })
       );
+      if (errors.length > 0) setLoadError(errors.join('\n'));
       setLocationsByConn(locMap);
     } finally {
       setLoading(false);
@@ -282,6 +291,18 @@ function GmbContent({ clientId, onDone, onCancel }: { clientId: string; onDone: 
           <RefreshCw className="w-4 h-4 animate-spin" /> Carregando locais...
         </div>
         <DialogFooter><Button variant="outline" onClick={onCancel}>Cancelar</Button></DialogFooter>
+      </>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <>
+        <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-xs text-destructive space-y-1">
+          <p className="font-semibold">Erro ao carregar locais</p>
+          <pre className="whitespace-pre-wrap break-all font-mono">{loadError}</pre>
+        </div>
+        <DialogFooter><Button variant="outline" onClick={onCancel}>Fechar</Button></DialogFooter>
       </>
     );
   }

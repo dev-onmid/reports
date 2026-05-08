@@ -51,12 +51,15 @@ type GmbMetrics = {
   directionRequests: number;
 };
 
-async function gmbGet(url: string, accessToken: string) {
+async function gmbGet(url: string, accessToken: string): Promise<{ ok: true; data: unknown } | { ok: false; status: number; body: string }> {
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
-  if (!res.ok) return null;
-  return res.json();
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    return { ok: false, status: res.status, body };
+  }
+  return { ok: true, data: await res.json() };
 }
 
 async function fetchLocationMetrics(
@@ -138,12 +141,14 @@ export async function GET(request: NextRequest) {
   const accessToken = await getFreshAccessToken(conn);
 
   // List accounts
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const accountsData = await gmbGet('https://mybusinessaccountmanagement.googleapis.com/v1/accounts', accessToken) as any;
-  if (!accountsData) return Response.json({ error: 'Failed to list GMB accounts' }, { status: 502 });
+  const accountsResult = await gmbGet('https://mybusinessaccountmanagement.googleapis.com/v1/accounts', accessToken);
+  if (!accountsResult.ok) {
+    console.error('[GMB] accounts API error', accountsResult.status, accountsResult.body);
+    return Response.json({ error: 'Failed to list GMB accounts', detail: accountsResult.body }, { status: 502 });
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const accounts: any[] = accountsData.accounts ?? [];
+  const accounts: any[] = (accountsResult.data as any).accounts ?? [];
   if (accounts.length === 0) return Response.json([]);
 
   const locations: GmbLocation[] = [];
@@ -153,15 +158,14 @@ export async function GET(request: NextRequest) {
       const accountName: string = account.name; // e.g. "accounts/123456"
       const accountId = accountName.replace('accounts/', '');
 
-      const locData = await gmbGet(
+      const locResult = await gmbGet(
         `https://mybusinessbusinessinformation.googleapis.com/v1/${accountName}/locations?readMask=name,title,phoneNumbers,websiteUri,storefrontAddress`,
         accessToken,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ) as any;
-      if (!locData) return;
+      );
+      if (!locResult.ok) return;
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const locs: any[] = locData.locations ?? [];
+      const locs: any[] = (locResult.data as any).locations ?? [];
       await Promise.allSettled(
         locs.map(async (loc) => {
           const locationName: string = loc.name; // e.g. "locations/987654"
