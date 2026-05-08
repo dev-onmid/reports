@@ -981,6 +981,7 @@ function GoogleConnectionsPanel({
         setShowAccounts(true);
       } catch (e) {
         setAdsError(e instanceof Error ? e.message : 'Erro');
+        setShowAccounts(true);
       } finally {
         setLoadingAds(false);
       }
