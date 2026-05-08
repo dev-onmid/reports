@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from 'react';
-import { assertSupabaseConfigured, supabase } from '@/lib/supabase';
 
 export type MetaConnection = {
   id: string;
@@ -15,56 +14,27 @@ export type MetaConnection = {
   connectedAt: string;
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function rowToConnection(r: any): MetaConnection {
-  return {
-    id: r.id,
-    label: r.label ?? '',
-    status: r.status ?? 'connected',
-    appId: r.app_id ?? '',
-    accessToken: r.access_token ?? '',
-    userId: r.user_id ?? '',
-    userName: r.user_name ?? '',
-    userPicture: r.user_picture ?? undefined,
-    connectedAt: r.connected_at ?? new Date().toISOString(),
-  };
-}
-
 export async function loadMetaConnections(): Promise<MetaConnection[]> {
-  assertSupabaseConfigured();
-  const { data, error } = await supabase
-    .from('meta_connections')
-    .select('*')
-    .order('connected_at', { ascending: false });
-  if (error) throw error;
-  return (data ?? []).map(rowToConnection);
+  const res = await fetch('/api/meta/connections');
+  if (!res.ok) throw new Error('Erro ao carregar conexões Meta');
+  return res.json() as Promise<MetaConnection[]>;
 }
 
 export async function addMetaConnection(
   conn: Omit<MetaConnection, 'id' | 'connectedAt'>
 ): Promise<MetaConnection> {
-  assertSupabaseConfigured();
-  const { data, error } = await supabase
-    .from('meta_connections')
-    .insert({
-      label: conn.label,
-      status: conn.status,
-      app_id: conn.appId,
-      access_token: conn.accessToken,
-      user_id: conn.userId,
-      user_name: conn.userName,
-      user_picture: conn.userPicture ?? null,
-    })
-    .select()
-    .single();
-  if (error) throw error;
-  return rowToConnection(data);
+  const res = await fetch('/api/meta/connections', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(conn),
+  });
+  if (!res.ok) throw new Error('Erro ao salvar conexão Meta');
+  return res.json() as Promise<MetaConnection>;
 }
 
 export async function removeMetaConnection(id: string): Promise<void> {
-  assertSupabaseConfigured();
-  const { error } = await supabase.from('meta_connections').delete().eq('id', id);
-  if (error) throw error;
+  const res = await fetch(`/api/meta/connections?id=${id}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error('Erro ao remover conexão Meta');
 }
 
 export function useMetaConnections() {
