@@ -10,6 +10,7 @@ import {
 import { useClients } from '@/lib/client-store';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 import type { TopCreative } from '@/app/api/meta/top-creatives/route';
+import type { CampaignPerformance } from '@/app/api/campaigns/route';
 
 type Period = 'last_7d' | 'last_30d' | 'this_month' | 'last_month';
 type ApiMetrics = {
@@ -143,13 +144,13 @@ function autoPartial(target: number, period: Period): number {
 function KpiCard({
   title, value, meta, partial, format = 'number', inverse = false, loading = false, prefix,
   showMeta = true, showPartial = true, showProgress = true, description = 'Realizado contra a meta do período.',
-  metaLabel = 'Meta', partialLabel = 'Parcial',
+  metaLabel = 'Meta', partialLabel = 'Parcial', featured = false,
 }: {
   title: ReactNode; value: number; meta: number; partial: number;
   format?: 'currency' | 'number' | 'percent' | 'times'; inverse?: boolean;
   loading?: boolean; prefix?: string;
   showMeta?: boolean; showPartial?: boolean; showProgress?: boolean; description?: string;
-  metaLabel?: string; partialLabel?: string;
+  metaLabel?: string; partialLabel?: string; featured?: boolean;
 }) {
   const fmt = (v: number) =>
     format === 'currency' ? formatCurrencyBRL(v)
@@ -206,7 +207,7 @@ function KpiCard({
         </div>
       ) : (
         <>
-          <div className="relative overflow-hidden rounded-lg border border-border bg-background/70 min-h-24">
+          <div className={cn('relative overflow-hidden rounded-lg border border-border bg-background/70', featured ? 'min-h-32' : 'min-h-24')}>
             {showProgress && hasTarget && progress > 0 && (
               <div
                 className={cn('absolute inset-y-0 left-0 opacity-80 transition-all', barColor)}
@@ -216,7 +217,7 @@ function KpiCard({
             <div className="relative z-10 flex items-center justify-between gap-4 p-4">
               <div className="rounded-lg bg-black/25 px-3 py-2 shadow-[0_12px_30px_rgba(0,0,0,0.3)]">
                 <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Realizado</p>
-                <p className="mt-1 font-heading text-2xl font-bold tracking-wide leading-none text-foreground">{fmt(value)}</p>
+                <p className={cn('mt-1 font-heading font-bold tracking-wide leading-none text-foreground', featured ? 'text-4xl' : 'text-2xl')}>{fmt(value)}</p>
               </div>
               {showProgress && hasTarget && (
                 <div className="rounded-lg bg-black/25 px-3 py-2 text-right shadow-[0_12px_30px_rgba(0,0,0,0.3)]">
@@ -245,6 +246,108 @@ function KpiCard({
           )}
         </>
       )}
+    </div>
+  );
+}
+
+function ChannelMetricBox({
+  label,
+  value,
+  format = 'number',
+  color,
+}: {
+  label: string;
+  value: number;
+  format?: 'currency' | 'number';
+  color: string;
+}) {
+  const formatted = format === 'currency' ? formatCurrencyBRL(value) : value.toLocaleString('pt-BR');
+  return (
+    <div className="rounded-xl border border-border bg-background/70 p-4">
+      <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
+      <p className="mt-2 font-heading text-4xl font-bold leading-none" style={{ color }}>
+        {formatted}
+      </p>
+    </div>
+  );
+}
+
+function RealizedOnlyCard({
+  title,
+  value,
+  format = 'number',
+  description,
+  loading = false,
+}: {
+  title: string;
+  value: number;
+  format?: 'currency' | 'number' | 'percent' | 'times';
+  description: string;
+  loading?: boolean;
+}) {
+  const formatted = format === 'currency'
+    ? formatCurrencyBRL(value)
+    : format === 'percent'
+    ? `${value.toFixed(1)}%`
+    : format === 'times'
+    ? `${value.toFixed(1)}x`
+    : value.toLocaleString('pt-BR');
+
+  return (
+    <div className="relative self-start overflow-hidden rounded-xl border border-border bg-card p-4">
+      <div className="absolute inset-x-0 top-0 h-1 bg-muted" />
+      <p className="font-bold text-sm uppercase tracking-wide text-foreground">{title}</p>
+      <p className="mt-1 text-[11px] text-muted-foreground">{description}</p>
+      <div className="mt-4 rounded-lg border border-border bg-background/70 p-4">
+        {loading ? (
+          <div className="flex items-center gap-2 text-muted-foreground/60">
+            <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+            <span className="text-xs">Carregando...</span>
+          </div>
+        ) : (
+          <>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Realizado</p>
+            <p className="mt-2 font-heading text-4xl font-bold leading-none text-foreground">{formatted}</p>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ChannelCard({
+  title,
+  mark,
+  description,
+  color,
+  resultLabel,
+  resultValue,
+  costLabel,
+  costValue,
+}: {
+  title: string;
+  mark: ReactNode;
+  description: string;
+  color: string;
+  resultLabel: string;
+  resultValue: number;
+  costLabel: string;
+  costValue: number;
+}) {
+  return (
+    <div className="relative overflow-hidden rounded-xl border border-border bg-card p-5">
+      <div className="absolute inset-x-0 top-0 h-1" style={{ backgroundColor: color }} />
+      <div className="flex items-start gap-3">
+        {mark}
+        <div>
+          <h3 className="font-heading text-3xl font-bold uppercase tracking-wide" style={{ color }}>{title}</h3>
+          <p className="mt-1 text-xs text-muted-foreground">{description}</p>
+        </div>
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <ChannelMetricBox label={resultLabel} value={resultValue} color={color} />
+        <ChannelMetricBox label={costLabel} value={costValue} format="currency" color={color} />
+      </div>
     </div>
   );
 }
@@ -438,6 +541,74 @@ function CreativeCard({ creative, sortBy }: { creative: TopCreative; sortBy: Sor
   );
 }
 
+function CampaignPerformanceTable({
+  campaigns,
+  loading,
+}: {
+  campaigns: CampaignPerformance[];
+  loading: boolean;
+}) {
+  if (loading) {
+    return (
+      <div className="rounded-xl border border-border bg-card p-6">
+        <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+          <RefreshCw className="h-4 w-4 animate-spin" />
+          Carregando campanhas do período...
+        </div>
+      </div>
+    );
+  }
+
+  if (campaigns.length === 0) {
+    return (
+      <div className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground">
+        Nenhuma campanha com gasto no período selecionado.
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-border bg-card">
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[860px] text-left">
+          <thead className="border-b border-border bg-muted/30">
+            <tr className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+              <th className="px-4 py-3">Campanha</th>
+              <th className="px-4 py-3 text-right">Gasto</th>
+              <th className="px-4 py-3 text-right">Resultados</th>
+              <th className="px-4 py-3 text-right">Custo/Result.</th>
+              <th className="px-4 py-3 text-right">Impressões</th>
+              <th className="px-4 py-3 text-right">Cliques</th>
+              <th className="px-4 py-3 text-right">CTR</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {campaigns.map((campaign) => (
+              <tr key={`${campaign.platform}-${campaign.accountId}-${campaign.id}`} className="hover:bg-muted/20">
+                <td className="max-w-[320px] px-4 py-3">
+                  <div className="flex min-w-0 items-center gap-2">
+                    {campaign.platform === 'meta' ? <MetaMark /> : <GoogleMark />}
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-bold">{campaign.name}</p>
+                      <p className="truncate text-[11px] text-muted-foreground">{campaign.accountName}</p>
+                    </div>
+                  </div>
+                </td>
+                <td className="px-4 py-3 text-right text-sm font-bold text-primary">{formatCurrencyBRL(campaign.spend)}</td>
+                <td className="px-4 py-3 text-right text-sm font-bold">{campaign.leads.toLocaleString('pt-BR')}</td>
+                <td className="px-4 py-3 text-right text-sm font-bold">{campaign.cpl > 0 ? formatCurrencyBRL(campaign.cpl) : '—'}</td>
+                <td className="px-4 py-3 text-right text-sm">{campaign.impressions.toLocaleString('pt-BR')}</td>
+                <td className="px-4 py-3 text-right text-sm">{campaign.clicks.toLocaleString('pt-BR')}</td>
+                <td className="px-4 py-3 text-right text-sm">{campaign.ctr > 0 ? `${campaign.ctr.toFixed(2)}%` : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Dashboard ───────────────────────────────────────────────────────────
 export default function GeneralDashboard() {
   const { clients } = useClients();
@@ -446,9 +617,12 @@ export default function GeneralDashboard() {
   const [period, setPeriod] = useState<Period>('this_month');
   const [metricsByClient, setMetricsByClient] = useState<Record<string, ApiMetrics>>({});
   const [goalsByClient, setGoalsByClient] = useState<Record<string, GoalConfig | null>>({});
+  const [campaigns, setCampaigns] = useState<CampaignPerformance[]>([]);
   const [creatives, setCreatives] = useState<TopCreative[]>([]);
+  const [campaignSortBy, setCampaignSortBy] = useState<SortKey>('spend');
   const [sortBy, setSortBy] = useState<SortKey>('spend');
   const [metricsLoading, setMetricsLoading] = useState(false);
+  const [campaignsLoading, setCampaignsLoading] = useState(false);
   const [creativesLoading, setCreativesLoading] = useState(false);
 
   // Initialize: all clients selected
@@ -486,6 +660,23 @@ export default function GeneralDashboard() {
       setMetricsByClient(map);
     }).finally(() => setMetricsLoading(false));
   }, [selectedIds, period]);
+
+  // Fetch active campaigns with spend in selected period
+  useEffect(() => {
+    if (selectedIds.size === 0) return;
+    setCampaignsLoading(true);
+    const params = new URLSearchParams({
+      period,
+      sortBy: campaignSortBy,
+      limit: '30',
+      clientIds: [...selectedIds].join(','),
+    });
+    fetch(`/api/campaigns?${params.toString()}`)
+      .then(res => res.ok ? res.json() as Promise<CampaignPerformance[]> : [])
+      .then(setCampaigns)
+      .catch(() => setCampaigns([]))
+      .finally(() => setCampaignsLoading(false));
+  }, [period, campaignSortBy, selectedIds]);
 
   // Fetch top creatives
   useEffect(() => {
@@ -631,7 +822,7 @@ export default function GeneralDashboard() {
       )}
 
       {/* KPI Cards — Row 1 */}
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid items-start gap-4 lg:grid-cols-[2fr_1fr]">
         <KpiCard
           title="Resultado"
           value={revenue}
@@ -639,19 +830,18 @@ export default function GeneralDashboard() {
           partial={revenuePartial}
           format="currency"
           loading={metricsLoading}
+          featured
         />
-        <KpiCard
+        <RealizedOnlyCard
           title="ROI"
           value={roi}
-          meta={0}
-          partial={0}
           format="times"
           loading={metricsLoading}
-          showMeta={false}
-          showPartial={false}
-          showProgress={false}
           description="Resultado realizado dividido pelo total gasto."
         />
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
         <KpiCard
           title="Leads Total"
           value={totalLeads}
@@ -673,54 +863,27 @@ export default function GeneralDashboard() {
         />
       </div>
 
-      {/* KPI Cards — Row 2 */}
+      {/* Leads por canal */}
       <div className="grid gap-4 lg:grid-cols-2">
-        <KpiCard
-          title={<span className="inline-flex items-center gap-2"><MetaMark /> Leads Meta Ads</span>}
-          value={metaLeads}
-          meta={0}
-          partial={0}
-          prefix={`${metaFormLeads.toLocaleString('pt-BR')} formulários · ${metaConversations.toLocaleString('pt-BR')} conversas`}
-          loading={metricsLoading}
-          showMeta={false}
-          showPartial={false}
-          showProgress={false}
-          description="Conversas iniciadas + formulários vindos apenas do Meta Ads."
+        <ChannelCard
+          title="Meta Ads"
+          mark={<MetaMark />}
+          description={`${metaFormLeads.toLocaleString('pt-BR')} formulários + ${metaConversations.toLocaleString('pt-BR')} conversas no período selecionado.`}
+          color="#0B84FF"
+          resultLabel="Leads"
+          resultValue={metricsLoading ? 0 : metaLeads}
+          costLabel="CPL"
+          costValue={metricsLoading ? 0 : avgCpl}
         />
-        <KpiCard
-          title={<span className="inline-flex items-center gap-2"><GoogleMark /> Leads Google Ads</span>}
-          value={googleConv}
-          meta={0}
-          partial={0}
-          loading={metricsLoading}
-          showMeta={false}
-          showPartial={false}
-          showProgress={false}
-          description="Total de conversões vindas apenas do Google Ads."
-        />
-        <KpiCard
-          title="CPL Meta Ads"
-          value={avgCpl}
-          meta={0}
-          partial={0}
-          format="currency"
-          loading={metricsLoading}
-          showMeta={false}
-          showPartial={false}
-          showProgress={false}
-          description="Custo médio por lead do Meta Ads no período selecionado."
-        />
-        <KpiCard
-          title="CPC Google Ads"
-          value={avgCpa}
-          meta={0}
-          partial={0}
-          format="currency"
-          loading={metricsLoading}
-          showMeta={false}
-          showPartial={false}
-          showProgress={false}
-          description="Custo médio por conversão do Google Ads no período selecionado."
+        <ChannelCard
+          title="Google Ads"
+          mark={<GoogleMark />}
+          description="Conversões vindas apenas do Google Ads no período selecionado."
+          color="#4285F4"
+          resultLabel="Leads"
+          resultValue={metricsLoading ? 0 : googleConv}
+          costLabel="Custo / Conversão"
+          costValue={metricsLoading ? 0 : avgCpa}
         />
       </div>
 
@@ -765,6 +928,37 @@ export default function GeneralDashboard() {
           </div>
         </div>
       )}
+
+      {/* Campanhas ativas */}
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-bold uppercase tracking-wider">Campanhas Ativas</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Campanhas com gasto no período selecionado, considerando as contas vinculadas.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Ordenar por</span>
+            <div className="flex rounded-lg border border-border overflow-hidden">
+              {SORT_OPTIONS.map(opt => (
+                <button
+                  key={opt.value}
+                  onClick={() => setCampaignSortBy(opt.value)}
+                  className={cn(
+                    'px-3 py-1.5 text-[11px] font-semibold transition-colors',
+                    campaignSortBy === opt.value ? 'bg-primary text-black' : 'bg-card text-muted-foreground hover:bg-muted/50'
+                  )}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            {campaignsLoading && <RefreshCw className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
+          </div>
+        </div>
+        <CampaignPerformanceTable campaigns={campaigns} loading={campaignsLoading} />
+      </div>
 
       {/* Top Criativos */}
       <div className="space-y-4">
