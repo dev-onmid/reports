@@ -794,7 +794,7 @@ type GoalProgress = {
   format: 'currency' | 'number' | 'percent';
   inverse?: boolean;
 };
-type ClientGoalType = 'revenue' | 'leads' | 'enrollments' | 'custom';
+type ClientGoalType = 'revenue' | 'leads' | 'enrollments';
 type ClientGoalConfig = {
   type: ClientGoalType;
   label: string;
@@ -803,6 +803,13 @@ type ClientGoalConfig = {
   realized: number;
   format: 'currency' | 'number';
 };
+
+function autoPartial(target: number): number {
+  const now = new Date();
+  const day = now.getDate();
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  return Math.round((target * day) / daysInMonth);
+}
 type TodayProgress = {
   revenue: number;
   enrollments: number;
@@ -846,18 +853,17 @@ const ZERO_DASHBOARD_DATA: typeof mockDashboardData = {
 };
 
 const GOAL_TYPE_OPTIONS: { type: ClientGoalType; label: string; format: ClientGoalConfig['format'] }[] = [
-  { type: 'revenue', label: 'Faturamento', format: 'currency' },
   { type: 'leads', label: 'Leads', format: 'number' },
+  { type: 'revenue', label: 'Faturamento', format: 'currency' },
   { type: 'enrollments', label: 'Matrículas', format: 'number' },
-  { type: 'custom', label: 'Personalizada', format: 'number' },
 ];
 
 const DEFAULT_CLIENT_GOAL: ClientGoalConfig = {
   type: 'revenue',
   label: 'Faturamento',
   target: 150000,
-  partial: 53000,
-  realized: TODAY_PROGRESS.revenue,
+  partial: autoPartial(150000),
+  realized: 0,
   format: 'currency',
 };
 
@@ -1213,66 +1219,47 @@ function ClientGoalSettings({ goal, onChange }: {
   goal: ClientGoalConfig;
   onChange: (goal: ClientGoalConfig) => void;
 }) {
-  function updateGoal(next: Partial<ClientGoalConfig>) {
-    onChange({ ...goal, ...next });
+  function handleTypeChange(type: ClientGoalType) {
+    const option = GOAL_TYPE_OPTIONS.find((o) => o.type === type)!;
+    onChange({ ...goal, type, label: option.label, format: option.format, partial: autoPartial(goal.target) });
   }
 
-  function handleTypeChange(type: ClientGoalType) {
-    const option = GOAL_TYPE_OPTIONS.find((item) => item.type === type) ?? GOAL_TYPE_OPTIONS[0];
-    const keepZeroDefaults = goal.target === 0 && goal.partial === 0 && goal.realized === 0;
-    const defaults: Record<ClientGoalType, Pick<ClientGoalConfig, 'target' | 'partial' | 'realized'>> = {
-      revenue: keepZeroDefaults ? { target: 0, partial: 0, realized: 0 } : { target: 150000, partial: 53000, realized: TODAY_PROGRESS.revenue },
-      leads: keepZeroDefaults ? { target: 0, partial: 0, realized: 0 } : { target: 300, partial: 60, realized: TODAY_PROGRESS.funnel[0] },
-      enrollments: keepZeroDefaults ? { target: 0, partial: 0, realized: 0 } : { target: 25, partial: 8, realized: TODAY_PROGRESS.enrollments },
-      custom: keepZeroDefaults ? { target: 0, partial: 0, realized: 0 } : { target: 100, partial: 25, realized: 18 },
-    };
-
-    onChange({
-      type,
-      label: option.label,
-      format: option.format,
-      ...defaults[type],
-    });
+  function handleTargetChange(target: number) {
+    onChange({ ...goal, target, partial: autoPartial(target) });
   }
 
   return (
-    <Card className="bg-card border-border">
-      <CardHeader className="pb-3">
-        <CardTitle className="text-base">Meta principal do cliente</CardTitle>
-        <CardDescription>Essa meta alimenta a dashboard e o planejamento do cliente.</CardDescription>
-      </CardHeader>
-      <CardContent className="grid gap-3 md:grid-cols-[180px_minmax(160px,1fr)_repeat(3,minmax(120px,0.6fr))]">
-        <div className="space-y-1.5">
-          <Label>Tipo</Label>
-          <select
-            value={goal.type}
-            onChange={(event) => handleTypeChange(event.target.value as ClientGoalType)}
-            className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-          >
-            {GOAL_TYPE_OPTIONS.map((option) => <option key={option.type} value={option.type}>{option.label}</option>)}
-          </select>
+    <div className="flex flex-wrap items-end gap-4 py-1">
+      <div className="space-y-1.5">
+        <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Tipo de meta</Label>
+        <div className="flex gap-1 p-1 bg-muted/40 rounded-lg border border-border">
+          {GOAL_TYPE_OPTIONS.map((option) => (
+            <button
+              key={option.type}
+              onClick={() => handleTypeChange(option.type)}
+              className={cn(
+                'px-4 py-1.5 rounded-md text-xs font-bold uppercase tracking-wider transition-colors',
+                goal.type === option.type
+                  ? 'bg-primary text-primary-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {option.label}
+            </button>
+          ))}
         </div>
-        <div className="space-y-1.5">
-          <Label>Nome da meta</Label>
-          <Input value={goal.label} onChange={(event) => updateGoal({ label: event.target.value })} className="bg-background" />
-        </div>
-        {[
-          { key: 'target' as const, label: 'Meta final' },
-          { key: 'partial' as const, label: 'Meta parcial' },
-          { key: 'realized' as const, label: 'Realizado' },
-        ].map((field) => (
-          <div key={field.key} className="space-y-1.5">
-            <Label>{field.label}</Label>
-            <Input
-              type="number"
-              value={goal[field.key]}
-              onChange={(event) => updateGoal({ [field.key]: Number(event.target.value) })}
-              className="bg-background"
-            />
-          </div>
-        ))}
-      </CardContent>
-    </Card>
+      </div>
+      <div className="space-y-1.5">
+        <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Meta</Label>
+        <Input
+          type="number"
+          value={goal.target || ''}
+          onChange={(e) => handleTargetChange(Number(e.target.value))}
+          className="bg-background w-44"
+          placeholder="0"
+        />
+      </div>
+    </div>
   );
 }
 
@@ -2590,6 +2577,19 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
   const [clientGoal, setClientGoal] = useState<ClientGoalConfig>(() => isNewClient ? ZERO_CLIENT_GOAL : DEFAULT_CLIENT_GOAL);
   const [dashboardEditMode, setDashboardEditMode] = useState(false);
+
+  useEffect(() => {
+    setClientGoal((prev) => ({
+      ...prev,
+      partial: autoPartial(prev.target),
+      realized:
+        prev.type === 'leads' ? (realMetrics?.leads ?? prev.realized)
+        : prev.type === 'revenue' ? prev.realized
+        : prev.type === 'enrollments' ? (googleMetrics?.conversions ?? prev.realized)
+        : prev.realized,
+    }));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [realMetrics, googleMetrics]);
   const [customDashboardBlocks, setCustomDashboardBlocks] = useState<ClientDashboardWidget[]>([]);
 
   function addCustomDashboardBlock(widget: Omit<ClientDashboardWidget, 'id'>) {
