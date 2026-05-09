@@ -1312,62 +1312,68 @@ export default function GeneralDashboard() {
           description="Visão consolidada do resultado, investimento, leads e saldos das contas vinculadas."
           accent="#8B35FF"
         >
-          <div className="grid items-stretch gap-12 md:grid-cols-2 xl:grid-cols-4">
-            <MetricTile
-              title="Resultado"
-              value={revenue}
-              meta={revenueGoal}
-              partial={revenuePartial}
-              format="currency"
-              loading={metricsLoading}
-              description="Resultado realizado no período."
-            />
-            <MetricTile
-              title="ROI"
-              value={roi}
-              format="times"
-              loading={metricsLoading}
-              description="Resultado dividido pelo total investido."
-            />
-            <MetricTile
-              title="Total de Leads"
-              value={totalLeads}
-              meta={leadsGoal}
-              partial={leadsPartial}
-              loading={metricsLoading}
-              description="Meta Ads + Google Ads."
-            />
-            <MetricTile
-              title="Custo por Lead"
-              value={totalCostPerLead}
-              format="currency"
-              loading={metricsLoading}
-              description="Custo por resultado consolidado."
-            />
-            <MetricTile
-              title="Total Investido"
-              value={totalSpend}
-              meta={plannedInvestment}
-              format="currency"
-              loading={metricsLoading}
-              description="Investimento total em mídia."
-            />
-            <MetricTile
-              title="Saldo da Conta Meta Ads"
-              value={metaBalance}
-              format="currency"
-              loading={balancesLoading}
-              accent="#0B84FF"
-              description="Soma dos saldos vinculados aos clientes selecionados."
-            />
-            <MetricTile
-              title="Saldo da Conta Google Ads"
-              value={googleBalance}
-              format="currency"
-              loading={balancesLoading}
-              accent="#55F52F"
-              description="Soma dos saldos vinculados aos clientes selecionados."
-            />
+          <div className="grid gap-12">
+            <div className="grid items-stretch gap-12 lg:grid-cols-2">
+              <MetricTile
+                title="Resultado"
+                value={revenue}
+                meta={revenueGoal}
+                partial={revenuePartial}
+                format="currency"
+                loading={metricsLoading}
+                description="Resultado realizado no período."
+              />
+              <MetricTile
+                title="ROI"
+                value={roi}
+                format="times"
+                loading={metricsLoading}
+                description="Resultado dividido pelo total investido."
+              />
+            </div>
+            <div className="grid items-stretch gap-12 lg:grid-cols-2">
+              <MetricTile
+                title="Total de Leads"
+                value={totalLeads}
+                meta={leadsGoal}
+                partial={leadsPartial}
+                loading={metricsLoading}
+                description="Meta Ads + Google Ads."
+              />
+              <MetricTile
+                title="Custo por Lead"
+                value={totalCostPerLead}
+                format="currency"
+                loading={metricsLoading}
+                description="Custo por resultado consolidado."
+              />
+            </div>
+            <div className="grid items-stretch gap-12 lg:grid-cols-3">
+              <MetricTile
+                title="Total Investido"
+                value={totalSpend}
+                meta={plannedInvestment}
+                format="currency"
+                loading={metricsLoading}
+                description="Investimento total em mídia."
+              />
+              <MetricTile
+                title="Saldo da Conta Meta Ads"
+                value={metaBalance}
+                format="currency"
+                loading={balancesLoading}
+                accent="#0B84FF"
+                description="Soma dos saldos vinculados aos clientes selecionados."
+              />
+              <MetricTile
+                title="Saldo da Conta Google Ads"
+                value={googleBalance}
+                format="currency"
+                loading={balancesLoading}
+                accent="#55F52F"
+                description="Soma dos saldos vinculados aos clientes selecionados."
+              />
+            </div>
           </div>
         </MetricSection>
 
