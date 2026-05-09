@@ -479,7 +479,7 @@ function MetricTile({
   return (
     <div className={cn(
       'relative flex flex-col overflow-hidden rounded-xl border border-border bg-card/95 p-8 shadow-[0_22px_80px_rgba(0,0,0,0.18)]',
-      hasProgressPanel ? 'min-h-[320px] md:col-span-2' : 'min-h-[260px]'
+      hasProgressPanel ? 'min-h-[320px]' : 'min-h-[260px]'
     )}>
       <div className="absolute inset-x-0 top-0 h-1" style={{ backgroundColor: hasProgressPanel ? progressColor : accent }} />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_85%_18%,rgba(123,44,255,0.10),transparent_40%)]" />
