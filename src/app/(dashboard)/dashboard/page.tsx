@@ -825,6 +825,7 @@ export default function GeneralDashboard() {
   }
 
   const revenuePartial = autoPartial(revenueGoal, period);
+  const leadsPartial = autoPartial(leadsGoal, period);
   const roi = totalSpend > 0 ? revenue / totalSpend : 0;
 
   // ── Alerts ───────────────────────────────────────────────────────────────
@@ -937,9 +938,8 @@ export default function GeneralDashboard() {
           title="Leads Total"
           value={totalLeads}
           meta={leadsGoal}
-          partial={0}
+          partial={leadsPartial}
           loading={metricsLoading}
-          showPartial={false}
           description="Meta Ads formulários + conversas e conversões Google Ads."
         />
         <KpiCard
@@ -950,6 +950,7 @@ export default function GeneralDashboard() {
           format="currency"
           loading={metricsLoading}
           showPartial={false}
+          showProgress={false}
           description="Gasto real em campanhas Meta Ads e Google Ads."
         />
       </div>
