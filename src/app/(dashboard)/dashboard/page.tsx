@@ -4,14 +4,14 @@ import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import {
-  AlertTriangle, ChevronDown, ChevronRight, ImageIcon, Play, RefreshCw, Search,
+  AlertTriangle, CheckCircle2, ChevronDown, ImageIcon, Play, RefreshCw,
+  Search, TrendingDown,
 } from 'lucide-react';
 import { useClients } from '@/lib/client-store';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 import type { TopCreative } from '@/app/api/meta/top-creatives/route';
 import type { CampaignPerformance } from '@/app/api/campaigns/route';
 import type { AudienceBreakdowns, AudienceResponse, AudienceSlice } from '@/app/api/audience/route';
-import type { GoogleAdPreview, GoogleKeywordInsight, GoogleKeywordInsightsResponse } from '@/app/api/google/keyword-insights/route';
 
 type Period = 'last_7d' | 'last_30d' | 'this_month' | 'last_month';
 type ApiMetrics = {
@@ -44,7 +44,6 @@ const EMPTY_AUDIENCE: AudienceResponse = {
   meta: { age: [], gender: [], platform: [], device: [] },
   google: { age: [], gender: [], platform: [], device: [] },
 };
-const EMPTY_GOOGLE_KEYWORD_INSIGHTS: GoogleKeywordInsightsResponse = { keywords: [], ads: [] };
 
 const META_AUDIENCE_COLORS = ['#0B84FF', '#55F52F', '#7B2CFF', '#38BDF8', '#F59E0B', '#EC4899', '#EF4444', '#A3E635'];
 const GOOGLE_AUDIENCE_COLORS = ['#EA4335', '#FBBC05', '#34A853', '#4285F4', '#7B2CFF', '#F97316', '#EC4899', '#22C55E'];
@@ -211,9 +210,10 @@ function KpiCard({
   const progress = Math.max(0, Math.min(inverse ? inverseProgress : regularProgress, 100));
   const status = progress > 75 ? 'good' : progress >= 36 ? 'warning' : 'critical';
 
-  const statusColor = !showProgress || !hasTarget ? 'text-foreground' : status === 'critical' ? 'text-red-400' : status === 'good' ? 'text-primary' : 'text-orange-400';
+  const statusColor = !showProgress || !hasTarget ? 'text-foreground' : status === 'critical' ? 'text-red-400' : status === 'good' ? 'text-emerald-400' : 'text-orange-400';
   const barColor = status === 'critical' ? 'bg-red-500' : status === 'good' ? 'bg-emerald-500' : 'bg-orange-400';
-  const borderColor = !showProgress || !hasTarget ? 'border-border' : status === 'critical' ? 'border-red-500/35' : status === 'good' ? 'border-primary/30' : 'border-orange-400/35';
+  const borderColor = !showProgress || !hasTarget ? 'border-border' : status === 'critical' ? 'border-red-500/40' : status === 'good' ? 'border-primary/30' : 'border-orange-400/30';
+  const topColor = !showProgress || !hasTarget ? 'bg-muted' : status === 'critical' ? 'bg-red-500' : status === 'good' ? 'bg-primary' : 'bg-orange-400';
   const statusLabel = status === 'critical' ? 'Crítico' : status === 'good' ? 'No ritmo' : 'Atenção';
   const bottomItems = [
     ...(showMeta ? [{ label: metaLabel, value: meta > 0 ? fmt(meta) : prefix ? prefix : 'Sem meta' }] : []),
@@ -221,11 +221,11 @@ function KpiCard({
   ];
 
   return (
-    <div className={cn('relative overflow-hidden rounded-xl border bg-card/95 p-5 space-y-3 shadow-[0_20px_70px_rgba(0,0,0,0.18)]', borderColor)}>
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_85%_10%,rgba(123,44,255,0.10),transparent_36%)]" />
+    <div className={cn('relative overflow-hidden rounded-xl border bg-card p-4 space-y-3', borderColor)}>
+      <div className={cn('absolute inset-x-0 top-0 h-1', topColor)} />
       <div className="flex items-start justify-between gap-3">
-        <div className="relative">
-          <p className={cn('font-bold text-base', showProgress && hasTarget ? statusColor : 'text-foreground')}>{title}</p>
+        <div>
+          <p className={cn('font-bold text-lg', statusColor)}>{title}</p>
           <p className="mt-0.5 text-[11px] text-muted-foreground">{description}</p>
         </div>
         {showProgress && hasTarget && (
@@ -251,22 +251,26 @@ function KpiCard({
           <div className={cn('relative overflow-hidden rounded-lg border border-border bg-background/70', featured ? 'min-h-32' : 'min-h-24')}>
             {showProgress && hasTarget && progress > 0 && (
               <div
-                className={cn('absolute inset-y-0 left-0 opacity-85 transition-all', barColor)}
+                className={cn('absolute inset-y-0 left-0 opacity-80 transition-all', barColor)}
                 style={{ width: `${Math.max(0, Math.min(progress, 100))}%` }}
               />
             )}
-            <div className="relative z-10 grid gap-4 p-4 sm:grid-cols-[1fr_auto]">
+            <div className="relative z-10 flex items-center justify-between gap-4 p-4">
               <div className="rounded-lg bg-black/25 px-3 py-2 shadow-[0_12px_30px_rgba(0,0,0,0.3)]">
                 <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Realizado</p>
                 <p className={cn('mt-1 font-heading font-bold tracking-wide leading-none text-foreground', featured ? 'text-4xl' : 'text-2xl')}>{fmt(value)}</p>
               </div>
               {showProgress && hasTarget && (
-                <div className="min-w-36 rounded-lg bg-black/25 px-3 py-2 text-right shadow-[0_12px_30px_rgba(0,0,0,0.3)]">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Atingimento</p>
+                <div className="rounded-lg bg-black/25 px-3 py-2 text-right shadow-[0_12px_30px_rgba(0,0,0,0.3)]">
                   <p className={cn('font-heading text-2xl font-bold leading-none', statusColor)}>{progress}%</p>
-                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
-                    <div className={cn('h-full rounded-full', barColor)} style={{ width: `${progress}%` }} />
-                  </div>
+                  <p className={cn('mt-1 flex items-center justify-end gap-1 text-[10px] font-bold uppercase tracking-wider', statusColor)}>
+                    {status === 'good'
+                      ? <CheckCircle2 className="w-3 h-3" />
+                      : status === 'critical'
+                      ? <TrendingDown className="w-3 h-3" />
+                      : <AlertTriangle className="w-3 h-3" />}
+                    {statusLabel}
+                  </p>
                 </div>
               )}
             </div>
@@ -309,30 +313,6 @@ function ChannelMetricBox({
   );
 }
 
-function MiniTrendLine({ color = '#7B2CFF' }: { color?: string }) {
-  return (
-    <svg viewBox="0 0 320 92" className="h-20 w-full overflow-visible" aria-hidden="true">
-      <defs>
-        <linearGradient id={`trend-${color.replace('#', '')}`} x1="0" x2="0" y1="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity="0.35" />
-          <stop offset="100%" stopColor={color} stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      <path
-        d="M0 76 C30 62 42 58 66 69 S110 80 132 62 S165 55 188 40 S224 14 248 30 S286 46 320 18"
-        fill="none"
-        stroke={color}
-        strokeWidth="4"
-        strokeLinecap="round"
-      />
-      <path
-        d="M0 76 C30 62 42 58 66 69 S110 80 132 62 S165 55 188 40 S224 14 248 30 S286 46 320 18 L320 92 L0 92 Z"
-        fill={`url(#trend-${color.replace('#', '')})`}
-      />
-    </svg>
-  );
-}
-
 function RealizedOnlyCard({
   title,
   value,
@@ -355,9 +335,8 @@ function RealizedOnlyCard({
     : value.toLocaleString('pt-BR');
 
   return (
-    <div className="relative h-full overflow-hidden rounded-xl border border-border bg-card p-5">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_35%,rgba(123,44,255,0.12),transparent_42%)]" />
-      <div className="relative">
+    <div className="relative self-start overflow-hidden rounded-xl border border-border bg-card p-4">
+      <div className="absolute inset-x-0 top-0 h-1 bg-muted" />
       <p className="font-bold text-sm uppercase tracking-wide text-foreground">{title}</p>
       <p className="mt-1 text-[11px] text-muted-foreground">{description}</p>
       <div className="mt-4 rounded-lg border border-border bg-background/70 p-4">
@@ -372,10 +351,6 @@ function RealizedOnlyCard({
             <p className="mt-2 font-heading text-4xl font-bold leading-none text-foreground">{formatted}</p>
           </>
         )}
-      </div>
-      <div className="mt-3">
-        <MiniTrendLine color="#7B2CFF" />
-      </div>
       </div>
     </div>
   );
@@ -402,21 +377,17 @@ function ChannelCard({
 }) {
   return (
     <div className="relative overflow-hidden rounded-xl border border-border bg-card p-5">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_20%,rgba(255,255,255,0.05),transparent_38%)]" />
       <div className="absolute inset-x-0 top-0 h-1" style={{ backgroundColor: color }} />
-      <div className="relative flex items-start gap-3">
+      <div className="flex items-start gap-3">
         {mark}
         <div>
           <h3 className="font-heading text-3xl font-bold uppercase tracking-wide" style={{ color }}>{title}</h3>
           <p className="mt-1 text-xs text-muted-foreground">{description}</p>
         </div>
       </div>
-      <div className="relative mt-4 grid gap-3 sm:grid-cols-2">
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
         <ChannelMetricBox label={resultLabel} value={resultValue} color={color} />
         <ChannelMetricBox label={costLabel} value={costValue} format="currency" color={color} />
-      </div>
-      <div className="relative mt-3">
-        <MiniTrendLine color={color} />
       </div>
     </div>
   );
@@ -701,195 +672,6 @@ function CreativePreviewOverlay({
   );
 }
 
-function TopCreativesTablePanel({
-  creatives,
-  loading,
-  onPreview,
-}: {
-  creatives: TopCreative[];
-  loading: boolean;
-  onPreview: (creative: TopCreative) => void;
-}) {
-  const topItems = creatives.slice(0, 5);
-  return (
-    <div className="h-full rounded-xl border border-border bg-card p-5">
-      <div>
-        <h2 className="text-sm font-bold uppercase tracking-wider">Top Criativos</h2>
-        <p className="mt-0.5 text-xs text-muted-foreground">Anúncios com melhor performance no período selecionado.</p>
-      </div>
-      <div className="mt-4 space-y-3">
-        {loading ? (
-          Array.from({ length: 5 }).map((_, index) => (
-            <div key={index} className="h-14 rounded-lg bg-muted/20 animate-pulse" />
-          ))
-        ) : topItems.length > 0 ? topItems.map((creative) => {
-          const imgUrl = creative.thumbnailUrl ?? creative.imageUrl;
-          return (
-            <button
-              key={creative.adId}
-              type="button"
-              onClick={() => onPreview(creative)}
-              className="grid w-full grid-cols-[76px_minmax(0,1fr)_auto] items-center gap-3 rounded-lg border border-transparent p-1.5 text-left transition-colors hover:border-primary/30 hover:bg-muted/20"
-            >
-              <div className="relative aspect-video overflow-hidden rounded-md bg-muted/30">
-                {imgUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={imgUrl} alt={creative.adName} className="h-full w-full object-cover" />
-                ) : (
-                  <ImageIcon className="m-auto h-full w-5 text-muted-foreground/30" />
-                )}
-                {creative.videoUrl && (
-                  <span className="absolute inset-0 flex items-center justify-center bg-black/20">
-                    <Play className="h-4 w-4 fill-white text-white" />
-                  </span>
-                )}
-              </div>
-              <div className="min-w-0">
-                <p className="truncate text-xs font-bold">{creative.adName}</p>
-                <p className="mt-0.5 truncate text-[10px] text-muted-foreground">{creative.headline || creative.accountName}</p>
-              </div>
-              <div className="grid grid-cols-3 gap-3 text-right text-[10px]">
-                <span><b className="block text-foreground">{formatCurrencyBRL(creative.spend)}</b>Invest.</span>
-                <span><b className="block text-foreground">{creative.leads || '—'}</b>Leads</span>
-                <span><b className="block text-foreground">{creative.cpl > 0 ? formatCurrencyBRL(creative.cpl) : '—'}</b>Custo</span>
-              </div>
-            </button>
-          );
-        }) : (
-          <div className="rounded-lg border border-border bg-background/60 p-6 text-center text-sm text-muted-foreground">
-            Nenhum criativo encontrado.
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function AudienceSnapshotCard({
-  audience,
-  loading,
-}: {
-  audience: AudienceResponse;
-  loading: boolean;
-}) {
-  const [platform, setPlatform] = useState<'meta' | 'google'>('meta');
-  const [metric, setMetric] = useState<AudienceKey>('age');
-  const [activeIndex, setActiveIndex] = useState<number | null>(null);
-  const data = audience[platform][metric];
-  const colors = platform === 'meta' ? META_AUDIENCE_COLORS : GOOGLE_AUDIENCE_COLORS;
-  const total = data.reduce((sum, item) => sum + item.value, 0);
-  let cursorAngle = 0;
-  const slices = data.map((item, index) => {
-    const angle = total > 0 ? (item.value / total) * 360 : 0;
-    const slice = {
-      ...item,
-      index,
-      color: colors[index % colors.length],
-      pct: total > 0 ? Math.round((item.value / total) * 100) : 0,
-      startAngle: cursorAngle,
-      endAngle: cursorAngle + angle,
-    };
-    cursorAngle += angle;
-    return slice;
-  });
-
-  return (
-    <div className="h-full rounded-xl border border-border bg-card p-5">
-      <div>
-        <h2 className="text-sm font-bold uppercase tracking-wider">Público Atingido</h2>
-        <p className="mt-0.5 text-xs text-muted-foreground">Recortes por idade, gênero, plataforma e dispositivo.</p>
-      </div>
-      <div className="mt-4 flex flex-wrap items-center gap-2">
-        {(['meta', 'google'] as const).map((item) => (
-          <button
-            key={item}
-            type="button"
-            onClick={() => setPlatform(item)}
-            className={cn(
-              'rounded-lg px-3 py-1.5 text-[11px] font-bold uppercase transition-colors',
-              platform === item ? 'bg-primary text-black' : 'bg-background text-muted-foreground hover:bg-muted/50'
-            )}
-          >
-            {item === 'meta' ? 'Meta Ads' : 'Google Ads'}
-          </button>
-        ))}
-      </div>
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        {(['age', 'gender', 'platform', 'device'] as AudienceKey[]).map((item) => (
-          <button
-            key={item}
-            type="button"
-            onClick={() => setMetric(item)}
-            className={cn(
-              'border-b-2 px-1.5 py-1 text-[11px] font-bold transition-colors',
-              metric === item ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'
-            )}
-          >
-            {AUDIENCE_TITLES[item]}
-          </button>
-        ))}
-      </div>
-      {loading ? (
-        <div className="mt-5 h-72 rounded-xl bg-muted/20 animate-pulse" />
-      ) : (
-        <div className="mt-5 grid items-center gap-5 md:grid-cols-[260px_minmax(0,1fr)]">
-          <div className="flex justify-center">
-            {slices.length > 0 ? (
-              <svg viewBox="0 0 220 220" className="h-64 w-64 overflow-visible" role="img" aria-label={`Gráfico de ${AUDIENCE_TITLES[metric]}`}>
-                {slices.map((slice) => (
-                  <path
-                    key={slice.label}
-                    d={describeDonutSlice(110, 110, 104, 48, slice.startAngle, slice.endAngle)}
-                    fill={slice.color}
-                    stroke="rgba(0,0,0,0.35)"
-                    strokeWidth="1"
-                    className="origin-center transition-all duration-200"
-                    style={{
-                      opacity: activeIndex === null || activeIndex === slice.index ? 1 : 0.35,
-                      transform: activeIndex === slice.index ? 'scale(1.06)' : 'scale(1)',
-                    }}
-                    onMouseEnter={() => setActiveIndex(slice.index)}
-                    onMouseLeave={() => setActiveIndex(null)}
-                  >
-                    <title>{`${slice.label}: ${slice.pct}%`}</title>
-                  </path>
-                ))}
-                <circle cx="110" cy="110" r="40" className="fill-card" />
-                <text x="110" y="106" textAnchor="middle" className="fill-muted-foreground text-[10px] font-bold uppercase tracking-widest">Total</text>
-                <text x="110" y="125" textAnchor="middle" className="fill-foreground text-[18px] font-bold">{total.toLocaleString('pt-BR')}</text>
-              </svg>
-            ) : (
-              <div className="relative h-56 w-56 rounded-full bg-muted/30">
-                <div className="absolute inset-12 rounded-full bg-card" />
-              </div>
-            )}
-          </div>
-          <div className="space-y-2">
-            {slices.length > 0 ? slices.slice(0, 7).map((item) => (
-              <button
-                key={item.label}
-                type="button"
-                onMouseEnter={() => setActiveIndex(item.index)}
-                onMouseLeave={() => setActiveIndex(null)}
-                className={cn(
-                  'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-xs transition-colors',
-                  activeIndex === item.index ? 'bg-muted/60' : 'hover:bg-muted/30'
-                )}
-              >
-                <span className="h-3 w-3 rounded-full" style={{ backgroundColor: item.color }} />
-                <span className="min-w-0 flex-1 truncate font-semibold">{item.label}</span>
-                <span className="font-bold">{item.pct}%</span>
-              </button>
-            )) : (
-              <p className="text-sm text-muted-foreground">Sem dados no período.</p>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function CampaignPerformanceTable({
   campaigns,
   loading,
@@ -1081,153 +863,6 @@ function AudiencePlatformBlock({
   );
 }
 
-function GoogleKeywordInsightsSection({
-  keywords,
-  ads,
-  loading,
-}: {
-  keywords: GoogleKeywordInsight[];
-  ads: GoogleAdPreview[];
-  loading: boolean;
-}) {
-  const topKeyword = keywords[0];
-  const totalClicks = keywords.reduce((sum, item) => sum + item.clicks, 0);
-  const totalCost = keywords.reduce((sum, item) => sum + item.cost, 0);
-
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-bold uppercase tracking-wider">Palavras-chave e anúncios Google Ads</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Termos e prévias montadas com títulos e descrições dos anúncios ativos no período selecionado.
-          </p>
-        </div>
-        {loading && <RefreshCw className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
-      </div>
-
-      {loading ? (
-        <div className="grid gap-4 xl:grid-cols-[1fr_1.35fr]">
-          <div className="h-96 rounded-xl border border-border bg-card animate-pulse" />
-          <div className="h-96 rounded-xl border border-border bg-card animate-pulse" />
-        </div>
-      ) : (
-        <div className="grid gap-4 xl:grid-cols-[1fr_1.35fr]">
-          <div className="rounded-xl border border-border bg-card p-5">
-            <div className="flex items-start gap-3">
-              <GoogleMark />
-              <div>
-                <h3 className="font-heading text-2xl font-bold uppercase tracking-wide text-[#EA4335]">Palavras-chave</h3>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {keywords.length > 0
-                    ? `${keywords.length} termos com impressão no período.`
-                    : 'Nenhuma palavra-chave com impressão no período.'}
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-4 grid gap-2 sm:grid-cols-3">
-              <div className="rounded-lg bg-background/70 p-3">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Principal</p>
-                <p className="mt-1 truncate text-sm font-bold">{topKeyword?.keyword ?? '—'}</p>
-              </div>
-              <div className="rounded-lg bg-background/70 p-3">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Cliques</p>
-                <p className="mt-1 text-sm font-bold">{totalClicks.toLocaleString('pt-BR')}</p>
-              </div>
-              <div className="rounded-lg bg-background/70 p-3">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Custo</p>
-                <p className="mt-1 text-sm font-bold">{formatCurrencyBRL(totalCost)}</p>
-              </div>
-            </div>
-
-            <div className="mt-4 overflow-hidden rounded-xl border border-border">
-              <div className="grid grid-cols-[minmax(0,1.4fr)_0.6fr_0.6fr_0.7fr] gap-2 bg-muted/30 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                <span>Palavra</span>
-                <span className="text-right">Cliques</span>
-                <span className="text-right">Conv.</span>
-                <span className="text-right">CPC</span>
-              </div>
-              <div className="max-h-[420px] divide-y divide-border overflow-y-auto">
-                {keywords.length > 0 ? keywords.map((keyword) => (
-                  <div key={`${keyword.accountId}-${keyword.campaignName}-${keyword.keyword}`} className="grid grid-cols-[minmax(0,1.4fr)_0.6fr_0.6fr_0.7fr] gap-2 px-3 py-2.5 text-xs">
-                    <div className="min-w-0">
-                      <p className="truncate font-bold">{keyword.keyword}</p>
-                      <p className="truncate text-[10px] text-muted-foreground">{keyword.campaignName}</p>
-                    </div>
-                    <span className="text-right font-bold">{keyword.clicks.toLocaleString('pt-BR')}</span>
-                    <span className="text-right font-bold">{keyword.conversions.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}</span>
-                    <span className="text-right font-bold">{keyword.cpc > 0 ? formatCurrencyBRL(keyword.cpc) : '—'}</span>
-                  </div>
-                )) : (
-                  <div className="px-3 py-8 text-center text-sm text-muted-foreground">Sem palavras-chave no período.</div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-border bg-card p-5">
-            <div className="flex items-start gap-3">
-              <GoogleMark />
-              <div>
-                <h3 className="font-heading text-2xl font-bold uppercase tracking-wide text-[#EA4335]">Prévias dos anúncios</h3>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Simulação do anúncio de pesquisa com os títulos e descrições configurados.
-                </p>
-              </div>
-            </div>
-            <div className="mt-4 grid gap-3 lg:grid-cols-2">
-              {ads.length > 0 ? ads.map((ad) => <GoogleSearchAdPreviewCard key={`${ad.accountId}-${ad.id}`} ad={ad} />) : (
-                <div className="rounded-xl border border-border bg-background/60 p-6 text-sm text-muted-foreground">
-                  Nenhum anúncio ativo com impressão no período.
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function GoogleSearchAdPreviewCard({ ad }: { ad: GoogleAdPreview }) {
-  const domain = (() => {
-    try { return ad.finalUrls[0] ? new URL(ad.finalUrls[0]).hostname.replace(/^www\./, '') : 'site.com.br'; }
-    catch { return 'site.com.br'; }
-  })();
-  const path = [ad.path1, ad.path2].filter(Boolean).join('/');
-  const headline = ad.headlines.slice(0, 3).filter(Boolean).join(' | ') || 'Título do anúncio';
-  const description = ad.descriptions.slice(0, 2).filter(Boolean).join(' ') || 'Descrição configurada no Google Ads.';
-
-  return (
-    <div className="rounded-xl border border-border bg-background/70 p-4">
-      <div className="rounded-lg border border-border bg-card p-4">
-        <div className="flex items-center gap-2 text-xs">
-          <span className="rounded border border-[#EA4335]/30 bg-[#EA4335]/10 px-1.5 py-0.5 font-bold text-[#EA4335]">Anúncio</span>
-          <span className="truncate text-muted-foreground">{domain}{path ? `/${path}` : ''}</span>
-        </div>
-        <h4 className="mt-2 line-clamp-2 text-base font-bold leading-snug text-[#4285F4]">{headline}</h4>
-        <p className="mt-1 line-clamp-3 text-xs leading-5 text-muted-foreground">{description}</p>
-      </div>
-      <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
-        <div className="rounded-lg bg-card p-2">
-          <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground">Impr.</p>
-          <p className="font-bold">{ad.impressions.toLocaleString('pt-BR')}</p>
-        </div>
-        <div className="rounded-lg bg-card p-2">
-          <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground">Cliques</p>
-          <p className="font-bold">{ad.clicks.toLocaleString('pt-BR')}</p>
-        </div>
-        <div className="rounded-lg bg-card p-2">
-          <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground">Custo</p>
-          <p className="font-bold">{formatCurrencyBRL(ad.cost)}</p>
-        </div>
-      </div>
-      <p className="mt-2 truncate text-[10px] text-muted-foreground">{ad.campaignName} · {ad.accountName}</p>
-    </div>
-  );
-}
-
 // ── Main Dashboard ───────────────────────────────────────────────────────────
 export default function GeneralDashboard() {
   const { clients } = useClients();
@@ -1239,7 +874,6 @@ export default function GeneralDashboard() {
   const [campaigns, setCampaigns] = useState<CampaignPerformance[]>([]);
   const [creatives, setCreatives] = useState<TopCreative[]>([]);
   const [audience, setAudience] = useState<AudienceResponse>(EMPTY_AUDIENCE);
-  const [googleKeywordInsights, setGoogleKeywordInsights] = useState<GoogleKeywordInsightsResponse>(EMPTY_GOOGLE_KEYWORD_INSIGHTS);
   const [previewCreative, setPreviewCreative] = useState<TopCreative | null>(null);
   const [campaignSortBy, setCampaignSortBy] = useState<SortKey>('spend');
   const [sortBy, setSortBy] = useState<SortKey>('spend');
@@ -1247,7 +881,6 @@ export default function GeneralDashboard() {
   const [campaignsLoading, setCampaignsLoading] = useState(false);
   const [creativesLoading, setCreativesLoading] = useState(false);
   const [audienceLoading, setAudienceLoading] = useState(false);
-  const [googleKeywordInsightsLoading, setGoogleKeywordInsightsLoading] = useState(false);
 
   // Initialize: all clients selected
   useEffect(() => {
@@ -1334,21 +967,6 @@ export default function GeneralDashboard() {
       .finally(() => setAudienceLoading(false));
   }, [period, selectedIds]);
 
-  // Fetch Google Ads keyword and ad preview insights
-  useEffect(() => {
-    if (selectedIds.size === 0) return;
-    setGoogleKeywordInsightsLoading(true);
-    const params = new URLSearchParams({
-      period,
-      clientIds: [...selectedIds].join(','),
-    });
-    fetch(`/api/google/keyword-insights?${params.toString()}`)
-      .then(res => res.ok ? res.json() as Promise<GoogleKeywordInsightsResponse> : EMPTY_GOOGLE_KEYWORD_INSIGHTS)
-      .then(setGoogleKeywordInsights)
-      .catch(() => setGoogleKeywordInsights(EMPTY_GOOGLE_KEYWORD_INSIGHTS))
-      .finally(() => setGoogleKeywordInsightsLoading(false));
-  }, [period, selectedIds]);
-
   // ── Aggregate metrics ────────────────────────────────────────────────────
   let metaLeads = 0, metaFormLeads = 0, metaConversations = 0, metaSpend = 0, metaImpressions = 0, metaClicks = 0;
   let googleConv = 0, googleCost = 0;
@@ -1420,7 +1038,7 @@ export default function GeneralDashboard() {
   const selectedClients = clients.filter(c => selectedIds.has(c.id));
 
   return (
-    <div className="space-y-5 pb-10">
+    <div className="space-y-6 pb-10">
       {/* Header + Filters */}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
@@ -1449,26 +1067,31 @@ export default function GeneralDashboard() {
 
       {/* Alerts */}
       {!metricsLoading && alerts.length > 0 && (
-        <Link
-          href={`/clientes/${alerts[0].clientId}`}
-          className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 transition-colors hover:border-orange-400/40 hover:bg-orange-500/5"
-        >
-          <AlertTriangle className="h-4 w-4 shrink-0 text-orange-400" />
-          <div className="min-w-0 flex-1">
+        <div className="rounded-xl border border-orange-400/30 bg-orange-500/5 p-4 space-y-2">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-orange-400" />
             <p className="text-sm font-bold text-orange-400">{alerts.length} alerta{alerts.length > 1 ? 's' : ''} fora do padrão</p>
-            <p className="truncate text-xs text-muted-foreground">
-              <span className={cn('mr-2 rounded-full border px-2 py-0.5 text-[10px] font-bold',
-                alerts[0].severity === 'critical'
-                  ? 'border-red-500/30 bg-red-500/15 text-red-400'
-                  : 'border-orange-500/30 bg-orange-500/15 text-orange-400'
-              )}>
-                {alerts[0].severity === 'critical' ? 'Crítico' : 'Atenção'}
-              </span>
-              {alerts[0].clientName} — {alerts[0].msg}
-            </p>
           </div>
-          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-        </Link>
+          <div className="space-y-1.5">
+            {alerts.map((a, i) => (
+              <div key={i} className="flex items-start gap-3">
+                <span className={cn('shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold border',
+                  a.severity === 'critical'
+                    ? 'bg-red-500/15 text-red-400 border-red-500/30'
+                    : 'bg-orange-500/15 text-orange-400 border-orange-500/30'
+                )}>
+                  {a.severity === 'critical' ? 'Crítico' : 'Atenção'}
+                </span>
+                <div className="text-xs">
+                  <Link href={`/clientes/${a.clientId}`} className="font-bold hover:text-primary transition-colors">
+                    {a.clientName}
+                  </Link>
+                  <span className="text-muted-foreground"> — {a.msg}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
       {/* KPI Cards — Row 1 */}
@@ -1610,11 +1233,15 @@ export default function GeneralDashboard() {
         <CampaignPerformanceTable campaigns={campaigns} loading={campaignsLoading} />
       </div>
 
-      <div className="grid items-stretch gap-4 xl:grid-cols-[0.95fr_1.05fr]">
-        <AudienceSnapshotCard audience={audience} loading={audienceLoading} />
-        <div className="space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-card px-4 py-3">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Ordenar criativos por</span>
+      {/* Top Criativos */}
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-bold uppercase tracking-wider">Top Criativos</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">Anúncios com melhor performance no período selecionado.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Ordenar por</span>
             <div className="flex rounded-lg border border-border overflow-hidden">
               {SORT_OPTIONS.map(opt => (
                 <button
@@ -1629,16 +1256,81 @@ export default function GeneralDashboard() {
                 </button>
               ))}
             </div>
+            {creativesLoading && <RefreshCw className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
           </div>
-          <TopCreativesTablePanel creatives={creatives} loading={creativesLoading} onPreview={setPreviewCreative} />
         </div>
+
+        {creativesLoading ? (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <div key={i} className="rounded-xl border border-border bg-card overflow-hidden animate-pulse">
+                <div className="aspect-[9/16] bg-muted/30" />
+                <div className="p-3 space-y-2">
+                  <div className="h-3 bg-muted/40 rounded w-3/4" />
+                  <div className="h-2 bg-muted/30 rounded w-full" />
+                  <div className="h-2 bg-muted/30 rounded w-2/3" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : creatives.length === 0 ? (
+          <div className="rounded-xl border border-border bg-card/50 py-12 text-center">
+            <ImageIcon className="w-8 h-8 text-muted-foreground/30 mx-auto mb-3" />
+            <p className="text-sm text-muted-foreground">Nenhum criativo encontrado.</p>
+            <p className="text-xs text-muted-foreground/60 mt-1">Conecte uma conta Meta Ads em Integrações e vincule a um cliente.</p>
+          </div>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+            {creatives.map(c => (
+              <CreativeCard key={c.adId} creative={c} sortBy={sortBy} onPreview={setPreviewCreative} />
+            ))}
+          </div>
+        )}
       </div>
 
-      <GoogleKeywordInsightsSection
-        keywords={googleKeywordInsights.keywords}
-        ads={googleKeywordInsights.ads}
-        loading={googleKeywordInsightsLoading}
-      />
+      {/* Público atingido */}
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-bold uppercase tracking-wider">Público atingido</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Recortes por idade, gênero, plataforma e dispositivo no período selecionado.
+            </p>
+          </div>
+          {audienceLoading && <RefreshCw className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
+        </div>
+        {audienceLoading ? (
+          <div className="grid gap-4 xl:grid-cols-2">
+            {Array.from({ length: 2 }).map((_, index) => (
+              <div key={index} className="rounded-xl border border-border bg-card p-5 animate-pulse">
+                <div className="h-5 w-32 rounded bg-muted/40" />
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  {Array.from({ length: 4 }).map((__, itemIndex) => (
+                    <div key={itemIndex} className="h-40 rounded-xl bg-muted/20" />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="grid items-stretch gap-4 xl:grid-cols-2">
+            <AudiencePlatformBlock
+              title="Meta Ads"
+              description="Alcance vindo das contas Meta vinculadas."
+              color="#0B84FF"
+              colors={META_AUDIENCE_COLORS}
+              data={audience.meta}
+            />
+            <AudiencePlatformBlock
+              title="Google Ads"
+              description="Impressões vindas das contas Google Ads vinculadas."
+              color="#EA4335"
+              colors={GOOGLE_AUDIENCE_COLORS}
+              data={audience.google}
+            />
+          </div>
+        )}
+      </div>
       <CreativePreviewOverlay creative={previewCreative} onClose={() => setPreviewCreative(null)} />
     </div>
   );
