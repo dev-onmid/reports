@@ -463,53 +463,89 @@ function MetricTile({
     : format === 'times' ? `${v.toFixed(1)}x`
     : v.toLocaleString('pt-BR');
   const target = partial && partial > 0 ? partial : meta;
-  const progress = target && target > 0 ? Math.max(0, Math.min(100, Math.round((value / target) * 100))) : null;
+  const rawProgress = target && target > 0 ? (value / target) * 100 : null;
+  const progress = rawProgress === null ? null : Math.max(0, Math.min(100, rawProgress));
+  const progressLabel = rawProgress === null ? null : `${rawProgress.toFixed(rawProgress >= 100 ? 2 : 0)}%`;
+  const progressColor = (() => {
+    if (rawProgress === null) return accent;
+    if (rawProgress <= 35) return '#EF4444';
+    if (rawProgress <= 75) return '#FACC15';
+    const boost = Math.min(Math.max(rawProgress - 100, 0) / 100, 1);
+    const green = Math.round(197 + (245 - 197) * boost);
+    return `rgb(${Math.round(34 - 10 * boost)}, ${green}, ${Math.round(94 - 30 * boost)})`;
+  })();
+  const hasProgressPanel = meta !== undefined || partial !== undefined || progress !== null;
 
   return (
-    <div className="relative flex min-h-[260px] flex-col overflow-hidden rounded-xl border border-border bg-card/95 p-8 shadow-[0_22px_80px_rgba(0,0,0,0.18)]">
-      <div className="absolute inset-x-0 top-0 h-1" style={{ backgroundColor: accent }} />
+    <div className={cn(
+      'relative flex flex-col overflow-hidden rounded-xl border border-border bg-card/95 p-8 shadow-[0_22px_80px_rgba(0,0,0,0.18)]',
+      hasProgressPanel ? 'min-h-[320px] md:col-span-2' : 'min-h-[260px]'
+    )}>
+      <div className="absolute inset-x-0 top-0 h-1" style={{ backgroundColor: hasProgressPanel ? progressColor : accent }} />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_85%_18%,rgba(123,44,255,0.10),transparent_40%)]" />
       <div className="relative flex h-full flex-col">
-        <p className="text-sm font-bold text-foreground">{title}</p>
+        <p className="text-lg font-bold text-foreground" style={{ color: hasProgressPanel ? progressColor : undefined }}>{title}</p>
         {description && <p className="mt-1 text-[11px] text-muted-foreground">{description}</p>}
-        <div className="mt-8 flex flex-1 items-center rounded-lg border border-border bg-background/70 p-7">
-          {loading ? (
+        {loading ? (
+          <div className="mt-8 flex flex-1 items-center rounded-lg border border-border bg-background/70 p-7">
             <div className="flex items-center gap-2 text-muted-foreground/60">
               <RefreshCw className="h-3.5 w-3.5 animate-spin" />
               <span className="text-xs">Carregando...</span>
             </div>
-          ) : (
+          </div>
+        ) : hasProgressPanel ? (
+          <div className="mt-8 flex flex-1 flex-col justify-center rounded-lg border border-border bg-background/70 p-8">
+            <div className={cn('grid gap-8 text-center', partial !== undefined ? 'sm:grid-cols-3' : 'sm:grid-cols-2')}>
+              {meta !== undefined && (
+                <div>
+                  <p className="font-heading text-2xl font-bold leading-none text-foreground">{meta > 0 ? fmt(meta) : 'Sem meta'}</p>
+                  <p className="mt-2 text-sm font-bold text-muted-foreground">Meta</p>
+                </div>
+              )}
+              {partial !== undefined && (
+                <div>
+                  <p className="font-heading text-2xl font-bold leading-none text-foreground">{partial > 0 ? fmt(partial) : '—'}</p>
+                  <p className="mt-2 text-sm font-bold text-muted-foreground">Meta Parcial</p>
+                </div>
+              )}
+              <div>
+                <p className="font-heading text-2xl font-bold leading-none text-foreground">{fmt(value)}</p>
+                <p className="mt-2 text-sm font-bold text-muted-foreground">Realizado</p>
+              </div>
+            </div>
+            {progress !== null && progressLabel && (
+              <div className="mt-8">
+                <div
+                  className="relative h-9 overflow-hidden rounded-md bg-muted/50"
+                  style={{
+                    backgroundImage: `linear-gradient(135deg, ${progressColor}33 25%, transparent 25%, transparent 50%, ${progressColor}33 50%, ${progressColor}33 75%, transparent 75%, transparent)`,
+                    backgroundSize: '32px 32px',
+                  }}
+                >
+                  <div
+                    className="absolute inset-y-0 left-0 rounded-md transition-all"
+                    style={{
+                      width: `${progress}%`,
+                      backgroundColor: progressColor,
+                      boxShadow: `0 0 24px ${progressColor}66`,
+                      opacity: 0.82,
+                    }}
+                  />
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <span className="rounded bg-background/65 px-3 py-0.5 text-base font-black text-foreground">{progressLabel}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="mt-8 flex flex-1 items-center rounded-lg border border-border bg-background/70 p-7">
             <div>
               <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Realizado</p>
               <p className="mt-3 font-heading text-4xl font-bold leading-none" style={{ color: accent }}>
                 {fmt(value)}
               </p>
             </div>
-          )}
-        </div>
-        {(meta !== undefined || partial !== undefined || progress !== null) && (
-          <div className="mt-6 grid gap-4 sm:grid-cols-3">
-            {meta !== undefined && (
-              <div className="rounded-lg bg-background/70 px-4 py-3">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Meta</p>
-                <p className="mt-1 truncate text-sm font-bold">{meta > 0 ? fmt(meta) : 'Sem meta'}</p>
-              </div>
-            )}
-            {partial !== undefined && (
-              <div className="rounded-lg bg-background/70 px-4 py-3">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Parcial</p>
-                <p className="mt-1 truncate text-sm font-bold">{partial > 0 ? fmt(partial) : '—'}</p>
-              </div>
-            )}
-            {progress !== null && (
-              <div className="rounded-lg bg-background/70 px-4 py-3">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Atingimento</p>
-                <p className="mt-1 text-sm font-bold" style={{ color: accent }}>{progress}%</p>
-                <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#2b2144]">
-                  <div className="h-full rounded-full" style={{ width: `${progress}%`, backgroundColor: accent }} />
-                </div>
-              </div>
-            )}
           </div>
         )}
       </div>
