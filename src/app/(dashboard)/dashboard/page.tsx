@@ -397,8 +397,8 @@ function ChannelCard({
       <div className="relative flex items-start gap-8">
         {mark}
         <div>
-          <h3 className="font-heading text-3xl font-bold uppercase tracking-wide" style={{ color }}>{title}</h3>
-          <p className="mt-1 text-xs text-muted-foreground">{description}</p>
+          <h3 className="font-heading text-3xl font-bold uppercase tracking-wide text-foreground">{title}</h3>
+          <p className="mt-1 text-xs text-foreground/75">{description}</p>
         </div>
       </div>
       <div className="relative mt-10 grid gap-10 sm:grid-cols-2">
@@ -427,10 +427,10 @@ function MetricSection({
     <section className="space-y-5">
       <div className="flex items-end justify-between gap-4">
         <div>
-          <h2 className="font-heading text-3xl font-bold uppercase tracking-wide" style={{ color: accent }}>
+          <h2 className="font-heading text-3xl font-bold uppercase tracking-wide text-foreground">
             {title}
           </h2>
-          <p className="mt-1 text-xs text-muted-foreground">{description}</p>
+          <p className="mt-1 text-xs text-foreground/75">{description}</p>
         </div>
       </div>
       {children}
@@ -484,8 +484,8 @@ function MetricTile({
       <div className="absolute inset-x-0 top-0 h-1" style={{ backgroundColor: hasProgressPanel ? progressColor : accent }} />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_85%_18%,rgba(123,44,255,0.10),transparent_40%)]" />
       <div className="relative flex h-full flex-col">
-        <p className="text-lg font-bold text-foreground" style={{ color: hasProgressPanel ? progressColor : undefined }}>{title}</p>
-        {description && <p className="mt-1 text-[11px] text-muted-foreground">{description}</p>}
+        <p className="text-lg font-bold text-foreground">{title}</p>
+        {description && <p className="mt-1 text-[11px] text-foreground/75">{description}</p>}
         {loading ? (
           <div className="mt-8 flex flex-1 items-center rounded-lg border border-border bg-background/70 p-7">
             <div className="flex items-center gap-2 text-muted-foreground/60">
@@ -1008,8 +1008,8 @@ function AudiencePlatformBlock({
       <div className="flex items-start gap-3">
         <span className="mt-0.5">{title === 'Meta Ads' ? <MetaMark /> : <GoogleMark />}</span>
         <div>
-          <h3 className="font-heading text-2xl font-bold uppercase tracking-wide" style={{ color }}>{title}</h3>
-          <p className="mt-1 text-xs text-muted-foreground">{description}</p>
+          <h3 className="font-heading text-2xl font-bold uppercase tracking-wide text-foreground">{title}</h3>
+          <p className="mt-1 text-xs text-foreground/75">{description}</p>
         </div>
       </div>
       <div className="mt-4 grid flex-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -1391,7 +1391,7 @@ export default function GeneralDashboard() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h3 className="text-sm font-bold uppercase tracking-wider">Campanhas Ativas Meta Ads</h3>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
+                  <p className="mt-0.5 text-xs text-foreground/75">
                     Campanhas Meta com gasto no período selecionado.
                   </p>
                 </div>
@@ -1421,7 +1421,7 @@ export default function GeneralDashboard() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h3 className="text-sm font-bold uppercase tracking-wider">Anúncios e previews Meta Ads</h3>
-                  <p className="mt-0.5 text-xs text-muted-foreground">Criativos com melhor performance no período selecionado.</p>
+                  <p className="mt-0.5 text-xs text-foreground/75">Criativos com melhor performance no período selecionado.</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Ordenar por</span>
@@ -1474,7 +1474,7 @@ export default function GeneralDashboard() {
             <div className="space-y-4">
               <div>
                 <h3 className="text-sm font-bold uppercase tracking-wider">Público Meta Ads</h3>
-                <p className="mt-0.5 text-xs text-muted-foreground">Recortes por idade, gênero, plataforma e dispositivo do Meta Ads.</p>
+                <p className="mt-0.5 text-xs text-foreground/75">Recortes por idade, gênero, plataforma e dispositivo do Meta Ads.</p>
               </div>
               {audienceLoading ? (
                 <div className="rounded-xl border border-border bg-card p-5 animate-pulse">
@@ -1518,7 +1518,7 @@ export default function GeneralDashboard() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h3 className="text-sm font-bold uppercase tracking-wider">Campanhas Ativas Google Ads</h3>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
+                  <p className="mt-0.5 text-xs text-foreground/75">
                     Campanhas Google com gasto no período selecionado.
                   </p>
                 </div>
@@ -1547,7 +1547,7 @@ export default function GeneralDashboard() {
             <div className="space-y-4">
               <div>
                 <h3 className="text-sm font-bold uppercase tracking-wider">Público Google Ads</h3>
-                <p className="mt-0.5 text-xs text-muted-foreground">Recortes por idade, gênero, plataforma e dispositivo do Google Ads.</p>
+                <p className="mt-0.5 text-xs text-foreground/75">Recortes por idade, gênero, plataforma e dispositivo do Google Ads.</p>
               </div>
               {audienceLoading ? (
                 <div className="rounded-xl border border-border bg-card p-5 animate-pulse">
