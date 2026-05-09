@@ -4,8 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import {
-  AlertTriangle, CheckCircle2, ChevronDown, ImageIcon, Play, RefreshCw,
-  Search, TrendingDown,
+  AlertTriangle, ChevronDown, ImageIcon, Play, RefreshCw, Search,
 } from 'lucide-react';
 import { useClients } from '@/lib/client-store';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
@@ -210,36 +209,20 @@ function KpiCard({
   const progress = Math.max(0, Math.min(inverse ? inverseProgress : regularProgress, 100));
   const status = progress > 75 ? 'good' : progress >= 36 ? 'warning' : 'critical';
 
-  const statusColor = !showProgress || !hasTarget ? 'text-foreground' : status === 'critical' ? 'text-red-400' : status === 'good' ? 'text-emerald-400' : 'text-orange-400';
-  const barColor = status === 'critical' ? 'bg-red-500' : status === 'good' ? 'bg-emerald-500' : 'bg-orange-400';
-  const borderColor = !showProgress || !hasTarget ? 'border-border' : status === 'critical' ? 'border-red-500/40' : status === 'good' ? 'border-primary/30' : 'border-orange-400/30';
-  const topColor = !showProgress || !hasTarget ? 'bg-muted' : status === 'critical' ? 'bg-red-500' : status === 'good' ? 'bg-primary' : 'bg-orange-400';
-  const statusLabel = status === 'critical' ? 'Crítico' : status === 'good' ? 'No ritmo' : 'Atenção';
+  const statusColor = !showProgress || !hasTarget ? 'text-foreground' : status === 'critical' ? 'text-red-400' : status === 'good' ? 'text-primary' : 'text-orange-400';
   const bottomItems = [
     ...(showMeta ? [{ label: metaLabel, value: meta > 0 ? fmt(meta) : prefix ? prefix : 'Sem meta' }] : []),
     ...(showPartial ? [{ label: partialLabel, value: partial > 0 ? fmt(partial) : '—' }] : []),
   ];
 
   return (
-    <div className={cn('relative overflow-hidden rounded-xl border bg-card p-4 space-y-3', borderColor)}>
-      <div className={cn('absolute inset-x-0 top-0 h-1', topColor)} />
+    <div className="relative overflow-hidden rounded-xl border border-border bg-card/95 p-5 space-y-4 shadow-[0_22px_80px_rgba(0,0,0,0.18)]">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_85%_12%,rgba(123,44,255,0.10),transparent_40%)]" />
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className={cn('font-bold text-lg', statusColor)}>{title}</p>
+        <div className="relative">
+          <p className="font-bold text-lg text-foreground">{title}</p>
           <p className="mt-0.5 text-[11px] text-muted-foreground">{description}</p>
         </div>
-        {showProgress && hasTarget && (
-          <span className={cn(
-            'rounded-lg border px-2 py-1 text-[10px] font-bold uppercase tracking-wider',
-            status === 'critical'
-              ? 'border-red-500/40 bg-red-500/10 text-red-300'
-              : status === 'good'
-              ? 'border-primary/40 bg-primary/10 text-primary'
-              : 'border-orange-400/40 bg-orange-400/10 text-orange-300',
-          )}>
-            {statusLabel}
-          </span>
-        )}
       </div>
       {loading ? (
         <div className="flex min-h-28 items-center justify-center gap-2 rounded-lg border border-border bg-background/70 text-muted-foreground/50">
@@ -248,29 +231,23 @@ function KpiCard({
         </div>
       ) : (
         <>
-          <div className={cn('relative overflow-hidden rounded-lg border border-border bg-background/70', featured ? 'min-h-32' : 'min-h-24')}>
-            {showProgress && hasTarget && progress > 0 && (
-              <div
-                className={cn('absolute inset-y-0 left-0 opacity-80 transition-all', barColor)}
-                style={{ width: `${Math.max(0, Math.min(progress, 100))}%` }}
-              />
-            )}
-            <div className="relative z-10 flex items-center justify-between gap-4 p-4">
-              <div className="rounded-lg bg-black/25 px-3 py-2 shadow-[0_12px_30px_rgba(0,0,0,0.3)]">
+          <div className={cn('relative overflow-hidden rounded-lg border border-border bg-background/70 p-4', featured ? 'min-h-32' : 'min-h-24')}>
+            <div className="grid items-center gap-4 sm:grid-cols-[1.35fr_0.85fr_1fr]">
+              <div>
                 <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Realizado</p>
                 <p className={cn('mt-1 font-heading font-bold tracking-wide leading-none text-foreground', featured ? 'text-4xl' : 'text-2xl')}>{fmt(value)}</p>
               </div>
+              <div>
+                <p className="text-[10px] font-semibold text-muted-foreground">{metaLabel}</p>
+                <p className="mt-1 text-sm font-bold text-foreground">{meta > 0 ? fmt(meta) : prefix ? prefix : 'Sem meta'}</p>
+              </div>
               {showProgress && hasTarget && (
-                <div className="rounded-lg bg-black/25 px-3 py-2 text-right shadow-[0_12px_30px_rgba(0,0,0,0.3)]">
-                  <p className={cn('font-heading text-2xl font-bold leading-none', statusColor)}>{progress}%</p>
-                  <p className={cn('mt-1 flex items-center justify-end gap-1 text-[10px] font-bold uppercase tracking-wider', statusColor)}>
-                    {status === 'good'
-                      ? <CheckCircle2 className="w-3 h-3" />
-                      : status === 'critical'
-                      ? <TrendingDown className="w-3 h-3" />
-                      : <AlertTriangle className="w-3 h-3" />}
-                    {statusLabel}
-                  </p>
+                <div>
+                  <p className="text-[10px] font-semibold text-muted-foreground">Atingimento</p>
+                  <p className={cn('mt-1 text-lg font-bold leading-none', statusColor)}>{progress}%</p>
+                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#2b2144]">
+                    <div className="h-full rounded-full bg-[#8B35FF] shadow-[0_0_18px_rgba(139,53,255,0.65)]" style={{ width: `${progress}%` }} />
+                  </div>
                 </div>
               )}
             </div>
@@ -291,6 +268,31 @@ function KpiCard({
   );
 }
 
+function MiniTrendLine({ color }: { color: string }) {
+  const gradientId = `trend-${color.replace('#', '')}`;
+  return (
+    <svg viewBox="0 0 320 92" className="h-20 w-full overflow-visible" aria-hidden="true">
+      <defs>
+        <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.35" />
+          <stop offset="100%" stopColor={color} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path
+        d="M0 76 C28 65 45 56 68 67 S111 79 132 61 S158 62 178 47 S204 16 229 31 S264 52 287 36 S306 26 320 16"
+        fill="none"
+        stroke={color}
+        strokeWidth="4"
+        strokeLinecap="round"
+      />
+      <path
+        d="M0 76 C28 65 45 56 68 67 S111 79 132 61 S158 62 178 47 S204 16 229 31 S264 52 287 36 S306 26 320 16 L320 92 L0 92 Z"
+        fill={`url(#${gradientId})`}
+      />
+    </svg>
+  );
+}
+
 function ChannelMetricBox({
   label,
   value,
@@ -306,7 +308,7 @@ function ChannelMetricBox({
   return (
     <div className="rounded-xl border border-border bg-background/70 p-4">
       <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
-      <p className="mt-2 font-heading text-4xl font-bold leading-none" style={{ color }}>
+      <p className="mt-3 font-heading text-4xl font-bold leading-none" style={{ color }}>
         {formatted}
       </p>
     </div>
@@ -335,9 +337,10 @@ function RealizedOnlyCard({
     : value.toLocaleString('pt-BR');
 
   return (
-    <div className="relative self-start overflow-hidden rounded-xl border border-border bg-card p-4">
-      <div className="absolute inset-x-0 top-0 h-1 bg-muted" />
-      <p className="font-bold text-sm uppercase tracking-wide text-foreground">{title}</p>
+    <div className="relative h-full overflow-hidden rounded-xl border border-border bg-card/95 p-5 shadow-[0_22px_80px_rgba(0,0,0,0.18)]">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_75%_30%,rgba(139,53,255,0.14),transparent_42%)]" />
+      <div className="relative">
+      <p className="font-bold text-lg text-foreground">{title}</p>
       <p className="mt-1 text-[11px] text-muted-foreground">{description}</p>
       <div className="mt-4 rounded-lg border border-border bg-background/70 p-4">
         {loading ? (
@@ -351,6 +354,10 @@ function RealizedOnlyCard({
             <p className="mt-2 font-heading text-4xl font-bold leading-none text-foreground">{formatted}</p>
           </>
         )}
+      </div>
+      <div className="mt-3">
+        <MiniTrendLine color="#8B35FF" />
+      </div>
       </div>
     </div>
   );
@@ -376,18 +383,22 @@ function ChannelCard({
   costValue: number;
 }) {
   return (
-    <div className="relative overflow-hidden rounded-xl border border-border bg-card p-5">
+    <div className="relative overflow-hidden rounded-xl border border-border bg-card/95 p-5 shadow-[0_22px_80px_rgba(0,0,0,0.18)]">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_82%_20%,rgba(255,255,255,0.05),transparent_38%)]" />
       <div className="absolute inset-x-0 top-0 h-1" style={{ backgroundColor: color }} />
-      <div className="flex items-start gap-3">
+      <div className="relative flex items-start gap-3">
         {mark}
         <div>
           <h3 className="font-heading text-3xl font-bold uppercase tracking-wide" style={{ color }}>{title}</h3>
           <p className="mt-1 text-xs text-muted-foreground">{description}</p>
         </div>
       </div>
-      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+      <div className="relative mt-4 grid gap-3 sm:grid-cols-2">
         <ChannelMetricBox label={resultLabel} value={resultValue} color={color} />
         <ChannelMetricBox label={costLabel} value={costValue} format="currency" color={color} />
+      </div>
+      <div className="relative mt-3">
+        <MiniTrendLine color={color} />
       </div>
     </div>
   );
@@ -1152,7 +1163,7 @@ export default function GeneralDashboard() {
           title="Google Ads"
           mark={<GoogleMark />}
           description="Conversões vindas apenas do Google Ads no período selecionado."
-          color="#4285F4"
+          color="#55F52F"
           resultLabel="Leads"
           resultValue={metricsLoading ? 0 : googleConv}
           costLabel="Custo / Conversão"
