@@ -217,7 +217,7 @@ function KpiCard({
   ];
 
   return (
-    <div className="relative overflow-hidden rounded-xl border border-border bg-card/95 p-10 space-y-10 shadow-[0_22px_80px_rgba(0,0,0,0.18)]">
+    <div className="relative h-full overflow-hidden rounded-xl border border-border bg-card/95 p-10 space-y-10 shadow-[0_22px_80px_rgba(0,0,0,0.18)]">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_85%_12%,rgba(123,44,255,0.10),transparent_40%)]" />
       <div className="flex items-start justify-between gap-3">
         <div className="relative">
@@ -300,7 +300,7 @@ function ChannelMetricBox({
 }) {
   const formatted = format === 'currency' ? formatCurrencyBRL(value) : value.toLocaleString('pt-BR');
   return (
-    <div className="rounded-xl border border-border bg-background/70 p-9">
+    <div className="h-full rounded-xl border border-border bg-background/70 p-9">
       <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
       <p className="mt-6 font-heading text-4xl font-bold leading-none" style={{ color }}>
         {formatted}
@@ -377,7 +377,7 @@ function ChannelCard({
   costValue: number;
 }) {
   return (
-    <div className="relative overflow-hidden rounded-xl border border-border bg-card/95 p-10 shadow-[0_22px_80px_rgba(0,0,0,0.18)]">
+    <div className="relative h-full overflow-hidden rounded-xl border border-border bg-card/95 p-10 shadow-[0_22px_80px_rgba(0,0,0,0.18)]">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_82%_20%,rgba(255,255,255,0.05),transparent_38%)]" />
       <div className="absolute inset-x-0 top-0 h-1" style={{ backgroundColor: color }} />
       <div className="relative flex items-start gap-8">
@@ -1099,70 +1099,72 @@ export default function GeneralDashboard() {
         </div>
       )}
 
-      {/* KPI Cards — Row 1 */}
-      <div className="grid items-start gap-12 lg:grid-cols-[2fr_1fr]">
-        <KpiCard
-          title="Resultado"
-          value={revenue}
-          meta={revenueGoal}
-          partial={revenuePartial}
-          format="currency"
-          loading={metricsLoading}
-          featured
-        />
-        <RealizedOnlyCard
-          title="ROI"
-          value={roi}
-          format="times"
-          loading={metricsLoading}
-          description="Resultado realizado dividido pelo total gasto."
-        />
-      </div>
+      <div className="grid gap-12">
+        {/* KPI Cards — Row 1 */}
+        <div className="grid items-stretch gap-12 lg:grid-cols-[2fr_1fr]">
+          <KpiCard
+            title="Resultado"
+            value={revenue}
+            meta={revenueGoal}
+            partial={revenuePartial}
+            format="currency"
+            loading={metricsLoading}
+            featured
+          />
+          <RealizedOnlyCard
+            title="ROI"
+            value={roi}
+            format="times"
+            loading={metricsLoading}
+            description="Resultado realizado dividido pelo total gasto."
+          />
+        </div>
 
-      <div className="grid gap-12 lg:grid-cols-2">
-        <KpiCard
-          title="Leads Total"
-          value={totalLeads}
-          meta={leadsGoal}
-          partial={leadsPartial}
-          loading={metricsLoading}
-          description="Meta Ads formulários + conversas e conversões Google Ads."
-        />
-        <KpiCard
-          title="Total Gasto"
-          value={totalSpend}
-          meta={plannedInvestment}
-          partial={0}
-          format="currency"
-          loading={metricsLoading}
-          showPartial={false}
-          showProgress={false}
-          description="Gasto real em campanhas Meta Ads e Google Ads."
-        />
-      </div>
+        <div className="grid items-stretch gap-12 lg:grid-cols-2">
+          <KpiCard
+            title="Leads Total"
+            value={totalLeads}
+            meta={leadsGoal}
+            partial={leadsPartial}
+            loading={metricsLoading}
+            description="Meta Ads formulários + conversas e conversões Google Ads."
+          />
+          <KpiCard
+            title="Total Gasto"
+            value={totalSpend}
+            meta={plannedInvestment}
+            partial={0}
+            format="currency"
+            loading={metricsLoading}
+            showPartial={false}
+            showProgress={false}
+            description="Gasto real em campanhas Meta Ads e Google Ads."
+          />
+        </div>
 
-      {/* Leads por canal */}
-      <div className="grid gap-12 lg:grid-cols-2">
-        <ChannelCard
-          title="Meta Ads"
-          mark={<MetaMark />}
-          description={`${metaFormLeads.toLocaleString('pt-BR')} formulários + ${metaConversations.toLocaleString('pt-BR')} conversas no período selecionado.`}
-          color="#0B84FF"
-          resultLabel="Leads"
-          resultValue={metricsLoading ? 0 : metaLeads}
-          costLabel="CPL"
-          costValue={metricsLoading ? 0 : avgCpl}
-        />
-        <ChannelCard
-          title="Google Ads"
-          mark={<GoogleMark />}
-          description="Conversões vindas apenas do Google Ads no período selecionado."
-          color="#55F52F"
-          resultLabel="Leads"
-          resultValue={metricsLoading ? 0 : googleConv}
-          costLabel="Custo / Conversão"
-          costValue={metricsLoading ? 0 : avgCpa}
-        />
+        {/* Leads por canal */}
+        <div className="grid items-stretch gap-12 lg:grid-cols-2">
+          <ChannelCard
+            title="Meta Ads"
+            mark={<MetaMark />}
+            description={`${metaFormLeads.toLocaleString('pt-BR')} formulários + ${metaConversations.toLocaleString('pt-BR')} conversas no período selecionado.`}
+            color="#0B84FF"
+            resultLabel="Leads"
+            resultValue={metricsLoading ? 0 : metaLeads}
+            costLabel="CPL"
+            costValue={metricsLoading ? 0 : avgCpl}
+          />
+          <ChannelCard
+            title="Google Ads"
+            mark={<GoogleMark />}
+            description="Conversões vindas apenas do Google Ads no período selecionado."
+            color="#55F52F"
+            resultLabel="Leads"
+            resultValue={metricsLoading ? 0 : googleConv}
+            costLabel="Custo / Conversão"
+            costValue={metricsLoading ? 0 : avgCpa}
+          />
+        </div>
       </div>
 
       {/* Client summary quick-view */}
