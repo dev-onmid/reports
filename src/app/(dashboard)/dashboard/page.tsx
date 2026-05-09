@@ -11,6 +11,7 @@ import { useClients } from '@/lib/client-store';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 import type { TopCreative } from '@/app/api/meta/top-creatives/route';
 import type { CampaignPerformance } from '@/app/api/campaigns/route';
+import type { AudienceBreakdowns, AudienceResponse, AudienceSlice } from '@/app/api/audience/route';
 
 type Period = 'last_7d' | 'last_30d' | 'this_month' | 'last_month';
 type ApiMetrics = {
@@ -21,6 +22,7 @@ type GoalConfig = { type: string; target: number; label?: string; format?: 'curr
 type FunnelStage = { id: string; name: string; conversion: number };
 type PlanningConfig = { tkm: number; cplMeta: number; stages: FunnelStage[] };
 type SortKey = 'spend' | 'leads' | 'impressions' | 'clicks' | 'cpl' | 'ctr';
+type AudienceKey = keyof AudienceBreakdowns;
 
 const PERIODS: { value: Period; label: string }[] = [
   { value: 'last_7d', label: 'Últimos 7 dias' },
@@ -37,6 +39,19 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'cpl', label: 'CPL (menor)' },
   { value: 'ctr', label: 'CTR' },
 ];
+
+const EMPTY_AUDIENCE: AudienceResponse = {
+  meta: { age: [], gender: [], platform: [], device: [] },
+  google: { age: [], gender: [], platform: [], device: [] },
+};
+
+const AUDIENCE_COLORS = ['#55F52F', '#7B2CFF', '#38BDF8', '#F59E0B', '#EF4444', '#EC4899', '#94A3B8', '#22C55E'];
+const AUDIENCE_TITLES: Record<AudienceKey, string> = {
+  age: 'Idade',
+  gender: 'Gênero',
+  platform: 'Plataforma',
+  device: 'Dispositivo',
+};
 
 const DEFAULT_STAGES: FunnelStage[] = [
   { id: 's5', name: '5º — Contatos (Leads)', conversion: 50 },
@@ -699,6 +714,85 @@ function CampaignPerformanceTable({
   );
 }
 
+function AudiencePieCard({
+  title,
+  data,
+}: {
+  title: string;
+  data: AudienceSlice[];
+}) {
+  const total = data.reduce((sum, item) => sum + item.value, 0);
+  let cursor = 0;
+  const gradient = total > 0
+    ? data.map((item, index) => {
+      const start = cursor;
+      const end = cursor + (item.value / total) * 100;
+      cursor = end;
+      const color = AUDIENCE_COLORS[index % AUDIENCE_COLORS.length];
+      return `${color} ${start}% ${end}%`;
+    }).join(', ')
+    : 'rgba(148, 163, 184, 0.25) 0% 100%';
+
+  return (
+    <div className="rounded-xl border border-border bg-background/60 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h4 className="text-sm font-bold uppercase tracking-wide">{title}</h4>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">{total.toLocaleString('pt-BR')} pessoas/imp.</p>
+        </div>
+        <div className="relative h-24 w-24 shrink-0 rounded-full" style={{ background: `conic-gradient(${gradient})` }}>
+          <div className="absolute inset-5 rounded-full bg-card" />
+        </div>
+      </div>
+      <div className="mt-4 space-y-2">
+        {data.length > 0 ? data.slice(0, 5).map((item, index) => {
+          const pct = total > 0 ? Math.round((item.value / total) * 100) : 0;
+          return (
+            <div key={item.label} className="flex items-center gap-2 text-xs">
+              <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: AUDIENCE_COLORS[index % AUDIENCE_COLORS.length] }} />
+              <span className="min-w-0 flex-1 truncate text-muted-foreground">{item.label}</span>
+              <span className="font-bold">{pct}%</span>
+            </div>
+          );
+        }) : (
+          <p className="text-xs text-muted-foreground">Sem dados no período.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AudiencePlatformBlock({
+  title,
+  description,
+  color,
+  data,
+}: {
+  title: string;
+  description: string;
+  color: string;
+  data: AudienceBreakdowns;
+}) {
+  const keys: AudienceKey[] = ['age', 'gender', 'platform', 'device'];
+  return (
+    <div className="relative overflow-hidden rounded-xl border border-border bg-card p-5">
+      <div className="absolute inset-x-0 top-0 h-1" style={{ backgroundColor: color }} />
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5">{title === 'Meta Ads' ? <MetaMark /> : <GoogleMark />}</span>
+        <div>
+          <h3 className="font-heading text-2xl font-bold uppercase tracking-wide" style={{ color }}>{title}</h3>
+          <p className="mt-1 text-xs text-muted-foreground">{description}</p>
+        </div>
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        {keys.map((key) => (
+          <AudiencePieCard key={key} title={AUDIENCE_TITLES[key]} data={data[key]} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Main Dashboard ───────────────────────────────────────────────────────────
 export default function GeneralDashboard() {
   const { clients } = useClients();
@@ -709,12 +803,14 @@ export default function GeneralDashboard() {
   const [goalsByClient, setGoalsByClient] = useState<Record<string, GoalConfig | null>>({});
   const [campaigns, setCampaigns] = useState<CampaignPerformance[]>([]);
   const [creatives, setCreatives] = useState<TopCreative[]>([]);
+  const [audience, setAudience] = useState<AudienceResponse>(EMPTY_AUDIENCE);
   const [previewCreative, setPreviewCreative] = useState<TopCreative | null>(null);
   const [campaignSortBy, setCampaignSortBy] = useState<SortKey>('spend');
   const [sortBy, setSortBy] = useState<SortKey>('spend');
   const [metricsLoading, setMetricsLoading] = useState(false);
   const [campaignsLoading, setCampaignsLoading] = useState(false);
   const [creativesLoading, setCreativesLoading] = useState(false);
+  const [audienceLoading, setAudienceLoading] = useState(false);
 
   // Initialize: all clients selected
   useEffect(() => {
@@ -785,6 +881,21 @@ export default function GeneralDashboard() {
       .catch(() => setCreatives([]))
       .finally(() => setCreativesLoading(false));
   }, [period, sortBy, selectedIds]);
+
+  // Fetch audience breakdowns
+  useEffect(() => {
+    if (selectedIds.size === 0) return;
+    setAudienceLoading(true);
+    const params = new URLSearchParams({
+      period,
+      clientIds: [...selectedIds].join(','),
+    });
+    fetch(`/api/audience?${params.toString()}`)
+      .then(res => res.ok ? res.json() as Promise<AudienceResponse> : EMPTY_AUDIENCE)
+      .then(setAudience)
+      .catch(() => setAudience(EMPTY_AUDIENCE))
+      .finally(() => setAudienceLoading(false));
+  }, [period, selectedIds]);
 
   // ── Aggregate metrics ────────────────────────────────────────────────────
   let metaLeads = 0, metaFormLeads = 0, metaConversations = 0, metaSpend = 0, metaImpressions = 0, metaClicks = 0;
@@ -1103,6 +1214,48 @@ export default function GeneralDashboard() {
             {creatives.map(c => (
               <CreativeCard key={c.adId} creative={c} sortBy={sortBy} onPreview={setPreviewCreative} />
             ))}
+          </div>
+        )}
+      </div>
+
+      {/* Público atingido */}
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-bold uppercase tracking-wider">Público atingido</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Recortes por idade, gênero, plataforma e dispositivo no período selecionado.
+            </p>
+          </div>
+          {audienceLoading && <RefreshCw className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
+        </div>
+        {audienceLoading ? (
+          <div className="grid gap-4 xl:grid-cols-2">
+            {Array.from({ length: 2 }).map((_, index) => (
+              <div key={index} className="rounded-xl border border-border bg-card p-5 animate-pulse">
+                <div className="h-5 w-32 rounded bg-muted/40" />
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  {Array.from({ length: 4 }).map((__, itemIndex) => (
+                    <div key={itemIndex} className="h-40 rounded-xl bg-muted/20" />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="grid gap-4 xl:grid-cols-2">
+            <AudiencePlatformBlock
+              title="Meta Ads"
+              description="Alcance vindo das contas Meta vinculadas."
+              color="#0B84FF"
+              data={audience.meta}
+            />
+            <AudiencePlatformBlock
+              title="Google Ads"
+              description="Impressões vindas das contas Google Ads vinculadas."
+              color="#4285F4"
+              data={audience.google}
+            />
           </div>
         )}
       </div>
