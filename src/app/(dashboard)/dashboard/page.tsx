@@ -171,20 +171,26 @@ function plannedFunnelFromGoal(goal: GoalConfig | null, planning: PlanningConfig
 
 function MetaMark() {
   return (
-    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#0B84FF] align-[-3px]">
-      <svg viewBox="0 0 20 20" fill="none" className="h-3.5 w-3.5">
-        <path d="M2.5 12.5C2.5 9.5 4 7 6 7c1.3 0 2.4 1.1 4 3.8C11.6 8.1 12.7 7 14 7c2 0 3.5 2.5 3.5 5.5" stroke="white" strokeWidth="2" strokeLinecap="round" />
-      </svg>
+    <span className="inline-flex h-8 w-10 shrink-0 items-center justify-center align-[-7px]">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="max-h-8 max-w-10 object-contain" />
     </span>
   );
 }
 
 function GoogleMark() {
   return (
-    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#4285F4] text-[11px] font-black text-white align-[-3px]">
-      G
+    <span className="inline-flex h-8 w-10 shrink-0 items-center justify-center align-[-7px]">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src="/brand/google-ads-logo.png" alt="Google Ads" className="max-h-8 max-w-10 object-contain" />
     </span>
   );
+}
+
+function PlatformMarkForText({ text }: { text: string }) {
+  if (/meta/i.test(text)) return <MetaMark />;
+  if (/google/i.test(text)) return <GoogleMark />;
+  return null;
 }
 
 function autoPartial(target: number, period: Period): number {
@@ -397,7 +403,10 @@ function ChannelCard({
       <div className="relative flex items-start gap-8">
         {mark}
         <div>
-          <h3 className="font-heading text-3xl font-bold uppercase tracking-wide text-foreground">{title}</h3>
+          <h3 className="flex items-center gap-3 font-heading text-3xl font-bold uppercase tracking-wide text-foreground">
+            <PlatformMarkForText text={title} />
+            <span>{title}</span>
+          </h3>
           <p className="mt-1 text-xs text-foreground/75">{description}</p>
         </div>
       </div>
@@ -427,8 +436,9 @@ function MetricSection({
     <section className="space-y-5">
       <div className="flex items-end justify-between gap-4">
         <div>
-          <h2 className="font-heading text-3xl font-bold uppercase tracking-wide text-foreground">
-            {title}
+          <h2 className="flex items-center gap-3 font-heading text-3xl font-bold uppercase tracking-wide text-foreground">
+            <PlatformMarkForText text={title} />
+            <span>{title}</span>
           </h2>
           <p className="mt-1 text-xs text-foreground/75">{description}</p>
         </div>
@@ -484,7 +494,10 @@ function MetricTile({
       <div className="absolute inset-x-0 top-0 h-1" style={{ backgroundColor: hasProgressPanel ? progressColor : accent }} />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_85%_18%,rgba(123,44,255,0.10),transparent_40%)]" />
       <div className="relative flex h-full flex-col">
-        <p className="text-lg font-bold text-foreground">{title}</p>
+        <p className="flex items-center gap-2 text-lg font-bold text-foreground">
+          <PlatformMarkForText text={title} />
+          <span>{title}</span>
+        </p>
         {description && <p className="mt-1 text-[11px] text-foreground/75">{description}</p>}
         {loading ? (
           <div className="mt-8 flex flex-1 items-center rounded-lg border border-border bg-background/70 p-7">
@@ -1396,7 +1409,10 @@ export default function GeneralDashboard() {
             <div className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h3 className="text-sm font-bold uppercase tracking-wider">Campanhas Ativas Meta Ads</h3>
+                  <h3 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider">
+                    <MetaMark />
+                    <span>Campanhas Ativas Meta Ads</span>
+                  </h3>
                   <p className="mt-0.5 text-xs text-foreground/75">
                     Campanhas Meta com gasto no período selecionado.
                   </p>
@@ -1426,7 +1442,10 @@ export default function GeneralDashboard() {
             <div className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h3 className="text-sm font-bold uppercase tracking-wider">Anúncios e previews Meta Ads</h3>
+                  <h3 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider">
+                    <MetaMark />
+                    <span>Anúncios e previews Meta Ads</span>
+                  </h3>
                   <p className="mt-0.5 text-xs text-foreground/75">Criativos com melhor performance no período selecionado.</p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -1479,7 +1498,10 @@ export default function GeneralDashboard() {
 
             <div className="space-y-4">
               <div>
-                <h3 className="text-sm font-bold uppercase tracking-wider">Público Meta Ads</h3>
+                <h3 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider">
+                  <MetaMark />
+                  <span>Público Meta Ads</span>
+                </h3>
                 <p className="mt-0.5 text-xs text-foreground/75">Recortes por idade, gênero, plataforma e dispositivo do Meta Ads.</p>
               </div>
               {audienceLoading ? (
@@ -1523,7 +1545,10 @@ export default function GeneralDashboard() {
             <div className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h3 className="text-sm font-bold uppercase tracking-wider">Campanhas Ativas Google Ads</h3>
+                  <h3 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider">
+                    <GoogleMark />
+                    <span>Campanhas Ativas Google Ads</span>
+                  </h3>
                   <p className="mt-0.5 text-xs text-foreground/75">
                     Campanhas Google com gasto no período selecionado.
                   </p>
@@ -1552,7 +1577,10 @@ export default function GeneralDashboard() {
 
             <div className="space-y-4">
               <div>
-                <h3 className="text-sm font-bold uppercase tracking-wider">Público Google Ads</h3>
+                <h3 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider">
+                  <GoogleMark />
+                  <span>Público Google Ads</span>
+                </h3>
                 <p className="mt-0.5 text-xs text-foreground/75">Recortes por idade, gênero, plataforma e dispositivo do Google Ads.</p>
               </div>
               {audienceLoading ? (

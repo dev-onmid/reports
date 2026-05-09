@@ -17,27 +17,24 @@ export const PLATFORM_INFO: Record<PlatformId, { label: string; bg: string }> = 
   google_sheets:   { label: 'Google Sheets',          bg: '#0F9D58' },
 };
 
+function PlatformLogo({ src, alt }: { src: string; alt: string }) {
+  return (
+    <span className="inline-flex h-full w-full items-center justify-center">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={src} alt={alt} className="max-h-full max-w-full object-contain" />
+    </span>
+  );
+}
+
 function IconGoogle() {
   return (
-    <svg viewBox="0 0 20 20" fill="none" className="w-3.5 h-3.5">
-      <path fill="white" d="M17.6 10.2c0-.6-.1-1.1-.2-1.7H10v3.2h4.3c-.2 1-.8 1.8-1.7 2.4v2h2.7c1.6-1.5 2.3-3.6 2.3-5.9z"/>
-      <path fill="white" d="M10 18c2.2 0 4-.7 5.3-2L12.6 14c-.7.5-1.6.8-2.6.8-2 0-3.7-1.3-4.3-3.2H3v2.1C4.3 16.5 7 18 10 18z"/>
-      <path fill="white" d="M5.7 11.6c-.2-.5-.2-1-.2-1.6s.1-1.1.2-1.6V6.3H3C2.4 7.4 2 8.7 2 10s.4 2.6 1 3.7l2.7-2.1z"/>
-      <path fill="white" d="M10 5.2c1.1 0 2.1.4 2.9 1.1l2.1-2.1C13.7 3 12 2.2 10 2.2 7 2.2 4.3 3.7 3 6.3l2.7 2.1C6.3 6.6 8 5.2 10 5.2z"/>
-    </svg>
+    <PlatformLogo src="/brand/google-ads-logo.png" alt="Google Ads" />
   );
 }
 
 function IconMeta() {
   return (
-    <svg viewBox="0 0 20 20" fill="none" className="w-3.5 h-3.5">
-      <path
-        d="M2.5 12.5C2.5 9.5 4 7 6 7c1.3 0 2.4 1.1 4 3.8C11.6 8.1 12.7 7 14 7c2 0 3.5 2.5 3.5 5.5"
-        stroke="white"
-        strokeWidth="2"
-        strokeLinecap="round"
-      />
-    </svg>
+    <PlatformLogo src="/brand/meta-ads-logo.webp" alt="Meta Ads" />
   );
 }
 
@@ -104,14 +101,16 @@ export function PlatformIconButton({
   onClick: (e: React.MouseEvent) => void;
 }) {
   const { label, bg } = PLATFORM_INFO[platform];
+  const isBrandLogo = platform === 'google_ads' || platform === 'meta_ads';
   const dim = size === 'sm' ? 'w-6 h-6' : 'w-7 h-7';
+  const logoDim = size === 'sm' ? 'w-8 h-6' : 'w-9 h-7';
   return (
     <button
       type="button"
       title={label}
       onClick={onClick}
-      className={`${dim} rounded-full flex items-center justify-center transition-all hover:scale-110 hover:shadow-md active:scale-95 shadow-sm shrink-0`}
-      style={{ backgroundColor: bg }}
+      className={`${isBrandLogo ? logoDim : dim} ${isBrandLogo ? 'rounded-md bg-transparent p-0.5' : 'rounded-full'} flex items-center justify-center transition-all hover:scale-110 hover:shadow-md active:scale-95 shadow-sm shrink-0`}
+      style={isBrandLogo ? undefined : { backgroundColor: bg }}
     >
       {ICONS[platform]}
     </button>
