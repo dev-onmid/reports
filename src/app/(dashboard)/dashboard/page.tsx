@@ -45,7 +45,8 @@ const EMPTY_AUDIENCE: AudienceResponse = {
   google: { age: [], gender: [], platform: [], device: [] },
 };
 
-const AUDIENCE_COLORS = ['#55F52F', '#7B2CFF', '#38BDF8', '#F59E0B', '#EF4444', '#EC4899', '#94A3B8', '#22C55E'];
+const META_AUDIENCE_COLORS = ['#0B84FF', '#38BDF8', '#1D4ED8', '#7DD3FC', '#2563EB', '#60A5FA', '#93C5FD', '#1E40AF'];
+const GOOGLE_AUDIENCE_COLORS = ['#EA4335', '#EF4444', '#F97316', '#B91C1C', '#FCA5A5', '#DC2626', '#FB7185', '#7F1D1D'];
 const AUDIENCE_TITLES: Record<AudienceKey, string> = {
   age: 'Idade',
   gender: 'Gênero',
@@ -717,9 +718,11 @@ function CampaignPerformanceTable({
 function AudiencePieCard({
   title,
   data,
+  colors,
 }: {
   title: string;
   data: AudienceSlice[];
+  colors: string[];
 }) {
   const total = data.reduce((sum, item) => sum + item.value, 0);
   let cursor = 0;
@@ -728,20 +731,20 @@ function AudiencePieCard({
       const start = cursor;
       const end = cursor + (item.value / total) * 100;
       cursor = end;
-      const color = AUDIENCE_COLORS[index % AUDIENCE_COLORS.length];
+      const color = colors[index % colors.length];
       return `${color} ${start}% ${end}%`;
     }).join(', ')
     : 'rgba(148, 163, 184, 0.25) 0% 100%';
 
   return (
-    <div className="rounded-xl border border-border bg-background/60 p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h4 className="text-sm font-bold uppercase tracking-wide">{title}</h4>
+    <div className="min-h-[260px] rounded-xl border border-border bg-background/60 p-5">
+      <div className="flex items-center justify-between gap-5">
+        <div className="min-w-0 flex-1">
+          <h4 className="text-base font-bold uppercase tracking-wide">{title}</h4>
           <p className="mt-0.5 text-[11px] text-muted-foreground">{total.toLocaleString('pt-BR')} pessoas/imp.</p>
         </div>
-        <div className="relative h-24 w-24 shrink-0 rounded-full" style={{ background: `conic-gradient(${gradient})` }}>
-          <div className="absolute inset-5 rounded-full bg-card" />
+        <div className="relative h-36 w-36 shrink-0 rounded-full" style={{ background: `conic-gradient(${gradient})` }}>
+          <div className="absolute inset-8 rounded-full bg-card" />
         </div>
       </div>
       <div className="mt-4 space-y-2">
@@ -749,7 +752,7 @@ function AudiencePieCard({
           const pct = total > 0 ? Math.round((item.value / total) * 100) : 0;
           return (
             <div key={item.label} className="flex items-center gap-2 text-xs">
-              <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: AUDIENCE_COLORS[index % AUDIENCE_COLORS.length] }} />
+              <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: colors[index % colors.length] }} />
               <span className="min-w-0 flex-1 truncate text-muted-foreground">{item.label}</span>
               <span className="font-bold">{pct}%</span>
             </div>
@@ -766,11 +769,13 @@ function AudiencePlatformBlock({
   title,
   description,
   color,
+  colors,
   data,
 }: {
   title: string;
   description: string;
   color: string;
+  colors: string[];
   data: AudienceBreakdowns;
 }) {
   const keys: AudienceKey[] = ['age', 'gender', 'platform', 'device'];
@@ -784,9 +789,9 @@ function AudiencePlatformBlock({
           <p className="mt-1 text-xs text-muted-foreground">{description}</p>
         </div>
       </div>
-      <div className="mt-4 grid gap-3 md:grid-cols-2">
+      <div className="mt-4 grid gap-3">
         {keys.map((key) => (
-          <AudiencePieCard key={key} title={AUDIENCE_TITLES[key]} data={data[key]} />
+          <AudiencePieCard key={key} title={AUDIENCE_TITLES[key]} data={data[key]} colors={colors} />
         ))}
       </div>
     </div>
@@ -1248,12 +1253,14 @@ export default function GeneralDashboard() {
               title="Meta Ads"
               description="Alcance vindo das contas Meta vinculadas."
               color="#0B84FF"
+              colors={META_AUDIENCE_COLORS}
               data={audience.meta}
             />
             <AudiencePlatformBlock
               title="Google Ads"
               description="Impressões vindas das contas Google Ads vinculadas."
-              color="#4285F4"
+              color="#EA4335"
+              colors={GOOGLE_AUDIENCE_COLORS}
               data={audience.google}
             />
           </div>
