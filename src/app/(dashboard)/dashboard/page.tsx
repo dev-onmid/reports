@@ -210,9 +210,10 @@ function KpiCard({
   const status = progress > 75 ? 'good' : progress >= 36 ? 'warning' : 'critical';
 
   const statusColor = !showProgress || !hasTarget ? 'text-foreground' : status === 'critical' ? 'text-red-400' : status === 'good' ? 'text-primary' : 'text-orange-400';
-  const bottomItems = [
-    ...(showMeta ? [{ label: metaLabel, value: meta > 0 ? fmt(meta) : prefix ? prefix : 'Sem meta' }] : []),
-    ...(showPartial ? [{ label: partialLabel, value: partial > 0 ? fmt(partial) : '—' }] : []),
+  const detailItems = [
+    ...(showMeta ? [{ label: metaLabel, value: meta > 0 ? fmt(meta) : prefix ? prefix : 'Sem meta', tone: 'text-foreground' }] : []),
+    ...(showPartial ? [{ label: partialLabel, value: partial > 0 ? fmt(partial) : '—', tone: 'text-foreground' }] : []),
+    ...(showProgress && hasTarget ? [{ label: 'Atingimento', value: `${progress}%`, tone: statusColor }] : []),
   ];
 
   return (
@@ -230,39 +231,32 @@ function KpiCard({
           <span className="text-sm">Carregando...</span>
         </div>
       ) : (
-        <>
-          <div className={cn('relative overflow-hidden rounded-lg border border-border bg-background/70 p-4', featured ? 'min-h-32' : 'min-h-24')}>
-            <div className="grid items-center gap-4 sm:grid-cols-[1.35fr_0.85fr_1fr]">
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Realizado</p>
-                <p className={cn('mt-1 font-heading font-bold tracking-wide leading-none text-foreground', featured ? 'text-4xl' : 'text-2xl')}>{fmt(value)}</p>
-              </div>
-              <div>
-                <p className="text-[10px] font-semibold text-muted-foreground">{metaLabel}</p>
-                <p className="mt-1 text-sm font-bold text-foreground">{meta > 0 ? fmt(meta) : prefix ? prefix : 'Sem meta'}</p>
-              </div>
-              {showProgress && hasTarget && (
-                <div>
-                  <p className="text-[10px] font-semibold text-muted-foreground">Atingimento</p>
-                  <p className={cn('mt-1 text-lg font-bold leading-none', statusColor)}>{progress}%</p>
-                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#2b2144]">
-                    <div className="h-full rounded-full bg-[#8B35FF] shadow-[0_0_18px_rgba(139,53,255,0.65)]" style={{ width: `${progress}%` }} />
+        <div className={cn('relative overflow-hidden rounded-lg border border-border bg-background/70 p-4', featured ? 'min-h-32' : 'min-h-24')}>
+          <div className="grid h-full items-center gap-5 lg:grid-cols-[1.15fr_1.85fr]">
+            <div className="rounded-lg bg-black/15 px-3 py-3">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Realizado</p>
+              <p className={cn('mt-1 font-heading font-bold tracking-wide leading-none text-foreground', featured ? 'text-4xl' : 'text-2xl')}>{fmt(value)}</p>
+            </div>
+            {detailItems.length > 0 && (
+              <div className={cn(
+                'grid gap-3',
+                detailItems.length === 1 ? 'sm:grid-cols-1' : detailItems.length === 2 ? 'sm:grid-cols-2' : 'sm:grid-cols-3'
+              )}>
+                {detailItems.map((item) => (
+                  <div key={item.label} className="min-w-0 rounded-lg bg-black/15 px-3 py-3">
+                    <p className="text-[10px] font-semibold text-muted-foreground">{item.label}</p>
+                    <p className={cn('mt-1 truncate text-sm font-bold', item.tone)}>{item.value}</p>
+                    {item.label === 'Atingimento' && (
+                      <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#2b2144]">
+                        <div className="h-full rounded-full bg-[#8B35FF] shadow-[0_0_18px_rgba(139,53,255,0.65)]" style={{ width: `${progress}%` }} />
+                      </div>
+                    )}
                   </div>
-                </div>
-              )}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
-          {bottomItems.length > 0 && (
-            <div className={cn('grid gap-2', bottomItems.length === 1 ? 'grid-cols-1' : 'grid-cols-2')}>
-              {bottomItems.map((item) => (
-                <div key={item.label} className="rounded-lg bg-background/70 px-3 py-2 text-center">
-                  <p className="text-sm font-bold">{item.value}</p>
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{item.label}</p>
-                </div>
-              ))}
-            </div>
-          )}
-        </>
+        </div>
       )}
     </div>
   );
