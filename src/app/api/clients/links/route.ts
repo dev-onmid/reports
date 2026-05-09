@@ -1,25 +1,4 @@
-import { Pool } from 'pg';
-
-function makePool() {
-  const connectionString = process.env.POSTGRES_URL_NON_POOLING ?? process.env.POSTGRES_URL ?? process.env.POSTGRES_PRISMA_URL;
-  if (connectionString) {
-    return new Pool({
-      connectionString,
-      ssl: { rejectUnauthorized: false },
-      max: 1,
-    });
-  }
-
-  return new Pool({
-    host: process.env.POSTGRES_HOST,
-    port: Number(process.env.POSTGRES_PORT ?? 5432),
-    database: process.env.POSTGRES_DATABASE ?? 'postgres',
-    user: process.env.POSTGRES_USER,
-    password: process.env.SUPABASE_DB_PASSWORD ?? process.env.POSTGRES_PASSWORD,
-    ssl: { rejectUnauthorized: false },
-    max: 1,
-  });
-}
+import { makeServerPool } from '@/lib/server-db';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function rowToJson(r: any) {
@@ -36,7 +15,7 @@ function rowToJson(r: any) {
 }
 
 export async function GET() {
-  const pool = makePool();
+  const pool = makeServerPool();
   try {
     const { rows } = await pool.query(
       'SELECT * FROM public.client_account_links ORDER BY created_at ASC'
