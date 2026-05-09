@@ -927,36 +927,14 @@ function AudiencePieCard({
   });
 
   return (
-    <div className="grid min-h-[340px] grid-cols-[minmax(0,1fr)_240px] gap-5 rounded-xl border border-border bg-background/60 p-5">
-      <div className="flex min-w-0 flex-col">
-        <div>
-          <h4 className="text-base font-bold uppercase tracking-wide">{title}</h4>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">{total.toLocaleString('pt-BR')} pessoas/imp.</p>
-        </div>
-        <div className="mt-5 flex-1 space-y-2">
-          {slices.length > 0 ? slices.slice(0, 7).map((item) => (
-            <button
-              key={item.label}
-              type="button"
-              onMouseEnter={() => setActiveIndex(item.index)}
-              onMouseLeave={() => setActiveIndex(null)}
-              className={cn(
-                'flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors',
-                activeIndex === item.index ? 'bg-muted/60 text-foreground' : 'text-muted-foreground hover:bg-muted/40'
-              )}
-            >
-              <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />
-              <span className="min-w-0 flex-1 truncate">{item.label}</span>
-              <span className="font-bold text-foreground">{item.pct}%</span>
-            </button>
-          )) : (
-            <p className="text-xs text-muted-foreground">Sem dados no período.</p>
-          )}
-        </div>
+    <div className="flex min-h-[420px] flex-col rounded-xl border border-border bg-background/60 p-5">
+      <div>
+        <h4 className="text-base font-bold uppercase tracking-wide">{title}</h4>
+        <p className="mt-0.5 text-[11px] text-muted-foreground">{total.toLocaleString('pt-BR')} pessoas/imp.</p>
       </div>
-      <div className="flex h-full items-center justify-center">
+      <div className="mt-5 flex justify-center">
         {slices.length > 0 ? (
-          <svg viewBox="0 0 220 220" className="h-56 w-56 overflow-visible" role="img" aria-label={`Gráfico de ${title}`}>
+          <svg viewBox="0 0 220 220" className="h-52 w-52 overflow-visible" role="img" aria-label={`Gráfico de ${title}`}>
             {slices.map((slice) => (
               <path
                 key={slice.label}
@@ -981,9 +959,29 @@ function AudiencePieCard({
             <text x="110" y="124" textAnchor="middle" className="fill-foreground text-[18px] font-bold">{total.toLocaleString('pt-BR')}</text>
           </svg>
         ) : (
-          <div className="relative h-56 w-56 rounded-full bg-muted/30">
+          <div className="relative h-52 w-52 rounded-full bg-muted/30">
             <div className="absolute inset-12 rounded-full bg-card" />
           </div>
+        )}
+      </div>
+      <div className="mt-5 flex-1 space-y-2">
+        {slices.length > 0 ? slices.slice(0, 7).map((item) => (
+          <button
+            key={item.label}
+            type="button"
+            onMouseEnter={() => setActiveIndex(item.index)}
+            onMouseLeave={() => setActiveIndex(null)}
+            className={cn(
+              'flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors',
+              activeIndex === item.index ? 'bg-muted/60 text-foreground' : 'text-muted-foreground hover:bg-muted/40'
+            )}
+          >
+            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />
+            <span className="min-w-0 flex-1 truncate">{item.label}</span>
+            <span className="font-bold text-foreground">{item.pct}%</span>
+          </button>
+        )) : (
+          <p className="text-xs text-muted-foreground">Sem dados no período.</p>
         )}
       </div>
     </div>
@@ -1014,7 +1012,7 @@ function AudiencePlatformBlock({
           <p className="mt-1 text-xs text-muted-foreground">{description}</p>
         </div>
       </div>
-      <div className="mt-4 grid flex-1 grid-rows-4 gap-3">
+      <div className="mt-4 grid flex-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         {keys.map((key) => (
           <AudiencePieCard key={key} title={AUDIENCE_TITLES[key]} data={data[key]} colors={colors} />
         ))}
