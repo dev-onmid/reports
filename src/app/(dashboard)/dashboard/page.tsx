@@ -45,8 +45,8 @@ const EMPTY_AUDIENCE: AudienceResponse = {
   google: { age: [], gender: [], platform: [], device: [] },
 };
 
-const META_AUDIENCE_COLORS = ['#0B84FF', '#38BDF8', '#1D4ED8', '#7DD3FC', '#2563EB', '#60A5FA', '#93C5FD', '#1E40AF'];
-const GOOGLE_AUDIENCE_COLORS = ['#EA4335', '#EF4444', '#F97316', '#B91C1C', '#FCA5A5', '#DC2626', '#FB7185', '#7F1D1D'];
+const META_AUDIENCE_COLORS = ['#0B84FF', '#55F52F', '#7B2CFF', '#38BDF8', '#F59E0B', '#EC4899', '#EF4444', '#A3E635'];
+const GOOGLE_AUDIENCE_COLORS = ['#EA4335', '#FBBC05', '#34A853', '#4285F4', '#7B2CFF', '#F97316', '#EC4899', '#22C55E'];
 const AUDIENCE_TITLES: Record<AudienceKey, string> = {
   age: 'Idade',
   gender: 'Gênero',
