@@ -1248,6 +1248,8 @@ export default function GeneralDashboard() {
   }
 
   const selectedClients = clients.filter(c => selectedIds.has(c.id));
+  const metaCampaigns = campaigns.filter((campaign) => campaign.platform === 'meta');
+  const googleCampaigns = campaigns.filter((campaign) => campaign.platform === 'google');
 
   return (
     <div className="space-y-6 pb-10">
@@ -1385,6 +1387,117 @@ export default function GeneralDashboard() {
             <MetricTile title="CPC Meta Ads" value={metaCpc} format="currency" loading={metricsLoading} accent="#0B84FF" />
             <MetricTile title="CTR Meta Ads" value={metaCtr} format="percent" loading={metricsLoading} accent="#0B84FF" />
           </div>
+
+          <div className="mt-12 space-y-12">
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-bold uppercase tracking-wider">Campanhas Ativas Meta Ads</h3>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Campanhas Meta com gasto no período selecionado.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Ordenar por</span>
+                  <div className="flex rounded-lg border border-border overflow-hidden">
+                    {SORT_OPTIONS.map(opt => (
+                      <button
+                        key={opt.value}
+                        onClick={() => setCampaignSortBy(opt.value)}
+                        className={cn(
+                          'px-3 py-1.5 text-[11px] font-semibold transition-colors',
+                          campaignSortBy === opt.value ? 'bg-primary text-black' : 'bg-card text-muted-foreground hover:bg-muted/50'
+                        )}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                  {campaignsLoading && <RefreshCw className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
+                </div>
+              </div>
+              <CampaignPerformanceTable campaigns={metaCampaigns} loading={campaignsLoading} />
+            </div>
+
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-bold uppercase tracking-wider">Anúncios e previews Meta Ads</h3>
+                  <p className="mt-0.5 text-xs text-muted-foreground">Criativos com melhor performance no período selecionado.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Ordenar por</span>
+                  <div className="flex rounded-lg border border-border overflow-hidden">
+                    {SORT_OPTIONS.map(opt => (
+                      <button
+                        key={opt.value}
+                        onClick={() => setSortBy(opt.value)}
+                        className={cn(
+                          'px-3 py-1.5 text-[11px] font-semibold transition-colors',
+                          sortBy === opt.value ? 'bg-primary text-black' : 'bg-card text-muted-foreground hover:bg-muted/50'
+                        )}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                  {creativesLoading && <RefreshCw className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
+                </div>
+              </div>
+
+              {creativesLoading ? (
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+                  {Array.from({ length: 8 }).map((_, i) => (
+                    <div key={i} className="rounded-xl border border-border bg-card overflow-hidden animate-pulse">
+                      <div className="aspect-[9/16] bg-muted/30" />
+                      <div className="p-3 space-y-2">
+                        <div className="h-3 bg-muted/40 rounded w-3/4" />
+                        <div className="h-2 bg-muted/30 rounded w-full" />
+                        <div className="h-2 bg-muted/30 rounded w-2/3" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : creatives.length === 0 ? (
+                <div className="rounded-xl border border-border bg-card/50 py-12 text-center">
+                  <ImageIcon className="w-8 h-8 text-muted-foreground/30 mx-auto mb-3" />
+                  <p className="text-sm text-muted-foreground">Nenhum criativo encontrado.</p>
+                  <p className="text-xs text-muted-foreground/60 mt-1">Conecte uma conta Meta Ads em Integrações e vincule a um cliente.</p>
+                </div>
+              ) : (
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+                  {creatives.map(c => (
+                    <CreativeCard key={c.adId} creative={c} sortBy={sortBy} onPreview={setPreviewCreative} />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-sm font-bold uppercase tracking-wider">Público Meta Ads</h3>
+                <p className="mt-0.5 text-xs text-muted-foreground">Recortes por idade, gênero, plataforma e dispositivo do Meta Ads.</p>
+              </div>
+              {audienceLoading ? (
+                <div className="rounded-xl border border-border bg-card p-5 animate-pulse">
+                  <div className="h-5 w-32 rounded bg-muted/40" />
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    {Array.from({ length: 4 }).map((__, itemIndex) => (
+                      <div key={itemIndex} className="h-40 rounded-xl bg-muted/20" />
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <AudiencePlatformBlock
+                  title="Meta Ads"
+                  description="Alcance vindo das contas Meta vinculadas."
+                  color="#0B84FF"
+                  colors={META_AUDIENCE_COLORS}
+                  data={audience.meta}
+                />
+              )}
+            </div>
+          </div>
         </MetricSection>
 
         <MetricSection
@@ -1400,6 +1513,63 @@ export default function GeneralDashboard() {
             <MetricTile title="Cliques Google Ads" value={googleClicks} loading={metricsLoading} accent="#55F52F" />
             <MetricTile title="CPC Google Ads" value={googleCpc} format="currency" loading={metricsLoading} accent="#55F52F" />
             <MetricTile title="CTR Google Ads" value={googleCtrValue} format="percent" loading={metricsLoading} accent="#55F52F" />
+          </div>
+
+          <div className="mt-12 space-y-12">
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-bold uppercase tracking-wider">Campanhas Ativas Google Ads</h3>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Campanhas Google com gasto no período selecionado.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Ordenar por</span>
+                  <div className="flex rounded-lg border border-border overflow-hidden">
+                    {SORT_OPTIONS.map(opt => (
+                      <button
+                        key={opt.value}
+                        onClick={() => setCampaignSortBy(opt.value)}
+                        className={cn(
+                          'px-3 py-1.5 text-[11px] font-semibold transition-colors',
+                          campaignSortBy === opt.value ? 'bg-primary text-black' : 'bg-card text-muted-foreground hover:bg-muted/50'
+                        )}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                  {campaignsLoading && <RefreshCw className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
+                </div>
+              </div>
+              <CampaignPerformanceTable campaigns={googleCampaigns} loading={campaignsLoading} />
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-sm font-bold uppercase tracking-wider">Público Google Ads</h3>
+                <p className="mt-0.5 text-xs text-muted-foreground">Recortes por idade, gênero, plataforma e dispositivo do Google Ads.</p>
+              </div>
+              {audienceLoading ? (
+                <div className="rounded-xl border border-border bg-card p-5 animate-pulse">
+                  <div className="h-5 w-32 rounded bg-muted/40" />
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    {Array.from({ length: 4 }).map((__, itemIndex) => (
+                      <div key={itemIndex} className="h-40 rounded-xl bg-muted/20" />
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <AudiencePlatformBlock
+                  title="Google Ads"
+                  description="Impressões vindas das contas Google Ads vinculadas."
+                  color="#EA4335"
+                  colors={GOOGLE_AUDIENCE_COLORS}
+                  data={audience.google}
+                />
+              )}
+            </div>
           </div>
         </MetricSection>
       </div>
@@ -1446,135 +1616,6 @@ export default function GeneralDashboard() {
         </div>
       )}
 
-      {/* Campanhas ativas */}
-      <div className="space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="text-sm font-bold uppercase tracking-wider">Campanhas Ativas</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              Campanhas com gasto no período selecionado, considerando as contas vinculadas.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Ordenar por</span>
-            <div className="flex rounded-lg border border-border overflow-hidden">
-              {SORT_OPTIONS.map(opt => (
-                <button
-                  key={opt.value}
-                  onClick={() => setCampaignSortBy(opt.value)}
-                  className={cn(
-                    'px-3 py-1.5 text-[11px] font-semibold transition-colors',
-                    campaignSortBy === opt.value ? 'bg-primary text-black' : 'bg-card text-muted-foreground hover:bg-muted/50'
-                  )}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-            {campaignsLoading && <RefreshCw className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
-          </div>
-        </div>
-        <CampaignPerformanceTable campaigns={campaigns} loading={campaignsLoading} />
-      </div>
-
-      {/* Top Criativos */}
-      <div className="space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="text-sm font-bold uppercase tracking-wider">Top Criativos</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">Anúncios com melhor performance no período selecionado.</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Ordenar por</span>
-            <div className="flex rounded-lg border border-border overflow-hidden">
-              {SORT_OPTIONS.map(opt => (
-                <button
-                  key={opt.value}
-                  onClick={() => setSortBy(opt.value)}
-                  className={cn(
-                    'px-3 py-1.5 text-[11px] font-semibold transition-colors',
-                    sortBy === opt.value ? 'bg-primary text-black' : 'bg-card text-muted-foreground hover:bg-muted/50'
-                  )}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-            {creativesLoading && <RefreshCw className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
-          </div>
-        </div>
-
-        {creativesLoading ? (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-            {Array.from({ length: 8 }).map((_, i) => (
-              <div key={i} className="rounded-xl border border-border bg-card overflow-hidden animate-pulse">
-                <div className="aspect-[9/16] bg-muted/30" />
-                <div className="p-3 space-y-2">
-                  <div className="h-3 bg-muted/40 rounded w-3/4" />
-                  <div className="h-2 bg-muted/30 rounded w-full" />
-                  <div className="h-2 bg-muted/30 rounded w-2/3" />
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : creatives.length === 0 ? (
-          <div className="rounded-xl border border-border bg-card/50 py-12 text-center">
-            <ImageIcon className="w-8 h-8 text-muted-foreground/30 mx-auto mb-3" />
-            <p className="text-sm text-muted-foreground">Nenhum criativo encontrado.</p>
-            <p className="text-xs text-muted-foreground/60 mt-1">Conecte uma conta Meta Ads em Integrações e vincule a um cliente.</p>
-          </div>
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-            {creatives.map(c => (
-              <CreativeCard key={c.adId} creative={c} sortBy={sortBy} onPreview={setPreviewCreative} />
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Público atingido */}
-      <div className="space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="text-sm font-bold uppercase tracking-wider">Público atingido</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              Recortes por idade, gênero, plataforma e dispositivo no período selecionado.
-            </p>
-          </div>
-          {audienceLoading && <RefreshCw className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
-        </div>
-        {audienceLoading ? (
-          <div className="grid gap-4 xl:grid-cols-2">
-            {Array.from({ length: 2 }).map((_, index) => (
-              <div key={index} className="rounded-xl border border-border bg-card p-5 animate-pulse">
-                <div className="h-5 w-32 rounded bg-muted/40" />
-                <div className="mt-4 grid gap-3 md:grid-cols-2">
-                  {Array.from({ length: 4 }).map((__, itemIndex) => (
-                    <div key={itemIndex} className="h-40 rounded-xl bg-muted/20" />
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="grid items-stretch gap-4 xl:grid-cols-2">
-            <AudiencePlatformBlock
-              title="Meta Ads"
-              description="Alcance vindo das contas Meta vinculadas."
-              color="#0B84FF"
-              colors={META_AUDIENCE_COLORS}
-              data={audience.meta}
-            />
-            <AudiencePlatformBlock
-              title="Google Ads"
-              description="Impressões vindas das contas Google Ads vinculadas."
-              color="#EA4335"
-              colors={GOOGLE_AUDIENCE_COLORS}
-              data={audience.google}
-            />
-          </div>
-        )}
-      </div>
       <CreativePreviewOverlay creative={previewCreative} onClose={() => setPreviewCreative(null)} />
     </div>
   );
