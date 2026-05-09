@@ -217,7 +217,7 @@ function KpiCard({
   ];
 
   return (
-    <div className="relative overflow-hidden rounded-xl border border-border bg-card/95 p-5 space-y-4 shadow-[0_22px_80px_rgba(0,0,0,0.18)]">
+    <div className="relative overflow-hidden rounded-xl border border-border bg-card/95 p-8 space-y-8 shadow-[0_22px_80px_rgba(0,0,0,0.18)]">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_85%_12%,rgba(123,44,255,0.10),transparent_40%)]" />
       <div className="flex items-start justify-between gap-3">
         <div className="relative">
@@ -231,23 +231,23 @@ function KpiCard({
           <span className="text-sm">Carregando...</span>
         </div>
       ) : (
-        <div className={cn('relative overflow-hidden rounded-lg border border-border bg-background/70 p-4', featured ? 'min-h-32' : 'min-h-24')}>
-          <div className="grid h-full items-center gap-5 lg:grid-cols-[1.15fr_1.85fr]">
-            <div className="rounded-lg bg-black/15 px-3 py-3">
+        <div className={cn('relative overflow-hidden rounded-lg border border-border bg-background/70 p-8', featured ? 'min-h-48' : 'min-h-40')}>
+          <div className="grid h-full items-center gap-14 lg:grid-cols-[1.05fr_1.95fr]">
+            <div className="rounded-lg bg-black/15 px-6 py-6">
               <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Realizado</p>
               <p className={cn('mt-1 font-heading font-bold tracking-wide leading-none text-foreground', featured ? 'text-4xl' : 'text-2xl')}>{fmt(value)}</p>
             </div>
             {detailItems.length > 0 && (
               <div className={cn(
-                'grid gap-3',
-                detailItems.length === 1 ? 'sm:grid-cols-1' : detailItems.length === 2 ? 'sm:grid-cols-2' : 'sm:grid-cols-3'
-              )}>
+                  'grid gap-9',
+                  detailItems.length === 1 ? 'sm:grid-cols-1' : detailItems.length === 2 ? 'sm:grid-cols-2' : 'sm:grid-cols-3'
+                )}>
                 {detailItems.map((item) => (
-                  <div key={item.label} className="min-w-0 rounded-lg bg-black/15 px-3 py-3">
+                  <div key={item.label} className="min-w-0 rounded-lg bg-black/15 px-6 py-6">
                     <p className="text-[10px] font-semibold text-muted-foreground">{item.label}</p>
                     <p className={cn('mt-1 truncate text-sm font-bold', item.tone)}>{item.value}</p>
                     {item.label === 'Atingimento' && (
-                      <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#2b2144]">
+                        <div className="mt-6 h-2 overflow-hidden rounded-full bg-[#2b2144]">
                         <div className="h-full rounded-full bg-[#8B35FF] shadow-[0_0_18px_rgba(139,53,255,0.65)]" style={{ width: `${progress}%` }} />
                       </div>
                     )}
@@ -300,9 +300,9 @@ function ChannelMetricBox({
 }) {
   const formatted = format === 'currency' ? formatCurrencyBRL(value) : value.toLocaleString('pt-BR');
   return (
-    <div className="rounded-xl border border-border bg-background/70 p-4">
+    <div className="rounded-xl border border-border bg-background/70 p-7">
       <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
-      <p className="mt-3 font-heading text-4xl font-bold leading-none" style={{ color }}>
+      <p className="mt-6 font-heading text-4xl font-bold leading-none" style={{ color }}>
         {formatted}
       </p>
     </div>
@@ -331,12 +331,12 @@ function RealizedOnlyCard({
     : value.toLocaleString('pt-BR');
 
   return (
-    <div className="relative h-full overflow-hidden rounded-xl border border-border bg-card/95 p-5 shadow-[0_22px_80px_rgba(0,0,0,0.18)]">
+    <div className="relative h-full overflow-hidden rounded-xl border border-border bg-card/95 p-8 shadow-[0_22px_80px_rgba(0,0,0,0.18)]">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_75%_30%,rgba(139,53,255,0.14),transparent_42%)]" />
       <div className="relative">
       <p className="font-bold text-lg text-foreground">{title}</p>
       <p className="mt-1 text-[11px] text-muted-foreground">{description}</p>
-      <div className="mt-4 rounded-lg border border-border bg-background/70 p-4">
+      <div className="mt-8 rounded-lg border border-border bg-background/70 p-8">
         {loading ? (
           <div className="flex items-center gap-2 text-muted-foreground/60">
             <RefreshCw className="h-3.5 w-3.5 animate-spin" />
@@ -349,7 +349,7 @@ function RealizedOnlyCard({
           </>
         )}
       </div>
-      <div className="mt-3">
+      <div className="mt-8">
         <MiniTrendLine color="#8B35FF" />
       </div>
       </div>
@@ -377,21 +377,21 @@ function ChannelCard({
   costValue: number;
 }) {
   return (
-    <div className="relative overflow-hidden rounded-xl border border-border bg-card/95 p-5 shadow-[0_22px_80px_rgba(0,0,0,0.18)]">
+    <div className="relative overflow-hidden rounded-xl border border-border bg-card/95 p-8 shadow-[0_22px_80px_rgba(0,0,0,0.18)]">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_82%_20%,rgba(255,255,255,0.05),transparent_38%)]" />
       <div className="absolute inset-x-0 top-0 h-1" style={{ backgroundColor: color }} />
-      <div className="relative flex items-start gap-3">
+      <div className="relative flex items-start gap-6">
         {mark}
         <div>
           <h3 className="font-heading text-3xl font-bold uppercase tracking-wide" style={{ color }}>{title}</h3>
           <p className="mt-1 text-xs text-muted-foreground">{description}</p>
         </div>
       </div>
-      <div className="relative mt-4 grid gap-3 sm:grid-cols-2">
+      <div className="relative mt-8 grid gap-9 sm:grid-cols-2">
         <ChannelMetricBox label={resultLabel} value={resultValue} color={color} />
         <ChannelMetricBox label={costLabel} value={costValue} format="currency" color={color} />
       </div>
-      <div className="relative mt-3">
+      <div className="relative mt-8">
         <MiniTrendLine color={color} />
       </div>
     </div>
