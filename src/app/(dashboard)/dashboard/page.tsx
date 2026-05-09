@@ -22,6 +22,20 @@ type FunnelStage = { id: string; name: string; conversion: number };
 type PlanningConfig = { tkm: number; cplMeta: number; stages: FunnelStage[] };
 type SortKey = 'spend' | 'leads' | 'impressions' | 'clicks' | 'cpl' | 'ctr';
 type AudienceKey = keyof AudienceBreakdowns;
+type AdsPlatform = 'meta' | 'google';
+type ClientAccountLink = {
+  clientId: string;
+  platform: AdsPlatform;
+  accountId: string;
+};
+type AdAccountBalance = {
+  id: string;
+  name: string;
+  currency: string;
+  balance: number | null;
+  error: string | null;
+  platform: AdsPlatform;
+};
 
 const PERIODS: { value: Period; label: string }[] = [
   { value: 'last_7d', label: 'Últimos 7 dias' },
@@ -393,6 +407,111 @@ function ChannelCard({
       </div>
       <div className="relative mt-10">
         <MiniTrendLine color={color} />
+      </div>
+    </div>
+  );
+}
+
+function MetricSection({
+  title,
+  description,
+  accent,
+  children,
+}: {
+  title: string;
+  description: string;
+  accent: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="space-y-5">
+      <div className="flex items-end justify-between gap-4">
+        <div>
+          <h2 className="font-heading text-3xl font-bold uppercase tracking-wide" style={{ color: accent }}>
+            {title}
+          </h2>
+          <p className="mt-1 text-xs text-muted-foreground">{description}</p>
+        </div>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function MetricTile({
+  title,
+  value,
+  format = 'number',
+  accent = '#8B35FF',
+  description,
+  meta,
+  partial,
+  loading = false,
+}: {
+  title: string;
+  value: number;
+  format?: 'currency' | 'number' | 'percent' | 'times';
+  accent?: string;
+  description?: string;
+  meta?: number;
+  partial?: number;
+  loading?: boolean;
+}) {
+  const fmt = (v: number) =>
+    format === 'currency' ? formatCurrencyBRL(v)
+    : format === 'percent' ? `${v.toFixed(1)}%`
+    : format === 'times' ? `${v.toFixed(1)}x`
+    : v.toLocaleString('pt-BR');
+  const target = partial && partial > 0 ? partial : meta;
+  const progress = target && target > 0 ? Math.max(0, Math.min(100, Math.round((value / target) * 100))) : null;
+
+  return (
+    <div className="relative flex min-h-[260px] flex-col overflow-hidden rounded-xl border border-border bg-card/95 p-8 shadow-[0_22px_80px_rgba(0,0,0,0.18)]">
+      <div className="absolute inset-x-0 top-0 h-1" style={{ backgroundColor: accent }} />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_85%_18%,rgba(123,44,255,0.10),transparent_40%)]" />
+      <div className="relative flex h-full flex-col">
+        <p className="text-sm font-bold text-foreground">{title}</p>
+        {description && <p className="mt-1 text-[11px] text-muted-foreground">{description}</p>}
+        <div className="mt-8 flex flex-1 items-center rounded-lg border border-border bg-background/70 p-7">
+          {loading ? (
+            <div className="flex items-center gap-2 text-muted-foreground/60">
+              <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+              <span className="text-xs">Carregando...</span>
+            </div>
+          ) : (
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Realizado</p>
+              <p className="mt-3 font-heading text-4xl font-bold leading-none" style={{ color: accent }}>
+                {fmt(value)}
+              </p>
+            </div>
+          )}
+        </div>
+        {(meta !== undefined || partial !== undefined || progress !== null) && (
+          <div className="mt-6 grid gap-4 sm:grid-cols-3">
+            {meta !== undefined && (
+              <div className="rounded-lg bg-background/70 px-4 py-3">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Meta</p>
+                <p className="mt-1 truncate text-sm font-bold">{meta > 0 ? fmt(meta) : 'Sem meta'}</p>
+              </div>
+            )}
+            {partial !== undefined && (
+              <div className="rounded-lg bg-background/70 px-4 py-3">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Parcial</p>
+                <p className="mt-1 truncate text-sm font-bold">{partial > 0 ? fmt(partial) : '—'}</p>
+              </div>
+            )}
+            {progress !== null && (
+              <div className="rounded-lg bg-background/70 px-4 py-3">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Atingimento</p>
+                <p className="mt-1 text-sm font-bold" style={{ color: accent }}>{progress}%</p>
+                <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#2b2144]">
+                  <div className="h-full rounded-full" style={{ width: `${progress}%`, backgroundColor: accent }} />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -879,6 +998,8 @@ export default function GeneralDashboard() {
   const [campaigns, setCampaigns] = useState<CampaignPerformance[]>([]);
   const [creatives, setCreatives] = useState<TopCreative[]>([]);
   const [audience, setAudience] = useState<AudienceResponse>(EMPTY_AUDIENCE);
+  const [balances, setBalances] = useState<AdAccountBalance[]>([]);
+  const [clientLinks, setClientLinks] = useState<ClientAccountLink[]>([]);
   const [previewCreative, setPreviewCreative] = useState<TopCreative | null>(null);
   const [campaignSortBy, setCampaignSortBy] = useState<SortKey>('spend');
   const [sortBy, setSortBy] = useState<SortKey>('spend');
@@ -886,6 +1007,7 @@ export default function GeneralDashboard() {
   const [campaignsLoading, setCampaignsLoading] = useState(false);
   const [creativesLoading, setCreativesLoading] = useState(false);
   const [audienceLoading, setAudienceLoading] = useState(false);
+  const [balancesLoading, setBalancesLoading] = useState(false);
 
   // Initialize: all clients selected
   useEffect(() => {
@@ -972,6 +1094,31 @@ export default function GeneralDashboard() {
       .finally(() => setAudienceLoading(false));
   }, [period, selectedIds]);
 
+  // Fetch balances and account links used by the general balance cards
+  useEffect(() => {
+    setBalancesLoading(true);
+    Promise.all([
+      fetch('/api/meta/account-balances'),
+      fetch('/api/google/account-balances'),
+      fetch('/api/clients/links'),
+    ])
+      .then(async ([metaRes, googleRes, linksRes]) => {
+        const metaRaw: Array<Omit<AdAccountBalance, 'platform'>> = metaRes.ok ? await metaRes.json() : [];
+        const googleRaw: Array<Omit<AdAccountBalance, 'platform'>> = googleRes.ok ? await googleRes.json() : [];
+        const linksRaw: ClientAccountLink[] = linksRes.ok ? await linksRes.json() : [];
+        setBalances([
+          ...metaRaw.map((account) => ({ ...account, platform: 'meta' as const })),
+          ...googleRaw.map((account) => ({ ...account, platform: 'google' as const })),
+        ]);
+        setClientLinks(linksRaw.filter((link) => link.platform === 'meta' || link.platform === 'google'));
+      })
+      .catch(() => {
+        setBalances([]);
+        setClientLinks([]);
+      })
+      .finally(() => setBalancesLoading(false));
+  }, []);
+
   // ── Aggregate metrics ────────────────────────────────────────────────────
   let metaLeads = 0, metaFormLeads = 0, metaConversations = 0, metaSpend = 0, metaImpressions = 0, metaClicks = 0;
   let googleConv = 0, googleCost = 0;
@@ -991,8 +1138,21 @@ export default function GeneralDashboard() {
 
   const totalLeads = metaLeads + googleConv;
   const totalSpend = metaSpend + googleCost;
+  const totalCostPerLead = totalLeads > 0 ? totalSpend / totalLeads : 0;
   const avgCpl = metaLeads > 0 ? metaSpend / metaLeads : 0;
   const avgCpa = googleConv > 0 ? googleCost / googleConv : 0;
+  const metaCtr = metaImpressions > 0 ? (metaClicks / metaImpressions) * 100 : 0;
+  const metaCpc = metaClicks > 0 ? metaSpend / metaClicks : 0;
+  let googleImpressions = 0, googleClicks = 0;
+  for (const id of selectedIds) {
+    const m = metricsByClient[id];
+    if (m?.google) {
+      googleImpressions += m.google.impressions;
+      googleClicks += m.google.clicks;
+    }
+  }
+  const googleCpc = googleClicks > 0 ? googleCost / googleClicks : 0;
+  const googleCtrValue = googleImpressions > 0 ? (googleClicks / googleImpressions) * 100 : 0;
 
   // ── Aggregate planning ───────────────────────────────────────────────────
   let leadsGoal = 0;
@@ -1013,6 +1173,17 @@ export default function GeneralDashboard() {
   const revenuePartial = autoPartial(revenueGoal, period);
   const leadsPartial = autoPartial(leadsGoal, period);
   const roi = totalSpend > 0 ? revenue / totalSpend : 0;
+  const selectedLinkedAccountIds = new Set(
+    clientLinks
+      .filter((link) => selectedIds.has(link.clientId))
+      .map((link) => `${link.platform}:${link.accountId}`)
+  );
+  const metaBalance = balances
+    .filter((account) => account.platform === 'meta' && selectedLinkedAccountIds.has(`meta:${account.id}`) && account.balance !== null)
+    .reduce((sum, account) => sum + (account.balance ?? 0), 0);
+  const googleBalance = balances
+    .filter((account) => account.platform === 'google' && selectedLinkedAccountIds.has(`google:${account.id}`) && account.balance !== null)
+    .reduce((sum, account) => sum + (account.balance ?? 0), 0);
 
   // ── Alerts ───────────────────────────────────────────────────────────────
   type Alert = { clientId: string; clientName: string; msg: string; severity: 'warning' | 'critical' };
@@ -1100,71 +1271,101 @@ export default function GeneralDashboard() {
       )}
 
       <div className="grid gap-12">
-        {/* KPI Cards — Row 1 */}
-        <div className="grid items-stretch gap-12 lg:grid-cols-[2fr_1fr]">
-          <KpiCard
-            title="Resultado"
-            value={revenue}
-            meta={revenueGoal}
-            partial={revenuePartial}
-            format="currency"
-            loading={metricsLoading}
-            featured
-          />
-          <RealizedOnlyCard
-            title="ROI"
-            value={roi}
-            format="times"
-            loading={metricsLoading}
-            description="Resultado realizado dividido pelo total gasto."
-          />
-        </div>
+        <MetricSection
+          title="Métricas Gerais"
+          description="Visão consolidada do resultado, investimento, leads e saldos das contas vinculadas."
+          accent="#8B35FF"
+        >
+          <div className="grid items-stretch gap-12 md:grid-cols-2 xl:grid-cols-4">
+            <MetricTile
+              title="Resultado"
+              value={revenue}
+              meta={revenueGoal}
+              partial={revenuePartial}
+              format="currency"
+              loading={metricsLoading}
+              description="Resultado realizado no período."
+            />
+            <MetricTile
+              title="ROI"
+              value={roi}
+              format="times"
+              loading={metricsLoading}
+              description="Resultado dividido pelo total investido."
+            />
+            <MetricTile
+              title="Total de Leads"
+              value={totalLeads}
+              meta={leadsGoal}
+              partial={leadsPartial}
+              loading={metricsLoading}
+              description="Meta Ads + Google Ads."
+            />
+            <MetricTile
+              title="Custo por Lead"
+              value={totalCostPerLead}
+              format="currency"
+              loading={metricsLoading}
+              description="Custo por resultado consolidado."
+            />
+            <MetricTile
+              title="Total Investido"
+              value={totalSpend}
+              meta={plannedInvestment}
+              format="currency"
+              loading={metricsLoading}
+              description="Investimento total em mídia."
+            />
+            <MetricTile
+              title="Saldo da Conta Meta Ads"
+              value={metaBalance}
+              format="currency"
+              loading={balancesLoading}
+              accent="#0B84FF"
+              description="Soma dos saldos vinculados aos clientes selecionados."
+            />
+            <MetricTile
+              title="Saldo da Conta Google Ads"
+              value={googleBalance}
+              format="currency"
+              loading={balancesLoading}
+              accent="#55F52F"
+              description="Soma dos saldos vinculados aos clientes selecionados."
+            />
+          </div>
+        </MetricSection>
 
-        <div className="grid items-stretch gap-12 lg:grid-cols-2">
-          <KpiCard
-            title="Leads Total"
-            value={totalLeads}
-            meta={leadsGoal}
-            partial={leadsPartial}
-            loading={metricsLoading}
-            description="Meta Ads formulários + conversas e conversões Google Ads."
-          />
-          <KpiCard
-            title="Total Gasto"
-            value={totalSpend}
-            meta={plannedInvestment}
-            partial={0}
-            format="currency"
-            loading={metricsLoading}
-            showPartial={false}
-            showProgress={false}
-            description="Gasto real em campanhas Meta Ads e Google Ads."
-          />
-        </div>
+        <MetricSection
+          title="Métricas Meta Ads"
+          description={`${metaFormLeads.toLocaleString('pt-BR')} formulários + ${metaConversations.toLocaleString('pt-BR')} conversas no período selecionado.`}
+          accent="#0B84FF"
+        >
+          <div className="grid items-stretch gap-12 md:grid-cols-2 xl:grid-cols-4">
+            <MetricTile title="Leads Meta Ads" value={metaLeads} loading={metricsLoading} accent="#0B84FF" />
+            <MetricTile title="CPL Meta Ads" value={avgCpl} format="currency" loading={metricsLoading} accent="#0B84FF" />
+            <MetricTile title="Investimento Meta Ads" value={metaSpend} format="currency" loading={metricsLoading} accent="#0B84FF" />
+            <MetricTile title="Impressões Meta Ads" value={metaImpressions} loading={metricsLoading} accent="#0B84FF" />
+            <MetricTile title="Cliques Meta Ads" value={metaClicks} loading={metricsLoading} accent="#0B84FF" />
+            <MetricTile title="CPC Meta Ads" value={metaCpc} format="currency" loading={metricsLoading} accent="#0B84FF" />
+            <MetricTile title="CTR Meta Ads" value={metaCtr} format="percent" loading={metricsLoading} accent="#0B84FF" />
+          </div>
+        </MetricSection>
 
-        {/* Leads por canal */}
-        <div className="grid items-stretch gap-12 lg:grid-cols-2">
-          <ChannelCard
-            title="Meta Ads"
-            mark={<MetaMark />}
-            description={`${metaFormLeads.toLocaleString('pt-BR')} formulários + ${metaConversations.toLocaleString('pt-BR')} conversas no período selecionado.`}
-            color="#0B84FF"
-            resultLabel="Leads"
-            resultValue={metricsLoading ? 0 : metaLeads}
-            costLabel="CPL"
-            costValue={metricsLoading ? 0 : avgCpl}
-          />
-          <ChannelCard
-            title="Google Ads"
-            mark={<GoogleMark />}
-            description="Conversões vindas apenas do Google Ads no período selecionado."
-            color="#55F52F"
-            resultLabel="Leads"
-            resultValue={metricsLoading ? 0 : googleConv}
-            costLabel="Custo / Conversão"
-            costValue={metricsLoading ? 0 : avgCpa}
-          />
-        </div>
+        <MetricSection
+          title="Métricas Google Ads"
+          description="Conversões e custos vindos apenas das contas Google Ads vinculadas."
+          accent="#55F52F"
+        >
+          <div className="grid items-stretch gap-12 md:grid-cols-2 xl:grid-cols-4">
+            <MetricTile title="Leads Google Ads" value={googleConv} loading={metricsLoading} accent="#55F52F" />
+            <MetricTile title="Custo / Conversão" value={avgCpa} format="currency" loading={metricsLoading} accent="#55F52F" />
+            <MetricTile title="Investimento Google Ads" value={googleCost} format="currency" loading={metricsLoading} accent="#55F52F" />
+            <MetricTile title="Impressões Google Ads" value={googleImpressions} loading={metricsLoading} accent="#55F52F" />
+            <MetricTile title="Cliques Google Ads" value={googleClicks} loading={metricsLoading} accent="#55F52F" />
+            <MetricTile title="CPC Google Ads" value={googleCpc} format="currency" loading={metricsLoading} accent="#55F52F" />
+            <MetricTile title="CTR Google Ads" value={googleCtrValue} format="percent" loading={metricsLoading} accent="#55F52F" />
+          </div>
+        </MetricSection>
       </div>
 
       {/* Client summary quick-view */}
