@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { Archive, RotateCcw, ShieldAlert, Trash2, Plus } from 'lucide-react';
+import { Archive, RotateCcw, ShieldAlert, Trash2, Plus, Power, PowerOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,7 +14,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { canManageClients, useClients } from '@/lib/client-store';
-import { getAuthSession } from '@/lib/auth-store';
+import { getAuthSession, verifyUserCredentials } from '@/lib/auth-store';
 import { useInvestmentPayments } from '@/lib/payment-store';
 import type { ClientStatus } from '@/lib/mock-data';
 import { LinkAccountsDialog } from '@/components/link-accounts-dialog';
@@ -28,18 +28,25 @@ export default function ClientesPage() {
     addClient,
     archiveClient,
     restoreClient,
+    setClientStatus,
     deleteClient,
   } = useClients();
   const { setPayments } = useInvestmentPayments();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [statusDialogOpen, setStatusDialogOpen] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [selectedClient, setSelectedClient] = useState<{ id: string; name: string } | null>(null);
+  const [pendingStatus, setPendingStatus] = useState<ClientStatus | null>(null);
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
   const [linkDialogClient, setLinkDialogClient] = useState<{ id: string; name: string } | null>(null);
   const [linkDialogPlatform, setLinkDialogPlatform] = useState<PlatformId>('google_ads');
   const [currentRole, setCurrentRole] = useState('');
+  const [securityEmail, setSecurityEmail] = useState('');
+  const [securityPassword, setSecurityPassword] = useState('');
+  const [securityError, setSecurityError] = useState('');
+  const [securityLoading, setSecurityLoading] = useState(false);
   const [name, setName] = useState('');
   const [segment, setSegment] = useState('');
   const [status, setStatus] = useState<ClientStatus>('Ativo');
@@ -47,7 +54,9 @@ export default function ClientesPage() {
   const displayedClients = showArchived ? archivedClients : clients;
 
   useEffect(() => {
-    setCurrentRole(getAuthSession()?.role ?? '');
+    const session = getAuthSession();
+    setCurrentRole(session?.role ?? '');
+    setSecurityEmail(session?.email ?? '');
   }, []);
 
   function handleAddClient() {
@@ -72,6 +81,17 @@ export default function ClientesPage() {
     setDeleteDialogOpen(true);
   }
 
+  function openStatusDialog(client: { id: string; name: string }, nextStatus: ClientStatus) {
+    if (!isAdmin) return;
+    const session = getAuthSession();
+    setSelectedClient(client);
+    setPendingStatus(nextStatus);
+    setSecurityEmail(session?.email ?? '');
+    setSecurityPassword('');
+    setSecurityError('');
+    setStatusDialogOpen(true);
+  }
+
   function confirmArchiveClient() {
     if (!selectedClient || !isAdmin) return;
     archiveClient(selectedClient.id);
@@ -85,6 +105,27 @@ export default function ClientesPage() {
     setPayments((prev) => prev.filter((payment) => payment.clientId !== selectedClient.id));
     setDeleteDialogOpen(false);
     setSelectedClient(null);
+  }
+
+  async function confirmStatusChange() {
+    if (!selectedClient || !pendingStatus || !isAdmin) return;
+    setSecurityLoading(true);
+    setSecurityError('');
+    try {
+      const user = await verifyUserCredentials(securityEmail, securityPassword);
+      if (!user || user.role !== 'Administrador') {
+        setSecurityError('Usuário ou senha inválidos para administrador.');
+        return;
+      }
+
+      setClientStatus(selectedClient.id, pendingStatus);
+      setStatusDialogOpen(false);
+      setSelectedClient(null);
+      setPendingStatus(null);
+      setSecurityPassword('');
+    } finally {
+      setSecurityLoading(false);
+    }
   }
 
   return (
@@ -101,7 +142,7 @@ export default function ClientesPage() {
               onClick={() => setShowArchived((prev) => !prev)}
             >
               {showArchived ? <RotateCcw className="w-4 h-4 mr-2" /> : <Archive className="w-4 h-4 mr-2" />}
-              {showArchived ? 'Ver ativos' : `Arquivados (${archivedClients.length})`}
+              {showArchived ? 'Ver ativos' : `Ocultos (${archivedClients.length})`}
             </Button>
           )}
           <Button onClick={() => setDialogOpen(true)} className="bg-primary text-primary-foreground hover:bg-primary/90">
@@ -151,6 +192,9 @@ export default function ClientesPage() {
                 )}
                 {isAdmin && !showArchived && (
                   <>
+                    <Button variant="ghost" size="icon-sm" title="Desativar cliente" onClick={() => openStatusDialog(cliente, 'Inativo')}>
+                      <PowerOff className="w-4 h-4 text-orange-400" />
+                    </Button>
                     <Button variant="ghost" size="icon-sm" title="Arquivar cliente" onClick={() => openArchiveDialog(cliente)}>
                       <Archive className="w-4 h-4" />
                     </Button>
@@ -161,10 +205,16 @@ export default function ClientesPage() {
                 )}
                 {isAdmin && showArchived && (
                   <>
-                    <Button variant="outline" size="sm" onClick={() => restoreClient(cliente.id)}>
-                      <RotateCcw className="w-4 h-4 mr-1" />
-                      Restaurar
+                    <Button variant="outline" size="sm" onClick={() => openStatusDialog(cliente, 'Ativo')}>
+                      <Power className="w-4 h-4 mr-1" />
+                      Ativar
                     </Button>
+                    {cliente.status === 'Arquivado' && (
+                      <Button variant="outline" size="sm" onClick={() => restoreClient(cliente.id)}>
+                        <RotateCcw className="w-4 h-4 mr-1" />
+                        Restaurar
+                      </Button>
+                    )}
                     <Button variant="ghost" size="icon-sm" title="Excluir cliente" className="text-destructive/70 hover:text-destructive hover:bg-destructive/10" onClick={() => openDeleteDialog(cliente)}>
                       <Trash2 className="w-4 h-4" />
                     </Button>
@@ -176,7 +226,7 @@ export default function ClientesPage() {
         {displayedClients.length === 0 && (
           <div className="rounded-lg border border-dashed border-border bg-card/50 p-10 text-center">
             <p className="font-semibold text-muted-foreground">
-              {showArchived ? 'Nenhum cliente arquivado.' : 'Nenhum cliente ativo cadastrado.'}
+              {showArchived ? 'Nenhum cliente oculto.' : 'Nenhum cliente ativo cadastrado.'}
             </p>
           </div>
         )}
@@ -232,6 +282,61 @@ export default function ClientesPage() {
             >
               <Plus className="w-4 h-4 mr-1" />
               Criar Cliente
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {pendingStatus === 'Ativo' ? <Power className="h-5 w-5 text-primary" /> : <PowerOff className="h-5 w-5 text-orange-400" />}
+              {pendingStatus === 'Ativo' ? 'Ativar cliente' : 'Desativar cliente'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="rounded-lg border border-border bg-background/60 p-4 text-sm">
+            <p className="font-semibold">
+              {pendingStatus === 'Ativo' ? 'Ativar' : 'Desativar'} {selectedClient?.name}?
+            </p>
+            <p className="mt-2 text-muted-foreground">
+              {pendingStatus === 'Ativo'
+                ? 'O cliente volta a aparecer na Dashboard, relatórios, pagamentos e demais áreas do sistema.'
+                : 'O cliente fica oculto da Dashboard, relatórios, pagamentos e demais áreas do sistema até ser ativado novamente.'}
+            </p>
+          </div>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="status-email">Usuário do sistema</Label>
+              <Input
+                id="status-email"
+                value={securityEmail}
+                onChange={(event) => setSecurityEmail(event.target.value)}
+                placeholder="email do administrador"
+                className="bg-background"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="status-password">Senha</Label>
+              <Input
+                id="status-password"
+                type="password"
+                value={securityPassword}
+                onChange={(event) => setSecurityPassword(event.target.value)}
+                placeholder="senha do administrador"
+                className="bg-background"
+              />
+            </div>
+            {securityError && <p className="text-xs font-semibold text-destructive">{securityError}</p>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setStatusDialogOpen(false)}>Cancelar</Button>
+            <Button
+              onClick={confirmStatusChange}
+              disabled={securityLoading || !securityEmail.trim() || !securityPassword}
+              className={pendingStatus === 'Ativo' ? 'bg-primary text-primary-foreground hover:bg-primary/90' : 'bg-orange-500 text-white hover:bg-orange-500/90'}
+            >
+              {securityLoading ? 'Validando...' : pendingStatus === 'Ativo' ? 'Ativar cliente' : 'Desativar cliente'}
             </Button>
           </DialogFooter>
         </DialogContent>

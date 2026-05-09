@@ -2,8 +2,9 @@
 
 import { use, useEffect, useState, type ComponentType } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { mockDashboardData, mockClients } from '@/lib/mock-data';
+import { mockDashboardData, mockClients, type ClientStatus } from '@/lib/mock-data';
 import { useClients } from '@/lib/client-store';
+import { getAuthSession, verifyUserCredentials } from '@/lib/auth-store';
 import {
   type MetaAdsMetrics,
   useMetaAdsConnections,
@@ -15,6 +16,7 @@ import {
   Link as LinkIcon, Link2, Plus, X, ChevronDown, LayoutGrid,
   WalletCards, Send, CheckCircle2, Clock3, AlertTriangle, Filter, Trash2,
   UserRound, Phone, Mail, Briefcase, SlidersHorizontal, Check, Hash, BarChart2, Layers,
+  Power, PowerOff,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -2517,7 +2519,7 @@ type Tab = typeof TABS[number];
 
 export default function ClientPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const { allClients } = useClients();
+  const { allClients, setClientStatus } = useClients();
   const googleAds = useGoogleAds();
   const baseClient = mockClients.find((c) => c.id === id);
   const storedClient = allClients.find((c) => c.id === id);
@@ -2539,6 +2541,12 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
 
   const [tab, setTab] = useState<Tab>('planejamento');
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
+  const [statusDialogOpen, setStatusDialogOpen] = useState(false);
+  const [pendingStatus, setPendingStatus] = useState<ClientStatus | null>(null);
+  const [securityEmail, setSecurityEmail] = useState('');
+  const [securityPassword, setSecurityPassword] = useState('');
+  const [securityError, setSecurityError] = useState('');
+  const [securityLoading, setSecurityLoading] = useState(false);
   const [clientGoal, setClientGoal] = useState<ClientGoalConfig>(() =>
     readSavedClientGoal(id, isNewClient ? ZERO_CLIENT_GOAL : DEFAULT_CLIENT_GOAL)
   );
@@ -2566,6 +2574,40 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
     }));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [realMetrics, googleMetrics]);
+
+  useEffect(() => {
+    setSecurityEmail(getAuthSession()?.email ?? '');
+  }, []);
+
+  function openStatusDialog(nextStatus: ClientStatus) {
+    const session = getAuthSession();
+    setPendingStatus(nextStatus);
+    setSecurityEmail(session?.email ?? '');
+    setSecurityPassword('');
+    setSecurityError('');
+    setStatusDialogOpen(true);
+  }
+
+  async function confirmStatusChange() {
+    if (!pendingStatus) return;
+    setSecurityLoading(true);
+    setSecurityError('');
+    try {
+      const user = await verifyUserCredentials(securityEmail, securityPassword);
+      if (!user || user.role !== 'Administrador') {
+        setSecurityError('Usuário ou senha inválidos para administrador.');
+        return;
+      }
+
+      setClientStatus(id, pendingStatus);
+      setStatusDialogOpen(false);
+      setPendingStatus(null);
+      setSecurityPassword('');
+    } finally {
+      setSecurityLoading(false);
+    }
+  }
+
   const tabLabel: Record<Tab, string> = {
     planejamento: 'Planejamento',
     pagamentos:   'Pagamentos',
@@ -2590,6 +2632,17 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
           </div>
         </div>
         <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            className={cn(
+              'border-border h-9 text-xs font-bold uppercase tracking-wider gap-2',
+              client.status === 'Inativo' ? 'border-primary/40 text-primary' : 'border-orange-400/40 text-orange-300'
+            )}
+            onClick={() => openStatusDialog(client.status === 'Inativo' ? 'Ativo' : 'Inativo')}
+          >
+            {client.status === 'Inativo' ? <Power className="w-4 h-4" /> : <PowerOff className="w-4 h-4" />}
+            {client.status === 'Inativo' ? 'Ativar Cliente' : 'Desativar Cliente'}
+          </Button>
           <Button
             variant="outline"
             className="border-border h-9 text-xs font-bold uppercase tracking-wider gap-2"
@@ -2670,6 +2723,61 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
           </Card>
         </div>
       )}
+
+      <Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {pendingStatus === 'Ativo' ? <Power className="h-5 w-5 text-primary" /> : <PowerOff className="h-5 w-5 text-orange-400" />}
+              {pendingStatus === 'Ativo' ? 'Ativar cliente' : 'Desativar cliente'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="rounded-lg border border-border bg-background/60 p-4 text-sm">
+            <p className="font-semibold">
+              {pendingStatus === 'Ativo' ? 'Ativar' : 'Desativar'} {client.name}?
+            </p>
+            <p className="mt-2 text-muted-foreground">
+              {pendingStatus === 'Ativo'
+                ? 'O cliente volta a aparecer na Dashboard, relatórios, pagamentos e demais áreas do sistema.'
+                : 'O cliente fica oculto da Dashboard, relatórios, pagamentos e demais áreas do sistema até ser ativado novamente.'}
+            </p>
+          </div>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="client-status-email">Usuário do sistema</Label>
+              <Input
+                id="client-status-email"
+                value={securityEmail}
+                onChange={(event) => setSecurityEmail(event.target.value)}
+                placeholder="email do administrador"
+                className="bg-background"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="client-status-password">Senha</Label>
+              <Input
+                id="client-status-password"
+                type="password"
+                value={securityPassword}
+                onChange={(event) => setSecurityPassword(event.target.value)}
+                placeholder="senha do administrador"
+                className="bg-background"
+              />
+            </div>
+            {securityError && <p className="text-xs font-semibold text-destructive">{securityError}</p>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setStatusDialogOpen(false)}>Cancelar</Button>
+            <Button
+              onClick={confirmStatusChange}
+              disabled={securityLoading || !securityEmail.trim() || !securityPassword}
+              className={pendingStatus === 'Ativo' ? 'bg-primary text-primary-foreground hover:bg-primary/90' : 'bg-orange-500 text-white hover:bg-orange-500/90'}
+            >
+              {securityLoading ? 'Validando...' : pendingStatus === 'Ativo' ? 'Ativar cliente' : 'Desativar cliente'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <LinkAccountsDialog
         clientId={id}

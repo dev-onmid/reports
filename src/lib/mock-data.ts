@@ -29,7 +29,7 @@ export const mockPermissions: Record<string, Permission> = {
   '3': { dashboard: true, clientes: false, relatorios: false, configuracoes: false, integracoes: false },
 };
 
-export type ClientStatus = 'Ativo' | 'Alerta' | 'Arquivado';
+export type ClientStatus = 'Ativo' | 'Alerta' | 'Arquivado' | 'Inativo';
 
 export type Client = {
   id: string;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import { CirclePlus, Trash2, UserPlus, ClipboardList, Filter } from 'lucide-react';
+import { CirclePlus, Trash2, UserPlus, ClipboardList, Filter, Power } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   type ActivityEntry,
@@ -17,24 +17,28 @@ const TYPE_LABELS: Record<ActivityType, string> = {
   payment_added: 'Pix adicionado',
   payment_deleted: 'Pix excluído',
   client_created: 'Cliente criado',
+  client_status_updated: 'Status do cliente',
 };
 
 const TYPE_ICON: Record<ActivityType, React.ElementType> = {
   payment_added: CirclePlus,
   payment_deleted: Trash2,
   client_created: UserPlus,
+  client_status_updated: Power,
 };
 
 const TYPE_STYLE: Record<ActivityType, string> = {
   payment_added: 'bg-primary/15 text-primary border-primary/30',
   payment_deleted: 'bg-red-500/15 text-red-300 border-red-400/30',
   client_created: 'bg-blue-500/15 text-blue-300 border-blue-400/30',
+  client_status_updated: 'bg-orange-500/15 text-orange-300 border-orange-400/30',
 };
 
 const TYPE_ICON_STYLE: Record<ActivityType, string> = {
   payment_added: 'text-primary',
   payment_deleted: 'text-red-300',
   client_created: 'text-blue-300',
+  client_status_updated: 'text-orange-300',
 };
 
 function formatTimestamp(iso: string): { date: string; time: string } {
@@ -49,6 +53,7 @@ const FILTERS: Array<{ key: FilterType; label: string }> = [
   { key: 'payment_added', label: 'Pix adicionados' },
   { key: 'payment_deleted', label: 'Pix excluídos' },
   { key: 'client_created', label: 'Clientes criados' },
+  { key: 'client_status_updated', label: 'Status de clientes' },
 ];
 
 export default function LogsPage() {

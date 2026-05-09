@@ -21,8 +21,8 @@ export function canManageClients(role = CURRENT_USER_ROLE): boolean {
 
 export function useClients() {
   const [clients, setClients] = useState<Client[]>([]);
-  const visibleClients = useMemo(() => clients.filter((c) => c.status !== 'Arquivado'), [clients]);
-  const archivedClients = useMemo(() => clients.filter((c) => c.status === 'Arquivado'), [clients]);
+  const visibleClients = useMemo(() => clients.filter((c) => c.status !== 'Arquivado' && c.status !== 'Inativo'), [clients]);
+  const archivedClients = useMemo(() => clients.filter((c) => c.status === 'Arquivado' || c.status === 'Inativo'), [clients]);
 
   useEffect(() => {
     async function load() {
@@ -78,6 +78,16 @@ export function useClients() {
         if (error) console.error('Erro ao restaurar cliente no Supabase:', error);
         window.dispatchEvent(new Event(CLIENTS_UPDATED_EVENT));
       })();
+    },
+    setClientStatus(id: string, status: ClientStatus) {
+      const target = clients.find((c) => c.id === id);
+      setClients((prev) => prev.map((c) => c.id === id ? { ...c, status } : c));
+      void (async () => {
+        const { error } = await supabase.from('clients').update({ status }).eq('id', id);
+        if (error) console.error('Erro ao atualizar status do cliente no Supabase:', error);
+        window.dispatchEvent(new Event(CLIENTS_UPDATED_EVENT));
+      })();
+      logActivity('client_status_updated', `Cliente ${target?.name ?? id} atualizado para ${status}`);
     },
     deleteClient(id: string) {
       setClients((prev) => prev.filter((c) => c.id !== id));

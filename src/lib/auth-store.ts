@@ -12,11 +12,7 @@ export type AuthSession = {
   role: string;
 };
 
-export async function authenticateUser(email: string, password: string): Promise<AuthSession | null> {
-  if (typeof window === 'undefined') return null;
-
-  const normalizedEmail = email.trim().toLowerCase();
-
+async function loadAuthUsers(): Promise<User[]> {
   let users: User[] = [];
   try {
     const { data } = await supabase.from('users').select('*');
@@ -28,6 +24,12 @@ export async function authenticateUser(email: string, password: string): Promise
   }
 
   if (users.length === 0) users = mockUsers;
+  return users;
+}
+
+export async function verifyUserCredentials(email: string, password: string): Promise<User | null> {
+  const normalizedEmail = email.trim().toLowerCase();
+  const users = await loadAuthUsers();
 
   const user = users.find((u) => (
     u.email.trim().toLowerCase() === normalizedEmail &&
@@ -35,6 +37,14 @@ export async function authenticateUser(email: string, password: string): Promise
     u.status === 'Ativo'
   ));
 
+  if (!user) return null;
+  return user;
+}
+
+export async function authenticateUser(email: string, password: string): Promise<AuthSession | null> {
+  if (typeof window === 'undefined') return null;
+
+  const user = await verifyUserCredentials(email, password);
   if (!user) return null;
 
   const session: AuthSession = { userId: user.id, name: user.name, email: user.email, role: user.role };

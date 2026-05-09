@@ -3,7 +3,7 @@
 import { assertSupabaseConfigured, supabase } from '@/lib/supabase';
 import { getAuthSession } from '@/lib/auth-store';
 
-export type ActivityType = 'payment_added' | 'payment_deleted' | 'client_created';
+export type ActivityType = 'payment_added' | 'payment_deleted' | 'client_created' | 'client_status_updated';
 
 export type ActivityEntry = {
   id: string;
