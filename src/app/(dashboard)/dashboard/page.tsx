@@ -54,6 +54,31 @@ const AUDIENCE_TITLES: Record<AudienceKey, string> = {
   device: 'Dispositivo',
 };
 
+function polarToCartesian(cx: number, cy: number, radius: number, angleInDegrees: number) {
+  const angleInRadians = (angleInDegrees - 90) * Math.PI / 180;
+  return {
+    x: cx + (radius * Math.cos(angleInRadians)),
+    y: cy + (radius * Math.sin(angleInRadians)),
+  };
+}
+
+function describeDonutSlice(cx: number, cy: number, outerRadius: number, innerRadius: number, startAngle: number, endAngle: number) {
+  const safeEndAngle = endAngle - startAngle >= 360 ? startAngle + 359.99 : endAngle;
+  const outerStart = polarToCartesian(cx, cy, outerRadius, safeEndAngle);
+  const outerEnd = polarToCartesian(cx, cy, outerRadius, startAngle);
+  const innerStart = polarToCartesian(cx, cy, innerRadius, startAngle);
+  const innerEnd = polarToCartesian(cx, cy, innerRadius, safeEndAngle);
+  const largeArcFlag = safeEndAngle - startAngle <= 180 ? '0' : '1';
+
+  return [
+    `M ${outerStart.x} ${outerStart.y}`,
+    `A ${outerRadius} ${outerRadius} 0 ${largeArcFlag} 0 ${outerEnd.x} ${outerEnd.y}`,
+    `L ${innerStart.x} ${innerStart.y}`,
+    `A ${innerRadius} ${innerRadius} 0 ${largeArcFlag} 1 ${innerEnd.x} ${innerEnd.y}`,
+    'Z',
+  ].join(' ');
+}
+
 const DEFAULT_STAGES: FunnelStage[] = [
   { id: 's5', name: '5º — Contatos (Leads)', conversion: 50 },
   { id: 's4', name: '4º — Qualificados', conversion: 100 },
@@ -724,41 +749,81 @@ function AudiencePieCard({
   data: AudienceSlice[];
   colors: string[];
 }) {
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const total = data.reduce((sum, item) => sum + item.value, 0);
-  let cursor = 0;
-  const gradient = total > 0
-    ? data.map((item, index) => {
-      const start = cursor;
-      const end = cursor + (item.value / total) * 100;
-      cursor = end;
-      const color = colors[index % colors.length];
-      return `${color} ${start}% ${end}%`;
-    }).join(', ')
-    : 'rgba(148, 163, 184, 0.25) 0% 100%';
+  let cursorAngle = 0;
+  const slices = data.map((item, index) => {
+    const angle = total > 0 ? (item.value / total) * 360 : 0;
+    const slice = {
+      ...item,
+      index,
+      color: colors[index % colors.length],
+      pct: total > 0 ? Math.round((item.value / total) * 100) : 0,
+      startAngle: cursorAngle,
+      endAngle: cursorAngle + angle,
+    };
+    cursorAngle += angle;
+    return slice;
+  });
 
   return (
-    <div className="min-h-[260px] rounded-xl border border-border bg-background/60 p-5">
-      <div className="flex items-center justify-between gap-5">
-        <div className="min-w-0 flex-1">
+    <div className="grid min-h-[340px] grid-cols-[minmax(0,1fr)_240px] gap-5 rounded-xl border border-border bg-background/60 p-5">
+      <div className="flex min-w-0 flex-col">
+        <div>
           <h4 className="text-base font-bold uppercase tracking-wide">{title}</h4>
           <p className="mt-0.5 text-[11px] text-muted-foreground">{total.toLocaleString('pt-BR')} pessoas/imp.</p>
         </div>
-        <div className="relative h-36 w-36 shrink-0 rounded-full" style={{ background: `conic-gradient(${gradient})` }}>
-          <div className="absolute inset-8 rounded-full bg-card" />
+        <div className="mt-5 flex-1 space-y-2">
+          {slices.length > 0 ? slices.slice(0, 7).map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              onMouseEnter={() => setActiveIndex(item.index)}
+              onMouseLeave={() => setActiveIndex(null)}
+              className={cn(
+                'flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors',
+                activeIndex === item.index ? 'bg-muted/60 text-foreground' : 'text-muted-foreground hover:bg-muted/40'
+              )}
+            >
+              <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />
+              <span className="min-w-0 flex-1 truncate">{item.label}</span>
+              <span className="font-bold text-foreground">{item.pct}%</span>
+            </button>
+          )) : (
+            <p className="text-xs text-muted-foreground">Sem dados no período.</p>
+          )}
         </div>
       </div>
-      <div className="mt-4 space-y-2">
-        {data.length > 0 ? data.slice(0, 5).map((item, index) => {
-          const pct = total > 0 ? Math.round((item.value / total) * 100) : 0;
-          return (
-            <div key={item.label} className="flex items-center gap-2 text-xs">
-              <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: colors[index % colors.length] }} />
-              <span className="min-w-0 flex-1 truncate text-muted-foreground">{item.label}</span>
-              <span className="font-bold">{pct}%</span>
-            </div>
-          );
-        }) : (
-          <p className="text-xs text-muted-foreground">Sem dados no período.</p>
+      <div className="flex h-full items-center justify-center">
+        {slices.length > 0 ? (
+          <svg viewBox="0 0 220 220" className="h-56 w-56 overflow-visible" role="img" aria-label={`Gráfico de ${title}`}>
+            {slices.map((slice) => (
+              <path
+                key={slice.label}
+                d={describeDonutSlice(110, 110, 100, 48, slice.startAngle, slice.endAngle)}
+                fill={slice.color}
+                stroke="rgba(0,0,0,0.35)"
+                strokeWidth="1"
+                className="origin-center transition-all duration-200"
+                style={{
+                  opacity: activeIndex === null || activeIndex === slice.index ? 1 : 0.35,
+                  transform: activeIndex === slice.index ? 'scale(1.07)' : 'scale(1)',
+                  filter: activeIndex === slice.index ? 'drop-shadow(0 12px 18px rgba(0,0,0,0.45))' : 'none',
+                }}
+                onMouseEnter={() => setActiveIndex(slice.index)}
+                onMouseLeave={() => setActiveIndex(null)}
+              >
+                <title>{`${slice.label}: ${slice.pct}%`}</title>
+              </path>
+            ))}
+            <circle cx="110" cy="110" r="40" className="fill-card" />
+            <text x="110" y="106" textAnchor="middle" className="fill-muted-foreground text-[10px] font-bold uppercase tracking-widest">Total</text>
+            <text x="110" y="124" textAnchor="middle" className="fill-foreground text-[18px] font-bold">{total.toLocaleString('pt-BR')}</text>
+          </svg>
+        ) : (
+          <div className="relative h-56 w-56 rounded-full bg-muted/30">
+            <div className="absolute inset-12 rounded-full bg-card" />
+          </div>
         )}
       </div>
     </div>
@@ -780,7 +845,7 @@ function AudiencePlatformBlock({
 }) {
   const keys: AudienceKey[] = ['age', 'gender', 'platform', 'device'];
   return (
-    <div className="relative overflow-hidden rounded-xl border border-border bg-card p-5">
+    <div className="relative flex h-full flex-col overflow-hidden rounded-xl border border-border bg-card p-5">
       <div className="absolute inset-x-0 top-0 h-1" style={{ backgroundColor: color }} />
       <div className="flex items-start gap-3">
         <span className="mt-0.5">{title === 'Meta Ads' ? <MetaMark /> : <GoogleMark />}</span>
@@ -789,7 +854,7 @@ function AudiencePlatformBlock({
           <p className="mt-1 text-xs text-muted-foreground">{description}</p>
         </div>
       </div>
-      <div className="mt-4 grid gap-3">
+      <div className="mt-4 grid flex-1 grid-rows-4 gap-3">
         {keys.map((key) => (
           <AudiencePieCard key={key} title={AUDIENCE_TITLES[key]} data={data[key]} colors={colors} />
         ))}
@@ -1248,7 +1313,7 @@ export default function GeneralDashboard() {
             ))}
           </div>
         ) : (
-          <div className="grid gap-4 xl:grid-cols-2">
+          <div className="grid items-stretch gap-4 xl:grid-cols-2">
             <AudiencePlatformBlock
               title="Meta Ads"
               description="Alcance vindo das contas Meta vinculadas."
