@@ -42,6 +42,7 @@ type AdAccountBalance = {
   error: string | null;
   platform: AdsBalancePlatform;
   paymentUrl: string;
+  connectionName?: string;
 };
 
 type ClientAccountLink = {
@@ -105,25 +106,38 @@ function CriticalBalanceAlerts({
   const critical = balances.filter(b => b.balance !== null && b.balance < LOW_BALANCE_THRESHOLD);
   const metaCritical = critical.filter((account) => account.platform === 'meta');
   const googleCritical = critical.filter((account) => account.platform === 'google');
+  const googleAccounts = balances.filter((account) => account.platform === 'google');
+  const googleColumnAccounts = googleCritical.length > 0 ? googleCritical : googleAccounts;
   const visibleMetaCritical = expanded ? metaCritical : metaCritical.slice(0, 2);
-  const visibleGoogleCritical = expanded ? googleCritical : googleCritical.slice(0, 2);
+  const visibleGoogleCritical = expanded ? googleColumnAccounts : googleColumnAccounts.slice(0, 2);
 
-  if (!loading && critical.length === 0) return null;
+  if (!loading && critical.length === 0 && googleAccounts.length === 0) return null;
 
   function renderAccountCard(account: AdAccountBalance) {
     const isMeta = account.platform === 'meta';
+    const hasKnownBalance = account.balance !== null;
+    const isCritical = hasKnownBalance && (account.balance ?? 0) < LOW_BALANCE_THRESHOLD;
 
     return (
       <div
         key={account.id}
-        className="rounded-lg bg-red-500/10 border border-red-500/30 p-3"
+        className={cn(
+          'rounded-lg border p-3',
+          isCritical ? 'border-red-500/30 bg-red-500/10' : 'border-border bg-card/60'
+        )}
       >
         <div className="flex items-start justify-between gap-2">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-red-500/25 bg-background">
+          <div className={cn(
+            'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border bg-background',
+            isCritical ? 'border-red-500/25' : 'border-border'
+          )}>
             {isMeta ? <MetaAdsMark className="h-5 w-5" /> : <GoogleAdsMark className="h-5 w-5" />}
           </div>
-          <p className="text-lg font-bold text-red-400 shrink-0 tabular-nums leading-none">
-            {formatCurrencyBRL(account.balance ?? 0)}
+          <p className={cn(
+            'text-lg font-bold shrink-0 tabular-nums leading-none',
+            isCritical ? 'text-red-400' : 'text-primary'
+          )}>
+            {hasKnownBalance ? formatCurrencyBRL(account.balance ?? 0) : 'Cobrança'}
           </p>
         </div>
         <div className="mt-2 min-w-0">
@@ -136,7 +150,10 @@ function CriticalBalanceAlerts({
           href={account.paymentUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="mt-3 flex h-8 items-center justify-center gap-1 rounded-md bg-red-500 px-2 text-[10px] font-bold text-white transition-colors hover:bg-red-600"
+          className={cn(
+            'mt-3 flex h-8 items-center justify-center gap-1 rounded-md px-2 text-[10px] font-bold text-white transition-colors',
+            isCritical ? 'bg-red-500 hover:bg-red-600' : 'bg-primary text-primary-foreground hover:bg-primary/90'
+          )}
           title={`Adicionar saldo no ${isMeta ? 'Meta Ads Manager' : 'Google Ads'}`}
         >
           <PlusCircle className="w-3 h-3" />
@@ -149,6 +166,7 @@ function CriticalBalanceAlerts({
 
   function renderPlatformColumn(platform: AdsBalancePlatform, accounts: AdAccountBalance[], visibleAccounts: AdAccountBalance[]) {
     const isMeta = platform === 'meta';
+    const criticalAccounts = accounts.filter((account) => account.balance !== null && account.balance < LOW_BALANCE_THRESHOLD);
 
     return (
       <div className="rounded-xl border border-red-500/25 bg-background/40 p-3">
@@ -160,7 +178,9 @@ function CriticalBalanceAlerts({
             <div>
               <p className="text-xs font-bold uppercase tracking-wider">{isMeta ? 'Meta Ads' : 'Google Ads'}</p>
               <p className="text-[10px] text-muted-foreground">
-                {accounts.length} conta{accounts.length === 1 ? '' : 's'} crítica{accounts.length === 1 ? '' : 's'}
+                {criticalAccounts.length > 0
+                  ? `${criticalAccounts.length} conta${criticalAccounts.length === 1 ? '' : 's'} crítica${criticalAccounts.length === 1 ? '' : 's'}`
+                  : `${accounts.length} conta${accounts.length === 1 ? '' : 's'} conectada${accounts.length === 1 ? '' : 's'}`}
               </p>
             </div>
           </div>
@@ -226,7 +246,7 @@ function CriticalBalanceAlerts({
 
       <div className="grid gap-3 lg:grid-cols-2">
         {renderPlatformColumn('meta', metaCritical, visibleMetaCritical)}
-        {renderPlatformColumn('google', googleCritical, visibleGoogleCritical)}
+        {renderPlatformColumn('google', googleColumnAccounts, visibleGoogleCritical)}
       </div>
     </div>
   );
@@ -629,7 +649,7 @@ export default function PagamentosPage() {
       const googleBalances: AdAccountBalance[] = googleRaw.map((account) => ({
         ...account,
         platform: 'google',
-        paymentUrl: `https://ads.google.com/aw/billing/summary?ocid=${account.id.replace(/\D/g, '')}`,
+        paymentUrl: `https://ads.google.com/aw/billing/summary?ocid=${account.id.replace(/\D/g, '')}&__c=${account.id.replace(/\D/g, '')}`,
       }));
 
       setClientLinks(links);
