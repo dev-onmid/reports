@@ -25,7 +25,7 @@ type AudienceKey = keyof AudienceBreakdowns;
 type AdsPlatform = 'meta' | 'google';
 type ClientAccountLink = {
   clientId: string;
-  platform: AdsPlatform;
+  platform: string;
   accountId: string;
 };
 type AdAccountBalance = {
@@ -1076,26 +1076,39 @@ export default function GeneralDashboard() {
 
   // Fetch metrics for selected clients
   useEffect(() => {
-    if (selectedIds.size === 0) return;
+    let cancelled = false;
     setMetricsLoading(true);
+    setMetricsByClient({});
+    if (selectedIds.size === 0) {
+      setMetricsLoading(false);
+      return () => { cancelled = true; };
+    }
     const ids = [...selectedIds];
     Promise.allSettled(
       ids.map(async (id) => {
         const res = await fetch(`/api/clients/${id}/metrics?period=${period}`);
+        if (cancelled) return null;
         const data: ApiMetrics = res.ok ? await res.json() : { meta: null, google: null };
         return [id, data] as const;
       })
     ).then(results => {
+      if (cancelled) return;
       const map: Record<string, ApiMetrics> = {};
-      for (const r of results) if (r.status === 'fulfilled') map[r.value[0]] = r.value[1];
+      for (const r of results) if (r.status === 'fulfilled' && r.value !== null) map[r.value[0]] = r.value[1];
       setMetricsByClient(map);
-    }).finally(() => setMetricsLoading(false));
+    }).finally(() => { if (!cancelled) setMetricsLoading(false); });
+    return () => { cancelled = true; };
   }, [selectedIds, period]);
 
   // Fetch active campaigns with spend in selected period
   useEffect(() => {
-    if (selectedIds.size === 0) return;
+    let cancelled = false;
     setCampaignsLoading(true);
+    setCampaigns([]);
+    if (selectedIds.size === 0) {
+      setCampaignsLoading(false);
+      return () => { cancelled = true; };
+    }
     const params = new URLSearchParams({
       period,
       sortBy: campaignSortBy,
@@ -1104,15 +1117,21 @@ export default function GeneralDashboard() {
     });
     fetch(`/api/campaigns?${params.toString()}`)
       .then(res => res.ok ? res.json() as Promise<CampaignPerformance[]> : [])
-      .then(setCampaigns)
-      .catch(() => setCampaigns([]))
-      .finally(() => setCampaignsLoading(false));
+      .then(data => { if (!cancelled) setCampaigns(data); })
+      .catch(() => { if (!cancelled) setCampaigns([]); })
+      .finally(() => { if (!cancelled) setCampaignsLoading(false); });
+    return () => { cancelled = true; };
   }, [period, campaignSortBy, selectedIds]);
 
   // Fetch top creatives
   useEffect(() => {
-    if (selectedIds.size === 0) return;
+    let cancelled = false;
     setCreativesLoading(true);
+    setCreatives([]);
+    if (selectedIds.size === 0) {
+      setCreativesLoading(false);
+      return () => { cancelled = true; };
+    }
     const params = new URLSearchParams({
       period,
       sortBy,
@@ -1121,24 +1140,31 @@ export default function GeneralDashboard() {
     });
     fetch(`/api/meta/top-creatives?${params.toString()}`)
       .then(res => res.ok ? res.json() as Promise<TopCreative[]> : [])
-      .then(setCreatives)
-      .catch(() => setCreatives([]))
-      .finally(() => setCreativesLoading(false));
+      .then(data => { if (!cancelled) setCreatives(data); })
+      .catch(() => { if (!cancelled) setCreatives([]); })
+      .finally(() => { if (!cancelled) setCreativesLoading(false); });
+    return () => { cancelled = true; };
   }, [period, sortBy, selectedIds]);
 
   // Fetch audience breakdowns
   useEffect(() => {
-    if (selectedIds.size === 0) return;
+    let cancelled = false;
     setAudienceLoading(true);
+    setAudience(EMPTY_AUDIENCE);
+    if (selectedIds.size === 0) {
+      setAudienceLoading(false);
+      return () => { cancelled = true; };
+    }
     const params = new URLSearchParams({
       period,
       clientIds: [...selectedIds].join(','),
     });
     fetch(`/api/audience?${params.toString()}`)
       .then(res => res.ok ? res.json() as Promise<AudienceResponse> : EMPTY_AUDIENCE)
-      .then(setAudience)
-      .catch(() => setAudience(EMPTY_AUDIENCE))
-      .finally(() => setAudienceLoading(false));
+      .then(data => { if (!cancelled) setAudience(data); })
+      .catch(() => { if (!cancelled) setAudience(EMPTY_AUDIENCE); })
+      .finally(() => { if (!cancelled) setAudienceLoading(false); });
+    return () => { cancelled = true; };
   }, [period, selectedIds]);
 
   // Fetch balances and account links used by the general balance cards
@@ -1157,7 +1183,7 @@ export default function GeneralDashboard() {
           ...metaRaw.map((account) => ({ ...account, platform: 'meta' as const })),
           ...googleRaw.map((account) => ({ ...account, platform: 'google' as const })),
         ]);
-        setClientLinks(linksRaw.filter((link) => link.platform === 'meta' || link.platform === 'google'));
+        setClientLinks(linksRaw.filter((link) => link.platform === 'meta_ads' || link.platform === 'google_ads'));
       })
       .catch(() => {
         setBalances([]);
@@ -1223,7 +1249,10 @@ export default function GeneralDashboard() {
   const selectedLinkedAccountIds = new Set(
     clientLinks
       .filter((link) => selectedIds.has(link.clientId))
-      .map((link) => `${link.platform}:${link.accountId}`)
+      .map((link) => {
+        const p = link.platform === 'meta_ads' ? 'meta' : link.platform === 'google_ads' ? 'google' : link.platform;
+        return `${p}:${link.accountId}`;
+      })
   );
   const metaBalance = balances
     .filter((account) => account.platform === 'meta' && selectedLinkedAccountIds.has(`meta:${account.id}`) && account.balance !== null)
