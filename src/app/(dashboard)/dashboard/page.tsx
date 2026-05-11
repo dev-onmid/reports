@@ -1294,7 +1294,7 @@ export default function GeneralDashboard() {
   return (
     <div className="space-y-6 pb-10">
       {/* Header + Filters */}
-      <div className="flex flex-wrap items-start justify-between gap-4">
+      <div className="sticky top-0 z-20 -mx-6 px-6 py-4 -mt-6 bg-background/90 backdrop-blur-sm border-b border-border flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="font-heading text-4xl uppercase tracking-wider">Dashboard Geral</h1>
           <p className="mt-1 text-muted-foreground text-sm">Performance consolidada das contas vinculadas.</p>
