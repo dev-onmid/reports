@@ -102,16 +102,14 @@ function CriticalBalanceAlerts({
   lastUpdated: Date | null;
   onRefresh: () => void;
 }) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const critical = balances.filter(b => b.balance !== null && b.balance < LOW_BALANCE_THRESHOLD);
   const metaCritical = critical.filter((account) => account.platform === 'meta');
   const googleCritical = critical.filter((account) => account.platform === 'google');
-  const googleAccounts = balances.filter((account) => account.platform === 'google');
-  const googleColumnAccounts = googleCritical.length > 0 ? googleCritical : googleAccounts;
   const visibleMetaCritical = expanded ? metaCritical : metaCritical.slice(0, 2);
-  const visibleGoogleCritical = expanded ? googleColumnAccounts : googleColumnAccounts.slice(0, 2);
+  const visibleGoogleCritical = expanded ? googleCritical : googleCritical.slice(0, 2);
 
-  if (!loading && critical.length === 0 && googleAccounts.length === 0) return null;
+  if (!loading && critical.length === 0) return null;
 
   function renderAccountCard(account: AdAccountBalance) {
     const isMeta = account.platform === 'meta';
@@ -244,9 +242,9 @@ function CriticalBalanceAlerts({
         </div>
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-2">
-        {renderPlatformColumn('meta', metaCritical, visibleMetaCritical)}
-        {renderPlatformColumn('google', googleColumnAccounts, visibleGoogleCritical)}
+      <div className={cn('grid gap-3', metaCritical.length > 0 && googleCritical.length > 0 ? 'lg:grid-cols-2' : 'lg:grid-cols-1 max-w-xl')}>
+        {metaCritical.length > 0 && renderPlatformColumn('meta', metaCritical, visibleMetaCritical)}
+        {googleCritical.length > 0 && renderPlatformColumn('google', googleCritical, visibleGoogleCritical)}
       </div>
     </div>
   );
@@ -652,8 +650,15 @@ export default function PagamentosPage() {
         paymentUrl: `https://ads.google.com/aw/billing/summary?ocid=${account.id.replace(/\D/g, '')}&__c=${account.id.replace(/\D/g, '')}`,
       }));
 
+      const metaLinked = new Set(links.filter(l => l.platform === 'meta_ads').map(l => l.accountId));
+      const googleLinked = new Set(links.filter(l => l.platform === 'google_ads').map(l => l.accountId));
+      const linkedBalances = [
+        ...metaBalances.filter(b => metaLinked.has(b.id)),
+        ...googleBalances.filter(b => googleLinked.has(b.id)),
+      ];
+
       setClientLinks(links);
-      setBalances([...metaBalances, ...googleBalances]);
+      setBalances(linkedBalances);
       setBalancesLastUpdated(new Date());
     } finally {
       setBalancesLoading(false);
