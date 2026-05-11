@@ -1301,46 +1301,57 @@ export default function GeneralDashboard() {
   return (
     <div className="space-y-6 pb-10">
       {/* Header + Filters */}
-      <div className="sticky top-0 z-20 -mx-6 px-6 py-4 -mt-6 bg-background/90 backdrop-blur-sm border-b border-border flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="font-heading text-4xl uppercase tracking-wider">Dashboard Geral</h1>
-          <p className="mt-1 text-muted-foreground text-sm">Performance consolidada das contas vinculadas.</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <ClientSelector clients={clients} selected={selectedIds} onChange={setSelectedIds} />
-          <div className="flex rounded-lg border border-border overflow-hidden">
-            {PERIODS.map(p => (
-              <button
-                key={p.value}
-                onClick={() => setPeriod(p.value)}
-                className={cn(
-                  'px-3 py-2 text-xs font-semibold transition-colors',
-                  period === p.value ? 'bg-primary text-black' : 'bg-card text-muted-foreground hover:bg-muted/50'
-                )}
-              >
-                {p.label}
-              </button>
-            ))}
+      <div className="sticky top-0 z-20 -mx-6 px-6 py-3 -mt-6 bg-background/90 backdrop-blur-sm border-b border-border">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 className="font-heading text-4xl uppercase tracking-wider">Dashboard Geral</h1>
+            <p className="mt-0.5 text-muted-foreground text-sm">Performance consolidada das contas vinculadas.</p>
           </div>
-          {period === 'custom' && (
-            <div className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <ClientSelector clients={clients} selected={selectedIds} onChange={setSelectedIds} />
+            <div className="flex overflow-hidden rounded-lg border border-border">
+              {PERIODS.map(p => (
+                <button
+                  key={p.value}
+                  onClick={() => setPeriod(p.value)}
+                  className={cn(
+                    'px-2.5 py-1.5 text-[11px] font-semibold whitespace-nowrap transition-colors',
+                    period === p.value ? 'bg-primary text-black' : 'bg-card text-muted-foreground hover:bg-muted/50'
+                  )}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+            {metricsLoading && <RefreshCw className="w-4 h-4 animate-spin text-muted-foreground" />}
+          </div>
+        </div>
+        {period === 'custom' && (
+          <div className="mt-2 pb-1 flex items-center gap-3">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Período</span>
+            <div className="flex items-center gap-2">
               <input
                 type="date"
                 value={customDateFrom}
                 onChange={e => setCustomDateFrom(e.target.value)}
-                className="bg-transparent text-xs font-semibold text-foreground focus:outline-none"
+                className="h-8 rounded-lg border border-border bg-card px-2.5 text-xs font-semibold text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
               />
-              <span className="text-[10px] text-muted-foreground">→</span>
+              <span className="text-xs text-muted-foreground">→</span>
               <input
                 type="date"
                 value={customDateTo}
                 onChange={e => setCustomDateTo(e.target.value)}
-                className="bg-transparent text-xs font-semibold text-foreground focus:outline-none"
+                className="h-8 rounded-lg border border-border bg-card px-2.5 text-xs font-semibold text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
               />
             </div>
-          )}
-          {metricsLoading && <RefreshCw className="w-4 h-4 animate-spin text-muted-foreground" />}
-        </div>
+            {customDateFrom && customDateTo && customReady && (
+              <span className="text-[11px] font-semibold text-primary">Aplicado</span>
+            )}
+            {customDateFrom && customDateTo && !customReady && (
+              <span className="text-[11px] text-muted-foreground">Preencha as duas datas</span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Alerts */}
