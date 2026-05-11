@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
-import { Pool } from 'pg';
 import { google } from 'googleapis';
+import { makeServerPool } from '@/lib/server-db';
 
 export type AudienceSlice = { label: string; value: number };
 export type AudienceBreakdowns = {
@@ -68,19 +68,6 @@ const GOOGLE_PLATFORM_LABELS: Record<string, string> = {
   UNKNOWN: 'Desconhecido',
 };
 
-function makePool() {
-  const connectionString = process.env.POSTGRES_URL_NON_POOLING ?? process.env.POSTGRES_URL ?? process.env.POSTGRES_PRISMA_URL;
-  if (connectionString) return new Pool({ connectionString, ssl: { rejectUnauthorized: false }, max: 1 });
-  return new Pool({
-    host: process.env.POSTGRES_HOST ?? 'aws-1-us-east-2.pooler.supabase.com',
-    port: Number(process.env.POSTGRES_PORT ?? 6543),
-    database: process.env.POSTGRES_DATABASE ?? 'postgres',
-    user: process.env.POSTGRES_USER ?? 'postgres.iremmorsgwiqrorzoihx',
-    password: process.env.SUPABASE_DB_PASSWORD ?? process.env.POSTGRES_PASSWORD,
-    ssl: { rejectUnauthorized: false },
-    max: 1,
-  });
-}
 
 function mapToMetaPeriod(p: string): string {
   const map: Record<string, string> = {
@@ -123,7 +110,7 @@ function mapToSlices(map: Map<string, number>): AudienceSlice[] {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function safeRows(pool: Pool, query: string, params: unknown[] = []): Promise<any[]> {
+async function safeRows(pool: ReturnType<typeof makeServerPool>, query: string, params: unknown[] = []): Promise<any[]> {
   try {
     const { rows } = await pool.query(query, params);
     return rows;
@@ -252,7 +239,7 @@ export async function GET(request: NextRequest) {
     .filter(Boolean);
   const shouldFilterByClient = requestedClientIds.length > 0;
 
-  const pool = makePool();
+  const pool = makeServerPool();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let metaConns: any[], googleConns: any[], links: any[];
   try {

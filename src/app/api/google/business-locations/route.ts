@@ -1,18 +1,7 @@
 import type { NextRequest } from 'next/server';
-import { Pool } from 'pg';
 import { google } from 'googleapis';
+import { makeServerPool } from '@/lib/server-db';
 
-function makePool() {
-  return new Pool({
-    host: 'aws-1-us-east-2.pooler.supabase.com',
-    port: 6543,
-    database: 'postgres',
-    user: 'postgres.iremmorsgwiqrorzoihx',
-    password: process.env.SUPABASE_DB_PASSWORD,
-    ssl: { rejectUnauthorized: false },
-    max: 1,
-  });
-}
 
 async function getFreshAccessToken(conn: {
   access_token: string;
@@ -124,7 +113,7 @@ export async function GET(request: NextRequest) {
   const noMetrics = request.nextUrl.searchParams.get('noMetrics') === 'true';
   if (!connectionId) return Response.json({ error: 'Missing connectionId' }, { status: 400 });
 
-  const pool = makePool();
+  const pool = makeServerPool();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let conn: any;
   try {

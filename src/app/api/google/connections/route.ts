@@ -1,17 +1,5 @@
 import type { NextRequest } from 'next/server';
-import { Pool } from 'pg';
-
-function makePool() {
-  return new Pool({
-    host: 'aws-1-us-east-2.pooler.supabase.com',
-    port: 6543,
-    database: 'postgres',
-    user: 'postgres.iremmorsgwiqrorzoihx',
-    password: process.env.SUPABASE_DB_PASSWORD,
-    ssl: { rejectUnauthorized: false },
-    max: 1,
-  });
-}
+import { makeServerPool } from '@/lib/server-db';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function rowToJson(r: any) {
@@ -31,7 +19,7 @@ function rowToJson(r: any) {
 }
 
 export async function GET() {
-  const pool = makePool();
+  const pool = makeServerPool();
   try {
     const { rows } = await pool.query(
       'SELECT * FROM public.google_connections ORDER BY connected_at DESC'
@@ -45,7 +33,7 @@ export async function GET() {
 export async function DELETE(request: NextRequest) {
   const id = request.nextUrl.searchParams.get('id');
   if (!id) return new Response('Missing id', { status: 400 });
-  const pool = makePool();
+  const pool = makeServerPool();
   try {
     await pool.query('DELETE FROM public.google_connections WHERE id = $1', [id]);
     return new Response(null, { status: 204 });

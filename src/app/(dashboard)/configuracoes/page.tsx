@@ -23,7 +23,6 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { mockUsers as initialUsers, mockPermissions as initialPermissions } from '@/lib/mock-data';
 import type { User, Permission } from '@/lib/mock-data';
 import { cn } from '@/lib/utils';
-import { assertSupabaseConfigured, supabase } from '@/lib/supabase';
 
 const MODULES: { key: keyof Permission; label: string }[] = [
   { key: 'dashboard', label: 'Dashboard' },
@@ -39,16 +38,20 @@ const defaultPermission: Permission = { dashboard: true, clientes: false, relato
 const emptyForm = { name: '', email: '', password: '', role: 'Usuário', status: 'Ativo' };
 
 async function persistUser(user: User): Promise<boolean> {
-  const { error } = await supabase.from('users').upsert({ id: user.id, name: user.name, email: user.email, password: user.password, role: user.role, status: user.status });
-  if (error) { console.error('Erro ao salvar usuário no Supabase:', error); return false; }
-  return true;
+  const res = await fetch('/api/users', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(user),
+  });
+  return res.ok;
 }
 
 function persistPermission(userId: string, permission: Permission) {
-  void (async () => {
-    const { error } = await supabase.from('user_permissions').upsert({ user_id: userId, ...permission });
-    if (error) console.error('Erro ao salvar permissão no Supabase:', error);
-  })();
+  void fetch('/api/permissions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId, ...permission }),
+  }).catch((e) => console.error('Erro ao salvar permissão:', e));
 }
 
 export default function ConfiguracoesPage() {
@@ -60,22 +63,19 @@ export default function ConfiguracoesPage() {
 
   // Load from database on mount
   useEffect(() => {
-    (async () => {
-      try {
-        assertSupabaseConfigured();
-        const { data: usersData, error: usersError } = await supabase.from('users').select('*');
-        if (!usersError && usersData && usersData.length > 0) setUsers(usersData as User[]);
-      } catch (error) { console.error('Erro ao carregar usuários do Supabase:', error); }
-
-      try {
-        assertSupabaseConfigured();
-        const { data: permsData } = await supabase.from('user_permissions').select('*');
-        if (permsData) {
-          const map: Record<string, Permission> = { ...initialPermissions };
-          permsData.forEach((r) => { map[r.user_id] = { dashboard: r.dashboard, clientes: r.clientes, relatorios: r.relatorios, configuracoes: r.configuracoes, integracoes: r.integracoes }; });
-          setPermissions(map);
-        }
-      } catch (error) { console.error('Erro ao carregar permissões do Supabase:', error); }
+    void (async () => {
+      const [usersRes, permsRes] = await Promise.allSettled([
+        fetch('/api/users'),
+        fetch('/api/permissions'),
+      ]);
+      if (usersRes.status === 'fulfilled' && usersRes.value.ok) {
+        const data: User[] = await usersRes.value.json();
+        if (data.length > 0) setUsers(data);
+      }
+      if (permsRes.status === 'fulfilled' && permsRes.value.ok) {
+        const data: Record<string, Permission> = await permsRes.value.json();
+        if (Object.keys(data).length > 0) setPermissions({ ...initialPermissions, ...data });
+      }
     })();
   }, []);
 
@@ -129,13 +129,9 @@ export default function ConfiguracoesPage() {
     const snapshot = users;
     setUsers((prev) => prev.filter((u) => u.id !== id));
     setPermissions((prev) => { const next = { ...prev }; delete next[id]; return next; });
-    void (async () => {
-      const { error } = await supabase.from('users').delete().eq('id', id);
-      if (error) {
-        console.error('Erro ao remover usuário no Supabase:', error);
-        setUsers(snapshot);
-      }
-    })();
+    void fetch(`/api/users?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
+      .then((res) => { if (!res.ok) setUsers(snapshot); })
+      .catch(() => setUsers(snapshot));
   }
 
   function togglePermission(userId: string, module: keyof Permission) {

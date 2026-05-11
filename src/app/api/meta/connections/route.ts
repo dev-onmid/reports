@@ -1,17 +1,5 @@
 import type { NextRequest } from 'next/server';
-import { Pool } from 'pg';
-
-function makePool() {
-  return new Pool({
-    host: 'aws-1-us-east-2.pooler.supabase.com',
-    port: 6543,
-    database: 'postgres',
-    user: 'postgres.iremmorsgwiqrorzoihx',
-    password: process.env.SUPABASE_DB_PASSWORD,
-    ssl: { rejectUnauthorized: false },
-    max: 1,
-  });
-}
+import { makeServerPool } from '@/lib/server-db';
 
 function normalizeMetaAccountId(accountId: string) {
   return accountId.replace(/^act_/, '');
@@ -42,7 +30,7 @@ async function syncClientLinksToConnection(connectionId: string, accessToken: st
   const accounts = data.data ?? [];
   if (accounts.length === 0) return;
 
-  const pool = makePool();
+  const pool = makeServerPool();
   try {
     await Promise.allSettled(
       accounts.map((account) => pool.query(
@@ -64,7 +52,7 @@ async function syncClientLinksToConnection(connectionId: string, accessToken: st
 }
 
 export async function GET() {
-  const pool = makePool();
+  const pool = makeServerPool();
   try {
     const { rows } = await pool.query(
       'SELECT * FROM public.meta_connections ORDER BY connected_at DESC'
@@ -80,7 +68,7 @@ export async function POST(request: NextRequest) {
     label: string; status: string; appId: string;
     accessToken: string; userId: string; userName: string; userPicture?: string;
   };
-  const pool = makePool();
+  const pool = makeServerPool();
   try {
     const existing = body.userId
       ? await pool.query('SELECT id FROM public.meta_connections WHERE user_id = $1 ORDER BY connected_at DESC LIMIT 1', [body.userId])
@@ -117,7 +105,7 @@ export async function POST(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   const id = request.nextUrl.searchParams.get('id');
   if (!id) return new Response('Missing id', { status: 400 });
-  const pool = makePool();
+  const pool = makeServerPool();
   try {
     await pool.query('DELETE FROM public.meta_connections WHERE id = $1', [id]);
     return new Response(null, { status: 204 });

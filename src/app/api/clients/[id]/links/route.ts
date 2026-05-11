@@ -1,21 +1,9 @@
 import type { NextRequest } from 'next/server';
-import { Pool } from 'pg';
-
-function makePool() {
-  return new Pool({
-    host: 'aws-1-us-east-2.pooler.supabase.com',
-    port: 6543,
-    database: 'postgres',
-    user: 'postgres.iremmorsgwiqrorzoihx',
-    password: process.env.SUPABASE_DB_PASSWORD,
-    ssl: { rejectUnauthorized: false },
-    max: 1,
-  });
-}
+import { makeServerPool } from '@/lib/server-db';
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id: clientId } = await params;
-  const pool = makePool();
+  const pool = makeServerPool();
   try {
     const { rows } = await pool.query(
       'SELECT * FROM public.client_account_links WHERE client_id = $1 ORDER BY created_at ASC',
@@ -42,7 +30,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { platform, connectionId, accountId, accountName, currency } = body;
   if (!platform || !accountId) return Response.json({ error: 'Missing required fields' }, { status: 400 });
 
-  const pool = makePool();
+  const pool = makeServerPool();
   try {
     const { rows } = await pool.query(
       `INSERT INTO public.client_account_links (client_id, platform, connection_id, account_id, account_name, currency)
@@ -63,7 +51,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   const linkId = req.nextUrl.searchParams.get('linkId');
   if (!linkId) return Response.json({ error: 'Missing linkId' }, { status: 400 });
 
-  const pool = makePool();
+  const pool = makeServerPool();
   try {
     await pool.query(
       'DELETE FROM public.client_account_links WHERE id = $1 AND client_id = $2',

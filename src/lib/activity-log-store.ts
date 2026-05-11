@@ -1,6 +1,5 @@
 "use client";
 
-import { assertSupabaseConfigured, supabase } from '@/lib/supabase';
 import { getAuthSession } from '@/lib/auth-store';
 
 export type ActivityType = 'payment_added' | 'payment_deleted' | 'client_created' | 'client_status_updated';
@@ -19,42 +18,28 @@ export function logActivity(type: ActivityType, description: string): void {
   const session = typeof window !== 'undefined' ? getAuthSession() : null;
   const actor = session?.name ?? CURRENT_USER;
 
-  void (async () => {
-    try {
-      assertSupabaseConfigured();
-      const { error } = await supabase.from('activity_logs').insert({
-        id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        type,
-        actor,
-        description,
-        created_at: new Date().toISOString(),
-      });
-      if (error) console.error('Erro ao salvar log no Supabase:', error);
-    } catch (error) {
-      console.error('Erro ao salvar log no Supabase:', error);
-    }
-  })();
+  void fetch('/api/activity-logs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      type,
+      actor,
+      description,
+    }),
+  }).catch((e) => console.error('Erro ao salvar log:', e));
 }
 
 export async function readActivityLog(): Promise<ActivityEntry[]> {
-  assertSupabaseConfigured();
-  const { data } = await supabase
-    .from('activity_logs')
-    .select('*')
-    .order('created_at', { ascending: false })
-    .limit(200);
-
-  if (!data) return [];
-  return data.map((r) => ({
-    id: r.id,
-    type: r.type as ActivityType,
-    actor: r.actor,
-    description: r.description,
-    timestamp: r.created_at,
-  }));
+  try {
+    const res = await fetch('/api/activity-logs');
+    if (!res.ok) return [];
+    return res.json() as Promise<ActivityEntry[]>;
+  } catch {
+    return [];
+  }
 }
 
 export async function clearActivityLog(): Promise<void> {
-  assertSupabaseConfigured();
-  await supabase.from('activity_logs').delete().neq('id', 'none');
+  await fetch('/api/activity-logs', { method: 'DELETE' }).catch(() => {});
 }

@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { logActivity } from '@/lib/activity-log-store';
 import { type Client, type ClientStatus } from '@/lib/mock-data';
-import { assertSupabaseConfigured, supabase } from '@/lib/supabase';
 
 const CLIENTS_UPDATED_EVENT = 'clients-updated';
 
@@ -19,34 +18,43 @@ export function canManageClients(role = CURRENT_USER_ROLE): boolean {
   return role === 'Administrador';
 }
 
+async function apiClients(method: string, body?: unknown, id?: string): Promise<Response> {
+  const url = id ? `/api/clients?id=${encodeURIComponent(id)}` : '/api/clients';
+  return fetch(url, {
+    method,
+    headers: body ? { 'Content-Type': 'application/json' } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+}
+
 export function useClients() {
   const [clients, setClients] = useState<Client[]>([]);
   const visibleClients = useMemo(() => clients.filter((c) => c.status !== 'Arquivado' && c.status !== 'Inativo'), [clients]);
   const archivedClients = useMemo(() => clients.filter((c) => c.status === 'Arquivado' || c.status === 'Inativo'), [clients]);
 
-  useEffect(() => {
-    async function load() {
-      try {
-        assertSupabaseConfigured();
-        const { data, error } = await supabase.from('clients').select('*').order('name');
-        if (error) throw error;
-        if (data !== null) {
-          setClients(data.map((r) => ({ id: r.id, name: r.name, segment: r.segment, status: r.status as ClientStatus })));
-        }
-      } catch (error) {
-        console.error('Erro ao carregar clientes do Supabase:', error);
-      }
+  async function load() {
+    try {
+      const res = await fetch('/api/clients');
+      if (!res.ok) return;
+      const data: Client[] = await res.json();
+      setClients(data);
+    } catch (error) {
+      console.error('Erro ao carregar clientes:', error);
     }
+  }
 
+  useEffect(() => {
     void load();
     window.addEventListener(CLIENTS_UPDATED_EVENT, load);
     return () => window.removeEventListener(CLIENTS_UPDATED_EVENT, load);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return useMemo(() => ({
     clients: visibleClients,
     allClients: clients,
     archivedClients,
+
     addClient(input: NewClientInput) {
       const client: Client = {
         id: `client-${Date.now()}`,
@@ -55,55 +63,44 @@ export function useClients() {
         status: input.status,
       };
       setClients((prev) => [...prev, client]);
-      void (async () => {
-        const { error } = await supabase.from('clients').upsert({ id: client.id, name: client.name, segment: client.segment, status: client.status });
-        if (error) console.error('Erro ao salvar cliente no Supabase:', error);
-        else window.dispatchEvent(new Event(CLIENTS_UPDATED_EVENT));
-      })();
+      void apiClients('POST', client).then(() => {
+        window.dispatchEvent(new Event(CLIENTS_UPDATED_EVENT));
+      }).catch((e) => console.error('Erro ao salvar cliente:', e));
       logActivity('client_created', `Cliente ${client.name} criado no segmento ${client.segment}`);
       return client;
     },
+
     archiveClient(id: string) {
       setClients((prev) => prev.map((c) => c.id === id ? { ...c, status: 'Arquivado' as ClientStatus } : c));
-      void (async () => {
-        const { error } = await supabase.from('clients').update({ status: 'Arquivado' }).eq('id', id);
-        if (error) console.error('Erro ao arquivar cliente no Supabase:', error);
-        window.dispatchEvent(new Event(CLIENTS_UPDATED_EVENT));
-      })();
+      void apiClients('PATCH', { status: 'Arquivado' }, id)
+        .then(() => window.dispatchEvent(new Event(CLIENTS_UPDATED_EVENT)))
+        .catch((e) => console.error('Erro ao arquivar cliente:', e));
     },
+
     restoreClient(id: string) {
       setClients((prev) => prev.map((c) => c.id === id ? { ...c, status: 'Ativo' as ClientStatus } : c));
-      void (async () => {
-        const { error } = await supabase.from('clients').update({ status: 'Ativo' }).eq('id', id);
-        if (error) console.error('Erro ao restaurar cliente no Supabase:', error);
-        window.dispatchEvent(new Event(CLIENTS_UPDATED_EVENT));
-      })();
+      void apiClients('PATCH', { status: 'Ativo' }, id)
+        .then(() => window.dispatchEvent(new Event(CLIENTS_UPDATED_EVENT)))
+        .catch((e) => console.error('Erro ao restaurar cliente:', e));
     },
+
     setClientStatus(id: string, status: ClientStatus) {
       const target = clients.find((c) => c.id === id);
       setClients((prev) => prev.map((c) => c.id === id ? { ...c, status } : c));
-      void (async () => {
-        const { error } = await supabase.from('clients').update({ status }).eq('id', id);
-        if (error) console.error('Erro ao atualizar status do cliente no Supabase:', error);
-        window.dispatchEvent(new Event(CLIENTS_UPDATED_EVENT));
-      })();
+      void apiClients('PATCH', { status }, id)
+        .then(() => window.dispatchEvent(new Event(CLIENTS_UPDATED_EVENT)))
+        .catch((e) => console.error('Erro ao atualizar status:', e));
       logActivity('client_status_updated', `Cliente ${target?.name ?? id} atualizado para ${status}`);
     },
+
     deleteClient(id: string) {
       setClients((prev) => prev.filter((c) => c.id !== id));
-      void (async () => {
-        const { error } = await supabase.from('clients').delete().eq('id', id);
-        if (error) {
-          console.error('Erro ao excluir cliente no Supabase:', error);
-          // Revert: restore client list from DB instead of dispatching (which would re-add)
-          const { data: refreshed } = await supabase.from('clients').select('*').order('name');
-          if (refreshed) {
-            setClients(refreshed.map((r) => ({ id: r.id, name: r.name, segment: r.segment, status: r.status as ClientStatus })));
-          }
-        } else {
-          window.dispatchEvent(new Event(CLIENTS_UPDATED_EVENT));
-        }
-      })();
+      void apiClients('DELETE', undefined, id)
+        .then((res) => {
+          if (res.ok) window.dispatchEvent(new Event(CLIENTS_UPDATED_EVENT));
+          else void load();
+        })
+        .catch((e) => { console.error('Erro ao excluir cliente:', e); void load(); });
     },
-  }), [archivedClients, clients, visibleClients]);
+  }), [archivedClients, clients, visibleClients]); // eslint-disable-line react-hooks/exhaustive-deps
 }

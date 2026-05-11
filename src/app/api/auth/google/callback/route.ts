@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { google } from 'googleapis';
-import { Pool } from 'pg';
+import { makeServerPool } from '@/lib/server-db';
 
 function popupHtml(script: string, message: string) {
   return new Response(
@@ -41,15 +41,7 @@ export async function GET(request: NextRequest) {
     const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
     const { data: profile } = await oauth2.userinfo.get();
 
-    const pool = new Pool({
-      host: 'aws-1-us-east-2.pooler.supabase.com',
-      port: 6543,
-      database: 'postgres',
-      user: 'postgres.iremmorsgwiqrorzoihx',
-      password: process.env.SUPABASE_DB_PASSWORD,
-      ssl: { rejectUnauthorized: false },
-      max: 1,
-    });
+    const pool = makeServerPool();
     try {
       await pool.query(
         `INSERT INTO public.google_connections (email, display_name, picture, access_token, refresh_token, token_expiry, scope, account_type, status)
