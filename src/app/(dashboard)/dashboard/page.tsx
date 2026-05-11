@@ -12,7 +12,7 @@ import type { TopCreative } from '@/app/api/meta/top-creatives/route';
 import type { CampaignPerformance } from '@/app/api/campaigns/route';
 import type { AudienceBreakdowns, AudienceResponse, AudienceSlice } from '@/app/api/audience/route';
 
-type Period = 'last_7d' | 'last_30d' | 'this_month' | 'last_month';
+type Period = 'yesterday' | 'last_7d' | 'last_14d' | 'last_30d' | 'this_month' | 'last_month' | 'custom';
 type ApiMetrics = {
   meta: { spend: number; impressions: number; clicks: number; leads: number; formLeads?: number; conversations?: number; cpl: number } | null;
   google: { cost: number; impressions: number; clicks: number; cpc: number; conversions: number; cpa: number } | null;
@@ -38,10 +38,13 @@ type AdAccountBalance = {
 };
 
 const PERIODS: { value: Period; label: string }[] = [
-  { value: 'last_7d', label: 'Últimos 7 dias' },
-  { value: 'last_30d', label: 'Últimos 30 dias' },
+  { value: 'yesterday', label: 'Ontem' },
+  { value: 'last_7d', label: '7 dias' },
+  { value: 'last_14d', label: '14 dias' },
+  { value: 'last_30d', label: '30 dias' },
   { value: 'this_month', label: 'Este mês' },
   { value: 'last_month', label: 'Mês passado' },
+  { value: 'custom', label: 'Personalizado' },
 ];
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
@@ -1040,6 +1043,8 @@ export default function GeneralDashboard() {
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [period, setPeriod] = useState<Period>('this_month');
+  const [customDateFrom, setCustomDateFrom] = useState('');
+  const [customDateTo, setCustomDateTo] = useState('');
   const [metricsByClient, setMetricsByClient] = useState<Record<string, ApiMetrics>>({});
   const [goalsByClient, setGoalsByClient] = useState<Record<string, GoalConfig | null>>({});
   const [campaigns, setCampaigns] = useState<CampaignPerformance[]>([]);
@@ -1074,19 +1079,34 @@ export default function GeneralDashboard() {
     setGoalsByClient(g);
   }, [clients]);
 
+  // Skip fetching when custom period but dates not yet filled
+  const customReady = period !== 'custom' || (customDateFrom.length === 10 && customDateTo.length === 10);
+
+  const buildPeriodParams = (extra?: Record<string, string>) => {
+    const p: Record<string, string> = { period, ...extra };
+    if (period === 'custom' && customDateFrom && customDateTo) {
+      p.dateFrom = customDateFrom;
+      p.dateTo = customDateTo;
+    }
+    return new URLSearchParams(p);
+  };
+
   // Fetch metrics for selected clients
   useEffect(() => {
     let cancelled = false;
     setMetricsLoading(true);
     setMetricsByClient({});
-    if (selectedIds.size === 0) {
+    if (selectedIds.size === 0 || !customReady) {
       setMetricsLoading(false);
       return () => { cancelled = true; };
     }
     const ids = [...selectedIds];
+    const periodParams = period === 'custom' && customDateFrom && customDateTo
+      ? `period=${period}&dateFrom=${customDateFrom}&dateTo=${customDateTo}`
+      : `period=${period}`;
     Promise.allSettled(
       ids.map(async (id) => {
-        const res = await fetch(`/api/clients/${id}/metrics?period=${period}`);
+        const res = await fetch(`/api/clients/${id}/metrics?${periodParams}`);
         if (cancelled) return null;
         const data: ApiMetrics = res.ok ? await res.json() : { meta: null, google: null };
         return [id, data] as const;
@@ -1098,74 +1118,61 @@ export default function GeneralDashboard() {
       setMetricsByClient(map);
     }).finally(() => { if (!cancelled) setMetricsLoading(false); });
     return () => { cancelled = true; };
-  }, [selectedIds, period]);
+  }, [selectedIds, period, customDateFrom, customDateTo, customReady]);
 
   // Fetch active campaigns with spend in selected period
   useEffect(() => {
     let cancelled = false;
     setCampaignsLoading(true);
     setCampaigns([]);
-    if (selectedIds.size === 0) {
+    if (selectedIds.size === 0 || !customReady) {
       setCampaignsLoading(false);
       return () => { cancelled = true; };
     }
-    const params = new URLSearchParams({
-      period,
-      sortBy: campaignSortBy,
-      limit: '30',
-      clientIds: [...selectedIds].join(','),
-    });
+    const params = buildPeriodParams({ sortBy: campaignSortBy, limit: '30', clientIds: [...selectedIds].join(',') });
     fetch(`/api/campaigns?${params.toString()}`)
       .then(res => res.ok ? res.json() as Promise<CampaignPerformance[]> : [])
       .then(data => { if (!cancelled) setCampaigns(data); })
       .catch(() => { if (!cancelled) setCampaigns([]); })
       .finally(() => { if (!cancelled) setCampaignsLoading(false); });
     return () => { cancelled = true; };
-  }, [period, campaignSortBy, selectedIds]);
+  }, [period, campaignSortBy, selectedIds, customDateFrom, customDateTo, customReady]);
 
   // Fetch top creatives
   useEffect(() => {
     let cancelled = false;
     setCreativesLoading(true);
     setCreatives([]);
-    if (selectedIds.size === 0) {
+    if (selectedIds.size === 0 || !customReady) {
       setCreativesLoading(false);
       return () => { cancelled = true; };
     }
-    const params = new URLSearchParams({
-      period,
-      sortBy,
-      limit: '20',
-      clientIds: [...selectedIds].join(','),
-    });
+    const params = buildPeriodParams({ sortBy, limit: '20', clientIds: [...selectedIds].join(',') });
     fetch(`/api/meta/top-creatives?${params.toString()}`)
       .then(res => res.ok ? res.json() as Promise<TopCreative[]> : [])
       .then(data => { if (!cancelled) setCreatives(data); })
       .catch(() => { if (!cancelled) setCreatives([]); })
       .finally(() => { if (!cancelled) setCreativesLoading(false); });
     return () => { cancelled = true; };
-  }, [period, sortBy, selectedIds]);
+  }, [period, sortBy, selectedIds, customDateFrom, customDateTo, customReady]);
 
   // Fetch audience breakdowns
   useEffect(() => {
     let cancelled = false;
     setAudienceLoading(true);
     setAudience(EMPTY_AUDIENCE);
-    if (selectedIds.size === 0) {
+    if (selectedIds.size === 0 || !customReady) {
       setAudienceLoading(false);
       return () => { cancelled = true; };
     }
-    const params = new URLSearchParams({
-      period,
-      clientIds: [...selectedIds].join(','),
-    });
+    const params = buildPeriodParams({ clientIds: [...selectedIds].join(',') });
     fetch(`/api/audience?${params.toString()}`)
       .then(res => res.ok ? res.json() as Promise<AudienceResponse> : EMPTY_AUDIENCE)
       .then(data => { if (!cancelled) setAudience(data); })
       .catch(() => { if (!cancelled) setAudience(EMPTY_AUDIENCE); })
       .finally(() => { if (!cancelled) setAudienceLoading(false); });
     return () => { cancelled = true; };
-  }, [period, selectedIds]);
+  }, [period, selectedIds, customDateFrom, customDateTo, customReady]);
 
   // Fetch balances and account links used by the general balance cards
   useEffect(() => {
@@ -1315,6 +1322,23 @@ export default function GeneralDashboard() {
               </button>
             ))}
           </div>
+          {period === 'custom' && (
+            <div className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5">
+              <input
+                type="date"
+                value={customDateFrom}
+                onChange={e => setCustomDateFrom(e.target.value)}
+                className="bg-transparent text-xs font-semibold text-foreground focus:outline-none"
+              />
+              <span className="text-[10px] text-muted-foreground">→</span>
+              <input
+                type="date"
+                value={customDateTo}
+                onChange={e => setCustomDateTo(e.target.value)}
+                className="bg-transparent text-xs font-semibold text-foreground focus:outline-none"
+              />
+            </div>
+          )}
           {metricsLoading && <RefreshCw className="w-4 h-4 animate-spin text-muted-foreground" />}
         </div>
       </div>

@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { google } from 'googleapis';
 import { makeServerPool } from '@/lib/server-db';
+import { resolveMetaPeriod, resolveGaqlPeriod, applyMetaDateToUrl } from '@/lib/period-utils';
 
 type SortKey = 'spend' | 'leads' | 'impressions' | 'clicks' | 'cpl' | 'ctr';
 
@@ -20,25 +21,6 @@ export type CampaignPerformance = {
 };
 
 
-function mapToMetaPeriod(p: string): string {
-  const map: Record<string, string> = {
-    last_7d: 'last_7_days',
-    last_30d: 'last_30_days',
-    last_month: 'last_month',
-    this_month: 'this_month',
-  };
-  return map[p] ?? 'last_30_days';
-}
-
-function mapToGaqlPeriod(p: string): string {
-  const map: Record<string, string> = {
-    last_7d: 'LAST_7_DAYS',
-    last_30d: 'LAST_30_DAYS',
-    last_month: 'LAST_MONTH',
-    this_month: 'THIS_MONTH',
-  };
-  return map[p] ?? 'LAST_30_DAYS';
-}
 
 const DEV_TOKEN = process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? '1vR8GhAk4UMZoPaqo7Qq8Q';
 
@@ -145,6 +127,8 @@ async function safeRows(pool: ReturnType<typeof makeServerPool>, query: string, 
 
 export async function GET(request: NextRequest) {
   const period = request.nextUrl.searchParams.get('period') ?? 'last_30d';
+  const dateFrom = request.nextUrl.searchParams.get('dateFrom') ?? '';
+  const dateTo = request.nextUrl.searchParams.get('dateTo') ?? '';
   const sortBy = (request.nextUrl.searchParams.get('sortBy') ?? 'spend') as SortKey;
   const limit = Math.min(parseInt(request.nextUrl.searchParams.get('limit') ?? '30', 10), 100);
   const requestedClientIds = (request.nextUrl.searchParams.get('clientIds') ?? '')
@@ -200,8 +184,8 @@ export async function GET(request: NextRequest) {
   if (shouldFilterByClient && links.length === 0) return Response.json([]);
 
   const campaigns: CampaignPerformance[] = [];
-  const metaPeriod = mapToMetaPeriod(period);
-  const gaqlPeriod = mapToGaqlPeriod(period);
+  const metaPeriod = resolveMetaPeriod(period, dateFrom, dateTo);
+  const gaqlPeriod = resolveGaqlPeriod(period, dateFrom, dateTo);
 
   const linksByPlatformAndConn = new Map<string, Array<{ id: string; name: string }>>();
   for (const link of links) {
@@ -239,7 +223,7 @@ export async function GET(request: NextRequest) {
           const url = new URL(`https://graph.facebook.com/v21.0/${toMetaAccountNodeId(account.id)}/insights`);
           url.searchParams.set('level', 'campaign');
           url.searchParams.set('fields', 'campaign_id,campaign_name,spend,impressions,clicks,actions');
-          url.searchParams.set('date_preset', metaPeriod);
+          applyMetaDateToUrl(url, metaPeriod);
           url.searchParams.set('sort', 'spend_descending');
           url.searchParams.set('limit', String(limit));
           url.searchParams.set('access_token', token);
@@ -294,7 +278,7 @@ export async function GET(request: NextRequest) {
                     metrics.cost_micros, metrics.impressions, metrics.clicks,
                     metrics.conversions
              FROM campaign
-             WHERE segments.date DURING ${gaqlPeriod}
+             WHERE ${gaqlPeriod}
                AND campaign.status = ENABLED
                AND metrics.cost_micros > 0
              ORDER BY metrics.cost_micros DESC

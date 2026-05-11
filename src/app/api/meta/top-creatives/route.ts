@@ -1,14 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
-
-
-function mapToMetaPeriod(p: string): string {
-  const map: Record<string, string> = {
-    last_7d: 'last_7_days', last_30d: 'last_30_days',
-    last_month: 'last_month', this_month: 'this_month',
-  };
-  return map[p] ?? 'last_30_days';
-}
+import { resolveMetaPeriod, applyMetaDateToUrl } from '@/lib/period-utils';
 
 const LEAD_ACTIONS = [
   'lead',
@@ -69,9 +61,11 @@ export type TopCreative = {
 
 export async function GET(request: NextRequest) {
   const period = request.nextUrl.searchParams.get('period') ?? 'last_30d';
+  const dateFrom = request.nextUrl.searchParams.get('dateFrom') ?? '';
+  const dateTo = request.nextUrl.searchParams.get('dateTo') ?? '';
   const sortBy = request.nextUrl.searchParams.get('sortBy') ?? 'spend';
   const limit = Math.min(parseInt(request.nextUrl.searchParams.get('limit') ?? '20'), 50);
-  const metaPeriod = mapToMetaPeriod(period);
+  const metaPeriod = resolveMetaPeriod(period, dateFrom, dateTo);
   const requestedClientIds = (request.nextUrl.searchParams.get('clientIds') ?? '')
     .split(',')
     .map((id) => id.trim())
@@ -167,7 +161,7 @@ export async function GET(request: NextRequest) {
           const insightsUrl = new URL(`https://graph.facebook.com/v21.0/${toMetaAccountNodeId(account.id)}/insights`);
           insightsUrl.searchParams.set('level', 'ad');
           insightsUrl.searchParams.set('fields', 'ad_id,ad_name,spend,impressions,clicks,actions');
-          insightsUrl.searchParams.set('date_preset', metaPeriod);
+          applyMetaDateToUrl(insightsUrl, metaPeriod);
           insightsUrl.searchParams.set('sort', 'spend_descending');
           insightsUrl.searchParams.set('limit', String(limit));
           insightsUrl.searchParams.set('access_token', token);

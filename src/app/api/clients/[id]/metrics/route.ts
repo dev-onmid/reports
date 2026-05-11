@@ -1,7 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { google } from 'googleapis';
 import { makeServerPool } from '@/lib/server-db';
-
+import { resolveMetaPeriod, resolveGaqlPeriod, applyMetaDateToUrl } from '@/lib/period-utils';
 
 async function getFreshGoogleToken(conn: { access_token: string; refresh_token: string; token_expiry: string | null }): Promise<string> {
   if (conn.token_expiry) {
@@ -12,22 +12,6 @@ async function getFreshGoogleToken(conn: { access_token: string; refresh_token: 
   oauth2.setCredentials({ refresh_token: conn.refresh_token });
   const { credentials } = await oauth2.refreshAccessToken();
   return credentials.access_token!;
-}
-
-function mapToGaqlPeriod(p: string): string {
-  const map: Record<string, string> = {
-    last_7d: 'LAST_7_DAYS', last_30d: 'LAST_30_DAYS',
-    last_month: 'LAST_MONTH', this_month: 'THIS_MONTH',
-  };
-  return map[p] ?? 'LAST_30_DAYS';
-}
-
-function mapToMetaPeriod(p: string): string {
-  const map: Record<string, string> = {
-    last_7d: 'last_7_days', last_30d: 'last_30_days',
-    last_month: 'last_month', this_month: 'this_month',
-  };
-  return map[p] ?? 'last_30_days';
 }
 
 function toMetaAccountNodeId(accountId: string) {
@@ -59,7 +43,7 @@ async function fetchGadsAccountMetrics(customerId: string, accessToken: string, 
   const data = await gadsSearch(
     customerId,
     `SELECT metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.average_cpc, metrics.conversions, metrics.cost_per_conversion
-     FROM customer WHERE segments.date DURING ${gaqlPeriod}`,
+     FROM customer WHERE ${gaqlPeriod}`,
     accessToken,
     loginCustomerId,
   );
@@ -132,9 +116,12 @@ const CONVERSATION_ACTIONS = [
 ];
 
 async function fetchMetaAccountMetrics(accountId: string, accessToken: string, metaPeriod: string) {
-  const fields = 'spend,impressions,clicks,actions';
-  const url = `https://graph.facebook.com/v21.0/${toMetaAccountNodeId(accountId)}/insights?fields=${fields}&level=account&date_preset=${metaPeriod}&access_token=${accessToken}`;
-  const res = await fetch(url);
+  const url = new URL(`https://graph.facebook.com/v21.0/${toMetaAccountNodeId(accountId)}/insights`);
+  url.searchParams.set('fields', 'spend,impressions,clicks,actions');
+  url.searchParams.set('level', 'account');
+  url.searchParams.set('access_token', accessToken);
+  applyMetaDateToUrl(url, metaPeriod);
+  const res = await fetch(url.toString());
   if (!res.ok) return null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const data = await res.json() as any;
@@ -172,8 +159,10 @@ async function safeRows(pool: ReturnType<typeof makeServerPool>, query: string, 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id: clientId } = await params;
   const period = request.nextUrl.searchParams.get('period') ?? 'last_30d';
-  const gaqlPeriod = mapToGaqlPeriod(period);
-  const metaPeriod = mapToMetaPeriod(period);
+  const dateFrom = request.nextUrl.searchParams.get('dateFrom') ?? '';
+  const dateTo = request.nextUrl.searchParams.get('dateTo') ?? '';
+  const gaqlPeriod = resolveGaqlPeriod(period, dateFrom, dateTo);
+  const metaPeriod = resolveMetaPeriod(period, dateFrom, dateTo);
 
   const pool = makeServerPool();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

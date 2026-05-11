@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { google } from 'googleapis';
 import { makeServerPool } from '@/lib/server-db';
+import { resolveMetaPeriod, resolveGaqlPeriod, applyMetaDateToUrl } from '@/lib/period-utils';
 
 export type AudienceSlice = { label: string; value: number };
 export type AudienceBreakdowns = {
@@ -69,25 +70,6 @@ const GOOGLE_PLATFORM_LABELS: Record<string, string> = {
 };
 
 
-function mapToMetaPeriod(p: string): string {
-  const map: Record<string, string> = {
-    last_7d: 'last_7_days',
-    last_30d: 'last_30_days',
-    last_month: 'last_month',
-    this_month: 'this_month',
-  };
-  return map[p] ?? 'last_30_days';
-}
-
-function mapToGaqlPeriod(p: string): string {
-  const map: Record<string, string> = {
-    last_7d: 'LAST_7_DAYS',
-    last_30d: 'LAST_30_DAYS',
-    last_month: 'LAST_MONTH',
-    this_month: 'THIS_MONTH',
-  };
-  return map[p] ?? 'LAST_30_DAYS';
-}
 
 function normalizeMetaAccountId(accountId: string) {
   return accountId.replace(/^act_/, '');
@@ -187,7 +169,7 @@ async function fetchMetaBreakdown(accountId: string, token: string, metaPeriod: 
   const url = new URL(`https://graph.facebook.com/v21.0/${toMetaAccountNodeId(accountId)}/insights`);
   url.searchParams.set('fields', 'reach,impressions');
   url.searchParams.set('breakdowns', breakdown);
-  url.searchParams.set('date_preset', metaPeriod);
+  applyMetaDateToUrl(url, metaPeriod);
   url.searchParams.set('access_token', token);
   const res = await fetch(url.toString());
   if (!res.ok) return [];
@@ -216,7 +198,7 @@ async function fetchGoogleBreakdown(
     accountId,
     `SELECT ${segmentField}, metrics.impressions, metrics.cost_micros
      FROM campaign
-     WHERE segments.date DURING ${gaqlPeriod}
+     WHERE ${gaqlPeriod}
        AND metrics.cost_micros > 0`,
     accessToken,
     loginCustomerId,
@@ -233,6 +215,8 @@ async function fetchGoogleBreakdown(
 
 export async function GET(request: NextRequest) {
   const period = request.nextUrl.searchParams.get('period') ?? 'last_30d';
+  const dateFrom = request.nextUrl.searchParams.get('dateFrom') ?? '';
+  const dateTo = request.nextUrl.searchParams.get('dateTo') ?? '';
   const requestedClientIds = (request.nextUrl.searchParams.get('clientIds') ?? '')
     .split(',')
     .map((id) => id.trim())
@@ -300,8 +284,8 @@ export async function GET(request: NextRequest) {
     platform: new Map<string, number>(),
     device: new Map<string, number>(),
   };
-  const metaPeriod = mapToMetaPeriod(period);
-  const gaqlPeriod = mapToGaqlPeriod(period);
+  const metaPeriod = resolveMetaPeriod(period, dateFrom, dateTo);
+  const gaqlPeriod = resolveGaqlPeriod(period, dateFrom, dateTo);
 
   await Promise.allSettled(metaConns.map(async (conn) => {
     const accountIds = shouldFilterByClient ? byPlatformAndConn.get(`meta_ads:${conn.id}`) ?? [] : [];
