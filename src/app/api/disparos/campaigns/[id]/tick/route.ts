@@ -11,6 +11,21 @@ function interpolate(template: string, phone: string, name: string) {
   return template.replace(/\{telefone\}/g, phone).replace(/\{nome\}/g, name);
 }
 
+function isWithinWindow(activeFrom: string, activeUntil: string): boolean {
+  const now = new Date();
+  const nowMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
+  const [fh, fm] = activeFrom.split(':').map(Number);
+  const [uh, um] = activeUntil.split(':').map(Number);
+  const fromMinutes = fh * 60 + fm;
+  const untilMinutes = uh * 60 + um;
+
+  if (fromMinutes <= untilMinutes) {
+    return nowMinutes >= fromMinutes && nowMinutes < untilMinutes;
+  }
+  // overnight window (e.g. 22:00 - 06:00)
+  return nowMinutes >= fromMinutes || nowMinutes < untilMinutes;
+}
+
 export async function POST(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -19,7 +34,6 @@ export async function POST(
   const pool = makeServerPool();
 
   try {
-    // Load campaign + client credentials
     const { rows: [campaign] } = await pool.query(
       `SELECT c.*, cl.instance_id, cl.token, cl.security_token
          FROM public.zapi_campaigns c
@@ -44,6 +58,13 @@ export async function POST(
       return Response.json({ status: 'done', done: true, reason: 'end_time_reached', ...final });
     }
 
+    // Check active time window
+    if (campaign.active_from && campaign.active_until) {
+      if (!isWithinWindow(campaign.active_from, campaign.active_until)) {
+        return Response.json({ status: 'running', done: false, sleeping: true });
+      }
+    }
+
     // Grab next pending number
     const { rows: [number] } = await pool.query(
       `SELECT * FROM public.zapi_numbers WHERE campaign_id = $1 AND status = 'pending' ORDER BY position ASC LIMIT 1`,
@@ -56,7 +77,6 @@ export async function POST(
       return Response.json({ status: 'done', done: true, ...final });
     }
 
-    // Send
     const message = interpolate(campaign.message, number.phone, number.name ?? '');
     const client = { instanceId: campaign.instance_id, token: campaign.token, clientToken: campaign.security_token ?? undefined };
 

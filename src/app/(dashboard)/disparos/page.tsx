@@ -35,6 +35,8 @@ type Campaign = {
   sent: number;
   failed: number;
   created_at: string;
+  active_from: string | null;
+  active_until: string | null;
 };
 
 type Progress = {
@@ -255,8 +257,11 @@ function NovaCampanhaTab({ onCreated }: { onCreated: () => void }) {
     name: '',
     message: '',
     numbers: '',
+    isNow: true,
     startsAt: '',
     endsAt: '',
+    activeFrom: '',
+    activeUntil: '',
     intervalMin: 5,
     intervalMax: 15,
   });
@@ -286,22 +291,46 @@ function NovaCampanhaTab({ onCreated }: { onCreated: () => void }) {
     }
   }
 
+  // Convert datetime-local string (local) to proper ISO (UTC) to avoid server timezone issues
+  function toISO(local: string) { return local ? new Date(local).toISOString() : ''; }
+  // Convert local HH:MM to UTC HH:MM for active window comparison on server
+  function localTimeToUTC(hhmm: string) {
+    if (!hhmm) return '';
+    const [h, m] = hhmm.split(':').map(Number);
+    const d = new Date(); d.setHours(h, m, 0, 0);
+    return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+  }
+
   async function create() {
-    if (!form.clientId || !form.name || !form.message || !form.numbers || !form.startsAt) {
+    if (!form.clientId || !form.name || !form.message || !form.numbers) {
       setError('Preencha todos os campos obrigatórios.');
+      return;
+    }
+    if (!form.isNow && !form.startsAt) {
+      setError('Selecione o horário de início ou escolha "Agora".');
       return;
     }
     setSaving(true);
     setError('');
     try {
+      const startsAt = form.isNow ? new Date().toISOString() : toISO(form.startsAt);
+      const endsAt = form.endsAt ? toISO(form.endsAt) : undefined;
+      const activeFrom = form.activeFrom && form.activeUntil ? localTimeToUTC(form.activeFrom) : undefined;
+      const activeUntil = form.activeFrom && form.activeUntil ? localTimeToUTC(form.activeUntil) : undefined;
+
       const res = await fetch('/api/disparos/campaigns', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form, imageUrl: imageUrl || undefined }),
+        body: JSON.stringify({
+          clientId: form.clientId, name: form.name, message: form.message,
+          numbers: form.numbers, startsAt, endsAt, activeFrom, activeUntil,
+          intervalMin: form.intervalMin, intervalMax: form.intervalMax,
+          imageUrl: imageUrl || undefined,
+        }),
       });
       const data = await res.json() as { error?: string };
       if (!res.ok) { setError(data.error ?? 'Erro ao criar campanha.'); return; }
-      setForm({ clientId: clients[0]?.id ?? '', name: '', message: '', numbers: '', startsAt: '', endsAt: '', intervalMin: 5, intervalMax: 15 });
+      setForm({ clientId: clients[0]?.id ?? '', name: '', message: '', numbers: '', isNow: true, startsAt: '', endsAt: '', activeFrom: '', activeUntil: '', intervalMin: 5, intervalMax: 15 });
       setImageUrl('');
       onCreated();
     } finally {
@@ -399,17 +428,46 @@ function NovaCampanhaTab({ onCreated }: { onCreated: () => void }) {
           )}
         </div>
 
-        {/* Dates */}
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Início *</label>
+        {/* Start */}
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Início *</label>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setForm(p => ({ ...p, isNow: true, startsAt: '' }))}
+              className={cn(
+                'h-9 rounded-lg border px-4 text-xs font-bold uppercase tracking-wider transition-colors',
+                form.isNow ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border bg-card text-muted-foreground hover:bg-muted/50',
+              )}
+            >
+              Agora
+            </button>
+            <button
+              type="button"
+              onClick={() => setForm(p => ({ ...p, isNow: false }))}
+              className={cn(
+                'h-9 rounded-lg border px-4 text-xs font-bold uppercase tracking-wider transition-colors',
+                !form.isNow ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border bg-card text-muted-foreground hover:bg-muted/50',
+              )}
+            >
+              Agendar
+            </button>
+          </div>
+          {!form.isNow && (
             <input
               type="datetime-local"
               value={form.startsAt}
               onChange={e => setForm(p => ({ ...p, startsAt: e.target.value }))}
               className="w-full h-9 rounded-lg border border-border bg-background px-3 text-sm outline-none focus:ring-1 focus:ring-primary"
             />
-          </div>
+          )}
+          {form.isNow && (
+            <p className="text-[11px] text-muted-foreground">A campanha inicia imediatamente ao clicar em Criar.</p>
+          )}
+        </div>
+
+        {/* End date + active window */}
+        <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">
             <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Término (opcional)</label>
             <input
@@ -418,6 +476,30 @@ function NovaCampanhaTab({ onCreated }: { onCreated: () => void }) {
               onChange={e => setForm(p => ({ ...p, endsAt: e.target.value }))}
               className="w-full h-9 rounded-lg border border-border bg-background px-3 text-sm outline-none focus:ring-1 focus:ring-primary"
             />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              Horário de envio (opcional)
+              <span className="ml-1 normal-case font-normal text-muted-foreground/60">— pausa fora desse período</span>
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="time"
+                value={form.activeFrom}
+                onChange={e => setForm(p => ({ ...p, activeFrom: e.target.value }))}
+                className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none focus:ring-1 focus:ring-primary"
+              />
+              <span className="text-xs text-muted-foreground shrink-0">até</span>
+              <input
+                type="time"
+                value={form.activeUntil}
+                onChange={e => setForm(p => ({ ...p, activeUntil: e.target.value }))}
+                className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none focus:ring-1 focus:ring-primary"
+              />
+            </div>
+            {form.activeFrom && form.activeUntil && (
+              <p className="text-[11px] text-muted-foreground">Envios apenas das {form.activeFrom} às {form.activeUntil}.</p>
+            )}
           </div>
         </div>
 
@@ -466,6 +548,7 @@ function NovaCampanhaTab({ onCreated }: { onCreated: () => void }) {
 type TickResult = {
   status: string;
   done?: boolean;
+  sleeping?: boolean;
   total?: number;
   sent?: number;
   failed?: number;
@@ -479,6 +562,7 @@ function CampaignCard({ campaign, onAction, onRefresh }: {
 }) {
   const [live, setLive] = useState<Progress | null>(null);
   const [tickError, setTickError] = useState('');
+  const [sleeping, setSleeping] = useState(false);
   const runningRef = useRef(false);
 
   const isRunning = campaign.status === 'running';
@@ -504,6 +588,15 @@ function CampaignCard({ campaign, onAction, onRefresh }: {
         }
 
         setTickError('');
+
+        if (data.sleeping) {
+          setSleeping(true);
+          // Outside active window — check again in 60 seconds
+          setTimeout(() => { if (runningRef.current) tick(); }, 60_000);
+          return;
+        }
+
+        setSleeping(false);
         setLive({
           campaignId: campaign.id,
           total: data.total ?? campaign.total,
@@ -577,6 +670,13 @@ function CampaignCard({ campaign, onAction, onRefresh }: {
           </span>
         )}
       </div>
+
+      {sleeping && status === 'running' && (
+        <div className="rounded-lg bg-yellow-500/10 border border-yellow-500/20 px-3 py-2 text-[11px] text-yellow-400 flex items-center gap-1.5">
+          <Clock className="h-3 w-3" />
+          Fora do horário de envio — aguardando janela...
+        </div>
+      )}
 
       {tickError && (
         <div className="rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2 text-[11px] text-red-400">
