@@ -1566,20 +1566,27 @@ function CampaignPerformanceTable({
 
     return (
       <tr key={row.key} className={cn('border-t border-border/50 hover:bg-muted/20 transition-colors', !isActive && 'opacity-60', levelBg)}>
-        {/* Name column */}
-        <td className="max-w-[300px] px-2 py-2.5">
-          <div className={cn('flex min-w-0 items-center gap-1.5', INDENT[row.level])}>
+        {/* Name column — whole name area is clickable when expandable */}
+        <td className="max-w-[300px] px-2 py-0">
+          <div
+            className={cn(
+              'flex min-w-0 items-center gap-1.5 py-2.5',
+              INDENT[row.level],
+              expandable && 'cursor-pointer select-none',
+            )}
+            onClick={expandable ? () => toggleExpand(row.key, (row as { fetchUrl: string }).fetchUrl) : undefined}
+            role={expandable ? 'button' : undefined}
+          >
             {/* Expand chevron */}
             {expandable ? (
-              <button
-                type="button"
-                onClick={() => toggleExpand(row.key, row.fetchUrl)}
-                className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
-              >
+              <span className={cn(
+                'shrink-0 transition-colors',
+                row.level === 0 ? 'text-foreground/70' : 'text-primary/70',
+              )}>
                 {isExpanded
                   ? <ChevronDown className="h-3.5 w-3.5" />
                   : <ChevronRight className="h-3.5 w-3.5" />}
-              </button>
+              </span>
             ) : (
               <span className="h-3.5 w-3.5 shrink-0" />
             )}
