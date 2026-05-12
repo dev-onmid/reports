@@ -320,10 +320,12 @@ export default function BibliotecaPage() {
             <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 space-y-2">
               <p className="text-sm font-bold text-red-400">Erro na busca</p>
               <p className="text-xs text-red-400/80">{searchError}</p>
-              <div className="mt-2 rounded-lg border border-red-500/20 bg-red-500/5 p-3 text-xs text-muted-foreground space-y-1">
+              <div className="mt-2 rounded-lg border border-red-500/20 bg-red-500/5 p-3 text-xs text-muted-foreground space-y-1.5">
                 <p className="font-semibold text-foreground">Como resolver:</p>
-                <p>1. Acesse <strong>facebook.com/ID_confirmation</strong> e confirme sua identidade</p>
-                <p>2. Após confirmação, a pesquisa funcionará automaticamente</p>
+                <p>1. Acesse <strong>developers.facebook.com</strong> → selecione o app usado na integração Meta</p>
+                <p>2. Vá em <strong>Produtos → Marketing API → Permissões</strong> e confirme que <code className="rounded bg-red-500/10 px-1">ads_read</code> tem acesso <strong>Standard</strong></p>
+                <p>3. Se necessário, solicite acesso à <strong>Ads Library API</strong> em <strong>facebook.com/ads/library/api</strong></p>
+                <p>4. Após aprovação, reconecte a integração Meta em <strong>Integrações</strong></p>
               </div>
             </div>
           )}
