@@ -404,24 +404,65 @@ function NovaCampanhaTab({ onCreated }: { onCreated: () => void }) {
 
 // ─── Campaign Card ─────────────────────────────────────────────────────────────
 
-function CampaignCard({ campaign, onAction }: {
+type TickResult = {
+  status: string;
+  done?: boolean;
+  total?: number;
+  sent?: number;
+  failed?: number;
+  lastPhone?: string;
+};
+
+function CampaignCard({ campaign, onAction, onRefresh }: {
   campaign: Campaign;
   onAction: (id: string, action: string) => void;
+  onRefresh: () => void;
 }) {
   const [live, setLive] = useState<Progress | null>(null);
-  const evtRef = useRef<EventSource | null>(null);
+  const runningRef = useRef(false);
 
-  const isActive = campaign.status === 'running';
+  const isRunning = campaign.status === 'running';
 
+  // Tick loop — drives sending from the frontend (works on Vercel serverless)
   useEffect(() => {
-    if (!isActive) { evtRef.current?.close(); return; }
-    const es = new EventSource(`/api/disparos/sse?campaignId=${campaign.id}`);
-    es.onmessage = (e) => {
-      try { setLive(JSON.parse(e.data) as Progress); } catch { /* ignore */ }
-    };
-    evtRef.current = es;
-    return () => es.close();
-  }, [isActive, campaign.id]);
+    if (!isRunning) { runningRef.current = false; return; }
+    runningRef.current = true;
+
+    const intervalMin = campaign.interval_min * 1000;
+    const intervalMax = campaign.interval_max * 1000;
+
+    async function tick() {
+      if (!runningRef.current) return;
+      try {
+        const res = await fetch(`/api/disparos/campaigns/${campaign.id}/tick`, { method: 'POST' });
+        const data = await res.json() as TickResult;
+
+        setLive({
+          campaignId: campaign.id,
+          total: data.total ?? campaign.total,
+          sent: data.sent ?? campaign.sent,
+          failed: data.failed ?? campaign.failed,
+          status: data.status,
+          currentPhone: data.lastPhone,
+        });
+
+        if (data.done || data.status !== 'running') {
+          runningRef.current = false;
+          onRefresh();
+          return;
+        }
+
+        // Wait random interval before next send
+        const delay = Math.floor(Math.random() * (intervalMax - intervalMin + 1)) + intervalMin;
+        setTimeout(() => { if (runningRef.current) tick(); }, delay);
+      } catch {
+        setTimeout(() => { if (runningRef.current) tick(); }, 5000);
+      }
+    }
+
+    tick();
+    return () => { runningRef.current = false; };
+  }, [isRunning, campaign.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const total = live?.total ?? campaign.total;
   const sent = live?.sent ?? campaign.sent;
@@ -562,7 +603,7 @@ function DashboardTab() {
         <div className="space-y-3">
           <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Em andamento</p>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {active.map(c => <CampaignCard key={c.id} campaign={c} onAction={handleAction} />)}
+            {active.map(c => <CampaignCard key={c.id} campaign={c} onAction={handleAction} onRefresh={load} />)}
           </div>
         </div>
       )}

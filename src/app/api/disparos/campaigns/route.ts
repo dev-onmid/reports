@@ -1,7 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { parsePhoneList } from '@/lib/phone-formatter';
-import { startCampaign } from '@/lib/campaign-queue';
 
 export async function GET() {
   const pool = makeServerPool();
@@ -44,31 +43,24 @@ export async function POST(request: NextRequest) {
 
   const pool = makeServerPool();
   try {
+    // Determine initial status: if start time is now or past, set running immediately
+    const startsAtDate = new Date(startsAt);
+    const initialStatus = startsAtDate <= new Date() ? 'running' : 'pending';
+
     const { rows: [campaign] } = await pool.query(
       `INSERT INTO public.zapi_campaigns
-         (client_id, name, message, image_url, starts_at, ends_at, interval_min, interval_max, total)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+         (client_id, name, message, image_url, status, starts_at, ends_at, interval_min, interval_max, total)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        RETURNING *`,
-      [clientId, name, message, imageUrl || null, startsAt, endsAt || null, intervalMin, intervalMax, parsed.length],
+      [clientId, name, message, imageUrl || null, initialStatus, startsAt, endsAt || null, intervalMin, intervalMax, parsed.length],
     );
 
-    // Bulk insert numbers
-    const values = parsed
-      .map((p, i) => `('${campaign.id}', '${p.phone}', ${p.name ? `'${p.name.replace(/'/g, "''")}'` : 'NULL'}, ${i})`)
-      .join(',');
-    await pool.query(
-      `INSERT INTO public.zapi_numbers (campaign_id, phone, name, position) VALUES ${values}`,
-    );
-
-    // Schedule start
-    const startsAtDate = new Date(startsAt);
-    const now = new Date();
-    const delay = startsAtDate.getTime() - now.getTime();
-
-    if (delay <= 0) {
-      startCampaign(campaign.id);
-    } else {
-      setTimeout(() => startCampaign(campaign.id), delay);
+    // Bulk insert numbers using parameterized query
+    for (let i = 0; i < parsed.length; i++) {
+      await pool.query(
+        `INSERT INTO public.zapi_numbers (campaign_id, phone, name, position) VALUES ($1,$2,$3,$4)`,
+        [campaign.id, parsed[i].phone, parsed[i].name || null, i],
+      );
     }
 
     return Response.json(campaign, { status: 201 });

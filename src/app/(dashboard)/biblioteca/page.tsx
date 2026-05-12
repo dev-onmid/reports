@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useClients } from '@/lib/client-store';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 import {
-  Search, BookMarked, ExternalLink, RefreshCw, ChevronRight, Trash2, X, Eye, EyeOff,
+  Search, BookMarked, ExternalLink, RefreshCw, ChevronRight, Trash2, X,
 } from 'lucide-react';
 import type { AdLibraryAd } from '@/app/api/meta/ad-library/route';
 import type { SavedAd } from '@/app/api/ad-library/saved/route';
@@ -33,59 +33,93 @@ function AdCard({
   clients: { id: string; name: string }[];
 }) {
   const [showClientPicker, setShowClientPicker] = useState(false);
-  const [showPreview, setShowPreview] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const body = ad.creativeBodies[0] ?? '';
   const title = ad.creativeTitles[0] ?? '';
+  const allBodies = ad.creativeBodies;
   const platforms = ad.publisherPlatforms.join(', ');
   const dateStart = ad.deliveryStartTime
     ? new Date(ad.deliveryStartTime).toLocaleDateString('pt-BR')
     : null;
+  const initial = ad.pageName.charAt(0).toUpperCase();
 
   return (
-    <div className="relative flex flex-col gap-3 rounded-xl border border-border bg-card p-4 hover:border-primary/30 transition-colors">
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="truncate text-sm font-bold">{ad.pageName}</p>
-          {platforms && (
-            <p className="text-[10px] text-muted-foreground mt-0.5 uppercase tracking-wider">{platforms}</p>
-          )}
-        </div>
-        <div className="flex items-center gap-1.5 shrink-0">
-          <button
-            type="button"
-            onClick={() => setShowPreview(v => !v)}
-            className="rounded p-1 text-muted-foreground hover:text-foreground transition-colors"
-            title={showPreview ? 'Ocultar preview' : 'Ver preview'}
-          >
-            {showPreview ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-          </button>
+    <div className="relative flex flex-col rounded-xl border border-border bg-card overflow-hidden hover:border-primary/30 transition-colors">
+      {/* Facebook-style ad mockup */}
+      <div className="bg-white text-[#1c1e21] p-3 flex flex-col gap-2">
+        {/* Page header */}
+        <div className="flex items-center gap-2">
+          <div className="w-10 h-10 rounded-full bg-[#1877f2] flex items-center justify-center text-white font-bold text-sm shrink-0">
+            {initial}
+          </div>
+          <div className="min-w-0">
+            <p className="text-[13px] font-semibold leading-tight truncate">{ad.pageName}</p>
+            <p className="text-[11px] text-[#65676b] leading-tight">
+              Patrocinado · {platforms || 'Facebook'}
+            </p>
+          </div>
           <span className={cn(
-            'rounded-full px-2 py-0.5 text-[10px] font-bold border',
+            'ml-auto shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold border',
             ad.adActiveStatus === 'ACTIVE'
               ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-              : 'bg-muted/50 text-muted-foreground border-border'
+              : 'bg-muted/50 text-[#65676b] border-gray-200'
           )}>
             {ad.adActiveStatus === 'ACTIVE' ? 'Ativo' : 'Inativo'}
           </span>
         </div>
+
+        {/* Body text */}
+        {body && (
+          <div>
+            <p className={cn('text-[13px] leading-snug text-[#1c1e21] whitespace-pre-line', !expanded && 'line-clamp-4')}>
+              {body}
+            </p>
+            {body.length > 200 && (
+              <button
+                type="button"
+                onClick={() => setExpanded(v => !v)}
+                className="text-[11px] text-[#1877f2] font-semibold mt-0.5"
+              >
+                {expanded ? 'Ver menos' : 'Ver mais'}
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* All creative bodies if multiple */}
+        {allBodies.length > 1 && expanded && allBodies.slice(1).map((b, i) => (
+          <p key={i} className="text-[12px] text-[#65676b] leading-snug border-t border-gray-100 pt-2 whitespace-pre-line">{b}</p>
+        ))}
+
+        {/* Title bar */}
+        {title && (
+          <div className="border border-gray-200 rounded-lg overflow-hidden mt-1">
+            <div className="bg-[#f0f2f5] px-3 py-2.5">
+              <p className="text-[11px] text-[#65676b] uppercase tracking-wider leading-none mb-1">
+                {ad.pageName.toLowerCase()}
+              </p>
+              <p className="text-[13px] font-semibold text-[#1c1e21] leading-tight line-clamp-2">{title}</p>
+            </div>
+          </div>
+        )}
+
+        {/* CTA row */}
+        <div className="flex items-center justify-between border-t border-gray-100 pt-2">
+          <span className="text-[11px] text-[#65676b]">{dateStart ? `Desde ${dateStart}` : ''}</span>
+          <a
+            href={ad.adSnapshotUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1 bg-[#1877f2] text-white text-[11px] font-semibold px-3 py-1.5 rounded-md hover:bg-[#166fe5] transition-colors"
+          >
+            <ExternalLink className="h-3 w-3" />
+            Ver no Facebook
+          </a>
+        </div>
       </div>
 
-      {/* Ad preview iframe via proxy (strips X-Frame-Options) */}
-      {showPreview && ad.adSnapshotUrl && (
-        <div className="rounded-lg overflow-hidden border border-border bg-white" style={{ height: 420 }}>
-          <iframe
-            src={`/api/meta/ad-proxy?url=${encodeURIComponent(ad.adSnapshotUrl)}`}
-            className="w-full h-full"
-            title={`Preview: ${ad.pageName}`}
-          />
-        </div>
-      )}
-
-      {title && <p className="text-sm font-semibold text-foreground/90 line-clamp-2">{title}</p>}
-      {body && <p className="text-xs text-muted-foreground line-clamp-3">{body}</p>}
-
-      <div className="flex flex-wrap items-center gap-3 text-[10px] text-muted-foreground border-t border-border pt-3 mt-auto">
-        {dateStart && <span>Início: {dateStart}</span>}
+      {/* Footer with stats */}
+      <div className="flex flex-wrap items-center gap-3 text-[10px] text-muted-foreground px-4 py-2 bg-card border-t border-border">
         {ad.impressions?.lower_bound && (
           <span>Impress.: {Number(ad.impressions.lower_bound).toLocaleString('pt-BR')}+</span>
         )}
