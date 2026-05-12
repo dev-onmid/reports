@@ -17,17 +17,16 @@ export async function POST(
   const { action, connectionId, dailyBudget } = body;
 
   const pool = makeServerPool();
-  let conn: { access_token: string; token_expiry: string | null; label?: string } | null = null;
+  let conn: { id: string; app_id: string; access_token: string; token_expiry: string | null } | null = null;
   try {
     const { rows } = await pool.query(
-      `SELECT access_token, token_expiry FROM public.meta_connections WHERE id = $1`,
+      `SELECT id, app_id, access_token, token_expiry FROM public.meta_connections WHERE id = $1`,
       [connectionId],
     );
     conn = rows[0] ?? null;
     if (!conn) {
-      // fallback: legacy global integration
       const { rows: legacy } = await pool.query(
-        `SELECT access_token, token_expiry FROM public.meta_integration WHERE id = 'global' AND status = 'connected' LIMIT 1`,
+        `SELECT 'legacy' AS id, '' AS app_id, access_token, token_expiry FROM public.meta_integration WHERE id = 'global' AND status = 'connected' LIMIT 1`,
       );
       conn = legacy[0] ?? null;
     }
