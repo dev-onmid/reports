@@ -599,7 +599,6 @@ function MetaConnectModal({
   onConnected: (conn: MetaConnection) => void;
 }) {
   const { add } = useMetaConnections();
-  const [showGuide, setShowGuide] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const backdropRef = useRef<HTMLDivElement>(null);
@@ -646,52 +645,18 @@ function MetaConnectModal({
       onClick={handleBackdrop}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
     >
-      <div className="w-full max-w-md bg-card border border-border rounded-2xl shadow-2xl overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-5 border-b border-border">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-background border border-border flex items-center justify-center">
-              <LogoMeta />
-            </div>
-            <div>
-              <h2 className="font-bold text-sm">Conectar conta Meta</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">Login via Facebook — pode conectar várias contas</p>
-            </div>
-          </div>
+      <div className="w-full max-w-sm bg-card border border-border rounded-2xl shadow-2xl overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+          <h2 className="font-bold text-sm">Conectar conta Meta</h2>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="px-6 py-5 space-y-4">
-          <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20 text-xs text-blue-300 leading-relaxed space-y-1">
-            <p className="font-semibold">Como funciona</p>
-            <p className="text-blue-300/80">Clique em &quot;Entrar com Facebook&quot; para adicionar uma conta. Você pode repetir o processo com perfis diferentes para conectar múltiplas contas Meta.</p>
-          </div>
-
-          <div className="rounded-lg border border-primary/20 bg-primary/10 px-3 py-2.5">
-            <p className="text-xs font-semibold uppercase tracking-wider text-primary">App Meta configurado</p>
-            <p className="mt-1 text-sm font-mono text-foreground">{META_APP_ID}</p>
-          </div>
-
-          <div className="rounded-lg border border-border overflow-hidden">
-            <button
-              type="button"
-              onClick={() => setShowGuide((v) => !v)}
-              className="w-full flex items-center justify-between px-3 py-2.5 bg-muted/30 text-xs text-muted-foreground font-semibold hover:bg-muted/50 transition-colors"
-            >
-              <span>Checklist da conexão</span>
-              <ChevronDown className={cn('w-4 h-4 transition-transform', showGuide && 'rotate-180')} />
-            </button>
-            {showGuide && (
-              <div className="px-3 py-3 bg-muted/10 text-xs text-muted-foreground leading-relaxed space-y-2">
-                <ol className="list-decimal list-inside space-y-1">
-                  <li>O App ID já está fixado no sistema.</li>
-                  <li>Certifique-se que o domínio do sistema está liberado no app da Meta.</li>
-                  <li>Use um perfil Facebook com permissão nas contas de anúncio dos clientes.</li>
-                </ol>
-              </div>
-            )}
-          </div>
+        <div className="px-6 py-6 space-y-5">
+          <p className="text-sm text-muted-foreground text-center leading-relaxed">
+            Clique no botão abaixo e faça login com o Facebook que tem acesso às contas de anúncio. Você pode repetir o processo para conectar múltiplos perfis.
+          </p>
 
           {error && (
             <div className="flex items-center gap-2 text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
@@ -700,22 +665,17 @@ function MetaConnectModal({
             </div>
           )}
 
-          <div className="flex gap-3 pt-1">
-            <Button type="button" variant="outline" className="flex-1 text-xs font-bold uppercase h-10" onClick={onClose}>
-              Cancelar
-            </Button>
-            <Button
-              onClick={handleFBLogin}
-              disabled={loading}
-              className="flex-1 h-10 font-bold text-xs uppercase bg-[#1877F2] hover:bg-[#1565C0] text-white disabled:opacity-50"
-            >
-              {loading ? (
-                <span className="flex items-center gap-2"><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Conectando...</span>
-              ) : (
-                <span className="flex items-center gap-2"><LogoMeta /> Entrar com Facebook</span>
-              )}
-            </Button>
-          </div>
+          <Button
+            onClick={handleFBLogin}
+            disabled={loading}
+            className="w-full h-11 font-bold text-sm bg-[#1877F2] hover:bg-[#1565C0] text-white disabled:opacity-50"
+          >
+            {loading ? (
+              <span className="flex items-center gap-2"><RefreshCw className="w-4 h-4 animate-spin" /> Conectando...</span>
+            ) : (
+              <span className="flex items-center gap-2"><LogoMeta /> Entrar com Facebook</span>
+            )}
+          </Button>
         </div>
       </div>
     </div>

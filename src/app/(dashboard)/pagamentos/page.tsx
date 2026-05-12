@@ -289,11 +289,13 @@ function ClientInvestmentSummary({
     const row = map.get(link.clientId);
     if (!row) continue;
     if (link.platform === 'meta_ads') {
-      const balance = balances.find(b => b.platform === 'meta' && b.id === link.accountId && b.balance !== null);
+      const normalizedLink = link.accountId.replace(/^act_/, '');
+      const balance = balances.find(b => b.platform === 'meta' && b.id.replace(/^act_/, '') === normalizedLink && b.balance !== null);
       if (balance) row.metaBalance = (row.metaBalance ?? 0) + (balance.balance ?? 0);
     }
     if (link.platform === 'google_ads') {
-      const balance = balances.find(b => b.platform === 'google' && b.id === link.accountId && b.balance !== null);
+      const normalizedLink = link.accountId.replace(/\D/g, '');
+      const balance = balances.find(b => b.platform === 'google' && b.id.replace(/\D/g, '') === normalizedLink && b.balance !== null);
       if (balance) row.googleBalance = (row.googleBalance ?? 0) + (balance.balance ?? 0);
     }
   }
@@ -650,11 +652,11 @@ export default function PagamentosPage() {
         paymentUrl: `https://ads.google.com/aw/billing/summary?ocid=${account.id.replace(/\D/g, '')}&__c=${account.id.replace(/\D/g, '')}`,
       }));
 
-      const metaLinked = new Set(links.filter(l => l.platform === 'meta_ads').map(l => l.accountId));
-      const googleLinked = new Set(links.filter(l => l.platform === 'google_ads').map(l => l.accountId));
+      const metaLinked = new Set(links.filter(l => l.platform === 'meta_ads').map(l => l.accountId.replace(/^act_/, '')));
+      const googleLinked = new Set(links.filter(l => l.platform === 'google_ads').map(l => l.accountId.replace(/\D/g, '')));
       const linkedBalances = [
-        ...metaBalances.filter(b => metaLinked.has(b.id)),
-        ...googleBalances.filter(b => googleLinked.has(b.id)),
+        ...metaBalances.filter(b => metaLinked.has(b.id.replace(/^act_/, ''))),
+        ...googleBalances.filter(b => googleLinked.has(b.id.replace(/\D/g, ''))),
       ];
 
       setClientLinks(links);
