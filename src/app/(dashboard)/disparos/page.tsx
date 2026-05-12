@@ -553,6 +553,15 @@ type TickResult = {
   sent?: number;
   failed?: number;
   lastPhone?: string;
+  lastError?: string | null;
+};
+
+type NumberDetail = {
+  phone: string;
+  name: string | null;
+  status: string;
+  error_msg: string | null;
+  sent_at: string | null;
 };
 
 function CampaignCard({ campaign, onAction, onRefresh }: {
@@ -562,10 +571,21 @@ function CampaignCard({ campaign, onAction, onRefresh }: {
 }) {
   const [live, setLive] = useState<Progress | null>(null);
   const [tickError, setTickError] = useState('');
+  const [lastSendError, setLastSendError] = useState<string | null>(null);
   const [sleeping, setSleeping] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
+  const [numbers, setNumbers] = useState<NumberDetail[] | null>(null);
+  const [loadingNumbers, setLoadingNumbers] = useState(false);
   const runningRef = useRef(false);
 
   const isRunning = campaign.status === 'running';
+
+  async function loadNumbers() {
+    setLoadingNumbers(true);
+    const data = await fetch(`/api/disparos/campaigns/${campaign.id}/numbers`).then(r => r.json() as Promise<NumberDetail[]>);
+    setNumbers(data);
+    setLoadingNumbers(false);
+  }
 
   useEffect(() => {
     if (!isRunning) { runningRef.current = false; return; }
@@ -597,6 +617,7 @@ function CampaignCard({ campaign, onAction, onRefresh }: {
         }
 
         setSleeping(false);
+        if (data.lastError) setLastSendError(data.lastError);
         setLive({
           campaignId: campaign.id,
           total: data.total ?? campaign.total,
@@ -681,6 +702,49 @@ function CampaignCard({ campaign, onAction, onRefresh }: {
       {tickError && (
         <div className="rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2 text-[11px] text-red-400">
           {tickError}
+        </div>
+      )}
+
+      {lastSendError && !tickError && (
+        <div className="rounded-lg bg-orange-500/10 border border-orange-500/20 px-3 py-2 text-[11px] text-orange-400">
+          Último erro Z-API: {lastSendError}
+        </div>
+      )}
+
+      {/* Details panel */}
+      {failed > 0 && (
+        <button
+          type="button"
+          onClick={() => {
+            setShowDetails(v => !v);
+            if (!numbers) loadNumbers();
+          }}
+          className="text-[11px] text-muted-foreground hover:text-foreground underline underline-offset-2 text-left"
+        >
+          {loadingNumbers ? 'Carregando...' : showDetails ? 'Ocultar detalhes' : `Ver detalhes dos ${failed} erro(s)`}
+        </button>
+      )}
+
+      {showDetails && numbers && (
+        <div className="rounded-lg border border-border overflow-hidden">
+          <table className="w-full text-[11px]">
+            <thead>
+              <tr className="bg-muted/30 border-b border-border">
+                <th className="px-2 py-1.5 text-left font-semibold text-muted-foreground">Número</th>
+                <th className="px-2 py-1.5 text-left font-semibold text-muted-foreground">Status</th>
+                <th className="px-2 py-1.5 text-left font-semibold text-muted-foreground">Erro</th>
+              </tr>
+            </thead>
+            <tbody>
+              {numbers.filter(n => n.status === 'failed').map(n => (
+                <tr key={n.phone} className="border-b border-border last:border-0">
+                  <td className="px-2 py-1.5 font-mono">{n.phone}</td>
+                  <td className="px-2 py-1.5 text-red-400 font-semibold">Falha</td>
+                  <td className="px-2 py-1.5 text-muted-foreground break-all">{n.error_msg ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 

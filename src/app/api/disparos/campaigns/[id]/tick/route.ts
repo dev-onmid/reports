@@ -106,6 +106,7 @@ export async function POST(
       failed: updated.failed,
       lastPhone: number.phone,
       lastResult: newStatus,
+      lastError: newStatus === 'failed' ? (result.error ?? null) : null,
     });
   } finally {
     await pool.end();
