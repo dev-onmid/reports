@@ -80,9 +80,29 @@ export async function POST(
     const message = interpolate(campaign.message, number.phone, number.name ?? '');
     const client = { instanceId: campaign.instance_id, token: campaign.token, clientToken: campaign.security_token ?? undefined };
 
-    const result = campaign.image_url
-      ? await sendImage(client, number.phone, campaign.image_url, message)
-      : await sendText(client, number.phone, message);
+    // Parse image URLs (may be a JSON array for multiple images, or a plain string for single)
+    let imageUrls: string[] = [];
+    if (campaign.image_url) {
+      if (campaign.image_url.startsWith('[')) {
+        try { imageUrls = JSON.parse(campaign.image_url); } catch { imageUrls = [campaign.image_url]; }
+      } else {
+        imageUrls = [campaign.image_url];
+      }
+    }
+
+    let result;
+    if (imageUrls.length > 0) {
+      // Send first image with caption
+      result = await sendImage(client, number.phone, imageUrls[0], message);
+      // Send remaining images without caption (best-effort, don't fail the number)
+      if (result.ok) {
+        for (let i = 1; i < imageUrls.length; i++) {
+          await sendImage(client, number.phone, imageUrls[i], '');
+        }
+      }
+    } else {
+      result = await sendText(client, number.phone, message);
+    }
 
     const newStatus = result.ok ? 'sent' : 'failed';
     await pool.query(

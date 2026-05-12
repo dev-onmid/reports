@@ -265,8 +265,7 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
     intervalMin: 5,
     intervalMax: 15,
   });
-  const [imageUrl, setImageUrl] = useState('');
-  const [uploading, setUploading] = useState(false);
+  const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
@@ -295,18 +294,16 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
       intervalMin: prefill.intervalMin,
       intervalMax: prefill.intervalMax,
     });
-    setImageUrl(prefill.imageUrl ?? '');
+    setImageUrls(prefill.imageUrls ?? []);
   }, [prefill]);
 
-  async function uploadImage(file: File) {
-    setUploading(true);
-    try {
+  function addImages(files: FileList | null) {
+    if (!files) return;
+    Array.from(files).forEach(file => {
       const reader = new FileReader();
-      reader.onload = () => setImageUrl(reader.result as string);
+      reader.onload = () => setImageUrls(prev => [...prev, reader.result as string]);
       reader.readAsDataURL(file);
-    } finally {
-      setUploading(false);
-    }
+    });
   }
 
   // Convert datetime-local string (local) to proper ISO (UTC) to avoid server timezone issues
@@ -343,13 +340,13 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
           clientId: form.clientId, name: form.name, message: form.message,
           numbers: form.numbers, startsAt, endsAt, activeFrom, activeUntil,
           intervalMin: form.intervalMin, intervalMax: form.intervalMax,
-          imageUrl: imageUrl || undefined,
+          imageUrls: imageUrls.length > 0 ? imageUrls : undefined,
         }),
       });
       const data = await res.json() as { error?: string };
       if (!res.ok) { setError(data.error ?? 'Erro ao criar campanha.'); return; }
       setForm({ clientId: clients[0]?.id ?? '', name: '', message: '', numbers: '', isNow: true, startsAt: '', endsAt: '', activeFrom: '', activeUntil: '', intervalMin: 5, intervalMax: 15 });
-      setImageUrl('');
+      setImageUrls([]);
       onCreated();
     } finally {
       setSaving(false);
@@ -357,6 +354,7 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
   }
 
   return (
+    <div className="grid gap-6 xl:grid-cols-[1fr_280px] items-start">
     <div className="space-y-5 max-w-2xl">
       <div className="grid gap-4">
         {/* Name + Client */}
@@ -396,33 +394,43 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
           />
         </div>
 
-        {/* Image */}
+        {/* Images */}
         <div className="space-y-1.5">
-          <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Imagem (opcional)</label>
-          <div className="flex items-center gap-3">
+          <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+            Imagens (opcional) <span className="normal-case font-normal text-muted-foreground/60">— primeira imagem receberá o texto como legenda</span>
+          </label>
+          <div className="flex flex-wrap gap-2 items-center">
+            {imageUrls.map((url, idx) => (
+              <div key={idx} className="relative group">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={url} alt="" className="h-16 w-16 rounded-lg object-cover border border-border" />
+                {idx === 0 && imageUrls.length > 0 && (
+                  <span className="absolute bottom-0 left-0 right-0 text-center text-[8px] bg-black/50 text-white rounded-b-lg py-0.5">1ª</span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setImageUrls(prev => prev.filter((_, i) => i !== idx))}
+                  className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-background border border-border flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <X className="h-2.5 w-2.5 text-foreground" />
+                </button>
+              </div>
+            ))}
             <button
               type="button"
               onClick={() => fileRef.current?.click()}
-              className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-xs font-semibold text-muted-foreground hover:bg-muted/50 transition-colors"
+              className="h-16 w-16 rounded-lg border-2 border-dashed border-border flex flex-col items-center justify-center gap-0.5 text-muted-foreground hover:border-primary/50 hover:text-primary transition-colors"
             >
-              {uploading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
-              {imageUrl ? 'Trocar imagem' : 'Selecionar imagem'}
+              <Upload className="h-4 w-4" />
+              <span className="text-[9px] font-semibold">Adicionar</span>
             </button>
-            {imageUrl && (
-              <div className="flex items-center gap-2">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={imageUrl} alt="preview" className="h-10 w-10 rounded object-cover border border-border" />
-                <button type="button" onClick={() => setImageUrl('')}>
-                  <X className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
-                </button>
-              </div>
-            )}
             <input
               ref={fileRef}
               type="file"
               accept="image/*"
+              multiple
               className="hidden"
-              onChange={e => e.target.files?.[0] && uploadImage(e.target.files[0])}
+              onChange={e => { addImages(e.target.files); e.target.value = ''; }}
             />
           </div>
         </div>
@@ -558,6 +566,12 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
         Criar campanha
       </button>
     </div>
+
+    {/* WhatsApp Preview */}
+    <div className="xl:sticky xl:top-24 h-fit">
+      <WhatsAppPreview images={imageUrls} message={form.message} />
+    </div>
+  </div>
   );
 }
 
@@ -587,12 +601,126 @@ type CampaignPrefill = {
   name: string;
   message: string;
   numbers: string;
-  imageUrl?: string;
+  imageUrls?: string[];
   intervalMin: number;
   intervalMax: number;
   activeFrom?: string;
   activeUntil?: string;
 };
+
+// ─── WhatsApp text formatter ──────────────────────────────────────────────────
+
+function parseWASegments(text: string): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
+  let rem = text;
+  let ki = 0;
+  while (rem) {
+    const b = rem.match(/^\*([^*\n]+)\*/);
+    const i = rem.match(/^_([^_\n]+)_/);
+    const s = rem.match(/^~([^~\n]+)~/);
+    const m = rem.match(/^`([^`\n]+)`/);
+    if (b) { nodes.push(<strong key={ki++}>{b[1]}</strong>); rem = rem.slice(b[0].length); }
+    else if (i) { nodes.push(<em key={ki++}>{i[1]}</em>); rem = rem.slice(i[0].length); }
+    else if (s) { nodes.push(<del key={ki++}>{s[1]}</del>); rem = rem.slice(s[0].length); }
+    else if (m) { nodes.push(<code key={ki++} className="font-mono text-[11px] bg-black/10 px-0.5 rounded">{m[1]}</code>); rem = rem.slice(m[0].length); }
+    else { nodes.push(rem[0]); rem = rem.slice(1); }
+  }
+  return nodes;
+}
+
+function formatWAText(text: string): React.ReactNode[] {
+  return text.split('\n').flatMap((line, i, arr) => {
+    const segs = parseWASegments(line);
+    return i < arr.length - 1 ? [...segs, <br key={`br${i}`} />] : segs;
+  });
+}
+
+// ─── WhatsApp Preview component ───────────────────────────────────────────────
+
+function WhatsAppPreview({ images, message }: { images: string[]; message: string }) {
+  const preview = message
+    .replace(/\{nome\}/g, 'João Silva')
+    .replace(/\{telefone\}/g, '43 9 9999-1111');
+
+  const now = new Date();
+  const time = `${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}`;
+  const hasContent = images.length > 0 || preview.trim();
+
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Preview</p>
+      {/* Phone frame */}
+      <div className="mx-auto w-[260px] select-none">
+        <div className="rounded-[2rem] border-2 border-border bg-zinc-950 p-1.5 shadow-xl">
+          <div className="rounded-[1.6rem] overflow-hidden">
+            {/* Status bar */}
+            <div className="bg-[#075E54] px-4 pt-2 pb-0.5 flex justify-between items-center">
+              <span className="text-white text-[10px] font-semibold">{time}</span>
+              <span className="text-white text-[10px]">📶 🔋</span>
+            </div>
+            {/* WA header */}
+            <div className="bg-[#075E54] px-3 py-2 flex items-center gap-2">
+              <div className="h-8 w-8 rounded-full bg-[#128C7E] flex items-center justify-center shrink-0 text-white text-sm font-bold">
+                M
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-white text-xs font-semibold truncate">Minha Empresa</p>
+                <p className="text-[#B2DFDB] text-[10px]">online</p>
+              </div>
+            </div>
+            {/* Chat bg */}
+            <div className="bg-[#E5DDD5] min-h-[340px] flex flex-col justify-end p-2 gap-1.5">
+              {hasContent ? (
+                <>
+                  {/* Extra images (2nd, 3rd...) as separate bubbles */}
+                  {images.slice(1).map((img, idx) => (
+                    <div key={idx} className="self-end rounded-[12px] rounded-tr-[4px] overflow-hidden shadow-sm max-w-[180px]" style={{ background: '#DCF8C6' }}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={img} alt="" className="w-full object-cover max-h-[130px]" />
+                      <div className="flex justify-end px-2 py-0.5">
+                        <span className="text-[9px] text-black/40">{time} <span className="text-[#53BDEB]">✓✓</span></span>
+                      </div>
+                    </div>
+                  ))}
+                  {/* Main bubble: first image + text */}
+                  <div className="self-end rounded-[12px] rounded-tr-[4px] overflow-hidden shadow-sm max-w-[190px]" style={{ background: '#DCF8C6' }}>
+                    {images[0] && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={images[0]} alt="" className="w-full object-cover max-h-[150px]" />
+                    )}
+                    {preview.trim() && (
+                      <div className="px-2 pt-1.5 pb-0.5 text-[12px] text-black/90 leading-relaxed break-words">
+                        {formatWAText(preview)}
+                      </div>
+                    )}
+                    <div className="flex justify-end px-2 pb-1 gap-1">
+                      <span className="text-[9px] text-black/40">{time}</span>
+                      <span className="text-[9px] text-[#53BDEB]">✓✓</span>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="flex-1 flex items-center justify-center py-8">
+                  <p className="text-[11px] text-black/30 text-center px-4">Digite uma mensagem para ver o preview</p>
+                </div>
+              )}
+            </div>
+            {/* Input bar */}
+            <div className="bg-[#F0F0F0] px-2 py-1.5 flex items-center gap-1.5">
+              <div className="flex-1 bg-white rounded-full px-3 py-1">
+                <span className="text-[10px] text-black/25">Mensagem</span>
+              </div>
+              <div className="h-7 w-7 rounded-full bg-[#128C7E] flex items-center justify-center shrink-0">
+                <span className="text-[11px]">🎤</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p className="text-center text-[10px] text-muted-foreground/50">Simulação — layout pode variar</p>
+    </div>
+  );
+}
 
 function CampaignCard({ campaign, onAction, onRefresh }: {
   campaign: Campaign;
@@ -866,12 +994,20 @@ function DashboardTab({ onReuse }: { onReuse: (p: CampaignPrefill) => void }) {
   async function handleReuse(c: Campaign) {
     const nums = await fetchNumbers(c.id);
     const numbers = nums.map(n => n.name ? `${n.phone},${n.name}` : n.phone).join('\n');
+    let imageUrls: string[] = [];
+    if (c.image_url) {
+      if (c.image_url.startsWith('[')) {
+        try { imageUrls = JSON.parse(c.image_url); } catch { imageUrls = [c.image_url]; }
+      } else {
+        imageUrls = [c.image_url];
+      }
+    }
     onReuse({
       clientId: c.client_id,
       name: c.name,
       message: c.message,
       numbers,
-      imageUrl: c.image_url ?? undefined,
+      imageUrls,
       intervalMin: c.interval_min,
       intervalMax: c.interval_max,
       activeFrom: c.active_from ?? undefined,

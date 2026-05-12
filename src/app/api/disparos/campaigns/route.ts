@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
     clientId: string;
     name: string;
     message: string;
-    imageUrl?: string;
+    imageUrls?: string[];
     numbers: string;
     startsAt: string;
     endsAt?: string;
@@ -40,7 +40,8 @@ export async function POST(request: NextRequest) {
     activeUntil?: string;
   };
 
-  const { clientId, name, message, imageUrl, numbers, startsAt, endsAt, intervalMin, intervalMax, activeFrom, activeUntil } = body;
+  const { clientId, name, message, imageUrls, numbers, startsAt, endsAt, intervalMin, intervalMax, activeFrom, activeUntil } = body;
+  const imageUrl = imageUrls && imageUrls.length > 0 ? JSON.stringify(imageUrls) : null;
 
   if (!clientId || !name || !message || !numbers || !startsAt) {
     return Response.json({ error: 'Campos obrigatórios ausentes.' }, { status: 400 });
