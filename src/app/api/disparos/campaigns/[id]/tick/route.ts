@@ -36,8 +36,10 @@ export async function POST(
       return Response.json({ status: campaign.status, done: true });
     }
 
-    // Check end time
-    if (campaign.ends_at && new Date() > new Date(campaign.ends_at)) {
+    // Check end time — only enforce if ends_at is after starts_at (valid range)
+    const endsAt = campaign.ends_at ? new Date(campaign.ends_at) : null;
+    const startsAt = new Date(campaign.starts_at);
+    if (endsAt && endsAt > startsAt && new Date() > endsAt) {
       await pool.query(`UPDATE public.zapi_campaigns SET status = 'paused' WHERE id = $1`, [id]);
       return Response.json({ status: 'paused', done: true, reason: 'end_time_reached' });
     }

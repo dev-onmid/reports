@@ -70,6 +70,8 @@ function ClientesTab() {
   const [form, setForm] = useState({ name: '', instanceId: '', token: '' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [testing, setTesting] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<Record<string, { connected: boolean; error?: string }>>({});
 
   useEffect(() => {
     fetch('/api/disparos/clients')
@@ -107,6 +109,21 @@ function ClientesTab() {
       body: JSON.stringify({ id }),
     });
     setClients(prev => prev.filter(c => c.id !== id));
+  }
+
+  async function testConnection(id: string) {
+    setTesting(id);
+    try {
+      const res = await fetch('/api/disparos/clients/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientId: id }),
+      });
+      const data = await res.json() as { connected: boolean; error?: string };
+      setTestResult(prev => ({ ...prev, [id]: data }));
+    } finally {
+      setTesting(null);
+    }
   }
 
   return (
@@ -159,28 +176,53 @@ function ClientesTab() {
         </div>
       ) : (
         <div className="space-y-2">
-          {clients.map(c => (
-            <div key={c.id} className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3">
-              <div className="flex items-center gap-3 min-w-0">
-                {c.online ? (
-                  <Wifi className="h-4 w-4 shrink-0 text-emerald-400" />
-                ) : (
-                  <WifiOff className="h-4 w-4 shrink-0 text-muted-foreground" />
-                )}
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold truncate">{c.name}</p>
-                  <p className="text-[11px] text-muted-foreground font-mono">{c.instance_id}</p>
+          {clients.map(c => {
+            const result = testResult[c.id];
+            return (
+              <div key={c.id} className="rounded-xl border border-border bg-card px-4 py-3 space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    {result?.connected ? (
+                      <Wifi className="h-4 w-4 shrink-0 text-emerald-400" />
+                    ) : result && !result.connected ? (
+                      <WifiOff className="h-4 w-4 shrink-0 text-red-400" />
+                    ) : (
+                      <WifiOff className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    )}
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold truncate">{c.name}</p>
+                      <p className="text-[11px] text-muted-foreground font-mono">{c.instance_id}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => testConnection(c.id)}
+                      disabled={testing === c.id}
+                      className="flex items-center gap-1 rounded-lg border border-border bg-background px-2.5 py-1.5 text-[11px] font-semibold text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                    >
+                      {testing === c.id
+                        ? <RefreshCw className="h-3 w-3 animate-spin" />
+                        : <Wifi className="h-3 w-3" />}
+                      Testar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => remove(c.id)}
+                      className="rounded-lg border border-red-500/20 p-1.5 text-red-400 hover:bg-red-500/10 transition-colors"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 </div>
+                {result && (
+                  <div className={cn('rounded-lg px-3 py-2 text-[11px] font-semibold', result.connected ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400')}>
+                    {result.connected ? '✓ Instância conectada e funcionando' : `✗ Não conectada${result.error ? ` — ${result.error}` : '. Verifique o WhatsApp no painel Z-API.'}`}
+                  </div>
+                )}
               </div>
-              <button
-                type="button"
-                onClick={() => remove(c.id)}
-                className="shrink-0 rounded-lg border border-red-500/20 p-1.5 text-red-400 hover:bg-red-500/10 transition-colors"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
@@ -419,24 +461,32 @@ function CampaignCard({ campaign, onAction, onRefresh }: {
   onRefresh: () => void;
 }) {
   const [live, setLive] = useState<Progress | null>(null);
+  const [tickError, setTickError] = useState('');
   const runningRef = useRef(false);
 
   const isRunning = campaign.status === 'running';
 
-  // Tick loop — drives sending from the frontend (works on Vercel serverless)
   useEffect(() => {
     if (!isRunning) { runningRef.current = false; return; }
     runningRef.current = true;
+    setTickError('');
 
-    const intervalMin = campaign.interval_min * 1000;
-    const intervalMax = campaign.interval_max * 1000;
+    const intervalMin = Math.max(campaign.interval_min * 1000, 1000);
+    const intervalMax = Math.max(campaign.interval_max * 1000, intervalMin);
 
     async function tick() {
       if (!runningRef.current) return;
       try {
         const res = await fetch(`/api/disparos/campaigns/${campaign.id}/tick`, { method: 'POST' });
-        const data = await res.json() as TickResult;
+        const data = await res.json() as TickResult & { error?: string };
 
+        if (!res.ok) {
+          setTickError(data.error ?? `Erro HTTP ${res.status}`);
+          setTimeout(() => { if (runningRef.current) tick(); }, 5000);
+          return;
+        }
+
+        setTickError('');
         setLive({
           campaignId: campaign.id,
           total: data.total ?? campaign.total,
@@ -452,10 +502,10 @@ function CampaignCard({ campaign, onAction, onRefresh }: {
           return;
         }
 
-        // Wait random interval before next send
         const delay = Math.floor(Math.random() * (intervalMax - intervalMin + 1)) + intervalMin;
         setTimeout(() => { if (runningRef.current) tick(); }, delay);
-      } catch {
+      } catch (err) {
+        setTickError(`Erro de conexão: ${String(err)}`);
         setTimeout(() => { if (runningRef.current) tick(); }, 5000);
       }
     }
@@ -510,6 +560,12 @@ function CampaignCard({ campaign, onAction, onRefresh }: {
           </span>
         )}
       </div>
+
+      {tickError && (
+        <div className="rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2 text-[11px] text-red-400">
+          {tickError}
+        </div>
+      )}
 
       {/* Actions */}
       <div className="flex gap-2 pt-1 border-t border-border">
