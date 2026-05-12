@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
          (client_id, name, message, image_url, starts_at, ends_at, interval_min, interval_max, total)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
        RETURNING *`,
-      [clientId, name, message, imageUrl ?? null, startsAt, endsAt ?? null, intervalMin, intervalMax, parsed.length],
+      [clientId, name, message, imageUrl || null, startsAt, endsAt || null, intervalMin, intervalMax, parsed.length],
     );
 
     // Bulk insert numbers
