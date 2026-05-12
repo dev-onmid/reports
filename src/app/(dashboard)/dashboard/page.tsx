@@ -829,7 +829,9 @@ function CreativePreviewOverlay({
             <img
               src={imgUrl}
               alt={creative.adName}
-              className="max-h-full w-full rounded-xl border border-white/15 bg-black object-contain"
+              className="max-h-full max-w-full rounded-xl border border-white/15 bg-black object-contain"
+              style={{ imageRendering: 'auto' }}
+              loading="eager"
               onClick={(event) => event.stopPropagation()}
             />
           ) : (

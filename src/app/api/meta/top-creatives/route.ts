@@ -178,7 +178,7 @@ export async function GET(request: NextRequest) {
           // Batch-fetch creative details
           const adIds = adsInsights.map(a => a.ad_id as string).filter(Boolean);
           const batchRes = await fetch(
-            `https://graph.facebook.com/v21.0/?ids=${adIds.join(',')}&fields=name,creative{body,title,image_url,thumbnail_url,object_story_spec}&access_token=${token}`
+            `https://graph.facebook.com/v21.0/?ids=${adIds.join(',')}&fields=name,creative{body,title,image_url,thumbnail_url,image_crops,object_story_spec}&access_token=${token}`
           );
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const batchData: Record<string, any> = batchRes.ok ? await batchRes.json() : {};
@@ -214,12 +214,16 @@ export async function GET(request: NextRequest) {
             const clicks = parseInt(insight.clicks || '0', 10);
             const impressions = parseInt(insight.impressions || '0', 10);
 
+            // Prefer original_image from image_crops (full resolution upload)
+            const originalImageUrl: string | undefined =
+              creative.image_crops?.original_image?.url ?? undefined;
+
             allCreatives.push({
               adId: insight.ad_id,
               adName: insight.ad_name ?? adData.name ?? `Ad ${insight.ad_id}`,
               accountId: account.id,
               accountName: account.name,
-              imageUrl: storyImageUrl ?? creative.image_url ?? undefined,
+              imageUrl: originalImageUrl ?? storyImageUrl ?? creative.image_url ?? undefined,
               thumbnailUrl: creative.thumbnail_url ?? undefined,
               videoUrl: videoInfo.source ?? undefined,
               headline: creative.title ?? undefined,
