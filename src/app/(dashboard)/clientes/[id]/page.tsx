@@ -16,8 +16,10 @@ import {
   Link as LinkIcon, Link2, Plus, X, ChevronDown, LayoutGrid,
   WalletCards, Send, CheckCircle2, Clock3, AlertTriangle, Filter, Trash2,
   UserRound, Phone, Mail, Briefcase, SlidersHorizontal, Check, Hash, BarChart2, Layers,
-  Power, PowerOff,
+  Power, PowerOff, Search, BookMarked, ExternalLink, RefreshCw, ChevronRight,
 } from 'lucide-react';
+import type { AdLibraryAd } from '@/app/api/meta/ad-library/route';
+import type { SavedAd } from '@/app/api/ad-library/saved/route';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -2513,8 +2515,359 @@ function ClientIntegrationsTab({ clientId, clientName }: { clientId: string; cli
   );
 }
 
+// ── Biblioteca de Anúncios Tab ────────────────────────────────────────────────
+const AD_COUNTRIES = [
+  { code: 'BR', label: 'Brasil' },
+  { code: 'US', label: 'EUA' },
+  { code: 'PT', label: 'Portugal' },
+  { code: 'AR', label: 'Argentina' },
+  { code: 'MX', label: 'México' },
+];
+
+function AdLibraryCard({
+  ad,
+  isSaved,
+  onSave,
+  onRemove,
+  saving,
+}: {
+  ad: AdLibraryAd;
+  isSaved: boolean;
+  onSave: () => void;
+  onRemove: () => void;
+  saving: boolean;
+}) {
+  const body = ad.creativeBodies[0] ?? '';
+  const title = ad.creativeTitles[0] ?? '';
+  const platforms = ad.publisherPlatforms.join(', ');
+  const dateStart = ad.deliveryStartTime
+    ? new Date(ad.deliveryStartTime).toLocaleDateString('pt-BR')
+    : null;
+
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 hover:border-primary/30 transition-colors">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-bold">{ad.pageName}</p>
+          {platforms && (
+            <p className="text-[10px] text-muted-foreground mt-0.5 uppercase tracking-wider">{platforms}</p>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span className={cn(
+            'rounded-full px-2 py-0.5 text-[10px] font-bold border',
+            ad.adActiveStatus === 'ACTIVE'
+              ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+              : 'bg-muted/50 text-muted-foreground border-border'
+          )}>
+            {ad.adActiveStatus === 'ACTIVE' ? 'Ativo' : 'Inativo'}
+          </span>
+        </div>
+      </div>
+
+      {title && (
+        <p className="text-sm font-semibold text-foreground/90 line-clamp-2">{title}</p>
+      )}
+      {body && (
+        <p className="text-xs text-muted-foreground line-clamp-3">{body}</p>
+      )}
+
+      <div className="flex items-center gap-3 text-[10px] text-muted-foreground border-t border-border pt-3 mt-auto">
+        {dateStart && <span>Início: {dateStart}</span>}
+        {ad.impressions?.lower_bound && (
+          <span>Impress.: {Number(ad.impressions.lower_bound).toLocaleString('pt-BR')}+</span>
+        )}
+        {ad.spend?.lower_bound && ad.currency && (
+          <span>Gasto: {ad.currency} {Number(ad.spend.lower_bound).toLocaleString('pt-BR')}+</span>
+        )}
+      </div>
+
+      <div className="flex gap-2">
+        <a
+          href={ad.adSnapshotUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-border bg-background/50 px-3 py-1.5 text-[11px] font-semibold text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+        >
+          <ExternalLink className="h-3 w-3" />
+          Ver anúncio
+        </a>
+        {isSaved ? (
+          <button
+            type="button"
+            onClick={onRemove}
+            disabled={saving}
+            className="flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-[11px] font-semibold text-red-400 hover:bg-red-500/20 transition-colors"
+          >
+            <Trash2 className="h-3 w-3" />
+            Remover
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={saving}
+            className="flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-3 py-1.5 text-[11px] font-semibold text-primary hover:bg-primary/20 transition-colors"
+          >
+            <BookMarked className="h-3 w-3" />
+            {saving ? 'Salvando...' : 'Salvar'}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function BibliotecaTab({ clientId }: { clientId: string }) {
+  const [query, setQuery] = useState('');
+  const [country, setCountry] = useState('BR');
+  const [status, setAdStatus] = useState<'ALL' | 'ACTIVE' | 'INACTIVE'>('ALL');
+  const [results, setResults] = useState<AdLibraryAd[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [searchError, setSearchError] = useState('');
+  const [savedAds, setSavedAds] = useState<SavedAd[]>([]);
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [activeView, setActiveView] = useState<'search' | 'saved'>('search');
+
+  useEffect(() => {
+    fetch(`/api/ad-library/saved?clientId=${clientId}`)
+      .then(r => r.ok ? r.json() as Promise<SavedAd[]> : [])
+      .then(setSavedAds)
+      .catch(() => {});
+  }, [clientId]);
+
+  async function doSearch(cursor?: string) {
+    if (!query.trim()) return;
+    if (cursor) setLoadingMore(true); else { setSearching(true); setResults([]); setNextCursor(null); }
+    setSearchError('');
+    try {
+      const params = new URLSearchParams({ q: query, country, status, limit: '20' });
+      if (cursor) params.set('after', cursor);
+      const res = await fetch(`/api/meta/ad-library?${params.toString()}`);
+      const json = await res.json() as { data?: AdLibraryAd[]; paging?: { cursors?: { after?: string }; next?: string }; error?: string };
+      if (!res.ok) { setSearchError(json.error ?? 'Erro na busca.'); return; }
+      setResults(prev => cursor ? [...prev, ...(json.data ?? [])] : (json.data ?? []));
+      setNextCursor(json.paging?.cursors?.after ?? (json.paging?.next ? 'next' : null));
+    } catch {
+      setSearchError('Erro de conexão.');
+    } finally {
+      setSearching(false);
+      setLoadingMore(false);
+    }
+  }
+
+  async function saveAd(ad: AdLibraryAd) {
+    setSavingId(ad.adArchiveId);
+    try {
+      const res = await fetch('/api/ad-library/saved', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientId, ad }),
+      });
+      if (res.ok) {
+        const saved = await res.json() as SavedAd;
+        setSavedAds(prev => [saved, ...prev.filter(s => s.adArchiveId !== ad.adArchiveId)]);
+      }
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  async function removeAd(savedId: string) {
+    setSavingId(savedId);
+    try {
+      await fetch(`/api/ad-library/saved/${savedId}`, { method: 'DELETE' });
+      setSavedAds(prev => prev.filter(s => s.id !== savedId));
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  const savedIds = new Set(savedAds.map(s => s.adArchiveId));
+
+  return (
+    <div className="space-y-5">
+      {/* View toggle */}
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setActiveView('search')}
+          className={cn(
+            'flex items-center gap-1.5 rounded-lg border px-4 py-2 text-xs font-bold uppercase tracking-wider transition-colors',
+            activeView === 'search'
+              ? 'border-primary/40 bg-primary/10 text-primary'
+              : 'border-border bg-card text-muted-foreground hover:bg-muted/50'
+          )}
+        >
+          <Search className="h-3.5 w-3.5" />
+          Buscar
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveView('saved')}
+          className={cn(
+            'flex items-center gap-1.5 rounded-lg border px-4 py-2 text-xs font-bold uppercase tracking-wider transition-colors',
+            activeView === 'saved'
+              ? 'border-primary/40 bg-primary/10 text-primary'
+              : 'border-border bg-card text-muted-foreground hover:bg-muted/50'
+          )}
+        >
+          <BookMarked className="h-3.5 w-3.5" />
+          Salvos
+          {savedAds.length > 0 && (
+            <span className="ml-0.5 rounded-full bg-primary/20 px-1.5 py-0.5 text-[10px] font-black text-primary">
+              {savedAds.length}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {activeView === 'search' && (
+        <>
+          {/* Search form */}
+          <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+            <div className="flex flex-wrap gap-3">
+              <div className="flex flex-1 min-w-52 items-center gap-2 rounded-lg border border-border bg-background px-3">
+                <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <input
+                  value={query}
+                  onChange={e => setQuery(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && doSearch()}
+                  placeholder="Palavra-chave, produto, marca..."
+                  className="flex-1 bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground"
+                />
+              </div>
+              <select
+                value={country}
+                onChange={e => setCountry(e.target.value)}
+                className="h-9 rounded-lg border border-border bg-background px-3 text-xs font-semibold text-foreground outline-none focus:ring-1 focus:ring-primary"
+              >
+                {AD_COUNTRIES.map(c => (
+                  <option key={c.code} value={c.code}>{c.label}</option>
+                ))}
+              </select>
+              <select
+                value={status}
+                onChange={e => setAdStatus(e.target.value as 'ALL' | 'ACTIVE' | 'INACTIVE')}
+                className="h-9 rounded-lg border border-border bg-background px-3 text-xs font-semibold text-foreground outline-none focus:ring-1 focus:ring-primary"
+              >
+                <option value="ALL">Todos</option>
+                <option value="ACTIVE">Ativos</option>
+                <option value="INACTIVE">Inativos</option>
+              </select>
+              <button
+                type="button"
+                onClick={() => doSearch()}
+                disabled={searching || !query.trim()}
+                className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-bold uppercase tracking-wider text-black hover:bg-primary/90 disabled:opacity-50 transition-colors"
+              >
+                {searching ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+                Buscar
+              </button>
+            </div>
+          </div>
+
+          {searchError && (
+            <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">
+              {searchError}
+            </div>
+          )}
+
+          {searching && (
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="h-56 animate-pulse rounded-xl border border-border bg-card" />
+              ))}
+            </div>
+          )}
+
+          {!searching && results.length > 0 && (
+            <>
+              <p className="text-xs text-muted-foreground">{results.length} anúncios encontrados</p>
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                {results.map(ad => (
+                  <AdLibraryCard
+                    key={ad.adArchiveId}
+                    ad={ad}
+                    isSaved={savedIds.has(ad.adArchiveId)}
+                    onSave={() => saveAd(ad)}
+                    onRemove={() => {
+                      const saved = savedAds.find(s => s.adArchiveId === ad.adArchiveId);
+                      if (saved) removeAd(saved.id);
+                    }}
+                    saving={savingId === ad.adArchiveId}
+                  />
+                ))}
+              </div>
+              {nextCursor && (
+                <div className="flex justify-center">
+                  <button
+                    type="button"
+                    onClick={() => doSearch(nextCursor)}
+                    disabled={loadingMore}
+                    className="flex items-center gap-2 rounded-lg border border-border bg-card px-5 py-2 text-xs font-bold text-muted-foreground hover:bg-muted/50 transition-colors"
+                  >
+                    {loadingMore ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                    {loadingMore ? 'Carregando...' : 'Carregar mais'}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+
+          {!searching && results.length === 0 && query.trim() && !searchError && (
+            <div className="rounded-xl border border-border bg-card/50 py-12 text-center">
+              <Search className="mx-auto h-8 w-8 text-muted-foreground/30 mb-3" />
+              <p className="text-sm text-muted-foreground">Nenhum anúncio encontrado.</p>
+              <p className="text-xs text-muted-foreground/60 mt-1">Tente outras palavras-chave ou mude o filtro de status.</p>
+            </div>
+          )}
+
+          {!searching && !query.trim() && (
+            <div className="rounded-xl border border-border bg-card/50 py-12 text-center">
+              <Search className="mx-auto h-8 w-8 text-muted-foreground/30 mb-3" />
+              <p className="text-sm text-muted-foreground">Digite palavras-chave para pesquisar na biblioteca de anúncios.</p>
+              <p className="text-xs text-muted-foreground/60 mt-1">Você pode pesquisar por produto, nicho, concorrente, etc.</p>
+            </div>
+          )}
+        </>
+      )}
+
+      {activeView === 'saved' && (
+        <>
+          {savedAds.length === 0 ? (
+            <div className="rounded-xl border border-border bg-card/50 py-12 text-center">
+              <BookMarked className="mx-auto h-8 w-8 text-muted-foreground/30 mb-3" />
+              <p className="text-sm text-muted-foreground">Nenhum anúncio salvo para este cliente.</p>
+              <p className="text-xs text-muted-foreground/60 mt-1">Vá em Buscar, encontre anúncios relevantes e salve aqui.</p>
+            </div>
+          ) : (
+            <>
+              <p className="text-xs text-muted-foreground">{savedAds.length} anúncio{savedAds.length !== 1 ? 's' : ''} salvo{savedAds.length !== 1 ? 's' : ''}</p>
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                {savedAds.map(ad => (
+                  <AdLibraryCard
+                    key={ad.id}
+                    ad={ad}
+                    isSaved
+                    onSave={() => {}}
+                    onRemove={() => removeAd(ad.id)}
+                    saving={savingId === ad.id}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── Page ───────────────────────────────────────────────────────────────────────
-const TABS = ['planejamento', 'pagamentos', 'dna', 'importar'] as const;
+const TABS = ['planejamento', 'pagamentos', 'dna', 'biblioteca', 'importar'] as const;
 type Tab = typeof TABS[number];
 
 export default function ClientPage({ params }: { params: Promise<{ id: string }> }) {
@@ -2612,6 +2965,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
     planejamento: 'Planejamento',
     pagamentos:   'Pagamentos',
     dna:          'DNA do Cliente',
+    biblioteca:   'Biblioteca de Anúncios',
     importar:     'Importar Dados',
   };
 
@@ -2680,6 +3034,8 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
       {tab === 'dna' && <ClientDnaTab clientId={id} clientName={client.name} />}
 
       {tab === 'pagamentos' && <InvestmentPaymentsTab clientId={id} clientName={client.name} />}
+
+      {tab === 'biblioteca' && <BibliotecaTab clientId={id} />}
 
 
 
