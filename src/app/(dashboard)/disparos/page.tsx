@@ -581,7 +581,7 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
     </div>
 
     {/* WhatsApp Preview */}
-    <div className="h-full">
+    <div className="h-full flex items-start justify-center pt-6">
       <WhatsAppPreview images={imageUrls} message={form.message} />
     </div>
   </div>
@@ -660,11 +660,11 @@ function WhatsAppPreview({ images, message }: { images: string[]; message: strin
   const hasContent = images.length > 0 || preview.trim();
 
   return (
-    <div className="h-full flex flex-col gap-2 min-h-[500px]">
+    <div className="flex flex-col gap-2 w-[300px]">
       <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground shrink-0">Preview</p>
 
-      {/* Phone — fills 100% of right column height */}
-      <div className="select-none flex-1 flex flex-col rounded-3xl border-[3px] border-zinc-700 bg-zinc-950 p-2 shadow-2xl overflow-hidden">
+      {/* Phone — fixed phone-like proportions */}
+      <div className="select-none flex flex-col rounded-3xl border-[3px] border-zinc-700 bg-zinc-950 p-2 shadow-2xl overflow-hidden" style={{ height: '580px' }}>
         <div className="rounded-[1.4rem] overflow-hidden flex-1 flex flex-col min-h-0">
 
           {/* Status bar */}
@@ -735,7 +735,7 @@ function WhatsAppPreview({ images, message }: { images: string[]; message: strin
         </div>
       </div>
 
-      <p className="text-center text-[10px] text-muted-foreground/40 shrink-0">Simulação — layout pode variar</p>
+      <p className="text-center text-[10px] text-muted-foreground/40 shrink-0 mt-1">Simulação — layout pode variar</p>
     </div>
   );
 }
