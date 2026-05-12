@@ -8,19 +8,20 @@ export async function POST(request: NextRequest) {
   const pool = makeServerPool();
   try {
     const { rows: [client] } = await pool.query(
-      `SELECT instance_id, token FROM public.zapi_clients WHERE id = $1`,
+      `SELECT instance_id, token, security_token FROM public.zapi_clients WHERE id = $1`,
       [clientId],
     );
     if (!client) return Response.json({ error: 'Instância não encontrada' }, { status: 404 });
 
     const url = `https://api.z-api.io/instances/${client.instance_id}/token/${client.token}/status`;
 
-    const res = await fetch(url, {
-      headers: {
-        'Cache-Control': 'no-cache',
-        'Content-Type': 'application/json',
-      },
-    });
+    const headers: Record<string, string> = {
+      'Cache-Control': 'no-cache',
+      'Content-Type': 'application/json',
+    };
+    if (client.security_token) headers['Client-Token'] = client.security_token;
+
+    const res = await fetch(url, { headers });
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let body: any = null;

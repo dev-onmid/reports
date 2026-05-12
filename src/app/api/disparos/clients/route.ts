@@ -5,13 +5,15 @@ import { checkStatus } from '@/lib/zapi';
 async function ensureTables(pool: ReturnType<typeof makeServerPool>) {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS public.zapi_clients (
-      id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-      name        TEXT        NOT NULL,
-      instance_id TEXT        NOT NULL,
-      token       TEXT        NOT NULL,
-      active      BOOLEAN     NOT NULL DEFAULT true,
-      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      id             UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+      name           TEXT        NOT NULL,
+      instance_id    TEXT        NOT NULL,
+      token          TEXT        NOT NULL,
+      security_token TEXT,
+      active         BOOLEAN     NOT NULL DEFAULT true,
+      created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    ALTER TABLE public.zapi_clients ADD COLUMN IF NOT EXISTS security_token TEXT;
     CREATE TABLE IF NOT EXISTS public.zapi_campaigns (
       id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
       client_id     UUID        NOT NULL REFERENCES public.zapi_clients(id) ON DELETE CASCADE,
@@ -57,10 +59,11 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const { name, instanceId, token } = await request.json() as {
+  const { name, instanceId, token, securityToken } = await request.json() as {
     name: string;
     instanceId: string;
     token: string;
+    securityToken?: string;
   };
 
   if (!name || !instanceId || !token) {
@@ -71,11 +74,11 @@ export async function POST(request: NextRequest) {
   try {
     await ensureTables(pool);
     const { rows } = await pool.query(
-      `INSERT INTO public.zapi_clients (name, instance_id, token) VALUES ($1, $2, $3) RETURNING id, name, instance_id, active, created_at`,
-      [name, instanceId, token],
+      `INSERT INTO public.zapi_clients (name, instance_id, token, security_token) VALUES ($1, $2, $3, $4) RETURNING id, name, instance_id, active, created_at`,
+      [name, instanceId, token, securityToken || null],
     );
 
-    const online = await checkStatus({ instanceId, token });
+    const online = await checkStatus({ instanceId, token, clientToken: securityToken });
     return Response.json({ ...rows[0], online }, { status: 201 });
   } finally {
     await pool.end();

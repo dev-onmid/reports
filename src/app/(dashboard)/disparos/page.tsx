@@ -67,7 +67,7 @@ const STATUS_COLOR: Record<string, string> = {
 function ClientesTab() {
   const [clients, setClients] = useState<ZClient[]>([]);
   const [loading, setLoading] = useState(true);
-  const [form, setForm] = useState({ name: '', instanceId: '', token: '' });
+  const [form, setForm] = useState({ name: '', instanceId: '', token: '', securityToken: '' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [testing, setTesting] = useState<string | null>(null);
@@ -82,7 +82,7 @@ function ClientesTab() {
 
   async function add() {
     if (!form.name || !form.instanceId || !form.token) {
-      setError('Preencha todos os campos.');
+      setError('Preencha nome, Instance ID e Token.');
       return;
     }
     setSaving(true);
@@ -96,7 +96,7 @@ function ClientesTab() {
       const data = await res.json() as ZClient;
       if (!res.ok) { setError((data as { error?: string }).error ?? 'Erro'); return; }
       setClients(prev => [data, ...prev]);
-      setForm({ name: '', instanceId: '', token: '' });
+      setForm({ name: '', instanceId: '', token: '', securityToken: '' });
     } finally {
       setSaving(false);
     }
@@ -131,7 +131,7 @@ function ClientesTab() {
       {/* Add form */}
       <div className="rounded-xl border border-border bg-card p-5 space-y-4">
         <p className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Nova instância Z-API</p>
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <input
             value={form.name}
             onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
@@ -148,6 +148,13 @@ function ClientesTab() {
             value={form.token}
             onChange={e => setForm(p => ({ ...p, token: e.target.value }))}
             placeholder="Token"
+            type="password"
+            className="h-9 rounded-lg border border-border bg-background px-3 text-sm outline-none focus:ring-1 focus:ring-primary"
+          />
+          <input
+            value={form.securityToken}
+            onChange={e => setForm(p => ({ ...p, securityToken: e.target.value }))}
+            placeholder="Client-Token (segurança)"
             type="password"
             className="h-9 rounded-lg border border-border bg-background px-3 text-sm outline-none focus:ring-1 focus:ring-primary"
           />

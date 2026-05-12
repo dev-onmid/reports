@@ -3,6 +3,13 @@ const BASE = 'https://api.z-api.io/instances';
 export interface ZApiClient {
   instanceId: string;
   token: string;
+  clientToken?: string;
+}
+
+function zapiHeaders(clientToken?: string): Record<string, string> {
+  const h: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (clientToken) h['Client-Token'] = clientToken;
+  return h;
 }
 
 export interface SendResult {
@@ -20,7 +27,7 @@ export async function sendText(
       `${BASE}/${client.instanceId}/token/${client.token}/send-text`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: zapiHeaders(client.clientToken),
         body: JSON.stringify({ phone, message }),
       },
     );
@@ -43,7 +50,7 @@ export async function sendImage(
       `${BASE}/${client.instanceId}/token/${client.token}/send-image`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: zapiHeaders(client.clientToken),
         body: JSON.stringify({ phone, image, caption }),
       },
     );
@@ -59,6 +66,7 @@ export async function checkStatus(client: ZApiClient): Promise<boolean> {
   try {
     const res = await fetch(
       `${BASE}/${client.instanceId}/token/${client.token}/status`,
+      { headers: zapiHeaders(client.clientToken) },
     );
     return res.ok;
   } catch {

@@ -21,7 +21,7 @@ export async function POST(
   try {
     // Load campaign + client credentials
     const { rows: [campaign] } = await pool.query(
-      `SELECT c.*, cl.instance_id, cl.token
+      `SELECT c.*, cl.instance_id, cl.token, cl.security_token
          FROM public.zapi_campaigns c
          JOIN public.zapi_clients cl ON cl.id = c.client_id
         WHERE c.id = $1`,
@@ -58,7 +58,7 @@ export async function POST(
 
     // Send
     const message = interpolate(campaign.message, number.phone, number.name ?? '');
-    const client = { instanceId: campaign.instance_id, token: campaign.token };
+    const client = { instanceId: campaign.instance_id, token: campaign.token, clientToken: campaign.security_token ?? undefined };
 
     const result = campaign.image_url
       ? await sendImage(client, number.phone, campaign.image_url, message)
