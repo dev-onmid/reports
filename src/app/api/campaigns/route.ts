@@ -12,6 +12,9 @@ export type CampaignPerformance = {
   platform: 'meta' | 'google';
   accountId: string;
   accountName: string;
+  connectionId: string;
+  loginCustomerId?: string;
+  status: string;
   spend: number;
   impressions: number;
   clicks: number;
@@ -221,7 +224,15 @@ export async function GET(request: NextRequest) {
 
       await Promise.allSettled(
         accounts.map(async (account) => {
-          const url = new URL(`https://graph.facebook.com/v21.0/${toMetaAccountNodeId(account.id)}/insights`);
+          const acctNode = toMetaAccountNodeId(account.id);
+
+          // Fetch campaign statuses in parallel with insights
+          const statusUrl = new URL(`https://graph.facebook.com/v21.0/${acctNode}/campaigns`);
+          statusUrl.searchParams.set('fields', 'id,effective_status');
+          statusUrl.searchParams.set('limit', '200');
+          statusUrl.searchParams.set('access_token', token);
+
+          const url = new URL(`https://graph.facebook.com/v21.0/${acctNode}/insights`);
           url.searchParams.set('level', 'campaign');
           url.searchParams.set('fields', 'campaign_id,campaign_name,spend,impressions,clicks,actions');
           applyMetaDateToUrl(url, metaPeriod);
@@ -229,11 +240,19 @@ export async function GET(request: NextRequest) {
           url.searchParams.set('limit', String(limit));
           url.searchParams.set('access_token', token);
 
-          const res = await fetch(url.toString());
-          if (!res.ok) return;
+          const [insightsRes, statusRes] = await Promise.all([fetch(url.toString()), fetch(statusUrl.toString())]);
+          if (!insightsRes.ok) return;
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const data = await res.json() as { data?: any[] };
-          for (const row of data.data ?? []) {
+          const insightsData = await insightsRes.json() as { data?: any[] };
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const statusData: Record<string, string> = {};
+          if (statusRes.ok) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const sd = await statusRes.json() as { data?: any[] };
+            for (const c of sd.data ?? []) statusData[c.id] = c.effective_status ?? 'ACTIVE';
+          }
+
+          for (const row of insightsData.data ?? []) {
             const spend = parseFloat(row.spend || '0');
             if (spend <= 0) continue;
             const impressions = parseInt(row.impressions || '0', 10);
@@ -247,6 +266,8 @@ export async function GET(request: NextRequest) {
               platform: 'meta',
               accountId: account.id,
               accountName: account.name,
+              connectionId: conn.id,
+              status: statusData[row.campaign_id] ?? 'ACTIVE',
               spend,
               impressions,
               clicks,
@@ -280,7 +301,7 @@ export async function GET(request: NextRequest) {
                     metrics.conversions
              FROM campaign
              WHERE ${gaqlPeriod}
-               AND campaign.status = ENABLED
+               AND campaign.status IN ('ENABLED', 'PAUSED')
                AND metrics.cost_micros > 0
              ORDER BY metrics.cost_micros DESC
              LIMIT ${limit}`,
@@ -305,6 +326,9 @@ export async function GET(request: NextRequest) {
               platform: 'google',
               accountId,
               accountName: accountId,
+              connectionId: conn.id,
+              loginCustomerId: loginCustomerId ?? undefined,
+              status: campaign.status ?? 'ENABLED',
               spend,
               impressions,
               clicks,

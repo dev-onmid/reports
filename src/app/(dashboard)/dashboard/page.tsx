@@ -6,6 +6,7 @@ import Link from 'next/link';
 import {
   AlertTriangle, ChevronDown, ChevronUp, GripVertical, ImageIcon,
   LayoutDashboard, Play, RefreshCw, Search, Sparkles, Check, X,
+  Pause, CircleDot,
 } from 'lucide-react';
 import type { AiInsight } from '@/app/api/ai/insights/route';
 import {
@@ -863,13 +864,58 @@ function CreativePreviewOverlay({
   );
 }
 
+function CampaignStatusDot({ status }: { status: string }) {
+  const isActive = status === 'ACTIVE' || status === 'ENABLED';
+  const isPaused = status === 'PAUSED';
+  return (
+    <span className={cn(
+      'inline-block h-2 w-2 rounded-full shrink-0',
+      isActive ? 'bg-emerald-400' : isPaused ? 'bg-yellow-400' : 'bg-muted-foreground/40',
+    )} title={isActive ? 'Ativa' : isPaused ? 'Pausada' : status} />
+  );
+}
+
 function CampaignPerformanceTable({
-  campaigns,
+  campaigns: initialCampaigns,
   loading,
 }: {
   campaigns: CampaignPerformance[];
   loading: boolean;
 }) {
+  const [campaigns, setCampaigns] = useState(initialCampaigns);
+  const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
+  const [actionError, setActionError] = useState<Record<string, string>>({});
+
+  useEffect(() => { setCampaigns(initialCampaigns); }, [initialCampaigns]);
+
+  async function toggleStatus(c: CampaignPerformance) {
+    const isActive = c.status === 'ACTIVE' || c.status === 'ENABLED';
+    const action = isActive ? 'pause' : 'activate';
+    const key = c.id;
+    setActionLoading(p => ({ ...p, [key]: true }));
+    setActionError(p => ({ ...p, [key]: '' }));
+
+    const apiBase = c.platform === 'meta' ? '/api/meta' : '/api/google';
+    const res = await fetch(`${apiBase}/campaigns/${c.id}/action`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action,
+        connectionId: c.connectionId,
+        accountId: c.accountId,
+        loginCustomerId: c.loginCustomerId,
+      }),
+    });
+    const data = await res.json() as { ok?: boolean; newStatus?: string; error?: string };
+
+    if (res.ok && data.newStatus) {
+      setCampaigns(prev => prev.map(x => x.id === c.id ? { ...x, status: data.newStatus! } : x));
+    } else {
+      setActionError(p => ({ ...p, [key]: data.error ?? 'Erro ao executar ação.' }));
+    }
+    setActionLoading(p => ({ ...p, [key]: false }));
+  }
+
   if (loading) {
     return (
       <div className="rounded-xl border border-border bg-card p-6">
@@ -892,7 +938,7 @@ function CampaignPerformanceTable({
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card">
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[860px] text-left">
+        <table className="w-full min-w-[920px] text-left">
           <thead className="border-b border-border bg-muted/30">
             <tr className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
               <th className="px-4 py-3">Campanha</th>
@@ -902,28 +948,57 @@ function CampaignPerformanceTable({
               <th className="px-4 py-3 text-right">Impressões</th>
               <th className="px-4 py-3 text-right">Cliques</th>
               <th className="px-4 py-3 text-right">CTR</th>
+              <th className="px-4 py-3 text-center">Ações</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {campaigns.map((campaign) => (
-              <tr key={`${campaign.platform}-${campaign.accountId}-${campaign.id}`} className="hover:bg-muted/20">
-                <td className="max-w-[320px] px-4 py-3">
-                  <div className="flex min-w-0 items-center gap-2">
-                    {campaign.platform === 'meta' ? <MetaMark /> : <GoogleMark />}
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-bold">{campaign.name}</p>
-                      <p className="truncate text-[11px] text-muted-foreground">{campaign.accountName}</p>
+            {campaigns.map((campaign) => {
+              const isActive = campaign.status === 'ACTIVE' || campaign.status === 'ENABLED';
+              const busy = actionLoading[campaign.id];
+              const err = actionError[campaign.id];
+              return (
+                <tr key={`${campaign.platform}-${campaign.accountId}-${campaign.id}`} className={cn('hover:bg-muted/20', !isActive && 'opacity-60')}>
+                  <td className="max-w-[300px] px-4 py-3">
+                    <div className="flex min-w-0 items-center gap-2">
+                      {campaign.platform === 'meta' ? <MetaMark /> : <GoogleMark />}
+                      <CampaignStatusDot status={campaign.status} />
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-bold">{campaign.name}</p>
+                        <p className="truncate text-[11px] text-muted-foreground">{campaign.accountName}</p>
+                        {err && <p className="text-[10px] text-red-400 mt-0.5 truncate">{err}</p>}
+                      </div>
                     </div>
-                  </div>
-                </td>
-                <td className="px-4 py-3 text-right text-sm font-bold text-primary">{formatCurrencyBRL(campaign.spend)}</td>
-                <td className="px-4 py-3 text-right text-sm font-bold">{campaign.leads.toLocaleString('pt-BR')}</td>
-                <td className="px-4 py-3 text-right text-sm font-bold">{campaign.cpl > 0 ? formatCurrencyBRL(campaign.cpl) : '—'}</td>
-                <td className="px-4 py-3 text-right text-sm">{campaign.impressions.toLocaleString('pt-BR')}</td>
-                <td className="px-4 py-3 text-right text-sm">{campaign.clicks.toLocaleString('pt-BR')}</td>
-                <td className="px-4 py-3 text-right text-sm">{campaign.ctr > 0 ? `${campaign.ctr.toFixed(2)}%` : '—'}</td>
-              </tr>
-            ))}
+                  </td>
+                  <td className="px-4 py-3 text-right text-sm font-bold text-primary">{formatCurrencyBRL(campaign.spend)}</td>
+                  <td className="px-4 py-3 text-right text-sm font-bold">{campaign.leads.toLocaleString('pt-BR')}</td>
+                  <td className="px-4 py-3 text-right text-sm font-bold">{campaign.cpl > 0 ? formatCurrencyBRL(campaign.cpl) : '—'}</td>
+                  <td className="px-4 py-3 text-right text-sm">{campaign.impressions.toLocaleString('pt-BR')}</td>
+                  <td className="px-4 py-3 text-right text-sm">{campaign.clicks.toLocaleString('pt-BR')}</td>
+                  <td className="px-4 py-3 text-right text-sm">{campaign.ctr > 0 ? `${campaign.ctr.toFixed(2)}%` : '—'}</td>
+                  <td className="px-4 py-3 text-center">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => toggleStatus(campaign)}
+                      title={isActive ? 'Pausar campanha' : 'Ativar campanha'}
+                      className={cn(
+                        'inline-flex h-7 w-7 items-center justify-center rounded-lg border transition-colors',
+                        busy && 'opacity-50 cursor-wait',
+                        isActive
+                          ? 'border-yellow-500/30 bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20'
+                          : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20',
+                      )}
+                    >
+                      {busy
+                        ? <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                        : isActive
+                          ? <Pause className="h-3.5 w-3.5" />
+                          : <CircleDot className="h-3.5 w-3.5" />}
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
