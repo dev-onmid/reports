@@ -62,9 +62,6 @@ export async function GET(request: NextRequest) {
     'ad_delivery_start_time',
     'ad_delivery_stop_time',
     'ad_active_status',
-    'spend',
-    'impressions',
-    'currency',
   ].join(','));
   url.searchParams.set('limit', String(limit));
   url.searchParams.set('access_token', token);

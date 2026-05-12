@@ -13,6 +13,7 @@ import {
   WalletCards,
   ClipboardList,
   BarChart3,
+  Library,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { APP_VERSION } from '@/lib/app-version';
@@ -23,6 +24,7 @@ const navItems = [
   { name: 'Relatórios', href: '/relatorios',  icon: FileText        },
   { name: 'Resultados', href: '/resultados',  icon: BarChart3       },
   { name: 'Pagamentos', href: '/pagamentos',  icon: WalletCards     },
+  { name: 'Biblioteca', href: '/biblioteca',  icon: Library         },
   { name: 'Integrações',href: '/integracoes', icon: Plug            },
   { name: 'Logs',       href: '/logs',        icon: ClipboardList   },
 ];

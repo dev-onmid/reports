@@ -65,10 +65,13 @@ export async function GET(request: NextRequest) {
   const pool = makeServerPool();
   try {
     await ensureTable(pool);
-    const { rows } = await pool.query(
-      'SELECT * FROM public.saved_ads WHERE client_id = $1 ORDER BY saved_at DESC',
-      [clientId]
-    );
+    const all = clientId === '__all__';
+    const { rows } = all
+      ? await pool.query('SELECT * FROM public.saved_ads ORDER BY saved_at DESC')
+      : await pool.query(
+          'SELECT * FROM public.saved_ads WHERE client_id = $1 ORDER BY saved_at DESC',
+          [clientId]
+        );
     return Response.json(rows.map(rowToSavedAd));
   } finally {
     await pool.end();
