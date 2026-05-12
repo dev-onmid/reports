@@ -301,7 +301,20 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
     if (!files) return;
     Array.from(files).forEach(file => {
       const reader = new FileReader();
-      reader.onload = () => setImageUrls(prev => [...prev, reader.result as string]);
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          // Resize to max 1200px and compress to JPEG 85% to reduce payload size
+          const MAX = 1200;
+          const scale = img.width > MAX ? MAX / img.width : 1;
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.round(img.width * scale);
+          canvas.height = Math.round(img.height * scale);
+          canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height);
+          setImageUrls(prev => [...prev, canvas.toDataURL('image/jpeg', 0.85)]);
+        };
+        img.src = e.target?.result as string;
+      };
       reader.readAsDataURL(file);
     });
   }
