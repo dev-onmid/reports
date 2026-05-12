@@ -22,7 +22,9 @@ type GoogleAdsAccountBalance = {
   isManager: boolean;
 };
 
-type GoogleAdsAccountBase = Omit<GoogleAdsAccountBalance, 'balance' | 'error' | 'connectionId' | 'connectionName'>;
+type GoogleAdsAccountBase = Omit<GoogleAdsAccountBalance, 'balance' | 'error' | 'connectionId' | 'connectionName'> & {
+  mccId?: string;
+};
 
 async function getFreshAccessToken(conn: GoogleConnectionRow): Promise<string> {
   if (conn.token_expiry) {
@@ -64,7 +66,7 @@ async function fetchCustomerInfo(
   accessToken: string,
   developerToken: string,
   loginCustomerId?: string
-): Promise<Omit<GoogleAdsAccountBalance, 'balance' | 'error' | 'connectionId' | 'connectionName'> | null> {
+): Promise<GoogleAdsAccountBase | null> {
   const data = await gadsSearch(
     customerId,
     'SELECT customer.id, customer.descriptive_name, customer.currency_code, customer.status, customer.manager FROM customer LIMIT 1',
@@ -90,7 +92,7 @@ async function fetchMccSubAccounts(
   mccId: string,
   accessToken: string,
   developerToken: string
-): Promise<Array<Omit<GoogleAdsAccountBalance, 'balance' | 'error' | 'connectionId' | 'connectionName'>>> {
+): Promise<GoogleAdsAccountBase[]> {
   const data = await gadsSearch(
     mccId,
     `SELECT customer_client.id, customer_client.descriptive_name, customer_client.currency_code,
@@ -109,30 +111,58 @@ async function fetchMccSubAccounts(
     name: customer.descriptiveName ?? `Conta ${customer.id}`,
     currency: customer.currencyCode ?? 'BRL',
     isManager: Boolean(customer.manager),
+    mccId,
   }));
+}
+
+async function fetchAccountBalance(
+  customerId: string,
+  accessToken: string,
+  developerToken: string,
+  loginCustomerId?: string
+): Promise<number | null> {
+  const data = await gadsSearch(
+    customerId,
+    `SELECT account_budget.adjusted_spending_limit_micros, account_budget.amount_served_micros
+     FROM account_budget
+     WHERE account_budget.status = 'APPROVED'`,
+    accessToken,
+    developerToken,
+    loginCustomerId
+  );
+  if (!data?.results?.length) return null;
+
+  let totalRemaining = 0;
+  let hasFiniteBudget = false;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  for (const row of data.results as any[]) {
+    const budget = row.accountBudget;
+    if (!budget) continue;
+    const limitMicros = budget.adjustedSpendingLimitMicros;
+    if (limitMicros == null) continue; // unlimited / postpaid
+    hasFiniteBudget = true;
+    const served = Number(budget.amountServedMicros ?? 0);
+    totalRemaining += Math.max(0, Number(limitMicros) - served);
+  }
+
+  if (!hasFiniteBudget) return null;
+  return totalRemaining / 1_000_000;
 }
 
 export async function GET() {
   const pool = makeServerPool();
   let connections: GoogleConnectionRow[] = [];
-  let storedBalances = new Map<string, number | null>();
 
   try {
-    const [connResult, balanceResult] = await Promise.all([
-      pool.query(
-        `SELECT *
-         FROM public.google_connections
-         WHERE status = 'connected'
-           AND COALESCE(account_type, 'google_ads') = 'google_ads'
-         ORDER BY connected_at DESC`
-      ),
-      pool.query('SELECT id, balance FROM public.google_ads_accounts'),
-    ]);
-
-    connections = connResult.rows as GoogleConnectionRow[];
-    storedBalances = new Map(
-      balanceResult.rows.map((row) => [String(row.id).replace(/\D/g, ''), row.balance === null ? null : Number(row.balance)])
+    const { rows } = await pool.query(
+      `SELECT *
+       FROM public.google_connections
+       WHERE status = 'connected'
+         AND COALESCE(account_type, 'google_ads') = 'google_ads'
+       ORDER BY connected_at DESC`
     );
+    connections = rows as GoogleConnectionRow[];
   } finally {
     await pool.end();
   }
@@ -154,7 +184,7 @@ export async function GET() {
           resourceNames.map((resourceName) => fetchCustomerInfo(resourceName.replace('customers/', ''), accessToken, developerToken))
         )
       )
-        .filter((result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof fetchCustomerInfo>>> => result.status === 'fulfilled' && result.value !== null)
+        .filter((result): result is PromiseFulfilledResult<GoogleAdsAccountBase> => result.status === 'fulfilled' && result.value !== null)
         .map((result) => result.value);
       const topLevel = settledTopLevel.filter((account): account is GoogleAdsAccountBase => account !== null);
 
@@ -162,24 +192,27 @@ export async function GET() {
         topLevel.filter((account) => account.isManager).map((account) => fetchMccSubAccounts(account.id, accessToken, developerToken))
       );
       const subAccounts = subAccountArrays
-        .filter((result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof fetchMccSubAccounts>>> => result.status === 'fulfilled')
+        .filter((result): result is PromiseFulfilledResult<GoogleAdsAccountBase[]> => result.status === 'fulfilled')
         .flatMap((result) => result.value);
 
       const seenTopIds = new Set(topLevel.map((account) => account.id));
       const accounts = [...topLevel, ...subAccounts.filter((account) => !seenTopIds.has(account.id))];
 
-      for (const account of accounts) {
-        if (!account.id || account.isManager) continue;
-        const normalizedId = account.id.replace(/\D/g, '');
-        accountMap.set(normalizedId, {
-          ...account,
-          id: normalizedId,
-          balance: storedBalances.get(normalizedId) ?? null,
-          error: null,
-          connectionId: conn.id,
-          connectionName: conn.email ?? 'Google Ads',
-        });
-      }
+      await Promise.allSettled(
+        accounts.map(async (account) => {
+          if (!account.id || account.isManager) return;
+          const normalizedId = account.id.replace(/\D/g, '');
+          const balance = await fetchAccountBalance(normalizedId, accessToken, developerToken, account.mccId);
+          accountMap.set(normalizedId, {
+            ...account,
+            id: normalizedId,
+            balance,
+            error: null,
+            connectionId: conn.id,
+            connectionName: conn.email ?? 'Google Ads',
+          });
+        })
+      );
     })
   );
 
