@@ -51,7 +51,7 @@ export async function sendImage(
       {
         method: 'POST',
         headers: zapiHeaders(client.clientToken),
-        body: JSON.stringify({ phone, image, caption }),
+        body: JSON.stringify({ phone, image: image.includes(',') ? image.split(',')[1] : image, caption }),
       },
     );
     if (res.ok) return { ok: true };
