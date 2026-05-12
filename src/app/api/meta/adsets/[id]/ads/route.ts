@@ -3,31 +3,14 @@ import { makeServerPool } from '@/lib/server-db';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import { resolveMetaPeriod } from '@/lib/period-utils';
 
-export type AdSetTargeting = {
-  age_min?: number;
-  age_max?: number;
-  genders?: number[];
-  geo_locations?: {
-    countries?: string[];
-    cities?: Array<{ key: string; name: string; country: string }>;
-    regions?: Array<{ key: string; name: string; country: string }>;
-  };
-  flexible_spec?: Array<{
-    interests?: Array<{ id: string; name: string }>;
-    behaviors?: Array<{ id: string; name: string }>;
-  }>;
-};
-
-export type AdSet = {
+export type MetaAdWithMetrics = {
   id: string;
   name: string;
   status: string;
-  daily_budget?: number;
-  lifetime_budget?: number;
-  targeting: AdSetTargeting;
-};
-
-export type AdSetWithMetrics = AdSet & {
+  body?: string;
+  title?: string;
+  imageUrl?: string;
+  creativeId?: string;
   spend: number;
   impressions: number;
   clicks: number;
@@ -55,7 +38,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { id: campaignId } = await params;
+  const { id: adsetId } = await params;
   const connectionId = req.nextUrl.searchParams.get('connectionId') ?? '';
   const period = req.nextUrl.searchParams.get('period') ?? 'last_30d';
   const dateFrom = req.nextUrl.searchParams.get('dateFrom') ?? '';
@@ -89,9 +72,9 @@ export async function GET(
   const [, since, until] = metaPeriod.split(':');
   const insightField = `insights.time_range(${JSON.stringify({ since, until })}){spend,impressions,clicks,actions}`;
 
-  const url = new URL(`https://graph.facebook.com/v21.0/${campaignId}/adsets`);
-  url.searchParams.set('fields', `id,name,status,effective_status,daily_budget,lifetime_budget,targeting,${insightField}`);
-  url.searchParams.set('limit', '50');
+  const url = new URL(`https://graph.facebook.com/v21.0/${adsetId}/ads`);
+  url.searchParams.set('fields', `id,name,status,effective_status,creative{id,body,title,thumbnail_url,effective_object_story_spec},${insightField}`);
+  url.searchParams.set('limit', '30');
   url.searchParams.set('access_token', token);
 
   const res = await fetch(url.toString());
@@ -102,22 +85,29 @@ export async function GET(
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const data = await res.json() as { data?: any[] };
-  const adsets: AdSetWithMetrics[] = (data.data ?? []).map((s) => {
+  const ads: MetaAdWithMetrics[] = (data.data ?? []).map((ad) => {
+    const cr = ad.creative ?? {};
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const insightRow = (s.insights?.data?.[0] ?? {}) as Record<string, any>;
+    const spec = cr.effective_object_story_spec as any;
+    const linkData = spec?.link_data ?? spec?.video_data ?? spec?.photo_data ?? {};
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const insightRow = (ad.insights?.data?.[0] ?? {}) as Record<string, any>;
     const spend = parseFloat(insightRow.spend ?? '0');
     const impressions = parseInt(insightRow.impressions ?? '0', 10);
     const clicks = parseInt(insightRow.clicks ?? '0', 10);
     const leads = ((insightRow.actions ?? []) as { action_type: string; value: string }[])
       .filter(a => META_RESULT_ACTIONS.includes(a.action_type))
       .reduce((sum, a) => sum + parseInt(a.value || '0', 10), 0);
+
     return {
-      id: s.id,
-      name: s.name,
-      status: s.effective_status ?? s.status ?? 'ACTIVE',
-      daily_budget: s.daily_budget ? Number(s.daily_budget) / 100 : undefined,
-      lifetime_budget: s.lifetime_budget ? Number(s.lifetime_budget) / 100 : undefined,
-      targeting: s.targeting ?? {},
+      id: ad.id,
+      name: ad.name,
+      status: ad.effective_status ?? ad.status ?? 'ACTIVE',
+      body: cr.body ?? linkData.message ?? '',
+      title: cr.title ?? linkData.name ?? '',
+      imageUrl: cr.thumbnail_url ?? linkData.picture ?? '',
+      creativeId: cr.id,
       spend,
       impressions,
       clicks,
@@ -127,5 +117,5 @@ export async function GET(
     };
   });
 
-  return Response.json(adsets);
+  return Response.json(ads);
 }

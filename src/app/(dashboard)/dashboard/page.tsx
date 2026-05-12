@@ -1,16 +1,19 @@
 "use client";
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import {
-  AlertTriangle, ChevronDown, ChevronUp, GripVertical, ImageIcon,
+  AlertTriangle, ChevronDown, ChevronUp, ChevronRight, GripVertical, ImageIcon,
   LayoutDashboard, Play, RefreshCw, Search, Sparkles, Check, X,
   Pause, CircleDot, Pencil, Settings2, Users, Copy,
 } from 'lucide-react';
 import type { AiInsight } from '@/app/api/ai/insights/route';
-import type { AdSet } from '@/app/api/meta/campaigns/[id]/adsets/route';
+import type { AdSet, AdSetWithMetrics } from '@/app/api/meta/campaigns/[id]/adsets/route';
 import type { MetaAd } from '@/app/api/meta/campaigns/[id]/ads/route';
+import type { MetaAdWithMetrics } from '@/app/api/meta/adsets/[id]/ads/route';
+import type { GoogleAdGroup } from '@/app/api/google/campaigns/[id]/adgroups/route';
+import type { GoogleAd } from '@/app/api/google/adgroups/[id]/ads/route';
 import type { CopyVariation } from '@/app/api/ai/copy/route';
 import {
   DndContext, closestCenter, KeyboardSensor, PointerSensor,
@@ -1261,12 +1264,58 @@ function CampaignOptimizeDrawer({ campaign, onClose }: { campaign: CampaignPerfo
 
 // ─── Campaign Performance Table ───────────────────────────────────────────────
 
+type ChildState = { loading: boolean; data: unknown[] };
+
+type RowKind = 'campaign' | 'adset' | 'meta-ad' | 'adgroup' | 'google-ad';
+
+type ExpandableRow =
+  | { kind: 'campaign'; key: string; fetchUrl: string; data: CampaignPerformance; level: 0 }
+  | { kind: 'adset'; key: string; fetchUrl: string; data: AdSetWithMetrics; campaign: CampaignPerformance; level: 1 }
+  | { kind: 'meta-ad'; key: string; data: MetaAdWithMetrics; adset: AdSetWithMetrics; campaign: CampaignPerformance; level: 2 }
+  | { kind: 'adgroup'; key: string; fetchUrl: string; data: GoogleAdGroup; campaign: CampaignPerformance; level: 1 }
+  | { kind: 'google-ad'; key: string; data: GoogleAd; adgroup: GoogleAdGroup; campaign: CampaignPerformance; level: 2 }
+  | { kind: 'loading'; key: string; level: 1 | 2 };
+
+function canExpand(r: ExpandableRow): r is Extract<ExpandableRow, { fetchUrl: string }> {
+  return 'fetchUrl' in r;
+}
+
+const INDENT = ['pl-2', 'pl-8', 'pl-14'] as const;
+
+function PauseActivateBtn({
+  status, busy, onClick,
+}: { status: string; busy: boolean; onClick: () => void }) {
+  const isActive = status === 'ACTIVE' || status === 'ENABLED';
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={onClick}
+      title={isActive ? 'Pausar' : 'Ativar'}
+      className={cn(
+        'inline-flex h-7 w-7 items-center justify-center rounded-lg border transition-colors',
+        busy && 'opacity-50 cursor-wait',
+        isActive ? 'border-yellow-500/30 bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20'
+                 : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20',
+      )}
+    >
+      {busy ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : isActive ? <Pause className="h-3.5 w-3.5" /> : <CircleDot className="h-3.5 w-3.5" />}
+    </button>
+  );
+}
+
 function CampaignPerformanceTable({
   campaigns: initialCampaigns,
   loading,
+  period,
+  dateFrom,
+  dateTo,
 }: {
   campaigns: CampaignPerformance[];
   loading: boolean;
+  period: string;
+  dateFrom: string;
+  dateTo: string;
 }) {
   const [campaigns, setCampaigns] = useState(initialCampaigns);
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
@@ -1275,8 +1324,90 @@ function CampaignPerformanceTable({
   const [budgetInput, setBudgetInput] = useState('');
   const [savingBudget, setSavingBudget] = useState<string | null>(null);
   const [optimizeCampaign, setOptimizeCampaign] = useState<CampaignPerformance | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [childrenMap, setChildrenMap] = useState<Record<string, ChildState>>({});
+  // Track optimistic status overrides for child rows
+  const [childStatus, setChildStatus] = useState<Record<string, string>>({});
 
   useEffect(() => { setCampaigns(initialCampaigns); }, [initialCampaigns]);
+
+  const periodParams = useMemo(() => {
+    const params = new URLSearchParams({ period });
+    if (dateFrom) params.set('dateFrom', dateFrom);
+    if (dateTo) params.set('dateTo', dateTo);
+    return params.toString();
+  }, [period, dateFrom, dateTo]);
+
+  async function toggleExpand(key: string, fetchUrl: string) {
+    if (expanded.has(key)) {
+      setExpanded(prev => { const s = new Set(prev); s.delete(key); return s; });
+      return;
+    }
+    setExpanded(prev => new Set([...prev, key]));
+    if (childrenMap[key]) return;
+    setChildrenMap(prev => ({ ...prev, [key]: { loading: true, data: [] } }));
+    try {
+      const res = await fetch(fetchUrl);
+      const data = await res.json();
+      setChildrenMap(prev => ({ ...prev, [key]: { loading: false, data: Array.isArray(data) ? data : [] } }));
+    } catch {
+      setChildrenMap(prev => ({ ...prev, [key]: { loading: false, data: [] } }));
+    }
+  }
+
+  const rows = useMemo<ExpandableRow[]>(() => {
+    const result: ExpandableRow[] = [];
+    for (const campaign of campaigns) {
+      const campKey = campaign.id;
+      const campUrl = campaign.platform === 'meta'
+        ? `/api/meta/campaigns/${campaign.id}/adsets?connectionId=${campaign.connectionId}&${periodParams}`
+        : `/api/google/campaigns/${campaign.id}/adgroups?connectionId=${campaign.connectionId}&accountId=${campaign.accountId}${campaign.loginCustomerId ? `&loginCustomerId=${campaign.loginCustomerId}` : ''}&${periodParams}`;
+
+      result.push({ kind: 'campaign', key: campKey, fetchUrl: campUrl, data: campaign, level: 0 });
+
+      if (expanded.has(campKey)) {
+        const campChildren = childrenMap[campKey];
+        if (campChildren?.loading) {
+          result.push({ kind: 'loading', key: `${campKey}:loading`, level: 1 });
+        } else {
+          for (const child of campChildren?.data ?? []) {
+            if (campaign.platform === 'meta') {
+              const adset = child as AdSetWithMetrics;
+              const adsetKey = `${campKey}:${adset.id}`;
+              const adsetUrl = `/api/meta/adsets/${adset.id}/ads?connectionId=${campaign.connectionId}&${periodParams}`;
+              result.push({ kind: 'adset', key: adsetKey, fetchUrl: adsetUrl, data: adset, campaign, level: 1 });
+              if (expanded.has(adsetKey)) {
+                const adChildren = childrenMap[adsetKey];
+                if (adChildren?.loading) {
+                  result.push({ kind: 'loading', key: `${adsetKey}:loading`, level: 2 });
+                } else {
+                  for (const ad of (adChildren?.data ?? []) as MetaAdWithMetrics[]) {
+                    result.push({ kind: 'meta-ad', key: `${adsetKey}:${ad.id}`, data: ad, adset, campaign, level: 2 });
+                  }
+                }
+              }
+            } else {
+              const adgroup = child as GoogleAdGroup;
+              const adgroupKey = `${campKey}:${adgroup.id}`;
+              const adgroupUrl = `/api/google/adgroups/${adgroup.id}/ads?connectionId=${campaign.connectionId}&accountId=${campaign.accountId}${campaign.loginCustomerId ? `&loginCustomerId=${campaign.loginCustomerId}` : ''}&${periodParams}`;
+              result.push({ kind: 'adgroup', key: adgroupKey, fetchUrl: adgroupUrl, data: adgroup, campaign, level: 1 });
+              if (expanded.has(adgroupKey)) {
+                const adChildren = childrenMap[adgroupKey];
+                if (adChildren?.loading) {
+                  result.push({ kind: 'loading', key: `${adgroupKey}:loading`, level: 2 });
+                } else {
+                  for (const ad of (adChildren?.data ?? []) as GoogleAd[]) {
+                    result.push({ kind: 'google-ad', key: `${adgroupKey}:${ad.id}`, data: ad, adgroup, campaign, level: 2 });
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    return result;
+  }, [campaigns, expanded, childrenMap, periodParams]);
 
   async function toggleStatus(c: CampaignPerformance) {
     const isActive = c.status === 'ACTIVE' || c.status === 'ENABLED';
@@ -1292,6 +1423,29 @@ function CampaignPerformanceTable({
     if (res.ok && data.newStatus) setCampaigns(prev => prev.map(x => x.id === c.id ? { ...x, status: data.newStatus! } : x));
     else setActionError(p => ({ ...p, [c.id]: data.error ?? 'Erro.' }));
     setActionLoading(p => ({ ...p, [c.id]: false }));
+  }
+
+  async function toggleChildStatus(
+    rowKey: string,
+    currentStatus: string,
+    apiUrl: string,
+    body: Record<string, unknown>,
+  ) {
+    const isActive = currentStatus === 'ACTIVE' || currentStatus === 'ENABLED';
+    setActionLoading(p => ({ ...p, [rowKey]: true }));
+    setActionError(p => ({ ...p, [rowKey]: '' }));
+    const res = await fetch(apiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...body, action: isActive ? 'pause' : 'activate' }),
+    });
+    const data = await res.json() as { ok?: boolean; newStatus?: string; error?: string };
+    if (res.ok && data.newStatus) {
+      setChildStatus(p => ({ ...p, [rowKey]: data.newStatus! }));
+    } else {
+      setActionError(p => ({ ...p, [rowKey]: data.error ?? 'Erro.' }));
+    }
+    setActionLoading(p => ({ ...p, [rowKey]: false }));
   }
 
   async function saveBudget(c: CampaignPerformance) {
@@ -1329,6 +1483,248 @@ function CampaignPerformanceTable({
     return <div className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground">Nenhuma campanha com gasto no período selecionado.</div>;
   }
 
+  function renderRow(row: ExpandableRow) {
+    if (row.kind === 'loading') {
+      return (
+        <tr key={row.key} className="border-t border-border/50">
+          <td colSpan={8} className={cn('px-4 py-2', INDENT[row.level])}>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <RefreshCw className="h-3 w-3 animate-spin" /> Carregando...
+            </div>
+          </td>
+        </tr>
+      );
+    }
+
+    const isExpanded = 'fetchUrl' in row && expanded.has(row.key);
+    const expandable = canExpand(row);
+
+    const rowKind: RowKind = row.kind;
+    const busy = actionLoading[row.key] ?? false;
+    const err = actionError[row.key] ?? '';
+
+    // Determine display status (with optimistic override for children)
+    let displayStatus: string;
+    let displayName: string;
+    let spend = 0, impressions = 0, clicks = 0, leads = 0, ctr = 0, cpl = 0;
+    let dailyBudget: number | undefined;
+    let isActive: boolean;
+
+    if (row.kind === 'campaign') {
+      displayStatus = row.data.status;
+      displayName = row.data.name;
+      spend = row.data.spend;
+      impressions = row.data.impressions;
+      clicks = row.data.clicks;
+      leads = row.data.leads;
+      ctr = row.data.ctr;
+      cpl = row.data.cpl;
+      dailyBudget = row.data.dailyBudget;
+    } else if (row.kind === 'adset') {
+      displayStatus = childStatus[row.key] ?? row.data.status;
+      displayName = row.data.name;
+      spend = row.data.spend;
+      impressions = row.data.impressions;
+      clicks = row.data.clicks;
+      leads = row.data.leads;
+      ctr = row.data.ctr;
+      cpl = row.data.cpl;
+      dailyBudget = row.data.daily_budget;
+    } else if (row.kind === 'meta-ad') {
+      displayStatus = childStatus[row.key] ?? row.data.status;
+      displayName = row.data.name;
+      spend = row.data.spend;
+      impressions = row.data.impressions;
+      clicks = row.data.clicks;
+      leads = row.data.leads;
+      ctr = row.data.ctr;
+      cpl = row.data.cpl;
+    } else if (row.kind === 'adgroup') {
+      displayStatus = childStatus[row.key] ?? row.data.status;
+      displayName = row.data.name;
+      spend = row.data.spend;
+      impressions = row.data.impressions;
+      clicks = row.data.clicks;
+      leads = row.data.leads;
+      ctr = row.data.ctr;
+      cpl = row.data.cpl;
+    } else {
+      // google-ad
+      displayStatus = childStatus[row.key] ?? row.data.status;
+      displayName = row.data.name;
+      spend = row.data.spend;
+      impressions = row.data.impressions;
+      clicks = row.data.clicks;
+      leads = row.data.leads;
+      ctr = row.data.ctr;
+      cpl = row.data.cpl;
+    }
+
+    isActive = displayStatus === 'ACTIVE' || displayStatus === 'ENABLED';
+
+    const levelBg = row.level === 0 ? '' : row.level === 1 ? 'bg-muted/10' : 'bg-muted/5';
+
+    return (
+      <tr key={row.key} className={cn('border-t border-border/50 hover:bg-muted/20 transition-colors', !isActive && 'opacity-60', levelBg)}>
+        {/* Name column */}
+        <td className="max-w-[300px] px-2 py-2.5">
+          <div className={cn('flex min-w-0 items-center gap-1.5', INDENT[row.level])}>
+            {/* Expand chevron */}
+            {expandable ? (
+              <button
+                type="button"
+                onClick={() => toggleExpand(row.key, row.fetchUrl)}
+                className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {isExpanded
+                  ? <ChevronDown className="h-3.5 w-3.5" />
+                  : <ChevronRight className="h-3.5 w-3.5" />}
+              </button>
+            ) : (
+              <span className="h-3.5 w-3.5 shrink-0" />
+            )}
+
+            {row.kind === 'campaign' && (row.data.platform === 'meta' ? <MetaMark /> : <GoogleMark />)}
+            <CampaignStatusDot status={displayStatus} />
+            <div className="min-w-0">
+              <p className={cn('truncate font-semibold', row.level === 0 ? 'text-sm font-bold' : row.level === 1 ? 'text-xs' : 'text-[11px] text-muted-foreground')}>
+                {displayName}
+              </p>
+              {row.kind === 'campaign' && (
+                <p className="truncate text-[11px] text-muted-foreground">{row.data.accountName}</p>
+              )}
+              {row.kind === 'adset' && (row.data.targeting?.geo_locations?.countries?.length ?? 0) > 0 && (
+                <p className="truncate text-[10px] text-muted-foreground">{(row.data.targeting.geo_locations?.countries ?? []).join(', ')}</p>
+              )}
+              {err && <p className="text-[10px] text-red-400 mt-0.5 truncate">{err}</p>}
+            </div>
+          </div>
+        </td>
+
+        {/* Budget cell — editable for campaign level */}
+        <td className="px-3 py-2.5 text-right">
+          {row.kind === 'campaign' && editingBudget === row.data.id ? (
+            <div className="flex items-center justify-end gap-1">
+              <input
+                autoFocus
+                type="number"
+                min={1}
+                value={budgetInput}
+                onChange={e => setBudgetInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') saveBudget(row.data); if (e.key === 'Escape') setEditingBudget(null); }}
+                className="w-20 h-7 rounded border border-primary bg-background px-2 text-xs outline-none"
+              />
+              <button type="button" onClick={() => saveBudget(row.data)} className="text-emerald-400 hover:text-emerald-300">
+                {savingBudget === row.data.id ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+              </button>
+              <button type="button" onClick={() => setEditingBudget(null)} className="text-muted-foreground hover:text-foreground"><X className="h-3 w-3" /></button>
+            </div>
+          ) : dailyBudget != null ? (
+            <button
+              type="button"
+              onClick={row.kind === 'campaign' ? () => { setEditingBudget(row.data.id); setBudgetInput(String(dailyBudget ?? '')); } : undefined}
+              className={cn('group flex items-center justify-end gap-1 text-xs font-semibold', row.kind === 'campaign' && 'hover:text-primary transition-colors')}
+            >
+              {formatCurrencyBRL(dailyBudget)}
+              {row.kind === 'campaign' && <Pencil className="h-3 w-3 opacity-0 group-hover:opacity-60 transition-opacity" />}
+            </button>
+          ) : (
+            <span className="text-xs text-muted-foreground/40">—</span>
+          )}
+        </td>
+
+        {/* Metrics */}
+        <td className="px-3 py-2.5 text-right text-xs font-bold text-primary">{formatCurrencyBRL(spend)}</td>
+        <td className="px-3 py-2.5 text-right text-xs font-semibold">{leads > 0 ? leads.toLocaleString('pt-BR') : <span className="text-muted-foreground/40">—</span>}</td>
+        <td className="px-3 py-2.5 text-right text-xs font-semibold">{cpl > 0 ? formatCurrencyBRL(cpl) : <span className="text-muted-foreground/40">—</span>}</td>
+        <td className="px-3 py-2.5 text-right text-xs text-muted-foreground">{impressions > 0 ? impressions.toLocaleString('pt-BR') : <span className="opacity-40">—</span>}</td>
+        <td className="px-3 py-2.5 text-right text-xs text-muted-foreground">{ctr > 0 ? `${ctr.toFixed(2)}%` : <span className="opacity-40">—</span>}</td>
+
+        {/* Actions */}
+        <td className="px-3 py-2.5">
+          <div className="flex items-center justify-center gap-1">
+            {/* Pause/Activate */}
+            {rowKind === 'campaign' && (
+              <PauseActivateBtn
+                status={displayStatus}
+                busy={busy}
+                onClick={() => toggleStatus(row.data as CampaignPerformance)}
+              />
+            )}
+            {rowKind === 'adset' && (
+              <PauseActivateBtn
+                status={displayStatus}
+                busy={busy}
+                onClick={() => {
+                  const r = row as Extract<ExpandableRow, { kind: 'adset' }>;
+                  toggleChildStatus(
+                    row.key, displayStatus,
+                    `/api/meta/adsets/${r.data.id}/action`,
+                    { connectionId: r.campaign.connectionId },
+                  );
+                }}
+              />
+            )}
+            {rowKind === 'meta-ad' && (
+              <PauseActivateBtn
+                status={displayStatus}
+                busy={busy}
+                onClick={() => {
+                  const r = row as Extract<ExpandableRow, { kind: 'meta-ad' }>;
+                  toggleChildStatus(
+                    row.key, displayStatus,
+                    `/api/meta/ads/${r.data.id}/action`,
+                    { connectionId: r.campaign.connectionId },
+                  );
+                }}
+              />
+            )}
+            {rowKind === 'adgroup' && (
+              <PauseActivateBtn
+                status={displayStatus}
+                busy={busy}
+                onClick={() => {
+                  const r = row as Extract<ExpandableRow, { kind: 'adgroup' }>;
+                  toggleChildStatus(
+                    row.key, displayStatus,
+                    `/api/google/adgroups/${r.data.id}/action`,
+                    { connectionId: r.campaign.connectionId, accountId: r.campaign.accountId, loginCustomerId: r.campaign.loginCustomerId },
+                  );
+                }}
+              />
+            )}
+            {rowKind === 'google-ad' && (
+              <PauseActivateBtn
+                status={displayStatus}
+                busy={busy}
+                onClick={() => {
+                  const r = row as Extract<ExpandableRow, { kind: 'google-ad' }>;
+                  toggleChildStatus(
+                    row.key, displayStatus,
+                    `/api/google/ads/${r.data.id}/action`,
+                    { connectionId: r.campaign.connectionId, accountId: r.campaign.accountId, loginCustomerId: r.campaign.loginCustomerId, adGroupId: r.data.adGroupId },
+                  );
+                }}
+              />
+            )}
+
+            {/* Campaign-level optimize button */}
+            {rowKind === 'campaign' && (
+              <button
+                type="button"
+                onClick={() => setOptimizeCampaign(row.data as CampaignPerformance)}
+                title="Otimizar público e copy"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-violet-500/30 bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 transition-colors"
+              >
+                <Settings2 className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        </td>
+      </tr>
+    );
+  }
+
   return (
     <>
       {optimizeCampaign && <CampaignOptimizeDrawer campaign={optimizeCampaign} onClose={() => setOptimizeCampaign(null)} />}
@@ -1337,7 +1733,7 @@ function CampaignPerformanceTable({
           <table className="w-full min-w-[1020px] text-left">
             <thead className="border-b border-border bg-muted/30">
               <tr className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                <th className="px-4 py-3">Campanha</th>
+                <th className="px-4 py-3">Nome</th>
                 <th className="px-4 py-3 text-right">Verba/dia</th>
                 <th className="px-4 py-3 text-right">Gasto</th>
                 <th className="px-4 py-3 text-right">Resultados</th>
@@ -1347,91 +1743,8 @@ function CampaignPerformanceTable({
                 <th className="px-4 py-3 text-center">Ações</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-border">
-              {campaigns.map((campaign) => {
-                const isActive = campaign.status === 'ACTIVE' || campaign.status === 'ENABLED';
-                const busy = actionLoading[campaign.id];
-                const err = actionError[campaign.id];
-                const isEditingBudget = editingBudget === campaign.id;
-                const isSavingBudget = savingBudget === campaign.id;
-                return (
-                  <tr key={`${campaign.platform}-${campaign.accountId}-${campaign.id}`} className={cn('hover:bg-muted/20', !isActive && 'opacity-60')}>
-                    <td className="max-w-[280px] px-4 py-3">
-                      <div className="flex min-w-0 items-center gap-2">
-                        {campaign.platform === 'meta' ? <MetaMark /> : <GoogleMark />}
-                        <CampaignStatusDot status={campaign.status} />
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-bold">{campaign.name}</p>
-                          <p className="truncate text-[11px] text-muted-foreground">{campaign.accountName}</p>
-                          {err && <p className="text-[10px] text-red-400 mt-0.5 truncate">{err}</p>}
-                        </div>
-                      </div>
-                    </td>
-                    {/* Budget cell */}
-                    <td className="px-4 py-3 text-right">
-                      {isEditingBudget ? (
-                        <div className="flex items-center justify-end gap-1">
-                          <input
-                            autoFocus
-                            type="number"
-                            min={1}
-                            value={budgetInput}
-                            onChange={e => setBudgetInput(e.target.value)}
-                            onKeyDown={e => { if (e.key === 'Enter') saveBudget(campaign); if (e.key === 'Escape') setEditingBudget(null); }}
-                            className="w-20 h-7 rounded border border-primary bg-background px-2 text-xs outline-none"
-                          />
-                          <button type="button" onClick={() => saveBudget(campaign)} className="text-emerald-400 hover:text-emerald-300">
-                            {isSavingBudget ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
-                          </button>
-                          <button type="button" onClick={() => setEditingBudget(null)} className="text-muted-foreground hover:text-foreground"><X className="h-3 w-3" /></button>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => { setEditingBudget(campaign.id); setBudgetInput(String(campaign.dailyBudget ?? '')); }}
-                          className="group flex items-center justify-end gap-1 text-sm font-semibold hover:text-primary transition-colors"
-                        >
-                          {campaign.dailyBudget != null ? formatCurrencyBRL(campaign.dailyBudget) : '—'}
-                          <Pencil className="h-3 w-3 opacity-0 group-hover:opacity-60 transition-opacity" />
-                        </button>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-right text-sm font-bold text-primary">{formatCurrencyBRL(campaign.spend)}</td>
-                    <td className="px-4 py-3 text-right text-sm font-bold">{campaign.leads.toLocaleString('pt-BR')}</td>
-                    <td className="px-4 py-3 text-right text-sm font-bold">{campaign.cpl > 0 ? formatCurrencyBRL(campaign.cpl) : '—'}</td>
-                    <td className="px-4 py-3 text-right text-sm">{campaign.impressions.toLocaleString('pt-BR')}</td>
-                    <td className="px-4 py-3 text-right text-sm">{campaign.ctr > 0 ? `${campaign.ctr.toFixed(2)}%` : '—'}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center justify-center gap-1.5">
-                        {/* Pause/Activate */}
-                        <button
-                          type="button"
-                          disabled={busy}
-                          onClick={() => toggleStatus(campaign)}
-                          title={isActive ? 'Pausar campanha' : 'Ativar campanha'}
-                          className={cn(
-                            'inline-flex h-7 w-7 items-center justify-center rounded-lg border transition-colors',
-                            busy && 'opacity-50 cursor-wait',
-                            isActive ? 'border-yellow-500/30 bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20'
-                                     : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20',
-                          )}
-                        >
-                          {busy ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : isActive ? <Pause className="h-3.5 w-3.5" /> : <CircleDot className="h-3.5 w-3.5" />}
-                        </button>
-                        {/* Optimize drawer */}
-                        <button
-                          type="button"
-                          onClick={() => setOptimizeCampaign(campaign)}
-                          title="Otimizar público e copy"
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-violet-500/30 bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 transition-colors"
-                        >
-                          <Settings2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
+            <tbody>
+              {rows.map(renderRow)}
             </tbody>
           </table>
         </div>
@@ -2266,7 +2579,7 @@ export default function GeneralDashboard() {
                   {campaignsLoading && <RefreshCw className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
                 </div>
               </div>
-              <CampaignPerformanceTable campaigns={metaCampaigns} loading={campaignsLoading} />
+              <CampaignPerformanceTable campaigns={metaCampaigns} loading={campaignsLoading} period={period} dateFrom={customDateFrom} dateTo={customDateTo} />
             </div>
 
             <div className="space-y-4">
@@ -2403,7 +2716,7 @@ export default function GeneralDashboard() {
                   {campaignsLoading && <RefreshCw className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
                 </div>
               </div>
-              <CampaignPerformanceTable campaigns={googleCampaigns} loading={campaignsLoading} />
+              <CampaignPerformanceTable campaigns={googleCampaigns} loading={campaignsLoading} period={period} dateFrom={customDateFrom} dateTo={customDateTo} />
             </div>
 
             <div className="space-y-4">
