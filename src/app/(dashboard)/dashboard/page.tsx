@@ -6,9 +6,12 @@ import Link from 'next/link';
 import {
   AlertTriangle, ChevronDown, ChevronUp, GripVertical, ImageIcon,
   LayoutDashboard, Play, RefreshCw, Search, Sparkles, Check, X,
-  Pause, CircleDot,
+  Pause, CircleDot, Pencil, Settings2, Users, Copy,
 } from 'lucide-react';
 import type { AiInsight } from '@/app/api/ai/insights/route';
+import type { AdSet } from '@/app/api/meta/campaigns/[id]/adsets/route';
+import type { MetaAd } from '@/app/api/meta/campaigns/[id]/ads/route';
+import type { CopyVariation } from '@/app/api/ai/copy/route';
 import {
   DndContext, closestCenter, KeyboardSensor, PointerSensor,
   useSensor, useSensors, type DragEndEvent,
@@ -875,6 +878,389 @@ function CampaignStatusDot({ status }: { status: string }) {
   );
 }
 
+// ─── Campaign Optimize Drawer ─────────────────────────────────────────────────
+
+function CampaignOptimizeDrawer({ campaign, onClose }: { campaign: CampaignPerformance; onClose: () => void }) {
+  const [tab, setTab] = useState<'publico' | 'copy'>('publico');
+
+  // Audience state
+  const [adsets, setAdsets] = useState<AdSet[]>([]);
+  const [adsetsLoading, setAdsetsLoading] = useState(false);
+  const [savingAdset, setSavingAdset] = useState<string | null>(null);
+  const [adsetMsg, setAdsetMsg] = useState<Record<string, string>>({});
+  const [editedTargeting, setEditedTargeting] = useState<Record<string, AdSet>>({});
+
+  // Copy state
+  const [ads, setAds] = useState<MetaAd[]>([]);
+  const [adsLoading, setAdsLoading] = useState(false);
+  const [copyLoading, setCopyLoading] = useState(false);
+  const [variations, setVariations] = useState<CopyVariation[]>([]);
+  const [copyError, setCopyError] = useState('');
+  const [creatingAd, setCreatingAd] = useState<string | null>(null);
+  const [createMsg, setCreateMsg] = useState('');
+
+  useEffect(() => {
+    if (campaign.platform !== 'meta') return;
+    setAdsetsLoading(true);
+    fetch(`/api/meta/campaigns/${campaign.id}/adsets?connectionId=${campaign.connectionId}`)
+      .then(r => r.json() as Promise<AdSet[]>)
+      .then(data => { setAdsets(data); setEditedTargeting(Object.fromEntries(data.map(s => [s.id, { ...s }]))); })
+      .finally(() => setAdsetsLoading(false));
+  }, [campaign.id, campaign.connectionId, campaign.platform]);
+
+  useEffect(() => {
+    if (tab !== 'copy' || campaign.platform !== 'meta') return;
+    if (ads.length > 0) return;
+    setAdsLoading(true);
+    fetch(`/api/meta/campaigns/${campaign.id}/ads?connectionId=${campaign.connectionId}`)
+      .then(r => r.json() as Promise<MetaAd[]>)
+      .then(setAds)
+      .finally(() => setAdsLoading(false));
+  }, [tab, campaign.id, campaign.connectionId, campaign.platform, ads.length]);
+
+  async function saveTargeting(adset: AdSet) {
+    const edited = editedTargeting[adset.id];
+    if (!edited) return;
+    setSavingAdset(adset.id);
+    setAdsetMsg(p => ({ ...p, [adset.id]: '' }));
+    const res = await fetch(`/api/meta/adsets/${adset.id}/targeting`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ connectionId: campaign.connectionId, targeting: edited.targeting, daily_budget: edited.daily_budget }),
+    });
+    const data = await res.json() as { ok?: boolean; error?: string };
+    setAdsetMsg(p => ({ ...p, [adset.id]: res.ok ? '✓ Salvo' : (data.error ?? 'Erro') }));
+    setSavingAdset(null);
+  }
+
+  function patchTargeting(adsetId: string, patch: Partial<AdSet['targeting']>) {
+    setEditedTargeting(p => ({
+      ...p,
+      [adsetId]: { ...p[adsetId], targeting: { ...p[adsetId].targeting, ...patch } },
+    }));
+  }
+
+  async function generateCopy() {
+    setCopyLoading(true);
+    setCopyError('');
+    setVariations([]);
+    const res = await fetch('/api/ai/copy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        campaignName: campaign.name,
+        platform: campaign.platform,
+        currentAds: ads.map(a => ({ name: a.name, body: a.body ?? '', title: a.title ?? '' })),
+        metrics: { spend: campaign.spend, leads: campaign.leads, ctr: campaign.ctr, cpl: campaign.cpl },
+      }),
+    });
+    const data = await res.json() as CopyVariation[] | { error: string };
+    if (!res.ok) { setCopyError((data as { error: string }).error); }
+    else setVariations(data as CopyVariation[]);
+    setCopyLoading(false);
+  }
+
+  async function useVariation(v: CopyVariation, sourceAd: MetaAd, pauseOld: boolean) {
+    if (!sourceAd.creativeId) { setCreateMsg('Anúncio sem criativo identificado.'); return; }
+    const firstAdset = adsets[0];
+    if (!firstAdset) { setCreateMsg('Nenhum conjunto de anúncios encontrado.'); return; }
+    setCreatingAd(v.body);
+    setCreateMsg('');
+    const res = await fetch(`/api/meta/campaigns/${campaign.id}/create-ad`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        connectionId: campaign.connectionId,
+        accountId: campaign.accountId,
+        adsetId: firstAdset.id,
+        sourceCreativeId: sourceAd.creativeId,
+        newBody: v.body,
+        newTitle: v.title,
+        pauseSourceAdId: pauseOld ? sourceAd.id : undefined,
+      }),
+    });
+    const data = await res.json() as { ok?: boolean; newAdId?: string; error?: string };
+    setCreateMsg(res.ok ? `✓ Anúncio criado (ID: ${data.newAdId})` : (data.error ?? 'Erro ao criar anúncio.'));
+    setCreatingAd(null);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex">
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="relative ml-auto h-full w-full max-w-[520px] bg-background border-l border-border flex flex-col shadow-2xl">
+        {/* Header */}
+        <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-border shrink-0">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              {campaign.platform === 'meta' ? <MetaMark /> : <GoogleMark />}
+              <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Otimizar campanha</p>
+            </div>
+            <p className="mt-1 text-sm font-bold truncate">{campaign.name}</p>
+          </div>
+          <button type="button" onClick={onClose} className="shrink-0 text-muted-foreground hover:text-foreground transition-colors">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {campaign.platform === 'google' && (
+          <div className="px-5 py-8 text-sm text-muted-foreground text-center">
+            Edição de público e copy disponível apenas para Meta Ads no momento.
+          </div>
+        )}
+
+        {campaign.platform === 'meta' && (
+          <>
+            {/* Tabs */}
+            <div className="flex border-b border-border shrink-0">
+              {([['publico', Users, 'Público'], ['copy', Copy, 'Copy IA']] as const).map(([id, Icon, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setTab(id)}
+                  className={cn(
+                    'flex items-center gap-2 px-5 py-3 text-xs font-bold uppercase tracking-wider border-b-2 transition-colors',
+                    tab === id ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-6">
+
+              {/* ── Público tab ── */}
+              {tab === 'publico' && (
+                <>
+                  {adsetsLoading && (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <RefreshCw className="h-4 w-4 animate-spin" /> Carregando conjuntos...
+                    </div>
+                  )}
+                  {!adsetsLoading && adsets.length === 0 && (
+                    <p className="text-sm text-muted-foreground">Nenhum conjunto de anúncios encontrado.</p>
+                  )}
+                  {adsets.map((adset) => {
+                    const edited = editedTargeting[adset.id] ?? adset;
+                    const t = edited.targeting;
+                    const countries = t.geo_locations?.countries ?? [];
+                    const interests = (t.flexible_spec ?? []).flatMap(s => s.interests ?? []);
+                    return (
+                      <div key={adset.id} className="rounded-xl border border-border bg-card p-4 space-y-4">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-sm font-bold">{adset.name}</p>
+                            <CampaignStatusDot status={adset.status} />
+                          </div>
+                          {adset.daily_budget != null && (
+                            <span className="text-xs text-muted-foreground">Verba: {formatCurrencyBRL(edited.daily_budget ?? adset.daily_budget ?? 0)}/dia</span>
+                          )}
+                        </div>
+
+                        {/* Budget */}
+                        {adset.daily_budget != null && (
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Orçamento diário (R$)</label>
+                            <input
+                              type="number"
+                              min={1}
+                              value={edited.daily_budget ?? adset.daily_budget ?? ''}
+                              onChange={e => setEditedTargeting(p => ({ ...p, [adset.id]: { ...p[adset.id], daily_budget: Number(e.target.value) } }))}
+                              className="w-full h-9 rounded-lg border border-border bg-background px-3 text-sm outline-none focus:ring-1 focus:ring-primary"
+                            />
+                          </div>
+                        )}
+
+                        {/* Age */}
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Faixa etária</label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="number" min={13} max={65}
+                              value={t.age_min ?? 18}
+                              onChange={e => patchTargeting(adset.id, { age_min: Number(e.target.value) })}
+                              className="w-20 h-9 rounded-lg border border-border bg-background px-3 text-sm outline-none focus:ring-1 focus:ring-primary"
+                            />
+                            <span className="text-xs text-muted-foreground">até</span>
+                            <input
+                              type="number" min={13} max={65}
+                              value={t.age_max ?? 65}
+                              onChange={e => patchTargeting(adset.id, { age_max: Number(e.target.value) })}
+                              className="w-20 h-9 rounded-lg border border-border bg-background px-3 text-sm outline-none focus:ring-1 focus:ring-primary"
+                            />
+                            <span className="text-[10px] text-muted-foreground">anos</span>
+                          </div>
+                        </div>
+
+                        {/* Gender */}
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Gênero</label>
+                          <div className="flex gap-2">
+                            {[{ label: 'Todos', val: [] }, { label: 'Masculino', val: [1] }, { label: 'Feminino', val: [2] }].map(opt => {
+                              const active = JSON.stringify(t.genders ?? []) === JSON.stringify(opt.val);
+                              return (
+                                <button
+                                  key={opt.label}
+                                  type="button"
+                                  onClick={() => patchTargeting(adset.id, { genders: opt.val })}
+                                  className={cn(
+                                    'px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors',
+                                    active ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:bg-muted/50',
+                                  )}
+                                >{opt.label}</button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Countries */}
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Países</label>
+                          <div className="flex flex-wrap gap-1.5">
+                            {countries.map(c => (
+                              <span key={c} className="flex items-center gap-1 rounded-full bg-muted/50 px-2.5 py-0.5 text-xs font-semibold">
+                                {c}
+                                <button type="button" onClick={() => patchTargeting(adset.id, { geo_locations: { ...t.geo_locations, countries: countries.filter(x => x !== c) } })}>
+                                  <X className="h-2.5 w-2.5" />
+                                </button>
+                              </span>
+                            ))}
+                            <input
+                              placeholder="+ código (ex: BR)"
+                              className="h-6 w-24 rounded-full border border-dashed border-border bg-background px-2 text-xs outline-none focus:ring-1 focus:ring-primary"
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                  const val = (e.target as HTMLInputElement).value.trim().toUpperCase();
+                                  if (val && !countries.includes(val)) {
+                                    patchTargeting(adset.id, { geo_locations: { ...t.geo_locations, countries: [...countries, val] } });
+                                  }
+                                  (e.target as HTMLInputElement).value = '';
+                                }
+                              }}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Interests (read-only) */}
+                        {interests.length > 0 && (
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Interesses (somente leitura)</label>
+                            <div className="flex flex-wrap gap-1.5">
+                              {interests.map(i => (
+                                <span key={i.id} className="rounded-full bg-muted/30 px-2.5 py-0.5 text-xs text-muted-foreground">{i.name}</span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            disabled={savingAdset === adset.id}
+                            onClick={() => saveTargeting(adset)}
+                            className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-bold uppercase tracking-wider text-black hover:bg-primary/90 disabled:opacity-50"
+                          >
+                            {savingAdset === adset.id ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                            Salvar alterações
+                          </button>
+                          {adsetMsg[adset.id] && (
+                            <span className={cn('text-xs font-semibold', adsetMsg[adset.id].startsWith('✓') ? 'text-emerald-400' : 'text-red-400')}>
+                              {adsetMsg[adset.id]}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </>
+              )}
+
+              {/* ── Copy IA tab ── */}
+              {tab === 'copy' && (
+                <div className="space-y-5">
+                  {/* Current ads */}
+                  {adsLoading && <div className="flex items-center gap-2 text-sm text-muted-foreground"><RefreshCw className="h-4 w-4 animate-spin" /> Carregando anúncios...</div>}
+                  {!adsLoading && ads.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Anúncios atuais</p>
+                      {ads.slice(0, 3).map(ad => (
+                        <div key={ad.id} className="rounded-lg border border-border bg-card p-3 space-y-1">
+                          <div className="flex items-center gap-2">
+                            <CampaignStatusDot status={ad.status} />
+                            <p className="text-xs font-semibold truncate">{ad.name}</p>
+                          </div>
+                          {ad.title && <p className="text-xs font-bold text-foreground">{ad.title}</p>}
+                          {ad.body && <p className="text-xs text-muted-foreground line-clamp-2">{ad.body}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={generateCopy}
+                    disabled={copyLoading}
+                    className="flex items-center gap-2 rounded-lg border border-violet-500/40 bg-violet-500/10 px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-violet-400 hover:bg-violet-500/20 disabled:opacity-50 w-full justify-center"
+                  >
+                    {copyLoading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                    {copyLoading ? 'Gerando variações...' : 'Gerar variações com IA'}
+                  </button>
+                  {copyError && <p className="text-xs text-red-400">{copyError}</p>}
+
+                  {/* Variations */}
+                  {variations.length > 0 && (
+                    <div className="space-y-3">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Variações geradas — escolha uma para criar</p>
+                      {variations.map((v, idx) => (
+                        <div key={idx} className="rounded-xl border border-violet-500/20 bg-violet-500/5 p-4 space-y-2">
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-violet-400">Variação {idx + 1}</p>
+                          {v.title && <p className="text-sm font-bold">{v.title}</p>}
+                          <p className="text-sm text-foreground leading-relaxed">{v.body}</p>
+                          <p className="text-[11px] text-muted-foreground italic">{v.rationale}</p>
+                          {ads.length > 0 && (
+                            <div className="flex gap-2 pt-1">
+                              <button
+                                type="button"
+                                disabled={creatingAd === v.body}
+                                onClick={() => useVariation(v, ads[0], false)}
+                                className="flex items-center gap-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-[10px] font-bold uppercase text-emerald-400 hover:bg-emerald-500/20 disabled:opacity-50"
+                              >
+                                {creatingAd === v.body ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+                                Criar anúncio
+                              </button>
+                              <button
+                                type="button"
+                                disabled={creatingAd === v.body}
+                                onClick={() => useVariation(v, ads[0], true)}
+                                className="flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-[10px] font-bold uppercase text-muted-foreground hover:bg-muted/50 disabled:opacity-50"
+                              >
+                                Criar + pausar original
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                      {createMsg && (
+                        <p className={cn('text-xs font-semibold', createMsg.startsWith('✓') ? 'text-emerald-400' : 'text-red-400')}>
+                          {createMsg}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Campaign Performance Table ───────────────────────────────────────────────
+
 function CampaignPerformanceTable({
   campaigns: initialCampaigns,
   loading,
@@ -885,124 +1271,172 @@ function CampaignPerformanceTable({
   const [campaigns, setCampaigns] = useState(initialCampaigns);
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
   const [actionError, setActionError] = useState<Record<string, string>>({});
+  const [editingBudget, setEditingBudget] = useState<string | null>(null);
+  const [budgetInput, setBudgetInput] = useState('');
+  const [savingBudget, setSavingBudget] = useState<string | null>(null);
+  const [optimizeCampaign, setOptimizeCampaign] = useState<CampaignPerformance | null>(null);
 
   useEffect(() => { setCampaigns(initialCampaigns); }, [initialCampaigns]);
 
   async function toggleStatus(c: CampaignPerformance) {
     const isActive = c.status === 'ACTIVE' || c.status === 'ENABLED';
-    const action = isActive ? 'pause' : 'activate';
-    const key = c.id;
-    setActionLoading(p => ({ ...p, [key]: true }));
-    setActionError(p => ({ ...p, [key]: '' }));
+    setActionLoading(p => ({ ...p, [c.id]: true }));
+    setActionError(p => ({ ...p, [c.id]: '' }));
+    const apiBase = c.platform === 'meta' ? '/api/meta' : '/api/google';
+    const res = await fetch(`${apiBase}/campaigns/${c.id}/action`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: isActive ? 'pause' : 'activate', connectionId: c.connectionId, accountId: c.accountId, loginCustomerId: c.loginCustomerId }),
+    });
+    const data = await res.json() as { ok?: boolean; newStatus?: string; error?: string };
+    if (res.ok && data.newStatus) setCampaigns(prev => prev.map(x => x.id === c.id ? { ...x, status: data.newStatus! } : x));
+    else setActionError(p => ({ ...p, [c.id]: data.error ?? 'Erro.' }));
+    setActionLoading(p => ({ ...p, [c.id]: false }));
+  }
 
+  async function saveBudget(c: CampaignPerformance) {
+    const value = parseFloat(budgetInput);
+    if (!value || value <= 0) { setEditingBudget(null); return; }
+    setSavingBudget(c.id);
     const apiBase = c.platform === 'meta' ? '/api/meta' : '/api/google';
     const res = await fetch(`${apiBase}/campaigns/${c.id}/action`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        action,
+        action: 'set_budget',
         connectionId: c.connectionId,
         accountId: c.accountId,
         loginCustomerId: c.loginCustomerId,
+        budgetResourceName: c.budgetResourceName,
+        dailyBudget: value,
       }),
     });
-    const data = await res.json() as { ok?: boolean; newStatus?: string; error?: string };
-
-    if (res.ok && data.newStatus) {
-      setCampaigns(prev => prev.map(x => x.id === c.id ? { ...x, status: data.newStatus! } : x));
-    } else {
-      setActionError(p => ({ ...p, [key]: data.error ?? 'Erro ao executar ação.' }));
-    }
-    setActionLoading(p => ({ ...p, [key]: false }));
+    if (res.ok) setCampaigns(prev => prev.map(x => x.id === c.id ? { ...x, dailyBudget: value } : x));
+    setSavingBudget(null);
+    setEditingBudget(null);
   }
 
   if (loading) {
     return (
       <div className="rounded-xl border border-border bg-card p-6">
         <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-          <RefreshCw className="h-4 w-4 animate-spin" />
-          Carregando campanhas do período...
+          <RefreshCw className="h-4 w-4 animate-spin" /> Carregando campanhas do período...
         </div>
       </div>
     );
   }
-
   if (campaigns.length === 0) {
-    return (
-      <div className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground">
-        Nenhuma campanha com gasto no período selecionado.
-      </div>
-    );
+    return <div className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground">Nenhuma campanha com gasto no período selecionado.</div>;
   }
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border bg-card">
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[920px] text-left">
-          <thead className="border-b border-border bg-muted/30">
-            <tr className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-              <th className="px-4 py-3">Campanha</th>
-              <th className="px-4 py-3 text-right">Gasto</th>
-              <th className="px-4 py-3 text-right">Resultados</th>
-              <th className="px-4 py-3 text-right">Custo/Result.</th>
-              <th className="px-4 py-3 text-right">Impressões</th>
-              <th className="px-4 py-3 text-right">Cliques</th>
-              <th className="px-4 py-3 text-right">CTR</th>
-              <th className="px-4 py-3 text-center">Ações</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {campaigns.map((campaign) => {
-              const isActive = campaign.status === 'ACTIVE' || campaign.status === 'ENABLED';
-              const busy = actionLoading[campaign.id];
-              const err = actionError[campaign.id];
-              return (
-                <tr key={`${campaign.platform}-${campaign.accountId}-${campaign.id}`} className={cn('hover:bg-muted/20', !isActive && 'opacity-60')}>
-                  <td className="max-w-[300px] px-4 py-3">
-                    <div className="flex min-w-0 items-center gap-2">
-                      {campaign.platform === 'meta' ? <MetaMark /> : <GoogleMark />}
-                      <CampaignStatusDot status={campaign.status} />
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-bold">{campaign.name}</p>
-                        <p className="truncate text-[11px] text-muted-foreground">{campaign.accountName}</p>
-                        {err && <p className="text-[10px] text-red-400 mt-0.5 truncate">{err}</p>}
+    <>
+      {optimizeCampaign && <CampaignOptimizeDrawer campaign={optimizeCampaign} onClose={() => setOptimizeCampaign(null)} />}
+      <div className="overflow-hidden rounded-xl border border-border bg-card">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[1020px] text-left">
+            <thead className="border-b border-border bg-muted/30">
+              <tr className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                <th className="px-4 py-3">Campanha</th>
+                <th className="px-4 py-3 text-right">Verba/dia</th>
+                <th className="px-4 py-3 text-right">Gasto</th>
+                <th className="px-4 py-3 text-right">Resultados</th>
+                <th className="px-4 py-3 text-right">CPL</th>
+                <th className="px-4 py-3 text-right">Impressões</th>
+                <th className="px-4 py-3 text-right">CTR</th>
+                <th className="px-4 py-3 text-center">Ações</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {campaigns.map((campaign) => {
+                const isActive = campaign.status === 'ACTIVE' || campaign.status === 'ENABLED';
+                const busy = actionLoading[campaign.id];
+                const err = actionError[campaign.id];
+                const isEditingBudget = editingBudget === campaign.id;
+                const isSavingBudget = savingBudget === campaign.id;
+                return (
+                  <tr key={`${campaign.platform}-${campaign.accountId}-${campaign.id}`} className={cn('hover:bg-muted/20', !isActive && 'opacity-60')}>
+                    <td className="max-w-[280px] px-4 py-3">
+                      <div className="flex min-w-0 items-center gap-2">
+                        {campaign.platform === 'meta' ? <MetaMark /> : <GoogleMark />}
+                        <CampaignStatusDot status={campaign.status} />
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-bold">{campaign.name}</p>
+                          <p className="truncate text-[11px] text-muted-foreground">{campaign.accountName}</p>
+                          {err && <p className="text-[10px] text-red-400 mt-0.5 truncate">{err}</p>}
+                        </div>
                       </div>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-right text-sm font-bold text-primary">{formatCurrencyBRL(campaign.spend)}</td>
-                  <td className="px-4 py-3 text-right text-sm font-bold">{campaign.leads.toLocaleString('pt-BR')}</td>
-                  <td className="px-4 py-3 text-right text-sm font-bold">{campaign.cpl > 0 ? formatCurrencyBRL(campaign.cpl) : '—'}</td>
-                  <td className="px-4 py-3 text-right text-sm">{campaign.impressions.toLocaleString('pt-BR')}</td>
-                  <td className="px-4 py-3 text-right text-sm">{campaign.clicks.toLocaleString('pt-BR')}</td>
-                  <td className="px-4 py-3 text-right text-sm">{campaign.ctr > 0 ? `${campaign.ctr.toFixed(2)}%` : '—'}</td>
-                  <td className="px-4 py-3 text-center">
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => toggleStatus(campaign)}
-                      title={isActive ? 'Pausar campanha' : 'Ativar campanha'}
-                      className={cn(
-                        'inline-flex h-7 w-7 items-center justify-center rounded-lg border transition-colors',
-                        busy && 'opacity-50 cursor-wait',
-                        isActive
-                          ? 'border-yellow-500/30 bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20'
-                          : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20',
+                    </td>
+                    {/* Budget cell */}
+                    <td className="px-4 py-3 text-right">
+                      {isEditingBudget ? (
+                        <div className="flex items-center justify-end gap-1">
+                          <input
+                            autoFocus
+                            type="number"
+                            min={1}
+                            value={budgetInput}
+                            onChange={e => setBudgetInput(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') saveBudget(campaign); if (e.key === 'Escape') setEditingBudget(null); }}
+                            className="w-20 h-7 rounded border border-primary bg-background px-2 text-xs outline-none"
+                          />
+                          <button type="button" onClick={() => saveBudget(campaign)} className="text-emerald-400 hover:text-emerald-300">
+                            {isSavingBudget ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                          </button>
+                          <button type="button" onClick={() => setEditingBudget(null)} className="text-muted-foreground hover:text-foreground"><X className="h-3 w-3" /></button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => { setEditingBudget(campaign.id); setBudgetInput(String(campaign.dailyBudget ?? '')); }}
+                          className="group flex items-center justify-end gap-1 text-sm font-semibold hover:text-primary transition-colors"
+                        >
+                          {campaign.dailyBudget != null ? formatCurrencyBRL(campaign.dailyBudget) : '—'}
+                          <Pencil className="h-3 w-3 opacity-0 group-hover:opacity-60 transition-opacity" />
+                        </button>
                       )}
-                    >
-                      {busy
-                        ? <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                        : isActive
-                          ? <Pause className="h-3.5 w-3.5" />
-                          : <CircleDot className="h-3.5 w-3.5" />}
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                    </td>
+                    <td className="px-4 py-3 text-right text-sm font-bold text-primary">{formatCurrencyBRL(campaign.spend)}</td>
+                    <td className="px-4 py-3 text-right text-sm font-bold">{campaign.leads.toLocaleString('pt-BR')}</td>
+                    <td className="px-4 py-3 text-right text-sm font-bold">{campaign.cpl > 0 ? formatCurrencyBRL(campaign.cpl) : '—'}</td>
+                    <td className="px-4 py-3 text-right text-sm">{campaign.impressions.toLocaleString('pt-BR')}</td>
+                    <td className="px-4 py-3 text-right text-sm">{campaign.ctr > 0 ? `${campaign.ctr.toFixed(2)}%` : '—'}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-center gap-1.5">
+                        {/* Pause/Activate */}
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => toggleStatus(campaign)}
+                          title={isActive ? 'Pausar campanha' : 'Ativar campanha'}
+                          className={cn(
+                            'inline-flex h-7 w-7 items-center justify-center rounded-lg border transition-colors',
+                            busy && 'opacity-50 cursor-wait',
+                            isActive ? 'border-yellow-500/30 bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20'
+                                     : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20',
+                          )}
+                        >
+                          {busy ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : isActive ? <Pause className="h-3.5 w-3.5" /> : <CircleDot className="h-3.5 w-3.5" />}
+                        </button>
+                        {/* Optimize drawer */}
+                        <button
+                          type="button"
+                          onClick={() => setOptimizeCampaign(campaign)}
+                          title="Otimizar público e copy"
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-violet-500/30 bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 transition-colors"
+                        >
+                          <Settings2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 

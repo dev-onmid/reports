@@ -15,6 +15,8 @@ export type CampaignPerformance = {
   connectionId: string;
   loginCustomerId?: string;
   status: string;
+  dailyBudget?: number;
+  budgetResourceName?: string;
   spend: number;
   impressions: number;
   clicks: number;
@@ -228,7 +230,7 @@ export async function GET(request: NextRequest) {
 
           // Fetch campaign statuses in parallel with insights
           const statusUrl = new URL(`https://graph.facebook.com/v21.0/${acctNode}/campaigns`);
-          statusUrl.searchParams.set('fields', 'id,effective_status');
+          statusUrl.searchParams.set('fields', 'id,effective_status,daily_budget,lifetime_budget');
           statusUrl.searchParams.set('limit', '200');
           statusUrl.searchParams.set('access_token', token);
 
@@ -244,12 +246,16 @@ export async function GET(request: NextRequest) {
           if (!insightsRes.ok) return;
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const insightsData = await insightsRes.json() as { data?: any[] };
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const statusData: Record<string, string> = {};
+          const statusData: Record<string, { status: string; dailyBudget?: number }> = {};
           if (statusRes.ok) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const sd = await statusRes.json() as { data?: any[] };
-            for (const c of sd.data ?? []) statusData[c.id] = c.effective_status ?? 'ACTIVE';
+            for (const c of sd.data ?? []) {
+              statusData[c.id] = {
+                status: c.effective_status ?? 'ACTIVE',
+                dailyBudget: c.daily_budget ? Number(c.daily_budget) / 100 : (c.lifetime_budget ? Number(c.lifetime_budget) / 100 : undefined),
+              };
+            }
           }
 
           for (const row of insightsData.data ?? []) {
@@ -267,7 +273,8 @@ export async function GET(request: NextRequest) {
               accountId: account.id,
               accountName: account.name,
               connectionId: conn.id,
-              status: statusData[row.campaign_id] ?? 'ACTIVE',
+              status: statusData[row.campaign_id]?.status ?? 'ACTIVE',
+              dailyBudget: statusData[row.campaign_id]?.dailyBudget,
               spend,
               impressions,
               clicks,
@@ -297,6 +304,7 @@ export async function GET(request: NextRequest) {
           const data = await gadsSearch(
             accountId,
             `SELECT campaign.id, campaign.name, campaign.status,
+                    campaign_budget.amount_micros, campaign_budget.resource_name,
                     metrics.cost_micros, metrics.impressions, metrics.clicks,
                     metrics.conversions
              FROM campaign
@@ -320,6 +328,8 @@ export async function GET(request: NextRequest) {
             const clicks = Number(metrics.clicks ?? 0);
             const impressions = Number(metrics.impressions ?? 0);
             const leads = Number(metrics.conversions ?? 0);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const budget = (row as any).campaignBudget ?? {};
             campaigns.push({
               id: String(campaign.id),
               name: campaign.name ?? `Campanha ${campaign.id}`,
@@ -329,6 +339,8 @@ export async function GET(request: NextRequest) {
               connectionId: conn.id,
               loginCustomerId: loginCustomerId ?? undefined,
               status: campaign.status ?? 'ENABLED',
+              dailyBudget: budget.amountMicros ? Number(budget.amountMicros) / 1_000_000 : undefined,
+              budgetResourceName: budget.resourceName ?? undefined,
               spend,
               impressions,
               clicks,
