@@ -36,6 +36,17 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: 'Campos obrigatórios ausentes.' }, { status: 400 });
   }
 
+  if (endsAt) {
+    const endsAtDate = new Date(endsAt);
+    const startsAtDate2 = new Date(startsAt);
+    if (endsAtDate <= new Date()) {
+      return Response.json({ error: 'Horário de término já passou. Deixe em branco ou escolha um horário futuro.' }, { status: 400 });
+    }
+    if (endsAtDate <= startsAtDate2) {
+      return Response.json({ error: 'Horário de término deve ser depois do início.' }, { status: 400 });
+    }
+  }
+
   const parsed = parsePhoneList(numbers);
   if (parsed.length === 0) {
     return Response.json({ error: 'Nenhum número válido encontrado.' }, { status: 400 });

@@ -19,7 +19,14 @@ export async function POST(
     if (action === 'pause') {
       await pool.query(`UPDATE public.zapi_campaigns SET status = 'paused' WHERE id = $1`, [id]);
     } else if (action === 'resume' || action === 'start') {
-      await pool.query(`UPDATE public.zapi_campaigns SET status = 'running' WHERE id = $1`, [id]);
+      // If ends_at has already passed, clear it so the campaign can run until completion
+      await pool.query(
+        `UPDATE public.zapi_campaigns
+            SET status = 'running',
+                ends_at = CASE WHEN ends_at IS NOT NULL AND ends_at < NOW() THEN NULL ELSE ends_at END
+          WHERE id = $1`,
+        [id],
+      );
     } else if (action === 'cancel') {
       await pool.query(`UPDATE public.zapi_campaigns SET status = 'cancelled' WHERE id = $1`, [id]);
     }

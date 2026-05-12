@@ -36,12 +36,12 @@ export async function POST(
       return Response.json({ status: campaign.status, done: true });
     }
 
-    // Check end time — only enforce if ends_at is after starts_at (valid range)
+    // Check end time
     const endsAt = campaign.ends_at ? new Date(campaign.ends_at) : null;
-    const startsAt = new Date(campaign.starts_at);
-    if (endsAt && endsAt > startsAt && new Date() > endsAt) {
-      await pool.query(`UPDATE public.zapi_campaigns SET status = 'paused' WHERE id = $1`, [id]);
-      return Response.json({ status: 'paused', done: true, reason: 'end_time_reached' });
+    if (endsAt && new Date() > endsAt) {
+      await pool.query(`UPDATE public.zapi_campaigns SET status = 'done' WHERE id = $1`, [id]);
+      const { rows: [final] } = await pool.query(`SELECT total, sent, failed FROM public.zapi_campaigns WHERE id = $1`, [id]);
+      return Response.json({ status: 'done', done: true, reason: 'end_time_reached', ...final });
     }
 
     // Grab next pending number
