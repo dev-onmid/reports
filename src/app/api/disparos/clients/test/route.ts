@@ -13,20 +13,35 @@ export async function POST(request: NextRequest) {
     );
     if (!client) return Response.json({ error: 'Instância não encontrada' }, { status: 404 });
 
-    const res = await fetch(
-      `https://api.z-api.io/instances/${client.instance_id}/token/${client.token}/status`,
-      { headers: { 'Cache-Control': 'no-cache' } },
-    );
+    const url = `https://api.z-api.io/instances/${client.instance_id}/token/${client.token}/status`;
 
-    if (!res.ok) {
-      return Response.json({ connected: false, error: `HTTP ${res.status}` });
-    }
+    const res = await fetch(url, {
+      headers: {
+        'Cache-Control': 'no-cache',
+        'Content-Type': 'application/json',
+      },
+    });
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const data = await res.json() as any;
-    const connected = data?.connected === true || data?.status === 'connected' || data?.value === 'CONNECTED';
+    let body: any = null;
+    try { body = await res.json(); } catch { /* non-JSON response */ }
 
-    return Response.json({ connected, raw: data });
+    if (!res.ok) {
+      const zapiMsg = body?.message ?? body?.error ?? body?.value ?? JSON.stringify(body);
+      return Response.json({
+        connected: false,
+        error: `Z-API retornou ${res.status}: ${zapiMsg}`,
+        debug: { url: url.replace(client.token, '***'), body },
+      });
+    }
+
+    const connected =
+      body?.connected === true ||
+      body?.status === 'connected' ||
+      body?.value === 'CONNECTED' ||
+      body?.smartphoneConnected === true;
+
+    return Response.json({ connected, raw: body });
   } catch (err) {
     return Response.json({ connected: false, error: String(err) });
   } finally {

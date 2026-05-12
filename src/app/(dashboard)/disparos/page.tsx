@@ -71,7 +71,7 @@ function ClientesTab() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [testing, setTesting] = useState<string | null>(null);
-  const [testResult, setTestResult] = useState<Record<string, { connected: boolean; error?: string }>>({});
+  const [testResult, setTestResult] = useState<Record<string, { connected: boolean; error?: string; raw?: unknown }>>({});
 
   useEffect(() => {
     fetch('/api/disparos/clients')
@@ -119,7 +119,7 @@ function ClientesTab() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ clientId: id }),
       });
-      const data = await res.json() as { connected: boolean; error?: string };
+      const data = await res.json() as { connected: boolean; error?: string; raw?: unknown };
       setTestResult(prev => ({ ...prev, [id]: data }));
     } finally {
       setTesting(null);
@@ -216,8 +216,18 @@ function ClientesTab() {
                   </div>
                 </div>
                 {result && (
-                  <div className={cn('rounded-lg px-3 py-2 text-[11px] font-semibold', result.connected ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400')}>
-                    {result.connected ? '✓ Instância conectada e funcionando' : `✗ Não conectada${result.error ? ` — ${result.error}` : '. Verifique o WhatsApp no painel Z-API.'}`}
+                  <div className={cn('rounded-lg px-3 py-2 text-[11px]', result.connected ? 'bg-emerald-500/10 text-emerald-400 font-semibold' : 'bg-red-500/10 text-red-400 space-y-1')}>
+                    {result.connected ? (
+                      '✓ Instância conectada e funcionando'
+                    ) : (
+                      <>
+                        <p className="font-semibold">✗ {result.error ?? 'Não conectada — verifique o WhatsApp no painel Z-API.'}</p>
+                        <p className="opacity-70">Verifique se o Instance ID e Token estão corretos no painel <strong>app.z-api.io</strong> → sua instância → API.</p>
+                        {result.raw && (
+                          <pre className="mt-1 text-[10px] opacity-50 whitespace-pre-wrap break-all">{JSON.stringify(result.raw, null, 2)}</pre>
+                        )}
+                      </>
+                    )}
                   </div>
                 )}
               </div>
