@@ -367,8 +367,8 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
   }
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[1fr_280px] items-start">
-    <div className="space-y-5 max-w-2xl">
+    <div className="grid gap-5 lg:grid-cols-[minmax(0,2fr)_320px] items-start">
+    <div className="space-y-5">
       <div className="grid gap-4">
         {/* Name + Client */}
         <div className="grid gap-3 sm:grid-cols-2">
@@ -660,72 +660,68 @@ function WhatsAppPreview({ images, message }: { images: string[]; message: strin
   const hasContent = images.length > 0 || preview.trim();
 
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col gap-2 h-full">
       <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Preview</p>
-      {/* Phone frame */}
-      <div className="mx-auto w-[260px] select-none">
-        <div className="rounded-[2rem] border-2 border-border bg-zinc-950 p-1.5 shadow-xl">
-          <div className="rounded-[1.6rem] overflow-hidden">
-            {/* Status bar */}
-            <div className="bg-[#075E54] px-4 pt-2 pb-0.5 flex justify-between items-center">
-              <span className="text-white text-[10px] font-semibold">{time}</span>
-              <span className="text-white text-[10px]">📶 🔋</span>
+      {/* Phone frame — fills column width */}
+      <div className="select-none flex-1 flex flex-col rounded-[2rem] border-2 border-border bg-zinc-950 p-1.5 shadow-xl overflow-hidden min-h-[560px]">
+        <div className="rounded-[1.6rem] overflow-hidden flex-1 flex flex-col">
+          {/* Status bar */}
+          <div className="bg-[#075E54] px-4 pt-2 pb-0.5 flex justify-between items-center shrink-0">
+            <span className="text-white text-[10px] font-semibold">{time}</span>
+            <span className="text-white text-[10px]">📶 🔋</span>
+          </div>
+          {/* WA header */}
+          <div className="bg-[#075E54] px-3 py-2.5 flex items-center gap-2 shrink-0">
+            <div className="h-9 w-9 rounded-full bg-[#128C7E] flex items-center justify-center shrink-0 text-white font-bold text-base">
+              M
             </div>
-            {/* WA header */}
-            <div className="bg-[#075E54] px-3 py-2 flex items-center gap-2">
-              <div className="h-8 w-8 rounded-full bg-[#128C7E] flex items-center justify-center shrink-0 text-white text-sm font-bold">
-                M
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-white text-xs font-semibold truncate">Minha Empresa</p>
-                <p className="text-[#B2DFDB] text-[10px]">online</p>
-              </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-white text-sm font-semibold truncate">Minha Empresa</p>
+              <p className="text-[#B2DFDB] text-[11px]">online</p>
             </div>
-            {/* Chat bg */}
-            <div className="bg-[#E5DDD5] min-h-[340px] flex flex-col justify-end p-2 gap-1.5">
-              {hasContent ? (
-                <>
-                  {/* Extra images (2nd, 3rd...) as separate bubbles */}
-                  {images.slice(1).map((img, idx) => (
-                    <div key={idx} className="self-end rounded-[12px] rounded-tr-[4px] overflow-hidden shadow-sm max-w-[180px]" style={{ background: '#DCF8C6' }}>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={img} alt="" className="w-full object-cover max-h-[130px]" />
-                      <div className="flex justify-end px-2 py-0.5">
-                        <span className="text-[9px] text-black/40">{time} <span className="text-[#53BDEB]">✓✓</span></span>
-                      </div>
-                    </div>
-                  ))}
-                  {/* Main bubble: first image + text */}
-                  <div className="self-end rounded-[12px] rounded-tr-[4px] overflow-hidden shadow-sm max-w-[190px]" style={{ background: '#DCF8C6' }}>
-                    {images[0] && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={images[0]} alt="" className="w-full object-cover max-h-[150px]" />
-                    )}
-                    {preview.trim() && (
-                      <div className="px-2 pt-1.5 pb-0.5 text-[12px] text-black/90 leading-relaxed break-words">
-                        {formatWAText(preview)}
-                      </div>
-                    )}
-                    <div className="flex justify-end px-2 pb-1 gap-1">
-                      <span className="text-[9px] text-black/40">{time}</span>
-                      <span className="text-[9px] text-[#53BDEB]">✓✓</span>
+          </div>
+          {/* Chat bg — flex-1 fills remaining height */}
+          <div className="bg-[#E5DDD5] flex-1 flex flex-col justify-end p-3 gap-2 overflow-y-auto">
+            {hasContent ? (
+              <>
+                {images.slice(1).map((img, idx) => (
+                  <div key={idx} className="self-end rounded-[14px] rounded-tr-[4px] overflow-hidden shadow-sm" style={{ background: '#DCF8C6', maxWidth: '85%' }}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={img} alt="" className="w-full object-cover max-h-[160px]" />
+                    <div className="flex justify-end px-2 py-0.5">
+                      <span className="text-[9px] text-black/40">{time} <span className="text-[#53BDEB]">✓✓</span></span>
                     </div>
                   </div>
-                </>
-              ) : (
-                <div className="flex-1 flex items-center justify-center py-8">
-                  <p className="text-[11px] text-black/30 text-center px-4">Digite uma mensagem para ver o preview</p>
+                ))}
+                <div className="self-end rounded-[14px] rounded-tr-[4px] overflow-hidden shadow-sm" style={{ background: '#DCF8C6', maxWidth: '88%' }}>
+                  {images[0] && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={images[0]} alt="" className="w-full object-cover max-h-[180px]" />
+                  )}
+                  {preview.trim() && (
+                    <div className="px-2.5 pt-2 pb-1 text-[13px] text-black/90 leading-relaxed break-words">
+                      {formatWAText(preview)}
+                    </div>
+                  )}
+                  <div className="flex justify-end px-2.5 pb-1.5 gap-1">
+                    <span className="text-[10px] text-black/40">{time}</span>
+                    <span className="text-[10px] text-[#53BDEB]">✓✓</span>
+                  </div>
                 </div>
-              )}
+              </>
+            ) : (
+              <div className="flex-1 flex items-center justify-center">
+                <p className="text-[12px] text-black/30 text-center px-6">Digite uma mensagem para ver o preview</p>
+              </div>
+            )}
+          </div>
+          {/* Input bar */}
+          <div className="bg-[#F0F0F0] px-2.5 py-2 flex items-center gap-2 shrink-0">
+            <div className="flex-1 bg-white rounded-full px-3 py-1.5">
+              <span className="text-[11px] text-black/25">Mensagem</span>
             </div>
-            {/* Input bar */}
-            <div className="bg-[#F0F0F0] px-2 py-1.5 flex items-center gap-1.5">
-              <div className="flex-1 bg-white rounded-full px-3 py-1">
-                <span className="text-[10px] text-black/25">Mensagem</span>
-              </div>
-              <div className="h-7 w-7 rounded-full bg-[#128C7E] flex items-center justify-center shrink-0">
-                <span className="text-[11px]">🎤</span>
-              </div>
+            <div className="h-8 w-8 rounded-full bg-[#128C7E] flex items-center justify-center shrink-0">
+              <span className="text-sm">🎤</span>
             </div>
           </div>
         </div>
