@@ -5,8 +5,9 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import {
   AlertTriangle, ChevronDown, ChevronUp, GripVertical, ImageIcon,
-  LayoutDashboard, Play, RefreshCw, Search,
+  LayoutDashboard, Play, RefreshCw, Search, Sparkles, Check, X,
 } from 'lucide-react';
+import type { AiInsight } from '@/app/api/ai/insights/route';
 import {
   DndContext, closestCenter, KeyboardSensor, PointerSensor,
   useSensor, useSensors, type DragEndEvent,
@@ -1127,6 +1128,9 @@ export default function GeneralDashboard() {
   const [editMode, setEditMode] = useState(false);
   const [widgetOrder, setWidgetOrder] = useState<WidgetId[]>(DEFAULT_WIDGET_ORDER);
   const [collapsedWidgets, setCollapsedWidgets] = useState<Set<WidgetId>>(new Set());
+  const [aiInsights, setAiInsights] = useState<AiInsight[]>([]);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState('');
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -1308,6 +1312,19 @@ export default function GeneralDashboard() {
       .finally(() => setBalancesLoading(false));
   }, []);
 
+  // Load saved AI insights when clients/period change
+  useEffect(() => {
+    if (selectedIds.size === 0 || !customReady) { setAiInsights([]); return; }
+    const params = new URLSearchParams({ clientIds: [...selectedIds].join(','), period });
+    if (period === 'custom' && customDateFrom && customDateTo) {
+      params.set('period', `custom:${customDateFrom}:${customDateTo}`);
+    }
+    fetch(`/api/ai/insights?${params}`)
+      .then(r => r.ok ? r.json() as Promise<AiInsight[]> : [])
+      .then(setAiInsights)
+      .catch(() => setAiInsights([]));
+  }, [selectedIds, period, customDateFrom, customDateTo, customReady]);
+
   // ── Aggregate metrics ────────────────────────────────────────────────────
   let metaLeads = 0, metaFormLeads = 0, metaConversations = 0, metaSpend = 0, metaImpressions = 0, metaClicks = 0;
   let googleConv = 0, googleCost = 0;
@@ -1407,6 +1424,71 @@ export default function GeneralDashboard() {
   const metaCampaigns = campaigns.filter((campaign) => campaign.platform === 'meta');
   const googleCampaigns = campaigns.filter((campaign) => campaign.platform === 'google');
 
+  async function analyzeWithAI() {
+    if (selectedIds.size === 0) return;
+    setAiLoading(true);
+    setAiError('');
+    try {
+      const effectivePeriod = period === 'custom' && customDateFrom && customDateTo
+        ? `custom:${customDateFrom}:${customDateTo}`
+        : period;
+
+      const metaPayload = metaSpend > 0 ? {
+        spend: metaSpend, impressions: metaImpressions, clicks: metaClicks,
+        leads: metaLeads, ctr: metaCtr, cpc: metaCpc, cpl: avgCpl,
+      } : null;
+
+      const googlePayload = googleCost > 0 ? {
+        cost: googleCost, impressions: googleImpressions, clicks: googleClicks,
+        conversions: googleConv, ctr: googleCtrValue, cpc: googleCpc, cpa: avgCpa,
+      } : null;
+
+      const res = await fetch('/api/ai/insights', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientIds: [...selectedIds],
+          clientNames: selectedClients.map(c => c.name),
+          period: effectivePeriod,
+          meta: metaPayload,
+          google: googlePayload,
+          topCreatives: creatives.slice(0, 5).map(c => ({
+            name: c.adName ?? '',
+            spend: c.spend ?? 0,
+            leads: c.leads ?? 0,
+            cpl: c.cpl ?? 0,
+            impressions: c.impressions ?? 0,
+          })),
+        }),
+      });
+      const data = await res.json() as AiInsight[] | { error: string };
+      if (!res.ok) { setAiError((data as { error: string }).error); return; }
+      setAiInsights(data as AiInsight[]);
+    } catch (e) {
+      setAiError(String(e));
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
+  async function dismissInsight(id: string) {
+    setAiInsights(prev => prev.filter(i => i.id !== id));
+    await fetch('/api/ai/insights', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, status: 'dismissed' }),
+    });
+  }
+
+  async function acceptInsight(id: string) {
+    setAiInsights(prev => prev.map(i => i.id === id ? { ...i, status: 'accepted' } : i));
+    await fetch('/api/ai/insights', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, status: 'accepted' }),
+    });
+  }
+
   return (
     <div className="space-y-6 pb-10">
       {/* Header + Filters */}
@@ -1433,6 +1515,17 @@ export default function GeneralDashboard() {
               ))}
             </div>
             {metricsLoading && <RefreshCw className="w-4 h-4 animate-spin text-muted-foreground" />}
+            <button
+              type="button"
+              onClick={analyzeWithAI}
+              disabled={aiLoading || selectedIds.size === 0 || metricsLoading}
+              className="flex items-center gap-1.5 rounded-lg border border-violet-500/40 bg-violet-500/10 px-3 py-1.5 text-[11px] font-semibold text-violet-400 transition-colors hover:bg-violet-500/20 disabled:opacity-50"
+            >
+              {aiLoading
+                ? <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                : <Sparkles className="h-3.5 w-3.5" />}
+              {aiLoading ? 'Analisando...' : 'Analisar com IA'}
+            </button>
             <button
               type="button"
               onClick={() => setEditMode(v => !v)}
@@ -1499,6 +1592,88 @@ export default function GeneralDashboard() {
                   </Link>
                   <span className="text-muted-foreground"> — {a.msg}</span>
                 </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* AI Insights */}
+      {aiError && (
+        <div className="rounded-xl border border-red-400/30 bg-red-500/5 px-4 py-3 text-xs text-red-400">
+          {aiError}
+        </div>
+      )}
+      {aiInsights.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-violet-400" />
+              <p className="text-sm font-bold text-violet-400">
+                {aiInsights.filter(i => i.status === 'new').length} insight{aiInsights.filter(i => i.status === 'new').length !== 1 ? 's' : ''} da IA Gestora
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={analyzeWithAI}
+              disabled={aiLoading}
+              className="text-[10px] font-semibold text-muted-foreground hover:text-violet-400 transition-colors flex items-center gap-1"
+            >
+              <RefreshCw className={cn('h-3 w-3', aiLoading && 'animate-spin')} />
+              Reanalisar
+            </button>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {aiInsights.map(ins => (
+              <div
+                key={ins.id}
+                className={cn(
+                  'relative rounded-xl border p-4 space-y-2 transition-opacity',
+                  ins.status === 'accepted' && 'opacity-60',
+                  ins.severity === 'critical' ? 'border-red-500/30 bg-red-500/5'
+                    : ins.severity === 'warn' ? 'border-yellow-500/30 bg-yellow-500/5'
+                    : 'border-violet-500/20 bg-violet-500/5',
+                )}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={cn(
+                      'rounded-full px-2 py-0.5 text-[10px] font-bold border uppercase tracking-wider',
+                      ins.severity === 'critical' ? 'bg-red-500/15 text-red-400 border-red-500/30'
+                        : ins.severity === 'warn' ? 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30'
+                        : 'bg-violet-500/15 text-violet-400 border-violet-500/30',
+                    )}>
+                      {ins.severity === 'critical' ? 'Crítico' : ins.severity === 'warn' ? 'Atenção' : 'Info'}
+                    </span>
+                    <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                      {ins.platform === 'meta' ? 'Meta Ads' : ins.platform === 'google' ? 'Google Ads' : 'Geral'} · {ins.metric}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => dismissInsight(ins.id)}
+                    className="shrink-0 text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                <p className="text-sm font-semibold text-foreground leading-snug">{ins.title}</p>
+                <p className="text-xs text-muted-foreground leading-relaxed">{ins.suggestion}</p>
+                {ins.status === 'new' && (
+                  <button
+                    type="button"
+                    onClick={() => acceptInsight(ins.id)}
+                    className="flex items-center gap-1 text-[10px] font-semibold text-muted-foreground hover:text-emerald-400 transition-colors"
+                  >
+                    <Check className="h-3 w-3" />
+                    Marcar como aplicado
+                  </button>
+                )}
+                {ins.status === 'accepted' && (
+                  <span className="flex items-center gap-1 text-[10px] font-semibold text-emerald-400">
+                    <Check className="h-3 w-3" /> Aplicado
+                  </span>
+                )}
               </div>
             ))}
           </div>
