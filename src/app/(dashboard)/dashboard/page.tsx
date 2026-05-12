@@ -4,8 +4,18 @@ import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import {
-  AlertTriangle, ChevronDown, ImageIcon, Play, RefreshCw, Search,
+  AlertTriangle, ChevronDown, ChevronUp, GripVertical, ImageIcon,
+  LayoutDashboard, Play, RefreshCw, Search,
 } from 'lucide-react';
+import {
+  DndContext, closestCenter, KeyboardSensor, PointerSensor,
+  useSensor, useSensors, type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext, sortableKeyboardCoordinates, useSortable,
+  verticalListSortingStrategy, arrayMove,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { useClients } from '@/lib/client-store';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 import type { TopCreative } from '@/app/api/meta/top-creatives/route';
@@ -430,21 +440,23 @@ function MetricSection({
   accent,
   children,
 }: {
-  title: string;
-  description: string;
+  title?: string;
+  description?: string;
   accent: string;
   children: ReactNode;
 }) {
   return (
     <section className="space-y-5">
       <div className="flex items-end justify-between gap-4">
+        {title && (
         <div>
           <h2 className="flex items-center gap-3 font-heading text-3xl font-bold uppercase tracking-wide text-foreground">
             <PlatformMarkForText text={title} />
             <span>{title}</span>
           </h2>
-          <p className="mt-1 text-xs text-foreground/75">{description}</p>
+          {description && <p className="mt-1 text-xs text-foreground/75">{description}</p>}
         </div>
+        )}
       </div>
       {children}
     </section>
@@ -1037,6 +1049,56 @@ function AudiencePlatformBlock({
   );
 }
 
+// ── Dashboard Edit Mode ──────────────────────────────────────────────────────
+type WidgetId = 'general' | 'meta' | 'google';
+
+const WIDGET_INFO: Record<WidgetId, { label: string }> = {
+  general: { label: 'Métricas Gerais' },
+  meta: { label: 'Meta Ads' },
+  google: { label: 'Google Ads' },
+};
+
+const DEFAULT_WIDGET_ORDER: WidgetId[] = ['general', 'meta', 'google'];
+const LS_ORDER = 'dashboard_widget_order';
+const LS_COLLAPSED = 'dashboard_widget_collapsed';
+
+function SortableWidget({
+  id, editMode, collapsed, onToggleCollapse, children,
+}: {
+  id: WidgetId; editMode: boolean; collapsed: boolean; onToggleCollapse: () => void; children: ReactNode;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 };
+
+  return (
+    <div ref={setNodeRef} style={style}>
+      {editMode && (
+        <div className="mb-2 flex items-center gap-2 rounded-lg border border-dashed border-primary/40 bg-primary/5 px-3 py-2">
+          <button
+            type="button"
+            {...attributes}
+            {...listeners}
+            className="cursor-grab active:cursor-grabbing p-0.5 text-muted-foreground hover:text-foreground"
+            aria-label="Arrastar seção"
+          >
+            <GripVertical className="h-4 w-4" />
+          </button>
+          <span className="flex-1 text-xs font-semibold text-muted-foreground">{WIDGET_INFO[id].label}</span>
+          <button
+            type="button"
+            onClick={onToggleCollapse}
+            className="p-0.5 text-muted-foreground hover:text-foreground"
+            aria-label={collapsed ? 'Expandir seção' : 'Recolher seção'}
+          >
+            {collapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+          </button>
+        </div>
+      )}
+      {!collapsed && children}
+    </div>
+  );
+}
+
 // ── Main Dashboard ───────────────────────────────────────────────────────────
 export default function GeneralDashboard() {
   const { clients } = useClients();
@@ -1060,6 +1122,51 @@ export default function GeneralDashboard() {
   const [creativesLoading, setCreativesLoading] = useState(false);
   const [audienceLoading, setAudienceLoading] = useState(false);
   const [balancesLoading, setBalancesLoading] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+  const [widgetOrder, setWidgetOrder] = useState<WidgetId[]>(DEFAULT_WIDGET_ORDER);
+  const [collapsedWidgets, setCollapsedWidgets] = useState<Set<WidgetId>>(new Set());
+
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+      setWidgetOrder(order => {
+        const oldIndex = order.indexOf(active.id as WidgetId);
+        const newIndex = order.indexOf(over.id as WidgetId);
+        return arrayMove(order, oldIndex, newIndex);
+      });
+    }
+  }
+
+  function toggleCollapse(id: WidgetId) {
+    setCollapsedWidgets(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  // Load layout from localStorage
+  useEffect(() => {
+    try {
+      const order = localStorage.getItem(LS_ORDER);
+      if (order) {
+        const parsed = JSON.parse(order) as WidgetId[];
+        if (Array.isArray(parsed) && parsed.every(id => DEFAULT_WIDGET_ORDER.includes(id))) {
+          setWidgetOrder(parsed);
+        }
+      }
+      const collapsed = localStorage.getItem(LS_COLLAPSED);
+      if (collapsed) setCollapsedWidgets(new Set(JSON.parse(collapsed) as WidgetId[]));
+    } catch {}
+  }, []);
+
+  useEffect(() => { localStorage.setItem(LS_ORDER, JSON.stringify(widgetOrder)); }, [widgetOrder]);
+  useEffect(() => { localStorage.setItem(LS_COLLAPSED, JSON.stringify([...collapsedWidgets])); }, [collapsedWidgets]);
 
   // Initialize: all clients selected
   useEffect(() => {
@@ -1324,6 +1431,19 @@ export default function GeneralDashboard() {
               ))}
             </div>
             {metricsLoading && <RefreshCw className="w-4 h-4 animate-spin text-muted-foreground" />}
+            <button
+              type="button"
+              onClick={() => setEditMode(v => !v)}
+              className={cn(
+                'flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[11px] font-semibold transition-colors',
+                editMode
+                  ? 'border-primary bg-primary/15 text-primary'
+                  : 'border-border bg-card text-muted-foreground hover:bg-muted/50'
+              )}
+            >
+              <LayoutDashboard className="h-3.5 w-3.5" />
+              {editMode ? 'Concluir edição' : 'Editar layout'}
+            </button>
           </div>
         </div>
         {period === 'custom' && (
@@ -1383,82 +1503,42 @@ export default function GeneralDashboard() {
         </div>
       )}
 
-      <div className="grid gap-12">
-        <MetricSection
-          title="Métricas Gerais"
-          description="Visão consolidada do resultado, investimento, leads e saldos das contas vinculadas."
-          accent="#8B35FF"
-        >
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+        <SortableContext items={widgetOrder} strategy={verticalListSortingStrategy}>
           <div className="grid gap-12">
-            <div className="grid items-stretch gap-12 lg:grid-cols-2">
-              <MetricTile
-                title="Resultado"
-                value={revenue}
-                meta={revenueGoal}
-                partial={revenuePartial}
-                format="currency"
-                loading={metricsLoading}
-                description="Resultado realizado no período."
-              />
-              <MetricTile
-                title="ROI"
-                value={roi}
-                format="times"
-                loading={metricsLoading}
-                description="Resultado dividido pelo total investido."
-              />
-            </div>
-            <div className="grid items-stretch gap-12 lg:grid-cols-2">
-              <MetricTile
-                title="Total de Leads"
-                value={totalLeads}
-                meta={leadsGoal}
-                partial={leadsPartial}
-                loading={metricsLoading}
-                description="Meta Ads + Google Ads."
-              />
-              <MetricTile
-                title="Custo por Lead"
-                value={totalCostPerLead}
-                format="currency"
-                loading={metricsLoading}
-                description="Custo por resultado consolidado."
-              />
-            </div>
-            <div className="grid items-stretch gap-12 lg:grid-cols-3">
-              <MetricTile
-                title="Total Investido"
-                value={totalSpend}
-                meta={plannedInvestment}
-                format="currency"
-                loading={metricsLoading}
-                description="Investimento total em mídia."
-              />
-              <MetricTile
-                title="Saldo da Conta Meta Ads"
-                value={metaBalance}
-                format="currency"
-                loading={balancesLoading}
-                accent="#0B84FF"
-                description="Soma dos saldos vinculados aos clientes selecionados."
-              />
-              <MetricTile
-                title="Saldo da Conta Google Ads"
-                value={googleBalance}
-                format="currency"
-                loading={balancesLoading}
-                accent="#55F52F"
-                description="Soma dos saldos vinculados aos clientes selecionados."
-              />
-            </div>
-          </div>
-        </MetricSection>
-
-        <MetricSection
-          title="Métricas Meta Ads"
-          description={`${metaFormLeads.toLocaleString('pt-BR')} formulários + ${metaConversations.toLocaleString('pt-BR')} conversas no período selecionado.`}
-          accent="#0B84FF"
-        >
+            {widgetOrder.map(id => (
+              <SortableWidget
+                key={id}
+                id={id}
+                editMode={editMode}
+                collapsed={collapsedWidgets.has(id)}
+                onToggleCollapse={() => toggleCollapse(id)}
+              >
+                {id === 'general' && (
+                  <MetricSection accent="#8B35FF">
+                    <div className="grid gap-12">
+                      <div className="grid items-stretch gap-12 lg:grid-cols-2">
+                        <MetricTile title="Resultado" value={revenue} meta={revenueGoal} partial={revenuePartial} format="currency" loading={metricsLoading} description="Resultado realizado no período." />
+                        <MetricTile title="ROI" value={roi} format="times" loading={metricsLoading} description="Resultado dividido pelo total investido." />
+                      </div>
+                      <div className="grid items-stretch gap-12 lg:grid-cols-2">
+                        <MetricTile title="Total de Leads" value={totalLeads} meta={leadsGoal} partial={leadsPartial} loading={metricsLoading} description="Meta Ads + Google Ads." />
+                        <MetricTile title="Custo por Lead" value={totalCostPerLead} format="currency" loading={metricsLoading} description="Custo por resultado consolidado." />
+                      </div>
+                      <div className="grid items-stretch gap-12 lg:grid-cols-3">
+                        <MetricTile title="Total Investido" value={totalSpend} meta={plannedInvestment} format="currency" loading={metricsLoading} description="Investimento total em mídia." />
+                        <MetricTile title="Saldo da Conta Meta Ads" value={metaBalance} format="currency" loading={balancesLoading} accent="#0B84FF" description="Soma dos saldos vinculados aos clientes selecionados." />
+                        <MetricTile title="Saldo da Conta Google Ads" value={googleBalance} format="currency" loading={balancesLoading} accent="#55F52F" description="Soma dos saldos vinculados aos clientes selecionados." />
+                      </div>
+                    </div>
+                  </MetricSection>
+                )}
+                {id === 'meta' && (
+                  <MetricSection
+                    title="Métricas Meta Ads"
+                    description={`${metaFormLeads.toLocaleString('pt-BR')} formulários + ${metaConversations.toLocaleString('pt-BR')} conversas no período selecionado.`}
+                    accent="#0B84FF"
+                  >
           <div className="grid items-stretch gap-12 md:grid-cols-2 xl:grid-cols-4">
             <MetricTile title="Leads Meta Ads" value={metaLeads} loading={metricsLoading} accent="#0B84FF" />
             <MetricTile title="CPL Meta Ads" value={avgCpl} format="currency" loading={metricsLoading} accent="#0B84FF" />
@@ -1588,13 +1668,14 @@ export default function GeneralDashboard() {
               )}
             </div>
           </div>
-        </MetricSection>
-
-        <MetricSection
-          title="Métricas Google Ads"
-          description="Conversões e custos vindos apenas das contas Google Ads vinculadas."
-          accent="#55F52F"
-        >
+                  </MetricSection>
+                )}
+                {id === 'google' && (
+                  <MetricSection
+                    title="Métricas Google Ads"
+                    description="Conversões e custos vindos apenas das contas Google Ads vinculadas."
+                    accent="#55F52F"
+                  >
           <div className="grid items-stretch gap-12 md:grid-cols-2 xl:grid-cols-4">
             <MetricTile title="Leads Google Ads" value={googleConv} loading={metricsLoading} accent="#55F52F" />
             <MetricTile title="Custo / Conversão" value={avgCpa} format="currency" loading={metricsLoading} accent="#55F52F" />
@@ -1667,8 +1748,13 @@ export default function GeneralDashboard() {
               )}
             </div>
           </div>
-        </MetricSection>
-      </div>
+                  </MetricSection>
+                )}
+              </SortableWidget>
+            ))}
+          </div>
+        </SortableContext>
+      </DndContext>
 
       {/* Client summary quick-view */}
       {selectedClients.length > 1 && (
