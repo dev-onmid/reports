@@ -16,7 +16,7 @@ import {
   Link as LinkIcon, Link2, Plus, X, ChevronDown, LayoutGrid,
   WalletCards, Send, CheckCircle2, Clock3, AlertTriangle, Filter, Trash2,
   UserRound, Phone, Mail, Briefcase, SlidersHorizontal, Check, Hash, BarChart2, Layers,
-  Power, PowerOff, Search, BookMarked, ExternalLink, RefreshCw, ChevronRight,
+  Power, PowerOff, Search, BookMarked, ExternalLink, RefreshCw, ChevronRight, Eye, EyeOff,
 } from 'lucide-react';
 import type { AdLibraryAd } from '@/app/api/meta/ad-library/route';
 import type { SavedAd } from '@/app/api/ad-library/saved/route';
@@ -2537,6 +2537,7 @@ function AdLibraryCard({
   onRemove: () => void;
   saving: boolean;
 }) {
+  const [showPreview, setShowPreview] = useState(true);
   const body = ad.creativeBodies[0] ?? '';
   const title = ad.creativeTitles[0] ?? '';
   const platforms = ad.publisherPlatforms.join(', ');
@@ -2554,6 +2555,14 @@ function AdLibraryCard({
           )}
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            onClick={() => setShowPreview(v => !v)}
+            className="rounded p-1 text-muted-foreground hover:text-foreground transition-colors"
+            title={showPreview ? 'Ocultar preview' : 'Ver preview'}
+          >
+            {showPreview ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+          </button>
           <span className={cn(
             'rounded-full px-2 py-0.5 text-[10px] font-bold border',
             ad.adActiveStatus === 'ACTIVE'
@@ -2564,6 +2573,19 @@ function AdLibraryCard({
           </span>
         </div>
       </div>
+
+      {/* Ad preview iframe */}
+      {showPreview && ad.adSnapshotUrl && (
+        <div className="rounded-lg overflow-hidden border border-border bg-white" style={{ height: 400 }}>
+          <iframe
+            src={ad.adSnapshotUrl}
+            className="w-full h-full"
+            scrolling="no"
+            sandbox="allow-scripts allow-same-origin"
+            title={`Preview: ${ad.pageName}`}
+          />
+        </div>
+      )}
 
       {title && (
         <p className="text-sm font-semibold text-foreground/90 line-clamp-2">{title}</p>

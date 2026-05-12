@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useClients } from '@/lib/client-store';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 import {
-  Search, BookMarked, ExternalLink, RefreshCw, ChevronRight, Trash2, X,
+  Search, BookMarked, ExternalLink, RefreshCw, ChevronRight, Trash2, X, Eye, EyeOff,
 } from 'lucide-react';
 import type { AdLibraryAd } from '@/app/api/meta/ad-library/route';
 import type { SavedAd } from '@/app/api/ad-library/saved/route';
@@ -33,6 +33,7 @@ function AdCard({
   clients: { id: string; name: string }[];
 }) {
   const [showClientPicker, setShowClientPicker] = useState(false);
+  const [showPreview, setShowPreview] = useState(true);
   const body = ad.creativeBodies[0] ?? '';
   const title = ad.creativeTitles[0] ?? '';
   const platforms = ad.publisherPlatforms.join(', ');
@@ -49,15 +50,38 @@ function AdCard({
             <p className="text-[10px] text-muted-foreground mt-0.5 uppercase tracking-wider">{platforms}</p>
           )}
         </div>
-        <span className={cn(
-          'shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold border',
-          ad.adActiveStatus === 'ACTIVE'
-            ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-            : 'bg-muted/50 text-muted-foreground border-border'
-        )}>
-          {ad.adActiveStatus === 'ACTIVE' ? 'Ativo' : 'Inativo'}
-        </span>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            onClick={() => setShowPreview(v => !v)}
+            className="rounded p-1 text-muted-foreground hover:text-foreground transition-colors"
+            title={showPreview ? 'Ocultar preview' : 'Ver preview'}
+          >
+            {showPreview ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+          </button>
+          <span className={cn(
+            'rounded-full px-2 py-0.5 text-[10px] font-bold border',
+            ad.adActiveStatus === 'ACTIVE'
+              ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+              : 'bg-muted/50 text-muted-foreground border-border'
+          )}>
+            {ad.adActiveStatus === 'ACTIVE' ? 'Ativo' : 'Inativo'}
+          </span>
+        </div>
       </div>
+
+      {/* Ad preview iframe */}
+      {showPreview && ad.adSnapshotUrl && (
+        <div className="rounded-lg overflow-hidden border border-border bg-white" style={{ height: 400 }}>
+          <iframe
+            src={ad.adSnapshotUrl}
+            className="w-full h-full"
+            scrolling="no"
+            sandbox="allow-scripts allow-same-origin"
+            title={`Preview: ${ad.pageName}`}
+          />
+        </div>
+      )}
 
       {title && <p className="text-sm font-semibold text-foreground/90 line-clamp-2">{title}</p>}
       {body && <p className="text-xs text-muted-foreground line-clamp-3">{body}</p>}
