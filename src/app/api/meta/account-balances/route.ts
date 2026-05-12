@@ -1,4 +1,5 @@
 import { makeServerPool } from '@/lib/server-db';
+import { getFreshMetaToken } from '@/lib/meta-token';
 
 export type AccountBalance = {
   id: string;
@@ -57,7 +58,7 @@ export async function GET() {
 
   await Promise.allSettled(
     conns.map(async (conn) => {
-      const token = conn.access_token as string;
+      const token = await getFreshMetaToken(conn);
       const connId = conn.id as string;
       const connName = (conn.user_name ?? conn.label ?? '') as string;
 

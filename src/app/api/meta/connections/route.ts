@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
+import { exchangeAndSaveMetaToken } from '@/lib/meta-token';
 
 function normalizeMetaAccountId(accountId: string) {
   return accountId.replace(/^act_/, '');
@@ -17,6 +18,7 @@ function rowToJson(r: any) {
     userName: r.user_name ?? '',
     userPicture: r.user_picture ?? null,
     connectedAt: r.connected_at ?? new Date().toISOString(),
+    tokenExpiry: r.token_expiry ?? null,
   };
 }
 
@@ -83,7 +85,8 @@ export async function POST(request: NextRequest) {
              access_token = $4,
              user_name = $5,
              user_picture = $6,
-             connected_at = NOW()
+             connected_at = NOW(),
+             token_expiry = NULL
          WHERE id = $7
          RETURNING *`,
         [body.label, body.status, body.appId, body.accessToken, body.userName, body.userPicture ?? null, existing.rows[0].id]
@@ -95,6 +98,10 @@ export async function POST(request: NextRequest) {
       );
 
     const saved = rowToJson(rows[0]);
+
+    // Exchange short-lived token for long-lived (60 days) — runs async, doesn't block response
+    exchangeAndSaveMetaToken(saved.id, body.appId, body.accessToken).catch(console.error);
+
     await syncClientLinksToConnection(saved.id, body.accessToken);
     return Response.json(saved, { status: existing.rows[0] ? 200 : 201 });
   } finally {

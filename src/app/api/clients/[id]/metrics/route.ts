@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server';
 import { google } from 'googleapis';
 import { makeServerPool } from '@/lib/server-db';
 import { resolveMetaPeriod, resolveGaqlPeriod, applyMetaDateToUrl } from '@/lib/period-utils';
+import { getFreshMetaToken } from '@/lib/meta-token';
 
 async function getFreshGoogleToken(conn: { access_token: string; refresh_token: string; token_expiry: string | null }): Promise<string> {
   if (conn.token_expiry) {
@@ -249,7 +250,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       metaLinks.map(async (link) => {
         const conn = metaConns.find(c => c.id === link.connection_id);
         if (!conn) return;
-        const m = await fetchMetaAccountMetrics(link.account_id, conn.access_token, metaPeriod);
+        const token = await getFreshMetaToken(conn);
+        const m = await fetchMetaAccountMetrics(link.account_id, token, metaPeriod);
         if (m) allMetrics.push(m);
       })
     );

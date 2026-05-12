@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { resolveMetaPeriod, applyMetaDateToUrl } from '@/lib/period-utils';
+import { getFreshMetaToken } from '@/lib/meta-token';
 
 const LEAD_ACTIONS = [
   'lead',
@@ -132,7 +133,7 @@ export async function GET(request: NextRequest) {
 
   await Promise.allSettled(
     conns.map(async (conn) => {
-      const token = conn.access_token as string;
+      const token = await getFreshMetaToken(conn);
       const allowedAccounts = shouldFilterByClient ? allowedByConnection.get(conn.id) ?? [] : [];
       if (shouldFilterByClient && allowedAccounts.length === 0) return;
 

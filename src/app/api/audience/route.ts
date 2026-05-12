@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server';
 import { google } from 'googleapis';
 import { makeServerPool } from '@/lib/server-db';
 import { resolveMetaPeriod, resolveGaqlPeriod, applyMetaDateToUrl } from '@/lib/period-utils';
+import { getFreshMetaToken } from '@/lib/meta-token';
 
 export type AudienceSlice = { label: string; value: number };
 export type AudienceBreakdowns = {
@@ -291,12 +292,13 @@ export async function GET(request: NextRequest) {
     const accountIds = shouldFilterByClient ? byPlatformAndConn.get(`meta_ads:${conn.id}`) ?? [] : [];
     if (shouldFilterByClient && accountIds.length === 0) return;
     const ids = shouldFilterByClient ? accountIds : [];
+    const token = await getFreshMetaToken(conn);
     await Promise.allSettled(ids.map(async (accountId) => {
       const [age, gender, platform, device] = await Promise.all([
-        fetchMetaBreakdown(accountId, conn.access_token, metaPeriod, 'age'),
-        fetchMetaBreakdown(accountId, conn.access_token, metaPeriod, 'gender', META_GENDER_LABELS),
-        fetchMetaBreakdown(accountId, conn.access_token, metaPeriod, 'publisher_platform', META_PLATFORM_LABELS),
-        fetchMetaBreakdown(accountId, conn.access_token, metaPeriod, 'impression_device'),
+        fetchMetaBreakdown(accountId, token, metaPeriod, 'age'),
+        fetchMetaBreakdown(accountId, token, metaPeriod, 'gender', META_GENDER_LABELS),
+        fetchMetaBreakdown(accountId, token, metaPeriod, 'publisher_platform', META_PLATFORM_LABELS),
+        fetchMetaBreakdown(accountId, token, metaPeriod, 'impression_device'),
       ]);
       age.forEach((item) => addSlice(metaMaps.age, item.label, item.value));
       gender.forEach((item) => addSlice(metaMaps.gender, item.label, item.value));

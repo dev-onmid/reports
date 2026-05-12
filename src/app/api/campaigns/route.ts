@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server';
 import { google } from 'googleapis';
 import { makeServerPool } from '@/lib/server-db';
 import { resolveMetaPeriod, resolveGaqlPeriod, applyMetaDateToUrl } from '@/lib/period-utils';
+import { getFreshMetaToken } from '@/lib/meta-token';
 
 type SortKey = 'spend' | 'leads' | 'impressions' | 'clicks' | 'cpl' | 'ctr';
 
@@ -197,7 +198,7 @@ export async function GET(request: NextRequest) {
 
   await Promise.allSettled(
     metaConns.map(async (conn) => {
-      const token = conn.access_token as string;
+      const token = await getFreshMetaToken(conn);
       const allowed = shouldFilterByClient ? linksByPlatformAndConn.get(`meta_ads:${conn.id}`) ?? [] : [];
       if (shouldFilterByClient && allowed.length === 0) return;
 
