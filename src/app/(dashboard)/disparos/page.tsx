@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   Plus, Trash2, Wifi, WifiOff, Play, Pause, X, Upload,
   CheckCircle2, AlertCircle, Clock, RefreshCw, MessageSquare,
-  Users, BarChart2,
+  Users, BarChart2, ChevronDown, Copy,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -250,7 +250,7 @@ function ClientesTab() {
 
 // ─── Tab: Nova Campanha ────────────────────────────────────────────────────────
 
-function NovaCampanhaTab({ onCreated }: { onCreated: () => void }) {
+function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefill?: CampaignPrefill | null }) {
   const [clients, setClients] = useState<ZClient[]>([]);
   const [form, setForm] = useState({
     clientId: '',
@@ -276,9 +276,27 @@ function NovaCampanhaTab({ onCreated }: { onCreated: () => void }) {
       .then(r => r.json() as Promise<ZClient[]>)
       .then(data => {
         setClients(data);
-        if (data[0]) setForm(p => ({ ...p, clientId: data[0].id }));
+        if (data[0]) setForm(p => ({ ...p, clientId: p.clientId || data[0].id }));
       });
   }, []);
+
+  useEffect(() => {
+    if (!prefill) return;
+    setForm({
+      clientId: prefill.clientId,
+      name: prefill.name + ' (cópia)',
+      message: prefill.message,
+      numbers: prefill.numbers,
+      isNow: true,
+      startsAt: '',
+      endsAt: '',
+      activeFrom: prefill.activeFrom ?? '',
+      activeUntil: prefill.activeUntil ?? '',
+      intervalMin: prefill.intervalMin,
+      intervalMax: prefill.intervalMax,
+    });
+    setImageUrl(prefill.imageUrl ?? '');
+  }, [prefill]);
 
   async function uploadImage(file: File) {
     setUploading(true);
@@ -564,6 +582,18 @@ type NumberDetail = {
   sent_at: string | null;
 };
 
+type CampaignPrefill = {
+  clientId: string;
+  name: string;
+  message: string;
+  numbers: string;
+  imageUrl?: string;
+  intervalMin: number;
+  intervalMax: number;
+  activeFrom?: string;
+  activeUntil?: string;
+};
+
 function CampaignCard({ campaign, onAction, onRefresh }: {
   campaign: Campaign;
   onAction: (id: string, action: string) => void;
@@ -784,9 +814,13 @@ function CampaignCard({ campaign, onAction, onRefresh }: {
 
 // ─── Tab: Dashboard ────────────────────────────────────────────────────────────
 
-function DashboardTab() {
+function DashboardTab({ onReuse }: { onReuse: (p: CampaignPrefill) => void }) {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expandedNumbers, setExpandedNumbers] = useState<Record<string, NumberDetail[]>>({});
+  const [loadingDetail, setLoadingDetail] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
 
   async function load() {
     const data = await fetch('/api/disparos/campaigns').then(r => r.json() as Promise<Campaign[]>);
@@ -803,6 +837,46 @@ function DashboardTab() {
       body: JSON.stringify({ action }),
     });
     load();
+  }
+
+  async function fetchNumbers(id: string): Promise<NumberDetail[]> {
+    if (expandedNumbers[id]) return expandedNumbers[id];
+    setLoadingDetail(id);
+    const data = await fetch(`/api/disparos/campaigns/${id}/numbers`).then(r => r.json() as Promise<NumberDetail[]>);
+    setExpandedNumbers(prev => ({ ...prev, [id]: data }));
+    setLoadingDetail(null);
+    return data;
+  }
+
+  async function handleExpand(id: string) {
+    if (expandedId === id) { setExpandedId(null); return; }
+    setExpandedId(id);
+    fetchNumbers(id);
+  }
+
+  async function handleDelete(id: string) {
+    if (!window.confirm('Excluir esta campanha permanentemente?')) return;
+    setDeleting(id);
+    await fetch(`/api/disparos/campaigns/${id}`, { method: 'DELETE' });
+    setDeleting(null);
+    setExpandedId(null);
+    load();
+  }
+
+  async function handleReuse(c: Campaign) {
+    const nums = await fetchNumbers(c.id);
+    const numbers = nums.map(n => n.name ? `${n.phone},${n.name}` : n.phone).join('\n');
+    onReuse({
+      clientId: c.client_id,
+      name: c.name,
+      message: c.message,
+      numbers,
+      imageUrl: c.image_url ?? undefined,
+      intervalMin: c.interval_min,
+      intervalMax: c.interval_max,
+      activeFrom: c.active_from ?? undefined,
+      activeUntil: c.active_until ?? undefined,
+    });
   }
 
   const active = campaigns.filter(c => ['running', 'paused', 'pending'].includes(c.status));
@@ -849,33 +923,98 @@ function DashboardTab() {
       {done.length > 0 && (
         <div className="space-y-3">
           <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Histórico</p>
-          <div className="rounded-xl border border-border overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border bg-muted/30">
-                  <th className="px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Campanha</th>
-                  <th className="px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Instância</th>
-                  <th className="px-4 py-2.5 text-right text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Enviados</th>
-                  <th className="px-4 py-2.5 text-right text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Falhas</th>
-                  <th className="px-4 py-2.5 text-right text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {done.map(c => (
-                  <tr key={c.id} className="border-b border-border last:border-0 hover:bg-muted/20">
-                    <td className="px-4 py-3 font-medium">{c.name}</td>
-                    <td className="px-4 py-3 text-muted-foreground text-xs">{c.client_name}</td>
-                    <td className="px-4 py-3 text-right text-emerald-400 font-semibold">{c.sent}</td>
-                    <td className="px-4 py-3 text-right text-red-400 font-semibold">{c.failed}</td>
-                    <td className="px-4 py-3 text-right">
-                      <span className={cn('rounded-full border px-2 py-0.5 text-[10px] font-bold', STATUS_COLOR[c.status])}>
-                        {STATUS_LABEL[c.status]}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="space-y-2">
+            {done.map(c => {
+              const isExpanded = expandedId === c.id;
+              const nums = expandedNumbers[c.id];
+              return (
+                <div key={c.id} className="rounded-xl border border-border overflow-hidden bg-card">
+                  {/* Row */}
+                  <div className="flex items-center gap-3 px-4 py-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-sm truncate">{c.name}</p>
+                      <p className="text-[11px] text-muted-foreground">{c.client_name}</p>
+                    </div>
+                    <div className="flex items-center gap-3 text-[11px] shrink-0">
+                      <span className="text-emerald-400 font-semibold">{c.sent} enviados</span>
+                      {c.failed > 0 && <span className="text-red-400 font-semibold">{c.failed} falhas</span>}
+                    </div>
+                    <span className={cn('shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold', STATUS_COLOR[c.status])}>
+                      {STATUS_LABEL[c.status]}
+                    </span>
+                    {/* Actions */}
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        title="Ver detalhes"
+                        onClick={() => handleExpand(c.id)}
+                        className="rounded-lg border border-border bg-background p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                      >
+                        <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', isExpanded && 'rotate-180')} />
+                      </button>
+                      <button
+                        type="button"
+                        title="Reaproveitar campanha"
+                        onClick={() => handleReuse(c)}
+                        className="rounded-lg border border-border bg-background p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 hover:border-primary/30 transition-colors"
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        title="Excluir campanha"
+                        onClick={() => handleDelete(c.id)}
+                        disabled={deleting === c.id}
+                        className="rounded-lg border border-red-500/20 bg-background p-1.5 text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-50"
+                      >
+                        {deleting === c.id ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Expandable detail */}
+                  {isExpanded && (
+                    <div className="border-t border-border bg-muted/20 p-3">
+                      {loadingDetail === c.id || !nums ? (
+                        <p className="text-[11px] text-muted-foreground animate-pulse">Carregando...</p>
+                      ) : nums.length === 0 ? (
+                        <p className="text-[11px] text-muted-foreground">Nenhum número registrado.</p>
+                      ) : (
+                        <div className="rounded-lg border border-border overflow-hidden">
+                          <table className="w-full text-[11px]">
+                            <thead>
+                              <tr className="bg-muted/40 border-b border-border">
+                                <th className="px-3 py-1.5 text-left font-semibold text-muted-foreground">Número</th>
+                                <th className="px-3 py-1.5 text-left font-semibold text-muted-foreground">Nome</th>
+                                <th className="px-3 py-1.5 text-left font-semibold text-muted-foreground">Status</th>
+                                <th className="px-3 py-1.5 text-left font-semibold text-muted-foreground">Erro / Detalhes</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {nums.map((n, i) => (
+                                <tr key={i} className="border-b border-border last:border-0">
+                                  <td className="px-3 py-1.5 font-mono">{n.phone}</td>
+                                  <td className="px-3 py-1.5 text-muted-foreground">{n.name || '—'}</td>
+                                  <td className={cn('px-3 py-1.5 font-semibold',
+                                    n.status === 'sent' ? 'text-emerald-400' :
+                                    n.status === 'failed' ? 'text-red-400' : 'text-muted-foreground'
+                                  )}>
+                                    {n.status === 'sent' ? 'Enviado' : n.status === 'failed' ? 'Falha' : n.status}
+                                  </td>
+                                  <td className="px-3 py-1.5 text-muted-foreground break-all">
+                                    {n.error_msg || (n.sent_at ? new Date(n.sent_at).toLocaleString('pt-BR') : '—')}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -909,6 +1048,12 @@ const TAB_ICON: Record<Tab, React.ElementType> = {
 
 export default function DisparosPage() {
   const [tab, setTab] = useState<Tab>('dashboard');
+  const [prefill, setPrefill] = useState<CampaignPrefill | null>(null);
+
+  function handleReuse(p: CampaignPrefill) {
+    setPrefill(p);
+    setTab('nova');
+  }
 
   return (
     <div className="space-y-6 pb-10">
@@ -943,9 +1088,15 @@ export default function DisparosPage() {
         </div>
       </div>
 
-      {tab === 'dashboard' && <DashboardTab />}
+      {tab === 'dashboard' && <DashboardTab onReuse={handleReuse} />}
       {tab === 'clientes' && <ClientesTab />}
-      {tab === 'nova' && <NovaCampanhaTab onCreated={() => setTab('dashboard')} />}
+      {tab === 'nova' && (
+        <NovaCampanhaTab
+          key={prefill ? JSON.stringify(prefill).slice(0, 40) : 'new'}
+          prefill={prefill}
+          onCreated={() => { setPrefill(null); setTab('dashboard'); }}
+        />
+      )}
     </div>
   );
 }
