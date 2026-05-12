@@ -70,14 +70,12 @@ function AdCard({
         </div>
       </div>
 
-      {/* Ad preview iframe */}
+      {/* Ad preview iframe via proxy (strips X-Frame-Options) */}
       {showPreview && ad.adSnapshotUrl && (
-        <div className="rounded-lg overflow-hidden border border-border bg-white" style={{ height: 400 }}>
+        <div className="rounded-lg overflow-hidden border border-border bg-white" style={{ height: 420 }}>
           <iframe
-            src={ad.adSnapshotUrl}
+            src={`/api/meta/ad-proxy?url=${encodeURIComponent(ad.adSnapshotUrl)}`}
             className="w-full h-full"
-            scrolling="no"
-            sandbox="allow-scripts allow-same-origin"
             title={`Preview: ${ad.pageName}`}
           />
         </div>
