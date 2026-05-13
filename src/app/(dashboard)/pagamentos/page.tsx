@@ -669,21 +669,33 @@ export default function PagamentosPage() {
 
   useEffect(() => { loadBalances(); }, [loadBalances]);
 
+  const activeClientIds = new Set(clients.filter(c => c.status === 'Ativo').map(c => c.id));
+  const activeClientLinks = clientLinks.filter(l => activeClientIds.has(l.clientId));
+  const activeBalances = balances.filter(b =>
+    activeClientLinks.some(l => {
+      if (l.platform === 'meta_ads' && b.platform === 'meta')
+        return b.id.replace(/^act_/, '') === l.accountId.replace(/^act_/, '');
+      if (l.platform === 'google_ads' && b.platform === 'google')
+        return b.id.replace(/\D/g, '') === l.accountId.replace(/\D/g, '');
+      return false;
+    })
+  );
+
   // Helper: get total Meta balance for a client
   function getClientMetaBalance(clientId: string): number | null {
-    const accountIds = clientLinks
+    const accountIds = activeClientLinks
       .filter((link) => link.clientId === clientId && link.platform === 'meta_ads')
       .map((link) => link.accountId);
-    const linked = balances.filter(b => b.platform === 'meta' && accountIds.includes(b.id) && b.balance !== null);
+    const linked = activeBalances.filter(b => b.platform === 'meta' && accountIds.includes(b.id) && b.balance !== null);
     if (linked.length === 0) return null;
     return linked.reduce((sum, b) => sum + (b.balance ?? 0), 0);
   }
 
   function getClientGoogleBalance(clientId: string): number | null {
-    const accountIds = clientLinks
+    const accountIds = activeClientLinks
       .filter((link) => link.clientId === clientId && link.platform === 'google_ads')
       .map((link) => link.accountId);
-    const linked = balances.filter(b => b.platform === 'google' && accountIds.includes(b.id) && b.balance !== null);
+    const linked = activeBalances.filter(b => b.platform === 'google' && accountIds.includes(b.id) && b.balance !== null);
     if (linked.length === 0) return null;
     return linked.reduce((sum, b) => sum + (b.balance ?? 0), 0);
   }
@@ -1027,16 +1039,16 @@ export default function PagamentosPage() {
         </div>
       </div>
 
-      {(balances.length > 0 || balancesLoading) && (
+      {(activeBalances.length > 0 || balancesLoading) && (
         <CriticalBalanceAlerts
-          balances={balances}
+          balances={activeBalances}
           loading={balancesLoading}
           lastUpdated={balancesLastUpdated}
           onRefresh={loadBalances}
         />
       )}
 
-      <ClientInvestmentSummary payments={visiblePayments} balances={balances} clientLinks={clientLinks} />
+      <ClientInvestmentSummary payments={visiblePayments} balances={activeBalances} clientLinks={activeClientLinks} />
 
       <div className="grid gap-3 md:grid-cols-5">
         {[
