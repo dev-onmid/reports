@@ -22,7 +22,7 @@ type MetaConn = { id: string; label: string; userName: string; userPicture?: str
 
 const PLATFORM_LABEL = (p: PlatformId) => PLATFORM_INFO[p].label;
 
-const COMING_SOON_PLATFORMS: PlatformId[] = ['google_sheets'];
+const COMING_SOON_PLATFORMS: PlatformId[] = [];
 const LINKABLE_PLATFORMS: PlatformId[] = ['meta_ads', 'google_ads', 'google_business', 'google_sheets'];
 
 type SortDirection = 'az' | 'za';
@@ -808,6 +808,65 @@ function MetaPagesContent({
   );
 }
 
+function GoogleSheetsContent({ clientId, onDone, onCancel }: { clientId: string; onDone: () => void; onCancel: () => void }) {
+  const [url, setUrl] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    fetch(`/api/clients/${clientId}/sheets`)
+      .then(r => r.ok ? r.json() as Promise<{ sheetsUrl: string | null }> : null)
+      .then(d => { if (d?.sheetsUrl) setUrl(d.sheetsUrl); });
+  }, [clientId]);
+
+  async function handleSave() {
+    if (!url.trim()) return;
+    if (!url.includes('docs.google.com/spreadsheets')) {
+      setError('Cole uma URL válida do Google Sheets.');
+      return;
+    }
+    setSaving(true);
+    const res = await fetch(`/api/clients/${clientId}/sheets`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sheetsUrl: url.trim() }),
+    });
+    setSaving(false);
+    if (res.ok) onDone();
+    else setError('Erro ao salvar.');
+  }
+
+  return (
+    <>
+      <div className="space-y-4 py-2">
+        <p className="text-sm text-muted-foreground">
+          Cole o link da planilha do Google Sheets. Ela precisa estar como <strong>"qualquer pessoa com o link pode visualizar"</strong>.
+        </p>
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">URL da Planilha</label>
+          <input
+            type="url"
+            placeholder="https://docs.google.com/spreadsheets/d/..."
+            value={url}
+            onChange={e => { setUrl(e.target.value); setError(''); }}
+            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+          />
+          {error && <p className="text-xs text-destructive">{error}</p>}
+        </div>
+        <p className="text-xs text-muted-foreground/60">
+          Após vincular, acesse a aba <strong>Resultados</strong> na página do cliente para analisar os dados.
+        </p>
+      </div>
+      <DialogFooter>
+        <Button variant="outline" onClick={onCancel}>Cancelar</Button>
+        <Button onClick={handleSave} disabled={saving || !url.trim()} className="bg-[#0F9D58] text-white hover:bg-[#0F9D58]/90">
+          {saving ? 'Salvando...' : 'Vincular Planilha'}
+        </Button>
+      </DialogFooter>
+    </>
+  );
+}
+
 function ComingSoonContent({ platform, onCancel }: { platform: PlatformId; onCancel: () => void }) {
   return (
     <>
@@ -946,6 +1005,8 @@ export function LinkAccountsDialog({
           <MetaPagesContent platform="facebook" clientId={clientId} onDone={closeDialog} onCancel={closeDialog} />
         ) : activePlatform === 'instagram' ? (
           <MetaPagesContent platform="instagram" clientId={clientId} onDone={closeDialog} onCancel={closeDialog} />
+        ) : activePlatform === 'google_sheets' ? (
+          <GoogleSheetsContent clientId={clientId} onDone={closeDialog} onCancel={closeDialog} />
         ) : (
           <GoogleAdsContent clientId={clientId} onDone={closeDialog} onCancel={closeDialog} />
         )}

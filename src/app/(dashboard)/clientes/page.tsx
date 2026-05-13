@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { Archive, RotateCcw, ShieldAlert, Trash2, Plus, Power, PowerOff } from 'lucide-react';
+import { Archive, RotateCcw, ShieldAlert, Trash2, Plus, Power, PowerOff, Search, ArrowUpDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -51,7 +51,13 @@ export default function ClientesPage() {
   const [segment, setSegment] = useState('');
   const [status, setStatus] = useState<ClientStatus>('Ativo');
   const isAdmin = canManageClients(currentRole);
-  const displayedClients = showArchived ? archivedClients : clients;
+  const [search, setSearch] = useState('');
+  const [sortOrder, setSortOrder] = useState<'az' | 'za'>('az');
+
+  const baseClients = showArchived ? archivedClients : clients;
+  const displayedClients = baseClients
+    .filter(c => c.name.toLowerCase().includes(search.toLowerCase()) || c.segment.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => sortOrder === 'az' ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name));
 
   useEffect(() => {
     const session = getAuthSession();
@@ -150,6 +156,27 @@ export default function ClientesPage() {
             Novo Cliente
           </Button>
         </div>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+          <input
+            type="text"
+            placeholder="Buscar cliente ou segmento..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="w-full rounded-lg border border-border bg-card pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => setSortOrder(prev => prev === 'az' ? 'za' : 'az')}
+          className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <ArrowUpDown className="w-3.5 h-3.5" />
+          {sortOrder === 'az' ? 'A→Z' : 'Z→A'}
+        </button>
       </div>
 
       <div className="grid gap-4">
