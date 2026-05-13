@@ -1972,6 +1972,7 @@ export default function GeneralDashboard() {
   const [goalsByClient, setGoalsByClient] = useState<Record<string, GoalConfig | null>>({});
   const [sheetsSummary, setSheetsSummary] = useState<Record<string, ClientSheetsSummary>>({});
   const [sheetsRefreshing, setSheetsRefreshing] = useState(false);
+  const [sheetsMsg, setSheetsMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [campaigns, setCampaigns] = useState<CampaignPerformance[]>([]);
   const [creatives, setCreatives] = useState<TopCreative[]>([]);
   const [audience, setAudience] = useState<AudienceResponse>(EMPTY_AUDIENCE);
@@ -2034,8 +2035,14 @@ export default function GeneralDashboard() {
       const order = localStorage.getItem(LS_ORDER);
       if (order) {
         const parsed = JSON.parse(order) as WidgetId[];
-        if (Array.isArray(parsed) && parsed.every(id => DEFAULT_WIDGET_ORDER.includes(id))) {
+        if (
+          Array.isArray(parsed) &&
+          parsed.every(id => DEFAULT_WIDGET_ORDER.includes(id)) &&
+          DEFAULT_WIDGET_ORDER.every(id => parsed.includes(id))
+        ) {
           setWidgetOrder(parsed);
+        } else {
+          setWidgetOrder(DEFAULT_WIDGET_ORDER);
         }
       }
       const collapsed = localStorage.getItem(LS_COLLAPSED);
@@ -2328,23 +2335,33 @@ export default function GeneralDashboard() {
   const googleCampaigns = campaigns.filter((campaign) => campaign.platform === 'google');
 
   async function refreshSheets() {
-    const clientsWithSheets = [...selectedIds].filter(id => {
-      const client = clients.find(c => c.id === id);
-      return client && sheetsSummary[id] !== undefined;
-    });
+    const clientsWithSheets = [...selectedIds].filter(id => sheetsSummary[id] !== undefined);
     if (clientsWithSheets.length === 0) return;
     setSheetsRefreshing(true);
+    setSheetsMsg(null);
     try {
-      await Promise.all(clientsWithSheets.map(id =>
+      const responses = await Promise.all(clientsWithSheets.map(id =>
         fetch(`/api/clients/${id}/sheets`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
+          .then(async r => ({ id, ok: r.ok, data: r.ok ? await r.json() as { entries?: unknown[]; total?: number } : await r.json() as { error?: string } }))
+          .catch(e => ({ id, ok: false, data: { error: String(e) } }))
       ));
-      const res = await fetch('/api/clients/sheets-summary');
-      if (res.ok) {
-        const data = await res.json() as { clientId: string; entries: FunnelEntry[]; stages: string[] }[];
+
+      const errors = responses.filter(r => !r.ok).map(r => (r.data as { error?: string }).error ?? 'Erro desconhecido');
+      if (errors.length > 0) {
+        setSheetsMsg({ ok: false, text: errors[0] });
+        return;
+      }
+
+      const totalEntries = responses.reduce((sum, r) => sum + ((r.data as { entries?: unknown[] }).entries?.length ?? 0), 0);
+
+      const summaryRes = await fetch('/api/clients/sheets-summary');
+      if (summaryRes.ok) {
+        const data = await summaryRes.json() as { clientId: string; entries: FunnelEntry[]; stages: string[] }[];
         const map: Record<string, ClientSheetsSummary> = {};
         for (const item of data) map[item.clientId] = { entries: item.entries, stages: item.stages };
         setSheetsSummary(map);
       }
+      setSheetsMsg({ ok: true, text: `Atualizado — ${totalEntries} registros encontrados na planilha.` });
     } finally {
       setSheetsRefreshing(false);
     }
@@ -2442,15 +2459,22 @@ export default function GeneralDashboard() {
             </div>
             {metricsLoading && <RefreshCw className="w-4 h-4 animate-spin text-muted-foreground" />}
             {[...selectedIds].some(id => sheetsSummary[id] !== undefined) && (
-              <button
-                type="button"
-                onClick={refreshSheets}
-                disabled={sheetsRefreshing}
-                className="flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-[11px] font-semibold text-emerald-400 transition-colors hover:bg-emerald-500/20 disabled:opacity-50"
-              >
-                <RefreshCw className={cn('h-3.5 w-3.5', sheetsRefreshing && 'animate-spin')} />
-                {sheetsRefreshing ? 'Atualizando...' : 'Atualizar Planilha'}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={refreshSheets}
+                  disabled={sheetsRefreshing}
+                  className="flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-[11px] font-semibold text-emerald-400 transition-colors hover:bg-emerald-500/20 disabled:opacity-50"
+                >
+                  <RefreshCw className={cn('h-3.5 w-3.5', sheetsRefreshing && 'animate-spin')} />
+                  {sheetsRefreshing ? 'Atualizando...' : 'Atualizar Planilha'}
+                </button>
+                {sheetsMsg && (
+                  <span className={cn('text-[10px] font-medium max-w-[180px] truncate', sheetsMsg.ok ? 'text-emerald-400' : 'text-red-400')}>
+                    {sheetsMsg.text}
+                  </span>
+                )}
+              </div>
             )}
             <button
               type="button"
