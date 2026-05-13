@@ -1941,6 +1941,7 @@ export default function GeneralDashboard() {
   const [customDateTo, setCustomDateTo] = useState('');
   const [metricsByClient, setMetricsByClient] = useState<Record<string, ApiMetrics>>({});
   const [goalsByClient, setGoalsByClient] = useState<Record<string, GoalConfig | null>>({});
+  const [sheetsSummary, setSheetsSummary] = useState<Record<string, number>>({});
   const [campaigns, setCampaigns] = useState<CampaignPerformance[]>([]);
   const [creatives, setCreatives] = useState<TopCreative[]>([]);
   const [audience, setAudience] = useState<AudienceResponse>(EMPTY_AUDIENCE);
@@ -2153,6 +2154,17 @@ export default function GeneralDashboard() {
       .finally(() => setBalancesLoading(false));
   }, []);
 
+  useEffect(() => {
+    fetch('/api/clients/sheets-summary')
+      .then(r => r.ok ? r.json() as Promise<{ clientId: string; total: number }[]> : [])
+      .then(data => {
+        const map: Record<string, number> = {};
+        for (const item of data) map[item.clientId] = item.total;
+        setSheetsSummary(map);
+      })
+      .catch(() => setSheetsSummary({}));
+  }, []);
+
   // Load saved AI insights when clients/period change
   useEffect(() => {
     if (selectedIds.size === 0 || !customReady) { setAiInsights([]); return; }
@@ -2205,7 +2217,7 @@ export default function GeneralDashboard() {
   let leadsGoal = 0;
   let plannedInvestment = 0;
   let revenueGoal = 0;
-  const revenue = 0; // Futuro: realizado vindo da planilha/Google Sheets de vendas.
+  const revenue = [...selectedIds].reduce((sum, id) => sum + (sheetsSummary[id] ?? 0), 0);
 
   for (const id of selectedIds) {
     const goal = goalsByClient[id];

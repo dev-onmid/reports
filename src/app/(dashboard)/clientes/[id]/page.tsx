@@ -2520,18 +2520,23 @@ type SheetsTab = { name: string; amount: number; count?: number; source?: string
 type SheetsResult = { tabs: SheetsTab[]; total: number; note?: string };
 
 function SheetsResultsTab({ clientId }: { clientId: string }) {
-  const [sheetsUrl, setSheetsUrl]     = useState('');
-  const [savedUrl, setSavedUrl]       = useState('');
-  const [result, setResult]           = useState<SheetsResult | null>(null);
-  const [loading, setLoading]         = useState(false);
-  const [saving, setSaving]           = useState(false);
-  const [error, setError]             = useState('');
-  const [loadingUrl, setLoadingUrl]   = useState(true);
+  const [sheetsUrl, setSheetsUrl]       = useState('');
+  const [savedUrl, setSavedUrl]         = useState('');
+  const [result, setResult]             = useState<SheetsResult | null>(null);
+  const [analyzedAt, setAnalyzedAt]     = useState<string | null>(null);
+  const [loading, setLoading]           = useState(false);
+  const [saving, setSaving]             = useState(false);
+  const [error, setError]               = useState('');
+  const [loadingUrl, setLoadingUrl]     = useState(true);
 
   useEffect(() => {
     fetch(`/api/clients/${clientId}/sheets`)
-      .then(r => r.ok ? r.json() as Promise<{ sheetsUrl: string | null }> : null)
-      .then(d => { if (d?.sheetsUrl) { setSavedUrl(d.sheetsUrl); setSheetsUrl(d.sheetsUrl); } })
+      .then(r => r.ok ? r.json() as Promise<{ sheetsUrl: string | null; sheetsResult: SheetsResult | null; sheetsAnalyzedAt: string | null }> : null)
+      .then(d => {
+        if (d?.sheetsUrl) { setSavedUrl(d.sheetsUrl); setSheetsUrl(d.sheetsUrl); }
+        if (d?.sheetsResult) setResult(d.sheetsResult);
+        if (d?.sheetsAnalyzedAt) setAnalyzedAt(d.sheetsAnalyzedAt);
+      })
       .finally(() => setLoadingUrl(false));
   }, [clientId]);
 
@@ -2549,7 +2554,6 @@ function SheetsResultsTab({ clientId }: { clientId: string }) {
   async function handleAnalyze() {
     setLoading(true);
     setError('');
-    setResult(null);
     const res = await fetch(`/api/clients/${clientId}/sheets`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2559,6 +2563,7 @@ function SheetsResultsTab({ clientId }: { clientId: string }) {
     setLoading(false);
     if (!res.ok || data.error) { setError(data.error ?? 'Erro ao analisar.'); return; }
     setResult(data);
+    setAnalyzedAt(new Date().toISOString());
   }
 
   const urlChanged = sheetsUrl.trim() !== savedUrl;
@@ -2597,18 +2602,25 @@ function SheetsResultsTab({ clientId }: { clientId: string }) {
           <p className="text-[11px] text-muted-foreground/60">A planilha precisa estar como "qualquer pessoa com o link pode visualizar".</p>
         </div>
 
-        <button
-          onClick={handleAnalyze}
-          disabled={loading || (!sheetsUrl.trim() && !savedUrl)}
-          className="flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50 transition-opacity"
-          style={{ background: '#7B21D0' }}
-        >
-          {loading ? (
-            <><div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />Analisando...</>
-          ) : (
-            <><RefreshCw className="w-4 h-4" />Analisar Planilha</>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleAnalyze}
+            disabled={loading || (!sheetsUrl.trim() && !savedUrl)}
+            className="flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50 transition-opacity"
+            style={{ background: '#7B21D0' }}
+          >
+            {loading ? (
+              <><div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />Analisando...</>
+            ) : (
+              <><RefreshCw className="w-4 h-4" />Analisar Agora</>
+            )}
+          </button>
+          {analyzedAt && (
+            <span className="text-xs text-muted-foreground">
+              Última análise: {new Date(analyzedAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+            </span>
           )}
-        </button>
+        </div>
       </div>
 
       {error && (

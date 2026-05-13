@@ -6,76 +6,41 @@ function parseSpreadsheetId(url: string): string | null {
   return match?.[1] ?? null;
 }
 
-async function ensureColumn(pool: ReturnType<typeof makeServerPool>) {
-  await pool.query(`ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS sheets_url TEXT`);
+async function ensureColumns(pool: ReturnType<typeof makeServerPool>) {
+  await pool.query(`
+    ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS sheets_url TEXT;
+    ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS sheets_result JSONB;
+    ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS sheets_analyzed_at TIMESTAMPTZ;
+  `);
 }
 
-export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  const pool = makeServerPool();
-  try {
-    await ensureColumn(pool);
-    const { rows: [client] } = await pool.query(`SELECT sheets_url FROM public.clients WHERE id = $1`, [id]);
-    return Response.json({ sheetsUrl: client?.sheets_url ?? null });
-  } finally {
-    await pool.end();
-  }
-}
+export type SheetsAnalysisResult = {
+  tabs: { name: string; amount: number; count?: number; source?: string }[];
+  total: number;
+  note?: string;
+};
 
-export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  const { sheetsUrl } = await req.json() as { sheetsUrl: string };
-  const pool = makeServerPool();
-  try {
-    await ensureColumn(pool);
-    await pool.query(`UPDATE public.clients SET sheets_url = $1 WHERE id = $2`, [sheetsUrl || null, id]);
-    return new Response(null, { status: 204 });
-  } finally {
-    await pool.end();
-  }
-}
+export async function analyzeClientSheets(
+  sheetsUrl: string,
+  googleApiKey: string,
+  anthropicKey: string,
+): Promise<SheetsAnalysisResult> {
+  const spreadsheetId = parseSpreadsheetId(sheetsUrl);
+  if (!spreadsheetId) throw new Error('URL de planilha inválida.');
 
-export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  const body = await req.json() as { sheetsUrl?: string };
-  let url = body.sheetsUrl;
-
-  if (!url) {
-    const pool = makeServerPool();
-    try {
-      await ensureColumn(pool);
-      const { rows: [client] } = await pool.query(`SELECT sheets_url FROM public.clients WHERE id = $1`, [id]);
-      url = client?.sheets_url;
-    } finally {
-      await pool.end();
-    }
-  }
-
-  if (!url) return Response.json({ error: 'Nenhuma planilha vinculada.' }, { status: 400 });
-
-  const spreadsheetId = parseSpreadsheetId(url);
-  if (!spreadsheetId) return Response.json({ error: 'URL de planilha inválida.' }, { status: 400 });
-
-  const apiKey = process.env.GOOGLE_API_KEY;
-  if (!apiKey) return Response.json({ error: 'GOOGLE_API_KEY não configurada nas variáveis de ambiente.' }, { status: 500 });
-
-  // Get sheet names
-  const metaRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?key=${apiKey}`);
+  const metaRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?key=${googleApiKey}`);
   if (!metaRes.ok) {
-    if (metaRes.status === 403) {
-      return Response.json({ error: 'Planilha privada. Defina como "qualquer pessoa com o link pode visualizar".' }, { status: 403 });
-    }
-    return Response.json({ error: 'Erro ao acessar a planilha. Verifique se o link está correto e a planilha é pública.' }, { status: 400 });
+    if (metaRes.status === 403) throw new Error('Planilha privada. Defina como "qualquer pessoa com o link pode visualizar".');
+    throw new Error('Erro ao acessar a planilha. Verifique se o link está correto e a planilha é pública.');
   }
 
   const meta = await metaRes.json() as { sheets: { properties: { title: string } }[] };
   const sheetNames = meta.sheets.map(s => s.properties.title);
 
-  // Fetch data from each sheet (max 50 rows per sheet to keep context manageable)
   const allSheetData: { name: string; rows: string[][] }[] = [];
   for (const name of sheetNames) {
     const dataRes = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(name)}?key=${apiKey}`
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(name)}?key=${googleApiKey}`
     );
     if (!dataRes.ok) continue;
     const data = await dataRes.json() as { values?: string[][] };
@@ -84,12 +49,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
   }
 
-  if (allSheetData.length === 0) {
-    return Response.json({ error: 'Planilha vazia ou sem dados.' }, { status: 400 });
-  }
-
-  const anthropicKey = process.env.ANTHROPIC_API_KEY;
-  if (!anthropicKey) return Response.json({ error: 'ANTHROPIC_API_KEY não configurada.' }, { status: 500 });
+  if (allSheetData.length === 0) throw new Error('Planilha vazia ou sem dados.');
 
   const sheetsText = allSheetData.map(sheet => {
     const rows = sheet.rows.map(row => row.join('\t')).join('\n');
@@ -128,16 +88,77 @@ ${sheetsText}`,
     }),
   });
 
-  if (!claudeRes.ok) return Response.json({ error: 'Erro ao analisar com IA.' }, { status: 500 });
+  if (!claudeRes.ok) throw new Error('Erro ao analisar com IA.');
 
   const claudeData = await claudeRes.json() as { content: { text: string }[] };
   const text = claudeData.content[0]?.text ?? '';
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  return JSON.parse(jsonMatch?.[0] ?? text) as SheetsAnalysisResult;
+}
+
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const pool = makeServerPool();
+  try {
+    await ensureColumns(pool);
+    const { rows: [client] } = await pool.query(
+      `SELECT sheets_url, sheets_result, sheets_analyzed_at FROM public.clients WHERE id = $1`, [id]
+    );
+    return Response.json({
+      sheetsUrl: client?.sheets_url ?? null,
+      sheetsResult: client?.sheets_result ?? null,
+      sheetsAnalyzedAt: client?.sheets_analyzed_at ?? null,
+    });
+  } finally {
+    await pool.end();
+  }
+}
+
+export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const { sheetsUrl } = await req.json() as { sheetsUrl: string };
+  const pool = makeServerPool();
+  try {
+    await ensureColumns(pool);
+    await pool.query(`UPDATE public.clients SET sheets_url = $1 WHERE id = $2`, [sheetsUrl || null, id]);
+    return new Response(null, { status: 204 });
+  } finally {
+    await pool.end();
+  }
+}
+
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const body = await req.json() as { sheetsUrl?: string };
+
+  const pool = makeServerPool();
+  let url = body.sheetsUrl;
 
   try {
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    const result = JSON.parse(jsonMatch?.[0] ?? text);
+    await ensureColumns(pool);
+    if (!url) {
+      const { rows: [client] } = await pool.query(`SELECT sheets_url FROM public.clients WHERE id = $1`, [id]);
+      url = client?.sheets_url;
+    }
+    if (!url) return Response.json({ error: 'Nenhuma planilha vinculada.' }, { status: 400 });
+
+    const googleApiKey = process.env.GOOGLE_API_KEY;
+    if (!googleApiKey) return Response.json({ error: 'GOOGLE_API_KEY não configurada.' }, { status: 500 });
+    const anthropicKey = process.env.ANTHROPIC_API_KEY;
+    if (!anthropicKey) return Response.json({ error: 'ANTHROPIC_API_KEY não configurada.' }, { status: 500 });
+
+    const result = await analyzeClientSheets(url, googleApiKey, anthropicKey);
+
+    await pool.query(
+      `UPDATE public.clients SET sheets_result = $1, sheets_analyzed_at = NOW() WHERE id = $2`,
+      [JSON.stringify(result), id]
+    );
+
     return Response.json(result);
-  } catch {
-    return Response.json({ error: 'Erro ao interpretar resposta da IA.', raw: text }, { status: 500 });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Erro ao analisar planilha.';
+    return Response.json({ error: msg }, { status: 400 });
+  } finally {
+    await pool.end();
   }
 }

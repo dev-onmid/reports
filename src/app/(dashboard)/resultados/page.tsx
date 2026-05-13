@@ -23,13 +23,20 @@ function readGoalFromStorage(clientId: string): GoalConfig | null {
   } catch { return null; }
 }
 
-function calcPct(atual: number, meta: number, inverse = false): number {
-  if (meta === 0 || atual === 0) return 0;
+function calcPct(atual: number, meta: number, inverse = false): number | null {
+  if (meta === 0) return null; // sem meta definida → sem cor
+  if (atual === 0) return 0;
   const raw = inverse ? (meta / atual) * 100 : (atual / meta) * 100;
   return Math.min(100, Math.round(raw));
 }
 
-function pctColors(pct: number) {
+const NEUTRAL_COLORS = {
+  badge:  'bg-muted/30 border-border text-muted-foreground',
+  text:   'text-foreground', bar: 'bg-muted', border: 'border-l-border',
+};
+
+function pctColors(pct: number | null) {
+  if (pct === null) return NEUTRAL_COLORS;
   if (pct >= 75) return {
     badge:  'bg-emerald-500/15 border-emerald-400/30 text-emerald-300',
     text:   'text-emerald-300', bar: 'bg-emerald-500', border: 'border-l-emerald-500',
@@ -45,7 +52,7 @@ function pctColors(pct: number) {
 }
 
 function MetricCell({ value, pct, format = 'currency', loading = false }: {
-  value: number; pct: number; format?: 'currency' | 'number'; loading?: boolean;
+  value: number; pct: number | null; format?: 'currency' | 'number'; loading?: boolean;
 }) {
   const c = pctColors(pct);
   if (loading) return <span className="text-muted-foreground/40 text-sm">…</span>;
@@ -226,7 +233,7 @@ export default function ResultadosPage() {
                     <td className="px-4 py-4">
                       {row.metaTarget > 0 && row.resultado > 0 ? (
                         <div className="h-2 w-16 rounded-full bg-muted overflow-hidden">
-                          <div className={cn('h-full rounded-full', resultC.bar)} style={{ width: `${row.pctResult}%` }} />
+                          <div className={cn('h-full rounded-full', resultC.bar)} style={{ width: `${row.pctResult ?? 0}%` }} />
                         </div>
                       ) : <span className="text-muted-foreground/40 text-sm">—</span>}
                     </td>
