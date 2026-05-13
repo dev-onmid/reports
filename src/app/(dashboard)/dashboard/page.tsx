@@ -1960,6 +1960,18 @@ export default function GeneralDashboard() {
   const [aiInsights, setAiInsights] = useState<AiInsight[]>([]);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
+  const [alertsCollapsed, setAlertsCollapsed] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return localStorage.getItem('dashboard:alerts:collapsed') === '1';
+  });
+
+  function toggleAlertsCollapsed() {
+    setAlertsCollapsed(prev => {
+      const next = !prev;
+      localStorage.setItem('dashboard:alerts:collapsed', next ? '1' : '0');
+      return next;
+    });
+  }
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -2400,30 +2412,41 @@ export default function GeneralDashboard() {
 
       {/* Alerts */}
       {!metricsLoading && alerts.length > 0 && (
-        <div className="rounded-xl border border-orange-400/30 bg-orange-500/5 p-4 space-y-2">
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 text-orange-400" />
-            <p className="text-sm font-bold text-orange-400">{alerts.length} alerta{alerts.length > 1 ? 's' : ''} fora do padrão</p>
-          </div>
-          <div className="space-y-1.5">
-            {alerts.map((a, i) => (
-              <div key={i} className="flex items-start gap-3">
-                <span className={cn('shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold border',
-                  a.severity === 'critical'
-                    ? 'bg-red-500/15 text-red-400 border-red-500/30'
-                    : 'bg-orange-500/15 text-orange-400 border-orange-500/30'
-                )}>
-                  {a.severity === 'critical' ? 'Crítico' : 'Atenção'}
-                </span>
-                <div className="text-xs">
-                  <Link href={`/clientes/${a.clientId}`} className="font-bold hover:text-primary transition-colors">
-                    {a.clientName}
-                  </Link>
-                  <span className="text-muted-foreground"> — {a.msg}</span>
+        <div className="rounded-xl border border-orange-400/30 bg-orange-500/5 overflow-hidden">
+          <button
+            type="button"
+            onClick={toggleAlertsCollapsed}
+            className="w-full flex items-center justify-between gap-2 px-4 py-3 hover:bg-orange-500/5 transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-orange-400 shrink-0" />
+              <p className="text-sm font-bold text-orange-400">
+                {alerts.length} alerta{alerts.length > 1 ? 's' : ''} fora do padrão
+              </p>
+            </div>
+            <ChevronDown className={cn('w-4 h-4 text-orange-400/60 transition-transform shrink-0', alertsCollapsed && '-rotate-90')} />
+          </button>
+          {!alertsCollapsed && (
+            <div className="px-4 pb-3 space-y-1.5 border-t border-orange-400/15 pt-2">
+              {alerts.map((a, i) => (
+                <div key={i} className="flex items-start gap-3">
+                  <span className={cn('shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold border',
+                    a.severity === 'critical'
+                      ? 'bg-red-500/15 text-red-400 border-red-500/30'
+                      : 'bg-orange-500/15 text-orange-400 border-orange-500/30'
+                  )}>
+                    {a.severity === 'critical' ? 'Crítico' : 'Atenção'}
+                  </span>
+                  <div className="text-xs">
+                    <Link href={`/clientes/${a.clientId}`} className="font-bold hover:text-primary transition-colors">
+                      {a.clientName}
+                    </Link>
+                    <span className="text-muted-foreground"> — {a.msg}</span>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
