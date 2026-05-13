@@ -1,7 +1,6 @@
 "use client";
 
 import { mockUsers, type User } from '@/lib/mock-data';
-import { supabase } from '@/lib/supabase';
 
 const SESSION_STORAGE_KEY = 'onmid-session';
 
@@ -13,18 +12,16 @@ export type AuthSession = {
 };
 
 async function loadAuthUsers(): Promise<User[]> {
-  let users: User[] = [];
   try {
-    const { data } = await supabase.from('users').select('*');
-    if (data && data.length > 0) {
-      users = data.map((u) => ({ id: u.id, name: u.name, email: u.email, password: u.password, role: u.role, status: u.status }));
+    const res = await fetch('/api/users');
+    if (res.ok) {
+      const data = await res.json() as User[];
+      if (data && data.length > 0) return data;
     }
   } catch {
-    // fall back to mock users if Supabase not available
+    // fall back to mock users if API not available
   }
-
-  if (users.length === 0) users = mockUsers;
-  return users;
+  return mockUsers;
 }
 
 export async function verifyUserCredentials(email: string, password: string): Promise<User | null> {
