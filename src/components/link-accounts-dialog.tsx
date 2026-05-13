@@ -810,7 +810,7 @@ function MetaPagesContent({
 
 function GoogleSheetsContent({ clientId, onDone, onCancel }: { clientId: string; onDone: () => void; onCancel: () => void }) {
   const [url, setUrl] = useState('');
-  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState<'idle' | 'saving' | 'analyzing'>('idle');
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -825,16 +825,31 @@ function GoogleSheetsContent({ clientId, onDone, onCancel }: { clientId: string;
       setError('Cole uma URL válida do Google Sheets.');
       return;
     }
-    setSaving(true);
-    const res = await fetch(`/api/clients/${clientId}/sheets`, {
+    setStatus('saving');
+    const putRes = await fetch(`/api/clients/${clientId}/sheets`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sheetsUrl: url.trim() }),
     });
-    setSaving(false);
-    if (res.ok) onDone();
-    else setError('Erro ao salvar.');
+    if (!putRes.ok) { setStatus('idle'); setError('Erro ao salvar.'); return; }
+
+    setStatus('analyzing');
+    const postRes = await fetch(`/api/clients/${clientId}/sheets`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sheetsUrl: url.trim() }),
+    });
+    setStatus('idle');
+    if (!postRes.ok) {
+      const data = await postRes.json() as { error?: string };
+      setError(data.error ?? 'Erro ao analisar planilha.');
+      return;
+    }
+    onDone();
   }
+
+  const busy = status !== 'idle';
+  const btnLabel = status === 'analyzing' ? 'Analisando...' : status === 'saving' ? 'Salvando...' : 'Vincular Planilha';
 
   return (
     <>
@@ -853,14 +868,14 @@ function GoogleSheetsContent({ clientId, onDone, onCancel }: { clientId: string;
           />
           {error && <p className="text-xs text-destructive">{error}</p>}
         </div>
-        <p className="text-xs text-muted-foreground/60">
-          Após vincular, acesse a aba <strong>Resultados</strong> na página do cliente para analisar os dados.
-        </p>
+        {status === 'analyzing' && (
+          <p className="text-xs text-muted-foreground/70">A IA está lendo as abas da planilha. Isso pode levar alguns segundos...</p>
+        )}
       </div>
       <DialogFooter>
-        <Button variant="outline" onClick={onCancel}>Cancelar</Button>
-        <Button onClick={handleSave} disabled={saving || !url.trim()} className="bg-[#0F9D58] text-white hover:bg-[#0F9D58]/90">
-          {saving ? 'Salvando...' : 'Vincular Planilha'}
+        <Button variant="outline" onClick={onCancel} disabled={busy}>Cancelar</Button>
+        <Button onClick={handleSave} disabled={busy || !url.trim()} className="bg-[#0F9D58] text-white hover:bg-[#0F9D58]/90">
+          {btnLabel}
         </Button>
       </DialogFooter>
     </>
