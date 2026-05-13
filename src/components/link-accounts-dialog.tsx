@@ -812,11 +812,15 @@ function GoogleSheetsContent({ clientId, onDone, onCancel }: { clientId: string;
   const [url, setUrl] = useState('');
   const [status, setStatus] = useState<'idle' | 'saving' | 'analyzing'>('idle');
   const [error, setError] = useState('');
+  const [hasResult, setHasResult] = useState<boolean | null>(null);
 
   useEffect(() => {
     fetch(`/api/clients/${clientId}/sheets`)
-      .then(r => r.ok ? r.json() as Promise<{ sheetsUrl: string | null }> : null)
-      .then(d => { if (d?.sheetsUrl) setUrl(d.sheetsUrl); });
+      .then(r => r.ok ? r.json() as Promise<{ sheetsUrl: string | null; sheetsResult: unknown }> : null)
+      .then(d => {
+        if (d?.sheetsUrl) setUrl(d.sheetsUrl);
+        setHasResult(!!d?.sheetsResult);
+      });
   }, [clientId]);
 
   async function handleSave() {
@@ -849,7 +853,7 @@ function GoogleSheetsContent({ clientId, onDone, onCancel }: { clientId: string;
   }
 
   const busy = status !== 'idle';
-  const btnLabel = status === 'analyzing' ? 'Analisando...' : status === 'saving' ? 'Salvando...' : 'Vincular Planilha';
+  const btnLabel = status === 'analyzing' ? 'Analisando...' : status === 'saving' ? 'Salvando...' : hasResult === false && url ? 'Analisar agora' : 'Vincular Planilha';
 
   return (
     <>
@@ -868,6 +872,9 @@ function GoogleSheetsContent({ clientId, onDone, onCancel }: { clientId: string;
           />
           {error && <p className="text-xs text-destructive">{error}</p>}
         </div>
+        {hasResult === false && url && status === 'idle' && (
+          <p className="text-xs text-amber-400/80">Planilha vinculada mas ainda não analisada. Clique em &quot;Analisar agora&quot; para buscar os dados de faturamento.</p>
+        )}
         {status === 'analyzing' && (
           <p className="text-xs text-muted-foreground/70">A IA está lendo as abas da planilha. Isso pode levar alguns segundos...</p>
         )}
