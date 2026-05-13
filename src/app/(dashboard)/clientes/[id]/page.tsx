@@ -2515,6 +2515,142 @@ function ClientIntegrationsTab({ clientId, clientName }: { clientId: string; cli
   );
 }
 
+// ── Google Sheets Results Tab ─────────────────────────────────────────────────
+type SheetsTab = { name: string; amount: number; count?: number; source?: string };
+type SheetsResult = { tabs: SheetsTab[]; total: number; note?: string };
+
+function SheetsResultsTab({ clientId }: { clientId: string }) {
+  const [sheetsUrl, setSheetsUrl]     = useState('');
+  const [savedUrl, setSavedUrl]       = useState('');
+  const [result, setResult]           = useState<SheetsResult | null>(null);
+  const [loading, setLoading]         = useState(false);
+  const [saving, setSaving]           = useState(false);
+  const [error, setError]             = useState('');
+  const [loadingUrl, setLoadingUrl]   = useState(true);
+
+  useEffect(() => {
+    fetch(`/api/clients/${clientId}/sheets`)
+      .then(r => r.ok ? r.json() as Promise<{ sheetsUrl: string | null }> : null)
+      .then(d => { if (d?.sheetsUrl) { setSavedUrl(d.sheetsUrl); setSheetsUrl(d.sheetsUrl); } })
+      .finally(() => setLoadingUrl(false));
+  }, [clientId]);
+
+  async function handleSaveUrl() {
+    setSaving(true);
+    await fetch(`/api/clients/${clientId}/sheets`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sheetsUrl: sheetsUrl.trim() }),
+    });
+    setSavedUrl(sheetsUrl.trim());
+    setSaving(false);
+  }
+
+  async function handleAnalyze() {
+    setLoading(true);
+    setError('');
+    setResult(null);
+    const res = await fetch(`/api/clients/${clientId}/sheets`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sheetsUrl: sheetsUrl.trim() || savedUrl }),
+    });
+    const data = await res.json() as SheetsResult & { error?: string };
+    setLoading(false);
+    if (!res.ok || data.error) { setError(data.error ?? 'Erro ao analisar.'); return; }
+    setResult(data);
+  }
+
+  const urlChanged = sheetsUrl.trim() !== savedUrl;
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-lg font-bold">Resultados Financeiros</h2>
+        <p className="text-sm text-muted-foreground mt-1">
+          Cole o link do Google Sheets. A IA analisa todas as abas e extrai os valores de vendas automaticamente.
+        </p>
+      </div>
+
+      <div className="rounded-xl border border-border bg-card p-5 space-y-4">
+        <div className="space-y-2">
+          <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Link do Google Sheets</label>
+          <div className="flex gap-2">
+            <input
+              type="url"
+              placeholder="https://docs.google.com/spreadsheets/d/..."
+              value={loadingUrl ? 'Carregando...' : sheetsUrl}
+              disabled={loadingUrl}
+              onChange={e => setSheetsUrl(e.target.value)}
+              className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+            />
+            {urlChanged && (
+              <button
+                onClick={handleSaveUrl}
+                disabled={saving || !sheetsUrl.trim()}
+                className="rounded-lg border border-border bg-card px-4 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors"
+              >
+                {saving ? 'Salvando...' : 'Salvar'}
+              </button>
+            )}
+          </div>
+          <p className="text-[11px] text-muted-foreground/60">A planilha precisa estar como "qualquer pessoa com o link pode visualizar".</p>
+        </div>
+
+        <button
+          onClick={handleAnalyze}
+          disabled={loading || (!sheetsUrl.trim() && !savedUrl)}
+          className="flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50 transition-opacity"
+          style={{ background: '#7B21D0' }}
+        >
+          {loading ? (
+            <><div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />Analisando...</>
+          ) : (
+            <><RefreshCw className="w-4 h-4" />Analisar Planilha</>
+          )}
+        </button>
+      </div>
+
+      {error && (
+        <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          {error}
+        </div>
+      )}
+
+      {result && (
+        <div className="space-y-4">
+          <div className="rounded-xl border border-primary/20 bg-primary/5 p-5 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Total de Vendas</p>
+              <p className="text-3xl font-bold text-primary mt-1">{fmtBRL(result.total)}</p>
+              {result.note && <p className="text-xs text-muted-foreground mt-2 max-w-md">{result.note}</p>}
+            </div>
+          </div>
+
+          {result.tabs.filter(t => t.amount > 0).length > 0 && (
+            <div className="rounded-xl border border-border bg-card overflow-hidden">
+              <div className="px-4 py-3 border-b border-border">
+                <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Breakdown por Aba</p>
+              </div>
+              <div className="divide-y divide-border">
+                {result.tabs.filter(t => t.amount > 0).map(tab => (
+                  <div key={tab.name} className="flex items-center justify-between px-4 py-3">
+                    <div>
+                      <p className="text-sm font-semibold">{tab.name}</p>
+                      {tab.source && <p className="text-[11px] text-muted-foreground mt-0.5">via {tab.source}{tab.count ? ` · ${tab.count} venda${tab.count !== 1 ? 's' : ''}` : ''}</p>}
+                    </div>
+                    <p className="text-sm font-bold text-primary">{fmtBRL(tab.amount)}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Biblioteca de Anúncios Tab ────────────────────────────────────────────────
 const AD_COUNTRIES = [
   { code: 'BR', label: 'Brasil' },
@@ -2887,7 +3023,7 @@ function BibliotecaTab({ clientId }: { clientId: string }) {
 }
 
 // ── Page ───────────────────────────────────────────────────────────────────────
-const TABS = ['planejamento', 'pagamentos', 'dna', 'biblioteca', 'importar'] as const;
+const TABS = ['planejamento', 'pagamentos', 'resultados', 'dna', 'biblioteca', 'importar'] as const;
 type Tab = typeof TABS[number];
 
 export default function ClientPage({ params }: { params: Promise<{ id: string }> }) {
@@ -2984,6 +3120,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
   const tabLabel: Record<Tab, string> = {
     planejamento: 'Planejamento',
     pagamentos:   'Pagamentos',
+    resultados:   'Resultados',
     dna:          'DNA do Cliente',
     biblioteca:   'Biblioteca de Anúncios',
     importar:     'Importar Dados',
@@ -3056,6 +3193,8 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
       {tab === 'pagamentos' && <InvestmentPaymentsTab clientId={id} clientName={client.name} />}
 
       {tab === 'biblioteca' && <BibliotecaTab clientId={id} />}
+
+      {tab === 'resultados' && <SheetsResultsTab clientId={id} />}
 
 
 
