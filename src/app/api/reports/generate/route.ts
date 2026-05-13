@@ -265,7 +265,6 @@ async function buildManifest(
   hasGoogle: boolean,
   hasCrm: boolean,
   theme: string,
-  primaryLogo: string | undefined,
   clientLogo: string | undefined,
   apiKey: string,
 ): Promise<ReportManifest> {
@@ -375,7 +374,7 @@ Retorne APENAS o array JSON, sem markdown, sem texto adicional:`;
     const raw = await res.json() as { content: Array<{ text: string }> };
     const text = (raw.content[0]?.text ?? '[]').replace(/```json\n?|\n?```/g, '').trim();
     const slides = JSON.parse(text) as SlideSpec[];
-    return { slides, theme, primaryLogo, clientLogo };
+    return { slides, theme, clientLogo };
   } catch {
     // Minimal fallback manifest
     const slides: SlideSpec[] = [
@@ -402,7 +401,7 @@ Retorne APENAS o array JSON, sem markdown, sem texto adicional:`;
         ],
       },
     ];
-    return { slides, theme, primaryLogo, clientLogo };
+    return { slides, theme, clientLogo };
   }
 }
 
@@ -466,7 +465,6 @@ export async function POST(req: NextRequest) {
     dateTo: string;
     generatedBy?: string;
     theme?: string;
-    primaryLogo?: string;
     clientLogo?: string;
   };
 
@@ -572,7 +570,6 @@ export async function POST(req: NextRequest) {
     !!(googleConnectionId && googleAccountId),
     hasCrm,
     body.theme ?? '#1A0A2E',
-    body.primaryLogo,
     body.clientLogo,
     apiKey,
   );

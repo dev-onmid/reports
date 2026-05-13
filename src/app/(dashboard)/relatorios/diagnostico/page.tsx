@@ -105,7 +105,6 @@ export default function NovoDiagnosticoPage() {
   const [dateTo, setDateTo]           = useState('');
   const [theme, setTheme]             = useState(THEMES[0].color);
   const [customColor, setCustomColor] = useState('');
-  const [primaryLogo, setPrimaryLogo] = useState<string | undefined>();
   const [clientLogo, setClientLogo]   = useState<string | undefined>();
   const [generating, setGenerating]   = useState(false);
   const [error, setError]             = useState('');
@@ -133,7 +132,6 @@ export default function NovoDiagnosticoPage() {
       body: JSON.stringify({
         clientId, clientName, dateFrom, dateTo,
         theme: customColor || theme,
-        primaryLogo,
         clientLogo,
       }),
     });
@@ -262,14 +260,8 @@ export default function NovoDiagnosticoPage() {
           />
         </div>
 
-        {/* Logos */}
-        <div className="grid grid-cols-2 gap-5 pt-1 border-t border-border">
-          <LogoUpload
-            label="Logo da agência"
-            hint="Aparece no canto superior direito de todos os slides"
-            value={primaryLogo}
-            onChange={setPrimaryLogo}
-          />
+        {/* Client logo */}
+        <div className="pt-1 border-t border-border">
           <LogoUpload
             label="Logo do cliente"
             hint="Aparece na capa do relatório (opcional)"

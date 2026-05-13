@@ -77,7 +77,6 @@ export type SlideSpec =
 export type ReportManifest = {
   slides: SlideSpec[];
   theme: string;
-  primaryLogo?: string;
   clientLogo?: string;
 };
 

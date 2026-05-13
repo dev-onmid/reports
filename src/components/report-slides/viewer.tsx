@@ -13,7 +13,7 @@ export function ReportViewer({ data, onClose }: { data: ReportData; onClose?: ()
 
   const slides = manifest
     ? manifest.slides.map((spec, i) =>
-        renderSlide(spec, manifest.theme, manifest.primaryLogo, manifest.clientLogo, i, manifest.slides.length)
+        renderSlide(spec, manifest.theme, manifest.clientLogo, i, manifest.slides.length)
       )
     : null;
 

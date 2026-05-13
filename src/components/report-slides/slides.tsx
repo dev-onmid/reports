@@ -40,10 +40,13 @@ type Colors = typeof DARK;
 
 // ─── Slide base wrapper ────────────────────────────────────────────────────────
 
+function onmidLogoSrc(light: boolean) {
+  return light ? '/brand/onmid-logo.png' : '/brand/onmid-logo-white.png';
+}
+
 interface BaseProps {
   theme: string;
   colors: Colors;
-  primaryLogo?: string;
   clientLogo?: string;
   slideIndex: number;
   totalSlides: number;
@@ -51,7 +54,8 @@ interface BaseProps {
   children: React.ReactNode;
 }
 
-function Base({ theme, colors, primaryLogo, clientLogo, slideIndex, totalSlides, padding, children }: BaseProps) {
+function Base({ theme, colors, clientLogo, slideIndex, totalSlides, padding, children }: BaseProps) {
+  const light = isLightColor(theme);
   return (
     <div style={{
       width: SLIDE_W,
@@ -61,13 +65,12 @@ function Base({ theme, colors, primaryLogo, clientLogo, slideIndex, totalSlides,
       background: theme,
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif',
     }}>
-      {primaryLogo && (
-        <img
-          src={primaryLogo}
-          alt=""
-          style={{ position: 'absolute', top: 30, right: 56, height: 30, objectFit: 'contain', opacity: 0.9 }}
-        />
-      )}
+      {/* Onmid logo — always present top right */}
+      <img
+        src={onmidLogoSrc(light)}
+        alt="onmid"
+        style={{ position: 'absolute', top: 28, right: 52, height: 28, objectFit: 'contain', opacity: 0.9 }}
+      />
       {clientLogo && slideIndex === 0 && (
         <img
           src={clientLogo}
@@ -273,11 +276,11 @@ function InsightBar({ text, colors }: { text: string; colors: Colors }) {
 
 // ─── Individual slide renderers ───────────────────────────────────────────────
 
-function CoverSlide({ spec, theme, colors, primaryLogo, clientLogo, slideIndex, totalSlides }: {
+function CoverSlide({ spec, theme, colors, clientLogo, slideIndex, totalSlides }: {
   spec: Extract<SlideSpec, { type: 'cover' }>;
   theme: string;
   colors: Colors;
-  primaryLogo?: string;
+
   clientLogo?: string;
   slideIndex: number;
   totalSlides: number;
@@ -318,14 +321,12 @@ function CoverSlide({ spec, theme, colors, primaryLogo, clientLogo, slideIndex, 
         pointerEvents: 'none',
       }} />
 
-      {/* Agency logo top right */}
-      {primaryLogo && (
-        <img
-          src={primaryLogo}
-          alt=""
-          style={{ position: 'absolute', top: 36, right: 56, height: 32, objectFit: 'contain', opacity: 0.9 }}
-        />
-      )}
+      {/* Onmid logo top right */}
+      <img
+        src={onmidLogoSrc(isLight)}
+        alt="onmid"
+        style={{ position: 'absolute', top: 32, right: 52, height: 30, objectFit: 'contain', opacity: 0.9 }}
+      />
 
       {/* Client logo bottom left */}
       {clientLogo && (
@@ -394,18 +395,18 @@ function CoverSlide({ spec, theme, colors, primaryLogo, clientLogo, slideIndex, 
   );
 }
 
-function KpisSlide({ spec, theme, colors, primaryLogo, clientLogo, slideIndex, totalSlides }: {
+function KpisSlide({ spec, theme, colors, clientLogo, slideIndex, totalSlides }: {
   spec: Extract<SlideSpec, { type: 'kpis' }>;
   theme: string;
   colors: Colors;
-  primaryLogo?: string;
+
   clientLogo?: string;
   slideIndex: number;
   totalSlides: number;
 }) {
   const cols = Math.min(4, spec.metrics.length);
   return (
-    <Base theme={theme} colors={colors} primaryLogo={primaryLogo} clientLogo={clientLogo} slideIndex={slideIndex} totalSlides={totalSlides}>
+    <Base theme={theme} colors={colors} clientLogo={clientLogo} slideIndex={slideIndex} totalSlides={totalSlides}>
       <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
         <SlideTitle title={spec.title} subtitle={spec.subtitle} colors={colors} />
         <div style={{
@@ -425,17 +426,17 @@ function KpisSlide({ spec, theme, colors, primaryLogo, clientLogo, slideIndex, t
   );
 }
 
-function BarChartSlide({ spec, theme, colors, primaryLogo, clientLogo, slideIndex, totalSlides }: {
+function BarChartSlide({ spec, theme, colors, clientLogo, slideIndex, totalSlides }: {
   spec: Extract<SlideSpec, { type: 'bar-chart' }>;
   theme: string;
   colors: Colors;
-  primaryLogo?: string;
+
   clientLogo?: string;
   slideIndex: number;
   totalSlides: number;
 }) {
   return (
-    <Base theme={theme} colors={colors} primaryLogo={primaryLogo} clientLogo={clientLogo} slideIndex={slideIndex} totalSlides={totalSlides}>
+    <Base theme={theme} colors={colors} clientLogo={clientLogo} slideIndex={slideIndex} totalSlides={totalSlides}>
       <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
         <SlideTitle title={spec.title} subtitle={spec.subtitle} colors={colors} />
         <div style={{ flex: 1, display: 'flex', alignItems: 'center' }}>
@@ -452,17 +453,17 @@ function BarChartSlide({ spec, theme, colors, primaryLogo, clientLogo, slideInde
   );
 }
 
-function FunnelSlide({ spec, theme, colors, primaryLogo, clientLogo, slideIndex, totalSlides }: {
+function FunnelSlide({ spec, theme, colors, clientLogo, slideIndex, totalSlides }: {
   spec: Extract<SlideSpec, { type: 'funnel' }>;
   theme: string;
   colors: Colors;
-  primaryLogo?: string;
+
   clientLogo?: string;
   slideIndex: number;
   totalSlides: number;
 }) {
   return (
-    <Base theme={theme} colors={colors} primaryLogo={primaryLogo} clientLogo={clientLogo} slideIndex={slideIndex} totalSlides={totalSlides}>
+    <Base theme={theme} colors={colors} clientLogo={clientLogo} slideIndex={slideIndex} totalSlides={totalSlides}>
       <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
         <SlideTitle title={spec.title} colors={colors} />
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
@@ -474,17 +475,17 @@ function FunnelSlide({ spec, theme, colors, primaryLogo, clientLogo, slideIndex,
   );
 }
 
-function ChannelsSlide({ spec, theme, colors, primaryLogo, clientLogo, slideIndex, totalSlides }: {
+function ChannelsSlide({ spec, theme, colors, clientLogo, slideIndex, totalSlides }: {
   spec: Extract<SlideSpec, { type: 'channels' }>;
   theme: string;
   colors: Colors;
-  primaryLogo?: string;
+
   clientLogo?: string;
   slideIndex: number;
   totalSlides: number;
 }) {
   return (
-    <Base theme={theme} colors={colors} primaryLogo={primaryLogo} clientLogo={clientLogo} slideIndex={slideIndex} totalSlides={totalSlides}>
+    <Base theme={theme} colors={colors} clientLogo={clientLogo} slideIndex={slideIndex} totalSlides={totalSlides}>
       <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
         <SlideTitle title={spec.title} colors={colors} />
         <div style={{
@@ -541,17 +542,17 @@ function ChannelsSlide({ spec, theme, colors, primaryLogo, clientLogo, slideInde
   );
 }
 
-function InsightSlide({ spec, theme, colors, primaryLogo, clientLogo, slideIndex, totalSlides }: {
+function InsightSlide({ spec, theme, colors, clientLogo, slideIndex, totalSlides }: {
   spec: Extract<SlideSpec, { type: 'insight' }>;
   theme: string;
   colors: Colors;
-  primaryLogo?: string;
+
   clientLogo?: string;
   slideIndex: number;
   totalSlides: number;
 }) {
   return (
-    <Base theme={theme} colors={colors} primaryLogo={primaryLogo} clientLogo={clientLogo} slideIndex={slideIndex} totalSlides={totalSlides}>
+    <Base theme={theme} colors={colors} clientLogo={clientLogo} slideIndex={slideIndex} totalSlides={totalSlides}>
       <div style={{ height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', maxWidth: 820 }}>
         <div style={{
           width: 40,
@@ -600,17 +601,17 @@ function InsightSlide({ spec, theme, colors, primaryLogo, clientLogo, slideIndex
   );
 }
 
-function RecommendationsSlide({ spec, theme, colors, primaryLogo, clientLogo, slideIndex, totalSlides }: {
+function RecommendationsSlide({ spec, theme, colors, clientLogo, slideIndex, totalSlides }: {
   spec: Extract<SlideSpec, { type: 'recommendations' }>;
   theme: string;
   colors: Colors;
-  primaryLogo?: string;
+
   clientLogo?: string;
   slideIndex: number;
   totalSlides: number;
 }) {
   return (
-    <Base theme={theme} colors={colors} primaryLogo={primaryLogo} clientLogo={clientLogo} slideIndex={slideIndex} totalSlides={totalSlides}>
+    <Base theme={theme} colors={colors} clientLogo={clientLogo} slideIndex={slideIndex} totalSlides={totalSlides}>
       <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
         <SlideTitle title={spec.title} colors={colors} />
         <div style={{
@@ -667,13 +668,12 @@ function RecommendationsSlide({ spec, theme, colors, primaryLogo, clientLogo, sl
 export function renderSlide(
   spec: SlideSpec,
   theme: string,
-  primaryLogo: string | undefined,
   clientLogo: string | undefined,
   slideIndex: number,
   totalSlides: number,
 ): React.ReactNode {
   const colors = isLightColor(theme) ? LIGHT : DARK;
-  const shared = { theme, colors, primaryLogo, clientLogo, slideIndex, totalSlides };
+  const shared = { theme, colors, clientLogo, slideIndex, totalSlides };
 
   switch (spec.type) {
     case 'cover':          return <CoverSlide key={slideIndex} spec={spec} {...shared} />;
