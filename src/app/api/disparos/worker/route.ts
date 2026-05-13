@@ -13,9 +13,9 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { sendText, sendImage } from '@/lib/zapi';
 
-export const maxDuration = 60;
+export const maxDuration = 30;
 
-const BUDGET_MS = 55_000;
+const BUDGET_MS = 25_000;
 
 function interpolate(template: string, phone: string, name: string) {
   return template.replace(/\{telefone\}/g, phone).replace(/\{nome\}/g, name);
