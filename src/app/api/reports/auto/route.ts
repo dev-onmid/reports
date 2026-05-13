@@ -70,9 +70,7 @@ export async function POST(req: NextRequest) {
           clientName: client.name,
           dateFrom,
           dateTo,
-          // Connections are resolved automatically from client_account_links
-          metaConnectionId: undefined,
-          googleConnectionId: undefined,
+          generatedBy: 'auto',
         }),
       });
       const data = await res.json() as { id?: string; error?: string };

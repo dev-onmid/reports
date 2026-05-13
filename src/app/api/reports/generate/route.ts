@@ -337,6 +337,35 @@ async function ensureReportsTable(pool: ReturnType<typeof makeServerPool>) {
 
 // ─── Main POST handler ────────────────────────────────────────────────────────
 
+async function resolveClientLinks(clientId: string) {
+  const pool = makeServerPool();
+  try {
+    const [links, legacyLinks, legacyIntegration] = await Promise.all([
+      pool.query('SELECT platform, connection_id, account_id FROM public.client_account_links WHERE client_id = $1', [clientId])
+        .then(r => r.rows as { platform: string; connection_id: string; account_id: string }[])
+        .catch(() => [] as { platform: string; connection_id: string; account_id: string }[]),
+      pool.query('SELECT account_ids FROM public.meta_ads_connections WHERE client_id = $1', [clientId])
+        .then(r => r.rows as { account_ids: string[] }[])
+        .catch(() => [] as { account_ids: string[] }[]),
+      pool.query("SELECT access_token FROM public.meta_integration WHERE id = 'global' AND status = 'connected' LIMIT 1")
+        .then(r => r.rows as { access_token: string }[])
+        .catch(() => [] as { access_token: string }[]),
+    ]);
+
+    const hasMeta = links.some(l => l.platform === 'meta_ads');
+    if (!hasMeta && legacyIntegration[0]) {
+      for (const ll of legacyLinks) {
+        for (const accountId of ll.account_ids ?? []) {
+          links.push({ platform: 'meta_ads', connection_id: 'legacy-meta-global', account_id: accountId });
+        }
+      }
+    }
+    return links;
+  } finally {
+    await pool.end();
+  }
+}
+
 export async function POST(req: NextRequest) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return Response.json({ error: 'ANTHROPIC_API_KEY não configurada.' }, { status: 500 });
@@ -346,10 +375,7 @@ export async function POST(req: NextRequest) {
     clientName: string;
     dateFrom: string;
     dateTo: string;
-    metaConnectionId?: string;
-    metaAccountIds?: string[];
-    googleConnectionId?: string;
-    googleAccountId?: string;
+    generatedBy?: string;
   };
 
   const { clientId, clientName, dateFrom, dateTo } = body;
@@ -357,16 +383,25 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: 'clientId, dateFrom e dateTo são obrigatórios.' }, { status: 400 });
   }
 
+  // Auto-discover connections from client_account_links
+  const resolvedLinks = await resolveClientLinks(clientId);
+  const metaLinks = resolvedLinks.filter(l => l.platform === 'meta_ads');
+  const gadsLinks = resolvedLinks.filter(l => l.platform === 'google_ads');
+  const metaConnectionId = metaLinks[0]?.connection_id;
+  const metaAccountIds = metaLinks.map(l => l.account_id);
+  const googleConnectionId = gadsLinks[0]?.connection_id;
+  const googleAccountId = gadsLinks[0]?.account_id;
+
   // Fetch data in parallel
   type MonthlyBucket = { spend: number; impressions: number; clicks: number; leads: number };
   type PlatformResult = { monthly: Record<string, MonthlyBucket>; total: PlatformMetrics };
 
   const [metaResult, googleResult, crmRows] = await Promise.all([
-    body.metaConnectionId && body.metaAccountIds?.length
-      ? fetchMetaMonthly(body.metaConnectionId, body.metaAccountIds, dateFrom, dateTo)
+    metaConnectionId && metaAccountIds.length
+      ? fetchMetaMonthly(metaConnectionId, metaAccountIds, dateFrom, dateTo)
       : Promise.resolve<PlatformResult>({ monthly: {}, total: { name: 'Meta Ads', investment: 0, impressions: 0, clicks: 0, leads: 0, cpl: 0 } }),
-    body.googleConnectionId && body.googleAccountId
-      ? fetchGoogleMonthly(body.googleConnectionId, body.googleAccountId, dateFrom, dateTo)
+    googleConnectionId && googleAccountId
+      ? fetchGoogleMonthly(googleConnectionId, googleAccountId, dateFrom, dateTo)
       : Promise.resolve<PlatformResult>({ monthly: {}, total: { name: 'Google Ads', investment: 0, impressions: 0, clicks: 0, leads: 0, cpl: 0 } }),
     fetchCRMMonthly(clientId, dateFrom, dateTo),
   ] as const);
@@ -430,7 +465,7 @@ export async function POST(req: NextRequest) {
     roi: totalInvestment > 0 ? totalRevenue / totalInvestment : 0,
   };
 
-  const sources = ['CRM', ...(body.metaConnectionId ? ['Meta Ads'] : []), ...(body.googleConnectionId ? ['Google Ads'] : [])];
+  const sources = ['CRM', ...(metaConnectionId ? ['Meta Ads'] : []), ...(googleConnectionId ? ['Google Ads'] : [])];
   const period = periodLabel(dateFrom, dateTo);
 
   const ai = await buildNarrative(clientName, period, overall, monthly, metaResult.total as PlatformMetrics, googleResult.total as PlatformMetrics, apiKey);
@@ -456,9 +491,9 @@ export async function POST(req: NextRequest) {
     await ensureReportsTable(pool);
     const { rows: [saved] } = await pool.query(
       `INSERT INTO public.diagnostic_reports (client_id, client_name, title, period_from, period_to, report_data, generated_by)
-       VALUES ($1, $2, $3, $4, $5, $6, 'manual')
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING id, created_at`,
-      [clientId, clientName, `Diagnóstico de Performance — ${clientName} — ${period}`, dateFrom, dateTo, JSON.stringify({ ...reportData })],
+      [clientId, clientName, `Diagnóstico de Performance — ${clientName} — ${period}`, dateFrom, dateTo, JSON.stringify({ ...reportData }), body.generatedBy ?? 'manual'],
     );
     reportData.id = saved.id;
     reportData.createdAt = saved.created_at;
