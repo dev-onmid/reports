@@ -2,7 +2,7 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import { google } from 'googleapis';
-import type { ReportData, MonthlyData, OverallMetrics, PlatformMetrics, AiNarrative } from '@/components/report-slides/types';
+import type { ReportData, MonthlyData, OverallMetrics, PlatformMetrics, ReportManifest, SlideSpec } from '@/components/report-slides/types';
 
 const DEV_TOKEN = process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? '1vR8GhAk4UMZoPaqo7Qq8Q';
 
@@ -241,79 +241,168 @@ async function fetchCRMMonthly(clientId: string, from: string, to: string) {
   }
 }
 
-// ─── Build AI narrative ───────────────────────────────────────────────────────
+// ─── Build AI manifest (slides) ──────────────────────────────────────────────
 
-async function buildNarrative(
+function brl(n: number) {
+  return `R$ ${n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+function num(n: number) {
+  return n.toLocaleString('pt-BR');
+}
+function pct(a: number, b: number) {
+  if (!b) return null;
+  return `${((a / b) * 100).toFixed(1).replace('.', ',')}%`;
+}
+
+async function buildManifest(
   clientName: string,
   period: string,
   overall: OverallMetrics,
   monthly: MonthlyData[],
-  meta: PlatformMetrics,
-  google: PlatformMetrics,
+  metaTotal: PlatformMetrics,
+  googleTotal: PlatformMetrics,
+  hasMeta: boolean,
+  hasGoogle: boolean,
+  hasCrm: boolean,
+  theme: string,
+  primaryLogo: string | undefined,
+  clientLogo: string | undefined,
   apiKey: string,
-): Promise<AiNarrative> {
-  const prompt = `Você é um especialista em marketing digital analisando resultados para um relatório de diagnóstico de performance. Analise os dados abaixo e gere textos analíticos em português para um relatório profissional.
+): Promise<ReportManifest> {
 
-CLIENTE: ${clientName}
-PERÍODO: ${period}
+  const summary = {
+    cliente: clientName,
+    periodo: period,
+    geral: {
+      investimento: brl(overall.investment),
+      investimento_num: overall.investment,
+      impressoes: num(overall.impressions),
+      cliques: num(overall.clicks),
+      leads: overall.leads,
+      cpl: brl(overall.cpl),
+      reunioes_agendadas: overall.meetingsScheduled,
+      reunioes_realizadas: overall.meetingsDone,
+      fechamentos: overall.wins,
+      faturamento: brl(overall.revenue),
+      faturamento_num: overall.revenue,
+      roi: `${overall.roi.toFixed(2).replace('.', ',')}x`,
+      taxa_lead_reuniao: pct(overall.meetingsScheduled, overall.leads),
+      taxa_reuniao_fechamento: pct(overall.wins, overall.meetingsDone),
+    },
+    evolucao_mensal: monthly.map(m => ({
+      mes: m.month,
+      investimento_num: m.investment,
+      investimento: brl(m.investment),
+      leads: m.leads,
+      reunioes: m.meetingsScheduled,
+      fechamentos: m.wins,
+      faturamento_num: m.revenue,
+      faturamento: brl(m.revenue),
+    })),
+    meta_ads: hasMeta ? {
+      investimento: brl(metaTotal.investment),
+      investimento_num: metaTotal.investment,
+      impressoes: num(metaTotal.impressions),
+      cliques: num(metaTotal.clicks),
+      leads: metaTotal.leads,
+      cpl: brl(metaTotal.cpl),
+      share: pct(metaTotal.investment, overall.investment),
+    } : null,
+    google_ads: hasGoogle ? {
+      investimento: brl(googleTotal.investment),
+      investimento_num: googleTotal.investment,
+      impressoes: num(googleTotal.impressions),
+      cliques: num(googleTotal.clicks),
+      leads: googleTotal.leads,
+      cpl: brl(googleTotal.cpl),
+      share: pct(googleTotal.investment, overall.investment),
+    } : null,
+    crm_disponivel: hasCrm,
+  };
 
-=== RESULTADO GERAL ===
-Investimento: R$ ${overall.investment.toFixed(2)}
-Impressões: ${overall.impressions}
-Cliques: ${overall.clicks}
-Leads (CRM): ${overall.leads}
-CPL médio: R$ ${overall.cpl.toFixed(2)}
-Reuniões agendadas: ${overall.meetingsScheduled}
-Reuniões realizadas: ${overall.meetingsDone}
-Ganhos: ${overall.wins}
-Faturamento: R$ ${overall.revenue.toFixed(2)}
-ROI: ${overall.roi.toFixed(2)}x
+  const prompt = `Você é um especialista sênior em marketing digital. Analise os dados abaixo e crie um relatório de performance profissional em slides.
 
-=== EVOLUÇÃO MENSAL ===
-${monthly.map(m => `${m.month}: Investimento R$${m.investment.toFixed(2)}, Leads ${m.leads}, Reuniões ${m.meetingsScheduled}, Ganhos ${m.wins}, Faturamento R$${m.revenue.toFixed(2)}`).join('\n')}
+DADOS:
+${JSON.stringify(summary, null, 2)}
 
-=== META ADS ===
-Investimento: R$ ${meta.investment.toFixed(2)} | Leads: ${meta.leads} | CPL: R$ ${meta.cpl.toFixed(2)}
+TIPOS DE SLIDES DISPONÍVEIS — use os mais relevantes conforme os dados:
 
-=== GOOGLE ADS ===
-Investimento: R$ ${google.investment.toFixed(2)} | Leads: ${google.leads} | CPL: R$ ${google.cpl.toFixed(2)}
+1. cover (OBRIGATÓRIO, sempre primeiro):
+{"type":"cover","clientName":"string","period":"string","headline":"string","tagline":"string opcional — frase de destaque do período"}
 
-Gere APENAS JSON (sem markdown) com estes campos (máximo 2-3 frases por campo, tom profissional):
-{
-  "overallHighlight": "insight principal sobre a operação no período",
-  "funnelBottleneck": "onde está o maior gargalo no funil",
-  "monthlyInsight": "análise da evolução mensal, qual mês se destacou e por quê",
-  "visibilityConversionInsight": "análise da relação entre entrega de mídia e conversão comercial",
-  "metaInsight": "análise do Meta Ads no período",
-  "googleInsight": "análise do Google Ads no período",
-  "recommendations": ["recomendação 1", "recomendação 2", "recomendação 3", "recomendação 4"]
-}`;
+2. kpis (cards de métricas — máx. 4 por slide, use múltiplos slides se necessário):
+{"type":"kpis","title":"string","subtitle":"string opcional","metrics":[{"label":"string","value":"string formatado","sub":"string opcional ex: vs mês anterior","accent":boolean}],"insight":"string — análise 1-2 frases"}
+
+3. bar-chart (gráfico de barras — ótimo para evolução mensal; use _num como value):
+{"type":"bar-chart","title":"string","subtitle":"string opcional","data":[{"label":"string","value":number}],"valuePrefix":"string ex: R$ ","valueSuffix":"string ex: leads","insight":"string"}
+
+4. funnel (funil de conversão — use APENAS se crm_disponivel e leads > 0):
+{"type":"funnel","title":"string","stages":[{"label":"string","value":number,"rate":"string ex: 100% ou 37%"}],"insight":"string"}
+
+5. channels (comparação de canais — use se tiver 2 canais com dados):
+{"type":"channels","title":"string","channels":[{"name":"string","color":"string hex opcional","metrics":[{"label":"string","value":"string","accent":boolean}],"insight":"string opcional"}]}
+
+6. insight (slide de análise textual — para destaques importantes):
+{"type":"insight","headline":"string — frase de impacto curta","body":"string — parágrafo analítico","supporting":[{"label":"string","value":"string","accent":boolean}]}
+
+7. recommendations (OBRIGATÓRIO, sempre último):
+{"type":"recommendations","title":"string","items":[{"title":"string","description":"string — 1-2 frases"}]}
+
+REGRAS:
+- Total de slides: entre 8 e 20
+- Omita completamente slides para dados que sejam nulos ou todos zero
+- Se meta_ads for null → sem slides de Meta Ads
+- Se google_ads for null → sem slides de Google Ads
+- Se crm_disponivel for false → sem funil de CRM
+- Nos campos "value" de bar-chart.data → use o campo _num (número puro), não a string formatada
+- Nos cards de kpis, MetricCard.value → string formatada (ex: "R$ 45.200" ou "1.254")
+- Texto em português brasileiro, tom profissional e direto
+- Seja analítico: aponte tendências, gargalos e oportunidades reais
+
+Retorne APENAS o array JSON, sem markdown, sem texto adicional:`;
 
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 2048, messages: [{ role: 'user', content: prompt }] }),
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 6000,
+        messages: [{ role: 'user', content: prompt }],
+      }),
     });
-    if (!res.ok) throw new Error('Claude error');
-    const data = await res.json() as { content: Array<{ text: string }> };
-    const text = data.content[0]?.text ?? '{}';
-    return JSON.parse(text.replace(/```json\n?|\n?```/g, '').trim()) as AiNarrative;
+    if (!res.ok) throw new Error(`Claude error ${res.status}`);
+    const raw = await res.json() as { content: Array<{ text: string }> };
+    const text = (raw.content[0]?.text ?? '[]').replace(/```json\n?|\n?```/g, '').trim();
+    const slides = JSON.parse(text) as SlideSpec[];
+    return { slides, theme, primaryLogo, clientLogo };
   } catch {
-    return {
-      overallHighlight: `A operação no período ${period} apresentou ROI de ${overall.roi.toFixed(2)}x com ${overall.leads} leads gerados.`,
-      funnelBottleneck: `O maior gargalo está na conversão de lead para reunião agendada (${overall.leads} leads → ${overall.meetingsScheduled} reuniões).`,
-      monthlyInsight: 'A análise mensal revela variações significativas entre os meses do período.',
-      visibilityConversionInsight: 'O aumento de impressões nem sempre se traduz em aumento proporcional de vendas.',
-      metaInsight: `Meta Ads gerou ${meta.leads} leads com CPL de R$ ${meta.cpl.toFixed(2)}.`,
-      googleInsight: `Google Ads gerou ${google.leads} leads com CPL de R$ ${google.cpl.toFixed(2)}.`,
-      recommendations: [
-        'Focar em qualidade de lead ao invés de volume.',
-        'Revisar processo comercial na etapa de agendamento.',
-        'Testar novos criativos nos canais com maior CPL.',
-        'Aumentar investimento nos meses e campanhas de maior eficiência.',
-      ],
-    };
+    // Minimal fallback manifest
+    const slides: SlideSpec[] = [
+      { type: 'cover', clientName, period, headline: 'Diagnóstico de Performance', tagline: `Relatório gerado automaticamente` },
+      {
+        type: 'kpis',
+        title: 'Resultado Geral',
+        metrics: [
+          { label: 'Investimento Total', value: brl(overall.investment) },
+          { label: 'Leads', value: num(overall.leads) },
+          { label: 'CPL Médio', value: brl(overall.cpl) },
+          { label: 'ROI', value: `${overall.roi.toFixed(2).replace('.', ',')}x`, accent: overall.roi >= 1 },
+        ],
+        insight: `No período ${period}, foram gerados ${num(overall.leads)} leads com CPL de ${brl(overall.cpl)}.`,
+      },
+      {
+        type: 'recommendations',
+        title: 'Próximos Passos',
+        items: [
+          { title: 'Otimizar CPL', description: 'Revisar criativos e segmentações com maior custo por lead.' },
+          { title: 'Processo comercial', description: 'Analisar taxa de conversão em cada etapa do funil.' },
+          { title: 'Mix de canais', description: 'Avaliar distribuição de investimento entre canais.' },
+          { title: 'Testes A/B', description: 'Implementar testes sistemáticos de criativos e landing pages.' },
+        ],
+      },
+    ];
+    return { slides, theme, primaryLogo, clientLogo };
   }
 }
 
@@ -376,6 +465,9 @@ export async function POST(req: NextRequest) {
     dateFrom: string;
     dateTo: string;
     generatedBy?: string;
+    theme?: string;
+    primaryLogo?: string;
+    clientLogo?: string;
   };
 
   const { clientId, clientName, dateFrom, dateTo } = body;
@@ -467,8 +559,23 @@ export async function POST(req: NextRequest) {
 
   const sources = ['CRM', ...(metaConnectionId ? ['Meta Ads'] : []), ...(googleConnectionId ? ['Google Ads'] : [])];
   const period = periodLabel(dateFrom, dateTo);
+  const hasCrm = crmRows.length > 0;
 
-  const ai = await buildNarrative(clientName, period, overall, monthly, metaResult.total as PlatformMetrics, googleResult.total as PlatformMetrics, apiKey);
+  const manifest = await buildManifest(
+    clientName,
+    period,
+    overall,
+    monthly,
+    metaResult.total as PlatformMetrics,
+    googleResult.total as PlatformMetrics,
+    !!(metaConnectionId && metaAccountIds.length),
+    !!(googleConnectionId && googleAccountId),
+    hasCrm,
+    body.theme ?? '#1A0A2E',
+    body.primaryLogo,
+    body.clientLogo,
+    apiKey,
+  );
 
   const reportData: ReportData = {
     id: '',
@@ -482,8 +589,9 @@ export async function POST(req: NextRequest) {
     overall,
     meta: metaResult.total as PlatformMetrics,
     google: googleResult.total as PlatformMetrics,
-    ai,
+    ai: {} as never,
     createdAt: new Date().toISOString(),
+    manifest,
   };
 
   const pool = makeServerPool();
