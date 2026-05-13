@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   Plus, Trash2, Wifi, WifiOff, Play, Pause, X, Upload,
   CheckCircle2, AlertCircle, Clock, RefreshCw, MessageSquare,
-  Users, BarChart2, ChevronDown, Copy,
+  Users, BarChart2, ChevronDown, Copy, Server,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -594,6 +594,7 @@ type TickResult = {
   status: string;
   done?: boolean;
   sleeping?: boolean;
+  skipped?: boolean;
   total?: number;
   sent?: number;
   failed?: number;
@@ -792,6 +793,12 @@ function CampaignCard({ campaign, onAction, onRefresh }: {
           return;
         }
 
+        // Background worker just processed this slot — back off and retry after the interval
+        if (data.skipped) {
+          setTimeout(() => { if (runningRef.current) tick(); }, intervalMax);
+          return;
+        }
+
         setSleeping(false);
         if (data.lastError) setLastSendError(data.lastError);
         setLive({
@@ -834,9 +841,17 @@ function CampaignCard({ campaign, onAction, onRefresh }: {
           <p className="font-semibold text-sm truncate">{campaign.name}</p>
           <p className="text-[11px] text-muted-foreground mt-0.5">{campaign.client_name}</p>
         </div>
-        <span className={cn('shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold', STATUS_COLOR[status])}>
-          {STATUS_LABEL[status] ?? status}
-        </span>
+        <div className="flex flex-col items-end gap-1">
+          <span className={cn('shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold', STATUS_COLOR[status])}>
+            {STATUS_LABEL[status] ?? status}
+          </span>
+          {status === 'running' && (
+            <span className="flex items-center gap-1 text-[9px] text-muted-foreground/70">
+              <Server className="h-2.5 w-2.5" />
+              Segundo plano
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Progress bar */}

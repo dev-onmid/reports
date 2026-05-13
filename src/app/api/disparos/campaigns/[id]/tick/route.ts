@@ -65,6 +65,22 @@ export async function POST(
       }
     }
 
+    // Atomically claim the tick slot — if next_tick_at is in the future, the background
+    // worker just processed this campaign; skip to avoid double-sending
+    const intervalSec = campaign.interval_min + Math.random() * (campaign.interval_max - campaign.interval_min);
+    const { rows: [claimed] } = await pool.query(
+      `UPDATE public.zapi_campaigns
+          SET next_tick_at = NOW() + ($1 * INTERVAL '1 second')
+        WHERE id = $2
+          AND status = 'running'
+          AND (next_tick_at IS NULL OR next_tick_at <= NOW())
+        RETURNING id`,
+      [Math.ceil(intervalSec), id],
+    );
+    if (!claimed) {
+      return Response.json({ status: 'running', done: false, skipped: true });
+    }
+
     // Grab next pending number
     const { rows: [number] } = await pool.query(
       `SELECT * FROM public.zapi_numbers WHERE campaign_id = $1 AND status = 'pending' ORDER BY position ASC LIMIT 1`,
