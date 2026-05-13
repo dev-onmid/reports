@@ -6,6 +6,7 @@ async function ensureColumns(pool: ReturnType<typeof makeServerPool>) {
   await pool.query(`
     ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS active_from TEXT;
     ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS active_until TEXT;
+    ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS next_tick_at TIMESTAMPTZ;
   `);
 }
 

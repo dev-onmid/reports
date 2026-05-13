@@ -10,6 +10,8 @@ export async function POST(
 
   const pool = makeServerPool();
   try {
+    await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS next_tick_at TIMESTAMPTZ`);
+
     const { rows: [campaign] } = await pool.query(
       `SELECT status FROM public.zapi_campaigns WHERE id = $1`,
       [id],
