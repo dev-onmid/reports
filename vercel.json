@@ -3,6 +3,10 @@
     {
       "path": "/api/disparos/worker",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/reports/auto",
+      "schedule": "0 8 28-31 * *"
     }
   ]
 }
