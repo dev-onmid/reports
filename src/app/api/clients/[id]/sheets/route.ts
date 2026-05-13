@@ -14,10 +14,15 @@ async function ensureColumns(pool: ReturnType<typeof makeServerPool>) {
   `);
 }
 
-export type SaleEntry = { date: string; amount: number; tab?: string };
+export type FunnelEntry = {
+  date: string;    // YYYY-MM-DD
+  stage: string;   // stage name from sheet
+  amount?: number; // only for closing/revenue entries
+};
 
 export type SheetsAnalysisResult = {
-  sales: SaleEntry[];
+  entries: FunnelEntry[];
+  stages: string[];  // ordered funnel stages detected
   total: number;
   note?: string;
 };
@@ -66,21 +71,26 @@ export async function analyzeClientSheets(
       max_tokens: 4096,
       messages: [{
         role: 'user',
-        content: `Analise estas abas de uma planilha de vendas e extraia cada venda individual com sua data e valor.
+        content: `Analise esta planilha de CRM/vendas e extraia cada lead individualmente com seu estágio no funil de vendas.
 
-Regras:
-1. Identifique a coluna de data (normalmente uma das primeiras colunas)
-2. Identifique a coluna de valor: "Valor Fechado", "Valor", "Venda", "Receita", "Faturamento" ou similares
-3. Considere como venda efetivada linhas com status: "Comprou", "Efetivado", "Fechado", "Vendido", "Convertido" — ou quando a coluna de valor já tiver um valor preenchido indicando fechamento
-4. Ignore linhas com status: "Não comprou", "Perdido", "Cancelado", "Lead", "Em andamento", ou linhas sem valor/data
-5. Normalize todas as datas para o formato YYYY-MM-DD (ex: "17/04/2025" → "2025-04-17")
-6. Valores monetários: remova "R$", pontos de milhar e converta vírgula decimal para ponto (ex: "R$ 1.500,00" → 1500.00)
+Para cada linha que representa um lead/contato:
+1. Identifique a data (coluna de data, normalmente uma das primeiras — normalize para YYYY-MM-DD)
+2. Identifique o estágio atual no funil: "Lead", "Atendimento", "Agendamento", "Comparecimento", "Fechamento" ou equivalentes presentes na planilha
+3. Se o estágio for fechamento/venda (ex: "Comprou", "Efetivado", "Fechado", "Vendido", "Convertido"), inclua o valor monetário da coluna de valor/orçamento
+4. Ignore linhas de cabeçalho, linhas vazias e linhas sem data
+5. Valores monetários: remova "R$", pontos de milhar, converta vírgula decimal para ponto (ex: "R$ 1.500,00" → 1500.00)
+6. Datas: normalize para YYYY-MM-DD (ex: "17/04/2025" → "2025-04-17")
+
+Identifique também todos os estágios do funil em ordem crescente (do mais inicial ao fechamento/perda).
 
 Retorne APENAS JSON válido neste formato exato, sem texto adicional:
 {
-  "sales": [
-    { "date": "2025-04-17", "amount": 1500.00, "tab": "nome da aba" }
+  "entries": [
+    { "date": "2025-04-17", "stage": "Fechamento", "amount": 1500.00 },
+    { "date": "2025-04-18", "stage": "Agendamento" },
+    { "date": "2025-04-19", "stage": "Lead" }
   ],
+  "stages": ["Lead", "Atendimento", "Agendamento", "Comparecimento", "Fechamento"],
   "total": 1500.00,
   "note": "breve observação de como interpretou os dados"
 }
@@ -98,8 +108,7 @@ ${sheetsText}`,
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   const parsed = JSON.parse(jsonMatch?.[0] ?? text) as SheetsAnalysisResult;
 
-  // Recalculate total from sales to ensure consistency
-  parsed.total = parsed.sales.reduce((sum, s) => sum + s.amount, 0);
+  parsed.total = parsed.entries.reduce((sum, e) => sum + (e.amount ?? 0), 0);
   return parsed;
 }
 

@@ -1,8 +1,9 @@
 /**
  * Analisa a planilha do próximo cliente com sheets_url pendente.
  * Executa 1 cliente por chamada para não exceder timeout.
- * Configurar no cron-job.org: a cada 5 minutos, método POST.
- * Cada cliente é reanalisado no máximo 1x a cada 20 horas.
+ * Configurar no cron-job.org: toda terça-feira, método POST.
+ * Cron expression: 0 8 * * 2  (08:00 toda terça, a cada 5 min para processar todos)
+ * Cada cliente é reanalisado no máximo 1x a cada 6 dias.
  */
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
@@ -34,19 +35,18 @@ export async function POST(req: NextRequest) {
       ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS sheets_analyzed_at TIMESTAMPTZ;
     `);
 
-    // Pega o cliente ativo com sheets_url que ainda não foi analisado hoje
     const { rows: [client] } = await pool.query(`
       SELECT id, name, sheets_url
         FROM public.clients
        WHERE sheets_url IS NOT NULL
          AND status = 'Ativo'
-         AND (sheets_analyzed_at IS NULL OR sheets_analyzed_at < NOW() - INTERVAL '20 hours')
+         AND (sheets_analyzed_at IS NULL OR sheets_analyzed_at < NOW() - INTERVAL '6 days')
        ORDER BY sheets_analyzed_at ASC NULLS FIRST
        LIMIT 1
     `);
 
     if (!client) {
-      return Response.json({ ok: true, skipped: true, reason: 'Todos os clientes já foram analisados hoje.' });
+      return Response.json({ ok: true, skipped: true, reason: 'Todos os clientes foram analisados esta semana.' });
     }
 
     const result = await analyzeClientSheets(client.sheets_url, googleApiKey, anthropicKey);

@@ -31,7 +31,8 @@ import type { CampaignPerformance } from '@/app/api/campaigns/route';
 import type { AudienceBreakdowns, AudienceResponse, AudienceSlice } from '@/app/api/audience/route';
 
 type Period = 'yesterday' | 'last_7d' | 'last_14d' | 'last_30d' | 'this_month' | 'last_month' | 'custom';
-type SaleEntry = { date: string; amount: number };
+type FunnelEntry = { date: string; stage: string; amount?: number };
+type ClientSheetsSummary = { entries: FunnelEntry[]; stages: string[] };
 type ApiMetrics = {
   meta: { spend: number; impressions: number; clicks: number; leads: number; formLeads?: number; conversations?: number; cpl: number } | null;
   google: { cost: number; impressions: number; clicks: number; cpc: number; conversions: number; cpa: number } | null;
@@ -176,11 +177,9 @@ function periodToDateRange(
   }
 }
 
-function salesInRange(sales: SaleEntry[], from: Date, to: Date): number {
+function entriesInRange(entries: FunnelEntry[], from: Date, to: Date): FunnelEntry[] {
   const toEnd = new Date(to); toEnd.setHours(23, 59, 59, 999);
-  return sales
-    .filter(s => { const d = new Date(s.date); return d >= from && d <= toEnd; })
-    .reduce((sum, s) => sum + s.amount, 0);
+  return entries.filter(e => { const d = new Date(e.date); return d >= from && d <= toEnd; });
 }
 
 function computeFunnel(stages: FunnelStage[], revenueTarget: number, ticket: number): number[] {
@@ -1911,15 +1910,16 @@ function AudiencePlatformBlock({
 }
 
 // ── Dashboard Edit Mode ──────────────────────────────────────────────────────
-type WidgetId = 'general' | 'meta' | 'google';
+type WidgetId = 'general' | 'funnel' | 'meta' | 'google';
 
 const WIDGET_INFO: Record<WidgetId, { label: string }> = {
   general: { label: 'Métricas Gerais' },
+  funnel: { label: 'Funil de Vendas' },
   meta: { label: 'Meta Ads' },
   google: { label: 'Google Ads' },
 };
 
-const DEFAULT_WIDGET_ORDER: WidgetId[] = ['general', 'meta', 'google'];
+const DEFAULT_WIDGET_ORDER: WidgetId[] = ['general', 'funnel', 'meta', 'google'];
 const LS_ORDER = 'dashboard_widget_order';
 const LS_COLLAPSED = 'dashboard_widget_collapsed';
 
@@ -1970,7 +1970,8 @@ export default function GeneralDashboard() {
   const [customDateTo, setCustomDateTo] = useState('');
   const [metricsByClient, setMetricsByClient] = useState<Record<string, ApiMetrics>>({});
   const [goalsByClient, setGoalsByClient] = useState<Record<string, GoalConfig | null>>({});
-  const [sheetsSummary, setSheetsSummary] = useState<Record<string, SaleEntry[]>>({});
+  const [sheetsSummary, setSheetsSummary] = useState<Record<string, ClientSheetsSummary>>({});
+  const [sheetsRefreshing, setSheetsRefreshing] = useState(false);
   const [campaigns, setCampaigns] = useState<CampaignPerformance[]>([]);
   const [creatives, setCreatives] = useState<TopCreative[]>([]);
   const [audience, setAudience] = useState<AudienceResponse>(EMPTY_AUDIENCE);
@@ -2185,10 +2186,10 @@ export default function GeneralDashboard() {
 
   useEffect(() => {
     fetch('/api/clients/sheets-summary')
-      .then(r => r.ok ? r.json() as Promise<{ clientId: string; sales: SaleEntry[] }[]> : [])
+      .then(r => r.ok ? r.json() as Promise<{ clientId: string; entries: FunnelEntry[]; stages: string[] }[]> : [])
       .then(data => {
-        const map: Record<string, SaleEntry[]> = {};
-        for (const item of data) map[item.clientId] = item.sales;
+        const map: Record<string, ClientSheetsSummary> = {};
+        for (const item of data) map[item.clientId] = { entries: item.entries, stages: item.stages };
         setSheetsSummary(map);
       })
       .catch(() => setSheetsSummary({}));
@@ -2247,7 +2248,26 @@ export default function GeneralDashboard() {
   let plannedInvestment = 0;
   let revenueGoal = 0;
   const { from: revFrom, to: revTo } = periodToDateRange(period, customDateFrom, customDateTo);
-  const revenue = [...selectedIds].reduce((sum, id) => sum + salesInRange(sheetsSummary[id] ?? [], revFrom, revTo), 0);
+  const revenue = [...selectedIds].reduce((sum, id) => {
+    const inRange = entriesInRange(sheetsSummary[id]?.entries ?? [], revFrom, revTo);
+    return sum + inRange.reduce((s, e) => s + (e.amount ?? 0), 0);
+  }, 0);
+
+  // Funnel aggregation for selected clients + period
+  const funnelStages: string[] = [];
+  const funnelCounts: Record<string, number> = {};
+  for (const id of selectedIds) {
+    const summary = sheetsSummary[id];
+    if (!summary) continue;
+    for (const stage of summary.stages) {
+      if (!funnelStages.includes(stage)) funnelStages.push(stage);
+    }
+    const inRange = entriesInRange(summary.entries, revFrom, revTo);
+    for (const entry of inRange) {
+      funnelCounts[entry.stage] = (funnelCounts[entry.stage] ?? 0) + 1;
+    }
+  }
+  const hasFunnelData = funnelStages.length > 0 && Object.keys(funnelCounts).length > 0;
 
   for (const id of selectedIds) {
     const goal = goalsByClient[id];
@@ -2306,6 +2326,29 @@ export default function GeneralDashboard() {
   const selectedClients = clients.filter(c => selectedIds.has(c.id));
   const metaCampaigns = campaigns.filter((campaign) => campaign.platform === 'meta');
   const googleCampaigns = campaigns.filter((campaign) => campaign.platform === 'google');
+
+  async function refreshSheets() {
+    const clientsWithSheets = [...selectedIds].filter(id => {
+      const client = clients.find(c => c.id === id);
+      return client && sheetsSummary[id] !== undefined;
+    });
+    if (clientsWithSheets.length === 0) return;
+    setSheetsRefreshing(true);
+    try {
+      await Promise.all(clientsWithSheets.map(id =>
+        fetch(`/api/clients/${id}/sheets`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
+      ));
+      const res = await fetch('/api/clients/sheets-summary');
+      if (res.ok) {
+        const data = await res.json() as { clientId: string; entries: FunnelEntry[]; stages: string[] }[];
+        const map: Record<string, ClientSheetsSummary> = {};
+        for (const item of data) map[item.clientId] = { entries: item.entries, stages: item.stages };
+        setSheetsSummary(map);
+      }
+    } finally {
+      setSheetsRefreshing(false);
+    }
+  }
 
   async function analyzeWithAI() {
     if (selectedIds.size === 0) return;
@@ -2398,6 +2441,17 @@ export default function GeneralDashboard() {
               ))}
             </div>
             {metricsLoading && <RefreshCw className="w-4 h-4 animate-spin text-muted-foreground" />}
+            {[...selectedIds].some(id => sheetsSummary[id] !== undefined) && (
+              <button
+                type="button"
+                onClick={refreshSheets}
+                disabled={sheetsRefreshing}
+                className="flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-[11px] font-semibold text-emerald-400 transition-colors hover:bg-emerald-500/20 disabled:opacity-50"
+              >
+                <RefreshCw className={cn('h-3.5 w-3.5', sheetsRefreshing && 'animate-spin')} />
+                {sheetsRefreshing ? 'Atualizando...' : 'Atualizar Planilha'}
+              </button>
+            )}
             <button
               type="button"
               onClick={analyzeWithAI}
@@ -2602,6 +2656,54 @@ export default function GeneralDashboard() {
                         <MetricTile title="Saldo da Conta Google Ads" value={googleBalance} format="currency" loading={balancesLoading} accent="#55F52F" description="Soma dos saldos vinculados aos clientes selecionados." />
                       </div>
                     </div>
+                  </MetricSection>
+                )}
+                {id === 'funnel' && hasFunnelData && (
+                  <MetricSection title="Funil de Vendas" description="Leads por estágio no período selecionado, extraídos da planilha." accent="#0F9D58">
+                    <div className="space-y-3">
+                      {funnelStages.map((stage, i) => {
+                        const count = funnelCounts[stage] ?? 0;
+                        const prevCount = i > 0 ? (funnelCounts[funnelStages[i - 1]] ?? 0) : count;
+                        const convRate = prevCount > 0 ? Math.round((count / prevCount) * 100) : null;
+                        const maxCount = funnelCounts[funnelStages[0]] ?? 1;
+                        const barPct = maxCount > 0 ? Math.round((count / maxCount) * 100) : 0;
+                        const isClosing = !!(funnelStages[i] && entriesInRange(
+                          [...selectedIds].flatMap(id => sheetsSummary[id]?.entries ?? []),
+                          revFrom, revTo
+                        ).find(e => e.stage === stage && e.amount));
+                        return (
+                          <div key={stage} className="flex items-center gap-3">
+                            <div className="w-32 shrink-0 text-right text-xs font-medium text-muted-foreground truncate">{stage}</div>
+                            <div className="flex-1 relative h-7 rounded overflow-hidden bg-muted/20">
+                              <div
+                                className={cn('h-full rounded transition-all', isClosing ? 'bg-emerald-500/60' : 'bg-[#0F9D58]/40')}
+                                style={{ width: `${barPct}%` }}
+                              />
+                              <span className="absolute inset-0 flex items-center px-2 text-xs font-bold text-foreground">
+                                {count.toLocaleString('pt-BR')}
+                              </span>
+                            </div>
+                            {convRate !== null && i > 0 && (
+                              <div className={cn('w-12 shrink-0 text-xs font-semibold text-right', convRate >= 60 ? 'text-emerald-400' : convRate >= 30 ? 'text-yellow-400' : 'text-red-400')}>
+                                {convRate}%
+                              </div>
+                            )}
+                            {i === 0 && <div className="w-12 shrink-0" />}
+                          </div>
+                        );
+                      })}
+                      {revenue > 0 && (
+                        <div className="mt-4 pt-4 border-t border-border flex items-center justify-between">
+                          <span className="text-sm font-semibold text-muted-foreground">Faturamento no período</span>
+                          <span className="text-lg font-bold text-emerald-400">{formatCurrencyBRL(revenue)}</span>
+                        </div>
+                      )}
+                    </div>
+                  </MetricSection>
+                )}
+                {id === 'funnel' && !hasFunnelData && (
+                  <MetricSection title="Funil de Vendas" description="Vincule uma planilha ao cliente para visualizar o funil." accent="#0F9D58">
+                    <p className="text-sm text-muted-foreground py-4 text-center">Nenhum dado de funil disponível para o período selecionado.</p>
                   </MetricSection>
                 )}
                 {id === 'meta' && (
