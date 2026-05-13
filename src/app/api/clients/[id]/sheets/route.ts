@@ -29,6 +29,28 @@ export type SheetsAnalysisResult = {
   note?: string;
 };
 
+function parseSheetJson(text: string): SheetsAnalysisResult | null {
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  const raw = jsonMatch?.[0] ?? text;
+  try {
+    return JSON.parse(raw) as SheetsAnalysisResult;
+  } catch {
+    // JSON was truncated — extract complete entry objects from the partial response
+    const entries: FunnelEntry[] = [];
+    const entryRegex = /\{\s*"date"\s*:\s*"([^"]+)"\s*,\s*"stage"\s*:\s*"([^"]+)"(?:\s*,\s*"amount"\s*:\s*([\d.]+))?\s*\}/g;
+    let m;
+    while ((m = entryRegex.exec(raw)) !== null) {
+      entries.push({ date: m[1], stage: m[2], ...(m[3] ? { amount: parseFloat(m[3]) } : {}) });
+    }
+    const stagesMatch = raw.match(/"stages"\s*:\s*\[([\s\S]*?)\]/);
+    const stages = stagesMatch
+      ? (stagesMatch[1].match(/"([^"]+)"/g) ?? []).map(s => s.replace(/"/g, ''))
+      : [...new Set(entries.map(e => e.stage))];
+    if (entries.length === 0) return null;
+    return { entries, stages, total: entries.reduce((s, e) => s + (e.amount ?? 0), 0) };
+  }
+}
+
 export async function analyzeClientSheets(
   sheetsUrl: string,
   googleApiKey: string,
@@ -54,26 +76,34 @@ export async function analyzeClientSheets(
     if (!dataRes.ok) continue;
     const data = await dataRes.json() as { values?: string[][] };
     if (data.values && data.values.length > 1) {
-      allSheetData.push({ name, rows: data.values.slice(0, 200) });
+      allSheetData.push({ name, rows: data.values.slice(0, 120) });
     }
   }
 
   if (allSheetData.length === 0) throw new Error('Planilha vazia ou sem dados.');
 
-  const sheetsText = allSheetData.map(sheet => {
-    const rows = sheet.rows.map(row => row.join('\t')).join('\n');
-    return `=== ABA: ${sheet.name} ===\n${rows}`;
-  }).join('\n\n');
+  // Process tabs in batches of 3 to avoid token overflow
+  const BATCH_SIZE = 3;
+  const allEntries: FunnelEntry[] = [];
+  const allStages: string[] = [];
+  let note = '';
 
-  const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01' },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 4096,
-      messages: [{
-        role: 'user',
-        content: `Analise esta planilha de CRM/vendas e extraia cada lead individualmente com seu estágio no funil de vendas.
+  for (let i = 0; i < allSheetData.length; i += BATCH_SIZE) {
+    const batch = allSheetData.slice(i, i + BATCH_SIZE);
+    const sheetsText = batch.map(sheet => {
+      const rows = sheet.rows.map(row => row.join('\t')).join('\n');
+      return `=== ABA: ${sheet.name} ===\n${rows}`;
+    }).join('\n\n');
+
+    const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 8192,
+        messages: [{
+          role: 'user',
+          content: `Analise esta planilha de CRM/vendas e extraia cada lead individualmente com seu estágio no funil de vendas.
 
 Para cada linha que representa um lead/contato:
 1. Identifique a data (coluna de data, normalmente uma das primeiras — normalize para YYYY-MM-DD)
@@ -94,24 +124,33 @@ Retorne APENAS JSON válido neste formato exato, sem texto adicional:
   ],
   "stages": ["Lead", "Atendimento", "Agendamento", "Comparecimento", "Fechamento"],
   "total": 1500.00,
-  "note": "breve observação de como interpretou os dados"
+  "note": "breve observação"
 }
 
 Planilha:
 ${sheetsText}`,
-      }],
-    }),
-  });
+        }],
+      }),
+    });
 
-  if (!claudeRes.ok) throw new Error('Erro ao analisar com IA.');
+    if (!claudeRes.ok) continue;
 
-  const claudeData = await claudeRes.json() as { content: { text: string }[] };
-  const text = claudeData.content[0]?.text ?? '';
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  const parsed = JSON.parse(jsonMatch?.[0] ?? text) as SheetsAnalysisResult;
+    const claudeData = await claudeRes.json() as { content: { text: string }[] };
+    const rawText = claudeData.content[0]?.text ?? '';
+    const batchResult = parseSheetJson(rawText);
+    if (batchResult) {
+      allEntries.push(...batchResult.entries);
+      for (const s of batchResult.stages) {
+        if (!allStages.includes(s)) allStages.push(s);
+      }
+      if (!note && batchResult.note) note = batchResult.note;
+    }
+  }
 
-  parsed.total = parsed.entries.reduce((sum, e) => sum + (e.amount ?? 0), 0);
-  return parsed;
+  if (allEntries.length === 0 && allStages.length === 0) throw new Error('Não foi possível extrair dados da planilha.');
+
+  const total = allEntries.reduce((sum, e) => sum + (e.amount ?? 0), 0);
+  return { entries: allEntries, stages: allStages, total, note };
 }
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
