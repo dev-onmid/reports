@@ -31,6 +31,7 @@ import type { CampaignPerformance } from '@/app/api/campaigns/route';
 import type { AudienceBreakdowns, AudienceResponse, AudienceSlice } from '@/app/api/audience/route';
 
 type Period = 'yesterday' | 'last_7d' | 'last_14d' | 'last_30d' | 'this_month' | 'last_month' | 'custom';
+type SaleEntry = { date: string; amount: number };
 type ApiMetrics = {
   meta: { spend: number; impressions: number; clicks: number; leads: number; formLeads?: number; conversations?: number; cpl: number } | null;
   google: { cost: number; impressions: number; clicks: number; cpc: number; conversions: number; cpa: number } | null;
@@ -152,6 +153,34 @@ function readPlanningFromStorage(clientId: string): PlanningConfig {
   } catch {
     return DEFAULT_PLANNING;
   }
+}
+
+function periodToDateRange(
+  period: Period,
+  customFrom?: string,
+  customTo?: string,
+): { from: Date; to: Date } {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
+
+  switch (period) {
+    case 'yesterday': return { from: yesterday, to: yesterday };
+    case 'last_7d': { const f = new Date(today); f.setDate(f.getDate() - 6); return { from: f, to: today }; }
+    case 'last_14d': { const f = new Date(today); f.setDate(f.getDate() - 13); return { from: f, to: today }; }
+    case 'last_30d': { const f = new Date(today); f.setDate(f.getDate() - 29); return { from: f, to: today }; }
+    case 'this_month': return { from: new Date(now.getFullYear(), now.getMonth(), 1), to: new Date(now.getFullYear(), now.getMonth() + 1, 0) };
+    case 'last_month': return { from: new Date(now.getFullYear(), now.getMonth() - 1, 1), to: new Date(now.getFullYear(), now.getMonth(), 0) };
+    case 'custom': return { from: customFrom ? new Date(customFrom) : today, to: customTo ? new Date(customTo) : today };
+    default: return { from: today, to: today };
+  }
+}
+
+function salesInRange(sales: SaleEntry[], from: Date, to: Date): number {
+  const toEnd = new Date(to); toEnd.setHours(23, 59, 59, 999);
+  return sales
+    .filter(s => { const d = new Date(s.date); return d >= from && d <= toEnd; })
+    .reduce((sum, s) => sum + s.amount, 0);
 }
 
 function computeFunnel(stages: FunnelStage[], revenueTarget: number, ticket: number): number[] {
@@ -1941,7 +1970,7 @@ export default function GeneralDashboard() {
   const [customDateTo, setCustomDateTo] = useState('');
   const [metricsByClient, setMetricsByClient] = useState<Record<string, ApiMetrics>>({});
   const [goalsByClient, setGoalsByClient] = useState<Record<string, GoalConfig | null>>({});
-  const [sheetsSummary, setSheetsSummary] = useState<Record<string, number>>({});
+  const [sheetsSummary, setSheetsSummary] = useState<Record<string, SaleEntry[]>>({});
   const [campaigns, setCampaigns] = useState<CampaignPerformance[]>([]);
   const [creatives, setCreatives] = useState<TopCreative[]>([]);
   const [audience, setAudience] = useState<AudienceResponse>(EMPTY_AUDIENCE);
@@ -2156,10 +2185,10 @@ export default function GeneralDashboard() {
 
   useEffect(() => {
     fetch('/api/clients/sheets-summary')
-      .then(r => r.ok ? r.json() as Promise<{ clientId: string; total: number }[]> : [])
+      .then(r => r.ok ? r.json() as Promise<{ clientId: string; sales: SaleEntry[] }[]> : [])
       .then(data => {
-        const map: Record<string, number> = {};
-        for (const item of data) map[item.clientId] = item.total;
+        const map: Record<string, SaleEntry[]> = {};
+        for (const item of data) map[item.clientId] = item.sales;
         setSheetsSummary(map);
       })
       .catch(() => setSheetsSummary({}));
@@ -2217,7 +2246,8 @@ export default function GeneralDashboard() {
   let leadsGoal = 0;
   let plannedInvestment = 0;
   let revenueGoal = 0;
-  const revenue = [...selectedIds].reduce((sum, id) => sum + (sheetsSummary[id] ?? 0), 0);
+  const { from: revFrom, to: revTo } = periodToDateRange(period, customDateFrom, customDateTo);
+  const revenue = [...selectedIds].reduce((sum, id) => sum + salesInRange(sheetsSummary[id] ?? [], revFrom, revTo), 0);
 
   for (const id of selectedIds) {
     const goal = goalsByClient[id];

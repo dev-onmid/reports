@@ -1,4 +1,5 @@
 import { makeServerPool } from '@/lib/server-db';
+import type { SaleEntry } from '@/app/api/clients/[id]/sheets/route';
 
 export async function GET() {
   const pool = makeServerPool();
@@ -12,11 +13,15 @@ export async function GET() {
         FROM public.clients
        WHERE sheets_result IS NOT NULL
     `);
-    return Response.json(rows.map(r => ({
-      clientId: r.id,
-      total: (r.sheets_result as { total?: number })?.total ?? 0,
-      analyzedAt: r.sheets_analyzed_at,
-    })));
+    return Response.json(rows.map(r => {
+      const result = r.sheets_result as { sales?: SaleEntry[]; total?: number } | null;
+      return {
+        clientId: r.id,
+        sales: result?.sales ?? [],
+        total: result?.total ?? 0,
+        analyzedAt: r.sheets_analyzed_at,
+      };
+    }));
   } finally {
     await pool.end();
   }

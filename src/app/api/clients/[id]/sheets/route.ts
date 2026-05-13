@@ -14,8 +14,10 @@ async function ensureColumns(pool: ReturnType<typeof makeServerPool>) {
   `);
 }
 
+export type SaleEntry = { date: string; amount: number; tab?: string };
+
 export type SheetsAnalysisResult = {
-  tabs: { name: string; amount: number; count?: number; source?: string }[];
+  sales: SaleEntry[];
   total: number;
   note?: string;
 };
@@ -45,7 +47,7 @@ export async function analyzeClientSheets(
     if (!dataRes.ok) continue;
     const data = await dataRes.json() as { values?: string[][] };
     if (data.values && data.values.length > 1) {
-      allSheetData.push({ name, rows: data.values.slice(0, 150) });
+      allSheetData.push({ name, rows: data.values.slice(0, 200) });
     }
   }
 
@@ -61,22 +63,23 @@ export async function analyzeClientSheets(
     headers: { 'Content-Type': 'application/json', 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01' },
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
-      max_tokens: 1024,
+      max_tokens: 4096,
       messages: [{
         role: 'user',
-        content: `Analise estas abas de uma planilha de vendas e identifique os valores financeiros de vendas/fechamentos.
+        content: `Analise estas abas de uma planilha de vendas e extraia cada venda individual com sua data e valor.
 
-Procure por:
-1. Colunas chamadas "Valor Fechado", "Valor", "Venda", "Receita", "Faturamento" ou similares com valores monetários
-2. Colunas de status com valores como "Comprou", "Efetivado", "Fechado", "Vendido", "Convertido" — nesse caso, some o campo de orçamento/proposta/valor correspondente daquela linha
-3. Ignore linhas com status como "Não comprou", "Perdido", "Cancelado", "Lead", "Em andamento"
-
-Para cada aba que tiver dados de vendas, calcule o total. Abas sem dados relevantes retorne amount 0.
+Regras:
+1. Identifique a coluna de data (normalmente uma das primeiras colunas)
+2. Identifique a coluna de valor: "Valor Fechado", "Valor", "Venda", "Receita", "Faturamento" ou similares
+3. Considere como venda efetivada linhas com status: "Comprou", "Efetivado", "Fechado", "Vendido", "Convertido" — ou quando a coluna de valor já tiver um valor preenchido indicando fechamento
+4. Ignore linhas com status: "Não comprou", "Perdido", "Cancelado", "Lead", "Em andamento", ou linhas sem valor/data
+5. Normalize todas as datas para o formato YYYY-MM-DD (ex: "17/04/2025" → "2025-04-17")
+6. Valores monetários: remova "R$", pontos de milhar e converta vírgula decimal para ponto (ex: "R$ 1.500,00" → 1500.00)
 
 Retorne APENAS JSON válido neste formato exato, sem texto adicional:
 {
-  "tabs": [
-    { "name": "nome da aba", "amount": 1500.00, "count": 3, "source": "coluna usada" }
+  "sales": [
+    { "date": "2025-04-17", "amount": 1500.00, "tab": "nome da aba" }
   ],
   "total": 1500.00,
   "note": "breve observação de como interpretou os dados"
@@ -93,7 +96,11 @@ ${sheetsText}`,
   const claudeData = await claudeRes.json() as { content: { text: string }[] };
   const text = claudeData.content[0]?.text ?? '';
   const jsonMatch = text.match(/\{[\s\S]*\}/);
-  return JSON.parse(jsonMatch?.[0] ?? text) as SheetsAnalysisResult;
+  const parsed = JSON.parse(jsonMatch?.[0] ?? text) as SheetsAnalysisResult;
+
+  // Recalculate total from sales to ensure consistency
+  parsed.total = parsed.sales.reduce((sum, s) => sum + s.amount, 0);
+  return parsed;
 }
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
