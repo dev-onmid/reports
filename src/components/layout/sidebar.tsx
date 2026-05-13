@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { clearAuthSession } from '@/lib/auth-store';
+import { clearAuthSession, getAuthSession } from '@/lib/auth-store';
 import {
   LayoutDashboard,
   Users,
@@ -19,20 +19,27 @@ import {
 import { cn } from '@/lib/utils';
 import { APP_VERSION } from '@/lib/app-version';
 
-const navItems = [
-  { name: 'Dashboard',  href: '/dashboard',   icon: LayoutDashboard },
-  { name: 'Clientes',   href: '/clientes',    icon: Users           },
-  { name: 'Relatórios', href: '/relatorios',  icon: FileText        },
-  { name: 'Resultados', href: '/resultados',  icon: BarChart3       },
-  { name: 'Pagamentos', href: '/pagamentos',  icon: WalletCards     },
-  { name: 'Biblioteca', href: '/biblioteca',  icon: Library         },
-  { name: 'Disparos',   href: '/disparos',    icon: MessageCircle   },
-  { name: 'Integrações',href: '/integracoes', icon: Plug            },
-  { name: 'Logs',       href: '/logs',        icon: ClipboardList   },
+type Role = 'Administrador' | 'Usuário' | 'Visualizador';
+
+const navItems: { name: string; href: string; icon: React.ElementType; roles: Role[] }[] = [
+  { name: 'Dashboard',   href: '/dashboard',   icon: LayoutDashboard, roles: ['Administrador', 'Usuário', 'Visualizador'] },
+  { name: 'Clientes',    href: '/clientes',    icon: Users,           roles: ['Administrador', 'Usuário'] },
+  { name: 'Relatórios',  href: '/relatorios',  icon: FileText,        roles: ['Administrador', 'Usuário'] },
+  { name: 'Resultados',  href: '/resultados',  icon: BarChart3,       roles: ['Administrador', 'Usuário'] },
+  { name: 'Pagamentos',  href: '/pagamentos',  icon: WalletCards,     roles: ['Administrador', 'Usuário'] },
+  { name: 'Biblioteca',  href: '/biblioteca',  icon: Library,         roles: ['Administrador', 'Usuário'] },
+  { name: 'Disparos',    href: '/disparos',    icon: MessageCircle,   roles: ['Administrador', 'Usuário'] },
+  { name: 'Integrações', href: '/integracoes', icon: Plug,            roles: ['Administrador'] },
+  { name: 'Logs',        href: '/logs',        icon: ClipboardList,   roles: ['Administrador'] },
 ];
 
 export function Sidebar() {
   const pathname = usePathname();
+  const session = getAuthSession();
+  const role = (session?.role ?? 'Visualizador') as Role;
+
+  const visibleItems = navItems.filter(item => item.roles.includes(role));
+  const showConfiguracoes = role === 'Administrador';
 
   return (
     <aside className="w-64 bg-background border-r border-border h-screen flex flex-col sticky top-0 relative z-20">
@@ -51,7 +58,7 @@ export function Sidebar() {
 
       <nav className="flex-1 px-3 py-8 space-y-2 overflow-y-auto">
         <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-6 px-3">Menu Principal</div>
-        {navItems.map((item) => {
+        {visibleItems.map((item) => {
           const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
           return (
             <Link
@@ -59,8 +66,8 @@ export function Sidebar() {
               href={item.href}
               className={cn(
                 "flex items-center gap-3 px-3 py-3 rounded-md text-sm font-semibold transition-all relative overflow-hidden",
-                isActive 
-                  ? "text-primary bg-primary/10" 
+                isActive
+                  ? "text-primary bg-primary/10"
                   : "text-muted-foreground hover:bg-card hover:text-foreground"
               )}
             >
@@ -75,13 +82,15 @@ export function Sidebar() {
       </nav>
 
       <div className="p-4 border-t border-border space-y-2 bg-background">
-        <Link
-          href="/configuracoes"
-          className="flex items-center gap-3 px-3 py-3 rounded-md text-sm font-medium text-muted-foreground hover:bg-card hover:text-foreground transition-all"
-        >
-          <Settings className="w-5 h-5" />
-          Configurações
-        </Link>
+        {showConfiguracoes && (
+          <Link
+            href="/configuracoes"
+            className="flex items-center gap-3 px-3 py-3 rounded-md text-sm font-medium text-muted-foreground hover:bg-card hover:text-foreground transition-all"
+          >
+            <Settings className="w-5 h-5" />
+            Configurações
+          </Link>
+        )}
         <Link
           href="/"
           onClick={() => clearAuthSession()}
