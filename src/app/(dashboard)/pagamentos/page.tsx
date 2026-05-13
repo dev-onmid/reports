@@ -688,7 +688,7 @@ export default function PagamentosPage() {
     return linked.reduce((sum, b) => sum + (b.balance ?? 0), 0);
   }
   const [selectedDate, setSelectedDate] = useState(makeDate(6));
-  const [viewMode, setViewMode] = useState<ViewMode>('dia');
+  const [viewMode, setViewMode] = useState<ViewMode>('mes');
   const [statusFilter, setStatusFilter] = useState<PaymentStatus | 'Todos'>('Todos');
   const [channelFilter, setChannelFilter] = useState<PaymentChannel | 'Todos'>('Todos');
   const [newPayment, setNewPayment] = useState<Omit<InvestmentPayment, 'id'>>({
@@ -700,6 +700,52 @@ export default function PagamentosPage() {
     channel: 'Meta ADS',
     status: 'Pendente',
   });
+
+  type RecurMode = 'none' | 'weekdays' | 'interval';
+  const [recurMode, setRecurMode] = useState<RecurMode>('none');
+  const [recurWeekdays, setRecurWeekdays] = useState<number[]>([1, 2, 3, 4, 5]); // 0=Dom,1=Seg..6=Sáb
+  const [recurInterval, setRecurInterval] = useState(7);
+  const [recurUntil, setRecurUntil] = useState('');
+
+  function getMonthEnd(dateStr: string): string {
+    const d = parseDate(dateStr);
+    return toISODate(new Date(d.getFullYear(), d.getMonth() + 1, 0));
+  }
+
+  function generateRecurDates(
+    startDate: string,
+    mode: 'weekdays' | 'interval',
+    weekdays: number[],
+    intervalDays: number,
+    until: string,
+  ): string[] {
+    const dates: string[] = [];
+    const start = parseDate(startDate);
+    const end = parseDate(until);
+    if (end < start) return dates;
+    if (mode === 'weekdays') {
+      if (weekdays.length === 0) return dates;
+      const cur = new Date(start);
+      while (cur <= end) {
+        if (weekdays.includes(cur.getDay())) dates.push(toISODate(cur));
+        cur.setDate(cur.getDate() + 1);
+      }
+    } else {
+      const step = Math.max(1, intervalDays);
+      const cur = new Date(start);
+      while (cur <= end) {
+        dates.push(toISODate(cur));
+        cur.setDate(cur.getDate() + step);
+      }
+    }
+    return dates;
+  }
+
+  const recurUntilResolved = recurUntil || getMonthEnd(newPayment.date);
+  const previewDates = recurMode !== 'none'
+    ? generateRecurDates(newPayment.date, recurMode, recurWeekdays, recurInterval, recurUntilResolved)
+    : [];
+  const previewCount = previewDates.length;
 
   const filteredPayments = visiblePayments.filter((payment) => {
     const dateMatches = isDateInView(payment.date, selectedDate, viewMode);
@@ -751,9 +797,17 @@ export default function PagamentosPage() {
 
   function handleAddPayment() {
     if (!newPayment.clientId || !newPayment.destination.trim() || newPayment.amount <= 0) return;
+    const base = { ...newPayment, destination: newPayment.destination.trim() };
 
-    addPayment({ ...newPayment, destination: newPayment.destination.trim() });
-    setSelectedDate(newPayment.date);
+    if (recurMode === 'none') {
+      addPayment(base);
+      setSelectedDate(newPayment.date);
+    } else {
+      const dates = previewDates;
+      for (const date of dates) addPayment({ ...base, date });
+      if (dates.length > 0) setSelectedDate(dates[0]);
+    }
+
     setNewPayment((prev) => ({ ...prev, destination: `${prev.clientName} - Novo investimento`, amount: 500 }));
   }
 
@@ -795,69 +849,181 @@ export default function PagamentosPage() {
         </div>
       </div>
 
-      <div className="bg-card border border-border rounded-xl p-4">
-        <div className="flex items-end gap-3 flex-wrap">
-          <div className="space-y-1.5">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Cliente</p>
-            <select
-              value={newPayment.clientId}
-              onChange={(e) => handleClientChange(e.target.value)}
-              className="h-9 min-w-44 rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-            >
-              {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
-            </select>
-          </div>
-          <div className="space-y-1.5">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Data</p>
-            <Input
-              type="date"
-              value={newPayment.date}
-              onChange={(e) => setNewPayment((prev) => ({ ...prev, date: e.target.value }))}
-              className="w-40 bg-background"
-            />
-          </div>
-          <div className="space-y-1.5 flex-1 min-w-56">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Destino / Campanha</p>
-            <Input
-              value={newPayment.destination}
-              onChange={(e) => setNewPayment((prev) => ({ ...prev, destination: e.target.value }))}
-              className="bg-background"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Canal</p>
-            <select
-              value={newPayment.channel}
-              onChange={(e) => setNewPayment((prev) => ({ ...prev, channel: e.target.value as PaymentChannel }))}
-              className="h-9 w-32 rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-            >
-              {PAYMENT_CHANNELS.filter((channel) => channel !== 'Todos').map((channel) => <option key={channel}>{channel}</option>)}
-            </select>
-          </div>
-          <div className="space-y-1.5">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Valor</p>
-            <div className="flex h-9 w-36 items-center gap-2 rounded-lg border border-input bg-background px-3">
-              <span className="text-sm font-bold text-muted-foreground">R$</span>
-              <CurrencyInput
-                value={newPayment.amount}
-                onChange={(amount) => setNewPayment((prev) => ({ ...prev, amount }))}
-                className="min-w-0 flex-1 bg-transparent text-sm font-semibold focus:outline-none"
+      <div className="sticky top-0 z-20">
+        <div className="bg-card border border-border rounded-xl p-4 shadow-lg shadow-black/20">
+          {/* ── Row 1: payment fields ── */}
+          <div className="flex items-end gap-3 flex-wrap">
+            <div className="space-y-1.5">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Cliente</p>
+              <select
+                value={newPayment.clientId}
+                onChange={(e) => handleClientChange(e.target.value)}
+                className="h-9 min-w-44 rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Data início</p>
+              <Input
+                type="date"
+                value={newPayment.date}
+                onChange={(e) => setNewPayment((prev) => ({ ...prev, date: e.target.value }))}
+                className="w-40 bg-background"
               />
             </div>
+            <div className="space-y-1.5 flex-1 min-w-56">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Destino / Campanha</p>
+              <Input
+                value={newPayment.destination}
+                onChange={(e) => setNewPayment((prev) => ({ ...prev, destination: e.target.value }))}
+                className="bg-background"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Canal</p>
+              <select
+                value={newPayment.channel}
+                onChange={(e) => setNewPayment((prev) => ({ ...prev, channel: e.target.value as PaymentChannel }))}
+                className="h-9 w-32 rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                {PAYMENT_CHANNELS.filter((channel) => channel !== 'Todos').map((channel) => <option key={channel}>{channel}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Valor</p>
+              <div className="flex h-9 w-36 items-center gap-2 rounded-lg border border-input bg-background px-3">
+                <span className="text-sm font-bold text-muted-foreground">R$</span>
+                <CurrencyInput
+                  value={newPayment.amount}
+                  onChange={(amount) => setNewPayment((prev) => ({ ...prev, amount }))}
+                  className="min-w-0 flex-1 bg-transparent text-sm font-semibold focus:outline-none"
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Status</p>
+              <StatusDropdown
+                value={newPayment.status}
+                onChange={(status) => setNewPayment((prev) => ({ ...prev, status }))}
+              />
+            </div>
+            <Button
+              onClick={handleAddPayment}
+              disabled={recurMode !== 'none' && previewCount === 0}
+              className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            >
+              {recurMode !== 'none' && previewCount > 0
+                ? `Criar ${previewCount} Pix`
+                : 'Adicionar Pix'}
+            </Button>
           </div>
-          <div className="space-y-1.5">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Status</p>
-            <StatusDropdown
-              value={newPayment.status}
-              onChange={(status) => setNewPayment((prev) => ({ ...prev, status }))}
-            />
+
+          {/* ── Row 2: recurrence ── */}
+          <div className="mt-3 flex items-center gap-3 flex-wrap border-t border-border/40 pt-3">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground shrink-0">Recorrência</p>
+            <div className="flex rounded-lg border border-border bg-background p-0.5 shrink-0">
+              {([
+                { key: 'none', label: 'Nenhuma' },
+                { key: 'weekdays', label: 'Dias da semana' },
+                { key: 'interval', label: 'A cada N dias' },
+              ] as { key: RecurMode; label: string }[]).map((mode) => (
+                <button
+                  key={mode.key}
+                  type="button"
+                  onClick={() => setRecurMode(mode.key)}
+                  className={cn(
+                    'h-7 rounded-md px-3 text-xs font-bold transition-colors',
+                    recurMode === mode.key ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  {mode.label}
+                </button>
+              ))}
+            </div>
+
+            {recurMode === 'weekdays' && (
+              <>
+                <div className="flex gap-1">
+                  {([
+                    { label: 'Dom', value: 0 },
+                    { label: 'Seg', value: 1 },
+                    { label: 'Ter', value: 2 },
+                    { label: 'Qua', value: 3 },
+                    { label: 'Qui', value: 4 },
+                    { label: 'Sex', value: 5 },
+                    { label: 'Sáb', value: 6 },
+                  ]).map((day) => {
+                    const active = recurWeekdays.includes(day.value);
+                    return (
+                      <button
+                        key={day.value}
+                        type="button"
+                        onClick={() => setRecurWeekdays((prev) =>
+                          active ? prev.filter((d) => d !== day.value) : [...prev, day.value],
+                        )}
+                        className={cn(
+                          'h-7 w-9 rounded-md border text-[10px] font-bold transition-colors',
+                          active ? 'border-primary/40 bg-primary/20 text-primary' : 'border-border text-muted-foreground hover:bg-muted/50',
+                        )}
+                      >
+                        {day.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="flex items-center gap-2">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Até</p>
+                  <Input
+                    type="date"
+                    value={recurUntilResolved}
+                    onChange={(e) => setRecurUntil(e.target.value)}
+                    className="w-36 h-7 bg-background text-xs py-0"
+                  />
+                </div>
+                {previewCount > 0 && (
+                  <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
+                    {previewCount} pagamento{previewCount !== 1 ? 's' : ''}
+                  </span>
+                )}
+              </>
+            )}
+
+            {recurMode === 'interval' && (
+              <>
+                <div className="flex items-center gap-2">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">A cada</p>
+                  <input
+                    type="number"
+                    min={1}
+                    max={90}
+                    value={recurInterval}
+                    onChange={(e) => setRecurInterval(Math.max(1, parseInt(e.target.value) || 1))}
+                    className="h-7 w-14 rounded-lg border border-input bg-background px-2 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-primary text-center"
+                  />
+                  <p className="text-xs text-muted-foreground">dias</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Até</p>
+                  <Input
+                    type="date"
+                    value={recurUntilResolved}
+                    onChange={(e) => setRecurUntil(e.target.value)}
+                    className="w-36 h-7 bg-background text-xs py-0"
+                  />
+                </div>
+                {previewCount > 0 && (
+                  <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
+                    {previewCount} pagamento{previewCount !== 1 ? 's' : ''}
+                  </span>
+                )}
+              </>
+            )}
           </div>
-          <Button onClick={handleAddPayment} className="bg-primary text-primary-foreground hover:bg-primary/90">
-            Adicionar Pix
-          </Button>
-        </div>
-        <div className="mt-3">
-          <HolidayPaymentNotice date={newPayment.date} />
+
+          <div className="mt-3">
+            <HolidayPaymentNotice date={newPayment.date} />
+          </div>
         </div>
       </div>
 
