@@ -83,6 +83,10 @@ export async function POST(req: NextRequest) {
       ]
     );
     return Response.json(lead, { status: 201 });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[CRM POST error]', msg);
+    return Response.json({ error: msg }, { status: 500 });
   } finally {
     await pool.end();
   }

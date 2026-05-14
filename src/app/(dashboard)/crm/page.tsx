@@ -71,7 +71,7 @@ export default function CrmPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // ── NEW ROW (always at top, always editable, independent state) ──
   const [newDraft, setNewDraft] = useState<Draft>(freshDraft());
@@ -127,7 +127,7 @@ export default function CrmPage() {
     }
     newSavingRef.current = true;
     setSaving(true);
-    setSaveError(false);
+    setSaveError(null);
     try {
       const res = await fetch('/api/crm', {
         method: 'POST',
@@ -139,12 +139,11 @@ export default function CrmPage() {
         setLeads(prev => [saved, ...prev]);
         setNewDraft(freshDraft());
       } else {
-        setSaveError(true);
-        console.error('CRM POST failed', res.status, await res.text());
+        const body = await res.json().catch(() => ({})) as { error?: string };
+        setSaveError(body.error ?? `Erro ${res.status}`);
       }
     } catch (err) {
-      setSaveError(true);
-      console.error('CRM POST error:', err);
+      setSaveError(err instanceof Error ? err.message : 'Erro de rede');
     } finally {
       newSavingRef.current = false;
       setSaving(false);
@@ -256,7 +255,7 @@ export default function CrmPage() {
           <p className="text-sm text-muted-foreground">Gestão de leads e funil de vendas por cliente.</p>
         </div>
         {saving && <span className="text-xs font-medium text-amber-600 animate-pulse">Salvando…</span>}
-        {saveError && <span className="text-xs font-medium text-red-600">Erro ao salvar — verifique a conexão</span>}
+        {saveError && <span className="text-xs font-medium text-red-600">Erro: {saveError}</span>}
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
