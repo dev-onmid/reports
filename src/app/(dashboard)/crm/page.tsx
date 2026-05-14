@@ -1,7 +1,11 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Plus, Trash2, Search } from 'lucide-react';
+import {
+  Plus, Search, MoreVertical, Download, Settings2,
+  Users, CalendarDays, CheckCircle2, DollarSign,
+  ChevronLeft, ChevronRight, Filter, TableProperties, Trash2,
+} from 'lucide-react';
 import { useClients } from '@/lib/client-store';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 
@@ -16,32 +20,42 @@ type CrmLead = {
   pagamento: string | null; analise_credito: boolean;
   data_nasc: string | null; bairro: string | null;
   motivacoes: string | null; dores: string | null;
+  created_at: string | null;
 };
 
-type Draft = Partial<Omit<CrmLead, 'id' | 'client_id'>>;
+type Draft = Partial<Omit<CrmLead, 'id' | 'client_id' | 'created_at'>>;
 
 const STATUS_OPTIONS = ['Em Atendimento', 'Agendado', 'Reagendado', 'Não Retorna', 'Distante', 'Sem Interesse', 'Desqualificado'];
 const CANAL_OPTIONS = ['Facebook', 'Instagram', 'Google', 'WHATS PRINCIPAL', 'FACHADA', 'Outro'];
 const PAGAMENTO_OPTIONS = ['Boleto', 'Cartão', 'PIX', 'Dinheiro', 'Financiamento'];
 
-const STATUS_COLOR: Record<string, string> = {
-  'Em Atendimento': 'text-blue-600',
-  'Agendado':       'text-amber-600',
-  'Reagendado':     'text-orange-600',
-  'Não Retorna':    'text-gray-500',
-  'Distante':       'text-gray-500',
-  'Sem Interesse':  'text-red-600',
-  'Desqualificado': 'text-red-600',
+const STATUS_BADGE: Record<string, string> = {
+  'Em Atendimento': 'bg-blue-500/15 text-blue-400 border border-blue-500/25',
+  'Agendado':       'bg-amber-500/15 text-amber-400 border border-amber-500/25',
+  'Reagendado':     'bg-orange-500/15 text-orange-400 border border-orange-500/25',
+  'Não Retorna':    'bg-gray-500/15 text-gray-400 border border-gray-500/25',
+  'Distante':       'bg-gray-500/15 text-gray-400 border border-gray-500/25',
+  'Sem Interesse':  'bg-red-500/15 text-red-400 border border-red-500/25',
+  'Desqualificado': 'bg-red-500/15 text-red-400 border border-red-500/25',
 };
 
-const STATUS_BADGE: Record<string, string> = {
-  'Em Atendimento': 'bg-blue-50 text-blue-700 border border-blue-200',
-  'Agendado':       'bg-amber-50 text-amber-700 border border-amber-200',
-  'Reagendado':     'bg-orange-50 text-orange-700 border border-orange-200',
-  'Não Retorna':    'bg-gray-100 text-gray-600 border border-gray-200',
-  'Distante':       'bg-gray-100 text-gray-600 border border-gray-200',
-  'Sem Interesse':  'bg-red-50 text-red-700 border border-red-200',
-  'Desqualificado': 'bg-red-50 text-red-700 border border-red-200',
+const STATUS_COLOR: Record<string, string> = {
+  'Em Atendimento': 'text-blue-400',
+  'Agendado':       'text-amber-400',
+  'Reagendado':     'text-orange-400',
+  'Não Retorna':    'text-gray-400',
+  'Distante':       'text-gray-400',
+  'Sem Interesse':  'text-red-400',
+  'Desqualificado': 'text-red-400',
+};
+
+const CANAL_BADGE: Record<string, { bg: string; short: string }> = {
+  'Facebook':        { bg: 'bg-[#1877F2]',  short: 'fb' },
+  'Instagram':       { bg: 'bg-pink-600',    short: 'ig' },
+  'Google':          { bg: 'bg-red-500',     short: 'G'  },
+  'WHATS PRINCIPAL': { bg: 'bg-green-600',   short: 'wp' },
+  'FACHADA':         { bg: 'bg-slate-500',   short: 'fc' },
+  'Outro':           { bg: 'bg-purple-600',  short: '?'  },
 };
 
 function freshDraft(): Draft {
@@ -58,18 +72,23 @@ function fmtD(v: string | null) {
   const s = toD(v); if (!s) return '';
   const [y, m, d] = s.split('-'); return `${d}/${m}/${y}`;
 }
+function fmtTime(v: string | null) {
+  if (!v) return '';
+  try { return new Date(v).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }); }
+  catch { return ''; }
+}
 function fmtN(v: number | null) { return v ? formatCurrencyBRL(v) : ''; }
 
-const cell = 'px-2 py-0 h-9 text-xs focus:outline-none focus:bg-blue-50 bg-transparent border-0 w-full text-gray-800 placeholder:text-gray-300';
+const cell    = 'px-2 py-0 h-9 text-xs focus:outline-none focus:bg-primary/10 bg-transparent border-0 w-full text-foreground placeholder:text-muted-foreground/30';
 const cellSel = cn(cell, 'cursor-pointer');
-const cellNew = 'px-2 py-0 h-9 text-xs focus:outline-none focus:bg-green-100 bg-transparent border-0 w-full text-gray-800 placeholder:text-gray-400';
+const cellNew = 'px-2 py-0 h-9 text-xs focus:outline-none focus:bg-primary/10 bg-transparent border-0 w-full text-foreground placeholder:text-muted-foreground/50';
 
 const COLS: [string, string][] = [
-  ['Data','w-28'],['Nome','w-40'],['Número','w-32'],['Canal','w-28'],
+  ['Data','w-28'],['Nome','w-40'],['Número','w-32'],['Canal','w-20'],
   ['Status','w-36'],
   ['1D','w-8'],['2D','w-8'],['3D','w-8'],['4D','w-8'],
   ['Data Ag.','w-28'],['Fechou','w-10'],['Valor R$','w-28'],
-  ['Pagamento','w-28'],['Orçamento','w-28'],['Observação','w-56'],['Bairro','w-28'],['',''],
+  ['Pagamento','w-28'],['Orçamento','w-28'],['Observação','w-52'],['Bairro','w-24'],['','w-8'],
 ];
 
 export default function CrmPage() {
@@ -83,8 +102,12 @@ export default function CrmPage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [menuId, setMenuId] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
-  // ── NEW ROW (always at top, always editable, independent state) ──
+  // ── NEW ROW ──
   const [newDraft, setNewDraft] = useState<Draft>(freshDraft());
   const newDraftRef = useRef<Draft>(newDraft);
   newDraftRef.current = newDraft;
@@ -100,6 +123,16 @@ export default function CrmPage() {
   const editPendingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuId(null);
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  useEffect(() => { setPage(1); }, [statusFilter, search, clientId]);
+
+  useEffect(() => {
     if (!clientId) { setLeads([]); return; }
     setLoading(true);
     fetch(`/api/crm?clientId=${clientId}`)
@@ -109,16 +142,18 @@ export default function CrmPage() {
       .finally(() => setLoading(false));
   }, [clientId]);
 
-  const filtered = useMemo(() => {
-    return leads.filter(l => {
-      if (statusFilter && l.status !== statusFilter) return false;
-      if (search) {
-        const q = search.toLowerCase();
-        return l.nome?.toLowerCase().includes(q) || l.numero?.includes(q) || false;
-      }
-      return true;
-    });
-  }, [leads, search, statusFilter]);
+  const filtered = useMemo(() => leads.filter(l => {
+    if (statusFilter && l.status !== statusFilter) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      return (l.nome?.toLowerCase().includes(q) || l.numero?.includes(q) ||
+              l.canal?.toLowerCase().includes(q) || l.bairro?.toLowerCase().includes(q) || false);
+    }
+    return true;
+  }), [leads, search, statusFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
 
   const stats = useMemo(() => ({
     total: leads.length,
@@ -127,22 +162,16 @@ export default function CrmPage() {
     faturamento: leads.filter(l => l.fechou).reduce((s, l) => s + (l.valor_rs ?? 0), 0),
   }), [leads]);
 
-  // ── Save new lead ──
   async function saveNew() {
     if (newSavingRef.current) return;
     const data = newDraftRef.current;
     const hasData = data.nome || data.numero || data.observacao || data.canal || data.bairro || data.valor_rs;
-    if (!hasData) {
-      focusNew();
-      return;
-    }
+    if (!hasData) { focusNew(); return; }
     newSavingRef.current = true;
-    setSaving(true);
-    setSaveError(null);
+    setSaving(true); setSaveError(null);
     try {
       const res = await fetch('/api/crm', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ clientId, ...data }),
       });
       if (res.ok) {
@@ -156,52 +185,36 @@ export default function CrmPage() {
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Erro de rede');
     } finally {
-      newSavingRef.current = false;
-      setSaving(false);
-      focusNew();
+      newSavingRef.current = false; setSaving(false); focusNew();
     }
   }
 
   function handleNewBlur(e: React.FocusEvent<HTMLTableRowElement>) {
     if (newPendingRef.current) clearTimeout(newPendingRef.current);
     newPendingRef.current = setTimeout(() => {
-      if (e.currentTarget && !e.currentTarget.contains(document.activeElement)) {
-        void saveNew();
-      }
+      if (e.currentTarget && !e.currentTarget.contains(document.activeElement)) void saveNew();
     }, 150);
   }
-
-  function handleNewFocus() {
-    if (newPendingRef.current) clearTimeout(newPendingRef.current);
-  }
+  function handleNewFocus() { if (newPendingRef.current) clearTimeout(newPendingRef.current); }
 
   function focusNew() {
-    setTimeout(() => {
-      const first = newRowRef.current?.querySelector<HTMLElement>('input[type="date"]');
-      first?.focus();
-    }, 30);
+    setTimeout(() => newRowRef.current?.querySelector<HTMLElement>('input[type="date"]')?.focus(), 30);
   }
 
-  // ── Save existing lead ──
   async function saveExisting(id: string) {
     const data = editDraftRef.current;
     setSaving(true);
     try {
       const res = await fetch(`/api/crm/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
       });
       if (res.ok) {
         const saved = await res.json() as CrmLead;
         setLeads(prev => prev.map(l => l.id === id ? saved : l));
         setEditId(null);
-      } else {
-        console.error('CRM PUT failed', res.status);
       }
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   }
 
   function startEdit(lead: CrmLead) {
@@ -214,18 +227,13 @@ export default function CrmPage() {
   function handleExistingBlur(e: React.FocusEvent<HTMLTableRowElement>, id: string) {
     if (editPendingRef.current) clearTimeout(editPendingRef.current);
     editPendingRef.current = setTimeout(() => {
-      if (e.currentTarget && !e.currentTarget.contains(document.activeElement)) {
-        void saveExisting(id);
-      }
+      if (e.currentTarget && !e.currentTarget.contains(document.activeElement)) void saveExisting(id);
     }, 150);
   }
+  function handleExistingFocus() { if (editPendingRef.current) clearTimeout(editPendingRef.current); }
 
-  function handleExistingFocus() {
-    if (editPendingRef.current) clearTimeout(editPendingRef.current);
-  }
-
-  async function deleteRow(id: string, e: React.MouseEvent) {
-    e.stopPropagation();
+  async function deleteRow(id: string) {
+    setMenuId(null);
     const res = await fetch(`/api/crm/${id}`, { method: 'DELETE' });
     if (res.ok) {
       setLeads(prev => prev.filter(l => l.id !== id));
@@ -233,63 +241,62 @@ export default function CrmPage() {
     }
   }
 
-  function setN<K extends keyof Draft>(k: K, v: Draft[K]) {
-    setNewDraft(prev => ({ ...prev, [k]: v }));
-  }
-
-  function setE<K extends keyof Draft>(k: K, v: Draft[K]) {
-    setEditDraft(prev => ({ ...prev, [k]: v }));
-  }
-
-  // Handler: Tab or Enter on last field of new row
   function onNewBairroKey(e: React.KeyboardEvent) {
-    if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey)) {
-      e.preventDefault();
-      void saveNew();
-    }
+    if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey)) { e.preventDefault(); void saveNew(); }
+  }
+  function onNewRowKey(e: React.KeyboardEvent) {
+    if (e.key === 'Enter' && (e.target as HTMLElement).tagName === 'INPUT') { e.preventDefault(); void saveNew(); }
   }
 
-  // Handler: Enter on any input of new row
-  function onNewRowKey(e: React.KeyboardEvent) {
-    if (e.key === 'Enter' && (e.target as HTMLElement).tagName === 'INPUT') {
-      e.preventDefault();
-      void saveNew();
-    }
-  }
+  function setN<K extends keyof Draft>(k: K, v: Draft[K]) { setNewDraft(prev => ({ ...prev, [k]: v })); }
+  function setE<K extends keyof Draft>(k: K, v: Draft[K]) { setEditDraft(prev => ({ ...prev, [k]: v })); }
+
+  const clientName = activeClients.find(c => c.id === clientId)?.name ?? '';
 
   return (
-    <div className="flex flex-col gap-4 px-4 py-6 md:px-8 h-full">
+    <div className="flex flex-col gap-5 h-full">
+      {/* Header */}
       <div className="flex items-center gap-3">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-black uppercase tracking-tight">CRM</h1>
-          <p className="text-sm text-muted-foreground">Gestão de leads e funil de vendas por cliente.</p>
+        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 border border-primary/20">
+          <TableProperties className="h-5 w-5 text-primary" />
         </div>
-        {saving && <span className="text-xs font-medium text-amber-600 animate-pulse">Salvando…</span>}
-        {saveError && <span className="text-xs font-medium text-red-600">Erro: {saveError}</span>}
+        <div>
+          <h1 className="text-xl font-black uppercase tracking-tight">CRM</h1>
+          <p className="text-xs text-muted-foreground">Gestão de leads e funil de vendas por cliente.</p>
+        </div>
+        {saving && <span className="ml-2 text-xs font-medium text-amber-400 animate-pulse">Salvando…</span>}
+        {saveError && <span className="ml-2 text-xs font-medium text-red-400">Erro: {saveError}</span>}
       </div>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <select value={clientId} onChange={e => setClientId(e.target.value)}
-          className="rounded-lg border border-border bg-card px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary min-w-[180px]"
-        >
-          <option value="">Selecionar cliente...</option>
-          {activeClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
+      {/* Filters bar */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative">
+          <CalendarDays className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+          <select value={clientId} onChange={e => setClientId(e.target.value)}
+            className="pl-8 pr-3 py-2 rounded-lg border border-border bg-card text-sm focus:outline-none focus:ring-1 focus:ring-primary min-w-[180px]"
+          >
+            <option value="">Selecionar cliente...</option>
+            {activeClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </div>
         {clientId && (
           <>
-            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
-              className="rounded-lg border border-border bg-card px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-            >
-              <option value="">Todos status</option>
-              {STATUS_OPTIONS.map(s => <option key={s}>{s}</option>)}
-            </select>
+            <div className="relative">
+              <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+              <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
+                className="pl-8 pr-3 py-2 rounded-lg border border-border bg-card text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                <option value="">Todos status</option>
+                {STATUS_OPTIONS.map(s => <option key={s}>{s}</option>)}
+              </select>
+            </div>
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar..."
-                className="pl-8 pr-3 py-2 rounded-lg border border-border bg-card text-sm focus:outline-none focus:ring-1 focus:ring-primary w-44" />
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar leads..."
+                className="pl-8 pr-3 py-2 rounded-lg border border-border bg-card text-sm focus:outline-none focus:ring-1 focus:ring-primary w-48" />
             </div>
             <button onClick={() => void saveNew()}
-              className="ml-auto flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
+              className="ml-auto flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
             >
               <Plus className="h-4 w-4" /> Novo Lead
             </button>
@@ -297,17 +304,24 @@ export default function CrmPage() {
         )}
       </div>
 
+      {/* Stats */}
       {clientId && !loading && leads.length > 0 && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 shrink-0">
           {[
-            { label: 'Total', value: stats.total, fmt: 'n' },
-            { label: 'Agendados', value: stats.agendados, fmt: 'n' },
-            { label: 'Fechamentos', value: stats.fechamentos, fmt: 'n' },
-            { label: 'Faturamento', value: stats.faturamento, fmt: 'c' },
-          ].map(({ label, value, fmt }) => (
-            <div key={label} className="rounded-xl border border-border bg-card px-4 py-3">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
-              <p className="mt-0.5 text-lg font-bold">{fmt === 'c' ? formatCurrencyBRL(value) : value.toLocaleString('pt-BR')}</p>
+            { label: 'TOTAL', sub: 'leads cadastrados', value: stats.total, fmt: 'n', icon: Users, color: 'text-purple-400', bg: 'bg-purple-500/10', border: 'border-purple-500/20' },
+            { label: 'AGENDADOS', sub: stats.agendados === 1 ? 'lead agendado' : 'leads agendados', value: stats.agendados, fmt: 'n', icon: CalendarDays, color: 'text-green-400', bg: 'bg-green-500/10', border: 'border-green-500/20' },
+            { label: 'FECHAMENTOS', sub: 'negócios fechados', value: stats.fechamentos, fmt: 'n', icon: CheckCircle2, color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/20' },
+            { label: 'FATURAMENTO', sub: 'valor total faturado', value: stats.faturamento, fmt: 'c', icon: DollarSign, color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/20' },
+          ].map(({ label, sub, value, fmt, icon: Icon, color, bg, border }) => (
+            <div key={label} className={cn('rounded-xl border bg-card px-4 py-3 flex items-center gap-3', border)}>
+              <div className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-lg', bg)}>
+                <Icon className={cn('h-5 w-5', color)} />
+              </div>
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{label}</p>
+                <p className="text-lg font-black leading-tight">{fmt === 'c' ? formatCurrencyBRL(value) : value.toLocaleString('pt-BR')}</p>
+                <p className="text-[10px] text-muted-foreground">{sub}</p>
+              </div>
             </div>
           ))}
         </div>
@@ -323,175 +337,267 @@ export default function CrmPage() {
       )}
 
       {clientId && !loading && (
-        <div className="overflow-auto rounded-xl border border-gray-200 flex-1 min-h-0 bg-white">
-          <table className="w-full border-collapse text-xs" style={{ minWidth: 1300 }}>
-            <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
-              <tr>
-                {COLS.map(([h, w], i) => (
-                  <th key={i} className={cn('border-b border-gray-200 px-1.5 py-2 text-left font-semibold uppercase tracking-wider text-gray-500 text-[10px]', w)}>
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {/* ── NEW ROW — always at top, always editable ── */}
-              <tr
-                ref={newRowRef}
-                onKeyDown={onNewRowKey}
-                onBlur={handleNewBlur}
-                onFocus={handleNewFocus}
-                className="border-b border-gray-200 bg-green-50 ring-1 ring-inset ring-green-300"
-              >
-                <Td><input type="date" value={toD(newDraft.data)} onChange={e => setN('data', e.target.value || null)} className={cellNew} /></Td>
-                <Td><input type="text" value={newDraft.nome ?? ''} onChange={e => setN('nome', e.target.value || null)} placeholder="Nome" className={cellNew} /></Td>
-                <Td><input type="text" value={newDraft.numero ?? ''} onChange={e => setN('numero', e.target.value || null)} placeholder="Número" className={cellNew} /></Td>
-                <Td>
-                  <select value={newDraft.canal ?? ''} onChange={e => setN('canal', e.target.value || null)} className={cn(cellNew, 'cursor-pointer')}>
-                    <option value=""></option>
-                    {CANAL_OPTIONS.map(o => <option key={o}>{o}</option>)}
-                  </select>
-                </Td>
-                <Td>
-                  <select value={newDraft.status ?? ''} onChange={e => setN('status', e.target.value || null)} className={cn(cellNew, 'cursor-pointer', STATUS_COLOR[newDraft.status ?? ''] ?? '')}>
-                    {STATUS_OPTIONS.map(o => <option key={o}>{o}</option>)}
-                  </select>
-                </Td>
-                {(['dia1','dia2','dia3','dia4'] as const).map(k => (
-                  <Td key={k} center>
-                    <input type="checkbox" checked={!!newDraft[k]} onChange={e => setN(k, e.target.checked)} className="h-4 w-4 accent-green-600 cursor-pointer" />
-                  </Td>
-                ))}
-                <Td><input type="date" value={toD(newDraft.data_agendada)} onChange={e => setN('data_agendada', e.target.value || null)} className={cellNew} /></Td>
-                <Td center><input type="checkbox" checked={!!newDraft.fechou} onChange={e => setN('fechou', e.target.checked)} className="h-4 w-4 accent-green-600 cursor-pointer" /></Td>
-                <Td><input type="number" step="0.01" value={newDraft.valor_rs ?? ''} onChange={e => setN('valor_rs', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cn(cellNew, 'text-green-700 font-semibold')} /></Td>
-                <Td>
-                  <select value={newDraft.pagamento ?? ''} onChange={e => setN('pagamento', e.target.value || null)} className={cn(cellNew, 'cursor-pointer')}>
-                    <option value=""></option>
-                    {PAGAMENTO_OPTIONS.map(o => <option key={o}>{o}</option>)}
-                  </select>
-                </Td>
-                <Td><input type="number" step="0.01" value={newDraft.orcamento ?? ''} onChange={e => setN('orcamento', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cellNew} /></Td>
-                <Td><input type="text" value={newDraft.observacao ?? ''} onChange={e => setN('observacao', e.target.value || null)} placeholder="Observação" className={cellNew} /></Td>
-                <Td>
-                  <input type="text" value={newDraft.bairro ?? ''} onChange={e => setN('bairro', e.target.value || null)} placeholder="Bairro" className={cellNew}
-                    onKeyDown={onNewBairroKey} />
-                </Td>
-                <Td center />
-              </tr>
+        <div className="flex flex-col flex-1 min-h-0 rounded-xl border border-border bg-card overflow-hidden">
+          {/* Table header */}
+          <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
+            <div className="flex items-center gap-2">
+              <Filter className="h-4 w-4 text-primary" />
+              <span className="text-sm font-semibold">Leads</span>
+              {clientName && <span className="text-xs text-muted-foreground">— {clientName}</span>}
+            </div>
+            <div className="flex items-center gap-2">
+              <button className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-card hover:text-foreground transition-colors">
+                <Download className="h-3.5 w-3.5" /> Exportar
+              </button>
+              <button className="flex h-7 w-7 items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+                <Settings2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
 
-              {/* ── SAVED LEADS ── */}
-              {filtered.map((lead, idx) => {
-                const isEditing = editId === lead.id;
-                const d = isEditing ? editDraft : lead;
-                return (
-                  <tr
-                    key={lead.id}
-                    tabIndex={-1}
-                    onClick={() => !isEditing && startEdit(lead)}
-                    onBlur={isEditing ? e => handleExistingBlur(e, lead.id) : undefined}
-                    onFocus={isEditing ? handleExistingFocus : undefined}
-                    className={cn(
-                      'border-b border-gray-100 transition-colors group',
-                      isEditing
-                        ? 'bg-blue-50 ring-1 ring-inset ring-blue-300'
-                        : idx % 2 === 0 ? 'bg-white hover:bg-blue-50/40 cursor-pointer' : 'bg-gray-50/60 hover:bg-blue-50/40 cursor-pointer'
-                    )}
-                  >
-                    <Td>
-                      {isEditing
-                        ? <input type="date" value={toD(d.data)} onChange={e => setE('data', e.target.value || null)} className={cell} />
-                        : <span className="px-2 text-gray-600 text-[11px]">{fmtD(lead.data)}</span>}
+          {/* Table */}
+          <div className="overflow-auto flex-1 min-h-0">
+            <table className="w-full border-collapse text-xs" style={{ minWidth: 1280 }}>
+              <thead className="sticky top-0 z-10 bg-card border-b border-border">
+                <tr>
+                  {COLS.map(([h, w], i) => (
+                    <th key={i} className={cn('px-2 py-2.5 text-left font-semibold uppercase tracking-wider text-muted-foreground text-[10px]', w)}>
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {/* NEW ROW */}
+                <tr
+                  ref={newRowRef}
+                  onKeyDown={onNewRowKey}
+                  onBlur={handleNewBlur}
+                  onFocus={handleNewFocus}
+                  className="border-b border-border/60 bg-primary/5 ring-1 ring-inset ring-primary/20"
+                >
+                  <Td><input type="date" value={toD(newDraft.data)} onChange={e => setN('data', e.target.value || null)} className={cellNew} /></Td>
+                  <Td><input type="text" value={newDraft.nome ?? ''} onChange={e => setN('nome', e.target.value || null)} placeholder="Nome" className={cn(cellNew, 'text-primary placeholder:text-primary/40')} /></Td>
+                  <Td><input type="text" value={newDraft.numero ?? ''} onChange={e => setN('numero', e.target.value || null)} placeholder="Número" className={cellNew} /></Td>
+                  <Td>
+                    <select value={newDraft.canal ?? ''} onChange={e => setN('canal', e.target.value || null)} className={cn(cellNew, 'cursor-pointer')}>
+                      <option value=""></option>
+                      {CANAL_OPTIONS.map(o => <option key={o}>{o}</option>)}
+                    </select>
+                  </Td>
+                  <Td>
+                    <select value={newDraft.status ?? ''} onChange={e => setN('status', e.target.value || null)} className={cn(cellNew, 'cursor-pointer', STATUS_COLOR[newDraft.status ?? ''] ?? '')}>
+                      {STATUS_OPTIONS.map(o => <option key={o}>{o}</option>)}
+                    </select>
+                  </Td>
+                  {(['dia1','dia2','dia3','dia4'] as const).map(k => (
+                    <Td key={k} center>
+                      <input type="checkbox" checked={!!newDraft[k]} onChange={e => setN(k, e.target.checked)} className="h-3.5 w-3.5 accent-primary cursor-pointer" />
                     </Td>
-                    <Td>
-                      {isEditing
-                        ? <input type="text" value={d.nome ?? ''} onChange={e => setE('nome', e.target.value || null)} placeholder="Nome" className={cell} />
-                        : <span className="px-2 font-semibold text-gray-900 truncate block max-w-[160px] text-xs">{lead.nome ?? ''}</span>}
-                    </Td>
-                    <Td>
-                      {isEditing
-                        ? <input type="text" value={d.numero ?? ''} onChange={e => setE('numero', e.target.value || null)} placeholder="Número" className={cell} />
-                        : <span className="px-2 text-gray-700 text-[11px] font-mono">{lead.numero ?? ''}</span>}
-                    </Td>
-                    <Td>
-                      {isEditing
-                        ? <select value={d.canal ?? ''} onChange={e => setE('canal', e.target.value || null)} className={cellSel}>
-                            <option value=""></option>
-                            {CANAL_OPTIONS.map(o => <option key={o}>{o}</option>)}
-                          </select>
-                        : <span className="px-2 text-gray-600 text-[11px]">{lead.canal ?? ''}</span>}
-                    </Td>
-                    <Td>
-                      {isEditing
-                        ? <select value={d.status ?? ''} onChange={e => setE('status', e.target.value || null)} className={cn(cellSel, STATUS_COLOR[d.status ?? ''] ?? '')}>
-                            {STATUS_OPTIONS.map(o => <option key={o}>{o}</option>)}
-                          </select>
-                        : lead.status
-                          ? <span className={cn('mx-1.5 inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap', STATUS_BADGE[lead.status] ?? 'bg-gray-100 text-gray-600')}>{lead.status}</span>
-                          : null}
-                    </Td>
-                    {(['dia1','dia2','dia3','dia4'] as const).map(k => (
-                      <Td key={k} center>
+                  ))}
+                  <Td><input type="date" value={toD(newDraft.data_agendada)} onChange={e => setN('data_agendada', e.target.value || null)} className={cellNew} /></Td>
+                  <Td center><input type="checkbox" checked={!!newDraft.fechou} onChange={e => setN('fechou', e.target.checked)} className="h-3.5 w-3.5 accent-primary cursor-pointer" /></Td>
+                  <Td><input type="number" step="0.01" value={newDraft.valor_rs ?? ''} onChange={e => setN('valor_rs', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cn(cellNew, 'text-primary font-semibold')} /></Td>
+                  <Td>
+                    <select value={newDraft.pagamento ?? ''} onChange={e => setN('pagamento', e.target.value || null)} className={cn(cellNew, 'cursor-pointer')}>
+                      <option value=""></option>
+                      {PAGAMENTO_OPTIONS.map(o => <option key={o}>{o}</option>)}
+                    </select>
+                  </Td>
+                  <Td><input type="number" step="0.01" value={newDraft.orcamento ?? ''} onChange={e => setN('orcamento', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cellNew} /></Td>
+                  <Td><input type="text" value={newDraft.observacao ?? ''} onChange={e => setN('observacao', e.target.value || null)} placeholder="Observação" className={cellNew} /></Td>
+                  <Td>
+                    <input type="text" value={newDraft.bairro ?? ''} onChange={e => setN('bairro', e.target.value || null)} placeholder="Bairro" className={cellNew}
+                      onKeyDown={onNewBairroKey} />
+                  </Td>
+                  <Td center />
+                </tr>
+
+                {/* SAVED LEADS */}
+                {paginated.map((lead, idx) => {
+                  const isEditing = editId === lead.id;
+                  const d = isEditing ? editDraft : lead;
+                  const canalCfg = lead.canal ? CANAL_BADGE[lead.canal] : null;
+                  return (
+                    <tr
+                      key={lead.id}
+                      tabIndex={-1}
+                      onClick={() => !isEditing && startEdit(lead)}
+                      onBlur={isEditing ? e => handleExistingBlur(e, lead.id) : undefined}
+                      onFocus={isEditing ? handleExistingFocus : undefined}
+                      className={cn(
+                        'border-b border-border/40 transition-colors group',
+                        isEditing
+                          ? 'bg-blue-500/10 ring-1 ring-inset ring-blue-500/30'
+                          : idx % 2 === 0
+                            ? 'hover:bg-muted/30 cursor-pointer'
+                            : 'bg-muted/10 hover:bg-muted/30 cursor-pointer'
+                      )}
+                    >
+                      {/* Data + hora */}
+                      <Td>
                         {isEditing
-                          ? <input type="checkbox" checked={!!d[k]} onChange={e => setE(k, e.target.checked)} className="h-4 w-4 accent-blue-600 cursor-pointer" />
+                          ? <input type="date" value={toD(d.data)} onChange={e => setE('data', e.target.value || null)} className={cell} />
+                          : <div className="px-2">
+                              <div className="text-[11px] text-foreground">{fmtD(lead.data)}</div>
+                              <div className="text-[10px] text-muted-foreground">{fmtTime(lead.created_at)}</div>
+                            </div>}
+                      </Td>
+                      {/* Nome */}
+                      <Td>
+                        {isEditing
+                          ? <input type="text" value={d.nome ?? ''} onChange={e => setE('nome', e.target.value || null)} placeholder="Nome" className={cell} />
+                          : <span className="px-2 font-semibold text-primary text-xs truncate block max-w-[160px]">{lead.nome ?? '–'}</span>}
+                      </Td>
+                      {/* Número */}
+                      <Td>
+                        {isEditing
+                          ? <input type="text" value={d.numero ?? ''} onChange={e => setE('numero', e.target.value || null)} placeholder="Número" className={cell} />
+                          : <span className="px-2 text-muted-foreground text-[11px] font-mono">{lead.numero ?? '–'}</span>}
+                      </Td>
+                      {/* Canal */}
+                      <Td>
+                        {isEditing
+                          ? <select value={d.canal ?? ''} onChange={e => setE('canal', e.target.value || null)} className={cellSel}>
+                              <option value=""></option>
+                              {CANAL_OPTIONS.map(o => <option key={o}>{o}</option>)}
+                            </select>
+                          : canalCfg
+                            ? <div className="px-2">
+                                <span className={cn('inline-flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-bold text-white', canalCfg.bg)}>
+                                  {canalCfg.short}
+                                </span>
+                              </div>
+                            : <span className="px-2 text-muted-foreground text-[11px]">–</span>}
+                      </Td>
+                      {/* Status */}
+                      <Td>
+                        {isEditing
+                          ? <select value={d.status ?? ''} onChange={e => setE('status', e.target.value || null)} className={cn(cellSel, STATUS_COLOR[d.status ?? ''] ?? '')}>
+                              {STATUS_OPTIONS.map(o => <option key={o}>{o}</option>)}
+                            </select>
+                          : lead.status
+                            ? <span className={cn('mx-2 inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap', STATUS_BADGE[lead.status] ?? 'bg-muted text-muted-foreground')}>
+                                {lead.status}
+                              </span>
+                            : null}
+                      </Td>
+                      {/* 1D–4D */}
+                      {(['dia1','dia2','dia3','dia4'] as const).map(k => (
+                        <Td key={k} center>
+                          {isEditing
+                            ? <input type="checkbox" checked={!!d[k]} onChange={e => setE(k, e.target.checked)} className="h-3.5 w-3.5 accent-blue-500 cursor-pointer" />
+                            : <span onClick={e => { e.stopPropagation(); startEdit(lead); }}
+                                className={cn('inline-flex h-4 w-4 items-center justify-center rounded text-[10px] cursor-pointer select-none', lead[k] ? 'bg-primary/20 text-primary font-bold' : 'text-muted-foreground/30')}>
+                                {lead[k] ? '✓' : '–'}
+                              </span>}
+                        </Td>
+                      ))}
+                      {/* Data ag. */}
+                      <Td>
+                        {isEditing
+                          ? <input type="date" value={toD(d.data_agendada)} onChange={e => setE('data_agendada', e.target.value || null)} className={cell} />
+                          : <span className="px-2 text-muted-foreground text-[11px]">{fmtD(lead.data_agendada) || '–'}</span>}
+                      </Td>
+                      {/* Fechou */}
+                      <Td center>
+                        {isEditing
+                          ? <input type="checkbox" checked={!!d.fechou} onChange={e => setE('fechou', e.target.checked)} className="h-3.5 w-3.5 accent-blue-500 cursor-pointer" />
                           : <span onClick={e => { e.stopPropagation(); startEdit(lead); }}
-                              className={cn('inline-flex h-4 w-4 items-center justify-center rounded text-[10px] cursor-pointer', lead[k] ? 'bg-green-100 text-green-700 font-bold' : 'text-gray-300')}>
-                              {lead[k] ? '✓' : '–'}
+                              className={cn('inline-flex h-5 w-5 items-center justify-center rounded-full text-[11px] cursor-pointer font-bold select-none', lead.fechou ? 'bg-green-500 text-white' : 'bg-muted/50 text-muted-foreground/40')}>
+                              {lead.fechou ? '✓' : '–'}
                             </span>}
                       </Td>
-                    ))}
-                    <Td>
-                      {isEditing
-                        ? <input type="date" value={toD(d.data_agendada)} onChange={e => setE('data_agendada', e.target.value || null)} className={cell} />
-                        : <span className="px-2 text-gray-600 text-[11px]">{fmtD(lead.data_agendada)}</span>}
-                    </Td>
-                    <Td center>
-                      {isEditing
-                        ? <input type="checkbox" checked={!!d.fechou} onChange={e => setE('fechou', e.target.checked)} className="h-4 w-4 accent-blue-600 cursor-pointer" />
-                        : <span onClick={e => { e.stopPropagation(); startEdit(lead); }}
-                            className={cn('inline-flex h-5 w-5 items-center justify-center rounded-full text-[11px] cursor-pointer font-bold', lead.fechou ? 'bg-green-500 text-white' : 'bg-gray-100 text-gray-400')}>
-                            {lead.fechou ? '✓' : ''}
-                          </span>}
-                    </Td>
-                    <Td>
-                      {isEditing
-                        ? <input type="number" step="0.01" value={d.valor_rs ?? ''} onChange={e => setE('valor_rs', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cn(cell, 'text-green-700 font-semibold')} />
-                        : lead.valor_rs ? <span className="px-2 font-bold text-green-700 text-xs">{fmtN(lead.valor_rs)}</span> : null}
-                    </Td>
-                    <Td>
-                      {isEditing
-                        ? <select value={d.pagamento ?? ''} onChange={e => setE('pagamento', e.target.value || null)} className={cellSel}>
-                            <option value=""></option>
-                            {PAGAMENTO_OPTIONS.map(o => <option key={o}>{o}</option>)}
-                          </select>
-                        : <span className="px-2 text-gray-600 text-[11px]">{lead.pagamento ?? ''}</span>}
-                    </Td>
-                    <Td>
-                      {isEditing
-                        ? <input type="number" step="0.01" value={d.orcamento ?? ''} onChange={e => setE('orcamento', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cell} />
-                        : lead.orcamento ? <span className="px-2 text-gray-700 text-[11px]">{fmtN(lead.orcamento)}</span> : null}
-                    </Td>
-                    <Td>
-                      {isEditing
-                        ? <input type="text" value={d.observacao ?? ''} onChange={e => setE('observacao', e.target.value || null)} placeholder="Observação" className={cell} />
-                        : <span className="px-2 text-gray-600 text-[11px] truncate block max-w-[220px]">{lead.observacao ?? ''}</span>}
-                    </Td>
-                    <Td>
-                      {isEditing
-                        ? <input type="text" value={d.bairro ?? ''} onChange={e => setE('bairro', e.target.value || null)} placeholder="Bairro" className={cell} />
-                        : <span className="px-2 text-gray-600 text-[11px]">{lead.bairro ?? ''}</span>}
-                    </Td>
-                    <Td center>
-                      <button onClick={e => deleteRow(lead.id, e)}
-                        className="opacity-0 group-hover:opacity-100 p-1.5 rounded-md bg-red-50 text-red-400 hover:text-red-600 hover:bg-red-100 transition-all">
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </Td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                      {/* Valor */}
+                      <Td>
+                        {isEditing
+                          ? <input type="number" step="0.01" value={d.valor_rs ?? ''} onChange={e => setE('valor_rs', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cn(cell, 'text-primary font-semibold')} />
+                          : <span className="px-2 text-muted-foreground text-[11px]">{fmtN(lead.valor_rs) || '0,00'}</span>}
+                      </Td>
+                      {/* Pagamento */}
+                      <Td>
+                        {isEditing
+                          ? <select value={d.pagamento ?? ''} onChange={e => setE('pagamento', e.target.value || null)} className={cellSel}>
+                              <option value=""></option>
+                              {PAGAMENTO_OPTIONS.map(o => <option key={o}>{o}</option>)}
+                            </select>
+                          : <span className="px-2 text-muted-foreground text-[11px]">{lead.pagamento ?? '–'}</span>}
+                      </Td>
+                      {/* Orçamento */}
+                      <Td>
+                        {isEditing
+                          ? <input type="number" step="0.01" value={d.orcamento ?? ''} onChange={e => setE('orcamento', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cell} />
+                          : <span className="px-2 text-muted-foreground text-[11px]">{fmtN(lead.orcamento) || '0,00'}</span>}
+                      </Td>
+                      {/* Observação */}
+                      <Td>
+                        {isEditing
+                          ? <input type="text" value={d.observacao ?? ''} onChange={e => setE('observacao', e.target.value || null)} placeholder="Observação" className={cell} />
+                          : <span className="px-2 text-muted-foreground text-[11px] truncate block max-w-[200px]">{lead.observacao ?? 'Observação'}</span>}
+                      </Td>
+                      {/* Bairro */}
+                      <Td>
+                        {isEditing
+                          ? <input type="text" value={d.bairro ?? ''} onChange={e => setE('bairro', e.target.value || null)} placeholder="Bairro" className={cell} />
+                          : <span className="px-2 text-muted-foreground text-[11px]">{lead.bairro ?? 'Bairro'}</span>}
+                      </Td>
+                      {/* Menu */}
+                      <Td center>
+                        <div className="relative" ref={menuId === lead.id ? menuRef : null}>
+                          <button
+                            onClick={e => { e.stopPropagation(); setMenuId(menuId === lead.id ? null : lead.id); }}
+                            className="opacity-0 group-hover:opacity-100 flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+                          >
+                            <MoreVertical className="h-4 w-4" />
+                          </button>
+                          {menuId === lead.id && (
+                            <div className="absolute right-0 top-7 z-50 min-w-[120px] rounded-lg border border-border bg-popover shadow-lg py-1">
+                              <button
+                                onClick={e => { e.stopPropagation(); startEdit(lead); setMenuId(null); }}
+                                className="flex w-full items-center gap-2 px-3 py-2 text-xs hover:bg-muted transition-colors"
+                              >
+                                <Settings2 className="h-3.5 w-3.5" /> Editar
+                              </button>
+                              <button
+                                onClick={e => { e.stopPropagation(); void deleteRow(lead.id); }}
+                                className="flex w-full items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 transition-colors"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" /> Excluir
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </Td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination */}
+          <div className="flex items-center justify-between border-t border-border px-4 py-2.5 shrink-0">
+            <span className="text-xs text-muted-foreground">
+              {filtered.length === 0
+                ? 'Nenhum lead'
+                : `Mostrando ${(page - 1) * pageSize + 1} a ${Math.min(page * pageSize, filtered.length)} de ${filtered.length} lead${filtered.length !== 1 ? 's' : ''}`}
+            </span>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
+                className="flex h-7 w-7 items-center justify-center rounded border border-border disabled:opacity-30 hover:bg-muted transition-colors">
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </button>
+              <span className="flex h-7 min-w-[28px] items-center justify-center rounded border border-primary bg-primary/10 px-2 text-xs font-semibold text-primary">{page}</span>
+              <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
+                className="flex h-7 w-7 items-center justify-center rounded border border-border disabled:opacity-30 hover:bg-muted transition-colors">
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+              <select value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(1); }}
+                className="ml-2 rounded border border-border bg-card px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary">
+                {[10, 25, 50, 100].map(n => <option key={n} value={n}>{n} / página</option>)}
+              </select>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -500,7 +606,7 @@ export default function CrmPage() {
 
 function Td({ children, center }: { children?: React.ReactNode; center?: boolean }) {
   return (
-    <td className={cn('border-r border-gray-100 last:border-0 overflow-hidden', center && 'text-center')}>
+    <td className={cn('border-r border-border/20 last:border-0 overflow-hidden', center && 'text-center')}>
       {children}
     </td>
   );
