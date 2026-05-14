@@ -575,13 +575,24 @@ const LogoGoogle = ({ size = 'sm' }: { size?: 'sm' | 'lg' }) => (
 );
 
 const LogoGoogleMyBusiness = ({ size = 'sm' }: { size?: 'sm' | 'lg' }) => (
-  <svg viewBox="0 0 24 24" className={size === 'lg' ? 'w-8 h-8' : 'w-7 h-7'}>
-    <path fill="#4285F4" d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" />
+  <svg viewBox="0 0 48 48" className={size === 'lg' ? 'w-12 h-12' : 'w-7 h-7'}>
+    <path fill="#4285F4" d="M9 19h30v20a3 3 0 0 1-3 3H12a3 3 0 0 1-3-3V19Z" />
+    <path fill="#34A853" d="M9 19h8v23h-5a3 3 0 0 1-3-3V19Z" />
+    <path fill="#1A73E8" d="M31 19h8v20a3 3 0 0 1-3 3h-5V19Z" />
+    <path fill="#E8F0FE" d="M15 28h18v14H15V28Z" />
+    <path fill="#4285F4" d="M18 31h12v11H18V31Z" />
+    <path fill="#AECBFA" d="M8 6h32l3 13H5L8 6Z" />
+    <path fill="#4285F4" d="M8 6h8l-1 13H5L8 6Z" />
+    <path fill="#34A853" d="M16 6h8v13h-9l1-13Z" />
+    <path fill="#FBBC04" d="M24 6h8l1 13h-9V6Z" />
+    <path fill="#EA4335" d="M32 6h8l3 13H33L32 6Z" />
+    <path fill="#fff" d="M32.5 31.2c0-.4 0-.7-.1-1.1H27v2.1h3.1a2.6 2.6 0 0 1-1.1 1.7v1.4h1.8a5.4 5.4 0 0 0 1.7-4.1Z" />
+    <path fill="#fff" d="M27 36.8c1.5 0 2.7-.5 3.7-1.4L29 34c-.5.3-1.1.5-1.9.5a3.3 3.3 0 0 1-3.1-2.3h-1.9v1.4a5.6 5.6 0 0 0 4.9 3.2Z" />
   </svg>
 );
 
 const LogoWebsite = ({ size = 'sm' }: { size?: 'sm' | 'lg' }) => (
-  <svg viewBox="0 0 24 24" className={size === 'lg' ? 'w-8 h-8' : 'w-7 h-7'} fill="none" stroke="currentColor" strokeWidth="2">
+  <svg viewBox="0 0 24 24" className={cn(size === 'lg' ? 'w-14 h-14' : 'w-7 h-7', 'text-violet-200 drop-shadow-[0_0_12px_rgba(167,139,250,0.55)]')} fill="none" stroke="currentColor" strokeWidth="2">
     <circle cx="12" cy="12" r="10" />
     <line x1="2" y1="12" x2="22" y2="12" />
     <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
@@ -887,16 +898,22 @@ function MetaConnectionsPanel({
   ];
 
   return (
-    <div className="border border-border rounded-xl overflow-hidden">
+    <div
+      className="overflow-hidden rounded-xl border border-border bg-card"
+      style={{
+        background: 'linear-gradient(145deg, rgba(17,22,35,0.92), rgba(8,11,18,0.96))',
+        boxShadow: '0 0 30px rgba(15,23,42,0.24), inset 0 0 0 1px rgba(255,255,255,0.025)',
+      }}
+    >
       {/* Header */}
-      <div className="flex items-start justify-between px-5 py-4 border-b border-border">
+      <div className="flex items-start justify-between px-5 py-5 border-b border-border">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-full bg-[#1877F2]/10 border border-[#1877F2]/30 flex items-center justify-center shrink-0">
+          <div className="w-11 h-11 rounded-xl bg-[#1877F2]/10 border border-[#1877F2]/30 flex items-center justify-center shrink-0 shadow-[0_0_18px_rgba(24,119,242,0.16)]">
             <LogoMeta />
           </div>
           <div>
-            <p className="text-sm font-bold">Contas Meta conectadas</p>
-            <p className="text-xs text-muted-foreground mt-0.5">
+            <p className="font-heading text-xl font-black">Contas Meta conectadas</p>
+            <p className="text-sm text-muted-foreground mt-1">
               Gerencie suas contas de anúncios, páginas e perfis do Instagram conectados ao ONMID.
             </p>
           </div>
@@ -904,9 +921,9 @@ function MetaConnectionsPanel({
         <Button
           size="sm"
           onClick={onAdd}
-          className="bg-emerald-500 hover:bg-emerald-600 text-white h-8 gap-1.5 text-xs font-semibold shrink-0"
+          className="h-10 shrink-0 gap-2 rounded-lg bg-primary px-5 text-sm font-black text-black shadow-[0_0_18px_rgba(85,245,47,0.2)] hover:bg-primary/90"
         >
-          <Plus className="w-3.5 h-3.5" />
+          <Plus className="w-4 h-4" />
           Adicionar conta
         </Button>
       </div>
@@ -916,8 +933,8 @@ function MetaConnectionsPanel({
         {/* LEFT: Contas conectadas */}
         <div className="p-5 space-y-3">
           <div>
-            <p className="text-sm font-semibold">Contas conectadas ({connections.length})</p>
-            <p className="text-xs text-muted-foreground mt-0.5">Clique em uma conta para ver seus ativos</p>
+            <p className="text-base font-black">Contas conectadas ({connections.length})</p>
+            <p className="mt-1 text-sm text-muted-foreground">Selecione uma conta para gerenciar seus ativos</p>
           </div>
 
           <div className="space-y-2">
@@ -930,7 +947,7 @@ function MetaConnectionsPanel({
                   className={cn(
                     'flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all',
                     isSelected
-                      ? 'border-emerald-500/40 bg-emerald-500/5'
+                      ? 'border-primary/55 bg-primary/9 shadow-[0_0_18px_rgba(85,245,47,0.12)]'
                       : 'border-border hover:border-border/80 hover:bg-muted/20',
                   )}
                 >
@@ -945,7 +962,7 @@ function MetaConnectionsPanel({
                     <div className="flex items-center gap-2">
                       <p className="text-sm font-semibold truncate">{conn.userName}</p>
                       {isSelected && (
-                        <span className="shrink-0 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-400">
+                        <span className="shrink-0 rounded-md bg-primary/18 px-2 py-0.5 text-xs font-black text-primary">
                           Selecionada
                         </span>
                       )}
@@ -969,9 +986,9 @@ function MetaConnectionsPanel({
 
           <button
             onClick={onAdd}
-            className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg border border-dashed border-border text-xs text-muted-foreground hover:text-foreground hover:border-border/80 transition-colors"
+            className="w-full flex items-center justify-center gap-2 py-3 rounded-lg border border-dashed border-border text-sm font-medium text-muted-foreground hover:text-foreground hover:border-border/80 transition-colors"
           >
-            <Plus className="w-3.5 h-3.5" />
+            <Plus className="w-4 h-4" />
             Adicionar outra conta
           </button>
         </div>
@@ -979,9 +996,9 @@ function MetaConnectionsPanel({
         {/* RIGHT: Ativos da conta selecionada */}
         <div className="p-5 space-y-3">
           <div>
-            <p className="text-sm font-semibold">Ativos da conta selecionada</p>
+            <p className="text-base font-black">Ativos da conta selecionada</p>
             {selectedConn && (
-              <p className="text-xs text-muted-foreground mt-0.5">{selectedConn.userName}</p>
+              <p className="text-sm text-muted-foreground mt-1">{selectedConn.userName}</p>
             )}
           </div>
 
@@ -1348,7 +1365,7 @@ const BASE_INTEGRATIONS: Integration[] = [
   {
     id: 'meta-ads',
     name: 'Meta Ads',
-    description: 'Meta Ads — sincronize campanhas, leads e métricas.',
+    description: 'Sincronize campanhas, leads e métricas dos seus anúncios no Meta.',
     category: 'Anúncios',
     logo: <LogoMeta size="lg" />,
   },
@@ -1362,7 +1379,7 @@ const BASE_INTEGRATIONS: Integration[] = [
   {
     id: 'google-my-business',
     name: 'Google Meu Negócio',
-    description: 'Avaliações, buscas e desempenho do perfil do Google.',
+    description: 'Avaliações, buscas e desempenho do perfil da sua empresa no Google.',
     category: 'Presença Digital',
     logo: <LogoGoogleMyBusiness size="lg" />,
   },
@@ -1376,6 +1393,20 @@ const BASE_INTEGRATIONS: Integration[] = [
 ];
 
 const CATEGORIES = ['Todos', 'Anúncios', 'Presença Digital'];
+
+function IntegrationStatusBadge({ connected }: { connected: boolean }) {
+  return connected ? (
+    <span className="inline-flex items-center gap-1.5 rounded-md border border-primary/35 bg-primary/12 px-3 py-1 text-xs font-black text-primary shadow-[0_0_14px_rgba(85,245,47,0.14)]">
+      <CheckCircle2 className="h-3.5 w-3.5" />
+      Conectado
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background/60 px-3 py-1 text-xs font-bold text-muted-foreground">
+      <X className="h-3.5 w-3.5" />
+      Desconectado
+    </span>
+  );
+}
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
@@ -1486,13 +1517,6 @@ export default function IntegracoesPage() {
     return false;
   }
 
-  function connectionCount(id: IntegrationId): number {
-    if (id === 'meta-ads') return metaConns.length;
-    if (id === 'google-ads') return googleConns.filter((c) => c.accountType === 'google_ads').length;
-    if (id === 'google-my-business') return googleConns.filter((c) => c.accountType === 'gmb').length;
-    return 0;
-  }
-
   return (
     <>
       {metaModal && (
@@ -1508,29 +1532,37 @@ export default function IntegracoesPage() {
         />
       )}
 
-      <div className="space-y-6">
+      <div className="space-y-7">
 
         {/* ── HEADER ─────────────────────────────────────────────────────────── */}
-        <div className="flex items-start justify-between gap-4">
+        <div className="grid gap-6 xl:grid-cols-[1fr_560px] xl:items-end">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Integrações</h1>
-            <p className="text-sm text-muted-foreground mt-1 max-w-xl">
+            <h1 className="font-heading text-3xl font-black tracking-tight text-foreground">Integrações</h1>
+            <p className="mt-3 max-w-2xl text-base text-muted-foreground">
               Conecte suas plataformas para sincronizar dados automaticamente e potencializar seus resultados.
             </p>
           </div>
 
-          {/* Stats card — purple gradient */}
-          <div className="shrink-0 rounded-xl bg-gradient-to-br from-violet-600/20 to-violet-500/10 border border-violet-500/20 px-5 py-4 flex items-center gap-4 min-w-[220px]">
-            <div className="w-10 h-10 rounded-xl bg-violet-500/20 flex items-center justify-center shrink-0">
-              <LayoutGrid className="w-5 h-5 text-violet-400" />
+          <div
+            className="flex items-center justify-between gap-5 rounded-2xl border border-violet-400/35 bg-card px-6 py-5"
+            style={{
+              background: 'radial-gradient(circle at 8% 50%, rgba(124,58,237,0.22), transparent 34%), linear-gradient(135deg, rgba(124,58,237,0.12), rgba(15,18,29,0.82))',
+              boxShadow: '0 0 34px rgba(124,58,237,0.16), inset 0 0 0 1px rgba(255,255,255,0.025)',
+            }}
+          >
+            <div className="flex items-center gap-5">
+              <span className="flex h-14 w-14 items-center justify-center rounded-full border border-primary/35 bg-primary/10 text-primary shadow-[0_0_22px_rgba(85,245,47,0.16)]">
+                <LayoutGrid className="h-6 w-6" />
+              </span>
+              <div>
+                <p className="font-heading text-2xl font-black leading-none text-foreground">{totalConnected} de 4</p>
+                <p className="mt-1 text-base font-medium text-muted-foreground">Plataformas conectadas</p>
+              </div>
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-2xl font-bold leading-none">{totalConnected} <span className="text-sm font-normal text-muted-foreground">de 4</span></p>
-              <p className="text-xs text-muted-foreground mt-1">Plataformas conectadas</p>
-              <button className="mt-2 text-[11px] text-violet-400 hover:text-violet-300 transition-colors font-medium">
-                Ver status das integrações →
-              </button>
-            </div>
+            <button className="flex h-12 items-center gap-4 rounded-xl border border-border bg-background/35 px-6 text-sm font-black text-foreground transition-colors hover:border-primary/35">
+              Ver status das integrações
+              <span className="text-xl leading-none">→</span>
+            </button>
           </div>
         </div>
 
@@ -1557,16 +1589,16 @@ export default function IntegracoesPage() {
         )}
 
         {/* ── FILTER TABS ─────────────────────────────────────────────────────── */}
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-3 flex-wrap">
           {CATEGORIES.map((cat) => (
             <button
               key={cat}
               onClick={() => setActiveCategory(cat)}
               className={cn(
-                'px-4 py-1.5 rounded-full text-xs font-semibold transition-colors',
+                'h-10 rounded-xl border px-5 text-sm font-black transition-all',
                 activeCategory === cat
-                  ? 'bg-emerald-500 text-white'
-                  : 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground border border-border'
+                  ? 'border-primary/35 bg-primary/18 text-primary shadow-[0_0_16px_rgba(85,245,47,0.16)]'
+                  : 'border-border bg-card/70 text-muted-foreground hover:text-foreground'
               )}
             >
               {cat}
@@ -1580,39 +1612,36 @@ export default function IntegracoesPage() {
             const connected = isConnected(integration.id);
             const isWebsite = integration.id === 'website';
             const isGMB = integration.id === 'google-my-business';
+            const isMeta = integration.id === 'meta-ads';
+            const isGoogleAds = integration.id === 'google-ads';
+            const glow = isMeta ? '#0668E1' : isGoogleAds ? '#34A853' : isGMB ? '#4285F4' : '#a78bfa';
 
             return (
               <div
                 key={integration.id}
-                className="bg-card border border-border rounded-xl p-5 flex flex-col gap-4"
+                className="relative flex min-h-[250px] flex-col gap-5 overflow-hidden rounded-xl border border-border bg-card p-6"
+                style={{
+                  background: `radial-gradient(circle at 16% 18%, ${glow}20, transparent 30%), linear-gradient(145deg, rgba(17,22,35,0.9), rgba(8,11,18,0.96))`,
+                  boxShadow: `0 0 28px ${glow}0f, inset 0 0 0 1px rgba(255,255,255,0.025)`,
+                }}
               >
                 {/* Top: logo + status badge */}
                 <div className="flex items-start justify-between">
-                  <div className="w-14 h-14 rounded-xl bg-background border border-border flex items-center justify-center shadow-sm">
+                  <div className="flex h-16 w-16 items-center justify-center">
                     {integration.logo}
                   </div>
-                  {connected ? (
-                    <span className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-emerald-500/40 text-emerald-400 text-[11px] font-semibold">
-                      <CheckCircle2 className="w-3 h-3" />
-                      Conectado
-                    </span>
-                  ) : (
-                    <span className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-border text-muted-foreground text-[11px] font-semibold">
-                      <span className="w-2 h-2 rounded-full border border-muted-foreground" />
-                      Desconectado
-                    </span>
-                  )}
+                  <IntegrationStatusBadge connected={connected} />
                 </div>
 
                 {/* Name + category + description */}
-                <div className="flex-1 space-y-1.5">
+                <div className="flex-1 space-y-3">
                   <div className="flex items-center gap-2">
-                    <h3 className="font-bold text-sm">{integration.name}</h3>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground font-medium">
+                    <h3 className="font-heading text-xl font-black text-foreground">{integration.name}</h3>
+                    <span className="rounded-md bg-muted/60 px-2 py-1 text-xs font-bold text-muted-foreground">
                       {integration.category}
                     </span>
                   </div>
-                  <p className="text-xs text-muted-foreground leading-relaxed">
+                  <p className="text-sm leading-relaxed text-muted-foreground">
                     {integration.description}
                   </p>
                 </div>
@@ -1621,34 +1650,34 @@ export default function IntegracoesPage() {
                 {isWebsite ? (
                   <button
                     disabled
-                    className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg border border-border text-xs font-semibold text-muted-foreground opacity-50 cursor-not-allowed"
+                    className="flex h-11 w-full cursor-not-allowed items-center justify-center gap-2 rounded-lg border border-border bg-background/30 text-sm font-black text-muted-foreground"
                   >
-                    <Plus className="w-3.5 h-3.5" />
                     Conectar agora
+                    <Plus className="h-4 w-4" />
                   </button>
                 ) : connected && isGMB ? (
                   <button
                     onClick={() => handleCardAction(integration.id)}
-                    className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-semibold transition-colors"
+                    className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-primary text-sm font-black text-black shadow-[0_0_18px_rgba(85,245,47,0.22)] transition-colors hover:bg-primary/90"
                   >
                     Abrir painel
-                    <ExternalLink className="w-3.5 h-3.5" />
+                    <ExternalLink className="h-4 w-4" />
                   </button>
                 ) : connected ? (
                   <button
                     onClick={() => handleCardAction(integration.id)}
-                    className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg border border-border text-xs font-semibold text-foreground hover:bg-muted/30 transition-colors"
+                    className="flex h-11 w-full items-center justify-center gap-3 rounded-lg border border-primary/35 bg-background/25 text-sm font-black text-foreground transition-colors hover:bg-primary/10"
                   >
                     Gerenciar integração
-                    <span className="text-muted-foreground">→</span>
+                    <span className="text-primary">→</span>
                   </button>
                 ) : (
                   <button
                     onClick={() => handleCardAction(integration.id)}
-                    className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg border border-border text-xs font-semibold text-foreground hover:bg-muted/30 transition-colors"
+                    className="flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-border bg-background/25 text-sm font-black text-foreground transition-colors hover:border-primary/35"
                   >
                     Conectar agora
-                    <Plus className="w-3.5 h-3.5" />
+                    <Plus className="h-4 w-4" />
                   </button>
                 )}
               </div>
@@ -1683,21 +1712,30 @@ export default function IntegracoesPage() {
         )}
 
         {/* ── FOOTER ──────────────────────────────────────────────────────────── */}
-        <div className="flex items-center justify-between gap-4 rounded-xl border border-border bg-card px-5 py-4">
+        <div
+          className="flex items-center justify-between gap-4 rounded-xl border border-border bg-card px-6 py-5"
+          style={{
+            background: 'radial-gradient(circle at 2% 50%, rgba(124,58,237,0.16), transparent 26%), rgba(15,18,29,0.86)',
+            boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.025)',
+          }}
+        >
           <div className="flex items-center gap-3">
-            <Sparkles className="w-5 h-5 text-violet-400 shrink-0" />
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-violet-500/18 text-violet-300 shadow-[0_0_18px_rgba(124,58,237,0.22)]">
+              <Sparkles className="w-5 h-5" />
+            </span>
             <div>
-              <p className="text-sm font-bold">Sincronização automática e segura</p>
-              <p className="text-xs text-muted-foreground mt-0.5">
+              <p className="text-lg font-black">Sincronização automática e segura</p>
+              <p className="mt-1 text-sm text-muted-foreground">
                 Seus dados são sincronizados com segurança e atualizados automaticamente em segundo plano.
               </p>
             </div>
           </div>
           <a
             href="#"
-            className="shrink-0 text-xs font-semibold text-violet-400 hover:text-violet-300 transition-colors whitespace-nowrap"
+            className="flex h-11 shrink-0 items-center gap-2 rounded-lg border border-border bg-background/35 px-5 text-sm font-black text-foreground transition-colors hover:border-violet-400/40"
           >
-            Saiba mais sobre integrações ↗
+            Saiba mais sobre integrações
+            <ExternalLink className="h-4 w-4" />
           </a>
         </div>
 
