@@ -36,6 +36,15 @@ async function ensureTable(pool: ReturnType<typeof makeServerPool>) {
     );
     CREATE INDEX IF NOT EXISTS crm_leads_client_id_idx ON public.crm_leads(client_id);
     CREATE INDEX IF NOT EXISTS crm_leads_data_idx ON public.crm_leads(data);
+    DO $$ BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'crm_leads'
+          AND column_name = 'client_id' AND data_type = 'uuid'
+      ) THEN
+        ALTER TABLE public.crm_leads ALTER COLUMN client_id TYPE TEXT;
+      END IF;
+    END $$;
   `);
 }
 
