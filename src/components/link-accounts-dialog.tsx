@@ -23,7 +23,7 @@ type MetaConn = { id: string; label: string; userName: string; userPicture?: str
 const PLATFORM_LABEL = (p: PlatformId) => PLATFORM_INFO[p].label;
 
 const COMING_SOON_PLATFORMS: PlatformId[] = [];
-const LINKABLE_PLATFORMS: PlatformId[] = ['meta_ads', 'google_ads', 'google_business', 'google_sheets'];
+const LINKABLE_PLATFORMS: PlatformId[] = ['meta_ads', 'google_ads', 'google_business'];
 
 type SortDirection = 'az' | 'za';
 
@@ -1027,8 +1027,6 @@ export function LinkAccountsDialog({
           <MetaPagesContent platform="facebook" clientId={clientId} onDone={closeDialog} onCancel={closeDialog} />
         ) : activePlatform === 'instagram' ? (
           <MetaPagesContent platform="instagram" clientId={clientId} onDone={closeDialog} onCancel={closeDialog} />
-        ) : activePlatform === 'google_sheets' ? (
-          <GoogleSheetsContent clientId={clientId} onDone={closeDialog} onCancel={closeDialog} />
         ) : (
           <GoogleAdsContent clientId={clientId} onDone={closeDialog} onCancel={closeDialog} />
         )}

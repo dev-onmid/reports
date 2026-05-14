@@ -1970,9 +1970,7 @@ export default function GeneralDashboard() {
   const [customDateTo, setCustomDateTo] = useState('');
   const [metricsByClient, setMetricsByClient] = useState<Record<string, ApiMetrics>>({});
   const [goalsByClient, setGoalsByClient] = useState<Record<string, GoalConfig | null>>({});
-  const [sheetsSummary, setSheetsSummary] = useState<Record<string, ClientSheetsSummary>>({});
-  const [sheetsRefreshing, setSheetsRefreshing] = useState(false);
-  const [sheetsMsg, setSheetsMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [crmSummary, setCrmSummary] = useState<Record<string, ClientSheetsSummary>>({});
   const [campaigns, setCampaigns] = useState<CampaignPerformance[]>([]);
   const [creatives, setCreatives] = useState<TopCreative[]>([]);
   const [audience, setAudience] = useState<AudienceResponse>(EMPTY_AUDIENCE);
@@ -2192,15 +2190,17 @@ export default function GeneralDashboard() {
   }, []);
 
   useEffect(() => {
-    fetch('/api/clients/sheets-summary')
+    const { from, to } = periodToDateRange(period, customDateFrom, customDateTo);
+    const params = new URLSearchParams({ from: from.toISOString().split('T')[0], to: to.toISOString().split('T')[0] });
+    fetch(`/api/crm/summary?${params}`)
       .then(r => r.ok ? r.json() as Promise<{ clientId: string; entries: FunnelEntry[]; stages: string[] }[]> : [])
       .then(data => {
         const map: Record<string, ClientSheetsSummary> = {};
         for (const item of data) map[item.clientId] = { entries: item.entries, stages: item.stages };
-        setSheetsSummary(map);
+        setCrmSummary(map);
       })
-      .catch(() => setSheetsSummary({}));
-  }, []);
+      .catch(() => setCrmSummary({}));
+  }, [period, customDateFrom, customDateTo]);
 
   // Load saved AI insights when clients/period change
   useEffect(() => {
@@ -2254,27 +2254,19 @@ export default function GeneralDashboard() {
   let leadsGoal = 0;
   let plannedInvestment = 0;
   let revenueGoal = 0;
-  const { from: revFrom, to: revTo } = periodToDateRange(period, customDateFrom, customDateTo);
-  const revenue = [...selectedIds].reduce((sum, id) => {
-    const inRange = entriesInRange(sheetsSummary[id]?.entries ?? [], revFrom, revTo);
-    return sum + inRange.reduce((s, e) => s + (e.amount ?? 0), 0);
-  }, 0);
+  // CRM data (already filtered by period from the server)
+  const revenue = [...selectedIds].reduce((sum, id) =>
+    sum + (crmSummary[id]?.entries ?? []).reduce((s, e) => s + (e.amount ?? 0), 0), 0);
 
-  // Funnel aggregation for selected clients + period
-  const funnelStages: string[] = [];
+  const FUNNEL_ORDER = ['Atendimento', 'Agendamento', 'Comparecimento', 'Fechamento'];
   const funnelCounts: Record<string, number> = {};
   for (const id of selectedIds) {
-    const summary = sheetsSummary[id];
-    if (!summary) continue;
-    for (const stage of summary.stages) {
-      if (!funnelStages.includes(stage)) funnelStages.push(stage);
-    }
-    const inRange = entriesInRange(summary.entries, revFrom, revTo);
-    for (const entry of inRange) {
+    for (const entry of crmSummary[id]?.entries ?? []) {
       funnelCounts[entry.stage] = (funnelCounts[entry.stage] ?? 0) + 1;
     }
   }
-  const hasFunnelData = funnelStages.length > 0 && Object.keys(funnelCounts).length > 0;
+  const funnelStages = FUNNEL_ORDER.filter(s => funnelCounts[s] !== undefined);
+  const hasFunnelData = funnelStages.length > 0;
 
   for (const id of selectedIds) {
     const goal = goalsByClient[id];
@@ -2333,39 +2325,6 @@ export default function GeneralDashboard() {
   const selectedClients = clients.filter(c => selectedIds.has(c.id));
   const metaCampaigns = campaigns.filter((campaign) => campaign.platform === 'meta');
   const googleCampaigns = campaigns.filter((campaign) => campaign.platform === 'google');
-
-  async function refreshSheets() {
-    const clientsWithSheets = [...selectedIds].filter(id => sheetsSummary[id] !== undefined);
-    if (clientsWithSheets.length === 0) return;
-    setSheetsRefreshing(true);
-    setSheetsMsg(null);
-    try {
-      const responses = await Promise.all(clientsWithSheets.map(id =>
-        fetch(`/api/clients/${id}/sheets`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
-          .then(async r => ({ id, ok: r.ok, data: r.ok ? await r.json() as { entries?: unknown[]; total?: number } : await r.json() as { error?: string } }))
-          .catch(e => ({ id, ok: false, data: { error: String(e) } }))
-      ));
-
-      const errors = responses.filter(r => !r.ok).map(r => (r.data as { error?: string }).error ?? 'Erro desconhecido');
-      if (errors.length > 0) {
-        setSheetsMsg({ ok: false, text: errors[0] });
-        return;
-      }
-
-      const totalEntries = responses.reduce((sum, r) => sum + ((r.data as { entries?: unknown[] }).entries?.length ?? 0), 0);
-
-      const summaryRes = await fetch('/api/clients/sheets-summary');
-      if (summaryRes.ok) {
-        const data = await summaryRes.json() as { clientId: string; entries: FunnelEntry[]; stages: string[] }[];
-        const map: Record<string, ClientSheetsSummary> = {};
-        for (const item of data) map[item.clientId] = { entries: item.entries, stages: item.stages };
-        setSheetsSummary(map);
-      }
-      setSheetsMsg({ ok: true, text: `Atualizado — ${totalEntries} registros encontrados na planilha.` });
-    } finally {
-      setSheetsRefreshing(false);
-    }
-  }
 
   async function analyzeWithAI() {
     if (selectedIds.size === 0) return;
@@ -2458,24 +2417,6 @@ export default function GeneralDashboard() {
               ))}
             </div>
             {metricsLoading && <RefreshCw className="w-4 h-4 animate-spin text-muted-foreground" />}
-            {[...selectedIds].some(id => sheetsSummary[id] !== undefined) && (
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={refreshSheets}
-                  disabled={sheetsRefreshing}
-                  className="flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-[11px] font-semibold text-emerald-400 transition-colors hover:bg-emerald-500/20 disabled:opacity-50"
-                >
-                  <RefreshCw className={cn('h-3.5 w-3.5', sheetsRefreshing && 'animate-spin')} />
-                  {sheetsRefreshing ? 'Atualizando...' : 'Atualizar Planilha'}
-                </button>
-                {sheetsMsg && (
-                  <span className={cn('text-[10px] font-medium max-w-[180px] truncate', sheetsMsg.ok ? 'text-emerald-400' : 'text-red-400')}>
-                    {sheetsMsg.text}
-                  </span>
-                )}
-              </div>
-            )}
             <button
               type="button"
               onClick={analyzeWithAI}
@@ -2691,10 +2632,7 @@ export default function GeneralDashboard() {
                         const convRate = prevCount > 0 ? Math.round((count / prevCount) * 100) : null;
                         const maxCount = funnelCounts[funnelStages[0]] ?? 1;
                         const barPct = maxCount > 0 ? Math.round((count / maxCount) * 100) : 0;
-                        const isClosing = !!(funnelStages[i] && entriesInRange(
-                          [...selectedIds].flatMap(id => sheetsSummary[id]?.entries ?? []),
-                          revFrom, revTo
-                        ).find(e => e.stage === stage && e.amount));
+                        const isClosing = stage === 'Fechamento';
                         return (
                           <div key={stage} className="flex items-center gap-3">
                             <div className="w-32 shrink-0 text-right text-xs font-medium text-muted-foreground truncate">{stage}</div>

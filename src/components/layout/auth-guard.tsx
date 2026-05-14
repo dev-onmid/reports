@@ -9,6 +9,7 @@ type Role = 'Administrador' | 'Usuário' | 'Visualizador';
 const routeRoles: Record<string, Role[]> = {
   '/dashboard':   ['Administrador', 'Usuário', 'Visualizador'],
   '/clientes':    ['Administrador', 'Usuário'],
+  '/crm':         ['Administrador', 'Usuário'],
   '/relatorios':  ['Administrador', 'Usuário'],
   '/resultados':  ['Administrador', 'Usuário'],
   '/pagamentos':  ['Administrador', 'Usuário'],
