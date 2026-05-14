@@ -79,8 +79,11 @@ export default function CrmPage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [editId, setEditId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft>({});
+  const [saving, setSaving] = useState(false);
   const draftRef = useRef<Draft>({});
-  draftRef.current = draft; // always current, no stale closure
+  draftRef.current = draft;
+  const editIdRef = useRef<string | null>(null);
+  editIdRef.current = editId;
   const savingRef = useRef(false);
   const pendingBlurRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suppressBlurRef = useRef(false);
@@ -141,11 +144,12 @@ export default function CrmPage() {
   const saveRow = useCallback(async (id: string, data: Draft, thenFocusNew = false) => {
     if (savingRef.current) return;
     savingRef.current = true;
+    setSaving(true);
     let ok = false;
     try {
       if (id === NEW_ID) {
         const hasData = data.nome || data.numero || data.observacao || data.canal || data.data_agendada || data.bairro || data.valor_rs;
-        if (!hasData) { ok = true; } // empty row — treat as no-op success
+        if (!hasData) { ok = true; }
         else {
           const res = await fetch('/api/crm', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -176,14 +180,17 @@ export default function CrmPage() {
       console.error('CRM saveRow error:', err);
     } finally {
       savingRef.current = false;
-      // Only reset state on success — on failure, keep draft so user doesn't lose data
+      setSaving(false);
       if (ok) {
         if (thenFocusNew) {
           setEditId(NEW_ID);
           setDraft({ ...EMPTY });
           focusNewRow();
         } else {
-          setEditId(null);
+          // Only reset editId if it hasn't been changed to another row in the meantime
+          if (editIdRef.current === id) {
+            setEditId(null);
+          }
         }
       }
     }
@@ -239,9 +246,14 @@ export default function CrmPage() {
 
   return (
     <div className="flex flex-col gap-4 px-4 py-6 md:px-8 h-full">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-black uppercase tracking-tight">CRM</h1>
-        <p className="text-sm text-muted-foreground">Gestão de leads e funil de vendas por cliente.</p>
+      <div className="flex items-center gap-3">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-2xl font-black uppercase tracking-tight">CRM</h1>
+          <p className="text-sm text-muted-foreground">Gestão de leads e funil de vendas por cliente.</p>
+        </div>
+        {saving && (
+          <span className="text-xs font-medium text-amber-600 animate-pulse">Salvando…</span>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
