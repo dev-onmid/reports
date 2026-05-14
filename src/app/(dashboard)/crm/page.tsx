@@ -313,6 +313,13 @@ export default function CrmPage() {
                     ref={isBlank ? newRowRef : undefined}
                     tabIndex={-1}
                     onClick={() => !isEditing && startEdit(lead)}
+                    onKeyDown={isEditing ? e => {
+                      if (e.key === 'Enter' && (e.target as HTMLElement).tagName === 'INPUT') {
+                        e.preventDefault();
+                        if (pendingBlurRef.current) clearTimeout(pendingBlurRef.current);
+                        void saveRow(lead.id, draft, true);
+                      }
+                    } : undefined}
                     onBlur={isEditing ? e => handleRowBlur(e, lead.id) : undefined}
                     onFocus={isEditing ? handleRowFocus : undefined}
                     className={cn(
