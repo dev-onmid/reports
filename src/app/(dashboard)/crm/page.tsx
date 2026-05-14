@@ -34,6 +34,16 @@ const STATUS_COLOR: Record<string, string> = {
   'Desqualificado': 'text-red-600',
 };
 
+const STATUS_BADGE: Record<string, string> = {
+  'Em Atendimento': 'bg-blue-50 text-blue-700 border border-blue-200',
+  'Agendado':       'bg-amber-50 text-amber-700 border border-amber-200',
+  'Reagendado':     'bg-orange-50 text-orange-700 border border-orange-200',
+  'Não Retorna':    'bg-gray-100 text-gray-600 border border-gray-200',
+  'Distante':       'bg-gray-100 text-gray-600 border border-gray-200',
+  'Sem Interesse':  'bg-red-50 text-red-700 border border-red-200',
+  'Desqualificado': 'bg-red-50 text-red-700 border border-red-200',
+};
+
 function freshDraft(): Draft {
   return {
     data: new Date().toISOString().split('T')[0],
@@ -50,8 +60,9 @@ function fmtD(v: string | null) {
 }
 function fmtN(v: number | null) { return v ? formatCurrencyBRL(v) : ''; }
 
-const cell = 'px-1.5 py-0 h-8 text-xs focus:outline-none focus:bg-green-50 bg-transparent border-0 w-full text-gray-800 placeholder:text-gray-400';
+const cell = 'px-2 py-0 h-9 text-xs focus:outline-none focus:bg-blue-50 bg-transparent border-0 w-full text-gray-800 placeholder:text-gray-300';
 const cellSel = cn(cell, 'cursor-pointer');
+const cellNew = 'px-2 py-0 h-9 text-xs focus:outline-none focus:bg-green-100 bg-transparent border-0 w-full text-gray-800 placeholder:text-gray-400';
 
 const COLS: [string, string][] = [
   ['Data','w-28'],['Nome','w-40'],['Número','w-32'],['Canal','w-28'],
@@ -215,7 +226,6 @@ export default function CrmPage() {
 
   async function deleteRow(id: string, e: React.MouseEvent) {
     e.stopPropagation();
-    if (!window.confirm('Excluir este lead?')) return;
     const res = await fetch(`/api/crm/${id}`, { method: 'DELETE' });
     if (res.ok) {
       setLeads(prev => prev.filter(l => l.id !== id));
@@ -333,45 +343,45 @@ export default function CrmPage() {
                 onFocus={handleNewFocus}
                 className="border-b border-gray-200 bg-green-50 ring-1 ring-inset ring-green-300"
               >
-                <Td><input type="date" value={toD(newDraft.data)} onChange={e => setN('data', e.target.value || null)} className={cell} /></Td>
-                <Td><input type="text" value={newDraft.nome ?? ''} onChange={e => setN('nome', e.target.value || null)} placeholder="Nome" className={cell} /></Td>
-                <Td><input type="text" value={newDraft.numero ?? ''} onChange={e => setN('numero', e.target.value || null)} placeholder="Número" className={cell} /></Td>
+                <Td><input type="date" value={toD(newDraft.data)} onChange={e => setN('data', e.target.value || null)} className={cellNew} /></Td>
+                <Td><input type="text" value={newDraft.nome ?? ''} onChange={e => setN('nome', e.target.value || null)} placeholder="Nome" className={cellNew} /></Td>
+                <Td><input type="text" value={newDraft.numero ?? ''} onChange={e => setN('numero', e.target.value || null)} placeholder="Número" className={cellNew} /></Td>
                 <Td>
-                  <select value={newDraft.canal ?? ''} onChange={e => setN('canal', e.target.value || null)} className={cellSel}>
+                  <select value={newDraft.canal ?? ''} onChange={e => setN('canal', e.target.value || null)} className={cn(cellNew, 'cursor-pointer')}>
                     <option value=""></option>
                     {CANAL_OPTIONS.map(o => <option key={o}>{o}</option>)}
                   </select>
                 </Td>
                 <Td>
-                  <select value={newDraft.status ?? ''} onChange={e => setN('status', e.target.value || null)} className={cn(cellSel, STATUS_COLOR[newDraft.status ?? ''] ?? '')}>
+                  <select value={newDraft.status ?? ''} onChange={e => setN('status', e.target.value || null)} className={cn(cellNew, 'cursor-pointer', STATUS_COLOR[newDraft.status ?? ''] ?? '')}>
                     {STATUS_OPTIONS.map(o => <option key={o}>{o}</option>)}
                   </select>
                 </Td>
                 {(['dia1','dia2','dia3','dia4'] as const).map(k => (
                   <Td key={k} center>
-                    <input type="checkbox" checked={!!newDraft[k]} onChange={e => setN(k, e.target.checked)} className="h-3.5 w-3.5 accent-green-600 cursor-pointer" />
+                    <input type="checkbox" checked={!!newDraft[k]} onChange={e => setN(k, e.target.checked)} className="h-4 w-4 accent-green-600 cursor-pointer" />
                   </Td>
                 ))}
-                <Td><input type="date" value={toD(newDraft.data_agendada)} onChange={e => setN('data_agendada', e.target.value || null)} className={cell} /></Td>
-                <Td center><input type="checkbox" checked={!!newDraft.fechou} onChange={e => setN('fechou', e.target.checked)} className="h-3.5 w-3.5 accent-green-600 cursor-pointer" /></Td>
-                <Td><input type="number" step="0.01" value={newDraft.valor_rs ?? ''} onChange={e => setN('valor_rs', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cn(cell, 'text-green-700 font-semibold')} /></Td>
+                <Td><input type="date" value={toD(newDraft.data_agendada)} onChange={e => setN('data_agendada', e.target.value || null)} className={cellNew} /></Td>
+                <Td center><input type="checkbox" checked={!!newDraft.fechou} onChange={e => setN('fechou', e.target.checked)} className="h-4 w-4 accent-green-600 cursor-pointer" /></Td>
+                <Td><input type="number" step="0.01" value={newDraft.valor_rs ?? ''} onChange={e => setN('valor_rs', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cn(cellNew, 'text-green-700 font-semibold')} /></Td>
                 <Td>
-                  <select value={newDraft.pagamento ?? ''} onChange={e => setN('pagamento', e.target.value || null)} className={cellSel}>
+                  <select value={newDraft.pagamento ?? ''} onChange={e => setN('pagamento', e.target.value || null)} className={cn(cellNew, 'cursor-pointer')}>
                     <option value=""></option>
                     {PAGAMENTO_OPTIONS.map(o => <option key={o}>{o}</option>)}
                   </select>
                 </Td>
-                <Td><input type="number" step="0.01" value={newDraft.orcamento ?? ''} onChange={e => setN('orcamento', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cell} /></Td>
-                <Td><input type="text" value={newDraft.observacao ?? ''} onChange={e => setN('observacao', e.target.value || null)} placeholder="Observação" className={cell} /></Td>
+                <Td><input type="number" step="0.01" value={newDraft.orcamento ?? ''} onChange={e => setN('orcamento', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cellNew} /></Td>
+                <Td><input type="text" value={newDraft.observacao ?? ''} onChange={e => setN('observacao', e.target.value || null)} placeholder="Observação" className={cellNew} /></Td>
                 <Td>
-                  <input type="text" value={newDraft.bairro ?? ''} onChange={e => setN('bairro', e.target.value || null)} placeholder="Bairro" className={cell}
+                  <input type="text" value={newDraft.bairro ?? ''} onChange={e => setN('bairro', e.target.value || null)} placeholder="Bairro" className={cellNew}
                     onKeyDown={onNewBairroKey} />
                 </Td>
                 <Td center />
               </tr>
 
               {/* ── SAVED LEADS ── */}
-              {filtered.map(lead => {
+              {filtered.map((lead, idx) => {
                 const isEditing = editId === lead.id;
                 const d = isEditing ? editDraft : lead;
                 return (
@@ -383,23 +393,25 @@ export default function CrmPage() {
                     onFocus={isEditing ? handleExistingFocus : undefined}
                     className={cn(
                       'border-b border-gray-100 transition-colors group',
-                      isEditing ? 'bg-blue-50 ring-1 ring-inset ring-blue-200' : 'hover:bg-gray-50 cursor-pointer'
+                      isEditing
+                        ? 'bg-blue-50 ring-1 ring-inset ring-blue-300'
+                        : idx % 2 === 0 ? 'bg-white hover:bg-blue-50/40 cursor-pointer' : 'bg-gray-50/60 hover:bg-blue-50/40 cursor-pointer'
                     )}
                   >
                     <Td>
                       {isEditing
                         ? <input type="date" value={toD(d.data)} onChange={e => setE('data', e.target.value || null)} className={cell} />
-                        : <span className="px-1.5 text-gray-700">{fmtD(lead.data)}</span>}
+                        : <span className="px-2 text-gray-600 text-[11px]">{fmtD(lead.data)}</span>}
                     </Td>
                     <Td>
                       {isEditing
                         ? <input type="text" value={d.nome ?? ''} onChange={e => setE('nome', e.target.value || null)} placeholder="Nome" className={cell} />
-                        : <span className="px-1.5 font-medium text-gray-800 truncate block max-w-[160px]">{lead.nome ?? ''}</span>}
+                        : <span className="px-2 font-semibold text-gray-900 truncate block max-w-[160px] text-xs">{lead.nome ?? ''}</span>}
                     </Td>
                     <Td>
                       {isEditing
                         ? <input type="text" value={d.numero ?? ''} onChange={e => setE('numero', e.target.value || null)} placeholder="Número" className={cell} />
-                        : <span className="px-1.5 text-gray-600">{lead.numero ?? ''}</span>}
+                        : <span className="px-2 text-gray-700 text-[11px] font-mono">{lead.numero ?? ''}</span>}
                     </Td>
                     <Td>
                       {isEditing
@@ -407,38 +419,44 @@ export default function CrmPage() {
                             <option value=""></option>
                             {CANAL_OPTIONS.map(o => <option key={o}>{o}</option>)}
                           </select>
-                        : <span className="px-1.5 text-gray-700">{lead.canal ?? ''}</span>}
+                        : <span className="px-2 text-gray-600 text-[11px]">{lead.canal ?? ''}</span>}
                     </Td>
                     <Td>
                       {isEditing
                         ? <select value={d.status ?? ''} onChange={e => setE('status', e.target.value || null)} className={cn(cellSel, STATUS_COLOR[d.status ?? ''] ?? '')}>
                             {STATUS_OPTIONS.map(o => <option key={o}>{o}</option>)}
                           </select>
-                        : <span className={cn('px-1.5 font-semibold text-xs', STATUS_COLOR[lead.status ?? ''])}>{lead.status ?? ''}</span>}
+                        : lead.status
+                          ? <span className={cn('mx-1.5 inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap', STATUS_BADGE[lead.status] ?? 'bg-gray-100 text-gray-600')}>{lead.status}</span>
+                          : null}
                     </Td>
                     {(['dia1','dia2','dia3','dia4'] as const).map(k => (
                       <Td key={k} center>
-                        <input type="checkbox" checked={!!(isEditing ? d[k] : lead[k])}
-                          onChange={isEditing ? e => setE(k, e.target.checked) : undefined}
-                          onClick={!isEditing ? e => { e.stopPropagation(); startEdit(lead); } : undefined}
-                          className="h-3.5 w-3.5 accent-green-600 cursor-pointer" />
+                        {isEditing
+                          ? <input type="checkbox" checked={!!d[k]} onChange={e => setE(k, e.target.checked)} className="h-4 w-4 accent-blue-600 cursor-pointer" />
+                          : <span onClick={e => { e.stopPropagation(); startEdit(lead); }}
+                              className={cn('inline-flex h-4 w-4 items-center justify-center rounded text-[10px] cursor-pointer', lead[k] ? 'bg-green-100 text-green-700 font-bold' : 'text-gray-300')}>
+                              {lead[k] ? '✓' : '–'}
+                            </span>}
                       </Td>
                     ))}
                     <Td>
                       {isEditing
                         ? <input type="date" value={toD(d.data_agendada)} onChange={e => setE('data_agendada', e.target.value || null)} className={cell} />
-                        : <span className="px-1.5 text-gray-600">{fmtD(lead.data_agendada)}</span>}
+                        : <span className="px-2 text-gray-600 text-[11px]">{fmtD(lead.data_agendada)}</span>}
                     </Td>
                     <Td center>
-                      <input type="checkbox" checked={!!(isEditing ? d.fechou : lead.fechou)}
-                        onChange={isEditing ? e => setE('fechou', e.target.checked) : undefined}
-                        onClick={!isEditing ? e => { e.stopPropagation(); startEdit(lead); } : undefined}
-                        className="h-3.5 w-3.5 accent-green-600 cursor-pointer" />
+                      {isEditing
+                        ? <input type="checkbox" checked={!!d.fechou} onChange={e => setE('fechou', e.target.checked)} className="h-4 w-4 accent-blue-600 cursor-pointer" />
+                        : <span onClick={e => { e.stopPropagation(); startEdit(lead); }}
+                            className={cn('inline-flex h-5 w-5 items-center justify-center rounded-full text-[11px] cursor-pointer font-bold', lead.fechou ? 'bg-green-500 text-white' : 'bg-gray-100 text-gray-400')}>
+                            {lead.fechou ? '✓' : ''}
+                          </span>}
                     </Td>
                     <Td>
                       {isEditing
                         ? <input type="number" step="0.01" value={d.valor_rs ?? ''} onChange={e => setE('valor_rs', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cn(cell, 'text-green-700 font-semibold')} />
-                        : <span className="px-1.5 font-semibold text-green-700">{fmtN(lead.valor_rs)}</span>}
+                        : lead.valor_rs ? <span className="px-2 font-bold text-green-700 text-xs">{fmtN(lead.valor_rs)}</span> : null}
                     </Td>
                     <Td>
                       {isEditing
@@ -446,26 +464,26 @@ export default function CrmPage() {
                             <option value=""></option>
                             {PAGAMENTO_OPTIONS.map(o => <option key={o}>{o}</option>)}
                           </select>
-                        : <span className="px-1.5 text-gray-600">{lead.pagamento ?? ''}</span>}
+                        : <span className="px-2 text-gray-600 text-[11px]">{lead.pagamento ?? ''}</span>}
                     </Td>
                     <Td>
                       {isEditing
                         ? <input type="number" step="0.01" value={d.orcamento ?? ''} onChange={e => setE('orcamento', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cell} />
-                        : <span className="px-1.5 text-gray-700">{fmtN(lead.orcamento)}</span>}
+                        : lead.orcamento ? <span className="px-2 text-gray-700 text-[11px]">{fmtN(lead.orcamento)}</span> : null}
                     </Td>
                     <Td>
                       {isEditing
                         ? <input type="text" value={d.observacao ?? ''} onChange={e => setE('observacao', e.target.value || null)} placeholder="Observação" className={cell} />
-                        : <span className="px-1.5 text-gray-600 truncate block max-w-[220px]">{lead.observacao ?? ''}</span>}
+                        : <span className="px-2 text-gray-600 text-[11px] truncate block max-w-[220px]">{lead.observacao ?? ''}</span>}
                     </Td>
                     <Td>
                       {isEditing
                         ? <input type="text" value={d.bairro ?? ''} onChange={e => setE('bairro', e.target.value || null)} placeholder="Bairro" className={cell} />
-                        : <span className="px-1.5 text-gray-600">{lead.bairro ?? ''}</span>}
+                        : <span className="px-2 text-gray-600 text-[11px]">{lead.bairro ?? ''}</span>}
                     </Td>
                     <Td center>
                       <button onClick={e => deleteRow(lead.id, e)}
-                        className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 transition-all">
+                        className="opacity-0 group-hover:opacity-100 p-1.5 rounded-md bg-red-50 text-red-400 hover:text-red-600 hover:bg-red-100 transition-all">
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     </Td>
