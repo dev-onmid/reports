@@ -5,7 +5,7 @@ async function ensureTable(pool: ReturnType<typeof makeServerPool>) {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS public.crm_leads (
       id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      client_id   UUID NOT NULL,
+      client_id   TEXT NOT NULL,
       mes         TEXT,
       data        DATE,
       link_criativo TEXT,

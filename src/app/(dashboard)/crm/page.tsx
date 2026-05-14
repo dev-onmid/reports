@@ -71,6 +71,7 @@ export default function CrmPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(false);
 
   // ── NEW ROW (always at top, always editable, independent state) ──
   const [newDraft, setNewDraft] = useState<Draft>(freshDraft());
@@ -78,6 +79,7 @@ export default function CrmPage() {
   newDraftRef.current = newDraft;
   const newRowRef = useRef<HTMLTableRowElement | null>(null);
   const newSavingRef = useRef(false);
+  const newPendingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── EXISTING ROW EDITING ──
   const [editId, setEditId] = useState<string | null>(null);
@@ -125,6 +127,7 @@ export default function CrmPage() {
     }
     newSavingRef.current = true;
     setSaving(true);
+    setSaveError(false);
     try {
       const res = await fetch('/api/crm', {
         method: 'POST',
@@ -136,15 +139,30 @@ export default function CrmPage() {
         setLeads(prev => [saved, ...prev]);
         setNewDraft(freshDraft());
       } else {
+        setSaveError(true);
         console.error('CRM POST failed', res.status, await res.text());
       }
     } catch (err) {
+      setSaveError(true);
       console.error('CRM POST error:', err);
     } finally {
       newSavingRef.current = false;
       setSaving(false);
       focusNew();
     }
+  }
+
+  function handleNewBlur(e: React.FocusEvent<HTMLTableRowElement>) {
+    if (newPendingRef.current) clearTimeout(newPendingRef.current);
+    newPendingRef.current = setTimeout(() => {
+      if (e.currentTarget && !e.currentTarget.contains(document.activeElement)) {
+        void saveNew();
+      }
+    }, 150);
+  }
+
+  function handleNewFocus() {
+    if (newPendingRef.current) clearTimeout(newPendingRef.current);
   }
 
   function focusNew() {
@@ -238,6 +256,7 @@ export default function CrmPage() {
           <p className="text-sm text-muted-foreground">Gestão de leads e funil de vendas por cliente.</p>
         </div>
         {saving && <span className="text-xs font-medium text-amber-600 animate-pulse">Salvando…</span>}
+        {saveError && <span className="text-xs font-medium text-red-600">Erro ao salvar — verifique a conexão</span>}
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
@@ -311,6 +330,8 @@ export default function CrmPage() {
               <tr
                 ref={newRowRef}
                 onKeyDown={onNewRowKey}
+                onBlur={handleNewBlur}
+                onFocus={handleNewFocus}
                 className="border-b border-gray-200 bg-green-50 ring-1 ring-inset ring-green-300"
               >
                 <Td><input type="date" value={toD(newDraft.data)} onChange={e => setN('data', e.target.value || null)} className={cell} /></Td>
