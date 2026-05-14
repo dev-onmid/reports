@@ -65,7 +65,7 @@ const COLS: [string, string][] = [
   ['Status','w-36'],
   ['1D','w-8'],['2D','w-8'],['3D','w-8'],['4D','w-8'],
   ['Data Ag.','w-28'],['Fechou','w-10'],['Valor R$','w-28'],
-  ['Pagamento','w-28'],['Orçamento','w-28'],['Observação','w-56'],['Bairro','w-28'],[''],
+  ['Pagamento','w-28'],['Orçamento','w-28'],['Observação','w-56'],['Bairro','w-28'],['',''],
 ];
 
 export default function CrmPage() {
