@@ -1417,7 +1417,7 @@ export default function PagamentosPage() {
                     <XAxis dataKey="day" tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} />
                     <Area type="monotone" dataKey="total" stroke="#22c55e" fill="url(#semAreaGrad)" strokeWidth={2} dot={false} />
                     <Tooltip
-                      formatter={(v: number) => [formatCurrencyBRL(v), 'Total']}
+                      formatter={(v) => [formatCurrencyBRL(Number(v)), 'Total']}
                       contentStyle={{ background: '#111827', border: '1px solid #374151', borderRadius: '8px', fontSize: '11px' }}
                     />
                   </AreaChart>

@@ -825,10 +825,8 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
     const reader = new FileReader();
     reader.onload = (e) => {
       const text = (e.target?.result as string) ?? '';
-      const lines = text.split(/?
-/).filter(l => l.trim());
-      setForm(p => ({ ...p, numbers: lines.join('
-') }));
+      const lines = text.split(/\r?\n/).filter(l => l.trim());
+      setForm(p => ({ ...p, numbers: lines.join('\n') }));
     };
     reader.readAsText(file);
   }
@@ -863,8 +861,8 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
     } finally { setSaving(false); }
   }
 
-  const contactCount = form.numbers.split('
-').filter(l => l.trim()).length;
+  const contactCount = form.numbers.split('\n').filter(l => l.trim()).length;
+
   const charCount    = form.message.length;
 
   return (
@@ -1019,9 +1017,9 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
                   Números * — um por linha, com DDD e código do país
                 </label>
                 <textarea value={form.numbers} onChange={e => setForm(p => ({ ...p, numbers: e.target.value }))}
-                  placeholder={"(43) 9 9999-1111,João
-1198888-7777
-+55 43 9 6666-4444,Maria"}
+                  placeholder={"(43) 9 9999-1111,João\n1198888-7777\n+55 43 9 6666-4444,Maria"}
+
+
                   rows={6} className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-xs font-mono outline-none focus:ring-1 focus:ring-primary resize-none" />
               </div>
 
@@ -1359,8 +1357,9 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances }: {
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" vertical={false} />
                 <XAxis dataKey="day" tick={{ fill: '#6b7280', fontSize: 11 }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fill: '#6b7280', fontSize: 11 }} axisLine={false} tickLine={false} />
-                <Tooltip content={(props) => <BarTooltip active={props.active} payload={props.payload as { value: number }[] | undefined} label={props.label as string} />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
-                <Bar dataKey="enviados" shape={(props: Record<string, unknown>) => <GlowBar {...props} />} label={(props: Record<string, unknown>) => <BarLabel {...props} />} maxBarSize={48} />
+                <Tooltip content={(props) => <BarTooltip active={props.active} payload={(props.payload as unknown) as { value: number }[] | undefined} label={props.label as string} />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
+                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                <Bar dataKey="enviados" shape={(props: any) => <GlowBar {...props} />} label={(props: any) => <BarLabel {...props} />} maxBarSize={48} />
               </BarChart>
             </ResponsiveContainer>
           </div>
