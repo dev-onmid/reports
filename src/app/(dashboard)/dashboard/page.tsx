@@ -2532,9 +2532,22 @@ export default function GeneralDashboard() {
   const prevCpl = prevTotalLeads > 0 ? prevTotalSpend / prevTotalLeads : 0;
   const prevRoi = prevTotalSpend > 0 ? 0 / prevTotalSpend : 0;
 
+  // Receita efetiva: usa CRM se disponível, senão estima via fechamentos × TKM médio
+  let totalTkm = 0, tkmCount = 0;
+  for (const id of selectedIds) {
+    const planning = readPlanningFromStorage(id);
+    if (planning.tkm > 0) { totalTkm += planning.tkm; tkmCount++; }
+  }
+  const avgTkm = tkmCount > 0 ? totalTkm / tkmCount : DEFAULT_PLANNING.tkm;
+  const closings = funnelCounts['Fechamento'] ?? 0;
+  const effectiveRevenue = revenue > 0 ? revenue : closings > 0 ? closings * avgTkm : 0;
+
   // Índice de qualidade (ROI / meta 10x) por plataforma
-  const metaRoi = metaSpend > 0 ? revenue / metaSpend : 0;
-  const googleRoi = googleCost > 0 ? revenue / googleCost : 0;
+  const metaShare = totalLeads > 0 ? metaLeads / totalLeads : (metaSpend > 0 ? 1 : 0);
+  const metaRevenue = effectiveRevenue * metaShare;
+  const googleRevenue = effectiveRevenue * (1 - metaShare);
+  const metaRoi = metaSpend > 0 ? metaRevenue / metaSpend : 0;
+  const googleRoi = googleCost > 0 ? googleRevenue / googleCost : 0;
   const metaQuality = Math.min(Math.round((metaRoi / 10) * 100), 100);
   const googleQuality = googleCost > 0 ? Math.min(Math.round((googleRoi / 10) * 100), 100) : 0;
 
@@ -2847,8 +2860,8 @@ export default function GeneralDashboard() {
               <div className="w-full space-y-1.5">
                 {([
                   { label: 'Investimento', val: formatCurrencyBRL(metaSpend) },
-                  { label: 'Resultado', val: formatCurrencyBRL(revenue) },
-                  { label: 'ROI', val: `${metaRoi.toFixed(2)}x`, highlight: true },
+                  { label: 'Resultado', val: formatCurrencyBRL(metaRevenue) },
+                  { label: 'ROI', val: `${metaRoi.toFixed(2)}x`, highlight: metaRoi > 0 },
                 ] as const).map(r => (
                   <div key={r.label} className="flex justify-between text-[11px]">
                     <span className="text-muted-foreground">{r.label}</span>
@@ -2867,7 +2880,7 @@ export default function GeneralDashboard() {
               <div className="w-full space-y-1.5">
                 {([
                   { label: 'Investimento', val: formatCurrencyBRL(googleCost) },
-                  { label: 'Resultado', val: formatCurrencyBRL(googleCost > 0 ? revenue : 0) },
+                  { label: 'Resultado', val: formatCurrencyBRL(googleRevenue) },
                   { label: 'ROI', val: `${googleRoi.toFixed(2)}x`, highlight: googleRoi > 0 },
                 ] as const).map(r => (
                   <div key={r.label} className="flex justify-between text-[11px]">
