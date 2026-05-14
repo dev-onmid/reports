@@ -92,8 +92,7 @@ export default function CrmPage() {
     fetch(`/api/crm?clientId=${selectedClientId}`)
       .then(r => r.ok ? r.json() as Promise<CrmLead[]> : [])
       .then(data => {
-        setLeads([...data, makeBlank(selectedClientId)]);
-        // Auto-start editing the blank row
+        setLeads([makeBlank(selectedClientId), ...data]);
         setEditId(NEW_ID);
         setDraft({ ...EMPTY });
       })
@@ -117,7 +116,7 @@ export default function CrmPage() {
       return true;
     });
     const blank = leads.find(l => l.id === NEW_ID);
-    return blank ? [...real, blank] : real;
+    return blank ? [blank, ...real] : real;
   }, [leads, realLeads, search, statusFilter]);
 
   const stats = useMemo(() => ({
@@ -154,7 +153,7 @@ export default function CrmPage() {
           });
           if (res.ok) {
             const saved = await res.json() as CrmLead;
-            setLeads(prev => [...prev.filter(l => l.id !== NEW_ID), saved, makeBlank(selectedClientId)]);
+            setLeads(prev => [makeBlank(selectedClientId), saved, ...prev.filter(l => l.id !== NEW_ID)]);
             ok = true;
           } else {
             console.error('CRM POST failed', res.status, await res.text());
