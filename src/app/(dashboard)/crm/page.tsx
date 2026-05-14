@@ -5,10 +5,13 @@ import {
   Plus, Search, MoreVertical, Download, Settings2,
   Users, CalendarDays, HeartHandshake, CircleDollarSign,
   ChevronLeft, ChevronRight, ChevronDown, SlidersHorizontal,
-  AlignJustify, Trash2, Pencil,
+  AlignJustify, Trash2, Pencil, Sparkles, Clock3, LayoutGrid, List, ArrowUpDown,
+  BarChart3, Plug, UserRound,
 } from 'lucide-react';
 import { useClients } from '@/lib/client-store';
+import { ClientAvatar } from '@/components/client-avatar';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
+import type { Client } from '@/lib/mock-data';
 
 type CrmLead = {
   id: string; client_id: string; mes: string | null; data: string | null;
@@ -113,11 +116,104 @@ function IconSelect({ icon: Icon, value, onChange, placeholder, children, classN
   );
 }
 
+const CLIENT_CARD_THEMES = [
+  { accent: '#A855F7', glow: 'rgba(168,85,247,0.28)', bg: 'from-violet-950/70 via-card to-card' },
+  { accent: '#22D3EE', glow: 'rgba(34,211,238,0.22)', bg: 'from-cyan-950/55 via-card to-card' },
+  { accent: '#55F52F', glow: 'rgba(85,245,47,0.18)', bg: 'from-emerald-950/55 via-card to-card' },
+  { accent: '#F59E0B', glow: 'rgba(245,158,11,0.22)', bg: 'from-amber-950/60 via-card to-card' },
+  { accent: '#38BDF8', glow: 'rgba(56,189,248,0.20)', bg: 'from-sky-950/55 via-card to-card' },
+  { accent: '#EC4899', glow: 'rgba(236,72,153,0.20)', bg: 'from-pink-950/55 via-card to-card' },
+];
+
+function clientTheme(clientId: string) {
+  let hash = 0;
+  for (const c of clientId) hash = (hash * 31 + c.charCodeAt(0)) >>> 0;
+  return CLIENT_CARD_THEMES[hash % CLIENT_CARD_THEMES.length];
+}
+
+function ClientChoiceCard({
+  client,
+  recentLabel,
+  onOpen,
+}: {
+  client: Client;
+  recentLabel?: string;
+  onOpen: () => void;
+}) {
+  const theme = clientTheme(client.id);
+  return (
+    <article
+      className={cn(
+        'group relative overflow-hidden rounded-xl border bg-gradient-to-br p-4 transition-all hover:-translate-y-0.5',
+        theme.bg,
+      )}
+      style={{
+        borderColor: `${theme.accent}45`,
+        boxShadow: `0 0 0 1px rgba(255,255,255,0.03), 0 22px 70px ${theme.glow}`,
+      }}
+    >
+      <div className="pointer-events-none absolute inset-0 opacity-80" style={{ background: `radial-gradient(circle at 88% 8%, ${theme.glow}, transparent 34%)` }} />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-[linear-gradient(120deg,rgba(255,255,255,0.10),transparent_55%)] opacity-50" />
+      <div className="relative flex justify-between">
+        {recentLabel && (
+          <span className="rounded-full border px-2 py-1 text-[9px] font-bold uppercase tracking-wider" style={{ borderColor: `${theme.accent}55`, color: theme.accent, background: `${theme.accent}18` }}>
+            {recentLabel}
+          </span>
+        )}
+        <button type="button" className="ml-auto rounded-lg p-1 text-muted-foreground hover:bg-white/5 hover:text-foreground" aria-label="Mais opções">
+          <MoreVertical className="h-4 w-4" />
+        </button>
+      </div>
+
+      <div className="relative mt-12 flex items-center gap-4">
+        <div className="rounded-xl border bg-black/25 p-1.5" style={{ borderColor: `${theme.accent}70` }}>
+          <ClientAvatar clientId={client.id} name={client.name} size="lg" />
+        </div>
+        <div className="min-w-0">
+          <h3 className="truncate text-base font-bold text-foreground">{client.name}</h3>
+          <p className="mt-0.5 truncate text-sm text-muted-foreground">{client.segment}</p>
+        </div>
+        <span className="ml-auto inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-black/30 px-2 py-1 text-[10px] font-bold text-foreground">
+          <span className={cn('h-2 w-2 rounded-full', client.status === 'Ativo' ? 'bg-primary' : 'bg-amber-400')} />
+          {client.status}
+        </span>
+      </div>
+
+      <div className="relative mt-5 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onOpen}
+          className="flex h-10 min-w-0 flex-1 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-bold transition-colors hover:bg-white/5"
+          style={{ borderColor: `${theme.accent}80`, color: '#fff' }}
+        >
+          Abrir CRM
+          <ChevronRight className="h-4 w-4" style={{ color: theme.accent }} />
+        </button>
+        {[
+          { icon: UserRound, label: 'Leads' },
+          { icon: BarChart3, label: 'Resultados' },
+          { icon: Plug, label: 'Integrações' },
+          { icon: Pencil, label: 'Editar' },
+        ].map(({ icon: Icon, label }) => (
+          <button key={label} type="button" className="flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 bg-black/20 text-muted-foreground transition-colors hover:text-foreground" title={label}>
+            <Icon className="h-4 w-4" />
+          </button>
+        ))}
+      </div>
+    </article>
+  );
+}
+
 export default function CrmPage() {
   const { clients } = useClients();
   const activeClients = useMemo(() => clients.filter(c => c.status === 'Ativo'), [clients]);
 
   const [clientId, setClientId]     = useState('');
+  const [clientSearch, setClientSearch] = useState('');
+  const [segmentChoice, setSegmentChoice] = useState('');
+  const [clientSort, setClientSort] = useState<'az' | 'za'>('az');
+  const [clientView, setClientView] = useState<'grid' | 'list'>('grid');
+  const [recentClientIds, setRecentClientIds] = useState<string[]>([]);
   const [leads, setLeads]           = useState<CrmLead[]>([]);
   const [loading, setLoading]       = useState(false);
   const [search, setSearch]         = useState('');
@@ -143,6 +239,43 @@ export default function CrmPage() {
   const editDraftRef = useRef<Draft>(editDraft);
   editDraftRef.current = editDraft;
   const editPendingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clientSegments = useMemo(() => (
+    Array.from(new Set(activeClients.map(client => client.segment).filter(Boolean))).sort((a, b) => a.localeCompare(b))
+  ), [activeClients]);
+
+  const filteredClients = useMemo(() => {
+    const q = clientSearch.trim().toLowerCase();
+    return activeClients
+      .filter(client => !segmentChoice || client.segment === segmentChoice)
+      .filter(client => !q || client.name.toLowerCase().includes(q) || client.segment.toLowerCase().includes(q))
+      .sort((a, b) => clientSort === 'az' ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name));
+  }, [activeClients, clientSearch, clientSort, segmentChoice]);
+
+  const recentClients = useMemo(() => (
+    recentClientIds
+      .map(id => activeClients.find(client => client.id === id))
+      .filter((client): client is Client => Boolean(client))
+      .slice(0, 4)
+  ), [activeClients, recentClientIds]);
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('crm:recent-clients');
+      if (stored) setRecentClientIds(JSON.parse(stored) as string[]);
+    } catch {
+      setRecentClientIds([]);
+    }
+  }, []);
+
+  function openClientCrm(id: string) {
+    setClientId(id);
+    setRecentClientIds(prev => {
+      const next = [id, ...prev.filter(item => item !== id)].slice(0, 8);
+      localStorage.setItem('crm:recent-clients', JSON.stringify(next));
+      return next;
+    });
+  }
 
   useEffect(() => {
     function onDown(e: MouseEvent) {
@@ -271,19 +404,136 @@ export default function CrmPage() {
       {/* ── PAGE HEADER ─────────────────────────────────────────────── */}
       <div className="flex items-center gap-3">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-violet-600/20 border border-violet-500/30">
-          <Users className="h-5 w-5 text-violet-400" />
+          {clientId ? <Users className="h-5 w-5 text-violet-400" /> : <Sparkles className="h-5 w-5 text-violet-400" />}
         </div>
         <div>
-          <h1 className="text-lg font-bold leading-tight">CRM</h1>
-          <p className="text-xs text-muted-foreground">Gestão de leads e funil de vendas por cliente.</p>
+          <h1 className="text-lg font-bold leading-tight">{clientId ? 'CRM' : 'Escolha um cliente'}</h1>
+          <p className="text-xs text-muted-foreground">
+            {clientId ? 'Gestão de leads e funil de vendas por cliente.' : 'Acesse leads, funil e histórico comercial de forma rápida e organizada.'}
+          </p>
         </div>
         {saving    && <span className="ml-2 text-xs font-medium text-amber-400 animate-pulse">Salvando…</span>}
         {saveError && <span className="ml-2 text-xs font-medium text-red-400">Erro: {saveError}</span>}
       </div>
 
+      {!clientId && (
+        <div className="space-y-7">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="relative min-w-64 flex-1">
+              <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <input
+                value={clientSearch}
+                onChange={e => setClientSearch(e.target.value)}
+                placeholder="Buscar cliente ou segmento..."
+                className="h-12 w-full rounded-xl border border-border bg-card pl-11 pr-4 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-primary"
+              />
+            </div>
+            <div className="relative">
+              <SlidersHorizontal className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <select
+                value={segmentChoice}
+                onChange={e => setSegmentChoice(e.target.value)}
+                className="h-12 min-w-56 appearance-none rounded-xl border border-border bg-card pl-10 pr-10 text-sm font-semibold outline-none transition-colors focus:border-primary"
+              >
+                <option value="">Todos os segmentos</option>
+                {clientSegments.map(segment => <option key={segment} value={segment}>{segment}</option>)}
+              </select>
+            </div>
+            <button
+              type="button"
+              onClick={() => setClientSort(value => value === 'az' ? 'za' : 'az')}
+              className="flex h-12 items-center gap-2 rounded-xl border border-border bg-card px-4 text-sm font-semibold text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <ArrowUpDown className="h-4 w-4" />
+              Ordenar: {clientSort === 'az' ? 'A-Z' : 'Z-A'}
+            </button>
+            <div className="flex h-12 overflow-hidden rounded-xl border border-border bg-card p-1">
+              <button
+                type="button"
+                onClick={() => setClientView('grid')}
+                className={cn('flex h-10 w-10 items-center justify-center rounded-lg transition-colors', clientView === 'grid' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}
+              >
+                <LayoutGrid className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setClientView('list')}
+                className={cn('flex h-10 w-10 items-center justify-center rounded-lg transition-colors', clientView === 'list' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}
+              >
+                <List className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+
+          {recentClients.length > 0 && (
+            <section className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="flex items-center gap-2 text-base font-bold">
+                  <Clock3 className="h-5 w-5 text-violet-400" />
+                  Acessados recentemente
+                </h2>
+                <button type="button" onClick={() => setRecentClientIds([])} className="text-xs font-semibold text-muted-foreground hover:text-foreground">Limpar</button>
+              </div>
+              <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-4">
+                {recentClients.map((client, index) => (
+                  <ClientChoiceCard
+                    key={client.id}
+                    client={client}
+                    recentLabel={index === 0 ? 'Acessado agora' : index === 1 ? 'Recente' : 'Histórico'}
+                    onOpen={() => openClientCrm(client.id)}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+
+          <section className="space-y-3">
+            <h2 className="flex items-center gap-2 text-base font-bold">
+              <LayoutGrid className="h-5 w-5 text-violet-400" />
+              Todos os clientes
+            </h2>
+            {filteredClients.length === 0 ? (
+              <div className="rounded-xl border border-border bg-card p-12 text-center text-sm text-muted-foreground">
+                Nenhum cliente encontrado com os filtros atuais.
+              </div>
+            ) : clientView === 'grid' ? (
+              <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-4">
+                {filteredClients.map(client => (
+                  <ClientChoiceCard key={client.id} client={client} onOpen={() => openClientCrm(client.id)} />
+                ))}
+              </div>
+            ) : (
+              <div className="overflow-hidden rounded-xl border border-border bg-card">
+                {filteredClients.map(client => (
+                  <button
+                    key={client.id}
+                    type="button"
+                    onClick={() => openClientCrm(client.id)}
+                    className="flex w-full items-center gap-3 border-b border-border px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-muted/40"
+                  >
+                    <ClientAvatar clientId={client.id} name={client.name} size="md" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-bold">{client.name}</p>
+                      <p className="truncate text-xs text-muted-foreground">{client.segment}</p>
+                    </div>
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-background px-2 py-1 text-[10px] font-bold">
+                      <span className="h-2 w-2 rounded-full bg-primary" />
+                      {client.status}
+                    </span>
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+      )}
+
       {/* ── FILTERS BAR ─────────────────────────────────────────────── */}
+      {clientId && (
       <div className="flex flex-wrap items-center gap-2">
-        <IconSelect icon={Users} value={clientId} onChange={setClientId}
+        <IconSelect icon={Users} value={clientId} onChange={openClientCrm}
           placeholder="Selecionar cliente..." className="min-w-[180px]">
           {activeClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
         </IconSelect>
@@ -309,6 +559,7 @@ export default function CrmPage() {
           </>
         )}
       </div>
+      )}
 
       {/* ── STATS ───────────────────────────────────────────────────── */}
       {clientId && !loading && leads.length > 0 && (
@@ -333,11 +584,6 @@ export default function CrmPage() {
         </div>
       )}
 
-      {!clientId && (
-        <div className="rounded-xl border border-border bg-card p-12 text-center text-sm text-muted-foreground">
-          Selecione um cliente para ver seus leads.
-        </div>
-      )}
       {clientId && loading && (
         <div className="rounded-xl border border-border bg-card p-12 text-center text-sm text-muted-foreground">Carregando...</div>
       )}

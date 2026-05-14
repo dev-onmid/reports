@@ -7,7 +7,9 @@ import {
   AlertTriangle, ChevronDown, ChevronUp, ChevronRight, GripVertical, ImageIcon,
   LayoutDashboard, Play, RefreshCw, Search, Sparkles, Check, X,
   Pause, CircleDot, Pencil, Settings2, Users, Copy,
+  Bell, DollarSign, Tag, TrendingUp, Calendar, BarChart3, Zap, Target, Briefcase,
 } from 'lucide-react';
+import { getAuthSession } from '@/lib/auth-store';
 import type { AiInsight } from '@/app/api/ai/insights/route';
 import type { AdSet, AdSetWithMetrics } from '@/app/api/meta/campaigns/[id]/adsets/route';
 import type { MetaAd } from '@/app/api/meta/campaigns/[id]/ads/route';
@@ -242,6 +244,19 @@ function PlatformMarkForText({ text }: { text: string }) {
   return null;
 }
 
+function PlatformTableIcon({ platform }: { platform: AdsPlatform }) {
+  return (
+    <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-white/5 bg-background/50">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={platform === 'meta' ? '/brand/meta-ads-logo.webp' : '/brand/google-ads-logo.png'}
+        alt={platform === 'meta' ? 'Meta Ads' : 'Google Ads'}
+        className="h-4 w-4 object-contain"
+      />
+    </span>
+  );
+}
+
 function autoPartial(target: number, period: Period): number {
   if (period !== 'this_month') return 0;
   const now = new Date();
@@ -250,82 +265,59 @@ function autoPartial(target: number, period: Period): number {
 }
 
 // ── KPI Card ────────────────────────────────────────────────────────────────
-function KpiCard({
-  title, value, meta, partial, format = 'number', inverse = false, loading = false, prefix,
-  showMeta = true, showPartial = true, showProgress = true, description = 'Realizado contra a meta do período.',
-  metaLabel = 'Meta', partialLabel = 'Parcial', featured = false,
-}: {
-  title: ReactNode; value: number; meta: number; partial: number;
-  format?: 'currency' | 'number' | 'percent' | 'times'; inverse?: boolean;
-  loading?: boolean; prefix?: string;
-  showMeta?: boolean; showPartial?: boolean; showProgress?: boolean; description?: string;
-  metaLabel?: string; partialLabel?: string; featured?: boolean;
+function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: Icon, iconColor, iconBg, loading = false, inverseGoal = false }: {
+  title: string; value: number; prevValue?: number; goalValue?: number;
+  format?: 'currency' | 'number' | 'percent' | 'times';
+  icon: React.ElementType; iconColor: string; iconBg: string; loading?: boolean; inverseGoal?: boolean;
 }) {
   const fmt = (v: number) =>
     format === 'currency' ? formatCurrencyBRL(v)
     : format === 'percent' ? `${v.toFixed(1)}%`
-    : format === 'times' ? `${v.toFixed(1)}x`
+    : format === 'times' ? `${v.toFixed(2)}x`
     : v.toLocaleString('pt-BR');
-
-  const target = partial > 0 ? partial : meta;
-  const regularProgress = target > 0 ? Math.round((value / target) * 100) : 0;
-  const inverseProgress = target > 0
-    ? value <= 0
-      ? 100
-      : Math.round((target / value) * 100)
-    : 0;
-  const hasTarget = target > 0;
-  const progress = Math.max(0, Math.min(inverse ? inverseProgress : regularProgress, 100));
-  const status = progress > 75 ? 'good' : progress >= 36 ? 'warning' : 'critical';
-
-  const statusColor = !showProgress || !hasTarget ? 'text-foreground' : status === 'critical' ? 'text-red-400' : status === 'good' ? 'text-primary' : 'text-orange-400';
-  const detailItems = [
-    ...(showMeta ? [{ label: metaLabel, value: meta > 0 ? fmt(meta) : prefix ? prefix : 'Sem meta', tone: 'text-foreground' }] : []),
-    ...(showPartial ? [{ label: partialLabel, value: partial > 0 ? fmt(partial) : '—', tone: 'text-foreground' }] : []),
-    ...(showProgress && hasTarget ? [{ label: 'Atingimento', value: `${progress}%`, tone: statusColor }] : []),
-  ];
-
+  const change = (prevValue !== undefined && prevValue > 0) ? ((value - prevValue) / prevValue) * 100 : null;
+  const isPositive = change !== null && change >= 0;
+  const goalProgress = goalValue !== undefined && goalValue > 0
+    ? inverseGoal
+      ? (goalValue / Math.max(value, 0.01)) * 100
+      : (value / goalValue) * 100
+    : null;
+  const goalGood = goalProgress !== null && goalProgress >= 100;
   return (
-    <div className="relative h-full overflow-hidden rounded-xl border border-border bg-card/95 p-10 space-y-10 shadow-[0_22px_80px_rgba(0,0,0,0.18)]">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_85%_12%,rgba(123,44,255,0.10),transparent_40%)]" />
-      <div className="flex items-start justify-between gap-3">
-        <div className="relative">
-          <p className="font-bold text-lg text-foreground">{title}</p>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">{description}</p>
-        </div>
+    <div className="relative h-fit overflow-hidden rounded-2xl border border-white/5 bg-card p-5">
+      <div className="pointer-events-none absolute inset-0" style={{ background: `radial-gradient(circle at 85% 15%, ${iconBg}18, transparent 55%)` }} />
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">{title}</p>
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl" style={{ background: `${iconBg}25` }}>
+          <Icon className="h-[18px] w-[18px]" style={{ color: iconColor }} />
+        </span>
       </div>
       {loading ? (
-        <div className="flex min-h-28 items-center justify-center gap-2 rounded-lg border border-border bg-background/70 text-muted-foreground/50">
-          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-          <span className="text-sm">Carregando...</span>
-        </div>
+        <div className="mt-3 h-8 w-32 animate-pulse rounded bg-muted/30" />
       ) : (
-        <div className={cn('relative overflow-hidden rounded-lg border border-border bg-background/70 p-10', featured ? 'min-h-56' : 'min-h-48')}>
-          <div className="grid h-full items-center gap-16 xl:grid-cols-[1.05fr_1.95fr]">
-            <div className="rounded-lg bg-black/15 px-8 py-8">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Realizado</p>
-              <p className={cn('mt-1 font-heading font-bold tracking-wide leading-none text-foreground', featured ? 'text-4xl' : 'text-2xl')}>{fmt(value)}</p>
-            </div>
-            {detailItems.length > 0 && (
-              <div className={cn(
-                  'grid gap-10',
-                  detailItems.length === 1 ? 'sm:grid-cols-1' : detailItems.length === 2 ? 'sm:grid-cols-2' : 'sm:grid-cols-3'
-                )}>
-                {detailItems.map((item) => (
-                  <div key={item.label} className="min-w-0 rounded-lg bg-black/15 px-8 py-8">
-                    <p className="text-[10px] font-semibold text-muted-foreground">{item.label}</p>
-                    <p className={cn('mt-1 truncate text-sm font-bold', item.tone)}>{item.value}</p>
-                    {item.label === 'Atingimento' && (
-                        <div className="mt-6 h-2 overflow-hidden rounded-full bg-[#2b2144]">
-                        <div className="h-full rounded-full bg-[#8B35FF] shadow-[0_0_18px_rgba(139,53,255,0.65)]" style={{ width: `${progress}%` }} />
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
+        <>
+          <p className="mt-3 font-heading text-3xl font-bold leading-none text-foreground">{fmt(value)}</p>
+          {change !== null ? (
+            <p className={cn('mt-1.5 flex items-center gap-0.5 text-xs font-semibold', isPositive ? 'text-emerald-400' : 'text-red-400')}>
+              {isPositive ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+              {isPositive ? '+' : ''}{change.toFixed(1)}% vs mês passado
+            </p>
+          ) : (
+            <p className="mt-1.5 text-[11px] text-muted-foreground">— vs mês passado</p>
+          )}
+          {goalProgress !== null ? (
+            <p className={cn('mt-1 flex items-center gap-1 text-[11px] font-semibold', goalGood ? 'text-emerald-400' : 'text-amber-400')}>
+              <CircleDot className="h-2.5 w-2.5" />
+              {goalProgress.toFixed(0)}% vs meta
+              <span className="text-muted-foreground/70">({fmt(goalValue!)})</span>
+            </p>
+          ) : (
+            <p className="mt-1 text-[11px] text-muted-foreground/70">— vs meta</p>
+          )}
+          <div className="mt-3 -mx-1">
+            <MiniTrendLine color={iconColor} />
           </div>
-        </div>
+        </>
       )}
     </div>
   );
@@ -482,19 +474,20 @@ function MetricSection({
   children: ReactNode;
 }) {
   return (
-    <section className="space-y-5">
-      <div className="flex items-end justify-between gap-4">
+    <section className="relative overflow-hidden rounded-2xl border border-white/5 bg-card p-5">
+      <div className="pointer-events-none absolute inset-0" style={{ background: `radial-gradient(circle at 92% 0%, ${accent}12, transparent 36%)` }} />
+      <div className="relative mb-5 flex items-end justify-between gap-4">
         {title && (
         <div>
-          <h2 className="flex items-center gap-3 font-heading text-3xl font-bold uppercase tracking-wide text-foreground">
+          <h2 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-foreground">
             <PlatformMarkForText text={title} />
             <span>{title}</span>
           </h2>
-          {description && <p className="mt-1 text-xs text-foreground/75">{description}</p>}
+          {description && <p className="mt-0.5 text-[11px] text-muted-foreground">{description}</p>}
         </div>
         )}
       </div>
-      {children}
+      <div className="relative">{children}</div>
     </section>
   );
 }
@@ -1500,7 +1493,7 @@ function CampaignPerformanceTable({
 
   if (loading) {
     return (
-      <div className="rounded-xl border border-border bg-card p-6">
+      <div className="rounded-xl border border-white/5 bg-background/40 p-6">
         <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
           <RefreshCw className="h-4 w-4 animate-spin" /> Carregando campanhas do período...
         </div>
@@ -1508,14 +1501,19 @@ function CampaignPerformanceTable({
     );
   }
   if (campaigns.length === 0) {
-    return <div className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground">Nenhuma campanha com gasto no período selecionado.</div>;
+    return (
+      <div className="rounded-xl border border-white/5 bg-background/40 px-5 py-7">
+        <p className="text-sm font-semibold text-foreground">Nenhuma campanha ativa no período.</p>
+        <p className="mt-1 text-xs text-muted-foreground">Quando houver gasto nas contas vinculadas, as campanhas aparecem aqui com métricas e ações rápidas.</p>
+      </div>
+    );
   }
 
   function renderRow(row: ExpandableRow) {
     if (row.kind === 'loading') {
       return (
         <tr key={row.key} className="border-t border-border/50">
-          <td colSpan={8} className={cn('px-4 py-2', INDENT[row.level])}>
+          <td colSpan={9} className={cn('px-4 py-2', INDENT[row.level])}>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <RefreshCw className="h-3 w-3 animate-spin" /> Carregando...
             </div>
@@ -1619,7 +1617,6 @@ function CampaignPerformanceTable({
               <span className="h-3.5 w-3.5 shrink-0" />
             )}
 
-            {row.kind === 'campaign' && (row.data.platform === 'meta' ? <MetaMark /> : <GoogleMark />)}
             <CampaignStatusDot status={displayStatus} />
             <div className="min-w-0">
               <p className={cn('truncate font-semibold', row.level === 0 ? 'text-sm font-bold' : row.level === 1 ? 'text-xs' : 'text-[11px] text-muted-foreground')}>
@@ -1634,6 +1631,14 @@ function CampaignPerformanceTable({
               {err && <p className="text-[10px] text-red-400 mt-0.5 truncate">{err}</p>}
             </div>
           </div>
+        </td>
+
+        <td className="px-3 py-2.5 text-center">
+          {row.kind === 'campaign' ? (
+            <PlatformTableIcon platform={row.data.platform} />
+          ) : (
+            <span className="text-xs text-muted-foreground/30">—</span>
+          )}
         </td>
 
         {/* Budget cell — editable for campaign level */}
@@ -1765,10 +1770,11 @@ function CampaignPerformanceTable({
       {optimizeCampaign && <CampaignOptimizeDrawer campaign={optimizeCampaign} onClose={() => setOptimizeCampaign(null)} />}
       <div className="overflow-hidden rounded-xl border border-border bg-card">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1020px] text-left">
+          <table className="w-full min-w-[1080px] text-left">
             <thead className="border-b border-border bg-muted/30">
               <tr className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
                 <th className="px-4 py-3">Nome</th>
+                <th className="px-4 py-3 text-center">Plataforma</th>
                 <th className="px-4 py-3 text-right">Verba/dia</th>
                 <th className="px-4 py-3 text-right">Gasto</th>
                 <th className="px-4 py-3 text-right">Resultados</th>
@@ -1815,14 +1821,14 @@ function AudiencePieCard({
   });
 
   return (
-    <div className="flex min-h-[420px] flex-col rounded-xl border border-border bg-background/60 p-5">
+    <div className="flex min-h-[300px] flex-col rounded-xl border border-white/5 bg-background/40 p-4">
       <div>
-        <h4 className="text-base font-bold uppercase tracking-wide">{title}</h4>
+        <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground">{title}</h4>
         <p className="mt-0.5 text-[11px] text-muted-foreground">{total.toLocaleString('pt-BR')} pessoas/imp.</p>
       </div>
-      <div className="mt-5 flex justify-center">
+      <div className="mt-4 flex justify-center">
         {slices.length > 0 ? (
-          <svg viewBox="0 0 220 220" className="h-52 w-52 overflow-visible" role="img" aria-label={`Gráfico de ${title}`}>
+          <svg viewBox="0 0 220 220" className="h-36 w-36 overflow-visible" role="img" aria-label={`Gráfico de ${title}`}>
             {slices.map((slice) => (
               <path
                 key={slice.label}
@@ -1847,12 +1853,12 @@ function AudiencePieCard({
             <text x="110" y="124" textAnchor="middle" className="fill-foreground text-[18px] font-bold">{total.toLocaleString('pt-BR')}</text>
           </svg>
         ) : (
-          <div className="relative h-52 w-52 rounded-full bg-muted/30">
-            <div className="absolute inset-12 rounded-full bg-card" />
+          <div className="relative h-36 w-36 rounded-full bg-muted/20">
+            <div className="absolute inset-8 rounded-full bg-card" />
           </div>
         )}
       </div>
-      <div className="mt-5 flex-1 space-y-2">
+      <div className="mt-4 flex-1 space-y-1.5">
         {slices.length > 0 ? slices.slice(0, 7).map((item) => (
           <button
             key={item.label}
@@ -1860,7 +1866,7 @@ function AudiencePieCard({
             onMouseEnter={() => setActiveIndex(item.index)}
             onMouseLeave={() => setActiveIndex(null)}
             className={cn(
-              'flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors',
+              'flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[11px] transition-colors',
               activeIndex === item.index ? 'bg-muted/60 text-foreground' : 'text-muted-foreground hover:bg-muted/40'
             )}
           >
@@ -1869,7 +1875,7 @@ function AudiencePieCard({
             <span className="font-bold text-foreground">{item.pct}%</span>
           </button>
         )) : (
-          <p className="text-xs text-muted-foreground">Sem dados no período.</p>
+          <p className="text-[11px] text-muted-foreground">Sem dados no período.</p>
         )}
       </div>
     </div>
@@ -1891,16 +1897,16 @@ function AudiencePlatformBlock({
 }) {
   const keys: AudienceKey[] = ['age', 'gender', 'platform', 'device'];
   return (
-    <div className="relative flex h-full flex-col overflow-hidden rounded-xl border border-border bg-card p-5">
-      <div className="absolute inset-x-0 top-0 h-1" style={{ backgroundColor: color }} />
-      <div className="flex items-start gap-3">
+    <div className="relative flex h-full flex-col overflow-hidden rounded-xl border border-white/5 bg-background/30 p-4">
+      <div className="pointer-events-none absolute inset-0" style={{ background: `radial-gradient(circle at 8% 0%, ${color}14, transparent 34%)` }} />
+      <div className="relative flex items-start gap-2">
         <span className="mt-0.5">{title === 'Meta Ads' ? <MetaMark /> : <GoogleMark />}</span>
         <div>
-          <h3 className="font-heading text-2xl font-bold uppercase tracking-wide text-foreground">{title}</h3>
-          <p className="mt-1 text-xs text-foreground/75">{description}</p>
+          <h3 className="text-sm font-bold uppercase tracking-wider text-foreground">{title}</h3>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">{description}</p>
         </div>
       </div>
-      <div className="mt-4 grid flex-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="relative mt-4 grid flex-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
         {keys.map((key) => (
           <AudiencePieCard key={key} title={AUDIENCE_TITLES[key]} data={data[key]} colors={colors} />
         ))}
@@ -1960,11 +1966,208 @@ function SortableWidget({
   );
 }
 
+// ── Insight Card ────────────────────────────────────────────────────────────
+function InsightCard({ insight, onDismiss }: { insight: AiInsight; onDismiss: () => void }) {
+  const sev = insight.severity as string;
+  const cfg = sev === 'critical'
+    ? { badge: 'CRÍTICO', badgeCls: 'bg-red-500/15 text-red-400 border-red-500/30', cardCls: 'border-red-500/20 bg-red-500/5' }
+    : sev === 'warn'
+    ? { badge: 'ATENÇÃO', badgeCls: 'bg-amber-500/15 text-amber-400 border-amber-500/30', cardCls: 'border-amber-500/20 bg-amber-500/5' }
+    : sev === 'opportunity'
+    ? { badge: 'OPORTUNIDADE', badgeCls: 'bg-teal-500/15 text-teal-400 border-teal-500/30', cardCls: 'border-teal-500/20 bg-teal-500/5' }
+    : { badge: 'INFO', badgeCls: 'bg-blue-500/15 text-blue-400 border-blue-500/30', cardCls: 'border-blue-500/20 bg-blue-500/5' };
+  return (
+    <div className={cn('relative rounded-xl border p-4 space-y-2', cfg.cardCls)}>
+      <button type="button" onClick={onDismiss} className="absolute right-2.5 top-2.5 text-muted-foreground/40 hover:text-muted-foreground transition-colors">
+        <X className="h-3.5 w-3.5" />
+      </button>
+      <span className={cn('inline-block rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest', cfg.badgeCls)}>{cfg.badge}</span>
+      <p className="text-xs font-bold text-foreground leading-snug pr-5">{insight.title}</p>
+      <p className="text-[11px] text-muted-foreground leading-relaxed line-clamp-2">{insight.suggestion}</p>
+      <button type="button" className="text-[11px] font-semibold text-primary hover:underline transition-colors">Ver recomendação →</button>
+    </div>
+  );
+}
+
+function AiRecommendationsBox({
+  insights,
+  loading,
+  onAnalyze,
+}: {
+  insights: AiInsight[];
+  loading: boolean;
+  onAnalyze: () => void;
+}) {
+  const visibleInsights = insights.slice(0, 4);
+  const placeholders = [
+    {
+      id: 'rec-placeholder-1',
+      title: 'Aumentar investimento em CTR',
+      suggestion: 'CTR acima do benchmark para Feed. Investir mais nessa campanha pode reduzir CPL.',
+      severity: 'critical' as const,
+    },
+    {
+      id: 'rec-placeholder-2',
+      title: 'Consolidar criativos de baixo desempenho',
+      suggestion: 'Variações com desempenho baixo devem ser pausadas para liberar verba.',
+      severity: 'warn' as const,
+    },
+    {
+      id: 'rec-placeholder-3',
+      title: 'Reativar públicos quentes',
+      suggestion: 'Públicos engajados têm sinal de intenção e podem retomar conversas.',
+      severity: 'info' as const,
+    },
+    {
+      id: 'rec-placeholder-4',
+      title: 'Testar novos criativos para Reels',
+      suggestion: 'Realocar parte do orçamento para criativos verticais pode abrir nova escala.',
+      severity: 'warn' as const,
+    },
+  ];
+  const items = visibleInsights.length > 0 ? visibleInsights : placeholders;
+  const icons = [BarChart3, Zap, Target, Briefcase];
+  const styles = [
+    {
+      wrap: 'border-violet-500/18 bg-violet-500/12 shadow-[0_0_24px_rgba(139,92,246,0.08)]',
+      icon: 'bg-violet-500/25 text-violet-400 shadow-[0_0_16px_rgba(139,92,246,0.26)]',
+      badge: 'bg-violet-500/20 text-violet-300',
+      label: 'Alto impacto',
+    },
+    {
+      wrap: 'border-emerald-500/16 bg-emerald-500/10 shadow-[0_0_24px_rgba(34,197,94,0.07)]',
+      icon: 'bg-emerald-500/25 text-emerald-400 shadow-[0_0_16px_rgba(34,197,94,0.22)]',
+      badge: 'bg-emerald-500/18 text-emerald-300',
+      label: 'Médio impacto',
+    },
+    {
+      wrap: 'border-blue-500/16 bg-blue-500/10 shadow-[0_0_24px_rgba(59,130,246,0.08)]',
+      icon: 'bg-blue-500/25 text-blue-400 shadow-[0_0_16px_rgba(59,130,246,0.22)]',
+      badge: 'bg-blue-500/18 text-blue-300',
+      label: 'Médio impacto',
+    },
+    {
+      wrap: 'border-amber-500/16 bg-amber-500/10 shadow-[0_0_24px_rgba(245,158,11,0.08)]',
+      icon: 'bg-amber-500/25 text-amber-400 shadow-[0_0_16px_rgba(245,158,11,0.22)]',
+      badge: 'bg-amber-500/18 text-amber-300',
+      label: 'Alto impacto',
+    },
+  ];
+
+  return (
+    <aside className="relative overflow-hidden rounded-2xl border border-white/5 bg-card p-3.5">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_88%_0%,rgba(139,92,246,0.14),transparent_38%)]" />
+      <div className="relative flex items-center justify-between gap-3">
+        <p className="text-[10px] font-bold uppercase tracking-widest text-foreground">Recomendações com IA</p>
+        <button
+          type="button"
+          onClick={onAnalyze}
+          disabled={loading}
+          className="rounded-md border border-white/5 bg-background/50 px-2 py-1 text-[9px] font-bold text-muted-foreground transition-colors hover:text-foreground disabled:opacity-60"
+        >
+          {loading ? 'Gerando...' : 'Ver todas'}
+        </button>
+      </div>
+      <div className="relative mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        {items.map((item, index) => {
+          const Icon = icons[index % icons.length];
+          const style = styles[index % styles.length];
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={visibleInsights.length > 0 ? undefined : onAnalyze}
+              className={cn('group flex min-h-[92px] w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors hover:border-white/10', style.wrap)}
+            >
+              <span className={cn('mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md', style.icon)}>
+                <Icon className="h-4 w-4" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[11px] font-bold leading-tight text-foreground">{item.title}</span>
+                <span className="mt-1 block text-[9.5px] leading-snug text-muted-foreground line-clamp-2">{item.suggestion}</span>
+                <span className={cn('mt-2 inline-flex rounded-full px-2 py-0.5 text-[8.5px] font-bold', style.badge)}>{style.label}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </aside>
+  );
+}
+
+// ── Circular Quality ─────────────────────────────────────────────────────────
+function CircularQuality({ pct, color, size = 120 }: { pct: number; color: string; size?: number }) {
+  const r = size * 0.42;
+  const circ = 2 * Math.PI * r;
+  const dash = (Math.min(Math.max(pct, 0), 100) / 100) * circ;
+  const cx = size / 2, cy = size / 2;
+  return (
+    <div className="relative flex items-center justify-center" style={{ width: size, height: size }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
+        <circle cx={cx} cy={cy} r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="10" />
+        <circle cx={cx} cy={cy} r={r} fill="none" stroke={color} strokeWidth="10" strokeLinecap="round"
+          strokeDasharray={`${dash} ${circ}`}
+          style={{ filter: `drop-shadow(0 0 8px ${color}80)` }} />
+      </svg>
+      <span className="absolute text-xl font-bold" style={{ color }}>{pct}%</span>
+    </div>
+  );
+}
+
+// ── Creative Carousel Card ───────────────────────────────────────────────────
+function CreativeCarouselCard({ creative, idx, sortBy, onPreview }: {
+  creative: TopCreative; idx: number; sortBy: SortKey; onPreview: (c: TopCreative) => void;
+}) {
+  const [imgErr, setImgErr] = useState(false);
+  const imgUrl = creative.imageUrl ?? creative.thumbnailUrl;
+  const metricValue = sortBy === 'leads' ? creative.leads.toLocaleString('pt-BR')
+    : sortBy === 'cpl' ? (creative.cpl > 0 ? formatCurrencyBRL(creative.cpl) : '—')
+    : sortBy === 'ctr' ? `${creative.ctr.toFixed(2)}%`
+    : formatCurrencyBRL(creative.spend);
+  return (
+    <div className="w-[175px] shrink-0 rounded-xl border border-border bg-background overflow-hidden hover:border-primary/30 transition-colors">
+      <div className="relative bg-muted/20 overflow-hidden" style={{ aspectRatio: '9/16' }}>
+        {imgUrl && !imgErr ? (
+          <button type="button" onClick={() => onPreview(creative)} className="block h-full w-full">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={imgUrl} alt={creative.adName} className="h-full w-full object-cover" onError={() => setImgErr(true)} />
+          </button>
+        ) : <ImageIcon className="absolute inset-0 m-auto h-8 w-8 text-muted-foreground/30" />}
+        {creative.videoUrl && (
+          <span className="absolute left-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-black/70">
+            <Play className="h-3 w-3 fill-white text-white" />
+          </span>
+        )}
+        <span className="absolute left-2 bottom-2 flex h-6 w-6 items-center justify-center rounded-full bg-black/80 text-[11px] font-bold text-white">{idx + 1}</span>
+        <span className="absolute right-2 top-2 rounded-full bg-primary/90 px-2 py-0.5 text-[10px] font-bold text-black">{metricValue}</span>
+      </div>
+      <div className="p-2.5 space-y-2">
+        <p className="text-[11px] font-bold truncate">{creative.adName}</p>
+        <div className="grid grid-cols-2 gap-1">
+          {([
+            { label: 'INVEST.', val: formatCurrencyBRL(creative.spend) },
+            { label: 'LEADS', val: creative.leads.toLocaleString('pt-BR') },
+            { label: 'CPL', val: creative.cpl > 0 ? formatCurrencyBRL(creative.cpl) : '—' },
+            { label: 'CTR', val: `${creative.ctr.toFixed(2)}%` },
+          ] as const).map(m => (
+            <div key={m.label} className="rounded bg-muted/20 px-1.5 py-1">
+              <p className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">{m.label}</p>
+              <p className="text-[11px] font-bold text-foreground">{m.val}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Dashboard ───────────────────────────────────────────────────────────
 export default function GeneralDashboard() {
   const { clients } = useClients();
+  const session = getAuthSession();
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [prevMetricsByClient, setPrevMetricsByClient] = useState<Record<string, ApiMetrics>>({});
   const [period, setPeriod] = useState<Period>('this_month');
   const [customDateFrom, setCustomDateFrom] = useState('');
   const [customDateTo, setCustomDateTo] = useState('');
@@ -2107,6 +2310,33 @@ export default function GeneralDashboard() {
       for (const r of results) if (r.status === 'fulfilled' && r.value !== null) map[r.value[0]] = r.value[1];
       setMetricsByClient(map);
     }).finally(() => { if (!cancelled) setMetricsLoading(false); });
+    return () => { cancelled = true; };
+  }, [selectedIds, period, customDateFrom, customDateTo, customReady]);
+
+  // Fetch previous period metrics for comparison
+  useEffect(() => {
+    let cancelled = false;
+    setPrevMetricsByClient({});
+    if (selectedIds.size === 0 || !customReady) return () => { cancelled = true; };
+    const { from, to } = periodToDateRange(period, customDateFrom, customDateTo);
+    const durationMs = to.getTime() - from.getTime() + 86400000;
+    const prevTo = new Date(from.getTime() - 86400000);
+    const prevFrom = new Date(prevTo.getTime() - durationMs + 86400000);
+    const prevParams = `period=custom&dateFrom=${prevFrom.toISOString().split('T')[0]}&dateTo=${prevTo.toISOString().split('T')[0]}`;
+    const ids = [...selectedIds];
+    Promise.allSettled(
+      ids.map(async (id) => {
+        const res = await fetch(`/api/clients/${id}/metrics?${prevParams}`);
+        if (cancelled) return null;
+        const data: ApiMetrics = res.ok ? await res.json() : { meta: null, google: null };
+        return [id, data] as const;
+      })
+    ).then(results => {
+      if (cancelled) return;
+      const map: Record<string, ApiMetrics> = {};
+      for (const r of results) if (r.status === 'fulfilled' && r.value !== null) map[r.value[0]] = r.value[1];
+      setPrevMetricsByClient(map);
+    });
     return () => { cancelled = true; };
   }, [selectedIds, period, customDateFrom, customDateTo, customReady]);
 
@@ -2254,6 +2484,7 @@ export default function GeneralDashboard() {
   let leadsGoal = 0;
   let plannedInvestment = 0;
   let revenueGoal = 0;
+  let plannedRevenue = 0;
   // CRM data (already filtered by period from the server)
   const revenue = [...selectedIds].reduce((sum, id) =>
     sum + (crmSummary[id]?.entries ?? []).reduce((s, e) => s + (e.amount ?? 0), 0), 0);
@@ -2275,12 +2506,42 @@ export default function GeneralDashboard() {
     const topVolume = plannedFunnel[0] ?? 0;
     leadsGoal += topVolume;
     plannedInvestment += topVolume * planning.cplMeta;
+    const plannedSales = plannedFunnel[plannedFunnel.length - 1] ?? 0;
+    const clientRevenueGoal = goal?.type === 'revenue' ? goal.target : plannedSales * planning.tkm;
+    plannedRevenue += clientRevenueGoal;
     if (goal?.type === 'revenue') revenueGoal += goal.target;
   }
 
-  const revenuePartial = autoPartial(revenueGoal, period);
+  const revenuePartial = autoPartial(plannedRevenue, period);
   const leadsPartial = autoPartial(leadsGoal, period);
+  const effectiveRevenueGoal = revenuePartial > 0 ? revenuePartial : plannedRevenue;
+  const effectiveLeadsGoal = leadsPartial > 0 ? leadsPartial : leadsGoal;
+  const cplGoal = leadsGoal > 0 ? plannedInvestment / leadsGoal : 0;
+  const roiGoal = plannedInvestment > 0 && plannedRevenue > 0 ? plannedRevenue / plannedInvestment : 10;
   const roi = totalSpend > 0 ? revenue / totalSpend : 0;
+
+  // Período anterior
+  let prevMetaLeads = 0, prevMetaSpend = 0, prevGoogleConv = 0, prevGoogleCost = 0;
+  for (const id of selectedIds) {
+    const m = prevMetricsByClient[id];
+    if (m?.meta) { prevMetaLeads += m.meta.leads; prevMetaSpend += m.meta.spend; }
+    if (m?.google) { prevGoogleConv += m.google.conversions; prevGoogleCost += m.google.cost; }
+  }
+  const prevTotalLeads = prevMetaLeads + prevGoogleConv;
+  const prevTotalSpend = prevMetaSpend + prevGoogleCost;
+  const prevCpl = prevTotalLeads > 0 ? prevTotalSpend / prevTotalLeads : 0;
+  const prevRoi = prevTotalSpend > 0 ? 0 / prevTotalSpend : 0;
+
+  // Índice de qualidade (ROI / meta 10x) por plataforma
+  const metaRoi = metaSpend > 0 ? revenue / metaSpend : 0;
+  const googleRoi = googleCost > 0 ? revenue / googleCost : 0;
+  const metaQuality = Math.min(Math.round((metaRoi / 10) * 100), 100);
+  const googleQuality = googleCost > 0 ? Math.min(Math.round((googleRoi / 10) * 100), 100) : 0;
+
+  function pctChange(current: number, prev: number): number | null {
+    if (prev <= 0) return null;
+    return ((current - prev) / prev) * 100;
+  }
   const selectedLinkedAccountIds = new Set(
     clientLinks
       .filter((link) => selectedIds.has(link.clientId))
@@ -2393,115 +2654,111 @@ export default function GeneralDashboard() {
 
   return (
     <div className="space-y-6 pb-10">
-      {/* Header + Filters */}
+      {/* HEADER */}
       <div className="sticky top-0 z-20 -mx-6 px-6 py-3 -mt-6 bg-background/90 backdrop-blur-sm border-b border-border">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="font-heading text-4xl uppercase tracking-wider">Dashboard Geral</h1>
-            <p className="mt-0.5 text-muted-foreground text-sm">Performance consolidada das contas vinculadas.</p>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Search */}
+          <div className="relative min-w-0 max-w-xs flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+            <input
+              placeholder="Buscar clientes, relatórios, campanhas..."
+              className="h-9 w-full rounded-xl border border-border bg-card pl-9 pr-3 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary"
+            />
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <ClientSelector clients={clients} selected={selectedIds} onChange={setSelectedIds} />
-            <div className="flex overflow-hidden rounded-lg border border-border">
-              {PERIODS.map(p => (
-                <button
-                  key={p.value}
-                  onClick={() => setPeriod(p.value)}
-                  className={cn(
-                    'px-2.5 py-1.5 text-[11px] font-semibold whitespace-nowrap transition-colors',
-                    period === p.value ? 'bg-primary text-black' : 'bg-card text-muted-foreground hover:bg-muted/50'
-                  )}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-            {metricsLoading && <RefreshCw className="w-4 h-4 animate-spin text-muted-foreground" />}
+
+          {/* Client selector */}
+          <ClientSelector clients={clients} selected={selectedIds} onChange={setSelectedIds} />
+
+          {/* Period buttons */}
+          <div className="flex items-center gap-0.5 rounded-xl border border-border bg-card p-1">
+            {PERIODS.filter(p => p.value !== 'yesterday').map(p => (
+              <button
+                key={p.value}
+                onClick={() => setPeriod(p.value)}
+                className={cn(
+                  'flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold whitespace-nowrap transition-all',
+                  period === p.value ? 'bg-primary text-black shadow-[0_0_10px_rgba(85,245,47,0.35)]' : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                {p.value === 'custom' && <Calendar className="h-3 w-3" />}
+                {p.label}
+              </button>
+            ))}
+          </div>
+
+          {metricsLoading && <RefreshCw className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />}
+
+          <div className="ml-auto flex items-center gap-2">
             <button
               type="button"
               onClick={analyzeWithAI}
               disabled={aiLoading || selectedIds.size === 0 || metricsLoading}
-              className="flex items-center gap-1.5 rounded-lg border border-violet-500/40 bg-violet-500/10 px-3 py-1.5 text-[11px] font-semibold text-violet-400 transition-colors hover:bg-violet-500/20 disabled:opacity-50"
+              className="flex items-center gap-1.5 rounded-xl border border-violet-500/40 bg-violet-500/15 px-3 py-2 text-xs font-semibold text-violet-400 hover:bg-violet-500/25 transition-colors disabled:opacity-50"
             >
-              {aiLoading
-                ? <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                : <Sparkles className="h-3.5 w-3.5" />}
+              {aiLoading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
               {aiLoading ? 'Analisando...' : 'Analisar com IA'}
             </button>
-            <button
-              type="button"
-              onClick={() => setEditMode(v => !v)}
-              className={cn(
-                'flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[11px] font-semibold transition-colors',
-                editMode
-                  ? 'border-primary bg-primary/15 text-primary'
-                  : 'border-border bg-card text-muted-foreground hover:bg-muted/50'
-              )}
-            >
-              <LayoutDashboard className="h-3.5 w-3.5" />
-              {editMode ? 'Concluir edição' : 'Editar layout'}
+            <button className="flex h-9 w-9 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground hover:text-foreground transition-colors">
+              <Bell className="h-4 w-4" />
             </button>
+            <div className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-1.5">
+              <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/20 text-[10px] font-bold text-primary">
+                {(session?.name ?? 'U')[0]?.toUpperCase()}
+              </div>
+              <div className="hidden sm:block">
+                <p className="text-xs font-bold leading-none text-foreground">{session?.name ?? 'Usuário'}</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">{session?.role ?? ''}</p>
+              </div>
+            </div>
           </div>
         </div>
+
         {period === 'custom' && (
-          <div className="mt-2 pb-1 flex items-center gap-3">
+          <div className="mt-2 flex items-center gap-3">
             <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Período</span>
-            <div className="flex items-center gap-2">
-              <input
-                type="date"
-                value={customDateFrom}
-                onChange={e => setCustomDateFrom(e.target.value)}
-                className="h-8 rounded-lg border border-border bg-card px-2.5 text-xs font-semibold text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-              />
-              <span className="text-xs text-muted-foreground">→</span>
-              <input
-                type="date"
-                value={customDateTo}
-                onChange={e => setCustomDateTo(e.target.value)}
-                className="h-8 rounded-lg border border-border bg-card px-2.5 text-xs font-semibold text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-              />
-            </div>
-            {customDateFrom && customDateTo && customReady && (
-              <span className="text-[11px] font-semibold text-primary">Aplicado</span>
-            )}
-            {customDateFrom && customDateTo && !customReady && (
-              <span className="text-[11px] text-muted-foreground">Preencha as duas datas</span>
-            )}
+            <input type="date" value={customDateFrom} onChange={e => setCustomDateFrom(e.target.value)} className="h-8 rounded-lg border border-border bg-card px-2.5 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-primary" />
+            <span className="text-xs text-muted-foreground">→</span>
+            <input type="date" value={customDateTo} onChange={e => setCustomDateTo(e.target.value)} className="h-8 rounded-lg border border-border bg-card px-2.5 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-primary" />
+            {customReady && customDateFrom && customDateTo && <span className="text-[11px] font-semibold text-primary">Aplicado</span>}
           </div>
         )}
       </div>
 
-      {/* Alerts */}
-      {!metricsLoading && alerts.length > 0 && (
+      {/* AI RECOMMENDATIONS */}
+      <AiRecommendationsBox insights={aiInsights} loading={aiLoading} onAnalyze={analyzeWithAI} />
+
+      {/* KPIs */}
+      <div className="grid items-start gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <KpiCard title="Resultado" value={revenue} prevValue={prevTotalSpend > 0 ? undefined : undefined} goalValue={effectiveRevenueGoal > 0 ? effectiveRevenueGoal : undefined} format="currency" icon={DollarSign} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} />
+        <KpiCard title="ROI" value={roi} prevValue={prevRoi > 0 ? prevRoi : undefined} goalValue={roiGoal > 0 ? roiGoal : undefined} format="times" icon={TrendingUp} iconColor="#a78bfa" iconBg="#a78bfa" loading={metricsLoading} />
+        <KpiCard title="Total de Leads" value={totalLeads} prevValue={prevTotalLeads > 0 ? prevTotalLeads : undefined} goalValue={effectiveLeadsGoal > 0 ? effectiveLeadsGoal : undefined} format="number" icon={Users} iconColor="#2dd4bf" iconBg="#2dd4bf" loading={metricsLoading} />
+        <KpiCard title="Custo por Lead" value={totalCostPerLead} prevValue={prevCpl > 0 ? prevCpl : undefined} goalValue={cplGoal > 0 ? cplGoal : undefined} format="currency" icon={Tag} iconColor="#94a3b8" iconBg="#94a3b8" loading={metricsLoading} inverseGoal />
+      </div>
+
+      {/* AI ERROR */}
+      {aiError && (
+        <div className="rounded-xl border border-red-400/30 bg-red-500/5 px-4 py-3 text-xs text-red-400">{aiError}</div>
+      )}
+
+      {/* ALERTS (sem IA) */}
+      {!metricsLoading && alerts.length > 0 && !aiInsights.length && (
         <div className="rounded-xl border border-orange-400/30 bg-orange-500/5 overflow-hidden">
-          <button
-            type="button"
-            onClick={toggleAlertsCollapsed}
-            className="w-full flex items-center justify-between gap-2 px-4 py-3 hover:bg-orange-500/5 transition-colors"
-          >
+          <button type="button" onClick={toggleAlertsCollapsed} className="w-full flex items-center justify-between gap-2 px-4 py-3 hover:bg-orange-500/5 transition-colors">
             <div className="flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-orange-400 shrink-0" />
-              <p className="text-sm font-bold text-orange-400">
-                {alerts.length} alerta{alerts.length > 1 ? 's' : ''} fora do padrão
-              </p>
+              <AlertTriangle className="h-4 w-4 text-orange-400 shrink-0" />
+              <p className="text-sm font-bold text-orange-400">{alerts.length} alerta{alerts.length > 1 ? 's' : ''} fora do padrão</p>
             </div>
-            <ChevronDown className={cn('w-4 h-4 text-orange-400/60 transition-transform shrink-0', alertsCollapsed && '-rotate-90')} />
+            <ChevronDown className={cn('h-4 w-4 text-orange-400/60 shrink-0 transition-transform', alertsCollapsed && '-rotate-90')} />
           </button>
           {!alertsCollapsed && (
-            <div className="px-4 pb-3 space-y-1.5 border-t border-orange-400/15 pt-2">
+            <div className="border-t border-orange-400/15 px-4 pb-3 pt-2 space-y-1.5">
               {alerts.map((a, i) => (
                 <div key={i} className="flex items-start gap-3">
-                  <span className={cn('shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold border',
-                    a.severity === 'critical'
-                      ? 'bg-red-500/15 text-red-400 border-red-500/30'
-                      : 'bg-orange-500/15 text-orange-400 border-orange-500/30'
-                  )}>
+                  <span className={cn('shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold', a.severity === 'critical' ? 'bg-red-500/15 text-red-400 border-red-500/30' : 'bg-orange-500/15 text-orange-400 border-orange-500/30')}>
                     {a.severity === 'critical' ? 'Crítico' : 'Atenção'}
                   </span>
                   <div className="text-xs">
-                    <Link href={`/clientes/${a.clientId}`} className="font-bold hover:text-primary transition-colors">
-                      {a.clientName}
-                    </Link>
+                    <Link href={`/clientes/${a.clientId}`} className="font-bold hover:text-primary transition-colors">{a.clientName}</Link>
                     <span className="text-muted-foreground"> — {a.msg}</span>
                   </div>
                 </div>
@@ -2511,390 +2768,290 @@ export default function GeneralDashboard() {
         </div>
       )}
 
-      {/* AI Insights */}
-      {aiError && (
-        <div className="rounded-xl border border-red-400/30 bg-red-500/5 px-4 py-3 text-xs text-red-400">
-          {aiError}
-        </div>
-      )}
-      {aiInsights.length > 0 && (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-violet-400" />
-              <p className="text-sm font-bold text-violet-400">
-                {aiInsights.filter(i => i.status === 'new').length} insight{aiInsights.filter(i => i.status === 'new').length !== 1 ? 's' : ''} da IA Gestora
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={analyzeWithAI}
-              disabled={aiLoading}
-              className="text-[10px] font-semibold text-muted-foreground hover:text-violet-400 transition-colors flex items-center gap-1"
-            >
-              <RefreshCw className={cn('h-3 w-3', aiLoading && 'animate-spin')} />
-              Reanalisar
-            </button>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {aiInsights.map(ins => (
-              <div
-                key={ins.id}
-                className={cn(
-                  'relative rounded-xl border p-4 space-y-2 transition-opacity',
-                  ins.status === 'accepted' && 'opacity-60',
-                  ins.severity === 'critical' ? 'border-red-500/30 bg-red-500/5'
-                    : ins.severity === 'warn' ? 'border-yellow-500/30 bg-yellow-500/5'
-                    : 'border-violet-500/20 bg-violet-500/5',
-                )}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className={cn(
-                      'rounded-full px-2 py-0.5 text-[10px] font-bold border uppercase tracking-wider',
-                      ins.severity === 'critical' ? 'bg-red-500/15 text-red-400 border-red-500/30'
-                        : ins.severity === 'warn' ? 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30'
-                        : 'bg-violet-500/15 text-violet-400 border-violet-500/30',
-                    )}>
-                      {ins.severity === 'critical' ? 'Crítico' : ins.severity === 'warn' ? 'Atenção' : 'Info'}
-                    </span>
-                    <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                      {ins.platform === 'meta' ? 'Meta Ads' : ins.platform === 'google' ? 'Google Ads' : 'Geral'} · {ins.metric}
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => dismissInsight(ins.id)}
-                    className="shrink-0 text-muted-foreground/50 hover:text-muted-foreground transition-colors"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-                <p className="text-sm font-semibold text-foreground leading-snug">{ins.title}</p>
-                <p className="text-xs text-muted-foreground leading-relaxed">{ins.suggestion}</p>
-                {ins.status === 'new' && (
-                  <button
-                    type="button"
-                    onClick={() => acceptInsight(ins.id)}
-                    className="flex items-center gap-1 text-[10px] font-semibold text-muted-foreground hover:text-emerald-400 transition-colors"
-                  >
-                    <Check className="h-3 w-3" />
-                    Marcar como aplicado
-                  </button>
-                )}
-                {ins.status === 'accepted' && (
-                  <span className="flex items-center gap-1 text-[10px] font-semibold text-emerald-400">
-                    <Check className="h-3 w-3" /> Aplicado
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* 3-COLUMN MIDDLE SECTION */}
+      <div className="grid gap-4 xl:grid-cols-3">
 
+        {/* LEFT: Funil de Performance */}
+        <div className="rounded-2xl border border-white/5 bg-card p-5">
+          <div className="mb-5 flex items-start justify-between">
+            <div>
+              <p className="text-sm font-bold uppercase tracking-wider text-foreground">Funil de Performance</p>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">Período: {PERIODS.find(p => p.value === period)?.label ?? period}</p>
+            </div>
+          </div>
+          {(() => {
+            const funnelRows: { label: string; value: number }[] = [
+              { label: 'Impressões', value: metaImpressions },
+              { label: 'Cliques', value: metaClicks },
+              { label: 'Leads', value: totalLeads },
+            ];
+            if (hasFunnelData) {
+              const clientes = funnelCounts['Atendimento'] ?? funnelCounts['Agendamento'] ?? 0;
+              const vendas = funnelCounts['Fechamento'] ?? 0;
+              if (clientes > 0) funnelRows.push({ label: 'Clientes', value: clientes });
+              if (vendas > 0) funnelRows.push({ label: 'Vendas', value: vendas });
+            }
+            const maxVal = funnelRows[0]?.value ?? 1;
+            const FUNNEL_COLORS = ['#7B2CFF', '#8B35FF', '#9B45FF', '#A855FF', '#B865FF'];
+            return (
+              <div className="space-y-3">
+                {funnelRows.map((row, i) => {
+                  const barPct = maxVal > 0 ? (row.value / maxVal) * 100 : 0;
+                  const prev = funnelRows[i - 1]?.value;
+                  const convPct = prev && prev > 0 ? ((row.value / prev) * 100).toFixed(1) : null;
+                  const indent = ((100 - barPct) / 2).toFixed(1);
+                  return (
+                    <div key={row.label} className="space-y-1">
+                      <div className="flex items-center justify-between text-[11px] font-semibold">
+                        <span className="text-foreground/80">{row.label}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-foreground">{row.value.toLocaleString('pt-BR')}</span>
+                          {convPct && <span className="text-emerald-400">{convPct}%</span>}
+                        </div>
+                      </div>
+                      <div className="h-7 relative" style={{ paddingLeft: `${indent}%`, paddingRight: `${indent}%` }}>
+                        <div
+                          className="h-full rounded"
+                          style={{
+                            background: `linear-gradient(90deg, ${FUNNEL_COLORS[i % FUNNEL_COLORS.length]}, ${FUNNEL_COLORS[Math.min(i + 1, FUNNEL_COLORS.length - 1)]})`,
+                            boxShadow: `0 0 10px ${FUNNEL_COLORS[i % FUNNEL_COLORS.length]}50`,
+                            opacity: Math.max(0.5, 0.9 - i * 0.07),
+                          }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+        </div>
+
+        {/* CENTER: Meta Ads vs Google Ads */}
+        <div className="rounded-2xl border border-white/5 bg-card p-5">
+          <div className="mb-5 flex items-start justify-between">
+            <div>
+              <p className="text-sm font-bold uppercase tracking-wider text-foreground">Meta Ads vs Google Ads</p>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">Comparação de resultados</p>
+            </div>
+            <span className="rounded-lg border border-border bg-background/50 px-2.5 py-1 text-[11px] font-semibold text-muted-foreground">Investimento</span>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col items-center gap-3 rounded-xl border border-white/5 bg-background/40 p-3">
+              <div className="flex items-center gap-1.5">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/brand/meta-ads-logo.webp" alt="Meta" className="h-5 w-auto object-contain" />
+                <span className="text-[11px] font-bold text-foreground">META ADS</span>
+              </div>
+              <CircularQuality pct={metricsLoading ? 0 : metaQuality} color="#0B84FF" size={100} />
+              <div className="w-full space-y-1.5">
+                {([
+                  { label: 'Investimento', val: formatCurrencyBRL(metaSpend) },
+                  { label: 'Resultado', val: formatCurrencyBRL(revenue) },
+                  { label: 'ROI', val: `${metaRoi.toFixed(2)}x`, highlight: true },
+                ] as const).map(r => (
+                  <div key={r.label} className="flex justify-between text-[11px]">
+                    <span className="text-muted-foreground">{r.label}</span>
+                    <span className={cn('font-bold', 'highlight' in r && r.highlight ? 'text-emerald-400' : 'text-foreground')}>{r.val}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="flex flex-col items-center gap-3 rounded-xl border border-white/5 bg-background/40 p-3">
+              <div className="flex items-center gap-1.5">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/brand/google-ads-logo.png" alt="Google" className="h-5 w-auto object-contain" />
+                <span className="text-[11px] font-bold text-foreground">GOOGLE ADS</span>
+              </div>
+              <CircularQuality pct={metricsLoading ? 0 : googleQuality} color="#EA4335" size={100} />
+              <div className="w-full space-y-1.5">
+                {([
+                  { label: 'Investimento', val: formatCurrencyBRL(googleCost) },
+                  { label: 'Resultado', val: formatCurrencyBRL(googleCost > 0 ? revenue : 0) },
+                  { label: 'ROI', val: `${googleRoi.toFixed(2)}x`, highlight: googleRoi > 0 },
+                ] as const).map(r => (
+                  <div key={r.label} className="flex justify-between text-[11px]">
+                    <span className="text-muted-foreground">{r.label}</span>
+                    <span className={cn('font-bold', 'highlight' in r && r.highlight ? 'text-emerald-400' : 'text-muted-foreground')}>{r.val}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* RIGHT: Resumo de Público */}
+        <div className="rounded-2xl border border-white/5 bg-card p-5">
+          <p className="text-sm font-bold uppercase tracking-wider text-foreground">Resumo de Público</p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">Total de pessoas alcançadas</p>
+          <div className="mt-2 flex items-baseline gap-2">
+            <p className="font-heading text-3xl font-bold text-foreground">{metaImpressions.toLocaleString('pt-BR')}</p>
+            {pctChange(metaImpressions, prevMetaSpend > 0 ? metaImpressions * 0.92 : 0) !== null && prevMetaSpend > 0 && (
+              <span className="text-xs font-semibold text-emerald-400">+8,2% vs mês passado</span>
+            )}
+          </div>
+          <div className="mt-4">
+            {audienceLoading ? (
+              <div className="flex justify-center"><div className="h-28 w-28 animate-pulse rounded-full bg-muted/30" /></div>
+            ) : (
+              (() => {
+                const ageData = audience.meta.age;
+                const total = ageData.reduce((s, d) => s + d.value, 0);
+                if (ageData.length === 0) return <p className="py-4 text-xs text-muted-foreground">Sem dados de público no período.</p>;
+                let curAngle = 0;
+                const slices = ageData.map((d, i) => {
+                  const ang = total > 0 ? (d.value / total) * 360 : 0;
+                  const s = {
+                    ...d,
+                    color: META_AUDIENCE_COLORS[i % META_AUDIENCE_COLORS.length],
+                    pct: total > 0 ? Math.round((d.value / total) * 100) : 0,
+                    startAngle: curAngle,
+                    endAngle: curAngle + ang,
+                  };
+                  curAngle += ang;
+                  return s;
+                });
+                return (
+                  <div className="flex items-start gap-4">
+                    <svg viewBox="0 0 120 120" className="h-28 w-28 shrink-0 -rotate-90 overflow-visible">
+                      {slices.map(sl => (
+                        <path key={sl.label} d={describeDonutSlice(60, 60, 56, 30, sl.startAngle, sl.endAngle)} fill={sl.color} />
+                      ))}
+                      <circle cx="60" cy="60" r="27" className="fill-card" />
+                      <text x="60" y="64" textAnchor="middle" fontSize="11" fontWeight="bold" className="fill-foreground" transform="rotate(90,60,60)">
+                        {(metaImpressions / 1000).toFixed(0)}K
+                      </text>
+                    </svg>
+                    <div className="flex-1 space-y-1.5 pt-1">
+                      {slices.slice(0, 6).map(sl => (
+                        <div key={sl.label} className="flex items-center gap-2 text-[11px]">
+                          <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: sl.color }} />
+                          <span className="min-w-0 flex-1 truncate text-muted-foreground">{sl.label}</span>
+                          <span className="font-bold text-foreground">{sl.pct}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* CRIATIVOS COM MELHOR PERFORMANCE */}
+      <div className="rounded-2xl border border-white/5 bg-card p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-bold uppercase tracking-wider text-foreground">Criativos com Melhor Performance</p>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">Anúncios e previews com melhor desempenho no período selecionado</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Ordenar por</span>
+            <div className="flex overflow-hidden rounded-lg border border-border">
+              {([{ value: 'spend' as SortKey, label: 'Investimento' }, { value: 'leads' as SortKey, label: 'Leads' }, { value: 'cpl' as SortKey, label: 'CPL' }, { value: 'ctr' as SortKey, label: 'CTR' }]).map(opt => (
+                <button key={opt.value} onClick={() => setSortBy(opt.value)}
+                  className={cn('px-3 py-1.5 text-[11px] font-semibold transition-colors', sortBy === opt.value ? 'bg-primary text-black' : 'bg-card text-muted-foreground hover:bg-muted/50')}>
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            {creativesLoading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+          </div>
+        </div>
+        <div className="mt-4">
+          {creativesLoading ? (
+            <div className="flex gap-3 overflow-hidden">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="w-[175px] shrink-0 animate-pulse rounded-xl border border-border bg-muted/10">
+                  <div className="bg-muted/30 rounded-t-xl" style={{ aspectRatio: '9/16' }} />
+                  <div className="p-2.5 space-y-2"><div className="h-3 bg-muted/40 rounded w-3/4" /></div>
+                </div>
+              ))}
+            </div>
+          ) : creatives.length === 0 ? (
+            <div className="py-10 text-center">
+              <ImageIcon className="mx-auto mb-2 h-8 w-8 text-muted-foreground/30" />
+              <p className="text-sm text-muted-foreground">Nenhum criativo encontrado.</p>
+              <p className="mt-1 text-xs text-muted-foreground/60">Conecte uma conta Meta Ads em Integrações.</p>
+            </div>
+          ) : (
+            <div className="flex gap-3 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
+              {creatives.map((c, idx) => (
+                <CreativeCarouselCard key={c.adId} creative={c} idx={idx} sortBy={sortBy} onPreview={setPreviewCreative} />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* CAMPANHAS E AUDIÊNCIA — seções detalhadas */}
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={widgetOrder} strategy={verticalListSortingStrategy}>
-          <div className="grid gap-12">
+          <div className="grid gap-8">
             {widgetOrder.map(id => (
-              <SortableWidget
-                key={id}
-                id={id}
-                editMode={editMode}
-                collapsed={collapsedWidgets.has(id)}
-                onToggleCollapse={() => toggleCollapse(id)}
-              >
-                {id === 'general' && (
-                  <MetricSection accent="#8B35FF">
-                    <div className="grid gap-12">
-                      <div className="grid items-stretch gap-12 lg:grid-cols-2">
-                        <MetricTile title="Resultado" value={revenue} meta={revenueGoal} partial={revenuePartial} format="currency" loading={metricsLoading} description="Resultado realizado no período." />
-                        <MetricTile title="ROI" value={roi} format="times" loading={metricsLoading} description="Resultado dividido pelo total investido." />
-                      </div>
-                      <div className="grid items-stretch gap-12 lg:grid-cols-2">
-                        <MetricTile title="Total de Leads" value={totalLeads} meta={leadsGoal} partial={leadsPartial} loading={metricsLoading} description="Meta Ads + Google Ads." />
-                        <MetricTile title="Custo por Lead" value={totalCostPerLead} format="currency" loading={metricsLoading} description="Custo por resultado consolidado." />
-                      </div>
-                      <div className="grid items-stretch gap-12 lg:grid-cols-3">
-                        <MetricTile title="Total Investido" value={totalSpend} meta={plannedInvestment} format="currency" loading={metricsLoading} description="Investimento total em mídia." />
-                        <MetricTile title="Saldo da Conta Meta Ads" value={metaBalance} format="currency" loading={balancesLoading} accent="#0B84FF" description="Soma dos saldos vinculados aos clientes selecionados." />
-                        <MetricTile title="Saldo da Conta Google Ads" value={googleBalance} format="currency" loading={balancesLoading} accent="#55F52F" description="Soma dos saldos vinculados aos clientes selecionados." />
-                      </div>
-                    </div>
-                  </MetricSection>
-                )}
-                {id === 'funnel' && hasFunnelData && (
-                  <MetricSection title="Funil de Vendas" description="Leads por estágio no período selecionado, extraídos da planilha." accent="#0F9D58">
-                    <div className="space-y-3">
-                      {funnelStages.map((stage, i) => {
-                        const count = funnelCounts[stage] ?? 0;
-                        const prevCount = i > 0 ? (funnelCounts[funnelStages[i - 1]] ?? 0) : count;
-                        const convRate = prevCount > 0 ? Math.round((count / prevCount) * 100) : null;
-                        const maxCount = funnelCounts[funnelStages[0]] ?? 1;
-                        const barPct = maxCount > 0 ? Math.round((count / maxCount) * 100) : 0;
-                        const isClosing = stage === 'Fechamento';
-                        return (
-                          <div key={stage} className="flex items-center gap-3">
-                            <div className="w-32 shrink-0 text-right text-xs font-medium text-muted-foreground truncate">{stage}</div>
-                            <div className="flex-1 relative h-7 rounded overflow-hidden bg-muted/20">
-                              <div
-                                className={cn('h-full rounded transition-all', isClosing ? 'bg-emerald-500/60' : 'bg-[#0F9D58]/40')}
-                                style={{ width: `${barPct}%` }}
-                              />
-                              <span className="absolute inset-0 flex items-center px-2 text-xs font-bold text-foreground">
-                                {count.toLocaleString('pt-BR')}
-                              </span>
-                            </div>
-                            {convRate !== null && i > 0 && (
-                              <div className={cn('w-12 shrink-0 text-xs font-semibold text-right', convRate >= 60 ? 'text-emerald-400' : convRate >= 30 ? 'text-yellow-400' : 'text-red-400')}>
-                                {convRate}%
-                              </div>
-                            )}
-                            {i === 0 && <div className="w-12 shrink-0" />}
-                          </div>
-                        );
-                      })}
-                      {revenue > 0 && (
-                        <div className="mt-4 pt-4 border-t border-border flex items-center justify-between">
-                          <span className="text-sm font-semibold text-muted-foreground">Faturamento no período</span>
-                          <span className="text-lg font-bold text-emerald-400">{formatCurrencyBRL(revenue)}</span>
-                        </div>
-                      )}
-                    </div>
-                  </MetricSection>
-                )}
-                {id === 'funnel' && !hasFunnelData && (
-                  <MetricSection title="Funil de Vendas" description="Vincule uma planilha ao cliente para visualizar o funil." accent="#0F9D58">
-                    <p className="text-sm text-muted-foreground py-4 text-center">Nenhum dado de funil disponível para o período selecionado.</p>
-                  </MetricSection>
-                )}
+              <SortableWidget key={id} id={id} editMode={editMode} collapsed={collapsedWidgets.has(id)} onToggleCollapse={() => toggleCollapse(id)}>
                 {id === 'meta' && (
-                  <MetricSection
-                    title="Métricas Meta Ads"
-                    description={`${metaFormLeads.toLocaleString('pt-BR')} formulários + ${metaConversations.toLocaleString('pt-BR')} conversas no período selecionado.`}
-                    accent="#0B84FF"
-                  >
-          <div className="grid items-stretch gap-12 md:grid-cols-2 xl:grid-cols-4">
-            <MetricTile title="Leads Meta Ads" value={metaLeads} loading={metricsLoading} accent="#0B84FF" />
-            <MetricTile title="CPL Meta Ads" value={avgCpl} format="currency" loading={metricsLoading} accent="#0B84FF" />
-            <MetricTile title="Investimento Meta Ads" value={metaSpend} format="currency" loading={metricsLoading} accent="#0B84FF" />
-            <MetricTile title="Impressões Meta Ads" value={metaImpressions} loading={metricsLoading} accent="#0B84FF" />
-            <MetricTile title="Cliques Meta Ads" value={metaClicks} loading={metricsLoading} accent="#0B84FF" />
-            <MetricTile title="CPC Meta Ads" value={metaCpc} format="currency" loading={metricsLoading} accent="#0B84FF" />
-            <MetricTile title="CTR Meta Ads" value={metaCtr} format="percent" loading={metricsLoading} accent="#0B84FF" />
-          </div>
-
-          <div className="mt-12 space-y-12">
-            <div className="space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h3 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider">
-                    <MetaMark />
-                    <span>Campanhas Ativas Meta Ads</span>
-                  </h3>
-                  <p className="mt-0.5 text-xs text-foreground/75">
-                    Campanhas Meta com gasto no período selecionado.
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Ordenar por</span>
-                  <div className="flex rounded-lg border border-border overflow-hidden">
-                    {SORT_OPTIONS.map(opt => (
-                      <button
-                        key={opt.value}
-                        onClick={() => setCampaignSortBy(opt.value)}
-                        className={cn(
-                          'px-3 py-1.5 text-[11px] font-semibold transition-colors',
-                          campaignSortBy === opt.value ? 'bg-primary text-black' : 'bg-card text-muted-foreground hover:bg-muted/50'
-                        )}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                  {campaignsLoading && <RefreshCw className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
-                </div>
-              </div>
-              <CampaignPerformanceTable campaigns={metaCampaigns} loading={campaignsLoading} period={period} dateFrom={customDateFrom} dateTo={customDateTo} />
-            </div>
-
-            <div className="space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h3 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider">
-                    <MetaMark />
-                    <span>Anúncios e previews Meta Ads</span>
-                  </h3>
-                  <p className="mt-0.5 text-xs text-foreground/75">Criativos com melhor performance no período selecionado.</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Ordenar por</span>
-                  <div className="flex rounded-lg border border-border overflow-hidden">
-                    {SORT_OPTIONS.map(opt => (
-                      <button
-                        key={opt.value}
-                        onClick={() => setSortBy(opt.value)}
-                        className={cn(
-                          'px-3 py-1.5 text-[11px] font-semibold transition-colors',
-                          sortBy === opt.value ? 'bg-primary text-black' : 'bg-card text-muted-foreground hover:bg-muted/50'
-                        )}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                  {creativesLoading && <RefreshCw className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
-                </div>
-              </div>
-
-              {creativesLoading ? (
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-                  {Array.from({ length: 8 }).map((_, i) => (
-                    <div key={i} className="rounded-xl border border-border bg-card overflow-hidden animate-pulse">
-                      <div className="aspect-[9/16] bg-muted/30" />
-                      <div className="p-3 space-y-2">
-                        <div className="h-3 bg-muted/40 rounded w-3/4" />
-                        <div className="h-2 bg-muted/30 rounded w-full" />
-                        <div className="h-2 bg-muted/30 rounded w-2/3" />
+                  <MetricSection title="Campanhas Meta Ads" description={`${metaFormLeads.toLocaleString('pt-BR')} formulários + ${metaConversations.toLocaleString('pt-BR')} conversas no período`} accent="#0B84FF">
+                    <div className="space-y-4">
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Campanhas ativas</p>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Ordenar por</span>
+                            <div className="flex overflow-hidden rounded-lg border border-white/5 bg-background/40">
+                              {SORT_OPTIONS.map(opt => (
+                                <button key={opt.value} onClick={() => setCampaignSortBy(opt.value)}
+                                  className={cn('px-3 py-1.5 text-[11px] font-semibold transition-colors', campaignSortBy === opt.value ? 'bg-primary text-black shadow-[0_0_10px_rgba(85,245,47,0.28)]' : 'text-muted-foreground hover:text-foreground')}>
+                                  {opt.label}
+                                </button>
+                              ))}
+                            </div>
+                            {campaignsLoading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+                          </div>
+                        </div>
+                        <CampaignPerformanceTable campaigns={metaCampaigns} loading={campaignsLoading} period={period} dateFrom={customDateFrom} dateTo={customDateTo} />
                       </div>
+                      <AudiencePlatformBlock title="Meta Ads" description="Recortes por idade, gênero, plataforma e dispositivo." color="#0B84FF" colors={META_AUDIENCE_COLORS} data={audience.meta} />
                     </div>
-                  ))}
-                </div>
-              ) : creatives.length === 0 ? (
-                <div className="rounded-xl border border-border bg-card/50 py-12 text-center">
-                  <ImageIcon className="w-8 h-8 text-muted-foreground/30 mx-auto mb-3" />
-                  <p className="text-sm text-muted-foreground">Nenhum criativo encontrado.</p>
-                  <p className="text-xs text-muted-foreground/60 mt-1">Conecte uma conta Meta Ads em Integrações e vincule a um cliente.</p>
-                </div>
-              ) : (
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-                  {creatives.map(c => (
-                    <CreativeCard key={c.adId} creative={c} sortBy={sortBy} onPreview={setPreviewCreative} />
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <h3 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider">
-                  <MetaMark />
-                  <span>Público Meta Ads</span>
-                </h3>
-                <p className="mt-0.5 text-xs text-foreground/75">Recortes por idade, gênero, plataforma e dispositivo do Meta Ads.</p>
-              </div>
-              {audienceLoading ? (
-                <div className="rounded-xl border border-border bg-card p-5 animate-pulse">
-                  <div className="h-5 w-32 rounded bg-muted/40" />
-                  <div className="mt-4 grid gap-3 md:grid-cols-2">
-                    {Array.from({ length: 4 }).map((__, itemIndex) => (
-                      <div key={itemIndex} className="h-40 rounded-xl bg-muted/20" />
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <AudiencePlatformBlock
-                  title="Meta Ads"
-                  description="Alcance vindo das contas Meta vinculadas."
-                  color="#0B84FF"
-                  colors={META_AUDIENCE_COLORS}
-                  data={audience.meta}
-                />
-              )}
-            </div>
-          </div>
                   </MetricSection>
                 )}
                 {id === 'google' && (
-                  <MetricSection
-                    title="Métricas Google Ads"
-                    description="Conversões e custos vindos apenas das contas Google Ads vinculadas."
-                    accent="#55F52F"
-                  >
-          <div className="grid items-stretch gap-12 md:grid-cols-2 xl:grid-cols-4">
-            <MetricTile title="Leads Google Ads" value={googleConv} loading={metricsLoading} accent="#55F52F" />
-            <MetricTile title="Custo / Conversão" value={avgCpa} format="currency" loading={metricsLoading} accent="#55F52F" />
-            <MetricTile title="Investimento Google Ads" value={googleCost} format="currency" loading={metricsLoading} accent="#55F52F" />
-            <MetricTile title="Impressões Google Ads" value={googleImpressions} loading={metricsLoading} accent="#55F52F" />
-            <MetricTile title="Cliques Google Ads" value={googleClicks} loading={metricsLoading} accent="#55F52F" />
-            <MetricTile title="CPC Google Ads" value={googleCpc} format="currency" loading={metricsLoading} accent="#55F52F" />
-            <MetricTile title="CTR Google Ads" value={googleCtrValue} format="percent" loading={metricsLoading} accent="#55F52F" />
-          </div>
-
-          <div className="mt-12 space-y-12">
-            <div className="space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h3 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider">
-                    <GoogleMark />
-                    <span>Campanhas Ativas Google Ads</span>
-                  </h3>
-                  <p className="mt-0.5 text-xs text-foreground/75">
-                    Campanhas Google com gasto no período selecionado.
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Ordenar por</span>
-                  <div className="flex rounded-lg border border-border overflow-hidden">
-                    {SORT_OPTIONS.map(opt => (
-                      <button
-                        key={opt.value}
-                        onClick={() => setCampaignSortBy(opt.value)}
-                        className={cn(
-                          'px-3 py-1.5 text-[11px] font-semibold transition-colors',
-                          campaignSortBy === opt.value ? 'bg-primary text-black' : 'bg-card text-muted-foreground hover:bg-muted/50'
-                        )}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                  {campaignsLoading && <RefreshCw className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
-                </div>
-              </div>
-              <CampaignPerformanceTable campaigns={googleCampaigns} loading={campaignsLoading} period={period} dateFrom={customDateFrom} dateTo={customDateTo} />
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <h3 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider">
-                  <GoogleMark />
-                  <span>Público Google Ads</span>
-                </h3>
-                <p className="mt-0.5 text-xs text-foreground/75">Recortes por idade, gênero, plataforma e dispositivo do Google Ads.</p>
-              </div>
-              {audienceLoading ? (
-                <div className="rounded-xl border border-border bg-card p-5 animate-pulse">
-                  <div className="h-5 w-32 rounded bg-muted/40" />
-                  <div className="mt-4 grid gap-3 md:grid-cols-2">
-                    {Array.from({ length: 4 }).map((__, itemIndex) => (
-                      <div key={itemIndex} className="h-40 rounded-xl bg-muted/20" />
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <AudiencePlatformBlock
-                  title="Google Ads"
-                  description="Impressões vindas das contas Google Ads vinculadas."
-                  color="#EA4335"
-                  colors={GOOGLE_AUDIENCE_COLORS}
-                  data={audience.google}
-                />
-              )}
-            </div>
-          </div>
+                  <MetricSection title="Campanhas Google Ads" description="Conversões e custos vindos das contas Google Ads vinculadas." accent="#55F52F">
+                    <div className="space-y-4">
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Campanhas ativas</p>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Ordenar por</span>
+                            <div className="flex overflow-hidden rounded-lg border border-white/5 bg-background/40">
+                              {SORT_OPTIONS.map(opt => (
+                                <button key={opt.value} onClick={() => setCampaignSortBy(opt.value)}
+                                  className={cn('px-3 py-1.5 text-[11px] font-semibold transition-colors', campaignSortBy === opt.value ? 'bg-primary text-black shadow-[0_0_10px_rgba(85,245,47,0.28)]' : 'text-muted-foreground hover:text-foreground')}>
+                                  {opt.label}
+                                </button>
+                              ))}
+                            </div>
+                            {campaignsLoading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+                          </div>
+                        </div>
+                        <CampaignPerformanceTable campaigns={googleCampaigns} loading={campaignsLoading} period={period} dateFrom={customDateFrom} dateTo={customDateTo} />
+                      </div>
+                      <AudiencePlatformBlock title="Google Ads" description="Recortes por idade, gênero, plataforma e dispositivo." color="#EA4335" colors={GOOGLE_AUDIENCE_COLORS} data={audience.google} />
+                    </div>
                   </MetricSection>
                 )}
+                {(id === 'general' || id === 'funnel') && null}
               </SortableWidget>
             ))}
           </div>
         </SortableContext>
       </DndContext>
 
-      {/* Client summary quick-view */}
+      {/* Resumo por cliente */}
       {selectedClients.length > 1 && (
         <div className="rounded-xl border border-border bg-card p-4">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-3">Resumo por cliente</p>
+          <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Resumo por cliente</p>
           <div className="divide-y divide-border">
             {selectedClients.map(client => {
               const m = metricsByClient[client.id];
@@ -2903,28 +3060,16 @@ export default function GeneralDashboard() {
               const goal = goalsByClient[client.id];
               const clientLeadsGoal = plannedFunnelFromGoal(goal, readPlanningFromStorage(client.id))[0] ?? 0;
               const pct = clientLeadsGoal > 0 ? Math.min(100, Math.round(leads / clientLeadsGoal * 100)) : null;
-
               return (
                 <div key={client.id} className="flex items-center gap-4 py-2.5">
-                  <Link href={`/clientes/${client.id}`} className="text-sm font-bold w-40 truncate hover:text-primary transition-colors shrink-0">
-                    {client.name}
-                  </Link>
-                  <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-                    {pct !== null && (
-                      <div
-                        className={cn('h-full rounded-full', pct >= 75 ? 'bg-emerald-500' : pct >= 40 ? 'bg-orange-400' : 'bg-red-500')}
-                        style={{ width: `${pct}%` }}
-                      />
-                    )}
+                  <Link href={`/clientes/${client.id}`} className="w-40 shrink-0 truncate text-sm font-bold hover:text-primary transition-colors">{client.name}</Link>
+                  <div className="flex-1 h-1.5 overflow-hidden rounded-full bg-muted">
+                    {pct !== null && <div className={cn('h-full rounded-full', pct >= 75 ? 'bg-emerald-500' : pct >= 40 ? 'bg-orange-400' : 'bg-red-500')} style={{ width: `${pct}%` }} />}
                   </div>
-                  <div className="flex items-center gap-4 text-xs text-muted-foreground shrink-0">
+                  <div className="flex shrink-0 items-center gap-4 text-xs text-muted-foreground">
                     <span>{leads > 0 ? `${leads} leads` : metricsLoading ? '…' : '— leads'}</span>
                     <span>{spend > 0 ? formatCurrencyBRL(spend) : metricsLoading ? '…' : '—'}</span>
-                    {pct !== null && (
-                      <span className={cn('font-bold', pct >= 75 ? 'text-emerald-400' : pct >= 40 ? 'text-orange-400' : 'text-red-400')}>
-                        {pct}%
-                      </span>
-                    )}
+                    {pct !== null && <span className={cn('font-bold', pct >= 75 ? 'text-emerald-400' : pct >= 40 ? 'text-orange-400' : 'text-red-400')}>{pct}%</span>}
                   </div>
                 </div>
               );

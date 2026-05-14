@@ -270,6 +270,8 @@ function ClientInvestmentSummary({
   balances: AdAccountBalance[];
   clientLinks: ClientAccountLink[];
 }) {
+  const [expanded, setExpanded] = useState(false);
+
   if (payments.length === 0) return null;
 
   // Group payments by client
@@ -301,10 +303,37 @@ function ClientInvestmentSummary({
   }
 
   const rows = Array.from(map.values()).sort((a, b) => (b.metaTotal + b.googleTotal) - (a.metaTotal + a.googleTotal));
+  const totalMeta = rows.reduce((sum, row) => sum + row.metaTotal, 0);
+  const totalGoogle = rows.reduce((sum, row) => sum + row.googleTotal, 0);
+  const totalTikTok = rows.reduce((sum, row) => sum + row.tiktokTotal, 0);
+  const total = totalMeta + totalGoogle + totalTikTok;
 
   return (
     <div className="space-y-3">
-      <h2 className="font-bold text-sm uppercase tracking-wider">Compilado por Cliente</h2>
+      <button
+        type="button"
+        onClick={() => setExpanded((value) => !value)}
+        className="flex w-full items-center justify-between gap-4 rounded-xl border border-border bg-card px-4 py-3 text-left transition-colors hover:border-primary/30"
+      >
+        <div>
+          <h2 className="font-bold text-sm uppercase tracking-wider">Compilado por Cliente</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {rows.length} cliente{rows.length !== 1 ? 's' : ''} · {payments.length} Pix · Total {formatCurrencyBRL(total)}
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="hidden items-center gap-2 sm:flex">
+            {totalMeta > 0 && <span className="rounded-full bg-blue-500/10 px-2 py-1 text-[10px] font-bold text-blue-400">Meta {formatCurrencyBRL(totalMeta)}</span>}
+            {totalGoogle > 0 && <span className="rounded-full bg-red-500/10 px-2 py-1 text-[10px] font-bold text-red-400">Google {formatCurrencyBRL(totalGoogle)}</span>}
+          </div>
+          <span className="rounded-lg border border-border bg-background px-2.5 py-1 text-[11px] font-bold text-muted-foreground">
+            {expanded ? 'Minimizar' : 'Expandir'}
+          </span>
+          <ChevronDown className={cn('h-4 w-4 text-muted-foreground transition-transform', expanded && 'rotate-180')} />
+        </div>
+      </button>
+
+      {expanded && (
       <div className="rounded-xl border border-border bg-card overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-muted text-muted-foreground text-[10px] uppercase tracking-widest">
@@ -381,6 +410,7 @@ function ClientInvestmentSummary({
           </tbody>
         </table>
       </div>
+      )}
     </div>
   );
 }

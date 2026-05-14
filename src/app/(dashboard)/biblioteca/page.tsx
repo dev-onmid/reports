@@ -5,6 +5,7 @@ import { useClients } from '@/lib/client-store';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 import {
   Search, BookMarked, ExternalLink, RefreshCw, ChevronRight, Trash2, X,
+  MonitorPlay, ImageIcon,
 } from 'lucide-react';
 import type { AdLibraryAd } from '@/app/api/meta/ad-library/route';
 import type { SavedAd } from '@/app/api/ad-library/saved/route';
@@ -42,10 +43,47 @@ function AdCard({
     ? new Date(ad.deliveryStartTime).toLocaleDateString('pt-BR')
     : null;
   const initial = ad.pageName.charAt(0).toUpperCase();
+  const hasSnapshot = Boolean(ad.adSnapshotUrl);
 
   return (
-    <div className="relative flex flex-col rounded-xl border border-border bg-card overflow-hidden hover:border-primary/30 transition-colors">
-      {/* Facebook-style ad mockup */}
+    <div className="relative flex flex-col overflow-hidden rounded-xl border border-border bg-card transition-colors hover:border-primary/30">
+      {/* Creative preview */}
+      <div className="relative h-[420px] overflow-hidden bg-[#101217]">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_12%,rgba(59,130,246,0.14),transparent_44%)]" />
+        {hasSnapshot ? (
+          <iframe
+            src={ad.adSnapshotUrl}
+            title={`Preview do anúncio ${ad.adArchiveId}`}
+            className="absolute inset-0 h-full w-full bg-white"
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+          />
+        ) : (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-muted-foreground">
+            <ImageIcon className="h-10 w-10 opacity-40" />
+            <p className="text-xs font-semibold">Criativo indisponível</p>
+          </div>
+        )}
+        <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between bg-gradient-to-b from-black/70 to-transparent p-3">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-black/45 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-white">
+            <MonitorPlay className="h-3 w-3" />
+            Preview criativo
+          </span>
+          <span className={cn(
+            'rounded-full px-2 py-0.5 text-[10px] font-bold',
+            ad.adActiveStatus === 'ACTIVE' ? 'bg-emerald-500 text-black' : 'bg-white/75 text-black'
+          )}>
+            {ad.adActiveStatus === 'ACTIVE' ? 'Ativo' : 'Inativo'}
+          </span>
+        </div>
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent p-3">
+          <p className="line-clamp-1 text-xs font-bold text-white">{ad.pageName}</p>
+          <p className="mt-0.5 line-clamp-1 text-[10px] text-white/70">{platforms || 'Facebook'} · {dateStart ? `Desde ${dateStart}` : 'Meta Ad Library'}</p>
+        </div>
+      </div>
+
+      {/* Facebook-style ad copy */}
       <div className="bg-white text-[#1c1e21] p-3 flex flex-col gap-2">
         {/* Page header */}
         <div className="flex items-center gap-2">
@@ -58,14 +96,6 @@ function AdCard({
               Patrocinado · {platforms || 'Facebook'}
             </p>
           </div>
-          <span className={cn(
-            'ml-auto shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold border',
-            ad.adActiveStatus === 'ACTIVE'
-              ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-              : 'bg-muted/50 text-[#65676b] border-gray-200'
-          )}>
-            {ad.adActiveStatus === 'ACTIVE' ? 'Ativo' : 'Inativo'}
-          </span>
         </div>
 
         {/* Body text */}
@@ -387,9 +417,9 @@ export default function BibliotecaPage() {
           )}
 
           {searching && (
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+            <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
               {Array.from({ length: 8 }).map((_, i) => (
-                <div key={i} className="h-64 animate-pulse rounded-xl border border-border bg-card" />
+                <div key={i} className="h-[620px] animate-pulse rounded-xl border border-border bg-card" />
               ))}
             </div>
           )}
@@ -397,7 +427,7 @@ export default function BibliotecaPage() {
           {!searching && results.length > 0 && (
             <>
               <p className="text-xs text-muted-foreground">{results.length} anúncio{results.length !== 1 ? 's' : ''} encontrado{results.length !== 1 ? 's' : ''}</p>
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+              <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
                 {results.map(ad => {
                   const saved = savedMap[ad.adArchiveId];
                   return (
@@ -474,7 +504,7 @@ export default function BibliotecaPage() {
                 {displayedSaved.length} anúncio{displayedSaved.length !== 1 ? 's' : ''} salvo{displayedSaved.length !== 1 ? 's' : ''}
                 {filterClientId && ` para ${activeClients.find(c => c.id === filterClientId)?.name}`}
               </p>
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+              <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
                 {displayedSaved.map(ad => (
                   <AdCard
                     key={ad.id}
