@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Plus, Trash2, Search } from 'lucide-react';
 import { useClients } from '@/lib/client-store';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
@@ -18,7 +18,8 @@ type CrmLead = {
   motivacoes: string | null; dores: string | null;
 };
 
-const NEW_ID = '__new__';
+type Draft = Partial<Omit<CrmLead, 'id' | 'client_id'>>;
+
 const STATUS_OPTIONS = ['Em Atendimento', 'Agendado', 'Reagendado', 'Não Retorna', 'Distante', 'Sem Interesse', 'Desqualificado'];
 const CANAL_OPTIONS = ['Facebook', 'Instagram', 'Google', 'WHATS PRINCIPAL', 'FACHADA', 'Outro'];
 const PAGAMENTO_OPTIONS = ['Boleto', 'Cartão', 'PIX', 'Dinheiro', 'Financiamento'];
@@ -33,18 +34,13 @@ const STATUS_COLOR: Record<string, string> = {
   'Desqualificado': 'text-red-600',
 };
 
-const EMPTY: Omit<CrmLead, 'id' | 'client_id'> = {
-  mes: null, data: new Date().toISOString().split('T')[0], link_criativo: null,
-  nome: null, numero: null, canal: null, emoji: null,
-  dia1: false, dia2: false, dia3: false, dia4: false,
-  status: 'Em Atendimento', data_agendada: null, video_dra: false, compareceu: false,
-  observacao: null, orcamento: null, fechou: false, valor_rs: null,
-  pagamento: null, analise_credito: false, data_nasc: null, bairro: null,
-  motivacoes: null, dores: null,
-};
-
-function makeBlank(clientId: string): CrmLead {
-  return { ...EMPTY, id: NEW_ID, client_id: clientId } as CrmLead;
+function freshDraft(): Draft {
+  return {
+    data: new Date().toISOString().split('T')[0],
+    status: 'Em Atendimento',
+    dia1: false, dia2: false, dia3: false, dia4: false,
+    video_dra: false, compareceu: false, fechou: false, analise_credito: false,
+  };
 }
 
 function toD(v: string | null | undefined) { return v ? String(v).split('T')[0] : ''; }
@@ -54,11 +50,8 @@ function fmtD(v: string | null) {
 }
 function fmtN(v: number | null) { return v ? formatCurrencyBRL(v) : ''; }
 
-// White-bg table styles
 const cell = 'px-1.5 py-0 h-8 text-xs focus:outline-none focus:bg-green-50 bg-transparent border-0 w-full text-gray-800 placeholder:text-gray-400';
-const cellSelect = cn(cell, 'cursor-pointer');
-
-type Draft = Partial<Omit<CrmLead, 'id' | 'client_id'>>;
+const cellSel = cn(cell, 'cursor-pointer');
 
 const COLS: [string, string][] = [
   ['Data','w-28'],['Nome','w-40'],['Número','w-32'],['Canal','w-28'],
@@ -72,176 +65,169 @@ export default function CrmPage() {
   const { clients } = useClients();
   const activeClients = useMemo(() => clients.filter(c => c.status === 'Ativo'), [clients]);
 
-  const [selectedClientId, setSelectedClientId] = useState('');
+  const [clientId, setClientId] = useState('');
   const [leads, setLeads] = useState<CrmLead[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const [editId, setEditId] = useState<string | null>(null);
-  const [draft, setDraft] = useState<Draft>({});
   const [saving, setSaving] = useState(false);
-  const draftRef = useRef<Draft>({});
-  draftRef.current = draft;
-  const editIdRef = useRef<string | null>(null);
-  editIdRef.current = editId;
-  const savingRef = useRef(false);
-  const pendingBlurRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const suppressBlurRef = useRef(false);
+
+  // ── NEW ROW (always at top, always editable, independent state) ──
+  const [newDraft, setNewDraft] = useState<Draft>(freshDraft());
+  const newDraftRef = useRef<Draft>(newDraft);
+  newDraftRef.current = newDraft;
   const newRowRef = useRef<HTMLTableRowElement | null>(null);
+  const newSavingRef = useRef(false);
+
+  // ── EXISTING ROW EDITING ──
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<Draft>({});
+  const editDraftRef = useRef<Draft>(editDraft);
+  editDraftRef.current = editDraft;
+  const editPendingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (!selectedClientId) { setLeads([]); setEditId(null); return; }
+    if (!clientId) { setLeads([]); return; }
     setLoading(true);
-    fetch(`/api/crm?clientId=${selectedClientId}`)
+    fetch(`/api/crm?clientId=${clientId}`)
       .then(r => r.ok ? r.json() as Promise<CrmLead[]> : [])
-      .then(data => {
-        setLeads([makeBlank(selectedClientId), ...data]);
-        setEditId(NEW_ID);
-        setDraft({ ...EMPTY });
-      })
-      .catch(() => {
-        setLeads([makeBlank(selectedClientId)]);
-        setEditId(NEW_ID);
-        setDraft({ ...EMPTY });
-      })
+      .then(data => setLeads(data))
+      .catch(() => setLeads([]))
       .finally(() => setLoading(false));
-  }, [selectedClientId]);
-
-  const realLeads = useMemo(() => leads.filter(l => l.id !== NEW_ID), [leads]);
+  }, [clientId]);
 
   const filtered = useMemo(() => {
-    const real = realLeads.filter(l => {
+    return leads.filter(l => {
       if (statusFilter && l.status !== statusFilter) return false;
       if (search) {
         const q = search.toLowerCase();
-        return l.nome?.toLowerCase().includes(q) || l.numero?.includes(q) || l.observacao?.toLowerCase().includes(q) || false;
+        return l.nome?.toLowerCase().includes(q) || l.numero?.includes(q) || false;
       }
       return true;
     });
-    const blank = leads.find(l => l.id === NEW_ID);
-    return blank ? [blank, ...real] : real;
-  }, [leads, realLeads, search, statusFilter]);
+  }, [leads, search, statusFilter]);
 
   const stats = useMemo(() => ({
-    total: realLeads.length,
-    agendados: realLeads.filter(l => l.status === 'Agendado' || l.status === 'Reagendado').length,
-    fechamentos: realLeads.filter(l => l.fechou).length,
-    faturamento: realLeads.filter(l => l.fechou).reduce((s, l) => s + (l.valor_rs ?? 0), 0),
-  }), [realLeads]);
+    total: leads.length,
+    agendados: leads.filter(l => l.status === 'Agendado' || l.status === 'Reagendado').length,
+    fechamentos: leads.filter(l => l.fechou).length,
+    faturamento: leads.filter(l => l.fechou).reduce((s, l) => s + (l.valor_rs ?? 0), 0),
+  }), [leads]);
 
-  const focusNewRow = useCallback(() => {
-    // Suppress blur so the focus transfer doesn't trigger an unwanted save
-    if (pendingBlurRef.current) clearTimeout(pendingBlurRef.current);
-    suppressBlurRef.current = true;
-    setTimeout(() => {
-      newRowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      const first = newRowRef.current?.querySelector<HTMLElement>('input[type="text"], input[type="date"]');
-      first?.focus();
-      setTimeout(() => { suppressBlurRef.current = false; }, 80);
-    }, 50);
-  }, []);
-
-  const saveRow = useCallback(async (id: string, data: Draft, thenFocusNew = false) => {
-    if (savingRef.current) return;
-    savingRef.current = true;
+  // ── Save new lead ──
+  async function saveNew() {
+    if (newSavingRef.current) return;
+    const data = newDraftRef.current;
+    const hasData = data.nome || data.numero || data.observacao || data.canal || data.bairro || data.valor_rs;
+    if (!hasData) {
+      focusNew();
+      return;
+    }
+    newSavingRef.current = true;
     setSaving(true);
-    let ok = false;
     try {
-      if (id === NEW_ID) {
-        const hasData = data.nome || data.numero || data.observacao || data.canal || data.data_agendada || data.bairro || data.valor_rs;
-        if (!hasData) { ok = true; }
-        else {
-          const res = await fetch('/api/crm', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ clientId: selectedClientId, ...data }),
-          });
-          if (res.ok) {
-            const saved = await res.json() as CrmLead;
-            setLeads(prev => [makeBlank(selectedClientId), saved, ...prev.filter(l => l.id !== NEW_ID)]);
-            ok = true;
-          } else {
-            console.error('CRM POST failed', res.status, await res.text());
-          }
-        }
+      const res = await fetch('/api/crm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientId, ...data }),
+      });
+      if (res.ok) {
+        const saved = await res.json() as CrmLead;
+        setLeads(prev => [saved, ...prev]);
+        setNewDraft(freshDraft());
       } else {
-        const res = await fetch(`/api/crm/${id}`, {
-          method: 'PUT', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(data),
-        });
-        if (res.ok) {
-          const saved = await res.json() as CrmLead;
-          setLeads(prev => prev.map(l => l.id === id ? saved : l));
-          ok = true;
-        } else {
-          console.error('CRM PUT failed', res.status, await res.text());
-        }
+        console.error('CRM POST failed', res.status, await res.text());
       }
     } catch (err) {
-      console.error('CRM saveRow error:', err);
+      console.error('CRM POST error:', err);
     } finally {
-      savingRef.current = false;
+      newSavingRef.current = false;
       setSaving(false);
-      if (ok) {
-        if (thenFocusNew) {
-          setEditId(NEW_ID);
-          setDraft({ ...EMPTY });
-          focusNewRow();
-        } else {
-          // Only reset editId if it hasn't been changed to another row in the meantime
-          if (editIdRef.current === id) {
-            setEditId(null);
-          }
-        }
-      }
+      focusNew();
     }
-  }, [selectedClientId, focusNewRow]);
+  }
+
+  function focusNew() {
+    setTimeout(() => {
+      const first = newRowRef.current?.querySelector<HTMLElement>('input[type="date"]');
+      first?.focus();
+    }, 30);
+  }
+
+  // ── Save existing lead ──
+  async function saveExisting(id: string) {
+    const data = editDraftRef.current;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/crm/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (res.ok) {
+        const saved = await res.json() as CrmLead;
+        setLeads(prev => prev.map(l => l.id === id ? saved : l));
+        setEditId(null);
+      } else {
+        console.error('CRM PUT failed', res.status);
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
 
   function startEdit(lead: CrmLead) {
-    if (editId && editId !== lead.id) void saveRow(editId, draftRef.current);
+    if (editId === lead.id) return;
+    if (editId) void saveExisting(editId);
     setEditId(lead.id);
-    setDraft({ ...lead } as Draft);
+    setEditDraft({ ...lead } as Draft);
   }
 
-  function handleRowBlur(e: React.FocusEvent<HTMLTableRowElement>, id: string) {
-    if (suppressBlurRef.current) return;
-    if (pendingBlurRef.current) clearTimeout(pendingBlurRef.current);
-    pendingBlurRef.current = setTimeout(() => {
+  function handleExistingBlur(e: React.FocusEvent<HTMLTableRowElement>, id: string) {
+    if (editPendingRef.current) clearTimeout(editPendingRef.current);
+    editPendingRef.current = setTimeout(() => {
       if (e.currentTarget && !e.currentTarget.contains(document.activeElement)) {
-        void saveRow(id, draftRef.current);
+        void saveExisting(id);
       }
-    }, 100);
+    }, 150);
   }
 
-  function handleRowFocus() {
-    if (pendingBlurRef.current) clearTimeout(pendingBlurRef.current);
-  }
-
-  function handleLastFieldKeyDown(e: React.KeyboardEvent, id: string) {
-    if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey)) {
-      e.preventDefault();
-      if (pendingBlurRef.current) clearTimeout(pendingBlurRef.current);
-      void saveRow(id, draftRef.current, true);
-    }
-  }
-
-  function focusNewRowBtn() {
-    if (editId && editId !== NEW_ID) void saveRow(editId, draftRef.current);
-    setEditId(NEW_ID);
-    setDraft({ ...EMPTY });
-    focusNewRow();
+  function handleExistingFocus() {
+    if (editPendingRef.current) clearTimeout(editPendingRef.current);
   }
 
   async function deleteRow(id: string, e: React.MouseEvent) {
     e.stopPropagation();
-    if (id === NEW_ID) { setEditId(null); return; }
     if (!window.confirm('Excluir este lead?')) return;
     const res = await fetch(`/api/crm/${id}`, { method: 'DELETE' });
-    if (res.ok) setLeads(prev => prev.filter(l => l.id !== id));
-    if (editId === id) setEditId(null);
+    if (res.ok) {
+      setLeads(prev => prev.filter(l => l.id !== id));
+      if (editId === id) setEditId(null);
+    }
   }
 
-  function set<K extends keyof Draft>(k: K, v: Draft[K]) {
-    setDraft(prev => ({ ...prev, [k]: v }));
+  function setN<K extends keyof Draft>(k: K, v: Draft[K]) {
+    setNewDraft(prev => ({ ...prev, [k]: v }));
+  }
+
+  function setE<K extends keyof Draft>(k: K, v: Draft[K]) {
+    setEditDraft(prev => ({ ...prev, [k]: v }));
+  }
+
+  // Handler: Tab or Enter on last field of new row
+  function onNewBairroKey(e: React.KeyboardEvent) {
+    if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey)) {
+      e.preventDefault();
+      void saveNew();
+    }
+  }
+
+  // Handler: Enter on any input of new row
+  function onNewRowKey(e: React.KeyboardEvent) {
+    if (e.key === 'Enter' && (e.target as HTMLElement).tagName === 'INPUT') {
+      e.preventDefault();
+      void saveNew();
+    }
   }
 
   return (
@@ -251,21 +237,17 @@ export default function CrmPage() {
           <h1 className="text-2xl font-black uppercase tracking-tight">CRM</h1>
           <p className="text-sm text-muted-foreground">Gestão de leads e funil de vendas por cliente.</p>
         </div>
-        {saving && (
-          <span className="text-xs font-medium text-amber-600 animate-pulse">Salvando…</span>
-        )}
+        {saving && <span className="text-xs font-medium text-amber-600 animate-pulse">Salvando…</span>}
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
-        <select
-          value={selectedClientId}
-          onChange={e => setSelectedClientId(e.target.value)}
+        <select value={clientId} onChange={e => setClientId(e.target.value)}
           className="rounded-lg border border-border bg-card px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary min-w-[180px]"
         >
           <option value="">Selecionar cliente...</option>
           {activeClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
-        {selectedClientId && (
+        {clientId && (
           <>
             <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
               className="rounded-lg border border-border bg-card px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
@@ -278,7 +260,7 @@ export default function CrmPage() {
               <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar..."
                 className="pl-8 pr-3 py-2 rounded-lg border border-border bg-card text-sm focus:outline-none focus:ring-1 focus:ring-primary w-44" />
             </div>
-            <button onClick={focusNewRowBtn}
+            <button onClick={() => void saveNew()}
               className="ml-auto flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
             >
               <Plus className="h-4 w-4" /> Novo Lead
@@ -287,7 +269,7 @@ export default function CrmPage() {
         )}
       </div>
 
-      {selectedClientId && !loading && realLeads.length > 0 && (
+      {clientId && !loading && leads.length > 0 && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 shrink-0">
           {[
             { label: 'Total', value: stats.total, fmt: 'n' },
@@ -303,17 +285,16 @@ export default function CrmPage() {
         </div>
       )}
 
-      {!selectedClientId && (
+      {!clientId && (
         <div className="rounded-xl border border-border bg-card p-12 text-center text-sm text-muted-foreground">
           Selecione um cliente para ver seus leads.
         </div>
       )}
-      {selectedClientId && loading && (
+      {clientId && loading && (
         <div className="rounded-xl border border-border bg-card p-12 text-center text-sm text-muted-foreground">Carregando...</div>
       )}
 
-      {/* White table for readability */}
-      {selectedClientId && !loading && (
+      {clientId && !loading && (
         <div className="overflow-auto rounded-xl border border-gray-200 flex-1 min-h-0 bg-white">
           <table className="w-full border-collapse text-xs" style={{ minWidth: 1300 }}>
             <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
@@ -326,139 +307,147 @@ export default function CrmPage() {
               </tr>
             </thead>
             <tbody>
+              {/* ── NEW ROW — always at top, always editable ── */}
+              <tr
+                ref={newRowRef}
+                onKeyDown={onNewRowKey}
+                className="border-b border-gray-200 bg-green-50 ring-1 ring-inset ring-green-300"
+              >
+                <Td><input type="date" value={toD(newDraft.data)} onChange={e => setN('data', e.target.value || null)} className={cell} /></Td>
+                <Td><input type="text" value={newDraft.nome ?? ''} onChange={e => setN('nome', e.target.value || null)} placeholder="Nome" className={cell} /></Td>
+                <Td><input type="text" value={newDraft.numero ?? ''} onChange={e => setN('numero', e.target.value || null)} placeholder="Número" className={cell} /></Td>
+                <Td>
+                  <select value={newDraft.canal ?? ''} onChange={e => setN('canal', e.target.value || null)} className={cellSel}>
+                    <option value=""></option>
+                    {CANAL_OPTIONS.map(o => <option key={o}>{o}</option>)}
+                  </select>
+                </Td>
+                <Td>
+                  <select value={newDraft.status ?? ''} onChange={e => setN('status', e.target.value || null)} className={cn(cellSel, STATUS_COLOR[newDraft.status ?? ''] ?? '')}>
+                    {STATUS_OPTIONS.map(o => <option key={o}>{o}</option>)}
+                  </select>
+                </Td>
+                {(['dia1','dia2','dia3','dia4'] as const).map(k => (
+                  <Td key={k} center>
+                    <input type="checkbox" checked={!!newDraft[k]} onChange={e => setN(k, e.target.checked)} className="h-3.5 w-3.5 accent-green-600 cursor-pointer" />
+                  </Td>
+                ))}
+                <Td><input type="date" value={toD(newDraft.data_agendada)} onChange={e => setN('data_agendada', e.target.value || null)} className={cell} /></Td>
+                <Td center><input type="checkbox" checked={!!newDraft.fechou} onChange={e => setN('fechou', e.target.checked)} className="h-3.5 w-3.5 accent-green-600 cursor-pointer" /></Td>
+                <Td><input type="number" step="0.01" value={newDraft.valor_rs ?? ''} onChange={e => setN('valor_rs', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cn(cell, 'text-green-700 font-semibold')} /></Td>
+                <Td>
+                  <select value={newDraft.pagamento ?? ''} onChange={e => setN('pagamento', e.target.value || null)} className={cellSel}>
+                    <option value=""></option>
+                    {PAGAMENTO_OPTIONS.map(o => <option key={o}>{o}</option>)}
+                  </select>
+                </Td>
+                <Td><input type="number" step="0.01" value={newDraft.orcamento ?? ''} onChange={e => setN('orcamento', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cell} /></Td>
+                <Td><input type="text" value={newDraft.observacao ?? ''} onChange={e => setN('observacao', e.target.value || null)} placeholder="Observação" className={cell} /></Td>
+                <Td>
+                  <input type="text" value={newDraft.bairro ?? ''} onChange={e => setN('bairro', e.target.value || null)} placeholder="Bairro" className={cell}
+                    onKeyDown={onNewBairroKey} />
+                </Td>
+                <Td center />
+              </tr>
+
+              {/* ── SAVED LEADS ── */}
               {filtered.map(lead => {
-                const isBlank = lead.id === NEW_ID;
                 const isEditing = editId === lead.id;
-                const d = isEditing ? draft : lead;
+                const d = isEditing ? editDraft : lead;
                 return (
                   <tr
                     key={lead.id}
-                    data-id={lead.id}
-                    ref={isBlank ? newRowRef : undefined}
                     tabIndex={-1}
                     onClick={() => !isEditing && startEdit(lead)}
-                    onKeyDown={isEditing ? e => {
-                      if (e.key === 'Enter' && (e.target as HTMLElement).tagName === 'INPUT') {
-                        e.preventDefault();
-                        if (pendingBlurRef.current) clearTimeout(pendingBlurRef.current);
-                        void saveRow(lead.id, draftRef.current, true);
-                      }
-                    } : undefined}
-                    onBlur={isEditing ? e => handleRowBlur(e, lead.id) : undefined}
-                    onFocus={isEditing ? handleRowFocus : undefined}
+                    onBlur={isEditing ? e => handleExistingBlur(e, lead.id) : undefined}
+                    onFocus={isEditing ? handleExistingFocus : undefined}
                     className={cn(
                       'border-b border-gray-100 transition-colors group',
-                      isBlank && !isEditing && 'opacity-40 hover:opacity-80',
-                      isEditing ? 'bg-green-50 ring-1 ring-inset ring-green-300' : 'hover:bg-gray-50 cursor-pointer'
+                      isEditing ? 'bg-blue-50 ring-1 ring-inset ring-blue-200' : 'hover:bg-gray-50 cursor-pointer'
                     )}
                   >
-                    {/* Data */}
                     <Td>
                       {isEditing
-                        ? <input type="date" value={toD(d.data)} onChange={e => set('data', e.target.value || null)} className={cell} />
+                        ? <input type="date" value={toD(d.data)} onChange={e => setE('data', e.target.value || null)} className={cell} />
                         : <span className="px-1.5 text-gray-700">{fmtD(lead.data)}</span>}
                     </Td>
-                    {/* Nome */}
                     <Td>
                       {isEditing
-                        ? <input type="text" value={d.nome ?? ''} onChange={e => set('nome', e.target.value || null)} placeholder="Nome" className={cell} />
-                        : <span className="px-1.5 font-medium text-gray-800 truncate block max-w-[160px]">
-                            {isBlank
-                              ? <span className="text-gray-400 italic text-[10px]">novo lead…</span>
-                              : lead.nome ?? ''}
-                          </span>}
+                        ? <input type="text" value={d.nome ?? ''} onChange={e => setE('nome', e.target.value || null)} placeholder="Nome" className={cell} />
+                        : <span className="px-1.5 font-medium text-gray-800 truncate block max-w-[160px]">{lead.nome ?? ''}</span>}
                     </Td>
-                    {/* Número */}
                     <Td>
                       {isEditing
-                        ? <input type="text" value={d.numero ?? ''} onChange={e => set('numero', e.target.value || null)} placeholder="Número" className={cell} />
+                        ? <input type="text" value={d.numero ?? ''} onChange={e => setE('numero', e.target.value || null)} placeholder="Número" className={cell} />
                         : <span className="px-1.5 text-gray-600">{lead.numero ?? ''}</span>}
                     </Td>
-                    {/* Canal */}
                     <Td>
                       {isEditing
-                        ? <select value={d.canal ?? ''} onChange={e => set('canal', e.target.value || null)} className={cellSelect}>
+                        ? <select value={d.canal ?? ''} onChange={e => setE('canal', e.target.value || null)} className={cellSel}>
                             <option value=""></option>
                             {CANAL_OPTIONS.map(o => <option key={o}>{o}</option>)}
                           </select>
                         : <span className="px-1.5 text-gray-700">{lead.canal ?? ''}</span>}
                     </Td>
-                    {/* Status */}
                     <Td>
                       {isEditing
-                        ? <select value={d.status ?? ''} onChange={e => set('status', e.target.value || null)} className={cn(cellSelect, STATUS_COLOR[d.status ?? ''] ?? '')}>
-                            {STATUS_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                        ? <select value={d.status ?? ''} onChange={e => setE('status', e.target.value || null)} className={cn(cellSel, STATUS_COLOR[d.status ?? ''] ?? '')}>
+                            {STATUS_OPTIONS.map(o => <option key={o}>{o}</option>)}
                           </select>
                         : <span className={cn('px-1.5 font-semibold text-xs', STATUS_COLOR[lead.status ?? ''])}>{lead.status ?? ''}</span>}
                     </Td>
-                    {/* 1D 2D 3D 4D */}
                     {(['dia1','dia2','dia3','dia4'] as const).map(k => (
                       <Td key={k} center>
-                        {(!isBlank || isEditing) &&
-                          <input type="checkbox" checked={!!(isEditing ? d[k] : lead[k])}
-                            onChange={isEditing ? e => set(k, e.target.checked) : undefined}
-                            onClick={!isEditing ? e => { e.stopPropagation(); startEdit(lead); setTimeout(() => set(k, !lead[k]), 0); } : undefined}
-                            className="h-3.5 w-3.5 accent-green-600 cursor-pointer" />
-                        }
+                        <input type="checkbox" checked={!!(isEditing ? d[k] : lead[k])}
+                          onChange={isEditing ? e => setE(k, e.target.checked) : undefined}
+                          onClick={!isEditing ? e => { e.stopPropagation(); startEdit(lead); } : undefined}
+                          className="h-3.5 w-3.5 accent-green-600 cursor-pointer" />
                       </Td>
                     ))}
-                    {/* Data Agendada */}
                     <Td>
                       {isEditing
-                        ? <input type="date" value={toD(d.data_agendada)} onChange={e => set('data_agendada', e.target.value || null)} className={cell} />
+                        ? <input type="date" value={toD(d.data_agendada)} onChange={e => setE('data_agendada', e.target.value || null)} className={cell} />
                         : <span className="px-1.5 text-gray-600">{fmtD(lead.data_agendada)}</span>}
                     </Td>
-                    {/* Fechou */}
                     <Td center>
-                      {(!isBlank || isEditing) &&
-                        <input type="checkbox" checked={!!(isEditing ? d.fechou : lead.fechou)}
-                          onChange={isEditing ? e => set('fechou', e.target.checked) : undefined}
-                          onClick={!isEditing ? e => { e.stopPropagation(); startEdit(lead); setTimeout(() => set('fechou', !lead.fechou), 0); } : undefined}
-                          className="h-3.5 w-3.5 accent-green-600 cursor-pointer" />
-                      }
+                      <input type="checkbox" checked={!!(isEditing ? d.fechou : lead.fechou)}
+                        onChange={isEditing ? e => setE('fechou', e.target.checked) : undefined}
+                        onClick={!isEditing ? e => { e.stopPropagation(); startEdit(lead); } : undefined}
+                        className="h-3.5 w-3.5 accent-green-600 cursor-pointer" />
                     </Td>
-                    {/* Valor R$ */}
                     <Td>
                       {isEditing
-                        ? <input type="number" step="0.01" value={d.valor_rs ?? ''} onChange={e => set('valor_rs', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cn(cell, 'text-green-700 font-semibold')} />
+                        ? <input type="number" step="0.01" value={d.valor_rs ?? ''} onChange={e => setE('valor_rs', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cn(cell, 'text-green-700 font-semibold')} />
                         : <span className="px-1.5 font-semibold text-green-700">{fmtN(lead.valor_rs)}</span>}
                     </Td>
-                    {/* Pagamento */}
                     <Td>
                       {isEditing
-                        ? <select value={d.pagamento ?? ''} onChange={e => set('pagamento', e.target.value || null)} className={cellSelect}>
+                        ? <select value={d.pagamento ?? ''} onChange={e => setE('pagamento', e.target.value || null)} className={cellSel}>
                             <option value=""></option>
                             {PAGAMENTO_OPTIONS.map(o => <option key={o}>{o}</option>)}
                           </select>
                         : <span className="px-1.5 text-gray-600">{lead.pagamento ?? ''}</span>}
                     </Td>
-                    {/* Orçamento */}
                     <Td>
                       {isEditing
-                        ? <input type="number" step="0.01" value={d.orcamento ?? ''} onChange={e => set('orcamento', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cell} />
+                        ? <input type="number" step="0.01" value={d.orcamento ?? ''} onChange={e => setE('orcamento', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cell} />
                         : <span className="px-1.5 text-gray-700">{fmtN(lead.orcamento)}</span>}
                     </Td>
-                    {/* Observação */}
                     <Td>
                       {isEditing
-                        ? <input type="text" value={d.observacao ?? ''} onChange={e => set('observacao', e.target.value || null)} placeholder="Observação" className={cell} />
+                        ? <input type="text" value={d.observacao ?? ''} onChange={e => setE('observacao', e.target.value || null)} placeholder="Observação" className={cell} />
                         : <span className="px-1.5 text-gray-600 truncate block max-w-[220px]">{lead.observacao ?? ''}</span>}
                     </Td>
-                    {/* Bairro — last field */}
                     <Td>
                       {isEditing
-                        ? <input type="text" value={d.bairro ?? ''} onChange={e => set('bairro', e.target.value || null)} placeholder="Bairro" className={cell}
-                            onKeyDown={e => handleLastFieldKeyDown(e, lead.id)} />
+                        ? <input type="text" value={d.bairro ?? ''} onChange={e => setE('bairro', e.target.value || null)} placeholder="Bairro" className={cell} />
                         : <span className="px-1.5 text-gray-600">{lead.bairro ?? ''}</span>}
                     </Td>
-                    {/* Delete */}
                     <Td center>
-                      {!isBlank &&
-                        <button onClick={e => deleteRow(lead.id, e)}
-                          className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 transition-all">
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      }
+                      <button onClick={e => deleteRow(lead.id, e)}
+                        className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 transition-all">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
                     </Td>
                   </tr>
                 );
@@ -471,7 +460,7 @@ export default function CrmPage() {
   );
 }
 
-function Td({ children, center }: { children: React.ReactNode; center?: boolean }) {
+function Td({ children, center }: { children?: React.ReactNode; center?: boolean }) {
   return (
     <td className={cn('border-r border-gray-100 last:border-0 overflow-hidden', center && 'text-center')}>
       {children}
