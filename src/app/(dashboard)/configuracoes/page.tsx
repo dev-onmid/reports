@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import { Plus, Pencil, Trash2, ExternalLink } from 'lucide-react';
+import {
+  Plus, Trash2, ExternalLink, Users2, Shield, User, Mail,
+  Edit2, Search, Filter, Download, Eye, ChevronLeft, ChevronRight,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -19,9 +22,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { mockUsers as initialUsers, mockPermissions as initialPermissions } from '@/lib/mock-data';
-import type { User, Permission } from '@/lib/mock-data';
+import type { User as UserType, Permission } from '@/lib/mock-data';
 import { cn } from '@/lib/utils';
 
 const MODULES: { key: keyof Permission; label: string }[] = [
@@ -34,10 +36,45 @@ const MODULES: { key: keyof Permission; label: string }[] = [
 
 const ROLES = ['Administrador', 'Usuário', 'Visualizador'];
 
-const defaultPermission: Permission = { dashboard: true, clientes: false, relatorios: false, configuracoes: false, integracoes: false };
+const defaultPermission: Permission = {
+  dashboard: true,
+  clientes: false,
+  relatorios: false,
+  configuracoes: false,
+  integracoes: false,
+};
 const emptyForm = { name: '', email: '', password: '', role: 'Usuário', status: 'Ativo' };
 
-async function persistUser(user: User): Promise<boolean> {
+// Mock registration dates per id for display purposes
+const MOCK_DATES: Record<string, string> = {
+  '1': '10/01/2025',
+  '4': '12/01/2025',
+  '2': '18/01/2025',
+  '3': '05/05/2026',
+};
+
+function getRegDate(id: string): string {
+  return MOCK_DATES[id] ?? new Date().toLocaleDateString('pt-BR');
+}
+
+// Avatar color per first letter
+function avatarColor(name: string): string {
+  const letter = name.charAt(0).toUpperCase();
+  if (['A', 'M'].includes(letter)) return 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30';
+  if (['J'].includes(letter)) return 'bg-zinc-700 text-zinc-300 border border-zinc-600';
+  return 'bg-violet-500/20 text-violet-400 border border-violet-500/30';
+}
+
+// Role badge styles
+function roleBadge(role: string) {
+  if (role === 'Administrador')
+    return { cls: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20', Icon: Shield };
+  if (role === 'Usuário')
+    return { cls: 'bg-violet-500/10 text-violet-400 border border-violet-500/20', Icon: User };
+  return { cls: 'bg-zinc-700/50 text-zinc-400 border border-zinc-600/50', Icon: Eye };
+}
+
+async function persistUser(user: UserType): Promise<boolean> {
   const res = await fetch('/api/users', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -55,11 +92,13 @@ function persistPermission(userId: string, permission: Permission) {
 }
 
 export default function ConfiguracoesPage() {
-  const [users, setUsers] = useState<User[]>(initialUsers);
+  const [users, setUsers] = useState<UserType[]>(initialUsers);
   const [permissions, setPermissions] = useState<Record<string, Permission>>(initialPermissions);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'usuarios' | 'permissoes' | 'legal'>('usuarios');
+  const [search, setSearch] = useState('');
 
   // Load from database on mount
   useEffect(() => {
@@ -69,7 +108,7 @@ export default function ConfiguracoesPage() {
         fetch('/api/permissions'),
       ]);
       if (usersRes.status === 'fulfilled' && usersRes.value.ok) {
-        const data: User[] = await usersRes.value.json();
+        const data: UserType[] = await usersRes.value.json();
         if (data.length > 0) setUsers(data);
       }
       if (permsRes.status === 'fulfilled' && permsRes.value.ok) {
@@ -85,7 +124,7 @@ export default function ConfiguracoesPage() {
     setDialogOpen(true);
   }
 
-  function openEditDialog(user: User) {
+  function openEditDialog(user: UserType) {
     setEditingUserId(user.id);
     setForm({
       name: user.name,
@@ -101,7 +140,14 @@ export default function ConfiguracoesPage() {
     if (!form.name.trim() || !form.email.trim() || !form.password.trim()) return;
 
     if (editingUserId) {
-      const updated: User = { id: editingUserId, name: form.name.trim(), email: form.email.trim(), password: form.password, role: form.role, status: form.status };
+      const updated: UserType = {
+        id: editingUserId,
+        name: form.name.trim(),
+        email: form.email.trim(),
+        password: form.password,
+        role: form.role,
+        status: form.status,
+      };
       const snapshot = users;
       setUsers((prev) => prev.map((u) => u.id === editingUserId ? updated : u));
       setForm(emptyForm);
@@ -112,7 +158,14 @@ export default function ConfiguracoesPage() {
     }
 
     const id = String(Date.now());
-    const user: User = { id, name: form.name.trim(), email: form.email.trim(), password: form.password, role: form.role, status: form.status };
+    const user: UserType = {
+      id,
+      name: form.name.trim(),
+      email: form.email.trim(),
+      password: form.password,
+      role: form.role,
+      status: form.status,
+    };
     const snapshot = users;
     setUsers((prev) => [...prev, user]);
     setPermissions((prev) => ({ ...prev, [id]: defaultPermission }));
@@ -143,148 +196,346 @@ export default function ConfiguracoesPage() {
     });
   }
 
+  // Derived KPI values
+  const totalUsers = users.length;
+  const admins = users.filter((u) => u.role === 'Administrador').length;
+  const activeUsers = users.filter((u) => u.status === 'Ativo').length;
+  const pendingInvites = 1; // mocked
+
+  const filteredUsers = users.filter(
+    (u) =>
+      u.name.toLowerCase().includes(search.toLowerCase()) ||
+      u.email.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const TABS = [
+    { key: 'usuarios' as const, label: 'Usuários' },
+    { key: 'permissoes' as const, label: 'Permissões' },
+    { key: 'legal' as const, label: 'Legal' },
+  ];
+
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-4xl font-heading tracking-wider uppercase">Configurações</h1>
-        <p className="text-muted-foreground mt-1">Gerencie usuários e permissões do sistema.</p>
+    <div className="space-y-6 pb-10">
+      {/* ── HEADER ── */}
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-4xl font-heading font-bold tracking-widest uppercase">
+            CONFIGURAÇÕES
+          </h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Gerencie usuários e permissões do sistema.
+          </p>
+        </div>
+        <button
+          onClick={openCreateDialog}
+          className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-white text-sm font-semibold px-4 py-2 rounded-lg shadow-[0_0_16px_rgba(16,185,129,0.35)] transition-all"
+        >
+          <Plus className="w-4 h-4" />
+          Novo Usuário
+        </button>
       </div>
 
-      <Tabs defaultValue="usuarios">
-        <TabsList>
-          <TabsTrigger value="usuarios">Usuários</TabsTrigger>
-          <TabsTrigger value="permissoes">Permissões</TabsTrigger>
-          <TabsTrigger value="legal">Legal</TabsTrigger>
-        </TabsList>
+      {/* ── TABS (underline style) ── */}
+      <div className="flex gap-6 border-b border-border">
+        {TABS.map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
+            className={cn(
+              'pb-3 text-sm font-medium transition-colors',
+              activeTab === tab.key
+                ? 'text-foreground border-b-2 border-emerald-500 -mb-px'
+                : 'text-muted-foreground hover:text-foreground'
+            )}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
 
-        {/* ── USUÁRIOS ── */}
-        <TabsContent value="usuarios" className="mt-6 space-y-4">
-          <div className="flex justify-end">
-            <Button
-              onClick={openCreateDialog}
-              className="bg-primary text-primary-foreground hover:bg-primary/90"
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              Novo Usuário
-            </Button>
+      {/* ══════════════════════════════════
+          TAB: USUÁRIOS
+      ══════════════════════════════════ */}
+      {activeTab === 'usuarios' && (
+        <div className="space-y-6">
+          {/* ── KPI CARDS ── */}
+          <div className="grid grid-cols-4 gap-4">
+            {/* Card 1: Total */}
+            <div className="bg-card border border-border rounded-xl p-5 space-y-3">
+              <div className="w-12 h-12 rounded-full bg-violet-500/15 border border-violet-500/25 flex items-center justify-center">
+                <Users2 className="w-5 h-5 text-violet-400" />
+              </div>
+              <div>
+                <p className="text-3xl font-bold leading-none">{totalUsers}</p>
+                <p className="text-xs text-muted-foreground mt-1">Total de usuários</p>
+              </div>
+              <div>
+                <span className="text-xs text-emerald-400 font-medium">↑ 33%</span>
+                <p className="text-[11px] text-muted-foreground mt-0.5">+1 nos últimos 30 dias</p>
+              </div>
+            </div>
+
+            {/* Card 2: Admins */}
+            <div className="bg-card border border-border rounded-xl p-5 space-y-3">
+              <div className="w-12 h-12 rounded-full bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center">
+                <Shield className="w-5 h-5 text-emerald-400" />
+              </div>
+              <div>
+                <p className="text-3xl font-bold leading-none">{admins}</p>
+                <p className="text-xs text-muted-foreground mt-1">Administradores</p>
+              </div>
+              <div>
+                <span className="text-xs text-muted-foreground font-medium">— 0%</span>
+                <p className="text-[11px] text-muted-foreground mt-0.5">Sem alteração</p>
+              </div>
+            </div>
+
+            {/* Card 3: Ativos */}
+            <div className="bg-card border border-border rounded-xl p-5 space-y-3">
+              <div className="w-12 h-12 rounded-full bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center">
+                <User className="w-5 h-5 text-emerald-400" />
+              </div>
+              <div>
+                <p className="text-3xl font-bold leading-none">{activeUsers}</p>
+                <p className="text-xs text-muted-foreground mt-1">Usuários ativos</p>
+              </div>
+              <div>
+                <span className="text-xs text-emerald-400 font-medium">↑ 50%</span>
+                <p className="text-[11px] text-muted-foreground mt-0.5">+1 nos últimos 30 dias</p>
+              </div>
+            </div>
+
+            {/* Card 4: Convites */}
+            <div className="bg-card border border-border rounded-xl p-5 space-y-3">
+              <div className="w-12 h-12 rounded-full bg-violet-500/15 border border-violet-500/25 flex items-center justify-center">
+                <Mail className="w-5 h-5 text-violet-400" />
+              </div>
+              <div>
+                <p className="text-3xl font-bold leading-none">{pendingInvites}</p>
+                <p className="text-xs text-muted-foreground mt-1">Convite pendente</p>
+              </div>
+              <div>
+                <span className="text-xs text-muted-foreground font-medium">— 0%</span>
+                <p className="text-[11px] text-muted-foreground mt-0.5">Sem alteração</p>
+              </div>
+            </div>
           </div>
 
-          <div className="bg-card border border-border rounded-lg overflow-hidden">
+          {/* ── USUÁRIOS CADASTRADOS CARD ── */}
+          <div className="bg-card border border-border rounded-xl overflow-hidden">
+            {/* Card header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+              <div>
+                <p className="text-sm font-bold">Usuários cadastrados</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Lista de todos os usuários que possuem acesso ao sistema.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                {/* Search */}
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                  <input
+                    type="text"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Buscar usuário..."
+                    className="pl-8 pr-3 h-8 text-xs bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-emerald-500 w-44"
+                  />
+                </div>
+                {/* Filter button */}
+                <button className="flex items-center gap-1.5 h-8 px-3 text-xs text-muted-foreground bg-background border border-border rounded-lg hover:text-foreground transition-colors">
+                  <Filter className="w-3.5 h-3.5" />
+                  Filtrar
+                  <svg className="w-3 h-3 ml-0.5" viewBox="0 0 12 12" fill="currentColor">
+                    <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" />
+                  </svg>
+                </button>
+                {/* Download */}
+                <button className="h-8 w-8 flex items-center justify-center text-muted-foreground bg-background border border-border rounded-lg hover:text-foreground transition-colors">
+                  <Download className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Table */}
             <table className="w-full text-sm text-left">
-              <thead className="bg-muted text-muted-foreground text-xs uppercase font-medium">
-                <tr>
-                  <th className="px-6 py-4">Nome</th>
-                  <th className="px-6 py-4">Email</th>
-                  <th className="px-6 py-4">Perfil</th>
-                  <th className="px-6 py-4">Status</th>
-                  <th className="px-6 py-4 text-right">Ações</th>
+              <thead>
+                <tr className="border-b border-border">
+                  <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Usuário</th>
+                  <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Email</th>
+                  <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Perfil</th>
+                  <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Status</th>
+                  <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Ações</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {users.map((user) => (
-                  <tr key={user.id} className="hover:bg-muted/50 transition-colors">
-                    <td className="px-6 py-4 font-medium">{user.name}</td>
-                    <td className="px-6 py-4 text-muted-foreground">{user.email}</td>
-                    <td className="px-6 py-4">
-                      <span
-                        className={cn(
-                          'px-2 py-1 rounded-full text-xs font-medium',
-                          user.role === 'Administrador'
-                            ? 'bg-primary/20 text-primary'
-                            : user.role === 'Usuário'
-                            ? 'bg-blue-500/20 text-blue-500'
-                            : 'bg-muted text-muted-foreground'
-                        )}
-                      >
-                        {user.role}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span
-                        className={cn(
-                          'px-2 py-1 rounded-full text-xs font-medium',
-                          user.status === 'Ativo'
-                            ? 'bg-primary/20 text-primary'
-                            : 'bg-muted text-muted-foreground'
-                        )}
-                      >
-                        {user.status}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex justify-end gap-2">
-                        <Button variant="ghost" size="icon" title="Editar" onClick={() => openEditDialog(user)}>
-                          <Pencil className="w-4 h-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          title="Remover"
-                          className="text-destructive/70 hover:text-destructive"
-                          onClick={() => handleDeleteUser(user.id)}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </TabsContent>
-
-        {/* ── PERMISSÕES ── */}
-        <TabsContent value="permissoes" className="mt-6">
-          <div className="bg-card border border-border rounded-lg overflow-hidden">
-            <table className="w-full text-sm text-left">
-              <thead className="bg-muted text-muted-foreground text-xs uppercase font-medium">
-                <tr>
-                  <th className="px-6 py-4">Usuário</th>
-                  {MODULES.map((m) => (
-                    <th key={m.key} className="px-6 py-4 text-center">
-                      {m.label}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {users.map((user) => (
-                  <tr key={user.id} className="hover:bg-muted/50 transition-colors">
-                    <td className="px-6 py-4">
-                      <div className="font-medium">{user.name}</div>
-                      <div className="text-xs text-muted-foreground">{user.role}</div>
-                    </td>
-                    {MODULES.map((m) => {
-                      const enabled = permissions[user.id]?.[m.key] ?? defaultPermission[m.key];
-                      return (
-                        <td key={m.key} className="px-6 py-4 text-center">
-                          <button
-                            onClick={() => togglePermission(user.id, m.key)}
-                            aria-label={`${enabled ? 'Desativar' : 'Ativar'} ${m.label} para ${user.name}`}
+                {filteredUsers.map((user) => {
+                  const { cls: badgeCls, Icon: BadgeIcon } = roleBadge(user.role);
+                  return (
+                    <tr key={user.id} className="hover:bg-muted/30 transition-colors">
+                      {/* Avatar + name */}
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-3">
+                          <div
                             className={cn(
-                              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200',
-                              enabled ? 'bg-primary' : 'bg-muted-foreground/30'
+                              'w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold shrink-0',
+                              avatarColor(user.name)
                             )}
                           >
-                            <span
-                              className={cn(
-                                'inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200',
-                                enabled ? 'translate-x-5' : 'translate-x-0'
-                              )}
-                            />
+                            {user.name.charAt(0).toUpperCase()}
+                          </div>
+                          <div>
+                            <p className="font-semibold text-sm">{user.name}</p>
+                            <p className="text-[11px] text-muted-foreground">
+                              Cadastrado em {getRegDate(user.id)}
+                            </p>
+                          </div>
+                        </div>
+                      </td>
+                      {/* Email */}
+                      <td className="px-6 py-4 text-sm text-muted-foreground">{user.email}</td>
+                      {/* Role badge */}
+                      <td className="px-6 py-4">
+                        <span className={cn('inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium', badgeCls)}>
+                          <BadgeIcon className="w-3 h-3" />
+                          {user.role}
+                        </span>
+                      </td>
+                      {/* Status */}
+                      <td className="px-6 py-4">
+                        {user.status === 'Ativo' ? (
+                          <span className="inline-flex items-center gap-1.5 text-sm text-emerald-400">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />
+                            Ativo
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
+                            <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground inline-block" />
+                            Inativo
+                          </span>
+                        )}
+                      </td>
+                      {/* Actions */}
+                      <td className="px-6 py-4">
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            onClick={() => openEditDialog(user)}
+                            title="Editar"
+                            className="w-8 h-8 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
                           </button>
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
+                          <button
+                            onClick={() => handleDeleteUser(user.id)}
+                            title="Remover"
+                            className="w-8 h-8 flex items-center justify-center rounded-lg text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
+
+            {/* Card footer / pagination */}
+            <div className="flex items-center justify-between px-6 py-4 border-t border-border">
+              <p className="text-xs text-muted-foreground">
+                Mostrando 1 a {filteredUsers.length} de {filteredUsers.length} usuários
+              </p>
+              <div className="flex items-center gap-1">
+                <button className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors">
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <button className="w-7 h-7 flex items-center justify-center rounded-lg bg-emerald-500 text-white text-xs font-semibold">
+                  1
+                </button>
+                <button className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors">
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
           </div>
-        </TabsContent>
-        {/* ── LEGAL ── */}
-        <TabsContent value="legal" className="mt-6 space-y-6">
+        </div>
+      )}
+
+      {/* ══════════════════════════════════
+          TAB: PERMISSÕES
+      ══════════════════════════════════ */}
+      {activeTab === 'permissoes' && (
+        <div className="bg-card border border-border rounded-xl overflow-hidden">
+          <table className="w-full text-sm text-left">
+            <thead>
+              <tr className="border-b border-border">
+                <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Usuário
+                </th>
+                {MODULES.map((m) => (
+                  <th
+                    key={m.key}
+                    className="px-6 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground text-center"
+                  >
+                    {m.label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {users.map((user) => (
+                <tr key={user.id} className="hover:bg-muted/30 transition-colors">
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={cn(
+                          'w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold shrink-0',
+                          avatarColor(user.name)
+                        )}
+                      >
+                        {user.name.charAt(0).toUpperCase()}
+                      </div>
+                      <div>
+                        <p className="font-semibold text-sm">{user.name}</p>
+                        <p className="text-[11px] text-muted-foreground">{user.role}</p>
+                      </div>
+                    </div>
+                  </td>
+                  {MODULES.map((m) => {
+                    const enabled = permissions[user.id]?.[m.key] ?? defaultPermission[m.key];
+                    return (
+                      <td key={m.key} className="px-6 py-4 text-center">
+                        <button
+                          onClick={() => togglePermission(user.id, m.key)}
+                          aria-label={`${enabled ? 'Desativar' : 'Ativar'} ${m.label} para ${user.name}`}
+                          className={cn(
+                            'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200',
+                            enabled ? 'bg-emerald-500' : 'bg-muted-foreground/30'
+                          )}
+                        >
+                          <span
+                            className={cn(
+                              'inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200',
+                              enabled ? 'translate-x-5' : 'translate-x-0'
+                            )}
+                          />
+                        </button>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* ══════════════════════════════════
+          TAB: LEGAL
+      ══════════════════════════════════ */}
+      {activeTab === 'legal' && (
+        <div className="space-y-6">
           {[
             {
               title: 'Política de Privacidade',
@@ -322,8 +573,8 @@ export default function ConfiguracoesPage() {
               />
             </div>
           ))}
-        </TabsContent>
-      </Tabs>
+        </div>
+      )}
 
       {/* ── DIALOG: Novo/Editar Usuário ── */}
       <Dialog
@@ -390,7 +641,7 @@ export default function ConfiguracoesPage() {
               <select
                 value={form.status}
                 onChange={(event) => setForm({ ...form, status: event.target.value })}
-                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500"
               >
                 <option value="Ativo">Ativo</option>
                 <option value="Inativo">Inativo</option>
@@ -411,7 +662,7 @@ export default function ConfiguracoesPage() {
             <Button
               onClick={handleSaveUser}
               disabled={!form.name.trim() || !form.email.trim() || !form.password.trim()}
-              className="bg-primary text-primary-foreground hover:bg-primary/90"
+              className="bg-emerald-500 hover:bg-emerald-400 text-white shadow-[0_0_12px_rgba(16,185,129,0.3)]"
             >
               {editingUserId ? 'Salvar Usuário' : 'Criar Usuário'}
             </Button>

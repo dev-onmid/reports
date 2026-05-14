@@ -26,7 +26,7 @@ function initials(name: string): string {
 
 const pictureCache = new Map<string, string | null>();
 
-async function fetchClientPicture(clientId: string): Promise<string | null> {
+export async function fetchClientPicture(clientId: string): Promise<string | null> {
   if (pictureCache.has(clientId)) return pictureCache.get(clientId)!;
 
   try {

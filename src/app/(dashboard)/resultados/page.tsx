@@ -2,10 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowRight, TrendingUp, Users, Wallet, Target, RefreshCw } from 'lucide-react';
+import {
+  ArrowRight, TrendingUp, Users, Wallet, Target, RefreshCw,
+  Eye, Calendar, ShoppingBag, CheckCircle2, ChevronRight, Info, DollarSign, Users2,
+} from 'lucide-react';
 import { useInvestmentPayments } from '@/lib/payment-store';
 import { clientResults, type ClientFunnel } from '@/lib/client-results-store';
 import { useClients } from '@/lib/client-store';
+import { ClientAvatar } from '@/components/client-avatar';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 
 type ApiMetrics = {
@@ -66,7 +70,23 @@ function MetricCell({ value, pct, format = 'currency', loading = false }: {
 
 const FUNNEL_KEYS: (keyof ClientFunnel)[] = ['contatos', 'qualificados', 'agendamentos', 'comparecimentos', 'fechamentos'];
 const FUNNEL_LABELS = ['Cont.', 'Qualif.', 'Agend.', 'Comp.', 'Fecha.'];
+const FUNNEL_ICONS = [Eye, Users2, Calendar, ShoppingBag, CheckCircle2];
 const ZERO_FUNNEL: ClientFunnel = { contatos: 0, qualificados: 0, agendamentos: 0, comparecimentos: 0, fechamentos: 0 };
+
+function ResultSparkline({ color }: { color: string }) {
+  return (
+    <svg width="100%" height="28" viewBox="0 0 120 28" preserveAspectRatio="none" className="mt-3 opacity-70">
+      <path
+        d="M0,18 C8,12 15,8 25,14 C35,20 42,6 55,10 C68,14 75,22 88,8 C101,-4 110,16 120,12"
+        fill="none"
+        stroke={color}
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
 
 export default function ResultadosPage() {
   const { clients } = useClients();
@@ -151,63 +171,86 @@ export default function ResultadosPage() {
   const overC = pctColors(overallPct);
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-5 pb-8">
+
+      {/* ── Header ── */}
+      <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Resultado Geral</h1>
-          <p className="text-muted-foreground mt-1">
+          <h1 className="text-3xl font-bold font-heading tracking-tight uppercase">Resultado Geral</h1>
+          <p className="text-muted-foreground mt-1 text-sm">
             Métricas reais das contas vinculadas — leads e CPL do Meta Ads, CAC do Google Ads.
           </p>
         </div>
         {loadingMetrics && (
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Atualizando métricas...
+          <div className="flex items-center gap-2 text-xs text-muted-foreground shrink-0">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            Atualizando métricas...
+            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
           </div>
         )}
       </div>
 
-      {/* Summary cards */}
+      {/* ── KPI Cards ── */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {([
-          { label: 'Meta Total',      value: formatCurrencyBRL(totMeta),       icon: Target,     tone: 'text-foreground' as const },
-          { label: 'Resultado Total', value: formatCurrencyBRL(totResult),      icon: TrendingUp, tone: overC.text as string },
-          { label: 'Total de Leads',  value: totLeads.toLocaleString('pt-BR'),  icon: Users,      tone: 'text-foreground' as const },
-          { label: 'Investimento',    value: formatCurrencyBRL(totInvest),      icon: Wallet,     tone: 'text-foreground' as const },
-        ] as const).map(({ label, value, icon: Icon, tone }) => (
-          <div key={label} className="bg-card border border-border rounded-xl p-4">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
-              <Icon className={cn('w-4 h-4 shrink-0', tone)} />
+          { label: 'META TOTAL',      value: formatCurrencyBRL(totMeta),      Icon: Target,     color: '#8b5cf6' },
+          { label: 'RESULTADO TOTAL', value: formatCurrencyBRL(totResult),     Icon: TrendingUp, color: overC.text === 'text-emerald-300' ? '#10b981' : overC.text === 'text-yellow-300' ? '#eab308' : '#ef4444' },
+          { label: 'TOTAL DE LEADS',  value: totLeads.toLocaleString('pt-BR'), Icon: Users,      color: '#3b82f6' },
+          { label: 'INVESTIMENTO',    value: formatCurrencyBRL(totInvest),     Icon: DollarSign, color: '#f59e0b' },
+        ] as const).map(({ label, value, Icon, color }) => (
+          <div key={label} className="bg-card border border-border rounded-xl p-5 relative overflow-hidden">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
+                <p className="text-2xl font-bold font-heading mt-2 tabular-nums" style={{ color }}>{value}</p>
+              </div>
+              <div className="w-12 h-12 rounded-full flex items-center justify-center shrink-0"
+                style={{ background: `radial-gradient(circle, ${color}30 0%, ${color}12 70%)`, border: `1px solid ${color}25` }}>
+                <Icon className="w-6 h-6" style={{ color }} />
+              </div>
             </div>
-            <p className={cn('text-2xl font-bold font-heading mt-3', tone)}>{value}</p>
+            <ResultSparkline color={color} />
           </div>
         ))}
       </div>
 
-      {/* Legend */}
+      {/* ── Legend ── */}
       <div className="flex items-center gap-3 flex-wrap">
-        <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Legenda</span>
+        <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">LEGENDA</span>
         {([
-          { label: '≥ 75% da meta', badge: 'bg-emerald-500/15 border-emerald-400/30 text-emerald-300' },
-          { label: '30 – 74%',       badge: 'bg-yellow-500/15 border-yellow-400/30 text-yellow-300' },
-          { label: '< 30% da meta',  badge: 'bg-red-500/15 border-red-400/30 text-red-300' },
-        ] as const).map(({ label, badge }) => (
-          <span key={label} className={cn('rounded-full border px-2.5 py-0.5 text-[10px] font-bold', badge)}>
+          { label: '≥ 75% da meta',  bg: 'bg-emerald-500/15 border-emerald-400/30 text-emerald-300' },
+          { label: '30 – 74% da meta', bg: 'bg-orange-500/15 border-orange-400/30 text-orange-300' },
+          { label: '< 30% da meta',  bg: 'bg-red-500/15 border-red-400/30 text-red-300' },
+        ]).map(({ label, bg }) => (
+          <span key={label} className={cn('rounded-full border px-2.5 py-0.5 text-[10px] font-bold', bg)}>
             {label}
           </span>
         ))}
         <span className="text-[10px] text-muted-foreground/60 italic">CPL e CAC: menor = melhor</span>
       </div>
 
-      {/* Table */}
+      {/* ── Table ── */}
       <div className="bg-card border border-border rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="min-w-[1200px] w-full">
+          <table className="min-w-[1100px] w-full">
             <thead>
-              <tr className="border-b border-border bg-muted/30">
-                {['Gestor', 'Cliente', 'Meta', 'Resultado', '%', 'Leads', 'CPL', 'CAC', 'Funil', 'Investimento'].map((col) => (
-                  <th key={col} className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-muted-foreground whitespace-nowrap">
-                    {col}
+              <tr className="border-b border-border bg-muted/20">
+                {[
+                  { label: 'CLIENTE', info: false },
+                  { label: 'META', info: false },
+                  { label: 'RESULTADO', info: false },
+                  { label: '%', info: false },
+                  { label: 'LEADS', info: false },
+                  { label: 'CPL', info: true },
+                  { label: 'CAC', info: true },
+                  { label: 'FUNIL', info: false },
+                  { label: 'INVESTIMENTO', info: true },
+                  { label: '', info: false },
+                ].map((col) => (
+                  <th key={col.label} className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-muted-foreground whitespace-nowrap">
+                    {col.info ? (
+                      <span className="flex items-center gap-1">{col.label} <Info className="w-3 h-3 opacity-50" /></span>
+                    ) : col.label}
                   </th>
                 ))}
               </tr>
@@ -217,80 +260,70 @@ export default function ResultadosPage() {
                 const resultC = pctColors(row.pctResult);
                 return (
                   <tr key={row.client.id} className={cn('border-l-[3px] hover:bg-muted/20 transition-colors', resultC.border)}>
-                    <td className="px-4 py-4 text-sm font-semibold whitespace-nowrap">{row.gestor || '—'}</td>
-                    <td className="px-4 py-4">
-                      <Link href={`/clientes/${row.client.id}`} className="text-sm font-bold hover:text-primary transition-colors">
-                        {row.client.name}
+                    <td className="px-4 py-3">
+                      <Link href={`/clientes/${row.client.id}`} className="flex items-center gap-3 hover:opacity-80 transition-opacity">
+                        <ClientAvatar clientId={row.client.id} name={row.client.name} size="sm" />
+                        <div>
+                          <p className="text-sm font-bold">{row.client.name}</p>
+                          <p className="text-xs text-muted-foreground mt-0.5">{row.client.segment}</p>
+                        </div>
                       </Link>
-                      <p className="text-xs text-muted-foreground mt-0.5">{row.client.segment}</p>
                     </td>
-                    <td className="px-4 py-4 text-sm font-semibold whitespace-nowrap">
-                      {row.metaTarget > 0 ? formatCurrencyBRL(row.metaTarget) : '—'}
+                    <td className="px-4 py-3 text-sm font-semibold whitespace-nowrap">
+                      {row.metaTarget > 0 ? formatCurrencyBRL(row.metaTarget) : <span className="text-muted-foreground/40">—</span>}
                     </td>
-                    <td className={cn('px-4 py-4 text-sm font-bold whitespace-nowrap', resultC.text)}>
+                    <td className={cn('px-4 py-3 text-sm font-bold whitespace-nowrap', row.resultado > 0 ? resultC.text : 'text-red-400')}>
                       {row.resultado > 0 ? formatCurrencyBRL(row.resultado) : '—'}
                     </td>
-                    <td className="px-4 py-4">
-                      {row.metaTarget > 0 && row.resultado > 0 ? (
-                        <div className="h-2 w-16 rounded-full bg-muted overflow-hidden">
-                          <div className={cn('h-full rounded-full', resultC.bar)} style={{ width: `${row.pctResult ?? 0}%` }} />
-                        </div>
-                      ) : <span className="text-muted-foreground/40 text-sm">—</span>}
+                    <td className="px-4 py-3">
+                      {row.metaTarget > 0 && row.pctResult !== null ? (
+                        <span className={cn('text-sm font-bold', resultC.text)}>{row.pctResult}%</span>
+                      ) : <span className="text-red-400 text-sm font-bold">—</span>}
                     </td>
-                    <td className="px-4 py-4">
-                      <MetricCell value={row.leads} pct={row.pctLeads} format="number" loading={loadingMetrics && !apiMetricsByClient[row.client.id]} />
+                    <td className="px-4 py-3 text-sm font-bold text-blue-400">
+                      {row.leads > 0 ? row.leads.toLocaleString('pt-BR') : <span className="text-foreground/70">0</span>}
                     </td>
-                    <td className="px-4 py-4">
+                    <td className="px-4 py-3">
                       <MetricCell value={row.cpl} pct={row.pctCpl} loading={loadingMetrics && !apiMetricsByClient[row.client.id]} />
                     </td>
-                    <td className="px-4 py-4">
+                    <td className="px-4 py-3">
                       <MetricCell value={row.cac} pct={row.pctCac} loading={loadingMetrics && !apiMetricsByClient[row.client.id]} />
                     </td>
-                    <td className="px-4 py-4">
-                      <div className="flex items-start gap-0.5">
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-0.5">
                         {FUNNEL_KEYS.map((key, idx) => {
+                          const FunnelIcon = FUNNEL_ICONS[idx];
                           const c = pctColors(row.funnelPcts[idx]);
                           return (
-                            <span key={key} className="flex items-start gap-0.5">
+                            <span key={key} className="flex items-center gap-0.5">
                               <span className="flex flex-col items-center min-w-[36px]">
-                                <span className={cn('text-xs font-bold leading-tight', row.funil[key] > 0 ? c.text : 'text-muted-foreground/30')}>
+                                <span className={cn('text-[10px] font-bold mb-0.5 tabular-nums', row.funil[key] > 0 ? c.text : 'text-muted-foreground/30')}>
                                   {row.funil[key] > 0 ? row.funil[key] : '—'}
                                 </span>
-                                <span className="text-[9px] text-muted-foreground/40 leading-tight mt-0.5">{FUNNEL_LABELS[idx]}</span>
+                                <span className={cn('w-7 h-7 rounded-lg flex items-center justify-center', row.funil[key] > 0 ? 'bg-muted/40' : 'bg-muted/20')}>
+                                  <FunnelIcon className={cn('w-3.5 h-3.5', row.funil[key] > 0 ? c.text : 'text-muted-foreground/25')} />
+                                </span>
+                                <span className="text-[8px] text-muted-foreground/40 mt-0.5 whitespace-nowrap">{FUNNEL_LABELS[idx]}</span>
                               </span>
                               {idx < FUNNEL_KEYS.length - 1 && (
-                                <ArrowRight className="w-2.5 h-2.5 mt-1 text-muted-foreground/25 shrink-0" />
+                                <ArrowRight className="w-2.5 h-2.5 text-muted-foreground/20 shrink-0 mb-3" />
                               )}
                             </span>
                           );
                         })}
                       </div>
                     </td>
-                    <td className="px-4 py-4">
+                    <td className="px-4 py-3">
                       <p className="text-sm font-bold whitespace-nowrap">{formatCurrencyBRL(row.totalInvest)}</p>
-                      <p className="text-[11px] text-muted-foreground mt-0.5 whitespace-nowrap">
-                        {formatCurrencyBRL(row.dispatchedInvest)} enviado
-                      </p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5 whitespace-nowrap">{formatCurrencyBRL(row.dispatchedInvest)} enviado</p>
+                    </td>
+                    <td className="px-2 py-3">
+                      <ChevronRight className="w-4 h-4 text-muted-foreground/30" />
                     </td>
                   </tr>
                 );
               })}
             </tbody>
-            <tfoot>
-              <tr className="border-t-2 border-border bg-muted/30">
-                <td className="px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-muted-foreground" colSpan={2}>Total Geral</td>
-                <td className="px-4 py-3 text-sm font-bold whitespace-nowrap">{formatCurrencyBRL(totMeta)}</td>
-                <td className={cn('px-4 py-3 text-sm font-bold whitespace-nowrap', overC.text)}>{formatCurrencyBRL(totResult)}</td>
-                <td className="px-4 py-3">
-                  <div className="h-2 w-16 rounded-full bg-muted overflow-hidden">
-                    <div className={cn('h-full rounded-full', overC.bar)} style={{ width: `${overallPct}%` }} />
-                  </div>
-                </td>
-                <td className="px-4 py-3 text-sm font-bold">{totLeads.toLocaleString('pt-BR')}</td>
-                <td colSpan={3} />
-                <td className="px-4 py-3 text-sm font-bold whitespace-nowrap">{formatCurrencyBRL(totInvest)}</td>
-              </tr>
-            </tfoot>
           </table>
         </div>
       </div>

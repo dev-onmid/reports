@@ -265,10 +265,10 @@ function autoPartial(target: number, period: Period): number {
 }
 
 // ── KPI Card ────────────────────────────────────────────────────────────────
-function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: Icon, iconColor, iconBg, loading = false, inverseGoal = false }: {
+function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: Icon, iconColor, iconBg, loading = false, inverseGoal = false, inverseChange = false }: {
   title: string; value: number; prevValue?: number; goalValue?: number;
   format?: 'currency' | 'number' | 'percent' | 'times';
-  icon: React.ElementType; iconColor: string; iconBg: string; loading?: boolean; inverseGoal?: boolean;
+  icon: React.ElementType; iconColor: string; iconBg: string; loading?: boolean; inverseGoal?: boolean; inverseChange?: boolean;
 }) {
   const fmt = (v: number) =>
     format === 'currency' ? formatCurrencyBRL(v)
@@ -276,7 +276,8 @@ function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: 
     : format === 'times' ? `${v.toFixed(2)}x`
     : v.toLocaleString('pt-BR');
   const change = (prevValue !== undefined && prevValue > 0) ? ((value - prevValue) / prevValue) * 100 : null;
-  const isPositive = change !== null && change >= 0;
+  // inverseChange: métricas onde menor = melhor (ex: CPL) — aumento é ruim, queda é boa
+  const isPositive = change !== null && (inverseChange ? change <= 0 : change >= 0);
   const goalProgress = goalValue !== undefined && goalValue > 0
     ? inverseGoal
       ? (goalValue / Math.max(value, 0.01)) * 100
@@ -299,8 +300,8 @@ function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: 
           <p className="mt-3 font-heading text-3xl font-bold leading-none text-foreground">{fmt(value)}</p>
           {change !== null ? (
             <p className={cn('mt-1.5 flex items-center gap-0.5 text-xs font-semibold', isPositive ? 'text-emerald-400' : 'text-red-400')}>
-              {isPositive ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-              {isPositive ? '+' : ''}{change.toFixed(1)}% vs mês passado
+              {change >= 0 ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+              {change >= 0 ? '+' : ''}{change.toFixed(1)}% vs mês passado
             </p>
           ) : (
             <p className="mt-1.5 text-[11px] text-muted-foreground">— vs mês passado</p>
@@ -2745,7 +2746,7 @@ export default function GeneralDashboard() {
         <KpiCard title="Resultado" value={revenue} prevValue={prevTotalSpend > 0 ? undefined : undefined} goalValue={effectiveRevenueGoal > 0 ? effectiveRevenueGoal : undefined} format="currency" icon={DollarSign} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} />
         <KpiCard title="ROI" value={roi} prevValue={prevRoi > 0 ? prevRoi : undefined} goalValue={roiGoal > 0 ? roiGoal : undefined} format="times" icon={TrendingUp} iconColor="#a78bfa" iconBg="#a78bfa" loading={metricsLoading} />
         <KpiCard title="Total de Leads" value={totalLeads} prevValue={prevTotalLeads > 0 ? prevTotalLeads : undefined} goalValue={effectiveLeadsGoal > 0 ? effectiveLeadsGoal : undefined} format="number" icon={Users} iconColor="#2dd4bf" iconBg="#2dd4bf" loading={metricsLoading} />
-        <KpiCard title="Custo por Lead" value={totalCostPerLead} prevValue={prevCpl > 0 ? prevCpl : undefined} goalValue={cplGoal > 0 ? cplGoal : undefined} format="currency" icon={Tag} iconColor="#94a3b8" iconBg="#94a3b8" loading={metricsLoading} inverseGoal />
+        <KpiCard title="Custo por Lead" value={totalCostPerLead} prevValue={prevCpl > 0 ? prevCpl : undefined} goalValue={cplGoal > 0 ? cplGoal : undefined} format="currency" icon={Tag} iconColor="#94a3b8" iconBg="#94a3b8" loading={metricsLoading} inverseGoal inverseChange />
       </div>
 
       {/* AI ERROR */}
@@ -2793,21 +2794,38 @@ export default function GeneralDashboard() {
             </div>
           </div>
           {(() => {
-            const funnelRows: { label: string; value: number }[] = [
-              { label: 'Impressões', value: metaImpressions },
-              { label: 'Cliques', value: metaClicks },
-              { label: 'Leads', value: totalLeads },
+            // Pega os estágios do planejamento do primeiro cliente selecionado
+            const firstId = [...selectedIds][0];
+            const clientPlanning = firstId ? readPlanningFromStorage(firstId) : DEFAULT_PLANNING;
+            const stages = clientPlanning.stages.length >= 2 ? clientPlanning.stages : DEFAULT_PLANNING.stages;
+
+            // Mapeia estágios do planejamento para valores do CRM
+            // stages[0] = Contatos/Leads → totalLeads
+            // stages[1..4] → funnelCounts por ordem do FUNNEL_ORDER
+            const crmValues = [
+              totalLeads,
+              funnelCounts[FUNNEL_ORDER[0]] ?? 0, // Atendimento
+              funnelCounts[FUNNEL_ORDER[1]] ?? 0, // Agendamento
+              funnelCounts[FUNNEL_ORDER[2]] ?? 0, // Comparecimento
+              funnelCounts[FUNNEL_ORDER[3]] ?? 0, // Fechamento
             ];
-            if (hasFunnelData) {
-              const clientes = funnelCounts['Atendimento'] ?? funnelCounts['Agendamento'] ?? 0;
-              const vendas = funnelCounts['Fechamento'] ?? 0;
-              if (clientes > 0) funnelRows.push({ label: 'Clientes', value: clientes });
-              if (vendas > 0) funnelRows.push({ label: 'Vendas', value: vendas });
-            }
-            const maxVal = funnelRows[0]?.value ?? 1;
-            const FUNNEL_COLORS = ['#7B2CFF', '#8B35FF', '#9B45FF', '#A855FF', '#B865FF'];
+
+            const totalReach = metaImpressions + googleImpressions;
+            const totalClicks = metaClicks + googleClicks;
+
+            const funnelRows: { label: string; value: number; badge?: string }[] = [
+              { label: 'Alcance Total', value: totalReach, badge: 'Meta + Google' },
+              { label: 'Cliques Totais', value: totalClicks, badge: 'Meta + Google' },
+              ...stages.map((s, i) => ({
+                label: s.name.replace(/^\d+º\s*—\s*/, ''), // remove "5º — " prefix
+                value: crmValues[i] ?? 0,
+              })),
+            ];
+
+            const maxVal = funnelRows[0]?.value || 1;
+            const FUNNEL_COLORS = ['#4C1D95', '#5B21B6', '#6D28D9', '#7C3AED', '#8B5CF6', '#9333EA', '#A855F7'];
             return (
-              <div className="space-y-3">
+              <div className="space-y-2.5">
                 {funnelRows.map((row, i) => {
                   const barPct = maxVal > 0 ? (row.value / maxVal) * 100 : 0;
                   const prev = funnelRows[i - 1]?.value;
@@ -2816,19 +2834,22 @@ export default function GeneralDashboard() {
                   return (
                     <div key={row.label} className="space-y-1">
                       <div className="flex items-center justify-between text-[11px] font-semibold">
-                        <span className="text-foreground/80">{row.label}</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-foreground/80">{row.label}</span>
+                          {row.badge && <span className="text-[9px] text-muted-foreground/60">{row.badge}</span>}
+                        </div>
                         <div className="flex items-center gap-2">
                           <span className="font-bold text-foreground">{row.value.toLocaleString('pt-BR')}</span>
                           {convPct && <span className="text-emerald-400">{convPct}%</span>}
                         </div>
                       </div>
-                      <div className="h-7 relative" style={{ paddingLeft: `${indent}%`, paddingRight: `${indent}%` }}>
+                      <div className="h-6 relative" style={{ paddingLeft: `${indent}%`, paddingRight: `${indent}%` }}>
                         <div
                           className="h-full rounded"
                           style={{
                             background: `linear-gradient(90deg, ${FUNNEL_COLORS[i % FUNNEL_COLORS.length]}, ${FUNNEL_COLORS[Math.min(i + 1, FUNNEL_COLORS.length - 1)]})`,
-                            boxShadow: `0 0 10px ${FUNNEL_COLORS[i % FUNNEL_COLORS.length]}50`,
-                            opacity: Math.max(0.5, 0.9 - i * 0.07),
+                            boxShadow: `0 0 8px ${FUNNEL_COLORS[i % FUNNEL_COLORS.length]}60`,
+                            opacity: Math.max(0.55, 1 - i * 0.06),
                           }}
                         />
                       </div>

@@ -9,7 +9,7 @@ import {
   BarChart3, Plug, UserRound,
 } from 'lucide-react';
 import { useClients } from '@/lib/client-store';
-import { ClientAvatar } from '@/components/client-avatar';
+import { ClientAvatar, fetchClientPicture } from '@/components/client-avatar';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 import type { Client } from '@/lib/mock-data';
 
@@ -131,6 +131,23 @@ function clientTheme(clientId: string) {
   return CLIENT_CARD_THEMES[hash % CLIENT_CARD_THEMES.length];
 }
 
+function ClientLogoBg({ clientId }: { clientId: string }) {
+  const [imgUrl, setImgUrl] = useState<string | null>(null);
+  useEffect(() => { void fetchClientPicture(clientId).then(setImgUrl); }, [clientId]);
+  if (!imgUrl) return null;
+  return (
+    <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-xl">
+      <img
+        src={imgUrl}
+        alt=""
+        className="absolute right-0 top-1/2 -translate-y-1/2 h-[120%] w-auto object-cover opacity-[0.09] scale-110"
+        onError={() => setImgUrl(null)}
+      />
+      <div className="absolute inset-0" style={{ background: 'linear-gradient(to right, rgba(0,0,0,0.92) 30%, rgba(0,0,0,0.55) 65%, rgba(0,0,0,0.25) 100%)' }} />
+    </div>
+  );
+}
+
 function ClientChoiceCard({
   client,
   recentLabel,
@@ -154,6 +171,7 @@ function ClientChoiceCard({
     >
       <div className="pointer-events-none absolute inset-0 opacity-80" style={{ background: `radial-gradient(circle at 88% 8%, ${theme.glow}, transparent 34%)` }} />
       <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-[linear-gradient(120deg,rgba(255,255,255,0.10),transparent_55%)] opacity-50" />
+      <ClientLogoBg clientId={client.id} />
       <div className="relative flex justify-between">
         {recentLabel && (
           <span className="rounded-full border px-2 py-1 text-[9px] font-bold uppercase tracking-wider" style={{ borderColor: `${theme.accent}55`, color: theme.accent, background: `${theme.accent}18` }}>

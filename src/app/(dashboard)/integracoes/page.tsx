@@ -8,12 +8,14 @@ import {
   ChevronDown,
   CheckCircle2,
   ExternalLink,
+  LayoutGrid,
   Megaphone,
+  MoreHorizontal,
   Plus,
   RefreshCw,
+  Sparkles,
   Trash2,
   X,
-  XCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -28,7 +30,6 @@ import {
 } from '@/lib/google-ads-store';
 import {
   fbLogin,
-  fbLogout,
   loadCachedAdAccounts,
   saveCachedAdAccounts,
   setAccountEnabled,
@@ -551,8 +552,8 @@ function GoogleAdsAssetsPanel({ google }: { google: GoogleAdsIntegration }) {
 
 // ─── Logos ────────────────────────────────────────────────────────────────────
 
-const LogoMeta = () => (
-  <svg viewBox="0 0 24 24" className="w-7 h-7" fill="none">
+const LogoMeta = ({ size = 'sm' }: { size?: 'sm' | 'lg' }) => (
+  <svg viewBox="0 0 24 24" className={size === 'lg' ? 'w-8 h-8' : 'w-7 h-7'} fill="none">
     <path
       d="M4.15 15.45c0-3.92 1.98-7.03 4.34-7.03 1.38 0 2.47 1.03 3.52 2.68 1.05-1.65 2.14-2.68 3.52-2.68 2.36 0 4.34 3.11 4.34 7.03 0 2.5-1.08 4.13-2.8 4.13-1.46 0-2.54-.95-4.96-5.18-2.42 4.23-3.5 5.18-4.96 5.18-1.72 0-3-1.63-3-4.13Z"
       stroke="#0668E1" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"
@@ -564,8 +565,8 @@ const LogoMeta = () => (
   </svg>
 );
 
-const LogoGoogle = () => (
-  <svg viewBox="0 0 24 24" className="w-7 h-7">
+const LogoGoogle = ({ size = 'sm' }: { size?: 'sm' | 'lg' }) => (
+  <svg viewBox="0 0 24 24" className={size === 'lg' ? 'w-8 h-8' : 'w-7 h-7'}>
     <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
     <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
     <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
@@ -573,14 +574,14 @@ const LogoGoogle = () => (
   </svg>
 );
 
-const LogoGoogleMyBusiness = () => (
-  <svg viewBox="0 0 24 24" className="w-7 h-7">
+const LogoGoogleMyBusiness = ({ size = 'sm' }: { size?: 'sm' | 'lg' }) => (
+  <svg viewBox="0 0 24 24" className={size === 'lg' ? 'w-8 h-8' : 'w-7 h-7'}>
     <path fill="#4285F4" d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" />
   </svg>
 );
 
-const LogoWebsite = () => (
-  <svg viewBox="0 0 24 24" className="w-7 h-7" fill="none" stroke="currentColor" strokeWidth="2">
+const LogoWebsite = ({ size = 'sm' }: { size?: 'sm' | 'lg' }) => (
+  <svg viewBox="0 0 24 24" className={size === 'lg' ? 'w-8 h-8' : 'w-7 h-7'} fill="none" stroke="currentColor" strokeWidth="2">
     <circle cx="12" cy="12" r="10" />
     <line x1="2" y1="12" x2="22" y2="12" />
     <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
@@ -828,74 +829,305 @@ function MetaConnectionsPanel({
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
+  const [assetTab, setAssetTab] = useState<AssetTab>('adAccounts');
+  const [assets, setAssets] = useState<MetaAssets | null>(null);
+  const [assetsLoading, setAssetsLoading] = useState(false);
+  const [assetsError, setAssetsError] = useState('');
+  const [enabledMap, setEnabledMap] = useState<Record<string, boolean>>({});
+
+  const selectedConn = connections.find((c) => c.id === selectedId) ?? connections[0] ?? null;
+
+  async function loadAssets(conn: MetaConnection) {
+    setAssetsLoading(true);
+    setAssetsError('');
+    setAssets(null);
+    try {
+      const cached = await loadCachedAdAccounts();
+      const existingEnabled: Record<string, boolean> = {};
+      cached.forEach((a) => { existingEnabled[a.id] = a.enabled; });
+
+      const data = await fetchMetaAssets(conn.accessToken);
+      const finalAdAccounts = data.adAccounts.length > 0 ? data.adAccounts : cached;
+      setAssets({ ...data, adAccounts: finalAdAccounts });
+
+      const newMap: Record<string, boolean> = {};
+      finalAdAccounts.forEach((a) => { newMap[a.id] = existingEnabled[a.id] ?? true; });
+      setEnabledMap(newMap);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : (e as { message?: string })?.message ?? 'Erro ao buscar ativos.';
+      setAssetsError(msg);
+    } finally {
+      setAssetsLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (selectedConn) loadAssets(selectedConn);
+  }, [selectedConn?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleToggleAccount(id: string) {
+    const newEnabled = !(enabledMap[id] ?? true);
+    setEnabledMap((prev) => ({ ...prev, [id]: newEnabled }));
+    try {
+      await setAccountEnabled(id, newEnabled);
+    } catch {
+      setEnabledMap((prev) => ({ ...prev, [id]: !newEnabled }));
+    }
+  }
+
   async function handleRemove(conn: MetaConnection) {
     if (!window.confirm(`Desconectar a conta "${conn.userName}"?`)) return;
     await onRemove(conn.id);
   }
 
+  const assetTabs: { key: AssetTab; label: string; icon: React.ElementType; count: number }[] = [
+    { key: 'adAccounts', label: 'Contas de Anúncio', icon: Megaphone,  count: assets?.adAccounts.length ?? 0 },
+    { key: 'pages',      label: 'Páginas',           icon: Building2,  count: assets?.pages.length ?? 0      },
+    { key: 'instagram',  label: 'Instagram',         icon: Camera,     count: assets?.instagram.length ?? 0  },
+  ];
+
   return (
-    <div className="bg-card border border-border rounded-xl overflow-hidden">
-      <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+    <div className="border border-border rounded-xl overflow-hidden">
+      {/* Header */}
+      <div className="flex items-start justify-between px-5 py-4 border-b border-border">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-background border border-border flex items-center justify-center shrink-0">
+          <div className="w-9 h-9 rounded-full bg-[#1877F2]/10 border border-[#1877F2]/30 flex items-center justify-center shrink-0">
             <LogoMeta />
           </div>
           <div>
             <p className="text-sm font-bold">Contas Meta conectadas</p>
             <p className="text-xs text-muted-foreground mt-0.5">
-              {connections.length} conta{connections.length === 1 ? '' : 's'} · Clique para ver ativos
+              Gerencie suas contas de anúncios, páginas e perfis do Instagram conectados ao ONMID.
             </p>
           </div>
         </div>
-        <Button size="sm" onClick={onAdd} className="bg-primary text-primary-foreground hover:bg-primary/90 h-8 gap-1.5 text-xs">
+        <Button
+          size="sm"
+          onClick={onAdd}
+          className="bg-emerald-500 hover:bg-emerald-600 text-white h-8 gap-1.5 text-xs font-semibold shrink-0"
+        >
           <Plus className="w-3.5 h-3.5" />
           Adicionar conta
         </Button>
       </div>
 
-      <div className="divide-y divide-border px-5">
-        {connections.map((conn) => {
-          const isSelected = conn.id === selectedId;
-          return (
-            <div
-              key={conn.id}
-              onClick={() => onSelect(conn.id)}
-              className={cn(
-                'flex items-center gap-3 py-3 cursor-pointer rounded-lg transition-colors -mx-2 px-2',
-                isSelected ? 'bg-primary/5' : 'hover:bg-muted/30',
-              )}
-            >
-              {conn.userPicture ? (
-                <img src={conn.userPicture} alt={conn.userName} className="w-9 h-9 rounded-full shrink-0 object-cover" />
-              ) : (
-                <div className="w-9 h-9 rounded-full bg-[#1877F2] flex items-center justify-center shrink-0">
-                  <LogoMeta />
-                </div>
-              )}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <p className="text-sm font-semibold truncate">{conn.userName}</p>
-                  {isSelected && (
-                    <span className="shrink-0 rounded-full bg-primary/20 px-1.5 py-0.5 text-[10px] font-bold text-primary">selecionada</span>
+      {/* 2-column layout */}
+      <div className="grid md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-border">
+        {/* LEFT: Contas conectadas */}
+        <div className="p-5 space-y-3">
+          <div>
+            <p className="text-sm font-semibold">Contas conectadas ({connections.length})</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Clique em uma conta para ver seus ativos</p>
+          </div>
+
+          <div className="space-y-2">
+            {connections.map((conn) => {
+              const isSelected = conn.id === (selectedId ?? connections[0]?.id);
+              return (
+                <div
+                  key={conn.id}
+                  onClick={() => onSelect(conn.id)}
+                  className={cn(
+                    'flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all',
+                    isSelected
+                      ? 'border-emerald-500/40 bg-emerald-500/5'
+                      : 'border-border hover:border-border/80 hover:bg-muted/20',
                   )}
-                </div>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {conn.connectedAt ? `Conectada em ${new Date(conn.connectedAt).toLocaleDateString('pt-BR')}` : 'Meta Ads'}
-                </p>
-              </div>
-              <div className="flex items-center gap-1 shrink-0">
-                <CheckCircle2 className="w-3.5 h-3.5 text-primary" />
-                <button
-                  onClick={(e) => { e.stopPropagation(); void handleRemove(conn); }}
-                  className="ml-1 rounded-lg p-1.5 text-muted-foreground hover:bg-red-500/10 hover:text-red-400 transition-colors"
-                  title="Desconectar conta"
                 >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                  {conn.userPicture ? (
+                    <img src={conn.userPicture} alt={conn.userName} className="w-9 h-9 rounded-full shrink-0 object-cover" />
+                  ) : (
+                    <div className={cn('w-9 h-9 rounded-full flex items-center justify-center shrink-0 text-white text-sm font-bold', accountColorClass(conn.id))}>
+                      {accountInitials(conn.userName)}
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-semibold truncate">{conn.userName}</p>
+                      {isSelected && (
+                        <span className="shrink-0 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-400">
+                          Selecionada
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs font-mono text-muted-foreground mt-0.5">{conn.userId ?? conn.id}</p>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                    <button
+                      onClick={(e) => { e.stopPropagation(); void handleRemove(conn); }}
+                      className="ml-0.5 rounded-lg p-1.5 text-muted-foreground hover:bg-red-500/10 hover:text-red-400 transition-colors"
+                      title="Desconectar conta"
+                    >
+                      <MoreHorizontal className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <button
+            onClick={onAdd}
+            className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg border border-dashed border-border text-xs text-muted-foreground hover:text-foreground hover:border-border/80 transition-colors"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Adicionar outra conta
+          </button>
+        </div>
+
+        {/* RIGHT: Ativos da conta selecionada */}
+        <div className="p-5 space-y-3">
+          <div>
+            <p className="text-sm font-semibold">Ativos da conta selecionada</p>
+            {selectedConn && (
+              <p className="text-xs text-muted-foreground mt-0.5">{selectedConn.userName}</p>
+            )}
+          </div>
+
+          {/* Asset tabs */}
+          <div className="flex border-b border-border gap-1 -mx-0">
+            {assetTabs.map(({ key, label, icon: Icon, count }) => (
+              <button
+                key={key}
+                onClick={() => setAssetTab(key)}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-2.5 text-xs font-semibold border-b-2 transition-colors whitespace-nowrap',
+                  assetTab === key
+                    ? 'border-emerald-500 text-emerald-400'
+                    : 'border-transparent text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {key === 'adAccounts' && <span className="text-emerald-400">✓</span>}
+                <Icon className="w-3.5 h-3.5" />
+                {label}
+                {!assetsLoading && assets && (
+                  <span className={cn(
+                    'ml-1 rounded-full px-1.5 py-0.5 text-[10px] font-bold',
+                    assetTab === key ? 'bg-emerald-500/20 text-emerald-400' : 'bg-muted text-muted-foreground',
+                  )}>
+                    {count}
+                  </span>
+                )}
+              </button>
+            ))}
+            {!assetsLoading && assets && (
+              <span className="ml-auto self-center text-[10px] text-muted-foreground pr-1">
+                {assetTab === 'adAccounts' && `${assets.adAccounts.length} conta${assets.adAccounts.length === 1 ? '' : 's'} de anúncio`}
+                {assetTab === 'pages' && `${assets.pages.length} página${assets.pages.length === 1 ? '' : 's'}`}
+                {assetTab === 'instagram' && `${assets.instagram.length} perfil${assets.instagram.length === 1 ? '' : 'is'}`}
+              </span>
+            )}
+          </div>
+
+          {/* Asset content */}
+          {assetsLoading && (
+            <div className="py-8 text-center">
+              <RefreshCw className="w-4 h-4 text-muted-foreground/40 animate-spin mx-auto mb-2" />
+              <p className="text-xs text-muted-foreground">Buscando ativos...</p>
+            </div>
+          )}
+
+          {!assetsLoading && assetsError && (
+            <div className="flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2.5 text-xs text-red-400">
+              <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold">Erro ao carregar ativos</p>
+                <p className="mt-0.5 text-red-400/70">{assetsError}</p>
               </div>
             </div>
-          );
-        })}
+          )}
+
+          {!assetsLoading && !assetsError && assets && (
+            <div className="space-y-1">
+              {assetTab === 'adAccounts' && assets.adAccounts.map((acc) => {
+                const statusInfo = AD_ACCOUNT_STATUS[acc.account_status] ?? { label: 'Desconhecido', color: 'text-muted-foreground' };
+                const enabled = enabledMap[acc.id] ?? true;
+                return (
+                  <div key={acc.id} className={cn('flex items-center gap-3 p-3 rounded-lg bg-muted/20 transition-opacity', !enabled && 'opacity-50')}>
+                    <div className="w-8 h-8 rounded-lg bg-muted/50 border border-border flex items-center justify-center shrink-0">
+                      <Megaphone className="w-4 h-4 text-muted-foreground" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="text-xs font-semibold truncate">{acc.name}</p>
+                        <span className="shrink-0 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-bold text-emerald-400">Padrão</span>
+                      </div>
+                      <p className="text-[10px] font-mono text-muted-foreground mt-0.5">{acc.id} · {acc.currency}</p>
+                      <div className="flex items-center gap-1 mt-0.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                        <span className={cn('text-[10px] font-medium', statusInfo.color)}>{statusInfo.label}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        onClick={() => handleToggleAccount(acc.id)}
+                        className={cn(
+                          'relative inline-flex h-4 w-7 cursor-pointer rounded-full border-2 border-transparent transition-colors',
+                          enabled ? 'bg-emerald-500' : 'bg-muted',
+                        )}
+                      >
+                        <span className={cn(
+                          'pointer-events-none inline-block h-3 w-3 rounded-full bg-white shadow-sm transition-transform',
+                          enabled ? 'translate-x-3' : 'translate-x-0',
+                        )} />
+                      </button>
+                      <MoreHorizontal className="w-4 h-4 text-muted-foreground" />
+                    </div>
+                  </div>
+                );
+              })}
+
+              {assetTab === 'pages' && assets.pages.map((page) => (
+                <div key={page.id} className="flex items-center gap-3 p-3 rounded-lg bg-muted/20">
+                  {page.picture?.data?.url ? (
+                    <img src={page.picture.data.url} alt={page.name} className="w-8 h-8 rounded-full object-cover shrink-0" />
+                  ) : (
+                    <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center shrink-0">
+                      <Building2 className="w-4 h-4 text-muted-foreground" />
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold truncate">{page.name}</p>
+                    <p className="text-[10px] text-muted-foreground">{page.category}</p>
+                  </div>
+                  {page.fan_count !== undefined && (
+                    <p className="text-[10px] text-muted-foreground shrink-0">{page.fan_count.toLocaleString('pt-BR')} seg.</p>
+                  )}
+                </div>
+              ))}
+
+              {assetTab === 'instagram' && assets.instagram.map((ig) => (
+                <div key={ig.id} className="flex items-center gap-3 p-3 rounded-lg bg-muted/20">
+                  {ig.profile_picture_url ? (
+                    <img src={ig.profile_picture_url} alt={ig.username} className="w-8 h-8 rounded-full object-cover shrink-0" />
+                  ) : (
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-fuchsia-500 to-orange-400 flex items-center justify-center shrink-0">
+                      <Camera className="w-4 h-4 text-white" />
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold">@{ig.username}</p>
+                    {ig.name && <p className="text-[10px] text-muted-foreground truncate">{ig.name}</p>}
+                  </div>
+                  {ig.followers_count !== undefined && (
+                    <p className="text-[10px] text-muted-foreground shrink-0">{ig.followers_count.toLocaleString('pt-BR')} seg.</p>
+                  )}
+                </div>
+              ))}
+
+              {assetTab === 'adAccounts' && assets.adAccounts.length === 0 && (
+                <p className="py-6 text-center text-xs text-muted-foreground">Nenhuma conta de anúncio encontrada.</p>
+              )}
+              {assetTab === 'pages' && assets.pages.length === 0 && (
+                <p className="py-6 text-center text-xs text-muted-foreground">Nenhuma página encontrada.</p>
+              )}
+              {assetTab === 'instagram' && assets.instagram.length === 0 && (
+                <p className="py-6 text-center text-xs text-muted-foreground">Nenhuma conta Instagram encontrada.</p>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -1006,7 +1238,6 @@ function GoogleConnectionsPanel({
         {showItems && (
           <div className="pl-12 pb-3 space-y-1.5">
             {error && <p className="text-xs text-red-400 break-all">{error}</p>}
-            {/* Google Ads accounts */}
             {isAds && !error && adsAccounts.length === 0 && (
               <p className="text-xs text-muted-foreground">Nenhuma conta encontrada.</p>
             )}
@@ -1019,7 +1250,6 @@ function GoogleConnectionsPanel({
                 {a.mccId && !a.isManager && <span className="text-[9px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded">via MCC</span>}
               </div>
             ))}
-            {/* GMB locations */}
             {isGmb && !error && gmbLocations.length === 0 && (
               <p className="text-xs text-muted-foreground">Nenhum local encontrado.</p>
             )}
@@ -1120,28 +1350,28 @@ const BASE_INTEGRATIONS: Integration[] = [
     name: 'Meta Ads',
     description: 'Meta Ads — sincronize campanhas, leads e métricas.',
     category: 'Anúncios',
-    logo: <LogoMeta />,
+    logo: <LogoMeta size="lg" />,
   },
   {
     id: 'google-ads',
     name: 'Google Ads',
     description: 'Importe campanhas, palavras-chave e conversões do Google Ads.',
     category: 'Anúncios',
-    logo: <LogoGoogle />,
+    logo: <LogoGoogle size="lg" />,
   },
   {
     id: 'google-my-business',
     name: 'Google Meu Negócio',
     description: 'Avaliações, buscas e desempenho do perfil do Google.',
     category: 'Presença Digital',
-    logo: <LogoGoogleMyBusiness />,
+    logo: <LogoGoogleMyBusiness size="lg" />,
   },
   {
     id: 'website',
     name: 'Website / Analytics',
     description: 'Conecte o Google Analytics ou GTM para rastrear visitas e conversões.',
     category: 'Presença Digital',
-    logo: <LogoWebsite />,
+    logo: <LogoWebsite size="lg" />,
   },
 ];
 
@@ -1160,8 +1390,6 @@ export default function IntegracoesPage() {
   const [googleDisplayInfo, setGoogleDisplayInfo] = useState<GoogleAdsIntegration | null>(null);
   const [selectedMetaId, setSelectedMetaId] = useState<string | null>(null);
   const [oauthBanner, setOauthBanner] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
-
-  const selectedMetaConn = metaConns.find((c) => c.id === selectedMetaId) ?? metaConns[0] ?? null;
 
   // Connection status derived from hooks
   const metaConnected = !metaLoading && metaConns.length > 0;
@@ -1281,18 +1509,28 @@ export default function IntegracoesPage() {
       )}
 
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
+
+        {/* ── HEADER ─────────────────────────────────────────────────────────── */}
+        <div className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-4xl font-heading tracking-wider uppercase">Integrações</h1>
-            <p className="text-muted-foreground mt-1">
-              Conecte suas plataformas para sincronizar dados automaticamente.
+            <h1 className="text-2xl font-bold tracking-tight">Integrações</h1>
+            <p className="text-sm text-muted-foreground mt-1 max-w-xl">
+              Conecte suas plataformas para sincronizar dados automaticamente e potencializar seus resultados.
             </p>
           </div>
-          <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary/10 border border-primary/20">
-            <CheckCircle2 className="w-4 h-4 text-primary" />
-            <span className="text-sm font-semibold text-primary">
-              {totalConnected} plataforma{totalConnected === 1 ? '' : 's'} conectada{totalConnected === 1 ? '' : 's'}
-            </span>
+
+          {/* Stats card — purple gradient */}
+          <div className="shrink-0 rounded-xl bg-gradient-to-br from-violet-600/20 to-violet-500/10 border border-violet-500/20 px-5 py-4 flex items-center gap-4 min-w-[220px]">
+            <div className="w-10 h-10 rounded-xl bg-violet-500/20 flex items-center justify-center shrink-0">
+              <LayoutGrid className="w-5 h-5 text-violet-400" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-2xl font-bold leading-none">{totalConnected} <span className="text-sm font-normal text-muted-foreground">de 4</span></p>
+              <p className="text-xs text-muted-foreground mt-1">Plataformas conectadas</p>
+              <button className="mt-2 text-[11px] text-violet-400 hover:text-violet-300 transition-colors font-medium">
+                Ver status das integrações →
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1318,17 +1556,17 @@ export default function IntegracoesPage() {
           </div>
         )}
 
-        {/* Category filter */}
+        {/* ── FILTER TABS ─────────────────────────────────────────────────────── */}
         <div className="flex gap-2 flex-wrap">
           {CATEGORIES.map((cat) => (
             <button
               key={cat}
               onClick={() => setActiveCategory(cat)}
               className={cn(
-                'px-3 py-1.5 rounded-full text-xs font-semibold transition-colors',
+                'px-4 py-1.5 rounded-full text-xs font-semibold transition-colors',
                 activeCategory === cat
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-muted text-muted-foreground hover:bg-card hover:text-foreground'
+                  ? 'bg-emerald-500 text-white'
+                  : 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground border border-border'
               )}
             >
               {cat}
@@ -1336,44 +1574,41 @@ export default function IntegracoesPage() {
           ))}
         </div>
 
-        {/* Integration cards */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        {/* ── INTEGRATION CARDS ───────────────────────────────────────────────── */}
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {filtered.map((integration) => {
             const connected = isConnected(integration.id);
-            const count = connectionCount(integration.id);
             const isWebsite = integration.id === 'website';
+            const isGMB = integration.id === 'google-my-business';
 
             return (
               <div
                 key={integration.id}
-                className={cn(
-                  'bg-card border rounded-xl p-5 flex flex-col gap-4 transition-colors',
-                  connected ? 'border-primary/30' : 'border-border'
-                )}
+                className="bg-card border border-border rounded-xl p-5 flex flex-col gap-4"
               >
+                {/* Top: logo + status badge */}
                 <div className="flex items-start justify-between">
-                  <div className="w-12 h-12 rounded-xl bg-background border border-border flex items-center justify-center shadow-sm">
+                  <div className="w-14 h-14 rounded-xl bg-background border border-border flex items-center justify-center shadow-sm">
                     {integration.logo}
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    {connected ? (
-                      <CheckCircle2 className="w-4 h-4 text-primary" />
-                    ) : (
-                      <XCircle className="w-4 h-4 text-muted-foreground" />
-                    )}
-                    <span className={cn(
-                      'text-[10px] font-bold uppercase tracking-wider',
-                      connected ? 'text-primary' : 'text-muted-foreground'
-                    )}>
-                      {connected ? `${count} conectada${count === 1 ? '' : 's'}` : 'Desconectado'}
+                  {connected ? (
+                    <span className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-emerald-500/40 text-emerald-400 text-[11px] font-semibold">
+                      <CheckCircle2 className="w-3 h-3" />
+                      Conectado
                     </span>
-                  </div>
+                  ) : (
+                    <span className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-border text-muted-foreground text-[11px] font-semibold">
+                      <span className="w-2 h-2 rounded-full border border-muted-foreground" />
+                      Desconectado
+                    </span>
+                  )}
                 </div>
 
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <h3 className="font-semibold text-sm">{integration.name}</h3>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-medium">
+                {/* Name + category + description */}
+                <div className="flex-1 space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-bold text-sm">{integration.name}</h3>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground font-medium">
                       {integration.category}
                     </span>
                   </div>
@@ -1382,40 +1617,46 @@ export default function IntegracoesPage() {
                   </p>
                 </div>
 
-                <div className="flex gap-2">
-                  {isWebsite ? (
-                    <Button variant="outline" className="flex-1 text-xs font-bold uppercase h-9" disabled>
-                      Em breve
-                    </Button>
-                  ) : (
-                    <>
-                      <Button
-                        onClick={() => handleCardAction(integration.id)}
-                        variant={connected ? 'outline' : 'default'}
-                        className={cn(
-                          'flex-1 text-xs font-bold uppercase h-9 gap-1.5',
-                          !connected && 'bg-primary text-primary-foreground hover:bg-primary/90'
-                        )}
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        {connected ? 'Adicionar conta' : 'Conectar'}
-                      </Button>
-                      {connected && (
-                        <Button variant="ghost" size="icon" title="Configurações" onClick={() => {
-                          if (integration.id === 'google-ads' && googleDisplayInfo) handleGoogleAdsDisconnect();
-                        }}>
-                          <ExternalLink className="w-4 h-4" />
-                        </Button>
-                      )}
-                    </>
-                  )}
-                </div>
+                {/* Action button */}
+                {isWebsite ? (
+                  <button
+                    disabled
+                    className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg border border-border text-xs font-semibold text-muted-foreground opacity-50 cursor-not-allowed"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Conectar agora
+                  </button>
+                ) : connected && isGMB ? (
+                  <button
+                    onClick={() => handleCardAction(integration.id)}
+                    className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-semibold transition-colors"
+                  >
+                    Abrir painel
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </button>
+                ) : connected ? (
+                  <button
+                    onClick={() => handleCardAction(integration.id)}
+                    className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg border border-border text-xs font-semibold text-foreground hover:bg-muted/30 transition-colors"
+                  >
+                    Gerenciar integração
+                    <span className="text-muted-foreground">→</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleCardAction(integration.id)}
+                    className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg border border-border text-xs font-semibold text-foreground hover:bg-muted/30 transition-colors"
+                  >
+                    Conectar agora
+                    <Plus className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             );
           })}
         </div>
 
-        {/* Meta connections panel */}
+        {/* ── META CONNECTIONS PANEL (new design) ─────────────────────────────── */}
         {(metaConnected || metaLoading) && (
           <MetaConnectionsPanel
             connections={metaConns}
@@ -1424,11 +1665,6 @@ export default function IntegracoesPage() {
             selectedId={selectedMetaId ?? metaConns[0]?.id ?? null}
             onSelect={setSelectedMetaId}
           />
-        )}
-
-        {/* Meta assets panel for selected connection */}
-        {selectedMetaConn && (
-          <MetaAssetsPanel connection={selectedMetaConn} />
         )}
 
         {/* Google connections panel */}
@@ -1445,6 +1681,26 @@ export default function IntegracoesPage() {
         {googleDisplayInfo && googleDisplayInfo.status === 'connected' && (
           <GoogleAdsAssetsPanel google={googleDisplayInfo} />
         )}
+
+        {/* ── FOOTER ──────────────────────────────────────────────────────────── */}
+        <div className="flex items-center justify-between gap-4 rounded-xl border border-border bg-card px-5 py-4">
+          <div className="flex items-center gap-3">
+            <Sparkles className="w-5 h-5 text-violet-400 shrink-0" />
+            <div>
+              <p className="text-sm font-bold">Sincronização automática e segura</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Seus dados são sincronizados com segurança e atualizados automaticamente em segundo plano.
+              </p>
+            </div>
+          </div>
+          <a
+            href="#"
+            className="shrink-0 text-xs font-semibold text-violet-400 hover:text-violet-300 transition-colors whitespace-nowrap"
+          >
+            Saiba mais sobre integrações ↗
+          </a>
+        </div>
+
       </div>
     </>
   );

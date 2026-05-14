@@ -2,7 +2,26 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { Plus, Download, Eye, Trash2, Sparkles, FileText } from 'lucide-react';
+import {
+  BarChart2,
+  TrendingUp,
+  Plus,
+  Download,
+  Eye,
+  Trash2,
+  Sparkles,
+  FileText,
+  Search,
+  ChevronDown,
+  RefreshCw,
+  ArrowUpRight,
+  FileCheck2,
+  CalendarDays,
+  Users,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useClients } from '@/lib/client-store';
 import { deleteReport, downloadReportPdf, readReports, subscribeReports, type StoredReport } from '@/lib/report-store';
@@ -23,11 +42,31 @@ function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString('pt-BR');
 }
 
+function fmtDateTime(iso: string) {
+  const d = new Date(iso);
+  return {
+    date: d.toLocaleDateString('pt-BR'),
+    time: d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+  };
+}
+
+const PAGE_SIZE = 6;
+
 export default function RelatoriosPage() {
   const { clients } = useClients();
   const [libraryReports, setLibraryReports] = useState<StoredReport[]>([]);
   const [diagnostics, setDiagnostics] = useState<DiagnosticReport[]>([]);
   const [tab, setTab] = useState<'diagnostico' | 'widget'>('diagnostico');
+
+  // Filters
+  const [search, setSearch] = useState('');
+  const [filterClient, setFilterClient] = useState('');
+  const [filterPeriod, setFilterPeriod] = useState('');
+  const [filterOrigin, setFilterOrigin] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+
+  // Pagination
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     setLibraryReports(readReports());
@@ -50,169 +89,472 @@ export default function RelatoriosPage() {
     setDiagnostics(prev => prev.filter(r => r.id !== id));
   }
 
+  function clearFilters() {
+    setSearch('');
+    setFilterClient('');
+    setFilterPeriod('');
+    setFilterOrigin('');
+    setFilterStatus('');
+    setPage(1);
+  }
+
+  // Build the unified row list for the active tab
+  type UnifiedRow =
+    | ({ kind: 'diag' } & DiagnosticReport)
+    | ({ kind: 'widget' } & StoredReport);
+
+  const allRows: UnifiedRow[] =
+    tab === 'diagnostico'
+      ? diagnostics.map(d => ({ kind: 'diag' as const, ...d }))
+      : widgetReports.map(w => ({ kind: 'widget' as const, ...w }));
+
+  const filteredRows = allRows.filter(row => {
+    const name = row.kind === 'diag' ? row.title : row.title;
+    const client = row.kind === 'diag' ? row.client_name : row.client;
+    const origin = row.kind === 'diag' ? (row.generated_by === 'auto' ? 'Automático' : 'Manual') : 'Personalizado';
+    const status = row.kind === 'widget' ? row.status : 'Ativo';
+
+    if (search && !name.toLowerCase().includes(search.toLowerCase()) && !client.toLowerCase().includes(search.toLowerCase())) return false;
+    if (filterClient && client !== filterClient) return false;
+    if (filterOrigin && origin !== filterOrigin) return false;
+    if (filterStatus && status !== filterStatus) return false;
+    return true;
+  });
+
+  const totalRows = filteredRows.length;
+  const totalPages = Math.max(1, Math.ceil(totalRows / PAGE_SIZE));
+  const pagedRows = filteredRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  // KPI counts
+  const totalReports = diagnostics.length + widgetReports.length;
+  const now = new Date();
+  const thisMonth = diagnostics.filter(d => {
+    const dt = new Date(d.created_at);
+    return dt.getMonth() === now.getMonth() && dt.getFullYear() === now.getFullYear();
+  }).length + widgetReports.filter(w => {
+    const parts = w.date.split('/');
+    if (parts.length !== 3) return false;
+    const dt = new Date(+parts[2], +parts[1] - 1, +parts[0]);
+    return dt.getMonth() === now.getMonth() && dt.getFullYear() === now.getFullYear();
+  }).length;
+
+  const uniqueClients = new Set([
+    ...diagnostics.map(d => d.client_name),
+    ...widgetReports.map(w => w.client),
+  ]).size;
+
+  const activeReports = widgetReports.filter(w => w.status === 'Gerado' || w.status === 'Enviado').length + diagnostics.length;
+
+  // Unique client names for filter dropdown
+  const allClientNames = Array.from(new Set([
+    ...diagnostics.map(d => d.client_name),
+    ...widgetReports.map(w => w.client),
+  ])).sort();
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Relatórios</h1>
-          <p className="text-muted-foreground mt-1">Diagnósticos de performance e relatórios personalizados.</p>
+    <div className="space-y-6 p-6">
+      {/* ── HEADER ── */}
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 rounded-xl bg-violet-500/20 border border-violet-500/30 flex items-center justify-center shrink-0">
+            <BarChart2 className="w-6 h-6 text-violet-400" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-foreground">Relatórios</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              Diagnósticos de performance e relatórios personalizados para insights estratégicos.
+            </p>
+          </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <Button
             render={<Link href="/relatorios/diagnostico" />}
             nativeButton={false}
-            className="bg-[#7B21D0] hover:bg-[#6418B0] text-white"
+            className="bg-violet-600 hover:bg-violet-700 text-white gap-2"
           >
-            <Sparkles className="w-4 h-4 mr-2" />
+            <TrendingUp className="w-4 h-4" />
             Novo Diagnóstico
           </Button>
           <Button
             render={<Link href="/relatorios/novo" />}
             nativeButton={false}
             variant="outline"
+            className="gap-2"
           >
-            <Plus className="w-4 h-4 mr-2" />
+            <Plus className="w-4 h-4" />
             Relatório Personalizado
           </Button>
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 p-1 bg-muted rounded-lg w-fit">
-        {([['diagnostico', 'Diagnósticos de Performance', Sparkles], ['widget', 'Relatórios Personalizados', FileText]] as const).map(([key, label, Icon]) => (
+      {/* ── TABS ── */}
+      <div className="flex border-b border-border gap-0">
+        {([
+          ['diagnostico', 'Diagnósticos de Performance', Sparkles],
+          ['widget', 'Relatórios Personalizados', FileText],
+        ] as const).map(([key, label, Icon]) => (
           <button
             key={key}
-            onClick={() => setTab(key)}
+            onClick={() => { setTab(key); setPage(1); }}
             className={cn(
-              'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
-              tab === key ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground',
+              'flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 -mb-px',
+              tab === key
+                ? 'border-emerald-500 text-emerald-400'
+                : 'border-transparent text-muted-foreground hover:text-foreground',
             )}
           >
-            <Icon className="w-3.5 h-3.5" />
+            <Icon className="w-4 h-4" />
             {label}
           </button>
         ))}
       </div>
 
-      {/* Diagnostics tab */}
-      {tab === 'diagnostico' && (
-        <div className="bg-card border border-border rounded-lg overflow-hidden">
-          <table className="w-full text-sm text-left">
-            <thead className="bg-muted text-muted-foreground text-xs uppercase font-medium">
-              <tr>
-                <th className="px-6 py-4">Relatório</th>
-                <th className="px-6 py-4">Cliente</th>
-                <th className="px-6 py-4">Período</th>
-                <th className="px-6 py-4">Gerado em</th>
-                <th className="px-6 py-4">Origem</th>
-                <th className="px-6 py-4 text-right">Ações</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {diagnostics.map((r) => (
-                <tr key={r.id} className="hover:bg-muted/50 transition-colors">
-                  <td className="px-6 py-4 font-medium max-w-xs truncate">{r.title}</td>
-                  <td className="px-6 py-4 text-muted-foreground">{r.client_name}</td>
-                  <td className="px-6 py-4 text-muted-foreground text-xs">
-                    {fmtDate(r.period_from)} – {fmtDate(r.period_to)}
-                  </td>
-                  <td className="px-6 py-4 text-muted-foreground text-xs">{fmtDate(r.created_at)}</td>
-                  <td className="px-6 py-4">
-                    <span className={cn(
-                      'px-2 py-0.5 rounded-full text-[10px] font-semibold',
-                      r.generated_by === 'auto'
-                        ? 'bg-emerald-500/15 text-emerald-400'
-                        : 'bg-violet-500/15 text-violet-400',
-                    )}>
-                      {r.generated_by === 'auto' ? 'Automático' : 'Manual'}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 flex justify-end gap-1">
-                    <Button variant="ghost" size="icon" title="Visualizar" render={<Link href={`/relatorios/${r.id}`} />} nativeButton={false}>
-                      <Eye className="w-4 h-4" />
-                    </Button>
-                    <Button
-                      variant="ghost" size="icon" title="Excluir"
-                      className="text-red-500 hover:text-red-400 hover:bg-red-500/10"
-                      onClick={() => handleDeleteDiagnostic(r.id, r.title)}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {diagnostics.length === 0 && (
-            <div className="py-14 text-center">
-              <Sparkles className="w-8 h-8 mx-auto mb-3 text-muted-foreground/50" />
-              <p className="text-sm text-muted-foreground">Nenhum diagnóstico gerado ainda.</p>
-              <p className="text-xs text-muted-foreground mt-1">
-                <Link href="/relatorios/diagnostico" className="text-primary hover:underline">
-                  Gerar primeiro diagnóstico →
-                </Link>
-              </p>
-            </div>
-          )}
+      {/* ── KPI CARDS ── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {/* Total */}
+        <div className="bg-card border border-border rounded-xl p-4 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-emerald-500/15 flex items-center justify-center shrink-0">
+            <FileCheck2 className="w-5 h-5 text-emerald-400" />
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Total de relatórios</p>
+            <p className="text-2xl font-bold text-foreground leading-none mt-0.5">
+              {totalReports}
+              <span className="text-violet-400 text-sm ml-1">✦</span>
+            </p>
+          </div>
         </div>
-      )}
+        {/* This month */}
+        <div className="bg-card border border-border rounded-xl p-4 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-violet-500/15 flex items-center justify-center shrink-0">
+            <CalendarDays className="w-5 h-5 text-violet-400" />
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Gerados este mês</p>
+            <p className="text-2xl font-bold text-foreground leading-none mt-0.5">{thisMonth}</p>
+          </div>
+        </div>
+        {/* Unique clients */}
+        <div className="bg-card border border-border rounded-xl p-4 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-blue-500/15 flex items-center justify-center shrink-0">
+            <Users className="w-5 h-5 text-blue-400" />
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Clientes únicos</p>
+            <p className="text-2xl font-bold text-foreground leading-none mt-0.5">{uniqueClients}</p>
+          </div>
+        </div>
+        {/* Active */}
+        <div className="bg-card border border-border rounded-xl p-4 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-amber-500/15 flex items-center justify-center shrink-0">
+            <CheckCircle2 className="w-5 h-5 text-amber-400" />
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Relatórios ativos</p>
+            <p className="text-2xl font-bold text-foreground leading-none mt-0.5">{activeReports}</p>
+          </div>
+        </div>
+      </div>
 
-      {/* Widget reports tab */}
-      {tab === 'widget' && (
-        <div className="bg-card border border-border rounded-lg overflow-hidden">
-          <table className="w-full text-sm text-left">
-            <thead className="bg-muted text-muted-foreground text-xs uppercase font-medium">
+      {/* ── SEARCH + FILTERS ── */}
+      <div className="flex flex-wrap items-center gap-2">
+        {/* Search */}
+        <div className="relative flex-1 min-w-[200px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+          <input
+            type="text"
+            placeholder="Buscar relatórios..."
+            value={search}
+            onChange={e => { setSearch(e.target.value); setPage(1); }}
+            className="w-full pl-9 pr-4 py-2 text-sm bg-card border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50"
+          />
+        </div>
+
+        {/* Cliente */}
+        <div className="relative">
+          <select
+            value={filterClient}
+            onChange={e => { setFilterClient(e.target.value); setPage(1); }}
+            className="appearance-none pl-3 pr-8 py-2 text-sm bg-card border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50 cursor-pointer"
+          >
+            <option value="">Cliente</option>
+            {allClientNames.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+        </div>
+
+        {/* Período */}
+        <div className="relative">
+          <select
+            value={filterPeriod}
+            onChange={e => { setFilterPeriod(e.target.value); setPage(1); }}
+            className="appearance-none pl-3 pr-8 py-2 text-sm bg-card border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50 cursor-pointer"
+          >
+            <option value="">Período</option>
+            <option value="7d">Últimos 7 dias</option>
+            <option value="30d">Últimos 30 dias</option>
+            <option value="90d">Últimos 90 dias</option>
+          </select>
+          <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+        </div>
+
+        {/* Origem */}
+        <div className="relative">
+          <select
+            value={filterOrigin}
+            onChange={e => { setFilterOrigin(e.target.value); setPage(1); }}
+            className="appearance-none pl-3 pr-8 py-2 text-sm bg-card border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50 cursor-pointer"
+          >
+            <option value="">Origem</option>
+            <option value="Manual">Manual</option>
+            <option value="Automático">Automático</option>
+            <option value="Personalizado">Personalizado</option>
+          </select>
+          <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+        </div>
+
+        {/* Status */}
+        <div className="relative">
+          <select
+            value={filterStatus}
+            onChange={e => { setFilterStatus(e.target.value); setPage(1); }}
+            className="appearance-none pl-3 pr-8 py-2 text-sm bg-card border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50 cursor-pointer"
+          >
+            <option value="">Status</option>
+            <option value="Ativo">Ativo</option>
+            <option value="Rascunho">Rascunho</option>
+            <option value="Gerado">Gerado</option>
+            <option value="Enviado">Enviado</option>
+          </select>
+          <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+        </div>
+
+        {/* Clear */}
+        <button
+          onClick={clearFilters}
+          className="flex items-center gap-1.5 px-3 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors ml-auto"
+        >
+          <RefreshCw className="w-3.5 h-3.5" />
+          Limpar filtros
+        </button>
+      </div>
+
+      {/* ── TABLE ── */}
+      <div className="bg-card border border-border rounded-xl overflow-hidden">
+        <table className="w-full text-sm text-left">
+          <thead className="border-b border-border">
+            <tr>
+              <th className="px-5 py-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Relatório</th>
+              <th className="px-5 py-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Cliente</th>
+              <th className="px-5 py-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Período</th>
+              <th className="px-5 py-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Gerado em</th>
+              <th className="px-5 py-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Origem</th>
+              <th className="px-5 py-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Status</th>
+              <th className="px-5 py-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Ações</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {pagedRows.length === 0 && (
               <tr>
-                <th className="px-6 py-4">Título</th>
-                <th className="px-6 py-4">Cliente</th>
-                <th className="px-6 py-4">Data</th>
-                <th className="px-6 py-4">Status</th>
-                <th className="px-6 py-4 text-right">Ações</th>
+                <td colSpan={7} className="py-14 text-center">
+                  <div className="flex flex-col items-center gap-3">
+                    <FileText className="w-8 h-8 text-muted-foreground/40" />
+                    <p className="text-sm text-muted-foreground">Nenhum relatório encontrado.</p>
+                    {tab === 'diagnostico' && (
+                      <Link href="/relatorios/diagnostico" className="text-xs text-emerald-400 hover:underline">
+                        Gerar primeiro diagnóstico →
+                      </Link>
+                    )}
+                  </div>
+                </td>
               </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {widgetReports.map((report) => (
-                <tr key={report.id} className="hover:bg-muted/50 transition-colors">
-                  <td className="px-6 py-4 font-medium">{report.title}</td>
-                  <td className="px-6 py-4">{report.client}</td>
-                  <td className="px-6 py-4">{report.date}</td>
-                  <td className="px-6 py-4">
-                    <span className={cn('px-2 py-1 rounded-full text-xs font-medium',
-                      report.status === 'Gerado' ? 'bg-primary/20 text-primary' :
-                      report.status === 'Enviado' ? 'bg-blue-500/20 text-blue-500' :
-                      'bg-muted text-muted-foreground'
-                    )}>
-                      {report.status}
+            )}
+
+            {pagedRows.map(row => {
+              if (row.kind === 'diag') {
+                const dt = fmtDateTime(row.created_at);
+                const origin = row.generated_by === 'auto' ? 'Automático' : 'Manual';
+                return (
+                  <tr key={row.id} className="hover:bg-muted/40 transition-colors group">
+                    {/* Relatório */}
+                    <td className="px-5 py-3.5">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-md bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center shrink-0">
+                          <ArrowUpRight className="w-4 h-4 text-emerald-400" />
+                        </div>
+                        <div>
+                          <p className="font-semibold text-foreground leading-none">{row.title}</p>
+                          <p className="text-xs text-muted-foreground mt-0.5">Análise completa de campanhas e métricas</p>
+                        </div>
+                      </div>
+                    </td>
+                    {/* Cliente */}
+                    <td className="px-5 py-3.5 text-sm text-foreground">{row.client_name}</td>
+                    {/* Período */}
+                    <td className="px-5 py-3.5 text-xs text-muted-foreground whitespace-nowrap">
+                      {fmtDate(row.period_from)} – {fmtDate(row.period_to)}
+                    </td>
+                    {/* Gerado em */}
+                    <td className="px-5 py-3.5">
+                      <p className="text-xs text-foreground">{dt.date}</p>
+                      <p className="text-[10px] text-muted-foreground">{dt.time}</p>
+                    </td>
+                    {/* Origem */}
+                    <td className="px-5 py-3.5">
+                      <span className={cn(
+                        'inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border',
+                        origin === 'Manual'
+                          ? 'bg-violet-500/15 text-violet-300 border-violet-400/30'
+                          : 'bg-emerald-500/15 text-emerald-300 border-emerald-400/30',
+                      )}>
+                        {origin}
+                      </span>
+                    </td>
+                    {/* Status */}
+                    <td className="px-5 py-3.5">
+                      <span className="inline-flex items-center gap-1 text-xs text-emerald-400 font-medium">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                        Ativo
+                      </span>
+                    </td>
+                    {/* Ações */}
+                    <td className="px-5 py-3.5">
+                      <div className="flex items-center justify-end gap-1">
+                        <Link
+                          href={`/relatorios/${row.id}`}
+                          className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                          title="Visualizar"
+                        >
+                          <Eye className="w-4 h-4" />
+                        </Link>
+                        <button
+                          title="Excluir"
+                          onClick={() => handleDeleteDiagnostic(row.id, row.title)}
+                          className="p-1.5 rounded-md text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              }
+
+              // widget row
+              const statusConfig = {
+                Gerado: { dot: 'bg-emerald-400', text: 'text-emerald-400', label: 'Ativo' },
+                Enviado: { dot: 'bg-emerald-400', text: 'text-emerald-400', label: 'Ativo' },
+                Rascunho: { dot: 'bg-amber-400', text: 'text-amber-400', label: 'Rascunho' },
+              }[row.status] ?? { dot: 'bg-muted-foreground', text: 'text-muted-foreground', label: row.status };
+
+              return (
+                <tr key={row.id} className="hover:bg-muted/40 transition-colors group">
+                  {/* Relatório */}
+                  <td className="px-5 py-3.5">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-md bg-blue-500/15 border border-blue-500/25 flex items-center justify-center shrink-0">
+                        <FileText className="w-4 h-4 text-blue-400" />
+                      </div>
+                      <div>
+                        <p className="font-semibold text-foreground leading-none">{row.title}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">{row.summary}</p>
+                      </div>
+                    </div>
+                  </td>
+                  {/* Cliente */}
+                  <td className="px-5 py-3.5 text-sm text-foreground">{row.client}</td>
+                  {/* Período */}
+                  <td className="px-5 py-3.5 text-xs text-muted-foreground">{row.date}</td>
+                  {/* Gerado em */}
+                  <td className="px-5 py-3.5">
+                    <p className="text-xs text-foreground">{row.date}</p>
+                    <p className="text-[10px] text-muted-foreground">–</p>
+                  </td>
+                  {/* Origem */}
+                  <td className="px-5 py-3.5">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border bg-blue-500/15 text-blue-300 border-blue-400/30">
+                      Personalizado
                     </span>
                   </td>
-                  <td className="px-6 py-4 flex justify-end gap-2">
-                    <Button variant="ghost" size="icon" title="Baixar PDF" onClick={() => downloadReportPdf(report)}>
-                      <Download className="w-4 h-4" />
-                    </Button>
-                    <Button
-                      variant="ghost" size="icon" title="Excluir"
-                      className="text-red-500 hover:text-red-400 hover:bg-red-500/10"
-                      onClick={() => {
-                        if (window.confirm(`Excluir "${report.title}"?`)) {
-                          deleteReport(report.id);
-                          setLibraryReports(readReports());
-                        }
-                      }}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
+                  {/* Status */}
+                  <td className="px-5 py-3.5">
+                    <span className={cn('inline-flex items-center gap-1 text-xs font-medium', statusConfig.text)}>
+                      <span className={cn('w-1.5 h-1.5 rounded-full', statusConfig.dot)} />
+                      {statusConfig.label}
+                    </span>
+                  </td>
+                  {/* Ações */}
+                  <td className="px-5 py-3.5">
+                    <div className="flex items-center justify-end gap-1">
+                      <button
+                        title="Baixar PDF"
+                        onClick={() => downloadReportPdf(row)}
+                        className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                      >
+                        <Eye className="w-4 h-4" />
+                      </button>
+                      <button
+                        title="Excluir"
+                        onClick={() => {
+                          if (window.confirm(`Excluir "${row.title}"?`)) {
+                            deleteReport(row.id);
+                            setLibraryReports(readReports());
+                          }
+                        }}
+                        className="p-1.5 rounded-md text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          {widgetReports.length === 0 && (
-            <div className="py-14 text-center text-sm text-muted-foreground">
-              Nenhum relatório personalizado.
-            </div>
-          )}
+              );
+            })}
+          </tbody>
+        </table>
+
+        {/* ── FOOTER / PAGINATION ── */}
+        <div className="flex items-center justify-between px-5 py-3 border-t border-border">
+          <p className="text-xs text-muted-foreground">
+            Mostrando {totalRows === 0 ? 0 : (page - 1) * PAGE_SIZE + 1} a{' '}
+            {Math.min(page * PAGE_SIZE, totalRows)} de {totalRows} relatórios
+          </p>
+          <div className="flex items-center gap-1">
+            <button
+              disabled={page === 1}
+              onClick={() => setPage(p => p - 1)}
+              className="flex items-center gap-1 px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted rounded-md disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+              Anterior
+            </button>
+
+            {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
+              <button
+                key={p}
+                onClick={() => setPage(p)}
+                className={cn(
+                  'w-7 h-7 text-xs rounded-md transition-colors',
+                  p === page
+                    ? 'bg-violet-600 text-white font-medium'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted',
+                )}
+              >
+                {p}
+              </button>
+            ))}
+
+            <button
+              disabled={page === totalPages}
+              onClick={() => setPage(p => p + 1)}
+              className="flex items-center gap-1 px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted rounded-md disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              Próxima
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }

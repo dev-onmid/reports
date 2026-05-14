@@ -6,17 +6,24 @@ import {
   AlertTriangle,
   CalendarDays,
   CheckCircle2,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Clock3,
   ExternalLink,
   Eye,
   Filter,
+  Plus,
   PlusCircle,
   RefreshCw,
   Send,
   Trash2,
   WalletCards,
-  ChevronDown,
 } from 'lucide-react';
+import {
+  AreaChart, Area, PieChart, Pie, Cell,
+  ResponsiveContainer, Tooltip, XAxis,
+} from 'recharts';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useClients } from '@/lib/client-store';
@@ -430,6 +437,25 @@ const CHANNEL_STYLES: Record<PaymentChannel, string> = {
   'TikTok ADS': 'bg-foreground/10 text-foreground border-border',
 };
 
+const STATUS_PALETTE: Record<PaymentStatus, { bg: string; border: string; text: string; dot: string }> = {
+  Pendente:     { bg: 'bg-orange-500/10', border: 'border-orange-400/25', text: 'text-orange-300',  dot: '#f97316' },
+  Enviado:      { bg: 'bg-sky-500/10',    border: 'border-sky-400/25',    text: 'text-sky-300',     dot: '#0ea5e9' },
+  Pago:         { bg: 'bg-emerald-500/10',border: 'border-emerald-400/25',text: 'text-emerald-400', dot: '#10b981' },
+  'Em atraso':  { bg: 'bg-red-500/10',    border: 'border-red-400/25',    text: 'text-red-400',     dot: '#ef4444' },
+};
+
+function PagSparkline({ data, color }: { data: number[]; color: string }) {
+  if (data.length < 2) return null;
+  const max = Math.max(...data, 0.01);
+  const w = 56, h = 20;
+  const pts = data.map((v, i) => `${(i / (data.length - 1)) * w},${h - (v / max) * (h - 2) - 1}`).join(' ');
+  return (
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="shrink-0 opacity-80">
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 const WEEKDAY_LABELS = ['SEGUNDA', 'TERÇA', 'QUARTA', 'QUINTA', 'SEXTA'];
 const WEEKDAY_COLORS = [
   'bg-emerald-600',
@@ -514,9 +540,60 @@ function getMonthBusinessWeeks(date: string): string[][] {
   return weeks;
 }
 
+function getWeek7Dates(date: string): string[] {
+  const base = parseDate(date);
+  const weekday = base.getDay();
+  const mondayOffset = weekday === 0 ? -6 : 1 - weekday;
+  const monday = new Date(base);
+  monday.setDate(base.getDate() + mondayOffset);
+  return Array.from({ length: 7 }, (_, i) => {
+    const day = new Date(monday);
+    day.setDate(monday.getDate() + i);
+    return toISODate(day);
+  });
+}
+
+function getMonthAllWeeks(date: string): (string | null)[][] {
+  const base = parseDate(date);
+  const year = base.getFullYear();
+  const month = base.getMonth();
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  const firstDayOfWeek = firstDay.getDay();
+  const startOffset = firstDayOfWeek === 0 ? -6 : 1 - firstDayOfWeek;
+  const startDate = new Date(firstDay);
+  startDate.setDate(firstDay.getDate() + startOffset);
+  const weeks: (string | null)[][] = [];
+  const current = new Date(startDate);
+  while (current <= lastDay || (weeks.length > 0 && current.getDay() !== 1)) {
+    const week: (string | null)[] = [];
+    for (let i = 0; i < 7; i++) {
+      const isInMonth = current.getFullYear() === year && current.getMonth() === month;
+      week.push(isInMonth ? toISODate(new Date(current)) : null);
+      current.setDate(current.getDate() + 1);
+    }
+    weeks.push(week);
+    if (current > lastDay && current.getDay() === 1) break;
+  }
+  return weeks;
+}
+
+function getMonthLabel(date: string): string {
+  const d = parseDate(date);
+  const label = d.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+function shiftMonth(date: string, delta: number): string {
+  const d = parseDate(date);
+  d.setDate(1);
+  d.setMonth(d.getMonth() + delta);
+  return toISODate(d);
+}
+
 function isDateInView(date: string, selectedDate: string, viewMode: ViewMode): boolean {
   if (viewMode === 'dia') return date === selectedDate;
-  if (viewMode === 'semana') return getWeekDates(selectedDate).includes(date);
+  if (viewMode === 'semana') return getWeek7Dates(selectedDate).includes(date);
 
   const current = parseDate(date);
   const selected = parseDate(selectedDate);
@@ -805,8 +882,11 @@ export default function PagamentosPage() {
 
   const availableDates = Array.from(new Set(visiblePayments.map((payment) => payment.date))).sort();
   const weekDates = getWeekDates(selectedDate);
+  const weekDates7 = getWeek7Dates(selectedDate);
   const monthWeeks = getMonthBusinessWeeks(selectedDate);
+  const monthAllWeeks = getMonthAllWeeks(selectedDate);
   const summaryLabel = viewMode === 'dia' ? 'do dia' : 'do período';
+  const [showNewForm, setShowNewForm] = useState(false);
 
   useEffect(() => {
     if (clients.length === 0) {
@@ -853,116 +933,112 @@ export default function PagamentosPage() {
     setNewPayment((prev) => ({ ...prev, destination: `${prev.clientName} - Novo investimento`, amount: 500 }));
   }
 
+  const todayStr = toISODate(new Date());
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Acompanhamento de Pagamentos</h1>
-          <p className="text-muted-foreground mt-1">Veja os Pix de investimento por dia, semana ou mês para todos os clientes cadastrados.</p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex rounded-lg border border-border bg-card p-1">
-            {([
-              { key: 'dia' as ViewMode, label: 'Dia' },
-              { key: 'semana' as ViewMode, label: 'Semana' },
-              { key: 'mes' as ViewMode, label: 'Mês' },
-            ]).map((mode) => (
-              <button
-                key={mode.key}
-                type="button"
-                onClick={() => setViewMode(mode.key)}
-                className={cn(
-                  'h-7 rounded-md px-3 text-xs font-bold transition-colors',
-                  viewMode === mode.key ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground',
-                )}
-              >
-                {mode.label}
-              </button>
-            ))}
+    <div className="space-y-5 pb-10">
+
+      {/* ── Sticky header ── */}
+      <div className="sticky top-0 z-30 -mx-4 px-4 pb-3 pt-3 bg-background/95 backdrop-blur border-b border-border/40">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h1 className="text-xl font-bold font-heading tracking-tight uppercase">Acompanhamento de Pagamentos</h1>
+            <p className="text-[11px] text-muted-foreground mt-0.5">Pix de investimento — visão por dia, semana ou mês</p>
           </div>
-          <CalendarDays className="w-4 h-4 text-muted-foreground" />
-          <Input
-            type="date"
-            value={selectedDate}
-            onChange={(e) => setSelectedDate(e.target.value)}
-            className="w-40 bg-card"
-          />
-          <HolidayPaymentNotice date={selectedDate} compact />
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex rounded-lg border border-border bg-card p-0.5 gap-0.5">
+              {([
+                { key: 'dia' as ViewMode, label: 'DIA' },
+                { key: 'semana' as ViewMode, label: 'SEMANA' },
+                { key: 'mes' as ViewMode, label: 'MÊS' },
+              ]).map((mode) => (
+                <button key={mode.key} type="button" onClick={() => setViewMode(mode.key)}
+                  className={cn('h-7 rounded-md px-3 text-[10px] font-bold tracking-wider transition-all',
+                    viewMode === mode.key
+                      ? 'bg-emerald-500 text-white shadow-[0_0_10px_rgba(16,185,129,0.35)]'
+                      : 'text-muted-foreground hover:text-foreground',
+                  )}>
+                  {mode.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-1 rounded-lg border border-border bg-card px-1 h-8">
+              <button type="button" onClick={() => {
+                if (viewMode === 'mes') setSelectedDate(shiftMonth(selectedDate, -1));
+                else if (viewMode === 'semana') { const d = parseDate(selectedDate); d.setDate(d.getDate() - 7); setSelectedDate(toISODate(d)); }
+                else { const d = parseDate(selectedDate); d.setDate(d.getDate() - 1); setSelectedDate(toISODate(d)); }
+              }} className="w-6 h-6 rounded flex items-center justify-center hover:bg-muted/60 text-muted-foreground">
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </button>
+              <span className="text-[10px] font-bold tracking-wide text-foreground min-w-40 text-center px-1">
+                {viewMode === 'mes'
+                  ? getMonthLabel(selectedDate)
+                  : viewMode === 'semana'
+                  ? `${formatDateBR(weekDates7[0])} – ${formatDateBR(weekDates7[6])}`
+                  : formatDateBR(selectedDate)}
+              </span>
+              <button type="button" onClick={() => {
+                if (viewMode === 'mes') setSelectedDate(shiftMonth(selectedDate, 1));
+                else if (viewMode === 'semana') { const d = parseDate(selectedDate); d.setDate(d.getDate() + 7); setSelectedDate(toISODate(d)); }
+                else { const d = parseDate(selectedDate); d.setDate(d.getDate() + 1); setSelectedDate(toISODate(d)); }
+              }} className="w-6 h-6 rounded flex items-center justify-center hover:bg-muted/60 text-muted-foreground">
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <button type="button" onClick={() => setShowNewForm(p => !p)}
+              className={cn('flex items-center gap-1.5 h-8 rounded-lg border px-3 text-[10px] font-bold tracking-wider transition-all',
+                showNewForm
+                  ? 'bg-emerald-500 border-emerald-500 text-white shadow-[0_0_12px_rgba(16,185,129,0.4)]'
+                  : 'border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10',
+              )}>
+              <Plus className="w-3 h-3" />
+              NOVO PAGAMENTO
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className="sticky top-0 z-20">
-        <div className="bg-card border border-border rounded-xl p-4 shadow-lg shadow-black/20">
-          {/* ── Row 1: payment fields ── */}
+      {/* ── New payment form ── */}
+      {showNewForm && (
+        <div className="rounded-xl border border-emerald-500/25 bg-card/80 backdrop-blur p-4 space-y-3">
           <div className="flex items-end gap-3 flex-wrap">
             <div className="space-y-1.5">
               <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Cliente</p>
-              <select
-                value={newPayment.clientId}
-                onChange={(e) => handleClientChange(e.target.value)}
-                className="h-9 min-w-44 rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-              >
-                {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
+              <select value={newPayment.clientId} onChange={(e) => handleClientChange(e.target.value)} className="h-9 min-w-44 rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
+                {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
             <div className="space-y-1.5">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Data início</p>
-              <Input
-                type="date"
-                value={newPayment.date}
-                onChange={(e) => setNewPayment((prev) => ({ ...prev, date: e.target.value }))}
-                className="w-40 bg-background"
-              />
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Data</p>
+              <Input type="date" value={newPayment.date} onChange={(e) => setNewPayment((p) => ({ ...p, date: e.target.value }))} className="w-40 bg-background" />
             </div>
-            <div className="space-y-1.5 flex-1 min-w-56">
+            <div className="space-y-1.5 flex-1 min-w-48">
               <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Destino / Campanha</p>
-              <Input
-                value={newPayment.destination}
-                onChange={(e) => setNewPayment((prev) => ({ ...prev, destination: e.target.value }))}
-                className="bg-background"
-              />
+              <Input value={newPayment.destination} onChange={(e) => setNewPayment((p) => ({ ...p, destination: e.target.value }))} className="bg-background" />
             </div>
             <div className="space-y-1.5">
               <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Canal</p>
-              <select
-                value={newPayment.channel}
-                onChange={(e) => setNewPayment((prev) => ({ ...prev, channel: e.target.value as PaymentChannel }))}
-                className="h-9 w-32 rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-              >
-                {PAYMENT_CHANNELS.filter((channel) => channel !== 'Todos').map((channel) => <option key={channel}>{channel}</option>)}
+              <select value={newPayment.channel} onChange={(e) => setNewPayment((p) => ({ ...p, channel: e.target.value as PaymentChannel }))} className="h-9 w-32 rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
+                {PAYMENT_CHANNELS.filter((ch) => ch !== 'Todos').map((ch) => <option key={ch}>{ch}</option>)}
               </select>
             </div>
             <div className="space-y-1.5">
               <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Valor</p>
               <div className="flex h-9 w-36 items-center gap-2 rounded-lg border border-input bg-background px-3">
                 <span className="text-sm font-bold text-muted-foreground">R$</span>
-                <CurrencyInput
-                  value={newPayment.amount}
-                  onChange={(amount) => setNewPayment((prev) => ({ ...prev, amount }))}
-                  className="min-w-0 flex-1 bg-transparent text-sm font-semibold focus:outline-none"
-                />
+                <CurrencyInput value={newPayment.amount} onChange={(amount) => setNewPayment((p) => ({ ...p, amount }))} className="min-w-0 flex-1 bg-transparent text-sm font-semibold focus:outline-none" />
               </div>
             </div>
             <div className="space-y-1.5">
               <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Status</p>
-              <StatusDropdown
-                value={newPayment.status}
-                onChange={(status) => setNewPayment((prev) => ({ ...prev, status }))}
-              />
+              <StatusDropdown value={newPayment.status} onChange={(status) => setNewPayment((p) => ({ ...p, status }))} />
             </div>
-            <Button
-              onClick={handleAddPayment}
-              disabled={recurMode !== 'none' && previewCount === 0}
-              className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-            >
-              {recurMode !== 'none' && previewCount > 0
-                ? `Criar ${previewCount} Pix`
-                : 'Adicionar Pix'}
+            <Button onClick={handleAddPayment} disabled={recurMode !== 'none' && previewCount === 0}
+              className="bg-emerald-500 text-white hover:bg-emerald-600 shadow-[0_0_12px_rgba(16,185,129,0.3)]">
+              {recurMode !== 'none' && previewCount > 0 ? `Criar ${previewCount} Pix` : 'Adicionar Pix'}
             </Button>
           </div>
-
-          {/* ── Row 2: recurrence ── */}
-          <div className="mt-3 flex items-center gap-3 flex-wrap border-t border-border/40 pt-3">
+          <div className="flex items-center gap-3 flex-wrap border-t border-border/40 pt-3">
             <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground shrink-0">Recorrência</p>
             <div className="flex rounded-lg border border-border bg-background p-0.5 shrink-0">
               {([
@@ -970,372 +1046,393 @@ export default function PagamentosPage() {
                 { key: 'weekdays', label: 'Dias da semana' },
                 { key: 'interval', label: 'A cada N dias' },
               ] as { key: RecurMode; label: string }[]).map((mode) => (
-                <button
-                  key={mode.key}
-                  type="button"
-                  onClick={() => setRecurMode(mode.key)}
-                  className={cn(
-                    'h-7 rounded-md px-3 text-xs font-bold transition-colors',
-                    recurMode === mode.key ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground',
-                  )}
-                >
+                <button key={mode.key} type="button" onClick={() => setRecurMode(mode.key)}
+                  className={cn('h-7 rounded-md px-3 text-xs font-bold transition-colors',
+                    recurMode === mode.key ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground')}>
                   {mode.label}
                 </button>
               ))}
             </div>
-
             {recurMode === 'weekdays' && (
               <>
                 <div className="flex gap-1">
-                  {([
-                    { label: 'Dom', value: 0 },
-                    { label: 'Seg', value: 1 },
-                    { label: 'Ter', value: 2 },
-                    { label: 'Qua', value: 3 },
-                    { label: 'Qui', value: 4 },
-                    { label: 'Sex', value: 5 },
-                    { label: 'Sáb', value: 6 },
-                  ]).map((day) => {
+                  {([{label:'Dom',value:0},{label:'Seg',value:1},{label:'Ter',value:2},{label:'Qua',value:3},{label:'Qui',value:4},{label:'Sex',value:5},{label:'Sáb',value:6}]).map((day) => {
                     const active = recurWeekdays.includes(day.value);
-                    return (
-                      <button
-                        key={day.value}
-                        type="button"
-                        onClick={() => setRecurWeekdays((prev) =>
-                          active ? prev.filter((d) => d !== day.value) : [...prev, day.value],
-                        )}
-                        className={cn(
-                          'h-7 w-9 rounded-md border text-[10px] font-bold transition-colors',
-                          active ? 'border-primary/40 bg-primary/20 text-primary' : 'border-border text-muted-foreground hover:bg-muted/50',
-                        )}
-                      >
-                        {day.label}
-                      </button>
-                    );
+                    return (<button key={day.value} type="button" onClick={() => setRecurWeekdays((prev) => active ? prev.filter((d) => d !== day.value) : [...prev, day.value])} className={cn('h-7 w-9 rounded-md border text-[10px] font-bold transition-colors', active ? 'border-primary/40 bg-primary/20 text-primary' : 'border-border text-muted-foreground hover:bg-muted/50')}>{day.label}</button>);
                   })}
                 </div>
                 <div className="flex items-center gap-2">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Até</p>
-                  <Input
-                    type="date"
-                    value={recurUntilResolved}
-                    onChange={(e) => setRecurUntil(e.target.value)}
-                    className="w-36 h-7 bg-background text-xs py-0"
-                  />
+                  <Input type="date" value={recurUntilResolved} onChange={(e) => setRecurUntil(e.target.value)} className="w-36 h-7 bg-background text-xs py-0" />
                 </div>
-                {previewCount > 0 && (
-                  <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
-                    {previewCount} pagamento{previewCount !== 1 ? 's' : ''}
-                  </span>
-                )}
+                {previewCount > 0 && <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">{previewCount} pagamento{previewCount !== 1 ? 's' : ''}</span>}
               </>
             )}
-
             {recurMode === 'interval' && (
               <>
                 <div className="flex items-center gap-2">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">A cada</p>
-                  <input
-                    type="number"
-                    min={1}
-                    max={90}
-                    value={recurInterval}
-                    onChange={(e) => setRecurInterval(Math.max(1, parseInt(e.target.value) || 1))}
-                    className="h-7 w-14 rounded-lg border border-input bg-background px-2 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-primary text-center"
-                  />
+                  <input type="number" min={1} max={90} value={recurInterval} onChange={(e) => setRecurInterval(Math.max(1, parseInt(e.target.value) || 1))} className="h-7 w-14 rounded-lg border border-input bg-background px-2 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-primary text-center" />
                   <p className="text-xs text-muted-foreground">dias</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Até</p>
-                  <Input
-                    type="date"
-                    value={recurUntilResolved}
-                    onChange={(e) => setRecurUntil(e.target.value)}
-                    className="w-36 h-7 bg-background text-xs py-0"
-                  />
+                  <Input type="date" value={recurUntilResolved} onChange={(e) => setRecurUntil(e.target.value)} className="w-36 h-7 bg-background text-xs py-0" />
                 </div>
-                {previewCount > 0 && (
-                  <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
-                    {previewCount} pagamento{previewCount !== 1 ? 's' : ''}
-                  </span>
-                )}
+                {previewCount > 0 && <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">{previewCount} pagamento{previewCount !== 1 ? 's' : ''}</span>}
               </>
             )}
           </div>
-
-          <div className="mt-3">
-            <HolidayPaymentNotice date={newPayment.date} />
-          </div>
+          <HolidayPaymentNotice date={newPayment.date} />
         </div>
-      </div>
-
-      {(activeBalances.length > 0 || balancesLoading) && (
-        <CriticalBalanceAlerts
-          balances={activeBalances}
-          loading={balancesLoading}
-          lastUpdated={balancesLastUpdated}
-          onRefresh={loadBalances}
-        />
       )}
 
+      {/* ── Balance alerts ── */}
+      {(activeBalances.length > 0 || balancesLoading) && (
+        <CriticalBalanceAlerts balances={activeBalances} loading={balancesLoading} lastUpdated={balancesLastUpdated} onRefresh={loadBalances} />
+      )}
       <ClientInvestmentSummary payments={visiblePayments} balances={activeBalances} clientLinks={activeClientLinks} />
 
-      <div className="grid gap-3 md:grid-cols-5">
-        {[
-          { label: `Total ${summaryLabel}`, value: totalDay, icon: WalletCards, tone: 'text-foreground' },
-          { label: 'Pendente', value: pendingDay, icon: Clock3, tone: 'text-orange-300' },
-          { label: 'Enviado', value: sentDay, icon: Send, tone: 'text-sky-300' },
-          { label: 'Pago', value: paidDay, icon: CheckCircle2, tone: 'text-primary' },
-          { label: 'Em atraso', value: overdueDay, icon: AlertTriangle, tone: 'text-red-300' },
-        ].map(({ label, value, icon: Icon, tone }) => (
-          <div key={label} className="bg-card border border-border rounded-xl p-4">
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
-              <Icon className={cn('w-4 h-4 shrink-0', tone)} />
+      {/* ── KPI Cards ── */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        {([
+          { label: 'TOTAL', value: totalDay, color: '#22c55e', Icon: WalletCards, sub: `${selectedScopePayments.length} pagamentos` },
+          { label: 'PENDENTE', value: pendingDay, color: '#f97316', Icon: Clock3, sub: `${selectedScopePayments.filter(p => p.status === 'Pendente').length} itens` },
+          { label: 'ENVIADO', value: sentDay, color: '#0ea5e9', Icon: Send, sub: `${selectedScopePayments.filter(p => p.status === 'Enviado').length} itens` },
+          { label: 'PAGO', value: paidDay, color: '#10b981', Icon: CheckCircle2, sub: `${selectedScopePayments.filter(p => p.status === 'Pago').length} itens` },
+          { label: 'EM ATRASO', value: overdueDay, color: '#ef4444', Icon: AlertTriangle, sub: `${selectedScopePayments.filter(p => p.status === 'Em atraso').length} itens` },
+        ] as const).map(({ label, value, color, Icon, sub }) => (
+          <div key={label} className="rounded-xl border border-border bg-card p-4 relative overflow-hidden">
+            <div className="flex items-start justify-between gap-2 mb-2">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground leading-tight">{label}</p>
+              <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: `${color}20` }}>
+                <Icon className="w-3.5 h-3.5 shrink-0" style={{ color }} />
+              </div>
             </div>
-            <p className={cn('text-2xl font-bold font-heading mt-3', tone)}>{formatCurrencyBRL(value)}</p>
+            <p className="text-lg font-bold font-heading tabular-nums" style={{ color }}>{formatCurrencyBRL(value)}</p>
+            <p className="text-[10px] text-muted-foreground mt-1">{sub}</p>
           </div>
         ))}
       </div>
 
-      <div className="flex gap-2 overflow-x-auto pb-2">
-        {availableDates.map((date) => {
-          const count = visiblePayments.filter((payment) => payment.date === date).length;
-          const selected = viewMode === 'dia' ? date === selectedDate : isDateInView(date, selectedDate, viewMode);
-          const holiday = getHoliday(date);
-
-          return (
-            <button
-              key={date}
-              type="button"
-              onClick={() => setSelectedDate(date)}
-              className={cn(
-                'min-w-32 rounded-lg border px-3 py-2 text-left transition-colors',
-                selected ? 'border-primary bg-primary/10 text-primary' : 'border-border bg-card hover:bg-muted/50',
-              )}
-            >
-              <p className="text-xs font-bold">{formatDateBR(date)}</p>
-              <p className="text-[11px] text-muted-foreground mt-1">{count} Pix programado{count === 1 ? '' : 's'}</p>
-              {holiday && <p className="mt-1 text-[10px] font-bold uppercase tracking-wider text-orange-300">{holiday.name}</p>}
-            </button>
-          );
-        })}
-      </div>
-
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div>
-          <h2 className="font-bold text-sm uppercase tracking-wider">Pix de {scopeLabel(selectedDate, viewMode)}</h2>
-          <p className="text-xs text-muted-foreground mt-1">{filteredPayments.length} lançamento{filteredPayments.length === 1 ? '' : 's'} visível{filteredPayments.length === 1 ? '' : 's'} após filtros.</p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <Filter className="w-4 h-4 text-muted-foreground" />
-          <select
-            value={channelFilter}
-            onChange={(e) => setChannelFilter(e.target.value as PaymentChannel | 'Todos')}
-            className="h-8 rounded-lg border border-border bg-card px-2 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-primary"
-          >
-            {PAYMENT_CHANNELS.map((channel) => <option key={channel}>{channel}</option>)}
-          </select>
-          <StatusFilter value={statusFilter} onChange={setStatusFilter} />
-        </div>
-      </div>
-
-      {viewMode === 'semana' && (
-        <div className="grid gap-3 lg:grid-cols-5">
-          {weekDates.map((date, dateIndex) => {
-            const dayPayments = filteredPayments.filter((payment) => payment.date === date);
-            const hasPayments = dayPayments.length > 0;
-            const holiday = getHoliday(date);
-
-            return (
-              <div key={date} className={cn('min-h-52 rounded-xl border overflow-hidden', holiday ? 'border-orange-400/40 bg-orange-500/5' : hasPayments ? 'border-border bg-card' : 'border-border/30 bg-card/25 opacity-45')}>
-                <div className={cn('px-3 py-2 text-xs font-bold', hasPayments || holiday ? cn('text-white', WEEKDAY_COLORS[dateIndex]) : 'bg-muted/20 text-muted-foreground/50')}>
-                  {formatDateBR(date)}
-                </div>
-                <div className="p-2 space-y-2">
-                  <HolidayPaymentNotice date={date} compact />
-                  {hasPayments ? dayPayments.map((payment) => (
-                    <div key={payment.id} className="rounded-lg bg-muted/35 p-2 text-xs">
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <p className="font-bold">{payment.clientName}</p>
-                          <p className="font-bold mt-1">{formatCurrencyBRL(payment.amount)}</p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => deletePayment(payment.id)}
-                          className="rounded-md p-1 text-muted-foreground/60 hover:bg-red-500/10 hover:text-red-300"
-                          title="Apagar programação"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                      <div className="mt-2 flex items-center justify-between gap-2">
-                        <span className={cn('rounded-full border px-2 py-0.5 text-[10px] font-bold', CHANNEL_STYLES[payment.channel])}>{payment.channel}</span>
-                      </div>
-                      <div className="mt-2">
-                        <StatusDropdown value={payment.status} onChange={(status) => updatePaymentStatus(payment.id, status)} />
-                      </div>
-                    </div>
-                  )) : <div className="h-24" />}
-                </div>
+      {/* ──────────────────────────────────────────────
+          MÊS VIEW
+      ────────────────────────────────────────────── */}
+      {viewMode === 'mes' && (
+        <div className="rounded-xl border border-border bg-card overflow-hidden">
+          <div className="grid grid-cols-7 border-b border-border bg-muted/20">
+            {['SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB', 'DOM'].map((day, i) => (
+              <div key={day} className={cn('py-2.5 text-center text-[10px] font-bold tracking-widest', i >= 5 ? 'text-slate-400' : 'text-muted-foreground')}>
+                {day}
               </div>
-            );
-          })}
+            ))}
+          </div>
+          {monthAllWeeks.map((week, wi) => (
+            <div key={wi} className="grid grid-cols-7 divide-x divide-border/60 border-b border-border/60 last:border-b-0">
+              {week.map((date, di) => {
+                const dayPayments = date ? filteredPayments.filter(p => p.date === date) : [];
+                const isToday = date === todayStr;
+                const isWeekend = di >= 5;
+                return (
+                  <div key={di} className={cn('min-h-[90px] p-1.5', date ? (isWeekend ? 'bg-muted/10' : '') : 'bg-muted/5 opacity-40')}>
+                    {date && (
+                      <>
+                        <div className={cn('w-6 h-6 rounded-full flex items-center justify-center mb-1 text-[11px] font-bold mx-auto',
+                          isToday
+                            ? 'bg-emerald-500 text-white shadow-[0_0_8px_rgba(16,185,129,0.5)]'
+                            : isWeekend ? 'text-slate-400' : 'text-muted-foreground/70',
+                        )}>
+                          {date.split('-')[2]}
+                        </div>
+                        <div className="space-y-0.5">
+                          {dayPayments.slice(0, 3).map(p => (
+                            <div key={p.id} className={cn('rounded px-1.5 py-0.5 text-[9px] font-bold truncate flex items-center justify-between gap-1 border', STATUS_PALETTE[p.status].bg, STATUS_PALETTE[p.status].text, STATUS_PALETTE[p.status].border)}>
+                              <span className="truncate">{p.clientName}</span>
+                              <span className="shrink-0">{formatCurrencyBRL(p.amount).replace('R$ ', 'R$')}</span>
+                            </div>
+                          ))}
+                          {dayPayments.length > 3 && (
+                            <button type="button" onClick={() => { setSelectedDate(date); setViewMode('dia'); }} className="text-[9px] font-bold text-emerald-500 hover:text-emerald-400 w-full text-left px-1 mt-0.5">
+                              +{dayPayments.length - 3} ver mais
+                            </button>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
         </div>
       )}
 
-      {viewMode === 'mes' && (
-        <div className="overflow-x-auto pb-2">
-          <div className="min-w-[980px] space-y-2">
-            <div className="grid grid-cols-5 gap-2">
-              {WEEKDAY_LABELS.map((label, idx) => (
-                <div key={label} className={cn('rounded-t-lg px-3 py-2 text-center text-xs font-bold tracking-widest text-white', WEEKDAY_COLORS[idx])}>
-                  {label}
-                </div>
-              ))}
+      {/* ──────────────────────────────────────────────
+          DIA VIEW
+      ────────────────────────────────────────────── */}
+      {viewMode === 'dia' && (
+        <div className="flex gap-4 items-start">
+          <div className="flex-1 min-w-0 space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <h2 className="font-bold text-sm uppercase tracking-wider">Agenda do dia • {formatDateBR(selectedDate)}</h2>
+              <HolidayPaymentNotice date={selectedDate} compact />
             </div>
-            {monthWeeks.map((week, weekIndex) => (
-              <div key={weekIndex} className="grid grid-cols-5 gap-2">
-                {week.map((date, dayIndex) => {
-                  const dayPayments = filteredPayments.filter((payment) => payment.date === date);
-                  const hasPayments = dayPayments.length > 0;
-                  const holiday = date ? getHoliday(date) : undefined;
-
+            {filteredPayments.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {filteredPayments.map(p => {
+                  const pal = STATUS_PALETTE[p.status];
+                  const metaBalance = p.channel === 'Meta ADS' ? getClientMetaBalance(p.clientId) : null;
+                  const googleBalance = p.channel === 'Google ADS' ? getClientGoogleBalance(p.clientId) : null;
+                  const accountBalance = p.channel === 'Meta ADS' ? metaBalance : p.channel === 'Google ADS' ? googleBalance : null;
+                  const balanceLow = accountBalance !== null && accountBalance < LOW_BALANCE_THRESHOLD;
                   return (
-                    <div
-                      key={`${weekIndex}-${dayIndex}`}
-                      className={cn(
-                        'min-h-[150px] rounded-b-lg border overflow-hidden',
-                        holiday ? 'border-orange-400/40 bg-orange-500/5' : hasPayments ? 'border-border bg-card' : 'border-border/30 bg-card/25 opacity-45',
+                    <div key={p.id} className={cn('rounded-xl border p-4 space-y-3', pal.bg, pal.border)}>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="font-bold text-sm truncate">{p.clientName}</p>
+                          <p className="text-xs text-muted-foreground mt-0.5 truncate">{p.destination}</p>
+                        </div>
+                        <span className={cn('shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold', pal.border, pal.text)}>{p.status}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={cn('rounded-full border px-2 py-0.5 text-[10px] font-bold', CHANNEL_STYLES[p.channel])}>{p.channel}</span>
+                        <p className={cn('text-xl font-bold font-heading tabular-nums', pal.text)}>{formatCurrencyBRL(p.amount)}</p>
+                      </div>
+                      {accountBalance !== null && (
+                        <div className={cn('rounded-lg px-2.5 py-1.5 text-[10px] flex items-center gap-1.5', balanceLow ? 'bg-red-500/10 text-red-400' : 'bg-muted/40 text-muted-foreground')}>
+                          {balanceLow && <AlertTriangle className="w-3 h-3 shrink-0" />}
+                          Saldo conta: {formatCurrencyBRL(accountBalance)}
+                        </div>
                       )}
-                    >
-                      {date ? (
-                        <>
-                          <div className={cn('px-3 py-2 text-center text-xs font-bold', hasPayments || holiday ? cn('text-white', WEEKDAY_COLORS[dayIndex]) : 'bg-muted/20 text-muted-foreground/50')}>
-                            {formatDateBR(date)}
-                          </div>
-                          <div className="p-2 space-y-1.5">
-                            <HolidayPaymentNotice date={date} compact />
-                            {hasPayments ? dayPayments.map((payment) => (
-                              <div key={payment.id} className="rounded-md bg-muted/35 p-2 text-xs">
-                                <div className="flex items-start justify-between gap-2">
-                                  <div className="min-w-0">
-                                    <p className="font-bold truncate">{payment.clientName}</p>
-                                    <p className="text-[11px] font-bold mt-1">{formatCurrencyBRL(payment.amount)}</p>
-                                  </div>
-                                  <button
-                                    type="button"
-                                    onClick={() => deletePayment(payment.id)}
-                                    className="rounded-md p-1 text-muted-foreground/60 hover:bg-red-500/10 hover:text-red-300"
-                                    title="Apagar programação"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                                <div className="mt-2">
-                                  <StatusDropdown value={payment.status} onChange={(status) => updatePaymentStatus(payment.id, status)} />
-                                </div>
-                              </div>
-                            )) : <div className="h-20" />}
-                          </div>
-                        </>
-                      ) : (
-                        <div className="h-full bg-muted/20" />
-                      )}
+                      <div className="flex items-center justify-between gap-2 pt-1 border-t border-border/30">
+                        <StatusDropdown value={p.status} onChange={(status) => updatePaymentStatus(p.id, status)} />
+                        <div className="flex gap-1">
+                          <Button render={<Link href={`/clientes/${p.clientId}`} />} nativeButton={false} variant="ghost" size="icon-sm" title="Abrir cliente">
+                            <Eye className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button variant="ghost" size="icon-sm" title="Apagar" className="text-muted-foreground hover:text-red-300 hover:bg-red-500/10" onClick={() => deletePayment(p.id)}>
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
+                      </div>
                     </div>
                   );
                 })}
               </div>
-            ))}
+            ) : (
+              <div className="rounded-xl border border-border bg-card/50 py-16 text-center">
+                <CalendarDays className="w-8 h-8 text-muted-foreground/40 mx-auto mb-3" />
+                <p className="font-semibold text-muted-foreground">Nenhum Pix para este dia</p>
+                <p className="text-xs text-muted-foreground/70 mt-1">Use o botão "Novo Pagamento" para adicionar</p>
+              </div>
+            )}
+          </div>
+          {/* Sidebar */}
+          <div className="w-60 shrink-0 space-y-3 hidden lg:block">
+            <div className="rounded-xl border border-border bg-card p-4">
+              <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-3">Resumo do dia</h3>
+              <p className="text-2xl font-bold font-heading text-foreground tabular-nums">{formatCurrencyBRL(totalDay)}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">{selectedScopePayments.length} pagamento{selectedScopePayments.length !== 1 ? 's' : ''}</p>
+              {selectedScopePayments.length > 0 && (() => {
+                const channelMap = new Map<string, number>();
+                for (const p of selectedScopePayments) channelMap.set(p.channel, (channelMap.get(p.channel) ?? 0) + p.amount);
+                const channelData = Array.from(channelMap.entries()).map(([name, value]) => ({
+                  name, value,
+                  color: name === 'Meta ADS' ? '#3b82f6' : name === 'Google ADS' ? '#ef4444' : '#a3a3a3',
+                }));
+                return (
+                  <div className="mt-3 pt-3 border-t border-border/40">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2">Por canal</p>
+                    <div className="flex items-center gap-2">
+                      <ResponsiveContainer width={72} height={72}>
+                        <PieChart>
+                          <Pie data={channelData} cx="50%" cy="50%" innerRadius={20} outerRadius={32} dataKey="value" paddingAngle={2} startAngle={90} endAngle={-270}>
+                            {channelData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+                          </Pie>
+                        </PieChart>
+                      </ResponsiveContainer>
+                      <div className="space-y-1.5 flex-1 min-w-0">
+                        {channelData.map(({ name, value, color }) => (
+                          <div key={name} className="flex items-center gap-1 text-[10px]">
+                            <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                            <span className="text-muted-foreground truncate">{name.replace(' ADS', '')}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+              <div className="mt-3 pt-3 border-t border-border/40 space-y-1.5">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2">Por status</p>
+                {PAYMENT_STATUS_OPTIONS.map(st => {
+                  const stPs = selectedScopePayments.filter(p => p.status === st);
+                  if (stPs.length === 0) return null;
+                  const pal = STATUS_PALETTE[st];
+                  return (
+                    <div key={st} className="flex items-center justify-between text-[10px] gap-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: pal.dot }} />
+                        <span className="text-muted-foreground">{st}</span>
+                      </div>
+                      <span className={cn('font-bold tabular-nums', pal.text)}>{formatCurrencyBRL(stPs.reduce((s, p) => s + p.amount, 0))}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <Link href="/relatorios" className="mt-3 flex items-center justify-center gap-1 text-[10px] font-bold text-emerald-400 hover:text-emerald-300 transition-colors border-t border-border/40 pt-3">
+                Ver relatórios completos
+                <ChevronRight className="w-3 h-3" />
+              </Link>
+            </div>
           </div>
         </div>
       )}
 
-      {viewMode === 'dia' && (
-      <div className="bg-card border border-border rounded-xl overflow-hidden">
-        <div className="grid grid-cols-[minmax(200px,1.5fr)_110px_130px_130px_140px_112px] gap-3 px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-muted-foreground border-b border-border">
-          <span>Cliente</span>
-          <span>Canal</span>
-          <span>Valor Pix</span>
-          <span>Status</span>
-          <span>Saldo Conta</span>
-          <span className="text-right">Ações</span>
-        </div>
+      {/* ──────────────────────────────────────────────
+          SEMANA VIEW
+      ────────────────────────────────────────────── */}
+      {viewMode === 'semana' && (() => {
+        const DAY_LABELS = ['SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB', 'DOM'];
+        const dailyData = weekDates7.map((date, i) => {
+          const dayPs = filteredPayments.filter(p => p.date === date);
+          return { day: DAY_LABELS[i], total: dayPs.reduce((s, p) => s + p.amount, 0), count: dayPs.length };
+        });
+        const metaTotal = filteredPayments.filter(p => p.channel === 'Meta ADS').reduce((s, p) => s + p.amount, 0);
+        const googleTotal = filteredPayments.filter(p => p.channel === 'Google ADS').reduce((s, p) => s + p.amount, 0);
+        const metaCount = filteredPayments.filter(p => p.channel === 'Meta ADS').length;
+        const googleCount = filteredPayments.filter(p => p.channel === 'Google ADS').length;
+        const nonZero = dailyData.filter(d => d.total > 0);
+        const maxDay = nonZero.length > 0 ? nonZero.reduce((a, b) => a.total > b.total ? a : b) : null;
+        const minDay = nonZero.length > 1 ? nonZero.reduce((a, b) => a.total < b.total ? a : b) : null;
+        return (
+          <div className="space-y-4">
+            <div className="rounded-xl border border-border bg-card overflow-hidden">
+              <div className="grid grid-cols-7 border-b border-border bg-muted/20">
+                {DAY_LABELS.map((label, i) => (
+                  <div key={label} className={cn('py-2.5 px-1 text-center', i >= 5 ? 'bg-muted/10' : '')}>
+                    <p className={cn('text-[10px] font-bold tracking-wider', i >= 5 ? 'text-slate-400' : 'text-muted-foreground')}>{label}</p>
+                    <p className={cn('text-xs font-bold mt-0.5', weekDates7[i] === todayStr ? 'text-emerald-400' : 'text-foreground/60')}>
+                      {weekDates7[i].split('-')[2]}/{weekDates7[i].split('-')[1]}
+                    </p>
+                  </div>
+                ))}
+              </div>
+              <div className="grid grid-cols-7 divide-x divide-border/60 min-h-[160px]">
+                {weekDates7.map((date, di) => {
+                  const dayPs = filteredPayments.filter(p => p.date === date);
+                  return (
+                    <div key={date} className={cn('p-1 space-y-0.5 min-h-[160px]', di >= 5 ? 'bg-muted/5' : '')}>
+                      {dayPs.map(p => {
+                        const pal = STATUS_PALETTE[p.status];
+                        return (
+                          <div key={p.id} className={cn('rounded px-1.5 py-1 border', pal.bg, pal.border)}>
+                            <p className={cn('text-[9px] font-bold truncate', pal.text)}>{p.clientName}</p>
+                            <p className="text-[9px] text-muted-foreground/80">{p.channel.replace(' ADS', '')}</p>
+                            <p className={cn('text-[9px] font-bold tabular-nums mt-0.5', pal.text)}>{formatCurrencyBRL(p.amount)}</p>
+                            <div className="mt-0.5">
+                              <StatusDropdown value={p.status} onChange={(status) => updatePaymentStatus(p.id, status)} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="grid grid-cols-7 divide-x divide-border/60 border-t border-border bg-muted/20">
+                {dailyData.map((d, i) => (
+                  <div key={i} className={cn('py-2 px-1 text-center', i >= 5 ? 'bg-muted/10' : '')}>
+                    <p className="text-[9px] text-muted-foreground/70">{d.count} pix</p>
+                    <p className={cn('text-[10px] font-bold tabular-nums', d.total > 0 ? 'text-foreground' : 'text-muted-foreground/30')}>
+                      {d.total > 0 ? formatCurrencyBRL(d.total) : '—'}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
 
-        {filteredPayments.length > 0 ? (
-          <div className="divide-y divide-border">
-            {filteredPayments.map((payment) => {
-              const metaBalance = payment.channel === 'Meta ADS' ? getClientMetaBalance(payment.clientId) : null;
-              const googleBalance = payment.channel === 'Google ADS' ? getClientGoogleBalance(payment.clientId) : null;
-              const accountBalance = payment.channel === 'Meta ADS' ? metaBalance : payment.channel === 'Google ADS' ? googleBalance : null;
-              const balanceLow = accountBalance !== null && accountBalance < LOW_BALANCE_THRESHOLD;
-              return (
-              <div key={payment.id} className="grid grid-cols-[minmax(200px,1.5fr)_110px_130px_130px_140px_112px] gap-3 px-4 py-3 items-center text-sm hover:bg-muted/35 transition-colors">
-                <div>
-                  <p className="font-bold">{payment.clientName}</p>
-                  <p className="text-xs text-muted-foreground">{formatDateBR(payment.date)}</p>
-                  <HolidayPaymentNotice date={payment.date} compact />
-                </div>
-                <span className={cn('w-fit rounded-full border px-2 py-0.5 text-[10px] font-bold', CHANNEL_STYLES[payment.channel])}>
-                  {payment.channel}
-                </span>
-                <p className="font-bold">{formatCurrencyBRL(payment.amount)}</p>
-                <StatusDropdown
-                  value={payment.status}
-                  onChange={(status) => updatePaymentStatus(payment.id, status)}
-                />
-                <div>
-                  {payment.channel === 'Meta ADS' || payment.channel === 'Google ADS' ? (
-                    accountBalance !== null ? (
-                      <span className={cn(
-                        'inline-flex items-center gap-1 text-xs font-semibold tabular-nums px-2 py-0.5 rounded-lg',
-                        balanceLow
-                          ? 'bg-red-500/15 text-red-400 border border-red-500/30'
-                          : 'bg-muted text-muted-foreground',
-                      )}>
-                        {balanceLow && <AlertTriangle className="w-3 h-3 shrink-0" />}
-                        {formatCurrencyBRL(accountBalance)}
-                      </span>
-                    ) : (
-                      <span className="text-xs text-muted-foreground/50">—</span>
-                    )
-                  ) : (
-                    <span className="text-xs text-muted-foreground/50">—</span>
-                  )}
-                </div>
-                <div className="flex justify-end gap-1">
-                  <Button
-                    render={<Link href={`/clientes/${payment.clientId}`} />}
-                    nativeButton={false}
-                    variant="ghost"
-                    size="icon-sm"
-                    title="Abrir cliente"
-                  >
-                    <Eye className="w-4 h-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    title="Apagar programação"
-                    className="text-muted-foreground hover:text-red-300 hover:bg-red-500/10"
-                    onClick={() => deletePayment(payment.id)}
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
+            <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Resumo da Semana por Canal</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="rounded-xl border border-blue-500/25 bg-card p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="w-9 h-9 rounded-lg border border-border bg-background flex items-center justify-center">
+                      <MetaAdsMark className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold">Meta ADS</p>
+                      <p className="text-[10px] text-muted-foreground">{metaCount} pix esta semana</p>
+                    </div>
+                  </div>
+                  <p className="text-xl font-bold font-heading text-blue-400 tabular-nums">{formatCurrencyBRL(metaTotal)}</p>
                 </div>
               </div>
-              );
-            })}
+              <div className="rounded-xl border border-red-500/25 bg-card p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="w-9 h-9 rounded-lg border border-border bg-background flex items-center justify-center">
+                      <GoogleAdsMark className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold">Google ADS</p>
+                      <p className="text-[10px] text-muted-foreground">{googleCount} pix esta semana</p>
+                    </div>
+                  </div>
+                  <p className="text-xl font-bold font-heading text-red-400 tabular-nums">{formatCurrencyBRL(googleTotal)}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              <div className="rounded-xl border border-border bg-card p-4 space-y-2">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-3">Por Status</p>
+                {PAYMENT_STATUS_OPTIONS.map(st => {
+                  const stPs = filteredPayments.filter(p => p.status === st);
+                  if (stPs.length === 0) return null;
+                  const pal = STATUS_PALETTE[st];
+                  const stTotal = stPs.reduce((s, p) => s + p.amount, 0);
+                  return (
+                    <div key={st} className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: pal.dot }} />
+                        <span className="text-xs text-muted-foreground">{st}</span>
+                        <span className="text-[10px] text-muted-foreground/60">({stPs.length})</span>
+                      </div>
+                      <span className={cn('text-xs font-bold tabular-nums', pal.text)}>{formatCurrencyBRL(stTotal)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="rounded-xl border border-border bg-card p-4">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-3">Evolução Diária (Total)</p>
+                <ResponsiveContainer width="100%" height={90}>
+                  <AreaChart data={dailyData} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}>
+                    <defs>
+                      <linearGradient id="semAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#22c55e" stopOpacity={0.25} />
+                        <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <XAxis dataKey="day" tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} />
+                    <Area type="monotone" dataKey="total" stroke="#22c55e" fill="url(#semAreaGrad)" strokeWidth={2} dot={false} />
+                    <Tooltip
+                      formatter={(v: number) => [formatCurrencyBRL(v), 'Total']}
+                      contentStyle={{ background: '#111827', border: '1px solid #374151', borderRadius: '8px', fontSize: '11px' }}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+                {(maxDay || minDay) && (
+                  <div className="flex items-center justify-between mt-2 text-[10px] gap-4 flex-wrap">
+                    {maxDay && <span className="text-emerald-400 font-bold">▲ Max: {maxDay.day} — {formatCurrencyBRL(maxDay.total)}</span>}
+                    {minDay && <span className="text-muted-foreground">▼ Min: {minDay.day} — {formatCurrencyBRL(minDay.total)}</span>}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
-        ) : (
-          <div className="py-16 text-center">
-            <p className="font-semibold text-muted-foreground">Nenhum Pix para este dia</p>
-            <p className="text-sm text-muted-foreground/70 mt-1">Troque a data ou limpe os filtros para ver outras programações.</p>
-          </div>
-        )}
-      </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
