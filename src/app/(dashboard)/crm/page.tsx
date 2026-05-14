@@ -24,13 +24,13 @@ const CANAL_OPTIONS = ['Facebook', 'Instagram', 'Google', 'WHATS PRINCIPAL', 'FA
 const PAGAMENTO_OPTIONS = ['Boleto', 'Cartão', 'PIX', 'Dinheiro', 'Financiamento'];
 
 const STATUS_COLOR: Record<string, string> = {
-  'Em Atendimento': 'text-blue-400',
-  'Agendado':       'text-yellow-400',
-  'Reagendado':     'text-orange-400',
-  'Não Retorna':    'text-zinc-400',
-  'Distante':       'text-zinc-400',
-  'Sem Interesse':  'text-red-400',
-  'Desqualificado': 'text-red-400',
+  'Em Atendimento': 'text-blue-600',
+  'Agendado':       'text-amber-600',
+  'Reagendado':     'text-orange-600',
+  'Não Retorna':    'text-gray-500',
+  'Distante':       'text-gray-500',
+  'Sem Interesse':  'text-red-600',
+  'Desqualificado': 'text-red-600',
 };
 
 const EMPTY: Omit<CrmLead, 'id' | 'client_id'> = {
@@ -54,12 +54,12 @@ function fmtD(v: string | null) {
 }
 function fmtN(v: number | null) { return v ? formatCurrencyBRL(v) : ''; }
 
-const cell = 'px-1.5 py-0 h-8 text-xs focus:outline-none focus:bg-primary/10 bg-transparent border-0 w-full';
+// White-bg table styles
+const cell = 'px-1.5 py-0 h-8 text-xs focus:outline-none focus:bg-green-50 bg-transparent border-0 w-full text-gray-800 placeholder:text-gray-400';
 const cellSelect = cn(cell, 'cursor-pointer');
 
 type Draft = Partial<Omit<CrmLead, 'id' | 'client_id'>>;
 
-// Column order: identity → status → follow-up → outcome → financial → notes
 const COLS: [string, string][] = [
   ['Data','w-28'],['Nome','w-40'],['Número','w-32'],['Canal','w-28'],
   ['Status','w-36'],
@@ -81,18 +81,25 @@ export default function CrmPage() {
   const [draft, setDraft] = useState<Draft>({});
   const savingRef = useRef(false);
   const pendingBlurRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const suppressBlurRef = useRef(false);
   const newRowRef = useRef<HTMLTableRowElement | null>(null);
 
   useEffect(() => {
-    if (!selectedClientId) { setLeads([]); return; }
+    if (!selectedClientId) { setLeads([]); setEditId(null); return; }
     setLoading(true);
     fetch(`/api/crm?clientId=${selectedClientId}`)
       .then(r => r.ok ? r.json() as Promise<CrmLead[]> : [])
       .then(data => {
         setLeads([...data, makeBlank(selectedClientId)]);
-        setEditId(null);
+        // Auto-start editing the blank row
+        setEditId(NEW_ID);
+        setDraft({ ...EMPTY });
       })
-      .catch(() => setLeads([makeBlank(selectedClientId)]))
+      .catch(() => {
+        setLeads([makeBlank(selectedClientId)]);
+        setEditId(NEW_ID);
+        setDraft({ ...EMPTY });
+      })
       .finally(() => setLoading(false));
   }, [selectedClientId]);
 
@@ -119,10 +126,14 @@ export default function CrmPage() {
   }), [realLeads]);
 
   const focusNewRow = useCallback(() => {
+    // Suppress blur so the focus transfer doesn't trigger an unwanted save
+    if (pendingBlurRef.current) clearTimeout(pendingBlurRef.current);
+    suppressBlurRef.current = true;
     setTimeout(() => {
       newRowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       const first = newRowRef.current?.querySelector<HTMLElement>('input[type="text"], input[type="date"]');
       first?.focus();
+      setTimeout(() => { suppressBlurRef.current = false; }, 80);
     }, 50);
   }, []);
 
@@ -131,10 +142,9 @@ export default function CrmPage() {
     savingRef.current = true;
     try {
       if (id === NEW_ID) {
-        const hasData = data.nome || data.numero || data.observacao;
+        const hasData = data.nome || data.numero || data.observacao || data.canal || data.data_agendada || data.bairro || data.valor_rs;
         if (!hasData) {
-          if (thenFocusNew) { setEditId(NEW_ID); setDraft({ ...EMPTY }); focusNewRow(); }
-          else setEditId(null);
+          if (thenFocusNew) focusNewRow();
           return;
         }
         const res = await fetch('/api/crm', {
@@ -174,6 +184,7 @@ export default function CrmPage() {
   }
 
   function handleRowBlur(e: React.FocusEvent<HTMLTableRowElement>, id: string) {
+    if (suppressBlurRef.current) return;
     if (pendingBlurRef.current) clearTimeout(pendingBlurRef.current);
     pendingBlurRef.current = setTimeout(() => {
       if (e.currentTarget && !e.currentTarget.contains(document.activeElement)) {
@@ -186,7 +197,6 @@ export default function CrmPage() {
     if (pendingBlurRef.current) clearTimeout(pendingBlurRef.current);
   }
 
-  // Enter or Tab from last field → save + jump to blank row
   function handleLastFieldKeyDown(e: React.KeyboardEvent, id: string) {
     if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey)) {
       e.preventDefault();
@@ -278,13 +288,14 @@ export default function CrmPage() {
         <div className="rounded-xl border border-border bg-card p-12 text-center text-sm text-muted-foreground">Carregando...</div>
       )}
 
+      {/* White table for readability */}
       {selectedClientId && !loading && (
-        <div className="overflow-auto rounded-xl border border-border flex-1 min-h-0">
+        <div className="overflow-auto rounded-xl border border-gray-200 flex-1 min-h-0 bg-white">
           <table className="w-full border-collapse text-xs" style={{ minWidth: 1300 }}>
-            <thead className="sticky top-0 z-10 bg-muted/80 backdrop-blur-sm">
+            <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
               <tr>
                 {COLS.map(([h, w], i) => (
-                  <th key={i} className={cn('border-b border-border px-1.5 py-2 text-left font-semibold uppercase tracking-wider text-muted-foreground text-[10px]', w)}>
+                  <th key={i} className={cn('border-b border-gray-200 px-1.5 py-2 text-left font-semibold uppercase tracking-wider text-gray-500 text-[10px]', w)}>
                     {h}
                   </th>
                 ))}
@@ -305,24 +316,24 @@ export default function CrmPage() {
                     onBlur={isEditing ? e => handleRowBlur(e, lead.id) : undefined}
                     onFocus={isEditing ? handleRowFocus : undefined}
                     className={cn(
-                      'border-b border-border/50 transition-colors group',
+                      'border-b border-gray-100 transition-colors group',
                       isBlank && !isEditing && 'opacity-40 hover:opacity-80',
-                      isEditing ? 'bg-primary/5 ring-1 ring-inset ring-primary/30' : 'hover:bg-muted/20 cursor-pointer'
+                      isEditing ? 'bg-green-50 ring-1 ring-inset ring-green-300' : 'hover:bg-gray-50 cursor-pointer'
                     )}
                   >
                     {/* Data */}
                     <Td>
                       {isEditing
                         ? <input type="date" value={toD(d.data)} onChange={e => set('data', e.target.value || null)} className={cell} />
-                        : <span className="px-1.5">{fmtD(lead.data)}</span>}
+                        : <span className="px-1.5 text-gray-700">{fmtD(lead.data)}</span>}
                     </Td>
                     {/* Nome */}
                     <Td>
                       {isEditing
                         ? <input type="text" value={d.nome ?? ''} onChange={e => set('nome', e.target.value || null)} placeholder="Nome" className={cell} />
-                        : <span className="px-1.5 font-medium truncate block max-w-[160px]">
+                        : <span className="px-1.5 font-medium text-gray-800 truncate block max-w-[160px]">
                             {isBlank
-                              ? <span className="text-muted-foreground/50 italic text-[10px]">novo lead…</span>
+                              ? <span className="text-gray-400 italic text-[10px]">novo lead…</span>
                               : lead.nome ?? ''}
                           </span>}
                     </Td>
@@ -330,7 +341,7 @@ export default function CrmPage() {
                     <Td>
                       {isEditing
                         ? <input type="text" value={d.numero ?? ''} onChange={e => set('numero', e.target.value || null)} placeholder="Número" className={cell} />
-                        : <span className="px-1.5 text-muted-foreground">{lead.numero ?? ''}</span>}
+                        : <span className="px-1.5 text-gray-600">{lead.numero ?? ''}</span>}
                     </Td>
                     {/* Canal */}
                     <Td>
@@ -339,7 +350,7 @@ export default function CrmPage() {
                             <option value=""></option>
                             {CANAL_OPTIONS.map(o => <option key={o}>{o}</option>)}
                           </select>
-                        : <span className="px-1.5">{lead.canal ?? ''}</span>}
+                        : <span className="px-1.5 text-gray-700">{lead.canal ?? ''}</span>}
                     </Td>
                     {/* Status */}
                     <Td>
@@ -347,7 +358,7 @@ export default function CrmPage() {
                         ? <select value={d.status ?? ''} onChange={e => set('status', e.target.value || null)} className={cn(cellSelect, STATUS_COLOR[d.status ?? ''] ?? '')}>
                             {STATUS_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
                           </select>
-                        : <span className={cn('px-1.5 font-medium', STATUS_COLOR[lead.status ?? ''])}>{lead.status ?? ''}</span>}
+                        : <span className={cn('px-1.5 font-semibold text-xs', STATUS_COLOR[lead.status ?? ''])}>{lead.status ?? ''}</span>}
                     </Td>
                     {/* 1D 2D 3D 4D */}
                     {(['dia1','dia2','dia3','dia4'] as const).map(k => (
@@ -356,7 +367,7 @@ export default function CrmPage() {
                           <input type="checkbox" checked={!!(isEditing ? d[k] : lead[k])}
                             onChange={isEditing ? e => set(k, e.target.checked) : undefined}
                             onClick={!isEditing ? e => { e.stopPropagation(); startEdit(lead); setTimeout(() => set(k, !lead[k]), 0); } : undefined}
-                            className="h-3.5 w-3.5 accent-primary cursor-pointer" />
+                            className="h-3.5 w-3.5 accent-green-600 cursor-pointer" />
                         }
                       </Td>
                     ))}
@@ -364,7 +375,7 @@ export default function CrmPage() {
                     <Td>
                       {isEditing
                         ? <input type="date" value={toD(d.data_agendada)} onChange={e => set('data_agendada', e.target.value || null)} className={cell} />
-                        : <span className="px-1.5 text-muted-foreground">{fmtD(lead.data_agendada)}</span>}
+                        : <span className="px-1.5 text-gray-600">{fmtD(lead.data_agendada)}</span>}
                     </Td>
                     {/* Fechou */}
                     <Td center>
@@ -372,14 +383,14 @@ export default function CrmPage() {
                         <input type="checkbox" checked={!!(isEditing ? d.fechou : lead.fechou)}
                           onChange={isEditing ? e => set('fechou', e.target.checked) : undefined}
                           onClick={!isEditing ? e => { e.stopPropagation(); startEdit(lead); setTimeout(() => set('fechou', !lead.fechou), 0); } : undefined}
-                          className="h-3.5 w-3.5 accent-primary cursor-pointer" />
+                          className="h-3.5 w-3.5 accent-green-600 cursor-pointer" />
                       }
                     </Td>
                     {/* Valor R$ */}
                     <Td>
                       {isEditing
-                        ? <input type="number" step="0.01" value={d.valor_rs ?? ''} onChange={e => set('valor_rs', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cn(cell, 'text-emerald-400')} />
-                        : <span className="px-1.5 font-semibold text-emerald-400">{fmtN(lead.valor_rs)}</span>}
+                        ? <input type="number" step="0.01" value={d.valor_rs ?? ''} onChange={e => set('valor_rs', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cn(cell, 'text-green-700 font-semibold')} />
+                        : <span className="px-1.5 font-semibold text-green-700">{fmtN(lead.valor_rs)}</span>}
                     </Td>
                     {/* Pagamento */}
                     <Td>
@@ -388,32 +399,32 @@ export default function CrmPage() {
                             <option value=""></option>
                             {PAGAMENTO_OPTIONS.map(o => <option key={o}>{o}</option>)}
                           </select>
-                        : <span className="px-1.5 text-muted-foreground">{lead.pagamento ?? ''}</span>}
+                        : <span className="px-1.5 text-gray-600">{lead.pagamento ?? ''}</span>}
                     </Td>
                     {/* Orçamento */}
                     <Td>
                       {isEditing
                         ? <input type="number" step="0.01" value={d.orcamento ?? ''} onChange={e => set('orcamento', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cell} />
-                        : <span className="px-1.5">{fmtN(lead.orcamento)}</span>}
+                        : <span className="px-1.5 text-gray-700">{fmtN(lead.orcamento)}</span>}
                     </Td>
                     {/* Observação */}
                     <Td>
                       {isEditing
                         ? <input type="text" value={d.observacao ?? ''} onChange={e => set('observacao', e.target.value || null)} placeholder="Observação" className={cell} />
-                        : <span className="px-1.5 text-muted-foreground truncate block max-w-[220px]">{lead.observacao ?? ''}</span>}
+                        : <span className="px-1.5 text-gray-600 truncate block max-w-[220px]">{lead.observacao ?? ''}</span>}
                     </Td>
-                    {/* Bairro — last editable field */}
+                    {/* Bairro — last field */}
                     <Td>
                       {isEditing
                         ? <input type="text" value={d.bairro ?? ''} onChange={e => set('bairro', e.target.value || null)} placeholder="Bairro" className={cell}
                             onKeyDown={e => handleLastFieldKeyDown(e, lead.id)} />
-                        : <span className="px-1.5 text-muted-foreground">{lead.bairro ?? ''}</span>}
+                        : <span className="px-1.5 text-gray-600">{lead.bairro ?? ''}</span>}
                     </Td>
                     {/* Delete */}
                     <Td center>
                       {!isBlank &&
                         <button onClick={e => deleteRow(lead.id, e)}
-                          className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-500/10 text-muted-foreground hover:text-red-400 transition-all">
+                          className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 transition-all">
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       }
@@ -431,7 +442,7 @@ export default function CrmPage() {
 
 function Td({ children, center }: { children: React.ReactNode; center?: boolean }) {
   return (
-    <td className={cn('border-r border-border/30 last:border-0 overflow-hidden', center && 'text-center')}>
+    <td className={cn('border-r border-gray-100 last:border-0 overflow-hidden', center && 'text-center')}>
       {children}
     </td>
   );
