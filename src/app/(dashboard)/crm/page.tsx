@@ -79,6 +79,8 @@ export default function CrmPage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [editId, setEditId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft>({});
+  const draftRef = useRef<Draft>({});
+  draftRef.current = draft; // always current, no stale closure
   const savingRef = useRef(false);
   const pendingBlurRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suppressBlurRef = useRef(false);
@@ -140,20 +142,23 @@ export default function CrmPage() {
   const saveRow = useCallback(async (id: string, data: Draft, thenFocusNew = false) => {
     if (savingRef.current) return;
     savingRef.current = true;
+    let ok = false;
     try {
       if (id === NEW_ID) {
         const hasData = data.nome || data.numero || data.observacao || data.canal || data.data_agendada || data.bairro || data.valor_rs;
-        if (!hasData) {
-          if (thenFocusNew) focusNewRow();
-          return;
-        }
-        const res = await fetch('/api/crm', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ clientId: selectedClientId, ...data }),
-        });
-        if (res.ok) {
-          const saved = await res.json() as CrmLead;
-          setLeads(prev => [...prev.filter(l => l.id !== NEW_ID), saved, makeBlank(selectedClientId)]);
+        if (!hasData) { ok = true; } // empty row — treat as no-op success
+        else {
+          const res = await fetch('/api/crm', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ clientId: selectedClientId, ...data }),
+          });
+          if (res.ok) {
+            const saved = await res.json() as CrmLead;
+            setLeads(prev => [...prev.filter(l => l.id !== NEW_ID), saved, makeBlank(selectedClientId)]);
+            ok = true;
+          } else {
+            console.error('CRM POST failed', res.status, await res.text());
+          }
         }
       } else {
         const res = await fetch(`/api/crm/${id}`, {
@@ -163,22 +168,30 @@ export default function CrmPage() {
         if (res.ok) {
           const saved = await res.json() as CrmLead;
           setLeads(prev => prev.map(l => l.id === id ? saved : l));
+          ok = true;
+        } else {
+          console.error('CRM PUT failed', res.status, await res.text());
         }
       }
+    } catch (err) {
+      console.error('CRM saveRow error:', err);
     } finally {
       savingRef.current = false;
-      if (thenFocusNew) {
-        setEditId(NEW_ID);
-        setDraft({ ...EMPTY });
-        focusNewRow();
-      } else {
-        setEditId(null);
+      // Only reset state on success — on failure, keep draft so user doesn't lose data
+      if (ok) {
+        if (thenFocusNew) {
+          setEditId(NEW_ID);
+          setDraft({ ...EMPTY });
+          focusNewRow();
+        } else {
+          setEditId(null);
+        }
       }
     }
   }, [selectedClientId, focusNewRow]);
 
   function startEdit(lead: CrmLead) {
-    if (editId && editId !== lead.id) void saveRow(editId, draft);
+    if (editId && editId !== lead.id) void saveRow(editId, draftRef.current);
     setEditId(lead.id);
     setDraft({ ...lead } as Draft);
   }
@@ -188,7 +201,7 @@ export default function CrmPage() {
     if (pendingBlurRef.current) clearTimeout(pendingBlurRef.current);
     pendingBlurRef.current = setTimeout(() => {
       if (e.currentTarget && !e.currentTarget.contains(document.activeElement)) {
-        void saveRow(id, draft);
+        void saveRow(id, draftRef.current);
       }
     }, 100);
   }
@@ -201,12 +214,12 @@ export default function CrmPage() {
     if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey)) {
       e.preventDefault();
       if (pendingBlurRef.current) clearTimeout(pendingBlurRef.current);
-      void saveRow(id, draft, true);
+      void saveRow(id, draftRef.current, true);
     }
   }
 
   function focusNewRowBtn() {
-    if (editId && editId !== NEW_ID) void saveRow(editId, draft);
+    if (editId && editId !== NEW_ID) void saveRow(editId, draftRef.current);
     setEditId(NEW_ID);
     setDraft({ ...EMPTY });
     focusNewRow();
@@ -317,7 +330,7 @@ export default function CrmPage() {
                       if (e.key === 'Enter' && (e.target as HTMLElement).tagName === 'INPUT') {
                         e.preventDefault();
                         if (pendingBlurRef.current) clearTimeout(pendingBlurRef.current);
-                        void saveRow(lead.id, draft, true);
+                        void saveRow(lead.id, draftRef.current, true);
                       }
                     } : undefined}
                     onBlur={isEditing ? e => handleRowBlur(e, lead.id) : undefined}
