@@ -3,8 +3,9 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Plus, Search, MoreVertical, Download, Settings2,
-  Users, CalendarDays, CheckCircle2, DollarSign,
-  ChevronLeft, ChevronRight, Filter, TableProperties, Trash2,
+  Users, CalendarDays, HeartHandshake, CircleDollarSign,
+  ChevronLeft, ChevronRight, ChevronDown, SlidersHorizontal,
+  AlignJustify, Trash2, Pencil,
 } from 'lucide-react';
 import { useClients } from '@/lib/client-store';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
@@ -26,17 +27,17 @@ type CrmLead = {
 type Draft = Partial<Omit<CrmLead, 'id' | 'client_id' | 'created_at'>>;
 
 const STATUS_OPTIONS = ['Em Atendimento', 'Agendado', 'Reagendado', 'Não Retorna', 'Distante', 'Sem Interesse', 'Desqualificado'];
-const CANAL_OPTIONS = ['Facebook', 'Instagram', 'Google', 'WHATS PRINCIPAL', 'FACHADA', 'Outro'];
+const CANAL_OPTIONS  = ['Facebook', 'Instagram', 'Google', 'WHATS PRINCIPAL', 'FACHADA', 'Outro'];
 const PAGAMENTO_OPTIONS = ['Boleto', 'Cartão', 'PIX', 'Dinheiro', 'Financiamento'];
 
-const STATUS_BADGE: Record<string, string> = {
-  'Em Atendimento': 'bg-blue-500/15 text-blue-400 border border-blue-500/25',
-  'Agendado':       'bg-amber-500/15 text-amber-400 border border-amber-500/25',
-  'Reagendado':     'bg-orange-500/15 text-orange-400 border border-orange-500/25',
-  'Não Retorna':    'bg-gray-500/15 text-gray-400 border border-gray-500/25',
-  'Distante':       'bg-gray-500/15 text-gray-400 border border-gray-500/25',
-  'Sem Interesse':  'bg-red-500/15 text-red-400 border border-red-500/25',
-  'Desqualificado': 'bg-red-500/15 text-red-400 border border-red-500/25',
+const STATUS_BADGE: Record<string, { pill: string; dot: string }> = {
+  'Em Atendimento': { pill: 'bg-blue-500/15 text-blue-400 border border-blue-500/25',   dot: 'bg-blue-400' },
+  'Agendado':       { pill: 'bg-amber-500/15 text-amber-400 border border-amber-500/25', dot: 'bg-amber-400' },
+  'Reagendado':     { pill: 'bg-orange-500/15 text-orange-400 border border-orange-500/25', dot: 'bg-orange-400' },
+  'Não Retorna':    { pill: 'bg-gray-500/15 text-gray-400 border border-gray-500/25',    dot: 'bg-gray-400' },
+  'Distante':       { pill: 'bg-gray-500/15 text-gray-400 border border-gray-500/25',    dot: 'bg-gray-400' },
+  'Sem Interesse':  { pill: 'bg-red-500/15 text-red-400 border border-red-500/25',       dot: 'bg-red-400' },
+  'Desqualificado': { pill: 'bg-red-500/15 text-red-400 border border-red-500/25',       dot: 'bg-red-400' },
 };
 
 const STATUS_COLOR: Record<string, string> = {
@@ -50,12 +51,12 @@ const STATUS_COLOR: Record<string, string> = {
 };
 
 const CANAL_BADGE: Record<string, { bg: string; short: string }> = {
-  'Facebook':        { bg: 'bg-[#1877F2]',  short: 'fb' },
-  'Instagram':       { bg: 'bg-pink-600',    short: 'ig' },
-  'Google':          { bg: 'bg-red-500',     short: 'G'  },
-  'WHATS PRINCIPAL': { bg: 'bg-green-600',   short: 'wp' },
-  'FACHADA':         { bg: 'bg-slate-500',   short: 'fc' },
-  'Outro':           { bg: 'bg-purple-600',  short: '?'  },
+  'Facebook':        { bg: 'bg-[#1877F2]', short: 'fb' },
+  'Instagram':       { bg: 'bg-pink-600',  short: 'ig' },
+  'Google':          { bg: 'bg-red-500',   short: 'G'  },
+  'WHATS PRINCIPAL': { bg: 'bg-green-600', short: 'wp' },
+  'FACHADA':         { bg: 'bg-slate-500', short: 'fc' },
+  'Outro':           { bg: 'bg-purple-600',short: '?'  },
 };
 
 function freshDraft(): Draft {
@@ -80,54 +81,75 @@ function fmtTime(v: string | null) {
 function fmtN(v: number | null) { return v ? formatCurrencyBRL(v) : ''; }
 
 const cell    = 'px-2 py-0 h-9 text-xs focus:outline-none focus:bg-primary/10 bg-transparent border-0 w-full text-foreground placeholder:text-muted-foreground/30';
-const cellSel = cn(cell, 'cursor-pointer');
+const cellSel = cn(cell, 'cursor-pointer appearance-none');
 const cellNew = 'px-2 py-0 h-9 text-xs focus:outline-none focus:bg-primary/10 bg-transparent border-0 w-full text-foreground placeholder:text-muted-foreground/50';
 
 const COLS: [string, string][] = [
-  ['Data','w-28'],['Nome','w-40'],['Número','w-32'],['Canal','w-20'],
+  ['Data','w-[110px]'],['Nome','w-36'],['Número','w-28'],['Canal','w-16'],
   ['Status','w-36'],
   ['1D','w-8'],['2D','w-8'],['3D','w-8'],['4D','w-8'],
-  ['Data Ag.','w-28'],['Fechou','w-10'],['Valor R$','w-28'],
-  ['Pagamento','w-28'],['Orçamento','w-28'],['Observação','w-52'],['Bairro','w-24'],['','w-8'],
+  ['Data Ag.','w-[110px]'],['Fechou','w-12'],['Valor R$','w-28'],
+  ['Pagamento','w-24'],['Orçamento','w-24'],['Observação','w-44'],['Bairro','w-24'],['','w-8'],
 ];
+
+// ── Styled select with icon ──────────────────────────────────────────────
+function IconSelect({ icon: Icon, value, onChange, placeholder, children, className }: {
+  icon: React.ElementType; value: string; onChange: (v: string) => void;
+  placeholder?: string; children: React.ReactNode; className?: string;
+}) {
+  return (
+    <div className={cn('relative flex items-center', className)}>
+      <Icon className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none z-10" />
+      <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none z-10" />
+      <select
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        className="appearance-none pl-8 pr-8 py-2 rounded-lg border border-border bg-card text-sm focus:outline-none focus:ring-1 focus:ring-primary w-full"
+      >
+        {placeholder && <option value="">{placeholder}</option>}
+        {children}
+      </select>
+    </div>
+  );
+}
 
 export default function CrmPage() {
   const { clients } = useClients();
   const activeClients = useMemo(() => clients.filter(c => c.status === 'Ativo'), [clients]);
 
-  const [clientId, setClientId] = useState('');
-  const [leads, setLeads] = useState<CrmLead[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [search, setSearch] = useState('');
+  const [clientId, setClientId]     = useState('');
+  const [leads, setLeads]           = useState<CrmLead[]>([]);
+  const [loading, setLoading]       = useState(false);
+  const [search, setSearch]         = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
-  const [menuId, setMenuId] = useState<string | null>(null);
+  const [saving, setSaving]         = useState(false);
+  const [saveError, setSaveError]   = useState<string | null>(null);
+  const [page, setPage]             = useState(1);
+  const [pageSize, setPageSize]     = useState(10);
+  const [menuId, setMenuId]         = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // ── NEW ROW ──
+  // ── NEW ROW ──────────────────────────────────────────────────────────
   const [newDraft, setNewDraft] = useState<Draft>(freshDraft());
   const newDraftRef = useRef<Draft>(newDraft);
   newDraftRef.current = newDraft;
-  const newRowRef = useRef<HTMLTableRowElement | null>(null);
+  const newRowRef   = useRef<HTMLTableRowElement | null>(null);
   const newSavingRef = useRef(false);
   const newPendingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ── EXISTING ROW EDITING ──
-  const [editId, setEditId] = useState<string | null>(null);
+  // ── EXISTING EDITING ─────────────────────────────────────────────────
+  const [editId, setEditId]     = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<Draft>({});
   const editDraftRef = useRef<Draft>(editDraft);
   editDraftRef.current = editDraft;
   const editPendingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    function handleClick(e: MouseEvent) {
+    function onDown(e: MouseEvent) {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuId(null);
     }
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
   }, []);
 
   useEffect(() => { setPage(1); }, [statusFilter, search, clientId]);
@@ -146,18 +168,18 @@ export default function CrmPage() {
     if (statusFilter && l.status !== statusFilter) return false;
     if (search) {
       const q = search.toLowerCase();
-      return (l.nome?.toLowerCase().includes(q) || l.numero?.includes(q) ||
-              l.canal?.toLowerCase().includes(q) || l.bairro?.toLowerCase().includes(q) || false);
+      return l.nome?.toLowerCase().includes(q) || l.numero?.includes(q) ||
+             l.canal?.toLowerCase().includes(q) || l.bairro?.toLowerCase().includes(q) || false;
     }
     return true;
   }), [leads, search, statusFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
+  const paginated  = filtered.slice((page - 1) * pageSize, page * pageSize);
 
   const stats = useMemo(() => ({
-    total: leads.length,
-    agendados: leads.filter(l => l.status === 'Agendado' || l.status === 'Reagendado').length,
+    total:       leads.length,
+    agendados:   leads.filter(l => l.status === 'Agendado' || l.status === 'Reagendado').length,
     fechamentos: leads.filter(l => l.fechou).length,
     faturamento: leads.filter(l => l.fechou).reduce((s, l) => s + (l.valor_rs ?? 0), 0),
   }), [leads]);
@@ -167,8 +189,7 @@ export default function CrmPage() {
     const data = newDraftRef.current;
     const hasData = data.nome || data.numero || data.observacao || data.canal || data.bairro || data.valor_rs;
     if (!hasData) { focusNew(); return; }
-    newSavingRef.current = true;
-    setSaving(true); setSaveError(null);
+    newSavingRef.current = true; setSaving(true); setSaveError(null);
     try {
       const res = await fetch('/api/crm', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -184,9 +205,7 @@ export default function CrmPage() {
       }
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Erro de rede');
-    } finally {
-      newSavingRef.current = false; setSaving(false); focusNew();
-    }
+    } finally { newSavingRef.current = false; setSaving(false); focusNew(); }
   }
 
   function handleNewBlur(e: React.FocusEvent<HTMLTableRowElement>) {
@@ -196,14 +215,12 @@ export default function CrmPage() {
     }, 150);
   }
   function handleNewFocus() { if (newPendingRef.current) clearTimeout(newPendingRef.current); }
-
   function focusNew() {
     setTimeout(() => newRowRef.current?.querySelector<HTMLElement>('input[type="date"]')?.focus(), 30);
   }
 
   async function saveExisting(id: string) {
-    const data = editDraftRef.current;
-    setSaving(true);
+    const data = editDraftRef.current; setSaving(true);
     try {
       const res = await fetch(`/api/crm/${id}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -235,10 +252,7 @@ export default function CrmPage() {
   async function deleteRow(id: string) {
     setMenuId(null);
     const res = await fetch(`/api/crm/${id}`, { method: 'DELETE' });
-    if (res.ok) {
-      setLeads(prev => prev.filter(l => l.id !== id));
-      if (editId === id) setEditId(null);
-    }
+    if (res.ok) { setLeads(prev => prev.filter(l => l.id !== id)); if (editId === id) setEditId(null); }
   }
 
   function onNewBairroKey(e: React.KeyboardEvent) {
@@ -251,50 +265,42 @@ export default function CrmPage() {
   function setN<K extends keyof Draft>(k: K, v: Draft[K]) { setNewDraft(prev => ({ ...prev, [k]: v })); }
   function setE<K extends keyof Draft>(k: K, v: Draft[K]) { setEditDraft(prev => ({ ...prev, [k]: v })); }
 
-  const clientName = activeClients.find(c => c.id === clientId)?.name ?? '';
-
   return (
     <div className="flex flex-col gap-5 h-full">
-      {/* Header */}
+
+      {/* ── PAGE HEADER ─────────────────────────────────────────────── */}
       <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 border border-primary/20">
-          <TableProperties className="h-5 w-5 text-primary" />
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-violet-600/20 border border-violet-500/30">
+          <Users className="h-5 w-5 text-violet-400" />
         </div>
         <div>
-          <h1 className="text-xl font-black uppercase tracking-tight">CRM</h1>
+          <h1 className="text-lg font-bold leading-tight">CRM</h1>
           <p className="text-xs text-muted-foreground">Gestão de leads e funil de vendas por cliente.</p>
         </div>
-        {saving && <span className="ml-2 text-xs font-medium text-amber-400 animate-pulse">Salvando…</span>}
+        {saving    && <span className="ml-2 text-xs font-medium text-amber-400 animate-pulse">Salvando…</span>}
         {saveError && <span className="ml-2 text-xs font-medium text-red-400">Erro: {saveError}</span>}
       </div>
 
-      {/* Filters bar */}
+      {/* ── FILTERS BAR ─────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-2">
-        <div className="relative">
-          <CalendarDays className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-          <select value={clientId} onChange={e => setClientId(e.target.value)}
-            className="pl-8 pr-3 py-2 rounded-lg border border-border bg-card text-sm focus:outline-none focus:ring-1 focus:ring-primary min-w-[180px]"
-          >
-            <option value="">Selecionar cliente...</option>
-            {activeClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-        </div>
+        <IconSelect icon={Users} value={clientId} onChange={setClientId}
+          placeholder="Selecionar cliente..." className="min-w-[180px]">
+          {activeClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </IconSelect>
+
         {clientId && (
           <>
+            <IconSelect icon={SlidersHorizontal} value={statusFilter} onChange={setStatusFilter}
+              placeholder="Todos status" className="min-w-[160px]">
+              {STATUS_OPTIONS.map(s => <option key={s}>{s}</option>)}
+            </IconSelect>
+
             <div className="relative">
-              <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-              <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
-                className="pl-8 pr-3 py-2 rounded-lg border border-border bg-card text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-              >
-                <option value="">Todos status</option>
-                {STATUS_OPTIONS.map(s => <option key={s}>{s}</option>)}
-              </select>
-            </div>
-            <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
               <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar leads..."
                 className="pl-8 pr-3 py-2 rounded-lg border border-border bg-card text-sm focus:outline-none focus:ring-1 focus:ring-primary w-48" />
             </div>
+
             <button onClick={() => void saveNew()}
               className="ml-auto flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
             >
@@ -304,22 +310,22 @@ export default function CrmPage() {
         )}
       </div>
 
-      {/* Stats */}
+      {/* ── STATS ───────────────────────────────────────────────────── */}
       {clientId && !loading && leads.length > 0 && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 shrink-0">
-          {[
-            { label: 'TOTAL', sub: 'leads cadastrados', value: stats.total, fmt: 'n', icon: Users, color: 'text-purple-400', bg: 'bg-purple-500/10', border: 'border-purple-500/20' },
-            { label: 'AGENDADOS', sub: stats.agendados === 1 ? 'lead agendado' : 'leads agendados', value: stats.agendados, fmt: 'n', icon: CalendarDays, color: 'text-green-400', bg: 'bg-green-500/10', border: 'border-green-500/20' },
-            { label: 'FECHAMENTOS', sub: 'negócios fechados', value: stats.fechamentos, fmt: 'n', icon: CheckCircle2, color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/20' },
-            { label: 'FATURAMENTO', sub: 'valor total faturado', value: stats.faturamento, fmt: 'c', icon: DollarSign, color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/20' },
-          ].map(({ label, sub, value, fmt, icon: Icon, color, bg, border }) => (
-            <div key={label} className={cn('rounded-xl border bg-card px-4 py-3 flex items-center gap-3', border)}>
-              <div className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-lg', bg)}>
-                <Icon className={cn('h-5 w-5', color)} />
+          {([
+            { label: 'TOTAL',       sub: 'leads cadastrados',   value: stats.total,       fmt: 'n', Icon: Users,             iconCls: 'text-purple-400',  bgCls: 'bg-purple-500/10',  borderCls: 'border-purple-500/25' },
+            { label: 'AGENDADOS',   sub: 'leads agendados',     value: stats.agendados,   fmt: 'n', Icon: CalendarDays,       iconCls: 'text-green-400',   bgCls: 'bg-green-500/10',   borderCls: 'border-green-500/25'  },
+            { label: 'FECHAMENTOS', sub: 'negócios fechados',   value: stats.fechamentos, fmt: 'n', Icon: HeartHandshake,     iconCls: 'text-blue-400',    bgCls: 'bg-blue-500/10',    borderCls: 'border-blue-500/25'   },
+            { label: 'FATURAMENTO', sub: 'valor total faturado',value: stats.faturamento, fmt: 'c', Icon: CircleDollarSign,   iconCls: 'text-violet-400',  bgCls: 'bg-violet-500/10',  borderCls: 'border-violet-500/25' },
+          ] as const).map(({ label, sub, value, fmt, Icon, iconCls, bgCls, borderCls }) => (
+            <div key={label} className={cn('rounded-xl border bg-card px-4 py-3 flex items-center gap-3', borderCls)}>
+              <div className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-lg', bgCls)}>
+                <Icon className={cn('h-5 w-5', iconCls)} />
               </div>
-              <div>
+              <div className="min-w-0">
                 <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{label}</p>
-                <p className="text-lg font-black leading-tight">{fmt === 'c' ? formatCurrencyBRL(value) : value.toLocaleString('pt-BR')}</p>
+                <p className="text-xl font-black leading-tight">{fmt === 'c' ? formatCurrencyBRL(value) : value.toLocaleString('pt-BR')}</p>
                 <p className="text-[10px] text-muted-foreground">{sub}</p>
               </div>
             </div>
@@ -336,26 +342,29 @@ export default function CrmPage() {
         <div className="rounded-xl border border-border bg-card p-12 text-center text-sm text-muted-foreground">Carregando...</div>
       )}
 
+      {/* ── TABLE ───────────────────────────────────────────────────── */}
       {clientId && !loading && (
         <div className="flex flex-col flex-1 min-h-0 rounded-xl border border-border bg-card overflow-hidden">
-          {/* Table header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
+
+          {/* Table toolbar */}
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-border shrink-0">
             <div className="flex items-center gap-2">
-              <Filter className="h-4 w-4 text-primary" />
+              <AlignJustify className="h-4 w-4 text-primary" />
               <span className="text-sm font-semibold">Leads</span>
-              {clientName && <span className="text-xs text-muted-foreground">— {clientName}</span>}
             </div>
             <div className="flex items-center gap-2">
-              <button className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-card hover:text-foreground transition-colors">
-                <Download className="h-3.5 w-3.5" /> Exportar
+              <button className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
+                <Download className="h-3.5 w-3.5" />
+                Exportar
+                <ChevronDown className="h-3 w-3" />
               </button>
-              <button className="flex h-7 w-7 items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+              <button className="flex h-7 w-7 items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-foreground transition-colors">
                 <Settings2 className="h-3.5 w-3.5" />
               </button>
             </div>
           </div>
 
-          {/* Table */}
+          {/* Scrollable table */}
           <div className="overflow-auto flex-1 min-h-0">
             <table className="w-full border-collapse text-xs" style={{ minWidth: 1280 }}>
               <thead className="sticky top-0 z-10 bg-card border-b border-border">
@@ -368,25 +377,26 @@ export default function CrmPage() {
                 </tr>
               </thead>
               <tbody>
-                {/* NEW ROW */}
+
+                {/* ── NEW ROW ── */}
                 <tr
                   ref={newRowRef}
                   onKeyDown={onNewRowKey}
                   onBlur={handleNewBlur}
                   onFocus={handleNewFocus}
-                  className="border-b border-border/60 bg-primary/5 ring-1 ring-inset ring-primary/20"
+                  className="border-b border-primary/20 bg-primary/5 ring-1 ring-inset ring-primary/20"
                 >
                   <Td><input type="date" value={toD(newDraft.data)} onChange={e => setN('data', e.target.value || null)} className={cellNew} /></Td>
-                  <Td><input type="text" value={newDraft.nome ?? ''} onChange={e => setN('nome', e.target.value || null)} placeholder="Nome" className={cn(cellNew, 'text-primary placeholder:text-primary/40')} /></Td>
+                  <Td><input type="text" value={newDraft.nome ?? ''} onChange={e => setN('nome', e.target.value || null)} placeholder="Nome" className={cn(cellNew, 'text-primary placeholder:text-primary/40 font-semibold')} /></Td>
                   <Td><input type="text" value={newDraft.numero ?? ''} onChange={e => setN('numero', e.target.value || null)} placeholder="Número" className={cellNew} /></Td>
                   <Td>
-                    <select value={newDraft.canal ?? ''} onChange={e => setN('canal', e.target.value || null)} className={cn(cellNew, 'cursor-pointer')}>
+                    <select value={newDraft.canal ?? ''} onChange={e => setN('canal', e.target.value || null)} className={cn(cellNew, 'cursor-pointer appearance-none')}>
                       <option value=""></option>
                       {CANAL_OPTIONS.map(o => <option key={o}>{o}</option>)}
                     </select>
                   </Td>
                   <Td>
-                    <select value={newDraft.status ?? ''} onChange={e => setN('status', e.target.value || null)} className={cn(cellNew, 'cursor-pointer', STATUS_COLOR[newDraft.status ?? ''] ?? '')}>
+                    <select value={newDraft.status ?? ''} onChange={e => setN('status', e.target.value || null)} className={cn(cellNew, 'cursor-pointer appearance-none', STATUS_COLOR[newDraft.status ?? ''] ?? '')}>
                       {STATUS_OPTIONS.map(o => <option key={o}>{o}</option>)}
                     </select>
                   </Td>
@@ -399,7 +409,7 @@ export default function CrmPage() {
                   <Td center><input type="checkbox" checked={!!newDraft.fechou} onChange={e => setN('fechou', e.target.checked)} className="h-3.5 w-3.5 accent-primary cursor-pointer" /></Td>
                   <Td><input type="number" step="0.01" value={newDraft.valor_rs ?? ''} onChange={e => setN('valor_rs', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cn(cellNew, 'text-primary font-semibold')} /></Td>
                   <Td>
-                    <select value={newDraft.pagamento ?? ''} onChange={e => setN('pagamento', e.target.value || null)} className={cn(cellNew, 'cursor-pointer')}>
+                    <select value={newDraft.pagamento ?? ''} onChange={e => setN('pagamento', e.target.value || null)} className={cn(cellNew, 'cursor-pointer appearance-none')}>
                       <option value=""></option>
                       {PAGAMENTO_OPTIONS.map(o => <option key={o}>{o}</option>)}
                     </select>
@@ -407,17 +417,17 @@ export default function CrmPage() {
                   <Td><input type="number" step="0.01" value={newDraft.orcamento ?? ''} onChange={e => setN('orcamento', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cellNew} /></Td>
                   <Td><input type="text" value={newDraft.observacao ?? ''} onChange={e => setN('observacao', e.target.value || null)} placeholder="Observação" className={cellNew} /></Td>
                   <Td>
-                    <input type="text" value={newDraft.bairro ?? ''} onChange={e => setN('bairro', e.target.value || null)} placeholder="Bairro" className={cellNew}
-                      onKeyDown={onNewBairroKey} />
+                    <input type="text" value={newDraft.bairro ?? ''} onChange={e => setN('bairro', e.target.value || null)} placeholder="Bairro" className={cellNew} onKeyDown={onNewBairroKey} />
                   </Td>
                   <Td center />
                 </tr>
 
-                {/* SAVED LEADS */}
+                {/* ── SAVED LEADS ── */}
                 {paginated.map((lead, idx) => {
                   const isEditing = editId === lead.id;
                   const d = isEditing ? editDraft : lead;
-                  const canalCfg = lead.canal ? CANAL_BADGE[lead.canal] : null;
+                  const canal = lead.canal ? CANAL_BADGE[lead.canal] : null;
+                  const badge = lead.status ? STATUS_BADGE[lead.status] : null;
                   return (
                     <tr
                       key={lead.id}
@@ -426,20 +436,18 @@ export default function CrmPage() {
                       onBlur={isEditing ? e => handleExistingBlur(e, lead.id) : undefined}
                       onFocus={isEditing ? handleExistingFocus : undefined}
                       className={cn(
-                        'border-b border-border/40 transition-colors group',
+                        'border-b border-border/30 transition-colors group',
                         isEditing
-                          ? 'bg-blue-500/10 ring-1 ring-inset ring-blue-500/30'
-                          : idx % 2 === 0
-                            ? 'hover:bg-muted/30 cursor-pointer'
-                            : 'bg-muted/10 hover:bg-muted/30 cursor-pointer'
+                          ? 'bg-blue-500/10 ring-1 ring-inset ring-blue-500/25'
+                          : idx % 2 === 0 ? 'hover:bg-muted/30 cursor-pointer' : 'bg-muted/10 hover:bg-muted/30 cursor-pointer'
                       )}
                     >
                       {/* Data + hora */}
                       <Td>
                         {isEditing
                           ? <input type="date" value={toD(d.data)} onChange={e => setE('data', e.target.value || null)} className={cell} />
-                          : <div className="px-2">
-                              <div className="text-[11px] text-foreground">{fmtD(lead.data)}</div>
+                          : <div className="px-2 py-1">
+                              <div className="text-[11px] font-medium text-foreground">{fmtD(lead.data)}</div>
                               <div className="text-[10px] text-muted-foreground">{fmtTime(lead.created_at)}</div>
                             </div>}
                       </Td>
@@ -447,13 +455,13 @@ export default function CrmPage() {
                       <Td>
                         {isEditing
                           ? <input type="text" value={d.nome ?? ''} onChange={e => setE('nome', e.target.value || null)} placeholder="Nome" className={cell} />
-                          : <span className="px-2 font-semibold text-primary text-xs truncate block max-w-[160px]">{lead.nome ?? '–'}</span>}
+                          : <span className="px-2 font-semibold text-primary text-xs truncate block max-w-[140px]">{lead.nome ?? '–'}</span>}
                       </Td>
                       {/* Número */}
                       <Td>
                         {isEditing
                           ? <input type="text" value={d.numero ?? ''} onChange={e => setE('numero', e.target.value || null)} placeholder="Número" className={cell} />
-                          : <span className="px-2 text-muted-foreground text-[11px] font-mono">{lead.numero ?? '–'}</span>}
+                          : <span className="px-2 text-muted-foreground text-[11px]">{lead.numero ?? '–'}</span>}
                       </Td>
                       {/* Canal */}
                       <Td>
@@ -462,10 +470,10 @@ export default function CrmPage() {
                               <option value=""></option>
                               {CANAL_OPTIONS.map(o => <option key={o}>{o}</option>)}
                             </select>
-                          : canalCfg
-                            ? <div className="px-2">
-                                <span className={cn('inline-flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-bold text-white', canalCfg.bg)}>
-                                  {canalCfg.short}
+                          : canal
+                            ? <div className="px-2 flex items-center">
+                                <span className={cn('inline-flex h-6 w-6 items-center justify-center rounded-full text-[9px] font-bold text-white', canal.bg)}>
+                                  {canal.short}
                                 </span>
                               </div>
                             : <span className="px-2 text-muted-foreground text-[11px]">–</span>}
@@ -476,24 +484,29 @@ export default function CrmPage() {
                           ? <select value={d.status ?? ''} onChange={e => setE('status', e.target.value || null)} className={cn(cellSel, STATUS_COLOR[d.status ?? ''] ?? '')}>
                               {STATUS_OPTIONS.map(o => <option key={o}>{o}</option>)}
                             </select>
-                          : lead.status
-                            ? <span className={cn('mx-2 inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap', STATUS_BADGE[lead.status] ?? 'bg-muted text-muted-foreground')}>
-                                {lead.status}
-                              </span>
+                          : badge
+                            ? <div className="px-1">
+                                <span className={cn('inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap', badge.pill)}>
+                                  <span className={cn('h-1.5 w-1.5 rounded-full shrink-0', badge.dot)} />
+                                  {lead.status}
+                                </span>
+                              </div>
                             : null}
                       </Td>
                       {/* 1D–4D */}
                       {(['dia1','dia2','dia3','dia4'] as const).map(k => (
                         <Td key={k} center>
                           {isEditing
-                            ? <input type="checkbox" checked={!!d[k]} onChange={e => setE(k, e.target.checked)} className="h-3.5 w-3.5 accent-blue-500 cursor-pointer" />
-                            : <span onClick={e => { e.stopPropagation(); startEdit(lead); }}
-                                className={cn('inline-flex h-4 w-4 items-center justify-center rounded text-[10px] cursor-pointer select-none', lead[k] ? 'bg-primary/20 text-primary font-bold' : 'text-muted-foreground/30')}>
+                            ? <input type="checkbox" checked={!!d[k]} onChange={e => setE(k, e.target.checked)} className="h-3.5 w-3.5 accent-primary cursor-pointer" />
+                            : <span
+                                onClick={e => { e.stopPropagation(); startEdit(lead); }}
+                                className={cn('inline-flex h-4 w-4 items-center justify-center rounded text-[10px] cursor-pointer select-none', lead[k] ? 'bg-primary/20 text-primary font-bold' : 'text-muted-foreground/30')}
+                              >
                                 {lead[k] ? '✓' : '–'}
                               </span>}
                         </Td>
                       ))}
-                      {/* Data ag. */}
+                      {/* Data Ag. */}
                       <Td>
                         {isEditing
                           ? <input type="date" value={toD(d.data_agendada)} onChange={e => setE('data_agendada', e.target.value || null)} className={cell} />
@@ -502,9 +515,11 @@ export default function CrmPage() {
                       {/* Fechou */}
                       <Td center>
                         {isEditing
-                          ? <input type="checkbox" checked={!!d.fechou} onChange={e => setE('fechou', e.target.checked)} className="h-3.5 w-3.5 accent-blue-500 cursor-pointer" />
-                          : <span onClick={e => { e.stopPropagation(); startEdit(lead); }}
-                              className={cn('inline-flex h-5 w-5 items-center justify-center rounded-full text-[11px] cursor-pointer font-bold select-none', lead.fechou ? 'bg-green-500 text-white' : 'bg-muted/50 text-muted-foreground/40')}>
+                          ? <input type="checkbox" checked={!!d.fechou} onChange={e => setE('fechou', e.target.checked)} className="h-3.5 w-3.5 accent-primary cursor-pointer" />
+                          : <span
+                              onClick={e => { e.stopPropagation(); startEdit(lead); }}
+                              className={cn('inline-flex h-5 w-5 items-center justify-center rounded-full text-[11px] cursor-pointer font-bold select-none', lead.fechou ? 'bg-green-500 text-white' : 'bg-muted/50 text-muted-foreground/40')}
+                            >
                               {lead.fechou ? '✓' : '–'}
                             </span>}
                       </Td>
@@ -533,17 +548,17 @@ export default function CrmPage() {
                       <Td>
                         {isEditing
                           ? <input type="text" value={d.observacao ?? ''} onChange={e => setE('observacao', e.target.value || null)} placeholder="Observação" className={cell} />
-                          : <span className="px-2 text-muted-foreground text-[11px] truncate block max-w-[200px]">{lead.observacao ?? 'Observação'}</span>}
+                          : <span className="px-2 text-muted-foreground text-[11px] truncate block max-w-[170px]">{lead.observacao || 'Observação'}</span>}
                       </Td>
                       {/* Bairro */}
                       <Td>
                         {isEditing
                           ? <input type="text" value={d.bairro ?? ''} onChange={e => setE('bairro', e.target.value || null)} placeholder="Bairro" className={cell} />
-                          : <span className="px-2 text-muted-foreground text-[11px]">{lead.bairro ?? 'Bairro'}</span>}
+                          : <span className="px-2 text-muted-foreground text-[11px]">{lead.bairro || 'Bairro'}</span>}
                       </Td>
-                      {/* Menu */}
+                      {/* ⋮ Menu */}
                       <Td center>
-                        <div className="relative" ref={menuId === lead.id ? menuRef : null}>
+                        <div className="relative" ref={menuId === lead.id ? menuRef : undefined}>
                           <button
                             onClick={e => { e.stopPropagation(); setMenuId(menuId === lead.id ? null : lead.id); }}
                             className="opacity-0 group-hover:opacity-100 flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
@@ -551,12 +566,12 @@ export default function CrmPage() {
                             <MoreVertical className="h-4 w-4" />
                           </button>
                           {menuId === lead.id && (
-                            <div className="absolute right-0 top-7 z-50 min-w-[120px] rounded-lg border border-border bg-popover shadow-lg py-1">
+                            <div className="absolute right-0 top-7 z-50 min-w-[130px] rounded-lg border border-border bg-popover shadow-xl py-1">
                               <button
                                 onClick={e => { e.stopPropagation(); startEdit(lead); setMenuId(null); }}
                                 className="flex w-full items-center gap-2 px-3 py-2 text-xs hover:bg-muted transition-colors"
                               >
-                                <Settings2 className="h-3.5 w-3.5" /> Editar
+                                <Pencil className="h-3.5 w-3.5" /> Editar
                               </button>
                               <button
                                 onClick={e => { e.stopPropagation(); void deleteRow(lead.id); }}
@@ -575,27 +590,30 @@ export default function CrmPage() {
             </table>
           </div>
 
-          {/* Pagination */}
+          {/* ── PAGINATION ── */}
           <div className="flex items-center justify-between border-t border-border px-4 py-2.5 shrink-0">
             <span className="text-xs text-muted-foreground">
               {filtered.length === 0
                 ? 'Nenhum lead'
-                : `Mostrando ${(page - 1) * pageSize + 1} a ${Math.min(page * pageSize, filtered.length)} de ${filtered.length} lead${filtered.length !== 1 ? 's' : ''}`}
+                : `Mostrando ${(page-1)*pageSize+1} a ${Math.min(page*pageSize, filtered.length)} de ${filtered.length} lead${filtered.length !== 1 ? 's' : ''}`}
             </span>
-            <div className="flex items-center gap-2">
-              <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
+            <div className="flex items-center gap-1.5">
+              <button onClick={() => setPage(p => Math.max(1, p-1))} disabled={page === 1}
                 className="flex h-7 w-7 items-center justify-center rounded border border-border disabled:opacity-30 hover:bg-muted transition-colors">
                 <ChevronLeft className="h-3.5 w-3.5" />
               </button>
-              <span className="flex h-7 min-w-[28px] items-center justify-center rounded border border-primary bg-primary/10 px-2 text-xs font-semibold text-primary">{page}</span>
-              <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
+              <span className="flex h-7 min-w-[28px] items-center justify-center rounded border border-primary bg-primary/10 px-2.5 text-xs font-bold text-primary">{page}</span>
+              <button onClick={() => setPage(p => Math.min(totalPages, p+1))} disabled={page === totalPages}
                 className="flex h-7 w-7 items-center justify-center rounded border border-border disabled:opacity-30 hover:bg-muted transition-colors">
                 <ChevronRight className="h-3.5 w-3.5" />
               </button>
-              <select value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(1); }}
-                className="ml-2 rounded border border-border bg-card px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary">
-                {[10, 25, 50, 100].map(n => <option key={n} value={n}>{n} / página</option>)}
-              </select>
+              <div className="relative ml-2">
+                <select value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(1); }}
+                  className="appearance-none rounded border border-border bg-card pl-2 pr-6 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary">
+                  {[10, 25, 50, 100].map(n => <option key={n} value={n}>{n} / página</option>)}
+                </select>
+                <ChevronDown className="absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground pointer-events-none" />
+              </div>
             </div>
           </div>
         </div>
