@@ -1,10 +1,7 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Plus, Pencil, Trash2, Search, X, Check } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { Plus, Trash2, Search } from 'lucide-react';
 import { useClients } from '@/lib/client-store';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 
@@ -19,43 +16,44 @@ type CrmLead = {
   pagamento: string | null; analise_credito: boolean;
   data_nasc: string | null; bairro: string | null;
   motivacoes: string | null; dores: string | null;
-  created_at: string; updated_at: string;
 };
 
+const NEW_ID = '__new__';
 const STATUS_OPTIONS = ['Em Atendimento', 'Agendado', 'Reagendado', 'Não Retorna', 'Distante', 'Sem Interesse', 'Desqualificado'];
 const CANAL_OPTIONS = ['Facebook', 'Instagram', 'Google', 'WHATS PRINCIPAL', 'FACHADA', 'Outro'];
 const PAGAMENTO_OPTIONS = ['Boleto', 'Cartão', 'PIX', 'Dinheiro', 'Financiamento'];
 
-const STATUS_STYLE: Record<string, string> = {
-  'Em Atendimento': 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-  'Agendado': 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
-  'Reagendado': 'bg-orange-500/20 text-orange-400 border-orange-500/30',
-  'Não Retorna': 'bg-zinc-500/20 text-zinc-400 border-zinc-500/30',
-  'Distante': 'bg-zinc-500/20 text-zinc-400 border-zinc-500/30',
-  'Sem Interesse': 'bg-red-500/20 text-red-400 border-red-500/30',
-  'Desqualificado': 'bg-red-500/20 text-red-400 border-red-500/30',
+const STATUS_COLOR: Record<string, string> = {
+  'Em Atendimento': 'text-blue-400',
+  'Agendado':       'text-yellow-400',
+  'Reagendado':     'text-orange-400',
+  'Não Retorna':    'text-zinc-400',
+  'Distante':       'text-zinc-400',
+  'Sem Interesse':  'text-red-400',
+  'Desqualificado': 'text-red-400',
 };
 
-const EMPTY: Omit<CrmLead, 'id' | 'client_id' | 'created_at' | 'updated_at'> = {
-  mes: null, data: null, link_criativo: null, nome: null, numero: null,
-  canal: null, emoji: null, dia1: false, dia2: false, dia3: false, dia4: false,
+const EMPTY: Omit<CrmLead, 'id' | 'client_id'> = {
+  mes: null, data: new Date().toISOString().split('T')[0], link_criativo: null,
+  nome: null, numero: null, canal: null, emoji: null,
+  dia1: false, dia2: false, dia3: false, dia4: false,
   status: 'Em Atendimento', data_agendada: null, video_dra: false, compareceu: false,
   observacao: null, orcamento: null, fechou: false, valor_rs: null,
   pagamento: null, analise_credito: false, data_nasc: null, bairro: null,
   motivacoes: null, dores: null,
 };
 
-function fmtDate(d: string | null): string {
-  if (!d) return '—';
-  const s = String(d).split('T')[0];
-  const [y, m, day] = s.split('-');
-  return `${day}/${m}/${y}`;
+function toD(v: string | null | undefined) { return v ? String(v).split('T')[0] : ''; }
+function fmtD(v: string | null) {
+  const s = toD(v); if (!s) return '';
+  const [y, m, d] = s.split('-'); return `${d}/${m}/${y}`;
 }
+function fmtN(v: number | null) { return v ? formatCurrencyBRL(v) : ''; }
 
-function toInputDate(d: string | null | undefined): string {
-  if (!d) return '';
-  return String(d).split('T')[0];
-}
+const cell = 'px-1.5 py-0 h-8 text-xs focus:outline-none focus:bg-primary/10 bg-transparent border-0 w-full';
+const cellSelect = cn(cell, 'cursor-pointer');
+
+type Draft = Partial<Omit<CrmLead, 'id' | 'client_id'>>;
 
 export default function CrmPage() {
   const { clients } = useClients();
@@ -66,80 +64,126 @@ export default function CrmPage() {
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const [editingLead, setEditingLead] = useState<Partial<CrmLead> & { _new?: boolean } | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [deleting, setDeleting] = useState<string | null>(null);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<Draft>({});
+  const savingRef = useRef(false);
+  const pendingBlurRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!selectedClientId) { setLeads([]); return; }
     setLoading(true);
     fetch(`/api/crm?clientId=${selectedClientId}`)
       .then(r => r.ok ? r.json() as Promise<CrmLead[]> : [])
-      .then(setLeads)
+      .then(data => { setLeads(data); setEditId(null); })
       .catch(() => setLeads([]))
       .finally(() => setLoading(false));
   }, [selectedClientId]);
 
-  const filtered = useMemo(() => leads.filter(l => {
-    if (statusFilter && l.status !== statusFilter) return false;
-    if (search) {
-      const q = search.toLowerCase();
-      return (l.nome?.toLowerCase().includes(q) || l.numero?.includes(q) || l.observacao?.toLowerCase().includes(q)) ?? false;
-    }
-    return true;
-  }), [leads, search, statusFilter]);
+  const filtered = useMemo(() => {
+    const base = editId === NEW_ID ? leads : leads.filter(l => l.id !== NEW_ID);
+    return base.filter(l => {
+      if (statusFilter && l.status !== statusFilter) return false;
+      if (search) {
+        const q = search.toLowerCase();
+        return l.nome?.toLowerCase().includes(q) || l.numero?.includes(q) || l.observacao?.toLowerCase().includes(q) || false;
+      }
+      return true;
+    });
+  }, [leads, search, statusFilter, editId]);
 
-  const stats = useMemo(() => ({
-    total: filtered.length,
-    agendados: filtered.filter(l => l.status === 'Agendado' || l.status === 'Reagendado').length,
-    compareceram: filtered.filter(l => l.compareceu).length,
-    fechamentos: filtered.filter(l => l.fechou).length,
-    faturamento: filtered.filter(l => l.fechou).reduce((s, l) => s + (l.valor_rs ?? 0), 0),
-  }), [filtered]);
+  const stats = useMemo(() => {
+    const real = leads.filter(l => l.id !== NEW_ID);
+    return {
+      total: real.length,
+      agendados: real.filter(l => l.status === 'Agendado' || l.status === 'Reagendado').length,
+      compareceram: real.filter(l => l.compareceu).length,
+      fechamentos: real.filter(l => l.fechou).length,
+      faturamento: real.filter(l => l.fechou).reduce((s, l) => s + (l.valor_rs ?? 0), 0),
+    };
+  }, [leads]);
 
-  const openNew = useCallback(() => {
-    setEditingLead({ ...EMPTY, _new: true, data: new Date().toISOString().split('T')[0] });
-  }, []);
-
-  const openEdit = useCallback((lead: CrmLead) => setEditingLead({ ...lead }), []);
-
-  async function saveLead() {
-    if (!editingLead || !selectedClientId) return;
-    setSaving(true);
+  const saveRow = useCallback(async (id: string, data: Draft) => {
+    if (savingRef.current) return;
+    savingRef.current = true;
     try {
-      const isNew = !!editingLead._new;
-      const { _new, ...body } = editingLead;
-      const url = isNew ? '/api/crm' : `/api/crm/${editingLead.id}`;
-      const method = isNew ? 'POST' : 'PUT';
-      const payload = isNew ? { clientId: selectedClientId, ...body } : body;
-      const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      if (res.ok) {
-        const saved = await res.json() as CrmLead;
-        setLeads(prev => isNew ? [saved, ...prev] : prev.map(l => l.id === saved.id ? saved : l));
-        setEditingLead(null);
+      if (id === NEW_ID) {
+        const hasData = data.nome || data.numero || data.observacao;
+        if (!hasData) { setLeads(prev => prev.filter(l => l.id !== NEW_ID)); setEditId(null); return; }
+        const res = await fetch('/api/crm', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ clientId: selectedClientId, ...data }),
+        });
+        if (res.ok) {
+          const saved = await res.json() as CrmLead;
+          setLeads(prev => [saved, ...prev.filter(l => l.id !== NEW_ID)]);
+        } else {
+          setLeads(prev => prev.filter(l => l.id !== NEW_ID));
+        }
+      } else {
+        const res = await fetch(`/api/crm/${id}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        });
+        if (res.ok) {
+          const saved = await res.json() as CrmLead;
+          setLeads(prev => prev.map(l => l.id === id ? saved : l));
+        }
       }
     } finally {
-      setSaving(false);
+      savingRef.current = false;
+      setEditId(null);
     }
+  }, [selectedClientId]);
+
+  function startEdit(lead: CrmLead) {
+    if (editId && editId !== lead.id) {
+      void saveRow(editId, draft);
+    }
+    setEditId(lead.id);
+    setDraft({ ...lead } as Draft);
   }
 
-  async function deleteLead(id: string) {
+  function handleRowBlur(e: React.FocusEvent<HTMLTableRowElement>, id: string) {
+    if (pendingBlurRef.current) clearTimeout(pendingBlurRef.current);
+    pendingBlurRef.current = setTimeout(() => {
+      if (e.currentTarget && !e.currentTarget.contains(document.activeElement)) {
+        void saveRow(id, draft);
+      }
+    }, 100);
+  }
+
+  function handleRowFocus() {
+    if (pendingBlurRef.current) clearTimeout(pendingBlurRef.current);
+  }
+
+  function addRow() {
+    if (editId) void saveRow(editId, draft);
+    const newLead = { ...EMPTY, id: NEW_ID, client_id: selectedClientId } as CrmLead;
+    setLeads(prev => [newLead, ...prev.filter(l => l.id !== NEW_ID)]);
+    setEditId(NEW_ID);
+    setDraft({ ...EMPTY });
+    // Focus first cell after render
+    setTimeout(() => {
+      const first = document.querySelector<HTMLInputElement>('tr[data-id="__new__"] input');
+      first?.focus();
+    }, 50);
+  }
+
+  async function deleteRow(id: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    if (id === NEW_ID) { setLeads(prev => prev.filter(l => l.id !== NEW_ID)); setEditId(null); return; }
     if (!window.confirm('Excluir este lead?')) return;
-    setDeleting(id);
-    try {
-      const res = await fetch(`/api/crm/${id}`, { method: 'DELETE' });
-      if (res.ok) setLeads(prev => prev.filter(l => l.id !== id));
-    } finally {
-      setDeleting(null);
-    }
+    const res = await fetch(`/api/crm/${id}`, { method: 'DELETE' });
+    if (res.ok) setLeads(prev => prev.filter(l => l.id !== id));
+    if (editId === id) setEditId(null);
   }
 
-  function setField<K extends keyof CrmLead>(key: K, value: CrmLead[K]) {
-    setEditingLead(prev => prev ? { ...prev, [key]: value } : prev);
+  function set<K extends keyof Draft>(k: K, v: Draft[K]) {
+    setDraft(prev => ({ ...prev, [k]: v }));
   }
 
   return (
-    <div className="space-y-6 px-4 py-6 md:px-8">
+    <div className="flex flex-col gap-4 px-4 py-6 md:px-8 h-full">
       {/* Header */}
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-black uppercase tracking-tight">CRM</h1>
@@ -158,262 +202,228 @@ export default function CrmPage() {
         </select>
         {selectedClientId && (
           <>
-            <select
-              value={statusFilter}
-              onChange={e => setStatusFilter(e.target.value)}
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
               className="rounded-lg border border-border bg-card px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
             >
-              <option value="">Todos os status</option>
-              {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+              <option value="">Todos status</option>
+              {STATUS_OPTIONS.map(s => <option key={s}>{s}</option>)}
             </select>
-            <div className="relative flex-1 min-w-[160px] max-w-xs">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-              <Input
-                placeholder="Buscar nome, número..."
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                className="pl-8 h-9 text-sm"
-              />
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar..."
+                className="pl-8 pr-3 py-2 rounded-lg border border-border bg-card text-sm focus:outline-none focus:ring-1 focus:ring-primary w-44" />
             </div>
-            <Button onClick={openNew} size="sm" className="ml-auto gap-1.5">
+            <button onClick={addRow}
+              className="ml-auto flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
+            >
               <Plus className="h-4 w-4" /> Novo Lead
-            </Button>
+            </button>
           </>
         )}
       </div>
 
       {/* Stats */}
-      {selectedClientId && !loading && leads.length > 0 && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      {selectedClientId && !loading && leads.filter(l => l.id !== NEW_ID).length > 0 && (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5 shrink-0">
           {[
-            { label: 'Total de Leads', value: stats.total, format: 'n' },
-            { label: 'Agendados', value: stats.agendados, format: 'n' },
-            { label: 'Compareceram', value: stats.compareceram, format: 'n' },
-            { label: 'Fechamentos', value: stats.fechamentos, format: 'n' },
-            { label: 'Faturamento', value: stats.faturamento, format: 'c' },
-          ].map(({ label, value, format }) => (
-            <div key={label} className="rounded-xl border border-border bg-card p-4">
+            { label: 'Total', value: stats.total, fmt: 'n' },
+            { label: 'Agendados', value: stats.agendados, fmt: 'n' },
+            { label: 'Compareceram', value: stats.compareceram, fmt: 'n' },
+            { label: 'Fechamentos', value: stats.fechamentos, fmt: 'n' },
+            { label: 'Faturamento', value: stats.faturamento, fmt: 'c' },
+          ].map(({ label, value, fmt }) => (
+            <div key={label} className="rounded-xl border border-border bg-card px-4 py-3">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
-              <p className="mt-1 text-xl font-bold">{format === 'c' ? formatCurrencyBRL(value) : value.toLocaleString('pt-BR')}</p>
+              <p className="mt-0.5 text-lg font-bold">{fmt === 'c' ? formatCurrencyBRL(value) : value.toLocaleString('pt-BR')}</p>
             </div>
           ))}
         </div>
       )}
 
-      {/* Table */}
+      {/* Empty states */}
       {!selectedClientId && (
         <div className="rounded-xl border border-border bg-card p-12 text-center text-sm text-muted-foreground">
           Selecione um cliente para ver seus leads.
         </div>
       )}
-
       {selectedClientId && loading && (
-        <div className="rounded-xl border border-border bg-card p-12 text-center text-sm text-muted-foreground">
-          Carregando leads...
-        </div>
+        <div className="rounded-xl border border-border bg-card p-12 text-center text-sm text-muted-foreground">Carregando...</div>
       )}
-
-      {selectedClientId && !loading && filtered.length === 0 && (
+      {selectedClientId && !loading && leads.filter(l => l.id !== NEW_ID).length === 0 && editId !== NEW_ID && (
         <div className="rounded-xl border border-border bg-card p-12 text-center space-y-3">
-          <p className="text-sm text-muted-foreground">Nenhum lead encontrado.</p>
-          {leads.length === 0 && <Button onClick={openNew} size="sm" className="gap-1.5"><Plus className="h-4 w-4" /> Adicionar primeiro lead</Button>}
+          <p className="text-sm text-muted-foreground">Nenhum lead. Clique em Novo Lead para começar.</p>
         </div>
       )}
 
-      {selectedClientId && !loading && filtered.length > 0 && (
-        <div className="overflow-x-auto rounded-xl border border-border">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/30">
-                {['Data', 'Nome', 'Número', 'Canal', 'Status', 'Ag.', 'Comp.', 'Observação', 'Orçamento', 'Fechou', 'Valor R$', ''].map(h => (
-                  <th key={h} className="px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap">{h}</th>
+      {/* Table */}
+      {selectedClientId && !loading && (filtered.length > 0 || editId === NEW_ID) && (
+        <div className="overflow-auto rounded-xl border border-border flex-1 min-h-0">
+          <table className="w-full border-collapse text-xs" style={{ minWidth: 1200 }}>
+            <thead className="sticky top-0 z-10 bg-muted/80 backdrop-blur-sm">
+              <tr>
+                {[
+                  ['Data','w-28'],['Nome','w-36'],['Número','w-32'],['Canal','w-28'],
+                  ['1D','w-8'],['2D','w-8'],['3D','w-8'],['4D','w-8'],
+                  ['Status','w-36'],['Data Ag.','w-28'],['V.Dra','w-10'],['Comp.','w-10'],
+                  ['Observação','w-56'],['Orçamento','w-28'],['Fechou','w-10'],['Valor R$','w-28'],
+                  ['Pagamento','w-28'],['An.Cred','w-10'],['Bairro','w-28'],[''],
+                ].map(([h, w], i) => (
+                  <th key={i} className={cn('border-b border-border px-1.5 py-2 text-left font-semibold uppercase tracking-wider text-muted-foreground text-[10px]', w)}>
+                    {h}
+                  </th>
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-border">
-              {filtered.map(lead => (
-                <tr key={lead.id} className="group hover:bg-muted/20 transition-colors">
-                  <td className="px-3 py-2.5 text-xs whitespace-nowrap">{fmtDate(lead.data)}</td>
-                  <td className="px-3 py-2.5 font-medium whitespace-nowrap max-w-[140px] truncate">{lead.nome ?? '—'}</td>
-                  <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{lead.numero ?? '—'}</td>
-                  <td className="px-3 py-2.5 text-xs whitespace-nowrap">{lead.canal ?? '—'}</td>
-                  <td className="px-3 py-2.5">
-                    <span className={cn('rounded-full border px-2 py-0.5 text-[10px] font-semibold whitespace-nowrap', STATUS_STYLE[lead.status ?? ''] ?? 'bg-muted/20 text-muted-foreground border-border')}>
-                      {lead.status ?? '—'}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{fmtDate(lead.data_agendada)}</td>
-                  <td className="px-3 py-2.5 text-center">{lead.compareceu ? <Check className="h-4 w-4 text-emerald-400 mx-auto" /> : <span className="text-muted-foreground/30">—</span>}</td>
-                  <td className="px-3 py-2.5 text-xs text-muted-foreground max-w-[200px] truncate">{lead.observacao ?? '—'}</td>
-                  <td className="px-3 py-2.5 text-xs whitespace-nowrap">{lead.orcamento ? formatCurrencyBRL(lead.orcamento) : '—'}</td>
-                  <td className="px-3 py-2.5 text-center">{lead.fechou ? <Check className="h-4 w-4 text-emerald-400 mx-auto" /> : <span className="text-muted-foreground/30">—</span>}</td>
-                  <td className="px-3 py-2.5 text-xs font-semibold whitespace-nowrap text-emerald-400">{lead.valor_rs ? formatCurrencyBRL(lead.valor_rs) : '—'}</td>
-                  <td className="px-3 py-2.5">
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button type="button" onClick={() => openEdit(lead)} className="p-1 rounded hover:bg-muted/50 text-muted-foreground hover:text-foreground">
-                        <Pencil className="h-3.5 w-3.5" />
-                      </button>
-                      <button type="button" onClick={() => deleteLead(lead.id)} disabled={deleting === lead.id} className="p-1 rounded hover:bg-red-500/10 text-muted-foreground hover:text-red-400 disabled:opacity-50">
+            <tbody>
+              {filtered.map(lead => {
+                const isEditing = editId === lead.id;
+                const d = isEditing ? draft : lead;
+                return (
+                  <tr
+                    key={lead.id}
+                    data-id={lead.id}
+                    tabIndex={-1}
+                    onClick={() => !isEditing && startEdit(lead)}
+                    onBlur={isEditing ? e => handleRowBlur(e, lead.id) : undefined}
+                    onFocus={isEditing ? handleRowFocus : undefined}
+                    className={cn(
+                      'border-b border-border/50 transition-colors group',
+                      isEditing ? 'bg-primary/5 ring-1 ring-inset ring-primary/30' : 'hover:bg-muted/20 cursor-pointer'
+                    )}
+                  >
+                    {/* Data */}
+                    <Td>
+                      {isEditing
+                        ? <input type="date" value={toD(d.data)} onChange={e => set('data', e.target.value || null)} className={cell} />
+                        : <span className="px-1.5">{fmtD(lead.data)}</span>}
+                    </Td>
+                    {/* Nome */}
+                    <Td>
+                      {isEditing
+                        ? <input type="text" value={d.nome ?? ''} onChange={e => set('nome', e.target.value || null)} placeholder="Nome" className={cell} />
+                        : <span className="px-1.5 font-medium truncate block max-w-[140px]">{lead.nome ?? ''}</span>}
+                    </Td>
+                    {/* Número */}
+                    <Td>
+                      {isEditing
+                        ? <input type="text" value={d.numero ?? ''} onChange={e => set('numero', e.target.value || null)} placeholder="Número" className={cell} />
+                        : <span className="px-1.5 text-muted-foreground">{lead.numero ?? ''}</span>}
+                    </Td>
+                    {/* Canal */}
+                    <Td>
+                      {isEditing
+                        ? <select value={d.canal ?? ''} onChange={e => set('canal', e.target.value || null)} className={cellSelect}>
+                            <option value=""></option>
+                            {CANAL_OPTIONS.map(o => <option key={o}>{o}</option>)}
+                          </select>
+                        : <span className="px-1.5">{lead.canal ?? ''}</span>}
+                    </Td>
+                    {/* 1D 2D 3D 4D */}
+                    {(['dia1','dia2','dia3','dia4'] as const).map(k => (
+                      <Td key={k} center>
+                        <input type="checkbox" checked={!!(isEditing ? d[k] : lead[k])}
+                          onChange={isEditing ? e => set(k, e.target.checked) : undefined}
+                          onClick={!isEditing ? e => { e.stopPropagation(); startEdit(lead); setTimeout(() => set(k, !(lead[k])), 0); } : undefined}
+                          className="h-3.5 w-3.5 accent-primary cursor-pointer" />
+                      </Td>
+                    ))}
+                    {/* Status */}
+                    <Td>
+                      {isEditing
+                        ? <select value={d.status ?? ''} onChange={e => set('status', e.target.value || null)} className={cn(cellSelect, STATUS_COLOR[d.status ?? ''] ?? '')}>
+                            {STATUS_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                          </select>
+                        : <span className={cn('px-1.5 font-medium', STATUS_COLOR[lead.status ?? ''])}>{lead.status ?? ''}</span>}
+                    </Td>
+                    {/* Data Agendada */}
+                    <Td>
+                      {isEditing
+                        ? <input type="date" value={toD(d.data_agendada)} onChange={e => set('data_agendada', e.target.value || null)} className={cell} />
+                        : <span className="px-1.5 text-muted-foreground">{fmtD(lead.data_agendada)}</span>}
+                    </Td>
+                    {/* Video Dra */}
+                    <Td center>
+                      <input type="checkbox" checked={!!(isEditing ? d.video_dra : lead.video_dra)}
+                        onChange={isEditing ? e => set('video_dra', e.target.checked) : undefined}
+                        onClick={!isEditing ? e => { e.stopPropagation(); startEdit(lead); setTimeout(() => set('video_dra', !lead.video_dra), 0); } : undefined}
+                        className="h-3.5 w-3.5 accent-primary cursor-pointer" />
+                    </Td>
+                    {/* Compareceu */}
+                    <Td center>
+                      <input type="checkbox" checked={!!(isEditing ? d.compareceu : lead.compareceu)}
+                        onChange={isEditing ? e => set('compareceu', e.target.checked) : undefined}
+                        onClick={!isEditing ? e => { e.stopPropagation(); startEdit(lead); setTimeout(() => set('compareceu', !lead.compareceu), 0); } : undefined}
+                        className="h-3.5 w-3.5 accent-primary cursor-pointer" />
+                    </Td>
+                    {/* Observação */}
+                    <Td>
+                      {isEditing
+                        ? <input type="text" value={d.observacao ?? ''} onChange={e => set('observacao', e.target.value || null)} placeholder="Observação" className={cell} />
+                        : <span className="px-1.5 text-muted-foreground truncate block max-w-[220px]">{lead.observacao ?? ''}</span>}
+                    </Td>
+                    {/* Orçamento */}
+                    <Td>
+                      {isEditing
+                        ? <input type="number" step="0.01" value={d.orcamento ?? ''} onChange={e => set('orcamento', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cell} />
+                        : <span className="px-1.5">{fmtN(lead.orcamento)}</span>}
+                    </Td>
+                    {/* Fechou */}
+                    <Td center>
+                      <input type="checkbox" checked={!!(isEditing ? d.fechou : lead.fechou)}
+                        onChange={isEditing ? e => set('fechou', e.target.checked) : undefined}
+                        onClick={!isEditing ? e => { e.stopPropagation(); startEdit(lead); setTimeout(() => set('fechou', !lead.fechou), 0); } : undefined}
+                        className="h-3.5 w-3.5 accent-primary cursor-pointer" />
+                    </Td>
+                    {/* Valor R$ */}
+                    <Td>
+                      {isEditing
+                        ? <input type="number" step="0.01" value={d.valor_rs ?? ''} onChange={e => set('valor_rs', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cn(cell, 'text-emerald-400')} />
+                        : <span className="px-1.5 font-semibold text-emerald-400">{fmtN(lead.valor_rs)}</span>}
+                    </Td>
+                    {/* Pagamento */}
+                    <Td>
+                      {isEditing
+                        ? <select value={d.pagamento ?? ''} onChange={e => set('pagamento', e.target.value || null)} className={cellSelect}>
+                            <option value=""></option>
+                            {PAGAMENTO_OPTIONS.map(o => <option key={o}>{o}</option>)}
+                          </select>
+                        : <span className="px-1.5 text-muted-foreground">{lead.pagamento ?? ''}</span>}
+                    </Td>
+                    {/* Análise Crédito */}
+                    <Td center>
+                      <input type="checkbox" checked={!!(isEditing ? d.analise_credito : lead.analise_credito)}
+                        onChange={isEditing ? e => set('analise_credito', e.target.checked) : undefined}
+                        onClick={!isEditing ? e => { e.stopPropagation(); startEdit(lead); setTimeout(() => set('analise_credito', !lead.analise_credito), 0); } : undefined}
+                        className="h-3.5 w-3.5 accent-primary cursor-pointer" />
+                    </Td>
+                    {/* Bairro */}
+                    <Td>
+                      {isEditing
+                        ? <input type="text" value={d.bairro ?? ''} onChange={e => set('bairro', e.target.value || null)} placeholder="Bairro" className={cell} />
+                        : <span className="px-1.5 text-muted-foreground">{lead.bairro ?? ''}</span>}
+                    </Td>
+                    {/* Delete */}
+                    <Td center>
+                      <button onClick={e => deleteRow(lead.id, e)}
+                        className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-500/10 text-muted-foreground hover:text-red-400 transition-all">
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                    </Td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       )}
-
-      {/* Add/Edit Modal */}
-      <Dialog open={!!editingLead} onOpenChange={open => { if (!open) setEditingLead(null); }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{editingLead?._new ? 'Novo Lead' : 'Editar Lead'}</DialogTitle>
-          </DialogHeader>
-
-          {editingLead && (
-            <div className="space-y-5 py-2">
-              {/* Dados Básicos */}
-              <Section label="Dados Básicos">
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="Data">
-                    <input type="date" value={toInputDate(editingLead.data)} onChange={e => setField('data', e.target.value || null)} className={inputCls} />
-                  </Field>
-                  <Field label="Mês">
-                    <input type="text" placeholder="Ex: maio" value={editingLead.mes ?? ''} onChange={e => setField('mes', e.target.value || null)} className={inputCls} />
-                  </Field>
-                  <Field label="Nome">
-                    <input type="text" value={editingLead.nome ?? ''} onChange={e => setField('nome', e.target.value || null)} className={inputCls} />
-                  </Field>
-                  <Field label="Número">
-                    <input type="text" value={editingLead.numero ?? ''} onChange={e => setField('numero', e.target.value || null)} className={inputCls} />
-                  </Field>
-                  <Field label="Canal">
-                    <select value={editingLead.canal ?? ''} onChange={e => setField('canal', e.target.value || null)} className={selectCls}>
-                      <option value="">Selecionar...</option>
-                      {CANAL_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-                    </select>
-                  </Field>
-                  <Field label="Emoji">
-                    <input type="text" placeholder="😊" value={editingLead.emoji ?? ''} onChange={e => setField('emoji', e.target.value || null)} className={inputCls} />
-                  </Field>
-                  <Field label="Link de Criativo" className="col-span-2">
-                    <input type="text" value={editingLead.link_criativo ?? ''} onChange={e => setField('link_criativo', e.target.value || null)} className={inputCls} />
-                  </Field>
-                </div>
-              </Section>
-
-              {/* Atendimento */}
-              <Section label="Atendimento">
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="Status">
-                    <select value={editingLead.status ?? ''} onChange={e => setField('status', e.target.value || null)} className={selectCls}>
-                      {STATUS_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-                    </select>
-                  </Field>
-                  <Field label="Observação" className="col-span-2">
-                    <textarea rows={2} value={editingLead.observacao ?? ''} onChange={e => setField('observacao', e.target.value || null)} className={cn(inputCls, 'resize-none')} />
-                  </Field>
-                  <div className="col-span-2 flex gap-6 flex-wrap">
-                    {(['dia1', 'dia2', 'dia3', 'dia4'] as const).map((d, i) => (
-                      <CheckField key={d} label={`${i + 1}º DIA`} checked={!!editingLead[d]} onChange={v => setField(d, v)} />
-                    ))}
-                  </div>
-                </div>
-              </Section>
-
-              {/* Agendamento */}
-              <Section label="Agendamento">
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="Data Agendada">
-                    <input type="date" value={toInputDate(editingLead.data_agendada)} onChange={e => setField('data_agendada', e.target.value || null)} className={inputCls} />
-                  </Field>
-                  <div className="flex items-end gap-6 pb-1">
-                    <CheckField label="Vídeo Dra." checked={!!editingLead.video_dra} onChange={v => setField('video_dra', v)} />
-                    <CheckField label="Compareceu" checked={!!editingLead.compareceu} onChange={v => setField('compareceu', v)} />
-                  </div>
-                </div>
-              </Section>
-
-              {/* Fechamento */}
-              <Section label="Fechamento">
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="Orçamento (R$)">
-                    <input type="number" step="0.01" value={editingLead.orcamento ?? ''} onChange={e => setField('orcamento', e.target.value ? parseFloat(e.target.value) : null)} className={inputCls} />
-                  </Field>
-                  <Field label="Valor R$">
-                    <input type="number" step="0.01" value={editingLead.valor_rs ?? ''} onChange={e => setField('valor_rs', e.target.value ? parseFloat(e.target.value) : null)} className={inputCls} />
-                  </Field>
-                  <Field label="Pagamento">
-                    <select value={editingLead.pagamento ?? ''} onChange={e => setField('pagamento', e.target.value || null)} className={selectCls}>
-                      <option value="">Selecionar...</option>
-                      {PAGAMENTO_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-                    </select>
-                  </Field>
-                  <div className="flex items-end gap-6 pb-1">
-                    <CheckField label="Fechou?" checked={!!editingLead.fechou} onChange={v => setField('fechou', v)} />
-                    <CheckField label="Análise de Crédito" checked={!!editingLead.analise_credito} onChange={v => setField('analise_credito', v)} />
-                  </div>
-                </div>
-              </Section>
-
-              {/* Dados do Lead */}
-              <Section label="Dados do Lead">
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="Data de Nascimento">
-                    <input type="date" value={toInputDate(editingLead.data_nasc)} onChange={e => setField('data_nasc', e.target.value || null)} className={inputCls} />
-                  </Field>
-                  <Field label="Bairro">
-                    <input type="text" value={editingLead.bairro ?? ''} onChange={e => setField('bairro', e.target.value || null)} className={inputCls} />
-                  </Field>
-                  <Field label="Motivações" className="col-span-2">
-                    <textarea rows={2} value={editingLead.motivacoes ?? ''} onChange={e => setField('motivacoes', e.target.value || null)} className={cn(inputCls, 'resize-none')} />
-                  </Field>
-                  <Field label="Dores / Incômodos" className="col-span-2">
-                    <textarea rows={2} value={editingLead.dores ?? ''} onChange={e => setField('dores', e.target.value || null)} className={cn(inputCls, 'resize-none')} />
-                  </Field>
-                </div>
-              </Section>
-            </div>
-          )}
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditingLead(null)} disabled={saving}>Cancelar</Button>
-            <Button onClick={saveLead} disabled={saving}>{saving ? 'Salvando...' : 'Salvar'}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
 
-const inputCls = 'w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary';
-const selectCls = 'w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary';
-
-function Section({ label, children }: { label: string; children: React.ReactNode }) {
+function Td({ children, center }: { children: React.ReactNode; center?: boolean }) {
   return (
-    <div className="space-y-3">
-      <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground border-b border-border pb-1">{label}</p>
+    <td className={cn('border-r border-border/30 last:border-0 overflow-hidden', center && 'text-center')}>
       {children}
-    </div>
-  );
-}
-
-function Field({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
-  return (
-    <div className={cn('space-y-1', className)}>
-      <label className="text-xs font-medium text-muted-foreground">{label}</label>
-      {children}
-    </div>
-  );
-}
-
-function CheckField({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <label className="flex items-center gap-2 cursor-pointer select-none">
-      <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} className="h-4 w-4 rounded accent-primary" />
-      <span className="text-xs font-medium">{label}</span>
-    </label>
+    </td>
   );
 }
