@@ -7,6 +7,7 @@ async function ensureColumns(pool: ReturnType<typeof makeServerPool>) {
     ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS active_from TEXT;
     ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS active_until TEXT;
     ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS next_tick_at TIMESTAMPTZ;
+    ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS messages JSONB;
   `);
 }
 
@@ -31,6 +32,7 @@ export async function POST(request: NextRequest) {
     clientId: string;
     name: string;
     message: string;
+    messages?: string[];
     imageUrls?: string[];
     numbers: string;
     startsAt: string;
@@ -41,8 +43,9 @@ export async function POST(request: NextRequest) {
     activeUntil?: string;
   };
 
-  const { clientId, name, message, imageUrls, numbers, startsAt, endsAt, intervalMin, intervalMax, activeFrom, activeUntil } = body;
+  const { clientId, name, message, messages, imageUrls, numbers, startsAt, endsAt, intervalMin, intervalMax, activeFrom, activeUntil } = body;
   const imageUrl = imageUrls && imageUrls.length > 0 ? JSON.stringify(imageUrls) : null;
+  const messagesJson = messages && messages.length > 1 ? JSON.stringify(messages) : null;
 
   if (!clientId || !name || !message || !numbers || !startsAt) {
     return Response.json({ error: 'Campos obrigatórios ausentes.' }, { status: 400 });
@@ -69,10 +72,10 @@ export async function POST(request: NextRequest) {
 
     const { rows: [campaign] } = await pool.query(
       `INSERT INTO public.zapi_campaigns
-         (client_id, name, message, image_url, status, starts_at, ends_at, interval_min, interval_max, total, active_from, active_until)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+         (client_id, name, message, image_url, status, starts_at, ends_at, interval_min, interval_max, total, active_from, active_until, messages)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
        RETURNING *`,
-      [clientId, name, message, imageUrl || null, initialStatus, startsAt, endsAt || null, intervalMin, intervalMax, parsed.length, activeFrom || null, activeUntil || null],
+      [clientId, name, message, imageUrl || null, initialStatus, startsAt, endsAt || null, intervalMin, intervalMax, parsed.length, activeFrom || null, activeUntil || null, messagesJson],
     );
 
     for (let i = 0; i < parsed.length; i++) {

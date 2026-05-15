@@ -786,9 +786,11 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [dragOver, setDragOver] = useState(false);
-  const [variations, setVariations] = useState<{ text: string; label: string }[]>([]);
+  const [variations, setVariations] = useState<{ text: string; label: string; editing: boolean }[]>([]);
   const [loadingVariations, setLoadingVariations] = useState(false);
   const [variationsError, setVariationsError] = useState('');
+  const [previewVariationIdx, setPreviewVariationIdx] = useState<number | null>(null);
+  const lastGeneratedMsgRef = useRef('');
   const fileRef   = useRef<HTMLInputElement>(null);
   const csvRef    = useRef<HTMLInputElement>(null);
 
@@ -838,27 +840,37 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
     setForm(p => ({ ...p, message: p.message + v }));
   }
 
-  async function generateVariations() {
-    if (!form.message.trim()) return;
+  async function generateVariations(msg?: string) {
+    const message = msg ?? form.message;
+    if (!message.trim()) return;
+    lastGeneratedMsgRef.current = message;
     setLoadingVariations(true);
     setVariationsError('');
     setVariations([]);
+    setPreviewVariationIdx(null);
     try {
       const res = await fetch('/api/ai/whatsapp-variations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: form.message }),
+        body: JSON.stringify({ message }),
       });
       const data = await res.json() as { text: string; label: string }[] | { error: string };
       if (!res.ok || 'error' in data) {
         setVariationsError('error' in data ? data.error : 'Erro ao gerar variações.');
       } else {
-        setVariations(data);
+        setVariations((data as { text: string; label: string }[]).map(v => ({ ...v, editing: false })));
       }
     } catch {
       setVariationsError('Erro de conexão ao gerar variações.');
     } finally {
       setLoadingVariations(false);
+    }
+  }
+
+  function handleMessageBlur(e: React.FocusEvent<HTMLTextAreaElement>) {
+    const msg = e.target.value.trim();
+    if (msg && msg !== lastGeneratedMsgRef.current) {
+      void generateVariations(msg);
     }
   }
 
@@ -879,11 +891,14 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
       const endsAt     = form.endsAt ? toISO(form.endsAt) : undefined;
       const activeFrom  = form.activeFrom  && form.activeUntil ? localTimeToUTC(form.activeFrom)  : undefined;
       const activeUntil = form.activeFrom  && form.activeUntil ? localTimeToUTC(form.activeUntil) : undefined;
-      const res = await fetch('/api/disparos/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId: form.clientId, name: form.name, message: form.message, numbers: form.numbers, startsAt, endsAt, activeFrom, activeUntil, intervalMin: form.intervalMin, intervalMax: form.intervalMax, imageUrls: imageUrls.length > 0 ? imageUrls : undefined }) });
+      const allMessages = variations.length > 0 ? [form.message, ...variations.map(v => v.text)] : undefined;
+      const res = await fetch('/api/disparos/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId: form.clientId, name: form.name, message: form.message, messages: allMessages, numbers: form.numbers, startsAt, endsAt, activeFrom, activeUntil, intervalMin: form.intervalMin, intervalMax: form.intervalMax, imageUrls: imageUrls.length > 0 ? imageUrls : undefined }) });
       const data = await res.json() as { error?: string };
       if (!res.ok) { setError(data.error ?? 'Erro ao criar campanha.'); return; }
       setForm({ clientId: clients[0]?.id ?? '', name: '', message: '', numbers: '', isNow: true, startsAt: '', endsAt: '', activeFrom: '', activeUntil: '', intervalMin: 5, intervalMax: 15 });
       setImageUrls([]);
+      setVariations([]);
+      setPreviewVariationIdx(null);
       onCreated();
     } finally { setSaving(false); }
   }
@@ -956,7 +971,7 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
                   Mensagem * — use {'{nome}'} e {'{telefone}'} para personalizar
                 </label>
                 <div className="relative">
-                  <textarea value={form.message} onChange={e => setForm(p => ({ ...p, message: e.target.value }))}
+                  <textarea value={form.message} onChange={e => setForm(p => ({ ...p, message: e.target.value }))} onBlur={handleMessageBlur}
                     placeholder="Olá {nome}, temos uma novidade para você!" rows={5}
                     className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:ring-1 focus:ring-primary resize-none pr-10" />
                   <button type="button" className="absolute bottom-3 right-3 text-muted-foreground hover:text-foreground transition-colors">
@@ -977,25 +992,21 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
                   className="flex items-center gap-1.5 rounded-lg border border-dashed border-border px-2.5 py-1 text-xs text-muted-foreground hover:text-primary hover:border-primary/40 transition-colors">
                   <Sparkles className="h-3 w-3" />Inserir variável
                 </button>
-                <div className="ml-auto">
-                  <button
-                    type="button"
-                    onClick={generateVariations}
-                    disabled={!form.message.trim() || loadingVariations}
-                    className={cn(
-                      'flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-bold tracking-wide transition-all',
-                      form.message.trim() && !loadingVariations
-                        ? 'border-violet-500/40 text-violet-400 hover:bg-violet-500/10 hover:border-violet-500/60 shadow-[0_0_8px_rgba(139,92,246,0.15)]'
-                        : 'border-border text-muted-foreground/40 cursor-not-allowed',
-                    )}
-                  >
-                    {loadingVariations ? (
-                      <RefreshCw className="h-3 w-3 animate-spin" />
-                    ) : (
-                      <Sparkles className="h-3 w-3" />
-                    )}
-                    {loadingVariations ? 'Gerando variações...' : '✦ Gerar 4 variações com IA'}
-                  </button>
+                <div className="ml-auto flex items-center gap-2">
+                  {loadingVariations && (
+                    <span className="flex items-center gap-1.5 text-[11px] text-violet-400">
+                      <RefreshCw className="h-3 w-3 animate-spin" />Gerando variações com IA…
+                    </span>
+                  )}
+                  {!loadingVariations && form.message.trim() && (
+                    <button
+                      type="button"
+                      onClick={() => void generateVariations()}
+                      className="flex items-center gap-1.5 rounded-lg border border-violet-500/40 px-3 py-1.5 text-xs font-bold text-violet-400 hover:bg-violet-500/10 hover:border-violet-500/60 transition-all shadow-[0_0_8px_rgba(139,92,246,0.15)]"
+                    >
+                      <Sparkles className="h-3 w-3" />Regenerar
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -1007,12 +1018,13 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
               )}
               {variations.length > 0 && (
                 <div className="mt-4 space-y-2">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <Sparkles className="h-3.5 w-3.5 text-violet-400" />
                     <p className="text-[11px] font-bold uppercase tracking-widest text-violet-400">Variações geradas pela IA</p>
+                    <span className="rounded-full bg-violet-500/20 px-2 py-0.5 text-[10px] font-bold text-violet-300">{variations.length} variações · serão intercaladas no envio</span>
                     <button
                       type="button"
-                      onClick={() => setVariations([])}
+                      onClick={() => { setVariations([]); setPreviewVariationIdx(null); }}
                       className="ml-auto text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors"
                     >
                       Fechar
@@ -1022,30 +1034,74 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
                     {variations.map((v, i) => (
                       <div
                         key={i}
-                        className="rounded-xl border border-violet-500/20 bg-violet-500/5 p-3 space-y-2 hover:border-violet-500/40 transition-colors"
+                        className={cn(
+                          'rounded-xl border p-3 space-y-2 transition-colors',
+                          previewVariationIdx === i
+                            ? 'border-violet-500/60 bg-violet-500/10'
+                            : 'border-violet-500/20 bg-violet-500/5 hover:border-violet-500/40',
+                        )}
                       >
-                        <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="rounded-full border border-violet-500/30 bg-violet-500/10 px-2 py-0.5 text-[10px] font-bold text-violet-300">
                             {v.label || `Variação ${i + 1}`}
                           </span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setForm(p => ({ ...p, message: v.text }));
-                              setVariations([]);
-                            }}
-                            className="flex items-center gap-1 rounded-lg bg-emerald-500 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-emerald-400 transition-colors shadow-[0_0_8px_rgba(16,185,129,0.3)]"
-                          >
-                            <CheckCircle2 className="h-3 w-3" />
-                            Usar esta
-                          </button>
+                          <div className="ml-auto flex items-center gap-1">
+                            <button
+                              type="button"
+                              title="Ver no preview"
+                              onClick={() => setPreviewVariationIdx(prev => prev === i ? null : i)}
+                              className={cn(
+                                'flex items-center gap-1 rounded-lg border px-2 py-1 text-[10px] font-bold transition-colors',
+                                previewVariationIdx === i
+                                  ? 'border-violet-500/60 bg-violet-500/20 text-violet-300'
+                                  : 'border-border text-muted-foreground hover:border-violet-500/40 hover:text-violet-400',
+                              )}
+                            >
+                              <Eye className="h-3 w-3" />
+                            </button>
+                            <button
+                              type="button"
+                              title={v.editing ? 'Salvar edição' : 'Editar variação'}
+                              onClick={() => setVariations(prev => prev.map((x, j) => j === i ? { ...x, editing: !x.editing } : x))}
+                              className={cn(
+                                'flex items-center gap-1 rounded-lg border px-2 py-1 text-[10px] font-bold transition-colors',
+                                v.editing
+                                  ? 'border-emerald-500/60 bg-emerald-500/10 text-emerald-400'
+                                  : 'border-border text-muted-foreground hover:border-primary/40 hover:text-foreground',
+                              )}
+                            >
+                              {v.editing ? <CheckCircle2 className="h-3 w-3" /> : <Pencil className="h-3 w-3" />}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setForm(p => ({ ...p, message: v.text }));
+                                lastGeneratedMsgRef.current = v.text;
+                                setVariations([]);
+                                setPreviewVariationIdx(null);
+                              }}
+                              className="flex items-center gap-1 rounded-lg bg-emerald-500 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-emerald-400 transition-colors shadow-[0_0_8px_rgba(16,185,129,0.3)]"
+                            >
+                              <CheckCircle2 className="h-3 w-3" />
+                              Usar esta
+                            </button>
+                          </div>
                         </div>
-                        <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap">{v.text}</p>
+                        {v.editing ? (
+                          <textarea
+                            value={v.text}
+                            rows={4}
+                            onChange={e => setVariations(prev => prev.map((x, j) => j === i ? { ...x, text: e.target.value } : x))}
+                            className="w-full rounded-lg border border-violet-500/30 bg-background px-2.5 py-2 text-xs text-foreground outline-none focus:ring-1 focus:ring-violet-500 resize-none"
+                          />
+                        ) : (
+                          <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap">{v.text}</p>
+                        )}
                       </div>
                     ))}
                   </div>
                   <p className="text-[10px] text-muted-foreground/50 text-center">
-                    Clique em &quot;Usar esta&quot; para substituir a mensagem principal
+                    Envio intercalado: contato 1 → msg principal, contato 2 → variação 1, contato 3 → variação 2…
                   </p>
                 </div>
               )}
@@ -1225,7 +1281,12 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
               </div>
               <p className="text-xs text-muted-foreground mt-1">Veja como sua mensagem aparecerá para os contatos.</p>
             </div>
-            <WhatsAppPreview images={imageUrls} message={form.message} />
+            <WhatsAppPreview images={imageUrls} message={previewVariationIdx !== null && variations[previewVariationIdx] ? variations[previewVariationIdx].text : form.message} />
+            {previewVariationIdx !== null && variations[previewVariationIdx] && (
+              <p className="mt-1.5 text-center text-[10px] text-violet-400 font-medium">
+                Prévia: {variations[previewVariationIdx].label || `Variação ${previewVariationIdx + 1}`}
+              </p>
+            )}
           </div>
         </div>
       </div>

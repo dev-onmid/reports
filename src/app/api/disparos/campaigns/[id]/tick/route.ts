@@ -95,7 +95,15 @@ export async function POST(
       return Response.json({ status: 'done', done: true, ...final });
     }
 
-    const message = interpolate(campaign.message, number.phone, number.name ?? '');
+    let messagePool: string[] = [campaign.message];
+    if (campaign.messages) {
+      try {
+        const parsed: string[] = typeof campaign.messages === 'string' ? JSON.parse(campaign.messages) : campaign.messages;
+        if (Array.isArray(parsed) && parsed.length > 0) messagePool = parsed;
+      } catch { /* keep single message */ }
+    }
+    const rawMessage = messagePool[number.position % messagePool.length];
+    const message = interpolate(rawMessage, number.phone, number.name ?? '');
     const client = { instanceId: campaign.instance_id, token: campaign.token, clientToken: campaign.security_token ?? undefined };
 
     // Parse image URLs (may be a JSON array for multiple images, or a plain string for single)
