@@ -786,6 +786,9 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [dragOver, setDragOver] = useState(false);
+  const [variations, setVariations] = useState<{ text: string; label: string }[]>([]);
+  const [loadingVariations, setLoadingVariations] = useState(false);
+  const [variationsError, setVariationsError] = useState('');
   const fileRef   = useRef<HTMLInputElement>(null);
   const csvRef    = useRef<HTMLInputElement>(null);
 
@@ -833,6 +836,30 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
 
   function insertVariable(v: string) {
     setForm(p => ({ ...p, message: p.message + v }));
+  }
+
+  async function generateVariations() {
+    if (!form.message.trim()) return;
+    setLoadingVariations(true);
+    setVariationsError('');
+    setVariations([]);
+    try {
+      const res = await fetch('/api/ai/whatsapp-variations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: form.message }),
+      });
+      const data = await res.json() as { text: string; label: string }[] | { error: string };
+      if (!res.ok || 'error' in data) {
+        setVariationsError('error' in data ? data.error : 'Erro ao gerar variações.');
+      } else {
+        setVariations(data);
+      }
+    } catch {
+      setVariationsError('Erro de conexão ao gerar variações.');
+    } finally {
+      setLoadingVariations(false);
+    }
   }
 
   function toISO(local: string) { return local ? new Date(local).toISOString() : ''; }
@@ -950,7 +977,78 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
                   className="flex items-center gap-1.5 rounded-lg border border-dashed border-border px-2.5 py-1 text-xs text-muted-foreground hover:text-primary hover:border-primary/40 transition-colors">
                   <Sparkles className="h-3 w-3" />Inserir variável
                 </button>
+                <div className="ml-auto">
+                  <button
+                    type="button"
+                    onClick={generateVariations}
+                    disabled={!form.message.trim() || loadingVariations}
+                    className={cn(
+                      'flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-bold tracking-wide transition-all',
+                      form.message.trim() && !loadingVariations
+                        ? 'border-violet-500/40 text-violet-400 hover:bg-violet-500/10 hover:border-violet-500/60 shadow-[0_0_8px_rgba(139,92,246,0.15)]'
+                        : 'border-border text-muted-foreground/40 cursor-not-allowed',
+                    )}
+                  >
+                    {loadingVariations ? (
+                      <RefreshCw className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-3 w-3" />
+                    )}
+                    {loadingVariations ? 'Gerando variações...' : '✦ Gerar 4 variações com IA'}
+                  </button>
+                </div>
               </div>
+
+              {/* Variations panel */}
+              {variationsError && (
+                <p className="mt-3 text-xs text-red-400 flex items-center gap-1.5">
+                  <AlertTriangle className="h-3 w-3 shrink-0" />{variationsError}
+                </p>
+              )}
+              {variations.length > 0 && (
+                <div className="mt-4 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-3.5 w-3.5 text-violet-400" />
+                    <p className="text-[11px] font-bold uppercase tracking-widest text-violet-400">Variações geradas pela IA</p>
+                    <button
+                      type="button"
+                      onClick={() => setVariations([])}
+                      className="ml-auto text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+                    >
+                      Fechar
+                    </button>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {variations.map((v, i) => (
+                      <div
+                        key={i}
+                        className="rounded-xl border border-violet-500/20 bg-violet-500/5 p-3 space-y-2 hover:border-violet-500/40 transition-colors"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="rounded-full border border-violet-500/30 bg-violet-500/10 px-2 py-0.5 text-[10px] font-bold text-violet-300">
+                            {v.label || `Variação ${i + 1}`}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setForm(p => ({ ...p, message: v.text }));
+                              setVariations([]);
+                            }}
+                            className="flex items-center gap-1 rounded-lg bg-emerald-500 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-emerald-400 transition-colors shadow-[0_0_8px_rgba(16,185,129,0.3)]"
+                          >
+                            <CheckCircle2 className="h-3 w-3" />
+                            Usar esta
+                          </button>
+                        </div>
+                        <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap">{v.text}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground/50 text-center">
+                    Clique em &quot;Usar esta&quot; para substituir a mensagem principal
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Section 3: Mídias */}
