@@ -48,10 +48,8 @@ export async function POST(request: NextRequest) {
       pageToken = page?.access_token ?? userToken;
     }
 
-    // Subscribe with the correct fields for each platform
-    const fields = platform === 'instagram'
-      ? 'instagram_incoming_messages,comments,mentions,live_comments'
-      : 'feed,messages,message_reactions';
+    // Both platforms use the same page-level fields
+    const fields = 'feed,messages,message_reactions,messaging_postbacks';
 
     const subRes = await fetch(
       `https://graph.facebook.com/v21.0/${fbPageId}/subscribed_apps`,
