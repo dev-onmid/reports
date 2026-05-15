@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useClients } from '@/lib/client-store';
 import { cn } from '@/lib/utils';
 import {
   Search, ExternalLink, RefreshCw, Trash2, X,
   Bookmark, Globe, ChevronDown, SlidersHorizontal,
   Sparkles, LayoutGrid, Calendar, ArrowUpDown, Play,
+  Copy, Download, ChevronLeft, ChevronRight, Clock,
 } from 'lucide-react';
 import type { AdLibraryAd } from '@/app/api/meta/ad-library/route';
 import type { SavedAd } from '@/app/api/ad-library/saved/route';
@@ -59,10 +60,12 @@ function avatarColor(name: string) {
   return AVATAR_COLORS[h % AVATAR_COLORS.length];
 }
 
-// ─── AdCard ────────────────────────────────────────────────────────────────
-function AdCard({
+
+// ─── Ad Detail Modal ────────────────────────────────────────────────────────
+function AdDetailModal({
   ad,
   savedId,
+  onClose,
   onSave,
   onRemove,
   saving,
@@ -70,8 +73,328 @@ function AdCard({
 }: {
   ad: AdLibraryAd;
   savedId: string | null;
+  onClose: () => void;
   onSave: (clientId: string) => void;
   onRemove: () => void;
+  saving: boolean;
+  clients: { id: string; name: string }[];
+}) {
+  const [carouselIdx, setCarouselIdx] = useState(0);
+  const [copied, setCopied] = useState(false);
+  const [showClientPicker, setShowClientPicker] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  const body = ad.creativeBodies[0] ?? '';
+  const isActive = ad.adActiveStatus === 'ACTIVE';
+  const platforms = ad.publisherPlatforms ?? [];
+  const hasFb = platforms.some(p => p.toLowerCase().includes('facebook')) || platforms.length === 0;
+  const hasIg = platforms.some(p => p.toLowerCase().includes('instagram'));
+  const initial = ad.pageName.charAt(0).toUpperCase();
+  const dateStart = ad.deliveryStartTime ? new Date(ad.deliveryStartTime).toLocaleDateString('pt-BR') : null;
+  const daysRunning = ad.deliveryStartTime
+    ? Math.floor((Date.now() - new Date(ad.deliveryStartTime).getTime()) / 86400000)
+    : null;
+
+  const isCarousel = ad.mediaType === 'carousel' && ad.cards.length > 0;
+  const currentCard = isCarousel ? ad.cards[carouselIdx] : null;
+  const displayImage = currentCard?.imageUrl ?? ad.imageUrl;
+  const displayVideo = currentCard?.videoUrl ?? ad.videoUrl;
+  const displayThumb = currentCard?.thumbnailUrl ?? ad.videoThumbnailUrl;
+
+  function copyText() {
+    const text = [body, ...(ad.creativeBodies.slice(1))].filter(Boolean).join('\n\n');
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  // Close on Escape
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose(); }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(4px)' }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="relative flex w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl lg:flex-row" style={{ maxHeight: '92vh' }}>
+
+        {/* Close button */}
+        <button
+          type="button"
+          onClick={onClose}
+          className="absolute right-4 top-4 z-20 flex h-8 w-8 items-center justify-center rounded-full border border-border bg-background/80 text-muted-foreground hover:text-foreground backdrop-blur-sm transition-colors"
+        >
+          <X className="h-4 w-4" />
+        </button>
+
+        {/* ── Left: Creative ── */}
+        <div className="flex flex-col bg-zinc-950 lg:w-[55%] shrink-0">
+          <div className="flex flex-1 items-center justify-center overflow-hidden" style={{ minHeight: '300px', maxHeight: '70vh' }}>
+            {displayVideo ? (
+              <video
+                ref={videoRef}
+                key={displayVideo}
+                src={displayVideo}
+                poster={displayThumb ?? undefined}
+                controls
+                autoPlay
+                muted
+                loop
+                playsInline
+                className="max-h-full max-w-full object-contain"
+                style={{ maxHeight: '65vh' }}
+              />
+            ) : displayImage ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={displayImage}
+                alt=""
+                className="max-h-full max-w-full object-contain"
+                style={{ maxHeight: '65vh' }}
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="flex min-h-[260px] w-full items-center justify-center bg-gradient-to-br from-zinc-800 to-zinc-900 p-8">
+                <p className="text-center text-sm text-zinc-300 leading-relaxed">{body || 'Anúncio de texto'}</p>
+              </div>
+            )}
+          </div>
+
+          {/* Carousel navigation */}
+          {isCarousel && ad.cards.length > 1 && (
+            <div className="flex items-center justify-center gap-3 border-t border-border bg-zinc-900/80 px-4 py-3">
+              <button
+                type="button"
+                onClick={() => setCarouselIdx(i => Math.max(0, i - 1))}
+                disabled={carouselIdx === 0}
+                className="flex h-7 w-7 items-center justify-center rounded-full border border-border text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <div className="flex gap-1.5">
+                {ad.cards.map((_, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => setCarouselIdx(i)}
+                    className={cn(
+                      'h-1.5 rounded-full transition-all',
+                      i === carouselIdx ? 'w-5 bg-white' : 'w-1.5 bg-white/30',
+                    )}
+                  />
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() => setCarouselIdx(i => Math.min(ad.cards.length - 1, i + 1))}
+                disabled={carouselIdx === ad.cards.length - 1}
+                className="flex h-7 w-7 items-center justify-center rounded-full border border-border text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+              <span className="text-[11px] text-muted-foreground">{carouselIdx + 1} / {ad.cards.length}</span>
+            </div>
+          )}
+        </div>
+
+        {/* ── Right: Details ── */}
+        <div className="flex flex-col overflow-y-auto lg:flex-1" style={{ maxHeight: '92vh' }}>
+          <div className="flex flex-col gap-4 p-5">
+
+            {/* Advertiser */}
+            <div className="flex items-center gap-3">
+              <div className={cn(
+                'flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white',
+                avatarColor(ad.pageName)
+              )}>
+                {initial}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-semibold text-foreground">{ad.pageName}</p>
+                <p className="text-[11px] text-muted-foreground">Patrocinado</p>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {hasFb && <FacebookIcon className="h-4 w-4 text-[#1877f2]" />}
+                {hasIg && <InstagramIcon className="h-4 w-4" />}
+              </div>
+            </div>
+
+            {/* Status + duration */}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={cn(
+                'rounded-full border px-2.5 py-0.5 text-[11px] font-semibold',
+                isActive ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-400' : 'border-zinc-500/40 bg-zinc-500/10 text-zinc-400'
+              )}>
+                {isActive ? 'Ativo' : 'Inativo'}
+              </span>
+              {daysRunning !== null && (
+                <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                  <Clock className="h-3 w-3" />
+                  {daysRunning === 0 ? 'Iniciou hoje' : `Ativo há ${daysRunning} dia${daysRunning !== 1 ? 's' : ''}`}
+                  {dateStart && <span className="text-muted-foreground/50">· desde {dateStart}</span>}
+                </span>
+              )}
+              {ad.mediaType && (
+                <span className="rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[10px] font-medium text-muted-foreground capitalize">
+                  {ad.mediaType === 'video' ? '▶ Vídeo' : ad.mediaType === 'carousel' ? '⊞ Carrossel' : ad.mediaType === 'image' ? '🖼 Imagem' : '📝 Texto'}
+                </span>
+              )}
+              {ad.callToAction && (
+                <span className="rounded-full border border-violet-500/30 bg-violet-500/10 px-2 py-0.5 text-[10px] font-medium text-violet-300">
+                  {ad.callToAction.replace(/_/g, ' ')}
+                </span>
+              )}
+            </div>
+
+            {/* Ad copy */}
+            {ad.creativeBodies.length > 0 && (
+              <div className="rounded-xl border border-border bg-background/50 p-3 space-y-1.5">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Copy do anúncio</p>
+                {ad.creativeBodies.map((b, i) => (
+                  <p key={i} className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{b}</p>
+                ))}
+                {ad.creativeTitles.length > 0 && (
+                  <>
+                    <div className="h-px bg-border my-2" />
+                    {ad.creativeTitles.map((t, i) => (
+                      <p key={i} className="text-xs font-semibold text-foreground">{t}</p>
+                    ))}
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Carousel card info */}
+            {currentCard && (currentCard.title || currentCard.body) && (
+              <div className="rounded-xl border border-violet-500/20 bg-violet-500/5 p-3 space-y-1.5">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-violet-400">Card {carouselIdx + 1}</p>
+                {currentCard.title && <p className="text-sm font-semibold text-foreground">{currentCard.title}</p>}
+                {currentCard.body && <p className="text-xs text-muted-foreground leading-relaxed">{currentCard.body}</p>}
+              </div>
+            )}
+
+            {/* Link */}
+            {ad.linkUrl && (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Globe className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">{ad.linkUrl.replace(/^https?:\/\/(www\.)?/, '')}</span>
+              </div>
+            )}
+
+            {/* Action buttons */}
+            <div className="flex flex-wrap gap-2 pt-1">
+              <button
+                type="button"
+                onClick={copyText}
+                className="flex items-center gap-1.5 rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors"
+              >
+                <Copy className="h-3.5 w-3.5" />
+                {copied ? 'Copiado!' : 'Copiar texto'}
+              </button>
+
+              {(displayImage || displayVideo) && (
+                <a
+                  href={displayImage ?? displayVideo ?? '#'}
+                  download
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Download
+                </a>
+              )}
+
+              {ad.adSnapshotUrl && (
+                <a
+                  href={ad.adSnapshotUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  Ver no Facebook
+                </a>
+              )}
+            </div>
+
+            {/* Save for client */}
+            <div className="border-t border-border pt-3">
+              {savedId ? (
+                <button
+                  type="button"
+                  onClick={onRemove}
+                  disabled={saving}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 py-2.5 text-sm font-semibold text-red-400 hover:bg-red-500/20 transition-colors"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  {saving ? 'Removendo...' : 'Remover dos salvos'}
+                </button>
+              ) : (
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowClientPicker(v => !v)}
+                    disabled={saving}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/10 py-2.5 text-sm font-semibold text-emerald-400 hover:bg-emerald-500/20 transition-colors"
+                  >
+                    <Bookmark className="h-4 w-4" />
+                    {saving ? 'Salvando...' : 'Salvar para cliente'}
+                  </button>
+                  {showClientPicker && (
+                    <div className="absolute bottom-full mb-1.5 left-0 right-0 z-50 rounded-xl border border-border bg-card shadow-xl p-1">
+                      <div className="flex items-center justify-between px-2 py-1.5">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Escolha o cliente</p>
+                        <button type="button" onClick={() => setShowClientPicker(false)}>
+                          <X className="h-3 w-3 text-muted-foreground" />
+                        </button>
+                      </div>
+                      <div className="max-h-48 overflow-y-auto">
+                        {clients.map(c => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => { onSave(c.id); setShowClientPicker(false); }}
+                            className="w-full rounded-lg px-3 py-2 text-left text-xs font-medium hover:bg-muted/50 transition-colors truncate"
+                          >
+                            {c.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── AdCard ────────────────────────────────────────────────────────────────
+function AdCard({
+  ad,
+  savedId,
+  onSave,
+  onRemove,
+  onSelect,
+  saving,
+  clients,
+}: {
+  ad: AdLibraryAd;
+  savedId: string | null;
+  onSave: (clientId: string) => void;
+  onRemove: () => void;
+  onSelect: () => void;
   saving: boolean;
   clients: { id: string; name: string }[];
 }) {
@@ -92,41 +415,42 @@ function AdCard({
       {/* ── Media area ── */}
       <div className="relative w-full overflow-hidden bg-zinc-900" style={{ minHeight: '200px' }}>
         {/* Actual media */}
-        {(ad.videoThumbnailUrl ?? ad.videoUrl) ? (
-          <a href={snapshotUrl || undefined} target="_blank" rel="noopener noreferrer" className="block relative group">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={ad.videoThumbnailUrl ?? ''}
-              alt=""
-              className="w-full object-cover"
-              style={{ maxHeight: '260px', minHeight: '160px' }}
-              referrerPolicy="no-referrer"
-              loading="lazy"
-            />
-            <div className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/30 transition-colors">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-sm">
-                <Play className="h-5 w-5 fill-current ml-0.5" />
+        <button type="button" onClick={onSelect} className="block w-full text-left group cursor-pointer">
+          {(ad.videoThumbnailUrl ?? ad.videoUrl) ? (
+            <div className="relative">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={ad.videoThumbnailUrl ?? ''}
+                alt=""
+                className="w-full object-cover"
+                style={{ maxHeight: '260px', minHeight: '160px' }}
+                referrerPolicy="no-referrer"
+                loading="lazy"
+              />
+              <div className="absolute inset-0 flex items-center justify-center bg-black/10 group-hover:bg-black/30 transition-colors">
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-sm opacity-80 group-hover:opacity-100 transition-opacity">
+                  <Play className="h-5 w-5 fill-current ml-0.5" />
+                </div>
               </div>
             </div>
-          </a>
-        ) : ad.imageUrl ? (
-          <a href={snapshotUrl || undefined} target="_blank" rel="noopener noreferrer" className="block">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={ad.imageUrl}
-              alt=""
-              className="w-full object-cover"
-              style={{ maxHeight: '300px', minHeight: '160px' }}
-              referrerPolicy="no-referrer"
-              loading="lazy"
-            />
-          </a>
-        ) : (
-          /* Text-only ad — show copy in styled block */
-          <div className="flex min-h-[160px] items-center justify-center bg-gradient-to-br from-zinc-800 to-zinc-900 p-5">
-            <p className="text-center text-sm text-zinc-300 leading-relaxed line-clamp-5">{body || 'Anúncio de texto'}</p>
-          </div>
-        )}
+          ) : ad.imageUrl ? (
+            <div className="overflow-hidden">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={ad.imageUrl}
+                alt=""
+                className="w-full object-cover group-hover:scale-105 transition-transform duration-300"
+                style={{ maxHeight: '300px', minHeight: '160px' }}
+                referrerPolicy="no-referrer"
+                loading="lazy"
+              />
+            </div>
+          ) : (
+            <div className="flex min-h-[160px] items-center justify-center bg-gradient-to-br from-zinc-800 to-zinc-900 p-5 group-hover:from-zinc-700/80 transition-colors">
+              <p className="text-center text-sm text-zinc-300 leading-relaxed line-clamp-5">{body || 'Anúncio de texto'}</p>
+            </div>
+          )}
+        </button>
 
         {/* Status badge — top left */}
         <div className="absolute left-3 top-3 z-10">
@@ -247,17 +571,14 @@ function AdCard({
           {dateStart ? `Desde ${dateStart}` : '—'}
         </span>
         <div className="flex items-center gap-1.5">
-          {snapshotUrl && (
-            <a
-              href={snapshotUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors"
-            >
-              <ExternalLink className="h-3 w-3" />
-              Ver anúncio
-            </a>
-          )}
+          <button
+            type="button"
+            onClick={onSelect}
+            className="flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors"
+          >
+            <ExternalLink className="h-3 w-3" />
+            Ver detalhes
+          </button>
           {savedId ? (
             <button
               type="button"
@@ -306,6 +627,8 @@ export default function BibliotecaPage() {
   const [allSaved, setAllSaved] = useState<SavedAd[]>([]);
   const [savedLoading, setSavedLoading] = useState(false);
   const [filterClientId, setFilterClientId] = useState('');
+  const [selectedAd, setSelectedAd] = useState<AdLibraryAd | null>(null);
+  const handleSelectAd = useCallback((ad: AdLibraryAd) => setSelectedAd(ad), []);
 
   // Load all saved ads
   useEffect(() => {
@@ -579,6 +902,7 @@ export default function BibliotecaPage() {
                       savedId={saved?.id ?? null}
                       onSave={(clientId) => saveAd(ad, clientId)}
                       onRemove={() => saved && removeAd(saved.id, ad.adArchiveId)}
+                      onSelect={() => handleSelectAd(ad)}
                       saving={savingId === ad.adArchiveId || savingId === saved?.id}
                       clients={activeClients}
                     />
@@ -678,6 +1002,7 @@ export default function BibliotecaPage() {
                     savedId={ad.id}
                     onSave={() => {}}
                     onRemove={() => removeAd(ad.id, ad.adArchiveId)}
+                    onSelect={() => handleSelectAd(ad)}
                     saving={savingId === ad.id}
                     clients={activeClients}
                   />
@@ -686,6 +1011,21 @@ export default function BibliotecaPage() {
             </>
           )}
         </div>
+      )}
+      {/* ════ AD DETAIL MODAL ════ */}
+      {selectedAd && (
+        <AdDetailModal
+          ad={selectedAd}
+          savedId={savedMap[selectedAd.adArchiveId]?.id ?? null}
+          onClose={() => setSelectedAd(null)}
+          onSave={(clientId) => { saveAd(selectedAd, clientId); }}
+          onRemove={() => {
+            const s = savedMap[selectedAd.adArchiveId];
+            if (s) removeAd(s.id, selectedAd.adArchiveId);
+          }}
+          saving={savingId === selectedAd.adArchiveId || savingId === (savedMap[selectedAd.adArchiveId]?.id ?? '')}
+          clients={activeClients}
+        />
       )}
     </div>
   );

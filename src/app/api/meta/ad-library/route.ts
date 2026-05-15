@@ -2,6 +2,15 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { getFreshMetaToken } from '@/lib/meta-token';
 
+export type AdCard = {
+  imageUrl: string | null;
+  videoUrl: string | null;
+  thumbnailUrl: string | null;
+  title: string | null;
+  body: string | null;
+  linkUrl: string | null;
+};
+
 export type AdLibraryAd = {
   adArchiveId: string;
   pageId: string;
@@ -23,6 +32,7 @@ export type AdLibraryAd = {
   linkUrl: string | null;
   callToAction: string | null;
   mediaType: 'image' | 'video' | 'carousel' | 'text' | null;
+  cards: AdCard[];
 };
 
 export async function GET(request: NextRequest) {
@@ -107,6 +117,16 @@ export async function GET(request: NextRequest) {
     const linkUrl = snap.link_url ?? snap.caption ?? null;
     const callToAction = snap.call_to_action?.type ?? null;
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const cardItems: import('./route').AdCard[] = (snap.cards ?? []).map((c: any) => ({
+      imageUrl: c.original_image_url ?? c.resized_image_url ?? null,
+      videoUrl: c.video_hd_url ?? c.video_sd_url ?? null,
+      thumbnailUrl: c.video_preview_image_url ?? null,
+      title: c.title ?? null,
+      body: c.body ?? null,
+      linkUrl: c.link_url ?? null,
+    }));
+
     return {
       adArchiveId: ad.id,
       pageId: ad.page_id ?? '',
@@ -127,6 +147,7 @@ export async function GET(request: NextRequest) {
       linkUrl,
       callToAction,
       mediaType,
+      cards: cardItems,
     };
   });
 

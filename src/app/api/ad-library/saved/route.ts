@@ -67,6 +67,7 @@ function rowToSavedAd(r: any): SavedAd {
     linkUrl: r.link_url ?? null,
     callToAction: r.call_to_action ?? null,
     mediaType: r.media_type ?? null,
+    cards: [],
   };
 }
 
