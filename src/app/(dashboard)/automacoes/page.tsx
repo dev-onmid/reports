@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
+import Link from 'next/link';
 import {
   Plus, Copy, Trash2, Check, Zap, RefreshCw,
   ToggleLeft, ToggleRight, ChevronDown, ChevronUp,
-  AlertCircle, CheckCircle2, MinusCircle, Globe,
+  AlertCircle, CheckCircle2, MinusCircle, Globe, MessageCircle, ArrowRight,
 } from 'lucide-react';
 
 type WebhookConfig = {
@@ -157,6 +158,20 @@ export default function AutomacoesPage() {
           <RefreshCw className="h-3.5 w-3.5" />
           Atualizar
         </button>
+      </div>
+
+      {/* Quick access cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Link href="/automacoes/meta" className="flex items-center gap-4 rounded-xl border border-border bg-card px-4 py-3.5 hover:border-primary/40 hover:bg-primary/5 transition-all group">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-fuchsia-500/20 to-pink-500/20 text-fuchsia-400 shrink-0">
+            <MessageCircle className="h-5 w-5" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-foreground">Automações Meta</p>
+            <p className="text-xs text-muted-foreground truncate">Auto-resposta a comentários e DMs do Instagram e Facebook</p>
+          </div>
+          <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors shrink-0" />
+        </Link>
       </div>
 
       {/* Tabs */}
