@@ -33,6 +33,7 @@ export type AdLibraryAd = {
   mediaType: 'image' | 'video' | 'carousel' | 'text' | null;
   cards: AdCard[];
   ogImageUrl: string | null;
+  pageProfilePictureUrl: string | null;
 };
 
 // Fetch OG image from a landing page — used for link/text ads with no creative image
@@ -65,6 +66,16 @@ async function fetchOgImage(url: string): Promise<string | null> {
     return null;
   } catch {
     return null;
+  }
+}
+
+function isFacebookUrl(url: string): boolean {
+  try {
+    const { hostname } = new URL(url);
+    return hostname === 'facebook.com' || hostname.endsWith('.facebook.com') ||
+           hostname === 'fb.com' || hostname.endsWith('.fb.com');
+  } catch {
+    return false;
   }
 }
 
@@ -112,7 +123,7 @@ export async function GET(request: NextRequest) {
     'ad_delivery_start_time',
     'ad_delivery_stop_time',
     'ad_active_status',
-    'snapshot',
+    'snapshot{images,videos,cards,body,title,link_url,caption,cta_text,page_profile_picture_url,display_format}',
   ].join(','));
   url.searchParams.set('limit', String(limit));
   url.searchParams.set('access_token', token);
@@ -148,7 +159,8 @@ export async function GET(request: NextRequest) {
     const videoUrl = firstVideo ? (firstVideo.video_hd_url ?? firstVideo.video_sd_url ?? null) : null;
     const videoThumbnailUrl = firstVideo?.video_preview_image_url ?? null;
     const linkUrl = snap.link_url ?? snap.caption ?? null;
-    const callToAction = snap.call_to_action?.type ?? null;
+    const callToAction = snap.call_to_action?.type ?? snap.cta_text ?? null;
+    const pageProfilePictureUrl: string | null = snap.page_profile_picture_url ?? null;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const cardItems: AdCard[] = (snap.cards ?? []).map((c: any) => ({
@@ -181,12 +193,14 @@ export async function GET(request: NextRequest) {
       callToAction,
       mediaType,
       cards: cardItems,
-      _needsOg: !imageUrl && !videoUrl && !!linkUrl,
+      pageProfilePictureUrl,
+      // Fetch OG only for real external landing pages, not Facebook URLs
+      _needsOg: !imageUrl && !videoUrl && !!linkUrl && !isFacebookUrl(linkUrl),
       _linkUrl: linkUrl,
     };
   });
 
-  // Fetch OG images in parallel for link/text ads that have no creative image
+  // Fetch OG images in parallel for link/text ads that point to real external pages
   const data: AdLibraryAd[] = await Promise.all(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     parsed.map(async (ad: any) => {

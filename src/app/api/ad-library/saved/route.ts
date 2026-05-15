@@ -39,6 +39,7 @@ async function ensureTable(pool: ReturnType<typeof makeServerPool>) {
     ALTER TABLE public.saved_ads ADD COLUMN IF NOT EXISTS call_to_action TEXT;
     ALTER TABLE public.saved_ads ADD COLUMN IF NOT EXISTS media_type TEXT;
     ALTER TABLE public.saved_ads ADD COLUMN IF NOT EXISTS og_image_url TEXT;
+    ALTER TABLE public.saved_ads ADD COLUMN IF NOT EXISTS page_profile_picture_url TEXT;
   `);
 }
 
@@ -70,6 +71,7 @@ function rowToSavedAd(r: any): SavedAd {
     mediaType: r.media_type ?? null,
     cards: [],
     ogImageUrl: r.og_image_url ?? null,
+    pageProfilePictureUrl: r.page_profile_picture_url ?? null,
   };
 }
 
@@ -110,8 +112,8 @@ export async function POST(request: NextRequest) {
           creative_bodies, creative_titles, publisher_platforms,
           delivery_start_time, delivery_stop_time, ad_active_status,
           spend, impressions, currency, notes,
-          image_url, video_url, video_thumbnail_url, link_url, call_to_action, media_type, og_image_url)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+          image_url, video_url, video_thumbnail_url, link_url, call_to_action, media_type, og_image_url, page_profile_picture_url)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
        ON CONFLICT (client_id, ad_archive_id) DO UPDATE
          SET notes = EXCLUDED.notes, saved_at = NOW(),
              image_url = EXCLUDED.image_url,
@@ -120,7 +122,8 @@ export async function POST(request: NextRequest) {
              link_url = EXCLUDED.link_url,
              call_to_action = EXCLUDED.call_to_action,
              media_type = EXCLUDED.media_type,
-             og_image_url = EXCLUDED.og_image_url
+             og_image_url = EXCLUDED.og_image_url,
+             page_profile_picture_url = EXCLUDED.page_profile_picture_url
        RETURNING *`,
       [
         clientId,
@@ -145,6 +148,7 @@ export async function POST(request: NextRequest) {
         ad.callToAction ?? null,
         ad.mediaType ?? null,
         ad.ogImageUrl ?? null,
+        ad.pageProfilePictureUrl ?? null,
       ]
     );
     return Response.json(rowToSavedAd(rows[0]), { status: 201 });

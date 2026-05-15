@@ -510,16 +510,24 @@ function AdCard({
               </div>
             </div>
           </button>
-        ) : (ad.imageUrl ?? ad.ogImageUrl) ? (
+        ) : (ad.imageUrl ?? ad.ogImageUrl ?? ad.pageProfilePictureUrl) ? (
           <button type="button" onClick={onSelect} className="block w-full overflow-hidden group/media">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={(ad.imageUrl ?? ad.ogImageUrl) ?? ''}  alt=""
-              className="w-full object-cover group-hover/media:scale-105 transition-transform duration-300"
+            <img src={(ad.imageUrl ?? ad.ogImageUrl ?? ad.pageProfilePictureUrl) ?? ''}  alt=""
+              className={cn(
+                'w-full object-cover group-hover/media:scale-105 transition-transform duration-300',
+                !ad.imageUrl && !ad.ogImageUrl && ad.pageProfilePictureUrl ? 'object-contain bg-zinc-900 p-4' : '',
+              )}
               style={{ maxHeight: '280px', minHeight: '160px' }}
               referrerPolicy="no-referrer" loading="lazy" />
-            {ad.ogImageUrl && !ad.imageUrl && (
+            {!ad.imageUrl && ad.ogImageUrl && (
               <div className="absolute bottom-2 right-2 pointer-events-none">
                 <span className="rounded bg-black/60 px-1.5 py-0.5 text-[9px] text-white/60 backdrop-blur-sm">preview da página</span>
+              </div>
+            )}
+            {!ad.imageUrl && !ad.ogImageUrl && ad.pageProfilePictureUrl && (
+              <div className="absolute bottom-2 right-2 pointer-events-none">
+                <span className="rounded bg-black/60 px-1.5 py-0.5 text-[9px] text-white/60 backdrop-blur-sm">logo da página</span>
               </div>
             )}
           </button>
