@@ -160,21 +160,30 @@ function AdDetailModal({
                 style={{ maxHeight: '65vh' }}
                 referrerPolicy="no-referrer"
               />
-            ) : ad.adSnapshotUrl ? (
-              /* Proxy iframe — renders the actual Facebook ad preview */
-              <div className="w-full flex-1 flex flex-col" style={{ minHeight: '300px' }}>
-                <iframe
-                  key={ad.adSnapshotUrl}
-                  src={`/api/meta/ad-preview?url=${encodeURIComponent(ad.adSnapshotUrl)}`}
-                  className="w-full flex-1 border-0"
-                  style={{ minHeight: '400px' }}
-                  title={ad.pageName}
-                  loading="lazy"
-                />
-              </div>
             ) : (
-              <div className="flex min-h-[260px] w-full items-center justify-center bg-gradient-to-br from-zinc-800 to-zinc-900 p-8">
-                <p className="text-center text-sm text-zinc-300 leading-relaxed">{body || 'Anúncio de texto'}</p>
+              /* Text-only — styled Facebook post layout */
+              <div className="flex w-full flex-col gap-3 bg-[#1c1c1e] p-5">
+                <div className="flex items-center gap-3">
+                  <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white', avatarColor(ad.pageName))}>
+                    {initial}
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-zinc-100">{ad.pageName}</p>
+                    <p className="text-[10px] text-zinc-500">Patrocinado · 🌐</p>
+                  </div>
+                </div>
+                <p className="text-sm text-zinc-200 leading-relaxed whitespace-pre-line">{body}</p>
+                {ad.linkUrl && (
+                  <div className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2.5">
+                    <p className="text-[10px] uppercase tracking-wide text-zinc-500 mb-0.5">{ad.linkUrl.replace(/^https?:\/\/(www\.)?/, '').split('/')[0]}</p>
+                    {ad.creativeTitles[0] && <p className="text-sm font-semibold text-zinc-100">{ad.creativeTitles[0]}</p>}
+                    {ad.callToAction && (
+                      <div className="mt-2 inline-block rounded-md bg-zinc-600 px-3 py-1 text-xs font-semibold text-zinc-100">
+                        {ad.callToAction.replace(/_/g, ' ')}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -488,12 +497,12 @@ function AdCard({
       </div>
 
       {/* ── Media ── */}
-      <div className="relative w-full overflow-hidden bg-zinc-950" style={{ height: '260px' }}>
+      <div className="relative w-full overflow-hidden bg-zinc-950" style={{ minHeight: '180px' }}>
         {(ad.videoThumbnailUrl ?? ad.videoUrl) ? (
-          <button type="button" onClick={onSelect} className="block w-full h-full relative group/media">
+          <button type="button" onClick={onSelect} className="block w-full relative group/media">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={ad.videoThumbnailUrl ?? ''} alt=""
-              className="w-full h-full object-cover"
+              className="w-full object-cover" style={{ maxHeight: '260px', minHeight: '160px' }}
               referrerPolicy="no-referrer" loading="lazy" />
             <div className="absolute inset-0 flex items-center justify-center bg-black/10 group-hover/media:bg-black/30 transition-colors">
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-sm">
@@ -502,33 +511,41 @@ function AdCard({
             </div>
           </button>
         ) : ad.imageUrl ? (
-          <button type="button" onClick={onSelect} className="block w-full h-full overflow-hidden group/media">
+          <button type="button" onClick={onSelect} className="block w-full overflow-hidden group/media">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={ad.imageUrl} alt=""
-              className="w-full h-full object-cover group-hover/media:scale-105 transition-transform duration-300"
+              className="w-full object-cover group-hover/media:scale-105 transition-transform duration-300"
+              style={{ maxHeight: '280px', minHeight: '160px' }}
               referrerPolicy="no-referrer" loading="lazy" />
           </button>
-        ) : ad.adSnapshotUrl ? (
-          /* Proxy iframe — shows real Facebook ad creative (image, video, text) */
-          <div className="relative w-full h-full">
-            <iframe
-              src={`/api/meta/ad-preview?url=${encodeURIComponent(ad.adSnapshotUrl)}`}
-              className="w-full h-full border-0 pointer-events-none"
-              style={{ transform: 'scale(0.75)', transformOrigin: 'top left', width: '133%', height: '133%' }}
-              loading="lazy"
-              title={ad.pageName}
-            />
-            {/* Transparent click overlay — forwards click to modal */}
-            <button
-              type="button"
-              onClick={onSelect}
-              className="absolute inset-0 w-full h-full bg-transparent hover:bg-white/5 transition-colors"
-              aria-label="Ver detalhes"
-            />
-          </div>
         ) : (
-          <button type="button" onClick={onSelect} className="flex w-full h-full items-center justify-center bg-gradient-to-br from-zinc-800 to-zinc-900 p-4 hover:from-zinc-700/80 transition-colors">
-            <p className="text-center text-xs text-zinc-300 leading-relaxed line-clamp-4">{body || '—'}</p>
+          /* Text-only ad — styled like a Facebook post */
+          <button type="button" onClick={onSelect}
+            className="flex w-full flex-col gap-2 bg-[#1c1c1e] p-3 text-left hover:bg-[#242426] transition-colors">
+            {/* Fake FB post header */}
+            <div className="flex items-center gap-2">
+              <div className={cn('flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white', avatarColor(ad.pageName))}>
+                {ad.pageName.charAt(0).toUpperCase()}
+              </div>
+              <div>
+                <p className="text-[11px] font-semibold text-zinc-100 leading-tight">{ad.pageName}</p>
+                <p className="text-[9px] text-zinc-500">Patrocinado · 🌐</p>
+              </div>
+            </div>
+            {/* Ad copy */}
+            <p className="text-[11px] text-zinc-200 leading-relaxed line-clamp-4 whitespace-pre-line">{body}</p>
+            {/* Fake link preview bar */}
+            {ad.linkUrl && (
+              <div className="mt-1 rounded border border-zinc-700 bg-zinc-800 px-2.5 py-1.5">
+                <p className="text-[9px] uppercase tracking-wide text-zinc-500">{ad.linkUrl.replace(/^https?:\/\/(www\.)?/, '').split('/')[0]}</p>
+                {ad.creativeTitles[0] && <p className="text-[11px] font-semibold text-zinc-200 leading-tight line-clamp-1">{ad.creativeTitles[0]}</p>}
+                {ad.callToAction && (
+                  <div className="mt-1.5 inline-block rounded bg-zinc-600 px-2 py-0.5 text-[10px] font-semibold text-zinc-100">
+                    {ad.callToAction.replace(/_/g, ' ')}
+                  </div>
+                )}
+              </div>
+            )}
           </button>
         )}
         {/* Status dot */}
