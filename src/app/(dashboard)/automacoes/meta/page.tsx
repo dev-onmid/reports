@@ -82,6 +82,18 @@ export default function MetaAutomacoesPage() {
   const [saving, setSaving] = useState(false);
   const [expandedLog, setExpandedLog] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [webhookStatus, setWebhookStatus] = useState<{
+    configured: boolean;
+    last_event_at: string | null;
+    last_platform: string | null;
+    last_event_type: string | null;
+    last_status: string | null;
+    events_today: number;
+    events_week: number;
+    errors_today: number;
+  } | null>(null);
+  const [testingWebhook, setTestingWebhook] = useState(false);
+  const [testResult, setTestResult] = useState<'ok' | 'error' | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
   const [clientSearch, setClientSearch] = useState('');
   const [clientSort, setClientSort] = useState<'asc' | 'desc'>('asc');
@@ -90,6 +102,28 @@ export default function MetaAutomacoesPage() {
   const [clientPages, setClientPages] = useState<ClientPage[]>([]);
   const [loadingPages, setLoadingPages] = useState(false);
   const clientPickerRef = useRef<HTMLDivElement>(null);
+
+  async function loadWebhookStatus() {
+    const res = await fetch('/api/meta/webhook/status');
+    if (res.ok) setWebhookStatus(await res.json());
+  }
+
+  async function testWebhook() {
+    if (!verifyToken) return;
+    setTestingWebhook(true);
+    setTestResult(null);
+    try {
+      const url = `/api/meta/webhook?hub.mode=subscribe&hub.verify_token=${verifyToken}&hub.challenge=ping123`;
+      const res = await fetch(url);
+      const text = await res.text();
+      setTestResult(res.ok && text === 'ping123' ? 'ok' : 'error');
+    } catch {
+      setTestResult('error');
+    } finally {
+      setTestingWebhook(false);
+      setTimeout(() => setTestResult(null), 4000);
+    }
+  }
 
   async function loadClients() {
     const res = await fetch('/api/clients');
@@ -126,6 +160,7 @@ export default function MetaAutomacoesPage() {
   useEffect(() => {
     void load();
     void loadClients();
+    void loadWebhookStatus();
   }, []);
 
   async function create() {
@@ -535,6 +570,83 @@ export default function MetaAutomacoesPage() {
       {/* ── Setup tab ── */}
       {tab === 'setup' && (
         <div className="space-y-4 max-w-2xl">
+
+          {/* Status card */}
+          <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm font-semibold text-foreground">Status da integração</p>
+              <button type="button" onClick={() => void loadWebhookStatus()}
+                className="flex items-center gap-1 rounded-lg border border-border bg-background px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
+                <RefreshCw className="h-3 w-3" /> Atualizar
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {/* Webhook configurado */}
+              <div className={cn('rounded-lg border p-3 flex flex-col gap-1',
+                webhookStatus?.configured ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-rose-500/30 bg-rose-500/5'
+              )}>
+                {webhookStatus?.configured
+                  ? <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                  : <AlertCircle className="h-4 w-4 text-rose-500" />}
+                <p className="text-[11px] font-medium text-foreground">Webhook</p>
+                <p className={cn('text-[10px]', webhookStatus?.configured ? 'text-emerald-500' : 'text-rose-500')}>
+                  {webhookStatus === null ? 'Verificando...' : webhookStatus.configured ? 'Configurado' : 'Não configurado'}
+                </p>
+              </div>
+
+              {/* Último evento */}
+              <div className="rounded-lg border border-border bg-background p-3 flex flex-col gap-1">
+                <Zap className="h-4 w-4 text-primary" />
+                <p className="text-[11px] font-medium text-foreground">Último evento</p>
+                <p className="text-[10px] text-muted-foreground">
+                  {webhookStatus?.last_event_at
+                    ? new Date(webhookStatus.last_event_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+                    : 'Nenhum ainda'}
+                </p>
+              </div>
+
+              {/* Eventos hoje */}
+              <div className="rounded-lg border border-border bg-background p-3 flex flex-col gap-1">
+                <MessageCircle className="h-4 w-4 text-blue-400" />
+                <p className="text-[11px] font-medium text-foreground">Hoje</p>
+                <p className="text-[10px] text-muted-foreground">
+                  {webhookStatus?.events_today ?? '—'} evento{webhookStatus?.events_today !== 1 ? 's' : ''}
+                </p>
+              </div>
+
+              {/* Erros hoje */}
+              <div className={cn('rounded-lg border p-3 flex flex-col gap-1',
+                (webhookStatus?.errors_today ?? 0) > 0 ? 'border-rose-500/30 bg-rose-500/5' : 'border-border bg-background'
+              )}>
+                <AlertCircle className={cn('h-4 w-4', (webhookStatus?.errors_today ?? 0) > 0 ? 'text-rose-500' : 'text-muted-foreground')} />
+                <p className="text-[11px] font-medium text-foreground">Erros hoje</p>
+                <p className={cn('text-[10px]', (webhookStatus?.errors_today ?? 0) > 0 ? 'text-rose-500' : 'text-muted-foreground')}>
+                  {webhookStatus?.errors_today ?? '—'}
+                </p>
+              </div>
+            </div>
+
+            {/* Test button */}
+            <div className="flex items-center gap-3 pt-1">
+              <button type="button" onClick={() => void testWebhook()} disabled={testingWebhook || !verifyToken}
+                className="flex items-center gap-1.5 rounded-lg bg-primary/10 border border-primary/30 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 transition-colors disabled:opacity-50">
+                {testingWebhook ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
+                {testingWebhook ? 'Testando...' : 'Testar conexão'}
+              </button>
+              {testResult === 'ok' && (
+                <span className="flex items-center gap-1 text-xs text-emerald-500 font-medium">
+                  <CheckCircle2 className="h-3.5 w-3.5" /> Webhook respondendo corretamente!
+                </span>
+              )}
+              {testResult === 'error' && (
+                <span className="flex items-center gap-1 text-xs text-rose-500 font-medium">
+                  <AlertCircle className="h-3.5 w-3.5" /> Falha na verificação — confira a URL e o token.
+                </span>
+              )}
+            </div>
+          </div>
+
           <div className="rounded-xl border border-amber-200 bg-amber-50/50 dark:bg-amber-950/20 dark:border-amber-900/50 p-4 flex gap-3">
             <Info className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
             <p className="text-sm text-amber-800 dark:text-amber-200 leading-relaxed">
