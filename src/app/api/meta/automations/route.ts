@@ -4,13 +4,50 @@ import { makeServerPool } from '@/lib/server-db';
 export async function GET() {
   const pool = makeServerPool();
   try {
+    // Ensure config table + global row exist so verify_token is always available
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS public.meta_webhook_config (
+        id TEXT PRIMARY KEY DEFAULT 'global',
+        verify_token TEXT NOT NULL DEFAULT encode(gen_random_bytes(16), 'hex')
+      );
+      INSERT INTO public.meta_webhook_config (id) VALUES ('global') ON CONFLICT DO NOTHING;
+
+      CREATE TABLE IF NOT EXISTS public.meta_automations (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        client_id TEXT,
+        account_id TEXT NOT NULL,
+        account_name TEXT,
+        platform TEXT NOT NULL,
+        trigger_type TEXT NOT NULL,
+        keyword TEXT,
+        action TEXT NOT NULL,
+        reply_message TEXT NOT NULL,
+        dm_message TEXT,
+        enabled BOOLEAN NOT NULL DEFAULT true,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.meta_automation_logs (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        automation_id UUID,
+        platform TEXT,
+        event_type TEXT,
+        account_id TEXT,
+        sender_id TEXT,
+        trigger_text TEXT,
+        action_taken TEXT,
+        status TEXT NOT NULL DEFAULT 'success',
+        error_msg TEXT,
+        triggered_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+
     const { rows } = await pool.query(
       `SELECT * FROM public.meta_automations ORDER BY created_at DESC`
     );
-    // Also return verify token for setup instructions
     const { rows: [cfg] } = await pool.query(
       `SELECT verify_token FROM public.meta_webhook_config WHERE id = 'global'`
-    ).catch(() => ({ rows: [null] }));
+    );
 
     return Response.json({ automations: rows, verifyToken: cfg?.verify_token ?? null });
   } finally {
