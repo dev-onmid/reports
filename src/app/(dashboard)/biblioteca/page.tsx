@@ -680,7 +680,7 @@ export default function BibliotecaPage() {
     else { setSearching(true); setResults([]); setNextCursor(null); }
     setSearchError('');
     try {
-      const params = new URLSearchParams({ q: query, country, status: adStatus, limit: '20' });
+      const params = new URLSearchParams({ q: query, country, status: adStatus, limit: '50' });
       if (cursor) params.set('after', cursor);
       const res = await fetch(`/api/meta/ad-library?${params}`);
       const json = await res.json() as { data?: AdLibraryAd[]; paging?: { cursors?: { after?: string }; next?: string }; error?: string };
@@ -731,7 +731,7 @@ export default function BibliotecaPage() {
   const countryLabel = AD_COUNTRIES.find(c => c.code === country)?.label ?? 'Brasil';
 
   const filteredResults = results
-    .filter(ad => !onlyWithCreative || (ad.mediaType !== 'text' && (!!ad.imageUrl || !!ad.videoUrl || ad.cards.length > 0)))
+    .filter(ad => !onlyWithCreative || !!ad.imageUrl || !!ad.videoUrl || ad.cards.length > 0)
     .filter(ad => !mediaTypeFilter || ad.mediaType === mediaTypeFilter)
     .filter(ad => !platformFilter || ad.publisherPlatforms.some(p => p.toLowerCase().includes(platformFilter)))
     .sort((a, b) => {
