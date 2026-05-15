@@ -160,6 +160,18 @@ function AdDetailModal({
                 style={{ maxHeight: '65vh' }}
                 referrerPolicy="no-referrer"
               />
+            ) : ad.adSnapshotUrl ? (
+              /* Proxy iframe — renders the actual Facebook ad preview */
+              <div className="w-full flex-1 flex flex-col" style={{ minHeight: '300px' }}>
+                <iframe
+                  key={ad.adSnapshotUrl}
+                  src={`/api/meta/ad-preview?url=${encodeURIComponent(ad.adSnapshotUrl)}`}
+                  className="w-full flex-1 border-0"
+                  style={{ minHeight: '400px' }}
+                  title={ad.pageName}
+                  loading="lazy"
+                />
+              </div>
             ) : (
               <div className="flex min-h-[260px] w-full items-center justify-center bg-gradient-to-br from-zinc-800 to-zinc-900 p-8">
                 <p className="text-center text-sm text-zinc-300 leading-relaxed">{body || 'Anúncio de texto'}</p>
@@ -476,36 +488,51 @@ function AdCard({
       </div>
 
       {/* ── Media ── */}
-      <button type="button" onClick={onSelect} className="block w-full relative group/media">
+      <div className="relative w-full overflow-hidden bg-zinc-950" style={{ height: '260px' }}>
         {(ad.videoThumbnailUrl ?? ad.videoUrl) ? (
-          <div className="relative">
+          <button type="button" onClick={onSelect} className="block w-full h-full relative group/media">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={ad.videoThumbnailUrl ?? ''} alt=""
-              className="w-full object-cover"
-              style={{ maxHeight: '240px', minHeight: '140px' }}
+              className="w-full h-full object-cover"
               referrerPolicy="no-referrer" loading="lazy" />
             <div className="absolute inset-0 flex items-center justify-center bg-black/10 group-hover/media:bg-black/30 transition-colors">
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-sm">
                 <Play className="h-4 w-4 fill-current ml-0.5" />
               </div>
             </div>
-          </div>
+          </button>
         ) : ad.imageUrl ? (
-          <div className="overflow-hidden">
+          <button type="button" onClick={onSelect} className="block w-full h-full overflow-hidden group/media">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={ad.imageUrl} alt=""
-              className="w-full object-cover group-hover/media:scale-105 transition-transform duration-300"
-              style={{ maxHeight: '260px', minHeight: '140px' }}
+              className="w-full h-full object-cover group-hover/media:scale-105 transition-transform duration-300"
               referrerPolicy="no-referrer" loading="lazy" />
+          </button>
+        ) : ad.adSnapshotUrl ? (
+          /* Proxy iframe — shows real Facebook ad creative (image, video, text) */
+          <div className="relative w-full h-full">
+            <iframe
+              src={`/api/meta/ad-preview?url=${encodeURIComponent(ad.adSnapshotUrl)}`}
+              className="w-full h-full border-0 pointer-events-none"
+              style={{ transform: 'scale(0.75)', transformOrigin: 'top left', width: '133%', height: '133%' }}
+              loading="lazy"
+              title={ad.pageName}
+            />
+            {/* Transparent click overlay — forwards click to modal */}
+            <button
+              type="button"
+              onClick={onSelect}
+              className="absolute inset-0 w-full h-full bg-transparent hover:bg-white/5 transition-colors"
+              aria-label="Ver detalhes"
+            />
           </div>
         ) : (
-          <div className="flex items-center justify-center bg-gradient-to-br from-zinc-800 to-zinc-900 p-4 group-hover/media:from-zinc-700/80 transition-colors"
-            style={{ minHeight: '120px' }}>
+          <button type="button" onClick={onSelect} className="flex w-full h-full items-center justify-center bg-gradient-to-br from-zinc-800 to-zinc-900 p-4 hover:from-zinc-700/80 transition-colors">
             <p className="text-center text-xs text-zinc-300 leading-relaxed line-clamp-4">{body || '—'}</p>
-          </div>
+          </button>
         )}
         {/* Status dot */}
-        <div className="absolute top-2 left-2">
+        <div className="absolute top-2 left-2 pointer-events-none z-10">
           <span className={cn(
             'inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-bold backdrop-blur-sm',
             isActive ? 'bg-emerald-500/90 text-white' : 'bg-zinc-600/80 text-zinc-300'
@@ -513,13 +540,13 @@ function AdCard({
         </div>
         {/* Carousel badge */}
         {ad.mediaType === 'carousel' && ad.cards.length > 1 && (
-          <div className="absolute top-2 right-2">
+          <div className="absolute top-2 right-2 pointer-events-none z-10">
             <span className="inline-flex items-center rounded-full bg-black/60 px-1.5 py-0.5 text-[9px] font-bold text-white backdrop-blur-sm">
               1/{ad.cards.length}
             </span>
           </div>
         )}
-      </button>
+      </div>
 
       {/* ── Copy ── */}
       {body && (
