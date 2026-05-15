@@ -62,7 +62,7 @@ type ClientPage = {
   platform: 'instagram' | 'facebook';
   account_id: string;
   account_name: string;
-  label: string;
+  picture_url: string | null;
 };
 
 const EMPTY_FORM = {
@@ -327,41 +327,57 @@ export default function MetaAutomacoesPage() {
                 </div>
               </div>
 
-              {/* Step 2 — pick account */}
+              {/* Step 2 — pick platform account */}
               {selectedClient && (
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium text-muted-foreground">Conta do cliente</label>
                   {loadingPages ? (
                     <div className="text-xs text-muted-foreground py-2 flex items-center gap-2">
-                      <RefreshCw className="h-3.5 w-3.5 animate-spin" /> Buscando contas conectadas...
+                      <RefreshCw className="h-3.5 w-3.5 animate-spin" /> Buscando páginas vinculadas...
                     </div>
                   ) : clientPages.length > 0 ? (
-                    <div className="grid grid-cols-1 gap-1.5">
-                      {clientPages.map(pg => (
-                        <button
-                          key={`${pg.platform}::${pg.account_id}`}
-                          type="button"
-                          onClick={() => setForm(f => ({ ...f, account_id: pg.account_id, account_name: pg.account_name, platform: pg.platform }))}
-                          className={cn(
-                            'flex items-center gap-3 rounded-lg border px-3 py-2.5 text-sm text-left transition-all',
-                            form.account_id === pg.account_id && form.platform === pg.platform
-                              ? 'border-primary bg-primary/10 text-primary'
-                              : 'border-border hover:border-primary/40 hover:bg-card'
-                          )}
-                        >
-                          <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-bold uppercase shrink-0',
-                            pg.platform === 'instagram' ? 'bg-pink-500/10 text-pink-400' : 'bg-blue-500/10 text-blue-400'
-                          )}>{pg.platform === 'instagram' ? 'IG' : 'FB'}</span>
-                          <span className="flex-1 truncate font-medium">{pg.account_name}</span>
-                          {form.account_id === pg.account_id && form.platform === pg.platform && (
-                            <Check className="h-4 w-4 shrink-0" />
-                          )}
-                        </button>
-                      ))}
+                    <div className="space-y-3">
+                      {(['instagram', 'facebook'] as const).map(plat => {
+                        const group = clientPages.filter(p => p.platform === plat);
+                        if (!group.length) return null;
+                        return (
+                          <div key={plat} className="space-y-1.5">
+                            <p className={cn('text-[11px] font-semibold uppercase tracking-wider',
+                              plat === 'instagram' ? 'text-pink-400' : 'text-blue-400'
+                            )}>{plat === 'instagram' ? 'Instagram' : 'Facebook'}</p>
+                            {group.map(pg => {
+                              const isSelected = form.account_id === pg.account_id && form.platform === pg.platform;
+                              return (
+                                <button
+                                  key={`${pg.platform}::${pg.account_id}`}
+                                  type="button"
+                                  onClick={() => setForm(f => ({ ...f, account_id: pg.account_id, account_name: pg.account_name, platform: pg.platform }))}
+                                  className={cn(
+                                    'w-full flex items-center gap-3 rounded-lg border px-3 py-2.5 text-sm text-left transition-all',
+                                    isSelected ? 'border-primary bg-primary/10' : 'border-border hover:border-primary/40 hover:bg-card/60'
+                                  )}
+                                >
+                                  {pg.picture_url ? (
+                                    <img src={pg.picture_url} alt="" className="h-8 w-8 rounded-full object-cover shrink-0 border border-border" />
+                                  ) : (
+                                    <span className={cn('flex h-8 w-8 items-center justify-center rounded-full text-[10px] font-bold text-white shrink-0',
+                                      pg.platform === 'instagram' ? 'bg-gradient-to-br from-fuchsia-500 to-pink-500' : 'bg-blue-600'
+                                    )}>
+                                      {pg.account_name.slice(0, 2).toUpperCase()}
+                                    </span>
+                                  )}
+                                  <span className={cn('flex-1 truncate font-medium', isSelected && 'text-primary')}>{pg.account_name}</span>
+                                  {isSelected && <Check className="h-4 w-4 text-primary shrink-0" />}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        );
+                      })}
                     </div>
                   ) : (
                     <div className="rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
-                      Nenhuma conta Meta vinculada a este cliente. Vincule em{' '}
+                      Nenhuma página Meta encontrada para este cliente. Verifique se a conta de anúncios está vinculada em{' '}
                       <a href={`/clientes/${selectedClient.id}`} className="text-primary underline">Clientes → Integrações</a>.
                     </div>
                   )}
