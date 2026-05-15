@@ -8,6 +8,7 @@ import {
   Bookmark, Globe, ChevronDown, SlidersHorizontal,
   Sparkles, LayoutGrid, Calendar, ArrowUpDown, Play,
   Copy, Download, ChevronLeft, ChevronRight, Clock,
+  Filter, Video, Image, AlignLeft,
 } from 'lucide-react';
 import type { AdLibraryAd } from '@/app/api/meta/ad-library/route';
 import type { SavedAd } from '@/app/api/ad-library/saved/route';
@@ -401,209 +402,173 @@ function AdCard({
   const [showClientPicker, setShowClientPicker] = useState(false);
   const body = ad.creativeBodies[0] ?? '';
   const initial = ad.pageName.charAt(0).toUpperCase();
-  const dateStart = ad.deliveryStartTime
-    ? new Date(ad.deliveryStartTime).toLocaleDateString('pt-BR')
-    : null;
   const isActive = ad.adActiveStatus === 'ACTIVE';
   const platforms = ad.publisherPlatforms ?? [];
   const hasFb = platforms.some(p => p.toLowerCase().includes('facebook')) || platforms.length === 0;
   const hasIg = platforms.some(p => p.toLowerCase().includes('instagram'));
-  const snapshotUrl = ad.adSnapshotUrl;
+  const daysAgo = ad.deliveryStartTime
+    ? Math.floor((Date.now() - new Date(ad.deliveryStartTime).getTime()) / 86400000)
+    : null;
+  const daysActive = (ad.deliveryStartTime && ad.deliveryStopTime)
+    ? Math.floor((new Date(ad.deliveryStopTime).getTime() - new Date(ad.deliveryStartTime).getTime()) / 86400000)
+    : daysAgo;
 
   return (
-    <div className="flex flex-col overflow-hidden rounded-2xl border border-border bg-card transition-all hover:border-violet-500/30 hover:shadow-lg hover:shadow-violet-500/5">
-      {/* ── Media area ── */}
-      <div className="relative w-full overflow-hidden bg-zinc-900" style={{ minHeight: '200px' }}>
-        {/* Actual media */}
-        <button type="button" onClick={onSelect} className="block w-full text-left group cursor-pointer">
-          {(ad.videoThumbnailUrl ?? ad.videoUrl) ? (
-            <div className="relative">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={ad.videoThumbnailUrl ?? ''}
-                alt=""
-                className="w-full object-cover"
-                style={{ maxHeight: '260px', minHeight: '160px' }}
-                referrerPolicy="no-referrer"
-                loading="lazy"
-              />
-              <div className="absolute inset-0 flex items-center justify-center bg-black/10 group-hover:bg-black/30 transition-colors">
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-sm opacity-80 group-hover:opacity-100 transition-opacity">
-                  <Play className="h-5 w-5 fill-current ml-0.5" />
-                </div>
-              </div>
-            </div>
-          ) : ad.imageUrl ? (
-            <div className="overflow-hidden">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={ad.imageUrl}
-                alt=""
-                className="w-full object-cover group-hover:scale-105 transition-transform duration-300"
-                style={{ maxHeight: '300px', minHeight: '160px' }}
-                referrerPolicy="no-referrer"
-                loading="lazy"
-              />
-            </div>
-          ) : (
-            <div className="flex min-h-[160px] items-center justify-center bg-gradient-to-br from-zinc-800 to-zinc-900 p-5 group-hover:from-zinc-700/80 transition-colors">
-              <p className="text-center text-sm text-zinc-300 leading-relaxed line-clamp-5">{body || 'Anúncio de texto'}</p>
-            </div>
-          )}
-        </button>
+    <div className="flex flex-col overflow-hidden rounded-xl border border-border bg-card transition-all hover:border-violet-500/30 hover:shadow-md hover:shadow-violet-500/5 group/card">
 
-        {/* Status badge — top left */}
-        <div className="absolute left-3 top-3 z-10">
-          <span className={cn(
-            'inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold backdrop-blur-sm',
-            isActive
-              ? 'border-emerald-500/60 text-emerald-400 bg-black/50'
-              : 'border-zinc-500/40 text-zinc-400 bg-black/50'
-          )}>
-            {isActive ? 'Ativo' : 'Inativo'}
-          </span>
+      {/* ── Top: Advertiser row ── */}
+      <div className="flex items-center gap-2 px-3 py-2.5 shrink-0">
+        <div className={cn(
+          'flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white',
+          avatarColor(ad.pageName)
+        )}>
+          {initial}
         </div>
-
-        {/* Media type badge */}
-        {ad.mediaType && ad.mediaType !== 'text' && (
-          <div className="absolute left-3 bottom-3 z-10">
-            <span className="inline-flex items-center rounded-full border border-white/20 bg-black/60 px-2 py-0.5 text-[10px] font-semibold text-white/80 backdrop-blur-sm capitalize">
-              {ad.mediaType === 'video' ? '▶ Vídeo' : ad.mediaType === 'carousel' ? '⊞ Carrossel' : '🖼 Imagem'}
-            </span>
-          </div>
-        )}
-
-        {/* Bookmark icon — top right */}
-        <div className="absolute right-3 top-3 z-10">
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[12px] font-semibold text-foreground leading-tight">{ad.pageName}</p>
+          {daysAgo !== null && (
+            <p className="text-[10px] text-muted-foreground/60 leading-tight">
+              {daysAgo}d atrás{daysActive && daysActive !== daysAgo ? ` · ${daysActive}d ativo` : ''}
+            </p>
+          )}
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          {hasFb && <FacebookIcon className="h-3.5 w-3.5 text-[#1877f2]" />}
+          {hasIg && <InstagramIcon className="h-3.5 w-3.5" />}
+        </div>
+        {/* Bookmark */}
+        <div className="relative shrink-0">
           {savedId ? (
-            <button
-              type="button"
-              onClick={onRemove}
-              disabled={saving}
-              className="flex h-7 w-7 items-center justify-center rounded-full border border-red-500/40 bg-black/50 text-red-400 backdrop-blur-sm hover:bg-red-500/20 transition-colors"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
+            <button type="button" onClick={onRemove} disabled={saving}
+              className="flex h-6 w-6 items-center justify-center rounded-md text-emerald-400 hover:text-red-400 transition-colors"
+              title="Remover">
+              <Bookmark className="h-3.5 w-3.5 fill-current" />
             </button>
           ) : (
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setShowClientPicker(v => !v)}
-                disabled={saving}
-                className="flex h-7 w-7 items-center justify-center rounded-full border border-white/20 bg-black/50 text-white/70 backdrop-blur-sm hover:border-emerald-500/60 hover:text-emerald-400 transition-colors"
-              >
+            <>
+              <button type="button" onClick={() => setShowClientPicker(v => !v)} disabled={saving}
+                className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground/40 hover:text-emerald-400 transition-colors"
+                title="Salvar">
                 <Bookmark className="h-3.5 w-3.5" />
               </button>
               {showClientPicker && (
-                <div className="absolute right-0 top-full mt-1.5 z-50 w-52 rounded-xl border border-border bg-card shadow-xl p-1">
+                <div className="absolute right-0 top-full mt-1 z-50 w-48 rounded-xl border border-border bg-card shadow-xl p-1">
                   <div className="flex items-center justify-between px-2 py-1.5">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Salvar para cliente</p>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Salvar para</p>
                     <button type="button" onClick={() => setShowClientPicker(false)}>
                       <X className="h-3 w-3 text-muted-foreground" />
                     </button>
                   </div>
-                  <div className="max-h-48 overflow-y-auto">
+                  <div className="max-h-44 overflow-y-auto">
                     {clients.map(c => (
-                      <button
-                        key={c.id}
-                        type="button"
+                      <button key={c.id} type="button"
                         onClick={() => { onSave(c.id); setShowClientPicker(false); }}
-                        className="w-full rounded-lg px-3 py-2 text-left text-xs font-medium hover:bg-muted/50 transition-colors truncate"
-                      >
+                        className="w-full rounded-lg px-3 py-1.5 text-left text-xs font-medium hover:bg-muted/50 transition-colors truncate">
                         {c.name}
                       </button>
                     ))}
                   </div>
                 </div>
               )}
-            </div>
+            </>
           )}
         </div>
       </div>
 
-      {/* ── Body ── */}
-      <div className="flex flex-col gap-3 p-4">
-        {/* Advertiser row */}
-        <div className="flex items-center gap-2.5">
-          <div className={cn(
-            'flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white',
-            avatarColor(ad.pageName)
-          )}>
-            {initial}
+      {/* ── Media ── */}
+      <button type="button" onClick={onSelect} className="block w-full relative group/media">
+        {(ad.videoThumbnailUrl ?? ad.videoUrl) ? (
+          <div className="relative">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={ad.videoThumbnailUrl ?? ''} alt=""
+              className="w-full object-cover"
+              style={{ maxHeight: '240px', minHeight: '140px' }}
+              referrerPolicy="no-referrer" loading="lazy" />
+            <div className="absolute inset-0 flex items-center justify-center bg-black/10 group-hover/media:bg-black/30 transition-colors">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-sm">
+                <Play className="h-4 w-4 fill-current ml-0.5" />
+              </div>
+            </div>
           </div>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-[13px] font-semibold text-foreground">{ad.pageName}</p>
-            <p className="text-[10px] text-muted-foreground">Patrocinado</p>
+        ) : ad.imageUrl ? (
+          <div className="overflow-hidden">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={ad.imageUrl} alt=""
+              className="w-full object-cover group-hover/media:scale-105 transition-transform duration-300"
+              style={{ maxHeight: '260px', minHeight: '140px' }}
+              referrerPolicy="no-referrer" loading="lazy" />
           </div>
-          <div className="flex items-center gap-1.5 shrink-0">
-            {hasFb && <FacebookIcon className="h-4 w-4 text-[#1877f2]" />}
-            {hasIg && <InstagramIcon className="h-4 w-4" />}
+        ) : (
+          <div className="flex items-center justify-center bg-gradient-to-br from-zinc-800 to-zinc-900 p-4 group-hover/media:from-zinc-700/80 transition-colors"
+            style={{ minHeight: '120px' }}>
+            <p className="text-center text-xs text-zinc-300 leading-relaxed line-clamp-4">{body || '—'}</p>
           </div>
-        </div>
-
-        {/* Ad text */}
-        {body && (
-          <p className="line-clamp-2 text-xs leading-relaxed text-muted-foreground">{body}</p>
         )}
-
-        {/* URL row */}
-        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground/70">
-          <Globe className="h-3 w-3 shrink-0" />
-          {ad.linkUrl ? (
-            <a href={ad.linkUrl} target="_blank" rel="noopener noreferrer"
-              className="truncate hover:text-foreground transition-colors max-w-[160px]">
-              {ad.linkUrl.replace(/^https?:\/\/(www\.)?/, '').split('/')[0]}
-            </a>
-          ) : (
-            <span className="truncate text-[10px]">facebook.com/ads</span>
-          )}
-          {ad.callToAction && (
-            <span className="ml-auto shrink-0 rounded-md border border-border bg-muted/40 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-              {ad.callToAction.replace(/_/g, ' ')}
+        {/* Status dot */}
+        <div className="absolute top-2 left-2">
+          <span className={cn(
+            'inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-bold backdrop-blur-sm',
+            isActive ? 'bg-emerald-500/90 text-white' : 'bg-zinc-600/80 text-zinc-300'
+          )}>{isActive ? 'Ativo' : 'Inativo'}</span>
+        </div>
+        {/* Carousel badge */}
+        {ad.mediaType === 'carousel' && ad.cards.length > 1 && (
+          <div className="absolute top-2 right-2">
+            <span className="inline-flex items-center rounded-full bg-black/60 px-1.5 py-0.5 text-[9px] font-bold text-white backdrop-blur-sm">
+              1/{ad.cards.length}
             </span>
+          </div>
+        )}
+      </button>
+
+      {/* ── Copy ── */}
+      {body && (
+        <button type="button" onClick={onSelect} className="px-3 pt-2 pb-1 text-left">
+          <p className="line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">{body}</p>
+        </button>
+      )}
+
+      {/* ── URL + CTA ── */}
+      <div className="flex items-center gap-1.5 px-3 pb-2 min-w-0">
+        <Globe className="h-2.5 w-2.5 shrink-0 text-muted-foreground/40" />
+        <span className="truncate text-[10px] text-muted-foreground/50">
+          {ad.linkUrl ? ad.linkUrl.replace(/^https?:\/\/(www\.)?/, '').split('/')[0] : 'facebook.com/ads'}
+        </span>
+        {ad.callToAction && (
+          <span className="ml-auto shrink-0 rounded border border-border/50 px-1.5 py-0.5 text-[9px] font-semibold text-muted-foreground/60 uppercase tracking-wide">
+            {ad.callToAction.replace(/_/g, ' ')}
+          </span>
+        )}
+      </div>
+
+      {/* ── Actions bar ── */}
+      <div className="flex items-center border-t border-border/50 px-3 py-1.5 gap-1">
+        <button type="button" onClick={onSelect} title="Ver detalhes"
+          className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground/50 hover:text-foreground hover:bg-muted/50 transition-colors">
+          <ExternalLink className="h-3.5 w-3.5" />
+        </button>
+        {(ad.imageUrl ?? ad.videoThumbnailUrl) && (
+          <a href={ad.imageUrl ?? ad.videoThumbnailUrl ?? '#'} download target="_blank" rel="noopener noreferrer"
+            title="Download"
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground/50 hover:text-foreground hover:bg-muted/50 transition-colors">
+            <Download className="h-3.5 w-3.5" />
+          </a>
+        )}
+        <button type="button" title="Copiar texto"
+          onClick={() => body && navigator.clipboard.writeText(body)}
+          className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground/50 hover:text-foreground hover:bg-muted/50 transition-colors">
+          <Copy className="h-3.5 w-3.5" />
+        </button>
+        <div className="ml-auto flex items-center gap-1">
+          {ad.mediaType === 'video' && <Video className="h-3 w-3 text-muted-foreground/30" />}
+          {ad.mediaType === 'image' && <Image className="h-3 w-3 text-muted-foreground/30" />}
+          {(!ad.mediaType || ad.mediaType === 'text') && <AlignLeft className="h-3 w-3 text-muted-foreground/30" />}
+          {daysAgo !== null && (
+            <span className="text-[10px] text-muted-foreground/40">{daysAgo}d</span>
           )}
         </div>
       </div>
 
-      {/* ── Footer ── */}
-      <div className="flex items-center justify-between border-t border-border px-4 py-2.5 mt-auto">
-        <span className="text-[11px] text-muted-foreground">
-          {dateStart ? `Desde ${dateStart}` : '—'}
-        </span>
-        <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            onClick={onSelect}
-            className="flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors"
-          >
-            <ExternalLink className="h-3 w-3" />
-            Ver detalhes
-          </button>
-          {savedId ? (
-            <button
-              type="button"
-              onClick={onRemove}
-              disabled={saving}
-              className="flex items-center gap-1 rounded-md border border-red-500/30 bg-red-500/10 px-2.5 py-1 text-[11px] font-medium text-red-400 hover:bg-red-500/20 transition-colors"
-            >
-              <Trash2 className="h-3 w-3" />
-              Remover
-            </button>
-          ) : (
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setShowClientPicker(v => !v)}
-                disabled={saving}
-                className="flex items-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-400 hover:bg-emerald-500/20 transition-colors"
-              >
-                <Bookmark className="h-3 w-3" />
-                {saving ? 'Salvando...' : 'Salvar'}
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
     </div>
   );
 }
@@ -628,6 +593,9 @@ export default function BibliotecaPage() {
   const [savedLoading, setSavedLoading] = useState(false);
   const [filterClientId, setFilterClientId] = useState('');
   const [selectedAd, setSelectedAd] = useState<AdLibraryAd | null>(null);
+  const [mediaTypeFilter, setMediaTypeFilter] = useState<'' | 'image' | 'video' | 'carousel' | 'text'>('');
+  const [platformFilter, setPlatformFilter] = useState<'' | 'facebook' | 'instagram'>('');
+  const [sortOrder, setSortOrder] = useState<'newest' | 'oldest' | 'longest'>('newest');
   const handleSelectAd = useCallback((ad: AdLibraryAd) => setSelectedAd(ad), []);
 
   // Load all saved ads
@@ -703,6 +671,19 @@ export default function BibliotecaPage() {
     : allSaved;
 
   const countryLabel = AD_COUNTRIES.find(c => c.code === country)?.label ?? 'Brasil';
+
+  const filteredResults = results
+    .filter(ad => !mediaTypeFilter || ad.mediaType === mediaTypeFilter)
+    .filter(ad => !platformFilter || ad.publisherPlatforms.some(p => p.toLowerCase().includes(platformFilter)))
+    .sort((a, b) => {
+      if (sortOrder === 'oldest') return (new Date(a.deliveryStartTime ?? 0).getTime()) - (new Date(b.deliveryStartTime ?? 0).getTime());
+      if (sortOrder === 'longest') {
+        const dA = a.deliveryStartTime ? Date.now() - new Date(a.deliveryStartTime).getTime() : 0;
+        const dB = b.deliveryStartTime ? Date.now() - new Date(b.deliveryStartTime).getTime() : 0;
+        return dB - dA;
+      }
+      return (new Date(b.deliveryStartTime ?? 0).getTime()) - (new Date(a.deliveryStartTime ?? 0).getTime());
+    });
 
   return (
     <div className="space-y-6 pb-10">
@@ -793,10 +774,10 @@ export default function BibliotecaPage() {
         <div className="flex items-center gap-1.5">
           <span className="text-xs text-muted-foreground">Plataforma</span>
           <div className="relative flex items-center">
-            <select className="h-8 appearance-none rounded-lg border border-border bg-card pl-3 pr-7 text-xs font-medium text-foreground outline-none focus:ring-1 focus:ring-primary cursor-pointer">
-              <option>Todas</option>
-              <option>Facebook</option>
-              <option>Instagram</option>
+            <select value={platformFilter} onChange={e => setPlatformFilter(e.target.value as '' | 'facebook' | 'instagram')} className="h-8 appearance-none rounded-lg border border-border bg-card pl-3 pr-7 text-xs font-medium text-foreground outline-none focus:ring-1 focus:ring-primary cursor-pointer">
+              <option value="">Todas</option>
+              <option value="facebook">Facebook</option>
+              <option value="instagram">Instagram</option>
             </select>
             <ChevronDown className="pointer-events-none absolute right-2 h-3 w-3 text-muted-foreground" />
           </div>
@@ -807,13 +788,15 @@ export default function BibliotecaPage() {
           <span className="text-xs text-muted-foreground">Tipo de mídia</span>
           <div className="relative flex items-center">
             <select
-              value={adStatus}
-              onChange={e => setAdStatus(e.target.value as 'ALL' | 'ACTIVE' | 'INACTIVE')}
+              value={mediaTypeFilter}
+              onChange={e => setMediaTypeFilter(e.target.value as '' | 'image' | 'video' | 'carousel' | 'text')}
               className="h-8 appearance-none rounded-lg border border-border bg-card pl-3 pr-7 text-xs font-medium text-foreground outline-none focus:ring-1 focus:ring-primary cursor-pointer"
             >
-              <option value="ALL">Todos</option>
-              <option value="ACTIVE">Ativos</option>
-              <option value="INACTIVE">Inativos</option>
+              <option value="">Todos</option>
+              <option value="image">Imagem</option>
+              <option value="video">Vídeo</option>
+              <option value="carousel">Carrossel</option>
+              <option value="text">Texto</option>
             </select>
             <ChevronDown className="pointer-events-none absolute right-2 h-3 w-3 text-muted-foreground" />
           </div>
@@ -862,8 +845,8 @@ export default function BibliotecaPage() {
 
           {/* Skeleton while searching */}
           {searching && (
-            <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
-              {Array.from({ length: 6 }).map((_, i) => (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {Array.from({ length: 8 }).map((_, i) => (
                 <div key={i} className="h-80 animate-pulse rounded-2xl border border-border bg-card" />
               ))}
             </div>
@@ -876,24 +859,32 @@ export default function BibliotecaPage() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <Sparkles className="h-4 w-4 text-violet-400" />
-                  <span className="font-semibold text-foreground">{results.length} anúncios encontrados</span>
+                  <span className="font-semibold text-foreground">{filteredResults.length} anúncios encontrados</span>
                   <span className="text-xs text-muted-foreground">
                     Resultados dos últimos 180 dias no {countryLabel.replace(/^.+ /, '')}
                   </span>
                 </div>
-                <button
-                  type="button"
-                  className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <ArrowUpDown className="h-3.5 w-3.5" />
-                  Mais recentes
-                  <ChevronDown className="h-3 w-3" />
-                </button>
+                <div className="relative group/sort">
+                  <button type="button"
+                    className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
+                    <ArrowUpDown className="h-3.5 w-3.5" />
+                    {sortOrder === 'newest' ? 'Mais recentes' : sortOrder === 'oldest' ? 'Mais antigos' : 'Mais duradouros'}
+                    <ChevronDown className="h-3 w-3" />
+                  </button>
+                  <div className="absolute right-0 top-full mt-1 z-30 hidden group-hover/sort:block w-44 rounded-xl border border-border bg-card shadow-xl p-1">
+                    {(['newest','oldest','longest'] as const).map(o => (
+                      <button key={o} type="button" onClick={() => setSortOrder(o)}
+                        className={cn('w-full rounded-lg px-3 py-2 text-left text-xs font-medium transition-colors', sortOrder === o ? 'bg-primary/10 text-primary' : 'hover:bg-muted/50 text-muted-foreground')}>
+                        {o === 'newest' ? 'Mais recentes' : o === 'oldest' ? 'Mais antigos' : 'Mais duradouros'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
 
               {/* Card grid */}
-              <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
-                {results.map(ad => {
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {filteredResults.map(ad => {
                   const saved = savedMap[ad.adArchiveId];
                   return (
                     <AdCard
@@ -994,7 +985,7 @@ export default function BibliotecaPage() {
               </div>
 
               {/* Saved card grid */}
-              <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {displayedSaved.map(ad => (
                   <AdCard
                     key={ad.id}
