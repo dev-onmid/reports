@@ -510,13 +510,18 @@ function AdCard({
               </div>
             </div>
           </button>
-        ) : ad.imageUrl ? (
+        ) : (ad.imageUrl ?? ad.ogImageUrl) ? (
           <button type="button" onClick={onSelect} className="block w-full overflow-hidden group/media">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={ad.imageUrl} alt=""
+            <img src={(ad.imageUrl ?? ad.ogImageUrl) ?? ''}  alt=""
               className="w-full object-cover group-hover/media:scale-105 transition-transform duration-300"
               style={{ maxHeight: '280px', minHeight: '160px' }}
               referrerPolicy="no-referrer" loading="lazy" />
+            {ad.ogImageUrl && !ad.imageUrl && (
+              <div className="absolute bottom-2 right-2 pointer-events-none">
+                <span className="rounded bg-black/60 px-1.5 py-0.5 text-[9px] text-white/60 backdrop-blur-sm">preview da página</span>
+              </div>
+            )}
           </button>
         ) : (
           /* Text-only ad — styled like a Facebook post */

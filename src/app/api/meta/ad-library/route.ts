@@ -25,7 +25,6 @@ export type AdLibraryAd = {
   spend: { lower_bound?: string; upper_bound?: string } | null;
   impressions: { lower_bound?: string; upper_bound?: string } | null;
   currency: string | null;
-  // Media from snapshot
   imageUrl: string | null;
   videoUrl: string | null;
   videoThumbnailUrl: string | null;
@@ -33,7 +32,41 @@ export type AdLibraryAd = {
   callToAction: string | null;
   mediaType: 'image' | 'video' | 'carousel' | 'text' | null;
   cards: AdCard[];
+  ogImageUrl: string | null;
 };
+
+// Fetch OG image from a landing page — used for link/text ads with no creative image
+async function fetchOgImage(url: string): Promise<string | null> {
+  try {
+    const controller = new AbortController();
+    const tid = setTimeout(() => controller.abort(), 4000);
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+        'Accept': 'text/html,application/xhtml+xml',
+      },
+      redirect: 'follow',
+    });
+    clearTimeout(tid);
+    if (!res.ok) return null;
+    const html = await res.text();
+    // Try og:image first, then twitter:image
+    const patterns = [
+      /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i,
+      /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i,
+      /<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i,
+      /<meta[^>]+content=["']([^"']+)["'][^>]+name=["']twitter:image["']/i,
+    ];
+    for (const pat of patterns) {
+      const m = html.match(pat);
+      if (m?.[1] && m[1].startsWith('http')) return m[1];
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
@@ -97,7 +130,7 @@ export async function GET(request: NextRequest) {
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const data: AdLibraryAd[] = (raw.data ?? []).map((ad: any) => {
+  const parsed = (raw.data ?? []).map((ad: any) => {
     const snap = ad.snapshot ?? {};
     const images: string[] = (snap.images ?? [])
       .map((img: any) => img.original_image_url ?? img.resized_image_url ?? '')
@@ -118,7 +151,7 @@ export async function GET(request: NextRequest) {
     const callToAction = snap.call_to_action?.type ?? null;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const cardItems: import('./route').AdCard[] = (snap.cards ?? []).map((c: any) => ({
+    const cardItems: AdCard[] = (snap.cards ?? []).map((c: any) => ({
       imageUrl: c.original_image_url ?? c.resized_image_url ?? null,
       videoUrl: c.video_hd_url ?? c.video_sd_url ?? null,
       thumbnailUrl: c.video_preview_image_url ?? null,
@@ -148,8 +181,20 @@ export async function GET(request: NextRequest) {
       callToAction,
       mediaType,
       cards: cardItems,
+      _needsOg: !imageUrl && !videoUrl && !!linkUrl,
+      _linkUrl: linkUrl,
     };
   });
+
+  // Fetch OG images in parallel for link/text ads that have no creative image
+  const data: AdLibraryAd[] = await Promise.all(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    parsed.map(async (ad: any) => {
+      const { _needsOg, _linkUrl, ...rest } = ad;
+      const ogImageUrl = _needsOg ? await fetchOgImage(_linkUrl) : null;
+      return { ...rest, ogImageUrl } as AdLibraryAd;
+    })
+  );
 
   return Response.json({
     data,
