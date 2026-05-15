@@ -106,6 +106,7 @@ export default function MetaAutomacoesPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [subscribing, setSubscribing] = useState<string | null>(null);
   const [subscribeResults, setSubscribeResults] = useState<Record<string, 'ok' | 'error'>>({});
+  const [subscribeErrors, setSubscribeErrors] = useState<Record<string, string>>({});
 
   async function loadWebhookStatus() {
     const res = await fetch('/api/meta/webhook/status');
@@ -132,14 +133,21 @@ export default function MetaAutomacoesPage() {
   async function subscribePageForAutomation(auto: Automation) {
     const key = `${auto.platform}::${auto.account_id}`;
     setSubscribing(key);
+    setSubscribeErrors(prev => { const n = { ...prev }; delete n[key]; return n; });
     try {
       const res = await fetch('/api/meta/subscribe-page', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pageId: auto.account_id, platform: auto.platform }),
       });
-      setSubscribeResults(prev => ({ ...prev, [key]: res.ok ? 'ok' : 'error' }));
-      setTimeout(() => setSubscribeResults(prev => { const n = { ...prev }; delete n[key]; return n; }), 5000);
+      const data = await res.json() as { ok?: boolean; error?: string };
+      if (!res.ok || !data.ok) {
+        setSubscribeResults(prev => ({ ...prev, [key]: 'error' }));
+        setSubscribeErrors(prev => ({ ...prev, [key]: data.error ?? 'Erro desconhecido' }));
+      } else {
+        setSubscribeResults(prev => ({ ...prev, [key]: 'ok' }));
+        setTimeout(() => setSubscribeResults(prev => { const n = { ...prev }; delete n[key]; return n; }), 6000);
+      }
     } finally {
       setSubscribing(null);
     }
@@ -648,6 +656,13 @@ export default function MetaAutomacoesPage() {
                       </button>
                     </div>
                   </div>
+                  {/* Error message */}
+                  {subscribeErrors[`${auto.platform}::${auto.account_id}`] && (
+                    <div className="px-4 pb-3 flex items-start gap-2 text-xs text-rose-400">
+                      <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                      <span>{subscribeErrors[`${auto.platform}::${auto.account_id}`]}</span>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
