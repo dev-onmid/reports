@@ -123,7 +123,7 @@ export async function GET(request: NextRequest) {
     'ad_delivery_start_time',
     'ad_delivery_stop_time',
     'ad_active_status',
-    'snapshot{images,videos,cards,body,title,link_url,caption,cta_text,page_profile_picture_url,display_format}',
+    'snapshot',
   ].join(','));
   url.searchParams.set('limit', String(limit));
   url.searchParams.set('access_token', token);
@@ -210,8 +210,10 @@ export async function GET(request: NextRequest) {
     })
   );
 
+  const debug = searchParams.get('debug') === '1';
   return Response.json({
     data,
     paging: raw.paging ?? null,
+    ...(debug ? { _rawFirstSnap: (raw.data?.[0]?.snapshot ?? null) } : {}),
   });
 }
