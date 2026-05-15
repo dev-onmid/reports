@@ -15,21 +15,46 @@ export async function POST(request: NextRequest) {
 
     const userToken = await getFreshMetaToken(conn);
 
-    // Get the page access token
+    // Fetch all pages with their Instagram accounts and tokens
     const pagesRes = await fetch(
-      `https://graph.facebook.com/v21.0/me/accounts?fields=id,access_token&limit=100&access_token=${userToken}`
+      `https://graph.facebook.com/v21.0/me/accounts?fields=id,access_token,instagram_business_account{id}&limit=100&access_token=${userToken}`
     );
-    const pagesData = await pagesRes.json() as { data?: Array<{ id: string; access_token: string }> };
-    const page = (pagesData.data ?? []).find(p => p.id === pageId);
-    const pageToken = page?.access_token ?? userToken;
+    const pagesData = await pagesRes.json() as {
+      data?: Array<{
+        id: string;
+        access_token: string;
+        instagram_business_account?: { id: string };
+      }>;
+    };
+    const pages = pagesData.data ?? [];
 
-    // Subscribe the page to the app with the needed webhook fields
+    // For Instagram: find the Facebook page that owns this Instagram account
+    // For Facebook: find the page directly by ID
+    let fbPageId: string;
+    let pageToken: string;
+
+    if (platform === 'instagram') {
+      const parent = pages.find(p => p.instagram_business_account?.id === pageId);
+      if (!parent) {
+        return Response.json({
+          error: `Nenhuma página Facebook encontrada vinculada a este Instagram (ID: ${pageId}). Verifique se a conta está conectada.`,
+        }, { status: 400 });
+      }
+      fbPageId = parent.id;
+      pageToken = parent.access_token;
+    } else {
+      const page = pages.find(p => p.id === pageId);
+      fbPageId = pageId;
+      pageToken = page?.access_token ?? userToken;
+    }
+
+    // Subscribe with the correct fields for each platform
     const fields = platform === 'instagram'
-      ? 'instagram_incoming_messages,comments,mentions'
-      : 'feed,messages';
+      ? 'instagram_incoming_messages,comments,mentions,live_comments'
+      : 'feed,messages,message_reactions';
 
     const subRes = await fetch(
-      `https://graph.facebook.com/v21.0/${pageId}/subscribed_apps`,
+      `https://graph.facebook.com/v21.0/${fbPageId}/subscribed_apps`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -44,7 +69,7 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    return Response.json({ ok: true, subscribed_fields: fields });
+    return Response.json({ ok: true, fb_page_id: fbPageId, subscribed_fields: fields });
   } finally {
     await pool.end();
   }
