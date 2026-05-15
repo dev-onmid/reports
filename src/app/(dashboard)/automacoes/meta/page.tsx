@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 import {
   Plus, Trash2, Check, RefreshCw, AlertCircle,
   CheckCircle2, MinusCircle, ToggleLeft, ToggleRight,
   ChevronDown, ChevronUp, Copy, MessageCircle,
-  MessageSquare, Zap, Info,
+  MessageSquare, Zap, Info, Search, ArrowDownAZ, ArrowUpAZ, X,
 } from 'lucide-react';
 
 type Automation = {
@@ -56,11 +56,13 @@ const ACTION_LABELS: Record<string, string> = {
 
 const BASE = typeof window !== 'undefined' ? window.location.origin : 'https://reports.onmid.app';
 
-type ConnectedAccount = {
-  label: string; // e.g. "@clinicasorrir (Instagram)" or "Clínica Sorrir (Facebook)"
+type Client = { id: string; name: string; segment: string; status: string };
+
+type ClientPage = {
   platform: 'instagram' | 'facebook';
   account_id: string;
   account_name: string;
+  label: string;
 };
 
 const EMPTY_FORM = {
@@ -80,34 +82,29 @@ export default function MetaAutomacoesPage() {
   const [saving, setSaving] = useState(false);
   const [expandedLog, setExpandedLog] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [connectedAccounts, setConnectedAccounts] = useState<ConnectedAccount[]>([]);
-  const [loadingAccounts, setLoadingAccounts] = useState(false);
+  const [clients, setClients] = useState<Client[]>([]);
+  const [clientSearch, setClientSearch] = useState('');
+  const [clientSort, setClientSort] = useState<'asc' | 'desc'>('asc');
+  const [showClientPicker, setShowClientPicker] = useState(false);
+  const [selectedClient, setSelectedClient] = useState<Client | null>(null);
+  const [clientPages, setClientPages] = useState<ClientPage[]>([]);
+  const [loadingPages, setLoadingPages] = useState(false);
+  const clientPickerRef = useRef<HTMLDivElement>(null);
 
-  async function loadConnectedAccounts() {
-    setLoadingAccounts(true);
+  async function loadClients() {
+    const res = await fetch('/api/clients');
+    if (res.ok) setClients(await res.json());
+  }
+
+  async function loadClientPages(clientId: string) {
+    setLoadingPages(true);
+    setClientPages([]);
+    setForm(f => ({ ...f, account_id: '', account_name: '', platform: 'instagram' }));
     try {
-      const connRes = await fetch('/api/meta/connections');
-      if (!connRes.ok) return;
-      const connections = await connRes.json() as Array<{ id: string; label: string; status: string }>;
-      const active = connections.filter(c => c.status === 'connected');
-
-      const pagesResults = await Promise.all(
-        active.map(c => fetch(`/api/meta/pages?connectionId=${c.id}`).then(r => r.ok ? r.json() : []))
-      );
-
-      const accounts: ConnectedAccount[] = [];
-      for (const pages of pagesResults as Array<Array<{ id: string; name: string; instagramAccountId?: string; instagramUsername?: string }>>) {
-        for (const page of pages) {
-          accounts.push({ label: `${page.name} (Facebook)`, platform: 'facebook', account_id: page.id, account_name: page.name });
-          if (page.instagramAccountId) {
-            const igName = page.instagramUsername ? `@${page.instagramUsername}` : page.name;
-            accounts.push({ label: `${igName} (Instagram)`, platform: 'instagram', account_id: page.instagramAccountId, account_name: igName });
-          }
-        }
-      }
-      setConnectedAccounts(accounts);
+      const res = await fetch(`/api/meta/client-pages?clientId=${clientId}`);
+      if (res.ok) setClientPages(await res.json());
     } finally {
-      setLoadingAccounts(false);
+      setLoadingPages(false);
     }
   }
 
@@ -128,7 +125,7 @@ export default function MetaAutomacoesPage() {
 
   useEffect(() => {
     void load();
-    void loadConnectedAccounts();
+    void loadClients();
   }, []);
 
   async function create() {
@@ -139,6 +136,7 @@ export default function MetaAutomacoesPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ...form,
+        client_id: selectedClient?.id ?? null,
         keyword: form.keyword || null,
         dm_message: form.dm_message || null,
       }),
@@ -147,6 +145,8 @@ export default function MetaAutomacoesPage() {
       const row = await res.json() as Automation;
       setAutomations(prev => [row, ...prev]);
       setForm({ ...EMPTY_FORM });
+      setSelectedClient(null);
+      setClientPages([]);
       setShowForm(false);
     }
     setSaving(false);
@@ -175,6 +175,21 @@ export default function MetaAutomacoesPage() {
 
   const needsKeyword = form.trigger_type === 'keyword_comment' || form.trigger_type === 'keyword_dm';
   const needsDmMessage = form.action === 'reply_and_dm';
+
+  function clientInitials(name: string) {
+    return name.split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase();
+  }
+
+  function clientColor(name: string) {
+    const colors = ['bg-violet-500', 'bg-pink-500', 'bg-blue-500', 'bg-emerald-500', 'bg-amber-500', 'bg-rose-500', 'bg-cyan-500', 'bg-indigo-500'];
+    let h = 0;
+    for (const c of name) h = (h * 31 + c.charCodeAt(0)) & 0xffff;
+    return colors[h % colors.length];
+  }
+
+  const filteredClients = clients
+    .filter(c => c.name.toLowerCase().includes(clientSearch.toLowerCase()))
+    .sort((a, b) => clientSort === 'asc' ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name));
 
   const statusIcon = (s: Log['status']) => {
     if (s === 'success') return <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />;
@@ -229,36 +244,129 @@ export default function MetaAutomacoesPage() {
             <div className="rounded-xl border border-border bg-card p-5 space-y-4">
               <p className="text-sm font-semibold text-foreground">Nova automação</p>
 
+              {/* Step 1 — pick client */}
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-muted-foreground">Conta</label>
-                {loadingAccounts ? (
-                  <div className="text-xs text-muted-foreground py-2">Carregando contas conectadas...</div>
-                ) : connectedAccounts.length > 0 ? (
-                  <select
-                    value={form.account_id ? `${form.platform}::${form.account_id}` : ''}
-                    onChange={e => {
-                      if (!e.target.value) { setForm(f => ({ ...f, account_id: '', account_name: '', platform: 'instagram' })); return; }
-                      const acc = connectedAccounts.find(a => `${a.platform}::${a.account_id}` === e.target.value);
-                      if (acc) setForm(f => ({ ...f, account_id: acc.account_id, account_name: acc.account_name, platform: acc.platform }));
-                    }}
-                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary">
-                    <option value="">Selecione uma conta...</option>
-                    {connectedAccounts.map(acc => (
-                      <option key={`${acc.platform}::${acc.account_id}`} value={`${acc.platform}::${acc.account_id}`}>
-                        {acc.label}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <div className="rounded-lg border border-dashed border-border px-3 py-2.5 text-xs text-muted-foreground">
-                    Nenhuma conta Meta conectada. Conecte uma conta em{' '}
-                    <a href="/integracoes" className="text-primary underline">Integrações</a>.
-                  </div>
-                )}
-                {form.account_id && (
-                  <p className="text-[11px] text-muted-foreground">ID: {form.account_id} · {form.platform}</p>
-                )}
+                <label className="text-xs font-medium text-muted-foreground">Cliente</label>
+                <div className="relative" ref={clientPickerRef}>
+                  <button
+                    type="button"
+                    onClick={() => setShowClientPicker(v => !v)}
+                    className="w-full flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm text-left hover:border-primary/50 transition-colors"
+                  >
+                    {selectedClient ? (
+                      <>
+                        <span className={cn('flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold text-white shrink-0', clientColor(selectedClient.name))}>
+                          {clientInitials(selectedClient.name)}
+                        </span>
+                        <span className="flex-1 truncate">{selectedClient.name}</span>
+                        <button type="button" onClick={e => { e.stopPropagation(); setSelectedClient(null); setClientPages([]); setForm(f => ({ ...f, account_id: '', account_name: '', platform: 'instagram' })); }}>
+                          <X className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
+                        </button>
+                      </>
+                    ) : (
+                      <span className="text-muted-foreground flex-1">Selecione um cliente...</span>
+                    )}
+                    <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+                  </button>
+
+                  {showClientPicker && (
+                    <div className="absolute z-50 mt-1 w-full rounded-xl border border-border bg-card shadow-xl">
+                      {/* Search + sort */}
+                      <div className="flex items-center gap-2 p-2 border-b border-border">
+                        <div className="relative flex-1">
+                          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                          <input
+                            autoFocus
+                            value={clientSearch}
+                            onChange={e => setClientSearch(e.target.value)}
+                            placeholder="Buscar cliente..."
+                            className="w-full rounded-md border border-border bg-background pl-8 pr-3 py-1.5 text-sm outline-none focus:ring-1 focus:ring-primary"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setClientSort(s => s === 'asc' ? 'desc' : 'asc')}
+                          title={clientSort === 'asc' ? 'A→Z' : 'Z→A'}
+                          className="flex h-8 w-8 items-center justify-center rounded-md border border-border bg-background text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                        >
+                          {clientSort === 'asc' ? <ArrowDownAZ className="h-4 w-4" /> : <ArrowUpAZ className="h-4 w-4" />}
+                        </button>
+                      </div>
+
+                      {/* List */}
+                      <div className="max-h-56 overflow-y-auto p-1.5 space-y-0.5">
+                        {filteredClients.length === 0 ? (
+                          <p className="py-4 text-center text-xs text-muted-foreground">Nenhum cliente encontrado</p>
+                        ) : filteredClients.map(c => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedClient(c);
+                              setShowClientPicker(false);
+                              setClientSearch('');
+                              void loadClientPages(c.id);
+                            }}
+                            className={cn(
+                              'w-full flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-left hover:bg-primary/10 transition-colors',
+                              selectedClient?.id === c.id && 'bg-primary/10 text-primary'
+                            )}
+                          >
+                            <span className={cn('flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold text-white shrink-0', clientColor(c.name))}>
+                              {clientInitials(c.name)}
+                            </span>
+                            <div className="min-w-0">
+                              <p className="font-medium truncate">{c.name}</p>
+                              {c.segment && <p className="text-[11px] text-muted-foreground truncate">{c.segment}</p>}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
+
+              {/* Step 2 — pick account */}
+              {selectedClient && (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">Conta do cliente</label>
+                  {loadingPages ? (
+                    <div className="text-xs text-muted-foreground py-2 flex items-center gap-2">
+                      <RefreshCw className="h-3.5 w-3.5 animate-spin" /> Buscando contas conectadas...
+                    </div>
+                  ) : clientPages.length > 0 ? (
+                    <div className="grid grid-cols-1 gap-1.5">
+                      {clientPages.map(pg => (
+                        <button
+                          key={`${pg.platform}::${pg.account_id}`}
+                          type="button"
+                          onClick={() => setForm(f => ({ ...f, account_id: pg.account_id, account_name: pg.account_name, platform: pg.platform }))}
+                          className={cn(
+                            'flex items-center gap-3 rounded-lg border px-3 py-2.5 text-sm text-left transition-all',
+                            form.account_id === pg.account_id && form.platform === pg.platform
+                              ? 'border-primary bg-primary/10 text-primary'
+                              : 'border-border hover:border-primary/40 hover:bg-card'
+                          )}
+                        >
+                          <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-bold uppercase shrink-0',
+                            pg.platform === 'instagram' ? 'bg-pink-500/10 text-pink-400' : 'bg-blue-500/10 text-blue-400'
+                          )}>{pg.platform === 'instagram' ? 'IG' : 'FB'}</span>
+                          <span className="flex-1 truncate font-medium">{pg.account_name}</span>
+                          {form.account_id === pg.account_id && form.platform === pg.platform && (
+                            <Check className="h-4 w-4 shrink-0" />
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
+                      Nenhuma conta Meta vinculada a este cliente. Vincule em{' '}
+                      <a href={`/clientes/${selectedClient.id}`} className="text-primary underline">Clientes → Integrações</a>.
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
