@@ -23,6 +23,7 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { ClientAvatar } from '@/components/client-avatar';
 import { useClients } from '@/lib/client-store';
 import { deleteReport, downloadReportPdf, readReports, subscribeReports, type StoredReport } from '@/lib/report-store';
 import { cn } from '@/lib/utils';
@@ -124,6 +125,8 @@ export default function RelatoriosPage() {
   const totalRows = filteredRows.length;
   const totalPages = Math.max(1, Math.ceil(totalRows / PAGE_SIZE));
   const pagedRows = filteredRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const clientsById = new Map(clients.map((client) => [client.id, client]));
+  const clientsByName = new Map(clients.map((client) => [client.name, client]));
 
   // KPI counts
   const totalReports = diagnostics.length + widgetReports.length;
@@ -150,6 +153,16 @@ export default function RelatoriosPage() {
     ...diagnostics.map(d => d.client_name),
     ...widgetReports.map(w => w.client),
   ])).sort();
+
+  function renderClientCell(clientName: string, clientId?: string) {
+    const client = (clientId ? clientsById.get(clientId) : undefined) ?? clientsByName.get(clientName);
+    return (
+      <div className="flex items-center gap-2.5">
+        <ClientAvatar clientId={client?.id ?? clientId ?? clientName} name={clientName} size="sm" />
+        <span className="truncate text-sm text-foreground">{clientName}</span>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 p-6">
@@ -389,7 +402,7 @@ export default function RelatoriosPage() {
                       </div>
                     </td>
                     {/* Cliente */}
-                    <td className="px-5 py-3.5 text-sm text-foreground">{row.client_name}</td>
+                    <td className="px-5 py-3.5">{renderClientCell(row.client_name, row.client_id)}</td>
                     {/* Período */}
                     <td className="px-5 py-3.5 text-xs text-muted-foreground whitespace-nowrap">
                       {fmtDate(row.period_from)} – {fmtDate(row.period_to)}
@@ -462,7 +475,7 @@ export default function RelatoriosPage() {
                     </div>
                   </td>
                   {/* Cliente */}
-                  <td className="px-5 py-3.5 text-sm text-foreground">{row.client}</td>
+                  <td className="px-5 py-3.5">{renderClientCell(row.client, row.clientId)}</td>
                   {/* Período */}
                   <td className="px-5 py-3.5 text-xs text-muted-foreground">{row.date}</td>
                   {/* Gerado em */}

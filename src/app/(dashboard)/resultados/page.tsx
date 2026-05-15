@@ -18,6 +18,22 @@ type ApiMetrics = {
 };
 
 type GoalConfig = { type: string; target: number };
+type FunnelStage = { id: string; name: string; conversion: number };
+type ClientPlanningConfig = { tkm: number; cplMeta: number; stages: FunnelStage[] };
+
+const DEFAULT_STAGES: FunnelStage[] = [
+  { id: 's5', name: '5º — Contatos (Leads)', conversion: 50 },
+  { id: 's4', name: '4º — Qualificados', conversion: 100 },
+  { id: 's3', name: '3º — Agendamentos', conversion: 50 },
+  { id: 's2', name: '2º — Comparecimentos', conversion: 47 },
+  { id: 's1', name: '1º — Fechamentos (Vendas)', conversion: 0 },
+];
+
+const DEFAULT_CLIENT_PLANNING: ClientPlanningConfig = {
+  tkm: 9000,
+  cplMeta: 30,
+  stages: DEFAULT_STAGES,
+};
 
 function readGoalFromStorage(clientId: string): GoalConfig | null {
   try {
@@ -25,6 +41,78 @@ function readGoalFromStorage(clientId: string): GoalConfig | null {
     if (!stored) return null;
     return JSON.parse(stored) as GoalConfig;
   } catch { return null; }
+}
+
+function readPlanningFromStorage(clientId: string): ClientPlanningConfig {
+  try {
+    const stored = localStorage.getItem(`clientPlanning_${clientId}`);
+    if (!stored) return DEFAULT_CLIENT_PLANNING;
+    const parsed = JSON.parse(stored) as Partial<ClientPlanningConfig>;
+    return {
+      tkm: Number(parsed.tkm) > 0 ? Number(parsed.tkm) : DEFAULT_CLIENT_PLANNING.tkm,
+      cplMeta: Number(parsed.cplMeta) > 0 ? Number(parsed.cplMeta) : DEFAULT_CLIENT_PLANNING.cplMeta,
+      stages: sanitizePlanningStages(parsed.stages),
+    };
+  } catch { return DEFAULT_CLIENT_PLANNING; }
+}
+
+function sanitizePlanningStages(stages: unknown): FunnelStage[] {
+  if (!Array.isArray(stages) || stages.length === 0) return DEFAULT_STAGES;
+  return DEFAULT_STAGES.map((fallback, index) => {
+    const source = stages[index] as Partial<FunnelStage> | undefined;
+    return {
+      id: source?.id ?? fallback.id,
+      name: source?.name ?? fallback.name,
+      conversion: Number.isFinite(Number(source?.conversion)) ? Number(source?.conversion) : fallback.conversion,
+    };
+  });
+}
+
+function computeFunnel(stages: FunnelStage[], metaRS: number, ticket: number): number[] {
+  const values = new Array(stages.length).fill(0);
+  if (metaRS <= 0 || ticket <= 0 || stages.length === 0) return values;
+
+  values[stages.length - 1] = Math.ceil(metaRS / ticket);
+  for (let i = stages.length - 2; i >= 0; i -= 1) {
+    const conversion = Math.max(0.01, (stages[i].conversion || 0) / 100);
+    values[i] = Math.ceil(values[i + 1] / conversion);
+  }
+
+  return values;
+}
+
+function plannedFunnelFromGoal(goal: GoalConfig | null, stages: FunnelStage[], ticket: number): number[] {
+  const values = new Array(stages.length).fill(0);
+  const target = Number(goal?.target ?? 0);
+  if (!goal || target <= 0 || stages.length === 0) return values;
+
+  if (goal.type === 'leads') {
+    values[0] = Math.ceil(target);
+    for (let i = 1; i < stages.length; i += 1) {
+      const conversion = Math.max(0, (stages[i - 1].conversion || 0) / 100);
+      values[i] = Math.ceil(values[i - 1] * conversion);
+    }
+    return values;
+  }
+
+  if (goal.type === 'revenue') return computeFunnel(stages, target, ticket);
+
+  values[stages.length - 1] = Math.ceil(target);
+  for (let i = stages.length - 2; i >= 0; i -= 1) {
+    const conversion = Math.max(0.01, (stages[i].conversion || 0) / 100);
+    values[i] = Math.ceil(values[i + 1] / conversion);
+  }
+  return values;
+}
+
+function funnelArrayToObject(values: number[]): ClientFunnel {
+  return {
+    contatos: values[0] ?? 0,
+    qualificados: values[1] ?? 0,
+    agendamentos: values[2] ?? 0,
+    comparecimentos: values[3] ?? 0,
+    fechamentos: values[4] ?? 0,
+  };
 }
 
 function calcPct(atual: number, meta: number, inverse = false): number | null {
@@ -46,8 +134,8 @@ function pctColors(pct: number | null) {
     text:   'text-emerald-300', bar: 'bg-emerald-500', border: 'border-l-emerald-500',
   };
   if (pct >= 30) return {
-    badge:  'bg-yellow-500/15 border-yellow-400/30 text-yellow-300',
-    text:   'text-yellow-300', bar: 'bg-yellow-400', border: 'border-l-yellow-400',
+    badge:  'bg-orange-500/15 border-orange-400/30 text-orange-300',
+    text:   'text-orange-300', bar: 'bg-orange-400', border: 'border-l-orange-400',
   };
   return {
     badge:  'bg-red-500/15 border-red-400/30 text-red-300',
@@ -60,7 +148,9 @@ function MetricCell({ value, pct, format = 'currency', loading = false }: {
 }) {
   const c = pctColors(pct);
   if (loading) return <span className="text-muted-foreground/40 text-sm">…</span>;
-  if (value === 0) return <span className="text-muted-foreground/40 text-sm">—</span>;
+  if (value === 0) {
+    return <span className={cn('text-sm font-bold', pct === null ? 'text-muted-foreground/40' : c.text)}>—</span>;
+  }
   return (
     <p className={cn('text-sm font-bold whitespace-nowrap', c.text)}>
       {format === 'currency' ? formatCurrencyBRL(value) : value.toLocaleString('pt-BR')}
@@ -141,13 +231,19 @@ export default function ResultadosPage() {
   const { payments } = useInvestmentPayments();
   const [apiMetricsByClient, setApiMetricsByClient] = useState<Record<string, ApiMetrics>>({});
   const [goalsByClient, setGoalsByClient] = useState<Record<string, GoalConfig | null>>({});
+  const [planningByClient, setPlanningByClient] = useState<Record<string, ClientPlanningConfig>>({});
   const [loadingMetrics, setLoadingMetrics] = useState(false);
 
-  // Read localStorage goals (client-side only)
+  // Read localStorage goals and planning (client-side only)
   useEffect(() => {
     const goals: Record<string, GoalConfig | null> = {};
-    for (const c of clients) goals[c.id] = readGoalFromStorage(c.id);
+    const planning: Record<string, ClientPlanningConfig> = {};
+    for (const c of clients) {
+      goals[c.id] = readGoalFromStorage(c.id);
+      planning[c.id] = readPlanningFromStorage(c.id);
+    }
     setGoalsByClient(goals);
+    setPlanningByClient(planning);
   }, [clients]);
 
   // Fetch real metrics for all clients
@@ -173,6 +269,9 @@ export default function ResultadosPage() {
     const hardcoded = clientResults.find((r) => r.clientId === client.id);
     const api = apiMetricsByClient[client.id];
     const goal = goalsByClient[client.id];
+    const planning = planningByClient[client.id] ?? DEFAULT_CLIENT_PLANNING;
+    const plannedFunil = funnelArrayToObject(plannedFunnelFromGoal(goal, planning.stages, planning.tkm));
+    const hasPlannedFunil = FUNNEL_KEYS.some((key) => plannedFunil[key] > 0);
 
     const clientPayments = payments.filter((p) => p.clientId === client.id);
     const totalInvest = clientPayments.reduce((s, p) => s + p.amount, 0);
@@ -187,12 +286,20 @@ export default function ResultadosPage() {
     const resultado = hardcoded?.resultado ?? 0;
 
     // Goals: prefer localStorage config, fallback to hardcoded
-    const metaTarget = (goal?.type === 'revenue' ? goal.target : null) ?? hardcoded?.meta ?? 0;
-    const metaLeads = (goal?.type === 'leads' ? goal.target : null) ?? hardcoded?.metaLeads ?? 0;
-    const metaCpl = hardcoded?.metaCpl ?? 0;
-    const metaCac = hardcoded?.metaCac ?? 0;
+    const metaTarget = goal?.type === 'revenue'
+      ? goal.target
+      : hasPlannedFunil && plannedFunil.fechamentos > 0
+        ? plannedFunil.fechamentos * planning.tkm
+        : hardcoded?.meta ?? 0;
+    const metaLeads = (hasPlannedFunil ? plannedFunil.contatos : null) ?? hardcoded?.metaLeads ?? 0;
+    const metaCpl = planning.cplMeta || hardcoded?.metaCpl || 0;
     const funil = hardcoded?.funil ?? ZERO_FUNNEL;
-    const metaFunil = hardcoded?.metaFunil ?? ZERO_FUNNEL;
+    const metaFunil = hasPlannedFunil ? plannedFunil : hardcoded?.metaFunil ?? ZERO_FUNNEL;
+    const metaFunnelSales = metaFunil.fechamentos;
+    const metaCacFromPlanning = metaLeads > 0 && metaCpl > 0 && metaFunnelSales > 0
+      ? (metaLeads * metaCpl) / metaFunnelSales
+      : 0;
+    const metaCac = metaCacFromPlanning || hardcoded?.metaCac || 0;
 
     const pctResult = calcPct(resultado, metaTarget);
     const pctLeads  = calcPct(leads, metaLeads);
@@ -204,7 +311,7 @@ export default function ResultadosPage() {
       client, hardcoded, api,
       leads, cpl, cac, resultado,
       metaTarget, metaLeads, metaCpl, metaCac,
-      funil, funnelPcts,
+      funil, metaFunil, funnelPcts,
       totalInvest, dispatchedInvest,
       pctResult, pctLeads, pctCpl, pctCac,
       gestor: hardcoded?.gestor ?? '',
@@ -245,7 +352,7 @@ export default function ResultadosPage() {
       <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
         {([
           { label: 'META TOTAL',      value: formatCurrencyBRL(totMeta),      Icon: Target,     color: '#8b5cf6' },
-          { label: 'RESULTADO TOTAL', value: formatCurrencyBRL(totResult),     Icon: TrendingUp, color: overC.text === 'text-emerald-300' ? '#22c55e' : overC.text === 'text-yellow-300' ? '#facc15' : '#ef4444' },
+          { label: 'RESULTADO TOTAL', value: formatCurrencyBRL(totResult),     Icon: TrendingUp, color: overC.text === 'text-emerald-300' ? '#22c55e' : overC.text === 'text-orange-300' ? '#fb923c' : '#ef4444' },
           { label: 'TOTAL DE LEADS',  value: totLeads.toLocaleString('pt-BR'), Icon: Users,      color: '#2f85ff' },
           { label: 'INVESTIMENTO',    value: formatCurrencyBRL(totInvest),     Icon: DollarSign, color: '#f5d000' },
         ] as const).map(({ label, value, Icon, color }) => (
@@ -303,6 +410,7 @@ export default function ResultadosPage() {
             <tbody className="divide-y divide-border">
               {rows.map((row) => {
                 const resultC = pctColors(row.pctResult);
+                const leadsC = pctColors(row.pctLeads);
                 return (
                   <tr key={row.client.id} className={cn('border-l-[3px] hover:bg-muted/20 transition-colors', resultC.border)}>
                     <td className="px-4 py-3">
@@ -325,8 +433,11 @@ export default function ResultadosPage() {
                         <span className={cn('text-sm font-bold', resultC.text)}>{row.pctResult}%</span>
                       ) : <span className="text-red-400 text-sm font-bold">—</span>}
                     </td>
-                    <td className="px-4 py-3 text-sm font-bold text-blue-400">
-                      {row.leads > 0 ? row.leads.toLocaleString('pt-BR') : <span className="text-foreground/70">0</span>}
+                    <td
+                      className={cn('px-4 py-3 text-sm font-bold', row.pctLeads === null ? 'text-blue-400' : leadsC.text)}
+                      title={row.metaLeads > 0 ? `Meta: ${row.metaLeads.toLocaleString('pt-BR')} leads` : undefined}
+                    >
+                      {row.leads > 0 ? row.leads.toLocaleString('pt-BR') : '0'}
                     </td>
                     <td className="px-4 py-3">
                       <MetricCell value={row.cpl} pct={row.pctCpl} loading={loadingMetrics && !apiMetricsByClient[row.client.id]} />
@@ -339,14 +450,20 @@ export default function ResultadosPage() {
                         {FUNNEL_KEYS.map((key, idx) => {
                           const FunnelIcon = FUNNEL_ICONS[idx];
                           const c = pctColors(row.funnelPcts[idx]);
+                          const hasStageGoal = row.metaFunil[key] > 0;
+                          const hasStageValue = row.funil[key] > 0;
                           return (
-                            <span key={key} className="flex items-center gap-0.5">
+                            <span
+                              key={key}
+                              className="flex items-center gap-0.5"
+                              title={hasStageGoal ? `Meta ${FUNNEL_LABELS[idx]}: ${row.metaFunil[key].toLocaleString('pt-BR')}` : undefined}
+                            >
                               <span className="flex flex-col items-center min-w-[36px]">
-                                <span className={cn('text-[10px] font-bold mb-0.5 tabular-nums', row.funil[key] > 0 ? c.text : 'text-muted-foreground/30')}>
-                                  {row.funil[key] > 0 ? row.funil[key] : '—'}
+                                <span className={cn('text-[10px] font-bold mb-0.5 tabular-nums', hasStageGoal || hasStageValue ? c.text : 'text-muted-foreground/30')}>
+                                  {hasStageValue ? row.funil[key] : '—'}
                                 </span>
-                                <span className={cn('w-7 h-7 rounded-lg flex items-center justify-center', row.funil[key] > 0 ? 'bg-muted/40' : 'bg-muted/20')}>
-                                  <FunnelIcon className={cn('w-3.5 h-3.5', row.funil[key] > 0 ? c.text : 'text-muted-foreground/25')} />
+                                <span className={cn('w-7 h-7 rounded-lg flex items-center justify-center', hasStageGoal || hasStageValue ? 'bg-muted/40' : 'bg-muted/20')}>
+                                  <FunnelIcon className={cn('w-3.5 h-3.5', hasStageGoal || hasStageValue ? c.text : 'text-muted-foreground/25')} />
                                 </span>
                                 <span className="text-[8px] text-muted-foreground/40 mt-0.5 whitespace-nowrap">{FUNNEL_LABELS[idx]}</span>
                               </span>

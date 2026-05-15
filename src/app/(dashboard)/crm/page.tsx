@@ -116,19 +116,15 @@ function IconSelect({ icon: Icon, value, onChange, placeholder, children, classN
   );
 }
 
-const CLIENT_CARD_THEMES = [
-  { accent: '#A855F7', glow: 'rgba(168,85,247,0.28)', bg: 'from-violet-950/70 via-card to-card' },
-  { accent: '#22D3EE', glow: 'rgba(34,211,238,0.22)', bg: 'from-cyan-950/55 via-card to-card' },
-  { accent: '#55F52F', glow: 'rgba(85,245,47,0.18)', bg: 'from-emerald-950/55 via-card to-card' },
-  { accent: '#F59E0B', glow: 'rgba(245,158,11,0.22)', bg: 'from-amber-950/60 via-card to-card' },
-  { accent: '#38BDF8', glow: 'rgba(56,189,248,0.20)', bg: 'from-sky-950/55 via-card to-card' },
-  { accent: '#EC4899', glow: 'rgba(236,72,153,0.20)', bg: 'from-pink-950/55 via-card to-card' },
-];
+const ONMID_GREEN = '#55F52F';
 
 function clientTheme(clientId: string) {
-  let hash = 0;
-  for (const c of clientId) hash = (hash * 31 + c.charCodeAt(0)) >>> 0;
-  return CLIENT_CARD_THEMES[hash % CLIENT_CARD_THEMES.length];
+  void clientId;
+  return {
+    accent: ONMID_GREEN,
+    glow: 'rgba(85,245,47,0.14)',
+    bg: 'from-emerald-950/35 via-card to-card',
+  };
 }
 
 function ClientLogoBg({ clientId }: { clientId: string }) {
@@ -140,10 +136,10 @@ function ClientLogoBg({ clientId }: { clientId: string }) {
       <img
         src={imgUrl}
         alt=""
-        className="absolute right-0 top-1/2 -translate-y-1/2 h-[120%] w-auto object-cover opacity-[0.09] scale-110"
+        className="absolute right-0 top-1/2 -translate-y-1/2 h-[115%] w-auto object-cover opacity-[0.07] scale-105"
         onError={() => setImgUrl(null)}
       />
-      <div className="absolute inset-0" style={{ background: 'linear-gradient(to right, rgba(0,0,0,0.92) 30%, rgba(0,0,0,0.55) 65%, rgba(0,0,0,0.25) 100%)' }} />
+      <div className="absolute inset-0" style={{ background: 'linear-gradient(to right, rgba(0,0,0,0.9) 34%, rgba(0,0,0,0.58) 68%, rgba(0,0,0,0.34) 100%)' }} />
     </div>
   );
 }
@@ -161,51 +157,51 @@ function ClientChoiceCard({
   return (
     <article
       className={cn(
-        'group relative overflow-hidden rounded-xl border bg-gradient-to-br p-4 transition-all hover:-translate-y-0.5',
+        'group relative overflow-hidden rounded-xl border bg-gradient-to-br p-3 transition-all hover:-translate-y-0.5',
         theme.bg,
       )}
       style={{
-        borderColor: `${theme.accent}45`,
-        boxShadow: `0 0 0 1px rgba(255,255,255,0.03), 0 22px 70px ${theme.glow}`,
+        borderColor: `${theme.accent}38`,
+        boxShadow: `0 0 0 1px rgba(255,255,255,0.025), 0 14px 42px ${theme.glow}`,
       }}
     >
-      <div className="pointer-events-none absolute inset-0 opacity-80" style={{ background: `radial-gradient(circle at 88% 8%, ${theme.glow}, transparent 34%)` }} />
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-[linear-gradient(120deg,rgba(255,255,255,0.10),transparent_55%)] opacity-50" />
+      <div className="pointer-events-none absolute inset-0 opacity-70" style={{ background: `radial-gradient(circle at 88% 8%, ${theme.glow}, transparent 30%)` }} />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-16 bg-[linear-gradient(120deg,rgba(85,245,47,0.08),transparent_55%)] opacity-60" />
       <ClientLogoBg clientId={client.id} />
       <div className="relative flex justify-between">
         {recentLabel && (
-          <span className="rounded-full border px-2 py-1 text-[9px] font-bold uppercase tracking-wider" style={{ borderColor: `${theme.accent}55`, color: theme.accent, background: `${theme.accent}18` }}>
+          <span className="rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider" style={{ borderColor: `${theme.accent}55`, color: theme.accent, background: `${theme.accent}14` }}>
             {recentLabel}
           </span>
         )}
-        <button type="button" className="ml-auto rounded-lg p-1 text-muted-foreground hover:bg-white/5 hover:text-foreground" aria-label="Mais opções">
-          <MoreVertical className="h-4 w-4" />
+        <button type="button" className="ml-auto rounded-lg p-0.5 text-muted-foreground hover:bg-white/5 hover:text-foreground" aria-label="Mais opções">
+          <MoreVertical className="h-3.5 w-3.5" />
         </button>
       </div>
 
-      <div className="relative mt-12 flex items-center gap-4">
-        <div className="rounded-xl border bg-black/25 p-1.5" style={{ borderColor: `${theme.accent}70` }}>
-          <ClientAvatar clientId={client.id} name={client.name} size="lg" />
+      <div className="relative mt-8 flex items-center gap-3">
+        <div className="rounded-lg border bg-black/25 p-1" style={{ borderColor: `${theme.accent}60` }}>
+          <ClientAvatar clientId={client.id} name={client.name} size="md" />
         </div>
         <div className="min-w-0">
-          <h3 className="truncate text-base font-bold text-foreground">{client.name}</h3>
-          <p className="mt-0.5 truncate text-sm text-muted-foreground">{client.segment}</p>
+          <h3 className="truncate text-sm font-bold text-foreground">{client.name}</h3>
+          <p className="mt-0.5 truncate text-xs text-muted-foreground">{client.segment}</p>
         </div>
-        <span className="ml-auto inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-black/30 px-2 py-1 text-[10px] font-bold text-foreground">
-          <span className={cn('h-2 w-2 rounded-full', client.status === 'Ativo' ? 'bg-primary' : 'bg-amber-400')} />
+        <span className="ml-auto inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-black/30 px-2 py-0.5 text-[10px] font-bold text-foreground">
+          <span className={cn('h-1.5 w-1.5 rounded-full', client.status === 'Ativo' ? 'bg-primary' : 'bg-amber-400')} />
           {client.status}
         </span>
       </div>
 
-      <div className="relative mt-5 flex items-center gap-2">
+      <div className="relative mt-4 flex items-center gap-2">
         <button
           type="button"
           onClick={onOpen}
-          className="flex h-10 min-w-0 flex-1 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-bold transition-colors hover:bg-white/5"
+          className="flex h-8 min-w-0 flex-1 items-center justify-center gap-2 rounded-lg border px-3 text-xs font-bold transition-colors hover:bg-white/5"
           style={{ borderColor: `${theme.accent}80`, color: '#fff' }}
         >
           Abrir CRM
-          <ChevronRight className="h-4 w-4" style={{ color: theme.accent }} />
+          <ChevronRight className="h-3.5 w-3.5" style={{ color: theme.accent }} />
         </button>
         {[
           { icon: UserRound, label: 'Leads' },
@@ -213,8 +209,8 @@ function ClientChoiceCard({
           { icon: Plug, label: 'Integrações' },
           { icon: Pencil, label: 'Editar' },
         ].map(({ icon: Icon, label }) => (
-          <button key={label} type="button" className="flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 bg-black/20 text-muted-foreground transition-colors hover:text-foreground" title={label}>
-            <Icon className="h-4 w-4" />
+          <button key={label} type="button" className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-black/20 text-muted-foreground transition-colors hover:text-foreground" title={label}>
+            <Icon className="h-3.5 w-3.5" />
           </button>
         ))}
       </div>
@@ -490,7 +486,7 @@ export default function CrmPage() {
             <section className="space-y-3">
               <div className="flex items-center justify-between gap-3">
                 <h2 className="flex items-center gap-2 text-base font-bold">
-                  <Clock3 className="h-5 w-5 text-violet-400" />
+                  <Clock3 className="h-5 w-5 text-primary" />
                   Acessados recentemente
                 </h2>
                 <button type="button" onClick={() => setRecentClientIds([])} className="text-xs font-semibold text-muted-foreground hover:text-foreground">Limpar</button>
@@ -510,7 +506,7 @@ export default function CrmPage() {
 
           <section className="space-y-3">
             <h2 className="flex items-center gap-2 text-base font-bold">
-              <LayoutGrid className="h-5 w-5 text-violet-400" />
+              <LayoutGrid className="h-5 w-5 text-primary" />
               Todos os clientes
             </h2>
             {filteredClients.length === 0 ? (

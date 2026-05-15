@@ -120,10 +120,8 @@ function CriticalBalanceAlerts({
   const critical = balances.filter(b => b.balance !== null && b.balance < LOW_BALANCE_THRESHOLD);
   const metaCritical = critical.filter((account) => account.platform === 'meta');
   const googleCritical = critical.filter((account) => account.platform === 'google');
-  const shouldCollapseMeta = metaCritical.length > 4;
-  const shouldCollapseGoogle = googleCritical.length > 4;
-  const visibleMetaCritical = expanded || !shouldCollapseMeta ? metaCritical : metaCritical.slice(0, 4);
-  const visibleGoogleCritical = expanded || !shouldCollapseGoogle ? googleCritical : googleCritical.slice(0, 4);
+  const visibleMetaCritical = metaCritical;
+  const visibleGoogleCritical = googleCritical;
 
   if (!loading && critical.length === 0) return null;
 
@@ -206,11 +204,11 @@ function CriticalBalanceAlerts({
         </div>
 
         {loading && critical.length === 0 ? (
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
             {[1, 2].map(i => <div key={i} className="h-28 bg-red-500/10 rounded-lg animate-pulse" />)}
           </div>
         ) : visibleAccounts.length > 0 ? (
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
             {visibleAccounts.map(renderAccountCard)}
           </div>
         ) : (
@@ -223,25 +221,28 @@ function CriticalBalanceAlerts({
   }
 
   return (
-    <div className="rounded-xl border border-red-500/40 bg-red-500/5 p-4 space-y-3">
-      <div className="flex items-center justify-between">
+    <div className="rounded-xl border border-red-500/35 bg-red-500/5">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+        <button
+          type="button"
+          onClick={() => setExpanded((value) => !value)}
+          className="flex min-w-0 flex-1 items-center gap-3 text-left"
+        >
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-red-500/30 bg-red-500/10">
+            <AlertTriangle className="h-4 w-4 text-red-400" />
+          </span>
+          <span className="min-w-0">
+            <span className="block text-sm font-bold uppercase tracking-wider text-red-400">
+              {loading && critical.length === 0 ? 'Verificando saldos...' : `${critical.length} conta${critical.length > 1 ? 's' : ''} com saldo crítico`}
+            </span>
+            <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+              {loading && critical.length === 0
+                ? 'Buscando contas Meta Ads e Google Ads com saldo baixo.'
+                : 'Alerta minimizado. Expanda para ver contas e adicionar saldo.'}
+            </span>
+          </span>
+        </button>
         <div className="flex items-center gap-2">
-          <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
-          <h2 className="font-bold text-sm text-red-400 uppercase tracking-wider">
-            {loading && critical.length === 0 ? 'Verificando saldos...' : `${critical.length} conta${critical.length > 1 ? 's' : ''} com saldo crítico`}
-          </h2>
-        </div>
-        <div className="flex items-center gap-2">
-          {(shouldCollapseMeta || shouldCollapseGoogle) && (
-            <button
-              type="button"
-              onClick={() => setExpanded((value) => !value)}
-              className="flex items-center gap-1 rounded-md border border-red-500/30 px-2 py-1 text-[10px] font-bold text-red-300 transition-colors hover:bg-red-500/10"
-            >
-              {expanded ? 'Minimizar' : `Ver ${critical.length}`}
-              <ChevronDown className={cn('h-3 w-3 transition-transform', expanded && 'rotate-180')} />
-            </button>
-          )}
           {lastUpdated && (
             <span className="text-[10px] text-muted-foreground">
               {lastUpdated.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
@@ -255,13 +256,23 @@ function CriticalBalanceAlerts({
             <RefreshCw className={cn('w-3 h-3', loading && 'animate-spin')} />
             Atualizar
           </button>
+          <button
+            type="button"
+            onClick={() => setExpanded((value) => !value)}
+            className="flex items-center gap-1 rounded-md border border-red-500/30 px-2 py-1 text-[10px] font-bold text-red-300 transition-colors hover:bg-red-500/10"
+          >
+            {expanded ? 'Minimizar' : 'Expandir'}
+            <ChevronDown className={cn('h-3 w-3 transition-transform', expanded && 'rotate-180')} />
+          </button>
         </div>
       </div>
 
-      <div className={cn('grid gap-3', metaCritical.length > 0 && googleCritical.length > 0 ? 'lg:grid-cols-2' : 'lg:grid-cols-1 max-w-xl')}>
-        {metaCritical.length > 0 && renderPlatformColumn('meta', metaCritical, visibleMetaCritical)}
-        {googleCritical.length > 0 && renderPlatformColumn('google', googleCritical, visibleGoogleCritical)}
-      </div>
+      {expanded && (
+        <div className="space-y-3 border-t border-red-500/20 p-4">
+          {metaCritical.length > 0 && renderPlatformColumn('meta', metaCritical, visibleMetaCritical)}
+          {googleCritical.length > 0 && renderPlatformColumn('google', googleCritical, visibleGoogleCritical)}
+        </div>
+      )}
     </div>
   );
 }
@@ -1324,6 +1335,10 @@ export default function PagamentosPage() {
         </div>
       </div>
 
+      {(activeBalances.length > 0 || balancesLoading) && (
+        <CriticalBalanceAlerts balances={activeBalances} loading={balancesLoading} lastUpdated={balancesLastUpdated} onRefresh={loadBalances} />
+      )}
+
       <div className="grid gap-4 xl:grid-cols-5">
         {viewMode === 'dia' ? (
           <>
@@ -1509,9 +1524,6 @@ export default function PagamentosPage() {
         </div>
       )}
 
-      {(activeBalances.length > 0 || balancesLoading) && (
-        <CriticalBalanceAlerts balances={activeBalances} loading={balancesLoading} lastUpdated={balancesLastUpdated} onRefresh={loadBalances} />
-      )}
       <ClientInvestmentSummary payments={visiblePayments} balances={activeBalances} clientLinks={activeClientLinks} />
 
       {/* ──────────────────────────────────────────────

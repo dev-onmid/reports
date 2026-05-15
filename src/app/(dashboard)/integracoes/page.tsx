@@ -845,6 +845,7 @@ function MetaConnectionsPanel({
   const [assetsLoading, setAssetsLoading] = useState(false);
   const [assetsError, setAssetsError] = useState('');
   const [enabledMap, setEnabledMap] = useState<Record<string, boolean>>({});
+  const [assetsExpanded, setAssetsExpanded] = useState(false);
 
   const selectedConn = connections.find((c) => c.id === selectedId) ?? connections[0] ?? null;
 
@@ -876,6 +877,10 @@ function MetaConnectionsPanel({
     if (selectedConn) loadAssets(selectedConn);
   }, [selectedConn?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    setAssetsExpanded(false);
+  }, [selectedConn?.id, assetTab]);
+
   async function handleToggleAccount(id: string) {
     const newEnabled = !(enabledMap[id] ?? true);
     setEnabledMap((prev) => ({ ...prev, [id]: newEnabled }));
@@ -896,6 +901,16 @@ function MetaConnectionsPanel({
     { key: 'pages',      label: 'Páginas',           icon: Building2,  count: assets?.pages.length ?? 0      },
     { key: 'instagram',  label: 'Instagram',         icon: Camera,     count: assets?.instagram.length ?? 0  },
   ];
+  const assetPreviewLimit = 3;
+  const visibleAdAccounts = assetsExpanded ? assets?.adAccounts ?? [] : (assets?.adAccounts ?? []).slice(0, assetPreviewLimit);
+  const visiblePages = assetsExpanded ? assets?.pages ?? [] : (assets?.pages ?? []).slice(0, assetPreviewLimit);
+  const visibleInstagram = assetsExpanded ? assets?.instagram ?? [] : (assets?.instagram ?? []).slice(0, assetPreviewLimit);
+  const selectedAssetCount =
+    assetTab === 'adAccounts' ? assets?.adAccounts.length ?? 0 :
+    assetTab === 'pages' ? assets?.pages.length ?? 0 :
+    assets?.instagram.length ?? 0;
+  const hiddenAssetCount = Math.max(0, selectedAssetCount - assetPreviewLimit);
+  const canExpandAssets = selectedAssetCount > assetPreviewLimit;
 
   return (
     <div
@@ -1057,7 +1072,7 @@ function MetaConnectionsPanel({
 
           {!assetsLoading && !assetsError && assets && (
             <div className="space-y-1">
-              {assetTab === 'adAccounts' && assets.adAccounts.map((acc) => {
+              {assetTab === 'adAccounts' && visibleAdAccounts.map((acc) => {
                 const statusInfo = AD_ACCOUNT_STATUS[acc.account_status] ?? { label: 'Desconhecido', color: 'text-muted-foreground' };
                 const enabled = enabledMap[acc.id] ?? true;
                 return (
@@ -1095,7 +1110,7 @@ function MetaConnectionsPanel({
                 );
               })}
 
-              {assetTab === 'pages' && assets.pages.map((page) => (
+              {assetTab === 'pages' && visiblePages.map((page) => (
                 <div key={page.id} className="flex items-center gap-3 p-3 rounded-lg bg-muted/20">
                   {page.picture?.data?.url ? (
                     <img src={page.picture.data.url} alt={page.name} className="w-8 h-8 rounded-full object-cover shrink-0" />
@@ -1114,7 +1129,7 @@ function MetaConnectionsPanel({
                 </div>
               ))}
 
-              {assetTab === 'instagram' && assets.instagram.map((ig) => (
+              {assetTab === 'instagram' && visibleInstagram.map((ig) => (
                 <div key={ig.id} className="flex items-center gap-3 p-3 rounded-lg bg-muted/20">
                   {ig.profile_picture_url ? (
                     <img src={ig.profile_picture_url} alt={ig.username} className="w-8 h-8 rounded-full object-cover shrink-0" />
@@ -1132,6 +1147,17 @@ function MetaConnectionsPanel({
                   )}
                 </div>
               ))}
+
+              {canExpandAssets && (
+                <button
+                  type="button"
+                  onClick={() => setAssetsExpanded((value) => !value)}
+                  className="mt-2 flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-background/25 text-xs font-bold text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+                >
+                  {assetsExpanded ? 'Recolher lista' : `Ver todos os ativos (${hiddenAssetCount} ocultos)`}
+                  <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', assetsExpanded && 'rotate-180')} />
+                </button>
+              )}
 
               {assetTab === 'adAccounts' && assets.adAccounts.length === 0 && (
                 <p className="py-6 text-center text-xs text-muted-foreground">Nenhuma conta de anúncio encontrada.</p>
