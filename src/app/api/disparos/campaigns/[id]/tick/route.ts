@@ -102,7 +102,7 @@ export async function POST(
         if (Array.isArray(parsed) && parsed.length > 0) messagePool = parsed;
       } catch { /* keep single message */ }
     }
-    const rawMessage = messagePool[number.position % messagePool.length];
+    const rawMessage = messagePool[Math.floor(Math.random() * messagePool.length)];
     const message = interpolate(rawMessage, number.phone, number.name ?? '');
     const client = { instanceId: campaign.instance_id, token: campaign.token, clientToken: campaign.security_token ?? undefined };
 

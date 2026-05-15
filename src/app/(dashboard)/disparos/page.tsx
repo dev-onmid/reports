@@ -1021,7 +1021,7 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
                   <div className="flex items-center gap-2 flex-wrap">
                     <Sparkles className="h-3.5 w-3.5 text-violet-400" />
                     <p className="text-[11px] font-bold uppercase tracking-widest text-violet-400">Variações geradas pela IA</p>
-                    <span className="rounded-full bg-violet-500/20 px-2 py-0.5 text-[10px] font-bold text-violet-300">{variations.length} variações · serão intercaladas no envio</span>
+                    <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-400">✓ {variations.length + 1} mensagens prontas para envio aleatório</span>
                     <button
                       type="button"
                       onClick={() => { setVariations([]); setPreviewVariationIdx(null); }}
@@ -1072,19 +1072,6 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
                             >
                               {v.editing ? <CheckCircle2 className="h-3 w-3" /> : <Pencil className="h-3 w-3" />}
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setForm(p => ({ ...p, message: v.text }));
-                                lastGeneratedMsgRef.current = v.text;
-                                setVariations([]);
-                                setPreviewVariationIdx(null);
-                              }}
-                              className="flex items-center gap-1 rounded-lg bg-emerald-500 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-emerald-400 transition-colors shadow-[0_0_8px_rgba(16,185,129,0.3)]"
-                            >
-                              <CheckCircle2 className="h-3 w-3" />
-                              Usar esta
-                            </button>
                           </div>
                         </div>
                         {v.editing ? (
@@ -1101,7 +1088,7 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
                     ))}
                   </div>
                   <p className="text-[10px] text-muted-foreground/50 text-center">
-                    Envio intercalado: contato 1 → msg principal, contato 2 → variação 1, contato 3 → variação 2…
+                    Cada contato receberá uma mensagem aleatória entre a principal e as variações acima.
                   </p>
                 </div>
               )}
