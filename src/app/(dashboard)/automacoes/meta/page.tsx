@@ -56,6 +56,13 @@ const ACTION_LABELS: Record<string, string> = {
 
 const BASE = typeof window !== 'undefined' ? window.location.origin : 'https://reports.onmid.app';
 
+type ConnectedAccount = {
+  label: string; // e.g. "@clinicasorrir (Instagram)" or "Clínica Sorrir (Facebook)"
+  platform: 'instagram' | 'facebook';
+  account_id: string;
+  account_name: string;
+};
+
 const EMPTY_FORM = {
   account_id: '', account_name: '', platform: 'instagram' as 'instagram' | 'facebook',
   trigger_type: 'any_comment', keyword: '',
@@ -73,6 +80,36 @@ export default function MetaAutomacoesPage() {
   const [saving, setSaving] = useState(false);
   const [expandedLog, setExpandedLog] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [connectedAccounts, setConnectedAccounts] = useState<ConnectedAccount[]>([]);
+  const [loadingAccounts, setLoadingAccounts] = useState(false);
+
+  async function loadConnectedAccounts() {
+    setLoadingAccounts(true);
+    try {
+      const connRes = await fetch('/api/meta/connections');
+      if (!connRes.ok) return;
+      const connections = await connRes.json() as Array<{ id: string; label: string; status: string }>;
+      const active = connections.filter(c => c.status === 'connected');
+
+      const pagesResults = await Promise.all(
+        active.map(c => fetch(`/api/meta/pages?connectionId=${c.id}`).then(r => r.ok ? r.json() : []))
+      );
+
+      const accounts: ConnectedAccount[] = [];
+      for (const pages of pagesResults as Array<Array<{ id: string; name: string; instagramAccountId?: string; instagramUsername?: string }>>) {
+        for (const page of pages) {
+          accounts.push({ label: `${page.name} (Facebook)`, platform: 'facebook', account_id: page.id, account_name: page.name });
+          if (page.instagramAccountId) {
+            const igName = page.instagramUsername ? `@${page.instagramUsername}` : page.name;
+            accounts.push({ label: `${igName} (Instagram)`, platform: 'instagram', account_id: page.instagramAccountId, account_name: igName });
+          }
+        }
+      }
+      setConnectedAccounts(accounts);
+    } finally {
+      setLoadingAccounts(false);
+    }
+  }
 
   async function load() {
     setLoading(true);
@@ -89,7 +126,10 @@ export default function MetaAutomacoesPage() {
     setLoading(false);
   }
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    void load();
+    void loadConnectedAccounts();
+  }, []);
 
   async function create() {
     if (!form.account_id || !form.reply_message) return;
@@ -189,28 +229,35 @@ export default function MetaAutomacoesPage() {
             <div className="rounded-xl border border-border bg-card p-5 space-y-4">
               <p className="text-sm font-semibold text-foreground">Nova automação</p>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-muted-foreground">Plataforma</label>
-                  <select value={form.platform} onChange={e => setForm(f => ({ ...f, platform: e.target.value as 'instagram' | 'facebook' }))}
-                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary">
-                    <option value="instagram">Instagram</option>
-                    <option value="facebook">Facebook</option>
-                  </select>
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-muted-foreground">ID da Conta / Página</label>
-                  <input value={form.account_id} onChange={e => setForm(f => ({ ...f, account_id: e.target.value }))}
-                    placeholder="123456789"
-                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary" />
-                </div>
-              </div>
-
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-muted-foreground">Nome da conta (para identificação)</label>
-                <input value={form.account_name} onChange={e => setForm(f => ({ ...f, account_name: e.target.value }))}
-                  placeholder="Ex: @clinicasorrir"
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary" />
+                <label className="text-xs font-medium text-muted-foreground">Conta</label>
+                {loadingAccounts ? (
+                  <div className="text-xs text-muted-foreground py-2">Carregando contas conectadas...</div>
+                ) : connectedAccounts.length > 0 ? (
+                  <select
+                    value={form.account_id ? `${form.platform}::${form.account_id}` : ''}
+                    onChange={e => {
+                      if (!e.target.value) { setForm(f => ({ ...f, account_id: '', account_name: '', platform: 'instagram' })); return; }
+                      const acc = connectedAccounts.find(a => `${a.platform}::${a.account_id}` === e.target.value);
+                      if (acc) setForm(f => ({ ...f, account_id: acc.account_id, account_name: acc.account_name, platform: acc.platform }));
+                    }}
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary">
+                    <option value="">Selecione uma conta...</option>
+                    {connectedAccounts.map(acc => (
+                      <option key={`${acc.platform}::${acc.account_id}`} value={`${acc.platform}::${acc.account_id}`}>
+                        {acc.label}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="rounded-lg border border-dashed border-border px-3 py-2.5 text-xs text-muted-foreground">
+                    Nenhuma conta Meta conectada. Conecte uma conta em{' '}
+                    <a href="/integracoes" className="text-primary underline">Integrações</a>.
+                  </div>
+                )}
+                {form.account_id && (
+                  <p className="text-[11px] text-muted-foreground">ID: {form.account_id} · {form.platform}</p>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
