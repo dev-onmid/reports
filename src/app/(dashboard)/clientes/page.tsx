@@ -128,7 +128,7 @@ export default function ClientesPage() {
       {/* ── HEADER ── */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-black uppercase tracking-tight">Meus Clientes</h1>
+          <h1 className="font-heading font-normal text-4xl uppercase leading-none tracking-wide text-foreground">Meus Clientes</h1>
           <div className="mt-1 h-[3px] w-14 rounded-full bg-violet-500" />
           <p className="mt-2 text-sm text-muted-foreground">
             Gerencie a base de clientes e acesse os dashboards individuais.

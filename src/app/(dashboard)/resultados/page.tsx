@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { type ElementType, useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
-  ArrowRight, TrendingUp, Users, Wallet, Target, RefreshCw,
+  ArrowRight, TrendingUp, Users, Target, RefreshCw,
   Eye, Calendar, ShoppingBag, CheckCircle2, ChevronRight, Info, DollarSign, Users2,
 } from 'lucide-react';
 import { useInvestmentPayments } from '@/lib/payment-store';
@@ -75,16 +75,64 @@ const ZERO_FUNNEL: ClientFunnel = { contatos: 0, qualificados: 0, agendamentos: 
 
 function ResultSparkline({ color }: { color: string }) {
   return (
-    <svg width="100%" height="28" viewBox="0 0 120 28" preserveAspectRatio="none" className="mt-3 opacity-70">
+    <svg width="100%" height="28" viewBox="0 0 120 28" preserveAspectRatio="none" className="mt-5 opacity-80">
       <path
-        d="M0,18 C8,12 15,8 25,14 C35,20 42,6 55,10 C68,14 75,22 88,8 C101,-4 110,16 120,12"
+        d="M0,17 L8,18 L16,18 L24,16 L32,18 L40,15 L48,16 L56,13 L64,13 L72,15 L80,13 L88,17 L96,17 L104,14 L112,17 L120,18"
         fill="none"
         stroke={color}
-        strokeWidth="1.5"
+        strokeWidth="1.7"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
     </svg>
+  );
+}
+
+function ResultKpiCard({
+  label,
+  value,
+  icon: Icon,
+  color,
+}: {
+  label: string;
+  value: string;
+  icon: ElementType;
+  color: string;
+}) {
+  return (
+    <div
+      className="relative min-h-[170px] overflow-hidden rounded-2xl border border-border bg-card px-7 py-7"
+      style={{
+        background: `radial-gradient(circle at 11% 36%, ${color}18, transparent 31%), linear-gradient(145deg, rgba(17,22,35,0.92), rgba(8,11,18,0.97))`,
+        boxShadow: `0 0 30px ${color}0d, inset 0 0 0 1px rgba(255,255,255,0.025)`,
+      }}
+    >
+      <div className="flex items-start gap-6">
+        <span
+          className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full border"
+          style={{
+            color,
+            borderColor: `${color}38`,
+            background: `radial-gradient(circle, ${color}30 0%, ${color}16 72%)`,
+            boxShadow: `0 0 24px ${color}22`,
+          }}
+        >
+          <Icon className="h-8 w-8" />
+        </span>
+        <div className="min-w-0 pt-1">
+          <div className="flex items-center gap-2">
+            <Icon className="h-3.5 w-3.5" style={{ color }} />
+            <p className="text-sm font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
+          </div>
+          <p className="mt-3 font-heading font-normal text-3xl leading-none tabular-nums" style={{ color }}>
+            {value}
+          </p>
+        </div>
+      </div>
+      <div className="absolute bottom-6 left-10 right-8">
+        <ResultSparkline color={color} />
+      </div>
+    </div>
   );
 }
 
@@ -171,62 +219,59 @@ export default function ResultadosPage() {
   const overC = pctColors(overallPct);
 
   return (
-    <div className="space-y-5 pb-8">
+    <div className="space-y-6 pb-8">
 
       {/* ── Header ── */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-3xl font-bold font-heading tracking-tight uppercase">Resultado Geral</h1>
-          <p className="text-muted-foreground mt-1 text-sm">
+          <h1 className="font-heading font-normal text-4xl uppercase leading-none tracking-wide text-foreground">Radar Geral</h1>
+          <p className="mt-4 text-lg font-medium text-muted-foreground">
             Métricas reais das contas vinculadas — leads e CPL do Meta Ads, CAC do Google Ads.
           </p>
         </div>
-        {loadingMetrics && (
-          <div className="flex items-center gap-2 text-xs text-muted-foreground shrink-0">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            Atualizando métricas...
-            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-          </div>
-        )}
+        <div
+          className={cn(
+            'mt-2 flex h-11 items-center gap-3 rounded-xl border border-border bg-card px-5 text-sm font-bold text-muted-foreground shadow-[0_0_22px_rgba(15,23,42,0.18)]',
+            !loadingMetrics && 'opacity-70',
+          )}
+        >
+          <span className={cn('h-2 w-2 rounded-full bg-primary', loadingMetrics && 'animate-pulse shadow-[0_0_12px_rgba(85,245,47,0.55)]')} />
+          {loadingMetrics ? 'Atualizando métricas...' : 'Métricas atualizadas'}
+          <RefreshCw className={cn('h-4 w-4', loadingMetrics && 'animate-spin')} />
+        </div>
       </div>
 
       {/* ── KPI Cards ── */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
         {([
           { label: 'META TOTAL',      value: formatCurrencyBRL(totMeta),      Icon: Target,     color: '#8b5cf6' },
-          { label: 'RESULTADO TOTAL', value: formatCurrencyBRL(totResult),     Icon: TrendingUp, color: overC.text === 'text-emerald-300' ? '#10b981' : overC.text === 'text-yellow-300' ? '#eab308' : '#ef4444' },
-          { label: 'TOTAL DE LEADS',  value: totLeads.toLocaleString('pt-BR'), Icon: Users,      color: '#3b82f6' },
-          { label: 'INVESTIMENTO',    value: formatCurrencyBRL(totInvest),     Icon: DollarSign, color: '#f59e0b' },
+          { label: 'RESULTADO TOTAL', value: formatCurrencyBRL(totResult),     Icon: TrendingUp, color: overC.text === 'text-emerald-300' ? '#22c55e' : overC.text === 'text-yellow-300' ? '#facc15' : '#ef4444' },
+          { label: 'TOTAL DE LEADS',  value: totLeads.toLocaleString('pt-BR'), Icon: Users,      color: '#2f85ff' },
+          { label: 'INVESTIMENTO',    value: formatCurrencyBRL(totInvest),     Icon: DollarSign, color: '#f5d000' },
         ] as const).map(({ label, value, Icon, color }) => (
-          <div key={label} className="bg-card border border-border rounded-xl p-5 relative overflow-hidden">
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex-1 min-w-0">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
-                <p className="text-2xl font-bold font-heading mt-2 tabular-nums" style={{ color }}>{value}</p>
-              </div>
-              <div className="w-12 h-12 rounded-full flex items-center justify-center shrink-0"
-                style={{ background: `radial-gradient(circle, ${color}30 0%, ${color}12 70%)`, border: `1px solid ${color}25` }}>
-                <Icon className="w-6 h-6" style={{ color }} />
-              </div>
-            </div>
-            <ResultSparkline color={color} />
-          </div>
+          <ResultKpiCard key={label} label={label} value={value} icon={Icon} color={color} />
         ))}
       </div>
 
       {/* ── Legend ── */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">LEGENDA</span>
+      <div className="flex items-center gap-4 flex-wrap">
+        <span className="flex items-center gap-2 text-sm font-bold uppercase tracking-widest text-muted-foreground">
+          <Info className="h-4 w-4" />
+          Legenda
+        </span>
         {([
           { label: '≥ 75% da meta',  bg: 'bg-emerald-500/15 border-emerald-400/30 text-emerald-300' },
           { label: '30 – 74% da meta', bg: 'bg-orange-500/15 border-orange-400/30 text-orange-300' },
           { label: '< 30% da meta',  bg: 'bg-red-500/15 border-red-400/30 text-red-300' },
         ]).map(({ label, bg }) => (
-          <span key={label} className={cn('rounded-full border px-2.5 py-0.5 text-[10px] font-bold', bg)}>
+          <span key={label} className={cn('rounded-full border px-5 py-2 text-sm font-bold', bg)}>
             {label}
           </span>
         ))}
-        <span className="text-[10px] text-muted-foreground/60 italic">CPL e CAC: menor = melhor</span>
+        <span className="flex items-center gap-2 text-sm font-semibold italic text-muted-foreground/70">
+          <TrendingUp className="h-4 w-4" />
+          CPL e CAC: menor = melhor
+        </span>
       </div>
 
       {/* ── Table ── */}

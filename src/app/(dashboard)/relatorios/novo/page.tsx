@@ -431,9 +431,9 @@ function ReportWidgetPreview({ widgets, reports }: { widgets: ReportWidget[]; re
         return (
           <div key={widget.id} className="rounded-xl border border-border bg-card p-4 overflow-hidden relative">
             <div className="absolute inset-x-0 top-0 h-1" style={{ background: metric.color }} />
-            <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{SOURCE_LABELS[metric.source]}</p>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{SOURCE_LABELS[metric.source]}</p>
             <h3 className="mt-1 text-sm font-bold">{widget.title}</h3>
-            <p className="mt-3 text-2xl font-bold tabular-nums" style={{ color: metric.color }}>
+            <p className="mt-3 font-heading font-normal text-3xl leading-none tabular-nums" style={{ color: metric.color }}>
               {formatMetricValue(value, metric.format)}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">{metric.description}</p>
@@ -644,7 +644,7 @@ function KpiCard({ label, value, sub }: { label: string; value: string; sub?: st
   return (
     <div className="p-5 rounded-xl border border-border bg-card">
       <p className="text-xs text-muted-foreground mb-1">{label}</p>
-      <p className="text-2xl font-bold tracking-tight">{value}</p>
+      <p className="font-heading font-normal text-3xl leading-none text-foreground">{value}</p>
       {sub && <p className="text-xs text-muted-foreground mt-1">{sub}</p>}
     </div>
   );
@@ -1000,7 +1000,7 @@ function WidgetCard({
       <div className="p-4">
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1 min-w-0">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{SOURCE_LABELS[metric.source]}</p>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{SOURCE_LABELS[metric.source]}</p>
             {editingTitle ? (
               <input
                 autoFocus
@@ -1043,7 +1043,7 @@ function WidgetCard({
 
         {/* Value / Chart */}
         {widget.type === 'kpi' ? (
-          <p className="mt-3 text-2xl font-bold tabular-nums" style={{ color: metric.color }}>
+          <p className="mt-3 font-heading font-normal text-3xl leading-none tabular-nums" style={{ color: metric.color }}>
             {isGenerating
               ? <span className="inline-block w-24 h-7 rounded bg-muted animate-pulse" />
               : formatMetricValue(value, metric.format)}
@@ -1092,7 +1092,7 @@ function WidgetCard({
       {showMenu && (
         <div className="absolute top-8 right-2 z-10 bg-card border border-border rounded-xl shadow-xl p-3 space-y-3 min-w-[180px]">
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5">Tipo de widget</p>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-1.5">Tipo de widget</p>
             <div className="grid grid-cols-4 gap-1">
               {WIDGET_TYPES.map(wt => (
                 <button
@@ -1109,7 +1109,7 @@ function WidgetCard({
             </div>
           </div>
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5">Largura</p>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-1.5">Largura</p>
             <div className="grid grid-cols-3 gap-1">
               {WIDGET_SIZES.map(ws => (
                 <button
@@ -1748,7 +1748,7 @@ export default function NovoRelatorioPage() {
           <div className="p-6 space-y-6">
             {/* Report header — live */}
             <div className="border-b border-border pb-4">
-              <h2 className="text-2xl font-bold tracking-tight">
+              <h2 className="font-heading font-normal text-4xl uppercase leading-none tracking-wide text-foreground">
                 {reportName.trim() || <span className="text-muted-foreground font-normal italic">Relatório sem título</span>}
               </h2>
               <p className="text-sm text-muted-foreground mt-1">
@@ -1760,7 +1760,7 @@ export default function NovoRelatorioPage() {
 
             {/* Widget cards — immediate mock values, real values after generation */}
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-3">Métricas selecionadas</p>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-3">Métricas selecionadas</p>
               <div className="grid gap-3 md:grid-cols-3">
                 {widgetsForSelectedSources.map(widget => {
                   const metric = METRIC_BY_KEY[widget.metricKey];

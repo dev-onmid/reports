@@ -30,7 +30,7 @@ const navItems: { name: string; href: string; icon: React.ElementType; roles: Ro
   { name: 'Clientes',    href: '/clientes',    icon: Users,           roles: ['Administrador', 'Usuário'] },
   { name: 'CRM',         href: '/crm',         icon: TableProperties, roles: ['Administrador', 'Usuário'] },
   { name: 'Relatórios',  href: '/relatorios',  icon: FileText,        roles: ['Administrador', 'Usuário'] },
-  { name: 'Resultados',  href: '/resultados',  icon: BarChart3,       roles: ['Administrador', 'Usuário'] },
+  { name: 'Radar',       href: '/resultados',  icon: BarChart3,       roles: ['Administrador', 'Usuário'] },
   { name: 'Pagamentos',  href: '/pagamentos',  icon: WalletCards,     roles: ['Administrador', 'Usuário'] },
   { name: 'Biblioteca',  href: '/biblioteca',  icon: Library,         roles: ['Administrador', 'Usuário'] },
   { name: 'Disparos',    href: '/disparos',    icon: MessageCircle,   roles: ['Administrador', 'Usuário'] },

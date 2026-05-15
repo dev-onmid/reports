@@ -30,6 +30,10 @@ export type CampaignPerformance = {
 
 const DEV_TOKEN = process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? '1vR8GhAk4UMZoPaqo7Qq8Q';
 
+function normalizeGoogleCustomerId(accountId: string) {
+  return accountId.replace(/\D/g, '');
+}
+
 function gadsHeaders(accessToken: string, loginCustomerId?: string) {
   const h: Record<string, string> = {
     Authorization: `Bearer ${accessToken}`,
@@ -41,8 +45,10 @@ function gadsHeaders(accessToken: string, loginCustomerId?: string) {
 }
 
 async function gadsSearch(customerId: string, query: string, accessToken: string, loginCustomerId?: string) {
+  const normalizedCustomerId = normalizeGoogleCustomerId(customerId);
+  if (!normalizedCustomerId) return null;
   const res = await fetch(
-    `https://googleads.googleapis.com/v20/customers/${customerId}/googleAds:search`,
+    `https://googleads.googleapis.com/v20/customers/${normalizedCustomerId}/googleAds:search`,
     { method: 'POST', headers: gadsHeaders(accessToken, loginCustomerId), body: JSON.stringify({ query }) },
   );
   if (!res.ok) return null;
@@ -70,7 +76,7 @@ async function buildMccMap(accessToken: string): Promise<Record<string, string>>
   const mccMap: Record<string, string> = {};
   await Promise.allSettled(
     resourceNames.map(async (rn) => {
-      const custId = rn.replace('customers/', '');
+      const custId = normalizeGoogleCustomerId(rn.replace('customers/', ''));
       const data = await gadsSearch(custId, 'SELECT customer.id, customer.manager FROM customer LIMIT 1', accessToken);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const c = (data?.results?.[0] as any)?.customer;
@@ -85,7 +91,7 @@ async function buildMccMap(accessToken: string): Promise<Record<string, string>>
       for (const r of (subData?.results ?? []) as any[]) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const sub = (r as any).customerClient;
-        if (sub?.id && !sub.manager) mccMap[String(sub.id)] = custId;
+        if (sub?.id && !sub.manager) mccMap[normalizeGoogleCustomerId(String(sub.id))] = custId;
       }
     }),
   );
@@ -197,7 +203,9 @@ export async function GET(request: NextRequest) {
   for (const link of links) {
     const key = `${link.platform}:${link.connection_id}`;
     const list = linksByPlatformAndConn.get(key) ?? [];
-    list.push({ id: link.account_id, name: link.account_name ?? link.account_id });
+    const accountId = link.platform === 'google_ads' ? normalizeGoogleCustomerId(link.account_id) : link.account_id;
+    if (!accountId) continue;
+    list.push({ id: accountId, name: link.account_name ?? link.account_id });
     linksByPlatformAndConn.set(key, list);
   }
 
@@ -300,9 +308,11 @@ export async function GET(request: NextRequest) {
 
       await Promise.allSettled(
         accountIds.map(async (accountId) => {
-          const loginCustomerId = mccMap[accountId];
+          const normalizedAccountId = normalizeGoogleCustomerId(accountId);
+          if (!normalizedAccountId) return;
+          const loginCustomerId = mccMap[normalizedAccountId];
           const data = await gadsSearch(
-            accountId,
+            normalizedAccountId,
             `SELECT campaign.id, campaign.name, campaign.status,
                     campaign_budget.amount_micros, campaign_budget.resource_name,
                     metrics.cost_micros, metrics.impressions, metrics.clicks,
@@ -334,8 +344,8 @@ export async function GET(request: NextRequest) {
               id: String(campaign.id),
               name: campaign.name ?? `Campanha ${campaign.id}`,
               platform: 'google',
-              accountId,
-              accountName: accountId,
+              accountId: normalizedAccountId,
+              accountName: normalizedAccountId,
               connectionId: conn.id,
               loginCustomerId: loginCustomerId ?? undefined,
               status: campaign.status ?? 'ENABLED',

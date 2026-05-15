@@ -143,7 +143,7 @@ function AdCard({
               {showClientPicker && (
                 <div className="absolute right-0 top-full mt-1.5 z-50 w-52 rounded-xl border border-border bg-card shadow-xl p-1">
                   <div className="flex items-center justify-between px-2 py-1.5">
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Salvar para cliente</p>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Salvar para cliente</p>
                     <button type="button" onClick={() => setShowClientPicker(false)}>
                       <X className="h-3 w-3 text-muted-foreground" />
                     </button>
@@ -362,7 +362,7 @@ export default function BibliotecaPage() {
           <LayoutGrid className="h-6 w-6 text-violet-400" />
         </div>
         <div>
-          <h1 className="font-heading text-2xl font-bold tracking-tight text-foreground">
+          <h1 className="font-heading font-normal text-4xl uppercase leading-none tracking-wide text-foreground">
             Biblioteca de Anúncios
           </h1>
           <p className="mt-0.5 text-sm text-muted-foreground">

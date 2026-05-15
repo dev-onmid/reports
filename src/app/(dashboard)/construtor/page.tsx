@@ -83,7 +83,7 @@ function WidgetChart({ widget, data }: { widget: Widget; data: MockPoint[] }) {
           return (
             <div key={m.key} className="flex flex-col items-center gap-0.5 text-center">
               <div className="w-2 h-2 rounded-full mb-1" style={{ backgroundColor: m.color }} />
-              <p className={cn('font-bold font-heading', metrics.length === 1 ? 'text-4xl' : 'text-2xl')} style={{ color: m.color }}>
+              <p className={cn('font-heading font-normal', metrics.length === 1 ? 'text-4xl' : 'text-2xl')} style={{ color: m.color }}>
                 {formatMetricValue(value, m.format)}
               </p>
               <p className="text-[11px] text-muted-foreground leading-tight">{m.label}</p>
@@ -272,7 +272,7 @@ function AddWidgetDialog({ open, onClose, onAdd }: {
 
           {/* 1 — Metrics */}
           <div>
-            <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-3">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground mb-3">
               1. Selecione as Métricas <span className="normal-case font-normal text-muted-foreground/50">(até 3 para comparar / cruzar)</span>
             </p>
 
@@ -363,7 +363,7 @@ function AddWidgetDialog({ open, onClose, onAdd }: {
           {/* 2 — Chart type */}
           {selected.length > 0 && (
             <div>
-              <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-2">2. Visualização</p>
+              <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground mb-2">2. Visualização</p>
               <div className="flex gap-2 flex-wrap">
                 {CHART_TYPE_OPTIONS.filter((o) => availableCharts.includes(o.key)).map(({ key, label, Icon }) => (
                   <button key={key} onClick={() => setChart(key)}
@@ -386,7 +386,7 @@ function AddWidgetDialog({ open, onClose, onAdd }: {
           {/* 3 — Title */}
           {selected.length > 0 && (
             <div>
-              <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-2">3. Título (opcional)</p>
+              <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground mb-2">3. Título (opcional)</p>
               <input
                 type="text"
                 value={customTitle}
@@ -400,7 +400,7 @@ function AddWidgetDialog({ open, onClose, onAdd }: {
           {/* 4 — Size */}
           {selected.length > 0 && (
             <div>
-              <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-2">4. Tamanho</p>
+              <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground mb-2">4. Tamanho</p>
               <div className="flex gap-2">
                 {([
                   { key: 1 as WidgetSize, label: '1 Coluna',  sub: 'Compacto' },
@@ -462,7 +462,7 @@ export default function ConstruitorPage() {
     <div className="space-y-6">
       <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-4xl font-heading tracking-wider uppercase">Construtor de Dashboard</h1>
+          <h1 className="font-heading font-normal text-4xl uppercase leading-none tracking-wide text-foreground">Construtor de Dashboard</h1>
           <p className="text-muted-foreground mt-1">
             60+ métricas de Meta Ads, Google Ads, Facebook, Instagram e CRM. Cruze qualquer combinação.
           </p>

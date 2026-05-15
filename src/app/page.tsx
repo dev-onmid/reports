@@ -45,7 +45,7 @@ export default function LoginPage() {
             alt="Onmid"
             className="mb-6 h-14 w-auto max-w-[260px] object-contain"
           />
-          <h1 className="text-3xl font-heading tracking-wider text-foreground uppercase">Acesso Restrito</h1>
+          <h1 className="text-3xl font-heading font-normal tracking-wider text-foreground uppercase">Acesso Restrito</h1>
           <p className="text-sm text-muted-foreground mt-2 font-medium">Plataforma de Relatórios Estratégicos</p>
         </div>
 

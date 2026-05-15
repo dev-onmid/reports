@@ -762,17 +762,17 @@ function GoogleAdsConnectModal({
 
           <div className="grid gap-3 rounded-lg border border-border bg-background/70 p-3">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Conta Google</p>
+              <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Conta Google</p>
               <p className="mt-1 text-sm font-semibold text-foreground">{GOOGLE_ADS_LOGIN_EMAIL}</p>
             </div>
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">MCC configurada</p>
+              <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">MCC configurada</p>
               <p className="mt-1 text-sm font-semibold text-foreground">{managerName}</p>
             </div>
           </div>
 
           <div className="rounded-lg border border-primary/20 bg-primary/10 px-3 py-2.5">
-            <p className="text-xs font-semibold uppercase tracking-wider text-primary">Developer token configurado</p>
+            <p className="text-[11px] font-bold uppercase tracking-widest text-primary">Developer token configurado</p>
             <p className="mt-1 text-sm font-mono text-foreground">••••••••••••••••••••</p>
           </div>
 
@@ -912,7 +912,7 @@ function MetaConnectionsPanel({
             <LogoMeta />
           </div>
           <div>
-            <p className="font-heading text-xl font-black">Contas Meta conectadas</p>
+            <p className="font-heading font-normal text-xl">Contas Meta conectadas</p>
             <p className="text-sm text-muted-foreground mt-1">
               Gerencie suas contas de anúncios, páginas e perfis do Instagram conectados ao ONMID.
             </p>
@@ -921,7 +921,7 @@ function MetaConnectionsPanel({
         <Button
           size="sm"
           onClick={onAdd}
-          className="h-10 shrink-0 gap-2 rounded-lg bg-primary px-5 text-sm font-black text-black shadow-[0_0_18px_rgba(85,245,47,0.2)] hover:bg-primary/90"
+          className="h-10 shrink-0 gap-2 rounded-lg bg-primary px-5 text-sm font-bold text-black shadow-[0_0_18px_rgba(85,245,47,0.2)] hover:bg-primary/90"
         >
           <Plus className="w-4 h-4" />
           Adicionar conta
@@ -933,7 +933,7 @@ function MetaConnectionsPanel({
         {/* LEFT: Contas conectadas */}
         <div className="p-5 space-y-3">
           <div>
-            <p className="text-base font-black">Contas conectadas ({connections.length})</p>
+            <p className="text-base font-bold">Contas conectadas ({connections.length})</p>
             <p className="mt-1 text-sm text-muted-foreground">Selecione uma conta para gerenciar seus ativos</p>
           </div>
 
@@ -962,7 +962,7 @@ function MetaConnectionsPanel({
                     <div className="flex items-center gap-2">
                       <p className="text-sm font-semibold truncate">{conn.userName}</p>
                       {isSelected && (
-                        <span className="shrink-0 rounded-md bg-primary/18 px-2 py-0.5 text-xs font-black text-primary">
+                        <span className="shrink-0 rounded-md bg-primary/18 px-2 py-0.5 text-xs font-bold text-primary">
                           Selecionada
                         </span>
                       )}
@@ -996,7 +996,7 @@ function MetaConnectionsPanel({
         {/* RIGHT: Ativos da conta selecionada */}
         <div className="p-5 space-y-3">
           <div>
-            <p className="text-base font-black">Ativos da conta selecionada</p>
+            <p className="text-base font-bold">Ativos da conta selecionada</p>
             {selectedConn && (
               <p className="text-sm text-muted-foreground mt-1">{selectedConn.userName}</p>
             )}
@@ -1315,7 +1315,7 @@ function GoogleConnectionsPanel({
       <div className="px-5">
         {gmbConns.length > 0 && (
           <>
-            <p className="pt-4 pb-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+            <p className="pt-4 pb-1 text-[10px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
               <LogoGoogleMyBusiness />
               Google Meu Negócio
             </p>
@@ -1327,7 +1327,7 @@ function GoogleConnectionsPanel({
 
         {adsConns.length > 0 && (
           <>
-            <p className={cn('pb-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2', gmbConns.length > 0 ? 'pt-4 border-t border-border mt-2' : 'pt-4')}>
+            <p className={cn('pb-1 text-[10px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2', gmbConns.length > 0 ? 'pt-4 border-t border-border mt-2' : 'pt-4')}>
               <LogoGoogle />
               Google Ads
             </p>
@@ -1396,7 +1396,7 @@ const CATEGORIES = ['Todos', 'Anúncios', 'Presença Digital'];
 
 function IntegrationStatusBadge({ connected }: { connected: boolean }) {
   return connected ? (
-    <span className="inline-flex items-center gap-1.5 rounded-md border border-primary/35 bg-primary/12 px-3 py-1 text-xs font-black text-primary shadow-[0_0_14px_rgba(85,245,47,0.14)]">
+    <span className="inline-flex items-center gap-1.5 rounded-md border border-primary/35 bg-primary/12 px-3 py-1 text-xs font-bold text-primary shadow-[0_0_14px_rgba(85,245,47,0.14)]">
       <CheckCircle2 className="h-3.5 w-3.5" />
       Conectado
     </span>
@@ -1537,7 +1537,7 @@ export default function IntegracoesPage() {
         {/* ── HEADER ─────────────────────────────────────────────────────────── */}
         <div className="grid gap-6 xl:grid-cols-[1fr_560px] xl:items-end">
           <div>
-            <h1 className="font-heading text-3xl font-black tracking-tight text-foreground">Integrações</h1>
+            <h1 className="font-heading font-normal text-4xl uppercase leading-none tracking-wide text-foreground">Integrações</h1>
             <p className="mt-3 max-w-2xl text-base text-muted-foreground">
               Conecte suas plataformas para sincronizar dados automaticamente e potencializar seus resultados.
             </p>
@@ -1555,11 +1555,11 @@ export default function IntegracoesPage() {
                 <LayoutGrid className="h-6 w-6" />
               </span>
               <div>
-                <p className="font-heading text-2xl font-black leading-none text-foreground">{totalConnected} de 4</p>
+                <p className="font-heading font-normal text-3xl leading-none text-foreground">{totalConnected} de 4</p>
                 <p className="mt-1 text-base font-medium text-muted-foreground">Plataformas conectadas</p>
               </div>
             </div>
-            <button className="flex h-12 items-center gap-4 rounded-xl border border-border bg-background/35 px-6 text-sm font-black text-foreground transition-colors hover:border-primary/35">
+            <button className="flex h-12 items-center gap-4 rounded-xl border border-border bg-background/35 px-6 text-sm font-bold text-foreground transition-colors hover:border-primary/35">
               Ver status das integrações
               <span className="text-xl leading-none">→</span>
             </button>
@@ -1595,7 +1595,7 @@ export default function IntegracoesPage() {
               key={cat}
               onClick={() => setActiveCategory(cat)}
               className={cn(
-                'h-10 rounded-xl border px-5 text-sm font-black transition-all',
+                'h-10 rounded-xl border px-5 text-sm font-bold transition-all',
                 activeCategory === cat
                   ? 'border-primary/35 bg-primary/18 text-primary shadow-[0_0_16px_rgba(85,245,47,0.16)]'
                   : 'border-border bg-card/70 text-muted-foreground hover:text-foreground'
@@ -1636,7 +1636,7 @@ export default function IntegracoesPage() {
                 {/* Name + category + description */}
                 <div className="flex-1 space-y-3">
                   <div className="flex items-center gap-2">
-                    <h3 className="font-heading text-xl font-black text-foreground">{integration.name}</h3>
+                    <h3 className="font-heading font-normal text-xl text-foreground">{integration.name}</h3>
                     <span className="rounded-md bg-muted/60 px-2 py-1 text-xs font-bold text-muted-foreground">
                       {integration.category}
                     </span>
@@ -1650,7 +1650,7 @@ export default function IntegracoesPage() {
                 {isWebsite ? (
                   <button
                     disabled
-                    className="flex h-11 w-full cursor-not-allowed items-center justify-center gap-2 rounded-lg border border-border bg-background/30 text-sm font-black text-muted-foreground"
+                    className="flex h-11 w-full cursor-not-allowed items-center justify-center gap-2 rounded-lg border border-border bg-background/30 text-sm font-bold text-muted-foreground"
                   >
                     Conectar agora
                     <Plus className="h-4 w-4" />
@@ -1658,7 +1658,7 @@ export default function IntegracoesPage() {
                 ) : connected && isGMB ? (
                   <button
                     onClick={() => handleCardAction(integration.id)}
-                    className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-primary text-sm font-black text-black shadow-[0_0_18px_rgba(85,245,47,0.22)] transition-colors hover:bg-primary/90"
+                    className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-primary text-sm font-bold text-black shadow-[0_0_18px_rgba(85,245,47,0.22)] transition-colors hover:bg-primary/90"
                   >
                     Abrir painel
                     <ExternalLink className="h-4 w-4" />
@@ -1666,7 +1666,7 @@ export default function IntegracoesPage() {
                 ) : connected ? (
                   <button
                     onClick={() => handleCardAction(integration.id)}
-                    className="flex h-11 w-full items-center justify-center gap-3 rounded-lg border border-primary/35 bg-background/25 text-sm font-black text-foreground transition-colors hover:bg-primary/10"
+                    className="flex h-11 w-full items-center justify-center gap-3 rounded-lg border border-primary/35 bg-background/25 text-sm font-bold text-foreground transition-colors hover:bg-primary/10"
                   >
                     Gerenciar integração
                     <span className="text-primary">→</span>
@@ -1674,7 +1674,7 @@ export default function IntegracoesPage() {
                 ) : (
                   <button
                     onClick={() => handleCardAction(integration.id)}
-                    className="flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-border bg-background/25 text-sm font-black text-foreground transition-colors hover:border-primary/35"
+                    className="flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-border bg-background/25 text-sm font-bold text-foreground transition-colors hover:border-primary/35"
                   >
                     Conectar agora
                     <Plus className="h-4 w-4" />
@@ -1724,7 +1724,7 @@ export default function IntegracoesPage() {
               <Sparkles className="w-5 h-5" />
             </span>
             <div>
-              <p className="text-lg font-black">Sincronização automática e segura</p>
+              <p className="text-lg font-bold">Sincronização automática e segura</p>
               <p className="mt-1 text-sm text-muted-foreground">
                 Seus dados são sincronizados com segurança e atualizados automaticamente em segundo plano.
               </p>
@@ -1732,7 +1732,7 @@ export default function IntegracoesPage() {
           </div>
           <a
             href="#"
-            className="flex h-11 shrink-0 items-center gap-2 rounded-lg border border-border bg-background/35 px-5 text-sm font-black text-foreground transition-colors hover:border-violet-400/40"
+            className="flex h-11 shrink-0 items-center gap-2 rounded-lg border border-border bg-background/35 px-5 text-sm font-bold text-foreground transition-colors hover:border-violet-400/40"
           >
             Saiba mais sobre integrações
             <ExternalLink className="h-4 w-4" />

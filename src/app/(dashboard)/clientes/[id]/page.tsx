@@ -415,7 +415,7 @@ function FunnelTab({ clientId, clientName, goalConfig }: { clientId: string; cli
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="bg-card border border-border rounded-xl p-4">
           <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">META ({goalConfig.label})</p>
-          <p className="text-2xl font-bold font-heading text-foreground">{goalValue}</p>
+          <p className="font-heading font-normal text-3xl leading-none text-foreground">{goalValue}</p>
           <p className="text-[11px] text-muted-foreground mt-1">Configurada na meta principal do cliente</p>
         </div>
         {[
@@ -429,7 +429,7 @@ function FunnelTab({ clientId, clientName, goalConfig }: { clientId: string; cli
               <CurrencyInput
                 value={value}
                 onChange={set}
-                className={cn('text-2xl font-bold font-heading flex-1 min-w-0', color, inputCls)}
+                className={cn('font-heading font-normal text-3xl leading-none flex-1 min-w-0', color, inputCls)}
               />
             </div>
             <p className="text-[11px] text-muted-foreground mt-1">{desc}</p>
@@ -479,13 +479,13 @@ function FunnelTab({ clientId, clientName, goalConfig }: { clientId: string; cli
                         <div className="grid shrink-0 grid-cols-2 overflow-hidden rounded-lg border border-border bg-background/70 min-w-[190px]">
                           <div className="px-3 py-2 text-right">
                             <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Volume</p>
-                            <p className="mt-1 text-xl font-bold font-heading leading-none" style={{ color }}>
+                            <p className="mt-1 text-xl font-heading font-normal leading-none" style={{ color }}>
                               {vol.toLocaleString('pt-BR')}
                             </p>
                           </div>
                           <div className="border-l border-border px-3 py-2 text-right">
                             <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">% do topo</p>
-                            <p className="mt-1 text-xl font-bold font-heading leading-none text-foreground">{pct}%</p>
+                            <p className="mt-1 text-xl font-heading font-normal leading-none text-foreground">{pct}%</p>
                           </div>
                         </div>
                         {stages.length > 2 && (
@@ -546,21 +546,21 @@ function FunnelTab({ clientId, clientName, goalConfig }: { clientId: string; cli
         <div className="flex flex-col gap-4">
           <div className="bg-primary/10 border border-primary/30 rounded-xl p-5">
             <p className="text-[9px] font-bold uppercase tracking-widest text-primary mb-2">INV. PLANEJADO</p>
-            <p className="text-4xl font-bold font-heading text-primary">{fmtBRL(invPla)}</p>
+            <p className="text-4xl font-heading font-normal text-primary">{fmtBRL(invPla)}</p>
             <p className="text-xs text-muted-foreground mt-2">{topVol} leads × {fmtBRL(cplPlanejado)} CPL planejado</p>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-card border border-border rounded-xl p-5">
               <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">{lastStageLabel.toUpperCase()} NECESSÁRIAS</p>
-              <p className="text-3xl font-bold font-heading">{botVol}</p>
+              <p className="text-3xl font-heading font-normal">{botVol}</p>
               <p className="text-xs text-muted-foreground mt-2">
                 {goalConfig.type === 'revenue' ? `${goalValue} ÷ ${fmtBRL(tkm)}` : `Meta principal: ${goalValue}`}
               </p>
             </div>
             <div className="bg-card border border-border rounded-xl p-5">
               <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">CAC</p>
-              <p className="text-3xl font-bold font-heading">{fmtBRL(cac)}</p>
+              <p className="text-3xl font-heading font-normal">{fmtBRL(cac)}</p>
               <p className="text-xs text-muted-foreground mt-2">Custo por aquisição</p>
             </div>
           </div>
@@ -569,7 +569,7 @@ function FunnelTab({ clientId, clientName, goalConfig }: { clientId: string; cli
             <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">
               {goalConfig.type === 'revenue' ? 'ROI ESPERADO' : `CUSTO POR ${goalConfig.label.toUpperCase()}`}
             </p>
-            <p className={cn('text-4xl font-bold font-heading', goalConfig.type === 'revenue' ? (roi >= 3 ? 'text-primary' : roi >= 1.5 ? 'text-yellow-400' : 'text-red-400') : 'text-primary')}>
+            <p className={cn('text-4xl font-heading font-normal', goalConfig.type === 'revenue' ? (roi >= 3 ? 'text-primary' : roi >= 1.5 ? 'text-yellow-400' : 'text-red-400') : 'text-primary')}>
               {goalConfig.type === 'revenue' ? `${roi.toFixed(1)}x` : fmtBRL(goalConfig.target > 0 ? invPla / goalConfig.target : 0)}
             </p>
             <p className="text-xs text-muted-foreground mt-2">
@@ -672,7 +672,7 @@ function InvestmentPaymentsTab({ clientId, clientName }: { clientId: string; cli
               <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
               <Icon className={cn('w-4 h-4 shrink-0', tone)} />
             </div>
-            <p className={cn('text-2xl font-bold font-heading mt-3', tone)}>{fmtBRL(value)}</p>
+            <p className={cn('font-heading font-normal text-3xl leading-none mt-3', tone)}>{fmtBRL(value)}</p>
           </div>
         ))}
       </div>
@@ -1199,12 +1199,12 @@ function GoalProgressCard({ goal }: { goal: GoalProgress }) {
           <div className="relative flex min-h-28 items-center justify-between gap-4 p-4">
             <div className="rounded-lg bg-background/80 px-4 py-3 shadow-[0_12px_30px_rgba(0,0,0,0.35)] backdrop-blur">
               <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Realizado</p>
-              <p className="mt-1 font-heading text-4xl leading-none tracking-wide text-foreground">
+              <p className="mt-1 font-heading font-normal text-4xl leading-none tracking-wide text-foreground">
                 {formatGoalValue(goal.realized, goal.format)}
               </p>
             </div>
             <div className="rounded-lg bg-background/80 px-3 py-2 text-right shadow-[0_12px_30px_rgba(0,0,0,0.35)] backdrop-blur">
-              <p className="font-heading text-3xl leading-none" style={{ color }}>{progress}%</p>
+              <p className="font-heading font-normal text-3xl leading-none" style={{ color }}>{progress}%</p>
               <p className="mt-1 text-[10px] font-bold uppercase tracking-widest" style={{ color }}>{goalToneLabel(progress)}</p>
             </div>
           </div>
@@ -1247,7 +1247,7 @@ function FunnelStageCard({ stage, target, partial, current, progress }: {
           </div>
           <div>
             <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Realizado</p>
-            <p className="mt-1 font-heading text-4xl leading-none" style={{ color }}>
+            <p className="mt-1 font-heading font-normal text-4xl leading-none" style={{ color }}>
               {current.toLocaleString('pt-BR')}
             </p>
           </div>
@@ -1290,7 +1290,7 @@ function TargetSummaryCard({ label, value, max }: {
       <CardContent>
         <div className="rounded-lg bg-background/60 p-4">
           <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Valor atual</p>
-          <span className="mt-1 block font-heading text-4xl leading-none tracking-wide" style={{ color }}>
+          <span className="mt-1 block font-heading font-normal text-4xl leading-none tracking-wide" style={{ color }}>
             {fmtBRL(value)}
           </span>
         </div>
@@ -1318,7 +1318,7 @@ function DataHighlightCard({ label, value, detail, color }: {
       <div className="h-1.5" style={{ backgroundColor: color }} />
       <div className="p-4">
         <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
-        <p className="mt-2 font-heading text-4xl leading-none tracking-wide" style={{ color }}>
+        <p className="mt-2 font-heading font-normal text-4xl leading-none tracking-wide" style={{ color }}>
           {value}
         </p>
         <p className="mt-2 text-xs text-muted-foreground">{detail}</p>
@@ -1573,7 +1573,7 @@ function ClientDnaTab({ clientId, clientName }: { clientId: string; clientName: 
             return (
               <div key={member.id} className="flex items-center gap-4 rounded-lg border border-border bg-card px-4 py-3">
                 <div
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border font-heading text-sm font-bold"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border font-heading font-normal text-sm"
                   style={{ borderColor: `${color}55`, backgroundColor: `${color}14`, color }}
                 >
                   {initials || <UserRound className="h-4 w-4" />}
@@ -1703,7 +1703,7 @@ function ClientWidgetCard({ widget, editable, onRemove }: {
                 <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{metric.short}</p>
                 <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: metric.color }} />
               </div>
-              <p className="mt-2 font-heading text-4xl leading-none tracking-wide" style={{ color: metric.color }}>
+              <p className="mt-2 font-heading font-normal text-4xl leading-none tracking-wide" style={{ color: metric.color }}>
                 {formatClientMetricValue(metric.value, metric.format)}
               </p>
               <p className="mt-2 text-xs text-muted-foreground">{metric.label}</p>
@@ -1793,7 +1793,7 @@ function AddClientWidgetDialog({ open, onClose, onAdd }: {
             )}
 
             <div>
-              <p className="mb-3 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+              <p className="mb-3 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
                 1. Selecione as Métricas <span className="font-normal normal-case text-muted-foreground/50">(até 3 para comparar)</span>
               </p>
               {CLIENT_METRIC_GROUPS.map((group) => {
@@ -1838,7 +1838,7 @@ function AddClientWidgetDialog({ open, onClose, onAdd }: {
 
             {selected.length > 0 && (
               <div>
-                <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">2. Visualização</p>
+                <p className="mb-2 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">2. Visualização</p>
                 <div className="flex flex-wrap gap-2">
                   {CLIENT_CHART_OPTIONS.filter((option) => availableCharts.includes(option.key)).map(({ key, label, Icon }) => (
                     <button
@@ -1865,7 +1865,7 @@ function AddClientWidgetDialog({ open, onClose, onAdd }: {
 
             {selected.length > 0 && (
               <div>
-                <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">3. Título (opcional)</p>
+                <p className="mb-2 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">3. Título (opcional)</p>
                 <Input
                   value={customTitle}
                   onChange={(e) => setCustomTitle(e.target.value)}
@@ -1877,7 +1877,7 @@ function AddClientWidgetDialog({ open, onClose, onAdd }: {
 
             {selected.length > 0 && (
               <div>
-                <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">4. Tamanho</p>
+                <p className="mb-2 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">4. Tamanho</p>
                 <div className="flex gap-2">
                   {([
                     { key: 1 as ClientWidgetSize, label: '1 Coluna', sub: 'Compacto' },
@@ -2125,7 +2125,7 @@ function MetaAdsConnectionDialog({
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
       <DialogContent className="max-w-lg border-border bg-card">
         <DialogHeader>
-          <DialogTitle className="font-heading text-2xl uppercase tracking-wider">Configurar Meta Ads</DialogTitle>
+          <DialogTitle className="font-heading font-normal text-2xl uppercase tracking-wider">Configurar Meta Ads</DialogTitle>
           <p className="text-sm text-muted-foreground">
             Selecione a(s) conta(s) de anúncio de <strong>{clientName}</strong>.
           </p>
@@ -2303,7 +2303,7 @@ function GoogleAdsConnectionDialog({
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
       <DialogContent className="max-w-lg border-border bg-card">
         <DialogHeader>
-          <DialogTitle className="font-heading text-2xl uppercase tracking-wider">Configurar Google Ads</DialogTitle>
+          <DialogTitle className="font-heading font-normal text-2xl uppercase tracking-wider">Configurar Google Ads</DialogTitle>
           <p className="text-sm text-muted-foreground">
             Selecione as contas Google Ads de <strong>{clientName}</strong>.
           </p>
@@ -2405,11 +2405,14 @@ function GoogleAdsConnectionDialog({
   );
 }
 
+const CLIENT_BILLING_MODE_PREFIX = 'clientAdsBillingMode_';
+
 function ClientIntegrationsTab({ clientId, clientName }: { clientId: string; clientName: string }) {
   const { getConnection, getClientAccounts, getClientMetrics } = useMetaAdsConnections();
   const googleAds = useGoogleAds();
   const [metaDialogOpen, setMetaDialogOpen] = useState(false);
   const [googleDialogOpen, setGoogleDialogOpen] = useState(false);
+  const [billingMode, setBillingMode] = useState<'prepaid' | 'card'>('prepaid');
   const metaConnection = getConnection(clientId);
   const metaAccounts = getClientAccounts(clientId);
   const metaMetrics = getClientMetrics(clientId);
@@ -2417,8 +2420,56 @@ function ClientIntegrationsTab({ clientId, clientName }: { clientId: string; cli
   const googleAccounts = googleAds.getClientAccounts(clientId);
   const googleMetrics = googleAds.getClientMetrics(clientId);
 
+  useEffect(() => {
+    const stored = localStorage.getItem(`${CLIENT_BILLING_MODE_PREFIX}${clientId}`);
+    setBillingMode(stored === 'card' ? 'card' : 'prepaid');
+  }, [clientId]);
+
+  function updateBillingMode(next: 'prepaid' | 'card') {
+    setBillingMode(next);
+    localStorage.setItem(`${CLIENT_BILLING_MODE_PREFIX}${clientId}`, next);
+  }
+
   return (
     <>
+      <Card className="mb-4 border-border bg-card">
+        <CardHeader>
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border bg-background">
+                <WalletCards className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <CardTitle>Forma de cobrança dos anúncios</CardTitle>
+                <CardDescription className="mt-1">
+                  Use “Cartão/faturado” para clientes em que a Meta/Google cobra direto no cartão. Essas contas não aparecem como saldo crítico em Pagamentos.
+                </CardDescription>
+              </div>
+            </div>
+            <div className="flex shrink-0 rounded-xl border border-border bg-background p-1">
+              {([
+                { value: 'prepaid' as const, label: 'Pré-pago / saldo' },
+                { value: 'card' as const, label: 'Cartão / faturado' },
+              ]).map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => updateBillingMode(option.value)}
+                  className={cn(
+                    'rounded-lg px-3 py-2 text-xs font-bold transition-all',
+                    billingMode === option.value
+                      ? 'bg-primary text-black shadow-[0_0_12px_rgba(85,245,47,0.25)]'
+                      : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </CardHeader>
+      </Card>
+
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 pt-1">
         {integracoes.map((int) => {
           const isMetaAds = int.name === 'Meta Ads';
@@ -2438,7 +2489,7 @@ function ClientIntegrationsTab({ clientId, clientName }: { clientId: string; cli
                     {int.logo}
                   </div>
                   <span className={cn(
-                    'text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-full border',
+                    'text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-full border',
                     connected ? 'bg-primary/20 text-primary border-primary/30' : 'bg-muted text-muted-foreground border-border',
                   )}>
                     {status}
@@ -2579,7 +2630,7 @@ function SheetsResultsTab({ clientId }: { clientId: string }) {
 
       <div className="rounded-xl border border-border bg-card p-5 space-y-4">
         <div className="space-y-2">
-          <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Link do Google Sheets</label>
+          <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Link do Google Sheets</label>
           <div className="flex gap-2">
             <input
               type="url"
@@ -2885,7 +2936,7 @@ function BibliotecaTab({ clientId }: { clientId: string }) {
           <BookMarked className="h-3.5 w-3.5" />
           Salvos
           {savedAds.length > 0 && (
-            <span className="ml-0.5 rounded-full bg-primary/20 px-1.5 py-0.5 text-[10px] font-black text-primary">
+            <span className="ml-0.5 rounded-full bg-primary/20 px-1.5 py-0.5 text-[10px] font-bold text-primary">
               {savedAds.length}
             </span>
           )}
@@ -3150,7 +3201,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
             <div className="px-2 py-0.5 rounded text-[10px] font-bold tracking-widest bg-primary/20 text-primary border border-primary/30 uppercase w-fit mb-2">
               {client.status}
             </div>
-            <h1 className="text-4xl font-heading tracking-wider uppercase">{client.name}</h1>
+            <h1 className="font-heading font-normal text-4xl uppercase leading-none tracking-wide text-foreground">{client.name}</h1>
             <p className="text-sm text-muted-foreground mt-1 uppercase tracking-wide">{client.segment}</p>
           </div>
         </div>

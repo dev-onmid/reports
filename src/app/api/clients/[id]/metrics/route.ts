@@ -19,6 +19,10 @@ function toMetaAccountNodeId(accountId: string) {
   return accountId.startsWith('act_') ? accountId : `act_${accountId}`;
 }
 
+function normalizeGoogleCustomerId(accountId: string) {
+  return accountId.replace(/\D/g, '');
+}
+
 const DEV_TOKEN = process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? '1vR8GhAk4UMZoPaqo7Qq8Q';
 
 function gadsHeaders(accessToken: string, loginCustomerId?: string) {
@@ -32,8 +36,10 @@ function gadsHeaders(accessToken: string, loginCustomerId?: string) {
 }
 
 async function gadsSearch(customerId: string, query: string, accessToken: string, loginCustomerId?: string) {
+  const normalizedCustomerId = normalizeGoogleCustomerId(customerId);
+  if (!normalizedCustomerId) return null;
   const res = await fetch(
-    `https://googleads.googleapis.com/v20/customers/${customerId}/googleAds:search`,
+    `https://googleads.googleapis.com/v20/customers/${normalizedCustomerId}/googleAds:search`,
     { method: 'POST', headers: gadsHeaders(accessToken, loginCustomerId), body: JSON.stringify({ query }) }
   );
   if (!res.ok) return null;
@@ -75,7 +81,7 @@ async function buildMccMap(accessToken: string): Promise<Record<string, string>>
   const mccMap: Record<string, string> = {};
   await Promise.allSettled(
     resourceNames.map(async (rn) => {
-      const custId = rn.replace('customers/', '');
+      const custId = normalizeGoogleCustomerId(rn.replace('customers/', ''));
       const data = await gadsSearch(custId, 'SELECT customer.id, customer.manager FROM customer LIMIT 1', accessToken);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const c = (data?.results?.[0] as any)?.customer;
@@ -91,7 +97,7 @@ async function buildMccMap(accessToken: string): Promise<Record<string, string>>
       for (const r of subData?.results ?? [] as any[]) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const sub = (r as any).customerClient;
-        if (sub?.id && !sub.manager) mccMap[String(sub.id)] = custId;
+        if (sub?.id && !sub.manager) mccMap[normalizeGoogleCustomerId(String(sub.id))] = custId;
       }
     })
   );
@@ -207,7 +213,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (gadsLinks.length > 0) {
     // Group by connection_id so we refresh each token once
     const byConn = gadsLinks.reduce<Record<string, string[]>>((acc, l) => {
-      (acc[l.connection_id] ??= []).push(l.account_id);
+      const accountId = normalizeGoogleCustomerId(l.account_id);
+      if (accountId) (acc[l.connection_id] ??= []).push(accountId);
       return acc;
     }, {});
 
@@ -221,8 +228,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
         await Promise.allSettled(
           accountIds.map(async (accountId) => {
-            const loginCustomerId = mccMap[accountId];
-            const m = await fetchGadsAccountMetrics(accountId, accessToken, loginCustomerId, gaqlPeriod);
+            const normalizedAccountId = normalizeGoogleCustomerId(accountId);
+            const loginCustomerId = mccMap[normalizedAccountId];
+            const m = await fetchGadsAccountMetrics(normalizedAccountId, accessToken, loginCustomerId, gaqlPeriod);
             if (m) connMetrics.push(m);
           })
         );

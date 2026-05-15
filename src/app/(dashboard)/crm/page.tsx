@@ -425,7 +425,9 @@ export default function CrmPage() {
           {clientId ? <Users className="h-5 w-5 text-violet-400" /> : <Sparkles className="h-5 w-5 text-violet-400" />}
         </div>
         <div>
-          <h1 className="text-lg font-bold leading-tight">{clientId ? 'CRM' : 'Escolha um cliente'}</h1>
+          <h1 className="font-heading font-normal text-4xl uppercase leading-none tracking-wide text-foreground">
+            {clientId ? 'CRM' : 'Escolha um cliente'}
+          </h1>
           <p className="text-xs text-muted-foreground">
             {clientId ? 'Gestão de leads e funil de vendas por cliente.' : 'Acesse leads, funil e histórico comercial de forma rápida e organizada.'}
           </p>
@@ -593,8 +595,8 @@ export default function CrmPage() {
                 <Icon className={cn('h-5 w-5', iconCls)} />
               </div>
               <div className="min-w-0">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{label}</p>
-                <p className="text-xl font-black leading-tight">{fmt === 'c' ? formatCurrencyBRL(value) : value.toLocaleString('pt-BR')}</p>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
+                <p className="font-heading font-normal text-3xl leading-none">{fmt === 'c' ? formatCurrencyBRL(value) : value.toLocaleString('pt-BR')}</p>
                 <p className="text-[10px] text-muted-foreground">{sub}</p>
               </div>
             </div>

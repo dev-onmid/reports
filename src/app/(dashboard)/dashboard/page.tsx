@@ -297,7 +297,7 @@ function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: 
         <div className="mt-3 h-8 w-32 animate-pulse rounded bg-muted/30" />
       ) : (
         <>
-          <p className="mt-3 font-heading text-3xl font-bold leading-none text-foreground">{fmt(value)}</p>
+          <p className="mt-3 font-heading font-normal text-3xl leading-none text-foreground">{fmt(value)}</p>
           {change !== null ? (
             <p className={cn('mt-1.5 flex items-center gap-0.5 text-xs font-semibold', isPositive ? 'text-emerald-400' : 'text-red-400')}>
               {change >= 0 ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
@@ -364,7 +364,7 @@ function ChannelMetricBox({
   return (
     <div className="h-full rounded-xl border border-border bg-background/70 p-9">
       <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
-      <p className="mt-6 font-heading text-4xl font-bold leading-none" style={{ color }}>
+      <p className="mt-6 font-heading font-normal text-4xl leading-none" style={{ color }}>
         {formatted}
       </p>
     </div>
@@ -407,7 +407,7 @@ function RealizedOnlyCard({
         ) : (
           <>
             <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Realizado</p>
-            <p className="mt-2 font-heading text-4xl font-bold leading-none text-foreground">{formatted}</p>
+            <p className="mt-2 font-heading font-normal text-4xl leading-none text-foreground">{formatted}</p>
           </>
         )}
       </div>
@@ -445,7 +445,7 @@ function ChannelCard({
       <div className="relative flex items-start gap-8">
         {mark}
         <div>
-          <h3 className="flex items-center gap-3 font-heading text-3xl font-bold uppercase tracking-wide text-foreground">
+          <h3 className="flex items-center gap-3 font-heading font-normal text-3xl uppercase tracking-wide text-foreground">
             <PlatformMarkForText text={title} />
             <span>{title}</span>
           </h3>
@@ -556,18 +556,18 @@ function MetricTile({
             <div className={cn('grid gap-8 text-center', partial !== undefined ? 'sm:grid-cols-3' : 'sm:grid-cols-2')}>
               {meta !== undefined && (
                 <div>
-                  <p className="font-heading text-2xl font-bold leading-none text-foreground">{meta > 0 ? fmt(meta) : 'Sem meta'}</p>
+                  <p className="font-heading font-normal text-2xl leading-none text-foreground">{meta > 0 ? fmt(meta) : 'Sem meta'}</p>
                   <p className="mt-2 text-sm font-bold text-muted-foreground">Meta</p>
                 </div>
               )}
               {partial !== undefined && (
                 <div>
-                  <p className="font-heading text-2xl font-bold leading-none text-foreground">{partial > 0 ? fmt(partial) : '—'}</p>
+                  <p className="font-heading font-normal text-2xl leading-none text-foreground">{partial > 0 ? fmt(partial) : '—'}</p>
                   <p className="mt-2 text-sm font-bold text-muted-foreground">Meta Parcial</p>
                 </div>
               )}
               <div>
-                <p className="font-heading text-2xl font-bold leading-none text-foreground">{fmt(value)}</p>
+                <p className="font-heading font-normal text-2xl leading-none text-foreground">{fmt(value)}</p>
                 <p className="mt-2 text-sm font-bold text-muted-foreground">Realizado</p>
               </div>
             </div>
@@ -590,7 +590,7 @@ function MetricTile({
                     }}
                   />
                   <div className="absolute inset-0 flex items-center justify-center">
-                    <span className="rounded bg-background/65 px-3 py-0.5 text-base font-black text-foreground">{progressLabel}</span>
+                    <span className="rounded bg-background/65 px-3 py-0.5 text-base font-bold text-foreground">{progressLabel}</span>
                   </div>
                 </div>
               </div>
@@ -600,7 +600,7 @@ function MetricTile({
           <div className="mt-8 flex flex-1 items-center rounded-lg border border-border bg-background/70 p-7">
             <div>
               <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Realizado</p>
-              <p className="mt-3 font-heading text-4xl font-bold leading-none" style={{ color: accent }}>
+              <p className="mt-3 font-heading font-normal text-4xl leading-none" style={{ color: accent }}>
                 {fmt(value)}
               </p>
             </div>
@@ -2783,10 +2783,10 @@ export default function GeneralDashboard() {
       )}
 
       {/* 3-COLUMN MIDDLE SECTION */}
-      <div className="grid gap-4 xl:grid-cols-3">
+      <div className="grid items-stretch gap-4 xl:grid-cols-3">
 
         {/* LEFT: Funil de Performance */}
-        <div className="rounded-2xl border border-white/5 bg-card p-5">
+        <div className="flex min-h-[430px] flex-col rounded-2xl border border-white/5 bg-card p-5">
           <div className="mb-5 flex items-start justify-between">
             <div>
               <p className="text-sm font-bold uppercase tracking-wider text-foreground">Funil de Performance</p>
@@ -2825,7 +2825,7 @@ export default function GeneralDashboard() {
             const maxVal = funnelRows[0]?.value || 1;
             const FUNNEL_COLORS = ['#4C1D95', '#5B21B6', '#6D28D9', '#7C3AED', '#8B5CF6', '#9333EA', '#A855F7'];
             return (
-              <div className="space-y-2.5">
+              <div className="flex flex-1 flex-col justify-between gap-3">
                 {funnelRows.map((row, i) => {
                   const barPct = maxVal > 0 ? (row.value / maxVal) * 100 : 0;
                   const prev = funnelRows[i - 1]?.value;
@@ -2843,7 +2843,7 @@ export default function GeneralDashboard() {
                           {convPct && <span className="text-emerald-400">{convPct}%</span>}
                         </div>
                       </div>
-                      <div className="h-6 relative" style={{ paddingLeft: `${indent}%`, paddingRight: `${indent}%` }}>
+                      <div className="relative h-7" style={{ paddingLeft: `${indent}%`, paddingRight: `${indent}%` }}>
                         <div
                           className="h-full rounded"
                           style={{
@@ -2862,7 +2862,7 @@ export default function GeneralDashboard() {
         </div>
 
         {/* CENTER: Meta Ads vs Google Ads */}
-        <div className="rounded-2xl border border-white/5 bg-card p-5">
+        <div className="flex min-h-[430px] flex-col rounded-2xl border border-white/5 bg-card p-5">
           <div className="mb-5 flex items-start justify-between">
             <div>
               <p className="text-sm font-bold uppercase tracking-wider text-foreground">Meta Ads vs Google Ads</p>
@@ -2870,41 +2870,41 @@ export default function GeneralDashboard() {
             </div>
             <span className="rounded-lg border border-border bg-background/50 px-2.5 py-1 text-[11px] font-semibold text-muted-foreground">Investimento</span>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col items-center gap-3 rounded-xl border border-white/5 bg-background/40 p-3">
+          <div className="grid flex-1 grid-cols-2 gap-4">
+            <div className="flex flex-col items-center justify-between gap-4 rounded-xl border border-white/5 bg-background/40 p-5">
               <div className="flex items-center gap-1.5">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/brand/meta-ads-logo.webp" alt="Meta" className="h-5 w-auto object-contain" />
-                <span className="text-[11px] font-bold text-foreground">META ADS</span>
+                <img src="/brand/meta-ads-logo.webp" alt="Meta" className="h-7 w-auto object-contain" />
+                <span className="text-sm font-bold text-foreground">META ADS</span>
               </div>
-              <CircularQuality pct={metricsLoading ? 0 : metaQuality} color="#0B84FF" size={100} />
-              <div className="w-full space-y-1.5">
+              <CircularQuality pct={metricsLoading ? 0 : metaQuality} color="#0B84FF" size={150} />
+              <div className="w-full space-y-3">
                 {([
                   { label: 'Investimento', val: formatCurrencyBRL(metaSpend) },
                   { label: 'Resultado', val: formatCurrencyBRL(metaRevenue) },
                   { label: 'ROI', val: `${metaRoi.toFixed(2)}x`, highlight: metaRoi > 0 },
                 ] as const).map(r => (
-                  <div key={r.label} className="flex justify-between text-[11px]">
+                  <div key={r.label} className="flex justify-between text-sm">
                     <span className="text-muted-foreground">{r.label}</span>
                     <span className={cn('font-bold', 'highlight' in r && r.highlight ? 'text-emerald-400' : 'text-foreground')}>{r.val}</span>
                   </div>
                 ))}
               </div>
             </div>
-            <div className="flex flex-col items-center gap-3 rounded-xl border border-white/5 bg-background/40 p-3">
+            <div className="flex flex-col items-center justify-between gap-4 rounded-xl border border-white/5 bg-background/40 p-5">
               <div className="flex items-center gap-1.5">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/brand/google-ads-logo.png" alt="Google" className="h-5 w-auto object-contain" />
-                <span className="text-[11px] font-bold text-foreground">GOOGLE ADS</span>
+                <img src="/brand/google-ads-logo.png" alt="Google" className="h-7 w-auto object-contain" />
+                <span className="text-sm font-bold text-foreground">GOOGLE ADS</span>
               </div>
-              <CircularQuality pct={metricsLoading ? 0 : googleQuality} color="#EA4335" size={100} />
-              <div className="w-full space-y-1.5">
+              <CircularQuality pct={metricsLoading ? 0 : googleQuality} color="#EA4335" size={150} />
+              <div className="w-full space-y-3">
                 {([
                   { label: 'Investimento', val: formatCurrencyBRL(googleCost) },
                   { label: 'Resultado', val: formatCurrencyBRL(googleRevenue) },
                   { label: 'ROI', val: `${googleRoi.toFixed(2)}x`, highlight: googleRoi > 0 },
                 ] as const).map(r => (
-                  <div key={r.label} className="flex justify-between text-[11px]">
+                  <div key={r.label} className="flex justify-between text-sm">
                     <span className="text-muted-foreground">{r.label}</span>
                     <span className={cn('font-bold', 'highlight' in r && r.highlight ? 'text-emerald-400' : 'text-muted-foreground')}>{r.val}</span>
                   </div>
@@ -2915,18 +2915,18 @@ export default function GeneralDashboard() {
         </div>
 
         {/* RIGHT: Resumo de Público */}
-        <div className="rounded-2xl border border-white/5 bg-card p-5">
+        <div className="flex min-h-[430px] flex-col rounded-2xl border border-white/5 bg-card p-5">
           <p className="text-sm font-bold uppercase tracking-wider text-foreground">Resumo de Público</p>
           <p className="mt-0.5 text-[11px] text-muted-foreground">Total de pessoas alcançadas</p>
           <div className="mt-2 flex items-baseline gap-2">
-            <p className="font-heading text-3xl font-bold text-foreground">{metaImpressions.toLocaleString('pt-BR')}</p>
+            <p className="font-heading font-normal text-4xl text-foreground">{metaImpressions.toLocaleString('pt-BR')}</p>
             {pctChange(metaImpressions, prevMetaSpend > 0 ? metaImpressions * 0.92 : 0) !== null && prevMetaSpend > 0 && (
-              <span className="text-xs font-semibold text-emerald-400">+8,2% vs mês passado</span>
+              <span className="text-sm font-semibold text-emerald-400">+8,2% vs mês passado</span>
             )}
           </div>
-          <div className="mt-4">
+          <div className="mt-6 flex flex-1 items-center">
             {audienceLoading ? (
-              <div className="flex justify-center"><div className="h-28 w-28 animate-pulse rounded-full bg-muted/30" /></div>
+              <div className="flex w-full justify-center"><div className="h-44 w-44 animate-pulse rounded-full bg-muted/30" /></div>
             ) : (
               (() => {
                 const ageData = audience.meta.age;
@@ -2946,20 +2946,20 @@ export default function GeneralDashboard() {
                   return s;
                 });
                 return (
-                  <div className="flex items-start gap-4">
-                    <svg viewBox="0 0 120 120" className="h-28 w-28 shrink-0 -rotate-90 overflow-visible">
+                  <div className="flex w-full items-center gap-8">
+                    <svg viewBox="0 0 120 120" className="h-48 w-48 shrink-0 -rotate-90 overflow-visible">
                       {slices.map(sl => (
                         <path key={sl.label} d={describeDonutSlice(60, 60, 56, 30, sl.startAngle, sl.endAngle)} fill={sl.color} />
                       ))}
                       <circle cx="60" cy="60" r="27" className="fill-card" />
-                      <text x="60" y="64" textAnchor="middle" fontSize="11" fontWeight="bold" className="fill-foreground" transform="rotate(90,60,60)">
+                      <text x="60" y="64" textAnchor="middle" fontSize="13" fontWeight="bold" className="fill-foreground" transform="rotate(90,60,60)">
                         {(metaImpressions / 1000).toFixed(0)}K
                       </text>
                     </svg>
-                    <div className="flex-1 space-y-1.5 pt-1">
+                    <div className="flex-1 space-y-4">
                       {slices.slice(0, 6).map(sl => (
-                        <div key={sl.label} className="flex items-center gap-2 text-[11px]">
-                          <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: sl.color }} />
+                        <div key={sl.label} className="flex items-center gap-3 text-base">
+                          <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: sl.color }} />
                           <span className="min-w-0 flex-1 truncate text-muted-foreground">{sl.label}</span>
                           <span className="font-bold text-foreground">{sl.pct}%</span>
                         </div>

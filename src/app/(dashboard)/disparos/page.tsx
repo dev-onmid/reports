@@ -107,7 +107,7 @@ function DisparoKpiCard({
       </div>
       <div className="min-w-0 flex-1">
         <p className="text-xs text-muted-foreground">{title}</p>
-        <p className="text-2xl font-bold mt-0.5 leading-none">{value}</p>
+        <p className="font-heading font-normal text-3xl leading-none text-foreground mt-0.5">{value}</p>
         {sub && <p className="text-[11px] text-muted-foreground mt-1">{sub}</p>}
         {change && (
           <p className={cn('text-[11px] mt-1 font-semibold', changeGood ? 'text-emerald-400' : 'text-red-400')}>
@@ -496,7 +496,7 @@ function ClientesTab() {
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-xs text-muted-foreground leading-tight">{label}</p>
-              <p className="text-2xl font-bold mt-0.5 leading-none">{value}</p>
+              <p className="font-heading font-normal text-3xl leading-none text-foreground mt-0.5">{value}</p>
               <p className={cn('text-[11px] font-semibold mt-1', subColor)}>{sub}</p>
             </div>
             <div className="shrink-0 opacity-80">{chart}</div>
@@ -515,7 +515,7 @@ function ClientesTab() {
               <div className="relative w-20 h-20">
                 <div className="absolute inset-0 rounded-2xl border-2 border-emerald-400 rotate-6" style={{ background: 'linear-gradient(135deg, rgba(34,197,94,0.25), rgba(6,182,212,0.15))' }} />
                 <div className="absolute inset-0 flex items-center justify-center">
-                  <span className="text-3xl font-black text-emerald-400 rotate-6 select-none">Z</span>
+                  <span className="text-3xl font-bold text-emerald-400 rotate-6 select-none">Z</span>
                 </div>
                 <div className="absolute -bottom-2 -right-2 w-5 h-5 rounded-full bg-emerald-500/30 border border-emerald-400/50" />
                 <div className="absolute -top-2 -left-2 w-4 h-4 rounded-full bg-cyan-500/30 border border-cyan-400/50" />
@@ -1508,7 +1508,7 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances }: {
                     </Pie>
                   </PieChart>
                   <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                    <span className="text-2xl font-bold leading-none">{donutTotal}</span>
+                    <span className="font-heading font-normal text-3xl leading-none text-foreground">{donutTotal}</span>
                     <span className="text-[11px] text-muted-foreground mt-0.5">Total</span>
                   </div>
                 </div>
@@ -1621,7 +1621,7 @@ export default function DisparosPage() {
               <MessageSquare className="h-5 w-5 text-white" />
             </div>
             <div>
-              <h1 className="font-heading text-4xl uppercase tracking-wider leading-none">Disparos WhatsApp</h1>
+              <h1 className="font-heading font-normal text-4xl uppercase leading-none tracking-wide text-foreground">Disparos WhatsApp</h1>
               <p className="mt-0.5 text-muted-foreground text-sm">Gerencie campanhas de disparo via Z-API.</p>
             </div>
           </div>

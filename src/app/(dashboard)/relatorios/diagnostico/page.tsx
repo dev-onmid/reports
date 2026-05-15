@@ -151,7 +151,7 @@ export default function NovoDiagnosticoPage() {
   return (
     <div className="max-w-lg mx-auto space-y-5 pt-4">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Novo Diagnóstico</h1>
+        <h1 className="font-heading font-normal text-4xl uppercase leading-none tracking-wide text-foreground">Novo Diagnóstico</h1>
         <p className="text-muted-foreground text-sm mt-1">
           Selecione o cliente e o período. O Claude analisa os dados da dashboard e monta o relatório automaticamente.
         </p>

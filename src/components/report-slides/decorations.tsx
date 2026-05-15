@@ -117,7 +117,7 @@ export function SlideBase({
       <div className="absolute top-5 left-6 flex items-center gap-2 z-10">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/brand/onmid-favicon.svg" alt="onmid" className="h-5 w-auto" />
-        <span className="font-black text-sm tracking-tight" style={{ color: '#1a1a1a' }}>onmid</span>
+        <span className="font-bold text-sm tracking-tight" style={{ color: '#1a1a1a' }}>onmid</span>
         <div
           className="w-8 h-4 rounded-full flex items-center justify-end pr-0.5"
           style={{ background: '#44DD2E' }}

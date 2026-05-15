@@ -219,7 +219,7 @@ export default function ConfiguracoesPage() {
       {/* ── HEADER ── */}
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-4xl font-heading font-bold tracking-widest uppercase">
+          <h1 className="font-heading font-normal text-4xl uppercase leading-none tracking-wide text-foreground">
             CONFIGURAÇÕES
           </h1>
           <p className="text-sm text-muted-foreground mt-1">

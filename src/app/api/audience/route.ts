@@ -76,6 +76,10 @@ function normalizeMetaAccountId(accountId: string) {
   return accountId.replace(/^act_/, '');
 }
 
+function normalizeGoogleCustomerId(accountId: string) {
+  return accountId.replace(/\D/g, '');
+}
+
 function toMetaAccountNodeId(accountId: string) {
   return accountId.startsWith('act_') ? accountId : `act_${accountId}`;
 }
@@ -115,8 +119,10 @@ function gadsHeaders(accessToken: string, loginCustomerId?: string) {
 }
 
 async function gadsSearch(customerId: string, query: string, accessToken: string, loginCustomerId?: string) {
+  const normalizedCustomerId = normalizeGoogleCustomerId(customerId);
+  if (!normalizedCustomerId) return null;
   const res = await fetch(
-    `https://googleads.googleapis.com/v20/customers/${customerId}/googleAds:search`,
+    `https://googleads.googleapis.com/v20/customers/${normalizedCustomerId}/googleAds:search`,
     { method: 'POST', headers: gadsHeaders(accessToken, loginCustomerId), body: JSON.stringify({ query }) },
   );
   if (!res.ok) return null;
@@ -144,7 +150,7 @@ async function buildMccMap(accessToken: string): Promise<Record<string, string>>
   const mccMap: Record<string, string> = {};
   await Promise.allSettled(
     resourceNames.map(async (rn) => {
-      const custId = rn.replace('customers/', '');
+      const custId = normalizeGoogleCustomerId(rn.replace('customers/', ''));
       const data = await gadsSearch(custId, 'SELECT customer.id, customer.manager FROM customer LIMIT 1', accessToken);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const c = (data?.results?.[0] as any)?.customer;
@@ -159,7 +165,7 @@ async function buildMccMap(accessToken: string): Promise<Record<string, string>>
       for (const r of (subData?.results ?? []) as any[]) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const sub = (r as any).customerClient;
-        if (sub?.id && !sub.manager) mccMap[String(sub.id)] = custId;
+        if (sub?.id && !sub.manager) mccMap[normalizeGoogleCustomerId(String(sub.id))] = custId;
       }
     }),
   );
@@ -269,7 +275,9 @@ export async function GET(request: NextRequest) {
   for (const link of links) {
     const key = `${link.platform}:${link.connection_id}`;
     const list = byPlatformAndConn.get(key) ?? [];
-    list.push(link.account_id);
+    const accountId = link.platform === 'google_ads' ? normalizeGoogleCustomerId(link.account_id) : link.account_id;
+    if (!accountId) continue;
+    list.push(accountId);
     byPlatformAndConn.set(key, [...new Set(list)]);
   }
 
@@ -314,12 +322,14 @@ export async function GET(request: NextRequest) {
     const mccMap = await buildMccMap(accessToken);
     const ids = shouldFilterByClient ? accountIds : Object.keys(mccMap);
     await Promise.allSettled(ids.map(async (accountId) => {
-      const loginCustomerId = mccMap[accountId];
+      const normalizedAccountId = normalizeGoogleCustomerId(accountId);
+      if (!normalizedAccountId) return;
+      const loginCustomerId = mccMap[normalizedAccountId];
       const [age, gender, platform, device] = await Promise.all([
-        fetchGoogleBreakdown(accountId, accessToken, loginCustomerId, gaqlPeriod, 'ageRange', GOOGLE_AGE_LABELS),
-        fetchGoogleBreakdown(accountId, accessToken, loginCustomerId, gaqlPeriod, 'gender', GOOGLE_GENDER_LABELS),
-        fetchGoogleBreakdown(accountId, accessToken, loginCustomerId, gaqlPeriod, 'adNetworkType', GOOGLE_PLATFORM_LABELS),
-        fetchGoogleBreakdown(accountId, accessToken, loginCustomerId, gaqlPeriod, 'device', GOOGLE_DEVICE_LABELS),
+        fetchGoogleBreakdown(normalizedAccountId, accessToken, loginCustomerId, gaqlPeriod, 'ageRange', GOOGLE_AGE_LABELS),
+        fetchGoogleBreakdown(normalizedAccountId, accessToken, loginCustomerId, gaqlPeriod, 'gender', GOOGLE_GENDER_LABELS),
+        fetchGoogleBreakdown(normalizedAccountId, accessToken, loginCustomerId, gaqlPeriod, 'adNetworkType', GOOGLE_PLATFORM_LABELS),
+        fetchGoogleBreakdown(normalizedAccountId, accessToken, loginCustomerId, gaqlPeriod, 'device', GOOGLE_DEVICE_LABELS),
       ]);
       age.forEach((item) => addSlice(googleMaps.age, item.label, item.value));
       gender.forEach((item) => addSlice(googleMaps.gender, item.label, item.value));

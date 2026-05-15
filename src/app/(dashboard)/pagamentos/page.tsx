@@ -65,6 +65,12 @@ type ClientAccountLink = {
 };
 
 const LOW_BALANCE_THRESHOLD = 100; // R$100
+const CLIENT_BILLING_MODE_PREFIX = 'clientAdsBillingMode_';
+
+function isClientCardBilling(clientId: string): boolean {
+  if (typeof window === 'undefined') return false;
+  return localStorage.getItem(`${CLIENT_BILLING_MODE_PREFIX}${clientId}`) === 'card';
+}
 
 function MetaAdsMark({ className }: { className?: string }) {
   return (
@@ -114,8 +120,10 @@ function CriticalBalanceAlerts({
   const critical = balances.filter(b => b.balance !== null && b.balance < LOW_BALANCE_THRESHOLD);
   const metaCritical = critical.filter((account) => account.platform === 'meta');
   const googleCritical = critical.filter((account) => account.platform === 'google');
-  const visibleMetaCritical = expanded ? metaCritical : metaCritical.slice(0, 2);
-  const visibleGoogleCritical = expanded ? googleCritical : googleCritical.slice(0, 2);
+  const shouldCollapseMeta = metaCritical.length > 4;
+  const shouldCollapseGoogle = googleCritical.length > 4;
+  const visibleMetaCritical = expanded || !shouldCollapseMeta ? metaCritical : metaCritical.slice(0, 4);
+  const visibleGoogleCritical = expanded || !shouldCollapseGoogle ? googleCritical : googleCritical.slice(0, 4);
 
   if (!loading && critical.length === 0) return null;
 
@@ -224,7 +232,7 @@ function CriticalBalanceAlerts({
           </h2>
         </div>
         <div className="flex items-center gap-2">
-          {critical.length > 4 && (
+          {(shouldCollapseMeta || shouldCollapseGoogle) && (
             <button
               type="button"
               onClick={() => setExpanded((value) => !value)}
@@ -758,8 +766,8 @@ function PaymentMetricCard({
           <Icon className="h-5 w-5" style={{ color }} />
         </span>
         <div className="min-w-0">
-          <p className="text-[10px] font-black uppercase tracking-widest" style={{ color }}>{label}</p>
-          <p className="mt-2 font-heading text-2xl font-black leading-none tracking-tight text-foreground tabular-nums">
+          <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color }}>{label}</p>
+          <p className="mt-2 font-heading font-normal text-3xl leading-none text-foreground tabular-nums">
             {formatCurrencyBRL(value)}
           </p>
           <div className="mt-4 text-[11px] font-bold leading-none">{sub}</div>
@@ -804,8 +812,8 @@ function DayMetricCard({
           <Icon className="h-5 w-5" style={{ color }} />
         </span>
         <div>
-          <p className="text-[10px] font-black uppercase tracking-widest" style={{ color }}>{label}</p>
-          <p className="mt-3 font-heading text-2xl font-black leading-none tracking-tight text-foreground tabular-nums">
+          <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color }}>{label}</p>
+          <p className="mt-3 font-heading font-normal text-3xl leading-none text-foreground tabular-nums">
             {formatCurrencyBRL(value)}
           </p>
           <p className="mt-5 text-xs font-bold" style={{ color }}>{count}</p>
@@ -857,7 +865,7 @@ function MonthPaymentCard({
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className={cn('text-[10px] font-black leading-none tabular-nums', tone.text)}>{time}</p>
+          <p className={cn('text-[10px] font-bold leading-none tabular-nums', tone.text)}>{time}</p>
           <div className="mt-2 flex items-center gap-2">
             {payment.channel === 'Meta ADS' ? <MetaAdsMark className="h-5 w-5 shrink-0" /> : payment.channel === 'Google ADS' ? <GoogleAdsMark className="h-5 w-5 shrink-0" /> : <WalletCards className="h-5 w-5 shrink-0 text-muted-foreground" />}
             <div className="min-w-0">
@@ -865,7 +873,7 @@ function MonthPaymentCard({
               <p className="truncate text-[10px] leading-tight text-muted-foreground">{payment.channel.replace(' ADS', ' Ads')}</p>
             </div>
           </div>
-          <p className={cn('mt-1.5 font-heading text-sm font-black leading-none tabular-nums', tone.amount)}>
+          <p className={cn('mt-1.5 font-heading font-normal text-sm leading-none tabular-nums', tone.amount)}>
             {formatCurrencyBRL(payment.amount)}
           </p>
         </div>
@@ -941,21 +949,21 @@ function DayTimelinePaymentCard({
           {payment.channel === 'Meta ADS' ? <MetaAdsMark className="h-9 w-9 shrink-0" /> : payment.channel === 'Google ADS' ? <GoogleAdsMark className="h-9 w-9 shrink-0" /> : <WalletCards className="h-9 w-9 shrink-0 text-muted-foreground" />}
           <div className="min-w-0">
             <div className="flex items-center gap-6">
-              <p className={cn('text-xs font-black tabular-nums', tone.text)}>{time}</p>
-              <p className="truncate text-sm font-black text-foreground">{payment.clientName}</p>
+              <p className={cn('text-xs font-bold tabular-nums', tone.text)}>{time}</p>
+              <p className="truncate text-sm font-bold text-foreground">{payment.clientName}</p>
             </div>
             <p className="mt-1 text-xs font-medium text-muted-foreground">{payment.channel.replace(' ADS', ' Ads')}</p>
           </div>
         </div>
         <div className="shrink-0 text-right">
-          <p className="font-heading text-sm font-black text-foreground tabular-nums">{formatCurrencyBRL(payment.amount)}</p>
+          <p className="font-heading font-normal text-sm text-foreground tabular-nums">{formatCurrencyBRL(payment.amount)}</p>
           <button
             type="button"
             onClick={() => {
               const current = PAYMENT_STATUS_OPTIONS.indexOf(payment.status);
               onStatusChange(PAYMENT_STATUS_OPTIONS[(current + 1) % PAYMENT_STATUS_OPTIONS.length]);
             }}
-            className={cn('mt-2 inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-black', tone.pill)}
+            className={cn('mt-2 inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-bold', tone.pill)}
           >
             {payment.status}
             <MonthStatusIcon status={payment.status} />
@@ -1000,7 +1008,7 @@ function WeekPaymentCard({
             const current = PAYMENT_STATUS_OPTIONS.indexOf(payment.status);
             onStatusChange(PAYMENT_STATUS_OPTIONS[(current + 1) % PAYMENT_STATUS_OPTIONS.length]);
           }}
-          className={cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[8px] font-black', cfg.text)}
+          className={cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[8px] font-bold', cfg.text)}
           style={{ background: `${cfg.dot}18` }}
           title="Alterar status"
         >
@@ -1013,7 +1021,7 @@ function WeekPaymentCard({
         <div className="min-w-0">
           <p className="truncate text-xs font-bold leading-tight text-foreground">{payment.clientName}</p>
           <p className="mt-0.5 truncate text-[11px] leading-tight text-muted-foreground">{payment.channel.replace(' ADS', ' Ads')}</p>
-          <p className={cn('mt-1 font-heading text-sm font-black leading-none tabular-nums', cfg.text)}>{formatCurrencyBRL(payment.amount)}</p>
+          <p className={cn('mt-1 font-heading font-normal text-sm leading-none tabular-nums', cfg.text)}>{formatCurrencyBRL(payment.amount)}</p>
         </div>
       </div>
     </div>
@@ -1047,7 +1055,7 @@ function WeekChannelSummaryCard({
         {isMeta ? <MetaAdsMark className="h-10 w-10 shrink-0" /> : <GoogleAdsMark className="h-10 w-10 shrink-0" />}
         <div>
           <p className="text-sm font-medium text-muted-foreground">{channel}</p>
-          <p className="mt-2 font-heading text-2xl font-black text-foreground tabular-nums">{formatCurrencyBRL(value)}</p>
+          <p className="mt-2 font-heading font-normal text-3xl leading-none text-foreground tabular-nums">{formatCurrencyBRL(value)}</p>
           <p className="mt-2 text-xs font-bold text-muted-foreground">{pct.toFixed(1)}% do total</p>
         </div>
       </div>
@@ -1113,8 +1121,9 @@ export default function PagamentosPage() {
 
   const activeClientIds = new Set(clients.filter(c => c.status === 'Ativo').map(c => c.id));
   const activeClientLinks = clientLinks.filter(l => activeClientIds.has(l.clientId));
+  const balanceAlertClientLinks = activeClientLinks.filter((link) => !isClientCardBilling(link.clientId));
   const activeBalances = balances.filter(b =>
-    activeClientLinks.some(l => {
+    balanceAlertClientLinks.some(l => {
       if (l.platform === 'meta_ads' && b.platform === 'meta')
         return b.id.replace(/^act_/, '') === l.accountId.replace(/^act_/, '');
       if (l.platform === 'google_ads' && b.platform === 'google')
@@ -1274,7 +1283,7 @@ export default function PagamentosPage() {
     <div className="space-y-5 pb-10">
       <div className="flex flex-wrap items-start justify-between gap-4 pt-2">
         <div>
-          <h1 className="font-heading text-2xl font-black uppercase tracking-tight text-foreground">Acompanhamento de Pagamentos</h1>
+          <h1 className="font-heading font-normal text-4xl uppercase leading-none tracking-wide text-foreground">Acompanhamento de Pagamentos</h1>
           <p className="mt-1 text-sm text-muted-foreground">Gerencie investimentos, recorrências e status dos pagamentos dos clientes.</p>
         </div>
         <div className="flex items-center gap-4">
@@ -1340,7 +1349,7 @@ export default function PagamentosPage() {
           <span className="flex h-8 w-8 items-center justify-center rounded-full bg-violet-500/20 text-violet-300 shadow-[0_0_18px_rgba(124,58,237,0.25)]">
             <Plus className="h-4 w-4" />
           </span>
-          <h2 className="font-heading text-lg font-black uppercase tracking-tight">Novo Pagamento</h2>
+          <h2 className="text-sm font-bold uppercase tracking-wider">Novo Pagamento</h2>
           <p className="text-xs text-muted-foreground">Cadastre um novo Pix ou agende para futuras datas.</p>
         </div>
         <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr_1.25fr_0.9fr_0.7fr_0.75fr_0.8fr]">
@@ -1381,7 +1390,7 @@ export default function PagamentosPage() {
             type="button"
             onClick={handleAddPayment}
             disabled={recurMode !== 'none' && previewCount === 0}
-            className="mt-6 flex h-14 items-center justify-center gap-2 rounded-xl border border-primary/60 bg-primary/15 px-4 text-sm font-black text-foreground shadow-[0_0_24px_rgba(85,245,47,0.28)] transition-all hover:bg-primary/25 disabled:opacity-50"
+            className="mt-6 flex h-14 items-center justify-center gap-2 rounded-xl border border-primary/60 bg-primary/15 px-4 text-sm font-bold text-foreground shadow-[0_0_24px_rgba(85,245,47,0.28)] transition-all hover:bg-primary/25 disabled:opacity-50"
           >
             <Plus className="h-4 w-4" />
             Adicionar Pix
@@ -1398,7 +1407,7 @@ export default function PagamentosPage() {
                 <CalendarDays className="h-4 w-4" />
               </span>
               <div>
-                <h2 className="font-heading text-lg font-black uppercase tracking-tight">Planejamento de Pagamentos</h2>
+                <h2 className="text-sm font-bold uppercase tracking-wider">Planejamento de Pagamentos</h2>
                 <p className="text-sm text-muted-foreground">Visualize e gerencie os pagamentos do mês.</p>
               </div>
             </div>
@@ -1407,7 +1416,7 @@ export default function PagamentosPage() {
                 <button type="button" onClick={() => setSelectedDate(shiftMonth(selectedDate, -1))} className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground hover:text-foreground">
                   <ChevronLeft className="h-4 w-4" />
                 </button>
-                <span className="min-w-36 text-center text-base font-black text-foreground">{getMonthLabel(selectedDate)}</span>
+                <span className="min-w-36 text-center text-base font-bold text-foreground">{getMonthLabel(selectedDate)}</span>
                 <button type="button" onClick={() => setSelectedDate(shiftMonth(selectedDate, 1))} className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground hover:text-foreground">
                   <ChevronRight className="h-4 w-4" />
                 </button>
@@ -1438,7 +1447,7 @@ export default function PagamentosPage() {
                       </PieChart>
                     </ResponsiveContainer>
                     <div className="absolute inset-0 flex flex-col items-center justify-center">
-                      <span className="font-heading text-lg font-black leading-none">{total}</span>
+                      <span className="font-heading font-normal text-lg leading-none">{total}</span>
                       <span className="text-[9px] font-bold uppercase text-muted-foreground">Total</span>
                     </div>
                   </div>
@@ -1457,7 +1466,7 @@ export default function PagamentosPage() {
               { label: 'DOM', color: '#55f52f' },
             ].map((day, i) => (
               <div key={day.label} className="border-r border-border/70 py-4 text-center last:border-r-0">
-                <p className="text-sm font-black tracking-widest text-foreground">
+                <p className="text-sm font-bold tracking-widest text-foreground">
                   <span style={{ color: day.color }}>{day.label}</span>
                   <span className="ml-2 text-muted-foreground">{monthAllWeeks[0]?.[i]?.split('-')[2] ?? ''}</span>
                 </p>
@@ -1529,7 +1538,7 @@ export default function PagamentosPage() {
                   <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-background text-foreground">
                     <CalendarDays className="h-5 w-5" />
                   </span>
-                  <h2 className="font-heading text-lg font-black tracking-tight text-foreground">Agenda do dia</h2>
+                  <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">Agenda do dia</h2>
                   <span className="text-lg text-muted-foreground">•</span>
                   <span className="text-lg font-medium text-muted-foreground">{parseDate(selectedDate).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}</span>
                 </div>
@@ -1578,19 +1587,19 @@ export default function PagamentosPage() {
                 <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-500/15 text-violet-300 shadow-[0_0_18px_rgba(124,58,237,0.2)]">
                   <BarChart3 className="h-4 w-4" />
                 </span>
-                <h3 className="font-heading text-lg font-black">Resumo do dia</h3>
+                <h3 className="font-heading font-normal text-lg">Resumo do dia</h3>
               </div>
 
               <div className="rounded-xl border border-border bg-background/40 p-5">
                 <p className="text-sm text-muted-foreground">Total de pagamentos</p>
                 <div className="mt-3 flex items-end justify-between gap-4">
-                  <p className="font-heading text-3xl font-black leading-none tabular-nums">{selectedScopePayments.length}</p>
-                  <p className="text-lg font-black text-primary tabular-nums">{formatCurrencyBRL(totalDay)}</p>
+                  <p className="font-heading font-normal text-3xl leading-none tabular-nums">{selectedScopePayments.length}</p>
+                  <p className="text-lg font-bold text-primary tabular-nums">{formatCurrencyBRL(totalDay)}</p>
                 </div>
               </div>
 
               <div className="mt-4 rounded-xl border border-border bg-background/40 p-5">
-                <p className="mb-4 text-sm font-black text-foreground">Por canal</p>
+                <p className="mb-4 text-sm font-bold text-foreground">Por canal</p>
                 {channelData.length > 0 ? (
                   <div className="grid grid-cols-[1fr_132px] items-center gap-4">
                     <div className="space-y-5">
@@ -1620,7 +1629,7 @@ export default function PagamentosPage() {
                       </ResponsiveContainer>
                       <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
                         <span className="text-xs font-bold text-foreground">R$</span>
-                        <span className="font-heading text-sm font-black leading-tight text-foreground">{formatCurrencyBRL(totalDay).replace('R$', '').trim()}</span>
+                        <span className="font-heading font-normal text-sm leading-tight text-foreground">{formatCurrencyBRL(totalDay).replace('R$', '').trim()}</span>
                         <span className="text-[10px] font-bold text-muted-foreground">Total</span>
                       </div>
                     </div>
@@ -1631,7 +1640,7 @@ export default function PagamentosPage() {
               </div>
 
               <div className="mt-4 rounded-xl border border-border bg-background/40 p-5">
-                <p className="mb-4 text-sm font-black text-foreground">Status dos pagamentos</p>
+                <p className="mb-4 text-sm font-bold text-foreground">Status dos pagamentos</p>
                 <div className="space-y-4">
                   {PAYMENT_STATUS_OPTIONS.map((status) => {
                     const statusPayments = selectedScopePayments.filter((payment) => payment.status === status);
@@ -1646,7 +1655,7 @@ export default function PagamentosPage() {
                           <span className="w-20 text-muted-foreground">{status}</span>
                           <span className="text-muted-foreground">{statusPayments.length} pagamentos</span>
                         </div>
-                        <span className="font-black tabular-nums" style={{ color: palette.dot }}>{formatCurrencyBRL(total)}</span>
+                        <span className="font-bold tabular-nums" style={{ color: palette.dot }}>{formatCurrencyBRL(total)}</span>
                       </div>
                     );
                   })}
@@ -1695,8 +1704,8 @@ export default function PagamentosPage() {
               <div className="grid grid-cols-7 border-b border-border/70">
                 {dailyData.map((day, i) => (
                   <div key={day.date} className="border-r border-border/70 px-4 py-5 text-center last:border-r-0">
-                    <p className="text-lg font-black text-foreground">{day.label}</p>
-                    <p className={cn('mt-1 text-sm font-black tabular-nums', day.date === todayStr ? 'text-primary' : 'text-primary')}>
+                    <p className="text-lg font-bold text-foreground">{day.label}</p>
+                    <p className={cn('mt-1 text-sm font-bold tabular-nums', day.date === todayStr ? 'text-primary' : 'text-primary')}>
                       {Number(day.date.split('-')[2])}/{Number(day.date.split('-')[1])}
                     </p>
                   </div>
@@ -1717,7 +1726,7 @@ export default function PagamentosPage() {
                     </div>
                     <div className="flex items-center justify-between border-t border-border/70 px-4 py-3">
                       <span className="text-sm text-muted-foreground">Total do dia</span>
-                      <span className="font-heading text-sm font-black tabular-nums text-foreground">{formatCurrencyBRL(day.total)}</span>
+                      <span className="font-heading font-normal text-sm tabular-nums text-foreground">{formatCurrencyBRL(day.total)}</span>
                     </div>
                   </div>
                 ))}
@@ -1726,7 +1735,7 @@ export default function PagamentosPage() {
 
             <div className="grid overflow-hidden rounded-xl border border-border bg-card shadow-[0_0_34px_rgba(15,23,42,0.28)] xl:grid-cols-[1.15fr_1.05fr_0.55fr]">
               <div className="border-r border-border/70 p-5">
-                <h3 className="mb-4 font-heading text-lg font-black uppercase tracking-tight">Resumo da semana por canal</h3>
+                <h3 className="mb-4 text-sm font-bold uppercase tracking-wider">Resumo da semana por canal</h3>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <WeekChannelSummaryCard channel="Meta Ads" value={metaTotal} total={weekTotal} trend={[1, 2, 1, 3, 2, 5, 4]} />
                   <WeekChannelSummaryCard channel="Google Ads" value={googleTotal} total={weekTotal} trend={[2, 1, 3, 2, 4, 3, 5]} />
@@ -1750,7 +1759,7 @@ export default function PagamentosPage() {
                   })}
                 </div>
                 <div className="border-l border-border/70 p-5">
-                  <p className="mb-3 text-sm font-black uppercase tracking-wider text-muted-foreground">Evolução diária (total)</p>
+                  <p className="mb-3 text-sm font-bold uppercase tracking-wider text-muted-foreground">Evolução diária (total)</p>
                   <ResponsiveContainer width="100%" height={150}>
                     <AreaChart data={dailyData} margin={{ top: 10, right: 8, bottom: 0, left: 0 }}>
                       <defs>
@@ -1775,14 +1784,14 @@ export default function PagamentosPage() {
                   <div className="rounded-lg border border-border bg-background/45 p-4">
                     <p className="text-sm text-muted-foreground">Maior dia</p>
                     <p className="mt-1 text-sm font-bold text-foreground">{maxDay.label.charAt(0) + maxDay.label.slice(1).toLowerCase()}-feira</p>
-                    <p className="mt-1 font-heading text-lg font-black tabular-nums text-foreground">{formatCurrencyBRL(maxDay.total)}</p>
+                    <p className="mt-1 font-heading font-normal text-lg tabular-nums text-foreground">{formatCurrencyBRL(maxDay.total)}</p>
                   </div>
                 )}
                 {minDay && (
                   <div className="rounded-lg border border-border bg-background/45 p-4">
                     <p className="text-sm text-muted-foreground">Menor dia</p>
                     <p className="mt-1 text-sm font-bold text-foreground">{minDay.label === 'DOM' ? 'Domingo' : minDay.label.charAt(0) + minDay.label.slice(1).toLowerCase()}</p>
-                    <p className="mt-1 font-heading text-lg font-black tabular-nums text-foreground">{formatCurrencyBRL(minDay.total)}</p>
+                    <p className="mt-1 font-heading font-normal text-lg tabular-nums text-foreground">{formatCurrencyBRL(minDay.total)}</p>
                   </div>
                 )}
               </div>

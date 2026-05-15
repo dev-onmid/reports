@@ -160,7 +160,7 @@ export default function RelatoriosPage() {
             <BarChart2 className="w-6 h-6 text-violet-400" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">Relatórios</h1>
+            <h1 className="font-heading font-normal text-4xl uppercase leading-none tracking-wide text-foreground">Relatórios</h1>
             <p className="text-sm text-muted-foreground mt-0.5">
               Diagnósticos de performance e relatórios personalizados para insights estratégicos.
             </p>
@@ -218,7 +218,7 @@ export default function RelatoriosPage() {
           </div>
           <div>
             <p className="text-xs text-muted-foreground">Total de relatórios</p>
-            <p className="text-2xl font-bold text-foreground leading-none mt-0.5">
+            <p className="font-heading font-normal text-3xl leading-none text-foreground mt-0.5">
               {totalReports}
               <span className="text-violet-400 text-sm ml-1">✦</span>
             </p>
@@ -231,7 +231,7 @@ export default function RelatoriosPage() {
           </div>
           <div>
             <p className="text-xs text-muted-foreground">Gerados este mês</p>
-            <p className="text-2xl font-bold text-foreground leading-none mt-0.5">{thisMonth}</p>
+            <p className="font-heading font-normal text-3xl leading-none text-foreground mt-0.5">{thisMonth}</p>
           </div>
         </div>
         {/* Unique clients */}
@@ -241,7 +241,7 @@ export default function RelatoriosPage() {
           </div>
           <div>
             <p className="text-xs text-muted-foreground">Clientes únicos</p>
-            <p className="text-2xl font-bold text-foreground leading-none mt-0.5">{uniqueClients}</p>
+            <p className="font-heading font-normal text-3xl leading-none text-foreground mt-0.5">{uniqueClients}</p>
           </div>
         </div>
         {/* Active */}
@@ -251,7 +251,7 @@ export default function RelatoriosPage() {
           </div>
           <div>
             <p className="text-xs text-muted-foreground">Relatórios ativos</p>
-            <p className="text-2xl font-bold text-foreground leading-none mt-0.5">{activeReports}</p>
+            <p className="font-heading font-normal text-3xl leading-none text-foreground mt-0.5">{activeReports}</p>
           </div>
         </div>
       </div>
