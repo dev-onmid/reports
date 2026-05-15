@@ -653,6 +653,7 @@ export default function BibliotecaPage() {
   const [mediaTypeFilter, setMediaTypeFilter] = useState<'' | 'image' | 'video' | 'carousel' | 'text'>('');
   const [platformFilter, setPlatformFilter] = useState<'' | 'facebook' | 'instagram'>('');
   const [sortOrder, setSortOrder] = useState<'newest' | 'oldest' | 'longest'>('newest');
+  const [onlyWithCreative, setOnlyWithCreative] = useState(true);
   const handleSelectAd = useCallback((ad: AdLibraryAd) => setSelectedAd(ad), []);
 
   // Load all saved ads
@@ -730,6 +731,7 @@ export default function BibliotecaPage() {
   const countryLabel = AD_COUNTRIES.find(c => c.code === country)?.label ?? 'Brasil';
 
   const filteredResults = results
+    .filter(ad => !onlyWithCreative || (ad.mediaType !== 'text' && (!!ad.imageUrl || !!ad.videoUrl || ad.cards.length > 0)))
     .filter(ad => !mediaTypeFilter || ad.mediaType === mediaTypeFilter)
     .filter(ad => !platformFilter || ad.publisherPlatforms.some(p => p.toLowerCase().includes(platformFilter)))
     .sort((a, b) => {
@@ -858,6 +860,21 @@ export default function BibliotecaPage() {
             <ChevronDown className="pointer-events-none absolute right-2 h-3 w-3 text-muted-foreground" />
           </div>
         </div>
+
+        {/* Apenas com criativo */}
+        <button
+          type="button"
+          onClick={() => setOnlyWithCreative(v => !v)}
+          className={cn(
+            'flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs font-medium transition-colors',
+            onlyWithCreative
+              ? 'border-primary/60 bg-primary/10 text-primary'
+              : 'border-border bg-card text-muted-foreground hover:border-foreground/30'
+          )}
+        >
+          <Image className="h-3 w-3" />
+          Só com criativo
+        </button>
 
         {/* Data veiculação */}
         <div className="flex items-center gap-1.5">
