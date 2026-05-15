@@ -653,7 +653,7 @@ export default function BibliotecaPage() {
   const [mediaTypeFilter, setMediaTypeFilter] = useState<'' | 'image' | 'video' | 'carousel' | 'text'>('');
   const [platformFilter, setPlatformFilter] = useState<'' | 'facebook' | 'instagram'>('');
   const [sortOrder, setSortOrder] = useState<'newest' | 'oldest' | 'longest'>('newest');
-  const [onlyWithCreative, setOnlyWithCreative] = useState(true);
+  const [onlyWithCreative, setOnlyWithCreative] = useState(false);
   const handleSelectAd = useCallback((ad: AdLibraryAd) => setSelectedAd(ad), []);
 
   // Load all saved ads
