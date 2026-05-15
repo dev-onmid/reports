@@ -16,6 +16,13 @@ export type AdLibraryAd = {
   spend: { lower_bound?: string; upper_bound?: string } | null;
   impressions: { lower_bound?: string; upper_bound?: string } | null;
   currency: string | null;
+  // Media from snapshot
+  imageUrl: string | null;
+  videoUrl: string | null;
+  videoThumbnailUrl: string | null;
+  linkUrl: string | null;
+  callToAction: string | null;
+  mediaType: 'image' | 'video' | 'carousel' | 'text' | null;
 };
 
 export async function GET(request: NextRequest) {
@@ -62,6 +69,7 @@ export async function GET(request: NextRequest) {
     'ad_delivery_start_time',
     'ad_delivery_stop_time',
     'ad_active_status',
+    'snapshot',
   ].join(','));
   url.searchParams.set('limit', String(limit));
   url.searchParams.set('access_token', token);
@@ -79,21 +87,48 @@ export async function GET(request: NextRequest) {
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const data: AdLibraryAd[] = (raw.data ?? []).map((ad: any) => ({
-    adArchiveId: ad.id,
-    pageId: ad.page_id ?? '',
-    pageName: ad.page_name ?? '',
-    adSnapshotUrl: ad.ad_snapshot_url ?? '',
-    creativeBodies: ad.ad_creative_bodies ?? [],
-    creativeTitles: ad.ad_creative_link_titles ?? [],
-    publisherPlatforms: ad.publisher_platforms ?? [],
-    deliveryStartTime: ad.ad_delivery_start_time ?? null,
-    deliveryStopTime: ad.ad_delivery_stop_time ?? null,
-    adActiveStatus: ad.ad_active_status ?? 'UNKNOWN',
-    spend: ad.spend ?? null,
-    impressions: ad.impressions ?? null,
-    currency: ad.currency ?? null,
-  }));
+  const data: AdLibraryAd[] = (raw.data ?? []).map((ad: any) => {
+    const snap = ad.snapshot ?? {};
+    const images: string[] = (snap.images ?? [])
+      .map((img: any) => img.original_image_url ?? img.resized_image_url ?? '')
+      .filter(Boolean);
+    const videos = snap.videos ?? [];
+    const firstVideo = videos[0] ?? null;
+    const cards = snap.cards ?? [];
+
+    let mediaType: AdLibraryAd['mediaType'] = 'text';
+    if (videos.length > 0) mediaType = 'video';
+    else if (images.length > 0) mediaType = 'image';
+    else if (cards.length > 0) mediaType = 'carousel';
+
+    const imageUrl = images[0] ?? (cards[0]?.original_image_url ?? cards[0]?.resized_image_url ?? null);
+    const videoUrl = firstVideo ? (firstVideo.video_hd_url ?? firstVideo.video_sd_url ?? null) : null;
+    const videoThumbnailUrl = firstVideo?.video_preview_image_url ?? null;
+    const linkUrl = snap.link_url ?? snap.caption ?? null;
+    const callToAction = snap.call_to_action?.type ?? null;
+
+    return {
+      adArchiveId: ad.id,
+      pageId: ad.page_id ?? '',
+      pageName: ad.page_name ?? '',
+      adSnapshotUrl: ad.ad_snapshot_url ?? '',
+      creativeBodies: ad.ad_creative_bodies ?? [],
+      creativeTitles: ad.ad_creative_link_titles ?? [],
+      publisherPlatforms: ad.publisher_platforms ?? [],
+      deliveryStartTime: ad.ad_delivery_start_time ?? null,
+      deliveryStopTime: ad.ad_delivery_stop_time ?? null,
+      adActiveStatus: ad.ad_active_status ?? 'UNKNOWN',
+      spend: ad.spend ?? null,
+      impressions: ad.impressions ?? null,
+      currency: ad.currency ?? null,
+      imageUrl,
+      videoUrl,
+      videoThumbnailUrl,
+      linkUrl,
+      callToAction,
+      mediaType,
+    };
+  });
 
   return Response.json({
     data,

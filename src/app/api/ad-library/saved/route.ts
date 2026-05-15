@@ -32,6 +32,12 @@ async function ensureTable(pool: ReturnType<typeof makeServerPool>) {
       UNIQUE (client_id, ad_archive_id)
     );
     CREATE INDEX IF NOT EXISTS idx_saved_ads_client_id ON public.saved_ads (client_id);
+    ALTER TABLE public.saved_ads ADD COLUMN IF NOT EXISTS image_url TEXT;
+    ALTER TABLE public.saved_ads ADD COLUMN IF NOT EXISTS video_url TEXT;
+    ALTER TABLE public.saved_ads ADD COLUMN IF NOT EXISTS video_thumbnail_url TEXT;
+    ALTER TABLE public.saved_ads ADD COLUMN IF NOT EXISTS link_url TEXT;
+    ALTER TABLE public.saved_ads ADD COLUMN IF NOT EXISTS call_to_action TEXT;
+    ALTER TABLE public.saved_ads ADD COLUMN IF NOT EXISTS media_type TEXT;
   `);
 }
 
@@ -55,6 +61,12 @@ function rowToSavedAd(r: any): SavedAd {
     currency: r.currency ?? null,
     notes: r.notes ?? null,
     savedAt: r.saved_at,
+    imageUrl: r.image_url ?? null,
+    videoUrl: r.video_url ?? null,
+    videoThumbnailUrl: r.video_thumbnail_url ?? null,
+    linkUrl: r.link_url ?? null,
+    callToAction: r.call_to_action ?? null,
+    mediaType: r.media_type ?? null,
   };
 }
 
@@ -94,10 +106,17 @@ export async function POST(request: NextRequest) {
          (client_id, ad_archive_id, page_id, page_name, ad_snapshot_url,
           creative_bodies, creative_titles, publisher_platforms,
           delivery_start_time, delivery_stop_time, ad_active_status,
-          spend, impressions, currency, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+          spend, impressions, currency, notes,
+          image_url, video_url, video_thumbnail_url, link_url, call_to_action, media_type)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
        ON CONFLICT (client_id, ad_archive_id) DO UPDATE
-         SET notes = EXCLUDED.notes, saved_at = NOW()
+         SET notes = EXCLUDED.notes, saved_at = NOW(),
+             image_url = EXCLUDED.image_url,
+             video_url = EXCLUDED.video_url,
+             video_thumbnail_url = EXCLUDED.video_thumbnail_url,
+             link_url = EXCLUDED.link_url,
+             call_to_action = EXCLUDED.call_to_action,
+             media_type = EXCLUDED.media_type
        RETURNING *`,
       [
         clientId,
@@ -115,6 +134,12 @@ export async function POST(request: NextRequest) {
         ad.impressions ? JSON.stringify(ad.impressions) : null,
         ad.currency,
         notes ?? null,
+        ad.imageUrl ?? null,
+        ad.videoUrl ?? null,
+        ad.videoThumbnailUrl ?? null,
+        ad.linkUrl ?? null,
+        ad.callToAction ?? null,
+        ad.mediaType ?? null,
       ]
     );
     return Response.json(rowToSavedAd(rows[0]), { status: 201 });

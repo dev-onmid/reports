@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils';
 import {
   Search, ExternalLink, RefreshCw, Trash2, X,
   Bookmark, Globe, ChevronDown, SlidersHorizontal,
-  Sparkles, LayoutGrid, Calendar, ArrowUpDown,
+  Sparkles, LayoutGrid, Calendar, ArrowUpDown, Play,
 } from 'lucide-react';
 import type { AdLibraryAd } from '@/app/api/meta/ad-library/route';
 import type { SavedAd } from '@/app/api/ad-library/saved/route';
@@ -89,35 +89,65 @@ function AdCard({
 
   return (
     <div className="flex flex-col overflow-hidden rounded-2xl border border-border bg-card transition-all hover:border-violet-500/30 hover:shadow-lg hover:shadow-violet-500/5">
-      {/* ── Image / preview area ── */}
-      <div className="relative aspect-video w-full overflow-hidden bg-zinc-900">
-        <div className="absolute inset-0 bg-gradient-to-br from-zinc-800/60 to-zinc-900/80" />
-        {snapshotUrl ? (
-          <iframe
-            src={snapshotUrl}
-            title={`Preview ${ad.adArchiveId}`}
-            className="absolute inset-0 h-full w-full"
-            loading="lazy"
-            referrerPolicy="no-referrer"
-            sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-          />
+      {/* ── Media area ── */}
+      <div className="relative w-full overflow-hidden bg-zinc-900" style={{ minHeight: '200px' }}>
+        {/* Actual media */}
+        {(ad.videoThumbnailUrl ?? ad.videoUrl) ? (
+          <a href={snapshotUrl || undefined} target="_blank" rel="noopener noreferrer" className="block relative group">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={ad.videoThumbnailUrl ?? ''}
+              alt=""
+              className="w-full object-cover"
+              style={{ maxHeight: '260px', minHeight: '160px' }}
+              referrerPolicy="no-referrer"
+              loading="lazy"
+            />
+            <div className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/30 transition-colors">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-sm">
+                <Play className="h-5 w-5 fill-current ml-0.5" />
+              </div>
+            </div>
+          </a>
+        ) : ad.imageUrl ? (
+          <a href={snapshotUrl || undefined} target="_blank" rel="noopener noreferrer" className="block">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={ad.imageUrl}
+              alt=""
+              className="w-full object-cover"
+              style={{ maxHeight: '300px', minHeight: '160px' }}
+              referrerPolicy="no-referrer"
+              loading="lazy"
+            />
+          </a>
         ) : (
-          <div className="absolute inset-0 flex items-center justify-center text-zinc-600">
-            <Globe className="h-10 w-10 opacity-30" />
+          /* Text-only ad — show copy in styled block */
+          <div className="flex min-h-[160px] items-center justify-center bg-gradient-to-br from-zinc-800 to-zinc-900 p-5">
+            <p className="text-center text-sm text-zinc-300 leading-relaxed line-clamp-5">{body || 'Anúncio de texto'}</p>
           </div>
         )}
 
         {/* Status badge — top left */}
         <div className="absolute left-3 top-3 z-10">
           <span className={cn(
-            'inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold',
+            'inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold backdrop-blur-sm',
             isActive
-              ? 'border-emerald-500/60 text-emerald-400 bg-emerald-500/10'
-              : 'border-zinc-500/40 text-zinc-400 bg-zinc-500/10'
+              ? 'border-emerald-500/60 text-emerald-400 bg-black/50'
+              : 'border-zinc-500/40 text-zinc-400 bg-black/50'
           )}>
             {isActive ? 'Ativo' : 'Inativo'}
           </span>
         </div>
+
+        {/* Media type badge */}
+        {ad.mediaType && ad.mediaType !== 'text' && (
+          <div className="absolute left-3 bottom-3 z-10">
+            <span className="inline-flex items-center rounded-full border border-white/20 bg-black/60 px-2 py-0.5 text-[10px] font-semibold text-white/80 backdrop-blur-sm capitalize">
+              {ad.mediaType === 'video' ? '▶ Vídeo' : ad.mediaType === 'carousel' ? '⊞ Carrossel' : '🖼 Imagem'}
+            </span>
+          </div>
+        )}
 
         {/* Bookmark icon — top right */}
         <div className="absolute right-3 top-3 z-10">
@@ -195,20 +225,18 @@ function AdCard({
         {/* URL row */}
         <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground/70">
           <Globe className="h-3 w-3 shrink-0" />
-          <span className="truncate uppercase tracking-wide text-[10px] font-medium">{ad.pageName}</span>
-          {snapshotUrl && (
-            <>
-              <span className="text-muted-foreground/30">·</span>
-              <a
-                href={snapshotUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="truncate hover:text-foreground transition-colors"
-              >
-                facebook.com/ads
-              </a>
-              <ExternalLink className="h-3 w-3 shrink-0" />
-            </>
+          {ad.linkUrl ? (
+            <a href={ad.linkUrl} target="_blank" rel="noopener noreferrer"
+              className="truncate hover:text-foreground transition-colors max-w-[160px]">
+              {ad.linkUrl.replace(/^https?:\/\/(www\.)?/, '').split('/')[0]}
+            </a>
+          ) : (
+            <span className="truncate text-[10px]">facebook.com/ads</span>
+          )}
+          {ad.callToAction && (
+            <span className="ml-auto shrink-0 rounded-md border border-border bg-muted/40 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+              {ad.callToAction.replace(/_/g, ' ')}
+            </span>
           )}
         </div>
       </div>
