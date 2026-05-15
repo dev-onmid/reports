@@ -347,7 +347,7 @@ export async function POST(request: NextRequest) {
     const { rows: [conn] } = await pool.query(
       `SELECT * FROM public.meta_connections WHERE status = 'connected' LIMIT 1`
     );
-    if (!conn) return Response.json({ ok: true }); // no connection, ignore
+    if (!conn) return Response.json({ ok: true });
     const userToken = await getFreshMetaToken(conn);
 
     const entries = body.entry ?? [];
@@ -357,21 +357,27 @@ export async function POST(request: NextRequest) {
 
       // ── Instagram events ──
       if (body.object === 'instagram') {
-        // Comments
         for (const change of (entry.changes ?? [])) {
           if (change.field === 'comments') {
             const v = change.value;
-            await processInstagramComment(
-              pool, entryId,
-              v.id, v.text ?? '',
-              v.from?.id ?? '',
-              userToken
-            );
+            // Log raw event even if no automation matches
+            await pool.query(
+              `INSERT INTO public.meta_automation_logs
+                 (automation_id, platform, event_type, account_id, sender_id, trigger_text, action_taken, status)
+               VALUES (NULL,'instagram','comment',$1,$2,$3,'received','ignored')`,
+              [entryId, v.from?.id ?? '', v.text ?? '']
+            ).catch(() => null);
+            await processInstagramComment(pool, entryId, v.id, v.text ?? '', v.from?.id ?? '', userToken);
           }
         }
-        // DMs
         for (const msg of (entry.messaging ?? [])) {
           if (msg.message?.text) {
+            await pool.query(
+              `INSERT INTO public.meta_automation_logs
+                 (automation_id, platform, event_type, account_id, sender_id, trigger_text, action_taken, status)
+               VALUES (NULL,'instagram','dm',$1,$2,$3,'received','ignored')`,
+              [entryId, msg.sender?.id ?? '', msg.message.text]
+            ).catch(() => null);
             await processInstagramDM(pool, entryId, msg.sender?.id ?? '', msg.message.text, userToken);
           }
         }
@@ -379,22 +385,26 @@ export async function POST(request: NextRequest) {
 
       // ── Facebook Page events ──
       if (body.object === 'page') {
-        // Comments (in feed changes)
         for (const change of (entry.changes ?? [])) {
           if (change.field === 'feed' && change.value?.item === 'comment') {
             const v = change.value;
-            await processFacebookComment(
-              pool, entryId,
-              v.comment_id ?? v.id,
-              v.message ?? '',
-              v.from?.id ?? '',
-              userToken
-            );
+            await pool.query(
+              `INSERT INTO public.meta_automation_logs
+                 (automation_id, platform, event_type, account_id, sender_id, trigger_text, action_taken, status)
+               VALUES (NULL,'facebook','comment',$1,$2,$3,'received','ignored')`,
+              [entryId, v.from?.id ?? '', v.message ?? '']
+            ).catch(() => null);
+            await processFacebookComment(pool, entryId, v.comment_id ?? v.id, v.message ?? '', v.from?.id ?? '', userToken);
           }
         }
-        // DMs (Messenger)
         for (const msg of (entry.messaging ?? [])) {
           if (msg.message?.text) {
+            await pool.query(
+              `INSERT INTO public.meta_automation_logs
+                 (automation_id, platform, event_type, account_id, sender_id, trigger_text, action_taken, status)
+               VALUES (NULL,'facebook','dm',$1,$2,$3,'received','ignored')`,
+              [entryId, msg.sender?.id ?? '', msg.message.text]
+            ).catch(() => null);
             await processFacebookDM(pool, entryId, msg.sender?.id ?? '', msg.message.text, userToken);
           }
         }

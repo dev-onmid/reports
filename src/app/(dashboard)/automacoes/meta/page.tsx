@@ -104,6 +104,8 @@ export default function MetaAutomacoesPage() {
   const [loadingPages, setLoadingPages] = useState(false);
   const clientPickerRef = useRef<HTMLDivElement>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [subscribing, setSubscribing] = useState<string | null>(null);
+  const [subscribeResults, setSubscribeResults] = useState<Record<string, 'ok' | 'error'>>({});
 
   async function loadWebhookStatus() {
     const res = await fetch('/api/meta/webhook/status');
@@ -124,6 +126,22 @@ export default function MetaAutomacoesPage() {
     } finally {
       setTestingWebhook(false);
       setTimeout(() => setTestResult(null), 4000);
+    }
+  }
+
+  async function subscribePageForAutomation(auto: Automation) {
+    const key = `${auto.platform}::${auto.account_id}`;
+    setSubscribing(key);
+    try {
+      const res = await fetch('/api/meta/subscribe-page', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pageId: auto.account_id, platform: auto.platform }),
+      });
+      setSubscribeResults(prev => ({ ...prev, [key]: res.ok ? 'ok' : 'error' }));
+      setTimeout(() => setSubscribeResults(prev => { const n = { ...prev }; delete n[key]; return n; }), 5000);
+    } finally {
+      setSubscribing(null);
     }
   }
 
@@ -592,6 +610,26 @@ export default function MetaAutomacoesPage() {
 
                     {/* Actions */}
                     <div className="flex items-center gap-1 shrink-0">
+                      {/* Subscribe page button */}
+                      {(() => {
+                        const key = `${auto.platform}::${auto.account_id}`;
+                        const result = subscribeResults[key];
+                        return (
+                          <button type="button" onClick={() => void subscribePageForAutomation(auto)}
+                            disabled={subscribing === key}
+                            title="Inscrever página no webhook"
+                            className={cn('rounded-lg p-1.5 transition-colors text-xs',
+                              result === 'ok' ? 'text-emerald-500 bg-emerald-500/10' :
+                              result === 'error' ? 'text-rose-500 bg-rose-500/10' :
+                              'text-muted-foreground hover:text-amber-400 hover:bg-amber-400/10'
+                            )}>
+                            {subscribing === key ? <RefreshCw className="h-4 w-4 animate-spin" /> :
+                             result === 'ok' ? <CheckCircle2 className="h-4 w-4" /> :
+                             result === 'error' ? <AlertCircle className="h-4 w-4" /> :
+                             <Zap className="h-4 w-4" />}
+                          </button>
+                        );
+                      })()}
                       <button type="button" onClick={() => startEdit(auto)} title="Editar"
                         className={cn('rounded-lg p-1.5 transition-colors',
                           editingId === auto.id
@@ -792,6 +830,47 @@ export default function MetaAutomacoesPage() {
             <p className="text-xs text-muted-foreground leading-relaxed">
               O campo "ID da Conta / Página" nas regras deve ser o <strong>Instagram User ID</strong> ou <strong>Facebook Page ID</strong> — não o nome de usuário. Você pode encontrar esse ID na aba Integrações do sistema ou no Meta Business Suite → Configurações da conta.
             </p>
+          </div>
+
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-5 space-y-3">
+            <p className="text-sm font-semibold text-amber-400 flex items-center gap-2">
+              <Zap className="h-4 w-4" />
+              5. Inscrever as páginas no app — passo obrigatório
+            </p>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Verificar o webhook não é suficiente. Cada página precisa ser inscrita individualmente no app para que a Meta envie eventos.
+              Clique no ícone <strong className="text-amber-400">⚡</strong> (raio) ao lado de cada automação na aba <strong>Regras</strong> para inscrever a página automaticamente.
+            </p>
+            {automations.length > 0 && (
+              <div className="space-y-2 pt-1">
+                <p className="text-xs font-medium text-muted-foreground">Inscrever todas as páginas de uma vez:</p>
+                <div className="flex flex-wrap gap-2">
+                  {automations.map(auto => {
+                    const key = `${auto.platform}::${auto.account_id}`;
+                    const result = subscribeResults[key];
+                    return (
+                      <button key={key} type="button" onClick={() => void subscribePageForAutomation(auto)}
+                        disabled={subscribing === key}
+                        className={cn(
+                          'flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition-all',
+                          result === 'ok' ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400' :
+                          result === 'error' ? 'border-rose-500/40 bg-rose-500/10 text-rose-400' :
+                          'border-border bg-card text-muted-foreground hover:text-foreground hover:border-primary/40'
+                        )}>
+                        {subscribing === key ? <RefreshCw className="h-3 w-3 animate-spin" /> :
+                         result === 'ok' ? <CheckCircle2 className="h-3 w-3" /> :
+                         result === 'error' ? <AlertCircle className="h-3 w-3" /> :
+                         <Zap className="h-3 w-3" />}
+                        {auto.account_name ?? auto.account_id}
+                        <span className={cn('text-[9px] font-bold uppercase',
+                          auto.platform === 'instagram' ? 'text-pink-400' : 'text-blue-400'
+                        )}>{auto.platform === 'instagram' ? 'IG' : 'FB'}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
