@@ -17,6 +17,7 @@ export async function GET() {
         client_id TEXT,
         account_id TEXT NOT NULL,
         account_name TEXT,
+        picture_url TEXT,
         platform TEXT NOT NULL,
         trigger_type TEXT NOT NULL,
         keyword TEXT,
@@ -26,6 +27,7 @@ export async function GET() {
         enabled BOOLEAN NOT NULL DEFAULT true,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+      ALTER TABLE public.meta_automations ADD COLUMN IF NOT EXISTS picture_url TEXT;
 
       CREATE TABLE IF NOT EXISTS public.meta_automation_logs (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -60,6 +62,7 @@ export async function POST(request: NextRequest) {
     client_id?: string;
     account_id: string;
     account_name?: string;
+    picture_url?: string;
     platform: string;
     trigger_type: string;
     keyword?: string;
@@ -76,13 +79,14 @@ export async function POST(request: NextRequest) {
   try {
     const { rows: [row] } = await pool.query(
       `INSERT INTO public.meta_automations
-         (client_id, account_id, account_name, platform, trigger_type, keyword, action, reply_message, dm_message)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+         (client_id, account_id, account_name, picture_url, platform, trigger_type, keyword, action, reply_message, dm_message)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        RETURNING *`,
       [
         body.client_id ?? null,
         body.account_id,
         body.account_name ?? null,
+        body.picture_url ?? null,
         body.platform,
         body.trigger_type,
         body.keyword ?? null,

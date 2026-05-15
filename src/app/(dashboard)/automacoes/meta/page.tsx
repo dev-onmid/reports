@@ -6,7 +6,7 @@ import {
   Plus, Trash2, Check, RefreshCw, AlertCircle,
   CheckCircle2, MinusCircle, ToggleLeft, ToggleRight,
   ChevronDown, ChevronUp, Copy, MessageCircle,
-  MessageSquare, Zap, Info, Search, ArrowDownAZ, ArrowUpAZ, X,
+  MessageSquare, Zap, Info, Search, ArrowDownAZ, ArrowUpAZ, X, Pencil,
 } from 'lucide-react';
 
 type Automation = {
@@ -14,6 +14,7 @@ type Automation = {
   client_id: string | null;
   account_id: string;
   account_name: string | null;
+  picture_url: string | null;
   platform: 'instagram' | 'facebook';
   trigger_type: string;
   keyword: string | null;
@@ -66,7 +67,7 @@ type ClientPage = {
 };
 
 const EMPTY_FORM = {
-  account_id: '', account_name: '', platform: 'instagram' as 'instagram' | 'facebook',
+  account_id: '', account_name: '', picture_url: '' as string | null, platform: 'instagram' as 'instagram' | 'facebook',
   trigger_type: 'any_comment', keyword: '',
   action: 'reply_comment', reply_message: '', dm_message: '',
 };
@@ -102,6 +103,7 @@ export default function MetaAutomacoesPage() {
   const [clientPages, setClientPages] = useState<ClientPage[]>([]);
   const [loadingPages, setLoadingPages] = useState(false);
   const clientPickerRef = useRef<HTMLDivElement>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   async function loadWebhookStatus() {
     const res = await fetch('/api/meta/webhook/status');
@@ -172,6 +174,7 @@ export default function MetaAutomacoesPage() {
       body: JSON.stringify({
         ...form,
         client_id: selectedClient?.id ?? null,
+        picture_url: form.picture_url || null,
         keyword: form.keyword || null,
         dm_message: form.dm_message || null,
       }),
@@ -179,10 +182,61 @@ export default function MetaAutomacoesPage() {
     if (res.ok) {
       const row = await res.json() as Automation;
       setAutomations(prev => [row, ...prev]);
-      setForm({ ...EMPTY_FORM });
-      setSelectedClient(null);
-      setClientPages([]);
-      setShowForm(false);
+      resetForm();
+    }
+    setSaving(false);
+  }
+
+  function resetForm() {
+    setForm({ ...EMPTY_FORM });
+    setSelectedClient(null);
+    setClientPages([]);
+    setShowForm(false);
+    setEditingId(null);
+  }
+
+  function startEdit(auto: Automation) {
+    setEditingId(auto.id);
+    setShowForm(true);
+    setForm({
+      account_id: auto.account_id,
+      account_name: auto.account_name ?? '',
+      picture_url: auto.picture_url ?? null,
+      platform: auto.platform,
+      trigger_type: auto.trigger_type,
+      keyword: auto.keyword ?? '',
+      action: auto.action,
+      reply_message: auto.reply_message,
+      dm_message: auto.dm_message ?? '',
+    });
+    // clear client picker since we're editing an existing record
+    setSelectedClient(null);
+    setClientPages([]);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  async function saveEdit() {
+    if (!editingId || !form.account_id || !form.reply_message) return;
+    setSaving(true);
+    const res = await fetch(`/api/meta/automations/${editingId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        account_id: form.account_id,
+        account_name: form.account_name || null,
+        picture_url: form.picture_url || null,
+        platform: form.platform,
+        trigger_type: form.trigger_type,
+        keyword: form.keyword || null,
+        action: form.action,
+        reply_message: form.reply_message,
+        dm_message: form.dm_message || null,
+      }),
+    });
+    if (res.ok) {
+      const row = await res.json() as Automation;
+      setAutomations(prev => prev.map(a => a.id === row.id ? row : a));
+      resetForm();
     }
     setSaving(false);
   }
@@ -274,10 +328,10 @@ export default function MetaAutomacoesPage() {
             </button>
           </div>
 
-          {/* Create form */}
+          {/* Create / Edit form */}
           {showForm && (
             <div className="rounded-xl border border-border bg-card p-5 space-y-4">
-              <p className="text-sm font-semibold text-foreground">Nova automação</p>
+              <p className="text-sm font-semibold text-foreground">{editingId ? 'Editar automação' : 'Nova automação'}</p>
 
               {/* Step 1 — pick client */}
               <div className="space-y-1.5">
@@ -386,7 +440,7 @@ export default function MetaAutomacoesPage() {
                                 <button
                                   key={`${pg.platform}::${pg.account_id}`}
                                   type="button"
-                                  onClick={() => setForm(f => ({ ...f, account_id: pg.account_id, account_name: pg.account_name, platform: pg.platform }))}
+                                  onClick={() => setForm(f => ({ ...f, account_id: pg.account_id, account_name: pg.account_name, picture_url: pg.picture_url, platform: pg.platform }))}
                                   className={cn(
                                     'w-full flex items-center gap-3 rounded-lg border px-3 py-2.5 text-sm text-left transition-all',
                                     isSelected ? 'border-primary bg-primary/10' : 'border-border hover:border-primary/40 hover:bg-card/60'
@@ -471,10 +525,10 @@ export default function MetaAutomacoesPage() {
               )}
 
               <div className="flex gap-2 justify-end">
-                <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 text-sm rounded-lg border border-border text-muted-foreground hover:text-foreground transition-colors">Cancelar</button>
-                <button type="button" onClick={() => void create()} disabled={saving || !form.account_id || !form.reply_message}
+                <button type="button" onClick={resetForm} className="px-4 py-2 text-sm rounded-lg border border-border text-muted-foreground hover:text-foreground transition-colors">Cancelar</button>
+                <button type="button" onClick={() => void (editingId ? saveEdit() : create())} disabled={saving || !form.account_id || !form.reply_message}
                   className="px-4 py-2 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50">
-                  {saving ? 'Salvando...' : 'Criar automação'}
+                  {saving ? 'Salvando...' : editingId ? 'Salvar alterações' : 'Criar automação'}
                 </button>
               </div>
             </div>
@@ -491,29 +545,61 @@ export default function MetaAutomacoesPage() {
           ) : (
             <div className="space-y-3">
               {automations.map(auto => (
-                <div key={auto.id} className={cn('rounded-xl border bg-card p-4 space-y-3', !auto.enabled && 'opacity-60')}>
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="space-y-1 min-w-0">
+                <div key={auto.id} className={cn(
+                  'rounded-xl border bg-card transition-all',
+                  !auto.enabled && 'opacity-50',
+                  editingId === auto.id && 'border-primary/40 ring-1 ring-primary/20'
+                )}>
+                  <div className="flex items-center gap-4 p-4">
+                    {/* Avatar */}
+                    <div className="relative shrink-0">
+                      {auto.picture_url ? (
+                        <img src={auto.picture_url} alt="" className="h-12 w-12 rounded-full object-cover border-2 border-border" />
+                      ) : (
+                        <div className={cn(
+                          'h-12 w-12 rounded-full flex items-center justify-center text-sm font-bold text-white border-2 border-border',
+                          auto.platform === 'instagram'
+                            ? 'bg-gradient-to-br from-fuchsia-500 to-pink-500'
+                            : 'bg-blue-600'
+                        )}>
+                          {(auto.account_name ?? auto.account_id).slice(0, 2).toUpperCase()}
+                        </div>
+                      )}
+                      <span className={cn(
+                        'absolute -bottom-0.5 -right-0.5 rounded-full border-2 border-card px-1 text-[8px] font-bold uppercase',
+                        auto.platform === 'instagram' ? 'bg-pink-500 text-white' : 'bg-blue-500 text-white'
+                      )}>{auto.platform === 'instagram' ? 'IG' : 'FB'}</span>
+                    </div>
+
+                    {/* Info */}
+                    <div className="flex-1 min-w-0 space-y-1">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-bold uppercase',
-                          auto.platform === 'instagram' ? 'bg-pink-500/10 text-pink-500' : 'bg-blue-500/10 text-blue-500'
-                        )}>{auto.platform}</span>
-                        <span className="text-sm font-semibold text-foreground truncate">
+                        <span className="text-base font-bold text-foreground truncate">
                           {auto.account_name ?? auto.account_id}
                         </span>
-                        <span className={cn('rounded-full px-1.5 py-0.5 text-[9px] font-bold',
-                          auto.enabled ? 'bg-emerald-500/10 text-emerald-500' : 'bg-zinc-500/10 text-zinc-500'
+                        <span className={cn('rounded-full px-2 py-0.5 text-[9px] font-bold uppercase',
+                          auto.enabled ? 'bg-emerald-500/10 text-emerald-500' : 'bg-zinc-500/10 text-zinc-400'
                         )}>{auto.enabled ? 'Ativa' : 'Inativa'}</span>
                       </div>
                       <p className="text-xs text-muted-foreground">
-                        <span className="font-medium text-foreground/80">{TRIGGER_LABELS[auto.trigger_type] ?? auto.trigger_type}</span>
+                        <span className="font-medium text-foreground/70">{TRIGGER_LABELS[auto.trigger_type] ?? auto.trigger_type}</span>
                         {auto.keyword && <span className="ml-1 rounded bg-muted px-1 font-mono text-[10px]">"{auto.keyword}"</span>}
-                        <span className="mx-1.5 text-muted-foreground/40">→</span>
+                        <span className="mx-1.5 text-muted-foreground/30">→</span>
                         {ACTION_LABELS[auto.action] ?? auto.action}
                       </p>
-                      <p className="text-xs text-muted-foreground/70 italic line-clamp-1">"{auto.reply_message}"</p>
+                      <p className="text-xs text-muted-foreground/60 italic line-clamp-1">"{auto.reply_message}"</p>
                     </div>
+
+                    {/* Actions */}
                     <div className="flex items-center gap-1 shrink-0">
+                      <button type="button" onClick={() => startEdit(auto)} title="Editar"
+                        className={cn('rounded-lg p-1.5 transition-colors',
+                          editingId === auto.id
+                            ? 'text-primary bg-primary/10'
+                            : 'text-muted-foreground hover:text-primary hover:bg-primary/10'
+                        )}>
+                        <Pencil className="h-4 w-4" />
+                      </button>
                       <button type="button" onClick={() => toggle(auto)} title={auto.enabled ? 'Desativar' : 'Ativar'}
                         className="rounded-lg p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
                         {auto.enabled ? <ToggleRight className="h-4 w-4 text-emerald-500" /> : <ToggleLeft className="h-4 w-4" />}

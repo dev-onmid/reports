@@ -10,7 +10,7 @@ export async function PATCH(
   const pool = makeServerPool();
 
   try {
-    const allowed = ['enabled', 'reply_message', 'dm_message', 'keyword', 'trigger_type', 'action', 'account_name'];
+    const allowed = ['enabled', 'reply_message', 'dm_message', 'keyword', 'trigger_type', 'action', 'account_name', 'account_id', 'picture_url', 'platform'];
     const sets: string[] = [];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const vals: any[] = [];
