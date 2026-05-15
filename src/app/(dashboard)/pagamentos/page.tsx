@@ -104,6 +104,34 @@ function GoogleAdsMark({ className }: { className?: string }) {
   );
 }
 
+function PaymentChannelLogo({
+  channel,
+  className,
+}: {
+  channel: PaymentChannel;
+  className?: string;
+}) {
+  if (channel === 'Meta ADS' || channel === 'Google ADS') {
+    const isMeta = channel === 'Meta ADS';
+    return (
+      <span className={cn('flex shrink-0 items-center justify-center', className)}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={isMeta ? '/brand/meta-ads-logo.webp' : '/brand/google-ads-logo.png'}
+          alt={isMeta ? 'Meta Ads' : 'Google Ads'}
+          className="h-full w-full object-contain"
+        />
+      </span>
+    );
+  }
+
+  return (
+    <span className={cn('flex shrink-0 items-center justify-center', className)}>
+      <WalletCards className="h-full w-full text-muted-foreground" />
+    </span>
+  );
+}
+
 // ── Low-balance alerts (list, only below threshold) ───────────────────────────
 function CriticalBalanceAlerts({
   balances,
@@ -560,42 +588,9 @@ function getMonthBusinessWeeks(date: string): string[][] {
   return weeks;
 }
 
-function getWeek7Dates(date: string): string[] {
-  const base = parseDate(date);
-  const weekday = base.getDay();
-  const mondayOffset = weekday === 0 ? -6 : 1 - weekday;
-  const monday = new Date(base);
-  monday.setDate(base.getDate() + mondayOffset);
-  return Array.from({ length: 7 }, (_, i) => {
-    const day = new Date(monday);
-    day.setDate(monday.getDate() + i);
-    return toISODate(day);
-  });
-}
-
-function getMonthAllWeeks(date: string): (string | null)[][] {
-  const base = parseDate(date);
-  const year = base.getFullYear();
-  const month = base.getMonth();
-  const firstDay = new Date(year, month, 1);
-  const lastDay = new Date(year, month + 1, 0);
-  const firstDayOfWeek = firstDay.getDay();
-  const startOffset = firstDayOfWeek === 0 ? -6 : 1 - firstDayOfWeek;
-  const startDate = new Date(firstDay);
-  startDate.setDate(firstDay.getDate() + startOffset);
-  const weeks: (string | null)[][] = [];
-  const current = new Date(startDate);
-  while (current <= lastDay || (weeks.length > 0 && current.getDay() !== 1)) {
-    const week: (string | null)[] = [];
-    for (let i = 0; i < 7; i++) {
-      const isInMonth = current.getFullYear() === year && current.getMonth() === month;
-      week.push(isInMonth ? toISODate(new Date(current)) : null);
-      current.setDate(current.getDate() + 1);
-    }
-    weeks.push(week);
-    if (current > lastDay && current.getDay() === 1) break;
-  }
-  return weeks;
+function isBusinessDate(date: string): boolean {
+  const weekday = parseDate(date).getDay();
+  return weekday !== 0 && weekday !== 6;
 }
 
 function getMonthLabel(date: string): string {
@@ -612,8 +607,9 @@ function shiftMonth(date: string, delta: number): string {
 }
 
 function isDateInView(date: string, selectedDate: string, viewMode: ViewMode): boolean {
+  if (!isBusinessDate(date)) return false;
   if (viewMode === 'dia') return date === selectedDate;
-  if (viewMode === 'semana') return getWeek7Dates(selectedDate).includes(date);
+  if (viewMode === 'semana') return getWeekDates(selectedDate).includes(date);
 
   const current = parseDate(date);
   const selected = parseDate(selectedDate);
@@ -871,20 +867,18 @@ function MonthPaymentCard({
 
   return (
     <div
-      className={cn('group rounded-lg border px-3 py-2 transition-colors hover:bg-card/80', tone.border, tone.bg)}
-      style={{ boxShadow: 'inset 0 0 18px rgba(0,0,0,0.18)' }}
+      className={cn('group min-h-[68px] rounded-lg border px-2.5 py-2 transition-colors hover:bg-card/80', tone.border, tone.bg)}
+      style={{ boxShadow: `0 0 16px ${tone.amount === 'text-primary' ? 'rgba(85,245,47,0.12)' : 'rgba(0,0,0,0.16)'}, inset 0 0 18px rgba(0,0,0,0.18)` }}
     >
-      <div className="flex items-start justify-between gap-2">
+      <div className="grid grid-cols-[42px_minmax(0,1fr)_22px] items-center gap-2">
+        <PaymentChannelLogo channel={payment.channel} className="h-9 w-10" />
         <div className="min-w-0">
-          <p className={cn('text-[10px] font-bold leading-none tabular-nums', tone.text)}>{time}</p>
-          <div className="mt-2 flex items-center gap-2">
-            {payment.channel === 'Meta ADS' ? <MetaAdsMark className="h-5 w-5 shrink-0" /> : payment.channel === 'Google ADS' ? <GoogleAdsMark className="h-5 w-5 shrink-0" /> : <WalletCards className="h-5 w-5 shrink-0 text-muted-foreground" />}
-            <div className="min-w-0">
-              <p className="truncate text-xs font-bold leading-tight text-foreground">{payment.clientName}</p>
-              <p className="truncate text-[10px] leading-tight text-muted-foreground">{payment.channel.replace(' ADS', ' Ads')}</p>
-            </div>
+          <div className="flex min-w-0 items-center gap-2">
+            <p className={cn('shrink-0 text-[10px] font-bold leading-none tabular-nums', tone.text)}>{time}</p>
+            <p className="truncate text-xs font-bold leading-tight text-foreground">{payment.clientName}</p>
           </div>
-          <p className={cn('mt-1.5 font-heading font-normal text-sm leading-none tabular-nums', tone.amount)}>
+          <p className="mt-0.5 truncate text-[10px] leading-tight text-muted-foreground">{payment.channel.replace(' ADS', ' Ads')}</p>
+          <p className={cn('mt-1 font-heading font-normal text-sm leading-none tabular-nums', tone.amount)}>
             {formatCurrencyBRL(payment.amount)}
           </p>
         </div>
@@ -895,7 +889,7 @@ function MonthPaymentCard({
             onStatusChange(PAYMENT_STATUS_OPTIONS[(current + 1) % PAYMENT_STATUS_OPTIONS.length]);
           }}
           title="Alterar status"
-          className="rounded-full opacity-90 transition-opacity group-hover:opacity-100"
+          className="justify-self-end rounded-full opacity-90 transition-opacity group-hover:opacity-100"
         >
           <MonthStatusIcon status={payment.status} />
         </button>
@@ -957,7 +951,7 @@ function DayTimelinePaymentCard({
     >
       <div className="flex items-center justify-between gap-4">
         <div className="flex min-w-0 items-center gap-4">
-          {payment.channel === 'Meta ADS' ? <MetaAdsMark className="h-9 w-9 shrink-0" /> : payment.channel === 'Google ADS' ? <GoogleAdsMark className="h-9 w-9 shrink-0" /> : <WalletCards className="h-9 w-9 shrink-0 text-muted-foreground" />}
+          <PaymentChannelLogo channel={payment.channel} className="h-11 w-11" />
           <div className="min-w-0">
             <div className="flex items-center gap-6">
               <p className={cn('text-xs font-bold tabular-nums', tone.text)}>{time}</p>
@@ -1028,7 +1022,7 @@ function WeekPaymentCard({
         </button>
       </div>
       <div className="flex items-center gap-3">
-        {payment.channel === 'Meta ADS' ? <MetaAdsMark className="h-8 w-8 shrink-0" /> : payment.channel === 'Google ADS' ? <GoogleAdsMark className="h-8 w-8 shrink-0" /> : <WalletCards className="h-8 w-8 shrink-0 text-muted-foreground" />}
+        <PaymentChannelLogo channel={payment.channel} className="h-9 w-9" />
         <div className="min-w-0">
           <p className="truncate text-xs font-bold leading-tight text-foreground">{payment.clientName}</p>
           <p className="mt-0.5 truncate text-[11px] leading-tight text-muted-foreground">{payment.channel.replace(' ADS', ' Ads')}</p>
@@ -1237,9 +1231,8 @@ export default function PagamentosPage() {
 
   const availableDates = Array.from(new Set(visiblePayments.map((payment) => payment.date))).sort();
   const weekDates = getWeekDates(selectedDate);
-  const weekDates7 = getWeek7Dates(selectedDate);
   const monthWeeks = getMonthBusinessWeeks(selectedDate);
-  const monthAllWeeks = getMonthAllWeeks(selectedDate);
+  const monthAllWeeks = monthWeeks;
   const summaryLabel = viewMode === 'dia' ? 'do dia' : 'do período';
   const [showNewForm, setShowNewForm] = useState(false);
 
@@ -1470,15 +1463,13 @@ export default function PagamentosPage() {
               })()}
             </div>
           </div>
-          <div className="grid grid-cols-7 border-b border-border/70">
+          <div className="grid grid-cols-5 border-b border-border/70">
             {[
               { label: 'SEG', color: '#55f52f' },
               { label: 'TER', color: '#f59e0b' },
               { label: 'QUA', color: '#2498ff' },
               { label: 'QUI', color: '#a855f7' },
               { label: 'SEX', color: '#ff4778' },
-              { label: 'SÁB', color: '#94a3b8' },
-              { label: 'DOM', color: '#55f52f' },
             ].map((day, i) => (
               <div key={day.label} className="border-r border-border/70 py-4 text-center last:border-r-0">
                 <p className="text-sm font-bold tracking-widest text-foreground">
@@ -1489,7 +1480,7 @@ export default function PagamentosPage() {
             ))}
           </div>
           {monthAllWeeks.map((week, wi) => (
-            <div key={wi} className="grid grid-cols-7 border-b border-border/70 last:border-b-0">
+            <div key={wi} className="grid grid-cols-5 border-b border-border/70 last:border-b-0">
               {week.map((date, di) => {
                 const dayPayments = date ? filteredPayments.filter(p => p.date === date) : [];
                 const isToday = date === todayStr;
@@ -1543,7 +1534,7 @@ export default function PagamentosPage() {
         const channelTotal = channelData.reduce((sum, item) => sum + item.value, 0);
 
         return (
-          <div className="grid gap-5 xl:grid-cols-[1fr_360px]">
+          <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_430px] 2xl:grid-cols-[minmax(0,1fr)_460px]">
             <div className="overflow-hidden rounded-xl border border-border bg-card shadow-[0_0_34px_rgba(15,23,42,0.28)]">
               <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border/70 px-5 py-5">
                 <div className="flex items-center gap-3">
@@ -1594,7 +1585,7 @@ export default function PagamentosPage() {
               )}
             </div>
 
-            <div className="rounded-xl border border-border bg-card p-4 shadow-[0_0_34px_rgba(15,23,42,0.28)]">
+            <div className="rounded-xl border border-border bg-card p-5 shadow-[0_0_34px_rgba(15,23,42,0.28)]">
               <div className="mb-4 flex items-center gap-3">
                 <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-500/15 text-violet-300 shadow-[0_0_18px_rgba(124,58,237,0.2)]">
                   <BarChart3 className="h-4 w-4" />
@@ -1653,21 +1644,25 @@ export default function PagamentosPage() {
 
               <div className="mt-4 rounded-xl border border-border bg-background/40 p-5">
                 <p className="mb-4 text-sm font-bold text-foreground">Status dos pagamentos</p>
-                <div className="space-y-4">
+                <div className="space-y-3">
                   {PAYMENT_STATUS_OPTIONS.map((status) => {
                     const statusPayments = selectedScopePayments.filter((payment) => payment.status === status);
                     const total = statusPayments.reduce((sum, payment) => sum + payment.amount, 0);
                     const palette = STATUS_PALETTE[status];
                     return (
-                      <div key={status} className="flex items-center justify-between gap-3 text-sm">
+                      <div key={status} className="grid grid-cols-[minmax(0,1fr)_104px] items-center gap-4 rounded-lg px-1 py-1 text-sm">
                         <div className="flex min-w-0 items-center gap-3">
-                          <span className="flex h-5 w-5 items-center justify-center rounded-full" style={{ background: `${palette.dot}24`, color: palette.dot }}>
+                          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full" style={{ background: `${palette.dot}24`, color: palette.dot }}>
                             <span className="h-2 w-2 rounded-full" style={{ background: palette.dot }} />
                           </span>
-                          <span className="w-20 text-muted-foreground">{status}</span>
-                          <span className="text-muted-foreground">{statusPayments.length} pagamentos</span>
+                          <div className="min-w-0">
+                            <p className="font-medium text-muted-foreground">{status}</p>
+                            <p className="mt-0.5 text-xs text-muted-foreground/80">
+                              {statusPayments.length} pagamento{statusPayments.length === 1 ? '' : 's'}
+                            </p>
+                          </div>
                         </div>
-                        <span className="font-bold tabular-nums" style={{ color: palette.dot }}>{formatCurrencyBRL(total)}</span>
+                        <span className="text-right font-bold tabular-nums leading-tight" style={{ color: palette.dot }}>{formatCurrencyBRL(total)}</span>
                       </div>
                     );
                   })}
@@ -1687,8 +1682,15 @@ export default function PagamentosPage() {
           SEMANA VIEW
       ────────────────────────────────────────────── */}
       {viewMode === 'semana' && (() => {
-        const DAY_LABELS = ['SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB', 'DOM'];
-        const dailyData = weekDates7.map((date, i) => {
+        const DAY_LABELS = ['SEG', 'TER', 'QUA', 'QUI', 'SEX'];
+        const DAY_NAMES: Record<string, string> = {
+          SEG: 'Segunda-feira',
+          TER: 'Terça-feira',
+          QUA: 'Quarta-feira',
+          QUI: 'Quinta-feira',
+          SEX: 'Sexta-feira',
+        };
+        const dailyData = weekDates.map((date, i) => {
           const dayPs = filteredPayments.filter(p => p.date === date);
           return {
             day: `${DAY_LABELS[i]} ${Number(date.split('-')[2])}`,
@@ -1713,7 +1715,7 @@ export default function PagamentosPage() {
         return (
           <div className="space-y-4">
             <div className="overflow-hidden rounded-xl border border-border bg-card shadow-[0_0_34px_rgba(15,23,42,0.28)]">
-              <div className="grid grid-cols-7 border-b border-border/70">
+              <div className="grid grid-cols-5 border-b border-border/70">
                 {dailyData.map((day, i) => (
                   <div key={day.date} className="border-r border-border/70 px-4 py-5 text-center last:border-r-0">
                     <p className="text-lg font-bold text-foreground">{day.label}</p>
@@ -1723,7 +1725,7 @@ export default function PagamentosPage() {
                   </div>
                 ))}
               </div>
-              <div className="grid min-h-[370px] grid-cols-7">
+              <div className="grid min-h-[370px] grid-cols-5">
                 {dailyData.map((day, di) => (
                   <div key={day.date} className="flex flex-col border-r border-border/70 last:border-r-0">
                     <div className="min-h-[342px] flex-1 space-y-2.5 p-3">
@@ -1795,14 +1797,14 @@ export default function PagamentosPage() {
                 {maxDay && (
                   <div className="rounded-lg border border-border bg-background/45 p-4">
                     <p className="text-sm text-muted-foreground">Maior dia</p>
-                    <p className="mt-1 text-sm font-bold text-foreground">{maxDay.label.charAt(0) + maxDay.label.slice(1).toLowerCase()}-feira</p>
+                    <p className="mt-1 text-sm font-bold text-foreground">{DAY_NAMES[maxDay.label]}</p>
                     <p className="mt-1 font-heading font-normal text-lg tabular-nums text-foreground">{formatCurrencyBRL(maxDay.total)}</p>
                   </div>
                 )}
                 {minDay && (
                   <div className="rounded-lg border border-border bg-background/45 p-4">
                     <p className="text-sm text-muted-foreground">Menor dia</p>
-                    <p className="mt-1 text-sm font-bold text-foreground">{minDay.label === 'DOM' ? 'Domingo' : minDay.label.charAt(0) + minDay.label.slice(1).toLowerCase()}</p>
+                    <p className="mt-1 text-sm font-bold text-foreground">{DAY_NAMES[minDay.label]}</p>
                     <p className="mt-1 font-heading font-normal text-lg tabular-nums text-foreground">{formatCurrencyBRL(minDay.total)}</p>
                   </div>
                 )}
