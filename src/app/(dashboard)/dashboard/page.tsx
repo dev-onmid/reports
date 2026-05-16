@@ -28,6 +28,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { useClients } from '@/lib/client-store';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
+import { ClientAvatar } from '@/components/client-avatar';
 import type { TopCreative } from '@/app/api/meta/top-creatives/route';
 import type { CampaignPerformance } from '@/app/api/campaigns/route';
 import type { AudienceBreakdowns, AudienceResponse, AudienceSlice } from '@/app/api/audience/route';
@@ -668,6 +669,7 @@ function ClientSelector({
         onClick={() => setOpen(v => !v)}
         className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm font-semibold hover:bg-muted/50 transition-colors"
       >
+        {selected.size === 1 && (() => { const c = clients.find(cl => selected.has(cl.id)); return c ? <ClientAvatar clientId={c.id} name={c.name} size="sm" /> : null; })()}
         {label}
         <ChevronDown className={cn('w-3.5 h-3.5 text-muted-foreground transition-transform', open && 'rotate-180')} />
       </button>
@@ -715,6 +717,7 @@ function ClientSelector({
                 <span className={cn('w-4 h-4 rounded border flex items-center justify-center text-[10px] shrink-0',
                   selected.has(c.id) ? 'bg-primary border-primary text-black' : 'border-border'
                 )}>{selected.has(c.id) && '✓'}</span>
+                <ClientAvatar clientId={c.id} name={c.name} size="sm" />
                 <span className="truncate">{c.name}</span>
               </button>
             ))}
