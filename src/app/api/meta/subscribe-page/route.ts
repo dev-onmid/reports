@@ -48,10 +48,15 @@ export async function POST(request: NextRequest) {
       pageToken = page?.access_token ?? userToken;
     }
 
-    // Both Instagram and Facebook need subscribed_apps on the Facebook Page.
-    // For Instagram DMs: 'messages' routes Instagram DMs through the page's Messenger API.
-    // For Facebook Pages: 'feed' covers comments, 'messages' covers Messenger DMs.
-    const fields = platform === 'instagram' ? 'messages,feed' : 'feed,messages';
+    // Instagram events (DMs + comments) are delivered via the app-level webhook subscription
+    // configured in Meta for Developers — no subscribed_apps needed per page.
+    // Facebook Pages need subscribed_apps to receive Messenger + feed events.
+    if (platform === 'instagram') {
+      return Response.json({ ok: true, fb_page_id: fbPageId });
+    }
+
+    // Facebook Pages: subscribe the page to receive feed + messages events
+    const fields = 'feed,messages';
 
     const subRes = await fetch(
       `https://graph.facebook.com/v21.0/${fbPageId}/subscribed_apps`,
