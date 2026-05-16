@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
   Building2,
@@ -8,6 +8,7 @@ import {
   ChevronDown,
   CheckCircle2,
   ExternalLink,
+  FileSpreadsheet,
   LayoutGrid,
   Megaphone,
   MoreHorizontal,
@@ -15,6 +16,7 @@ import {
   RefreshCw,
   Sparkles,
   Trash2,
+  Upload,
   X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -37,6 +39,8 @@ import {
 } from '@/lib/integration-store';
 import { useMetaConnections, type MetaConnection } from '@/lib/meta-connections-store';
 import { useGoogleConnections, type GoogleConnection } from '@/lib/google-connections-store';
+import { useClients } from '@/lib/client-store';
+import type { SpreadsheetAnalysis, SpreadsheetMapping } from '@/app/api/integrations/spreadsheet/route';
 
 // ─── Account avatar helpers ───────────────────────────────────────────────────
 
@@ -1375,6 +1379,274 @@ function GoogleConnectionsPanel({
   );
 }
 
+// ─── Spreadsheet CRM Import Panel ────────────────────────────────────────────
+
+type SheetStep = 'upload' | 'mapping' | 'done';
+
+function SpreadsheetImportPanel() {
+  const { clients } = useClients();
+  const [step, setStep] = useState<SheetStep>('upload');
+  const [file, setFile] = useState<File | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [analysis, setAnalysis] = useState<SpreadsheetAnalysis | null>(null);
+  const [mappings, setMappings] = useState<SpreadsheetMapping[]>([]);
+  const [columnOverrides, setColumnOverrides] = useState<{ clinic: string; revenue: string; date: string; name: string }>({ clinic: '', revenue: '', date: '', name: '' });
+  const [importResults, setImportResults] = useState<Record<string, number> | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  function handleFile(f: File) {
+    if (!f.name.match(/\.(xlsx|xls|csv)$/i)) {
+      setError('Formato inválido. Use .xlsx, .xls ou .csv');
+      return;
+    }
+    setFile(f);
+    setError('');
+  }
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragging(false);
+    const f = e.dataTransfer.files[0];
+    if (f) handleFile(f);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function handleAnalyze() {
+    if (!file) return;
+    setLoading(true);
+    setError('');
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch('/api/integrations/spreadsheet?step=analyze', { method: 'POST', body: fd });
+      const data = await res.json() as SpreadsheetAnalysis & { error?: string };
+      if (!res.ok || data.error) { setError(data.error ?? 'Erro ao analisar planilha'); return; }
+      setAnalysis(data);
+      setColumnOverrides({ clinic: data.mapping.clinic ?? '', revenue: data.mapping.revenue ?? '', date: data.mapping.date ?? '', name: data.mapping.name ?? '' });
+      const initialMappings: SpreadsheetMapping[] = data.clinicValues.map(v => ({ clinicValue: v, clientId: '', clientName: '' }));
+      setMappings(initialMappings);
+      setStep('mapping');
+    } catch {
+      setError('Erro de conexão ao analisar planilha.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleImport() {
+    if (!file || !analysis) return;
+    const filled = mappings.filter(m => m.clientId);
+    if (filled.length === 0) { setError('Mapeie ao menos uma clínica para um cliente.'); return; }
+    setLoading(true);
+    setError('');
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('mappings', JSON.stringify(filled));
+      if (columnOverrides.clinic) fd.append('clinicColumn', columnOverrides.clinic);
+      if (columnOverrides.revenue) fd.append('revenueColumn', columnOverrides.revenue);
+      if (columnOverrides.date) fd.append('dateColumn', columnOverrides.date);
+      if (columnOverrides.name) fd.append('nameColumn', columnOverrides.name);
+      const res = await fetch('/api/integrations/spreadsheet?step=import', { method: 'POST', body: fd });
+      const data = await res.json() as { ok?: boolean; results?: Record<string, number>; error?: string };
+      if (!res.ok || data.error) { setError(data.error ?? 'Erro ao importar planilha'); return; }
+      setImportResults(data.results ?? {});
+      setStep('done');
+    } catch {
+      setError('Erro de conexão ao importar planilha.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function reset() {
+    setStep('upload');
+    setFile(null);
+    setAnalysis(null);
+    setMappings([]);
+    setImportResults(null);
+    setError('');
+  }
+
+  return (
+    <div className="rounded-2xl border border-border bg-card overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-400">
+            <FileSpreadsheet className="w-4 h-4" />
+          </div>
+          <div>
+            <p className="text-sm font-bold">Importar Planilha CRM</p>
+            <p className="text-xs text-muted-foreground">Importe dados de faturamento por clínica de uma planilha Excel/CSV</p>
+          </div>
+        </div>
+        {step !== 'upload' && (
+          <button onClick={reset} className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1">
+            <X className="w-3.5 h-3.5" /> Nova importação
+          </button>
+        )}
+      </div>
+
+      <div className="p-6 space-y-5">
+        {/* Step indicator */}
+        <div className="flex items-center gap-2 text-xs">
+          {(['upload', 'mapping', 'done'] as SheetStep[]).map((s, i) => (
+            <div key={s} className="flex items-center gap-2">
+              <div className={cn(
+                'flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold',
+                step === s ? 'bg-primary text-black' : ((['upload', 'mapping', 'done'] as SheetStep[]).indexOf(step) > i ? 'bg-emerald-500/20 text-emerald-400' : 'bg-muted text-muted-foreground')
+              )}>
+                {i + 1}
+              </div>
+              <span className={cn('font-medium', step === s ? 'text-foreground' : 'text-muted-foreground')}>
+                {s === 'upload' ? 'Arquivo' : s === 'mapping' ? 'Mapeamento' : 'Concluído'}
+              </span>
+              {i < 2 && <span className="text-border mx-1">›</span>}
+            </div>
+          ))}
+        </div>
+
+        {/* Error */}
+        {error && (
+          <div className="flex items-center gap-2 text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+            <AlertCircle className="w-3.5 h-3.5 shrink-0" /> {error}
+          </div>
+        )}
+
+        {/* ── Step 1: Upload ── */}
+        {step === 'upload' && (
+          <div className="space-y-4">
+            <div
+              onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+              className={cn(
+                'flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed py-12 cursor-pointer transition-colors',
+                dragging ? 'border-primary/60 bg-primary/5' : 'border-border hover:border-primary/30 hover:bg-muted/20',
+              )}
+            >
+              <Upload className={cn('w-8 h-8', dragging ? 'text-primary' : 'text-muted-foreground')} />
+              <div className="text-center">
+                <p className="text-sm font-semibold">{file ? file.name : 'Arraste a planilha ou clique para selecionar'}</p>
+                <p className="text-xs text-muted-foreground mt-1">.xlsx, .xls ou .csv — exportação do seu sistema CRM</p>
+              </div>
+              {file && <p className="text-xs text-emerald-400">{(file.size / 1024).toFixed(0)} KB selecionado</p>}
+            </div>
+            <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+            <Button onClick={handleAnalyze} disabled={!file || loading} className="w-full h-10 font-bold text-sm">
+              {loading ? <><RefreshCw className="w-3.5 h-3.5 animate-spin mr-2" />Analisando com IA...</> : 'Analisar planilha'}
+            </Button>
+          </div>
+        )}
+
+        {/* ── Step 2: Mapping ── */}
+        {step === 'mapping' && analysis && (
+          <div className="space-y-5">
+            {/* Column detection summary */}
+            <div className="rounded-lg border border-border bg-muted/10 p-4 space-y-3">
+              <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Colunas detectadas pela IA</p>
+              <div className="grid grid-cols-2 gap-3">
+                {(['clinic', 'revenue', 'date', 'name'] as const).map((field) => {
+                  const labels = { clinic: 'Clínica/Unidade', revenue: 'Faturamento', date: 'Data', name: 'Nome' };
+                  return (
+                    <div key={field}>
+                      <p className="text-[10px] text-muted-foreground mb-1">{labels[field]}</p>
+                      <select
+                        value={columnOverrides[field]}
+                        onChange={(e) => setColumnOverrides(prev => ({ ...prev, [field]: e.target.value }))}
+                        className="w-full text-xs bg-background border border-border rounded-md px-2 py-1.5 text-foreground"
+                      >
+                        <option value="">— não mapeado —</option>
+                        {analysis.headers.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="text-[10px] text-muted-foreground">{analysis.rowCount.toLocaleString('pt-BR')} linhas encontradas na planilha</p>
+            </div>
+
+            {/* Clinic → Client mappings */}
+            {analysis.clinicValues.length > 0 ? (
+              <div className="space-y-2">
+                <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Mapear clínicas para clientes</p>
+                <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                  {mappings.map((m, idx) => (
+                    <div key={m.clinicValue} className="flex items-center gap-3 rounded-lg bg-muted/20 px-3 py-2.5">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold truncate">{m.clinicValue}</p>
+                      </div>
+                      <span className="text-muted-foreground text-xs shrink-0">→</span>
+                      <select
+                        value={m.clientId}
+                        onChange={(e) => {
+                          const client = clients.find(c => c.id === e.target.value);
+                          setMappings(prev => prev.map((mp, i) => i === idx ? { ...mp, clientId: e.target.value, clientName: client?.name ?? '' } : mp));
+                        }}
+                        className="flex-1 text-xs bg-background border border-border rounded-md px-2 py-1.5 text-foreground max-w-[200px]"
+                      >
+                        <option value="">— selecionar cliente —</option>
+                        {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Importar para cliente</p>
+                <select
+                  value={mappings[0]?.clientId ?? ''}
+                  onChange={(e) => {
+                    const client = clients.find(c => c.id === e.target.value);
+                    setMappings([{ clinicValue: '', clientId: e.target.value, clientName: client?.name ?? '' }]);
+                  }}
+                  className="w-full text-sm bg-background border border-border rounded-md px-3 py-2 text-foreground"
+                >
+                  <option value="">— selecionar cliente —</option>
+                  {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+            )}
+
+            <div className="flex gap-3">
+              <Button variant="outline" onClick={reset} className="flex-1 text-xs font-bold h-10">Voltar</Button>
+              <Button onClick={handleImport} disabled={loading || mappings.every(m => !m.clientId)} className="flex-1 h-10 font-bold text-sm">
+                {loading ? <><RefreshCw className="w-3.5 h-3.5 animate-spin mr-2" />Importando...</> : `Importar dados`}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Step 3: Done ── */}
+        {step === 'done' && importResults && (
+          <div className="space-y-4">
+            <div className="flex flex-col items-center gap-3 py-6">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/15 text-primary">
+                <CheckCircle2 className="w-6 h-6" />
+              </div>
+              <p className="text-sm font-bold">Importação concluída!</p>
+            </div>
+            <div className="rounded-lg border border-border divide-y divide-border overflow-hidden">
+              {Object.entries(importResults).map(([clinic, count]) => (
+                <div key={clinic} className="flex items-center justify-between px-4 py-2.5 text-xs">
+                  <span className="font-medium">{clinic || '(planilha inteira)'}</span>
+                  <span className="text-muted-foreground">{count.toLocaleString('pt-BR')} registros</span>
+                </div>
+              ))}
+            </div>
+            <Button onClick={reset} variant="outline" className="w-full h-10 font-bold text-sm">Nova importação</Button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type IntegrationId = 'meta-ads' | 'google-ads' | 'google-my-business' | 'website';
@@ -1736,6 +2008,9 @@ export default function IntegracoesPage() {
         {googleDisplayInfo && googleDisplayInfo.status === 'connected' && (
           <GoogleAdsAssetsPanel google={googleDisplayInfo} />
         )}
+
+        {/* ── SPREADSHEET CRM ─────────────────────────────────────────────────── */}
+        <SpreadsheetImportPanel />
 
         {/* ── FOOTER ──────────────────────────────────────────────────────────── */}
         <div
