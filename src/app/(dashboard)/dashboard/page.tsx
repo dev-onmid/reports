@@ -2135,6 +2135,7 @@ function CreativeCarouselCard({ creative, idx, sortBy, onPreview }: {
           <button type="button" onClick={() => onPreview(creative)} className="block h-full w-full">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={imgUrl} alt={creative.adName} className="h-full w-full object-cover" onError={() => setImgErr(true)} />
+            {creative.videoUrl && <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/20 pointer-events-none" />}
           </button>
         ) : <ImageIcon className="absolute inset-0 m-auto h-8 w-8 text-muted-foreground/30" />}
         {creative.videoUrl && (
