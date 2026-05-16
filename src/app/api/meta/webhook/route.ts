@@ -343,6 +343,14 @@ export async function POST(request: NextRequest) {
   try {
     await ensureTables(pool);
 
+    // Log every incoming POST for debugging (object type + raw payload summary)
+    await pool.query(
+      `INSERT INTO public.meta_automation_logs
+         (automation_id, platform, event_type, account_id, sender_id, trigger_text, action_taken, status)
+       VALUES (NULL, $1, 'raw_post', 'webhook', '', $2, 'received', 'debug')`,
+      [body.object ?? 'unknown', JSON.stringify(body).slice(0, 500)]
+    ).catch(() => null);
+
     // Get user token from the first connected Meta account
     const { rows: [conn] } = await pool.query(
       `SELECT * FROM public.meta_connections WHERE status = 'connected' LIMIT 1`
