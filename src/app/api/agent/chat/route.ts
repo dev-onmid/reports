@@ -149,6 +149,18 @@ const systemTools: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'generate_report_pdf',
+    description: 'Gera um relatório de performance em PDF e disponibiliza para download diretamente no chat. Use quando o usuário pedir para ver, gerar ou baixar um relatório em PDF no chat.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        client_id: { type: 'string', description: 'ID do cliente para gerar o relatório' },
+        period: { type: 'string', description: 'Período: this_month, last_month, last_30d, last_7d (padrão: this_month)' },
+      },
+      required: ['client_id'],
+    },
+  },
+  {
     name: 'list_zapi_clients',
     description: 'Lista as conexões Z-API disponíveis para envio de WhatsApp.',
     input_schema: { type: 'object' as const, properties: {}, required: [] },
@@ -157,8 +169,36 @@ const systemTools: Anthropic.Tool[] = [
 
 // --- Tool executors ---
 
+async function saveReportToDb(
+  pool: ReturnType<typeof makeServerPool>,
+  pdfBuffer: Buffer,
+  filename: string,
+  clientName: string
+): Promise<string> {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS public.agent_report_files (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      pdf_data BYTEA NOT NULL,
+      filename TEXT NOT NULL,
+      client_name TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '7 days'
+    )
+  `);
+  const { rows } = await pool.query(
+    `INSERT INTO public.agent_report_files (pdf_data, filename, client_name)
+     VALUES ($1, $2, $3) RETURNING id`,
+    [pdfBuffer, filename, clientName]
+  );
+  return rows[0].id as string;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function execSystemTool(name: string, input: Record<string, any>): Promise<string> {
+async function execSystemTool(
+  name: string,
+  input: Record<string, any>,
+  onEvent?: (event: Record<string, unknown>) => void
+): Promise<string> {
   const pool = makeServerPool();
   try {
     if (name === 'list_clients') {
@@ -431,6 +471,44 @@ async function execSystemTool(name: string, input: Record<string, any>): Promise
       });
     }
 
+    if (name === 'generate_report_pdf') {
+      const clientId = input.client_id as string;
+      const period = (input.period as string) || 'this_month';
+      const { rows: clientRows } = await pool.query('SELECT name FROM public.clients WHERE id = $1', [clientId]);
+      if (!clientRows[0]) return 'Cliente não encontrado.';
+      const clientName = clientRows[0].name as string;
+
+      let metaCampaigns: Record<string, unknown>[] = [];
+      let googleCampaigns: Record<string, unknown>[] = [];
+      let crmLeads: Record<string, unknown>[] = [];
+
+      try {
+        const r = await execSystemTool('get_meta_campaigns', { client_id: clientId, period });
+        if (r && !r.startsWith('Nenhuma') && !r.startsWith('Erro')) metaCampaigns = JSON.parse(r);
+      } catch { /* ignore */ }
+      try {
+        const r = await execSystemTool('get_google_campaigns', { client_id: clientId, period });
+        if (r && !r.startsWith('Nenhuma') && !r.startsWith('Erro')) googleCampaigns = JSON.parse(r);
+      } catch { /* ignore */ }
+      try {
+        const r = await execSystemTool('get_crm_data', { client_id: clientId, limit: 30 });
+        if (r && !r.startsWith('Nenhum') && !r.startsWith('Erro')) crmLeads = JSON.parse(r);
+      } catch { /* ignore */ }
+
+      const periodLabels: Record<string, string> = {
+        'this_month': 'Mês Atual', 'last_month': 'Mês Anterior',
+        'last_30d': 'Últimos 30 dias', 'last_7d': 'Últimos 7 dias',
+      };
+      const pdfBuffer = await generateReportPdf({
+        clientName, period: periodLabels[period] ?? period,
+        metaCampaigns, googleCampaigns, crmLeads,
+      });
+      const filename = `Relatorio_${clientName.replace(/\s+/g, '_')}_${period}.pdf`;
+      const reportId = await saveReportToDb(pool, pdfBuffer, filename, clientName);
+      onEvent?.({ type: 'file_attachment', url: `/api/agent/report/${reportId}`, filename, label: `Relatório ${clientName} — ${periodLabels[period] ?? period}` });
+      return `PDF do relatório gerado com sucesso! O arquivo está disponível para download no chat.`;
+    }
+
     if (name === 'list_zapi_clients') {
       const { rows } = await pool.query('SELECT id, name, instance_id, active FROM public.zapi_clients ORDER BY name ASC');
       if (rows.length === 0) return 'Nenhuma conexão Z-API cadastrada. Configure uma em Disparos.';
@@ -502,13 +580,17 @@ async function execSystemTool(name: string, input: Record<string, any>): Promise
       const fileName = `Relatorio_${clientName.replace(/\s+/g, '_')}_${period}.pdf`;
       const msgCaption = caption ?? `📊 Relatório de Performance — ${clientName}\nPeríodo: ${periodLabels[period] ?? period}\n\nGerado via Luna IA · Onmid Reports`;
 
+      // Save to DB and emit chat download event
+      const reportId = await saveReportToDb(pool, pdfBuffer, fileName, clientName);
+      onEvent?.({ type: 'file_attachment', url: `/api/agent/report/${reportId}`, filename: fileName, label: `Relatório ${clientName} — ${periodLabels[period] ?? period}` });
+
       const result = await sendDocument(
         { instanceId: zapiConn.instance_id, token: zapiConn.token, clientToken: zapiConn.security_token },
         phone, b64, fileName, msgCaption
       );
 
-      if (result.ok) return `✅ Relatório de ${clientName} enviado com sucesso para ${phone}!`;
-      return `❌ PDF gerado mas falha ao enviar: ${result.error}`;
+      if (result.ok) return `✅ Relatório de ${clientName} enviado com sucesso para ${phone}! O arquivo também está disponível para download no chat.`;
+      return `❌ PDF gerado mas falha ao enviar via WhatsApp: ${result.error}. O arquivo está disponível para download no chat.`;
     }
 
     return 'Ferramenta desconhecida.';
@@ -703,7 +785,7 @@ export async function POST(req: NextRequest) {
               if (extTool) {
                 result = await execExternalTool(extTool, block.input);
               } else {
-                result = await execSystemTool(block.name, block.input);
+                result = await execSystemTool(block.name, block.input, (ev) => send(controller, ev));
               }
               send(controller, { type: 'tool_done', name: block.name });
               return { type: 'tool_result' as const, tool_use_id: block.id, content: result };

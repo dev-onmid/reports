@@ -7,23 +7,31 @@ import {
   Send, Bot, User, Loader2, Settings2, Save, X, ChevronDown,
   Wrench, Mic, MicOff, Plus, Trash2, FileText, Link2, Type,
   Webhook, MessageSquare, BookOpen, Zap, Upload, Globe, CheckCircle,
-  ToggleLeft, ToggleRight, Play, Pause,
+  ToggleLeft, ToggleRight, Play, Pause, Download,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 type Role = string | undefined;
+
+type FileAttachment = {
+  url: string;
+  filename: string;
+  label: string;
+};
 
 type ChatMessage = {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   toolsUsed?: string[];
+  attachments?: FileAttachment[];
 };
 
 type StreamEvent =
   | { type: 'text'; text: string }
   | { type: 'tool_start'; name: string }
   | { type: 'tool_done'; name: string }
+  | { type: 'file_attachment'; url: string; filename: string; label: string }
   | { type: 'done'; role?: string }
   | { type: 'error'; message: string };
 
@@ -54,6 +62,7 @@ const TOOL_LABELS: Record<string, string> = {
   get_account_balances: 'verificando saldos',
   update_meta_campaign_status: 'atualizando campanha',
   generate_client_report: 'gerando relatório',
+  generate_report_pdf: 'gerando PDF',
   send_report_pdf_whatsapp: 'gerando e enviando PDF',
   list_zapi_clients: 'buscando conexões WhatsApp',
 };
@@ -135,6 +144,29 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
         )}>
           {msg.content}
         </div>
+        {msg.attachments && msg.attachments.length > 0 && (
+          <div className="flex flex-col gap-2 w-full">
+            {msg.attachments.map((att, i) => (
+              <a
+                key={i}
+                href={att.url}
+                download={att.filename}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-3 px-4 py-3 rounded-xl border border-border bg-card hover:bg-primary/5 hover:border-primary/30 transition-all group w-full"
+              >
+                <div className="w-9 h-9 rounded-lg bg-red-500/10 flex items-center justify-center shrink-0">
+                  <FileText className="w-4 h-4 text-red-400" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-foreground truncate">{att.label}</p>
+                  <p className="text-xs text-muted-foreground">{att.filename}</p>
+                </div>
+                <Download className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors shrink-0" />
+              </a>
+            ))}
+          </div>
+        )}
       </div>
       {isUser && (
         <div className="flex-shrink-0 w-8 h-8 rounded-full bg-muted border border-border flex items-center justify-center">
@@ -642,6 +674,9 @@ export default function AgentePage() {
             const event = JSON.parse(line.slice(6)) as StreamEvent;
             if (event.type === 'text') {
               setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: m.content + event.text } : m));
+            } else if (event.type === 'file_attachment') {
+              const att: FileAttachment = { url: event.url, filename: event.filename, label: event.label };
+              setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, attachments: [...(m.attachments ?? []), att] } : m));
             } else if (event.type === 'tool_start') {
               currentActive = [...currentActive, event.name];
               setActiveTools([...currentActive]);
