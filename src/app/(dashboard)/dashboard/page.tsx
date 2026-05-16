@@ -2424,11 +2424,13 @@ export default function GeneralDashboard() {
   useEffect(() => { localStorage.setItem(LS_ORDER, JSON.stringify(widgetOrder)); }, [widgetOrder]);
   useEffect(() => { localStorage.setItem(LS_COLLAPSED, JSON.stringify([...collapsedWidgets])); }, [collapsedWidgets]);
 
-  // Initialize: all clients selected
+  // Initialize: all clients selected (or pre-select from ?client=ID param)
   useEffect(() => {
     if (clients.length === 0) return;
     const clientIds = new Set(clients.map(c => c.id));
+    const preselect = new URLSearchParams(window.location.search).get('client');
     setSelectedIds((current) => {
+      if (preselect && clientIds.has(preselect)) return new Set([preselect]);
       if (current.size === 0) return new Set(clientIds);
       const valid = [...current].filter((id) => clientIds.has(id));
       return valid.length > 0 ? new Set(valid) : new Set(clientIds);

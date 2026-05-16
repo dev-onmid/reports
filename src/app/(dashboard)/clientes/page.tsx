@@ -241,7 +241,7 @@ export default function ClientesPage() {
               {/* Ver dashboard */}
               {!showArchived && (
                 <Link
-                  href={`/clientes/${cliente.id}`}
+                  href={`/dashboard?client=${cliente.id}`}
                   className="text-sm font-medium text-primary hover:text-primary/80 transition-colors whitespace-nowrap"
                 >
                   Ver dashboard →
