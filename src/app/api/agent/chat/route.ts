@@ -1,8 +1,10 @@
 import type { NextRequest } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
+import { google as googleapis } from 'googleapis';
 import { makeServerPool } from '@/lib/server-db';
 import { sendText } from '@/lib/zapi';
 import { getFreshMetaToken } from '@/lib/meta-token';
+import { resolveMetaPeriod, resolveGaqlPeriod, applyMetaDateToUrl } from '@/lib/period-utils';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -77,7 +79,7 @@ const systemTools: Anthropic.Tool[] = [
       type: 'object' as const,
       properties: {
         client_id: { type: 'string', description: 'ID do cliente' },
-        period: { type: 'string', description: 'Período: THIS_MONTH, LAST_7_DAYS, LAST_30_DAYS, LAST_MONTH, TODAY (padrão: THIS_MONTH)' },
+        period: { type: 'string', description: 'Período: this_month, last_7d, last_30d, last_month (padrão: this_month)' },
       },
       required: ['client_id'],
     },
@@ -89,7 +91,7 @@ const systemTools: Anthropic.Tool[] = [
       type: 'object' as const,
       properties: {
         client_id: { type: 'string', description: 'ID do cliente' },
-        period: { type: 'string', description: 'Período: THIS_MONTH, LAST_7_DAYS, LAST_30_DAYS, LAST_MONTH (padrão: THIS_MONTH)' },
+        period: { type: 'string', description: 'Período: this_month, last_7d, last_30d, last_month (padrão: this_month)' },
       },
       required: ['client_id'],
     },
@@ -169,66 +171,221 @@ async function execSystemTool(name: string, input: Record<string, any>): Promise
       return JSON.stringify(rows);
     }
 
-    if (name === 'get_meta_campaigns') {
+    if (name === 'get_meta_campaigns' || (name === 'generate_client_report' && input._platform === 'meta')) {
       const clientId = input.client_id as string;
-      const period = (input.period as string) || 'THIS_MONTH';
-      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-      const res = await fetch(`${baseUrl}/api/campaigns?clientId=${clientId}&platform=meta&period=${period}`);
-      if (!res.ok) return 'Erro ao buscar campanhas Meta.';
-      const data = await res.json() as { campaigns?: unknown[] } | unknown[];
-      const campaigns = Array.isArray(data) ? data : (data as { campaigns?: unknown[] }).campaigns ?? [];
-      if (campaigns.length === 0) return 'Nenhuma campanha Meta encontrada para esse período.';
-      return JSON.stringify((campaigns as unknown[]).slice(0, 30));
+      const period = (input.period as string) || 'this_month';
+      const metaPeriod = resolveMetaPeriod(period);
+
+      // Get client's Meta account links
+      const { rows: links } = await pool.query(
+        "SELECT connection_id, account_id, account_name FROM public.client_account_links WHERE client_id = $1 AND platform = 'meta_ads'",
+        [clientId]
+      );
+
+      // Also check legacy meta_ads_connections
+      const { rows: legacyLinks } = await pool.query(
+        'SELECT account_ids FROM public.meta_ads_connections WHERE client_id = $1 LIMIT 1',
+        [clientId]
+      ).catch(() => ({ rows: [] }));
+
+      // Get all connected Meta tokens
+      const { rows: metaConns } = await pool.query("SELECT * FROM public.meta_connections WHERE status = 'connected'");
+      const { rows: globalConn } = await pool.query("SELECT * FROM public.meta_integration WHERE id = 'global' AND status = 'connected'").catch(() => ({ rows: [] }));
+      if (globalConn[0]?.access_token) metaConns.push({ id: 'legacy-global', access_token: globalConn[0].access_token, app_id: null, token_expiry: null });
+
+      if (metaConns.length === 0) return 'Nenhuma conexão Meta Ads ativa.';
+
+      const META_LEAD_ACTIONS = ['lead','onsite_conversion.lead_grouped','offsite_conversion.fb_pixel_lead','onsite_conversion.lead','onsite_web_lead','messaging_conversation_started_7d','total_messaging_connection'];
+
+      const campaigns: Record<string, unknown>[] = [];
+
+      await Promise.allSettled(metaConns.map(async (conn) => {
+        const token = await getFreshMetaToken(conn);
+        // Determine allowed accounts for this connection
+        const allowed = links.filter(l => l.connection_id === conn.id).map(l => l.account_id);
+        // Add legacy account IDs
+        if (conn.id === 'legacy-global' && legacyLinks[0]?.account_ids) {
+          for (const aid of legacyLinks[0].account_ids) allowed.push(aid);
+        }
+        if (links.length > 0 && allowed.length === 0) return; // Wrong connection for this client
+
+        const acctToUse: Array<{ id: string; name: string }> = allowed.length > 0
+          ? allowed.map(id => ({ id, name: links.find(l => l.account_id === id)?.account_name ?? id }))
+          : [];
+
+        // If no specific accounts and no links at all, try fetching all accounts
+        if (acctToUse.length === 0 && links.length === 0) {
+          const r = await fetch(`https://graph.facebook.com/v21.0/me/adaccounts?fields=id,name&limit=100&access_token=${token}`);
+          if (!r.ok) return;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const d = await r.json() as { data?: any[] };
+          for (const a of d.data ?? []) acctToUse.push(a);
+        }
+
+        await Promise.allSettled(acctToUse.map(async (account) => {
+          const acctNode = account.id.startsWith('act_') ? account.id : `act_${account.id}`;
+          const url = new URL(`https://graph.facebook.com/v21.0/${acctNode}/insights`);
+          url.searchParams.set('level', 'campaign');
+          url.searchParams.set('fields', 'campaign_id,campaign_name,spend,impressions,clicks,actions');
+          applyMetaDateToUrl(url, metaPeriod);
+          url.searchParams.set('sort', 'spend_descending');
+          url.searchParams.set('limit', '30');
+          url.searchParams.set('access_token', token);
+
+          const statusUrl = new URL(`https://graph.facebook.com/v21.0/${acctNode}/campaigns`);
+          statusUrl.searchParams.set('fields', 'id,effective_status,daily_budget');
+          statusUrl.searchParams.set('limit', '200');
+          statusUrl.searchParams.set('access_token', token);
+
+          const [insRes, stRes] = await Promise.all([fetch(url.toString()), fetch(statusUrl.toString())]);
+          if (!insRes.ok) return;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const ins = await insRes.json() as { data?: any[] };
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const statusMap: Record<string, string> = {};
+          if (stRes.ok) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const st = await stRes.json() as { data?: any[] };
+            for (const c of st.data ?? []) statusMap[c.id] = c.effective_status ?? 'ACTIVE';
+          }
+          for (const row of ins.data ?? []) {
+            const spend = parseFloat(row.spend || '0');
+            if (spend <= 0) continue;
+            const impressions = parseInt(row.impressions || '0', 10);
+            const clicks = parseInt(row.clicks || '0', 10);
+            const leads = ((row.actions ?? []) as { action_type: string; value: string }[])
+              .filter(a => META_LEAD_ACTIONS.includes(a.action_type))
+              .reduce((s, a) => s + parseInt(a.value || '0', 10), 0);
+            campaigns.push({
+              id: row.campaign_id, name: row.campaign_name, platform: 'meta',
+              accountName: account.name, status: statusMap[row.campaign_id] ?? 'ACTIVE',
+              spend, impressions, clicks, leads,
+              ctr: impressions > 0 ? ((clicks / impressions) * 100).toFixed(2) : '0',
+              cpl: leads > 0 ? (spend / leads).toFixed(2) : '0',
+            });
+          }
+        }));
+      }));
+
+      if (name === 'generate_client_report') return JSON.stringify(campaigns.slice(0, 20));
+      if (campaigns.length === 0) return 'Nenhuma campanha Meta encontrada para esse período. Verifique se a conta está vinculada corretamente.';
+      return JSON.stringify(campaigns.slice(0, 30));
     }
 
     if (name === 'get_google_campaigns') {
       const clientId = input.client_id as string;
-      const period = (input.period as string) || 'THIS_MONTH';
-      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-      const res = await fetch(`${baseUrl}/api/campaigns?clientId=${clientId}&platform=google&period=${period}`);
-      if (!res.ok) return 'Erro ao buscar campanhas Google.';
-      const data = await res.json() as { campaigns?: unknown[] } | unknown[];
-      const campaigns = Array.isArray(data) ? data : (data as { campaigns?: unknown[] }).campaigns ?? [];
-      if (campaigns.length === 0) return 'Nenhuma campanha Google encontrada.';
-      return JSON.stringify((campaigns as unknown[]).slice(0, 30));
+      const period = (input.period as string) || 'this_month';
+      const gaqlPeriod = resolveGaqlPeriod(period);
+      const DEV_TOKEN = process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? '';
+
+      const { rows: links } = await pool.query(
+        "SELECT account_id FROM public.client_account_links WHERE client_id = $1 AND platform = 'google_ads'",
+        [clientId]
+      );
+      if (links.length === 0) return 'Nenhuma conta Google Ads vinculada a esse cliente.';
+
+      const { rows: googleConns } = await pool.query("SELECT * FROM public.google_connections WHERE status = 'connected'");
+      if (googleConns.length === 0) return 'Nenhuma conexão Google Ads ativa.';
+
+      const accountIds = [...new Set(links.map((l) => l.account_id.replace(/\D/g, '')).filter(Boolean))];
+      const campaigns: Record<string, unknown>[] = [];
+      const seen = new Set<string>();
+
+      await Promise.allSettled(googleConns.map(async (conn) => {
+        // Refresh token
+        const oauth2 = new googleapis.auth.OAuth2(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET);
+        oauth2.setCredentials({ refresh_token: conn.refresh_token });
+        let accessToken = conn.access_token;
+        try {
+          if (!conn.token_expiry || new Date(conn.token_expiry).getTime() < Date.now() + 5 * 60 * 1000) {
+            const { credentials } = await oauth2.refreshAccessToken();
+            accessToken = credentials.access_token ?? accessToken;
+          }
+        } catch { /* use existing */ }
+
+        await Promise.allSettled(accountIds.map(async (accountId) => {
+          const headers: Record<string, string> = {
+            Authorization: `Bearer ${accessToken}`,
+            'developer-token': DEV_TOKEN,
+            'Content-Type': 'application/json',
+          };
+          const res = await fetch(`https://googleads.googleapis.com/v20/customers/${accountId}/googleAds:search`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              query: `SELECT campaign.id, campaign.name, campaign.status,
+                        metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions
+                      FROM campaign
+                      WHERE ${gaqlPeriod}
+                        AND campaign.status IN ('ENABLED', 'PAUSED')
+                        AND metrics.cost_micros > 0
+                      ORDER BY metrics.cost_micros DESC LIMIT 30`,
+            }),
+          });
+          if (!res.ok) return;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const data = await res.json() as { results?: any[] };
+          for (const row of data.results ?? []) {
+            const campaign = row.campaign ?? {};
+            const metrics = row.metrics ?? {};
+            const spend = Number(metrics.costMicros ?? 0) / 1_000_000;
+            if (spend <= 0) continue;
+            const key = `${accountId}:${campaign.id}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            const clicks = Number(metrics.clicks ?? 0);
+            const impressions = Number(metrics.impressions ?? 0);
+            const leads = Number(metrics.conversions ?? 0);
+            campaigns.push({
+              id: String(campaign.id), name: campaign.name, platform: 'google',
+              accountId, status: campaign.status ?? 'ENABLED', spend, impressions, clicks, leads,
+              ctr: impressions > 0 ? ((clicks / impressions) * 100).toFixed(2) : '0',
+              cpl: leads > 0 ? (spend / leads).toFixed(2) : '0',
+            });
+          }
+        }));
+      }));
+
+      if (campaigns.length === 0) return 'Nenhuma campanha Google encontrada para esse período.';
+      return JSON.stringify(campaigns.slice(0, 30));
     }
 
     if (name === 'get_account_balances') {
       const clientId = input.client_id as string;
-      const { rows: links } = await pool.query('SELECT platform, connection_id FROM public.client_account_links WHERE client_id = $1', [clientId]);
+      const { rows: links } = await pool.query(
+        "SELECT platform, connection_id FROM public.client_account_links WHERE client_id = $1",
+        [clientId]
+      );
       if (links.length === 0) return 'Nenhuma conta vinculada.';
-      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+      const baseUrl = process.env.NEXT_PUBLIC_APP_URL
+        || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
       const balances: Record<string, unknown> = {};
-      const meta = links.find((l) => l.platform === 'meta');
-      const google = links.find((l) => l.platform === 'google');
-      if (meta) {
+      const meta = links.find((l) => l.platform === 'meta_ads' || l.platform === 'meta');
+      const goog = links.find((l) => l.platform === 'google_ads' || l.platform === 'google');
+      if (meta?.connection_id) {
         try { const r = await fetch(`${baseUrl}/api/meta/account-balances?connectionId=${meta.connection_id}`); if (r.ok) balances.meta = await r.json(); } catch { /* ignore */ }
       }
-      if (google) {
-        try { const r = await fetch(`${baseUrl}/api/google/account-balances?connectionId=${google.connection_id}`); if (r.ok) balances.google = await r.json(); } catch { /* ignore */ }
+      if (goog?.connection_id) {
+        try { const r = await fetch(`${baseUrl}/api/google/account-balances?connectionId=${goog.connection_id}`); if (r.ok) balances.google = await r.json(); } catch { /* ignore */ }
       }
       return JSON.stringify(balances);
     }
 
     if (name === 'update_meta_campaign_status') {
       const { campaign_id, status, client_id } = input as { campaign_id: string; status: 'PAUSED' | 'ACTIVE'; client_id: string };
-      // Find the Meta connection for this client
       const { rows: links } = await pool.query(
-        "SELECT connection_id FROM public.client_account_links WHERE client_id = $1 AND platform = 'meta' LIMIT 1",
+        "SELECT connection_id FROM public.client_account_links WHERE client_id = $1 AND platform IN ('meta_ads','meta') LIMIT 1",
         [client_id]
       );
       if (!links[0]) return 'Nenhuma conexão Meta encontrada para esse cliente.';
-
       const { rows: connRows } = await pool.query('SELECT * FROM public.meta_connections WHERE id = $1', [links[0].connection_id]);
       if (!connRows[0]) return 'Conexão Meta não encontrada.';
-
       const token = await getFreshMetaToken(connRows[0]);
       const res = await fetch(`https://graph.facebook.com/v21.0/${campaign_id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status, access_token: token }),
       });
-
       if (!res.ok) {
         const err = await res.json().catch(() => ({})) as { error?: { message?: string } };
         return `Erro ao atualizar campanha: ${err.error?.message ?? `HTTP ${res.status}`}`;
@@ -238,27 +395,18 @@ async function execSystemTool(name: string, input: Record<string, any>): Promise
 
     if (name === 'generate_client_report') {
       const clientId = input.client_id as string;
-      const period = (input.period as string) || 'THIS_MONTH';
-
+      const period = (input.period as string) || 'this_month';
       const { rows: clientRows } = await pool.query('SELECT name, segment FROM public.clients WHERE id = $1', [clientId]);
       if (!clientRows[0]) return 'Cliente não encontrado.';
-
-      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-      const [metaRes, googleRes] = await Promise.allSettled([
-        fetch(`${baseUrl}/api/campaigns?clientId=${clientId}&platform=meta&period=${period}`).then(r => r.ok ? r.json() : null),
-        fetch(`${baseUrl}/api/campaigns?clientId=${clientId}&platform=google&period=${period}`).then(r => r.ok ? r.json() : null),
+      // Reuse the meta/google campaign tools by setting a flag
+      const [metaResult, googleResult] = await Promise.allSettled([
+        execSystemTool('get_meta_campaigns', { client_id: clientId, period, _platform: 'meta' }),
+        execSystemTool('get_google_campaigns', { client_id: clientId, period }),
       ]);
-
-      const metaCampaigns = metaRes.status === 'fulfilled' && metaRes.value
-        ? (Array.isArray(metaRes.value) ? metaRes.value : (metaRes.value as { campaigns?: unknown[] }).campaigns ?? []) : [];
-      const googleCampaigns = googleRes.status === 'fulfilled' && googleRes.value
-        ? (Array.isArray(googleRes.value) ? googleRes.value : (googleRes.value as { campaigns?: unknown[] }).campaigns ?? []) : [];
-
       return JSON.stringify({
-        client: clientRows[0],
-        period,
-        meta: { campaigns: metaCampaigns.slice(0, 20) },
-        google: { campaigns: googleCampaigns.slice(0, 20) },
+        client: clientRows[0], period,
+        meta_campaigns: metaResult.status === 'fulfilled' ? JSON.parse(metaResult.value) : [],
+        google_campaigns: googleResult.status === 'fulfilled' ? JSON.parse(googleResult.value) : [],
       });
     }
 
