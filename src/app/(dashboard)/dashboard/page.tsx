@@ -2849,58 +2849,90 @@ export default function GeneralDashboard() {
           })()}
         </div>
 
-        {/* CENTER: Meta Ads vs Google Ads */}
-        <div className="flex min-h-[430px] flex-col rounded-2xl border border-white/5 bg-card p-5">
-          <div className="mb-5 flex items-start justify-between">
-            <div>
-              <p className="text-sm font-bold uppercase tracking-wider text-foreground">Meta Ads vs Google Ads</p>
-              <p className="mt-0.5 text-[11px] text-muted-foreground">Comparação de resultados</p>
-            </div>
-            <span className="rounded-lg border border-border bg-background/50 px-2.5 py-1 text-[11px] font-semibold text-muted-foreground">Investimento</span>
-          </div>
-          <div className="grid flex-1 grid-cols-2 gap-4">
-            <div className="flex flex-col items-center justify-between gap-4 rounded-xl border border-white/5 bg-background/40 p-5">
-              <div className="flex items-center gap-1.5">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/brand/meta-ads-logo.webp" alt="Meta" className="h-7 w-auto object-contain" />
-                <span className="text-sm font-bold text-foreground">META ADS</span>
+        {/* CENTER: Meta Ads vs Google Ads — Budget distribution */}
+        {(() => {
+          const total = metaSpend + googleCost;
+          const metaPct = total > 0 ? (metaSpend / total) * 100 : 0;
+          const googlePct = total > 0 ? (googleCost / total) * 100 : 0;
+          const metaLeadCost = metaLeads > 0 ? metaSpend / metaLeads : null;
+          const googleLeadCost = googleConv > 0 ? googleCost / googleConv : null;
+          return (
+            <div className="flex min-h-[430px] flex-col rounded-2xl border border-white/5 bg-card p-5">
+              <div className="mb-4 flex items-start justify-between">
+                <div>
+                  <p className="text-sm font-bold uppercase tracking-wider text-foreground">Meta Ads vs Google Ads</p>
+                  <p className="mt-0.5 text-[11px] text-muted-foreground">Distribuição de budget no período</p>
+                </div>
+                <span className="rounded-lg border border-border bg-background/50 px-2.5 py-1 text-[11px] font-semibold text-muted-foreground">{formatCurrencyBRL(total)}</span>
               </div>
-              <CircularQuality pct={metricsLoading ? 0 : metaQuality} color="#0B84FF" size={150} />
-              <div className="w-full space-y-3">
-                {([
-                  { label: 'Investimento', val: formatCurrencyBRL(metaSpend) },
-                  { label: 'Resultado', val: formatCurrencyBRL(metaRevenue) },
-                  { label: 'ROI', val: `${metaRoi.toFixed(2)}x`, highlight: metaRoi > 0 },
-                ] as const).map(r => (
-                  <div key={r.label} className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">{r.label}</span>
-                    <span className={cn('font-bold', 'highlight' in r && r.highlight ? 'text-emerald-400' : 'text-foreground')}>{r.val}</span>
+
+              {/* Budget bar */}
+              <div className="mb-1 flex h-3 w-full overflow-hidden rounded-full bg-muted/20">
+                {metricsLoading ? (
+                  <div className="h-full w-full animate-pulse rounded-full bg-muted/30" />
+                ) : total === 0 ? (
+                  <div className="h-full w-full rounded-full bg-muted/30" />
+                ) : (
+                  <>
+                    <div className="h-full rounded-l-full transition-all duration-700" style={{ width: `${metaPct}%`, background: 'linear-gradient(90deg,#0B84FF,#3b9eff)' }} />
+                    <div className="h-full rounded-r-full transition-all duration-700" style={{ width: `${googlePct}%`, background: 'linear-gradient(90deg,#EA4335,#ff6b5b)' }} />
+                  </>
+                )}
+              </div>
+              <div className="mb-5 flex justify-between text-[10px] font-semibold text-muted-foreground">
+                <span style={{ color: '#3b9eff' }}>Meta {metaPct.toFixed(0)}%</span>
+                <span style={{ color: '#ff6b5b' }}>Google {googlePct.toFixed(0)}%</span>
+              </div>
+
+              {/* Platform cards */}
+              <div className="grid flex-1 grid-cols-2 gap-3">
+                {/* Meta */}
+                <div className="flex flex-col gap-3 rounded-xl border border-white/5 bg-background/40 p-4">
+                  <div className="flex items-center gap-1.5">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src="/brand/meta-ads-logo.webp" alt="Meta" className="h-5 w-auto object-contain" />
+                    <span className="text-xs font-bold text-foreground">META ADS</span>
                   </div>
-                ))}
-              </div>
-            </div>
-            <div className="flex flex-col items-center justify-between gap-4 rounded-xl border border-white/5 bg-background/40 p-5">
-              <div className="flex items-center gap-1.5">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/brand/google-ads-logo.png" alt="Google" className="h-7 w-auto object-contain" />
-                <span className="text-sm font-bold text-foreground">GOOGLE ADS</span>
-              </div>
-              <CircularQuality pct={metricsLoading ? 0 : googleQuality} color="#EA4335" size={150} />
-              <div className="w-full space-y-3">
-                {([
-                  { label: 'Investimento', val: formatCurrencyBRL(googleCost) },
-                  { label: 'Resultado', val: formatCurrencyBRL(googleRevenue) },
-                  { label: 'ROI', val: `${googleRoi.toFixed(2)}x`, highlight: googleRoi > 0 },
-                ] as const).map(r => (
-                  <div key={r.label} className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">{r.label}</span>
-                    <span className={cn('font-bold', 'highlight' in r && r.highlight ? 'text-emerald-400' : 'text-muted-foreground')}>{r.val}</span>
+                  <p className="font-heading text-3xl font-normal leading-none" style={{ color: '#3b9eff' }}>
+                    {metricsLoading ? '…' : `${metaPct.toFixed(0)}%`}
+                  </p>
+                  <div className="mt-auto space-y-2 text-xs">
+                    <div className="flex justify-between"><span className="text-muted-foreground">Investimento</span><span className="font-bold">{formatCurrencyBRL(metaSpend)}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Leads</span><span className="font-bold">{metaLeads.toLocaleString('pt-BR')}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">CPL</span><span className={cn('font-bold', metaLeadCost !== null && metaLeadCost > 0 ? 'text-foreground' : 'text-muted-foreground')}>{metaLeadCost !== null ? formatCurrencyBRL(metaLeadCost) : '—'}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">ROI</span><span className={cn('font-bold', metaRoi > 0 ? 'text-emerald-400' : 'text-muted-foreground')}>{metaRoi.toFixed(2)}x</span></div>
                   </div>
-                ))}
+                </div>
+                {/* Google */}
+                <div className="flex flex-col gap-3 rounded-xl border border-white/5 bg-background/40 p-4">
+                  <div className="flex items-center gap-1.5">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src="/brand/google-ads-logo.png" alt="Google" className="h-5 w-auto object-contain" />
+                    <span className="text-xs font-bold text-foreground">GOOGLE ADS</span>
+                  </div>
+                  {googleCost === 0 && !metricsLoading ? (
+                    <>
+                      <p className="font-heading text-3xl font-normal leading-none text-muted-foreground/40">—</p>
+                      <p className="mt-auto text-[11px] text-muted-foreground">Sem investimento no período</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="font-heading text-3xl font-normal leading-none" style={{ color: '#ff6b5b' }}>
+                        {metricsLoading ? '…' : `${googlePct.toFixed(0)}%`}
+                      </p>
+                      <div className="mt-auto space-y-2 text-xs">
+                        <div className="flex justify-between"><span className="text-muted-foreground">Investimento</span><span className="font-bold">{formatCurrencyBRL(googleCost)}</span></div>
+                        <div className="flex justify-between"><span className="text-muted-foreground">Conversões</span><span className="font-bold">{googleConv.toLocaleString('pt-BR')}</span></div>
+                        <div className="flex justify-between"><span className="text-muted-foreground">CPA</span><span className={cn('font-bold', googleLeadCost !== null && googleLeadCost > 0 ? 'text-foreground' : 'text-muted-foreground')}>{googleLeadCost !== null ? formatCurrencyBRL(googleLeadCost) : '—'}</span></div>
+                        <div className="flex justify-between"><span className="text-muted-foreground">ROI</span><span className={cn('font-bold', googleRoi > 0 ? 'text-emerald-400' : 'text-muted-foreground')}>{googleRoi.toFixed(2)}x</span></div>
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        </div>
+          );
+        })()}
 
         {/* RIGHT: Resumo de Público */}
         <div className="flex min-h-[430px] flex-col rounded-2xl border border-white/5 bg-card p-5">
