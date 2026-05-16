@@ -1,4 +1,4 @@
-type PDFDocumentType = typeof import('pdfkit');
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 
 type CampaignRow = Record<string, unknown>;
 
@@ -10,11 +10,20 @@ export type ReportPdfData = {
   crmLeads: CampaignRow[];
 };
 
-const BRAND_GREEN = '#55f52f';
-const DARK_BG = '#0f1117';
-const CARD_BG = '#1a1d27';
-const TEXT_LIGHT = '#e8eaed';
-const TEXT_MUTED = '#9ca3af';
+const GREEN  = rgb(0.333, 0.961, 0.184);
+const DARK   = rgb(0.059, 0.067, 0.090);
+const CARD   = rgb(0.102, 0.114, 0.153);
+const LIGHT  = rgb(0.910, 0.918, 0.929);
+const MUTED  = rgb(0.612, 0.639, 0.686);
+const BLUE   = rgb(0.024, 0.408, 0.882);
+const GGREEN = rgb(0.204, 0.659, 0.325);
+const AMBER  = rgb(0.961, 0.620, 0.043);
+const ROW_ALT = rgb(0.086, 0.098, 0.141);
+
+const W = 595.28;
+const H = 841.89;
+const PAD = 40;
+const COL = W - PAD * 2;
 
 function currency(n: unknown): string {
   const v = typeof n === 'string' ? parseFloat(n) : Number(n ?? 0);
@@ -34,193 +43,247 @@ function sumField(rows: CampaignRow[], field: string): number {
   return rows.reduce((s, r) => s + (parseFloat(String(r[field] ?? 0)) || 0), 0);
 }
 
+function truncate(s: string, max: number): string {
+  return s.length > max ? s.slice(0, max - 1) + '…' : s;
+}
+
+// y helper: converts pdfkit top-origin y → pdf-lib bottom-origin y
+function ty(y: number, fontSize = 0): number {
+  return H - y - fontSize;
+}
+
 export async function generateReportPdf(data: ReportPdfData): Promise<Buffer> {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const PDFDocument = require('pdfkit') as PDFDocumentType;
-  return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: 'A4', margin: 0, info: { Title: `Relatório ${data.clientName}`, Author: 'Onmid Reports' } });
-    const chunks: Buffer[] = [];
-    doc.on('data', (c: Buffer) => chunks.push(c));
-    doc.on('end', () => resolve(Buffer.concat(chunks)));
-    doc.on('error', reject);
+  const doc = await PDFDocument.create();
 
-    const W = 595.28;
-    const H = 841.89;
-    const PAD = 40;
-    const COL = W - PAD * 2;
+  const regular = await doc.embedFont(StandardFonts.Helvetica);
+  const bold    = await doc.embedFont(StandardFonts.HelveticaBold);
 
-    // ── Helpers ──────────────────────────────────────────────────────────────
-    function fillPage(color: string) {
-      doc.rect(0, 0, W, H).fill(color);
-    }
+  // ── helpers ──────────────────────────────────────────────────────────────────
 
-    function sectionTitle(text: string, y: number) {
-      doc.fontSize(10).fillColor(BRAND_GREEN).font('Helvetica-Bold').text(text.toUpperCase(), PAD, y, { characterSpacing: 1.5 });
-      doc.moveTo(PAD, y + 14).lineTo(W - PAD, y + 14).strokeColor(BRAND_GREEN).lineWidth(0.5).stroke();
-      return y + 22;
-    }
+  function addPage() {
+    return doc.addPage([W, H]);
+  }
 
-    function kpiCard(x: number, y: number, w: number, h: number, label: string, value: string, sub?: string) {
-      doc.roundedRect(x, y, w, h, 6).fill(CARD_BG);
-      doc.fontSize(8).fillColor(TEXT_MUTED).font('Helvetica').text(label, x + 12, y + 12, { width: w - 24 });
-      doc.fontSize(18).fillColor(TEXT_LIGHT).font('Helvetica-Bold').text(value, x + 12, y + 26, { width: w - 24 });
-      if (sub) doc.fontSize(8).fillColor(TEXT_MUTED).font('Helvetica').text(sub, x + 12, y + 48, { width: w - 24 });
-    }
+  function fillBg(page: ReturnType<typeof addPage>, color = DARK) {
+    page.drawRectangle({ x: 0, y: 0, width: W, height: H, color });
+  }
 
-    function tableHeader(headers: string[], x: number, y: number, colWidths: number[]) {
-      let cx = x;
-      headers.forEach((h, i) => {
-        doc.fontSize(8).fillColor(TEXT_MUTED).font('Helvetica-Bold').text(h, cx + 4, y + 4, { width: colWidths[i] - 8, align: i === 0 ? 'left' : 'right' });
-        cx += colWidths[i];
-      });
-      doc.moveTo(x, y + 18).lineTo(x + colWidths.reduce((a, b) => a + b, 0), y + 18).strokeColor('#2d3142').lineWidth(0.5).stroke();
-      return y + 20;
-    }
+  function accentBar(page: ReturnType<typeof addPage>, color = GREEN) {
+    page.drawRectangle({ x: 0, y: 0, width: 6, height: H, color });
+  }
 
-    function tableRow(cells: string[], x: number, y: number, colWidths: number[], even: boolean) {
-      if (even) doc.rect(x, y, colWidths.reduce((a, b) => a + b, 0), 20).fill('#161924');
-      let cx = x;
-      cells.forEach((c, i) => {
-        doc.fontSize(8).fillColor(TEXT_LIGHT).font('Helvetica').text(c, cx + 4, y + 5, { width: colWidths[i] - 8, align: i === 0 ? 'left' : 'right', ellipsis: true });
-        cx += colWidths[i];
-      });
-      return y + 20;
-    }
+  function text(
+    page: ReturnType<typeof addPage>,
+    str: string,
+    x: number,
+    y: number, // pdfkit-style (from top)
+    size: number,
+    color = LIGHT,
+    font = regular,
+  ) {
+    page.drawText(str, { x, y: ty(y, size), size, color, font });
+  }
 
-    // ── PAGE 1: Cover ─────────────────────────────────────────────────────────
-    fillPage(DARK_BG);
-    // Green accent bar
-    doc.rect(0, 0, 6, H).fill(BRAND_GREEN);
-    // Brand
-    doc.fontSize(10).fillColor(BRAND_GREEN).font('Helvetica-Bold').text('ONMID REPORTS', PAD + 6, 60, { characterSpacing: 2 });
-    // Big title
-    doc.fontSize(38).fillColor(TEXT_LIGHT).font('Helvetica-Bold').text('Relatório de\nPerformance', PAD + 6, 120, { lineGap: 6 });
-    // Client badge
-    doc.roundedRect(PAD + 6, 240, COL - 6, 56, 8).fill(CARD_BG);
-    doc.fontSize(10).fillColor(TEXT_MUTED).font('Helvetica').text('CLIENTE', PAD + 20, 252);
-    doc.fontSize(20).fillColor(TEXT_LIGHT).font('Helvetica-Bold').text(data.clientName, PAD + 20, 266);
-    // Period
-    doc.roundedRect(PAD + 6, 312, COL - 6, 40, 8).fill(CARD_BG);
-    doc.fontSize(9).fillColor(TEXT_MUTED).font('Helvetica').text('PERÍODO', PAD + 20, 322);
-    doc.fontSize(14).fillColor(BRAND_GREEN).font('Helvetica-Bold').text(data.period.toUpperCase(), PAD + 20, 335);
-    // Summary numbers
-    const metaSpend = sumField(data.metaCampaigns, 'spend');
-    const googleSpend = sumField(data.googleCampaigns, 'spend');
-    const totalSpend = metaSpend + googleSpend;
-    const metaLeads = sumField(data.metaCampaigns, 'leads');
-    const googleLeads = sumField(data.googleCampaigns, 'leads');
-    const totalLeads = metaLeads + googleLeads;
-    const cpl = totalLeads > 0 ? totalSpend / totalLeads : 0;
-    const CARD_W = (COL - 6 - 12) / 3;
-    kpiCard(PAD + 6, 375, CARD_W, 70, 'Investimento Total', currency(totalSpend));
-    kpiCard(PAD + 6 + CARD_W + 6, 375, CARD_W, 70, 'Leads Gerados', num(totalLeads));
-    kpiCard(PAD + 6 + (CARD_W + 6) * 2, 375, CARD_W, 70, 'CPL Médio', currency(cpl));
-    // Footer
-    doc.fontSize(8).fillColor(TEXT_MUTED).font('Helvetica').text(`Gerado em ${new Date().toLocaleDateString('pt-BR')} via Luna IA · Onmid Marketing`, PAD + 6, H - 40);
+  function sectionTitle(page: ReturnType<typeof addPage>, label: string, y: number): number {
+    text(page, label.toUpperCase(), PAD + 6, y, 10, GREEN, bold);
+    page.drawLine({
+      start: { x: PAD + 6, y: ty(y + 14) },
+      end:   { x: W - PAD, y: ty(y + 14) },
+      color: GREEN,
+      thickness: 0.5,
+    });
+    return y + 24;
+  }
 
-    // ── PAGE 2: Meta Ads ─────────────────────────────────────────────────────
-    if (data.metaCampaigns.length > 0) {
-      doc.addPage();
-      fillPage(DARK_BG);
-      doc.rect(0, 0, 6, H).fill('#0668E1');
-      doc.fontSize(10).fillColor('#0668E1').font('Helvetica-Bold').text('META ADS', PAD + 6, 40, { characterSpacing: 2 });
-      doc.fontSize(22).fillColor(TEXT_LIGHT).font('Helvetica-Bold').text('Campanhas & Métricas', PAD + 6, 58);
-      doc.fontSize(9).fillColor(TEXT_MUTED).font('Helvetica').text(data.period, PAD + 6, 86);
+  function kpiCard(
+    page: ReturnType<typeof addPage>,
+    x: number, y: number, w: number, h: number,
+    label: string, value: string,
+  ) {
+    page.drawRectangle({ x, y: ty(y + h), width: w, height: h, color: CARD });
+    text(page, label, x + 12, y + 14, 8, MUTED, regular);
+    text(page, value, x + 12, y + 28, 16, LIGHT, bold);
+  }
 
-      // KPIs
-      const metaCtr = data.metaCampaigns.length > 0 ? sumField(data.metaCampaigns, 'clicks') / Math.max(sumField(data.metaCampaigns, 'impressions'), 1) * 100 : 0;
-      const metaCpl = metaLeads > 0 ? metaSpend / metaLeads : 0;
-      const HALF = (COL - 6) / 2 - 4;
-      kpiCard(PAD + 6, 104, HALF, 64, 'Investimento Meta', currency(metaSpend));
-      kpiCard(PAD + 6 + HALF + 8, 104, HALF, 64, 'Leads Meta', num(metaLeads));
-      kpiCard(PAD + 6, 176, HALF, 64, 'CPL Meta', currency(metaCpl));
-      kpiCard(PAD + 6 + HALF + 8, 176, HALF, 64, 'CTR Médio', pct(metaCtr));
+  function tableHeader(
+    page: ReturnType<typeof addPage>,
+    headers: string[], x: number, y: number, colWidths: number[],
+  ): number {
+    let cx = x;
+    headers.forEach((h, i) => {
+      const align = i === 0 ? 'left' : 'right';
+      const tx = align === 'right' ? cx + colWidths[i] - regular.widthOfTextAtSize(h, 8) - 8 : cx + 4;
+      text(page, h, tx, y + 6, 8, MUTED, bold);
+      cx += colWidths[i];
+    });
+    const totalW = colWidths.reduce((a, b) => a + b, 0);
+    page.drawLine({
+      start: { x, y: ty(y + 20) },
+      end:   { x: x + totalW, y: ty(y + 20) },
+      color: rgb(0.176, 0.192, 0.259),
+      thickness: 0.5,
+    });
+    return y + 22;
+  }
 
-      let y = sectionTitle('Campanhas', 260);
-      const mCols = [190, 70, 70, 65, 65, 55];
-      y = tableHeader(['Campanha', 'Status', 'Gasto', 'Leads', 'CPL', 'CTR'], PAD + 6, y, mCols);
-      data.metaCampaigns.slice(0, 20).forEach((c, i) => {
-        if (y > H - 60) return;
-        const status = String(c.status ?? 'ACTIVE');
-        y = tableRow([
-          String(c.name ?? '').slice(0, 28),
-          status === 'ACTIVE' ? 'Ativa' : 'Pausada',
-          currency(c.spend),
-          num(c.leads),
-          currency(Number(c.spend ?? 0) / Math.max(Number(c.leads ?? 0), 1)),
-          pct(c.ctr),
-        ], PAD + 6, y, mCols, i % 2 === 0);
-      });
-      doc.fontSize(8).fillColor(TEXT_MUTED).font('Helvetica').text(`${data.metaCampaigns.length} campanha(s) no período`, PAD + 6, H - 30);
-    }
+  function tableRow(
+    page: ReturnType<typeof addPage>,
+    cells: string[], x: number, y: number, colWidths: number[], even: boolean,
+  ): number {
+    const totalW = colWidths.reduce((a, b) => a + b, 0);
+    if (even) page.drawRectangle({ x, y: ty(y + 20), width: totalW, height: 20, color: ROW_ALT });
+    let cx = x;
+    cells.forEach((c, i) => {
+      const maxChars = Math.floor((colWidths[i] - 8) / 5);
+      const str = truncate(c, maxChars);
+      const align = i === 0 ? 'left' : 'right';
+      const tx = align === 'right' ? cx + colWidths[i] - regular.widthOfTextAtSize(str, 8) - 8 : cx + 4;
+      text(page, str, tx, y + 6, 8, LIGHT, regular);
+      cx += colWidths[i];
+    });
+    return y + 20;
+  }
 
-    // ── PAGE 3: Google Ads ────────────────────────────────────────────────────
-    if (data.googleCampaigns.length > 0) {
-      doc.addPage();
-      fillPage(DARK_BG);
-      doc.rect(0, 0, 6, H).fill('#34A853');
-      doc.fontSize(10).fillColor('#34A853').font('Helvetica-Bold').text('GOOGLE ADS', PAD + 6, 40, { characterSpacing: 2 });
-      doc.fontSize(22).fillColor(TEXT_LIGHT).font('Helvetica-Bold').text('Campanhas & Métricas', PAD + 6, 58);
-      doc.fontSize(9).fillColor(TEXT_MUTED).font('Helvetica').text(data.period, PAD + 6, 86);
+  // ── PAGE 1: Cover ─────────────────────────────────────────────────────────────
+  const metaSpend    = sumField(data.metaCampaigns,   'spend');
+  const googleSpend  = sumField(data.googleCampaigns, 'spend');
+  const totalSpend   = metaSpend + googleSpend;
+  const metaLeads    = sumField(data.metaCampaigns,   'leads');
+  const googleLeads  = sumField(data.googleCampaigns, 'leads');
+  const totalLeads   = metaLeads + googleLeads;
+  const cpl          = totalLeads > 0 ? totalSpend / totalLeads : 0;
 
-      const googleClicks = sumField(data.googleCampaigns, 'clicks');
-      const googleImpressions = sumField(data.googleCampaigns, 'impressions');
-      const googleCtr = googleClicks / Math.max(googleImpressions, 1) * 100;
-      const googleCpl = googleLeads > 0 ? googleSpend / googleLeads : 0;
-      const HALF = (COL - 6) / 2 - 4;
-      kpiCard(PAD + 6, 104, HALF, 64, 'Investimento Google', currency(googleSpend));
-      kpiCard(PAD + 6 + HALF + 8, 104, HALF, 64, 'Conversões', num(googleLeads));
-      kpiCard(PAD + 6, 176, HALF, 64, 'CPA Médio', currency(googleCpl));
-      kpiCard(PAD + 6 + HALF + 8, 176, HALF, 64, 'CTR Médio', pct(googleCtr));
+  const p1 = addPage();
+  fillBg(p1);
+  accentBar(p1);
+  text(p1, 'ONMID REPORTS', PAD + 6, 60,  10, GREEN, bold);
+  text(p1, 'Relatório de',  PAD + 6, 120, 36, LIGHT, bold);
+  text(p1, 'Performance',   PAD + 6, 162, 36, LIGHT, bold);
 
-      let y = sectionTitle('Campanhas', 260);
-      const gCols = [200, 70, 70, 60, 60, 55];
-      y = tableHeader(['Campanha', 'Status', 'Gasto', 'Conversões', 'CPA', 'CTR'], PAD + 6, y, gCols);
-      data.googleCampaigns.slice(0, 20).forEach((c, i) => {
-        if (y > H - 60) return;
-        y = tableRow([
-          String(c.name ?? '').slice(0, 30),
-          String(c.status ?? 'ENABLED') === 'ENABLED' ? 'Ativa' : 'Pausada',
-          currency(c.spend),
-          num(c.leads),
-          currency(Number(c.spend ?? 0) / Math.max(Number(c.leads ?? 0), 1)),
-          pct(c.ctr),
-        ], PAD + 6, y, gCols, i % 2 === 0);
-      });
-      doc.fontSize(8).fillColor(TEXT_MUTED).font('Helvetica').text(`${data.googleCampaigns.length} campanha(s) no período`, PAD + 6, H - 30);
-    }
+  // Client badge
+  p1.drawRectangle({ x: PAD + 6, y: ty(240 + 56), width: COL - 6, height: 56, color: CARD });
+  text(p1, 'CLIENTE',          PAD + 20, 252, 9,  MUTED, regular);
+  text(p1, data.clientName,    PAD + 20, 266, 18, LIGHT, bold);
 
-    // ── PAGE 4: CRM ───────────────────────────────────────────────────────────
-    if (data.crmLeads.length > 0) {
-      doc.addPage();
-      fillPage(DARK_BG);
-      doc.rect(0, 0, 6, H).fill('#f59e0b');
-      doc.fontSize(10).fillColor('#f59e0b').font('Helvetica-Bold').text('CRM', PAD + 6, 40, { characterSpacing: 2 });
-      doc.fontSize(22).fillColor(TEXT_LIGHT).font('Helvetica-Bold').text('Leads & Funil de Vendas', PAD + 6, 58);
+  // Period badge
+  p1.drawRectangle({ x: PAD + 6, y: ty(312 + 40), width: COL - 6, height: 40, color: CARD });
+  text(p1, 'PERÍODO',                   PAD + 20, 322, 9,  MUTED, regular);
+  text(p1, data.period.toUpperCase(),   PAD + 20, 334, 13, GREEN, bold);
 
-      const statusCount = (s: string) => data.crmLeads.filter(l => String(l.status ?? '').toLowerCase().includes(s)).length;
-      const wins = statusCount('won') + statusCount('win');
-      const meetings = statusCount('meeting');
-      const THIRD = (COL - 6 - 12) / 3;
-      kpiCard(PAD + 6, 100, THIRD, 64, 'Total de Leads', num(data.crmLeads.length));
-      kpiCard(PAD + 6 + THIRD + 6, 100, THIRD, 64, 'Reuniões', num(meetings));
-      kpiCard(PAD + 6 + (THIRD + 6) * 2, 100, THIRD, 64, 'Fechamentos', num(wins));
+  // KPI cards
+  const CARD_W = (COL - 6 - 12) / 3;
+  kpiCard(p1, PAD + 6,                     375, CARD_W, 70, 'Investimento Total', currency(totalSpend));
+  kpiCard(p1, PAD + 6 + CARD_W + 6,        375, CARD_W, 70, 'Leads Gerados',      num(totalLeads));
+  kpiCard(p1, PAD + 6 + (CARD_W + 6) * 2, 375, CARD_W, 70, 'CPL Médio',          currency(cpl));
 
-      let y = sectionTitle('Últimos Leads', 186);
-      const lCols = [160, 100, 100, 155];
-      y = tableHeader(['Nome', 'Status', 'Data', 'Contato'], PAD + 6, y, lCols);
-      data.crmLeads.slice(0, 25).forEach((l, i) => {
-        if (y > H - 60) return;
-        const date = l.created_at ? new Date(String(l.created_at)).toLocaleDateString('pt-BR') : '-';
-        y = tableRow([
-          String(l.name ?? '').slice(0, 22),
-          String(l.status ?? '-').slice(0, 14),
-          date,
-          String(l.phone ?? l.email ?? '-').slice(0, 22),
-        ], PAD + 6, y, lCols, i % 2 === 0);
-      });
-    }
+  text(p1, `Gerado em ${new Date().toLocaleDateString('pt-BR')} via Luna IA · Onmid Marketing`, PAD + 6, H - 30, 8, MUTED, regular);
 
-    doc.end();
-  });
+  // ── PAGE 2: Meta Ads ──────────────────────────────────────────────────────────
+  if (data.metaCampaigns.length > 0) {
+    const p2 = addPage();
+    fillBg(p2);
+    accentBar(p2, BLUE);
+    text(p2, 'META ADS',            PAD + 6, 40, 10, BLUE, bold);
+    text(p2, 'Campanhas & Métricas', PAD + 6, 58, 20, LIGHT, bold);
+    text(p2, data.period,            PAD + 6, 85,  9, MUTED, regular);
+
+    const metaClicks      = sumField(data.metaCampaigns, 'clicks');
+    const metaImpressions = sumField(data.metaCampaigns, 'impressions');
+    const metaCtr = metaClicks / Math.max(metaImpressions, 1) * 100;
+    const metaCpl = metaLeads > 0 ? metaSpend / metaLeads : 0;
+    const HALF = (COL - 6) / 2 - 4;
+
+    kpiCard(p2, PAD + 6,           104, HALF, 64, 'Investimento Meta', currency(metaSpend));
+    kpiCard(p2, PAD + 6 + HALF + 8, 104, HALF, 64, 'Leads Meta',       num(metaLeads));
+    kpiCard(p2, PAD + 6,           176, HALF, 64, 'CPL Meta',          currency(metaCpl));
+    kpiCard(p2, PAD + 6 + HALF + 8, 176, HALF, 64, 'CTR Médio',        pct(metaCtr));
+
+    let y = sectionTitle(p2, 'Campanhas', 260);
+    const mCols = [190, 70, 70, 65, 65, 55];
+    y = tableHeader(p2, ['Campanha', 'Status', 'Gasto', 'Leads', 'CPL', 'CTR'], PAD + 6, y, mCols);
+    data.metaCampaigns.slice(0, 20).forEach((c, i) => {
+      if (y > H - 60) return;
+      y = tableRow(p2, [
+        String(c.name ?? '').slice(0, 28),
+        String(c.status ?? 'ACTIVE') === 'ACTIVE' ? 'Ativa' : 'Pausada',
+        currency(c.spend),
+        num(c.leads),
+        currency(Number(c.spend ?? 0) / Math.max(Number(c.leads ?? 0), 1)),
+        pct(c.ctr),
+      ], PAD + 6, y, mCols, i % 2 === 0);
+    });
+    text(p2, `${data.metaCampaigns.length} campanha(s) no período`, PAD + 6, H - 24, 8, MUTED, regular);
+  }
+
+  // ── PAGE 3: Google Ads ────────────────────────────────────────────────────────
+  if (data.googleCampaigns.length > 0) {
+    const p3 = addPage();
+    fillBg(p3);
+    accentBar(p3, GGREEN);
+    text(p3, 'GOOGLE ADS',           PAD + 6, 40, 10, GGREEN, bold);
+    text(p3, 'Campanhas & Métricas', PAD + 6, 58, 20, LIGHT, bold);
+    text(p3, data.period,             PAD + 6, 85,  9, MUTED, regular);
+
+    const googleClicks      = sumField(data.googleCampaigns, 'clicks');
+    const googleImpressions = sumField(data.googleCampaigns, 'impressions');
+    const googleCtr = googleClicks / Math.max(googleImpressions, 1) * 100;
+    const googleCpl = googleLeads > 0 ? googleSpend / googleLeads : 0;
+    const HALF = (COL - 6) / 2 - 4;
+
+    kpiCard(p3, PAD + 6,           104, HALF, 64, 'Investimento Google', currency(googleSpend));
+    kpiCard(p3, PAD + 6 + HALF + 8, 104, HALF, 64, 'Conversões',         num(googleLeads));
+    kpiCard(p3, PAD + 6,           176, HALF, 64, 'CPA Médio',           currency(googleCpl));
+    kpiCard(p3, PAD + 6 + HALF + 8, 176, HALF, 64, 'CTR Médio',          pct(googleCtr));
+
+    let y = sectionTitle(p3, 'Campanhas', 260);
+    const gCols = [200, 70, 70, 60, 60, 55];
+    y = tableHeader(p3, ['Campanha', 'Status', 'Gasto', 'Conversões', 'CPA', 'CTR'], PAD + 6, y, gCols);
+    data.googleCampaigns.slice(0, 20).forEach((c, i) => {
+      if (y > H - 60) return;
+      y = tableRow(p3, [
+        String(c.name ?? '').slice(0, 30),
+        String(c.status ?? 'ENABLED') === 'ENABLED' ? 'Ativa' : 'Pausada',
+        currency(c.spend),
+        num(c.leads),
+        currency(Number(c.spend ?? 0) / Math.max(Number(c.leads ?? 0), 1)),
+        pct(c.ctr),
+      ], PAD + 6, y, gCols, i % 2 === 0);
+    });
+    text(p3, `${data.googleCampaigns.length} campanha(s) no período`, PAD + 6, H - 24, 8, MUTED, regular);
+  }
+
+  // ── PAGE 4: CRM ───────────────────────────────────────────────────────────────
+  if (data.crmLeads.length > 0) {
+    const p4 = addPage();
+    fillBg(p4);
+    accentBar(p4, AMBER);
+    text(p4, 'CRM',                    PAD + 6, 40, 10, AMBER, bold);
+    text(p4, 'Leads & Funil de Vendas', PAD + 6, 58, 20, LIGHT, bold);
+
+    const statusCount = (s: string) => data.crmLeads.filter(l => String(l.status ?? '').toLowerCase().includes(s)).length;
+    const wins     = statusCount('won') + statusCount('win');
+    const meetings = statusCount('meeting');
+    const THIRD = (COL - 6 - 12) / 3;
+
+    kpiCard(p4, PAD + 6,                    100, THIRD, 64, 'Total de Leads', num(data.crmLeads.length));
+    kpiCard(p4, PAD + 6 + THIRD + 6,        100, THIRD, 64, 'Reuniões',       num(meetings));
+    kpiCard(p4, PAD + 6 + (THIRD + 6) * 2, 100, THIRD, 64, 'Fechamentos',    num(wins));
+
+    let y = sectionTitle(p4, 'Últimos Leads', 186);
+    const lCols = [160, 100, 100, 155];
+    y = tableHeader(p4, ['Nome', 'Status', 'Data', 'Contato'], PAD + 6, y, lCols);
+    data.crmLeads.slice(0, 25).forEach((l, i) => {
+      if (y > H - 60) return;
+      const date = l.created_at ? new Date(String(l.created_at)).toLocaleDateString('pt-BR') : '-';
+      y = tableRow(p4, [
+        String(l.name ?? '').slice(0, 22),
+        String(l.status ?? '-').slice(0, 14),
+        date,
+        String(l.phone ?? l.email ?? '-').slice(0, 22),
+      ], PAD + 6, y, lCols, i % 2 === 0);
+    });
+  }
+
+  const bytes = await doc.save();
+  return Buffer.from(bytes);
 }
