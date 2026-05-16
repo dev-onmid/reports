@@ -317,7 +317,10 @@ function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: 
             <p className="mt-1 text-[11px] text-muted-foreground/70">— vs meta</p>
           )}
           <div className="mt-3 -mx-1">
-            <MiniTrendLine color={iconColor} />
+            <MiniTrendLine
+              color={change === null ? iconColor : isPositive ? '#34d399' : '#f87171'}
+              trend={change === null ? 'up' : change > 0 ? 'up' : change < 0 ? 'down' : 'flat'}
+            />
           </div>
         </>
       )}
@@ -325,8 +328,19 @@ function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: 
   );
 }
 
-function MiniTrendLine({ color }: { color: string }) {
-  const gradientId = `trend-${color.replace('#', '')}`;
+const TREND_UP   = "M0 76 C28 65 45 56 68 67 S111 79 132 61 S158 62 178 47 S204 16 229 31 S264 52 287 36 S306 26 320 16";
+const TREND_DOWN = "M0 16 C28 27 45 36 68 25 S111 13 132 31 S158 30 178 45 S204 76 229 61 S264 40 287 56 S306 66 320 76";
+const TREND_FLAT = "M0 46 C28 43 45 48 68 45 S111 42 132 46 S158 44 178 46 S204 44 229 46 S264 44 287 46 S306 44 320 46";
+
+function MiniTrendLine({ color, trend = 'up' }: { color: string; trend?: 'up' | 'down' | 'flat' }) {
+  const safeId = color.replace(/[^a-zA-Z0-9]/g, '');
+  const gradientId = `trend-${safeId}-${trend}`;
+  const path = trend === 'down' ? TREND_DOWN : trend === 'flat' ? TREND_FLAT : TREND_UP;
+  const closedPath = trend === 'down'
+    ? `${TREND_DOWN} L320 92 L0 92 Z`
+    : trend === 'flat'
+    ? `${TREND_FLAT} L320 92 L0 92 Z`
+    : `${TREND_UP} L320 92 L0 92 Z`;
   return (
     <svg viewBox="0 0 320 92" className="h-20 w-full overflow-visible" aria-hidden="true">
       <defs>
@@ -335,17 +349,8 @@ function MiniTrendLine({ color }: { color: string }) {
           <stop offset="100%" stopColor={color} stopOpacity="0" />
         </linearGradient>
       </defs>
-      <path
-        d="M0 76 C28 65 45 56 68 67 S111 79 132 61 S158 62 178 47 S204 16 229 31 S264 52 287 36 S306 26 320 16"
-        fill="none"
-        stroke={color}
-        strokeWidth="4"
-        strokeLinecap="round"
-      />
-      <path
-        d="M0 76 C28 65 45 56 68 67 S111 79 132 61 S158 62 178 47 S204 16 229 31 S264 52 287 36 S306 26 320 16 L320 92 L0 92 Z"
-        fill={`url(#${gradientId})`}
-      />
+      <path d={path} fill="none" stroke={color} strokeWidth="4" strokeLinecap="round" />
+      <path d={closedPath} fill={`url(#${gradientId})`} />
     </svg>
   );
 }
@@ -2675,15 +2680,6 @@ export default function GeneralDashboard() {
       {/* HEADER */}
       <div className="sticky top-0 z-20 -mx-6 px-6 py-3 -mt-6 bg-background/90 backdrop-blur-sm border-b border-border">
         <div className="flex flex-wrap items-center gap-2">
-          {/* Search */}
-          <div className="relative min-w-0 max-w-xs flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-            <input
-              placeholder="Buscar clientes, relatórios, campanhas..."
-              className="h-9 w-full rounded-xl border border-border bg-card pl-9 pr-3 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary"
-            />
-          </div>
-
           {/* Client selector */}
           <ClientSelector clients={clients} selected={selectedIds} onChange={setSelectedIds} />
 
@@ -2716,18 +2712,6 @@ export default function GeneralDashboard() {
               {aiLoading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
               {aiLoading ? 'Analisando...' : 'Analisar com IA'}
             </button>
-            <button className="flex h-9 w-9 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground hover:text-foreground transition-colors">
-              <Bell className="h-4 w-4" />
-            </button>
-            <div className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-1.5">
-              <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/20 text-[10px] font-bold text-primary">
-                {(session?.name ?? 'U')[0]?.toUpperCase()}
-              </div>
-              <div className="hidden sm:block">
-                <p className="text-xs font-bold leading-none text-foreground">{session?.name ?? 'Usuário'}</p>
-                <p className="text-[10px] text-muted-foreground mt-0.5">{session?.role ?? ''}</p>
-              </div>
-            </div>
           </div>
         </div>
 

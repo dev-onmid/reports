@@ -88,9 +88,6 @@ export function Sidebar() {
 
       {/* Nav */}
       <nav className={cn('flex-1 py-6 space-y-1 overflow-y-auto', collapsed ? 'px-2' : 'px-3')}>
-        {!collapsed && (
-          <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-4 px-3">Menu Principal</div>
-        )}
         {visibleItems.map((item) => {
           const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
           return (
