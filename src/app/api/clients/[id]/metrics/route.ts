@@ -191,6 +191,12 @@ async function ensureCrmMetricsColumns(pool: ReturnType<typeof makeServerPool>) 
   `);
 }
 
+function crmDateRange(period: string, dateFrom: string, dateTo: string) {
+  const resolved = resolveMetaPeriod(period, dateFrom, dateTo);
+  const [, from, to] = resolved.split(':');
+  return { from, to };
+}
+
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id: clientId } = await params;
   const period = request.nextUrl.searchParams.get('period') ?? 'last_30d';
@@ -198,6 +204,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const dateTo = request.nextUrl.searchParams.get('dateTo') ?? '';
   const gaqlPeriod = resolveGaqlPeriod(period, dateFrom, dateTo);
   const metaPeriod = resolveMetaPeriod(period, dateFrom, dateTo);
+  const crmPeriod = crmDateRange(period, dateFrom, dateTo);
 
   const pool = makeServerPool();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -223,8 +230,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           COUNT(*) FILTER (WHERE COALESCE(revenue, valor_rs, 0) > 0 OR fechou = TRUE)::int AS sales,
           COUNT(*)::int AS leads
          FROM public.crm_leads
-        WHERE client_id = $1`,
-      [clientId],
+        WHERE client_id = $1
+          AND (
+            COALESCE(lead_date, data) IS NULL
+            OR COALESCE(lead_date, data) BETWEEN $2 AND $3
+          )`,
+      [clientId, crmPeriod.from, crmPeriod.to],
     );
     const crm = crmRows[0];
     if (crm) {

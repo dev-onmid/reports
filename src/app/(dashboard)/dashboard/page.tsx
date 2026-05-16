@@ -45,6 +45,7 @@ type ClientSheetsSummary = { entries: FunnelEntry[]; stages: string[] };
 type ApiMetrics = {
   meta: { spend: number; impressions: number; clicks: number; leads: number; formLeads?: number; conversations?: number; cpl: number } | null;
   google: { cost: number; impressions: number; clicks: number; cpc: number; conversions: number; cpa: number } | null;
+  crm?: { revenue: number; sales: number; leads: number; ticket: number } | null;
 };
 type GoalConfig = { type: string; target: number; label?: string; format?: 'currency' | 'number' };
 type FunnelStage = { id: string; name: string; conversion: number };
@@ -2469,7 +2470,7 @@ export default function GeneralDashboard() {
       ids.map(async (id) => {
         const res = await fetch(`/api/clients/${id}/metrics?${periodParams}`);
         if (cancelled) return null;
-        const data: ApiMetrics = res.ok ? await res.json() : { meta: null, google: null };
+        const data: ApiMetrics = res.ok ? await res.json() : { meta: null, google: null, crm: null };
         return [id, data] as const;
       })
     ).then(results => {
@@ -2496,7 +2497,7 @@ export default function GeneralDashboard() {
       ids.map(async (id) => {
         const res = await fetch(`/api/clients/${id}/metrics?${prevParams}`);
         if (cancelled) return null;
-        const data: ApiMetrics = res.ok ? await res.json() : { meta: null, google: null };
+        const data: ApiMetrics = res.ok ? await res.json() : { meta: null, google: null, crm: null };
         return [id, data] as const;
       })
     ).then(results => {
@@ -2672,8 +2673,10 @@ export default function GeneralDashboard() {
   let revenueGoal = 0;
   let plannedRevenue = 0;
   // CRM data (already filtered by period from the server)
-  const revenue = [...selectedIds].reduce((sum, id) =>
+  const summaryRevenue = [...selectedIds].reduce((sum, id) =>
     sum + (crmSummary[id]?.entries ?? []).reduce((s, e) => s + (e.amount ?? 0), 0), 0);
+  const metricsRevenue = [...selectedIds].reduce((sum, id) => sum + (metricsByClient[id]?.crm?.revenue ?? 0), 0);
+  const revenue = metricsRevenue > 0 ? metricsRevenue : summaryRevenue;
 
   const FUNNEL_ORDER = ['Atendimento', 'Agendamento', 'Comparecimento', 'Fechamento'];
   const funnelCounts: Record<string, number> = {};

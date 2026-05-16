@@ -84,18 +84,75 @@ function fmtTime(v: string | null) {
   catch { return ''; }
 }
 function fmtN(v: number | null) { return v ? formatCurrencyBRL(v) : ''; }
+function plain(v: unknown) { return String(v ?? '').toLowerCase(); }
+function dateText(v: string | null) {
+  const shortDate = fmtD(v);
+  const rawDate = toD(v);
+  return `${shortDate} ${rawDate}`.toLowerCase();
+}
+function moneyText(v: number | null) {
+  return `${v ?? ''} ${fmtN(v)}`.toLowerCase();
+}
+
+function columnValueText(lead: CrmLead, key: ColumnKey) {
+  switch (key) {
+    case 'data':
+    case 'data_agendada':
+      return dateText(lead[key]);
+    case 'valor_rs':
+    case 'orcamento':
+      return moneyText(lead[key]);
+    case 'dia1':
+    case 'dia2':
+    case 'dia3':
+    case 'dia4':
+    case 'fechou':
+      return lead[key] ? 'sim true fechado marcado' : 'nao não false';
+    case 'actions':
+      return '';
+    default:
+      return plain(lead[key]);
+  }
+}
+
+function passesColumnFilter(lead: CrmLead, key: ColumnKey, value: string) {
+  if (!value) return true;
+  if (['dia1', 'dia2', 'dia3', 'dia4', 'fechou'].includes(key)) {
+    return value === 'yes' ? Boolean(lead[key as 'fechou']) : !lead[key as 'fechou'];
+  }
+  return columnValueText(lead, key).includes(value.toLowerCase());
+}
 
 const cell    = 'px-2 py-0 h-9 text-xs focus:outline-none focus:bg-primary/10 bg-transparent border-0 w-full text-foreground placeholder:text-muted-foreground/30';
 const cellSel = cn(cell, 'cursor-pointer appearance-none');
 const cellNew = 'px-2 py-0 h-9 text-xs focus:outline-none focus:bg-primary/10 bg-transparent border-0 w-full text-foreground placeholder:text-muted-foreground/50';
 
-const COLS: [string, string][] = [
-  ['Data','w-[110px]'],['Nome','w-36'],['Número','w-28'],['Canal','w-16'],
-  ['Status','w-36'],
-  ['1D','w-8'],['2D','w-8'],['3D','w-8'],['4D','w-8'],
-  ['Data Ag.','w-[110px]'],['Fechou','w-12'],['Valor R$','w-28'],
-  ['Pagamento','w-24'],['Orçamento','w-24'],['Observação','w-44'],['Bairro','w-24'],['','w-8'],
-];
+const COLS = [
+  { key: 'data', label: 'Data', width: 110, min: 96, filter: 'text' },
+  { key: 'nome', label: 'Nome', width: 170, min: 120, filter: 'text' },
+  { key: 'numero', label: 'Número', width: 120, min: 96, filter: 'text' },
+  { key: 'canal', label: 'Canal', width: 120, min: 90, filter: 'text' },
+  { key: 'status', label: 'Status', width: 150, min: 120, filter: 'select' },
+  { key: 'dia1', label: '1D', width: 46, min: 40, filter: 'boolean' },
+  { key: 'dia2', label: '2D', width: 46, min: 40, filter: 'boolean' },
+  { key: 'dia3', label: '3D', width: 46, min: 40, filter: 'boolean' },
+  { key: 'dia4', label: '4D', width: 46, min: 40, filter: 'boolean' },
+  { key: 'data_agendada', label: 'Data Ag.', width: 110, min: 96, filter: 'text' },
+  { key: 'fechou', label: 'Fechou', width: 70, min: 56, filter: 'boolean' },
+  { key: 'valor_rs', label: 'Valor R$', width: 130, min: 110, filter: 'text' },
+  { key: 'pagamento', label: 'Pagamento', width: 120, min: 100, filter: 'select' },
+  { key: 'orcamento', label: 'Orçamento', width: 130, min: 110, filter: 'text' },
+  { key: 'observacao', label: 'Observação', width: 240, min: 150, filter: 'text' },
+  { key: 'bairro', label: 'Bairro', width: 130, min: 100, filter: 'text' },
+  { key: 'actions', label: '', width: 48, min: 44, filter: 'none' },
+] as const;
+type ColumnKey = typeof COLS[number]['key'];
+type ColumnFilterKind = typeof COLS[number]['filter'];
+
+const DEFAULT_COL_WIDTHS = COLS.reduce<Record<ColumnKey, number>>((acc, col) => {
+  acc[col.key] = col.width;
+  return acc;
+}, {} as Record<ColumnKey, number>);
 
 // ── Styled select with icon ──────────────────────────────────────────────
 function IconSelect({ icon: Icon, value, onChange, placeholder, children, className }: {
@@ -234,6 +291,8 @@ export default function CrmPage() {
   const [loading, setLoading]       = useState(false);
   const [search, setSearch]         = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [columnFilters, setColumnFilters] = useState<Partial<Record<ColumnKey, string>>>({});
+  const [colWidths, setColWidths] = useState<Record<ColumnKey, number>>(DEFAULT_COL_WIDTHS);
   const [saving, setSaving]         = useState(false);
   const [saveError, setSaveError]   = useState<string | null>(null);
   const [page, setPage]             = useState(1);
@@ -284,6 +343,23 @@ export default function CrmPage() {
     }
   }, []);
 
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('crm:column-widths');
+      if (stored) setColWidths(prev => ({ ...prev, ...(JSON.parse(stored) as Partial<Record<ColumnKey, number>>) }));
+    } catch {
+      setColWidths(DEFAULT_COL_WIDTHS);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('crm:column-widths', JSON.stringify(colWidths));
+    } catch {
+      // Browser storage can be unavailable in private mode.
+    }
+  }, [colWidths]);
+
   function openClientCrm(id: string) {
     setClientId(id);
     setRecentClientIds(prev => {
@@ -301,7 +377,7 @@ export default function CrmPage() {
     return () => document.removeEventListener('mousedown', onDown);
   }, []);
 
-  useEffect(() => { setPage(1); }, [statusFilter, search, clientId]);
+  useEffect(() => { setPage(1); }, [statusFilter, search, clientId, columnFilters]);
 
   useEffect(() => {
     if (!clientId) { setLeads([]); return; }
@@ -317,14 +393,24 @@ export default function CrmPage() {
     if (statusFilter && l.status !== statusFilter) return false;
     if (search) {
       const q = search.toLowerCase();
-      return l.nome?.toLowerCase().includes(q) || l.numero?.includes(q) ||
-             l.canal?.toLowerCase().includes(q) || l.bairro?.toLowerCase().includes(q) || false;
+      const found = l.nome?.toLowerCase().includes(q) || l.numero?.includes(q) ||
+             l.canal?.toLowerCase().includes(q) || l.bairro?.toLowerCase().includes(q) ||
+             l.observacao?.toLowerCase().includes(q) || false;
+      if (!found) return false;
+    }
+    for (const [key, value] of Object.entries(columnFilters) as [ColumnKey, string][]) {
+      if (!passesColumnFilter(l, key, value)) return false;
     }
     return true;
-  }), [leads, search, statusFilter]);
+  }), [leads, search, statusFilter, columnFilters]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const paginated  = filtered.slice((page - 1) * pageSize, page * pageSize);
+  const tableMinWidth = useMemo(() => COLS.reduce((sum, col) => sum + colWidths[col.key], 0), [colWidths]);
+  const filteredTotals = useMemo(() => ({
+    faturamento: filtered.reduce((sum, lead) => sum + (lead.valor_rs ?? 0), 0),
+    orcamento: filtered.reduce((sum, lead) => sum + (lead.orcamento ?? 0), 0),
+  }), [filtered]);
 
   const stats = useMemo(() => ({
     total:       leads.length,
@@ -413,6 +499,31 @@ export default function CrmPage() {
 
   function setN<K extends keyof Draft>(k: K, v: Draft[K]) { setNewDraft(prev => ({ ...prev, [k]: v })); }
   function setE<K extends keyof Draft>(k: K, v: Draft[K]) { setEditDraft(prev => ({ ...prev, [k]: v })); }
+  function setColumnFilter(key: ColumnKey, value: string) {
+    setColumnFilters(prev => {
+      const next = { ...prev };
+      if (value) next[key] = value;
+      else delete next[key];
+      return next;
+    });
+  }
+  function clearColumnFilters() { setColumnFilters({}); }
+  function startColumnResize(key: ColumnKey, min: number, e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startWidth = colWidths[key];
+    const onMove = (event: MouseEvent) => {
+      const nextWidth = Math.max(min, startWidth + event.clientX - startX);
+      setColWidths(prev => ({ ...prev, [key]: nextWidth }));
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }
 
   return (
     <div className="flex flex-col gap-5 h-full">
@@ -617,6 +728,15 @@ export default function CrmPage() {
               <span className="text-sm font-semibold">Leads</span>
             </div>
             <div className="flex items-center gap-2">
+              {Object.keys(columnFilters).length > 0 && (
+                <button
+                  type="button"
+                  onClick={clearColumnFilters}
+                  className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  Limpar filtros
+                </button>
+              )}
               <button className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
                 <Download className="h-3.5 w-3.5" />
                 Exportar
@@ -630,12 +750,41 @@ export default function CrmPage() {
 
           {/* Scrollable table */}
           <div className="overflow-auto flex-1 min-h-0">
-            <table className="w-full border-collapse text-xs" style={{ minWidth: 1280 }}>
+            <table className="w-full table-fixed border-collapse text-xs" style={{ minWidth: tableMinWidth }}>
+              <colgroup>
+                {COLS.map(col => (
+                  <col key={col.key} style={{ width: colWidths[col.key] }} />
+                ))}
+              </colgroup>
               <thead className="sticky top-0 z-10 bg-card border-b border-border">
                 <tr>
-                  {COLS.map(([h, w], i) => (
-                    <th key={i} className={cn('px-2 py-2.5 text-left font-semibold uppercase tracking-wider text-muted-foreground text-[10px]', w)}>
-                      {h}
+                  {COLS.map(col => (
+                    <th
+                      key={col.key}
+                      className="relative px-2 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
+                      style={{ width: colWidths[col.key] }}
+                    >
+                      {col.label}
+                      {col.key !== 'actions' && (
+                        <button
+                          type="button"
+                          onMouseDown={e => startColumnResize(col.key, col.min, e)}
+                          className="absolute right-0 top-0 h-full w-2 cursor-col-resize touch-none border-r border-transparent transition-colors hover:border-primary/70"
+                          aria-label={`Redimensionar coluna ${col.label}`}
+                        />
+                      )}
+                    </th>
+                  ))}
+                </tr>
+                <tr className="border-t border-border/40 bg-card/95">
+                  {COLS.map(col => (
+                    <th key={`${col.key}-filter`} className="px-1.5 pb-2 text-left" style={{ width: colWidths[col.key] }}>
+                      <ColumnFilter
+                        kind={col.filter}
+                        columnKey={col.key}
+                        value={columnFilters[col.key] ?? ''}
+                        onChange={setColumnFilter}
+                      />
                     </th>
                   ))}
                 </tr>
@@ -719,7 +868,7 @@ export default function CrmPage() {
                       <Td>
                         {isEditing
                           ? <input type="text" value={d.nome ?? ''} onChange={e => setE('nome', e.target.value || null)} placeholder="Nome" className={cell} />
-                          : <span className="px-2 font-semibold text-primary text-xs truncate block max-w-[140px]">{lead.nome ?? '–'}</span>}
+                          : <span className="block truncate px-2 text-xs font-semibold text-primary" title={lead.nome ?? undefined}>{lead.nome ?? '–'}</span>}
                       </Td>
                       {/* Número */}
                       <Td>
@@ -741,7 +890,7 @@ export default function CrmPage() {
                                 </span>
                               </div>
                             : lead.canal
-                              ? <span className="px-2 block max-w-20 truncate text-[11px] font-semibold text-primary" title={lead.canal}>{lead.canal}</span>
+                              ? <span className="block truncate px-2 text-[11px] font-semibold text-primary" title={lead.canal}>{lead.canal}</span>
                               : <span className="px-2 text-muted-foreground text-[11px]">–</span>}
                       </Td>
                       {/* Status */}
@@ -802,7 +951,7 @@ export default function CrmPage() {
                               <option value=""></option>
                               {PAGAMENTO_OPTIONS.map(o => <option key={o}>{o}</option>)}
                             </select>
-                          : <span className="px-2 text-muted-foreground text-[11px]">{lead.pagamento ?? '–'}</span>}
+                          : <span className="block truncate px-2 text-[11px] text-muted-foreground" title={lead.pagamento ?? undefined}>{lead.pagamento ?? '–'}</span>}
                       </Td>
                       {/* Orçamento */}
                       <Td>
@@ -814,13 +963,13 @@ export default function CrmPage() {
                       <Td>
                         {isEditing
                           ? <input type="text" value={d.observacao ?? ''} onChange={e => setE('observacao', e.target.value || null)} placeholder="Observação" className={cell} />
-                          : <span className="px-2 text-muted-foreground text-[11px] truncate block max-w-[170px]">{lead.observacao || 'Observação'}</span>}
+                          : <span className="block truncate px-2 text-[11px] text-muted-foreground" title={lead.observacao ?? undefined}>{lead.observacao || 'Observação'}</span>}
                       </Td>
                       {/* Bairro */}
                       <Td>
                         {isEditing
                           ? <input type="text" value={d.bairro ?? ''} onChange={e => setE('bairro', e.target.value || null)} placeholder="Bairro" className={cell} />
-                          : <span className="px-2 text-muted-foreground text-[11px]">{lead.bairro || 'Bairro'}</span>}
+                          : <span className="block truncate px-2 text-[11px] text-muted-foreground" title={lead.bairro ?? undefined}>{lead.bairro || 'Bairro'}</span>}
                       </Td>
                       {/* ⋮ Menu */}
                       <Td center>
@@ -857,12 +1006,22 @@ export default function CrmPage() {
           </div>
 
           {/* ── PAGINATION ── */}
-          <div className="flex items-center justify-between border-t border-border px-4 py-2.5 shrink-0">
-            <span className="text-xs text-muted-foreground">
-              {filtered.length === 0
-                ? 'Nenhum lead'
-                : `Mostrando ${(page-1)*pageSize+1} a ${Math.min(page*pageSize, filtered.length)} de ${filtered.length} lead${filtered.length !== 1 ? 's' : ''}`}
-            </span>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-card px-4 py-2.5 shrink-0">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-xs text-muted-foreground">
+                {filtered.length === 0
+                  ? 'Nenhum lead'
+                  : `Mostrando ${(page-1)*pageSize+1} a ${Math.min(page*pageSize, filtered.length)} de ${filtered.length} lead${filtered.length !== 1 ? 's' : ''}`}
+              </span>
+              <div className="flex items-center gap-2 rounded-lg border border-border bg-background/60 px-3 py-1.5">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Total faturamento</span>
+                <span className="text-xs font-bold text-primary">{formatCurrencyBRL(filteredTotals.faturamento)}</span>
+              </div>
+              <div className="flex items-center gap-2 rounded-lg border border-border bg-background/60 px-3 py-1.5">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Total orçamento</span>
+                <span className="text-xs font-bold text-foreground">{formatCurrencyBRL(filteredTotals.orcamento)}</span>
+              </div>
+            </div>
             <div className="flex items-center gap-1.5">
               <button onClick={() => setPage(p => Math.max(1, p-1))} disabled={page === 1}
                 className="flex h-7 w-7 items-center justify-center rounded border border-border disabled:opacity-30 hover:bg-muted transition-colors">
@@ -893,5 +1052,62 @@ function Td({ children, center }: { children?: React.ReactNode; center?: boolean
     <td className={cn('border-r border-border/20 last:border-0 overflow-hidden', center && 'text-center')}>
       {children}
     </td>
+  );
+}
+
+function ColumnFilter({
+  kind,
+  columnKey,
+  value,
+  onChange,
+}: {
+  kind: ColumnFilterKind;
+  columnKey: ColumnKey;
+  value: string;
+  onChange: (key: ColumnKey, value: string) => void;
+}) {
+  const baseClass = 'h-7 w-full rounded-md border border-border/70 bg-background/70 px-2 text-[10px] font-medium normal-case tracking-normal text-foreground outline-none transition-colors placeholder:text-muted-foreground/40 focus:border-primary';
+
+  if (kind === 'none') return <div className="h-7" />;
+  if (kind === 'boolean') {
+    return (
+      <select value={value} onChange={e => onChange(columnKey, e.target.value)} className={cn(baseClass, 'appearance-none')}>
+        <option value="">Todos</option>
+        <option value="yes">Sim</option>
+        <option value="no">Não</option>
+      </select>
+    );
+  }
+  if (columnKey === 'status') {
+    return (
+      <select value={value} onChange={e => onChange(columnKey, e.target.value)} className={cn(baseClass, 'appearance-none')}>
+        <option value="">Todos</option>
+        {STATUS_OPTIONS.map(option => <option key={option}>{option}</option>)}
+      </select>
+    );
+  }
+  if (columnKey === 'canal') {
+    return (
+      <select value={value} onChange={e => onChange(columnKey, e.target.value)} className={cn(baseClass, 'appearance-none')}>
+        <option value="">Todos</option>
+        {CANAL_OPTIONS.map(option => <option key={option}>{option}</option>)}
+      </select>
+    );
+  }
+  if (columnKey === 'pagamento') {
+    return (
+      <select value={value} onChange={e => onChange(columnKey, e.target.value)} className={cn(baseClass, 'appearance-none')}>
+        <option value="">Todos</option>
+        {PAGAMENTO_OPTIONS.map(option => <option key={option}>{option}</option>)}
+      </select>
+    );
+  }
+  return (
+    <input
+      value={value}
+      onChange={e => onChange(columnKey, e.target.value)}
+      placeholder="Filtrar"
+      className={baseClass}
+    />
   );
 }

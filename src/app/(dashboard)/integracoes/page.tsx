@@ -40,7 +40,7 @@ import {
 import { useMetaConnections, type MetaConnection } from '@/lib/meta-connections-store';
 import { useGoogleConnections, type GoogleConnection } from '@/lib/google-connections-store';
 import { useClients } from '@/lib/client-store';
-import type { SpreadsheetAnalysis, SpreadsheetMapping } from '@/app/api/integrations/spreadsheet/route';
+import type { SpreadsheetAnalysis, SpreadsheetColumnMapping, SpreadsheetMapping } from '@/app/api/integrations/spreadsheet/route';
 
 // ─── Account avatar helpers ───────────────────────────────────────────────────
 
@@ -1382,6 +1382,35 @@ function GoogleConnectionsPanel({
 // ─── Spreadsheet CRM Import Panel ────────────────────────────────────────────
 
 type SheetStep = 'upload' | 'mapping' | 'done';
+type SpreadsheetFieldKey = keyof SpreadsheetColumnMapping;
+
+const SPREADSHEET_FIELD_GROUPS: Array<{
+  title: string;
+  fields: Array<{ key: SpreadsheetFieldKey; label: string; hint: string; required?: boolean }>;
+}> = [
+  {
+    title: 'Campos principais',
+    fields: [
+      { key: 'clinic', label: 'Clínica/Unidade', hint: 'Agrupa as linhas e permite mapear para cada cliente.', required: true },
+      { key: 'revenue', label: 'Faturamento', hint: 'Valor faturado que alimenta Resultado/Dashboard.', required: true },
+      { key: 'date', label: 'Data', hint: 'Data do faturamento ou venda.', required: true },
+      { key: 'name', label: 'Nome', hint: 'Nome do paciente, lead ou comprador.' },
+    ],
+  },
+  {
+    title: 'Dados comerciais',
+    fields: [
+      { key: 'channel', label: 'Canal/Origem', hint: 'Ex.: WhatsApp, Fachada, Google, indicação.' },
+      { key: 'phone', label: 'Telefone/Número', hint: 'Contato do lead ou paciente.' },
+      { key: 'budget', label: 'Orçamento', hint: 'Valor orçado/proposta.' },
+      { key: 'payment', label: 'Pagamento', hint: 'Forma ou condição de pagamento.' },
+      { key: 'status', label: 'Status', hint: 'Status original da linha na planilha.' },
+      { key: 'scheduledDate', label: 'Data agendada', hint: 'Data de consulta, agendamento ou retorno.' },
+      { key: 'neighborhood', label: 'Bairro/Cidade', hint: 'Localização do lead.' },
+      { key: 'notes', label: 'Observação', hint: 'Campo livre para detalhes adicionais.' },
+    ],
+  },
+];
 
 function SpreadsheetImportPanel() {
   const { clients } = useClients();
@@ -1392,7 +1421,20 @@ function SpreadsheetImportPanel() {
   const [error, setError] = useState('');
   const [analysis, setAnalysis] = useState<SpreadsheetAnalysis | null>(null);
   const [mappings, setMappings] = useState<SpreadsheetMapping[]>([]);
-  const [columnOverrides, setColumnOverrides] = useState<{ clinic: string; revenue: string; date: string; name: string }>({ clinic: '', revenue: '', date: '', name: '' });
+  const [columnOverrides, setColumnOverrides] = useState<Record<SpreadsheetFieldKey, string>>({
+    clinic: '',
+    revenue: '',
+    date: '',
+    name: '',
+    channel: '',
+    phone: '',
+    budget: '',
+    payment: '',
+    neighborhood: '',
+    notes: '',
+    scheduledDate: '',
+    status: '',
+  });
   const [importResults, setImportResults] = useState<Record<string, number> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -1403,6 +1445,20 @@ function SpreadsheetImportPanel() {
     }
     setFile(f);
     setError('');
+  }
+
+  function updateColumnOverride(field: SpreadsheetFieldKey, value: string) {
+    setColumnOverrides(prev => ({ ...prev, [field]: value }));
+    if (field === 'clinic' && analysis) {
+      if (!value) {
+        setMappings([{ clinicValue: '', clientId: '', clientName: '' }]);
+        return;
+      }
+      const nextValues = value === analysis.mapping.clinic
+        ? analysis.clinicValues
+        : analysis.distinctValues[value] ?? [];
+      setMappings(nextValues.map(v => ({ clinicValue: v, clientId: '', clientName: '' })));
+    }
   }
 
   const handleDrop = useCallback((e: React.DragEvent) => {
@@ -1424,7 +1480,21 @@ function SpreadsheetImportPanel() {
       const data = await res.json() as SpreadsheetAnalysis & { error?: string };
       if (!res.ok || data.error) { setError(data.error ?? 'Erro ao analisar planilha'); return; }
       setAnalysis(data);
-      setColumnOverrides({ clinic: data.mapping.clinic ?? '', revenue: data.mapping.revenue ?? '', date: data.mapping.date ?? '', name: data.mapping.name ?? '' });
+      setColumnOverrides(prev => ({
+        ...prev,
+        clinic: data.mapping.clinic ?? '',
+        revenue: data.mapping.revenue ?? '',
+        date: data.mapping.date ?? '',
+        name: data.mapping.name ?? '',
+        channel: data.mapping.channel ?? '',
+        phone: data.mapping.phone ?? '',
+        budget: data.mapping.budget ?? '',
+        payment: data.mapping.payment ?? '',
+        neighborhood: data.mapping.neighborhood ?? '',
+        notes: data.mapping.notes ?? '',
+        scheduledDate: data.mapping.scheduledDate ?? '',
+        status: data.mapping.status ?? '',
+      }));
       const initialMappings: SpreadsheetMapping[] = data.clinicValues.map(v => ({ clinicValue: v, clientId: '', clientName: '' }));
       setMappings(initialMappings);
       setStep('mapping');
@@ -1449,6 +1519,14 @@ function SpreadsheetImportPanel() {
       if (columnOverrides.revenue) fd.append('revenueColumn', columnOverrides.revenue);
       if (columnOverrides.date) fd.append('dateColumn', columnOverrides.date);
       if (columnOverrides.name) fd.append('nameColumn', columnOverrides.name);
+      if (columnOverrides.channel) fd.append('channelColumn', columnOverrides.channel);
+      if (columnOverrides.phone) fd.append('phoneColumn', columnOverrides.phone);
+      if (columnOverrides.budget) fd.append('budgetColumn', columnOverrides.budget);
+      if (columnOverrides.payment) fd.append('paymentColumn', columnOverrides.payment);
+      if (columnOverrides.neighborhood) fd.append('neighborhoodColumn', columnOverrides.neighborhood);
+      if (columnOverrides.notes) fd.append('notesColumn', columnOverrides.notes);
+      if (columnOverrides.scheduledDate) fd.append('scheduledDateColumn', columnOverrides.scheduledDate);
+      if (columnOverrides.status) fd.append('statusColumn', columnOverrides.status);
       const res = await fetch('/api/integrations/spreadsheet?step=import', { method: 'POST', body: fd });
       const data = await res.json() as { ok?: boolean; results?: Record<string, number>; error?: string };
       if (!res.ok || data.error) { setError(data.error ?? 'Erro ao importar planilha'); return; }
@@ -1466,6 +1544,20 @@ function SpreadsheetImportPanel() {
     setFile(null);
     setAnalysis(null);
     setMappings([]);
+    setColumnOverrides({
+      clinic: '',
+      revenue: '',
+      date: '',
+      name: '',
+      channel: '',
+      phone: '',
+      budget: '',
+      payment: '',
+      neighborhood: '',
+      notes: '',
+      scheduledDate: '',
+      status: '',
+    });
     setImportResults(null);
     setError('');
   }
@@ -1548,30 +1640,82 @@ function SpreadsheetImportPanel() {
           <div className="space-y-5">
             {/* Column detection summary */}
             <div className="rounded-lg border border-border bg-muted/10 p-4 space-y-3">
-              <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Colunas detectadas pela IA</p>
-              <div className="grid grid-cols-2 gap-3">
-                {(['clinic', 'revenue', 'date', 'name'] as const).map((field) => {
-                  const labels = { clinic: 'Clínica/Unidade', revenue: 'Faturamento', date: 'Data', name: 'Nome' };
-                  return (
-                    <div key={field}>
-                      <p className="text-[10px] text-muted-foreground mb-1">{labels[field]}</p>
-                      <select
-                        value={columnOverrides[field]}
-                        onChange={(e) => setColumnOverrides(prev => ({ ...prev, [field]: e.target.value }))}
-                        className="w-full text-xs bg-background border border-border rounded-md px-2 py-1.5 text-foreground"
-                      >
-                        <option value="">— não mapeado —</option>
-                        {analysis.headers.map(h => <option key={h} value={h}>{h}</option>)}
-                      </select>
-                    </div>
-                  );
-                })}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Mapeamento das colunas da planilha</p>
+                <span className="rounded-full border border-primary/25 bg-primary/10 px-2 py-1 text-[10px] font-bold text-primary">
+                  {analysis.headers.length} coluna{analysis.headers.length === 1 ? '' : 's'} identificada{analysis.headers.length === 1 ? '' : 's'}
+                </span>
               </div>
-              <p className="text-[10px] text-muted-foreground">{analysis.rowCount.toLocaleString('pt-BR')} linhas encontradas na planilha</p>
+
+              {SPREADSHEET_FIELD_GROUPS.map(group => (
+                <div key={group.title} className="space-y-2">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{group.title}</p>
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    {group.fields.map(field => (
+                      <div key={field.key} className="space-y-1">
+                        <div className="flex items-center gap-1.5">
+                          <p className="text-[10px] font-semibold text-muted-foreground">{field.label}</p>
+                          {field.required && <span className="text-[9px] font-bold text-primary">essencial</span>}
+                        </div>
+                        <select
+                          value={columnOverrides[field.key]}
+                          onChange={(e) => updateColumnOverride(field.key, e.target.value)}
+                          className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
+                        >
+                          <option value="">— não mapeado —</option>
+                          {analysis.headers.map(h => <option key={h} value={h}>{h}</option>)}
+                        </select>
+                        <p className="truncate text-[9px] text-muted-foreground/70" title={field.hint}>{field.hint}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+
+              <div className="rounded-lg border border-border/70 bg-background/45 p-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Todas as colunas encontradas</p>
+                  <p className="text-[10px] text-muted-foreground">{analysis.rowCount.toLocaleString('pt-BR')} linhas na planilha</p>
+                </div>
+                <div className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto pr-1">
+                  {analysis.headers.map(header => (
+                    <span key={header} className="rounded-md border border-border bg-muted/30 px-2 py-1 text-[10px] font-medium text-muted-foreground">
+                      {header}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {analysis.preview.length > 0 && (
+                <div className="overflow-auto rounded-lg border border-border/70">
+                  <table className="w-full min-w-[920px] text-left text-[10px]">
+                    <thead className="bg-background/70 text-muted-foreground">
+                      <tr>
+                        {analysis.headers.map(header => (
+                          <th key={header} className="max-w-40 truncate border-r border-border/40 px-2 py-2 font-bold uppercase tracking-wider last:border-r-0" title={header}>
+                            {header}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {analysis.preview.map((row, index) => (
+                        <tr key={index} className="border-t border-border/40">
+                          {analysis.headers.map(header => (
+                            <td key={header} className="max-w-40 truncate border-r border-border/30 px-2 py-1.5 text-muted-foreground last:border-r-0" title={String(row[header] ?? '')}>
+                              {String(row[header] ?? '') || '—'}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
 
             {/* Clinic → Client mappings */}
-            {analysis.clinicValues.length > 0 ? (
+            {columnOverrides.clinic && mappings.length > 0 ? (
               <div className="space-y-2">
                 <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Mapear clínicas para clientes</p>
                 <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
