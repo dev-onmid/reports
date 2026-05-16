@@ -171,6 +171,26 @@ async function safeRows(pool: ReturnType<typeof makeServerPool>, query: string, 
   }
 }
 
+async function ensureCrmMetricsColumns(pool: ReturnType<typeof makeServerPool>) {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS public.crm_leads (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      client_id TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    ALTER TABLE public.crm_leads
+      ADD COLUMN IF NOT EXISTS lead_date DATE,
+      ADD COLUMN IF NOT EXISTS lead_name TEXT,
+      ADD COLUMN IF NOT EXISTS revenue NUMERIC DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS data DATE,
+      ADD COLUMN IF NOT EXISTS nome TEXT,
+      ADD COLUMN IF NOT EXISTS valor_rs NUMERIC,
+      ADD COLUMN IF NOT EXISTS fechou BOOLEAN DEFAULT FALSE
+  `);
+}
+
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id: clientId } = await params;
   const period = request.nextUrl.searchParams.get('period') ?? 'last_30d';
@@ -182,7 +202,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const pool = makeServerPool();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let links: any[], googleConns: any[], metaConns: any[];
+  let crmResult: { revenue: number; sales: number; leads: number; ticket: number } | null = null;
   try {
+    await ensureCrmMetricsColumns(pool);
     const [newLinks, g, m, legacyMetaLinks, legacyMetaIntegration] = await Promise.all([
       safeRows(pool, 'SELECT * FROM public.client_account_links WHERE client_id = $1', [clientId]),
       safeRows(pool, 'SELECT * FROM public.google_connections'),
@@ -193,6 +215,28 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     links = newLinks;
     googleConns = g;
     metaConns = m;
+
+    const crmRows = await safeRows(
+      pool,
+      `SELECT
+          COALESCE(SUM(COALESCE(revenue, valor_rs, 0)), 0)::float AS revenue,
+          COUNT(*) FILTER (WHERE COALESCE(revenue, valor_rs, 0) > 0 OR fechou = TRUE)::int AS sales,
+          COUNT(*)::int AS leads
+         FROM public.crm_leads
+        WHERE client_id = $1`,
+      [clientId],
+    );
+    const crm = crmRows[0];
+    if (crm) {
+      const revenue = Number(crm.revenue ?? 0);
+      const sales = Number(crm.sales ?? 0);
+      crmResult = {
+        revenue,
+        sales,
+        leads: Number(crm.leads ?? 0),
+        ticket: sales > 0 ? revenue / sales : 0,
+      };
+    }
 
     const legacyMeta = legacyMetaIntegration[0];
     if (legacyMeta?.access_token) {
@@ -287,5 +331,5 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
   }
 
-  return Response.json({ google: googleResult, meta: metaResult });
+  return Response.json({ google: googleResult, meta: metaResult, crm: crmResult });
 }

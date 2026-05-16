@@ -45,6 +45,12 @@ async function ensureTable(pool: ReturnType<typeof makeServerPool>) {
         ALTER TABLE public.crm_leads ALTER COLUMN client_id TYPE TEXT;
       END IF;
     END $$;
+    ALTER TABLE public.crm_leads
+      ADD COLUMN IF NOT EXISTS upload_id UUID,
+      ADD COLUMN IF NOT EXISTS lead_date DATE,
+      ADD COLUMN IF NOT EXISTS lead_name TEXT,
+      ADD COLUMN IF NOT EXISTS revenue NUMERIC DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS raw JSONB;
   `);
 }
 
@@ -55,7 +61,13 @@ export async function GET(req: NextRequest) {
   try {
     await ensureTable(pool);
     const { rows } = await pool.query(
-      `SELECT * FROM public.crm_leads WHERE client_id = $1 ORDER BY data DESC NULLS LAST, created_at DESC`,
+      `SELECT *,
+          COALESCE(lead_date, data) AS normalized_date,
+          COALESCE(lead_name, nome) AS normalized_name,
+          COALESCE(revenue, valor_rs, 0)::float AS normalized_revenue
+         FROM public.crm_leads
+        WHERE client_id = $1
+        ORDER BY COALESCE(lead_date, data) DESC NULLS LAST, created_at DESC`,
       [clientId]
     );
     return Response.json(rows);

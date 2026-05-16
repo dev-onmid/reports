@@ -901,6 +901,13 @@ type TodayProgress = {
   funnel: number[];
 };
 
+type CrmMetrics = {
+  revenue: number;
+  sales: number;
+  leads: number;
+  ticket: number;
+};
+
 const PLANNING_GOALS = {
   revenue: 150000,
   ticket: 9000,
@@ -1109,6 +1116,26 @@ function buildTodayProgressFromPaidMedia(meta: MetaAdsMetrics | null, google: Go
       Math.round(results * 0.35),
       Math.round(results * 0.18),
       Math.round(results * 0.08),
+    ],
+  };
+}
+
+function buildTodayProgress(meta: MetaAdsMetrics | null, google: GoogleAdsMetrics | null, crm: CrmMetrics | null): TodayProgress {
+  const paid = buildTodayProgressFromPaidMedia(meta, google);
+  const crmLeads = crm?.leads ?? 0;
+  const sales = crm?.sales ?? 0;
+
+  return {
+    ...paid,
+    revenue: crm?.revenue ?? 0,
+    enrollments: sales,
+    ticket: crm?.ticket ?? 0,
+    funnel: [
+      paid.funnel[0] || crmLeads,
+      paid.funnel[1] || Math.round(crmLeads * 0.62),
+      paid.funnel[2] || Math.round(crmLeads * 0.35),
+      paid.funnel[3] || Math.round(crmLeads * 0.18),
+      sales,
     ],
   };
 }
@@ -2567,6 +2594,12 @@ function ClientIntegrationsTab({ clientId, clientName }: { clientId: string; cli
 // ── Google Sheets Results Tab ─────────────────────────────────────────────────
 type SheetsTab = { name: string; amount: number; count?: number; source?: string };
 type SheetsResult = { tabs: SheetsTab[]; total: number; note?: string };
+type CrmSaleRow = {
+  id: string;
+  normalized_date: string | null;
+  normalized_name: string | null;
+  normalized_revenue: number;
+};
 
 function SheetsResultsTab({ clientId }: { clientId: string }) {
   const [sheetsUrl, setSheetsUrl]       = useState('');
@@ -2577,6 +2610,8 @@ function SheetsResultsTab({ clientId }: { clientId: string }) {
   const [saving, setSaving]             = useState(false);
   const [error, setError]               = useState('');
   const [loadingUrl, setLoadingUrl]     = useState(true);
+  const [salesRows, setSalesRows]       = useState<CrmSaleRow[]>([]);
+  const [salesLoading, setSalesLoading] = useState(true);
 
   useEffect(() => {
     fetch(`/api/clients/${clientId}/sheets`)
@@ -2588,6 +2623,20 @@ function SheetsResultsTab({ clientId }: { clientId: string }) {
       })
       .finally(() => setLoadingUrl(false));
   }, [clientId]);
+
+  useEffect(() => {
+    setSalesLoading(true);
+    fetch(`/api/crm?clientId=${encodeURIComponent(clientId)}`)
+      .then(r => r.ok ? r.json() as Promise<CrmSaleRow[]> : [])
+      .then(rows => {
+        setSalesRows(rows
+          .map(row => ({ ...row, normalized_revenue: Number(row.normalized_revenue ?? 0) }))
+          .filter(row => row.normalized_revenue > 0)
+        );
+      })
+      .catch(() => setSalesRows([]))
+      .finally(() => setSalesLoading(false));
+  }, [clientId, analyzedAt]);
 
   async function handleSaveUrl() {
     setSaving(true);
@@ -2616,6 +2665,7 @@ function SheetsResultsTab({ clientId }: { clientId: string }) {
   }
 
   const urlChanged = sheetsUrl.trim() !== savedUrl;
+  const importedRevenue = salesRows.reduce((sum, row) => sum + row.normalized_revenue, 0);
 
   return (
     <div className="space-y-6">
@@ -2708,6 +2758,44 @@ function SheetsResultsTab({ clientId }: { clientId: string }) {
           )}
         </div>
       )}
+
+      <div className="rounded-xl border border-border bg-card overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Clientes das vendas importadas</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {salesLoading
+                ? 'Carregando vendas...'
+                : `${salesRows.length.toLocaleString('pt-BR')} venda${salesRows.length === 1 ? '' : 's'} com faturamento`}
+            </p>
+          </div>
+          <p className="text-sm font-bold text-primary">{fmtBRL(importedRevenue)}</p>
+        </div>
+        {salesRows.length > 0 ? (
+          <div className="max-h-96 overflow-y-auto divide-y divide-border">
+            {salesRows.slice(0, 200).map((sale) => (
+              <div key={sale.id} className="grid grid-cols-[1fr_auto] gap-4 px-4 py-3 text-sm">
+                <div className="min-w-0">
+                  <p className="truncate font-semibold text-foreground">{sale.normalized_name || 'Cliente sem nome'}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {sale.normalized_date ? new Date(sale.normalized_date).toLocaleDateString('pt-BR', { timeZone: 'UTC' }) : 'Sem data informada'}
+                  </p>
+                </div>
+                <p className="font-bold tabular-nums text-primary">{fmtBRL(sale.normalized_revenue)}</p>
+              </div>
+            ))}
+            {salesRows.length > 200 && (
+              <div className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground">
+                Mostrando 200 de {salesRows.length.toLocaleString('pt-BR')} vendas.
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+            {salesLoading ? 'Carregando...' : 'Nenhuma venda importada com faturamento para este cliente.'}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -2727,12 +2815,13 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
 
   const [realMetrics, setRealMetrics] = useState<MetaAdsMetrics | null>(null);
   const [apiGoogleMetrics, setApiGoogleMetrics] = useState<GoogleAdsMetrics | null>(null);
+  const [crmMetrics, setCrmMetrics] = useState<CrmMetrics | null>(null);
 
   useEffect(() => {
     fetch(`/api/clients/${id}/metrics`)
-      .then(res => res.ok ? res.json() as Promise<{ meta: MetaAdsMetrics | null; google: GoogleAdsMetrics | null }> : null)
-      .then(data => { setRealMetrics(data?.meta ?? null); setApiGoogleMetrics(data?.google ?? null); })
-      .catch(() => { setRealMetrics(null); setApiGoogleMetrics(null); });
+      .then(res => res.ok ? res.json() as Promise<{ meta: MetaAdsMetrics | null; google: GoogleAdsMetrics | null; crm?: CrmMetrics | null }> : null)
+      .then(data => { setRealMetrics(data?.meta ?? null); setApiGoogleMetrics(data?.google ?? null); setCrmMetrics(data?.crm ?? null); })
+      .catch(() => { setRealMetrics(null); setApiGoogleMetrics(null); setCrmMetrics(null); });
   }, [id]);
 
   const googleConnection = googleAds.getConnection(id);
@@ -2767,12 +2856,12 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
       partial: autoPartial(prev.target),
       realized:
         prev.type === 'leads' ? (realMetrics?.leads ?? prev.realized)
-        : prev.type === 'revenue' ? prev.realized
-        : prev.type === 'enrollments' ? (googleMetrics?.conversions ?? prev.realized)
+        : prev.type === 'revenue' ? (crmMetrics?.revenue ?? prev.realized)
+        : prev.type === 'enrollments' ? (crmMetrics?.sales ?? googleMetrics?.conversions ?? prev.realized)
         : prev.realized,
     }));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [realMetrics, googleMetrics]);
+  }, [realMetrics, googleMetrics, crmMetrics]);
 
   useEffect(() => {
     setSecurityEmail(getAuthSession()?.email ?? '');

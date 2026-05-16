@@ -20,18 +20,41 @@ export async function GET(req: NextRequest) {
 
   const pool = makeServerPool();
   try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS public.crm_leads (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        client_id TEXT NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await pool.query(`
+      ALTER TABLE public.crm_leads
+        ADD COLUMN IF NOT EXISTS data DATE,
+        ADD COLUMN IF NOT EXISTS lead_date DATE,
+        ADD COLUMN IF NOT EXISTS status TEXT,
+        ADD COLUMN IF NOT EXISTS compareceu BOOLEAN DEFAULT FALSE,
+        ADD COLUMN IF NOT EXISTS fechou BOOLEAN DEFAULT FALSE,
+        ADD COLUMN IF NOT EXISTS valor_rs NUMERIC,
+        ADD COLUMN IF NOT EXISTS revenue NUMERIC DEFAULT 0
+    `);
+
     const params: (string | null)[] = [];
     let dateFilter = '';
     if (from && to) {
       params.push(from, to);
-      dateFilter = `AND (data IS NULL OR (data >= $1 AND data <= $2))`;
+      dateFilter = `AND (COALESCE(lead_date, data) IS NULL OR (COALESCE(lead_date, data) >= $1 AND COALESCE(lead_date, data) <= $2))`;
     }
 
     const { rows } = await pool.query(
-      `SELECT client_id, data, status, compareceu, fechou, valor_rs
+      `SELECT client_id,
+              COALESCE(lead_date, data) AS data,
+              status,
+              compareceu,
+              (fechou OR COALESCE(revenue, valor_rs, 0) > 0) AS fechou,
+              COALESCE(revenue, valor_rs, 0) AS valor_rs
          FROM public.crm_leads
         WHERE TRUE ${dateFilter}
-        ORDER BY client_id, data`,
+        ORDER BY client_id, COALESCE(lead_date, data)`,
       params
     );
 

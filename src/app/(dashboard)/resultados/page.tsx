@@ -15,6 +15,7 @@ import { cn, formatCurrencyBRL } from '@/lib/utils';
 type ApiMetrics = {
   meta: { spend: number; impressions: number; clicks: number; leads: number; cpl: number } | null;
   google: { cost: number; impressions: number; clicks: number; cpc: number; conversions: number; cpa: number } | null;
+  crm?: { revenue: number; sales: number; leads: number; ticket: number } | null;
 };
 
 type GoalConfig = { type: string; target: number };
@@ -253,7 +254,7 @@ export default function ResultadosPage() {
     Promise.allSettled(
       clients.map(async (c) => {
         const res = await fetch(`/api/clients/${c.id}/metrics`);
-        const data: ApiMetrics = res.ok ? await res.json() : { meta: null, google: null };
+        const data: ApiMetrics = res.ok ? await res.json() : { meta: null, google: null, crm: null };
         return [c.id, data] as const;
       })
     ).then((results) => {
@@ -283,7 +284,7 @@ export default function ResultadosPage() {
     const leads = api?.meta?.leads ?? hardcoded?.leads ?? 0;
     const cpl = api?.meta?.cpl ?? hardcoded?.cpl ?? 0;
     const cac = api?.google?.cpa ?? hardcoded?.cac ?? 0;
-    const resultado = hardcoded?.resultado ?? 0;
+    const resultado = api?.crm?.revenue ?? hardcoded?.resultado ?? 0;
 
     // Goals: prefer localStorage config, fallback to hardcoded
     const metaTarget = goal?.type === 'revenue'
