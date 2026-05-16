@@ -32,6 +32,7 @@ import { cn, formatCurrencyBRL } from '@/lib/utils';
 import { ClientAvatar } from '@/components/client-avatar';
 import type { TopCreative } from '@/app/api/meta/top-creatives/route';
 import type { CampaignPerformance } from '@/app/api/campaigns/route';
+import type { GoogleKeyword } from '@/app/api/google/keywords/route';
 import type { AudienceBreakdowns, AudienceResponse, AudienceSlice } from '@/app/api/audience/route';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -85,7 +86,7 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
 ];
 
 const EMPTY_AUDIENCE: AudienceResponse = {
-  meta: { age: [], gender: [], platform: [], device: [] },
+  meta: { age: [], gender: [], platform: [], device: [], platformConversions: [], deviceConversions: [] },
   google: { age: [], gender: [], platform: [], device: [], platformConversions: [], deviceConversions: [] },
 };
 
@@ -1341,6 +1342,89 @@ function PauseActivateBtn({
   );
 }
 
+const MATCH_COLORS: Record<string, string> = {
+  'Exata': 'bg-blue-500/15 text-blue-400 border-blue-500/30',
+  'Frase': 'bg-violet-500/15 text-violet-400 border-violet-500/30',
+  'Ampla': 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+};
+
+function TopKeywordsTable({ keywords, loading }: { keywords: GoogleKeyword[]; loading: boolean }) {
+  const [sortKey, setSortKey] = useState<'impressions' | 'clicks' | 'spend' | 'conversions' | 'ctr' | 'cpl'>('impressions');
+  const sorted = [...keywords].sort((a, b) => {
+    if (sortKey === 'cpl') return (a.cpl || Infinity) - (b.cpl || Infinity);
+    return (b[sortKey] ?? 0) - (a[sortKey] ?? 0);
+  });
+
+  const cols: { key: typeof sortKey; label: string }[] = [
+    { key: 'impressions', label: 'Impressões' },
+    { key: 'clicks', label: 'Cliques' },
+    { key: 'ctr', label: 'CTR' },
+    { key: 'spend', label: 'Gasto' },
+    { key: 'conversions', label: 'Conv.' },
+    { key: 'cpl', label: 'CPL' },
+  ];
+
+  return (
+    <div className="rounded-xl border border-border bg-card overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+        <div className="flex items-center gap-2">
+          <GoogleMark />
+          <p className="text-sm font-bold uppercase tracking-wider">Top Palavras-chave</p>
+        </div>
+        {loading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+      </div>
+      {loading ? (
+        <div className="flex items-center justify-center gap-2 p-6 text-sm text-muted-foreground">
+          <RefreshCw className="h-4 w-4 animate-spin" /> Carregando palavras-chave...
+        </div>
+      ) : sorted.length === 0 ? (
+        <p className="p-6 text-sm text-muted-foreground">Nenhuma palavra-chave encontrada no período.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[780px] text-left">
+            <thead className="border-b border-border bg-muted/20">
+              <tr className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                <th className="px-4 py-2.5">Palavra-chave</th>
+                {cols.map(c => (
+                  <th key={c.key} className="px-3 py-2.5 text-right">
+                    <button
+                      onClick={() => setSortKey(c.key)}
+                      className={cn('hover:text-foreground transition-colors', sortKey === c.key && 'text-primary')}
+                    >
+                      {c.label}
+                    </button>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((kw, i) => (
+                <tr key={i} className="border-t border-border/50 hover:bg-muted/10 transition-colors">
+                  <td className="px-4 py-2.5 max-w-[320px]">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className={cn('shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide', MATCH_COLORS[kw.matchType] ?? 'bg-muted/30 text-muted-foreground border-border')}>
+                        {kw.matchType}
+                      </span>
+                      <span className="truncate text-xs font-semibold">{kw.text}</span>
+                    </div>
+                    <p className="mt-0.5 truncate pl-[42px] text-[10px] text-muted-foreground">{kw.adGroupName}</p>
+                  </td>
+                  <td className="px-3 py-2.5 text-right text-xs font-semibold">{kw.impressions.toLocaleString('pt-BR')}</td>
+                  <td className="px-3 py-2.5 text-right text-xs font-semibold">{kw.clicks.toLocaleString('pt-BR')}</td>
+                  <td className="px-3 py-2.5 text-right text-xs font-semibold">{kw.ctr.toFixed(2)}%</td>
+                  <td className="px-3 py-2.5 text-right text-xs font-semibold text-primary">{formatCurrencyBRL(kw.spend)}</td>
+                  <td className="px-3 py-2.5 text-right text-xs font-semibold">{kw.conversions > 0 ? kw.conversions.toLocaleString('pt-BR') : '—'}</td>
+                  <td className="px-3 py-2.5 text-right text-xs font-semibold">{kw.cpl > 0 ? formatCurrencyBRL(kw.cpl) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AdCreativePreview({ ad, x, y }: { ad: MetaAdWithMetrics; x: number; y: number }) {
   const CARD_W = 240;
   const CARD_H = 340;
@@ -2257,6 +2341,8 @@ export default function GeneralDashboard() {
   const [goalsByClient, setGoalsByClient] = useState<Record<string, GoalConfig | null>>({});
   const [crmSummary, setCrmSummary] = useState<Record<string, ClientSheetsSummary>>({});
   const [campaigns, setCampaigns] = useState<CampaignPerformance[]>([]);
+  const [keywords, setKeywords] = useState<GoogleKeyword[]>([]);
+  const [keywordsLoading, setKeywordsLoading] = useState(false);
   const [creatives, setCreatives] = useState<TopCreative[]>([]);
   const [audience, setAudience] = useState<AudienceResponse>(EMPTY_AUDIENCE);
   const [balances, setBalances] = useState<AdAccountBalance[]>([]);
@@ -2439,6 +2525,24 @@ export default function GeneralDashboard() {
       .finally(() => { if (!cancelled) setCampaignsLoading(false); });
     return () => { cancelled = true; };
   }, [period, campaignSortBy, selectedIds, customDateFrom, customDateTo, customReady]);
+
+  // Fetch top keywords (Google Ads)
+  useEffect(() => {
+    let cancelled = false;
+    setKeywordsLoading(true);
+    setKeywords([]);
+    if (selectedIds.size === 0 || !customReady) {
+      setKeywordsLoading(false);
+      return () => { cancelled = true; };
+    }
+    const params = buildPeriodParams({ limit: '30', clientIds: [...selectedIds].join(',') });
+    fetch(`/api/google/keywords?${params.toString()}`)
+      .then(res => res.ok ? res.json() as Promise<GoogleKeyword[]> : [])
+      .then(data => { if (!cancelled) setKeywords(data); })
+      .catch(() => { if (!cancelled) setKeywords([]); })
+      .finally(() => { if (!cancelled) setKeywordsLoading(false); });
+    return () => { cancelled = true; };
+  }, [period, selectedIds, customDateFrom, customDateTo, customReady]);
 
   // Fetch top creatives
   useEffect(() => {
@@ -3167,6 +3271,7 @@ export default function GeneralDashboard() {
                         </div>
                         <CampaignPerformanceTable campaigns={googleCampaigns} loading={campaignsLoading} period={period} dateFrom={customDateFrom} dateTo={customDateTo} />
                       </div>
+                      <TopKeywordsTable keywords={keywords} loading={keywordsLoading} />
                       <AudiencePlatformBlock title="Google Ads" description="Recortes por idade, gênero, plataforma, dispositivo e conversões." color="#EA4335" colors={GOOGLE_AUDIENCE_COLORS} data={audience.google} extraKeys={['platformConversions', 'deviceConversions']} />
                     </div>
                   </MetricSection>

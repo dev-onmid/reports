@@ -360,6 +360,8 @@ export async function GET(request: NextRequest) {
       gender: mapToSlices(metaMaps.gender),
       platform: mapToSlices(metaMaps.platform),
       device: mapToSlices(metaMaps.device),
+      platformConversions: [],
+      deviceConversions: [],
     },
     google: {
       age: mapToSlices(googleMaps.age),
