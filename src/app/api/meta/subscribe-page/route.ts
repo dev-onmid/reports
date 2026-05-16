@@ -48,14 +48,10 @@ export async function POST(request: NextRequest) {
       pageToken = page?.access_token ?? userToken;
     }
 
-    // For Instagram: subscription is handled at the app level (webhook fields configured
-    // in the Meta for Developers panel). subscribed_apps is only needed for Facebook Pages.
-    if (platform === 'instagram') {
-      return Response.json({ ok: true, note: 'Instagram usa assinatura no nível do app — nenhuma ação adicional necessária.' });
-    }
-
-    // Facebook Pages: subscribe the page to receive feed + messages events
-    const fields = 'feed,messages';
+    // Both Instagram and Facebook need subscribed_apps on the Facebook Page.
+    // For Instagram DMs: 'messages' routes Instagram DMs through the page's Messenger API.
+    // For Facebook Pages: 'feed' covers comments, 'messages' covers Messenger DMs.
+    const fields = platform === 'instagram' ? 'messages,feed' : 'feed,messages';
 
     const subRes = await fetch(
       `https://graph.facebook.com/v21.0/${fbPageId}/subscribed_apps`,
