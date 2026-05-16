@@ -7,8 +7,8 @@ import {
   Send, Bot, User, Loader2, Settings2, Save, X, ChevronDown,
   Wrench, Mic, MicOff, Plus, Trash2, FileText, Link2, Type,
   Webhook, MessageSquare, BookOpen, Zap, Upload, Globe, CheckCircle,
-  ToggleLeft, ToggleRight, Play, Pause, Download, ArrowRight, Clock3,
-  MapPin, Sparkles, ShieldCheck, SlidersHorizontal,
+  ToggleLeft, ToggleRight, Play, Pause, Download,
+  Sparkles, ShieldCheck, Users,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -123,27 +123,27 @@ function useVoiceInput(onTranscript: (text: string) => void) {
 function MessageBubble({ msg }: { msg: ChatMessage }) {
   const isUser = msg.role === 'user';
   return (
-    <div className={cn('flex gap-4', isUser ? 'justify-end' : 'justify-start')}>
+    <div className={cn('flex gap-3', isUser ? 'justify-end' : 'justify-start')}>
       {!isUser && (
-        <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full border-2 border-[#66cdd0]/45 bg-white shadow-[0_10px_28px_rgba(0,109,103,0.18)]">
-          <Bot className="h-5 w-5 text-[#006d67]" />
+        <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-2xl border border-primary/35 bg-primary/10 shadow-[0_0_26px_rgba(85,245,47,0.16)]">
+          <Bot className="h-[18px] w-[18px] text-primary" />
         </div>
       )}
       <div className={cn('flex max-w-[78%] flex-col gap-2', isUser ? 'items-end' : 'items-start')}>
         {msg.toolsUsed && msg.toolsUsed.length > 0 && (
           <div className="flex flex-wrap gap-1 mb-0.5">
             {[...new Set(msg.toolsUsed)].map((t, i) => (
-              <span key={i} className="inline-flex items-center gap-1 rounded-full border border-[#66cdd0]/35 bg-[#e8f7f7] px-2.5 py-1 text-[10px] font-bold text-[#006d67]">
+              <span key={i} className="inline-flex items-center gap-1 rounded-full border border-violet-400/25 bg-violet-500/10 px-2 py-0.5 text-[10px] font-semibold text-violet-300">
                 <Wrench className="w-2.5 h-2.5" />{getToolLabel(t)}
               </span>
             ))}
           </div>
         )}
         <div className={cn(
-          'whitespace-pre-wrap rounded-[26px] px-5 py-4 text-sm font-semibold leading-relaxed shadow-[0_16px_34px_rgba(0,0,0,0.10)]',
+          'whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-[0_18px_45px_rgba(0,0,0,0.22)]',
           isUser
-            ? 'rounded-tr-md bg-[#cc4700] text-white'
-            : 'rounded-tl-md border border-[#e8edf4] bg-[#f6f8fd] text-[#006d67]'
+            ? 'rounded-tr-md border border-primary/30 bg-primary/15 text-primary'
+            : 'rounded-tl-md border border-white/10 bg-[#101522]/90 text-slate-100'
         )}>
           {msg.content}
         </div>
@@ -156,24 +156,24 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
                 download={att.filename}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="group flex w-full items-center gap-3 rounded-2xl border border-[#e8edf4] bg-white px-4 py-3 shadow-[0_10px_26px_rgba(0,0,0,0.08)] transition-all hover:border-[#66cdd0]/70 hover:bg-[#f6fbfb]"
+                className="group flex w-full items-center gap-3 rounded-xl border border-white/10 bg-[#101522] px-4 py-3 transition-all hover:border-primary/30 hover:bg-primary/5"
               >
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#fff0e7]">
-                  <FileText className="h-4 w-4 text-[#f97316]" />
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-red-500/10">
+                  <FileText className="h-4 w-4 text-red-400" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="truncate text-sm font-bold text-[#006d67]">{att.label}</p>
-                  <p className="text-xs font-semibold text-[#8a8f99]">{att.filename}</p>
+                  <p className="truncate text-sm font-semibold text-slate-100">{att.label}</p>
+                  <p className="text-xs text-slate-500">{att.filename}</p>
                 </div>
-                <Download className="h-4 w-4 shrink-0 text-[#8a8f99] transition-colors group-hover:text-[#006d67]" />
+                <Download className="h-4 w-4 shrink-0 text-slate-500 transition-colors group-hover:text-primary" />
               </a>
             ))}
           </div>
         )}
       </div>
       {isUser && (
-        <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full border border-[#ffb392] bg-[#fff0e7]">
-          <User className="h-5 w-5 text-[#cc4700]" />
+        <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5">
+          <User className="h-[18px] w-[18px] text-slate-300" />
         </div>
       )}
     </div>
@@ -712,246 +712,239 @@ export default function AgentePage() {
   const isEmpty = messages.length === 0;
 
   return (
-    <div className="-m-6 flex h-[calc(100vh-4rem)] flex-col overflow-hidden bg-[#fbfcfd] text-[#0f2233]">
-      {/* Header */}
-      <div className="flex h-28 shrink-0 items-center justify-between gap-4 border-b border-[#eef1f6] bg-white px-5 shadow-[0_8px_24px_rgba(15,34,51,0.06)] lg:px-14">
-        <div className="flex min-w-0 items-center gap-6 xl:gap-11">
-          <div className="leading-none">
-            <div className="text-[38px] font-black tracking-[-0.06em] text-[#f97316]">luna</div>
-            <div className="-mt-1 ml-12 inline-flex rounded-sm bg-[#66cdd0] px-2 py-0.5 text-[11px] font-black tracking-[-0.03em] text-white">IA</div>
+    <div className="relative flex h-full max-h-[calc(100vh-6rem)] flex-col gap-4 overflow-hidden text-slate-100">
+      <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_20%_10%,rgba(123,44,255,0.18),transparent_28%),radial-gradient(circle_at_78%_16%,rgba(85,245,47,0.10),transparent_24%),linear-gradient(180deg,#050914_0%,#070b16_48%,#05070d_100%)]" />
+
+      <div className="flex shrink-0 items-center justify-between rounded-2xl border border-white/8 bg-[#0b1020]/80 p-6 shadow-[0_22px_70px_rgba(0,0,0,0.28)] backdrop-blur-xl">
+        <div className="flex items-center gap-5">
+          <div className="relative flex h-16 w-16 items-center justify-center rounded-full border border-primary/45 bg-primary/10 shadow-[0_0_35px_rgba(85,245,47,0.24)]">
+            <Bot className="h-8 w-8 text-primary" />
+            <span className="absolute inset-[-8px] rounded-full border border-primary/15" />
           </div>
-          <nav className="hidden items-center gap-8 text-xl font-black tracking-[-0.04em] text-[#13263a] xl:flex">
-            <span>Sobre</span>
-            <span>Ajuda</span>
-            <span>Campanhas</span>
-            <span>Relatórios</span>
-            <span>CRM</span>
-          </nav>
+          <div>
+            <h1 className="text-2xl font-bold tracking-[-0.03em] text-white">Luna</h1>
+            <p className="mt-1 text-sm text-slate-400">
+              Assistente de tráfego pago <span className="mx-1 text-primary">•</span>
+              <span className="font-semibold text-primary">Online</span>
+            </p>
+          </div>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2">
           {isAdmin && (
-            <button
-              type="button"
-              onClick={() => setShowTraining(true)}
-              className="h-14 rounded-md bg-[#cc4700] px-4 text-sm font-black tracking-[-0.04em] text-white shadow-[0_10px_24px_rgba(204,71,0,0.22)] transition-transform hover:-translate-y-0.5 sm:h-16 sm:px-9 sm:text-xl"
-            >
-              Treinar Luna
-            </button>
+            <Button variant="outline" size="sm" onClick={() => setShowTraining(true)} className="h-12 gap-2 rounded-xl border-primary/35 bg-transparent px-7 text-sm font-bold text-white hover:bg-primary/10 hover:text-primary">
+              <Settings2 className="w-4 h-4" />Treinar Luna
+            </Button>
           )}
           {messages.length > 0 && (
-            <button
-              type="button"
-              onClick={() => { setMessages([]); setActiveTools([]); }}
-              className="hidden h-16 items-center gap-2 rounded-md border border-[#ffb392] bg-[#fff3ec] px-8 text-xl font-black tracking-[-0.04em] text-[#a9430c] sm:flex"
-            >
-              <X className="h-5 w-5" /> Limpar
-            </button>
+            <Button variant="ghost" size="sm" onClick={() => { setMessages([]); setActiveTools([]); }} className="h-12 gap-2 rounded-xl px-4 text-sm text-slate-400 hover:bg-white/5 hover:text-white">
+              <X className="w-4 h-4" />Limpar
+            </Button>
           )}
         </div>
       </div>
 
-      <div className="mx-4 mt-6 shrink-0 overflow-hidden rounded-b-2xl rounded-t-sm bg-[#006d67] shadow-[0_18px_36px_rgba(0,109,103,0.16)] lg:mx-12">
-        <div className="flex h-20 items-center justify-between px-5 lg:px-10">
-          <div className="flex items-center gap-5">
-            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[#66cdd0] shadow-[0_10px_22px_rgba(0,0,0,0.14)]">
-              <Bot className="h-8 w-8 text-white" />
-            </div>
-            <div>
-              <p className="text-[15px] font-black uppercase tracking-[0.18em] text-[#9fe5e6]">Assistente inteligente Onmid</p>
-              <h1 className="text-xl font-black tracking-[-0.05em] text-white lg:text-3xl">Fale com a Luna IA para acelerar decisões de marketing</h1>
-            </div>
-          </div>
-          <div className="hidden rounded-full bg-[#cc4700] px-9 py-4 text-lg font-black tracking-[-0.04em] text-white lg:block">
-            Online agora
-          </div>
-        </div>
-      </div>
+      <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
+        <section ref={messagesRef} onScroll={handleScroll} className="relative min-h-0 overflow-y-auto rounded-2xl border border-white/8 bg-[#090e1a]/85 shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_24px_80px_rgba(0,0,0,0.32)]">
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_20%,rgba(123,44,255,0.22),transparent_28%),radial-gradient(circle_at_70%_36%,rgba(85,245,47,0.12),transparent_34%)]" />
+          <div className="pointer-events-none absolute inset-x-20 top-24 h-80 rounded-[50%] border border-primary/10" />
+          <div className="pointer-events-none absolute inset-x-28 top-28 h-72 rounded-[50%] border border-violet-400/10" />
 
-      <div className="flex shrink-0 items-center justify-between px-4 py-6 lg:px-12 lg:py-8">
-        <div>
-          <div className="flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#f97316] text-white">
-              <ArrowRight className="h-6 w-6" />
-            </span>
-            <h2 className="text-2xl font-light tracking-[-0.05em] text-[#66cdd0] lg:text-3xl">
-              Conversa com <strong className="font-black text-[#66cdd0]">Luna IA</strong>
-            </h2>
-          </div>
-          <div className="mt-5 flex flex-wrap items-center gap-5 text-base font-black tracking-[-0.04em] text-[#006d67] lg:gap-12 lg:text-lg">
-            <span className="flex items-center gap-2"><SlidersHorizontal className="h-5 w-5 text-[#66cdd0]" /> Filtrar contexto</span>
-            <span className="flex items-center gap-2">Ordenar por <ChevronDown className="h-5 w-5 text-[#66cdd0]" /></span>
-          </div>
-        </div>
-        <div className="hidden items-center gap-8 xl:flex">
-          {[
-            ['Hoje', 'a partir de', 'respostas rápidas'],
-            ['Relatórios', 'a partir de', 'PDF + insights'],
-            ['Campanhas', 'a partir de', 'ações em tempo real'],
-          ].map(([day, sub, value], index) => (
-            <div key={day} className={cn(
-              'min-w-52 rounded-3xl px-8 py-5 text-center',
-              index === 1 ? 'bg-white shadow-[0_16px_28px_rgba(15,34,51,0.14)]' : 'bg-transparent'
-            )}>
-              <p className="text-2xl font-black tracking-[-0.05em] text-[#006d67]">{day}</p>
-              <p className="text-sm font-black text-[#66cdd0]">{sub}</p>
-              <p className="text-xl font-black tracking-[-0.04em] text-[#66cdd0]">{value}</p>
-            </div>
-          ))}
-        </div>
-      </div>
+          <div className="relative min-h-full px-8 py-8">
+            {isEmpty ? (
+              <div className="flex min-h-[560px] flex-col items-center justify-center text-center">
+                <div className="relative mb-8 flex h-28 w-28 items-center justify-center rounded-full border border-primary/25 bg-[#101827]/80 shadow-[0_0_60px_rgba(85,245,47,0.20)]">
+                  <div className="absolute inset-5 rounded-full bg-primary/10 blur-xl" />
+                  <Bot className="relative h-14 w-14 text-primary" />
+                  <span className="absolute inset-[-18px] rounded-full border border-white/8" />
+                </div>
+                <h2 className="text-4xl font-bold tracking-[-0.04em] text-white">
+                  Olá! Sou a <span className="text-primary">Luna</span>
+                </h2>
+                <p className="mt-4 text-xl text-slate-300">Seu copiloto de tráfego pago e gestão.</p>
+                <p className="mt-6 max-w-xl text-base leading-relaxed text-slate-400">
+                  Tenho acesso ao sistema — clientes, campanhas, saldos, CRM, relatórios, pagamentos e métricas — para te ajudar a tomar decisões mais rápidas e inteligentes.
+                </p>
 
-      <div className="mx-4 mb-8 grid min-h-0 flex-1 grid-cols-1 overflow-hidden rounded-[28px] bg-white shadow-[0_12px_32px_rgba(15,34,51,0.18)] lg:mx-12 lg:grid-cols-[450px_minmax(0,1fr)]">
-        <aside className="hidden flex-col bg-[#f4f6fb] lg:flex">
-          <div className="border-b border-white px-9 py-5 text-center">
-            <p className="text-xl font-black tracking-[-0.04em] text-[#66cdd0]">Sua Luna pode ajudar entre:</p>
-            <div className="mt-4 flex items-center justify-center gap-8 text-[#006d67]">
-              <span className="flex items-center gap-1 text-3xl font-black tracking-[-0.05em]"><Clock3 className="h-7 w-7" />Agora</span>
-              <span className="text-2xl font-black">e</span>
-              <span className="flex items-center gap-1 text-3xl font-black tracking-[-0.05em]"><Clock3 className="h-7 w-7" />Sempre</span>
-            </div>
+                <div className="mt-10 grid w-full max-w-3xl gap-3 sm:grid-cols-2">
+                  {[
+                    { text: 'Quais clientes estão ativos?', sub: 'Veja os clientes com campanhas ativas', icon: Users, color: 'text-primary' },
+                    { text: 'Gera um relatório do cliente X', sub: 'Performance, gastos e resultados', icon: FileText, color: 'text-violet-400' },
+                    { text: 'Pausa a campanha Y do cliente Z', sub: 'Interrompa campanhas rapidamente', icon: Pause, color: 'text-amber-400' },
+                    { text: 'Qual o CPL das campanhas ativas?', sub: 'Análise de CPL e custo por resultado', icon: Sparkles, color: 'text-primary' },
+                  ].map(({ text, sub, icon: Icon, color }) => (
+                    <button
+                      key={text}
+                      type="button"
+                      onClick={() => { setInput(text); inputRef.current?.focus(); }}
+                      className="group flex items-center gap-4 rounded-xl border border-white/10 bg-[#121827]/80 px-5 py-4 text-left transition-all hover:border-primary/25 hover:bg-[#151d2f]"
+                    >
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/5">
+                        <Icon className={cn('h-5 w-5', color)} />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-semibold text-white">{text}</span>
+                        <span className="mt-1 block truncate text-xs text-slate-400">{sub}</span>
+                      </span>
+                      <ChevronDown className="-rotate-90 h-4 w-4 text-slate-400 transition-transform group-hover:translate-x-1 group-hover:text-primary" />
+                    </button>
+                  ))}
+                </div>
+                <button className="mt-7 inline-flex items-center gap-2 rounded-xl border border-white/10 bg-[#0c1220] px-5 py-2.5 text-sm font-medium text-slate-300 hover:border-white/20 hover:text-white">
+                  Ver mais sugestões <ChevronDown className="h-4 w-4" />
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-5">
+                {messages.map(msg => <MessageBubble key={msg.id} msg={msg} />)}
+                {activeTools.length > 0 && (
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-primary/35 bg-primary/10">
+                      <Bot className="h-[18px] w-[18px] text-primary" />
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5 pt-1.5">
+                      {activeTools.map((t, i) => (
+                        <span key={i} className="inline-flex animate-pulse items-center gap-1 rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
+                          <Wrench className="h-3 w-3" />{getToolLabel(t)}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {loading && activeTools.length === 0 && (
+                  <div className="flex gap-3">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-primary/35 bg-primary/10">
+                      <Bot className="h-[18px] w-[18px] text-primary" />
+                    </div>
+                    <div className="rounded-2xl rounded-tl-md border border-white/10 bg-[#101522] px-4 py-3">
+                      <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+                    </div>
+                  </div>
+                )}
+                <div ref={bottomRef} />
+              </div>
+            )}
           </div>
-          <div className="flex-1 px-10 py-8">
-            <p className="text-lg font-black tracking-[-0.04em] text-[#888]">Previsão de <span className="text-[#006d67]">resposta em segundos</span></p>
-            <div className="mt-8 space-y-9">
+        </section>
+
+        <aside className="hidden min-h-0 flex-col gap-4 xl:flex">
+          <div className="rounded-2xl border border-violet-400/20 bg-[#0d1322]/90 p-5 shadow-[0_20px_70px_rgba(0,0,0,0.28)]">
+            <h3 className="flex items-center gap-2 text-sm font-bold text-white">
+              <Sparkles className="h-4 w-4 text-violet-400" />O que a Luna pode fazer
+            </h3>
+            <div className="mt-6 space-y-5">
               {[
-                [MapPin, 'Origem', 'ONMID Reports'],
-                [Sparkles, 'Destino', 'Insights, CRM, campanhas e relatórios'],
-                [ShieldCheck, 'Seguro', 'Ações protegidas por contexto'],
-              ].map(([Icon, label, text]) => {
+                [FileText, 'Analisar dados e gerar insights', 'Relatórios, métricas e tendências'],
+                [Zap, 'Gerenciar campanhas e orçamentos', 'Ative, pause ou ajuste campanhas'],
+                [MessageSquare, 'Consultar clientes e saldos', 'Informações financeiras e status'],
+                [User, 'Apoiar decisões com IA', 'Respostas rápidas e personalizadas'],
+              ].map(([Icon, title, sub]) => {
                 const ItemIcon = Icon as React.ElementType;
                 return (
-                  <div key={String(label)} className="flex gap-4">
-                    <ItemIcon className="mt-1 h-7 w-7 shrink-0 text-[#006d67]" />
+                  <div key={String(title)} className="flex gap-3">
+                    <ItemIcon className="mt-0.5 h-4 w-4 shrink-0 text-violet-400" />
                     <div>
-                      <p className="text-lg font-black tracking-[-0.04em] text-[#66cdd0]">{label as string}</p>
-                      <p className="text-2xl font-black leading-tight tracking-[-0.05em] text-[#006d67]">{text as string}</p>
+                      <p className="text-sm font-medium text-slate-100">{title as string}</p>
+                      <p className="mt-0.5 text-xs text-slate-500">{sub as string}</p>
                     </div>
                   </div>
                 );
               })}
             </div>
           </div>
-        </aside>
 
-        <main className="flex min-w-0 flex-col bg-white">
-          <div ref={messagesRef} onScroll={handleScroll} className="min-h-0 flex-1 space-y-8 overflow-y-auto px-10 py-10">
-            {isEmpty && (
-              <div className="grid gap-12 lg:grid-cols-[1fr_0.95fr]">
-                <div className="flex items-start gap-8">
-                  <div className="mt-2 text-[#66cdd0]">
-                    <Bot className="h-14 w-14 stroke-[1.5]" />
-                  </div>
-                  <div>
-                    <h2 className="text-4xl font-black tracking-[-0.06em] text-[#006d67]">Luna IA</h2>
-                    <button className="mt-5 flex items-center gap-2 text-xl font-black tracking-[-0.05em] text-[#66cdd0] underline decoration-[#66cdd0]/70 underline-offset-4">
-                      <ArrowRight className="h-5 w-5 text-[#f97316]" />Comodidades
-                    </button>
-                  </div>
-                </div>
-                <div className="rounded-[26px] bg-[#f4f6fb] p-7 shadow-[0_18px_30px_rgba(15,34,51,0.18)]">
-                  <div className="mb-4 inline-flex rounded-md bg-[#66cdd0] px-4 py-2 text-sm font-black uppercase text-white">Melhor resposta do dia</div>
-                  <p className="text-2xl font-black tracking-[-0.05em] text-[#66cdd0]">Apenas pergunte</p>
-                  <p className="mt-1 text-4xl font-black tracking-[-0.06em] text-[#006d67]">“Como estão minhas campanhas?”</p>
-                  <p className="mt-4 text-lg font-black tracking-[-0.04em] text-[#f97316]">Você economizará tempo de análise</p>
-                </div>
-                <div className="lg:col-span-2">
-                  <div className="h-px bg-[#d6d6d6]" />
-                </div>
-                {[
-                  'Quais clientes estão ativos?',
-                  'Gera um relatório do cliente X este mês',
-                  'Pausa a campanha Y do cliente Z',
-                  'Qual o CPL das campanhas ativas?',
-                ].map(s => (
-                  <button
-                    key={s}
-                    onClick={() => { setInput(s); inputRef.current?.focus(); }}
-                    className="rounded-[26px] bg-[#f4f6fb] px-7 py-6 text-left text-2xl font-black tracking-[-0.05em] text-[#006d67] shadow-[0_14px_26px_rgba(15,34,51,0.12)] transition-transform hover:-translate-y-0.5"
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
-            )}
-            {messages.map(msg => <MessageBubble key={msg.id} msg={msg} />)}
-            {activeTools.length > 0 && (
-              <div className="flex items-start gap-4">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 border-[#66cdd0]/45 bg-white">
-                  <Bot className="h-5 w-5 text-[#006d67]" />
-                </div>
-                <div className="flex flex-wrap items-center gap-2 pt-1.5">
-                  {activeTools.map((t, i) => (
-                    <span key={i} className="inline-flex animate-pulse items-center gap-1 rounded-full border border-[#66cdd0]/35 bg-[#e8f7f7] px-3 py-1 text-xs font-black text-[#006d67]">
-                      <Wrench className="h-3 w-3" />{getToolLabel(t)}
+          <div className="rounded-2xl border border-white/10 bg-[#0d1322]/90 p-5 shadow-[0_20px_70px_rgba(0,0,0,0.25)]">
+            <h3 className="flex items-center gap-2 text-sm font-bold text-white">
+              <Zap className="h-4 w-4 text-primary" />Ações rápidas
+            </h3>
+            <div className="mt-5 space-y-3">
+              {[
+                ['Resumo do dia', 'O que aconteceu hoje', FileText, 'text-sky-400'],
+                ['Top campanhas', 'Melhores desempenhos', Sparkles, 'text-amber-400'],
+                ['Alertas e oportunidades', 'Pontos de atenção', Users, 'text-violet-400'],
+              ].map(([title, sub, Icon, color]) => {
+                const ItemIcon = Icon as React.ElementType;
+                return (
+                  <button key={String(title)} type="button" className="group flex w-full items-center gap-3 rounded-xl bg-white/[0.035] px-4 py-3 text-left hover:bg-white/[0.06]">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/5">
+                      <ItemIcon className={cn('h-4 w-4', color as string)} />
                     </span>
-                  ))}
-                </div>
-              </div>
-            )}
-            {loading && activeTools.length === 0 && (
-              <div className="flex gap-4">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 border-[#66cdd0]/45 bg-white">
-                  <Bot className="h-5 w-5 text-[#006d67]" />
-                </div>
-                <div className="rounded-[26px] rounded-tl-md border border-[#e8edf4] bg-[#f6f8fd] px-5 py-4">
-                  <Loader2 className="h-5 w-5 animate-spin text-[#006d67]" />
-                </div>
-              </div>
-            )}
-            <div ref={bottomRef} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-medium text-slate-100">{title as string}</span>
+                      <span className="block text-xs text-slate-500">{sub as string}</span>
+                    </span>
+                    <ChevronDown className="-rotate-90 h-4 w-4 text-slate-500 group-hover:text-primary" />
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          {scrolledUp && (
-            <button onClick={() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); setScrolledUp(false); }}
-              className="absolute bottom-24 right-8 flex h-10 w-10 items-center justify-center rounded-full bg-[#f97316] text-white shadow-lg transition-opacity hover:opacity-90">
-              <ChevronDown className="h-5 w-5" />
-            </button>
-          )}
-
-          <div className="shrink-0 border-t border-[#e6e6e6] bg-white px-10 py-6">
-            <div className="flex items-end gap-3 rounded-[26px] bg-[#f4f6fb] p-4 shadow-[0_14px_26px_rgba(15,34,51,0.12)]">
-              {voiceSupported && (
-                <button
-                  type="button"
-                  onClick={toggleVoice}
-                  className={cn(
-                    'flex h-14 w-14 shrink-0 items-center justify-center rounded-full border border-[#66cdd0]/45 bg-white text-[#006d67]',
-                    listening && 'animate-pulse border-red-300 bg-red-50 text-red-500'
-                  )}
-                  title={listening ? 'Parar gravação' : 'Gravar áudio'}
-                >
-                  {listening ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
-                </button>
-              )}
-              <textarea
-                ref={inputRef}
-                value={input}
-                onChange={e => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder={listening ? 'Ouvindo...' : 'Pergunte sobre clientes, campanhas, métricas...'}
-                rows={1}
-                disabled={loading}
-                className={cn(
-                  'max-h-32 min-h-14 flex-1 resize-none bg-transparent px-3 py-4 text-lg font-bold tracking-[-0.03em] text-[#006d67] outline-none',
-                  'placeholder:text-[#66cdd0]/80 disabled:cursor-not-allowed disabled:opacity-50',
-                )}
-                style={{ fieldSizing: 'content' } as React.CSSProperties}
-              />
-              <button
-                type="button"
-                onClick={sendMessage}
-                disabled={!input.trim() || loading}
-                className="flex h-14 w-28 shrink-0 items-center justify-center rounded-full bg-[#cc4700] text-white shadow-[0_10px_22px_rgba(204,71,0,0.24)] transition-opacity disabled:opacity-45"
-              >
-                {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
-              </button>
+          <div className="rounded-2xl border border-white/10 bg-[#0d1322]/90 p-5">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-white">Contexto do sistema</h3>
+              <span className="flex items-center gap-1 text-[11px] text-slate-500"><span className="h-1.5 w-1.5 rounded-full bg-primary" />Atualizado agora</span>
             </div>
-            <p className="mt-3 text-center text-[11px] font-bold uppercase tracking-[0.12em] text-[#9aa3ad]">
-              Enter para enviar · Shift+Enter para nova linha{voiceSupported ? ' · Microfone para voz' : ''}
+            <div className="mt-5 grid grid-cols-4 gap-3 border-t border-white/8 pt-4">
+              {[
+                ['Clientes', '124'],
+                ['Campanhas', '568'],
+                ['Gasto hoje', 'R$ 24.560,80'],
+                ['CPL médio', 'R$ 18,43'],
+              ].map(([label, value]) => (
+                <div key={label}>
+                  <p className="text-[11px] text-slate-500">{label}</p>
+                  <p className="mt-1 text-sm font-bold text-white">{value}</p>
+                </div>
+              ))}
+            </div>
+            <p className="mt-5 flex items-center gap-2 text-xs text-slate-500">
+              <ShieldCheck className="h-4 w-4 text-primary/70" />Seus dados estão protegidos e seguros.
             </p>
           </div>
-        </main>
+        </aside>
       </div>
+
+      <div className="shrink-0 rounded-2xl border border-primary/35 bg-[#0a1020]/95 p-4 shadow-[0_0_0_1px_rgba(123,44,255,0.35),0_20px_70px_rgba(85,245,47,0.10)]">
+        <div className="flex items-end gap-3">
+          {voiceSupported && (
+            <button
+              type="button"
+              onClick={toggleVoice}
+              className={cn(
+                'flex h-14 w-14 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-primary',
+                listening && 'animate-pulse border-red-400/40 bg-red-500/10 text-red-400'
+              )}
+              title={listening ? 'Parar gravação' : 'Gravar áudio'}
+            >
+              {listening ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+            </button>
+          )}
+          <textarea
+            ref={inputRef}
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={listening ? 'Ouvindo...' : 'Pergunte sobre clientes, campanhas, métricas...'}
+            rows={1}
+            disabled={loading}
+            className="max-h-32 min-h-14 flex-1 resize-none bg-transparent px-3 py-4 text-base text-slate-100 outline-none placeholder:text-slate-500 disabled:cursor-not-allowed disabled:opacity-50"
+            style={{ fieldSizing: 'content' } as React.CSSProperties}
+          />
+          <span className="hidden pb-4 text-xs text-slate-500 lg:block">Enter para enviar • Shift+Enter para nova linha</span>
+          <button
+            type="button"
+            onClick={sendMessage}
+            disabled={!input.trim() || loading}
+            className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border border-primary/20 bg-primary/10 text-primary transition-all hover:bg-primary/15 disabled:opacity-45"
+          >
+            {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
+          </button>
+        </div>
+      </div>
+
+      <p className="shrink-0 text-center text-xs text-slate-500">
+        Luna pode cometer erros. Sempre confira as informações importantes.
+      </p>
 
       {showTraining && isAdmin && (
         <TrainingModal
