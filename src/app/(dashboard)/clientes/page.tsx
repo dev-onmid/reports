@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import {
   Archive, RotateCcw, ShieldAlert, Trash2, Plus, Power, PowerOff,
   Search, ArrowUpDown, ChevronDown, EyeOff, LayoutList, LayoutGrid,
-  MoreHorizontal, SlidersHorizontal,
+  MoreHorizontal, SlidersHorizontal, PiggyBank, Wallet,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -51,6 +51,8 @@ export default function ClientesPage() {
   const [segmentFilter, setSegmentFilter]         = useState('');
   const [sortOrder, setSortOrder]                 = useState<'az' | 'za'>('az');
   const [menuId, setMenuId]                       = useState<string | null>(null);
+  const [clientBalances, setClientBalances]        = useState<Record<string, { meta: number | null; google: number | null }>>({});
+  const [balancesLoading, setBalancesLoading]      = useState(true);
 
   const isAdmin = canManageClients(currentRole);
 
@@ -70,6 +72,30 @@ export default function ClientesPage() {
     const session = getAuthSession();
     setCurrentRole(session?.role ?? '');
     setSecurityEmail(session?.email ?? '');
+  }, []);
+
+  useEffect(() => {
+    setBalancesLoading(true);
+    Promise.all([
+      fetch('/api/clients/links').then(r => r.ok ? r.json() as Promise<Array<{ clientId: string; platform: string; accountId: string }>> : []),
+      fetch('/api/meta/account-balances').then(r => r.ok ? r.json() as Promise<Array<{ id: string; balance: number | null }>> : []),
+      fetch('/api/google/account-balances').then(r => r.ok ? r.json() as Promise<Array<{ id: string; balance: number | null }>> : []),
+    ]).then(([links, metaBals, googleBals]) => {
+      const metaMap = new Map(metaBals.map(b => [b.id, b.balance]));
+      const googleMap = new Map(googleBals.map(b => [b.id, b.balance]));
+      const result: Record<string, { meta: number | null; google: number | null }> = {};
+      for (const link of links) {
+        if (!result[link.clientId]) result[link.clientId] = { meta: null, google: null };
+        if (link.platform === 'meta_ads') {
+          const bal = metaMap.get(link.accountId);
+          if (bal !== undefined && bal !== null) result[link.clientId].meta = (result[link.clientId].meta ?? 0) + bal;
+        } else if (link.platform === 'google_ads') {
+          const bal = googleMap.get(link.accountId);
+          if (bal !== undefined && bal !== null) result[link.clientId].google = (result[link.clientId].google ?? 0) + bal;
+        }
+      }
+      setClientBalances(result);
+    }).catch(() => {}).finally(() => setBalancesLoading(false));
   }, []);
 
   function handleAddClient() {
@@ -237,6 +263,32 @@ export default function ClientesPage() {
                 <span className={cn('h-1.5 w-1.5 rounded-full', cliente.status === 'Ativo' ? 'bg-green-400' : cliente.status === 'Inativo' ? 'bg-orange-400' : 'bg-gray-500')} />
                 {cliente.status}
               </span>
+
+              {/* Balance KPIs */}
+              {!showArchived && (
+                <div className="hidden lg:flex items-center gap-2">
+                  <div className="flex items-center gap-1.5 rounded-lg border border-border bg-background/50 px-2.5 py-1.5 min-w-[110px]">
+                    <PiggyBank className="h-3 w-3 shrink-0" style={{ color: '#0668E1' }} />
+                    {balancesLoading ? (
+                      <div className="h-3 w-14 animate-pulse rounded bg-muted/40" />
+                    ) : clientBalances[cliente.id]?.meta !== undefined && clientBalances[cliente.id]?.meta !== null ? (
+                      <span className="text-xs font-semibold">{(clientBalances[cliente.id].meta!).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })}</span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5 rounded-lg border border-border bg-background/50 px-2.5 py-1.5 min-w-[110px]">
+                    <Wallet className="h-3 w-3 shrink-0" style={{ color: '#34A853' }} />
+                    {balancesLoading ? (
+                      <div className="h-3 w-14 animate-pulse rounded bg-muted/40" />
+                    ) : clientBalances[cliente.id]?.google !== undefined && clientBalances[cliente.id]?.google !== null ? (
+                      <span className="text-xs font-semibold">{(clientBalances[cliente.id].google!).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })}</span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Ver dashboard */}
               {!showArchived && (
