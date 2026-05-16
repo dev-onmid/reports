@@ -9,6 +9,7 @@ import {
   LayoutDashboard, Play, RefreshCw, Search, Sparkles, Check, X,
   Pause, CircleDot, Pencil, Settings2, Users, Copy,
   Bell, DollarSign, Tag, TrendingUp, Calendar, BarChart3, Zap, Target, Briefcase,
+  Wallet, MousePointerClick, CreditCard, PiggyBank,
 } from 'lucide-react';
 import { getAuthSession } from '@/lib/auth-store';
 import type { AiInsight } from '@/app/api/ai/insights/route';
@@ -2666,6 +2667,8 @@ export default function GeneralDashboard() {
   }
   const googleCpc = googleClicks > 0 ? googleCost / googleClicks : 0;
   const googleCtrValue = googleImpressions > 0 ? (googleClicks / googleImpressions) * 100 : 0;
+  const ctrPlatformCount = (metaCtr > 0 ? 1 : 0) + (googleCtrValue > 0 ? 1 : 0);
+  const avgCtr = ctrPlatformCount > 0 ? (metaCtr + googleCtrValue) / ctrPlatformCount : 0;
 
   // ── Aggregate planning ───────────────────────────────────────────────────
   let leadsGoal = 0;
@@ -2945,6 +2948,14 @@ export default function GeneralDashboard() {
         <KpiCard title="ROI" value={roi} prevValue={prevRoi > 0 ? prevRoi : undefined} goalValue={roiGoal > 0 ? roiGoal : undefined} format="times" icon={TrendingUp} iconColor="#a78bfa" iconBg="#a78bfa" loading={metricsLoading} />
         <KpiCard title="Total de Leads" value={totalLeads} prevValue={prevTotalLeads > 0 ? prevTotalLeads : undefined} goalValue={effectiveLeadsGoal > 0 ? effectiveLeadsGoal : undefined} format="number" icon={Users} iconColor="#2dd4bf" iconBg="#2dd4bf" loading={metricsLoading} />
         <KpiCard title="Custo por Lead" value={totalCostPerLead} prevValue={prevCpl > 0 ? prevCpl : undefined} goalValue={cplGoal > 0 ? cplGoal : undefined} format="currency" icon={Tag} iconColor="#94a3b8" iconBg="#94a3b8" loading={metricsLoading} inverseGoal inverseChange />
+      </div>
+
+      {/* KPIs — Saldos + CTR + Gasto */}
+      <div className="grid items-start gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <KpiCard title="Saldo Meta Ads" value={metaBalance} format="currency" icon={PiggyBank} iconColor="#0668E1" iconBg="#0668E1" loading={balancesLoading} />
+        <KpiCard title="Saldo Google Ads" value={googleBalance} format="currency" icon={Wallet} iconColor="#34A853" iconBg="#34A853" loading={balancesLoading} />
+        <KpiCard title="CTR Médio" value={avgCtr} format="percent" icon={MousePointerClick} iconColor="#f59e0b" iconBg="#f59e0b" loading={metricsLoading} />
+        <KpiCard title="Valor Gasto Total" value={totalSpend} format="currency" icon={CreditCard} iconColor="#e879f9" iconBg="#e879f9" loading={metricsLoading} />
       </div>
 
       {/* AI ERROR */}
