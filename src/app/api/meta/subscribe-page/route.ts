@@ -48,11 +48,22 @@ export async function POST(request: NextRequest) {
       pageToken = page?.access_token ?? userToken;
     }
 
-    // Instagram events (DMs + comments) are delivered via the app-level webhook subscription
-    // configured in Meta for Developers — no subscribed_apps needed per page.
-    // Facebook Pages need subscribed_apps to receive Messenger + feed events.
+    // Instagram: subscribe the IG Business Account directly using instagram_manage_messages
+    // (does NOT require pages_messaging — uses the IG account ID, not the FB page ID)
     if (platform === 'instagram') {
-      return Response.json({ ok: true, fb_page_id: fbPageId });
+      const igRes = await fetch(
+        `https://graph.facebook.com/v21.0/${pageId}/subscribed_apps`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ subscribed_fields: 'messages,comments', access_token: userToken }),
+        }
+      );
+      const igData = await igRes.json() as { success?: boolean; error?: { message?: string } };
+      if (!igRes.ok || !igData.success) {
+        return Response.json({ error: igData.error?.message ?? 'Falha ao inscrever conta Instagram' }, { status: 400 });
+      }
+      return Response.json({ ok: true, ig_id: pageId, subscribed_fields: 'messages,comments' });
     }
 
     // Facebook Pages: subscribe the page to receive feed + messages events
