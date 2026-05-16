@@ -17,6 +17,7 @@ import {
   WalletCards, Send, CheckCircle2, Clock3, AlertTriangle, Filter, Trash2,
   UserRound, Phone, Mail, Briefcase, SlidersHorizontal, Check, Hash, BarChart2, Layers,
   Power, PowerOff, Search, BookMarked, ExternalLink, RefreshCw, ChevronRight,
+  PiggyBank, Wallet,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -2853,12 +2854,31 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
   const [realMetrics, setRealMetrics] = useState<MetaAdsMetrics | null>(null);
   const [apiGoogleMetrics, setApiGoogleMetrics] = useState<GoogleAdsMetrics | null>(null);
   const [crmMetrics, setCrmMetrics] = useState<CrmMetrics | null>(null);
+  const [metaBalance, setMetaBalance] = useState<number | null>(null);
+  const [googleBalance, setGoogleBalance] = useState<number | null>(null);
+  const [balancesLoading, setBalancesLoading] = useState(true);
 
   useEffect(() => {
     fetch(`/api/clients/${id}/metrics`)
       .then(res => res.ok ? res.json() as Promise<{ meta: MetaAdsMetrics | null; google: GoogleAdsMetrics | null; crm?: CrmMetrics | null }> : null)
       .then(data => { setRealMetrics(data?.meta ?? null); setApiGoogleMetrics(data?.google ?? null); setCrmMetrics(data?.crm ?? null); })
       .catch(() => { setRealMetrics(null); setApiGoogleMetrics(null); setCrmMetrics(null); });
+  }, [id]);
+
+  useEffect(() => {
+    setBalancesLoading(true);
+    Promise.all([
+      fetch('/api/clients/links').then(r => r.ok ? r.json() as Promise<Array<{ clientId: string; platform: string; accountId: string }>> : []),
+      fetch('/api/meta/account-balances').then(r => r.ok ? r.json() as Promise<Array<{ id: string; balance: number | null }>> : []),
+      fetch('/api/google/account-balances').then(r => r.ok ? r.json() as Promise<Array<{ id: string; balance: number | null }>> : []),
+    ]).then(([links, metaBalances, googleBalances]) => {
+      const metaIds = new Set(links.filter(l => l.clientId === id && l.platform === 'meta_ads').map(l => l.accountId));
+      const googleIds = new Set(links.filter(l => l.clientId === id && l.platform === 'google_ads').map(l => l.accountId));
+      const mb = metaBalances.filter(b => metaIds.has(b.id) && b.balance !== null).reduce((s, b) => s + (b.balance ?? 0), 0);
+      const gb = googleBalances.filter(b => googleIds.has(b.id) && b.balance !== null).reduce((s, b) => s + (b.balance ?? 0), 0);
+      setMetaBalance(metaIds.size > 0 ? mb : null);
+      setGoogleBalance(googleIds.size > 0 ? gb : null);
+    }).catch(() => {}).finally(() => setBalancesLoading(false));
   }, [id]);
 
   const googleConnection = googleAds.getConnection(id);
@@ -2955,6 +2975,39 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
             </div>
             <h1 className="font-heading font-normal text-4xl uppercase leading-none tracking-wide text-foreground">{client.name}</h1>
             <p className="text-sm text-muted-foreground mt-1 uppercase tracking-wide">{client.segment}</p>
+          </div>
+          {/* Balance KPIs */}
+          <div className="hidden md:flex items-center gap-3 ml-4 pl-4 border-l border-border">
+            <div className="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2.5 min-w-[130px]">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg" style={{ background: '#0668E125' }}>
+                <PiggyBank className="h-3.5 w-3.5" style={{ color: '#0668E1' }} />
+              </span>
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground leading-none mb-0.5">Saldo Meta</p>
+                {balancesLoading ? (
+                  <div className="h-4 w-16 animate-pulse rounded bg-muted/30 mt-0.5" />
+                ) : metaBalance === null ? (
+                  <p className="text-xs text-muted-foreground">—</p>
+                ) : (
+                  <p className="text-sm font-bold">{metaBalance.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2.5 min-w-[130px]">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg" style={{ background: '#34A85325' }}>
+                <Wallet className="h-3.5 w-3.5" style={{ color: '#34A853' }} />
+              </span>
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground leading-none mb-0.5">Saldo Google</p>
+                {balancesLoading ? (
+                  <div className="h-4 w-16 animate-pulse rounded bg-muted/30 mt-0.5" />
+                ) : googleBalance === null ? (
+                  <p className="text-xs text-muted-foreground">—</p>
+                ) : (
+                  <p className="text-sm font-bold">{googleBalance.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
+                )}
+              </div>
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-3">
