@@ -212,7 +212,6 @@ const FB_SCOPE = [
   'instagram_basic',
   'instagram_manage_comments',
   'instagram_manage_messages',
-  'instagram_business_manage_messages',
 ].join(',');
 
 export function loadFBSDK(appId: string): Promise<void> {
