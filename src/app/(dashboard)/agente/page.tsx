@@ -54,6 +54,8 @@ const TOOL_LABELS: Record<string, string> = {
   get_account_balances: 'verificando saldos',
   update_meta_campaign_status: 'atualizando campanha',
   generate_client_report: 'gerando relatório',
+  send_report_pdf_whatsapp: 'gerando e enviando PDF',
+  list_zapi_clients: 'buscando conexões WhatsApp',
 };
 
 function getToolLabel(name: string): string {

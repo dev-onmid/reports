@@ -2,7 +2,8 @@ import type { NextRequest } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { google as googleapis } from 'googleapis';
 import { makeServerPool } from '@/lib/server-db';
-import { sendText } from '@/lib/zapi';
+import { sendText, sendDocument } from '@/lib/zapi';
+import { generateReportPdf } from '@/lib/report-pdf';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import { resolveMetaPeriod, resolveGaqlPeriod, applyMetaDateToUrl } from '@/lib/period-utils';
 
@@ -127,10 +128,30 @@ const systemTools: Anthropic.Tool[] = [
       type: 'object' as const,
       properties: {
         client_id: { type: 'string', description: 'ID do cliente' },
-        period: { type: 'string', description: 'Período do relatório (padrão: THIS_MONTH)' },
+        period: { type: 'string', description: 'Período do relatório (padrão: this_month)' },
       },
       required: ['client_id'],
     },
+  },
+  {
+    name: 'send_report_pdf_whatsapp',
+    description: 'Gera um relatório de performance em PDF e envia via WhatsApp usando Z-API. Use quando o usuário pedir para enviar o relatório de um cliente pelo WhatsApp. Se não souber qual Z-API usar, pergunte ao usuário.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        client_id: { type: 'string', description: 'ID do cliente para gerar o relatório' },
+        phone: { type: 'string', description: 'Número do WhatsApp com DDI (ex: 5511999999999)' },
+        period: { type: 'string', description: 'Período: this_month, last_month, last_30d, last_7d (padrão: this_month)' },
+        caption: { type: 'string', description: 'Mensagem de texto que acompanha o PDF (opcional)' },
+        zapi_client_id: { type: 'string', description: 'ID da conexão Z-API a usar. Se não souber, use list_zapi_clients primeiro.' },
+      },
+      required: ['client_id', 'phone'],
+    },
+  },
+  {
+    name: 'list_zapi_clients',
+    description: 'Lista as conexões Z-API disponíveis para envio de WhatsApp.',
+    input_schema: { type: 'object' as const, properties: {}, required: [] },
   },
 ];
 
@@ -408,6 +429,86 @@ async function execSystemTool(name: string, input: Record<string, any>): Promise
         meta_campaigns: metaResult.status === 'fulfilled' ? JSON.parse(metaResult.value) : [],
         google_campaigns: googleResult.status === 'fulfilled' ? JSON.parse(googleResult.value) : [],
       });
+    }
+
+    if (name === 'list_zapi_clients') {
+      const { rows } = await pool.query('SELECT id, name, instance_id, active FROM public.zapi_clients ORDER BY name ASC');
+      if (rows.length === 0) return 'Nenhuma conexão Z-API cadastrada. Configure uma em Disparos.';
+      return JSON.stringify(rows.map(r => ({ id: r.id, name: r.name, instance_id: r.instance_id, active: r.active })));
+    }
+
+    if (name === 'send_report_pdf_whatsapp') {
+      const { client_id, phone, period = 'this_month', caption, zapi_client_id } = input as {
+        client_id: string; phone: string; period?: string; caption?: string; zapi_client_id?: string;
+      };
+
+      // Get client name
+      const { rows: clientRows } = await pool.query('SELECT name FROM public.clients WHERE id = $1', [client_id]);
+      if (!clientRows[0]) return 'Cliente não encontrado.';
+      const clientName = clientRows[0].name as string;
+
+      // Resolve Z-API connection
+      let zapiConn: { instance_id: string; token: string; security_token?: string } | null = null;
+      if (zapi_client_id) {
+        const { rows } = await pool.query('SELECT instance_id, token, security_token FROM public.zapi_clients WHERE id = $1', [zapi_client_id]);
+        if (rows[0]) zapiConn = rows[0];
+      }
+      // Fallback: first active Z-API
+      if (!zapiConn) {
+        const { rows } = await pool.query("SELECT instance_id, token, security_token FROM public.zapi_clients WHERE active = true ORDER BY created_at ASC LIMIT 1");
+        if (rows[0]) zapiConn = rows[0];
+      }
+      // Also check external tools configured in Luna for Z-API
+      if (!zapiConn) {
+        const { rows } = await pool.query("SELECT config FROM public.agent_external_tools WHERE type = 'zapi_whatsapp' AND enabled = true LIMIT 1");
+        if (rows[0]?.config?.instance_id) {
+          zapiConn = { instance_id: rows[0].config.instance_id, token: rows[0].config.token, security_token: rows[0].config.security_token };
+        }
+      }
+      if (!zapiConn) return 'Nenhuma conexão Z-API encontrada. Use list_zapi_clients para ver as disponíveis.';
+
+      // Fetch campaign and CRM data
+      let metaCampaigns: Record<string, unknown>[] = [];
+      let googleCampaigns: Record<string, unknown>[] = [];
+      let crmLeads: Record<string, unknown>[] = [];
+
+      try {
+        const metaRaw = await execSystemTool('get_meta_campaigns', { client_id, period });
+        if (metaRaw && !metaRaw.startsWith('Nenhuma') && !metaRaw.startsWith('Erro')) metaCampaigns = JSON.parse(metaRaw);
+      } catch { /* ignore */ }
+      try {
+        const googleRaw = await execSystemTool('get_google_campaigns', { client_id, period });
+        if (googleRaw && !googleRaw.startsWith('Nenhuma') && !googleRaw.startsWith('Erro')) googleCampaigns = JSON.parse(googleRaw);
+      } catch { /* ignore */ }
+      try {
+        const crmRaw = await execSystemTool('get_crm_data', { client_id, limit: 30 });
+        if (crmRaw && !crmRaw.startsWith('Nenhum') && !crmRaw.startsWith('Erro')) crmLeads = JSON.parse(crmRaw);
+      } catch { /* ignore */ }
+
+      // Generate PDF
+      const periodLabels: Record<string, string> = {
+        'this_month': 'Mês Atual', 'last_month': 'Mês Anterior',
+        'last_30d': 'Últimos 30 dias', 'last_7d': 'Últimos 7 dias',
+      };
+      const pdfBuffer = await generateReportPdf({
+        clientName,
+        period: periodLabels[period] ?? period,
+        metaCampaigns,
+        googleCampaigns,
+        crmLeads,
+      });
+
+      const b64 = pdfBuffer.toString('base64');
+      const fileName = `Relatorio_${clientName.replace(/\s+/g, '_')}_${period}.pdf`;
+      const msgCaption = caption ?? `📊 Relatório de Performance — ${clientName}\nPeríodo: ${periodLabels[period] ?? period}\n\nGerado via Luna IA · Onmid Reports`;
+
+      const result = await sendDocument(
+        { instanceId: zapiConn.instance_id, token: zapiConn.token, clientToken: zapiConn.security_token },
+        phone, b64, fileName, msgCaption
+      );
+
+      if (result.ok) return `✅ Relatório de ${clientName} enviado com sucesso para ${phone}!`;
+      return `❌ PDF gerado mas falha ao enviar: ${result.error}`;
     }
 
     return 'Ferramenta desconhecida.';
