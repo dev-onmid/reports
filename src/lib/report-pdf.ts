@@ -1,4 +1,4 @@
-import PDFDocument from 'pdfkit';
+type PDFDocumentType = typeof import('pdfkit');
 
 type CampaignRow = Record<string, unknown>;
 
@@ -35,6 +35,8 @@ function sumField(rows: CampaignRow[], field: string): number {
 }
 
 export async function generateReportPdf(data: ReportPdfData): Promise<Buffer> {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const PDFDocument = require('pdfkit') as PDFDocumentType;
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: 'A4', margin: 0, info: { Title: `Relatório ${data.clientName}`, Author: 'Onmid Reports' } });
     const chunks: Buffer[] = [];
