@@ -2612,6 +2612,7 @@ function SheetsResultsTab({ clientId }: { clientId: string }) {
   const [loadingUrl, setLoadingUrl]     = useState(true);
   const [salesRows, setSalesRows]       = useState<CrmSaleRow[]>([]);
   const [salesLoading, setSalesLoading] = useState(true);
+  const [clearingSales, setClearingSales] = useState(false);
 
   useEffect(() => {
     fetch(`/api/clients/${clientId}/sheets`)
@@ -2662,6 +2663,30 @@ function SheetsResultsTab({ clientId }: { clientId: string }) {
     if (!res.ok || data.error) { setError(data.error ?? 'Erro ao analisar.'); return; }
     setResult(data);
     setAnalyzedAt(new Date().toISOString());
+  }
+
+  async function handleClearImportedSales() {
+    if (salesRows.length === 0 || clearingSales) return;
+    const confirmed = window.confirm('Apagar as vendas importadas deste cliente? Esta ação limpa a importação atual para você enviar outra planilha.');
+    if (!confirmed) return;
+
+    setClearingSales(true);
+    setError('');
+    try {
+      const res = await fetch(`/api/crm?clientId=${encodeURIComponent(clientId)}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({})) as { error?: string };
+      if (!res.ok || data.error) {
+        setError(data.error ?? 'Erro ao limpar vendas importadas.');
+        return;
+      }
+      setSalesRows([]);
+      setResult(null);
+      setAnalyzedAt(null);
+    } catch {
+      setError('Erro de conexão ao limpar vendas importadas.');
+    } finally {
+      setClearingSales(false);
+    }
   }
 
   const urlChanged = sheetsUrl.trim() !== savedUrl;
@@ -2769,7 +2794,19 @@ function SheetsResultsTab({ clientId }: { clientId: string }) {
                 : `${salesRows.length.toLocaleString('pt-BR')} venda${salesRows.length === 1 ? '' : 's'} com faturamento`}
             </p>
           </div>
-          <p className="text-sm font-bold text-primary">{fmtBRL(importedRevenue)}</p>
+          <div className="flex items-center gap-3">
+            <p className="text-sm font-bold text-primary">{fmtBRL(importedRevenue)}</p>
+            {salesRows.length > 0 && (
+              <button
+                type="button"
+                onClick={handleClearImportedSales}
+                disabled={clearingSales}
+                className="rounded-lg border border-red-500/30 px-3 py-1.5 text-xs font-bold text-red-300 transition-colors hover:bg-red-500/10 disabled:opacity-50"
+              >
+                {clearingSales ? 'Limpando...' : 'Limpar importação'}
+              </button>
+            )}
+          </div>
         </div>
         {salesRows.length > 0 ? (
           <div className="max-h-96 overflow-y-auto divide-y divide-border">

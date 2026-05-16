@@ -112,3 +112,18 @@ export async function POST(req: NextRequest) {
     await pool.end();
   }
 }
+
+export async function DELETE(req: NextRequest) {
+  const clientId = new URL(req.url).searchParams.get('clientId');
+  if (!clientId) return Response.json({ error: 'clientId required' }, { status: 400 });
+
+  const pool = makeServerPool();
+  try {
+    await ensureTable(pool);
+    await pool.query(`DELETE FROM public.crm_leads WHERE client_id = $1`, [clientId]);
+    await pool.query(`DELETE FROM public.crm_uploads WHERE client_id = $1`, [clientId]).catch(() => null);
+    return Response.json({ ok: true });
+  } finally {
+    await pool.end();
+  }
+}

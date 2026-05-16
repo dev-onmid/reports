@@ -56,6 +56,21 @@ function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Erro inesperado ao processar planilha.';
 }
 
+function findHeader(headers: string[], patterns: RegExp[]): string | null {
+  return headers.find(header => patterns.some(pattern => pattern.test(header))) ?? null;
+}
+
+function compactDetails(parts: Array<[string, unknown]>): string | null {
+  const text = parts
+    .map(([label, value]) => {
+      const normalized = String(value ?? '').trim();
+      return normalized ? `${label}: ${normalized}` : '';
+    })
+    .filter(Boolean)
+    .join(' | ');
+  return text || null;
+}
+
 async function detectColumnsWithClaude(
   headers: string[],
   sampleRows: Record<string, unknown>[],
@@ -155,6 +170,14 @@ async function ensureTables(pool: ReturnType<typeof makeServerPool>) {
       ADD COLUMN IF NOT EXISTS upload_id UUID,
       ADD COLUMN IF NOT EXISTS lead_date DATE,
       ADD COLUMN IF NOT EXISTS lead_name TEXT,
+      ADD COLUMN IF NOT EXISTS data DATE,
+      ADD COLUMN IF NOT EXISTS nome TEXT,
+      ADD COLUMN IF NOT EXISTS canal TEXT,
+      ADD COLUMN IF NOT EXISTS observacao TEXT,
+      ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'Fechado',
+      ADD COLUMN IF NOT EXISTS status_category TEXT,
+      ADD COLUMN IF NOT EXISTS fechou BOOLEAN DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS valor_rs NUMERIC,
       ADD COLUMN IF NOT EXISTS revenue NUMERIC DEFAULT 0,
       ADD COLUMN IF NOT EXISTS raw JSONB,
       ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()
@@ -168,7 +191,10 @@ async function insertLeadBatch(
     clientId: string;
     leadDate: string | null;
     leadName: string | null;
+    channel: string | null;
+    notes: string | null;
     revenue: number;
+    closed: boolean;
     raw: string;
   }>,
 ) {
@@ -176,13 +202,29 @@ async function insertLeadBatch(
 
   const values: unknown[] = [];
   const placeholders = rows.map((row, index) => {
-    const base = index * 6;
-    values.push(row.uploadId, row.clientId, row.leadDate, row.leadName, row.revenue, row.raw);
-    return `($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5},$${base + 6})`;
+    const base = index * 14;
+    values.push(
+      row.uploadId,
+      row.clientId,
+      row.leadDate,
+      row.leadName,
+      row.leadDate,
+      row.leadName,
+      row.channel,
+      row.notes,
+      row.revenue,
+      row.revenue,
+      row.closed,
+      row.closed ? 'won' : null,
+      row.closed ? 'Fechado' : null,
+      row.raw,
+    );
+    return `($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5},$${base + 6},$${base + 7},$${base + 8},$${base + 9},$${base + 10},$${base + 11},$${base + 12},$${base + 13},$${base + 14})`;
   }).join(',');
 
   await pool.query(
-    `INSERT INTO public.crm_leads (upload_id, client_id, lead_date, lead_name, revenue, raw)
+    `INSERT INTO public.crm_leads
+      (upload_id, client_id, lead_date, lead_name, data, nome, canal, observacao, revenue, valor_rs, fechou, status_category, status, raw)
      VALUES ${placeholders}`,
     values,
   );
@@ -252,6 +294,11 @@ export async function POST(req: NextRequest) {
     const revenueCol = revenueColumnOverride || null;
     const dateCol = dateColumnOverride || null;
     const nameCol = nameColumnOverride || null;
+    const channelCol = findHeader(headers, [/como\s+nos\s+conheceu/i, /canal/i, /origem/i, /source/i, /m[ií]dia/i]);
+    const specialtiesCol = findHeader(headers, [/especialidades/i]);
+    const treatmentsCol = findHeader(headers, [/tratamentos/i]);
+    const saleTypeCol = findHeader(headers, [/tipo\s+venda/i]);
+    const userCol = findHeader(headers, [/usu[aá]rio/i, /vendedor/i, /consultor/i]);
 
     if (clinicCol && !headers.includes(clinicCol)) return Response.json({ error: `Coluna de clínica não encontrada: ${clinicCol}` }, { status: 400 });
     if (revenueCol && !headers.includes(revenueCol)) return Response.json({ error: `Coluna de faturamento não encontrada: ${revenueCol}` }, { status: 400 });
@@ -264,6 +311,8 @@ export async function POST(req: NextRequest) {
     const results: Record<string, number> = {};
 
     try {
+      const rowsByClient = new Map<string, Record<string, unknown>[]>();
+
       for (const m of mappings) {
         if (!m.clientId) continue;
 
@@ -272,29 +321,49 @@ export async function POST(req: NextRequest) {
           : rows;
 
         if (clientRows.length === 0) { results[m.clinicValue] = 0; continue; }
+        results[m.clinicValue] = clientRows.length;
 
+        const current = rowsByClient.get(m.clientId);
+        if (current) {
+          current.push(...clientRows);
+        } else {
+          rowsByClient.set(m.clientId, [...clientRows]);
+        }
+      }
+
+      for (const [clientId, groupedRows] of rowsByClient) {
         // Remove existing spreadsheet data for this client before replacing it.
-        await pool.query(`DELETE FROM public.crm_leads WHERE client_id = $1`, [m.clientId]);
-        await pool.query(`DELETE FROM public.crm_uploads WHERE client_id = $1`, [m.clientId]);
+        await pool.query(`DELETE FROM public.crm_leads WHERE client_id = $1`, [clientId]);
+        await pool.query(`DELETE FROM public.crm_uploads WHERE client_id = $1`, [clientId]);
 
         const { rows: [upload] } = await pool.query(
           `INSERT INTO public.crm_uploads (client_id, filename, column_mapping, row_count, raw_rows)
            VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-          [m.clientId, file.name, JSON.stringify({ clinic: clinicCol, revenue: revenueCol, date: dateCol, name: nameCol }), clientRows.length, JSON.stringify(clientRows.slice(0, 500))],
+          [clientId, file.name, JSON.stringify({ clinic: clinicCol, revenue: revenueCol, date: dateCol, name: nameCol }), groupedRows.length, JSON.stringify(groupedRows.slice(0, 500))],
         );
 
-        for (let i = 0; i < clientRows.length; i += 150) {
-          const batch = clientRows.slice(i, i + 150).map((row) => ({
-            uploadId: upload.id as string,
-            clientId: m.clientId,
-            leadDate: dateCol ? parseDate(row[dateCol]) : null,
-            leadName: nameCol ? String(row[nameCol] ?? '') : null,
-            revenue: revenueCol ? parseRevenue(row[revenueCol]) : 0,
-            raw: JSON.stringify(row),
-          }));
+        for (let i = 0; i < groupedRows.length; i += 150) {
+          const batch = groupedRows.slice(i, i + 150).map((row) => {
+            const revenue = revenueCol ? parseRevenue(row[revenueCol]) : 0;
+            return {
+              uploadId: upload.id as string,
+              clientId,
+              leadDate: dateCol ? parseDate(row[dateCol]) : null,
+              leadName: nameCol ? String(row[nameCol] ?? '') : null,
+              channel: channelCol ? String(row[channelCol] ?? '').trim() || null : null,
+              notes: compactDetails([
+                ['Especialidades', specialtiesCol ? row[specialtiesCol] : null],
+                ['Tratamentos', treatmentsCol ? row[treatmentsCol] : null],
+                ['Tipo venda', saleTypeCol ? row[saleTypeCol] : null],
+                ['Usuário', userCol ? row[userCol] : null],
+              ]),
+              revenue,
+              closed: revenue > 0,
+              raw: JSON.stringify(row),
+            };
+          });
           await insertLeadBatch(pool, batch);
         }
-        results[m.clinicValue] = clientRows.length;
       }
 
       return Response.json({ ok: true, results });

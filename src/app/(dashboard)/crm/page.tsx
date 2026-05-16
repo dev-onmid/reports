@@ -29,7 +29,7 @@ type CrmLead = {
 
 type Draft = Partial<Omit<CrmLead, 'id' | 'client_id' | 'created_at'>>;
 
-const STATUS_OPTIONS = ['Em Atendimento', 'Agendado', 'Reagendado', 'Não Retorna', 'Distante', 'Sem Interesse', 'Desqualificado'];
+const STATUS_OPTIONS = ['Em Atendimento', 'Agendado', 'Reagendado', 'Fechado', 'Não Retorna', 'Distante', 'Sem Interesse', 'Desqualificado'];
 const CANAL_OPTIONS  = ['Facebook', 'Instagram', 'Google', 'WHATS PRINCIPAL', 'FACHADA', 'Outro'];
 const PAGAMENTO_OPTIONS = ['Boleto', 'Cartão', 'PIX', 'Dinheiro', 'Financiamento'];
 
@@ -37,6 +37,7 @@ const STATUS_BADGE: Record<string, { pill: string; dot: string }> = {
   'Em Atendimento': { pill: 'bg-blue-500/15 text-blue-400 border border-blue-500/25',   dot: 'bg-blue-400' },
   'Agendado':       { pill: 'bg-amber-500/15 text-amber-400 border border-amber-500/25', dot: 'bg-amber-400' },
   'Reagendado':     { pill: 'bg-orange-500/15 text-orange-400 border border-orange-500/25', dot: 'bg-orange-400' },
+  'Fechado':         { pill: 'bg-primary/15 text-primary border border-primary/25', dot: 'bg-primary' },
   'Não Retorna':    { pill: 'bg-gray-500/15 text-gray-400 border border-gray-500/25',    dot: 'bg-gray-400' },
   'Distante':       { pill: 'bg-gray-500/15 text-gray-400 border border-gray-500/25',    dot: 'bg-gray-400' },
   'Sem Interesse':  { pill: 'bg-red-500/15 text-red-400 border border-red-500/25',       dot: 'bg-red-400' },
@@ -47,6 +48,7 @@ const STATUS_COLOR: Record<string, string> = {
   'Em Atendimento': 'text-blue-400',
   'Agendado':       'text-amber-400',
   'Reagendado':     'text-orange-400',
+  'Fechado':         'text-primary',
   'Não Retorna':    'text-gray-400',
   'Distante':       'text-gray-400',
   'Sem Interesse':  'text-red-400',
@@ -738,7 +740,9 @@ export default function CrmPage() {
                                   {canal.short}
                                 </span>
                               </div>
-                            : <span className="px-2 text-muted-foreground text-[11px]">–</span>}
+                            : lead.canal
+                              ? <span className="px-2 block max-w-20 truncate text-[11px] font-semibold text-primary" title={lead.canal}>{lead.canal}</span>
+                              : <span className="px-2 text-muted-foreground text-[11px]">–</span>}
                       </Td>
                       {/* Status */}
                       <Td>
