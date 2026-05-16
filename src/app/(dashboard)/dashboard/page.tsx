@@ -86,7 +86,7 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
 
 const EMPTY_AUDIENCE: AudienceResponse = {
   meta: { age: [], gender: [], platform: [], device: [] },
-  google: { age: [], gender: [], platform: [], device: [] },
+  google: { age: [], gender: [], platform: [], device: [], platformConversions: [], deviceConversions: [] },
 };
 
 const META_AUDIENCE_COLORS = ['#0B84FF', '#55F52F', '#7B2CFF', '#38BDF8', '#F59E0B', '#EC4899', '#EF4444', '#A3E635'];
@@ -96,6 +96,8 @@ const AUDIENCE_TITLES: Record<AudienceKey, string> = {
   gender: 'Gênero',
   platform: 'Plataforma',
   device: 'Dispositivo',
+  platformConversions: 'Conv. por Plataforma',
+  deviceConversions: 'Conv. por Dispositivo',
 };
 
 function polarToCartesian(cx: number, cy: number, radius: number, angleInDegrees: number) {
@@ -1961,14 +1963,18 @@ function AudiencePlatformBlock({
   color,
   colors,
   data,
+  extraKeys,
 }: {
   title: string;
   description: string;
   color: string;
   colors: string[];
   data: AudienceBreakdowns;
+  extraKeys?: AudienceKey[];
 }) {
-  const keys: AudienceKey[] = ['age', 'gender', 'platform', 'device'];
+  const baseKeys: AudienceKey[] = ['age', 'gender', 'platform', 'device'];
+  const allKeys = extraKeys ? [...baseKeys, ...extraKeys] : baseKeys;
+  const colClass = allKeys.length > 4 ? 'md:grid-cols-2 xl:grid-cols-3' : 'md:grid-cols-2 xl:grid-cols-4';
   return (
     <div className="relative flex h-full flex-col overflow-hidden rounded-xl border border-white/5 bg-background/30 p-4">
       <div className="pointer-events-none absolute inset-0" style={{ background: `radial-gradient(circle at 8% 0%, ${color}14, transparent 34%)` }} />
@@ -1979,8 +1985,8 @@ function AudiencePlatformBlock({
           <p className="mt-0.5 text-[11px] text-muted-foreground">{description}</p>
         </div>
       </div>
-      <div className="relative mt-4 grid flex-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-        {keys.map((key) => (
+      <div className={`relative mt-4 grid flex-1 gap-3 ${colClass}`}>
+        {allKeys.map((key) => (
           <AudiencePieCard key={key} title={AUDIENCE_TITLES[key]} data={data[key]} colors={colors} />
         ))}
       </div>
@@ -2969,13 +2975,13 @@ export default function GeneralDashboard() {
                     <span className="text-xs font-bold text-foreground">META ADS</span>
                   </div>
                   <div className="flex flex-1 items-center justify-center py-2">
-                    <CircularQuality pct={metricsLoading ? 0 : Math.round(metaLeads > 0 ? Math.min((metaLeads / Math.max(metaLeads + googleConv, 1)) * 100, 100) : 0)} color="#0B84FF" size={160} />
+                    <CircularQuality pct={metricsLoading ? 0 : Math.round(metaLeads > 0 ? Math.min((metaLeads / Math.max(metaLeads + googleConv, 1)) * 100, 100) : 0)} color="#0B84FF" size={180} />
                   </div>
-                  <div className="mt-3 space-y-2 text-xs border-t border-white/5 pt-3">
-                    <div className="flex justify-between"><span className="text-muted-foreground">Investimento</span><span className="font-bold">{formatCurrencyBRL(metaSpend)}</span></div>
-                    <div className="flex justify-between"><span className="text-muted-foreground">Leads</span><span className="font-bold">{metaLeads.toLocaleString('pt-BR')}</span></div>
-                    <div className="flex justify-between"><span className="text-muted-foreground">CPL</span><span className={cn('font-bold', metaLeadCost !== null && metaLeadCost > 0 ? 'text-foreground' : 'text-muted-foreground')}>{metaLeadCost !== null ? formatCurrencyBRL(metaLeadCost) : '—'}</span></div>
-                    <div className="flex justify-between"><span className="text-muted-foreground">ROI</span><span className={cn('font-bold', metaRoi > 0 ? 'text-emerald-400' : 'text-muted-foreground')}>{metaRoi.toFixed(2)}x</span></div>
+                  <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2.5 text-xs border-t border-white/5 pt-3">
+                    <div><p className="text-muted-foreground leading-none mb-0.5">Investimento</p><p className="font-bold">{formatCurrencyBRL(metaSpend)}</p></div>
+                    <div><p className="text-muted-foreground leading-none mb-0.5">Leads</p><p className="font-bold">{metaLeads.toLocaleString('pt-BR')}</p></div>
+                    <div><p className="text-muted-foreground leading-none mb-0.5">CPL</p><p className={cn('font-bold', metaLeadCost !== null && metaLeadCost > 0 ? 'text-foreground' : 'text-muted-foreground')}>{metaLeadCost !== null ? formatCurrencyBRL(metaLeadCost) : '—'}</p></div>
+                    <div><p className="text-muted-foreground leading-none mb-0.5">ROI</p><p className={cn('font-bold', metaRoi > 0 ? 'text-emerald-400' : 'text-muted-foreground')}>{metaRoi.toFixed(2)}x</p></div>
                   </div>
                 </div>
                 {/* Google */}
@@ -2986,16 +2992,16 @@ export default function GeneralDashboard() {
                     <span className="text-xs font-bold text-foreground">GOOGLE ADS</span>
                   </div>
                   <div className="flex flex-1 items-center justify-center py-2">
-                    <CircularQuality pct={metricsLoading ? 0 : Math.round(googleConv > 0 ? Math.min((googleConv / Math.max(metaLeads + googleConv, 1)) * 100, 100) : 0)} color="#EA4335" size={160} />
+                    <CircularQuality pct={metricsLoading ? 0 : Math.round(googleConv > 0 ? Math.min((googleConv / Math.max(metaLeads + googleConv, 1)) * 100, 100) : 0)} color="#EA4335" size={180} />
                   </div>
                   {googleCost === 0 && !metricsLoading ? (
                     <p className="mt-3 text-[11px] text-muted-foreground border-t border-white/5 pt-3">Sem investimento no período</p>
                   ) : (
-                    <div className="mt-3 space-y-2 text-xs border-t border-white/5 pt-3">
-                      <div className="flex justify-between"><span className="text-muted-foreground">Investimento</span><span className="font-bold">{formatCurrencyBRL(googleCost)}</span></div>
-                      <div className="flex justify-between"><span className="text-muted-foreground">Conversões</span><span className="font-bold">{googleConv.toLocaleString('pt-BR')}</span></div>
-                      <div className="flex justify-between"><span className="text-muted-foreground">CPA</span><span className={cn('font-bold', googleLeadCost !== null && googleLeadCost > 0 ? 'text-foreground' : 'text-muted-foreground')}>{googleLeadCost !== null ? formatCurrencyBRL(googleLeadCost) : '—'}</span></div>
-                      <div className="flex justify-between"><span className="text-muted-foreground">ROI</span><span className={cn('font-bold', googleRoi > 0 ? 'text-emerald-400' : 'text-muted-foreground')}>{googleRoi.toFixed(2)}x</span></div>
+                    <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2.5 text-xs border-t border-white/5 pt-3">
+                      <div><p className="text-muted-foreground leading-none mb-0.5">Investimento</p><p className="font-bold">{formatCurrencyBRL(googleCost)}</p></div>
+                      <div><p className="text-muted-foreground leading-none mb-0.5">Conversões</p><p className="font-bold">{googleConv.toLocaleString('pt-BR')}</p></div>
+                      <div><p className="text-muted-foreground leading-none mb-0.5">CPA</p><p className={cn('font-bold', googleLeadCost !== null && googleLeadCost > 0 ? 'text-foreground' : 'text-muted-foreground')}>{googleLeadCost !== null ? formatCurrencyBRL(googleLeadCost) : '—'}</p></div>
+                      <div><p className="text-muted-foreground leading-none mb-0.5">ROI</p><p className={cn('font-bold', googleRoi > 0 ? 'text-emerald-400' : 'text-muted-foreground')}>{googleRoi.toFixed(2)}x</p></div>
                     </div>
                   )}
                 </div>
@@ -3161,7 +3167,7 @@ export default function GeneralDashboard() {
                         </div>
                         <CampaignPerformanceTable campaigns={googleCampaigns} loading={campaignsLoading} period={period} dateFrom={customDateFrom} dateTo={customDateTo} />
                       </div>
-                      <AudiencePlatformBlock title="Google Ads" description="Recortes por idade, gênero, plataforma e dispositivo." color="#EA4335" colors={GOOGLE_AUDIENCE_COLORS} data={audience.google} />
+                      <AudiencePlatformBlock title="Google Ads" description="Recortes por idade, gênero, plataforma, dispositivo e conversões." color="#EA4335" colors={GOOGLE_AUDIENCE_COLORS} data={audience.google} extraKeys={['platformConversions', 'deviceConversions']} />
                     </div>
                   </MetricSection>
                 )}

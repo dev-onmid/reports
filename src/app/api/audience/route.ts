@@ -10,13 +10,15 @@ export type AudienceBreakdowns = {
   gender: AudienceSlice[];
   platform: AudienceSlice[];
   device: AudienceSlice[];
+  platformConversions: AudienceSlice[];
+  deviceConversions: AudienceSlice[];
 };
 export type AudienceResponse = {
   meta: AudienceBreakdowns;
   google: AudienceBreakdowns;
 };
 
-const EMPTY_BREAKDOWNS: AudienceBreakdowns = { age: [], gender: [], platform: [], device: [] };
+const EMPTY_BREAKDOWNS: AudienceBreakdowns = { age: [], gender: [], platform: [], device: [], platformConversions: [], deviceConversions: [] };
 const DEV_TOKEN = process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? '1vR8GhAk4UMZoPaqo7Qq8Q';
 
 const META_PLATFORM_LABELS: Record<string, string> = {
@@ -194,6 +196,7 @@ async function fetchGoogleBreakdown(
   gaqlPeriod: string,
   segment: 'ageRange' | 'gender' | 'device' | 'adNetworkType',
   labelMap: Record<string, string> = {},
+  metric: 'impressions' | 'conversions' = 'impressions',
 ) {
   const segmentField = {
     ageRange: 'segments.age_range',
@@ -203,7 +206,7 @@ async function fetchGoogleBreakdown(
   }[segment];
   const data = await gadsSearch(
     accountId,
-    `SELECT ${segmentField}, metrics.impressions, metrics.cost_micros
+    `SELECT ${segmentField}, metrics.impressions, metrics.conversions, metrics.cost_micros
      FROM campaign
      WHERE ${gaqlPeriod}
        AND metrics.cost_micros > 0`,
@@ -213,10 +216,10 @@ async function fetchGoogleBreakdown(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return ((data?.results ?? []) as any[]).map((row) => {
     const raw = String(row.segments?.[segment] ?? 'UNKNOWN');
-    return {
-      label: labelMap[raw] ?? raw.replaceAll('_', ' '),
-      value: Number(row.metrics?.impressions ?? 0),
-    };
+    const value = metric === 'conversions'
+      ? Number(row.metrics?.conversions ?? 0)
+      : Number(row.metrics?.impressions ?? 0);
+    return { label: labelMap[raw] ?? raw.replaceAll('_', ' '), value };
   });
 }
 
@@ -292,6 +295,8 @@ export async function GET(request: NextRequest) {
     gender: new Map<string, number>(),
     platform: new Map<string, number>(),
     device: new Map<string, number>(),
+    platformConversions: new Map<string, number>(),
+    deviceConversions: new Map<string, number>(),
   };
   const metaPeriod = resolveMetaPeriod(period, dateFrom, dateTo);
   const gaqlPeriod = resolveGaqlPeriod(period, dateFrom, dateTo);
@@ -329,11 +334,13 @@ export async function GET(request: NextRequest) {
       const normalizedAccountId = normalizeGoogleCustomerId(accountId);
       if (!normalizedAccountId || seenGoogleAccounts.has(normalizedAccountId)) return;
       const loginCustomerId = mccMap[normalizedAccountId];
-      const [age, gender, platform, device] = await Promise.all([
+      const [age, gender, platform, device, platformConv, deviceConv] = await Promise.all([
         fetchGoogleBreakdown(normalizedAccountId, accessToken, loginCustomerId, gaqlPeriod, 'ageRange', GOOGLE_AGE_LABELS),
         fetchGoogleBreakdown(normalizedAccountId, accessToken, loginCustomerId, gaqlPeriod, 'gender', GOOGLE_GENDER_LABELS),
         fetchGoogleBreakdown(normalizedAccountId, accessToken, loginCustomerId, gaqlPeriod, 'adNetworkType', GOOGLE_PLATFORM_LABELS),
         fetchGoogleBreakdown(normalizedAccountId, accessToken, loginCustomerId, gaqlPeriod, 'device', GOOGLE_DEVICE_LABELS),
+        fetchGoogleBreakdown(normalizedAccountId, accessToken, loginCustomerId, gaqlPeriod, 'adNetworkType', GOOGLE_PLATFORM_LABELS, 'conversions'),
+        fetchGoogleBreakdown(normalizedAccountId, accessToken, loginCustomerId, gaqlPeriod, 'device', GOOGLE_DEVICE_LABELS, 'conversions'),
       ]);
       if (age.length > 0 || gender.length > 0 || platform.length > 0 || device.length > 0) {
         seenGoogleAccounts.add(normalizedAccountId);
@@ -342,6 +349,8 @@ export async function GET(request: NextRequest) {
       gender.forEach((item) => addSlice(googleMaps.gender, item.label, item.value));
       platform.forEach((item) => addSlice(googleMaps.platform, item.label, item.value));
       device.forEach((item) => addSlice(googleMaps.device, item.label, item.value));
+      platformConv.forEach((item) => addSlice(googleMaps.platformConversions, item.label, item.value));
+      deviceConv.forEach((item) => addSlice(googleMaps.deviceConversions, item.label, item.value));
     }));
   }));
 
@@ -357,6 +366,8 @@ export async function GET(request: NextRequest) {
       gender: mapToSlices(googleMaps.gender),
       platform: mapToSlices(googleMaps.platform),
       device: mapToSlices(googleMaps.device),
+      platformConversions: mapToSlices(googleMaps.platformConversions),
+      deviceConversions: mapToSlices(googleMaps.deviceConversions),
     },
   } satisfies AudienceResponse);
 }
