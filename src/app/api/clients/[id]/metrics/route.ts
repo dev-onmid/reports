@@ -226,8 +226,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const crmRows = await safeRows(
       pool,
       `SELECT
-          COALESCE(SUM(COALESCE(revenue, valor_rs, 0)), 0)::float AS revenue,
-          COUNT(*) FILTER (WHERE COALESCE(revenue, valor_rs, 0) > 0 OR fechou = TRUE)::int AS sales,
+          COALESCE(SUM(COALESCE(NULLIF(revenue, 0), valor_rs, 0)), 0)::float AS revenue,
+          COUNT(*) FILTER (WHERE COALESCE(NULLIF(revenue, 0), valor_rs, 0) > 0 OR fechou = TRUE)::int AS sales,
           COUNT(*)::int AS leads
          FROM public.crm_leads
         WHERE client_id = $1

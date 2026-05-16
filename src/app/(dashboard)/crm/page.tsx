@@ -20,7 +20,7 @@ type CrmLead = {
   dia1: boolean; dia2: boolean; dia3: boolean; dia4: boolean;
   status: string | null; data_agendada: string | null;
   video_dra: boolean; compareceu: boolean; observacao: string | null;
-  orcamento: number | null; fechou: boolean; valor_rs: number | null;
+  orcamento: number | string | null; fechou: boolean; valor_rs: number | string | null;
   pagamento: string | null; analise_credito: boolean;
   data_nasc: string | null; bairro: string | null;
   motivacoes: string | null; dores: string | null;
@@ -83,14 +83,28 @@ function fmtTime(v: string | null) {
   try { return new Date(v).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }); }
   catch { return ''; }
 }
-function fmtN(v: number | null) { return v ? formatCurrencyBRL(v) : ''; }
+function toMoneyNumber(value: number | string | null | undefined) {
+  if (value === null || value === undefined || value === '') return 0;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  const normalized = value
+    .trim()
+    .replace(/[^\d,.-]/g, '')
+    .replace(/\.(?=\d{3}(?:\D|$))/g, '')
+    .replace(',', '.');
+  const parsed = Number.parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+function fmtN(v: number | string | null) {
+  const value = toMoneyNumber(v);
+  return value ? formatCurrencyBRL(value) : '';
+}
 function plain(v: unknown) { return String(v ?? '').toLowerCase(); }
 function dateText(v: string | null) {
   const shortDate = fmtD(v);
   const rawDate = toD(v);
   return `${shortDate} ${rawDate}`.toLowerCase();
 }
-function moneyText(v: number | null) {
+function moneyText(v: number | string | null) {
   return `${v ?? ''} ${fmtN(v)}`.toLowerCase();
 }
 
@@ -408,15 +422,15 @@ export default function CrmPage() {
   const paginated  = filtered.slice((page - 1) * pageSize, page * pageSize);
   const tableMinWidth = useMemo(() => COLS.reduce((sum, col) => sum + colWidths[col.key], 0), [colWidths]);
   const filteredTotals = useMemo(() => ({
-    faturamento: filtered.reduce((sum, lead) => sum + (lead.valor_rs ?? 0), 0),
-    orcamento: filtered.reduce((sum, lead) => sum + (lead.orcamento ?? 0), 0),
+    faturamento: filtered.reduce((sum, lead) => sum + toMoneyNumber(lead.valor_rs), 0),
+    orcamento: filtered.reduce((sum, lead) => sum + toMoneyNumber(lead.orcamento), 0),
   }), [filtered]);
 
   const stats = useMemo(() => ({
     total:       leads.length,
     agendados:   leads.filter(l => l.status === 'Agendado' || l.status === 'Reagendado').length,
     fechamentos: leads.filter(l => l.fechou).length,
-    faturamento: leads.filter(l => l.fechou).reduce((s, l) => s + (l.valor_rs ?? 0), 0),
+    faturamento: leads.filter(l => l.fechou).reduce((s, l) => s + toMoneyNumber(l.valor_rs), 0),
   }), [leads]);
 
   async function saveNew() {

@@ -64,7 +64,7 @@ export async function GET(req: NextRequest) {
       `SELECT *,
           COALESCE(lead_date, data) AS normalized_date,
           COALESCE(lead_name, nome) AS normalized_name,
-          COALESCE(revenue, valor_rs, 0)::float AS normalized_revenue
+          COALESCE(NULLIF(revenue, 0), valor_rs, 0)::float AS normalized_revenue
          FROM public.crm_leads
         WHERE client_id = $1
         ORDER BY COALESCE(lead_date, data) DESC NULLS LAST, created_at DESC`,

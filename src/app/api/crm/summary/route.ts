@@ -50,8 +50,8 @@ export async function GET(req: NextRequest) {
               COALESCE(lead_date, data) AS data,
               status,
               compareceu,
-              (fechou OR COALESCE(revenue, valor_rs, 0) > 0) AS fechou,
-              COALESCE(revenue, valor_rs, 0) AS valor_rs
+              (fechou OR COALESCE(NULLIF(revenue, 0), valor_rs, 0) > 0) AS fechou,
+              COALESCE(NULLIF(revenue, 0), valor_rs, 0) AS valor_rs
          FROM public.crm_leads
         WHERE TRUE ${dateFilter}
         ORDER BY client_id, COALESCE(lead_date, data)`,

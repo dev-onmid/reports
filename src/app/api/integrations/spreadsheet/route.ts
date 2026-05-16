@@ -33,6 +33,7 @@ export type SpreadsheetMapping = {
 
 function parseDate(val: unknown): string | null {
   if (!val) return null;
+  if (val instanceof Date && Number.isFinite(val.getTime())) return val.toISOString().split('T')[0];
   if (typeof val === 'number') {
     const d = new Date((val - 25569) * 86400 * 1000);
     return d.toISOString().split('T')[0];
@@ -311,7 +312,7 @@ export async function POST(req: NextRequest) {
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    const workbook = XLSX.read(buffer, { type: 'buffer' });
+    const workbook = XLSX.read(buffer, { type: 'buffer', raw: file.name.match(/\.csv$/i) ? true : undefined });
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const rows: Record<string, unknown>[] = XLSX.utils.sheet_to_json(sheet, { defval: '' });
 
