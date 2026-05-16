@@ -2170,19 +2170,21 @@ function AiRecommendationsBox({
 
 // ── Circular Quality ─────────────────────────────────────────────────────────
 function CircularQuality({ pct, color, size = 120 }: { pct: number; color: string; size?: number }) {
-  const r = size * 0.42;
+  const sw = Math.round(size * 0.085);
+  const r = (size - sw) / 2 - 2;
   const circ = 2 * Math.PI * r;
   const dash = (Math.min(Math.max(pct, 0), 100) / 100) * circ;
   const cx = size / 2, cy = size / 2;
+  const fontSize = size >= 150 ? '1.75rem' : size >= 120 ? '1.35rem' : '1.1rem';
   return (
     <div className="relative flex items-center justify-center" style={{ width: size, height: size }}>
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
-        <circle cx={cx} cy={cy} r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="10" />
-        <circle cx={cx} cy={cy} r={r} fill="none" stroke={color} strokeWidth="10" strokeLinecap="round"
+        <circle cx={cx} cy={cy} r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={sw} />
+        <circle cx={cx} cy={cy} r={r} fill="none" stroke={color} strokeWidth={sw} strokeLinecap="round"
           strokeDasharray={`${dash} ${circ}`}
-          style={{ filter: `drop-shadow(0 0 8px ${color}80)` }} />
+          style={{ filter: `drop-shadow(0 0 10px ${color}90)`, transition: 'stroke-dasharray 0.7s ease' }} />
       </svg>
-      <span className="absolute text-xl font-bold" style={{ color }}>{pct}%</span>
+      <span className="absolute font-bold" style={{ color, fontSize }}>{pct}%</span>
     </div>
   );
 }
@@ -2960,14 +2962,16 @@ export default function GeneralDashboard() {
               {/* Platform cards */}
               <div className="grid flex-1 grid-cols-2 gap-3">
                 {/* Meta */}
-                <div className="flex flex-col items-center gap-3 rounded-xl border border-white/5 bg-background/40 p-4">
-                  <div className="flex items-center gap-1.5 self-start">
+                <div className="flex flex-col rounded-xl border border-white/5 bg-background/40 p-4">
+                  <div className="flex items-center gap-1.5 mb-3">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src="/brand/meta-ads-logo.webp" alt="Meta" className="h-5 w-auto object-contain" />
                     <span className="text-xs font-bold text-foreground">META ADS</span>
                   </div>
-                  <CircularQuality pct={metricsLoading ? 0 : Math.round(metaLeads > 0 ? Math.min((metaLeads / Math.max(metaLeads + googleConv, 1)) * 100, 100) : 0)} color="#0B84FF" size={110} />
-                  <div className="mt-auto w-full space-y-2 text-xs">
+                  <div className="flex flex-1 items-center justify-center py-2">
+                    <CircularQuality pct={metricsLoading ? 0 : Math.round(metaLeads > 0 ? Math.min((metaLeads / Math.max(metaLeads + googleConv, 1)) * 100, 100) : 0)} color="#0B84FF" size={160} />
+                  </div>
+                  <div className="mt-3 space-y-2 text-xs border-t border-white/5 pt-3">
                     <div className="flex justify-between"><span className="text-muted-foreground">Investimento</span><span className="font-bold">{formatCurrencyBRL(metaSpend)}</span></div>
                     <div className="flex justify-between"><span className="text-muted-foreground">Leads</span><span className="font-bold">{metaLeads.toLocaleString('pt-BR')}</span></div>
                     <div className="flex justify-between"><span className="text-muted-foreground">CPL</span><span className={cn('font-bold', metaLeadCost !== null && metaLeadCost > 0 ? 'text-foreground' : 'text-muted-foreground')}>{metaLeadCost !== null ? formatCurrencyBRL(metaLeadCost) : '—'}</span></div>
@@ -2975,17 +2979,19 @@ export default function GeneralDashboard() {
                   </div>
                 </div>
                 {/* Google */}
-                <div className="flex flex-col items-center gap-3 rounded-xl border border-white/5 bg-background/40 p-4">
-                  <div className="flex items-center gap-1.5 self-start">
+                <div className="flex flex-col rounded-xl border border-white/5 bg-background/40 p-4">
+                  <div className="flex items-center gap-1.5 mb-3">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src="/brand/google-ads-logo.png" alt="Google" className="h-5 w-auto object-contain" />
                     <span className="text-xs font-bold text-foreground">GOOGLE ADS</span>
                   </div>
-                  <CircularQuality pct={metricsLoading ? 0 : Math.round(googleConv > 0 ? Math.min((googleConv / Math.max(metaLeads + googleConv, 1)) * 100, 100) : 0)} color="#EA4335" size={110} />
+                  <div className="flex flex-1 items-center justify-center py-2">
+                    <CircularQuality pct={metricsLoading ? 0 : Math.round(googleConv > 0 ? Math.min((googleConv / Math.max(metaLeads + googleConv, 1)) * 100, 100) : 0)} color="#EA4335" size={160} />
+                  </div>
                   {googleCost === 0 && !metricsLoading ? (
-                    <p className="mt-auto text-[11px] text-muted-foreground">Sem investimento no período</p>
+                    <p className="mt-3 text-[11px] text-muted-foreground border-t border-white/5 pt-3">Sem investimento no período</p>
                   ) : (
-                    <div className="mt-auto w-full space-y-2 text-xs">
+                    <div className="mt-3 space-y-2 text-xs border-t border-white/5 pt-3">
                       <div className="flex justify-between"><span className="text-muted-foreground">Investimento</span><span className="font-bold">{formatCurrencyBRL(googleCost)}</span></div>
                       <div className="flex justify-between"><span className="text-muted-foreground">Conversões</span><span className="font-bold">{googleConv.toLocaleString('pt-BR')}</span></div>
                       <div className="flex justify-between"><span className="text-muted-foreground">CPA</span><span className={cn('font-bold', googleLeadCost !== null && googleLeadCost > 0 ? 'text-foreground' : 'text-muted-foreground')}>{googleLeadCost !== null ? formatCurrencyBRL(googleLeadCost) : '—'}</span></div>
