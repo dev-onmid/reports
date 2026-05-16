@@ -171,7 +171,22 @@ export async function GET(request: NextRequest) {
   });
   if (!listRes.ok) {
     const body = await listRes.text();
-    return Response.json({ error: body }, { status: listRes.status });
+    let friendlyError = `Erro Google Ads (${listRes.status})`;
+    try {
+      const parsed = JSON.parse(body) as { error?: { message?: string; status?: string; details?: Array<{ errors?: Array<{ message?: string; details?: { quotaErrorDetails?: { rateName?: string; retryDelay?: string } } }> }> } };
+      const gErr = parsed.error;
+      if (gErr?.status === 'RESOURCE_EXHAUSTED') {
+        const detail = gErr.details?.[0]?.errors?.[0];
+        const retryDelay = detail?.details?.quotaErrorDetails?.retryDelay;
+        const retryHours = retryDelay ? Math.ceil(parseInt(retryDelay) / 3600) : null;
+        friendlyError = retryHours
+          ? `Cota da API Google Ads esgotada. Tente novamente em ~${retryHours}h.`
+          : 'Cota da API Google Ads esgotada. Aguarde antes de tentar novamente.';
+      } else if (gErr?.message) {
+        friendlyError = gErr.message;
+      }
+    } catch { /* keep default */ }
+    return Response.json({ error: friendlyError }, { status: listRes.status });
   }
 
   const { resourceNames = [] } = await listRes.json() as { resourceNames?: string[] };
