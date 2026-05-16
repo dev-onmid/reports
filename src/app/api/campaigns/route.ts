@@ -297,14 +297,21 @@ export async function GET(request: NextRequest) {
     }),
   );
 
+  // Collect all google_ads account IDs for the client regardless of connection_id
+  // (connection_id in client_account_links may point to a stale/old connection row)
+  const allGadsAccountIds = shouldFilterByClient
+    ? [...new Set(links.filter(l => l.platform === 'google_ads').map(l => normalizeGoogleCustomerId(l.account_id)).filter(Boolean))]
+    : [];
+
+  const seenGoogleCampaigns = new Set<string>();
+
   await Promise.allSettled(
     googleConns.map(async (conn) => {
-      const allowed = shouldFilterByClient ? linksByPlatformAndConn.get(`google_ads:${conn.id}`) ?? [] : [];
-      if (shouldFilterByClient && allowed.length === 0) return;
+      if (shouldFilterByClient && allGadsAccountIds.length === 0) return;
 
       const accessToken = await getFreshGoogleToken(conn);
       const mccMap = await buildMccMap(accessToken);
-      const accountIds = shouldFilterByClient ? allowed.map((account) => account.id) : Object.keys(mccMap);
+      const accountIds = shouldFilterByClient ? allGadsAccountIds : Object.keys(mccMap);
 
       await Promise.allSettled(
         accountIds.map(async (accountId) => {
@@ -335,6 +342,9 @@ export async function GET(request: NextRequest) {
             const metrics = (row as any).metrics ?? {};
             const spend = Number(metrics.costMicros ?? 0) / 1_000_000;
             if (spend <= 0) continue;
+            const dedupKey = `${normalizedAccountId}:${campaign.id}`;
+            if (seenGoogleCampaigns.has(dedupKey)) continue;
+            seenGoogleCampaigns.add(dedupKey);
             const clicks = Number(metrics.clicks ?? 0);
             const impressions = Number(metrics.impressions ?? 0);
             const leads = Number(metrics.conversions ?? 0);

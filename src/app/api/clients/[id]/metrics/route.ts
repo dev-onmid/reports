@@ -213,37 +213,37 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const gadsLinks = links.filter(l => l.platform === 'google_ads');
   const metaLinks = links.filter(l => l.platform === 'meta_ads');
-  console.log(`[metrics] client=${clientId} gadsLinks=${gadsLinks.length} googleConns=${googleConns.length} gadsLinkIds=${JSON.stringify(gadsLinks.map(l => ({ connId: l.connection_id, acct: l.account_id })))}`);
 
   // ── Google Ads ─────────────────────────────────────────────────────────────
   type GResult = { cost: number; impressions: number; clicks: number; cpc: number; conversions: number; cpa: number };
   let googleResult: GResult | null = null;
 
   if (gadsLinks.length > 0) {
-    // Group by connection_id so we refresh each token once
-    const byConn = gadsLinks.reduce<Record<string, string[]>>((acc, l) => {
-      const accountId = normalizeGoogleCustomerId(l.account_id);
-      if (accountId) (acc[l.connection_id] ??= []).push(accountId);
-      return acc;
-    }, {});
+    // Collect unique account IDs regardless of connection_id
+    // (connection_id in the link may be stale if Google was reconnected)
+    const uniqueAccountIds = [...new Set(
+      gadsLinks.map(l => normalizeGoogleCustomerId(l.account_id)).filter(Boolean)
+    )];
+
+    console.log(`[metrics] client=${clientId} gads uniqueAccounts=${uniqueAccountIds.join(',')} connections=${googleConns.length}`);
 
     const connMetrics: GResult[] = [];
+    const seenAccounts = new Set<string>();
+
     await Promise.allSettled(
-      Object.entries(byConn).map(async ([connId, accountIds]) => {
-        const conn = googleConns.find(c => c.id === connId);
-        if (!conn) {
-          console.error(`[metrics/gads] connection not found connId=${connId} available=${googleConns.map(c => c.id).join(',')}`);
-          return;
-        }
+      googleConns.map(async (conn) => {
         const accessToken = await getFreshGoogleToken(conn);
         const mccMap = await buildMccMap(accessToken);
 
         await Promise.allSettled(
-          accountIds.map(async (accountId) => {
-            const normalizedAccountId = normalizeGoogleCustomerId(accountId);
-            const loginCustomerId = mccMap[normalizedAccountId];
-            const m = await fetchGadsAccountMetrics(normalizedAccountId, accessToken, loginCustomerId, gaqlPeriod);
-            if (m) connMetrics.push(m);
+          uniqueAccountIds.map(async (accountId) => {
+            if (seenAccounts.has(accountId)) return;
+            const loginCustomerId = mccMap[accountId];
+            const m = await fetchGadsAccountMetrics(accountId, accessToken, loginCustomerId, gaqlPeriod);
+            if (m) {
+              seenAccounts.add(accountId);
+              connMetrics.push(m);
+            }
           })
         );
       })

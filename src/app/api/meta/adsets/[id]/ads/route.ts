@@ -73,8 +73,8 @@ export async function GET(
   const insightField = `insights.time_range(${JSON.stringify({ since, until })}){spend,impressions,clicks,actions}`;
 
   const url = new URL(`https://graph.facebook.com/v21.0/${adsetId}/ads`);
-  url.searchParams.set('fields', `id,name,status,effective_status,creative{id,body,title,thumbnail_url,effective_object_story_spec},${insightField}`);
-  url.searchParams.set('limit', '30');
+  url.searchParams.set('fields', `id,name,status,effective_status,creative{id,body,title,thumbnail_url},${insightField}`);
+  url.searchParams.set('limit', '50');
   url.searchParams.set('access_token', token);
 
   const res = await fetch(url.toString());
@@ -87,9 +87,6 @@ export async function GET(
   const data = await res.json() as { data?: any[] };
   const ads: MetaAdWithMetrics[] = (data.data ?? []).map((ad) => {
     const cr = ad.creative ?? {};
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const spec = cr.effective_object_story_spec as any;
-    const linkData = spec?.link_data ?? spec?.video_data ?? spec?.photo_data ?? {};
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const insightRow = (ad.insights?.data?.[0] ?? {}) as Record<string, any>;
@@ -104,9 +101,9 @@ export async function GET(
       id: ad.id,
       name: ad.name,
       status: ad.effective_status ?? ad.status ?? 'ACTIVE',
-      body: cr.body ?? linkData.message ?? '',
-      title: cr.title ?? linkData.name ?? '',
-      imageUrl: cr.thumbnail_url ?? linkData.picture ?? '',
+      body: cr.body ?? '',
+      title: cr.title ?? '',
+      imageUrl: cr.thumbnail_url ?? '',
       creativeId: cr.id,
       spend,
       impressions,
