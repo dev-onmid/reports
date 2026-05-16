@@ -170,6 +170,8 @@ function TrainingModal({
   const [tLoading, setTLoading] = useState(false);
   const [tForm, setTForm] = useState<Partial<ExternalTool> | null>(null);
   const [tSaving, setTSaving] = useState(false);
+  const [zapiClients, setZapiClients] = useState<{ id: string; name: string; instance_id: string; active: boolean }[]>([]);
+  const [zapiMode, setZapiMode] = useState<'existing' | 'new'>('existing');
 
   useEffect(() => {
     if (tab === 'knowledge' && knowledge.length === 0) loadKnowledge();
@@ -188,8 +190,12 @@ function TrainingModal({
   async function loadTools() {
     setTLoading(true);
     try {
-      const r = await fetch('/api/agent/tools-config');
-      if (r.ok) setExtTools(await r.json() as ExternalTool[]);
+      const [toolsRes, zapiRes] = await Promise.all([
+        fetch('/api/agent/tools-config'),
+        fetch('/api/disparos/clients'),
+      ]);
+      if (toolsRes.ok) setExtTools(await toolsRes.json() as ExternalTool[]);
+      if (zapiRes.ok) setZapiClients(await zapiRes.json() as { id: string; name: string; instance_id: string; active: boolean }[]);
     } finally { setTLoading(false); }
   }
 
@@ -416,11 +422,11 @@ function TrainingModal({
           {tab === 'tools' && (
             <div className="flex flex-col gap-4">
               {!tForm && (
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                   <Button variant="outline" size="sm" className="gap-2" onClick={() => setTForm({ type: 'webhook', config: {} })}>
                     <Webhook className="w-3.5 h-3.5" />Webhook (Make/Zapier)
                   </Button>
-                  <Button variant="outline" size="sm" className="gap-2" onClick={() => setTForm({ type: 'zapi_whatsapp', config: {} })}>
+                  <Button variant="outline" size="sm" className="gap-2" onClick={() => { setTForm({ type: 'zapi_whatsapp', config: {} }); setZapiMode(zapiClients.length > 0 ? 'existing' : 'new'); }}>
                     <MessageSquare className="w-3.5 h-3.5" />WhatsApp Z-API
                   </Button>
                 </div>
@@ -430,28 +436,73 @@ function TrainingModal({
                 <div className="border border-border rounded-xl p-4 bg-card flex flex-col gap-3">
                   <div className="flex items-center gap-2">
                     {tForm.type === 'webhook' ? <Webhook className="w-4 h-4 text-primary" /> : <MessageSquare className="w-4 h-4 text-primary" />}
-                    <span className="text-sm font-medium">{tForm.type === 'webhook' ? 'Webhook' : 'WhatsApp Z-API'}</span>
+                    <span className="text-sm font-medium">{tForm.type === 'webhook' ? 'Webhook (Make/Zapier)' : 'WhatsApp via Z-API'}</span>
                     <Button variant="ghost" size="icon" className="ml-auto h-6 w-6" onClick={() => setTForm(null)}><X className="w-3 h-3" /></Button>
                   </div>
-                  <input placeholder="Nome da ferramenta" value={tForm.name ?? ''} onChange={e => setTForm(p => ({ ...p, name: e.target.value }))}
+
+                  <input placeholder="Nome da ferramenta (ex: Enviar WhatsApp de boas-vindas)" value={tForm.name ?? ''} onChange={e => setTForm(p => ({ ...p, name: e.target.value }))}
                     className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary/50" />
-                  <input placeholder="Descrição (o que esta ferramenta faz — a Luna usa isso para decidir quando chamá-la)" value={tForm.description ?? ''} onChange={e => setTForm(p => ({ ...p, description: e.target.value }))}
+                  <input placeholder="Descrição — Luna usa isso para decidir quando acionar (ex: Use para enviar mensagem WhatsApp para um número)" value={tForm.description ?? ''} onChange={e => setTForm(p => ({ ...p, description: e.target.value }))}
                     className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary/50" />
 
                   {tForm.type === 'webhook' && (
                     <input placeholder="URL do webhook (ex: https://hook.make.com/...)" value={tForm.config?.url ?? ''} onChange={e => setTForm(p => ({ ...p, config: { ...p?.config, url: e.target.value } }))}
                       className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary/50" />
                   )}
+
                   {tForm.type === 'zapi_whatsapp' && (
-                    <>
-                      <input placeholder="Instance ID (Z-API)" value={tForm.config?.instance_id ?? ''} onChange={e => setTForm(p => ({ ...p, config: { ...p?.config, instance_id: e.target.value } }))}
-                        className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary/50" />
-                      <input placeholder="Token (Z-API)" value={tForm.config?.token ?? ''} onChange={e => setTForm(p => ({ ...p, config: { ...p?.config, token: e.target.value } }))}
-                        className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary/50" />
-                      <input placeholder="Security Token (opcional)" value={tForm.config?.security_token ?? ''} onChange={e => setTForm(p => ({ ...p, config: { ...p?.config, security_token: e.target.value } }))}
-                        className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary/50" />
-                    </>
+                    <div className="flex flex-col gap-3">
+                      {/* Mode selector */}
+                      {zapiClients.length > 0 && (
+                        <div className="flex rounded-lg border border-border overflow-hidden text-xs">
+                          <button onClick={() => setZapiMode('existing')} className={cn('flex-1 py-2 px-3 transition-colors', zapiMode === 'existing' ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-muted/50')}>
+                            Usar conexão existente
+                          </button>
+                          <button onClick={() => setZapiMode('new')} className={cn('flex-1 py-2 px-3 transition-colors border-l border-border', zapiMode === 'new' ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-muted/50')}>
+                            Configurar nova
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Existing connections */}
+                      {zapiMode === 'existing' && zapiClients.length > 0 && (
+                        <div className="flex flex-col gap-2">
+                          <p className="text-xs text-muted-foreground">Selecione uma conexão do Disparos:</p>
+                          {zapiClients.map(zc => {
+                            const selected = tForm.config?.zapi_client_id === zc.id;
+                            return (
+                              <button key={zc.id} onClick={() => setTForm(p => ({ ...p, config: { zapi_client_id: zc.id } }))}
+                                className={cn(
+                                  'flex items-center gap-3 p-3 rounded-xl border text-left transition-all',
+                                  selected ? 'border-primary bg-primary/5 text-foreground' : 'border-border bg-background text-muted-foreground hover:border-primary/40 hover:bg-primary/5'
+                                )}>
+                                <MessageSquare className={cn('w-4 h-4 shrink-0', selected ? 'text-primary' : '')} />
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium truncate">{zc.name}</p>
+                                  <p className="text-xs opacity-70">Instance: {zc.instance_id}</p>
+                                </div>
+                                {selected && <CheckCircle className="w-4 h-4 text-primary shrink-0" />}
+                                {!zc.active && <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-500/10 text-yellow-500 border border-yellow-500/20">Inativo</span>}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {/* New credentials */}
+                      {(zapiMode === 'new' || zapiClients.length === 0) && (
+                        <>
+                          <input placeholder="Instance ID (Z-API)" value={tForm.config?.instance_id ?? ''} onChange={e => { const v = e.target.value; setTForm(p => { const c = { ...p?.config }; delete c.zapi_client_id; return { ...p, config: { ...c, instance_id: v } }; }); }}
+                            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary/50" />
+                          <input placeholder="Token (Z-API)" value={tForm.config?.token ?? ''} onChange={e => setTForm(p => ({ ...p, config: { ...p?.config, token: e.target.value } }))}
+                            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary/50" />
+                          <input placeholder="Security Token (opcional)" value={tForm.config?.security_token ?? ''} onChange={e => setTForm(p => ({ ...p, config: { ...p?.config, security_token: e.target.value } }))}
+                            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary/50" />
+                        </>
+                      )}
+                    </div>
                   )}
+
                   <div className="flex justify-end gap-2">
                     <Button variant="outline" size="sm" onClick={() => setTForm(null)}>Cancelar</Button>
                     <Button size="sm" className="gap-2" onClick={saveExtTool} disabled={tSaving || !tForm.name || !tForm.description}>

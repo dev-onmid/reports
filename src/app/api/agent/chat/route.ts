@@ -433,14 +433,29 @@ async function execExternalTool(tool: ExternalTool, input: Record<string, unknow
     }
 
     if (tool.type === 'zapi_whatsapp') {
-      const cfg = tool.config as { instance_id: string; token: string; security_token?: string };
+      const cfg = tool.config as { zapi_client_id?: string; instance_id?: string; token?: string; security_token?: string };
       const phone = String(input.phone ?? '');
       const message = String(input.message ?? '');
       if (!phone || !message) return 'Parâmetros phone e message são obrigatórios.';
-      const result = await sendText(
-        { instanceId: cfg.instance_id, token: cfg.token, clientToken: cfg.security_token },
-        phone, message
-      );
+
+      let instanceId = cfg.instance_id ?? '';
+      let token = cfg.token ?? '';
+      let securityToken = cfg.security_token;
+
+      // Look up credentials from existing zapi_clients if referenced by ID
+      if (cfg.zapi_client_id) {
+        const pool2 = makeServerPool();
+        try {
+          const { rows } = await pool2.query(
+            'SELECT instance_id, token, security_token FROM public.zapi_clients WHERE id = $1 LIMIT 1',
+            [cfg.zapi_client_id]
+          );
+          if (rows[0]) { instanceId = rows[0].instance_id; token = rows[0].token; securityToken = rows[0].security_token ?? undefined; }
+        } finally { await pool2.end(); }
+      }
+
+      if (!instanceId || !token) return 'Configuração Z-API incompleta — instance_id e token são obrigatórios.';
+      const result = await sendText({ instanceId, token, clientToken: securityToken }, phone, message);
       return result.ok ? 'Mensagem WhatsApp enviada com sucesso.' : `Erro ao enviar: ${result.error}`;
     }
 
