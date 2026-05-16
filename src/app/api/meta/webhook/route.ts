@@ -338,6 +338,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const body = await request.json() as any;
+  console.log('[webhook] POST recebido object=', body.object, 'keys=', Object.keys(body));
   const pool = makeServerPool();
 
   try {
@@ -349,7 +350,8 @@ export async function POST(request: NextRequest) {
          (automation_id, platform, event_type, account_id, sender_id, trigger_text, action_taken, status)
        VALUES (NULL, $1, 'raw_post', 'webhook', '', $2, 'received', 'debug')`,
       [body.object ?? 'unknown', JSON.stringify(body).slice(0, 500)]
-    ).catch(() => null);
+    ).then(() => console.log('[webhook] debug log inserido'))
+     .catch((e) => console.error('[webhook] erro ao inserir debug log:', e?.message));
 
     // Get user token from the first connected Meta account
     const { rows: [conn] } = await pool.query(
