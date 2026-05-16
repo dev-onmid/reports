@@ -904,19 +904,19 @@ export default function AgentePage() {
         </aside>
       </div>
 
-      <div className="shrink-0 rounded-2xl border border-primary/35 bg-[#0a1020]/95 p-4 shadow-[0_0_0_1px_rgba(123,44,255,0.35),0_20px_70px_rgba(85,245,47,0.10)]">
-        <div className="flex items-end gap-3">
+      <div className="mx-0 shrink-0 rounded-2xl border border-primary/35 bg-[#0a1020]/95 px-4 py-3 shadow-[0_0_0_1px_rgba(123,44,255,0.35),0_18px_58px_rgba(85,245,47,0.10)]">
+        <div className="flex items-center gap-3">
           {voiceSupported && (
             <button
               type="button"
               onClick={toggleVoice}
               className={cn(
-                'flex h-14 w-14 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-primary',
+                'flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-primary',
                 listening && 'animate-pulse border-red-400/40 bg-red-500/10 text-red-400'
               )}
               title={listening ? 'Parar gravação' : 'Gravar áudio'}
             >
-              {listening ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+              {listening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
             </button>
           )}
           <textarea
@@ -927,17 +927,17 @@ export default function AgentePage() {
             placeholder={listening ? 'Ouvindo...' : 'Pergunte sobre clientes, campanhas, métricas...'}
             rows={1}
             disabled={loading}
-            className="max-h-32 min-h-14 flex-1 resize-none bg-transparent px-3 py-4 text-base text-slate-100 outline-none placeholder:text-slate-500 disabled:cursor-not-allowed disabled:opacity-50"
+            className="max-h-20 min-h-11 flex-1 resize-none bg-transparent px-3 py-3 text-base leading-5 text-slate-100 outline-none placeholder:text-slate-500 disabled:cursor-not-allowed disabled:opacity-50"
             style={{ fieldSizing: 'content' } as React.CSSProperties}
           />
-          <span className="hidden pb-4 text-xs text-slate-500 lg:block">Enter para enviar • Shift+Enter para nova linha</span>
+          <span className="hidden text-xs text-slate-500 lg:block">Enter para enviar • Shift+Enter para nova linha</span>
           <button
             type="button"
             onClick={sendMessage}
             disabled={!input.trim() || loading}
-            className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border border-primary/20 bg-primary/10 text-primary transition-all hover:bg-primary/15 disabled:opacity-45"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-primary/20 bg-primary/10 text-primary transition-all hover:bg-primary/15 disabled:opacity-45"
           >
-            {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
           </button>
         </div>
       </div>

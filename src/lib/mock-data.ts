@@ -36,6 +36,8 @@ export type Client = {
   name: string;
   segment: string;
   status: ClientStatus;
+  gestor_id?: string;
+  gestor_name?: string;
 };
 
 export const mockClients: Client[] = [

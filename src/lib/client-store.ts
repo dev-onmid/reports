@@ -12,6 +12,7 @@ export type NewClientInput = {
   name: string;
   segment: string;
   status: ClientStatus;
+  gestor_id?: string;
 };
 
 export function canManageClients(role = CURRENT_USER_ROLE): boolean {
@@ -61,6 +62,7 @@ export function useClients() {
         name: input.name.trim(),
         segment: input.segment.trim(),
         status: input.status,
+        gestor_id: input.gestor_id,
       };
       setClients((prev) => [...prev, client]);
       void apiClients('POST', client).then(() => {
@@ -68,6 +70,13 @@ export function useClients() {
       }).catch((e) => console.error('Erro ao salvar cliente:', e));
       logActivity('client_created', `Cliente ${client.name} criado no segmento ${client.segment}`);
       return client;
+    },
+
+    updateClientGestor(id: string, gestorId: string | null) {
+      setClients((prev) => prev.map((c) => c.id === id ? { ...c, gestor_id: gestorId ?? undefined } : c));
+      void apiClients('PATCH', { gestor_id: gestorId }, id)
+        .then(() => window.dispatchEvent(new Event(CLIENTS_UPDATED_EVENT)))
+        .catch((e) => console.error('Erro ao atualizar gestor:', e));
     },
 
     archiveClient(id: string) {

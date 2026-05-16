@@ -451,6 +451,16 @@ async function execSystemTool(
         const err = await res.json().catch(() => ({})) as { error?: { message?: string } };
         return `Erro ao atualizar campanha: ${err.error?.message ?? `HTTP ${res.status}`}`;
       }
+      // Log to activity log
+      try {
+        await pool.query(`CREATE TABLE IF NOT EXISTS public.client_activity_log (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), client_id TEXT NOT NULL, platform TEXT NOT NULL DEFAULT 'system', event_type TEXT NOT NULL, description TEXT NOT NULL, actor_name TEXT, actor_source TEXT NOT NULL DEFAULT 'system', campaign_id TEXT, campaign_name TEXT, old_value TEXT, new_value TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
+        await pool.query(
+          `INSERT INTO public.client_activity_log (client_id, platform, event_type, description, actor_name, actor_source, campaign_id, old_value, new_value) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          [client_id, 'meta', status === 'PAUSED' ? 'campaign_paused' : 'campaign_activated',
+           `Campanha ${campaign_id} ${status === 'PAUSED' ? 'pausada' : 'ativada'} via Luna`,
+           'Luna IA', 'luna', campaign_id, status === 'PAUSED' ? 'ACTIVE' : 'PAUSED', status]
+        );
+      } catch { /* ignore log errors */ }
       return `Campanha ${campaign_id} ${status === 'PAUSED' ? 'pausada' : 'ativada'} com sucesso.`;
     }
 

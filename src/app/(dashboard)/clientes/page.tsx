@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import {
   Archive, RotateCcw, ShieldAlert, Trash2, Plus, Power, PowerOff,
   Search, ArrowUpDown, ChevronDown, EyeOff, LayoutList, LayoutGrid,
-  MoreHorizontal, SlidersHorizontal, PiggyBank, Wallet,
+  MoreHorizontal, SlidersHorizontal, PiggyBank, Wallet, History, UserCog, X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -22,10 +22,21 @@ import { PlatformIconButton, ALL_PLATFORMS, type PlatformId } from '@/components
 import { ClientAvatar } from '@/components/client-avatar';
 import { cn } from '@/lib/utils';
 
+type ActivityLog = {
+  id: string;
+  platform: string;
+  event_type: string;
+  description: string;
+  actor_name?: string;
+  actor_source: string;
+  campaign_name?: string;
+  created_at: string;
+};
+
 export default function ClientesPage() {
   const {
     clients, archivedClients, addClient, archiveClient,
-    restoreClient, setClientStatus, deleteClient,
+    restoreClient, setClientStatus, deleteClient, updateClientGestor,
   } = useClients();
   const { setPayments } = useInvestmentPayments();
 
@@ -53,6 +64,13 @@ export default function ClientesPage() {
   const [menuId, setMenuId]                       = useState<string | null>(null);
   const [clientBalances, setClientBalances]        = useState<Record<string, { meta: number | null; google: number | null }>>({});
   const [balancesLoading, setBalancesLoading]      = useState(true);
+  const [users, setUsers]                          = useState<{id: string; name: string; role: string}[]>([]);
+  const [gestorClientId, setGestorClientId]        = useState<string | null>(null);
+  const [selectedGestorId, setSelectedGestorId]    = useState('');
+  const [newClientGestorId, setNewClientGestorId]  = useState('');
+  const [activityClientId, setActivityClientId]    = useState<string | null>(null);
+  const [activityLogs, setActivityLogs]            = useState<ActivityLog[]>([]);
+  const [activityLoading, setActivityLoading]      = useState(false);
 
   const isAdmin = canManageClients(currentRole);
 
@@ -72,6 +90,7 @@ export default function ClientesPage() {
     const session = getAuthSession();
     setCurrentRole(session?.role ?? '');
     setSecurityEmail(session?.email ?? '');
+    fetch('/api/users').then(r => r.ok ? r.json() : []).then(setUsers).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -100,8 +119,8 @@ export default function ClientesPage() {
 
   function handleAddClient() {
     if (!name.trim() || !segment.trim()) return;
-    addClient({ name, segment, status });
-    setName(''); setSegment(''); setStatus('Ativo'); setDialogOpen(false);
+    addClient({ name, segment, status, gestor_id: newClientGestorId || undefined });
+    setName(''); setSegment(''); setStatus('Ativo'); setNewClientGestorId(''); setDialogOpen(false);
   }
 
   function openArchiveDialog(client: { id: string; name: string }) {
@@ -120,6 +139,27 @@ export default function ClientesPage() {
     setSelectedClient(client); setPendingStatus(nextStatus);
     setSecurityEmail(session?.email ?? ''); setSecurityPassword('');
     setSecurityError(''); setStatusDialogOpen(true);
+  }
+
+  function openGestorDialog(client: { id: string; name: string }) {
+    const found = clients.find(c => c.id === client.id) ?? archivedClients.find(c => c.id === client.id);
+    setSelectedGestorId(found?.gestor_id ?? '');
+    setGestorClientId(client.id);
+  }
+
+  async function openActivityLog(clientId: string) {
+    setActivityClientId(clientId);
+    setActivityLoading(true);
+    setActivityLogs([]);
+    try {
+      const res = await fetch(`/api/clients/${clientId}/activity`);
+      if (res.ok) {
+        const data: ActivityLog[] = await res.json();
+        setActivityLogs(data);
+      }
+    } catch { /* ignore */ } finally {
+      setActivityLoading(false);
+    }
   }
 
   function confirmArchiveClient() {
@@ -146,6 +186,12 @@ export default function ClientesPage() {
       setStatusDialogOpen(false); setSelectedClient(null);
       setPendingStatus(null); setSecurityPassword('');
     } finally { setSecurityLoading(false); }
+  }
+
+  function platformColor(platform: string): string {
+    if (platform === 'meta') return 'text-blue-400 bg-blue-400/10';
+    if (platform === 'google') return 'text-red-400 bg-red-400/10';
+    return 'text-muted-foreground bg-muted/30';
   }
 
   return (
@@ -264,6 +310,16 @@ export default function ClientesPage() {
                 {cliente.status}
               </span>
 
+              {/* Gestor badge */}
+              {!showArchived && cliente.gestor_name && (
+                <span className="hidden xl:flex items-center gap-1.5 rounded-lg border border-border bg-background/50 px-2 py-1">
+                  <div className="w-4 h-4 rounded-full bg-primary/20 flex items-center justify-center text-[9px] font-bold text-primary">
+                    {cliente.gestor_name?.charAt(0).toUpperCase()}
+                  </div>
+                  <span className="text-xs text-muted-foreground max-w-[80px] truncate">{cliente.gestor_name}</span>
+                </span>
+              )}
+
               {/* Balance KPIs */}
               {!showArchived && (
                 <div className="hidden lg:flex items-center gap-2">
@@ -353,6 +409,18 @@ export default function ClientesPage() {
                       {!showArchived && (
                         <>
                           <button
+                            onClick={() => { openGestorDialog(cliente); setMenuId(null); }}
+                            className="flex w-full items-center gap-2 px-3 py-2 text-xs hover:bg-muted transition-colors"
+                          >
+                            <UserCog className="h-3.5 w-3.5" /> Alterar Gestor
+                          </button>
+                          <button
+                            onClick={() => { void openActivityLog(cliente.id); setMenuId(null); }}
+                            className="flex w-full items-center gap-2 px-3 py-2 text-xs hover:bg-muted transition-colors"
+                          >
+                            <History className="h-3.5 w-3.5" /> Log de Atividade
+                          </button>
+                          <button
                             onClick={() => { openStatusDialog(cliente, 'Inativo'); setMenuId(null); }}
                             className="flex w-full items-center gap-2 px-3 py-2 text-xs text-orange-400 hover:bg-orange-500/10 transition-colors"
                           >
@@ -389,10 +457,10 @@ export default function ClientesPage() {
         )}
       </div>
 
-      {/* ── DIALOGS (sem alteração) ── */}
+      {/* ── DIALOGS ── */}
 
       {/* Novo cliente */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog open={dialogOpen} onOpenChange={(v) => { setDialogOpen(v); if (!v) { setName(''); setSegment(''); setStatus('Ativo'); setNewClientGestorId(''); } }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader><DialogTitle>Novo Cliente</DialogTitle></DialogHeader>
           <div className="space-y-4">
@@ -410,6 +478,14 @@ export default function ClientesPage() {
                 className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
                 <option value="Ativo">Ativo</option>
                 <option value="Alerta">Alerta</option>
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="client-gestor">Gestor</Label>
+              <select id="client-gestor" value={newClientGestorId} onChange={e => setNewClientGestorId(e.target.value)}
+                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
+                <option value="">Sem gestor</option>
+                {users.map(u => <option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}
               </select>
             </div>
           </div>
@@ -499,6 +575,34 @@ export default function ClientesPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Alterar Gestor */}
+      <Dialog open={!!gestorClientId} onOpenChange={() => setGestorClientId(null)}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <UserCog className="h-5 w-5" /> Alterar Gestor
+            </DialogTitle>
+          </DialogHeader>
+          <select
+            value={selectedGestorId}
+            onChange={e => setSelectedGestorId(e.target.value)}
+            className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+          >
+            <option value="">Sem gestor</option>
+            {users.map(u => <option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}
+          </select>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setGestorClientId(null)}>Cancelar</Button>
+            <Button onClick={() => {
+              if (gestorClientId) {
+                updateClientGestor(gestorClientId, selectedGestorId || null);
+              }
+              setGestorClientId(null);
+            }}>Salvar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {linkDialogClient && (
         <LinkAccountsDialog
           clientId={linkDialogClient.id}
@@ -507,6 +611,57 @@ export default function ClientesPage() {
           open={linkDialogOpen}
           onOpenChange={v => { setLinkDialogOpen(v); if (!v) setLinkDialogClient(null); }}
         />
+      )}
+
+      {/* Activity Log Drawer */}
+      {activityClientId && (
+        <div className="fixed inset-y-0 right-0 z-50 w-96 bg-background border-l border-border shadow-2xl flex flex-col">
+          <div className="flex items-center justify-between p-4 border-b border-border">
+            <h3 className="font-bold text-sm flex items-center gap-2">
+              <History className="h-4 w-4 text-primary" /> Log de Atividade
+            </h3>
+            <Button variant="ghost" size="icon" onClick={() => setActivityClientId(null)}>
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            {activityLoading ? (
+              <div className="flex items-center justify-center py-12 text-sm text-muted-foreground gap-2">
+                <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                Carregando...
+              </div>
+            ) : activityLogs.length === 0 ? (
+              <div className="text-center py-12 text-sm text-muted-foreground">
+                Nenhuma atividade registrada.
+              </div>
+            ) : (
+              activityLogs.map(log => (
+                <div key={log.id} className="flex gap-3">
+                  <div className="mt-0.5 shrink-0">
+                    <div className={cn('w-2 h-2 rounded-full mt-1.5', platformColor(log.platform).split(' ')[1] ?? 'bg-muted')} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded', platformColor(log.platform))}>
+                        {log.platform.toUpperCase()}
+                      </span>
+                      <span className="text-xs font-medium text-foreground truncate">{log.description}</span>
+                    </div>
+                    {log.actor_name && (
+                      <p className="text-[10px] text-muted-foreground mt-0.5">{log.actor_name}</p>
+                    )}
+                    {log.campaign_name && (
+                      <p className="text-[10px] text-muted-foreground truncate">{log.campaign_name}</p>
+                    )}
+                    <p className="text-[10px] text-muted-foreground/70 mt-0.5">
+                      {log.created_at ? new Date(log.created_at).toLocaleString('pt-BR') : ''}
+                    </p>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
       )}
     </div>
   );
