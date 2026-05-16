@@ -32,6 +32,10 @@ import { ClientAvatar } from '@/components/client-avatar';
 import type { TopCreative } from '@/app/api/meta/top-creatives/route';
 import type { CampaignPerformance } from '@/app/api/campaigns/route';
 import type { AudienceBreakdowns, AudienceResponse, AudienceSlice } from '@/app/api/audience/route';
+import { ThemeToggle } from '@/components/theme-toggle';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Input } from '@/components/ui/input';
+import { APP_VERSION } from '@/lib/app-version';
 
 type Period = 'yesterday' | 'last_7d' | 'last_14d' | 'last_30d' | 'this_month' | 'last_month' | 'custom';
 type FunnelEntry = { date: string; stage: string; amount?: number };
@@ -2677,9 +2681,9 @@ export default function GeneralDashboard() {
 
   return (
     <div className="space-y-6 pb-10">
-      {/* HEADER */}
-      <div className="sticky top-0 z-20 -mx-6 px-6 py-3 -mt-6 bg-background/90 backdrop-blur-sm border-b border-border">
-        <div className="flex flex-wrap items-center gap-2">
+      {/* UNIFIED TOP BAR */}
+      <div className="sticky top-0 z-20 -mx-6 -mt-6 bg-background/95 backdrop-blur-sm border-b border-border">
+        <div className="flex items-center gap-2 px-6 h-16">
           {/* Client selector */}
           <ClientSelector clients={clients} selected={selectedIds} onChange={setSelectedIds} />
 
@@ -2702,21 +2706,52 @@ export default function GeneralDashboard() {
 
           {metricsLoading && <RefreshCw className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />}
 
-          <div className="ml-auto flex items-center gap-2">
-            <button
-              type="button"
-              onClick={analyzeWithAI}
-              disabled={aiLoading || selectedIds.size === 0 || metricsLoading}
-              className="flex items-center gap-1.5 rounded-xl border border-violet-500/40 bg-violet-500/15 px-3 py-2 text-xs font-semibold text-violet-400 hover:bg-violet-500/25 transition-colors disabled:opacity-50"
-            >
-              {aiLoading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-              {aiLoading ? 'Analisando...' : 'Analisar com IA'}
-            </button>
+          {/* Spacer */}
+          <div className="flex-1" />
+
+          {/* Search */}
+          <div className="relative w-52">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+            <Input
+              type="search"
+              placeholder="Buscar clientes, relatórios..."
+              className="pl-9 bg-muted/50 border-transparent focus-visible:ring-primary text-xs h-9"
+            />
+          </div>
+
+          {/* AI button */}
+          <button
+            type="button"
+            onClick={analyzeWithAI}
+            disabled={aiLoading || selectedIds.size === 0 || metricsLoading}
+            className="flex items-center gap-1.5 rounded-xl border border-violet-500/40 bg-violet-500/15 px-3 py-2 text-xs font-semibold text-violet-400 hover:bg-violet-500/25 transition-colors disabled:opacity-50 whitespace-nowrap"
+          >
+            {aiLoading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+            {aiLoading ? 'Analisando...' : 'Analisar com IA'}
+          </button>
+
+          {/* Theme + bell + user */}
+          <ThemeToggle />
+          <button className="relative p-2 text-muted-foreground hover:text-foreground transition-colors">
+            <Bell className="h-5 w-5" />
+            <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-primary" />
+          </button>
+          <div className="flex items-center gap-2.5 border-l border-border pl-3">
+            <div className="flex flex-col items-end leading-none gap-0.5">
+              <span className="text-sm font-medium">{session?.name ?? 'Usuário'}</span>
+              <span className="text-[11px] text-muted-foreground">{session?.role ?? ''}</span>
+            </div>
+            <Avatar className="h-8 w-8 border border-border">
+              <AvatarImage src="" alt="User" />
+              <AvatarFallback className="bg-primary/20 text-primary text-xs font-bold">
+                {(session?.name ?? 'ON').split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase()}
+              </AvatarFallback>
+            </Avatar>
           </div>
         </div>
 
         {period === 'custom' && (
-          <div className="mt-2 flex items-center gap-3">
+          <div className="flex items-center gap-3 px-6 pb-2.5">
             <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Período</span>
             <input type="date" value={customDateFrom} onChange={e => setCustomDateFrom(e.target.value)} className="h-8 rounded-lg border border-border bg-card px-2.5 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-primary" />
             <span className="text-xs text-muted-foreground">→</span>
