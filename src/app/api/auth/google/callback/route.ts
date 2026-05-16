@@ -43,20 +43,45 @@ export async function GET(request: NextRequest) {
 
     const pool = makeServerPool();
     try {
-      await pool.query(
-        `INSERT INTO public.google_connections (email, display_name, picture, access_token, refresh_token, token_expiry, scope, account_type, status)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'connected')`,
-        [
-          profile.email ?? '',
-          profile.name ?? '',
-          profile.picture ?? null,
-          tokens.access_token ?? '',
-          tokens.refresh_token ?? '',
-          tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null,
-          tokens.scope ?? '',
-          state,
-        ]
+      const { rows: existing } = await pool.query(
+        `SELECT id FROM public.google_connections WHERE email = $1 AND account_type = $2 LIMIT 1`,
+        [profile.email ?? '', state]
       );
+
+      if (existing[0]) {
+        // Update the existing connection in-place so client_account_links remain valid
+        await pool.query(
+          `UPDATE public.google_connections
+           SET display_name=$1, picture=$2, access_token=$3,
+               refresh_token = COALESCE($4, refresh_token),
+               token_expiry=$5, scope=$6, status='connected'
+           WHERE id=$7`,
+          [
+            profile.name ?? '',
+            profile.picture ?? null,
+            tokens.access_token ?? '',
+            tokens.refresh_token ?? null,
+            tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null,
+            tokens.scope ?? '',
+            existing[0].id,
+          ]
+        );
+      } else {
+        await pool.query(
+          `INSERT INTO public.google_connections (email, display_name, picture, access_token, refresh_token, token_expiry, scope, account_type, status)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'connected')`,
+          [
+            profile.email ?? '',
+            profile.name ?? '',
+            profile.picture ?? null,
+            tokens.access_token ?? '',
+            tokens.refresh_token ?? '',
+            tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null,
+            tokens.scope ?? '',
+            state,
+          ]
+        );
+      }
     } finally {
       await pool.end();
     }
