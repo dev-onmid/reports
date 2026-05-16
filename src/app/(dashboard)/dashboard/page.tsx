@@ -2743,7 +2743,7 @@ export default function GeneralDashboard() {
     <div className="space-y-6 pb-10">
       {/* UNIFIED TOP BAR */}
       <div className="sticky top-0 z-20 -mx-6 -mt-6 bg-background/95 backdrop-blur-sm border-b border-border">
-        <div className="flex items-center gap-2 px-6 h-16">
+        <div className="flex items-center gap-2 px-6 h-20">
           {/* Client selector */}
           <ClientSelector clients={clients} selected={selectedIds} onChange={setSelectedIds} />
 

@@ -65,7 +65,7 @@ export function Sidebar() {
       collapsed ? 'w-16' : 'w-64'
     )}>
       {/* Header */}
-      <div className={cn('h-16 flex items-center border-b border-border relative', collapsed ? 'justify-center' : 'px-5')}>
+      <div className={cn('h-20 flex items-center border-b border-border relative', collapsed ? 'justify-center' : 'px-5')}>
         {collapsed ? (
           <Link href="/dashboard">
             <img src="/brand/onmid-logo-white.png" alt="Onmid" className="h-6 w-auto object-contain" />
