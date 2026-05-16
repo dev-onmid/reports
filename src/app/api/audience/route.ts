@@ -315,15 +315,19 @@ export async function GET(request: NextRequest) {
     }));
   }));
 
+  const allGadsAccountIds = shouldFilterByClient
+    ? [...new Set(links.filter(l => l.platform === 'google_ads').map(l => normalizeGoogleCustomerId(l.account_id)).filter(Boolean))]
+    : [];
+  const seenGoogleAccounts = new Set<string>();
+
   await Promise.allSettled(googleConns.map(async (conn) => {
-    const accountIds = shouldFilterByClient ? byPlatformAndConn.get(`google_ads:${conn.id}`) ?? [] : [];
-    if (shouldFilterByClient && accountIds.length === 0) return;
+    if (shouldFilterByClient && allGadsAccountIds.length === 0) return;
     const accessToken = await getFreshGoogleToken(conn);
     const mccMap = await buildMccMap(accessToken);
-    const ids = shouldFilterByClient ? accountIds : Object.keys(mccMap);
+    const ids = shouldFilterByClient ? allGadsAccountIds : Object.keys(mccMap);
     await Promise.allSettled(ids.map(async (accountId) => {
       const normalizedAccountId = normalizeGoogleCustomerId(accountId);
-      if (!normalizedAccountId) return;
+      if (!normalizedAccountId || seenGoogleAccounts.has(normalizedAccountId)) return;
       const loginCustomerId = mccMap[normalizedAccountId];
       const [age, gender, platform, device] = await Promise.all([
         fetchGoogleBreakdown(normalizedAccountId, accessToken, loginCustomerId, gaqlPeriod, 'ageRange', GOOGLE_AGE_LABELS),
@@ -331,6 +335,9 @@ export async function GET(request: NextRequest) {
         fetchGoogleBreakdown(normalizedAccountId, accessToken, loginCustomerId, gaqlPeriod, 'adNetworkType', GOOGLE_PLATFORM_LABELS),
         fetchGoogleBreakdown(normalizedAccountId, accessToken, loginCustomerId, gaqlPeriod, 'device', GOOGLE_DEVICE_LABELS),
       ]);
+      if (age.length > 0 || gender.length > 0 || platform.length > 0 || device.length > 0) {
+        seenGoogleAccounts.add(normalizedAccountId);
+      }
       age.forEach((item) => addSlice(googleMaps.age, item.label, item.value));
       gender.forEach((item) => addSlice(googleMaps.gender, item.label, item.value));
       platform.forEach((item) => addSlice(googleMaps.platform, item.label, item.value));

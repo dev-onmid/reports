@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import {
@@ -1338,6 +1339,48 @@ function PauseActivateBtn({
   );
 }
 
+function AdCreativePreview({ ad, x, y }: { ad: MetaAdWithMetrics; x: number; y: number }) {
+  const CARD_W = 240;
+  const CARD_H = 340;
+  const GAP = 14;
+  const vw = typeof window !== 'undefined' ? window.innerWidth : 1440;
+  const vh = typeof window !== 'undefined' ? window.innerHeight : 900;
+  const left = x + GAP + CARD_W > vw ? x - CARD_W - GAP : x + GAP;
+  const top = Math.min(Math.max(y - 40, 8), vh - CARD_H - 8);
+  const hasImage = !!ad.imageUrl;
+
+  return createPortal(
+    <div
+      className="pointer-events-none fixed z-[9999] rounded-xl border border-border bg-card shadow-2xl overflow-hidden animate-in fade-in-0 zoom-in-95 duration-150"
+      style={{ left, top, width: CARD_W }}
+    >
+      {hasImage && (
+        <div className="relative bg-muted/30 overflow-hidden" style={{ aspectRatio: '1/1' }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={ad.imageUrl} alt={ad.name} className="h-full w-full object-cover" />
+        </div>
+      )}
+      <div className="p-3 space-y-2">
+        {ad.title && (
+          <p className="text-[11px] font-bold leading-snug line-clamp-2">{ad.title}</p>
+        )}
+        {ad.body && (
+          <p className="text-[10px] text-muted-foreground leading-relaxed line-clamp-3">{ad.body}</p>
+        )}
+        {!ad.title && !ad.body && (
+          <p className="text-[11px] font-semibold">{ad.name}</p>
+        )}
+        <div className="flex gap-3 pt-0.5 text-[10px] border-t border-border">
+          <span className="text-muted-foreground">Gasto <strong className="text-foreground">{formatCurrencyBRL(ad.spend)}</strong></span>
+          {ad.leads > 0 && <span className="text-muted-foreground">CPL <strong className="text-foreground">{formatCurrencyBRL(ad.cpl)}</strong></span>}
+          {ad.impressions > 0 && <span className="text-muted-foreground">CTR <strong className="text-foreground">{ad.ctr.toFixed(1)}%</strong></span>}
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 function CampaignPerformanceTable({
   campaigns: initialCampaigns,
   loading,
@@ -1360,8 +1403,9 @@ function CampaignPerformanceTable({
   const [optimizeCampaign, setOptimizeCampaign] = useState<CampaignPerformance | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [childrenMap, setChildrenMap] = useState<Record<string, ChildState>>({});
-  // Track optimistic status overrides for child rows
   const [childStatus, setChildStatus] = useState<Record<string, string>>({});
+  const [adPreview, setAdPreview] = useState<{ ad: MetaAdWithMetrics; x: number; y: number } | null>(null);
+  const adPreviewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => { setCampaigns(initialCampaigns); }, [initialCampaigns]);
 
@@ -1603,10 +1647,25 @@ function CampaignPerformanceTable({
 
     const levelBg = row.level === 0 ? '' : row.level === 1 ? 'bg-muted/10' : 'bg-muted/5';
 
+    const isMetaAd = row.kind === 'meta-ad';
+
     return (
       <tr key={row.key} className={cn('border-t border-border/50 hover:bg-muted/20 transition-colors', !isActive && 'opacity-60', levelBg)}>
         {/* Name column — whole name area is clickable when expandable */}
-        <td className="max-w-[300px] px-2 py-0">
+        <td
+          className="max-w-[300px] px-2 py-0"
+          onMouseEnter={isMetaAd ? (e) => {
+            if (adPreviewTimer.current) clearTimeout(adPreviewTimer.current);
+            const rect = e.currentTarget.getBoundingClientRect();
+            adPreviewTimer.current = setTimeout(() => {
+              setAdPreview({ ad: (row as Extract<ExpandableRow, { kind: 'meta-ad' }>).data, x: rect.right, y: rect.top + rect.height / 2 });
+            }, 300);
+          } : undefined}
+          onMouseLeave={isMetaAd ? () => {
+            if (adPreviewTimer.current) clearTimeout(adPreviewTimer.current);
+            setAdPreview(null);
+          } : undefined}
+        >
           <div
             className={cn(
               'flex min-w-0 items-center gap-1.5 py-2.5',
@@ -1781,6 +1840,7 @@ function CampaignPerformanceTable({
   return (
     <>
       {optimizeCampaign && <CampaignOptimizeDrawer campaign={optimizeCampaign} onClose={() => setOptimizeCampaign(null)} />}
+      {adPreview && <AdCreativePreview ad={adPreview.ad} x={adPreview.x} y={adPreview.y} />}
       <div className="overflow-hidden rounded-xl border border-border bg-card">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[1080px] text-left">
