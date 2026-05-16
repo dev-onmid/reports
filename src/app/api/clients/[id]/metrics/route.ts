@@ -42,7 +42,11 @@ async function gadsSearch(customerId: string, query: string, accessToken: string
     `https://googleads.googleapis.com/v20/customers/${normalizedCustomerId}/googleAds:search`,
     { method: 'POST', headers: gadsHeaders(accessToken, loginCustomerId), body: JSON.stringify({ query }) }
   );
-  if (!res.ok) return null;
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    console.error(`[metrics/gads] search failed customer=${normalizedCustomerId} loginCustomer=${loginCustomerId} status=${res.status}`, errText.slice(0, 300));
+    return null;
+  }
   return res.json() as Promise<{ results?: Record<string, unknown>[] }>;
 }
 
@@ -75,7 +79,11 @@ async function buildMccMap(accessToken: string): Promise<Record<string, string>>
   const listRes = await fetch('https://googleads.googleapis.com/v20/customers:listAccessibleCustomers', {
     headers: { Authorization: `Bearer ${accessToken}`, 'developer-token': DEV_TOKEN },
   });
-  if (!listRes.ok) return {};
+  if (!listRes.ok) {
+    const errText = await listRes.text().catch(() => '');
+    console.error(`[metrics/gads] listAccessibleCustomers failed status=${listRes.status}`, errText.slice(0, 300));
+    return {};
+  }
   const { resourceNames = [] } = await listRes.json() as { resourceNames?: string[] };
 
   const mccMap: Record<string, string> = {};
@@ -205,6 +213,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const gadsLinks = links.filter(l => l.platform === 'google_ads');
   const metaLinks = links.filter(l => l.platform === 'meta_ads');
+  console.log(`[metrics] client=${clientId} gadsLinks=${gadsLinks.length} googleConns=${googleConns.length} gadsLinkIds=${JSON.stringify(gadsLinks.map(l => ({ connId: l.connection_id, acct: l.account_id })))}`);
 
   // ── Google Ads ─────────────────────────────────────────────────────────────
   type GResult = { cost: number; impressions: number; clicks: number; cpc: number; conversions: number; cpa: number };
@@ -222,7 +231,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     await Promise.allSettled(
       Object.entries(byConn).map(async ([connId, accountIds]) => {
         const conn = googleConns.find(c => c.id === connId);
-        if (!conn) return;
+        if (!conn) {
+          console.error(`[metrics/gads] connection not found connId=${connId} available=${googleConns.map(c => c.id).join(',')}`);
+          return;
+        }
         const accessToken = await getFreshGoogleToken(conn);
         const mccMap = await buildMccMap(accessToken);
 
