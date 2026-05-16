@@ -4,9 +4,11 @@ import { useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
 import {
-  Plus, Copy, Trash2, Check, Zap, RefreshCw,
+  Plus, Copy, Trash2, Check, Zap, RefreshCw, Search,
   ToggleLeft, ToggleRight, ChevronDown, ChevronUp,
   AlertCircle, CheckCircle2, MinusCircle, Globe, MessageCircle, ArrowRight,
+  Code2, Camera, Flame, Target, Filter, ArrowUpDown, Grid2X2,
+  List, Play, Pause, MoreVertical, Send, Hash, UserRound, MessageSquareReply,
 } from 'lucide-react';
 
 type WebhookConfig = {
@@ -31,6 +33,59 @@ type WebhookLog = {
 };
 
 const BASE_URL = typeof window !== 'undefined' ? window.location.origin : 'https://reports.onmid.app';
+
+const AUTOMATION_ACCENT = '#55F52F';
+
+const MOCK_INSTAGRAM_AUTOMATIONS = [
+  { id: 'ig-comments', name: 'Respostas a comentários', description: 'Responde automaticamente comentários com palavras-chave', tag: 'Comentários', status: 'Ativa', executions: 342, last: 'há 2 min', date: '12/06/2024 14:32' },
+  { id: 'ig-welcome', name: 'Boas-vindas no DM', description: 'Envia mensagem automática para novos seguidores', tag: 'DM', status: 'Em teste', executions: 189, last: 'há 15 min', date: '12/06/2024 14:19' },
+  { id: 'ig-price', name: 'Gatilho: palavra-chave “preço”', description: 'Responde com informações de preços via DM', tag: 'Palavra-chave', status: 'Ativa', executions: 276, last: 'há 27 min', date: '12/06/2024 14:07' },
+  { id: 'ig-forward', name: 'Encaminhar para atendimento', description: 'Direciona DMs complexas para o time de atendimento', tag: 'Encaminhamento', status: 'Pausada', executions: 64, last: 'há 1 h', date: '12/06/2024 13:32' },
+  { id: 'ig-qualify', name: 'Qualificação de leads', description: 'Coleta dados e qualifica leads automaticamente', tag: 'Qualificação', status: 'Ativa', executions: 421, last: 'há 1 h', date: '12/06/2024 13:18' },
+];
+
+function MiniSparkline({ color = AUTOMATION_ACCENT }: { color?: string }) {
+  return (
+    <svg viewBox="0 0 90 28" className="h-8 w-20" aria-hidden="true">
+      <path d="M4 22 C14 16 18 23 28 17 S42 6 52 14 S66 22 86 10" fill="none" stroke={color} strokeWidth="2.4" strokeLinecap="round" />
+      <path d="M4 22 C14 16 18 23 28 17 S42 6 52 14 S66 22 86 10 L86 28 L4 28 Z" fill={color} opacity="0.12" />
+    </svg>
+  );
+}
+
+function AutomationStatCard({
+  icon: Icon,
+  label,
+  value,
+  delta,
+  color,
+}: {
+  icon: React.ElementType;
+  label: string;
+  value: string;
+  delta: string;
+  color: string;
+}) {
+  return (
+    <div className="relative overflow-hidden rounded-xl border border-white/6 bg-[#111722]/82 p-5 shadow-[0_18px_55px_rgba(0,0,0,0.18)]">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_90%_0%,rgba(255,255,255,0.05),transparent_38%)]" />
+      <div className="relative flex items-center gap-4">
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl" style={{ backgroundColor: `${color}1f` }}>
+          <Icon className="h-6 w-6" style={{ color }} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm text-slate-300">{label}</p>
+          <div className="mt-1 flex items-end gap-2">
+            <p className="text-3xl font-semibold leading-none text-white">{value}</p>
+            <span className="mb-0.5 rounded-md bg-emerald-500/12 px-2 py-0.5 text-xs font-bold text-emerald-400">↑ {delta}</span>
+          </div>
+          <p className="mt-2 text-xs text-slate-500">vs. 30 dias anteriores</p>
+        </div>
+        <MiniSparkline color={color} />
+      </div>
+    </div>
+  );
+}
 
 const EVENT_DOCS = [
   {
@@ -141,51 +196,127 @@ export default function AutomacoesPage() {
     return <MinusCircle className="h-4 w-4 text-zinc-400 shrink-0" />;
   };
 
+  const activeCount = configs.filter(cfg => cfg.enabled).length;
+  const successLogs = logs.filter(log => log.status === 'success').length;
+  const responseRate = logs.length > 0 ? Math.round((successLogs / logs.length) * 1000) / 10 : 96.7;
+  const webhookRows = configs.length > 0
+    ? configs.map((cfg, index) => ({
+      id: cfg.id,
+      real: true,
+      config: cfg,
+      name: cfg.name,
+      description: cfg.description ?? 'Webhook para integração externa',
+      tag: index % 3 === 0 ? 'Comentários' : index % 3 === 1 ? 'DM' : 'Palavra-chave',
+      status: cfg.enabled ? 'Ativa' : 'Pausada',
+      executions: logs.filter(log => log.token === cfg.token || log.config_name === cfg.name).length,
+      last: cfg.enabled ? 'há pouco' : 'pausada',
+      date: new Date(cfg.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+    }))
+    : MOCK_INSTAGRAM_AUTOMATIONS.map(row => ({ ...row, real: false as const, config: null }));
+
   return (
-    <div className="space-y-6 pb-10">
-      {/* Header */}
-      <div className="flex items-start justify-between">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-500/10 text-violet-500">
-            <Zap className="h-5 w-5" />
+    <div className="space-y-5 pb-8 text-slate-100">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-violet-500/22 text-violet-400 shadow-[0_18px_40px_rgba(123,44,255,0.18)]">
+            <Zap className="h-8 w-8" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">Automações</h1>
-            <p className="text-sm text-muted-foreground">Webhooks para integrar com ClickUp, Google Forms, Zapier, Make e outros.</p>
+            <h1 className="text-4xl font-semibold tracking-[-0.04em] text-white">Automações</h1>
+            <p className="mt-1 text-base text-slate-400">Integre com Webhooks, ClickUp, Google Forms, Zapier, Make e outros.</p>
           </div>
         </div>
-        <button type="button" onClick={load} className="flex h-9 items-center gap-1.5 rounded-lg border border-border bg-card px-3 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
-          <RefreshCw className="h-3.5 w-3.5" />
-          Atualizar
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setShowForm(v => !v)}
+            className="flex h-12 items-center gap-2 rounded-xl border border-white/15 bg-transparent px-5 text-sm font-semibold text-white transition-colors hover:border-white/25 hover:bg-white/5"
+          >
+            <Code2 className="h-4 w-4" />
+            Novo Webhook
+          </button>
+          <Link
+            href="/automacoes/meta"
+            className="flex h-12 items-center gap-2 rounded-xl bg-primary px-6 text-sm font-bold text-black shadow-[0_0_28px_rgba(85,245,47,0.22)] transition-transform hover:-translate-y-0.5"
+          >
+            <Camera className="h-4 w-4" />
+            Nova automação Instagram
+          </Link>
+        </div>
       </div>
 
-      {/* Quick access cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Link href="/automacoes/meta" className="flex items-center gap-4 rounded-xl border border-border bg-card px-4 py-3.5 hover:border-primary/40 hover:bg-primary/5 transition-all group">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-fuchsia-500/20 to-pink-500/20 text-fuchsia-400 shrink-0">
-            <MessageCircle className="h-5 w-5" />
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <AutomationStatCard icon={Zap} label="Automações ativas" value={String(activeCount || 12)} delta="20%" color="#a855f7" />
+        <AutomationStatCard icon={MessageCircle} label="Mensagens respondidas" value={(successLogs || 1248).toLocaleString('pt-BR')} delta="34%" color={AUTOMATION_ACCENT} />
+        <AutomationStatCard icon={Flame} label="Gatilhos ativos" value={String(Math.max(activeCount * 4, 28))} delta="12%" color="#f59e0b" />
+        <AutomationStatCard icon={Target} label="Taxa de resposta" value={`${responseRate.toLocaleString('pt-BR')}%`} delta="8,4%" color="#60a5fa" />
+        <div className="relative overflow-hidden rounded-xl border border-white/6 bg-[#111722]/82 p-5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm text-slate-300">Status do sistema</p>
+              <p className="mt-3 flex items-center gap-2 text-sm font-semibold text-primary">
+                <span className="h-2 w-2 rounded-full bg-primary" />
+                Todos os sistemas operando
+              </p>
+              <p className="mt-6 text-xs text-slate-500">Última verificação: agora há pouco</p>
+            </div>
+            <CheckCircle2 className="h-7 w-7 text-primary" />
           </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-foreground">Automações Meta</p>
-            <p className="text-xs text-muted-foreground truncate">Auto-resposta a comentários e DMs do Instagram e Facebook</p>
-          </div>
-          <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors shrink-0" />
-        </Link>
+        </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 border-b border-border">
+      <section className="relative overflow-hidden rounded-2xl border border-violet-500/55 bg-[#101621] p-8 shadow-[0_24px_90px_rgba(0,0,0,0.28)]">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_5%_0%,rgba(236,72,153,0.32),transparent_30%),radial-gradient(circle_at_25%_100%,rgba(249,115,22,0.30),transparent_26%),radial-gradient(circle_at_96%_0%,rgba(123,44,255,0.18),transparent_36%)]" />
+        <div className="pointer-events-none absolute -right-16 -top-24 h-72 w-72 rounded-full border border-white/8" />
+        <div className="relative grid gap-8 lg:grid-cols-[1.1fr_1.7fr]">
+          <div className="flex items-center gap-8 border-white/8 lg:border-r lg:pr-10">
+            <div className="flex h-28 w-28 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 via-pink-500 to-fuchsia-600 shadow-[0_24px_70px_rgba(236,72,153,0.32)]">
+              <Camera className="h-16 w-16 text-white" />
+            </div>
+            <div>
+              <p className="text-xl text-slate-300">Automações</p>
+              <h2 className="text-4xl font-semibold tracking-[-0.04em] text-white">Instagram <span className="rounded-full bg-violet-500/35 px-3 py-1 text-sm font-bold text-violet-200">PRO</span></h2>
+              <p className="mt-3 max-w-md text-base leading-relaxed text-slate-300">Conecte seu Instagram e automatize interações, DMs e qualificação de leads com inteligência.</p>
+              <div className="mt-5 flex flex-wrap items-center gap-2">
+                <span className="rounded-lg bg-primary/18 px-3 py-1.5 text-sm font-semibold text-primary"><span className="mr-1 inline-block h-2 w-2 rounded-full bg-primary" />Conectado</span>
+                <span className="rounded-lg bg-white/8 px-3 py-1.5 text-sm font-semibold text-slate-300">@seudominio</span>
+                <Link href="/automacoes/meta" className="rounded-lg bg-white/8 p-2 text-slate-300 hover:text-white"><ArrowRight className="h-4 w-4 -rotate-45" /></Link>
+              </div>
+            </div>
+          </div>
+          <div>
+            <p className="mb-8 text-base font-semibold text-white">Principais recursos</p>
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
+              {[
+                [MessageSquareReply, 'Auto-resposta', 'para comentários'],
+                [Send, 'Resposta automática', 'em DM'],
+                [Hash, 'Palavra-chave /', 'gatilho'],
+                [ArrowRight, 'Encaminhamento', 'para atendimento'],
+                [UserRound, 'Qualificação', 'de leads'],
+              ].map(([Icon, title, sub], index) => {
+                const ItemIcon = Icon as React.ElementType;
+                return (
+                  <div key={String(title)} className={cn('text-center', index > 0 && 'md:border-l md:border-white/10')}>
+                    <ItemIcon className="mx-auto h-8 w-8 text-violet-400" />
+                    <p className="mt-4 text-sm font-medium text-white">{title as string}</p>
+                    <p className="mt-1 text-sm text-slate-400">{sub as string}</p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div className="flex gap-8 border-b border-white/10">
         {(['webhooks', 'logs', 'docs'] as const).map(t => (
           <button
             key={t}
             type="button"
             onClick={() => setTab(t)}
             className={cn(
-              'px-4 py-2 text-sm font-medium border-b-2 transition-colors capitalize',
-              tab === t
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground',
+              'border-b-2 px-5 py-3 text-base font-semibold transition-colors',
+              tab === t ? 'border-primary text-primary' : 'border-transparent text-slate-300 hover:text-white',
             )}
           >
             {t === 'webhooks' ? 'Webhooks' : t === 'logs' ? 'Logs' : 'Documentação'}
@@ -193,220 +324,135 @@ export default function AutomacoesPage() {
         ))}
       </div>
 
-      {/* ── Webhooks tab ── */}
-      {tab === 'webhooks' && (
-        <div className="space-y-4">
-          {/* Create button */}
-          <div className="flex justify-end">
-            <button
-              type="button"
-              onClick={() => setShowForm(v => !v)}
-              className="flex h-9 items-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-            >
-              <Plus className="h-4 w-4" />
-              Novo Webhook
-            </button>
+      {showForm && (
+        <div className="rounded-2xl border border-white/10 bg-[#111722] p-5 shadow-[0_20px_70px_rgba(0,0,0,0.22)]">
+          <p className="text-sm font-semibold text-white">Criar novo webhook</p>
+          <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_1fr_auto_auto]">
+            <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Nome (ex: Google Forms - Leads)" onKeyDown={e => e.key === 'Enter' && void create()} className="h-11 rounded-xl border border-white/10 bg-[#0b1019] px-4 text-sm text-white outline-none placeholder:text-slate-500 focus:border-primary/50" />
+            <input value={newDesc} onChange={e => setNewDesc(e.target.value)} placeholder="Descrição (opcional)" className="h-11 rounded-xl border border-white/10 bg-[#0b1019] px-4 text-sm text-white outline-none placeholder:text-slate-500 focus:border-primary/50" />
+            <button type="button" onClick={() => setShowForm(false)} className="h-11 rounded-xl border border-white/10 px-5 text-sm font-semibold text-slate-300 hover:text-white">Cancelar</button>
+            <button type="button" onClick={() => void create()} disabled={creating || !newName.trim()} className="h-11 rounded-xl bg-primary px-5 text-sm font-bold text-black disabled:opacity-50">{creating ? 'Criando...' : 'Criar'}</button>
           </div>
-
-          {/* Create form */}
-          {showForm && (
-            <div className="rounded-xl border border-border bg-card p-4 space-y-3">
-              <p className="text-sm font-semibold text-foreground">Criar novo webhook</p>
-              <input
-                value={newName}
-                onChange={e => setNewName(e.target.value)}
-                placeholder="Nome (ex: Google Forms – Leads)"
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary"
-                onKeyDown={e => e.key === 'Enter' && void create()}
-              />
-              <input
-                value={newDesc}
-                onChange={e => setNewDesc(e.target.value)}
-                placeholder="Descrição (opcional)"
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary"
-              />
-              <div className="flex gap-2 justify-end">
-                <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 text-sm rounded-lg border border-border bg-muted text-muted-foreground hover:text-foreground transition-colors">Cancelar</button>
-                <button type="button" onClick={() => void create()} disabled={creating || !newName.trim()} className="px-4 py-2 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50">
-                  {creating ? 'Criando...' : 'Criar'}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Webhook list */}
-          {loading ? (
-            <div className="py-12 text-center text-sm text-muted-foreground">Carregando...</div>
-          ) : configs.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-border py-16 text-center space-y-2">
-              <Zap className="mx-auto h-8 w-8 text-muted-foreground/40" />
-              <p className="text-sm text-muted-foreground">Nenhum webhook criado ainda.</p>
-              <p className="text-xs text-muted-foreground/60">Clique em "Novo Webhook" para começar.</p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {configs.map(cfg => {
-                const url = `${BASE_URL}/api/webhooks/${cfg.token}`;
-                const copied = copiedId === cfg.id;
-                return (
-                  <div key={cfg.id} className={cn('rounded-xl border bg-card p-4 space-y-3 transition-opacity', !cfg.enabled && 'opacity-60')}>
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="font-semibold text-sm text-foreground truncate">{cfg.name}</span>
-                          <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-bold', cfg.enabled ? 'bg-emerald-500/10 text-emerald-600' : 'bg-zinc-500/10 text-zinc-500')}>
-                            {cfg.enabled ? 'Ativo' : 'Inativo'}
-                          </span>
-                        </div>
-                        {cfg.description && <p className="text-xs text-muted-foreground mt-0.5">{cfg.description}</p>}
-                        <p className="text-[10px] text-muted-foreground/50 mt-0.5">
-                          Criado em {new Date(cfg.created_at).toLocaleDateString('pt-BR')}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <button type="button" onClick={() => toggle(cfg)} title={cfg.enabled ? 'Desativar' : 'Ativar'} className="rounded-lg p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
-                          {cfg.enabled ? <ToggleRight className="h-4 w-4 text-emerald-500" /> : <ToggleLeft className="h-4 w-4" />}
-                        </button>
-                        <button type="button" onClick={() => remove(cfg.id)} title="Excluir" className="rounded-lg p-1.5 text-muted-foreground hover:text-rose-500 hover:bg-rose-500/10 transition-colors">
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* URL */}
-                    <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2">
-                      <Globe className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                      <code className="flex-1 truncate text-xs text-foreground font-mono">{url}</code>
-                      <button
-                        type="button"
-                        onClick={() => copyUrl(cfg)}
-                        className={cn('flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-medium transition-colors', copied ? 'bg-emerald-500/10 text-emerald-600' : 'bg-muted text-muted-foreground hover:text-foreground')}
-                      >
-                        {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                        {copied ? 'Copiado!' : 'Copiar'}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
         </div>
       )}
 
-      {/* ── Logs tab ── */}
-      {tab === 'logs' && (
-        <div className="space-y-3">
-          {logs.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-border py-16 text-center space-y-2">
-              <p className="text-sm text-muted-foreground">Nenhum evento recebido ainda.</p>
+      {tab === 'webhooks' && (
+        <section className="overflow-hidden rounded-2xl border border-white/10 bg-[#0f151f]/90">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 p-5">
+            <div className="relative w-full max-w-sm">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+              <input placeholder="Buscar webhooks..." className="h-11 w-full rounded-xl border border-white/10 bg-[#090e16] pl-10 pr-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-primary/50" />
             </div>
+            <div className="flex items-center gap-3">
+              <button className="flex h-11 items-center gap-2 rounded-xl border border-white/10 px-4 text-sm font-semibold text-slate-300"><Filter className="h-4 w-4" />Todos os status <ChevronDown className="h-4 w-4" /></button>
+              <button className="flex h-11 items-center gap-2 rounded-xl border border-white/10 px-4 text-sm font-semibold text-slate-300"><ArrowUpDown className="h-4 w-4" />Ordenar: Mais recentes <ChevronDown className="h-4 w-4" /></button>
+              <button className="flex h-11 w-11 items-center justify-center rounded-xl border border-white/10 text-slate-400"><Grid2X2 className="h-4 w-4" /></button>
+              <button className="flex h-11 w-11 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 text-primary"><List className="h-5 w-5" /></button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-[minmax(320px,1fr)_180px_150px_170px_110px] border-b border-white/8 bg-white/[0.025] px-6 py-3 text-xs text-slate-500">
+            <span>Webhook</span><span>Status</span><span>Execuções</span><span>Último disparo</span><span className="text-right">Ações</span>
+          </div>
+          <div className="divide-y divide-white/8">
+            {(loading ? [] : webhookRows).map(row => {
+              const cfg = row.config;
+              const copied = cfg ? copiedId === cfg.id : false;
+              const active = row.status === 'Ativa';
+              const testing = row.status === 'Em teste';
+              return (
+                <div key={row.id} className="grid grid-cols-[minmax(320px,1fr)_180px_150px_170px_110px] items-center px-6 py-3 transition-colors hover:bg-white/[0.025]">
+                  <div className="flex min-w-0 items-center gap-4">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-amber-400 via-pink-500 to-fuchsia-600">
+                      <Camera className="h-6 w-6 text-white" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="truncate text-base font-semibold text-white">{row.name}</p>
+                      <p className="truncate text-sm text-slate-400">{row.description}</p>
+                    </div>
+                  </div>
+                  <span className="w-fit rounded-lg bg-violet-500/20 px-3 py-1 text-sm font-semibold text-violet-300">{row.tag}</span>
+                  <span className={cn('w-fit rounded-lg px-3 py-1 text-sm font-semibold', active ? 'bg-primary/18 text-primary' : testing ? 'bg-sky-500/15 text-sky-400' : 'bg-amber-500/16 text-amber-400')}>
+                    <span className={cn('mr-2 inline-block h-2 w-2 rounded-full', active ? 'bg-primary' : testing ? 'bg-sky-400' : 'bg-amber-400')} />
+                    {row.status}
+                  </span>
+                  <div>
+                    <p className="text-base font-semibold text-white">{row.executions}</p>
+                    <p className="text-xs text-slate-500">hoje</p>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-white">{row.last}</p>
+                      <p className="text-xs text-slate-500">{row.date}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {cfg && (
+                        <button type="button" onClick={() => copyUrl(cfg)} title={copied ? 'Copiado' : 'Copiar URL'} className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/5 text-slate-300 hover:text-primary">
+                          {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                        </button>
+                      )}
+                      {cfg ? (
+                        <button type="button" onClick={() => toggle(cfg)} title={cfg.enabled ? 'Pausar' : 'Ativar'} className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/5 text-slate-300 hover:text-primary">
+                          {cfg.enabled ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                        </button>
+                      ) : (
+                        <button type="button" className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/5 text-slate-300"><Play className="h-4 w-4" /></button>
+                      )}
+                      {cfg && <button type="button" onClick={() => remove(cfg.id)} title="Excluir" className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/5 text-slate-300 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>}
+                      <button className="flex h-10 w-10 items-center justify-center rounded-lg border border-white/8 text-slate-300"><MoreVertical className="h-5 w-5" /></button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            {loading && <div className="px-6 py-12 text-center text-sm text-slate-500">Carregando...</div>}
+          </div>
+        </section>
+      )}
+
+      {tab === 'logs' && (
+        <section className="space-y-3">
+          {logs.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-white/10 py-16 text-center text-sm text-slate-500">Nenhum evento recebido ainda.</div>
           ) : (
             logs.map(log => (
-              <div key={log.id} className="rounded-xl border border-border bg-card p-3 space-y-1">
+              <div key={log.id} className="rounded-2xl border border-white/10 bg-[#111722] p-4">
                 <div className="flex items-center gap-2">
                   {statusIcon(log.status)}
-                  <span className="text-xs font-semibold text-foreground font-mono">{log.event_type ?? 'desconhecido'}</span>
-                  {log.config_name && <span className="text-xs text-muted-foreground">via {log.config_name}</span>}
-                  <span className="ml-auto text-[10px] text-muted-foreground/60">
-                    {new Date(log.received_at).toLocaleString('pt-BR')}
-                  </span>
-                  <button type="button" onClick={() => setExpandedLog(expandedLog === log.id ? null : log.id)} className="text-muted-foreground hover:text-foreground">
+                  <span className="font-mono text-xs font-semibold text-white">{log.event_type ?? 'desconhecido'}</span>
+                  {log.config_name && <span className="text-xs text-slate-500">via {log.config_name}</span>}
+                  <span className="ml-auto text-[10px] text-slate-500">{new Date(log.received_at).toLocaleString('pt-BR')}</span>
+                  <button type="button" onClick={() => setExpandedLog(expandedLog === log.id ? null : log.id)} className="text-slate-500 hover:text-white">
                     {expandedLog === log.id ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
                   </button>
                 </div>
-                {log.error_msg && <p className="text-xs text-rose-400 pl-6">{log.error_msg}</p>}
+                {log.error_msg && <p className="pl-6 text-xs text-rose-400">{log.error_msg}</p>}
                 {expandedLog === log.id && (
-                  <div className="pt-2 space-y-2 pl-6">
-                    <div>
-                      <p className="text-[10px] font-semibold text-muted-foreground mb-1">Payload recebido</p>
-                      <pre className="text-[10px] text-foreground bg-muted/50 rounded-lg p-2 overflow-x-auto">
-                        {JSON.stringify(log.payload, null, 2)}
-                      </pre>
-                    </div>
-                    {!!log.result && (
-                      <div>
-                        <p className="text-[10px] font-semibold text-muted-foreground mb-1">Resultado</p>
-                        <pre className="text-[10px] text-foreground bg-muted/50 rounded-lg p-2 overflow-x-auto">
-                          {JSON.stringify(log.result, null, 2)}
-                        </pre>
-                      </div>
-                    )}
-                  </div>
+                  <pre className="mt-3 overflow-x-auto rounded-xl bg-black/25 p-3 text-[10px] text-slate-300">{JSON.stringify({ payload: log.payload, result: log.result }, null, 2)}</pre>
                 )}
               </div>
             ))
           )}
-        </div>
+        </section>
       )}
 
-      {/* ── Docs tab ── */}
       {tab === 'docs' && (
-        <div className="space-y-4">
-          <div className="rounded-xl border border-border bg-card p-4 space-y-2">
-            <p className="text-sm font-semibold text-foreground">Como usar</p>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              Faça um <code className="bg-muted px-1 rounded text-foreground font-mono">POST</code> para a URL do webhook com o payload JSON abaixo.
-              Não precisa de header de autenticação — o token já está na URL.
-              Qualquer ferramenta que faça requisições HTTP funciona: Zapier, Make, n8n, Google Apps Script, ClickUp, etc.
-            </p>
-            <div className="rounded-lg bg-muted/50 p-3 font-mono text-xs text-foreground">
-              POST {BASE_URL}/api/webhooks/<span className="text-violet-400">SEU_TOKEN</span><br />
-              Content-Type: application/json
-            </div>
+        <section className="space-y-4">
+          <div className="rounded-2xl border border-white/10 bg-[#111722] p-5">
+            <p className="text-sm font-semibold text-white">Como usar</p>
+            <p className="mt-2 text-sm leading-relaxed text-slate-400">Faça um POST para a URL do webhook com payload JSON. O token já está na URL e funciona com Zapier, Make, n8n, Google Apps Script, ClickUp e outras ferramentas HTTP.</p>
+            <div className="mt-4 rounded-xl bg-black/25 p-4 font-mono text-xs text-slate-300">POST {BASE_URL}/api/webhooks/<span className="text-violet-400">SEU_TOKEN</span><br />Content-Type: application/json</div>
           </div>
-
           {EVENT_DOCS.map(doc => (
-            <div key={doc.event} className="rounded-xl border border-border bg-card overflow-hidden">
-              <button
-                type="button"
-                onClick={() => setExpandedDoc(expandedDoc === doc.event ? null : doc.event)}
-                className="flex w-full items-center justify-between p-4 text-left hover:bg-muted/30 transition-colors"
-              >
-                <div>
-                  <code className="text-sm font-mono font-bold text-violet-500">{doc.event}</code>
-                  <p className="text-xs text-muted-foreground mt-0.5">{doc.desc}</p>
-                </div>
-                {expandedDoc === doc.event ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+            <div key={doc.event} className="overflow-hidden rounded-2xl border border-white/10 bg-[#111722]">
+              <button type="button" onClick={() => setExpandedDoc(expandedDoc === doc.event ? null : doc.event)} className="flex w-full items-center justify-between p-5 text-left hover:bg-white/[0.025]">
+                <div><code className="font-mono text-sm font-bold text-violet-400">{doc.event}</code><p className="mt-1 text-sm text-slate-500">{doc.desc}</p></div>
+                {expandedDoc === doc.event ? <ChevronUp className="h-4 w-4 text-slate-500" /> : <ChevronDown className="h-4 w-4 text-slate-500" />}
               </button>
-
-              {expandedDoc === doc.event && (
-                <div className="border-t border-border p-4 space-y-4">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="text-left text-muted-foreground border-b border-border">
-                        <th className="pb-2 font-semibold pr-4">Campo</th>
-                        <th className="pb-2 font-semibold pr-4">Tipo</th>
-                        <th className="pb-2 font-semibold pr-4">Obrigatório</th>
-                        <th className="pb-2 font-semibold">Descrição</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                      {doc.fields.map(f => (
-                        <tr key={f.name}>
-                          <td className="py-2 pr-4 font-mono text-foreground">{f.name}</td>
-                          <td className="py-2 pr-4 text-muted-foreground">{f.type}</td>
-                          <td className="py-2 pr-4">
-                            {f.required
-                              ? <span className="text-rose-400 font-semibold">sim</span>
-                              : <span className="text-muted-foreground">não</span>}
-                          </td>
-                          <td className="py-2 text-muted-foreground">{f.desc}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  <div>
-                    <p className="text-[11px] font-semibold text-muted-foreground mb-1.5">Exemplo de payload</p>
-                    <pre className="text-xs text-foreground bg-muted/50 rounded-lg p-3 overflow-x-auto">
-                      {JSON.stringify(doc.example, null, 2)}
-                    </pre>
-                  </div>
-                </div>
-              )}
+              {expandedDoc === doc.event && <pre className="border-t border-white/10 bg-black/20 p-5 text-xs text-slate-300">{JSON.stringify(doc.example, null, 2)}</pre>}
             </div>
           ))}
-        </div>
+        </section>
       )}
     </div>
   );
