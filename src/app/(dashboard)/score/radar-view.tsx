@@ -201,9 +201,9 @@ function SvgRadar({ axes, color, hoveredAxis, onAxisHover }: {
               y={lp.y}
               textAnchor={anchor}
               dominantBaseline="middle"
-              fill={isHovered ? 'white' : 'hsl(var(--muted-foreground))'}
+              fill="white"
               fontSize={isHovered ? '12' : '11'}
-              fontWeight={isHovered ? '800' : '600'}
+              fontWeight={isHovered ? '800' : '500'}
             >
               {ax.label}
             </text>
@@ -220,7 +220,7 @@ export default function RadarView({ details, score }: {
 }) {
   const [hoveredAxis, setHoveredAxis] = useState<string | null>(null);
   const axes = buildAxes(details);
-  const color = score !== null ? radarColor(score) : '#6b7280';
+  const color = '#22c55e';
   const insights = buildInsights(details);
   const hoveredLegend = AXIS_LEGEND.find(l => l.label === hoveredAxis) ?? null;
 
@@ -292,57 +292,34 @@ export default function RadarView({ details, score }: {
         </section>
       </div>
 
-      <div className="mt-3 grid gap-4 xl:grid-cols-[1fr_1.2fr]">
-        <section className="rounded-xl border border-border bg-card p-5">
-          <div className="mb-4">
-            <p className="text-sm font-bold text-foreground">Legenda do radar</p>
-            <p className="text-xs text-muted-foreground">Entenda o que cada dimensão representa e como impacta o Score.</p>
-          </div>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {AXIS_LEGEND.map(item => (
-              <div key={item.label} className="rounded-lg border border-border/70 bg-background/35 p-3">
-                <p className="flex items-center gap-2 text-xs font-bold text-foreground">
-                  <span className="h-3 w-3 rounded-full" style={{ backgroundColor: AXIS_COLORS[item.label] ?? '#55f52f' }} />
-                  {item.label}
-                </p>
-                <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{item.desc}</p>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="rounded-xl border border-border bg-card p-5">
-          <div className="mb-4">
-            <p className="text-sm font-bold text-foreground">Insights diretos</p>
-            <p className="text-xs text-muted-foreground">Prioridades práticas para melhorar o Score e acelerar resultados.</p>
-          </div>
-          <div className="space-y-2">
-            {insights.map(item => {
-              const tone = toneClasses(item.tone);
-              return (
-                <div key={item.key} className={`grid gap-3 rounded-lg border p-3 md:grid-cols-[1fr_120px_1fr_28px] ${tone.card}`}>
-                  <div className="min-w-0">
-                      <p className="flex items-center gap-2 text-sm font-bold text-foreground">
-                        <span className={`h-2 w-2 rounded-full ${tone.dot}`} />
-                        {item.title}
-                      </p>
-                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{item.diagnosis}</p>
-                  </div>
-                  <div className="flex items-center md:justify-center">
-                    <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-bold ${tone.pill}`}>
-                      {tone.label}
-                    </span>
-                  </div>
-                  <p className="text-xs leading-relaxed text-foreground/85">
-                    <span className="font-bold">Recomendação: </span>{item.action}
+      <section className="mt-3 rounded-xl border border-border bg-card p-5">
+        <div className="mb-4">
+          <p className="text-sm font-bold text-foreground">Insights diretos</p>
+          <p className="text-xs text-muted-foreground">Prioridades práticas para melhorar o Score e acelerar resultados.</p>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+          {insights.map(item => {
+            const tone = toneClasses(item.tone);
+            return (
+              <div key={item.key} className={`rounded-lg border p-3 ${tone.card}`}>
+                <div className="mb-2 flex items-start justify-between gap-2">
+                  <p className="flex items-center gap-2 text-sm font-bold text-foreground">
+                    <span className={`h-2 w-2 shrink-0 rounded-full ${tone.dot}`} />
+                    {item.title}
                   </p>
-                  <span className="hidden items-center justify-center text-muted-foreground md:flex">›</span>
+                  <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-bold ${tone.pill}`}>
+                    {tone.label}
+                  </span>
                 </div>
-              );
-            })}
-          </div>
-        </section>
-      </div>
+                <p className="mb-2 text-xs leading-relaxed text-muted-foreground">{item.diagnosis}</p>
+                <p className="text-xs leading-relaxed text-foreground/85">
+                  <span className="font-bold">Recomendação: </span>{item.action}
+                </p>
+              </div>
+            );
+          })}
+        </div>
+      </section>
     </div>
   );
 }
