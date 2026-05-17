@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from 'react';
+
 type ScoreDetails = {
   cpl:             { score: number; max: number; current: number; previous: number };
   leads:           { score: number; max: number; current: number; previous: number };
@@ -114,7 +116,12 @@ function toneClasses(tone: InsightTone) {
 }
 
 // SVG hexagonal radar — no external deps
-function SvgRadar({ axes, color }: { axes: { label: string; value: number }[]; color: string }) {
+function SvgRadar({ axes, color, hoveredAxis, onAxisHover }: {
+  axes: { label: string; value: number }[];
+  color: string;
+  hoveredAxis: string | null;
+  onAxisHover: (label: string | null) => void;
+}) {
   const cx = 180;
   const cy = 170;
   const R = 120;
@@ -171,22 +178,32 @@ function SvgRadar({ axes, color }: { axes: { label: string; value: number }[]; c
         <circle key={i} cx={p.x} cy={p.y} r={4} fill={color} stroke="none" />
       ))}
 
-      {/* Labels */}
+      {/* Labels — hover area + colored dot + text */}
       {axes.map((ax, i) => {
         const lp = point(R + 22, i);
         const dot = point(R + 8, i);
+        const hitP = point(R + 30, i);
         const anchor = lp.x < cx - 5 ? 'end' : lp.x > cx + 5 ? 'start' : 'middle';
+        const isHovered = hoveredAxis === ax.label;
+        const axisColor = AXIS_COLORS[ax.label] ?? color;
         return (
-          <g key={i}>
-            <circle cx={dot.x} cy={dot.y} r={6} fill={AXIS_COLORS[ax.label] ?? color} />
+          <g
+            key={i}
+            style={{ cursor: 'pointer' }}
+            onMouseEnter={() => onAxisHover(ax.label)}
+            onMouseLeave={() => onAxisHover(null)}
+          >
+            {/* Invisible hit area */}
+            <circle cx={hitP.x} cy={hitP.y} r={28} fill="transparent" />
+            <circle cx={dot.x} cy={dot.y} r={isHovered ? 8 : 6} fill={axisColor} style={{ transition: 'r 0.15s' }} />
             <text
               x={lp.x}
               y={lp.y}
               textAnchor={anchor}
               dominantBaseline="middle"
-              fill="hsl(var(--muted-foreground))"
-              fontSize="11"
-              fontWeight="600"
+              fill={isHovered ? 'white' : 'hsl(var(--muted-foreground))'}
+              fontSize={isHovered ? '12' : '11'}
+              fontWeight={isHovered ? '800' : '600'}
             >
               {ax.label}
             </text>
@@ -201,9 +218,11 @@ export default function RadarView({ details, score }: {
   details: ScoreDetails;
   score: number | null;
 }) {
+  const [hoveredAxis, setHoveredAxis] = useState<string | null>(null);
   const axes = buildAxes(details);
   const color = score !== null ? radarColor(score) : '#6b7280';
   const insights = buildInsights(details);
+  const hoveredLegend = AXIS_LEGEND.find(l => l.label === hoveredAxis) ?? null;
 
   return (
     <div>
@@ -214,7 +233,18 @@ export default function RadarView({ details, score }: {
             <p className="text-xs text-muted-foreground">Visão geral da performance do cliente nas 6 dimensões do Score.</p>
           </div>
           <div className="flex min-h-[310px] items-center justify-center">
-            <SvgRadar axes={axes} color={color} />
+            <SvgRadar axes={axes} color={color} hoveredAxis={hoveredAxis} onAxisHover={setHoveredAxis} />
+          </div>
+          {/* Tooltip area below chart */}
+          <div className="min-h-[40px] rounded-lg px-3 py-2 text-center text-xs transition-all">
+            {hoveredLegend ? (
+              <span>
+                <span className="font-bold" style={{ color: AXIS_COLORS[hoveredLegend.label] ?? color }}>{hoveredLegend.label}: </span>
+                <span className="text-muted-foreground">{hoveredLegend.desc}</span>
+              </span>
+            ) : (
+              <span className="text-muted-foreground/40">Passe o mouse sobre um eixo para ver a descrição</span>
+            )}
           </div>
         </section>
 
@@ -223,26 +253,40 @@ export default function RadarView({ details, score }: {
             <p className="text-base font-bold text-foreground">Detalhes por eixo</p>
             <p className="text-xs text-muted-foreground">Performance em cada dimensão do Score.</p>
           </div>
-          <div className="flex flex-col gap-5">
-          {axes.map(item => (
-            <div key={item.label}>
-              <div className="mb-2 grid grid-cols-[130px_1fr_56px] items-center gap-3">
-                <span className="flex items-center gap-2 text-sm font-medium text-foreground">
-                  <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-background" style={{ color: AXIS_COLORS[item.label] ?? radarColor(item.value) }}>●</span>
-                  {item.label}
-                </span>
-                <div className="h-1.5 rounded-full bg-muted">
-                  <div
-                    className="h-1.5 rounded-full transition-all"
-                    style={{ width: `${item.value}%`, backgroundColor: AXIS_COLORS[item.label] ?? radarColor(item.value) }}
-                  />
+          <div className="flex flex-col gap-4">
+          {axes.map(item => {
+            const isHovered = hoveredAxis === item.label;
+            const legend = AXIS_LEGEND.find(l => l.label === item.label);
+            const axisColor = AXIS_COLORS[item.label] ?? radarColor(item.value);
+            return (
+              <div
+                key={item.label}
+                className="cursor-default rounded-lg px-2 py-1 transition-colors"
+                style={{ backgroundColor: isHovered ? `${axisColor}10` : 'transparent' }}
+                onMouseEnter={() => setHoveredAxis(item.label)}
+                onMouseLeave={() => setHoveredAxis(null)}
+              >
+                <div className="mb-1.5 grid grid-cols-[130px_1fr_56px] items-center gap-3">
+                  <span className="flex items-center gap-2 text-sm font-medium text-foreground">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-background" style={{ color: axisColor }}>●</span>
+                    {item.label}
+                  </span>
+                  <div className="h-1.5 rounded-full bg-muted">
+                    <div
+                      className="h-1.5 rounded-full transition-all"
+                      style={{ width: `${item.value}%`, backgroundColor: axisColor }}
+                    />
+                  </div>
+                  <span className="text-right text-sm font-bold" style={{ color: axisColor }}>{item.value} <span className="text-xs font-normal text-muted-foreground">/100</span></span>
                 </div>
-                <span className="text-right text-sm font-bold" style={{ color: AXIS_COLORS[item.label] ?? radarColor(item.value) }}>{item.value} <span className="text-xs font-normal text-muted-foreground">/100</span></span>
+                {isHovered && legend && (
+                  <p className="ml-8 text-[11px] leading-relaxed text-muted-foreground">{legend.desc}</p>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
           </div>
-          <div className="mt-7 rounded-lg bg-background/70 px-4 py-3 text-xs text-muted-foreground">
+          <div className="mt-5 rounded-lg bg-background/70 px-4 py-3 text-xs text-muted-foreground">
             ⓘ Pontuações atualizadas diariamente com base nos dados do período selecionado.
           </div>
         </section>
