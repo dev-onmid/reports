@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import dynamic from 'next/dynamic';
 import { cn } from '@/lib/utils';
 import {
   Trophy, RefreshCw, TrendingUp, TrendingDown, Minus,
@@ -10,15 +9,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ClientAvatar } from '@/components/client-avatar';
-
-const RadarView = dynamic(() => import('./radar-view'), {
-  ssr: false,
-  loading: () => (
-    <div className="flex items-center justify-center h-[340px]">
-      <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-    </div>
-  ),
-});
+import RadarView from './radar-view';
 
 type ScoreDetails = {
   cpl:             { score: number; max: number; current: number; previous: number };
