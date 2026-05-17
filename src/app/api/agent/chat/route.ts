@@ -263,7 +263,8 @@ const systemTools: Anthropic.Tool[] = [
   },
   {
     name: 'create_meta_campaign',
-    description: `Cria uma campanha COMPLETA no Meta Ads: campanha + conjunto de anúncios com targeting real. SEMPRE no status PAUSADO. Nunca ativa automaticamente.
+    description: `Cria uma campanha COMPLETA no Meta Ads: campanha + conjunto de anúncios + anúncio com criativo.
+IMPORTANTE: SEMPRE preencha ad_body (texto principal), ad_headline (título) e ad_cta antes de chamar. Gere a copy com base no segmento/objetivo do cliente.
 Antes de chamar, analise o negócio/segmento do cliente e preencha os campos de targeting adequados (cidade, interesses, placements, faixa etária).
 A ferramenta busca automaticamente os IDs de cidades e interesses na API Meta, você só precisa fornecer os nomes.`,
     input_schema: {
@@ -298,6 +299,15 @@ A ferramenta busca automaticamente os IDs de cidades e interesses na API Meta, v
           enum: ['all', 'instagram_only', 'facebook_only', 'instagram_feed_reels', 'facebook_feed'],
           description: 'Posicionamento dos anúncios. instagram_only = Feed+Stories+Reels+Explore do Instagram apenas.',
         },
+        ad_body: { type: 'string', description: 'Texto principal do anúncio (corpo/copy). Obrigatório para criar o anúncio.' },
+        ad_headline: { type: 'string', description: 'Título/headline do anúncio (ex: "Venda mais com marketing efetivo")' },
+        ad_description: { type: 'string', description: 'Descrição curta exibida abaixo do headline' },
+        ad_cta: {
+          type: 'string',
+          enum: ['LEARN_MORE', 'SIGN_UP', 'GET_QUOTE', 'CONTACT_US', 'SUBSCRIBE', 'APPLY_NOW', 'BOOK_TRAVEL', 'DOWNLOAD', 'WATCH_MORE', 'SHOP_NOW', 'ORDER_NOW', 'CALL_NOW', 'MESSAGE_PAGE', 'WHATSAPP_MESSAGE'],
+          description: 'Botão de CTA. Para leads: SIGN_UP, GET_QUOTE ou LEARN_MORE. Para vendas/tráfego: SHOP_NOW, LEARN_MORE.',
+        },
+        destination_url: { type: 'string', description: 'URL de destino do anúncio (site, LP, WhatsApp). Padrão: onmid.com.br' },
         audience_notes: { type: 'string', description: 'Análise de público-alvo gerada pela Luna (incluída no relatório)' },
       },
       required: ['client_id', 'name', 'objective', 'daily_budget'],
@@ -872,13 +882,17 @@ async function execSystemTool(
         client_id, name: campName, objective, daily_budget,
         adset_name, age_min = 18, age_max = 65,
         genders = 'all', cities = [], countries = ['BR'],
-        interests = [], placements = 'all', audience_notes,
+        interests = [], placements = 'all',
+        ad_body, ad_headline, ad_description, ad_cta = 'LEARN_MORE',
+        destination_url = 'https://onmid.com.br', audience_notes,
       } = input as {
         client_id: string; name: string; objective: string; daily_budget: number;
         adset_name?: string; age_min?: number; age_max?: number;
         genders?: 'all' | 'male' | 'female';
         cities?: string[]; countries?: string[];
-        interests?: string[]; placements?: string; audience_notes?: string;
+        interests?: string[]; placements?: string;
+        ad_body?: string; ad_headline?: string; ad_description?: string;
+        ad_cta?: string; destination_url?: string; audience_notes?: string;
       };
 
       // Resolve ad account + token
@@ -1128,21 +1142,21 @@ async function execSystemTool(
 
           if (imageHash && fbPageId) {
             // ── STEP 4: AdCreative ──────────────────────────
+            const linkData: Record<string, unknown> = {
+              image_hash: imageHash,
+              link: destination_url,
+              call_to_action: { type: ad_cta },
+            };
+            if (ad_body)        linkData.message     = ad_body;
+            if (ad_headline)    linkData.name        = ad_headline;
+            if (ad_description) linkData.description = ad_description;
+
             const creativeRes = await fetch(`https://graph.facebook.com/v21.0/${acctNode}/adcreatives`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 name: `Criativo — ${campName}`,
-                object_story_spec: {
-                  page_id: fbPageId,
-                  link_data: {
-                    image_hash: imageHash,
-                    link: 'https://onmid.com.br',
-                    message: 'Edite este texto no Gerenciador de Anúncios.',
-                    name: 'Título do anúncio',
-                    call_to_action: { type: 'LEARN_MORE' },
-                  },
-                },
+                object_story_spec: { page_id: fbPageId, link_data: linkData },
                 access_token: token,
               }),
             });
