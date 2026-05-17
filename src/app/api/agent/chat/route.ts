@@ -165,6 +165,120 @@ const systemTools: Anthropic.Tool[] = [
     description: 'Lista as conexões Z-API disponíveis para envio de WhatsApp.',
     input_schema: { type: 'object' as const, properties: {}, required: [] },
   },
+  {
+    name: 'list_users',
+    description: 'Lista todos os usuários e gestores cadastrados no sistema com nome, email, role e status.',
+    input_schema: { type: 'object' as const, properties: {}, required: [] },
+  },
+  {
+    name: 'create_user',
+    description: 'Cria um novo usuário no sistema. APENAS disponível para administradores. Sempre confirme com o usuário os dados antes de criar.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        name: { type: 'string', description: 'Nome completo do usuário' },
+        email: { type: 'string', description: 'Email de login do usuário' },
+        password: { type: 'string', description: 'Senha inicial' },
+        role: { type: 'string', enum: ['admin', 'gestor', 'viewer'], description: 'admin, gestor ou viewer' },
+      },
+      required: ['name', 'email', 'password', 'role'],
+    },
+  },
+  {
+    name: 'assign_gestor',
+    description: 'Vincula um gestor (usuário) a um cliente como responsável.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        client_id: { type: 'string', description: 'ID do cliente' },
+        gestor_id: { type: 'string', description: 'ID do gestor/usuário a vincular' },
+      },
+      required: ['client_id', 'gestor_id'],
+    },
+  },
+  {
+    name: 'link_account',
+    description: 'Vincula uma conta de anúncios (Meta Ads ou Google Ads) a um cliente.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        client_id: { type: 'string', description: 'ID do cliente' },
+        platform: { type: 'string', enum: ['meta_ads', 'google_ads'], description: 'meta_ads ou google_ads' },
+        account_id: { type: 'string', description: 'ID da conta de anúncios (ex: act_123456789 para Meta)' },
+        account_name: { type: 'string', description: 'Nome da conta (opcional)' },
+        connection_id: { type: 'string', description: 'ID da conexão OAuth (opcional)' },
+      },
+      required: ['client_id', 'platform', 'account_id'],
+    },
+  },
+  {
+    name: 'create_webhook',
+    description: 'Cria uma nova automação webhook no sistema. O token de autenticação é gerado automaticamente pelo banco.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        name: { type: 'string', description: 'Nome do webhook (ex: "Notificação de novo lead")' },
+        description: { type: 'string', description: 'Descrição do propósito' },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'create_disparo',
+    description: 'Cria uma campanha de disparo em massa via WhatsApp (Z-API). Use list_zapi_clients para descobrir o zapi_client_id.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        client_id: { type: 'string', description: 'ID do cliente dono da campanha' },
+        name: { type: 'string', description: 'Nome da campanha' },
+        message: { type: 'string', description: 'Mensagem a enviar' },
+        numbers: {
+          type: 'array',
+          items: { type: 'object', properties: { phone: { type: 'string' }, name: { type: 'string' } }, required: ['phone'] },
+          description: 'Contatos: [{phone: "5511999999999", name: "João"}]',
+        },
+        starts_at: { type: 'string', description: 'Início no formato ISO (ex: 2025-06-01T09:00:00). Padrão: agora.' },
+        interval_min: { type: 'number', description: 'Intervalo mínimo entre mensagens em segundos (padrão: 30)' },
+        interval_max: { type: 'number', description: 'Intervalo máximo entre mensagens em segundos (padrão: 90)' },
+      },
+      required: ['client_id', 'name', 'message', 'numbers'],
+    },
+  },
+  {
+    name: 'schedule_payment',
+    description: 'Agenda ou registra um pagamento PIX no sistema.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        client_id: { type: 'string', description: 'ID do cliente relacionado' },
+        destination: { type: 'string', description: 'Destinatário ou chave PIX' },
+        amount: { type: 'number', description: 'Valor em reais (ex: 150.00)' },
+        date: { type: 'string', description: 'Data do pagamento YYYY-MM-DD' },
+        channel: { type: 'string', enum: ['pix', 'ted', 'boleto'], description: 'Canal de pagamento (padrão: pix)' },
+        status: { type: 'string', enum: ['pendente', 'agendado', 'pago'], description: 'Status inicial (padrão: agendado)' },
+      },
+      required: ['client_id', 'destination', 'amount', 'date'],
+    },
+  },
+  {
+    name: 'create_meta_campaign',
+    description: 'Cria uma campanha no Meta Ads SEMPRE no status PAUSADO. Nunca ativa automaticamente. Inclui orientação de público-alvo baseada no negócio do cliente.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        client_id: { type: 'string', description: 'ID do cliente' },
+        name: { type: 'string', description: 'Nome da campanha' },
+        objective: {
+          type: 'string',
+          enum: ['OUTCOME_LEADS', 'OUTCOME_SALES', 'OUTCOME_TRAFFIC', 'OUTCOME_AWARENESS', 'OUTCOME_ENGAGEMENT', 'OUTCOME_APP_PROMOTION'],
+          description: 'OUTCOME_LEADS (geração de leads), OUTCOME_SALES (vendas), OUTCOME_TRAFFIC (tráfego), OUTCOME_AWARENESS (reconhecimento)',
+        },
+        daily_budget: { type: 'number', description: 'Orçamento diário em reais (ex: 50 para R$50/dia)' },
+        audience_notes: { type: 'string', description: 'Sugestão de público-alvo gerada pela Luna (não enviada à API Meta, apenas registrada)' },
+      },
+      required: ['client_id', 'name', 'objective', 'daily_budget'],
+    },
+  },
 ];
 
 // --- Tool executors ---
@@ -197,7 +311,8 @@ async function saveReportToDb(
 async function execSystemTool(
   name: string,
   input: Record<string, any>,
-  onEvent?: (event: Record<string, unknown>) => void
+  onEvent?: (event: Record<string, unknown>) => void,
+  callerRole?: string
 ): Promise<string> {
   const pool = makeServerPool();
   try {
@@ -509,9 +624,23 @@ async function execSystemTool(
         'this_month': 'Mês Atual', 'last_month': 'Mês Anterior',
         'last_30d': 'Últimos 30 dias', 'last_7d': 'Últimos 7 dias',
       };
+
+      // Fetch monthly summaries for the history page
+      let monthlySummaries: import('@/lib/report-pdf').MonthlySummaryRow[] = [];
+      try {
+        const { rows: sumRows } = await pool.query(
+          `SELECT month, year, summary, meta_spend, google_spend, total_leads
+           FROM public.client_monthly_summaries
+           WHERE client_id = $1
+           ORDER BY year DESC, month DESC LIMIT 6`,
+          [clientId]
+        );
+        monthlySummaries = sumRows;
+      } catch { /* table may not exist yet */ }
+
       const pdfBuffer = await generateReportPdf({
         clientName, period: periodLabels[period] ?? period,
-        metaCampaigns, googleCampaigns, crmLeads,
+        metaCampaigns, googleCampaigns, crmLeads, monthlySummaries,
       });
       const filename = `Relatorio_${clientName.replace(/\s+/g, '_')}_${period}.pdf`;
       const reportId = await saveReportToDb(pool, pdfBuffer, filename, clientName);
@@ -578,12 +707,25 @@ async function execSystemTool(
         'this_month': 'Mês Atual', 'last_month': 'Mês Anterior',
         'last_30d': 'Últimos 30 dias', 'last_7d': 'Últimos 7 dias',
       };
+
+      let monthlySummariesWA: import('@/lib/report-pdf').MonthlySummaryRow[] = [];
+      try {
+        const { rows: sumRows } = await pool.query(
+          `SELECT month, year, summary, meta_spend, google_spend, total_leads
+           FROM public.client_monthly_summaries WHERE client_id = $1
+           ORDER BY year DESC, month DESC LIMIT 6`,
+          [client_id]
+        );
+        monthlySummariesWA = sumRows;
+      } catch { /* ignore */ }
+
       const pdfBuffer = await generateReportPdf({
         clientName,
         period: periodLabels[period] ?? period,
         metaCampaigns,
         googleCampaigns,
         crmLeads,
+        monthlySummaries: monthlySummariesWA,
       });
 
       const b64 = pdfBuffer.toString('base64');
@@ -601,6 +743,135 @@ async function execSystemTool(
 
       if (result.ok) return `✅ Relatório de ${clientName} enviado com sucesso para ${phone}! O arquivo também está disponível para download no chat.`;
       return `❌ PDF gerado mas falha ao enviar via WhatsApp: ${result.error}. O arquivo está disponível para download no chat.`;
+    }
+
+    if (name === 'list_users') {
+      const { rows } = await pool.query('SELECT id, name, email, role, status FROM public.users ORDER BY name ASC');
+      if (rows.length === 0) return 'Nenhum usuário cadastrado.';
+      return JSON.stringify(rows.map(r => ({ id: r.id, name: r.name, email: r.email, role: r.role, status: r.status })));
+    }
+
+    if (name === 'create_user') {
+      if (callerRole !== 'admin') return 'Acesso negado. Apenas administradores podem criar usuários.';
+      const { name: userName, email, password, role: userRole } = input as { name: string; email: string; password: string; role: string };
+      const { rows: existing } = await pool.query('SELECT id FROM public.users WHERE email = $1', [email]);
+      if (existing.length > 0) return `Usuário com email "${email}" já existe.`;
+      const newId = crypto.randomUUID();
+      await pool.query(
+        'INSERT INTO public.users (id, name, email, password, role, status) VALUES ($1, $2, $3, $4, $5, $6)',
+        [newId, userName, email, password, userRole, 'active']
+      );
+      return `Usuário "${userName}" (${email}) criado com sucesso. Role: ${userRole}. ID: ${newId}`;
+    }
+
+    if (name === 'assign_gestor') {
+      const { client_id, gestor_id } = input as { client_id: string; gestor_id: string };
+      const { rows: clientRows } = await pool.query('SELECT name FROM public.clients WHERE id = $1', [client_id]);
+      if (!clientRows[0]) return 'Cliente não encontrado. Use list_clients para ver os clientes.';
+      const { rows: gestorRows } = await pool.query('SELECT name FROM public.users WHERE id = $1', [gestor_id]);
+      if (!gestorRows[0]) return 'Gestor não encontrado. Use list_users para ver os usuários.';
+      await pool.query('UPDATE public.clients SET gestor_id = $1 WHERE id = $2', [gestor_id, client_id]);
+      return `Gestor "${gestorRows[0].name}" vinculado ao cliente "${clientRows[0].name}" com sucesso.`;
+    }
+
+    if (name === 'link_account') {
+      const { client_id, platform, account_id, account_name, connection_id } = input as {
+        client_id: string; platform: string; account_id: string; account_name?: string; connection_id?: string;
+      };
+      const { rows: clientRows } = await pool.query('SELECT name FROM public.clients WHERE id = $1', [client_id]);
+      if (!clientRows[0]) return 'Cliente não encontrado. Use list_clients para ver os clientes.';
+      const { rows: existing } = await pool.query(
+        'SELECT id FROM public.client_account_links WHERE client_id = $1 AND account_id = $2',
+        [client_id, account_id]
+      );
+      if (existing.length > 0) return `Conta "${account_id}" já está vinculada a este cliente.`;
+      await pool.query(
+        'INSERT INTO public.client_account_links (client_id, platform, connection_id, account_id, account_name, currency) VALUES ($1, $2, $3, $4, $5, $6)',
+        [client_id, platform, connection_id ?? null, account_id, account_name ?? account_id, 'BRL']
+      );
+      return `Conta "${account_name ?? account_id}" (${platform}) vinculada ao cliente "${clientRows[0].name}" com sucesso.`;
+    }
+
+    if (name === 'create_webhook') {
+      const { name: wName, description } = input as { name: string; description?: string };
+      const { rows } = await pool.query(
+        'INSERT INTO public.webhook_configs (name, description) VALUES ($1, $2) RETURNING id, name, token',
+        [wName, description ?? '']
+      );
+      const wh = rows[0];
+      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+      return `Webhook "${wh.name}" criado com sucesso!\nToken: ${wh.token}\nURL para receber eventos: ${baseUrl}/api/webhook/${wh.token}\nID: ${wh.id}`;
+    }
+
+    if (name === 'create_disparo') {
+      const {
+        client_id, name: campName, message, numbers,
+        starts_at, interval_min = 30, interval_max = 90,
+      } = input as {
+        client_id: string; name: string; message: string;
+        numbers: { phone: string; name?: string }[];
+        starts_at?: string; interval_min?: number; interval_max?: number;
+      };
+      if (!numbers || numbers.length === 0) return 'É necessário informar ao menos um contato em "numbers".';
+      const startsAt = starts_at || new Date().toISOString();
+      const { rows: campRows } = await pool.query(
+        `INSERT INTO public.zapi_campaigns (client_id, name, message, status, starts_at, interval_min, interval_max, total)
+         VALUES ($1, $2, $3, 'pending', $4, $5, $6, $7) RETURNING id`,
+        [client_id, campName, message, startsAt, interval_min, interval_max, numbers.length]
+      );
+      const campId = campRows[0].id as string;
+      for (let i = 0; i < numbers.length; i++) {
+        await pool.query(
+          'INSERT INTO public.zapi_numbers (campaign_id, phone, name, position) VALUES ($1, $2, $3, $4)',
+          [campId, numbers[i].phone, numbers[i].name ?? '', i + 1]
+        );
+      }
+      return `Campanha de disparo "${campName}" criada com ${numbers.length} contato(s). ID: ${campId}\nStatus: pendente. Início agendado: ${startsAt}`;
+    }
+
+    if (name === 'schedule_payment') {
+      const { client_id, destination, amount, date, channel = 'pix', status = 'agendado' } = input as {
+        client_id: string; destination: string; amount: number; date: string; channel?: string; status?: string;
+      };
+      const { rows: clientRows } = await pool.query('SELECT name FROM public.clients WHERE id = $1', [client_id]);
+      const clientName = clientRows[0]?.name ?? client_id;
+      const payId = crypto.randomUUID();
+      await pool.query(
+        'INSERT INTO public.payments (id, client_id, client_name, date, destination, amount, channel, status) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+        [payId, client_id, clientName, date, destination, amount, channel, status]
+      );
+      return `Pagamento registrado: R$ ${Number(amount).toFixed(2)} via ${channel.toUpperCase()} para "${destination}" em ${date}. Status: ${status}. ID: ${payId}`;
+    }
+
+    if (name === 'create_meta_campaign') {
+      const { client_id, name: campName, objective, daily_budget, audience_notes } = input as {
+        client_id: string; name: string; objective: string; daily_budget: number; audience_notes?: string;
+      };
+      const { rows: links } = await pool.query(
+        "SELECT connection_id, account_id FROM public.client_account_links WHERE client_id = $1 AND platform IN ('meta_ads','meta') LIMIT 1",
+        [client_id]
+      );
+      if (!links[0]) return 'Nenhuma conta Meta Ads vinculada a este cliente. Use link_account para vincular primeiro.';
+      const { rows: connRows } = await pool.query('SELECT * FROM public.meta_connections WHERE id = $1', [links[0].connection_id]);
+      if (!connRows[0]) return 'Conexão Meta não encontrada. Verifique as integrações do cliente.';
+      const token = await getFreshMetaToken(connRows[0]);
+      const acctNode = String(links[0].account_id).startsWith('act_') ? links[0].account_id : `act_${links[0].account_id}`;
+      const res = await fetch(`https://graph.facebook.com/v21.0/${acctNode}/campaigns`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: campName,
+          objective,
+          status: 'PAUSED',
+          special_ad_categories: [],
+          daily_budget: Math.round(Number(daily_budget) * 100),
+          access_token: token,
+        }),
+      });
+      const data = await res.json() as { id?: string; error?: { message?: string } };
+      if (!res.ok || !data.id) return `Erro ao criar campanha: ${data.error?.message ?? `HTTP ${res.status}`}`;
+      const audienceNote = audience_notes ? `\n\n💡 Sugestão de público-alvo: ${audience_notes}` : '';
+      return `Campanha "${campName}" criada no Meta Ads com status PAUSADO ✅\nID da campanha: ${data.id}\nObjetivo: ${objective}\nOrçamento diário: R$ ${Number(daily_budget).toFixed(2)}${audienceNote}\n\n⚠️ A campanha está pausada — ative manualmente quando estiver pronta para veicular.`;
     }
 
     return 'Ferramenta desconhecida.';
@@ -795,7 +1066,7 @@ export async function POST(req: NextRequest) {
               if (extTool) {
                 result = await execExternalTool(extTool, block.input);
               } else {
-                result = await execSystemTool(block.name, block.input, (ev) => send(controller, ev));
+                result = await execSystemTool(block.name, block.input, (ev) => send(controller, ev), role);
               }
               send(controller, { type: 'tool_done', name: block.name });
               return { type: 'tool_result' as const, tool_use_id: block.id, content: result };

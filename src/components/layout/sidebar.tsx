@@ -21,6 +21,7 @@ import {
   Zap,
   Bot,
   Trophy,
+  ShieldCheck,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { APP_VERSION } from '@/lib/app-version';
@@ -37,6 +38,7 @@ const navItems: { name: string; href: string; icon: React.ElementType; roles: Ro
   { name: 'Disparos',    href: '/disparos',    icon: MessageCircle,   roles: ['Administrador', 'Usuário'] },
   { name: 'Luna IA',     href: '/agente',      icon: Bot,             roles: ['Administrador', 'Usuário'] },
   { name: 'Score',       href: '/score',       icon: Trophy,          roles: ['Administrador', 'Usuário'] },
+  { name: 'Cofre',       href: '/vault',       icon: ShieldCheck,     roles: ['Administrador', 'Usuário'] },
   { name: 'Automações',  href: '/automacoes',  icon: Zap,             roles: ['Administrador'] },
   { name: 'Integrações', href: '/integracoes', icon: Plug,            roles: ['Administrador'] },
   { name: 'Logs',        href: '/logs',        icon: ClipboardList,   roles: ['Administrador'] },

@@ -36,14 +36,6 @@ const BASE_URL = typeof window !== 'undefined' ? window.location.origin : 'https
 
 const AUTOMATION_ACCENT = '#55F52F';
 
-const MOCK_INSTAGRAM_AUTOMATIONS = [
-  { id: 'ig-comments', name: 'Respostas a comentários', description: 'Responde automaticamente comentários com palavras-chave', tag: 'Comentários', status: 'Ativa', executions: 342, last: 'há 2 min', date: '12/06/2024 14:32' },
-  { id: 'ig-welcome', name: 'Boas-vindas no DM', description: 'Envia mensagem automática para novos seguidores', tag: 'DM', status: 'Em teste', executions: 189, last: 'há 15 min', date: '12/06/2024 14:19' },
-  { id: 'ig-price', name: 'Gatilho: palavra-chave “preço”', description: 'Responde com informações de preços via DM', tag: 'Palavra-chave', status: 'Ativa', executions: 276, last: 'há 27 min', date: '12/06/2024 14:07' },
-  { id: 'ig-forward', name: 'Encaminhar para atendimento', description: 'Direciona DMs complexas para o time de atendimento', tag: 'Encaminhamento', status: 'Pausada', executions: 64, last: 'há 1 h', date: '12/06/2024 13:32' },
-  { id: 'ig-qualify', name: 'Qualificação de leads', description: 'Coleta dados e qualifica leads automaticamente', tag: 'Qualificação', status: 'Ativa', executions: 421, last: 'há 1 h', date: '12/06/2024 13:18' },
-];
-
 function MiniSparkline({ color = AUTOMATION_ACCENT }: { color?: string }) {
   return (
     <svg viewBox="0 0 90 28" className="h-8 w-20" aria-hidden="true">
@@ -57,13 +49,11 @@ function AutomationStatCard({
   icon: Icon,
   label,
   value,
-  delta,
   color,
 }: {
   icon: React.ElementType;
   label: string;
   value: string;
-  delta: string;
   color: string;
 }) {
   return (
@@ -75,11 +65,7 @@ function AutomationStatCard({
         </div>
         <div className="min-w-0 flex-1">
           <p className="text-sm text-slate-300">{label}</p>
-          <div className="mt-1 flex items-end gap-2">
-            <p className="text-3xl font-semibold leading-none text-white">{value}</p>
-            <span className="mb-0.5 rounded-md bg-emerald-500/12 px-2 py-0.5 text-xs font-bold text-emerald-400">↑ {delta}</span>
-          </div>
-          <p className="mt-2 text-xs text-slate-500">vs. 30 dias anteriores</p>
+          <p className="mt-1 text-3xl font-semibold leading-none text-white">{value}</p>
         </div>
         <MiniSparkline color={color} />
       </div>
@@ -127,6 +113,7 @@ const EVENT_DOCS = [
 export default function AutomacoesPage() {
   const [configs, setConfigs] = useState<WebhookConfig[]>([]);
   const [logs, setLogs] = useState<WebhookLog[]>([]);
+  const [igConnections, setIgConnections] = useState<{ id: string; userName: string; status: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
@@ -139,12 +126,14 @@ export default function AutomacoesPage() {
 
   async function load() {
     setLoading(true);
-    const [cfgRes, logRes] = await Promise.all([
+    const [cfgRes, logRes, igRes] = await Promise.all([
       fetch('/api/automacoes'),
       fetch('/api/automacoes/logs'),
+      fetch('/api/meta/connections'),
     ]);
     if (cfgRes.ok) setConfigs(await cfgRes.json());
     if (logRes.ok) setLogs(await logRes.json());
+    if (igRes.ok) setIgConnections(await igRes.json() as { id: string; userName: string; status: string }[]);
     setLoading(false);
   }
 
@@ -198,21 +187,19 @@ export default function AutomacoesPage() {
 
   const activeCount = configs.filter(cfg => cfg.enabled).length;
   const successLogs = logs.filter(log => log.status === 'success').length;
-  const responseRate = logs.length > 0 ? Math.round((successLogs / logs.length) * 1000) / 10 : 96.7;
-  const webhookRows = configs.length > 0
-    ? configs.map((cfg, index) => ({
-      id: cfg.id,
-      real: true,
-      config: cfg,
-      name: cfg.name,
-      description: cfg.description ?? 'Webhook para integração externa',
-      tag: index % 3 === 0 ? 'Comentários' : index % 3 === 1 ? 'DM' : 'Palavra-chave',
-      status: cfg.enabled ? 'Ativa' : 'Pausada',
-      executions: logs.filter(log => log.token === cfg.token || log.config_name === cfg.name).length,
-      last: cfg.enabled ? 'há pouco' : 'pausada',
-      date: new Date(cfg.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
-    }))
-    : MOCK_INSTAGRAM_AUTOMATIONS.map(row => ({ ...row, real: false as const, config: null }));
+  const responseRate = logs.length > 0 ? Math.round((successLogs / logs.length) * 1000) / 10 : null;
+  const webhookRows = configs.map(cfg => ({
+    id: cfg.id,
+    config: cfg,
+    name: cfg.name,
+    description: cfg.description ?? 'Webhook para integração externa',
+    status: cfg.enabled ? 'Ativa' : 'Pausada',
+    executions: logs.filter(log => log.token === cfg.token || log.config_name === cfg.name).length,
+    last: cfg.enabled ? 'há pouco' : 'pausada',
+    date: new Date(cfg.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+  }));
+  const igConnected = igConnections.some(c => c.status === 'connected');
+  const igUserName = igConnections.find(c => c.status === 'connected')?.userName ?? null;
 
   return (
     <div className="space-y-5 pb-8 text-slate-100">
@@ -246,10 +233,10 @@ export default function AutomacoesPage() {
       </div>
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-        <AutomationStatCard icon={Zap} label="Automações ativas" value={String(activeCount || 12)} delta="20%" color="#a855f7" />
-        <AutomationStatCard icon={MessageCircle} label="Mensagens respondidas" value={(successLogs || 1248).toLocaleString('pt-BR')} delta="34%" color={AUTOMATION_ACCENT} />
-        <AutomationStatCard icon={Flame} label="Gatilhos ativos" value={String(Math.max(activeCount * 4, 28))} delta="12%" color="#f59e0b" />
-        <AutomationStatCard icon={Target} label="Taxa de resposta" value={`${responseRate.toLocaleString('pt-BR')}%`} delta="8,4%" color="#60a5fa" />
+        <AutomationStatCard icon={Zap} label="Automações ativas" value={String(activeCount)} color="#a855f7" />
+        <AutomationStatCard icon={MessageCircle} label="Mensagens respondidas" value={successLogs.toLocaleString('pt-BR')} color={AUTOMATION_ACCENT} />
+        <AutomationStatCard icon={Flame} label="Webhooks cadastrados" value={String(configs.length)} color="#f59e0b" />
+        <AutomationStatCard icon={Target} label="Taxa de resposta" value={responseRate !== null ? `${responseRate.toLocaleString('pt-BR')}%` : '—'} color="#60a5fa" />
         <div className="relative overflow-hidden rounded-xl border border-white/6 bg-[#111722]/82 p-5">
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -278,8 +265,16 @@ export default function AutomacoesPage() {
               <h2 className="text-4xl font-semibold tracking-[-0.04em] text-white">Instagram <span className="rounded-full bg-violet-500/35 px-3 py-1 text-sm font-bold text-violet-200">PRO</span></h2>
               <p className="mt-3 max-w-md text-base leading-relaxed text-slate-300">Conecte seu Instagram e automatize interações, DMs e qualificação de leads com inteligência.</p>
               <div className="mt-5 flex flex-wrap items-center gap-2">
-                <span className="rounded-lg bg-primary/18 px-3 py-1.5 text-sm font-semibold text-primary"><span className="mr-1 inline-block h-2 w-2 rounded-full bg-primary" />Conectado</span>
-                <span className="rounded-lg bg-white/8 px-3 py-1.5 text-sm font-semibold text-slate-300">@seudominio</span>
+                {igConnected ? (
+                  <span className="rounded-lg bg-primary/18 px-3 py-1.5 text-sm font-semibold text-primary">
+                    <span className="mr-1 inline-block h-2 w-2 rounded-full bg-primary" />Conectado
+                  </span>
+                ) : (
+                  <span className="rounded-lg bg-red-500/15 px-3 py-1.5 text-sm font-semibold text-red-400">Não conectado</span>
+                )}
+                {igUserName && (
+                  <span className="rounded-lg bg-white/8 px-3 py-1.5 text-sm font-semibold text-slate-300">{igUserName}</span>
+                )}
                 <Link href="/automacoes/meta" className="rounded-lg bg-white/8 p-2 text-slate-300 hover:text-white"><ArrowRight className="h-4 w-4 -rotate-45" /></Link>
               </div>
             </div>
@@ -351,61 +346,58 @@ export default function AutomacoesPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-[minmax(320px,1fr)_180px_150px_170px_110px] border-b border-white/8 bg-white/[0.025] px-6 py-3 text-xs text-slate-500">
-            <span>Webhook</span><span>Status</span><span>Execuções</span><span>Último disparo</span><span className="text-right">Ações</span>
+          <div className="grid grid-cols-[minmax(320px,1fr)_160px_130px_170px_120px] border-b border-white/8 bg-white/[0.025] px-6 py-3 text-xs text-slate-500">
+            <span>Webhook</span><span>Status</span><span>Execuções</span><span>Criado em</span><span className="text-right">Ações</span>
           </div>
           <div className="divide-y divide-white/8">
-            {(loading ? [] : webhookRows).map(row => {
+            {loading && <div className="px-6 py-12 text-center text-sm text-slate-500">Carregando...</div>}
+            {!loading && webhookRows.length === 0 && (
+              <div className="px-6 py-16 text-center">
+                <Code2 className="mx-auto mb-3 h-10 w-10 text-slate-600" />
+                <p className="text-sm font-semibold text-slate-400">Nenhum webhook cadastrado</p>
+                <p className="mt-1 text-xs text-slate-600">Crie seu primeiro webhook usando o botão acima.</p>
+              </div>
+            )}
+            {webhookRows.map(row => {
               const cfg = row.config;
-              const copied = cfg ? copiedId === cfg.id : false;
+              const copied = copiedId === cfg.id;
               const active = row.status === 'Ativa';
-              const testing = row.status === 'Em teste';
               return (
-                <div key={row.id} className="grid grid-cols-[minmax(320px,1fr)_180px_150px_170px_110px] items-center px-6 py-3 transition-colors hover:bg-white/[0.025]">
+                <div key={row.id} className="grid grid-cols-[minmax(320px,1fr)_160px_130px_170px_120px] items-center px-6 py-3 transition-colors hover:bg-white/[0.025]">
                   <div className="flex min-w-0 items-center gap-4">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-amber-400 via-pink-500 to-fuchsia-600">
-                      <Camera className="h-6 w-6 text-white" />
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white/8">
+                      <Code2 className="h-5 w-5 text-slate-400" />
                     </div>
                     <div className="min-w-0">
                       <p className="truncate text-base font-semibold text-white">{row.name}</p>
                       <p className="truncate text-sm text-slate-400">{row.description}</p>
                     </div>
                   </div>
-                  <span className="w-fit rounded-lg bg-violet-500/20 px-3 py-1 text-sm font-semibold text-violet-300">{row.tag}</span>
-                  <span className={cn('w-fit rounded-lg px-3 py-1 text-sm font-semibold', active ? 'bg-primary/18 text-primary' : testing ? 'bg-sky-500/15 text-sky-400' : 'bg-amber-500/16 text-amber-400')}>
-                    <span className={cn('mr-2 inline-block h-2 w-2 rounded-full', active ? 'bg-primary' : testing ? 'bg-sky-400' : 'bg-amber-400')} />
+                  <span className={cn('w-fit rounded-lg px-3 py-1 text-sm font-semibold', active ? 'bg-primary/18 text-primary' : 'bg-amber-500/16 text-amber-400')}>
+                    <span className={cn('mr-2 inline-block h-2 w-2 rounded-full', active ? 'bg-primary' : 'bg-amber-400')} />
                     {row.status}
                   </span>
                   <div>
                     <p className="text-base font-semibold text-white">{row.executions}</p>
-                    <p className="text-xs text-slate-500">hoje</p>
+                    <p className="text-xs text-slate-500">eventos</p>
                   </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-white">{row.last}</p>
-                      <p className="text-xs text-slate-500">{row.date}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {cfg && (
-                        <button type="button" onClick={() => copyUrl(cfg)} title={copied ? 'Copiado' : 'Copiar URL'} className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/5 text-slate-300 hover:text-primary">
-                          {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                        </button>
-                      )}
-                      {cfg ? (
-                        <button type="button" onClick={() => toggle(cfg)} title={cfg.enabled ? 'Pausar' : 'Ativar'} className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/5 text-slate-300 hover:text-primary">
-                          {cfg.enabled ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-                        </button>
-                      ) : (
-                        <button type="button" className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/5 text-slate-300"><Play className="h-4 w-4" /></button>
-                      )}
-                      {cfg && <button type="button" onClick={() => remove(cfg.id)} title="Excluir" className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/5 text-slate-300 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>}
-                      <button className="flex h-10 w-10 items-center justify-center rounded-lg border border-white/8 text-slate-300"><MoreVertical className="h-5 w-5" /></button>
-                    </div>
+                  <div>
+                    <p className="text-sm text-slate-300">{row.date}</p>
+                  </div>
+                  <div className="flex items-center justify-end gap-2">
+                    <button type="button" onClick={() => copyUrl(cfg)} title={copied ? 'Copiado' : 'Copiar URL'} className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/5 text-slate-300 hover:text-primary">
+                      {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                    </button>
+                    <button type="button" onClick={() => toggle(cfg)} title={cfg.enabled ? 'Pausar' : 'Ativar'} className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/5 text-slate-300 hover:text-primary">
+                      {cfg.enabled ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                    </button>
+                    <button type="button" onClick={() => remove(cfg.id)} title="Excluir" className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/5 text-slate-300 hover:text-red-400">
+                      <Trash2 className="h-4 w-4" />
+                    </button>
                   </div>
                 </div>
               );
             })}
-            {loading && <div className="px-6 py-12 text-center text-sm text-slate-500">Carregando...</div>}
           </div>
         </section>
       )}

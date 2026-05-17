@@ -2,12 +2,22 @@ import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 
 type CampaignRow = Record<string, unknown>;
 
+export type MonthlySummaryRow = {
+  month: number;
+  year: number;
+  summary: string;
+  meta_spend?: number | null;
+  google_spend?: number | null;
+  total_leads?: number | null;
+};
+
 export type ReportPdfData = {
   clientName: string;
   period: string;
   metaCampaigns: CampaignRow[];
   googleCampaigns: CampaignRow[];
   crmLeads: CampaignRow[];
+  monthlySummaries?: MonthlySummaryRow[];
 };
 
 const GREEN  = rgb(0.333, 0.961, 0.184);
@@ -282,6 +292,57 @@ export async function generateReportPdf(data: ReportPdfData): Promise<Buffer> {
         String(l.phone ?? l.email ?? '-').slice(0, 22),
       ], PAD + 6, y, lCols, i % 2 === 0);
     });
+  }
+
+  // ── PAGE 5: Monthly Summaries ─────────────────────────────────────────────────
+  const HIST_COLOR = rgb(0.333, 0.961, 0.184); // same green
+  if (data.monthlySummaries && data.monthlySummaries.length > 0) {
+    const MONTH_NAMES = ['', 'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+      'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+
+    const ph = addPage();
+    fillBg(ph);
+    accentBar(ph, HIST_COLOR);
+    text(ph, 'HISTÓRICO', PAD + 6, 40, 10, HIST_COLOR, bold);
+    text(ph, 'Resumos Mensais', PAD + 6, 58, 20, LIGHT, bold);
+
+    let y = 100;
+    for (const s of data.monthlySummaries.slice(0, 6)) {
+      if (y > H - 100) break;
+      const monthLabel = `${MONTH_NAMES[s.month] ?? s.month} ${s.year}`;
+      const spend = (s.meta_spend ?? 0) + (s.google_spend ?? 0);
+
+      // Card background
+      ph.drawRectangle({ x: PAD + 6, y: ty(y + 72), width: COL - 6, height: 72, color: CARD });
+
+      // Month header
+      text(ph, monthLabel.toUpperCase(), PAD + 20, y + 14, 9, HIST_COLOR, bold);
+
+      // KPIs on same line
+      if (spend > 0) {
+        const kStr = `Gasto: ${currency(spend)}`;
+        text(ph, kStr, PAD + 6 + 140, y + 14, 8, MUTED, regular);
+      }
+      if ((s.total_leads ?? 0) > 0) {
+        const lStr = `Leads: ${num(s.total_leads)}`;
+        text(ph, lStr, PAD + 6 + 260, y + 14, 8, MUTED, regular);
+      }
+
+      // Summary text — wrap to ~95 chars per line, max 2 lines
+      const words = s.summary.split(/\s+/);
+      const lines: string[] = [];
+      let line = '';
+      for (const w of words) {
+        if ((line + ' ' + w).trim().length > 90) { lines.push(line.trim()); line = w; }
+        else line = line ? line + ' ' + w : w;
+        if (lines.length >= 2) break;
+      }
+      if (line && lines.length < 2) lines.push(line.trim());
+
+      lines.forEach((l, i) => text(ph, l, PAD + 20, y + 32 + i * 14, 8, LIGHT, regular));
+
+      y += 80;
+    }
   }
 
   const bytes = await doc.save();

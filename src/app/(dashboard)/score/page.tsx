@@ -261,7 +261,7 @@ function actionForAxis(label: string) {
 }
 
 function GestorRadarMini({ axes, className }: { axes: { label: string; avg: number }[]; className?: string }) {
-  const size = 210;
+  const size = 260;
   const center = size / 2;
   const radius = 74;
   const points = axes.map((axis, index) => {
@@ -306,99 +306,37 @@ function GestorRadarMini({ axes, className }: { axes: { label: string; avg: numb
 
 function GestorPriorityMap({ stats, selected, onSelect }: { stats: GestorStat[]; selected: string; onSelect: (name: string) => void }) {
   return (
-    <div className="overflow-hidden rounded-xl border border-slate-700/80 bg-[radial-gradient(circle_at_18%_0%,rgba(34,197,94,0.12),transparent_28%),rgba(8,15,27,0.88)] shadow-[0_0_36px_rgba(34,197,94,0.08)]">
-      <div className="flex items-center justify-between gap-3 border-b border-slate-700/70 px-5 py-4">
-        <div>
-          <h2 className="text-lg font-bold text-white">Mapa de prioridades</h2>
-          <p className="text-xs text-slate-400">Compare o desempenho dos gestores e identifique rapidamente onde agir.</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button className="flex h-9 items-center gap-2 rounded-lg border border-slate-600/80 bg-[#0b1220] px-3 text-xs text-slate-300">
-            Todos os gestores <ChevronDown className="h-3.5 w-3.5" />
-          </button>
-          <button className="flex h-9 items-center gap-2 rounded-lg border border-slate-600/80 bg-[#0b1220] px-3 text-xs text-slate-300">
-            <Download className="h-3.5 w-3.5" /> Exportar
-          </button>
-        </div>
+    <div className="overflow-hidden rounded-xl border border-slate-700/80 bg-[rgba(8,15,27,0.90)] shadow-[0_0_24px_rgba(34,197,94,0.06)]">
+      <div className="border-b border-slate-700/70 px-4 py-3">
+        <h2 className="text-sm font-bold text-white">Gestores de tráfego</h2>
+        <p className="text-xs text-slate-400">{stats.length} gestor{stats.length !== 1 ? 'es' : ''} · clique para ver o painel</p>
       </div>
-
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[1040px] text-left text-xs">
-          <thead className="border-b border-slate-700/70 text-slate-400">
-            <tr>
-              {['Gestor', 'Score geral', ...AXIS_LABELS, 'Prioridade principal', 'Ação sugerida'].map(head => (
-                <th key={head} className="px-4 py-3 font-medium">{head}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {stats.map(stat => {
-              const critical = [...stat.axes].sort((a, b) => a.avg - b.avg)[0];
-              const priority = priorityForAxis(critical);
-              const isSelected = selected === stat.name;
-              return (
-                <tr
-                  key={stat.name}
-                  onClick={() => onSelect(stat.name)}
-                  className={cn(
-                    'cursor-pointer border-b border-slate-800/90 transition-colors hover:bg-slate-800/50',
-                    isSelected && 'bg-emerald-400/8 shadow-[inset_0_0_0_1px_rgba(34,197,94,0.75),0_0_24px_rgba(34,197,94,0.16)]'
-                  )}
-                >
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-3">
-                      <span className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-400/15 text-sm font-bold text-emerald-300 shadow-[0_0_14px_rgba(34,197,94,0.28)]">{stat.name.charAt(0).toUpperCase()}</span>
-                      <div>
-                        <p className="font-bold text-white">{stat.name}</p>
-                        <p className="text-[11px] text-slate-400">{stat.clients.length} clientes</p>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl font-bold text-white">{stat.avgScore ?? '-'}</span>
-                      <span className={cn('rounded-full border px-2 py-0.5 text-xs font-bold shadow-[0_0_14px_currentColor]', gradeColor(stat.grade))}>{stat.grade ?? '?'}</span>
-                    </div>
-                  </td>
-                  {AXIS_LABELS.map(label => {
-                    const axis = stat.axes.find(a => a.label === label) ?? { label, avg: 0 };
-                    return (
-                      <td key={label} className="px-3 py-3">
-                        <p className="mb-1 font-bold" style={{ color: AXIS_COLOR[label] }}>{axis.avg}%</p>
-                        <div className="h-1.5 w-16 rounded-full bg-slate-700/70">
-                          <div className="h-1.5 rounded-full shadow-[0_0_10px_currentColor]" style={{ width: `${axis.avg}%`, backgroundColor: AXIS_COLOR[label], color: AXIS_COLOR[label] }} />
-                        </div>
-                      </td>
-                    );
-                  })}
-                  <td className="px-4 py-3">
-                    <div className="flex flex-col gap-1">
-                      <span className="flex items-center gap-2 text-xs font-semibold text-slate-200"><span className={cn('h-2.5 w-2.5 rounded-full', axisTone(critical?.avg ?? 0).bg)} />{critical?.label ?? '-'}</span>
-                      <span className={cn('w-fit rounded-full border px-2 py-0.5 text-[10px] font-bold', priority.tone)}>{priority.text}</span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center justify-between gap-3 text-slate-200">
-                      <span className="max-w-[150px] leading-snug">{priority.action}</span>
-                      <ArrowRight className="h-4 w-4 text-slate-500" />
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="flex flex-wrap items-center justify-center gap-8 border-t border-slate-700/70 px-5 py-4 text-xs text-slate-300">
-        {[
-          ['Excelente', '>= 75%', 'bg-emerald-400'],
-          ['Bom', '55% - 74%', 'bg-blue-400'],
-          ['Atenção', '35% - 54%', 'bg-amber-400'],
-          ['Crítico', '< 35%', 'bg-red-400'],
-        ].map(([label, range, bg]) => (
-          <span key={label} className="flex items-center gap-2"><span className={cn('h-2.5 w-2.5 rounded-full', bg)} />{label} ({range})</span>
-        ))}
+      <div className="divide-y divide-slate-800/70">
+        {stats.map(stat => {
+          const critical = [...stat.axes].sort((a, b) => a.avg - b.avg)[0];
+          return (
+            <button
+              key={stat.name}
+              onClick={() => onSelect(stat.name)}
+              className={cn(
+                'flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-slate-800/50',
+                selected === stat.name && 'bg-emerald-400/8 ring-inset ring-1 ring-emerald-400/40'
+              )}
+            >
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-400/15 text-sm font-bold text-emerald-300 shadow-[0_0_12px_rgba(34,197,94,0.22)]">
+                {stat.name.charAt(0).toUpperCase()}
+              </span>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-white truncate">{stat.name}</p>
+                <p className="text-[11px] text-slate-400">{stat.clients.length} cliente{stat.clients.length !== 1 ? 's' : ''}{critical ? ` · crítico: ${critical.label}` : ''}</p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-base font-bold text-white">{stat.avgScore ?? '-'}</span>
+                <span className={cn('rounded-full border px-1.5 py-0.5 text-xs font-bold', gradeColor(stat.grade))}>{stat.grade ?? '?'}</span>
+              </div>
+            </button>
+          );
+        })}
       </div>
     </div>
   );
@@ -412,27 +350,30 @@ function GestorDetailPanel({ stat }: { stat: GestorStat }) {
   const initial = stat.name.trim().charAt(0).toUpperCase();
 
   return (
-    <aside className="relative overflow-hidden rounded-xl border border-emerald-400/50 bg-[radial-gradient(circle_at_20%_0%,rgba(34,197,94,0.24),transparent_34%),rgba(8,15,27,0.92)] p-5 shadow-[0_0_36px_rgba(34,197,94,0.18)]">
-      <button className="absolute right-4 top-4 text-slate-400 hover:text-white"><X className="h-4 w-4" /></button>
-      <div className="mb-5 flex items-center gap-4">
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-emerald-400/20 text-lg font-bold text-emerald-300 shadow-[0_0_24px_rgba(34,197,94,0.26)]">{initial}</div>
+    <aside className="overflow-hidden rounded-xl border border-emerald-400/50 bg-[radial-gradient(circle_at_20%_0%,rgba(34,197,94,0.22),transparent_34%),rgba(8,15,27,0.92)] p-5 shadow-[0_0_36px_rgba(34,197,94,0.18)]">
+      {/* Header: avatar + name + score/grade inline */}
+      <div className="mb-4 flex items-center gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-400/20 text-base font-bold text-emerald-300 shadow-[0_0_18px_rgba(34,197,94,0.24)]">{initial}</div>
         <div className="flex-1 min-w-0">
-          <p className="text-lg font-bold text-white truncate">{stat.name}</p>
+          <p className="font-bold text-white truncate">{stat.name}</p>
           <p className="text-xs text-slate-400">{stat.clients.length} cliente{stat.clients.length !== 1 ? 's' : ''} · {stat.clients.filter(c => c.score !== null).length} calculados</p>
         </div>
-      </div>
-      <div className="grid gap-5 xl:grid-cols-[150px_1fr]">
-        <div className="rounded-lg border border-slate-700/80 bg-[#0a101c]/80 p-4 text-center">
-          <p className="text-xs text-slate-400">Score geral</p>
-          <p className="mt-3 text-5xl font-bold text-white">{stat.avgScore ?? '-'}<span className="text-2xl font-normal text-slate-500">/100</span></p>
-          <div className={cn('mx-auto mt-4 flex h-16 w-16 items-center justify-center rounded-full border-4 text-2xl font-black shadow-[0_0_22px_currentColor]', gradeColor(stat.grade))}>{stat.grade ?? '?'}</div>
-        </div>
-        <div className="min-h-[210px]">
-          <GestorRadarMini axes={stat.axes} />
+        <div className="flex items-center gap-2.5 shrink-0">
+          <div className="text-right">
+            <p className="text-[10px] text-slate-400">Score geral</p>
+            <p className="text-xl font-bold text-white leading-none mt-0.5">{stat.avgScore ?? '-'}<span className="text-xs font-normal text-slate-500">/100</span></p>
+          </div>
+          <div className={cn('flex h-12 w-12 items-center justify-center rounded-full border-4 text-xl font-black shadow-[0_0_20px_currentColor]', gradeColor(stat.grade))}>{stat.grade ?? '?'}</div>
         </div>
       </div>
 
-      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+      {/* Radar — full width */}
+      <div className="h-[220px]">
+        <GestorRadarMini axes={stat.axes} />
+      </div>
+
+      {/* Critical / Opportunities */}
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
         <div className="rounded-lg border border-slate-700/80 bg-[#0a101c]/72 p-4">
           <p className="mb-3 text-xs font-bold text-red-300">Pontos críticos</p>
           <div className="space-y-2">
@@ -447,9 +388,10 @@ function GestorDetailPanel({ stat }: { stat: GestorStat }) {
         </div>
       </div>
 
-      <div className="mt-4 rounded-lg border border-slate-700/80 bg-[#0a101c]/72 p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <p className="text-xs font-bold text-red-300">Clientes que precisam de atencao</p>
+      {/* Attention clients */}
+      <div className="mt-3 rounded-lg border border-slate-700/80 bg-[#0a101c]/72 p-4">
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-xs font-bold text-red-300">Clientes que precisam de atenção</p>
           <button className="text-xs font-bold text-red-300">Ver todos ({attentionClients.length})</button>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -459,12 +401,13 @@ function GestorDetailPanel({ stat }: { stat: GestorStat }) {
         </div>
       </div>
 
-      <div className="mt-4 rounded-lg border border-emerald-400/20 bg-emerald-400/5 p-4">
+      {/* Highlights */}
+      <div className="mt-3 rounded-lg border border-emerald-400/20 bg-emerald-400/5 p-4">
         <p className="mb-3 text-xs font-bold text-emerald-300">Melhores destaques</p>
         <div className="space-y-2">
           {highlights.length > 0 ? highlights.map(axis => (
-            <p key={axis.label} className="flex items-center gap-2 text-[11px] text-slate-300"><CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />{axis.label} acima da media da equipe</p>
-          )) : <p className="text-[11px] text-slate-500">Ainda sem destaque acima da media.</p>}
+            <p key={axis.label} className="flex items-center gap-2 text-[11px] text-slate-300"><CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />{axis.label} acima da média da equipe</p>
+          )) : <p className="text-[11px] text-slate-500">Ainda sem destaque acima da média.</p>}
         </div>
       </div>
     </aside>
@@ -713,7 +656,7 @@ export default function ScorePage() {
             </div>
           ) : (
             <div className="space-y-4">
-              <div className="grid gap-4 xl:grid-cols-[minmax(0,1.85fr)_minmax(380px,0.95fr)]">
+              <div className="grid gap-4 xl:grid-cols-[280px_1fr]">
                 <GestorPriorityMap stats={gestorStats} selected={selectedGestor?.name ?? ''} onSelect={setSelectedGestorName} />
                 {selectedGestor && <GestorDetailPanel stat={selectedGestor} />}
               </div>

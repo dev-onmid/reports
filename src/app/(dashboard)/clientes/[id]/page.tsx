@@ -42,6 +42,8 @@ import { getHoliday, previousBusinessDay, formatDateBR as formatHolidayDateBR } 
 import { cn, formatCurrencyBRL, formatCurrencyInputBRL, parseCurrencyBRL } from '@/lib/utils';
 import { LinkAccountsDialog } from '@/components/link-accounts-dialog';
 import { ClientAvatar } from '@/components/client-avatar';
+import { HistoricoTab } from '@/components/historico-tab';
+import { VaultTab } from '@/components/vault-tab';
 
 // ── Funnel types & logic ───────────────────────────────────────────────────────
 type FunnelStage = { id: string; name: string; conversion: number };
@@ -2839,7 +2841,7 @@ function SheetsResultsTab({ clientId }: { clientId: string }) {
 }
 
 // ── Page ───────────────────────────────────────────────────────────────────────
-const TABS = ['planejamento', 'pagamentos', 'resultados', 'dna', 'importar'] as const;
+const TABS = ['planejamento', 'historico', 'links', 'pagamentos', 'resultados', 'dna', 'importar'] as const;
 type Tab = typeof TABS[number];
 
 export default function ClientPage({ params }: { params: Promise<{ id: string }> }) {
@@ -2955,6 +2957,8 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
 
   const tabLabel: Record<Tab, string> = {
     planejamento: 'Planejamento',
+    historico:    'Histórico',
+    links:        'Links & Senhas',
     pagamentos:   'Pagamentos',
     resultados:   'Resultados',
     dna:          'DNA do Cliente',
@@ -3055,6 +3059,10 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
           <FunnelTab clientId={id} clientName={client.name} goalConfig={clientGoal} />
         </div>
       )}
+
+      {tab === 'historico' && <HistoricoTab clientId={id} />}
+
+      {tab === 'links' && <VaultTab clientId={id} />}
 
       {tab === 'dna' && <ClientDnaTab clientId={id} clientName={client.name} />}
 

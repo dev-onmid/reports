@@ -602,7 +602,7 @@ export default function AgentePage() {
   const [instructions, setInstructions] = useState('');
   const [scrolledUp, setScrolledUp] = useState(false);
   const [showMoreSuggestions, setShowMoreSuggestions] = useState(false);
-  const [systemContext, setSystemContext] = useState<{ clients: number } | null>(null);
+  const [systemContext, setSystemContext] = useState<{ clients: number; activeWebhooks: number; logsToday: number } | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
@@ -618,13 +618,17 @@ export default function AgentePage() {
       .then((d: { instructions: string }) => setInstructions(d.instructions))
       .catch(() => {});
 
-    fetch('/api/clients')
-      .then(r => r.ok ? r.json() : [])
-      .then((data: { status?: string }[]) => {
-        const active = Array.isArray(data) ? data.filter(c => !c.status || c.status === 'Ativo').length : 0;
-        setSystemContext({ clients: active });
-      })
-      .catch(() => {});
+    Promise.all([
+      fetch('/api/clients').then(r => r.ok ? r.json() : []),
+      fetch('/api/automacoes').then(r => r.ok ? r.json() : []),
+      fetch('/api/automacoes/logs').then(r => r.ok ? r.json() : []),
+    ]).then(([clients, webhooks, logs]: [{ status?: string }[], { enabled?: boolean }[], { received_at?: string }[]]) => {
+      const active = Array.isArray(clients) ? clients.filter(c => !c.status || c.status === 'Ativo').length : 0;
+      const activeWebhooks = Array.isArray(webhooks) ? webhooks.filter(w => w.enabled).length : 0;
+      const today = new Date().toDateString();
+      const logsToday = Array.isArray(logs) ? logs.filter(l => l.received_at && new Date(l.received_at).toDateString() === today).length : 0;
+      setSystemContext({ clients: active, activeWebhooks, logsToday });
+    }).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -658,7 +662,6 @@ export default function AgentePage() {
 
     const history = [...messages, userMsg].map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
     const assistantId = crypto.randomUUID();
-    setMessages(prev => [...prev, { id: assistantId, role: 'assistant', content: '', toolsUsed: [] }]);
 
     try {
       const res = await fetch('/api/agent/chat', {
@@ -673,6 +676,9 @@ export default function AgentePage() {
       let buffer = '';
       const toolsUsed: string[] = [];
       let currentActive: string[] = [];
+      let accText = '';
+      const accAttachments: FileAttachment[] = [];
+      let messageAdded = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -686,10 +692,9 @@ export default function AgentePage() {
           try {
             const event = JSON.parse(line.slice(6)) as StreamEvent;
             if (event.type === 'text') {
-              setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: m.content + event.text } : m));
+              accText += event.text;
             } else if (event.type === 'file_attachment') {
-              const att: FileAttachment = { url: event.url, filename: event.filename, label: event.label };
-              setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, attachments: [...(m.attachments ?? []), att] } : m));
+              accAttachments.push({ url: event.url, filename: event.filename, label: event.label });
             } else if (event.type === 'tool_start') {
               currentActive = [...currentActive, event.name];
               setActiveTools([...currentActive]);
@@ -698,16 +703,28 @@ export default function AgentePage() {
               currentActive = currentActive.filter(t => t !== event.name);
               setActiveTools([...currentActive]);
             } else if (event.type === 'done') {
-              setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, toolsUsed } : m));
+              messageAdded = true;
+              setMessages(prev => [...prev, {
+                id: assistantId, role: 'assistant', content: accText, toolsUsed,
+                attachments: accAttachments.length > 0 ? accAttachments : undefined,
+              }]);
               setActiveTools([]);
             } else if (event.type === 'error') {
-              setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: m.content || `Erro: ${event.message}` } : m));
+              messageAdded = true;
+              setMessages(prev => [...prev, { id: assistantId, role: 'assistant', content: `Erro: ${event.message}`, toolsUsed: [] }]);
             }
           } catch { /* ignore */ }
         }
       }
+
+      if (!messageAdded && accText) {
+        setMessages(prev => [...prev, {
+          id: assistantId, role: 'assistant', content: accText, toolsUsed,
+          attachments: accAttachments.length > 0 ? accAttachments : undefined,
+        }]);
+      }
     } catch {
-      setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: 'Desculpe, ocorreu um erro. Tente novamente.' } : m));
+      setMessages(prev => [...prev, { id: assistantId, role: 'assistant', content: 'Desculpe, ocorreu um erro. Tente novamente.', toolsUsed: [] }]);
     } finally {
       setLoading(false);
       setActiveTools([]);
@@ -820,27 +837,16 @@ export default function AgentePage() {
             ) : (
               <div className="space-y-5">
                 {messages.map(msg => <MessageBubble key={msg.id} msg={msg} />)}
-                {activeTools.length > 0 && (
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-primary/35 bg-primary/10">
-                      <Bot className="h-[18px] w-[18px] text-primary" />
-                    </div>
-                    <div className="flex flex-wrap items-center gap-1.5 pt-1.5">
-                      {activeTools.map((t, i) => (
-                        <span key={i} className="inline-flex animate-pulse items-center gap-1 rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
-                          <Wrench className="h-3 w-3" />{getToolLabel(t)}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {loading && activeTools.length === 0 && (
+                {loading && (
                   <div className="flex gap-3">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-primary/35 bg-primary/10">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-primary/35 bg-primary/10 shadow-[0_0_20px_rgba(85,245,47,0.12)]">
                       <Bot className="h-[18px] w-[18px] text-primary" />
                     </div>
-                    <div className="rounded-2xl rounded-tl-md border border-white/10 bg-[#101522] px-4 py-3">
-                      <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+                    <div className="rounded-2xl rounded-tl-md border border-white/10 bg-[#101522]/90 px-4 py-3 text-sm text-slate-300">
+                      <span className="inline-flex items-center gap-2">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                        Estou trabalhando nisso...
+                      </span>
                     </div>
                   </div>
                 )}
@@ -850,7 +856,7 @@ export default function AgentePage() {
           </div>
         </section>
 
-        <aside className="hidden min-h-0 flex-col gap-4 xl:flex">
+        <aside className="hidden min-h-0 flex-col gap-4 overflow-y-auto xl:flex">
           <div className="rounded-2xl border border-violet-400/20 bg-[#0d1322]/90 p-5 shadow-[0_20px_70px_rgba(0,0,0,0.28)]">
             <h3 className="flex items-center gap-2 text-sm font-bold text-white">
               <Sparkles className="h-4 w-4 text-violet-400" />O que a Luna pode fazer
@@ -911,20 +917,26 @@ export default function AgentePage() {
                 {systemContext ? 'Atualizado agora' : 'Carregando...'}
               </span>
             </div>
-            <div className="mt-5 grid grid-cols-2 gap-3 border-t border-white/8 pt-4">
-              <div>
-                <p className="text-[11px] text-slate-500">Clientes ativos</p>
-                <p className="mt-1 text-sm font-bold text-white">
-                  {systemContext ? systemContext.clients : <span className="text-slate-500">—</span>}
-                </p>
-              </div>
-              <div>
-                <p className="text-[11px] text-slate-500">Conversas hoje</p>
-                <p className="mt-1 text-sm font-bold text-white">{messages.length > 0 ? '1' : '—'}</p>
-              </div>
+            <div className="mt-4 space-y-3 border-t border-white/8 pt-4">
+              {[
+                { label: 'Clientes ativos', value: systemContext?.clients ?? null, icon: Users, color: 'text-primary' },
+                { label: 'Webhooks ativos', value: systemContext?.activeWebhooks ?? null, icon: Zap, color: 'text-amber-400' },
+                { label: 'Eventos hoje', value: systemContext?.logsToday ?? null, icon: MessageSquare, color: 'text-violet-400' },
+                { label: 'Conversas na sessão', value: messages.length > 0 ? 1 : 0, icon: Bot, color: 'text-sky-400' },
+              ].map(({ label, value, icon: Icon, color }) => (
+                <div key={label} className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <Icon className={cn('h-3.5 w-3.5 shrink-0', color)} />
+                    <p className="text-xs text-slate-400">{label}</p>
+                  </div>
+                  <p className="text-sm font-bold text-white">
+                    {value !== null ? value : <span className="text-slate-600">—</span>}
+                  </p>
+                </div>
+              ))}
             </div>
-            <p className="mt-5 flex items-center gap-2 text-xs text-slate-500">
-              <ShieldCheck className="h-4 w-4 text-primary/70" />Seus dados estão protegidos e seguros.
+            <p className="mt-4 flex items-center gap-2 border-t border-white/8 pt-4 text-xs text-slate-500">
+              <ShieldCheck className="h-3.5 w-3.5 text-primary/70 shrink-0" />Dados protegidos e seguros.
             </p>
           </div>
         </aside>
