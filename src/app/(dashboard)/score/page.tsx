@@ -109,7 +109,7 @@ function ClientRadarView({
 
       {client.details ? (
         <>
-          <RadarView details={client.details} clientName={client.name} score={client.score} />
+          <RadarView details={client.details} score={client.score} />
           {client.calculated_at && (
             <p className="text-[10px] text-muted-foreground px-5 pb-3 border-t border-border/40 pt-2">
               Calculado em {new Date(client.calculated_at).toLocaleString('pt-BR')}
