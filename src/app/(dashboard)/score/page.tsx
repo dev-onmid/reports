@@ -104,6 +104,8 @@ function ClientRadarView({
   calculating: boolean;
   onCalc: () => void;
 }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
   const color = client.score !== null ? radarFillColor(client.score) : '#6b7280';
 
   return (
@@ -128,6 +130,11 @@ function ClientRadarView({
         <div className="flex flex-col lg:flex-row gap-0">
           {/* Radar chart */}
           <div className="flex-1 flex items-center justify-center py-6 px-4">
+            {!mounted ? (
+              <div className="h-[340px] flex items-center justify-center">
+                <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : (
             <ResponsiveContainer width="100%" height={340}>
               <RadarChart data={buildRadarData(client.details)} margin={{ top: 20, right: 40, bottom: 20, left: 40 }}>
                 <PolarGrid
@@ -149,6 +156,7 @@ function ClientRadarView({
                 />
               </RadarChart>
             </ResponsiveContainer>
+            )}
           </div>
 
           {/* Right: axis breakdown */}
