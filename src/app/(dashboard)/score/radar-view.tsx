@@ -41,6 +41,15 @@ function radarColor(score: number): string {
   return '#ef4444';
 }
 
+const AXIS_COLORS: Record<string, string> = {
+  'Custo/CPL': '#22c55e',
+  Volume: '#2f86ff',
+  Engajamento: '#8b5cf6',
+  Criativos: '#f59e0b',
+  'Consistência': '#facc15',
+  'Gestão': '#f97316',
+};
+
 function buildAxes(d: ScoreDetails) {
   return [
     { label: 'Custo/CPL',    value: pct(d.cpl.score, d.cpl.max) },
@@ -53,12 +62,12 @@ function buildAxes(d: ScoreDetails) {
 }
 
 const AXIS_LEGEND = [
-  { label: 'Custo/CPL', desc: 'Compara o CPL atual com o mês anterior. Quanto menor o CPL, melhor a pontuação.' },
-  { label: 'Volume', desc: 'Mede o volume de leads atual versus o mês anterior.' },
-  { label: 'Engajamento', desc: 'Combina CTR e frequência para indicar qualidade de criativo e saturação.' },
-  { label: 'Criativos', desc: 'Considera quantidade de anúncios ativos, idade média e variedade de formatos.' },
-  { label: 'Consistência', desc: 'Avalia estabilidade semanal do investimento e campanhas pausadas por saldo.' },
-  { label: 'Gestão', desc: 'Considera conversão no CRM e quantidade de relatórios gerados no mês.' },
+  { label: 'Custo/CPL', desc: 'Avalia o custo por lead e sua eficiência em gerar resultados com economia.' },
+  { label: 'Volume', desc: 'Mede o volume de leads e conversões em relação ao período anterior.' },
+  { label: 'Engajamento', desc: 'Analisa cliques, CTR e frequência para qualificar as interações com os anúncios.' },
+  { label: 'Criativos', desc: 'Avalia quantidade, idade e diversidade dos criativos em veiculação.' },
+  { label: 'Consistência', desc: 'Verifica a regularidade do investimento e estabilidade das campanhas.' },
+  { label: 'Gestão', desc: 'Considera a gestão no CRM, revisões e ações tomadas pela equipe.' },
 ];
 
 function insightTone(percent: number): InsightTone {
@@ -99,9 +108,9 @@ function buildInsights(d: ScoreDetails): ScoreInsight[] {
 }
 
 function toneClasses(tone: InsightTone) {
-  if (tone === 'red') return { card: 'border-red-500/30 bg-red-500/10', pill: 'border-red-500/30 bg-red-500/10 text-red-400', dot: 'bg-red-400' };
-  if (tone === 'orange') return { card: 'border-orange-500/30 bg-orange-500/10', pill: 'border-orange-500/30 bg-orange-500/10 text-orange-400', dot: 'bg-orange-400' };
-  return { card: 'border-green-500/30 bg-green-500/10', pill: 'border-green-500/30 bg-green-500/10 text-green-400', dot: 'bg-green-400' };
+  if (tone === 'red') return { card: 'border-red-500/30 bg-red-500/10', pill: 'border-red-500/30 bg-red-500/10 text-red-400', dot: 'bg-red-400', label: 'Crítico' };
+  if (tone === 'orange') return { card: 'border-orange-500/30 bg-orange-500/10', pill: 'border-orange-500/30 bg-orange-500/10 text-orange-400', dot: 'bg-orange-400', label: 'Alto' };
+  return { card: 'border-yellow-500/30 bg-yellow-500/10', pill: 'border-yellow-500/30 bg-yellow-500/10 text-yellow-400', dot: 'bg-yellow-400', label: 'Médio' };
 }
 
 // SVG hexagonal radar — no external deps
@@ -165,9 +174,11 @@ function SvgRadar({ axes, color }: { axes: { label: string; value: number }[]; c
       {/* Labels */}
       {axes.map((ax, i) => {
         const lp = point(R + 22, i);
+        const dot = point(R + 8, i);
         const anchor = lp.x < cx - 5 ? 'end' : lp.x > cx + 5 ? 'start' : 'middle';
         return (
           <g key={i}>
+            <circle cx={dot.x} cy={dot.y} r={6} fill={AXIS_COLORS[ax.label] ?? color} />
             <text
               x={lp.x}
               y={lp.y}
@@ -196,73 +207,92 @@ export default function RadarView({ details, score }: {
 
   return (
     <div>
-      <div className="flex flex-col lg:flex-row">
-        {/* Radar SVG */}
-        <div className="flex-1 flex items-center justify-center py-4 px-4">
-          <SvgRadar axes={axes} color={color} />
-        </div>
+      <div className="grid gap-0 overflow-hidden rounded-xl border border-border bg-card lg:grid-cols-[1.1fr_1fr]">
+        <section className="border-border p-5 lg:border-r">
+          <div className="mb-2">
+            <p className="text-base font-bold text-foreground">Radar de Performance <span className="text-xs text-muted-foreground">ⓘ</span></p>
+            <p className="text-xs text-muted-foreground">Visão geral da performance do cliente nas 6 dimensões do Score.</p>
+          </div>
+          <div className="flex min-h-[310px] items-center justify-center">
+            <SvgRadar axes={axes} color={color} />
+          </div>
+        </section>
 
-        {/* Right: axis breakdown */}
-        <div className="lg:w-60 border-t lg:border-t-0 lg:border-l border-border/50 p-5 flex flex-col gap-2.5">
-          <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest mb-1">Detalhes por eixo</p>
+        <section className="p-5">
+          <div className="mb-6">
+            <p className="text-base font-bold text-foreground">Detalhes por eixo</p>
+            <p className="text-xs text-muted-foreground">Performance em cada dimensão do Score.</p>
+          </div>
+          <div className="flex flex-col gap-5">
           {axes.map(item => (
             <div key={item.label}>
-              <div className="flex justify-between items-center mb-1">
-                <span className="text-xs font-medium text-foreground">{item.label}</span>
-                <span className="text-xs font-bold" style={{ color: radarColor(item.value) }}>{item.value}%</span>
-              </div>
-              <div className="h-1.5 w-full rounded-full bg-muted">
-                <div
-                  className="h-1.5 rounded-full transition-all"
-                  style={{ width: `${item.value}%`, backgroundColor: radarColor(item.value) }}
-                />
+              <div className="mb-2 grid grid-cols-[130px_1fr_56px] items-center gap-3">
+                <span className="flex items-center gap-2 text-sm font-medium text-foreground">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-background" style={{ color: AXIS_COLORS[item.label] ?? radarColor(item.value) }}>●</span>
+                  {item.label}
+                </span>
+                <div className="h-1.5 rounded-full bg-muted">
+                  <div
+                    className="h-1.5 rounded-full transition-all"
+                    style={{ width: `${item.value}%`, backgroundColor: AXIS_COLORS[item.label] ?? radarColor(item.value) }}
+                  />
+                </div>
+                <span className="text-right text-sm font-bold" style={{ color: AXIS_COLORS[item.label] ?? radarColor(item.value) }}>{item.value} <span className="text-xs font-normal text-muted-foreground">/100</span></span>
               </div>
             </div>
           ))}
-        </div>
+          </div>
+          <div className="mt-7 rounded-lg bg-background/70 px-4 py-3 text-xs text-muted-foreground">
+            ⓘ Pontuações atualizadas diariamente com base nos dados do período selecionado.
+          </div>
+        </section>
       </div>
 
-      <div className="grid gap-4 border-t border-border/50 p-5 xl:grid-cols-[1fr_1.1fr]">
-        <section className="rounded-xl border border-border/70 bg-background/35 p-4">
+      <div className="mt-3 grid gap-4 xl:grid-cols-[1fr_1.2fr]">
+        <section className="rounded-xl border border-border bg-card p-5">
           <div className="mb-4">
             <p className="text-sm font-bold text-foreground">Legenda do radar</p>
-            <p className="text-xs text-muted-foreground">O que é considerado em cada etapa do Score.</p>
+            <p className="text-xs text-muted-foreground">Entenda o que cada dimensão representa e como impacta o Score.</p>
           </div>
           <div className="grid gap-2 sm:grid-cols-2">
             {AXIS_LEGEND.map(item => (
-              <div key={item.label} className="rounded-lg border border-border/60 bg-card/50 p-3">
-                <p className="text-xs font-bold text-foreground">{item.label}</p>
+              <div key={item.label} className="rounded-lg border border-border/70 bg-background/35 p-3">
+                <p className="flex items-center gap-2 text-xs font-bold text-foreground">
+                  <span className="h-3 w-3 rounded-full" style={{ backgroundColor: AXIS_COLORS[item.label] ?? '#55f52f' }} />
+                  {item.label}
+                </p>
                 <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{item.desc}</p>
               </div>
             ))}
           </div>
         </section>
 
-        <section className="rounded-xl border border-border/70 bg-background/35 p-4">
+        <section className="rounded-xl border border-border bg-card p-5">
           <div className="mb-4">
             <p className="text-sm font-bold text-foreground">Insights diretos</p>
-            <p className="text-xs text-muted-foreground">Prioridades práticas para melhorar o que está puxando o Score para baixo.</p>
+            <p className="text-xs text-muted-foreground">Prioridades práticas para melhorar o Score e acelerar resultados.</p>
           </div>
           <div className="space-y-2">
             {insights.map(item => {
               const tone = toneClasses(item.tone);
               return (
-                <div key={item.key} className={`rounded-lg border p-3 ${tone.card}`}>
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
+                <div key={item.key} className={`grid gap-3 rounded-lg border p-3 md:grid-cols-[1fr_120px_1fr_28px] ${tone.card}`}>
+                  <div className="min-w-0">
                       <p className="flex items-center gap-2 text-sm font-bold text-foreground">
                         <span className={`h-2 w-2 rounded-full ${tone.dot}`} />
                         {item.title}
                       </p>
                       <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{item.diagnosis}</p>
-                    </div>
+                  </div>
+                  <div className="flex items-center md:justify-center">
                     <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-bold ${tone.pill}`}>
-                      {item.percent}%
+                      {tone.label}
                     </span>
                   </div>
-                  <p className="mt-2 text-xs leading-relaxed text-foreground/85">
-                    <span className="font-bold">Como melhorar: </span>{item.action}
+                  <p className="text-xs leading-relaxed text-foreground/85">
+                    <span className="font-bold">Recomendação: </span>{item.action}
                   </p>
+                  <span className="hidden items-center justify-center text-muted-foreground md:flex">›</span>
                 </div>
               );
             })}

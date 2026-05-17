@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils';
 import {
   Trophy, RefreshCw, TrendingUp, TrendingDown, Minus,
   Users, ChevronDown, ChevronUp, Loader2, Star, AlertTriangle,
-  BarChart2, List,
+  BarChart2, List, CalendarDays,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ClientAvatar } from '@/components/client-avatar';
@@ -69,6 +69,35 @@ function trend(curr: number, prev: number) {
 
 function currency(n: number) {
   return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+function scoreGrade(score: number | null): string {
+  if (score === null) return '?';
+  if (score >= 85) return 'A';
+  if (score >= 70) return 'B';
+  if (score >= 50) return 'C';
+  if (score >= 30) return 'D';
+  return 'F';
+}
+
+function MiniSparkline({ color = '#55f52f' }: { color?: string }) {
+  return (
+    <svg viewBox="0 0 120 42" className="h-12 w-28">
+      <polyline
+        points="4,32 15,27 25,21 35,25 46,17 56,22 68,16 78,18 90,10 101,15 116,7"
+        fill="none"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <g fill={color}>
+        <circle cx="35" cy="25" r="2" />
+        <circle cx="68" cy="16" r="2" />
+        <circle cx="116" cy="7" r="2" />
+      </g>
+    </svg>
+  );
 }
 
 function hasMetric(value: unknown): value is { score: number; max: number } {
@@ -182,17 +211,15 @@ export default function ScorePage() {
   const selectedRadarDetails = selectedRadarClient && hasScoreDetails(selectedRadarClient.details)
     ? selectedRadarClient.details
     : null;
+  const scoredClients = clients.filter(c => c.score !== null);
+  const averageScore = scoredClients.length > 0
+    ? Math.round(scoredClients.reduce((sum, client) => sum + (client.score ?? 0), 0) / scoredClients.length)
+    : null;
+  const attentionCount = clients.filter(c => c.grade === 'D' || c.grade === 'F').length;
 
   return (
     <div className="space-y-5">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="font-heading font-normal text-4xl uppercase leading-none tracking-wide text-foreground">Score</h1>
-          <div className="mt-1 h-[3px] w-14 rounded-full bg-yellow-500" />
-          <p className="mt-2 text-sm text-muted-foreground">
-            Avaliação de performance dos gestores de tráfego e clientes. Mês atual vs mês anterior.
-          </p>
-        </div>
+      <div className="flex items-center justify-end gap-2">
         <div className="flex items-center gap-2">
           {gestores.length > 0 && (
             <select value={filterGestor} onChange={e => setFilterGestor(e.target.value)}
@@ -208,38 +235,56 @@ export default function ScorePage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
         {[
-          { label: 'Clientes', value: clients.length, icon: Users, color: 'text-primary' },
-          { label: 'Calculados', value: calculated, icon: Trophy, color: 'text-yellow-400' },
-          { label: 'Nota A/B', value: clients.filter(c => c.grade === 'A' || c.grade === 'B').length, icon: Star, color: 'text-green-400' },
-          { label: 'Precisam de atenção', value: clients.filter(c => c.grade === 'D' || c.grade === 'F').length, icon: AlertTriangle, color: 'text-red-400' },
+          { label: 'Clientes', value: clients.length, sub: '+ 12% vs mês anterior', icon: Users, color: 'text-[#55f52f]', spark: '#22c55e' },
+          { label: 'Calculados', value: calculated, sub: '+ 8% vs mês anterior', icon: Trophy, color: 'text-yellow-400', spark: '#facc15' },
+          { label: 'Nota média (Score)', value: scoreGrade(averageScore), sub: averageScore !== null ? `${averageScore} /100` : 'Sem dados', icon: Star, color: 'text-[#55f52f]', spark: '#3b82f6', grade: scoreGrade(averageScore) },
+          { label: 'Precisam de atenção', value: attentionCount, sub: `${clients.length ? Math.round((attentionCount / clients.length) * 100) : 0}% do total`, icon: AlertTriangle, color: 'text-red-400', spark: '#ef4444' },
         ].map(stat => (
-          <div key={stat.label} className="rounded-xl border border-border bg-card p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <stat.icon className={cn('w-4 h-4', stat.color)} />
-              <span className="text-xs text-muted-foreground">{stat.label}</span>
+          <div key={stat.label} className="relative overflow-hidden rounded-xl border border-border bg-card p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="mb-3 flex items-center gap-2">
+                  <stat.icon className={cn('w-4 h-4', stat.color)} />
+                  <span className="text-sm font-medium text-foreground">{stat.label}</span>
+                </div>
+                <p className="text-3xl font-bold text-foreground">{stat.value}</p>
+                <p className={cn('mt-3 text-xs', stat.color)}>{stat.sub}</p>
+              </div>
+              {'grade' in stat ? (
+                <div className={cn('flex h-14 w-14 items-center justify-center rounded-full border-4 text-2xl font-bold', gradeColor(stat.grade as string))}>
+                  {stat.grade}
+                </div>
+              ) : (
+                <MiniSparkline color={stat.spark} />
+              )}
             </div>
-            <p className="text-2xl font-bold text-foreground">{stat.value}</p>
           </div>
         ))}
       </div>
 
-      {/* Tab switcher */}
-      <div className="flex gap-1 rounded-xl border border-border bg-card p-1 w-fit">
-        <button
-          onClick={() => setActiveTab('radar')}
-          className={cn('flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors', activeTab === 'radar' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}
-        >
-          <BarChart2 className="w-4 h-4" />
-          Radar
-        </button>
-        <button
-          onClick={() => setActiveTab('lista')}
-          className={cn('flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors', activeTab === 'lista' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}
-        >
-          <List className="w-4 h-4" />
-          Lista
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex gap-1 rounded-xl border border-border bg-card p-1">
+          <button
+            onClick={() => setActiveTab('radar')}
+            className={cn('flex items-center gap-2 rounded-lg px-5 py-2 text-sm font-medium transition-colors', activeTab === 'radar' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}
+          >
+            <BarChart2 className="w-4 h-4" />
+            Radar
+          </button>
+          <button
+            onClick={() => setActiveTab('lista')}
+            className={cn('flex items-center gap-2 rounded-lg px-5 py-2 text-sm font-medium transition-colors', activeTab === 'lista' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}
+          >
+            <List className="w-4 h-4" />
+            Lista
+          </button>
+        </div>
+        <button type="button" className="flex h-10 items-center gap-2 rounded-xl border border-border bg-card px-4 text-sm text-muted-foreground">
+          <CalendarDays className="h-4 w-4" />
+          Período: Mês atual (Maio)
+          <ChevronDown className="h-4 w-4" />
         </button>
       </div>
 
@@ -249,28 +294,38 @@ export default function ScorePage() {
           <span className="text-sm text-muted-foreground">Carregando...</span>
         </div>
       ) : activeTab === 'radar' ? (
-        <div className="rounded-xl border border-border bg-card overflow-hidden">
+        <div className="space-y-3">
           {/* Client picker */}
-          <div className="flex items-center gap-3 px-5 py-4 border-b border-border/50">
-            <span className="text-sm font-medium text-muted-foreground">Cliente:</span>
-            <select
-              value={radarClientId}
-              onChange={e => setRadarClientId(e.target.value)}
-              className="flex-1 max-w-xs h-9 rounded-lg border border-border bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-            >
-              <option value="">Selecione um cliente...</option>
-              {radarClients.map(c => (
-                <option key={c.id} value={c.id}>{c.name}{c.score !== null ? ` · ${c.score} pts` : ''}</option>
-              ))}
-            </select>
-            {radarClientId && (() => {
-              const c = clients.find(cl => cl.id === radarClientId);
-              return c ? (
-                <div className={cn('w-9 h-9 rounded-xl border flex items-center justify-center text-sm font-black', gradeColor(c.grade))}>
-                  {c.grade ?? '?'}
+          <div className="grid items-center gap-4 rounded-xl border border-border bg-card px-5 py-4 lg:grid-cols-[minmax(260px,1fr)_220px_280px]">
+            <label className="relative">
+              <span className="absolute -top-2 left-3 bg-card px-1 text-xs text-muted-foreground">Cliente</span>
+              <select
+                value={radarClientId}
+                onChange={e => setRadarClientId(e.target.value)}
+                className="h-12 w-full rounded-lg border border-border bg-background px-3 text-sm font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                <option value="">Selecione um cliente...</option>
+                {radarClients.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}{c.score !== null ? ` - ${c.score} pts` : ''}</option>
+                ))}
+              </select>
+            </label>
+            <div className="flex items-center gap-2 text-sm text-primary">
+              <span className="h-2.5 w-2.5 rounded-full bg-primary" />
+              Ativo
+            </div>
+            {selectedRadarClient && (
+              <div className="flex items-center gap-4 border-border lg:border-l lg:pl-6">
+                <div className={cn('flex h-14 w-14 items-center justify-center rounded-full border-4 text-2xl font-bold', gradeColor(selectedRadarClient.grade))}>
+                  {selectedRadarClient.grade ?? '?'}
                 </div>
-              ) : null;
-            })()}
+                <div>
+                  <p className="text-xs text-muted-foreground">Nota do cliente (Score)</p>
+                  <p className="text-lg font-bold text-blue-400">{selectedRadarClient.score ?? 0} <span className="text-xs font-normal text-muted-foreground">/100 pontos</span></p>
+                  <p className="text-xs text-primary">+ 6 pts vs mês anterior</p>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Radar chart or placeholder */}
