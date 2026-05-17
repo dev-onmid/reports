@@ -262,19 +262,33 @@ const systemTools: Anthropic.Tool[] = [
   },
   {
     name: 'create_meta_campaign',
-    description: 'Cria uma campanha no Meta Ads SEMPRE no status PAUSADO. Nunca ativa automaticamente. Inclui orientação de público-alvo baseada no negócio do cliente.',
+    description: `Cria uma campanha COMPLETA no Meta Ads: campanha + conjunto de anúncios. SEMPRE no status PAUSADO. Nunca ativa. Retorna relatório detalhado de cada etapa.
+Antes de chamar esta ferramenta, pense no público-alvo adequado para o segmento do cliente e preencha os campos de targeting.`,
     input_schema: {
       type: 'object' as const,
       properties: {
         client_id: { type: 'string', description: 'ID do cliente' },
-        name: { type: 'string', description: 'Nome da campanha' },
+        name: { type: 'string', description: 'Nome da campanha (ex: [ON] Nome_Cliente - Objetivo - Mês/Ano)' },
         objective: {
           type: 'string',
           enum: ['OUTCOME_LEADS', 'OUTCOME_SALES', 'OUTCOME_TRAFFIC', 'OUTCOME_AWARENESS', 'OUTCOME_ENGAGEMENT', 'OUTCOME_APP_PROMOTION'],
-          description: 'OUTCOME_LEADS (geração de leads), OUTCOME_SALES (vendas), OUTCOME_TRAFFIC (tráfego), OUTCOME_AWARENESS (reconhecimento)',
+          description: 'OUTCOME_LEADS (geração de leads), OUTCOME_SALES (vendas/conversões), OUTCOME_TRAFFIC (tráfego para site), OUTCOME_AWARENESS (reconhecimento de marca), OUTCOME_ENGAGEMENT (engajamento)',
         },
-        daily_budget: { type: 'number', description: 'Orçamento diário em reais (ex: 50 para R$50/dia)' },
-        audience_notes: { type: 'string', description: 'Sugestão de público-alvo gerada pela Luna (não enviada à API Meta, apenas registrada)' },
+        daily_budget: { type: 'number', description: 'Orçamento diário da campanha em reais (ex: 50.00)' },
+        adset_name: { type: 'string', description: 'Nome do conjunto de anúncios. Padrão: "Conjunto 1 — [nome da campanha]"' },
+        age_min: { type: 'number', description: 'Idade mínima do público (padrão: 18)' },
+        age_max: { type: 'number', description: 'Idade máxima do público (padrão: 65)' },
+        genders: {
+          type: 'string',
+          enum: ['all', 'male', 'female'],
+          description: 'Gênero: all (todos), male (masculino), female (feminino). Padrão: all',
+        },
+        countries: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Países no formato ISO (ex: ["BR"]). Padrão: ["BR"]',
+        },
+        audience_notes: { type: 'string', description: 'Análise e sugestões de público geradas pela Luna para o relatório final' },
       },
       required: ['client_id', 'name', 'objective', 'daily_budget'],
     },
@@ -844,19 +858,35 @@ async function execSystemTool(
     }
 
     if (name === 'create_meta_campaign') {
-      const { client_id, name: campName, objective, daily_budget, audience_notes } = input as {
-        client_id: string; name: string; objective: string; daily_budget: number; audience_notes?: string;
+      const {
+        client_id, name: campName, objective, daily_budget,
+        adset_name, age_min = 18, age_max = 65,
+        genders = 'all', countries = ['BR'], audience_notes,
+      } = input as {
+        client_id: string; name: string; objective: string; daily_budget: number;
+        adset_name?: string; age_min?: number; age_max?: number;
+        genders?: 'all' | 'male' | 'female'; countries?: string[]; audience_notes?: string;
       };
+
+      // Resolve ad account + token
       const { rows: links } = await pool.query(
         "SELECT connection_id, account_id FROM public.client_account_links WHERE client_id = $1 AND platform IN ('meta_ads','meta') LIMIT 1",
         [client_id]
       );
-      if (!links[0]) return 'Nenhuma conta Meta Ads vinculada a este cliente. Use link_account para vincular primeiro.';
+      if (!links[0]) return '❌ Nenhuma conta Meta Ads vinculada a este cliente. Use link_account para vincular primeiro.';
       const { rows: connRows } = await pool.query('SELECT * FROM public.meta_connections WHERE id = $1', [links[0].connection_id]);
-      if (!connRows[0]) return 'Conexão Meta não encontrada. Verifique as integrações do cliente.';
+      if (!connRows[0]) return '❌ Conexão Meta não encontrada. Verifique as integrações do cliente.';
       const token = await getFreshMetaToken(connRows[0]);
       const acctNode = String(links[0].account_id).startsWith('act_') ? links[0].account_id : `act_${links[0].account_id}`;
-      const res = await fetch(`https://graph.facebook.com/v21.0/${acctNode}/campaigns`, {
+
+      const report: string[] = [
+        `📊 Relatório de criação — Meta Ads`,
+        `Conta: ${acctNode} | Cliente ID: ${client_id}`,
+        `${'─'.repeat(44)}`,
+      ];
+
+      // ── STEP 1: Campaign ──────────────────────────────
+      const campRes = await fetch(`https://graph.facebook.com/v21.0/${acctNode}/campaigns`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -868,10 +898,99 @@ async function execSystemTool(
           access_token: token,
         }),
       });
-      const data = await res.json() as { id?: string; error?: { message?: string } };
-      if (!res.ok || !data.id) return `Erro ao criar campanha: ${data.error?.message ?? `HTTP ${res.status}`}`;
-      const audienceNote = audience_notes ? `\n\n💡 Sugestão de público-alvo: ${audience_notes}` : '';
-      return `Campanha "${campName}" criada no Meta Ads com status PAUSADO ✅\nID da campanha: ${data.id}\nObjetivo: ${objective}\nOrçamento diário: R$ ${Number(daily_budget).toFixed(2)}${audienceNote}\n\n⚠️ A campanha está pausada — ative manualmente quando estiver pronta para veicular.`;
+      const campData = await campRes.json() as { id?: string; error?: { message?: string; error_subcode?: number } };
+
+      if (!campRes.ok || !campData.id) {
+        report.push(`❌ Campanha: FALHA — ${campData.error?.message ?? `HTTP ${campRes.status}`}`);
+        return report.join('\n');
+      }
+      const campaignId = campData.id;
+      report.push(`✅ Campanha criada`);
+      report.push(`   Nome: ${campName}`);
+      report.push(`   Objetivo: ${objective}`);
+      report.push(`   Orçamento diário: R$ ${Number(daily_budget).toFixed(2)}`);
+      report.push(`   ID: ${campaignId}`);
+      report.push('');
+
+      // ── STEP 2: Ad Set ────────────────────────────────
+      const OBJECTIVE_TO_GOAL: Record<string, string> = {
+        OUTCOME_LEADS:          'LEAD_GENERATION',
+        OUTCOME_SALES:          'OFFSITE_CONVERSIONS',
+        OUTCOME_TRAFFIC:        'LINK_CLICKS',
+        OUTCOME_AWARENESS:      'REACH',
+        OUTCOME_ENGAGEMENT:     'POST_ENGAGEMENT',
+        OUTCOME_APP_PROMOTION:  'APP_INSTALLS',
+      };
+      const OBJECTIVE_TO_BILLING: Record<string, string> = {
+        OUTCOME_TRAFFIC:     'LINK_CLICKS',
+        OUTCOME_ENGAGEMENT:  'POST_ENGAGEMENT',
+      };
+      const optimizationGoal = OBJECTIVE_TO_GOAL[objective] ?? 'REACH';
+      const billingEvent     = OBJECTIVE_TO_BILLING[objective] ?? 'IMPRESSIONS';
+      const resolvedAdsetName = adset_name ?? `Conjunto 1 — ${campName}`;
+
+      const targeting: Record<string, unknown> = {
+        geo_locations: { countries: countries.length > 0 ? countries : ['BR'] },
+        age_min: Number(age_min),
+        age_max: Number(age_max),
+      };
+      if (genders === 'male')   targeting.genders = [1];
+      if (genders === 'female') targeting.genders = [2];
+
+      const adsetPayload: Record<string, unknown> = {
+        name: resolvedAdsetName,
+        campaign_id: campaignId,
+        optimization_goal: optimizationGoal,
+        billing_event: billingEvent,
+        targeting,
+        status: 'PAUSED',
+        access_token: token,
+      };
+
+      const adsetRes = await fetch(`https://graph.facebook.com/v21.0/${acctNode}/adsets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(adsetPayload),
+      });
+      const adsetData = await adsetRes.json() as { id?: string; error?: { message?: string } };
+
+      if (!adsetRes.ok || !adsetData.id) {
+        report.push(`⚠️ Conjunto de anúncios: FALHA — ${adsetData.error?.message ?? `HTTP ${adsetRes.status}`}`);
+        report.push(`   A campanha (ID: ${campaignId}) foi criada. Crie o conjunto manualmente.`);
+      } else {
+        const adsetId = adsetData.id;
+        const genderLabel = genders === 'male' ? 'Masculino' : genders === 'female' ? 'Feminino' : 'Todos';
+        report.push(`✅ Conjunto de anúncios criado`);
+        report.push(`   Nome: ${resolvedAdsetName}`);
+        report.push(`   Otimização: ${optimizationGoal}`);
+        report.push(`   Público: ${age_min}–${age_max} anos | ${genderLabel} | ${countries.join(', ')}`);
+        report.push(`   ID: ${adsetId}`);
+        report.push('');
+      }
+
+      // ── STEP 3: Ad (instructions — criativo obrigatório) ──
+      report.push(`📌 Anúncio: pendente`);
+      report.push(`   O anúncio precisa de um criativo (imagem/vídeo + texto).`);
+      report.push(`   Adicione diretamente no Gerenciador de Anúncios após preparar o material.`);
+
+      // ── SUMMARY ──────────────────────────────────────
+      report.push('');
+      report.push('─'.repeat(44));
+      report.push('⚠️  Campanha e conjunto PAUSADOS — não veiculam até você ativar.');
+      report.push('');
+      report.push('📋 Próximos passos:');
+      report.push('   1. Prepare o criativo (imagem/vídeo, texto, headline, CTA)');
+      report.push('   2. Adicione o anúncio ao conjunto criado');
+      report.push('   3. Configure o Pixel Meta para rastreamento (se aplicável)');
+      report.push('   4. Revise tudo e ative a campanha');
+
+      if (audience_notes) {
+        report.push('');
+        report.push(`💡 Análise de público-alvo:`);
+        report.push(`   ${audience_notes}`);
+      }
+
+      return report.join('\n');
     }
 
     return 'Ferramenta desconhecida.';
