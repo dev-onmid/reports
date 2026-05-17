@@ -1362,6 +1362,11 @@ export async function POST(req: NextRequest) {
     async start(controller) {
       try {
         let currentMessages = augmentedMessages;
+        let totalInputTokens = 0;
+        let totalOutputTokens = 0;
+        // claude-opus-4-7 pricing: $5/1M input, $25/1M output
+        const INPUT_COST_PER_TOKEN  = 5 / 1_000_000;
+        const OUTPUT_COST_PER_TOKEN = 25 / 1_000_000;
 
         for (let iteration = 0; iteration < 10; iteration++) {
           const response = await client.messages.create({
@@ -1379,7 +1384,12 @@ export async function POST(req: NextRequest) {
           let currentToolName = '';
 
           for await (const event of response) {
-            if (event.type === 'content_block_start') {
+            if (event.type === 'message_start') {
+              totalInputTokens  += event.message.usage?.input_tokens  ?? 0;
+              totalOutputTokens += event.message.usage?.output_tokens ?? 0;
+            } else if (event.type === 'message_delta') {
+              totalOutputTokens += event.usage?.output_tokens ?? 0;
+            } else if (event.type === 'content_block_start') {
               if (event.content_block.type === 'tool_use') {
                 currentToolId = event.content_block.id;
                 currentToolName = event.content_block.name;
@@ -1431,7 +1441,16 @@ export async function POST(req: NextRequest) {
           ];
         }
 
-        send(controller, { type: 'done', role });
+        const totalCostUsd = totalInputTokens * INPUT_COST_PER_TOKEN + totalOutputTokens * OUTPUT_COST_PER_TOKEN;
+        send(controller, {
+          type: 'done', role,
+          usage: {
+            input_tokens: totalInputTokens,
+            output_tokens: totalOutputTokens,
+            total_tokens: totalInputTokens + totalOutputTokens,
+            cost_usd: totalCostUsd,
+          },
+        });
       } catch (err) {
         send(controller, { type: 'error', message: String(err) });
       } finally {

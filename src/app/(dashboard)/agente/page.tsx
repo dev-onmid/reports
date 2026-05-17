@@ -26,6 +26,14 @@ type ChatMessage = {
   content: string;
   toolsUsed?: string[];
   attachments?: FileAttachment[];
+  usage?: TokenUsage;
+};
+
+type TokenUsage = {
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  cost_usd: number;
 };
 
 type StreamEvent =
@@ -33,7 +41,7 @@ type StreamEvent =
   | { type: 'tool_start'; name: string }
   | { type: 'tool_done'; name: string }
   | { type: 'file_attachment'; url: string; filename: string; label: string }
-  | { type: 'done'; role?: string }
+  | { type: 'done'; role?: string; usage?: TokenUsage }
   | { type: 'error'; message: string };
 
 type KnowledgeItem = {
@@ -168,6 +176,17 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
                 <Download className="h-4 w-4 shrink-0 text-slate-500 transition-colors group-hover:text-primary" />
               </a>
             ))}
+          </div>
+        )}
+        {!isUser && msg.usage && (
+          <div className="flex items-center gap-2 text-[10px] text-slate-600 mt-0.5">
+            <span title={`Entrada: ${msg.usage.input_tokens.toLocaleString()} · Saída: ${msg.usage.output_tokens.toLocaleString()}`}>
+              {msg.usage.total_tokens.toLocaleString()} tokens
+            </span>
+            <span>·</span>
+            <span className="text-slate-500">
+              US$ {msg.usage.cost_usd < 0.001 ? msg.usage.cost_usd.toFixed(5) : msg.usage.cost_usd.toFixed(4)}
+            </span>
           </div>
         )}
       </div>
@@ -707,6 +726,7 @@ export default function AgentePage() {
               setMessages(prev => [...prev, {
                 id: assistantId, role: 'assistant', content: accText, toolsUsed,
                 attachments: accAttachments.length > 0 ? accAttachments : undefined,
+                usage: event.usage,
               }]);
               setActiveTools([]);
             } else if (event.type === 'error') {
