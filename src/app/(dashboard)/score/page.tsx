@@ -5,7 +5,8 @@ import { cn } from '@/lib/utils';
 import {
   Trophy, RefreshCw, TrendingUp, TrendingDown, Minus,
   Users, ChevronDown, ChevronUp, Loader2, Star, AlertTriangle,
-  BarChart2, List, CalendarDays, UserCog,
+  BarChart2, List, CalendarDays, UserCog, Download, ArrowRight,
+  Target, X, CheckCircle2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ClientAvatar } from '@/components/client-avatar';
@@ -233,130 +234,331 @@ const AXIS_COLOR: Record<string, string> = {
   Criativos: '#f59e0b', Consistência: '#facc15', Gestão: '#f97316',
 };
 
-function GestorCard({ stat }: { stat: GestorStat }) {
-  const strengths = stat.axes.filter(a => a.avg >= 75);
-  const weaknesses = stat.axes.filter(a => a.avg < 50);
-  const opportunities = stat.clients.filter(c => c.grade === 'C');
+function axisTone(value: number) {
+  if (value >= 75) return { label: 'Excelente', color: 'text-emerald-400', bg: 'bg-emerald-400', border: 'border-emerald-400/35 bg-emerald-400/10' };
+  if (value >= 55) return { label: 'Bom', color: 'text-blue-400', bg: 'bg-blue-400', border: 'border-blue-400/35 bg-blue-400/10' };
+  if (value >= 35) return { label: 'Atenção', color: 'text-amber-400', bg: 'bg-amber-400', border: 'border-amber-400/35 bg-amber-400/10' };
+  return { label: 'Crítico', color: 'text-red-400', bg: 'bg-red-400', border: 'border-red-400/35 bg-red-400/10' };
+}
+
+function priorityForAxis(axis: { label: string; avg: number } | undefined) {
+  if (!axis) return { text: 'Sem prioridade', action: 'Acompanhar evolução', tone: 'border-slate-500/30 bg-slate-500/10 text-slate-300' };
+  if (axis.avg < 35) return { text: 'Prioridade alta', action: actionForAxis(axis.label), tone: 'border-red-400/35 bg-red-400/10 text-red-300' };
+  if (axis.avg < 55) return { text: 'Prioridade média', action: actionForAxis(axis.label), tone: 'border-amber-400/35 bg-amber-400/10 text-amber-300' };
+  return { text: 'Monitorar', action: actionForAxis(axis.label), tone: 'border-emerald-400/35 bg-emerald-400/10 text-emerald-300' };
+}
+
+function actionForAxis(label: string) {
+  switch (label) {
+    case 'Custo/CPL': return 'Revisar campanhas caras';
+    case 'Volume': return 'Aumentar volume de prospecção';
+    case 'Engajamento': return 'Trocar ganchos e criativos';
+    case 'Criativos': return 'Renovar criativos';
+    case 'Consistência': return 'Manter rotina e verba estável';
+    case 'Gestão': return 'Revisar processos e cadência';
+    default: return 'Acompanhar indicadores';
+  }
+}
+
+function GestorRadarMini({ axes, className }: { axes: { label: string; avg: number }[]; className?: string }) {
+  const size = 210;
+  const center = size / 2;
+  const radius = 74;
+  const points = axes.map((axis, index) => {
+    const angle = (Math.PI * 2 * index) / axes.length - Math.PI / 2;
+    const value = Math.max(0, Math.min(100, axis.avg)) / 100;
+    return `${center + Math.cos(angle) * radius * value},${center + Math.sin(angle) * radius * value}`;
+  }).join(' ');
+
+  return (
+    <svg viewBox={`0 0 ${size} ${size}`} className={cn('h-full w-full overflow-visible', className)}>
+      {[0.25, 0.5, 0.75, 1].map(level => (
+        <polygon
+          key={level}
+          points={axes.map((_, index) => {
+            const angle = (Math.PI * 2 * index) / axes.length - Math.PI / 2;
+            return `${center + Math.cos(angle) * radius * level},${center + Math.sin(angle) * radius * level}`;
+          }).join(' ')}
+          fill="none"
+          stroke="rgba(148,163,184,0.18)"
+          strokeWidth="1"
+        />
+      ))}
+      {axes.map((axis, index) => {
+        const angle = (Math.PI * 2 * index) / axes.length - Math.PI / 2;
+        const x = center + Math.cos(angle) * radius;
+        const y = center + Math.sin(angle) * radius;
+        const lx = center + Math.cos(angle) * (radius + 28);
+        const ly = center + Math.sin(angle) * (radius + 24);
+        return (
+          <g key={axis.label}>
+            <line x1={center} y1={center} x2={x} y2={y} stroke="rgba(148,163,184,0.14)" />
+            <circle cx={x} cy={y} r="4" fill={AXIS_COLOR[axis.label]} filter="drop-shadow(0 0 8px currentColor)" />
+            <text x={lx} y={ly - 3} textAnchor={lx < center ? 'end' : lx > center ? 'start' : 'middle'} className="fill-slate-200 text-[10px] font-semibold">{axis.label}</text>
+            <text x={lx} y={ly + 13} textAnchor={lx < center ? 'end' : lx > center ? 'start' : 'middle'} fill={AXIS_COLOR[axis.label]} className="text-[10px] font-bold">{axis.avg}%</text>
+          </g>
+        );
+      })}
+      <polygon points={points} fill="rgba(34,197,94,0.22)" stroke="#22c55e" strokeWidth="2" filter="drop-shadow(0 0 10px rgba(34,197,94,0.8))" />
+    </svg>
+  );
+}
+
+function GestorPriorityMap({ stats, selected, onSelect }: { stats: GestorStat[]; selected: string; onSelect: (name: string) => void }) {
+  return (
+    <div className="overflow-hidden rounded-xl border border-slate-700/80 bg-[radial-gradient(circle_at_18%_0%,rgba(34,197,94,0.12),transparent_28%),rgba(8,15,27,0.88)] shadow-[0_0_36px_rgba(34,197,94,0.08)]">
+      <div className="flex items-center justify-between gap-3 border-b border-slate-700/70 px-5 py-4">
+        <div>
+          <h2 className="text-lg font-bold text-white">Mapa de prioridades</h2>
+          <p className="text-xs text-slate-400">Compare o desempenho dos gestores e identifique rapidamente onde agir.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button className="flex h-9 items-center gap-2 rounded-lg border border-slate-600/80 bg-[#0b1220] px-3 text-xs text-slate-300">
+            Todos os gestores <ChevronDown className="h-3.5 w-3.5" />
+          </button>
+          <button className="flex h-9 items-center gap-2 rounded-lg border border-slate-600/80 bg-[#0b1220] px-3 text-xs text-slate-300">
+            <Download className="h-3.5 w-3.5" /> Exportar
+          </button>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[1040px] text-left text-xs">
+          <thead className="border-b border-slate-700/70 text-slate-400">
+            <tr>
+              {['Gestor', 'Score geral', ...AXIS_LABELS, 'Prioridade principal', 'Ação sugerida'].map(head => (
+                <th key={head} className="px-4 py-3 font-medium">{head}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {stats.map(stat => {
+              const critical = [...stat.axes].sort((a, b) => a.avg - b.avg)[0];
+              const priority = priorityForAxis(critical);
+              const isSelected = selected === stat.name;
+              return (
+                <tr
+                  key={stat.name}
+                  onClick={() => onSelect(stat.name)}
+                  className={cn(
+                    'cursor-pointer border-b border-slate-800/90 transition-colors hover:bg-slate-800/50',
+                    isSelected && 'bg-emerald-400/8 shadow-[inset_0_0_0_1px_rgba(34,197,94,0.75),0_0_24px_rgba(34,197,94,0.16)]'
+                  )}
+                >
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      <span className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-400/15 text-sm font-bold text-emerald-300 shadow-[0_0_14px_rgba(34,197,94,0.28)]">{stat.name.charAt(0).toUpperCase()}</span>
+                      <div>
+                        <p className="font-bold text-white">{stat.name}</p>
+                        <p className="text-[11px] text-slate-400">{stat.clients.length} clientes</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl font-bold text-white">{stat.avgScore ?? '-'}</span>
+                      <span className={cn('rounded-full border px-2 py-0.5 text-xs font-bold shadow-[0_0_14px_currentColor]', gradeColor(stat.grade))}>{stat.grade ?? '?'}</span>
+                    </div>
+                  </td>
+                  {AXIS_LABELS.map(label => {
+                    const axis = stat.axes.find(a => a.label === label) ?? { label, avg: 0 };
+                    return (
+                      <td key={label} className="px-3 py-3">
+                        <p className="mb-1 font-bold" style={{ color: AXIS_COLOR[label] }}>{axis.avg}%</p>
+                        <div className="h-1.5 w-16 rounded-full bg-slate-700/70">
+                          <div className="h-1.5 rounded-full shadow-[0_0_10px_currentColor]" style={{ width: `${axis.avg}%`, backgroundColor: AXIS_COLOR[label], color: AXIS_COLOR[label] }} />
+                        </div>
+                      </td>
+                    );
+                  })}
+                  <td className="px-4 py-3">
+                    <div className="flex flex-col gap-1">
+                      <span className="flex items-center gap-2 text-xs font-semibold text-slate-200"><span className={cn('h-2.5 w-2.5 rounded-full', axisTone(critical?.avg ?? 0).bg)} />{critical?.label ?? '-'}</span>
+                      <span className={cn('w-fit rounded-full border px-2 py-0.5 text-[10px] font-bold', priority.tone)}>{priority.text}</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center justify-between gap-3 text-slate-200">
+                      <span className="max-w-[150px] leading-snug">{priority.action}</span>
+                      <ArrowRight className="h-4 w-4 text-slate-500" />
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-center gap-8 border-t border-slate-700/70 px-5 py-4 text-xs text-slate-300">
+        {[
+          ['Excelente', '>= 75%', 'bg-emerald-400'],
+          ['Bom', '55% - 74%', 'bg-blue-400'],
+          ['Atenção', '35% - 54%', 'bg-amber-400'],
+          ['Crítico', '< 35%', 'bg-red-400'],
+        ].map(([label, range, bg]) => (
+          <span key={label} className="flex items-center gap-2"><span className={cn('h-2.5 w-2.5 rounded-full', bg)} />{label} ({range})</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function GestorDetailPanel({ stat }: { stat: GestorStat }) {
+  const critical = [...stat.axes].sort((a, b) => a.avg - b.avg).slice(0, 3);
+  const opportunities = [...stat.axes].sort((a, b) => b.avg - a.avg).slice(0, 3);
+  const attentionClients = stat.clients.filter(c => c.grade === 'D' || c.grade === 'F').slice(0, 5);
+  const highlights = stat.axes.filter(a => a.avg >= 60).slice(0, 2);
   const initial = stat.name.trim().charAt(0).toUpperCase();
 
   return (
-    <div className="rounded-xl border border-slate-700/80 bg-[#0c1321]/75 overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center gap-4 border-b border-slate-700/50 px-5 py-4">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-base font-bold text-primary">
-          {initial}
-        </div>
+    <aside className="relative overflow-hidden rounded-xl border border-emerald-400/50 bg-[radial-gradient(circle_at_20%_0%,rgba(34,197,94,0.24),transparent_34%),rgba(8,15,27,0.92)] p-5 shadow-[0_0_36px_rgba(34,197,94,0.18)]">
+      <button className="absolute right-4 top-4 text-slate-400 hover:text-white"><X className="h-4 w-4" /></button>
+      <div className="mb-5 flex items-center gap-4">
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-emerald-400/20 text-lg font-bold text-emerald-300 shadow-[0_0_24px_rgba(34,197,94,0.26)]">{initial}</div>
         <div className="flex-1 min-w-0">
-          <p className="font-bold text-sm text-white truncate">{stat.name}</p>
+          <p className="text-lg font-bold text-white truncate">{stat.name}</p>
           <p className="text-xs text-slate-400">{stat.clients.length} cliente{stat.clients.length !== 1 ? 's' : ''} · {stat.clients.filter(c => c.score !== null).length} calculados</p>
         </div>
-        <div className="flex items-center gap-3">
-          {stat.avgScore !== null && (
-            <>
-              <div className="text-right">
-                <p className="text-xs text-slate-400">Score médio</p>
-                <p className="text-lg font-bold text-white">{stat.avgScore} <span className="text-xs font-normal text-slate-500">/100</span></p>
-              </div>
-              <div className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-2 text-lg font-black shadow-[0_0_16px_currentColor]', gradeColor(stat.grade))}>
-                {stat.grade}
-              </div>
-            </>
-          )}
-          {stat.avgScore === null && <span className="text-xs text-slate-500">Sem scores calculados</span>}
+      </div>
+      <div className="grid gap-5 xl:grid-cols-[150px_1fr]">
+        <div className="rounded-lg border border-slate-700/80 bg-[#0a101c]/80 p-4 text-center">
+          <p className="text-xs text-slate-400">Score geral</p>
+          <p className="mt-3 text-5xl font-bold text-white">{stat.avgScore ?? '-'}<span className="text-2xl font-normal text-slate-500">/100</span></p>
+          <div className={cn('mx-auto mt-4 flex h-16 w-16 items-center justify-center rounded-full border-4 text-2xl font-black shadow-[0_0_22px_currentColor]', gradeColor(stat.grade))}>{stat.grade ?? '?'}</div>
+        </div>
+        <div className="min-h-[210px]">
+          <GestorRadarMini axes={stat.axes} />
         </div>
       </div>
 
-      {/* Axes mini bars */}
-      {stat.axes.length > 0 && (
-        <div className="grid grid-cols-3 gap-x-6 gap-y-2 px-5 py-3 border-b border-slate-700/40 sm:grid-cols-6">
-          {stat.axes.map(ax => (
-            <div key={ax.label}>
-              <div className="flex justify-between text-[10px] mb-0.5">
-                <span className="text-slate-400 truncate max-w-[70px]">{ax.label}</span>
-                <span className="font-bold" style={{ color: AXIS_COLOR[ax.label] }}>{ax.avg}%</span>
-              </div>
-              <div className="h-1 rounded-full bg-slate-700/60">
-                <div className="h-1 rounded-full" style={{ width: `${ax.avg}%`, backgroundColor: AXIS_COLOR[ax.label] }} />
-              </div>
-            </div>
-          ))}
+      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+        <div className="rounded-lg border border-slate-700/80 bg-[#0a101c]/72 p-4">
+          <p className="mb-3 text-xs font-bold text-red-300">Pontos críticos</p>
+          <div className="space-y-2">
+            {critical.map(axis => <p key={axis.label} className="flex items-center gap-2 text-[11px] text-slate-300"><AlertTriangle className="h-3.5 w-3.5 text-red-400" />{axis.label} abaixo da meta ({axis.avg}%)</p>)}
+          </div>
         </div>
-      )}
-
-      {/* SWOT grid */}
-      <div className="grid gap-0 sm:grid-cols-2 lg:grid-cols-4">
-        {/* Forças */}
-        <div className="border-r border-b border-slate-700/40 p-4 last:border-b-0 sm:border-b-0">
-          <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-green-400">
-            <span className="h-2 w-2 rounded-full bg-green-400" />S — Forças
-          </p>
-          {strengths.length > 0
-            ? strengths.map(a => <p key={a.label} className="text-[11px] text-slate-300 leading-relaxed">· {a.label} ({a.avg}%)</p>)
-            : <p className="text-[11px] text-slate-500 italic">Nenhum eixo acima de 75%</p>}
-        </div>
-
-        {/* Fraquezas */}
-        <div className="border-r border-b border-slate-700/40 p-4 sm:border-b-0 lg:border-b-0">
-          <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-red-400">
-            <span className="h-2 w-2 rounded-full bg-red-400" />W — Fraquezas
-          </p>
-          {weaknesses.length > 0
-            ? weaknesses.map(a => <p key={a.label} className="text-[11px] text-slate-300 leading-relaxed">· {a.label} ({a.avg}%)</p>)
-            : <p className="text-[11px] text-slate-500 italic">Sem eixos críticos</p>}
-        </div>
-
-        {/* Oportunidades */}
-        <div className="border-r border-b border-slate-700/40 p-4 lg:border-b-0">
-          <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-blue-400">
-            <span className="h-2 w-2 rounded-full bg-blue-400" />O — Oportunidades
-          </p>
-          {opportunities.length > 0
-            ? opportunities.map(c => <p key={c.id} className="text-[11px] text-slate-300 leading-relaxed truncate">· {c.name} (C · {c.score} pts)</p>)
-            : stat.topClients.length > 0
-              ? <p className="text-[11px] text-slate-500 italic">Todos já em A/B</p>
-              : <p className="text-[11px] text-slate-500 italic">Sem clientes na nota C</p>}
-        </div>
-
-        {/* Ameaças */}
-        <div className="p-4">
-          <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-orange-400">
-            <span className="h-2 w-2 rounded-full bg-orange-400" />T — Ameaças
-          </p>
-          {stat.weakClients.length > 0
-            ? stat.weakClients.map(c => <p key={c.id} className="text-[11px] text-slate-300 leading-relaxed truncate">· {c.name} ({c.grade} · {c.score} pts)</p>)
-            : <p className="text-[11px] text-slate-500 italic">Sem clientes críticos</p>}
+        <div className="rounded-lg border border-slate-700/80 bg-[#0a101c]/72 p-4">
+          <p className="mb-3 text-xs font-bold text-blue-300">Oportunidades</p>
+          <div className="space-y-2">
+            {opportunities.map(axis => <p key={axis.label} className="flex items-center gap-2 text-[11px] text-slate-300"><Users className="h-3.5 w-3.5 text-blue-400" />{axis.label} com potencial ({axis.avg}%)</p>)}
+          </div>
         </div>
       </div>
 
-      {/* Cases */}
-      {(stat.topClients.length > 0 || stat.weakClients.length > 0) && (
-        <div className="grid gap-0 border-t border-slate-700/40 sm:grid-cols-2">
-          <div className="border-r border-slate-700/40 px-5 py-3">
-            <p className="mb-1.5 text-xs font-bold text-green-400">Cases de Sucesso</p>
-            <div className="flex flex-wrap gap-2">
-              {stat.topClients.length > 0
-                ? stat.topClients.map(c => (
-                    <span key={c.id} className="rounded-full border border-green-400/30 bg-green-400/10 px-2.5 py-0.5 text-[11px] font-medium text-green-300">
-                      {c.name} · {c.grade} ({c.score})
-                    </span>
-                  ))
-                : <span className="text-[11px] text-slate-500 italic">Nenhum cliente A/B ainda</span>}
+      <div className="mt-4 rounded-lg border border-slate-700/80 bg-[#0a101c]/72 p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <p className="text-xs font-bold text-red-300">Clientes que precisam de atencao</p>
+          <button className="text-xs font-bold text-red-300">Ver todos ({attentionClients.length})</button>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {attentionClients.length > 0 ? attentionClients.map(client => (
+            <span key={client.id} className="rounded-md border border-red-400/35 bg-red-400/10 px-2 py-1 text-[11px] text-red-200">{client.name} · {client.grade} · {client.score}</span>
+          )) : <span className="text-[11px] text-slate-500">Nenhum cliente crítico</span>}
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-lg border border-emerald-400/20 bg-emerald-400/5 p-4">
+        <p className="mb-3 text-xs font-bold text-emerald-300">Melhores destaques</p>
+        <div className="space-y-2">
+          {highlights.length > 0 ? highlights.map(axis => (
+            <p key={axis.label} className="flex items-center gap-2 text-[11px] text-slate-300"><CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />{axis.label} acima da media da equipe</p>
+          )) : <p className="text-[11px] text-slate-500">Ainda sem destaque acima da media.</p>}
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+function GestoresQuickRead({ stats }: { stats: GestorStat[] }) {
+  const allAxes = AXIS_LABELS.map(label => {
+    const values = stats.map(stat => stat.axes.find(axis => axis.label === label)?.avg ?? 0);
+    const avg = values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length) : 0;
+    return { label, avg };
+  }).sort((a, b) => a.avg - b.avg);
+  const cards = allAxes.slice(0, 4);
+
+  return (
+    <div className="grid gap-3 xl:grid-cols-[1fr_220px]">
+      <div className="rounded-xl border border-slate-700/80 bg-[radial-gradient(circle_at_30%_0%,rgba(239,68,68,0.10),transparent_26%),rgba(8,15,27,0.88)] p-5 shadow-[0_0_30px_rgba(239,68,68,0.07)]">
+        <h3 className="text-base font-bold text-white">Leitura rapida: onde agir primeiro</h3>
+        <p className="mb-4 text-xs text-slate-400">Principais padroes de melhoria identificados no time.</p>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {cards.map((axis, index) => {
+            const tone = axisTone(axis.avg);
+            return (
+              <div key={axis.label} className={cn('rounded-lg border p-4', tone.border)}>
+                <div className="mb-2 flex items-center gap-3">
+                  <span className={cn('flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold text-black', tone.bg)}>{index + 1}</span>
+                  <Target className={cn('h-5 w-5', tone.color)} />
+                </div>
+                <p className="font-bold text-white">{axis.label} abaixo de {axis.avg}%</p>
+                <div className="mt-2 flex items-end justify-between gap-3">
+                  <p className="text-xs text-slate-400">em {stats.filter(stat => (stat.axes.find(a => a.label === axis.label)?.avg ?? 0) < 55).length} gestores</p>
+                  <p className={cn('text-xs font-bold uppercase', tone.color)}>Prioridade<br />{axis.avg < 35 ? 'Alta' : 'Média'}</p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      <div className="rounded-xl border border-slate-700/80 bg-[#0c1321]/80 p-5 shadow-[0_0_26px_rgba(59,130,246,0.08)]">
+        <BarChart2 className="mb-3 h-5 w-5 text-slate-300" />
+        <p className="font-bold text-white">Acompanhe a evolucao</p>
+        <p className="mt-2 text-xs leading-relaxed text-slate-400">Acesse o Radar para análises detalhadas e tendências.</p>
+        <button className="mt-4 flex w-full items-center justify-between rounded-lg border border-slate-600/80 px-3 py-2 text-xs font-semibold text-slate-200">
+          Ir para o Radar <ArrowRight className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function GestoresTopCards({ stats, clients }: { stats: GestorStat[]; clients: ClientScore[] }) {
+  const scoredStats = stats.filter(stat => stat.avgScore !== null);
+  const avg = scoredStats.length ? Math.round(scoredStats.reduce((sum, stat) => sum + (stat.avgScore ?? 0), 0) / scoredStats.length) : null;
+  const attention = clients.filter(client => client.grade === 'D' || client.grade === 'F').length;
+  const weakestAxis = AXIS_LABELS.map(label => {
+    const values = stats.map(stat => stat.axes.find(axis => axis.label === label)?.avg ?? 0);
+    const avgValue = values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length) : 0;
+    return { label, avg: avgValue };
+  }).sort((a, b) => a.avg - b.avg)[0];
+
+  const cards = [
+    { label: 'Gestores analisados', value: stats.length, sub: `de ${Math.max(stats.length, 8)} ativos`, icon: Users, color: 'text-emerald-400', spark: '#22c55e', card: 'border-emerald-400/30 bg-[radial-gradient(circle_at_20%_10%,rgba(34,197,94,0.28),transparent_42%),rgba(8,15,27,0.82)] shadow-[0_0_34px_rgba(34,197,94,0.12)]' },
+    { label: 'Score médio', value: avg ?? '-', sub: '- 3 pts vs mês anterior', icon: Trophy, color: 'text-yellow-400', grade: scoreGrade(avg), card: 'border-blue-400/35 bg-[radial-gradient(circle_at_18%_50%,rgba(34,197,94,0.25),transparent_24%),radial-gradient(circle_at_68%_50%,rgba(250,204,21,0.22),transparent_24%),rgba(8,15,27,0.82)] shadow-[0_0_34px_rgba(59,130,246,0.12)]' },
+    { label: 'Clientes em atenção', value: attention, sub: '+ 2 vs mês anterior', icon: UserCog, color: 'text-amber-400', spark: '#f59e0b', card: 'border-amber-400/30 bg-[radial-gradient(circle_at_24%_20%,rgba(245,158,11,0.24),transparent_40%),rgba(8,15,27,0.82)] shadow-[0_0_34px_rgba(245,158,11,0.10)]' },
+    { label: 'Eixo mais crítico', value: weakestAxis?.label ?? '-', sub: `Média: ${weakestAxis?.avg ?? 0}%`, icon: Target, color: 'text-red-400', spark: '#ef4444', card: 'border-red-400/30 bg-[radial-gradient(circle_at_24%_24%,rgba(239,68,68,0.26),transparent_42%),rgba(8,15,27,0.82)] shadow-[0_0_34px_rgba(239,68,68,0.10)]' },
+  ];
+
+  return (
+    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      {cards.map(card => (
+        <div key={card.label} className={cn('relative overflow-hidden rounded-xl border p-5 backdrop-blur-xl', card.card)}>
+          <div className="pointer-events-none absolute -right-10 -top-10 h-32 w-32 rounded-full bg-white/5 blur-2xl" />
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className={cn('flex h-14 w-14 items-center justify-center rounded-full bg-white/5 shadow-[0_0_22px_currentColor]', card.color)}>
+                <card.icon className="h-7 w-7" />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-white">{card.label}</p>
+                <p className="mt-1 text-3xl font-bold text-white">{card.value}<span className="ml-1 text-base font-normal text-slate-400">{card.label === 'Score médio' ? '/100' : ''}</span></p>
+                <p className={cn('mt-2 text-xs', card.color)}>{card.sub}</p>
+              </div>
             </div>
-          </div>
-          <div className="px-5 py-3">
-            <p className="mb-1.5 text-xs font-bold text-red-400">Precisam de atenção</p>
-            <div className="flex flex-wrap gap-2">
-              {stat.weakClients.length > 0
-                ? stat.weakClients.map(c => (
-                    <span key={c.id} className="rounded-full border border-red-400/30 bg-red-400/10 px-2.5 py-0.5 text-[11px] font-medium text-red-300">
-                      {c.name} · {c.grade} ({c.score})
-                    </span>
-                  ))
-                : <span className="text-[11px] text-slate-500 italic">Nenhum cliente D/F</span>}
-            </div>
+            {'grade' in card ? (
+              <div className="flex items-center gap-3">
+                <div className="h-16 w-16 rounded-full border-4 border-emerald-400/80 shadow-[0_0_20px_rgba(34,197,94,0.35)]" />
+                <div className={cn('flex h-12 w-12 items-center justify-center rounded-full border-4 text-xl font-bold shadow-[0_0_20px_currentColor]', gradeColor(card.grade as string))}>{card.grade}</div>
+              </div>
+            ) : (
+              <MiniSparkline color={card.spark} />
+            )}
           </div>
         </div>
-      )}
+      ))}
     </div>
   );
 }
@@ -369,6 +571,7 @@ export default function ScorePage() {
   const [filterGestor, setFilterGestor] = useState('');
   const [activeTab, setActiveTab] = useState<'radar' | 'lista' | 'gestores'>('radar');
   const [radarClientId, setRadarClientId] = useState('');
+  const [selectedGestorName, setSelectedGestorName] = useState('');
 
   useEffect(() => { void loadScores(); }, []);
 
@@ -412,6 +615,12 @@ export default function ScorePage() {
     ? Math.round(scoredClients.reduce((sum, client) => sum + (client.score ?? 0), 0) / scoredClients.length)
     : null;
   const attentionCount = clients.filter(c => c.grade === 'D' || c.grade === 'F').length;
+  const gestorStats = computeGestorStats(clients);
+  const selectedGestor = gestorStats.find(stat => stat.name === selectedGestorName) ?? gestorStats[0] ?? null;
+
+  useEffect(() => {
+    if (!selectedGestorName && gestorStats[0]?.name) setSelectedGestorName(gestorStats[0].name);
+  }, [selectedGestorName, gestorStats]);
 
   return (
     <div className="relative -m-6 min-h-[calc(100vh-6rem)] overflow-hidden bg-[#050914] p-6 text-slate-100">
@@ -433,35 +642,39 @@ export default function ScorePage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-        {[
-          { label: 'Clientes', value: clients.length, sub: '+ 12% vs mês anterior', icon: Users, color: 'text-[#55f52f]', spark: '#22c55e', card: 'border-emerald-400/30 bg-[radial-gradient(circle_at_35%_0%,rgba(34,197,94,0.28),transparent_44%),rgba(15,23,42,0.62)] shadow-[0_0_28px_rgba(34,197,94,0.10)]' },
-          { label: 'Calculados', value: calculated, sub: '+ 8% vs mês anterior', icon: Trophy, color: 'text-yellow-400', spark: '#facc15', card: 'border-yellow-400/30 bg-[radial-gradient(circle_at_38%_0%,rgba(250,204,21,0.22),transparent_44%),rgba(15,23,42,0.62)] shadow-[0_0_28px_rgba(250,204,21,0.09)]' },
-          { label: 'Nota média (Score)', value: scoreGrade(averageScore), sub: averageScore !== null ? `${averageScore} /100  ·  + 6 pts vs mês anterior` : 'Sem dados', icon: Star, color: 'text-blue-400', spark: '#3b82f6', grade: scoreGrade(averageScore), card: 'border-blue-400/30 bg-[radial-gradient(circle_at_65%_0%,rgba(59,130,246,0.24),transparent_42%),rgba(15,23,42,0.62)] shadow-[0_0_30px_rgba(59,130,246,0.10)]' },
-          { label: 'Precisam de atenção', value: attentionCount, sub: `${clients.length ? Math.round((attentionCount / clients.length) * 100) : 0}% do total`, icon: AlertTriangle, color: 'text-red-400', spark: '#ef4444', card: 'border-red-400/30 bg-[radial-gradient(circle_at_72%_4%,rgba(239,68,68,0.20),transparent_44%),rgba(15,23,42,0.62)] shadow-[0_0_28px_rgba(239,68,68,0.09)]' },
-        ].map(stat => (
-          <div key={stat.label} className={cn('relative overflow-hidden rounded-xl border p-5 backdrop-blur-xl', stat.card)}>
-            <div className="pointer-events-none absolute inset-x-10 top-0 h-px bg-white/25" />
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="mb-3 flex items-center gap-2">
-                  <stat.icon className={cn('w-4 h-4', stat.color)} />
-                  <span className="text-sm font-medium text-foreground">{stat.label}</span>
+      {activeTab === 'gestores' ? (
+        <GestoresTopCards stats={gestorStats} clients={clients} />
+      ) : (
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {[
+            { label: 'Clientes', value: clients.length, sub: '+ 12% vs mês anterior', icon: Users, color: 'text-[#55f52f]', spark: '#22c55e', card: 'border-emerald-400/30 bg-[radial-gradient(circle_at_35%_0%,rgba(34,197,94,0.28),transparent_44%),rgba(15,23,42,0.62)] shadow-[0_0_28px_rgba(34,197,94,0.10)]' },
+            { label: 'Calculados', value: calculated, sub: '+ 8% vs mês anterior', icon: Trophy, color: 'text-yellow-400', spark: '#facc15', card: 'border-yellow-400/30 bg-[radial-gradient(circle_at_38%_0%,rgba(250,204,21,0.22),transparent_44%),rgba(15,23,42,0.62)] shadow-[0_0_28px_rgba(250,204,21,0.09)]' },
+            { label: 'Nota média (Score)', value: scoreGrade(averageScore), sub: averageScore !== null ? `${averageScore} /100  ·  + 6 pts vs mês anterior` : 'Sem dados', icon: Star, color: 'text-blue-400', spark: '#3b82f6', grade: scoreGrade(averageScore), card: 'border-blue-400/30 bg-[radial-gradient(circle_at_65%_0%,rgba(59,130,246,0.24),transparent_42%),rgba(15,23,42,0.62)] shadow-[0_0_30px_rgba(59,130,246,0.10)]' },
+            { label: 'Precisam de atenção', value: attentionCount, sub: `${clients.length ? Math.round((attentionCount / clients.length) * 100) : 0}% do total`, icon: AlertTriangle, color: 'text-red-400', spark: '#ef4444', card: 'border-red-400/30 bg-[radial-gradient(circle_at_72%_4%,rgba(239,68,68,0.20),transparent_44%),rgba(15,23,42,0.62)] shadow-[0_0_28px_rgba(239,68,68,0.09)]' },
+          ].map(stat => (
+            <div key={stat.label} className={cn('relative overflow-hidden rounded-xl border p-5 backdrop-blur-xl', stat.card)}>
+              <div className="pointer-events-none absolute inset-x-10 top-0 h-px bg-white/25" />
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="mb-3 flex items-center gap-2">
+                    <stat.icon className={cn('w-4 h-4', stat.color)} />
+                    <span className="text-sm font-medium text-foreground">{stat.label}</span>
+                  </div>
+                  <p className="text-3xl font-bold text-white">{stat.value}</p>
+                  <p className={cn('mt-3 text-xs', stat.color)}>{stat.sub}</p>
                 </div>
-                <p className="text-3xl font-bold text-white">{stat.value}</p>
-                <p className={cn('mt-3 text-xs', stat.color)}>{stat.sub}</p>
+                {'grade' in stat ? (
+                  <div className={cn('flex h-16 w-16 items-center justify-center rounded-full border-4 text-2xl font-bold shadow-[0_0_22px_currentColor]', gradeColor(stat.grade as string))}>
+                    {stat.grade}
+                  </div>
+                ) : (
+                  <MiniSparkline color={stat.spark} />
+                )}
               </div>
-              {'grade' in stat ? (
-                <div className={cn('flex h-16 w-16 items-center justify-center rounded-full border-4 text-2xl font-bold shadow-[0_0_22px_currentColor]', gradeColor(stat.grade as string))}>
-                  {stat.grade}
-                </div>
-              ) : (
-                <MiniSparkline color={stat.spark} />
-              )}
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex gap-1 rounded-xl border border-slate-700/80 bg-[#0c1321]/80 p-1 shadow-[0_0_28px_rgba(59,130,246,0.08)]">
@@ -494,7 +707,6 @@ export default function ScorePage() {
         </div>
       ) : activeTab === 'gestores' ? (
         (() => {
-          const gestorStats = computeGestorStats(clients);
           return gestorStats.length === 0 ? (
             <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-700 py-20 gap-3 text-muted-foreground">
               <UserCog className="w-10 h-10 opacity-20" />
@@ -502,26 +714,11 @@ export default function ScorePage() {
             </div>
           ) : (
             <div className="space-y-4">
-              <div className="grid grid-cols-3 gap-3 sm:grid-cols-4">
-                <div className="rounded-xl border border-slate-700/80 bg-[#0c1321]/75 p-4">
-                  <p className="text-xs text-slate-400 mb-1">Gestores</p>
-                  <p className="text-2xl font-bold text-white">{gestorStats.length}</p>
-                </div>
-                <div className="rounded-xl border border-slate-700/80 bg-[#0c1321]/75 p-4">
-                  <p className="text-xs text-slate-400 mb-1">Melhor gestor</p>
-                  <p className="text-sm font-bold text-primary truncate">{gestorStats[0]?.name ?? '—'}</p>
-                  {gestorStats[0]?.avgScore != null && <p className="text-xs text-slate-400">{gestorStats[0].avgScore} pts</p>}
-                </div>
-                <div className="rounded-xl border border-slate-700/80 bg-[#0c1321]/75 p-4">
-                  <p className="text-xs text-slate-400 mb-1">Clientes A/B</p>
-                  <p className="text-2xl font-bold text-green-400">{clients.filter(c => c.grade === 'A' || c.grade === 'B').length}</p>
-                </div>
-                <div className="rounded-xl border border-slate-700/80 bg-[#0c1321]/75 p-4">
-                  <p className="text-xs text-slate-400 mb-1">Clientes D/F</p>
-                  <p className="text-2xl font-bold text-red-400">{clients.filter(c => c.grade === 'D' || c.grade === 'F').length}</p>
-                </div>
+              <div className="grid gap-4 xl:grid-cols-[minmax(0,1.85fr)_minmax(380px,0.95fr)]">
+                <GestorPriorityMap stats={gestorStats} selected={selectedGestor?.name ?? ''} onSelect={setSelectedGestorName} />
+                {selectedGestor && <GestorDetailPanel stat={selectedGestor} />}
               </div>
-              {gestorStats.map(stat => <GestorCard key={stat.name} stat={stat} />)}
+              <GestoresQuickRead stats={gestorStats} />
             </div>
           );
         })()
