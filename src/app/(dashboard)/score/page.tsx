@@ -38,6 +38,8 @@ type ClientScore = {
   calculated_at: string | null;
 };
 
+type ClientScoreWithDetails = ClientScore & { details: ScoreDetails };
+
 function gradeColor(grade: string | null): string {
   switch (grade) {
     case 'A': return 'text-green-400 bg-green-400/10 border-green-400/30';
@@ -67,6 +69,32 @@ function trend(curr: number, prev: number) {
 
 function currency(n: number) {
   return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+function hasMetric(value: unknown): value is { score: number; max: number } {
+  if (!value || typeof value !== 'object') return false;
+  const metric = value as { score?: unknown; max?: unknown };
+  return typeof metric.score === 'number' && Number.isFinite(metric.score)
+    && typeof metric.max === 'number' && Number.isFinite(metric.max) && metric.max > 0;
+}
+
+function hasScoreDetails(details: ClientScore['details']): details is ScoreDetails {
+  if (!details || typeof details !== 'object') return false;
+  return hasMetric(details.cpl)
+    && hasMetric(details.leads)
+    && hasMetric(details.ctr)
+    && hasMetric(details.frequency)
+    && hasMetric(details.creativeCount)
+    && hasMetric(details.creativeAge)
+    && hasMetric(details.formatDiversity)
+    && hasMetric(details.consistency)
+    && hasMetric(details.budgetPaused)
+    && hasMetric(details.crmConversion)
+    && hasMetric(details.reports);
+}
+
+function hasClientScoreDetails(client: ClientScore): client is ClientScoreWithDetails {
+  return hasScoreDetails(client.details);
 }
 
 function ScoreBreakdown({ details }: { details: ScoreDetails }) {
@@ -149,6 +177,8 @@ export default function ScorePage() {
   const gestores = [...new Set(clients.map(c => c.gestor_name).filter(Boolean))] as string[];
   const filtered = filterGestor ? clients.filter(c => c.gestor_name === filterGestor) : clients;
   const calculated = clients.filter(c => c.score !== null).length;
+  const radarClients = clients.filter(hasClientScoreDetails);
+  const selectedRadarClient = radarClients.find(c => c.id === radarClientId) ?? null;
 
   return (
     <div className="space-y-5">
@@ -226,7 +256,7 @@ export default function ScorePage() {
               className="flex-1 max-w-xs h-9 rounded-lg border border-border bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
             >
               <option value="">Selecione um cliente...</option>
-              {clients.filter(c => c.details !== null).map(c => (
+              {radarClients.map(c => (
                 <option key={c.id} value={c.id}>{c.name}{c.score !== null ? ` · ${c.score} pts` : ''}</option>
               ))}
             </select>
@@ -241,19 +271,27 @@ export default function ScorePage() {
           </div>
 
           {/* Radar chart or placeholder */}
-          {radarClientId && clients.find(c => c.id === radarClientId && c.details !== null) ? (
+          {selectedRadarClient ? (
             <RadarView
-              details={clients.find(c => c.id === radarClientId)!.details!}
-              score={clients.find(c => c.id === radarClientId)!.score}
+              details={selectedRadarClient.details}
+              score={selectedRadarClient.score}
             />
           ) : (
             <div className="flex flex-col items-center justify-center py-20 gap-3 text-muted-foreground">
               <BarChart2 className="w-10 h-10 opacity-20" />
               <p className="text-sm">
-                {clients.filter(c => c.details !== null).length === 0
+                {radarClients.length === 0
                   ? 'Calcule o score de pelo menos um cliente para ver o radar.'
-                  : 'Selecione um cliente acima para visualizar o radar.'}
+                  : radarClientId
+                    ? 'Esse cliente precisa ter o score recalculado para gerar o radar.'
+                    : 'Selecione um cliente acima para visualizar o radar.'}
               </p>
+              {radarClientId && (
+                <Button variant="outline" size="sm" onClick={() => calcScore(radarClientId)} disabled={calculating.has(radarClientId)} className="gap-2">
+                  {calculating.has(radarClientId) ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                  Recalcular score
+                </Button>
+              )}
             </div>
           )}
         </div>
@@ -288,14 +326,14 @@ export default function ScorePage() {
                       {isCalc ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
                       {client.score !== null ? 'Atualizar' : 'Calcular'}
                     </Button>
-                    {client.details && (
+                    {hasScoreDetails(client.details) && (
                       <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setExpanded(prev => { const s = new Set(prev); s.has(client.id) ? s.delete(client.id) : s.add(client.id); return s; })}>
                         {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                       </Button>
                     )}
                   </div>
                 </div>
-                {isExpanded && client.details && (
+                {isExpanded && hasScoreDetails(client.details) && (
                   <div className="px-4 pb-4 border-t border-border/50">
                     <ScoreBreakdown details={client.details} />
                     {client.calculated_at && (
