@@ -262,33 +262,42 @@ const systemTools: Anthropic.Tool[] = [
   },
   {
     name: 'create_meta_campaign',
-    description: `Cria uma campanha COMPLETA no Meta Ads: campanha + conjunto de anúncios. SEMPRE no status PAUSADO. Nunca ativa. Retorna relatório detalhado de cada etapa.
-Antes de chamar esta ferramenta, pense no público-alvo adequado para o segmento do cliente e preencha os campos de targeting.`,
+    description: `Cria uma campanha COMPLETA no Meta Ads: campanha + conjunto de anúncios com targeting real. SEMPRE no status PAUSADO. Nunca ativa automaticamente.
+Antes de chamar, analise o negócio/segmento do cliente e preencha os campos de targeting adequados (cidade, interesses, placements, faixa etária).
+A ferramenta busca automaticamente os IDs de cidades e interesses na API Meta, você só precisa fornecer os nomes.`,
     input_schema: {
       type: 'object' as const,
       properties: {
         client_id: { type: 'string', description: 'ID do cliente' },
-        name: { type: 'string', description: 'Nome da campanha (ex: [ON] Nome_Cliente - Objetivo - Mês/Ano)' },
+        name: { type: 'string', description: 'Nome da campanha (ex: [ON] NomeCliente - Leads - Jun/25)' },
         objective: {
           type: 'string',
           enum: ['OUTCOME_LEADS', 'OUTCOME_SALES', 'OUTCOME_TRAFFIC', 'OUTCOME_AWARENESS', 'OUTCOME_ENGAGEMENT', 'OUTCOME_APP_PROMOTION'],
-          description: 'OUTCOME_LEADS (geração de leads), OUTCOME_SALES (vendas/conversões), OUTCOME_TRAFFIC (tráfego para site), OUTCOME_AWARENESS (reconhecimento de marca), OUTCOME_ENGAGEMENT (engajamento)',
+          description: 'OUTCOME_LEADS (leads), OUTCOME_SALES (vendas), OUTCOME_TRAFFIC (tráfego), OUTCOME_AWARENESS (reconhecimento)',
         },
-        daily_budget: { type: 'number', description: 'Orçamento diário da campanha em reais (ex: 50.00)' },
-        adset_name: { type: 'string', description: 'Nome do conjunto de anúncios. Padrão: "Conjunto 1 — [nome da campanha]"' },
-        age_min: { type: 'number', description: 'Idade mínima do público (padrão: 18)' },
-        age_max: { type: 'number', description: 'Idade máxima do público (padrão: 65)' },
-        genders: {
-          type: 'string',
-          enum: ['all', 'male', 'female'],
-          description: 'Gênero: all (todos), male (masculino), female (feminino). Padrão: all',
+        daily_budget: { type: 'number', description: 'Orçamento diário em reais (ex: 50.00)' },
+        adset_name: { type: 'string', description: 'Nome do conjunto. Padrão: "Conjunto 1 — [nome da campanha]"' },
+        age_min: { type: 'number', description: 'Idade mínima (padrão: 18)' },
+        age_max: { type: 'number', description: 'Idade máxima (padrão: 65)' },
+        genders: { type: 'string', enum: ['all', 'male', 'female'], description: 'Gênero: all, male ou female' },
+        cities: {
+          type: 'array', items: { type: 'string' },
+          description: 'Cidades alvo por nome (ex: ["Londrina", "Maringá"]). A ferramenta busca os IDs automaticamente na API Meta.',
         },
         countries: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Países no formato ISO (ex: ["BR"]). Padrão: ["BR"]',
+          type: 'array', items: { type: 'string' },
+          description: 'Países ISO como fallback se nenhuma cidade for encontrada (padrão: ["BR"])',
         },
-        audience_notes: { type: 'string', description: 'Análise e sugestões de público geradas pela Luna para o relatório final' },
+        interests: {
+          type: 'array', items: { type: 'string' },
+          description: 'Interesses por nome (ex: ["Empreendedorismo", "Marketing digital"]). A ferramenta busca os IDs automaticamente.',
+        },
+        placements: {
+          type: 'string',
+          enum: ['all', 'instagram_only', 'facebook_only', 'instagram_feed_reels', 'facebook_feed'],
+          description: 'Posicionamento dos anúncios. instagram_only = Feed+Stories+Reels+Explore do Instagram apenas.',
+        },
+        audience_notes: { type: 'string', description: 'Análise de público-alvo gerada pela Luna (incluída no relatório)' },
       },
       required: ['client_id', 'name', 'objective', 'daily_budget'],
     },
@@ -861,11 +870,14 @@ async function execSystemTool(
       const {
         client_id, name: campName, objective, daily_budget,
         adset_name, age_min = 18, age_max = 65,
-        genders = 'all', countries = ['BR'], audience_notes,
+        genders = 'all', cities = [], countries = ['BR'],
+        interests = [], placements = 'all', audience_notes,
       } = input as {
         client_id: string; name: string; objective: string; daily_budget: number;
         adset_name?: string; age_min?: number; age_max?: number;
-        genders?: 'all' | 'male' | 'female'; countries?: string[]; audience_notes?: string;
+        genders?: 'all' | 'male' | 'female';
+        cities?: string[]; countries?: string[];
+        interests?: string[]; placements?: string; audience_notes?: string;
       };
 
       // Resolve ad account + token
@@ -881,9 +893,33 @@ async function execSystemTool(
 
       const report: string[] = [
         `📊 Relatório de criação — Meta Ads`,
-        `Conta: ${acctNode} | Cliente ID: ${client_id}`,
+        `Conta: ${acctNode}`,
         `${'─'.repeat(44)}`,
       ];
+
+      // ── Helper: search Meta geo/interest ──────────────
+      async function searchMetaCities(names: string[]): Promise<Array<{ key: string; name: string }>> {
+        const found: Array<{ key: string; name: string }> = [];
+        await Promise.allSettled(names.map(async (cityName) => {
+          const r = await fetch(`https://graph.facebook.com/v21.0/search?type=adgeolocation&q=${encodeURIComponent(cityName)}&location_types=["city"]&country_code=BR&access_token=${token}`);
+          if (!r.ok) return;
+          const d = await r.json() as { data?: { key: string; name: string; region?: string }[] };
+          const match = d.data?.[0];
+          if (match) found.push({ key: match.key, name: match.region ? `${match.name}, ${match.region}` : match.name });
+        }));
+        return found;
+      }
+
+      async function searchMetaInterests(terms: string[]): Promise<Array<{ id: string; name: string }>> {
+        const found: Array<{ id: string; name: string }> = [];
+        await Promise.allSettled(terms.map(async (term) => {
+          const r = await fetch(`https://graph.facebook.com/v21.0/search?type=adinterest&q=${encodeURIComponent(term)}&locale=pt_BR&access_token=${token}`);
+          if (!r.ok) return;
+          const d = await r.json() as { data?: { id: string; name: string }[] };
+          if (d.data?.[0]) found.push({ id: d.data[0].id, name: d.data[0].name });
+        }));
+        return found;
+      }
 
       // ── STEP 1: Campaign ──────────────────────────────
       const campRes = await fetch(`https://graph.facebook.com/v21.0/${acctNode}/campaigns`, {
@@ -895,13 +931,15 @@ async function execSystemTool(
           status: 'PAUSED',
           special_ad_categories: [],
           daily_budget: Math.round(Number(daily_budget) * 100),
+          bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
           access_token: token,
         }),
       });
-      const campData = await campRes.json() as { id?: string; error?: { message?: string; error_subcode?: number } };
+      const campData = await campRes.json() as { id?: string; error?: { message?: string; error_user_msg?: string } };
 
       if (!campRes.ok || !campData.id) {
-        report.push(`❌ Campanha: FALHA — ${campData.error?.message ?? `HTTP ${campRes.status}`}`);
+        const err = campData.error?.error_user_msg ?? campData.error?.message ?? `HTTP ${campRes.status}`;
+        report.push(`❌ Campanha: FALHA — ${err}`);
         return report.join('\n');
       }
       const campaignId = campData.id;
@@ -909,41 +947,76 @@ async function execSystemTool(
       report.push(`   Nome: ${campName}`);
       report.push(`   Objetivo: ${objective}`);
       report.push(`   Orçamento diário: R$ ${Number(daily_budget).toFixed(2)}`);
+      report.push(`   Estratégia de lance: Menor custo (automático)`);
       report.push(`   ID: ${campaignId}`);
       report.push('');
 
-      // ── STEP 2: Ad Set ────────────────────────────────
-      const OBJECTIVE_TO_GOAL: Record<string, string> = {
-        OUTCOME_LEADS:          'LEAD_GENERATION',
-        OUTCOME_SALES:          'OFFSITE_CONVERSIONS',
-        OUTCOME_TRAFFIC:        'LINK_CLICKS',
-        OUTCOME_AWARENESS:      'REACH',
-        OUTCOME_ENGAGEMENT:     'POST_ENGAGEMENT',
-        OUTCOME_APP_PROMOTION:  'APP_INSTALLS',
-      };
-      const OBJECTIVE_TO_BILLING: Record<string, string> = {
-        OUTCOME_TRAFFIC:     'LINK_CLICKS',
-        OUTCOME_ENGAGEMENT:  'POST_ENGAGEMENT',
-      };
-      const optimizationGoal = OBJECTIVE_TO_GOAL[objective] ?? 'REACH';
-      const billingEvent     = OBJECTIVE_TO_BILLING[objective] ?? 'IMPRESSIONS';
-      const resolvedAdsetName = adset_name ?? `Conjunto 1 — ${campName}`;
+      // ── STEP 2: Resolve targeting ─────────────────────
+      const [resolvedCities, resolvedInterests] = await Promise.all([
+        cities.length > 0 ? searchMetaCities(cities) : Promise.resolve([]),
+        interests.length > 0 ? searchMetaInterests(interests) : Promise.resolve([]),
+      ]);
+
+      const geoLocations: Record<string, unknown> = {};
+      if (resolvedCities.length > 0) {
+        geoLocations.cities = resolvedCities.map(c => ({ key: c.key }));
+      } else {
+        geoLocations.countries = countries.length > 0 ? countries : ['BR'];
+      }
 
       const targeting: Record<string, unknown> = {
-        geo_locations: { countries: countries.length > 0 ? countries : ['BR'] },
+        geo_locations: geoLocations,
         age_min: Number(age_min),
         age_max: Number(age_max),
       };
       if (genders === 'male')   targeting.genders = [1];
       if (genders === 'female') targeting.genders = [2];
+      if (resolvedInterests.length > 0) {
+        targeting.flexible_spec = [{ interests: resolvedInterests.map(i => ({ id: i.id, name: i.name })) }];
+      }
 
-      // destination_type required for OUTCOME_LEADS (ON_AD = formulário instantâneo, sem pixel)
-      const OBJECTIVE_TO_DEST: Record<string, string> = {
-        OUTCOME_LEADS:      'ON_AD',
-        OUTCOME_SALES:      'WEBSITE',
-        OUTCOME_TRAFFIC:    'WEBSITE',
-        OUTCOME_ENGAGEMENT: 'UNDEFINED',
+      // Placements
+      switch (placements) {
+        case 'instagram_only':
+          targeting.publisher_platforms = ['instagram'];
+          targeting.instagram_positions = ['stream', 'story', 'reels', 'explore', 'explore_home'];
+          break;
+        case 'facebook_only':
+          targeting.publisher_platforms = ['facebook'];
+          targeting.facebook_positions = ['feed', 'video_feeds', 'story', 'reels'];
+          break;
+        case 'instagram_feed_reels':
+          targeting.publisher_platforms = ['instagram'];
+          targeting.instagram_positions = ['stream', 'reels'];
+          break;
+        case 'facebook_feed':
+          targeting.publisher_platforms = ['facebook'];
+          targeting.facebook_positions = ['feed'];
+          break;
+        // 'all': no placement restrictions (Advantage+ automatic)
+      }
+
+      // ── STEP 3: Ad Set ────────────────────────────────
+      const OBJECTIVE_TO_GOAL: Record<string, string> = {
+        OUTCOME_LEADS:         'LEAD_GENERATION',
+        OUTCOME_SALES:         'OFFSITE_CONVERSIONS',
+        OUTCOME_TRAFFIC:       'LINK_CLICKS',
+        OUTCOME_AWARENESS:     'REACH',
+        OUTCOME_ENGAGEMENT:    'POST_ENGAGEMENT',
+        OUTCOME_APP_PROMOTION: 'APP_INSTALLS',
       };
+      const OBJECTIVE_TO_BILLING: Record<string, string> = {
+        OUTCOME_TRAFFIC:    'LINK_CLICKS',
+        OUTCOME_ENGAGEMENT: 'POST_ENGAGEMENT',
+      };
+      const OBJECTIVE_TO_DEST: Record<string, string> = {
+        OUTCOME_LEADS:   'ON_AD',
+        OUTCOME_SALES:   'WEBSITE',
+        OUTCOME_TRAFFIC: 'WEBSITE',
+      };
+      const optimizationGoal  = OBJECTIVE_TO_GOAL[objective] ?? 'REACH';
+      const billingEvent      = OBJECTIVE_TO_BILLING[objective] ?? 'IMPRESSIONS';
+      const resolvedAdsetName = adset_name ?? `Conjunto 1 — ${campName}`;
 
       const adsetPayload: Record<string, unknown> = {
         name: resolvedAdsetName,
@@ -956,46 +1029,52 @@ async function execSystemTool(
         access_token: token,
       };
       const destType = OBJECTIVE_TO_DEST[objective];
-      if (destType && destType !== 'UNDEFINED') adsetPayload.destination_type = destType;
+      if (destType) adsetPayload.destination_type = destType;
 
       const adsetRes = await fetch(`https://graph.facebook.com/v21.0/${acctNode}/adsets`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(adsetPayload),
       });
-      const adsetData = await adsetRes.json() as { id?: string; error?: { message?: string; error_subcode?: number; error_user_msg?: string } };
+      const adsetData = await adsetRes.json() as { id?: string; error?: { message?: string; error_user_msg?: string } };
 
       if (!adsetRes.ok || !adsetData.id) {
-        const errMsg = adsetData.error?.error_user_msg ?? adsetData.error?.message ?? `HTTP ${adsetRes.status}`;
+        const err = adsetData.error?.error_user_msg ?? adsetData.error?.message ?? `HTTP ${adsetRes.status}`;
         report.push(`⚠️ Conjunto de anúncios: FALHA`);
-        report.push(`   Motivo: ${errMsg}`);
-        report.push(`   A campanha (ID: ${campaignId}) foi criada. Crie o conjunto manualmente no Gerenciador.`);
+        report.push(`   Motivo: ${err}`);
+        report.push(`   Campanha criada (ID: ${campaignId}) — adicione o conjunto manualmente.`);
       } else {
         const adsetId = adsetData.id;
         const genderLabel = genders === 'male' ? 'Masculino' : genders === 'female' ? 'Feminino' : 'Todos';
+        const geoLabel = resolvedCities.length > 0
+          ? resolvedCities.map(c => c.name).join(', ')
+          : countries.join(', ');
         report.push(`✅ Conjunto de anúncios criado`);
         report.push(`   Nome: ${resolvedAdsetName}`);
         report.push(`   Otimização: ${optimizationGoal}`);
-        report.push(`   Público: ${age_min}–${age_max} anos | ${genderLabel} | ${countries.join(', ')}`);
+        report.push(`   Público: ${age_min}–${age_max} anos | ${genderLabel}`);
+        report.push(`   Localização: ${geoLabel}`);
+        if (resolvedInterests.length > 0) report.push(`   Interesses: ${resolvedInterests.map(i => i.name).join(', ')}`);
+        if (placements !== 'all') report.push(`   Posicionamento: ${placements}`);
+        if (resolvedCities.length < cities.length) {
+          const notFound = cities.filter((_, i) => !resolvedCities[i]);
+          report.push(`   ⚠️ Cidades não encontradas: ${notFound.join(', ')} (usando país como fallback)`);
+        }
         report.push(`   ID: ${adsetId}`);
         report.push('');
       }
 
-      // ── STEP 3: Ad (instructions — criativo obrigatório) ──
+      // ── STEP 4: Ad ────────────────────────────────────
       report.push(`📌 Anúncio: pendente`);
-      report.push(`   O anúncio precisa de um criativo (imagem/vídeo + texto).`);
-      report.push(`   Adicione diretamente no Gerenciador de Anúncios após preparar o material.`);
-
-      // ── SUMMARY ──────────────────────────────────────
+      report.push(`   Adicione o criativo (imagem/vídeo + texto) no Gerenciador de Anúncios.`);
       report.push('');
       report.push('─'.repeat(44));
-      report.push('⚠️  Campanha e conjunto PAUSADOS — não veiculam até você ativar.');
+      report.push('⚠️  Tudo pausado — não veicula até você ativar.');
       report.push('');
       report.push('📋 Próximos passos:');
-      report.push('   1. Prepare o criativo (imagem/vídeo, texto, headline, CTA)');
-      report.push('   2. Adicione o anúncio ao conjunto criado');
-      report.push('   3. Configure o Pixel Meta para rastreamento (se aplicável)');
-      report.push('   4. Revise tudo e ative a campanha');
+      report.push('   1. Adicione o criativo (imagem/vídeo, headline, texto, CTA)');
+      report.push('   2. Configure o Pixel Meta se for rastrear conversões no site');
+      report.push('   3. Revise o público no Gerenciador e ative quando pronto');
 
       if (audience_notes) {
         report.push('');
