@@ -904,7 +904,7 @@ export default function AgentePage() {
         </aside>
       </div>
 
-      <div className="mx-0 shrink-0 rounded-2xl border border-primary/35 bg-[#0a1020]/95 px-4 py-3 shadow-[0_0_0_1px_rgba(123,44,255,0.35),0_18px_58px_rgba(85,245,47,0.10)]">
+      <div className="mx-0 shrink-0 rounded-2xl border border-primary/35 bg-[#0a1020]/95 px-4 py-3 shadow-[0_0_0_1px_rgba(123,44,255,0.35),0_18px_58px_rgba(85,245,47,0.10)] xl:mr-[396px]">
         <div className="flex items-center gap-3">
           {voiceSupported && (
             <button
