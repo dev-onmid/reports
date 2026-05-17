@@ -306,8 +306,22 @@ export default function ClientesPage() {
         {displayedClients.map(cliente => (
           <div
             key={cliente.id}
-            className="flex items-center gap-4 rounded-xl border border-border bg-card px-4 py-3 hover:border-border/80 hover:bg-muted/20 transition-all"
+            className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 hover:border-border/80 hover:bg-muted/20 transition-all"
           >
+            {/* Gestor column */}
+            <div className="hidden sm:flex w-36 shrink-0 items-center gap-2">
+              {cliente.gestor_name ? (
+                <>
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-bold text-primary ring-1 ring-primary/30">
+                    {cliente.gestor_name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase()}
+                  </div>
+                  <span className="text-xs font-medium text-foreground truncate">{cliente.gestor_name}</span>
+                </>
+              ) : (
+                <span className="text-xs text-muted-foreground/40 italic">Sem gestor</span>
+              )}
+            </div>
+
             {/* Avatar + name */}
             <Link href={`/clientes/${cliente.id}`} className="flex items-center gap-3 min-w-0 flex-1">
               <ClientAvatar clientId={cliente.id} name={cliente.name} size="md" />
@@ -332,15 +346,6 @@ export default function ClientesPage() {
                 {cliente.status}
               </span>
 
-              {/* Gestor badge */}
-              {!showArchived && cliente.gestor_name && (
-                <span className="hidden xl:flex items-center gap-1.5 rounded-lg border border-border bg-background/50 px-2 py-1">
-                  <div className="w-4 h-4 rounded-full bg-primary/20 flex items-center justify-center text-[9px] font-bold text-primary">
-                    {cliente.gestor_name?.charAt(0).toUpperCase()}
-                  </div>
-                  <span className="text-xs text-muted-foreground max-w-[80px] truncate">{cliente.gestor_name}</span>
-                </span>
-              )}
 
               {/* Balance KPIs */}
               {!showArchived && (
