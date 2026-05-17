@@ -72,6 +72,9 @@ export default function ClientesPage() {
   const [activityClientId, setActivityClientId]    = useState<string | null>(null);
   const [activityLogs, setActivityLogs]            = useState<ActivityLog[]>([]);
   const [activityLoading, setActivityLoading]      = useState(false);
+  const [selectedIds, setSelectedIds]              = useState<Set<string>>(new Set());
+  const [bulkGestorId, setBulkGestorId]            = useState('');
+  const [bulkConfirm, setBulkConfirm]              = useState<'delete' | 'archive' | 'inativar' | null>(null);
 
   const isAdmin = canManageClients(currentRole);
 
@@ -166,6 +169,43 @@ export default function ClientesPage() {
     } catch { /* ignore */ } finally {
       setActivityLoading(false);
     }
+  }
+
+  function toggleSelect(id: string) {
+    setSelectedIds(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
+  }
+
+  function toggleSelectAll() {
+    setSelectedIds(prev => prev.size === displayedClients.length ? new Set() : new Set(displayedClients.map(c => c.id)));
+  }
+
+  function clearSelection() { setSelectedIds(new Set()); setBulkConfirm(null); setBulkGestorId(''); }
+
+  function bulkSetGestor() {
+    if (!bulkGestorId || !isAdmin) return;
+    selectedIds.forEach(id => updateClientGestor(id, bulkGestorId));
+    clearSelection();
+  }
+
+  function bulkSetStatus(status: ClientStatus) {
+    if (!isAdmin) return;
+    selectedIds.forEach(id => setClientStatus(id, status));
+    clearSelection();
+  }
+
+  function bulkArchive() {
+    if (!isAdmin) return;
+    selectedIds.forEach(id => archiveClient(id));
+    clearSelection();
+  }
+
+  function bulkDelete() {
+    if (!isAdmin) return;
+    selectedIds.forEach(id => {
+      deleteClient(id);
+      setPayments(prev => prev.filter(p => p.clientId !== id));
+    });
+    clearSelection();
   }
 
   function confirmArchiveClient() {
@@ -306,8 +346,25 @@ export default function ClientesPage() {
         {displayedClients.map(cliente => (
           <div
             key={cliente.id}
-            className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 hover:border-border/80 hover:bg-muted/20 transition-all"
+            className={cn(
+              'group flex items-center gap-3 rounded-xl border bg-card px-4 py-3 transition-all',
+              selectedIds.has(cliente.id)
+                ? 'border-primary/40 bg-primary/5'
+                : 'border-border hover:border-border/80 hover:bg-muted/20'
+            )}
           >
+            {/* Checkbox */}
+            <input
+              type="checkbox"
+              checked={selectedIds.has(cliente.id)}
+              onChange={() => toggleSelect(cliente.id)}
+              onClick={e => e.stopPropagation()}
+              className={cn(
+                'h-4 w-4 shrink-0 cursor-pointer rounded accent-primary transition-opacity',
+                selectedIds.has(cliente.id) || selectedIds.size > 0 ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+              )}
+            />
+
             {/* Gestor column — clickable for admins */}
             <div
               className={cn(
@@ -647,6 +704,99 @@ export default function ClientesPage() {
           open={linkDialogOpen}
           onOpenChange={v => { setLinkDialogOpen(v); if (!v) setLinkDialogClient(null); }}
         />
+      )}
+
+      {/* ── BULK ACTION BAR ── */}
+      {selectedIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 w-max max-w-[calc(100vw-2rem)]">
+          <div className="flex items-center gap-2 rounded-2xl border border-border bg-card/95 px-4 py-3 shadow-2xl backdrop-blur-md ring-1 ring-white/5">
+            {/* Count + select all */}
+            <div className="flex items-center gap-2 border-r border-border pr-3">
+              <input
+                type="checkbox"
+                checked={selectedIds.size === displayedClients.length}
+                onChange={toggleSelectAll}
+                className="h-4 w-4 cursor-pointer rounded accent-primary"
+              />
+              <span className="text-sm font-bold text-foreground whitespace-nowrap">
+                {selectedIds.size} selecionado{selectedIds.size !== 1 ? 's' : ''}
+              </span>
+            </div>
+
+            {/* Gestor picker */}
+            <div className="flex items-center gap-1.5 border-r border-border pr-3">
+              <select
+                value={bulkGestorId}
+                onChange={e => setBulkGestorId(e.target.value)}
+                className="h-8 rounded-lg border border-border bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary max-w-[130px]"
+              >
+                <option value="">Atribuir gestor…</option>
+                <option value="__none__">Remover gestor</option>
+                {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </select>
+              <button
+                onClick={bulkSetGestor}
+                disabled={!bulkGestorId}
+                className="h-8 rounded-lg bg-primary/10 px-2.5 text-xs font-semibold text-primary hover:bg-primary/20 disabled:opacity-40 transition-colors"
+              >
+                Aplicar
+              </button>
+            </div>
+
+            {/* Status actions */}
+            <div className="flex items-center gap-1.5 border-r border-border pr-3">
+              {bulkConfirm === 'inativar' ? (
+                <>
+                  <span className="text-xs text-orange-400 font-medium">Desativar {selectedIds.size}?</span>
+                  <button onClick={() => bulkSetStatus('Inativo')} className="h-8 rounded-lg bg-orange-500/10 px-2.5 text-xs font-bold text-orange-400 hover:bg-orange-500/20">Confirmar</button>
+                  <button onClick={() => setBulkConfirm(null)} className="h-8 rounded-lg px-2 text-xs text-muted-foreground hover:text-foreground">✕</button>
+                </>
+              ) : (
+                <button onClick={() => setBulkConfirm('inativar')} className="h-8 rounded-lg border border-border px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
+                  Desativar
+                </button>
+              )}
+              <button onClick={() => bulkSetStatus('Ativo')} className="h-8 rounded-lg border border-border px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
+                Ativar
+              </button>
+            </div>
+
+            {/* Archive */}
+            <div className="flex items-center gap-1.5 border-r border-border pr-3">
+              {bulkConfirm === 'archive' ? (
+                <>
+                  <span className="text-xs text-yellow-400 font-medium">Arquivar {selectedIds.size}?</span>
+                  <button onClick={bulkArchive} className="h-8 rounded-lg bg-yellow-500/10 px-2.5 text-xs font-bold text-yellow-400 hover:bg-yellow-500/20">Confirmar</button>
+                  <button onClick={() => setBulkConfirm(null)} className="h-8 rounded-lg px-2 text-xs text-muted-foreground hover:text-foreground">✕</button>
+                </>
+              ) : (
+                <button onClick={() => setBulkConfirm('archive')} className="h-8 rounded-lg border border-border px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
+                  Arquivar
+                </button>
+              )}
+            </div>
+
+            {/* Delete */}
+            <div className="flex items-center gap-1.5 border-r border-border pr-3">
+              {bulkConfirm === 'delete' ? (
+                <>
+                  <span className="text-xs text-red-400 font-medium">Excluir {selectedIds.size}?</span>
+                  <button onClick={bulkDelete} className="h-8 rounded-lg bg-red-500/10 px-2.5 text-xs font-bold text-red-400 hover:bg-red-500/20">Confirmar</button>
+                  <button onClick={() => setBulkConfirm(null)} className="h-8 rounded-lg px-2 text-xs text-muted-foreground hover:text-foreground">✕</button>
+                </>
+              ) : (
+                <button onClick={() => setBulkConfirm('delete')} className="h-8 rounded-lg border border-red-500/30 px-2.5 text-xs font-medium text-red-400 hover:bg-red-500/10 transition-colors">
+                  Excluir
+                </button>
+              )}
+            </div>
+
+            {/* Clear */}
+            <button onClick={clearSelection} className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground transition-colors">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
       )}
 
       {/* Activity Log Drawer */}
