@@ -5,11 +5,9 @@ import { cn } from '@/lib/utils';
 import {
   Trophy, RefreshCw, TrendingUp, TrendingDown, Minus,
   Users, ChevronDown, ChevronUp, Loader2, Star, AlertTriangle,
-  Hexagon, List,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ClientAvatar } from '@/components/client-avatar';
-import RadarView from './radar-view';
 
 type ScoreDetails = {
   cpl:             { score: number; max: number; current: number; previous: number };
@@ -37,8 +35,6 @@ type ClientScore = {
   details: ScoreDetails | null;
   calculated_at: string | null;
 };
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function gradeColor(grade: string | null): string {
   switch (grade) {
@@ -71,58 +67,6 @@ function currency(n: number) {
   return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
-// ── Radar view wrapper (recharts loaded dynamically — no SSR) ─────────────────
-
-function ClientRadarView({
-  client, calculating, onCalc,
-}: {
-  client: ClientScore;
-  calculating: boolean;
-  onCalc: () => void;
-}) {
-  return (
-    <div className="rounded-2xl border border-border bg-card overflow-hidden">
-      {/* Client header */}
-      <div className="flex items-center gap-4 px-6 py-4 border-b border-border/50">
-        <ClientAvatar clientId={client.id} name={client.name} size="md" />
-        <div className="flex-1 min-w-0">
-          <p className="font-bold text-base text-foreground">{client.name}</p>
-          <p className="text-xs text-muted-foreground">{client.segment}{client.gestor_name ? ` · ${client.gestor_name}` : ''}</p>
-        </div>
-        <div className={cn('w-12 h-12 rounded-2xl border-2 flex items-center justify-center text-lg font-black', gradeColor(client.grade))}>
-          {client.grade ?? '?'}
-        </div>
-        <div className="text-right">
-          <p className="text-3xl font-black text-foreground">{client.score ?? '—'}</p>
-          <p className="text-xs text-muted-foreground">/ 100</p>
-        </div>
-      </div>
-
-      {client.details ? (
-        <>
-          <RadarView details={client.details} score={client.score} />
-          {client.calculated_at && (
-            <p className="text-[10px] text-muted-foreground px-5 pb-3 border-t border-border/40 pt-2">
-              Calculado em {new Date(client.calculated_at).toLocaleString('pt-BR')}
-            </p>
-          )}
-        </>
-      ) : (
-        <div className="flex flex-col items-center justify-center py-16 gap-4">
-          <Hexagon className="w-12 h-12 text-muted-foreground/30" strokeWidth={1} />
-          <p className="text-sm text-muted-foreground">Score ainda não calculado para este cliente.</p>
-          <Button variant="outline" size="sm" onClick={onCalc} disabled={calculating} className="gap-2">
-            {calculating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-            Calcular Agora
-          </Button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Criteria breakdown (list tab) ─────────────────────────────────────────────
-
 function ScoreBreakdown({ details }: { details: ScoreDetails }) {
   const criteria = [
     { label: 'CPL', score: details.cpl.score, max: details.cpl.max, desc: `Atual: ${currency(details.cpl.current)} vs Anterior: ${currency(details.cpl.previous)}`, icon: trend(details.cpl.previous || 1, details.cpl.current || 1) },
@@ -135,7 +79,7 @@ function ScoreBreakdown({ details }: { details: ScoreDetails }) {
     { label: 'Consistência', score: details.consistency.score, max: details.consistency.max, desc: details.consistency.cv !== null ? `Variação semanal: ${details.consistency.cv}%` : 'Dados insuficientes', icon: (details.consistency.cv ?? 100) <= 30 ? <Star className="w-3 h-3 text-green-400" /> : <AlertTriangle className="w-3 h-3 text-orange-400" /> },
     { label: 'Pausa Saldo', score: details.budgetPaused.score, max: details.budgetPaused.max, desc: details.budgetPaused.count === 0 ? 'Sem pausas por saldo' : `${details.budgetPaused.count} campanha(s) pausada(s)`, icon: details.budgetPaused.count > 0 ? <AlertTriangle className="w-3 h-3 text-red-400" /> : <Star className="w-3 h-3 text-green-400" /> },
     { label: 'CRM', score: details.crmConversion.score, max: details.crmConversion.max, desc: details.crmConversion.rate !== null ? `${details.crmConversion.rate}% conversão · ${details.crmConversion.advanced}/${details.crmConversion.total} leads` : 'Sem dados CRM', icon: (details.crmConversion.rate ?? 0) >= 20 ? <Star className="w-3 h-3 text-green-400" /> : <Minus className="w-3 h-3 text-muted-foreground" /> },
-    { label: 'Relatórios', score: details.reports.score, max: details.reports.max, desc: `${details.reports.count} relatório(s) entregue(s) no mês`, icon: details.reports.count >= 3 ? <Star className="w-3 h-3 text-green-400" /> : <Minus className="w-3 h-3 text-muted-foreground" /> },
+    { label: 'Relatórios', score: details.reports.score, max: details.reports.max, desc: `${details.reports.count} relatório(s) no mês`, icon: details.reports.count >= 3 ? <Star className="w-3 h-3 text-green-400" /> : <Minus className="w-3 h-3 text-muted-foreground" /> },
   ];
 
   return (
@@ -162,16 +106,12 @@ function CritCard({ label, score, max, desc, icon }: { label: string; score: num
   );
 }
 
-// ── Page ──────────────────────────────────────────────────────────────────────
-
 export default function ScorePage() {
   const [clients, setClients] = useState<ClientScore[]>([]);
   const [loading, setLoading] = useState(true);
   const [calculating, setCalculating] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [filterGestor, setFilterGestor] = useState('');
-  const [activeTab, setActiveTab] = useState<'radar' | 'lista'>('radar');
-  const [selectedClientId, setSelectedClientId] = useState<string>('');
 
   useEffect(() => { void loadScores(); }, []);
 
@@ -179,11 +119,7 @@ export default function ScorePage() {
     setLoading(true);
     try {
       const res = await fetch('/api/score');
-      if (res.ok) {
-        const data = await res.json() as ClientScore[];
-        setClients(data);
-        if (!selectedClientId && data.length > 0) setSelectedClientId(data[0].id);
-      }
+      if (res.ok) setClients(await res.json() as ClientScore[]);
     } finally { setLoading(false); }
   }
 
@@ -209,17 +145,15 @@ export default function ScorePage() {
   const gestores = [...new Set(clients.map(c => c.gestor_name).filter(Boolean))] as string[];
   const filtered = filterGestor ? clients.filter(c => c.gestor_name === filterGestor) : clients;
   const calculated = clients.filter(c => c.score !== null).length;
-  const selectedClient = clients.find(c => c.id === selectedClientId) ?? null;
 
   return (
     <div className="space-y-5">
-      {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="font-heading font-normal text-4xl uppercase leading-none tracking-wide text-foreground">Score</h1>
           <div className="mt-1 h-[3px] w-14 rounded-full bg-yellow-500" />
           <p className="mt-2 text-sm text-muted-foreground">
-            Avaliação de performance dos gestores de tráfego e clientes.
+            Avaliação de performance dos gestores de tráfego e clientes. Mês atual vs mês anterior.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -237,7 +171,6 @@ export default function ScorePage() {
         </div>
       </div>
 
-      {/* Summary cards */}
       <div className="grid grid-cols-4 gap-3">
         {[
           { label: 'Clientes', value: clients.length, icon: Users, color: 'text-primary' },
@@ -255,72 +188,12 @@ export default function ScorePage() {
         ))}
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 rounded-xl border border-border bg-card p-1 w-fit">
-        <button
-          onClick={() => setActiveTab('radar')}
-          className={cn(
-            'flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors',
-            activeTab === 'radar' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
-          )}
-        >
-          <Hexagon className="w-3.5 h-3.5" />
-          Radar
-        </button>
-        <button
-          onClick={() => setActiveTab('lista')}
-          className={cn(
-            'flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors',
-            activeTab === 'lista' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
-          )}
-        >
-          <List className="w-3.5 h-3.5" />
-          Lista
-        </button>
-      </div>
-
       {loading ? (
         <div className="flex items-center justify-center py-16 gap-3">
           <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
           <span className="text-sm text-muted-foreground">Carregando...</span>
         </div>
-      ) : activeTab === 'radar' ? (
-        /* ── Radar tab ─────────────────────────────────────────────────────── */
-        <div className="space-y-4">
-          {/* Client picker */}
-          <div className="flex flex-wrap gap-2">
-            {filtered.map(c => (
-              <button
-                key={c.id}
-                onClick={() => setSelectedClientId(c.id)}
-                className={cn(
-                  'flex items-center gap-2 rounded-xl border px-3 py-2 text-sm transition-colors',
-                  selectedClientId === c.id
-                    ? 'border-primary bg-primary/10 text-foreground font-semibold'
-                    : 'border-border bg-card text-muted-foreground hover:border-primary/50 hover:text-foreground',
-                )}
-              >
-                <ClientAvatar clientId={c.id} name={c.name} size="sm" />
-                <span className="truncate max-w-[120px]">{c.name}</span>
-                {c.score !== null && (
-                  <span className={cn('text-xs font-bold ml-1 px-1.5 py-0.5 rounded-md border', gradeColor(c.grade))}>
-                    {c.grade}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
-
-          {selectedClient && (
-            <ClientRadarView
-              client={selectedClient}
-              calculating={calculating.has(selectedClient.id)}
-              onCalc={() => calcScore(selectedClient.id)}
-            />
-          )}
-        </div>
       ) : (
-        /* ── Lista tab ─────────────────────────────────────────────────────── */
         <div className="space-y-2">
           {filtered.map(client => {
             const isCalc = calculating.has(client.id);

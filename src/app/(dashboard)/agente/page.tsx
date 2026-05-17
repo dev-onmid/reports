@@ -601,6 +601,8 @@ export default function AgentePage() {
   const [showTraining, setShowTraining] = useState(false);
   const [instructions, setInstructions] = useState('');
   const [scrolledUp, setScrolledUp] = useState(false);
+  const [showMoreSuggestions, setShowMoreSuggestions] = useState(false);
+  const [systemContext, setSystemContext] = useState<{ clients: number } | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
@@ -614,6 +616,14 @@ export default function AgentePage() {
     fetch('/api/agent/instructions')
       .then(r => r.json())
       .then((d: { instructions: string }) => setInstructions(d.instructions))
+      .catch(() => {});
+
+    fetch('/api/clients')
+      .then(r => r.ok ? r.json() : [])
+      .then((data: { status?: string }[]) => {
+        const active = Array.isArray(data) ? data.filter(c => !c.status || c.status === 'Ativo').length : 0;
+        setSystemContext({ clients: active });
+      })
       .catch(() => {});
   }, []);
 
@@ -636,13 +646,13 @@ export default function AgentePage() {
     setInstructions(value);
   }
 
-  async function sendMessage() {
-    const text = input.trim();
+  async function sendMessage(quickText?: string) {
+    const text = (quickText ?? input).trim();
     if (!text || loading) return;
 
     const userMsg: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: text };
     setMessages(prev => [...prev, userMsg]);
-    setInput('');
+    if (!quickText) setInput('');
     setLoading(true);
     setActiveTools([]);
 
@@ -709,6 +719,10 @@ export default function AgentePage() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   }
 
+  function sendQuick(prompt: string) {
+    void sendMessage(prompt);
+  }
+
   const isEmpty = messages.length === 0;
 
   return (
@@ -771,11 +785,17 @@ export default function AgentePage() {
                     { text: 'Gera um relatório do cliente X', sub: 'Performance, gastos e resultados', icon: FileText, color: 'text-violet-400' },
                     { text: 'Pausa a campanha Y do cliente Z', sub: 'Interrompa campanhas rapidamente', icon: Pause, color: 'text-amber-400' },
                     { text: 'Qual o CPL das campanhas ativas?', sub: 'Análise de CPL e custo por resultado', icon: Sparkles, color: 'text-primary' },
+                    ...(showMoreSuggestions ? [
+                      { text: 'Qual cliente tem o maior gasto hoje?', sub: 'Ranking por investimento', icon: Zap, color: 'text-amber-400' },
+                      { text: 'Me mostra os leads do mês no CRM', sub: 'Resumo de leads e conversões', icon: Users, color: 'text-violet-400' },
+                      { text: 'Quais campanhas estão pausadas?', sub: 'Status de campanhas inativas', icon: Play, color: 'text-sky-400' },
+                      { text: 'Qual o saldo disponível das contas?', sub: 'Saldo Meta e Google Ads', icon: ShieldCheck, color: 'text-green-400' },
+                    ] : []),
                   ].map(({ text, sub, icon: Icon, color }) => (
                     <button
                       key={text}
                       type="button"
-                      onClick={() => { setInput(text); inputRef.current?.focus(); }}
+                      onClick={() => sendQuick(text)}
                       className="group flex items-center gap-4 rounded-xl border border-white/10 bg-[#121827]/80 px-5 py-4 text-left transition-all hover:border-primary/25 hover:bg-[#151d2f]"
                     >
                       <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/5">
@@ -789,8 +809,12 @@ export default function AgentePage() {
                     </button>
                   ))}
                 </div>
-                <button className="mt-7 inline-flex items-center gap-2 rounded-xl border border-white/10 bg-[#0c1220] px-5 py-2.5 text-sm font-medium text-slate-300 hover:border-white/20 hover:text-white">
-                  Ver mais sugestões <ChevronDown className="h-4 w-4" />
+                <button
+                  onClick={() => setShowMoreSuggestions(p => !p)}
+                  className="mt-7 inline-flex items-center gap-2 rounded-xl border border-white/10 bg-[#0c1220] px-5 py-2.5 text-sm font-medium text-slate-300 hover:border-white/20 hover:text-white transition-colors"
+                >
+                  {showMoreSuggestions ? 'Ver menos' : 'Ver mais sugestões'}
+                  <ChevronDown className={cn('h-4 w-4 transition-transform', showMoreSuggestions && 'rotate-180')} />
                 </button>
               </div>
             ) : (
@@ -858,13 +882,13 @@ export default function AgentePage() {
             </h3>
             <div className="mt-5 space-y-3">
               {[
-                ['Resumo do dia', 'O que aconteceu hoje', FileText, 'text-sky-400'],
-                ['Top campanhas', 'Melhores desempenhos', Sparkles, 'text-amber-400'],
-                ['Alertas e oportunidades', 'Pontos de atenção', Users, 'text-violet-400'],
-              ].map(([title, sub, Icon, color]) => {
+                ['Resumo do dia', 'O que aconteceu hoje', FileText, 'text-sky-400', 'Faz um resumo do dia: quais clientes estão com campanhas ativas, métricas principais e o que está chamando atenção agora.'],
+                ['Top campanhas', 'Melhores desempenhos', Sparkles, 'text-amber-400', 'Quais são as campanhas com melhor desempenho hoje? Me mostra o ranking por CPL e volume de leads.'],
+                ['Alertas e oportunidades', 'Pontos de atenção', Users, 'text-violet-400', 'Analisa os dados dos clientes e me diz quais alertas e oportunidades de melhoria existem agora.'],
+              ].map(([title, sub, Icon, color, prompt]) => {
                 const ItemIcon = Icon as React.ElementType;
                 return (
-                  <button key={String(title)} type="button" className="group flex w-full items-center gap-3 rounded-xl bg-white/[0.035] px-4 py-3 text-left hover:bg-white/[0.06]">
+                  <button key={String(title)} type="button" onClick={() => sendQuick(String(prompt))} className="group flex w-full items-center gap-3 rounded-xl bg-white/[0.035] px-4 py-3 text-left hover:bg-white/[0.06] transition-colors">
                     <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/5">
                       <ItemIcon className={cn('h-4 w-4', color as string)} />
                     </span>
@@ -882,20 +906,22 @@ export default function AgentePage() {
           <div className="rounded-2xl border border-white/10 bg-[#0d1322]/90 p-5">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-white">Contexto do sistema</h3>
-              <span className="flex items-center gap-1 text-[11px] text-slate-500"><span className="h-1.5 w-1.5 rounded-full bg-primary" />Atualizado agora</span>
+              <span className="flex items-center gap-1 text-[11px] text-slate-500">
+                <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                {systemContext ? 'Atualizado agora' : 'Carregando...'}
+              </span>
             </div>
-            <div className="mt-5 grid grid-cols-4 gap-3 border-t border-white/8 pt-4">
-              {[
-                ['Clientes', '124'],
-                ['Campanhas', '568'],
-                ['Gasto hoje', 'R$ 24.560,80'],
-                ['CPL médio', 'R$ 18,43'],
-              ].map(([label, value]) => (
-                <div key={label}>
-                  <p className="text-[11px] text-slate-500">{label}</p>
-                  <p className="mt-1 text-sm font-bold text-white">{value}</p>
-                </div>
-              ))}
+            <div className="mt-5 grid grid-cols-2 gap-3 border-t border-white/8 pt-4">
+              <div>
+                <p className="text-[11px] text-slate-500">Clientes ativos</p>
+                <p className="mt-1 text-sm font-bold text-white">
+                  {systemContext ? systemContext.clients : <span className="text-slate-500">—</span>}
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] text-slate-500">Conversas hoje</p>
+                <p className="mt-1 text-sm font-bold text-white">{messages.length > 0 ? '1' : '—'}</p>
+              </div>
             </div>
             <p className="mt-5 flex items-center gap-2 text-xs text-slate-500">
               <ShieldCheck className="h-4 w-4 text-primary/70" />Seus dados estão protegidos e seguros.
@@ -933,7 +959,7 @@ export default function AgentePage() {
           <span className="hidden text-xs text-slate-500 lg:block">Enter para enviar • Shift+Enter para nova linha</span>
           <button
             type="button"
-            onClick={sendMessage}
+            onClick={() => sendMessage()}
             disabled={!input.trim() || loading}
             className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-primary/20 bg-primary/10 text-primary transition-all hover:bg-primary/15 disabled:opacity-45"
           >
