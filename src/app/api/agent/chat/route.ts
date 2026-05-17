@@ -1365,12 +1365,12 @@ export async function POST(req: NextRequest) {
         let totalInputTokens = 0;
         let totalOutputTokens = 0;
         // claude-opus-4-7 pricing: $5/1M input, $25/1M output
-        const INPUT_COST_PER_TOKEN  = 5 / 1_000_000;
-        const OUTPUT_COST_PER_TOKEN = 25 / 1_000_000;
+        const INPUT_COST_PER_TOKEN  = 3 / 1_000_000;
+        const OUTPUT_COST_PER_TOKEN = 15 / 1_000_000;
 
         for (let iteration = 0; iteration < 10; iteration++) {
           const response = await client.messages.create({
-            model: 'claude-opus-4-7',
+            model: 'claude-sonnet-4-6',
             max_tokens: 4096,
             system: [{ type: 'text', text: systemText, cache_control: { type: 'ephemeral' } }],
             tools: allTools,
