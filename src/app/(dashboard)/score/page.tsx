@@ -5,9 +5,11 @@ import { cn } from '@/lib/utils';
 import {
   Trophy, RefreshCw, TrendingUp, TrendingDown, Minus,
   Users, ChevronDown, ChevronUp, Loader2, Star, AlertTriangle,
+  BarChart2, List,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ClientAvatar } from '@/components/client-avatar';
+import RadarView from './radar-view';
 
 type ScoreDetails = {
   cpl:             { score: number; max: number; current: number; previous: number };
@@ -112,6 +114,8 @@ export default function ScorePage() {
   const [calculating, setCalculating] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [filterGestor, setFilterGestor] = useState('');
+  const [activeTab, setActiveTab] = useState<'radar' | 'lista'>('radar');
+  const [radarClientId, setRadarClientId] = useState('');
 
   useEffect(() => { void loadScores(); }, []);
 
@@ -188,10 +192,70 @@ export default function ScorePage() {
         ))}
       </div>
 
+      {/* Tab switcher */}
+      <div className="flex gap-1 rounded-xl border border-border bg-card p-1 w-fit">
+        <button
+          onClick={() => setActiveTab('radar')}
+          className={cn('flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors', activeTab === 'radar' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}
+        >
+          <BarChart2 className="w-4 h-4" />
+          Radar
+        </button>
+        <button
+          onClick={() => setActiveTab('lista')}
+          className={cn('flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors', activeTab === 'lista' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}
+        >
+          <List className="w-4 h-4" />
+          Lista
+        </button>
+      </div>
+
       {loading ? (
         <div className="flex items-center justify-center py-16 gap-3">
           <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
           <span className="text-sm text-muted-foreground">Carregando...</span>
+        </div>
+      ) : activeTab === 'radar' ? (
+        <div className="rounded-xl border border-border bg-card overflow-hidden">
+          {/* Client picker */}
+          <div className="flex items-center gap-3 px-5 py-4 border-b border-border/50">
+            <span className="text-sm font-medium text-muted-foreground">Cliente:</span>
+            <select
+              value={radarClientId}
+              onChange={e => setRadarClientId(e.target.value)}
+              className="flex-1 max-w-xs h-9 rounded-lg border border-border bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+            >
+              <option value="">Selecione um cliente...</option>
+              {clients.filter(c => c.details !== null).map(c => (
+                <option key={c.id} value={c.id}>{c.name}{c.score !== null ? ` · ${c.score} pts` : ''}</option>
+              ))}
+            </select>
+            {radarClientId && (() => {
+              const c = clients.find(cl => cl.id === radarClientId);
+              return c ? (
+                <div className={cn('w-9 h-9 rounded-xl border flex items-center justify-center text-sm font-black', gradeColor(c.grade))}>
+                  {c.grade ?? '?'}
+                </div>
+              ) : null;
+            })()}
+          </div>
+
+          {/* Radar chart or placeholder */}
+          {radarClientId && clients.find(c => c.id === radarClientId && c.details !== null) ? (
+            <RadarView
+              details={clients.find(c => c.id === radarClientId)!.details!}
+              score={clients.find(c => c.id === radarClientId)!.score}
+            />
+          ) : (
+            <div className="flex flex-col items-center justify-center py-20 gap-3 text-muted-foreground">
+              <BarChart2 className="w-10 h-10 opacity-20" />
+              <p className="text-sm">
+                {clients.filter(c => c.details !== null).length === 0
+                  ? 'Calcule o score de pelo menos um cliente para ver o radar.'
+                  : 'Selecione um cliente acima para visualizar o radar.'}
+              </p>
+            </div>
+          )}
         </div>
       ) : (
         <div className="space-y-2">
