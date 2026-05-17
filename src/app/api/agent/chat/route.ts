@@ -937,6 +937,14 @@ async function execSystemTool(
       if (genders === 'male')   targeting.genders = [1];
       if (genders === 'female') targeting.genders = [2];
 
+      // destination_type required for OUTCOME_LEADS (ON_AD = formulário instantâneo, sem pixel)
+      const OBJECTIVE_TO_DEST: Record<string, string> = {
+        OUTCOME_LEADS:      'ON_AD',
+        OUTCOME_SALES:      'WEBSITE',
+        OUTCOME_TRAFFIC:    'WEBSITE',
+        OUTCOME_ENGAGEMENT: 'UNDEFINED',
+      };
+
       const adsetPayload: Record<string, unknown> = {
         name: resolvedAdsetName,
         campaign_id: campaignId,
@@ -944,19 +952,24 @@ async function execSystemTool(
         billing_event: billingEvent,
         targeting,
         status: 'PAUSED',
+        start_time: new Date().toISOString(),
         access_token: token,
       };
+      const destType = OBJECTIVE_TO_DEST[objective];
+      if (destType && destType !== 'UNDEFINED') adsetPayload.destination_type = destType;
 
       const adsetRes = await fetch(`https://graph.facebook.com/v21.0/${acctNode}/adsets`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(adsetPayload),
       });
-      const adsetData = await adsetRes.json() as { id?: string; error?: { message?: string } };
+      const adsetData = await adsetRes.json() as { id?: string; error?: { message?: string; error_subcode?: number; error_user_msg?: string } };
 
       if (!adsetRes.ok || !adsetData.id) {
-        report.push(`⚠️ Conjunto de anúncios: FALHA — ${adsetData.error?.message ?? `HTTP ${adsetRes.status}`}`);
-        report.push(`   A campanha (ID: ${campaignId}) foi criada. Crie o conjunto manualmente.`);
+        const errMsg = adsetData.error?.error_user_msg ?? adsetData.error?.message ?? `HTTP ${adsetRes.status}`;
+        report.push(`⚠️ Conjunto de anúncios: FALHA`);
+        report.push(`   Motivo: ${errMsg}`);
+        report.push(`   A campanha (ID: ${campaignId}) foi criada. Crie o conjunto manualmente no Gerenciador.`);
       } else {
         const adsetId = adsetData.id;
         const genderLabel = genders === 'male' ? 'Masculino' : genders === 'female' ? 'Feminino' : 'Todos';
@@ -1074,6 +1087,16 @@ export async function POST(req: NextRequest) {
       systemText += `### ${item.title}\n${item.content.slice(0, 10000)}\n\n`;
     }
   }
+
+  // Always-on operational rules
+  systemText += `
+
+---
+## Regras operacionais obrigatórias
+
+- Quando uma ferramenta retornar um relatório de operação (create_meta_campaign, generate_client_report, generate_report_pdf, send_report_pdf_whatsapp, create_user, create_webhook, create_disparo, schedule_payment, link_account), copie e exiba o conteúdo EXATO retornado pela ferramenta, sem resumir, parafrasear ou omitir linhas. O relatório já está formatado para o usuário.
+- Se a ferramenta retornar ✅ ou ❌ em alguma linha, preserve esses símbolos.
+- Nunca substitua um relatório de múltiplas linhas por uma única frase curta.`;
 
   // Build dynamic external tools
   const dynTools: Anthropic.Tool[] = externalTools.map((t) => {
