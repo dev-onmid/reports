@@ -549,9 +549,8 @@ function GestoresTopCards({ stats, clients }: { stats: GestorStat[]; clients: Cl
               </div>
             </div>
             {'grade' in card ? (
-              <div className="flex items-center gap-3">
-                <div className="h-16 w-16 rounded-full border-4 border-emerald-400/80 shadow-[0_0_20px_rgba(34,197,94,0.35)]" />
-                <div className={cn('flex h-12 w-12 items-center justify-center rounded-full border-4 text-xl font-bold shadow-[0_0_20px_currentColor]', gradeColor(card.grade as string))}>{card.grade}</div>
+              <div className={cn('flex h-16 w-16 items-center justify-center rounded-full border-4 text-2xl font-black shadow-[0_0_22px_currentColor]', gradeColor(card.grade as string))}>
+                {card.grade}
               </div>
             ) : (
               <MiniSparkline color={card.spark} />
