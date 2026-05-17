@@ -1,5 +1,6 @@
 import { google } from 'googleapis';
 import { makeServerPool } from '@/lib/server-db';
+import { getCached, setCached, cachedJson } from '@/lib/api-cache';
 
 type GoogleConnectionRow = {
   id: string;
@@ -151,6 +152,10 @@ async function fetchAccountBalance(
 }
 
 export async function GET() {
+  const cacheKey = 'google:account-balances';
+  const cached = getCached(cacheKey);
+  if (cached) return cachedJson(cached.data, true, cached.cachedAt);
+
   const pool = makeServerPool();
   let connections: GoogleConnectionRow[] = [];
 
@@ -216,5 +221,7 @@ export async function GET() {
     })
   );
 
-  return Response.json([...accountMap.values()].sort((a, b) => a.name.localeCompare(b.name)));
+  const result = [...accountMap.values()].sort((a, b) => a.name.localeCompare(b.name));
+  setCached(cacheKey, result);
+  return cachedJson(result, false);
 }

@@ -3,6 +3,7 @@ import { google } from 'googleapis';
 import { makeServerPool } from '@/lib/server-db';
 import { resolveMetaPeriod, resolveGaqlPeriod, applyMetaDateToUrl } from '@/lib/period-utils';
 import { getFreshMetaToken } from '@/lib/meta-token';
+import { getCached, setCached, cachedJson } from '@/lib/api-cache';
 
 export type AudienceSlice = { label: string; value: number };
 export type AudienceBreakdowns = {
@@ -233,6 +234,10 @@ export async function GET(request: NextRequest) {
     .filter(Boolean);
   const shouldFilterByClient = requestedClientIds.length > 0;
 
+  const cacheKey = `audience:${period}:${dateFrom}:${dateTo}:${requestedClientIds.sort().join(',')}`;
+  const cached = getCached(cacheKey);
+  if (cached) return cachedJson(cached.data, true, cached.cachedAt);
+
   const pool = makeServerPool();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let metaConns: any[], googleConns: any[], links: any[];
@@ -354,7 +359,7 @@ export async function GET(request: NextRequest) {
     }));
   }));
 
-  return Response.json({
+  const result = {
     meta: {
       age: mapToSlices(metaMaps.age),
       gender: mapToSlices(metaMaps.gender),
@@ -371,5 +376,7 @@ export async function GET(request: NextRequest) {
       platformConversions: mapToSlices(googleMaps.platformConversions),
       deviceConversions: mapToSlices(googleMaps.deviceConversions),
     },
-  } satisfies AudienceResponse);
+  } satisfies AudienceResponse;
+  setCached(cacheKey, result);
+  return cachedJson(result, false);
 }

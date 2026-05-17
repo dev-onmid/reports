@@ -9,7 +9,7 @@ import {
   LayoutDashboard, Play, RefreshCw, Search, Sparkles, Check, X,
   Pause, CircleDot, Pencil, Settings2, Users, Copy,
   Bell, DollarSign, Tag, TrendingUp, Calendar, BarChart3, Zap, Target, Briefcase,
-  Wallet, MousePointerClick, CreditCard, PiggyBank,
+  Wallet, MousePointerClick, CreditCard, PiggyBank, Clock,
 } from 'lucide-react';
 import { getAuthSession } from '@/lib/auth-store';
 import type { AiInsight } from '@/app/api/ai/insights/route';
@@ -2357,6 +2357,7 @@ export default function GeneralDashboard() {
   const [creativesLoading, setCreativesLoading] = useState(false);
   const [audienceLoading, setAudienceLoading] = useState(false);
   const [balancesLoading, setBalancesLoading] = useState(false);
+  const [dataCacheAge, setDataCacheAge] = useState<number | null>(null);
   const [editMode, setEditMode] = useState(false);
   const [widgetOrder, setWidgetOrder] = useState<WidgetId[]>(DEFAULT_WIDGET_ORDER);
   const [collapsedWidgets, setCollapsedWidgets] = useState<Set<WidgetId>>(new Set());
@@ -2601,6 +2602,8 @@ export default function GeneralDashboard() {
           ...googleRaw.map((account) => ({ ...account, platform: 'google' as const })),
         ]);
         setClientLinks(linksRaw.filter((link) => link.platform === 'meta_ads' || link.platform === 'google_ads'));
+        const age = googleRes.headers.get('X-Cache-Age');
+        if (age !== null) setDataCacheAge(Number(age));
       })
       .catch(() => {
         setBalances([]);
@@ -2885,6 +2888,16 @@ export default function GeneralDashboard() {
           </div>
 
           {metricsLoading && <RefreshCw className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />}
+
+          {!metricsLoading && dataCacheAge !== null && (
+            <span
+              title={dataCacheAge === 0 ? 'Dados recém-buscados da API' : `Dados em cache — buscados há ${Math.round(dataCacheAge / 60)} min. Atualizados automaticamente a cada 15 min.`}
+              className="flex items-center gap-1 rounded-full border border-border bg-muted/30 px-2 py-0.5 text-[10px] font-semibold text-muted-foreground cursor-default"
+            >
+              <Clock className="h-3 w-3" />
+              {dataCacheAge === 0 ? 'Ao vivo' : `Cache · ${Math.round(dataCacheAge / 60)} min`}
+            </span>
+          )}
 
           {/* Spacer */}
           <div className="flex-1" />

@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { google as googleapis } from 'googleapis';
 import { getFreshMetaToken } from '@/lib/meta-token';
+import { getCached, setCached, cachedJson } from '@/lib/api-cache';
 
 async function ensureTable(pool: ReturnType<typeof makeServerPool>) {
   await pool.query(`
@@ -30,6 +31,10 @@ export async function GET(
   const days = parseInt(req.nextUrl.searchParams.get('days') ?? '30');
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
   const sinceUnix = Math.floor(since.getTime() / 1000);
+
+  const cacheKey = `activity:${clientId}:${days}`;
+  const cached = getCached(cacheKey);
+  if (cached) return cachedJson(cached.data, true, cached.cachedAt);
 
   const pool = makeServerPool();
   try {
@@ -165,7 +170,9 @@ export async function GET(
       return tb - ta;
     });
 
-    return Response.json(allLogs.slice(0, 200));
+    const result = allLogs.slice(0, 200);
+    setCached(cacheKey, result);
+    return cachedJson(result, false);
   } finally {
     await pool.end();
   }

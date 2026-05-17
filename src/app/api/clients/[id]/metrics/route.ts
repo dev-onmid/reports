@@ -3,6 +3,7 @@ import { google } from 'googleapis';
 import { makeServerPool } from '@/lib/server-db';
 import { resolveMetaPeriod, resolveGaqlPeriod, applyMetaDateToUrl } from '@/lib/period-utils';
 import { getFreshMetaToken } from '@/lib/meta-token';
+import { getCached, setCached, cachedJson } from '@/lib/api-cache';
 
 async function getFreshGoogleToken(conn: { access_token: string; refresh_token: string; token_expiry: string | null }): Promise<string> {
   if (conn.token_expiry) {
@@ -206,6 +207,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const metaPeriod = resolveMetaPeriod(period, dateFrom, dateTo);
   const crmPeriod = crmDateRange(period, dateFrom, dateTo);
 
+  const cacheKey = `metrics:${clientId}:${period}:${dateFrom}:${dateTo}`;
+  const cached = getCached(cacheKey);
+  if (cached) return cachedJson(cached.data, true, cached.cachedAt);
+
   const pool = makeServerPool();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let links: any[], googleConns: any[], metaConns: any[];
@@ -342,5 +347,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
   }
 
-  return Response.json({ google: googleResult, meta: metaResult, crm: crmResult });
+  const result = { google: googleResult, meta: metaResult, crm: crmResult };
+  setCached(cacheKey, result);
+  return cachedJson(result, false);
 }

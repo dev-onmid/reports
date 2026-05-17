@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server';
 import { google } from 'googleapis';
 import { makeServerPool } from '@/lib/server-db';
 import { resolveGaqlPeriod } from '@/lib/period-utils';
+import { getCached, setCached, cachedJson } from '@/lib/api-cache';
 
 const DEV_TOKEN = process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? '1vR8GhAk4UMZoPaqo7Qq8Q';
 
@@ -120,6 +121,11 @@ export async function GET(req: NextRequest) {
 
   const gaqlPeriod = resolveGaqlPeriod(period, dateFrom, dateTo);
 
+  const cacheKey = `google:keywords:${period}:${dateFrom}:${dateTo}:${requestedClientIds.sort().join(',')}`;
+  const cached = getCached(cacheKey);
+  if (cached) return cachedJson(cached.data, true, cached.cachedAt);
+
+
   const pool = makeServerPool();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let googleConns: any[], links: any[];
@@ -213,5 +219,7 @@ export async function GET(req: NextRequest) {
 
   keywords.sort((a, b) => b.impressions - a.impressions);
 
-  return Response.json(keywords.slice(0, limit));
+  const result = keywords.slice(0, limit);
+  setCached(cacheKey, result);
+  return cachedJson(result, false);
 }

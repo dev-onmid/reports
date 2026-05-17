@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { google } from 'googleapis';
 import { makeServerPool } from '@/lib/server-db';
+import { getCached, setCached, cachedJson } from '@/lib/api-cache';
 
 
 async function getFreshAccessToken(conn: { access_token: string; refresh_token: string; token_expiry: string | null }): Promise<string> {
@@ -152,6 +153,10 @@ export async function GET(request: NextRequest) {
   const noMetrics = request.nextUrl.searchParams.get('noMetrics') === 'true';
   if (!connectionId) return Response.json({ error: 'Missing connectionId' }, { status: 400 });
 
+  const cacheKey = `google:ads-accounts:${connectionId}:${period}:${noMetrics}`;
+  const cached = getCached(cacheKey);
+  if (cached) return cachedJson(cached.data, true, cached.cachedAt);
+
   const pool = makeServerPool();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let conn: any;
@@ -224,5 +229,6 @@ export async function GET(request: NextRequest) {
     .filter((r): r is PromiseFulfilledResult<AdsAccount> => r.status === 'fulfilled')
     .map((r) => r.value);
 
-  return Response.json(result);
+  setCached(cacheKey, result);
+  return cachedJson(result, false);
 }
