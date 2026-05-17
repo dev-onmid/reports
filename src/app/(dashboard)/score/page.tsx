@@ -177,8 +177,11 @@ export default function ScorePage() {
   const gestores = [...new Set(clients.map(c => c.gestor_name).filter(Boolean))] as string[];
   const filtered = filterGestor ? clients.filter(c => c.gestor_name === filterGestor) : clients;
   const calculated = clients.filter(c => c.score !== null).length;
-  const radarClients = clients.filter(hasClientScoreDetails);
-  const selectedRadarClient = radarClients.find(c => c.id === radarClientId) ?? null;
+  const radarClients = clients.filter(c => c.score !== null || c.details !== null);
+  const selectedRadarClient = clients.find(c => c.id === radarClientId) ?? null;
+  const selectedRadarDetails = selectedRadarClient && hasScoreDetails(selectedRadarClient.details)
+    ? selectedRadarClient.details
+    : null;
 
   return (
     <div className="space-y-5">
@@ -271,16 +274,16 @@ export default function ScorePage() {
           </div>
 
           {/* Radar chart or placeholder */}
-          {selectedRadarClient ? (
+          {selectedRadarClient && selectedRadarDetails ? (
             <RadarView
-              details={selectedRadarClient.details}
+              details={selectedRadarDetails}
               score={selectedRadarClient.score}
             />
           ) : (
             <div className="flex flex-col items-center justify-center py-20 gap-3 text-muted-foreground">
               <BarChart2 className="w-10 h-10 opacity-20" />
               <p className="text-sm">
-                {radarClients.length === 0
+                {calculated === 0
                   ? 'Calcule o score de pelo menos um cliente para ver o radar.'
                   : radarClientId
                     ? 'Esse cliente precisa ter o score recalculado para gerar o radar.'
