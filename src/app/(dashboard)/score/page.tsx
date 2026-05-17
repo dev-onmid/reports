@@ -82,7 +82,7 @@ function scoreGrade(score: number | null): string {
 
 function MiniSparkline({ color = '#55f52f' }: { color?: string }) {
   return (
-    <svg viewBox="0 0 120 42" className="h-12 w-28">
+    <svg viewBox="0 0 120 42" className="h-12 w-28 drop-shadow-[0_0_10px_currentColor]" style={{ color }}>
       <polyline
         points="4,32 15,27 25,21 35,25 46,17 56,22 68,16 78,18 90,10 101,15 116,7"
         fill="none"
@@ -218,7 +218,9 @@ export default function ScorePage() {
   const attentionCount = clients.filter(c => c.grade === 'D' || c.grade === 'F').length;
 
   return (
-    <div className="space-y-5">
+    <div className="relative -m-6 min-h-[calc(100vh-6rem)] overflow-hidden bg-[#050914] p-6 text-slate-100">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_4%,rgba(85,245,47,0.12),transparent_24%),radial-gradient(circle_at_76%_8%,rgba(59,130,246,0.16),transparent_24%),radial-gradient(circle_at_52%_48%,rgba(85,245,47,0.10),transparent_30%),linear-gradient(180deg,#060b15_0%,#080d17_45%,#05070d_100%)]" />
+      <div className="relative z-10 space-y-5">
       <div className="flex items-center justify-end gap-2">
         <div className="flex items-center gap-2">
           {gestores.length > 0 && (
@@ -237,23 +239,24 @@ export default function ScorePage() {
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
         {[
-          { label: 'Clientes', value: clients.length, sub: '+ 12% vs mês anterior', icon: Users, color: 'text-[#55f52f]', spark: '#22c55e' },
-          { label: 'Calculados', value: calculated, sub: '+ 8% vs mês anterior', icon: Trophy, color: 'text-yellow-400', spark: '#facc15' },
-          { label: 'Nota média (Score)', value: scoreGrade(averageScore), sub: averageScore !== null ? `${averageScore} /100` : 'Sem dados', icon: Star, color: 'text-[#55f52f]', spark: '#3b82f6', grade: scoreGrade(averageScore) },
-          { label: 'Precisam de atenção', value: attentionCount, sub: `${clients.length ? Math.round((attentionCount / clients.length) * 100) : 0}% do total`, icon: AlertTriangle, color: 'text-red-400', spark: '#ef4444' },
+          { label: 'Clientes', value: clients.length, sub: '+ 12% vs mês anterior', icon: Users, color: 'text-[#55f52f]', spark: '#22c55e', card: 'border-emerald-400/30 bg-[radial-gradient(circle_at_35%_0%,rgba(34,197,94,0.28),transparent_44%),rgba(15,23,42,0.62)] shadow-[0_0_28px_rgba(34,197,94,0.10)]' },
+          { label: 'Calculados', value: calculated, sub: '+ 8% vs mês anterior', icon: Trophy, color: 'text-yellow-400', spark: '#facc15', card: 'border-yellow-400/30 bg-[radial-gradient(circle_at_38%_0%,rgba(250,204,21,0.22),transparent_44%),rgba(15,23,42,0.62)] shadow-[0_0_28px_rgba(250,204,21,0.09)]' },
+          { label: 'Nota média (Score)', value: scoreGrade(averageScore), sub: averageScore !== null ? `${averageScore} /100  ·  + 6 pts vs mês anterior` : 'Sem dados', icon: Star, color: 'text-blue-400', spark: '#3b82f6', grade: scoreGrade(averageScore), card: 'border-blue-400/30 bg-[radial-gradient(circle_at_65%_0%,rgba(59,130,246,0.24),transparent_42%),rgba(15,23,42,0.62)] shadow-[0_0_30px_rgba(59,130,246,0.10)]' },
+          { label: 'Precisam de atenção', value: attentionCount, sub: `${clients.length ? Math.round((attentionCount / clients.length) * 100) : 0}% do total`, icon: AlertTriangle, color: 'text-red-400', spark: '#ef4444', card: 'border-red-400/30 bg-[radial-gradient(circle_at_72%_4%,rgba(239,68,68,0.20),transparent_44%),rgba(15,23,42,0.62)] shadow-[0_0_28px_rgba(239,68,68,0.09)]' },
         ].map(stat => (
-          <div key={stat.label} className="relative overflow-hidden rounded-xl border border-border bg-card p-5">
+          <div key={stat.label} className={cn('relative overflow-hidden rounded-xl border p-5 backdrop-blur-xl', stat.card)}>
+            <div className="pointer-events-none absolute inset-x-10 top-0 h-px bg-white/25" />
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="mb-3 flex items-center gap-2">
                   <stat.icon className={cn('w-4 h-4', stat.color)} />
                   <span className="text-sm font-medium text-foreground">{stat.label}</span>
                 </div>
-                <p className="text-3xl font-bold text-foreground">{stat.value}</p>
+                <p className="text-3xl font-bold text-white">{stat.value}</p>
                 <p className={cn('mt-3 text-xs', stat.color)}>{stat.sub}</p>
               </div>
               {'grade' in stat ? (
-                <div className={cn('flex h-14 w-14 items-center justify-center rounded-full border-4 text-2xl font-bold', gradeColor(stat.grade as string))}>
+                <div className={cn('flex h-16 w-16 items-center justify-center rounded-full border-4 text-2xl font-bold shadow-[0_0_22px_currentColor]', gradeColor(stat.grade as string))}>
                   {stat.grade}
                 </div>
               ) : (
@@ -265,23 +268,23 @@ export default function ScorePage() {
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex gap-1 rounded-xl border border-border bg-card p-1">
+        <div className="flex gap-1 rounded-xl border border-slate-700/80 bg-[#0c1321]/80 p-1 shadow-[0_0_28px_rgba(59,130,246,0.08)]">
           <button
             onClick={() => setActiveTab('radar')}
-            className={cn('flex items-center gap-2 rounded-lg px-5 py-2 text-sm font-medium transition-colors', activeTab === 'radar' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}
+            className={cn('flex items-center gap-2 rounded-lg px-5 py-2 text-sm font-medium transition-colors', activeTab === 'radar' ? 'bg-primary text-black shadow-[0_0_18px_rgba(85,245,47,0.35)]' : 'text-muted-foreground hover:text-foreground')}
           >
             <BarChart2 className="w-4 h-4" />
             Radar
           </button>
           <button
             onClick={() => setActiveTab('lista')}
-            className={cn('flex items-center gap-2 rounded-lg px-5 py-2 text-sm font-medium transition-colors', activeTab === 'lista' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}
+            className={cn('flex items-center gap-2 rounded-lg px-5 py-2 text-sm font-medium transition-colors', activeTab === 'lista' ? 'bg-primary text-black shadow-[0_0_18px_rgba(85,245,47,0.35)]' : 'text-muted-foreground hover:text-foreground')}
           >
             <List className="w-4 h-4" />
             Lista
           </button>
         </div>
-        <button type="button" className="flex h-10 items-center gap-2 rounded-xl border border-border bg-card px-4 text-sm text-muted-foreground">
+        <button type="button" className="flex h-10 items-center gap-2 rounded-xl border border-slate-700/80 bg-[#0c1321]/80 px-4 text-sm text-slate-300 shadow-[0_0_22px_rgba(59,130,246,0.07)]">
           <CalendarDays className="h-4 w-4" />
           Período: Mês atual (Maio)
           <ChevronDown className="h-4 w-4" />
@@ -296,13 +299,14 @@ export default function ScorePage() {
       ) : activeTab === 'radar' ? (
         <div className="space-y-3">
           {/* Client picker */}
-          <div className="grid items-center gap-4 rounded-xl border border-border bg-card px-5 py-4 lg:grid-cols-[minmax(260px,1fr)_220px_280px]">
+          <div className="grid items-center gap-4 lg:grid-cols-[1fr_310px]">
+            <div className="grid items-center gap-4 rounded-xl border border-slate-700/80 bg-[#0c1321]/75 px-5 py-4 shadow-[0_0_32px_rgba(34,197,94,0.08)] lg:grid-cols-[minmax(260px,1fr)_220px]">
             <label className="relative">
-              <span className="absolute -top-2 left-3 bg-card px-1 text-xs text-muted-foreground">Cliente</span>
+              <span className="absolute -top-2 left-3 bg-[#0c1321] px-1 text-xs text-muted-foreground">Cliente</span>
               <select
                 value={radarClientId}
                 onChange={e => setRadarClientId(e.target.value)}
-                className="h-12 w-full rounded-lg border border-border bg-background px-3 text-sm font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                className="h-12 w-full rounded-lg border border-slate-700 bg-[#050914] px-3 text-sm font-medium text-white focus:outline-none focus:ring-1 focus:ring-primary"
               >
                 <option value="">Selecione um cliente...</option>
                 {radarClients.map(c => (
@@ -311,12 +315,13 @@ export default function ScorePage() {
               </select>
             </label>
             <div className="flex items-center gap-2 text-sm text-primary">
-              <span className="h-2.5 w-2.5 rounded-full bg-primary" />
+              <span className="h-2.5 w-2.5 rounded-full bg-primary shadow-[0_0_12px_rgba(85,245,47,0.8)]" />
               Ativo
             </div>
+            </div>
             {selectedRadarClient && (
-              <div className="flex items-center gap-4 border-border lg:border-l lg:pl-6">
-                <div className={cn('flex h-14 w-14 items-center justify-center rounded-full border-4 text-2xl font-bold', gradeColor(selectedRadarClient.grade))}>
+              <div className="flex items-center gap-4 rounded-xl border border-yellow-400/20 bg-[radial-gradient(circle_at_10%_50%,rgba(250,204,21,0.20),transparent_36%),rgba(15,23,42,0.75)] px-5 py-4 shadow-[0_0_28px_rgba(250,204,21,0.08)]">
+                <div className={cn('flex h-16 w-16 items-center justify-center rounded-full border-4 text-2xl font-bold shadow-[0_0_22px_currentColor]', gradeColor(selectedRadarClient.grade))}>
                   {selectedRadarClient.grade ?? '?'}
                 </div>
                 <div>
@@ -335,7 +340,7 @@ export default function ScorePage() {
               score={selectedRadarClient.score}
             />
           ) : (
-            <div className="flex flex-col items-center justify-center py-20 gap-3 text-muted-foreground">
+            <div className="flex flex-col items-center justify-center rounded-xl border border-slate-700/80 bg-[#0c1321]/75 py-20 gap-3 text-muted-foreground">
               <BarChart2 className="w-10 h-10 opacity-20" />
               <p className="text-sm">
                 {calculated === 0
@@ -359,7 +364,7 @@ export default function ScorePage() {
             const isCalc = calculating.has(client.id);
             const isExpanded = expanded.has(client.id);
             return (
-              <div key={client.id} className="rounded-xl border border-border bg-card overflow-hidden">
+              <div key={client.id} className="rounded-xl border border-slate-700/80 bg-[#0c1321]/75 overflow-hidden">
                 <div className="flex items-center gap-4 px-4 py-3">
                   <ClientAvatar clientId={client.id} name={client.name} size="sm" />
                   <div className="flex-1 min-w-0">
@@ -411,6 +416,7 @@ export default function ScorePage() {
           )}
         </div>
       )}
+      </div>
     </div>
   );
 }

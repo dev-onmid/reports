@@ -110,9 +110,9 @@ function buildInsights(d: ScoreDetails): ScoreInsight[] {
 }
 
 function toneClasses(tone: InsightTone) {
-  if (tone === 'red') return { card: 'border-red-500/30 bg-red-500/10', pill: 'border-red-500/30 bg-red-500/10 text-red-400', dot: 'bg-red-400', label: 'Crítico' };
-  if (tone === 'orange') return { card: 'border-orange-500/30 bg-orange-500/10', pill: 'border-orange-500/30 bg-orange-500/10 text-orange-400', dot: 'bg-orange-400', label: 'Alto' };
-  return { card: 'border-yellow-500/30 bg-yellow-500/10', pill: 'border-yellow-500/30 bg-yellow-500/10 text-yellow-400', dot: 'bg-yellow-400', label: 'Médio' };
+  if (tone === 'red') return { card: 'border-red-500/40 bg-[radial-gradient(circle_at_50%_0%,rgba(239,68,68,0.22),transparent_42%),rgba(127,29,29,0.16)] shadow-[0_0_26px_rgba(239,68,68,0.10)]', pill: 'border-red-500/40 bg-red-500/10 text-red-400', dot: 'bg-red-400 shadow-[0_0_12px_rgba(248,113,113,0.85)]', label: 'Crítico' };
+  if (tone === 'orange') return { card: 'border-orange-500/40 bg-[radial-gradient(circle_at_50%_0%,rgba(249,115,22,0.20),transparent_42%),rgba(124,45,18,0.16)] shadow-[0_0_26px_rgba(249,115,22,0.10)]', pill: 'border-orange-500/40 bg-orange-500/10 text-orange-400', dot: 'bg-orange-400 shadow-[0_0_12px_rgba(251,146,60,0.85)]', label: 'Alto' };
+  return { card: 'border-yellow-500/40 bg-[radial-gradient(circle_at_50%_0%,rgba(250,204,21,0.18),transparent_42%),rgba(113,63,18,0.14)] shadow-[0_0_26px_rgba(250,204,21,0.10)]', pill: 'border-yellow-500/40 bg-yellow-500/10 text-yellow-400', dot: 'bg-yellow-400 shadow-[0_0_12px_rgba(250,204,21,0.85)]', label: 'Médio' };
 }
 
 // SVG hexagonal radar — no external deps
@@ -167,10 +167,11 @@ function SvgRadar({ axes, color, hoveredAxis, onAxisHover }: {
       <polygon
         points={dataPolygon}
         fill={color}
-        fillOpacity={0.2}
+        fillOpacity={0.26}
         stroke={color}
         strokeWidth={2}
         strokeLinejoin="round"
+        filter="drop-shadow(0 0 8px rgba(34,197,94,0.75))"
       />
 
       {/* Data dots */}
@@ -226,8 +227,9 @@ export default function RadarView({ details, score }: {
 
   return (
     <div>
-      <div className="grid gap-0 overflow-hidden rounded-xl border border-border bg-card lg:grid-cols-[1.1fr_1fr]">
-        <section className="border-border p-5 lg:border-r">
+      <div className="grid gap-3 lg:grid-cols-[1.05fr_1fr]">
+        <section className="relative overflow-hidden rounded-xl border border-emerald-400/30 bg-[radial-gradient(circle_at_24%_0%,rgba(34,197,94,0.24),transparent_34%),radial-gradient(circle_at_74%_36%,rgba(139,92,246,0.18),transparent_42%),rgba(15,23,42,0.72)] p-5 shadow-[0_0_42px_rgba(34,197,94,0.14)]">
+          <div className="pointer-events-none absolute inset-x-16 top-0 h-px bg-emerald-300/70" />
           <div className="mb-2">
             <p className="text-base font-bold text-foreground">Radar de Performance <span className="text-xs text-muted-foreground">ⓘ</span></p>
             <p className="text-xs text-muted-foreground">Visão geral da performance do cliente nas 6 dimensões do Score.</p>
@@ -248,7 +250,8 @@ export default function RadarView({ details, score }: {
           </div>
         </section>
 
-        <section className="p-5">
+        <section className="relative overflow-hidden rounded-xl border border-slate-700/80 bg-[radial-gradient(circle_at_64%_0%,rgba(34,197,94,0.18),transparent_34%),rgba(15,23,42,0.72)] p-5 shadow-[0_0_42px_rgba(59,130,246,0.10)]">
+          <div className="pointer-events-none absolute inset-x-20 top-0 h-px bg-emerald-300/50" />
           <div className="mb-6">
             <p className="text-base font-bold text-foreground">Detalhes por eixo</p>
             <p className="text-xs text-muted-foreground">Performance em cada dimensão do Score.</p>
@@ -262,19 +265,19 @@ export default function RadarView({ details, score }: {
               <div
                 key={item.label}
                 className="cursor-default rounded-lg px-2 py-1 transition-colors"
-                style={{ backgroundColor: isHovered ? `${axisColor}10` : 'transparent' }}
+                style={{ backgroundColor: isHovered ? `${axisColor}14` : 'transparent' }}
                 onMouseEnter={() => setHoveredAxis(item.label)}
                 onMouseLeave={() => setHoveredAxis(null)}
               >
                 <div className="mb-1.5 grid grid-cols-[130px_1fr_56px] items-center gap-3">
                   <span className="flex items-center gap-2 text-sm font-medium text-foreground">
-                    <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-background" style={{ color: axisColor }}>●</span>
+                    <span className="flex h-7 w-7 items-center justify-center rounded-full bg-background shadow-[0_0_14px_currentColor]" style={{ color: axisColor }}>●</span>
                     {item.label}
                   </span>
-                  <div className="h-1.5 rounded-full bg-muted">
+                  <div className="h-1.5 rounded-full bg-slate-800">
                     <div
-                      className="h-1.5 rounded-full transition-all"
-                      style={{ width: `${item.value}%`, backgroundColor: axisColor }}
+                      className="h-1.5 rounded-full transition-all shadow-[0_0_12px_currentColor]"
+                      style={{ width: `${item.value}%`, backgroundColor: axisColor, color: axisColor }}
                     />
                   </div>
                   <span className="text-right text-sm font-bold" style={{ color: axisColor }}>{item.value} <span className="text-xs font-normal text-muted-foreground">/100</span></span>
@@ -286,13 +289,14 @@ export default function RadarView({ details, score }: {
             );
           })}
           </div>
-          <div className="mt-5 rounded-lg bg-background/70 px-4 py-3 text-xs text-muted-foreground">
+          <div className="mt-5 rounded-lg bg-black/35 px-4 py-3 text-xs text-muted-foreground">
             ⓘ Pontuações atualizadas diariamente com base nos dados do período selecionado.
           </div>
         </section>
       </div>
 
-      <section className="mt-3 rounded-xl border border-border bg-card p-5">
+      <section className="relative mt-3 overflow-hidden rounded-xl border border-slate-700/80 bg-[radial-gradient(circle_at_50%_0%,rgba(239,68,68,0.14),transparent_36%),rgba(15,23,42,0.74)] p-5 shadow-[0_0_38px_rgba(239,68,68,0.08)]">
+        <div className="pointer-events-none absolute inset-x-24 top-0 h-px bg-red-300/35" />
         <div className="mb-4">
           <p className="text-sm font-bold text-foreground">Insights diretos</p>
           <p className="text-xs text-muted-foreground">Prioridades práticas para melhorar o Score e acelerar resultados.</p>
