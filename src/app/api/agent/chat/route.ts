@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { google as googleapis } from 'googleapis';
+import { deflateSync } from 'zlib';
 import { makeServerPool } from '@/lib/server-db';
 import { sendText, sendDocument } from '@/lib/zapi';
 import { generateReportPdf } from '@/lib/report-pdf';
@@ -931,6 +932,38 @@ async function execSystemTool(
         return found;
       }
 
+      function createBlackPng(w: number, h: number): Buffer {
+        const crcTable = new Uint32Array(256);
+        for (let i = 0; i < 256; i++) {
+          let c = i;
+          for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+          crcTable[i] = c;
+        }
+        function crc32(data: Buffer): number {
+          let crc = 0xFFFFFFFF;
+          for (const b of data) crc = (crcTable[(crc ^ b) & 0xFF]!) ^ (crc >>> 8);
+          return (crc ^ 0xFFFFFFFF) >>> 0;
+        }
+        function pngChunk(type: string, data: Buffer): Buffer {
+          const lenBuf = Buffer.alloc(4); lenBuf.writeUInt32BE(data.length);
+          const typeBuf = Buffer.from(type, 'ascii');
+          const crcBuf = Buffer.alloc(4); crcBuf.writeUInt32BE(crc32(Buffer.concat([typeBuf, data])));
+          return Buffer.concat([lenBuf, typeBuf, data, crcBuf]);
+        }
+        const ihdr = Buffer.alloc(13);
+        ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4);
+        ihdr[8] = 8; ihdr[9] = 2; // 8-bit RGB
+        const rowSize = 1 + w * 3;
+        const raw = Buffer.alloc(h * rowSize, 0); // all zeros = black
+        const compressed = deflateSync(raw);
+        return Buffer.concat([
+          Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+          pngChunk('IHDR', ihdr),
+          pngChunk('IDAT', compressed),
+          pngChunk('IEND', Buffer.alloc(0)),
+        ]);
+      }
+
       // ── STEP 1: Campaign ──────────────────────────────
       const campRes = await fetch(`https://graph.facebook.com/v21.0/${acctNode}/campaigns`, {
         method: 'POST',
@@ -1079,19 +1112,84 @@ async function execSystemTool(
         }
         report.push(`   ID: ${adsetId}`);
         report.push('');
+
+        // ── STEP 3b: Upload placeholder image ─────────────
+        try {
+          const pngBuf = createBlackPng(1080, 1080);
+          const imgForm = new FormData();
+          const pngArrayBuf = pngBuf.buffer.slice(pngBuf.byteOffset, pngBuf.byteOffset + pngBuf.byteLength) as ArrayBuffer;
+          imgForm.append('filename', new Blob([pngArrayBuf], { type: 'image/png' }), 'placeholder.png');
+          imgForm.append('access_token', token);
+          const imgRes = await fetch(`https://graph.facebook.com/v21.0/${acctNode}/adimages`, {
+            method: 'POST', body: imgForm,
+          });
+          const imgData = await imgRes.json() as { images?: Record<string, { hash: string }> };
+          const imageHash = imgData.images?.['placeholder.png']?.hash;
+
+          if (imageHash && fbPageId) {
+            // ── STEP 4: AdCreative ──────────────────────────
+            const creativeRes = await fetch(`https://graph.facebook.com/v21.0/${acctNode}/adcreatives`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                name: `Criativo — ${campName}`,
+                object_story_spec: {
+                  page_id: fbPageId,
+                  link_data: {
+                    image_hash: imageHash,
+                    link: 'https://onmid.com.br',
+                    message: 'Edite este texto no Gerenciador de Anúncios.',
+                    name: 'Título do anúncio',
+                    call_to_action: { type: 'LEARN_MORE' },
+                  },
+                },
+                access_token: token,
+              }),
+            });
+            const creativeData = await creativeRes.json() as { id?: string; error?: { message?: string; error_user_msg?: string } };
+
+            if (creativeData.id) {
+              // ── STEP 5: Ad ──────────────────────────────────
+              const adRes = await fetch(`https://graph.facebook.com/v21.0/${acctNode}/ads`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  name: `Anúncio — ${campName}`,
+                  adset_id: adsetId,
+                  creative: { creative_id: creativeData.id },
+                  status: 'PAUSED',
+                  access_token: token,
+                }),
+              });
+              const adData = await adRes.json() as { id?: string; error?: { message?: string; error_user_msg?: string } };
+              if (adData.id) {
+                report.push(`✅ Anúncio criado (PAUSADO)`);
+                report.push(`   ID: ${adData.id}`);
+                report.push(`   Criativo: imagem preta placeholder — troque pelo criativo definitivo`);
+              } else {
+                const adErr = adData.error?.error_user_msg ?? adData.error?.message ?? 'erro desconhecido';
+                report.push(`⚠️ Anúncio: FALHA — ${adErr}`);
+              }
+            } else {
+              const cErr = creativeData.error?.error_user_msg ?? creativeData.error?.message ?? 'erro desconhecido';
+              report.push(`⚠️ Criativo: FALHA — ${cErr}`);
+            }
+          } else {
+            report.push(`⚠️ Imagem: não foi possível obter hash — suba o criativo manualmente`);
+          }
+        } catch (imgErr) {
+          report.push(`⚠️ Anúncio: erro ao gerar placeholder — ${String(imgErr)}`);
+        }
+        report.push('');
       }
 
-      // ── STEP 4: Ad ────────────────────────────────────
-      report.push(`📌 Anúncio: pendente`);
-      report.push(`   Adicione o criativo (imagem/vídeo + texto) no Gerenciador de Anúncios.`);
-      report.push('');
       report.push('─'.repeat(44));
       report.push('✅ Campanha ATIVA — conjuntos de anúncios PAUSADOS');
       report.push('   Não veicula até você ativar um conjunto no Gerenciador.');
       report.push('');
       report.push('📋 Próximos passos:');
-      report.push('   1. Adicione o criativo (imagem/vídeo, headline, texto, CTA) no Gerenciador');
-      report.push('   2. Crie e selecione o Formulário Instantâneo no conjunto de anúncios');
+      report.push('   1. Troque a imagem preta pelo criativo definitivo no Gerenciador');
+      report.push('   2. Edite texto, headline e CTA do anúncio');
       report.push('   3. Ative o conjunto quando o criativo estiver pronto');
 
       if (audience_notes) {
