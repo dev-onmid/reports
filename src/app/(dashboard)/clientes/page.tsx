@@ -60,6 +60,7 @@ export default function ClientesPage() {
   const [status, setStatus]                       = useState<ClientStatus>('Ativo');
   const [search, setSearch]                       = useState('');
   const [segmentFilter, setSegmentFilter]         = useState('');
+  const [gestorFilter, setGestorFilter]           = useState('');
   const [sortOrder, setSortOrder]                 = useState<'az' | 'za'>('az');
   const [menuId, setMenuId]                       = useState<string | null>(null);
   const [clientBalances, setClientBalances]        = useState<Record<string, { meta: number | null; google: number | null }>>({});
@@ -78,11 +79,16 @@ export default function ClientesPage() {
     clients.map(c => c.segment).filter(Boolean)
   )].sort() as string[];
 
+  const allGestores = [...new Set(
+    clients.map(c => c.gestor_name).filter(Boolean)
+  )].sort() as string[];
+
   const baseClients = showArchived ? archivedClients : clients;
   const displayedClients = baseClients
     .filter(c =>
       (c.name.toLowerCase().includes(search.toLowerCase()) || c.segment.toLowerCase().includes(search.toLowerCase())) &&
-      (!segmentFilter || c.segment === segmentFilter)
+      (!segmentFilter || c.segment === segmentFilter) &&
+      (!gestorFilter || c.gestor_name === gestorFilter)
     )
     .sort((a, b) => sortOrder === 'az' ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name));
 
@@ -241,6 +247,22 @@ export default function ClientesPage() {
             {allSegments.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
+
+        {/* Gestor filter */}
+        {allGestores.length > 0 && (
+          <div className="relative">
+            <UserCog className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+            <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+            <select
+              value={gestorFilter}
+              onChange={e => setGestorFilter(e.target.value)}
+              className="appearance-none rounded-lg border border-border bg-card pl-9 pr-8 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary min-w-[160px]"
+            >
+              <option value="">Todos os gestores</option>
+              {allGestores.map(g => <option key={g} value={g}>{g}</option>)}
+            </select>
+          </div>
+        )}
 
         {/* Ocultos */}
         {isAdmin && (

@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils';
 import {
   Trophy, RefreshCw, TrendingUp, TrendingDown, Minus,
   Users, ChevronDown, ChevronUp, Loader2, Star, AlertTriangle,
-  BarChart2, List, CalendarDays,
+  BarChart2, List, CalendarDays, UserCog,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ClientAvatar } from '@/components/client-avatar';
@@ -165,13 +165,209 @@ function CritCard({ label, score, max, desc, icon }: { label: string; score: num
   );
 }
 
+// ─── Gestor analysis helpers ───────────────────────────────────────────────
+
+function pctH(score: number, max: number): number {
+  if (!Number.isFinite(score) || !Number.isFinite(max) || max <= 0) return 0;
+  return Math.max(0, Math.min(100, Math.round((score / max) * 100)));
+}
+
+function axesForClient(d: ScoreDetails): { label: string; value: number }[] {
+  return [
+    { label: 'Custo/CPL',    value: pctH(d.cpl.score, d.cpl.max) },
+    { label: 'Volume',       value: pctH(d.leads.score, d.leads.max) },
+    { label: 'Engajamento',  value: Math.round((pctH(d.ctr.score, d.ctr.max) + pctH(d.frequency.score, d.frequency.max)) / 2) },
+    { label: 'Criativos',    value: Math.round((pctH(d.creativeCount.score, d.creativeCount.max) + pctH(d.creativeAge.score, d.creativeAge.max) + pctH(d.formatDiversity.score, d.formatDiversity.max)) / 3) },
+    { label: 'Consistência', value: Math.round((pctH(d.consistency.score, d.consistency.max) + pctH(d.budgetPaused.score, d.budgetPaused.max)) / 2) },
+    { label: 'Gestão',       value: Math.round((pctH(d.crmConversion.score, d.crmConversion.max) + pctH(d.reports.score, d.reports.max)) / 2) },
+  ];
+}
+
+const AXIS_LABELS = ['Custo/CPL', 'Volume', 'Engajamento', 'Criativos', 'Consistência', 'Gestão'] as const;
+
+type GestorStat = {
+  name: string;
+  clients: ClientScore[];
+  avgScore: number | null;
+  grade: string | null;
+  topClients: ClientScore[];
+  weakClients: ClientScore[];
+  axes: { label: string; avg: number }[];
+};
+
+function computeGestorStats(all: ClientScore[]): GestorStat[] {
+  const byGestor = new Map<string, ClientScore[]>();
+  for (const c of all) {
+    const key = c.gestor_name ?? 'Sem gestor';
+    if (!byGestor.has(key)) byGestor.set(key, []);
+    byGestor.get(key)!.push(c);
+  }
+  return Array.from(byGestor.entries()).map(([name, cls]) => {
+    const scored = cls.filter(c => c.score !== null);
+    const avgScore = scored.length > 0
+      ? Math.round(scored.reduce((s, c) => s + (c.score ?? 0), 0) / scored.length)
+      : null;
+    const grade = avgScore !== null ? scoreGrade(avgScore) : null;
+    const withDetails = cls.filter(c => hasScoreDetails(c.details));
+    const axes = withDetails.length > 0
+      ? AXIS_LABELS.map(label => ({
+          label,
+          avg: Math.round(
+            withDetails.reduce((sum, c) => {
+              const ax = axesForClient(c.details as ScoreDetails).find(a => a.label === label);
+              return sum + (ax?.value ?? 0);
+            }, 0) / withDetails.length
+          ),
+        }))
+      : [];
+    return {
+      name, clients: cls, avgScore, grade, axes,
+      topClients: scored.filter(c => c.grade === 'A' || c.grade === 'B').sort((a, b) => (b.score ?? 0) - (a.score ?? 0)),
+      weakClients: scored.filter(c => c.grade === 'D' || c.grade === 'F').sort((a, b) => (a.score ?? 0) - (b.score ?? 0)),
+    };
+  }).sort((a, b) => (b.avgScore ?? -1) - (a.avgScore ?? -1));
+}
+
+const AXIS_COLOR: Record<string, string> = {
+  'Custo/CPL': '#22c55e', Volume: '#2f86ff', Engajamento: '#8b5cf6',
+  Criativos: '#f59e0b', Consistência: '#facc15', Gestão: '#f97316',
+};
+
+function GestorCard({ stat }: { stat: GestorStat }) {
+  const strengths = stat.axes.filter(a => a.avg >= 75);
+  const weaknesses = stat.axes.filter(a => a.avg < 50);
+  const opportunities = stat.clients.filter(c => c.grade === 'C');
+  const initial = stat.name.trim().charAt(0).toUpperCase();
+
+  return (
+    <div className="rounded-xl border border-slate-700/80 bg-[#0c1321]/75 overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center gap-4 border-b border-slate-700/50 px-5 py-4">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-base font-bold text-primary">
+          {initial}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="font-bold text-sm text-white truncate">{stat.name}</p>
+          <p className="text-xs text-slate-400">{stat.clients.length} cliente{stat.clients.length !== 1 ? 's' : ''} · {stat.clients.filter(c => c.score !== null).length} calculados</p>
+        </div>
+        <div className="flex items-center gap-3">
+          {stat.avgScore !== null && (
+            <>
+              <div className="text-right">
+                <p className="text-xs text-slate-400">Score médio</p>
+                <p className="text-lg font-bold text-white">{stat.avgScore} <span className="text-xs font-normal text-slate-500">/100</span></p>
+              </div>
+              <div className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-2 text-lg font-black shadow-[0_0_16px_currentColor]', gradeColor(stat.grade))}>
+                {stat.grade}
+              </div>
+            </>
+          )}
+          {stat.avgScore === null && <span className="text-xs text-slate-500">Sem scores calculados</span>}
+        </div>
+      </div>
+
+      {/* Axes mini bars */}
+      {stat.axes.length > 0 && (
+        <div className="grid grid-cols-3 gap-x-6 gap-y-2 px-5 py-3 border-b border-slate-700/40 sm:grid-cols-6">
+          {stat.axes.map(ax => (
+            <div key={ax.label}>
+              <div className="flex justify-between text-[10px] mb-0.5">
+                <span className="text-slate-400 truncate max-w-[70px]">{ax.label}</span>
+                <span className="font-bold" style={{ color: AXIS_COLOR[ax.label] }}>{ax.avg}%</span>
+              </div>
+              <div className="h-1 rounded-full bg-slate-700/60">
+                <div className="h-1 rounded-full" style={{ width: `${ax.avg}%`, backgroundColor: AXIS_COLOR[ax.label] }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* SWOT grid */}
+      <div className="grid gap-0 sm:grid-cols-2 lg:grid-cols-4">
+        {/* Forças */}
+        <div className="border-r border-b border-slate-700/40 p-4 last:border-b-0 sm:border-b-0">
+          <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-green-400">
+            <span className="h-2 w-2 rounded-full bg-green-400" />S — Forças
+          </p>
+          {strengths.length > 0
+            ? strengths.map(a => <p key={a.label} className="text-[11px] text-slate-300 leading-relaxed">· {a.label} ({a.avg}%)</p>)
+            : <p className="text-[11px] text-slate-500 italic">Nenhum eixo acima de 75%</p>}
+        </div>
+
+        {/* Fraquezas */}
+        <div className="border-r border-b border-slate-700/40 p-4 sm:border-b-0 lg:border-b-0">
+          <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-red-400">
+            <span className="h-2 w-2 rounded-full bg-red-400" />W — Fraquezas
+          </p>
+          {weaknesses.length > 0
+            ? weaknesses.map(a => <p key={a.label} className="text-[11px] text-slate-300 leading-relaxed">· {a.label} ({a.avg}%)</p>)
+            : <p className="text-[11px] text-slate-500 italic">Sem eixos críticos</p>}
+        </div>
+
+        {/* Oportunidades */}
+        <div className="border-r border-b border-slate-700/40 p-4 lg:border-b-0">
+          <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-blue-400">
+            <span className="h-2 w-2 rounded-full bg-blue-400" />O — Oportunidades
+          </p>
+          {opportunities.length > 0
+            ? opportunities.map(c => <p key={c.id} className="text-[11px] text-slate-300 leading-relaxed truncate">· {c.name} (C · {c.score} pts)</p>)
+            : stat.topClients.length > 0
+              ? <p className="text-[11px] text-slate-500 italic">Todos já em A/B</p>
+              : <p className="text-[11px] text-slate-500 italic">Sem clientes na nota C</p>}
+        </div>
+
+        {/* Ameaças */}
+        <div className="p-4">
+          <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-orange-400">
+            <span className="h-2 w-2 rounded-full bg-orange-400" />T — Ameaças
+          </p>
+          {stat.weakClients.length > 0
+            ? stat.weakClients.map(c => <p key={c.id} className="text-[11px] text-slate-300 leading-relaxed truncate">· {c.name} ({c.grade} · {c.score} pts)</p>)
+            : <p className="text-[11px] text-slate-500 italic">Sem clientes críticos</p>}
+        </div>
+      </div>
+
+      {/* Cases */}
+      {(stat.topClients.length > 0 || stat.weakClients.length > 0) && (
+        <div className="grid gap-0 border-t border-slate-700/40 sm:grid-cols-2">
+          <div className="border-r border-slate-700/40 px-5 py-3">
+            <p className="mb-1.5 text-xs font-bold text-green-400">Cases de Sucesso</p>
+            <div className="flex flex-wrap gap-2">
+              {stat.topClients.length > 0
+                ? stat.topClients.map(c => (
+                    <span key={c.id} className="rounded-full border border-green-400/30 bg-green-400/10 px-2.5 py-0.5 text-[11px] font-medium text-green-300">
+                      {c.name} · {c.grade} ({c.score})
+                    </span>
+                  ))
+                : <span className="text-[11px] text-slate-500 italic">Nenhum cliente A/B ainda</span>}
+            </div>
+          </div>
+          <div className="px-5 py-3">
+            <p className="mb-1.5 text-xs font-bold text-red-400">Precisam de atenção</p>
+            <div className="flex flex-wrap gap-2">
+              {stat.weakClients.length > 0
+                ? stat.weakClients.map(c => (
+                    <span key={c.id} className="rounded-full border border-red-400/30 bg-red-400/10 px-2.5 py-0.5 text-[11px] font-medium text-red-300">
+                      {c.name} · {c.grade} ({c.score})
+                    </span>
+                  ))
+                : <span className="text-[11px] text-slate-500 italic">Nenhum cliente D/F</span>}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ScorePage() {
   const [clients, setClients] = useState<ClientScore[]>([]);
   const [loading, setLoading] = useState(true);
   const [calculating, setCalculating] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [filterGestor, setFilterGestor] = useState('');
-  const [activeTab, setActiveTab] = useState<'radar' | 'lista'>('radar');
+  const [activeTab, setActiveTab] = useState<'radar' | 'lista' | 'gestores'>('radar');
   const [radarClientId, setRadarClientId] = useState('');
 
   useEffect(() => { void loadScores(); }, []);
@@ -269,20 +465,20 @@ export default function ScorePage() {
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex gap-1 rounded-xl border border-slate-700/80 bg-[#0c1321]/80 p-1 shadow-[0_0_28px_rgba(59,130,246,0.08)]">
-          <button
-            onClick={() => setActiveTab('radar')}
-            className={cn('flex items-center gap-2 rounded-lg px-5 py-2 text-sm font-medium transition-colors', activeTab === 'radar' ? 'bg-primary text-black shadow-[0_0_18px_rgba(85,245,47,0.35)]' : 'text-muted-foreground hover:text-foreground')}
-          >
-            <BarChart2 className="w-4 h-4" />
-            Radar
-          </button>
-          <button
-            onClick={() => setActiveTab('lista')}
-            className={cn('flex items-center gap-2 rounded-lg px-5 py-2 text-sm font-medium transition-colors', activeTab === 'lista' ? 'bg-primary text-black shadow-[0_0_18px_rgba(85,245,47,0.35)]' : 'text-muted-foreground hover:text-foreground')}
-          >
-            <List className="w-4 h-4" />
-            Lista
-          </button>
+          {([
+            { id: 'radar',    label: 'Radar',    Icon: BarChart2 },
+            { id: 'gestores', label: 'Gestores', Icon: UserCog },
+            { id: 'lista',    label: 'Lista',    Icon: List },
+          ] as const).map(({ id, label, Icon }) => (
+            <button
+              key={id}
+              onClick={() => setActiveTab(id)}
+              className={cn('flex items-center gap-2 rounded-lg px-5 py-2 text-sm font-medium transition-colors', activeTab === id ? 'bg-primary text-black shadow-[0_0_18px_rgba(85,245,47,0.35)]' : 'text-muted-foreground hover:text-foreground')}
+            >
+              <Icon className="w-4 h-4" />
+              {label}
+            </button>
+          ))}
         </div>
         <button type="button" className="flex h-10 items-center gap-2 rounded-xl border border-slate-700/80 bg-[#0c1321]/80 px-4 text-sm text-slate-300 shadow-[0_0_22px_rgba(59,130,246,0.07)]">
           <CalendarDays className="h-4 w-4" />
@@ -296,6 +492,39 @@ export default function ScorePage() {
           <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
           <span className="text-sm text-muted-foreground">Carregando...</span>
         </div>
+      ) : activeTab === 'gestores' ? (
+        (() => {
+          const gestorStats = computeGestorStats(clients);
+          return gestorStats.length === 0 ? (
+            <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-700 py-20 gap-3 text-muted-foreground">
+              <UserCog className="w-10 h-10 opacity-20" />
+              <p className="text-sm">Nenhum gestor encontrado. Atribua gestores aos clientes para ver a análise.</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="grid grid-cols-3 gap-3 sm:grid-cols-4">
+                <div className="rounded-xl border border-slate-700/80 bg-[#0c1321]/75 p-4">
+                  <p className="text-xs text-slate-400 mb-1">Gestores</p>
+                  <p className="text-2xl font-bold text-white">{gestorStats.length}</p>
+                </div>
+                <div className="rounded-xl border border-slate-700/80 bg-[#0c1321]/75 p-4">
+                  <p className="text-xs text-slate-400 mb-1">Melhor gestor</p>
+                  <p className="text-sm font-bold text-primary truncate">{gestorStats[0]?.name ?? '—'}</p>
+                  {gestorStats[0]?.avgScore != null && <p className="text-xs text-slate-400">{gestorStats[0].avgScore} pts</p>}
+                </div>
+                <div className="rounded-xl border border-slate-700/80 bg-[#0c1321]/75 p-4">
+                  <p className="text-xs text-slate-400 mb-1">Clientes A/B</p>
+                  <p className="text-2xl font-bold text-green-400">{clients.filter(c => c.grade === 'A' || c.grade === 'B').length}</p>
+                </div>
+                <div className="rounded-xl border border-slate-700/80 bg-[#0c1321]/75 p-4">
+                  <p className="text-xs text-slate-400 mb-1">Clientes D/F</p>
+                  <p className="text-2xl font-bold text-red-400">{clients.filter(c => c.grade === 'D' || c.grade === 'F').length}</p>
+                </div>
+              </div>
+              {gestorStats.map(stat => <GestorCard key={stat.name} stat={stat} />)}
+            </div>
+          );
+        })()
       ) : activeTab === 'radar' ? (
         <div className="space-y-3">
           {/* Client picker */}
