@@ -891,6 +891,16 @@ async function execSystemTool(
       const token = await getFreshMetaToken(connRows[0]);
       const acctNode = String(links[0].account_id).startsWith('act_') ? links[0].account_id : `act_${links[0].account_id}`;
 
+      // Resolve Facebook Page ID (needed as promoted_object for LEADS/SALES)
+      let fbPageId: string | null = null;
+      try {
+        const pagesRes = await fetch(`https://graph.facebook.com/v21.0/me/accounts?fields=id,name&limit=10&access_token=${token}`);
+        if (pagesRes.ok) {
+          const pagesData = await pagesRes.json() as { data?: Array<{ id: string; name: string }> };
+          fbPageId = pagesData.data?.[0]?.id ?? null;
+        }
+      } catch { /* non-fatal */ }
+
       const report: string[] = [
         `📊 Relatório de criação — Meta Ads`,
         `Conta: ${acctNode}`,
@@ -928,7 +938,7 @@ async function execSystemTool(
         body: JSON.stringify({
           name: campName,
           objective,
-          status: 'PAUSED',
+          status: 'ACTIVE',
           special_ad_categories: [],
           daily_budget: Math.round(Number(daily_budget) * 100),
           bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
@@ -943,7 +953,7 @@ async function execSystemTool(
         return report.join('\n');
       }
       const campaignId = campData.id;
-      report.push(`✅ Campanha criada`);
+      report.push(`✅ Campanha criada (ATIVA — conjuntos pausados)`);
       report.push(`   Nome: ${campName}`);
       report.push(`   Objetivo: ${objective}`);
       report.push(`   Orçamento diário: R$ ${Number(daily_budget).toFixed(2)}`);
@@ -1031,6 +1041,13 @@ async function execSystemTool(
       const destType = OBJECTIVE_TO_DEST[objective];
       if (destType) adsetPayload.destination_type = destType;
 
+      // promoted_object is required for LEADS (page) and SALES (pixel)
+      if (objective === 'OUTCOME_LEADS' && fbPageId) {
+        adsetPayload.promoted_object = { page_id: fbPageId };
+      } else if (objective === 'OUTCOME_SALES' && fbPageId) {
+        adsetPayload.promoted_object = { page_id: fbPageId };
+      }
+
       const adsetRes = await fetch(`https://graph.facebook.com/v21.0/${acctNode}/adsets`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1069,12 +1086,13 @@ async function execSystemTool(
       report.push(`   Adicione o criativo (imagem/vídeo + texto) no Gerenciador de Anúncios.`);
       report.push('');
       report.push('─'.repeat(44));
-      report.push('⚠️  Tudo pausado — não veicula até você ativar.');
+      report.push('✅ Campanha ATIVA — conjuntos de anúncios PAUSADOS');
+      report.push('   Não veicula até você ativar um conjunto no Gerenciador.');
       report.push('');
       report.push('📋 Próximos passos:');
-      report.push('   1. Adicione o criativo (imagem/vídeo, headline, texto, CTA)');
-      report.push('   2. Configure o Pixel Meta se for rastrear conversões no site');
-      report.push('   3. Revise o público no Gerenciador e ative quando pronto');
+      report.push('   1. Adicione o criativo (imagem/vídeo, headline, texto, CTA) no Gerenciador');
+      report.push('   2. Crie e selecione o Formulário Instantâneo no conjunto de anúncios');
+      report.push('   3. Ative o conjunto quando o criativo estiver pronto');
 
       if (audience_notes) {
         report.push('');
