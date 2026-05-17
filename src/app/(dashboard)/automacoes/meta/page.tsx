@@ -1,12 +1,16 @@
 "use client";
 
 import { useEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import {
   Plus, Trash2, Check, RefreshCw, AlertCircle,
   CheckCircle2, MinusCircle, ToggleLeft, ToggleRight,
   ChevronDown, ChevronUp, Copy, MessageCircle,
   MessageSquare, Zap, Info, Search, ArrowDownAZ, ArrowUpAZ, X, Pencil,
+  Pause, Eye, Send, Clock3, Timer, Camera, ShieldCheck,
+  CalendarDays, XCircle, Inbox, List, Grid2X2, ArrowUpDown,
+  BookOpen, ExternalLink, Rocket,
 } from 'lucide-react';
 
 type Automation = {
@@ -71,6 +75,37 @@ const EMPTY_FORM = {
   trigger_type: 'any_comment', keyword: '',
   action: 'reply_comment', reply_message: '', dm_message: '',
 };
+
+function MetaMark({ className }: { className?: string }) {
+  return (
+    <span className={cn('font-black leading-none text-blue-500', className)} aria-hidden>
+      ∞
+    </span>
+  );
+}
+
+function InstagramMark({ className }: { className?: string }) {
+  return (
+    <span className={cn('flex items-center justify-center rounded-lg bg-gradient-to-br from-yellow-300 via-pink-500 to-purple-600 text-white shadow-lg shadow-pink-500/20', className)}>
+      <Camera className="h-4 w-4" />
+    </span>
+  );
+}
+
+function RulePill({ children, tone = 'slate' }: { children: ReactNode; tone?: 'green' | 'purple' | 'blue' | 'slate' }) {
+  const tones = {
+    green: 'border-[#40ff2a]/30 bg-[#40ff2a]/10 text-[#40ff2a]',
+    purple: 'border-purple-400/30 bg-purple-500/10 text-purple-300',
+    blue: 'border-blue-400/30 bg-blue-500/10 text-blue-300',
+    slate: 'border-slate-500/30 bg-slate-500/10 text-slate-300',
+  };
+
+  return (
+    <span className={cn('inline-flex h-7 items-center gap-1.5 rounded-full border px-3 text-xs font-medium', tones[tone])}>
+      {children}
+    </span>
+  );
+}
 
 export default function MetaAutomacoesPage() {
   const [automations, setAutomations] = useState<Automation[]>([]);
@@ -312,31 +347,113 @@ export default function MetaAutomacoesPage() {
     return <MinusCircle className="h-3.5 w-3.5 text-zinc-400 shrink-0" />;
   };
 
+  const activeAutomations = automations.filter(auto => auto.enabled);
+  const pausedAutomations = automations.filter(auto => !auto.enabled);
+  const primaryAutomation = automations[0] ?? null;
+  const displayRule: Automation = primaryAutomation ?? {
+    id: 'preview-rule',
+    client_id: null,
+    account_id: 'preview',
+    account_name: '@onmidmkt',
+    picture_url: null,
+    platform: 'instagram',
+    trigger_type: 'any_dm',
+    keyword: null,
+    action: 'send_dm',
+    reply_message: 'Shoow, estamos testando tudo.',
+    dm_message: null,
+    enabled: true,
+    created_at: '2025-04-24T10:32:00.000Z',
+  };
+  const hasPrimaryAutomation = Boolean(primaryAutomation);
+  const primaryKey = `${displayRule.platform}::${displayRule.account_id}`;
+  const primaryLogCount = hasPrimaryAutomation ? logs.filter(log => log.automation_id === displayRule.id).length : 0;
+  const otherAutomations = automations.slice(1);
+  const displayTrigger = TRIGGER_LABELS[displayRule.trigger_type] ?? displayRule.trigger_type;
+  const displayAction = displayRule.action === 'send_dm'
+    ? 'Enviar DM automática'
+    : ACTION_LABELS[displayRule.action] ?? displayRule.action;
+  const createdAt = new Date(displayRule.created_at).toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  const todayKey = new Date().toDateString();
+  const logsToday = logs.filter(log => new Date(log.triggered_at).toDateString() === todayKey);
+  const successLogs = logs.filter(log => log.status === 'success');
+  const failureLogs = logs.filter(log => log.status === 'error');
+  const latestLog = logs
+    .slice()
+    .sort((a, b) => new Date(b.triggered_at).getTime() - new Date(a.triggered_at).getTime())[0];
+  const percentOfLogs = (value: number) => logs.length ? Math.round((value / logs.length) * 100) : 0;
+
   return (
-    <div className="space-y-6 pb-10">
-      {/* Header */}
-      <div className="flex items-start justify-between">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-500/10 text-blue-500">
-            <MessageCircle className="h-5 w-5" />
+    <div className="relative -m-6 min-h-[calc(100vh-7rem)] overflow-hidden bg-[#070b13] px-6 py-6 text-slate-100">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_12%,rgba(64,255,42,0.10),transparent_24%),radial-gradient(circle_at_74%_8%,rgba(126,55,255,0.12),transparent_28%),linear-gradient(180deg,rgba(12,18,32,0.92),rgba(7,11,19,1))]" />
+      <div className="relative z-10 space-y-6 pb-10">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-500/10 text-blue-400 shadow-[0_0_34px_rgba(59,130,246,0.20)]">
+              <MessageCircle className="h-7 w-7" />
+            </div>
+            <div>
+              <h1 className="text-[28px] font-semibold tracking-normal text-white">Automações Meta</h1>
+              <p className="mt-1 text-sm text-slate-400">Respostas automáticas a comentários e DMs do Instagram e Facebook.</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">Automações Meta</h1>
-            <p className="text-sm text-muted-foreground">Respostas automáticas a comentários e DMs do Instagram e Facebook.</p>
+
+          <div className="flex items-center gap-3">
+            <button type="button" onClick={load} className="flex h-11 items-center gap-2 rounded-xl border border-slate-700/80 bg-slate-950/30 px-5 text-sm font-semibold text-slate-200 shadow-lg shadow-black/20 transition-colors hover:border-slate-500 hover:bg-slate-900/70">
+              <RefreshCw className="h-4 w-4" />
+              Atualizar
+            </button>
+            <button type="button" onClick={() => setShowForm(v => !v)} className="flex h-11 items-center gap-2 rounded-xl bg-[#40ff2a] px-5 text-sm font-bold text-black shadow-[0_0_22px_rgba(64,255,42,0.32)] transition-transform hover:scale-[1.01]">
+              <Plus className="h-4 w-4" />
+              Nova Automação
+            </button>
           </div>
         </div>
-        <button type="button" onClick={load} className="flex h-9 items-center gap-1.5 rounded-lg border border-border bg-card px-3 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
-          <RefreshCw className="h-3.5 w-3.5" />
-          Atualizar
-        </button>
-      </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 border-b border-border">
+        <div className="grid gap-4 md:grid-cols-3">
+          <div className="flex h-20 items-center gap-4 rounded-xl border border-slate-700/70 bg-slate-900/45 px-5 shadow-xl shadow-black/15">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#40ff2a]/15 text-[#40ff2a]">
+              <Zap className="h-7 w-7 fill-current" />
+            </div>
+            <div>
+              <p className="text-2xl font-semibold text-white">{activeAutomations.length}</p>
+              <p className="text-sm text-slate-400">{activeAutomations.length === 1 ? 'automação ativa' : 'automações ativas'}</p>
+            </div>
+          </div>
+
+          <div className="flex h-20 items-center gap-4 rounded-xl border border-slate-700/70 bg-slate-900/45 px-5 shadow-xl shadow-black/15">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-500/15 text-slate-300">
+              <Pause className="h-6 w-6 fill-current" />
+            </div>
+            <div>
+              <p className="text-2xl font-semibold text-white">{pausedAutomations.length}</p>
+              <p className="text-sm text-slate-400">pausadas</p>
+            </div>
+          </div>
+
+          <div className="flex h-20 items-center gap-4 rounded-xl border border-slate-700/70 bg-slate-900/45 px-5 shadow-xl shadow-black/15">
+            <div className="flex items-center gap-1">
+              <MetaMark className="text-5xl" />
+              <InstagramMark className="h-8 w-8" />
+            </div>
+            <div>
+              <p className="text-base font-semibold text-white">Instagram + Facebook</p>
+              <p className="text-sm text-slate-400">Canais conectados</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex gap-8 border-b border-slate-700/70">
         {(['rules', 'logs', 'setup'] as const).map(t => (
           <button key={t} type="button" onClick={() => setTab(t)}
-            className={cn('px-4 py-2 text-sm font-medium border-b-2 transition-colors',
-              tab === t ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'
+            className={cn('border-b-2 px-0 pb-3 pt-1 text-sm font-semibold transition-colors',
+              tab === t ? 'border-[#40ff2a] text-[#40ff2a]' : 'border-transparent text-slate-400 hover:text-white'
             )}>
             {t === 'rules' ? 'Regras' : t === 'logs' ? 'Logs' : 'Configuração'}
           </button>
@@ -346,14 +463,6 @@ export default function MetaAutomacoesPage() {
       {/* ── Rules tab ── */}
       {tab === 'rules' && (
         <div className="space-y-4">
-          <div className="flex justify-end">
-            <button type="button" onClick={() => setShowForm(v => !v)}
-              className="flex h-9 items-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
-              <Plus className="h-4 w-4" />
-              Nova Automação
-            </button>
-          </div>
-
           {/* Create / Edit form */}
           {showForm && (
             <div className="rounded-xl border border-border bg-card p-5 space-y-4">
@@ -560,335 +669,575 @@ export default function MetaAutomacoesPage() {
             </div>
           )}
 
-          {/* List */}
           {loading ? (
-            <div className="py-12 text-center text-sm text-muted-foreground">Carregando...</div>
-          ) : automations.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-border py-16 text-center space-y-2">
-              <MessageSquare className="mx-auto h-8 w-8 text-muted-foreground/40" />
-              <p className="text-sm text-muted-foreground">Nenhuma automação criada ainda.</p>
-            </div>
+            <div className="rounded-2xl border border-slate-700/60 bg-slate-900/40 py-16 text-center text-sm text-slate-400">Carregando...</div>
           ) : (
-            <div className="space-y-3">
-              {automations.map(auto => (
-                <div key={auto.id} className={cn(
-                  'rounded-xl border bg-card transition-all',
-                  !auto.enabled && 'opacity-50',
-                  editingId === auto.id && 'border-primary/40 ring-1 ring-primary/20'
-                )}>
-                  <div className="flex items-center gap-4 p-4">
-                    {/* Avatar */}
-                    <div className="relative shrink-0">
-                      {auto.picture_url ? (
-                        <img src={auto.picture_url} alt="" className="h-12 w-12 rounded-full object-cover border-2 border-border" />
-                      ) : (
-                        <div className={cn(
-                          'h-12 w-12 rounded-full flex items-center justify-center text-sm font-bold text-white border-2 border-border',
-                          auto.platform === 'instagram'
-                            ? 'bg-gradient-to-br from-fuchsia-500 to-pink-500'
-                            : 'bg-blue-600'
-                        )}>
-                          {(auto.account_name ?? auto.account_id).slice(0, 2).toUpperCase()}
+            <>
+              <div className="overflow-hidden rounded-2xl border border-[#40ff2a]/35 bg-[linear-gradient(110deg,rgba(64,255,42,0.12),rgba(15,23,42,0.82)_31%,rgba(15,23,42,0.92)_68%,rgba(64,255,42,0.06))] shadow-[0_0_40px_rgba(64,255,42,0.10)]">
+                <div className="grid gap-6 p-6 lg:grid-cols-[1.1fr_1.25fr_220px_58px]">
+                  <div className="flex flex-col justify-between gap-8">
+                    <div className="flex items-start gap-5">
+                      <div className="relative">
+                        <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-full border border-[#40ff2a]/30 bg-slate-950 shadow-[0_0_34px_rgba(147,51,234,0.25)]">
+                          {displayRule.picture_url ? (
+                            <img src={displayRule.picture_url} alt="" className="h-full w-full object-cover" />
+                          ) : (
+                            <span className="text-sm font-bold text-[#40ff2a]">onmid</span>
+                          )}
                         </div>
-                      )}
-                      <span className={cn(
-                        'absolute -bottom-0.5 -right-0.5 rounded-full border-2 border-card px-1 text-[8px] font-bold uppercase',
-                        auto.platform === 'instagram' ? 'bg-pink-500 text-white' : 'bg-blue-500 text-white'
-                      )}>{auto.platform === 'instagram' ? 'IG' : 'FB'}</span>
-                    </div>
-
-                    {/* Info */}
-                    <div className="flex-1 min-w-0 space-y-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-base font-bold text-foreground truncate">
-                          {auto.account_name ?? auto.account_id}
-                        </span>
-                        <span className={cn('rounded-full px-2 py-0.5 text-[9px] font-bold uppercase',
-                          auto.enabled ? 'bg-emerald-500/10 text-emerald-500' : 'bg-zinc-500/10 text-zinc-400'
-                        )}>{auto.enabled ? 'Ativa' : 'Inativa'}</span>
+                        <InstagramMark className="absolute -bottom-1 -right-1 h-7 w-7 rounded-full border-2 border-slate-950" />
                       </div>
-                      <p className="text-xs text-muted-foreground">
-                        <span className="font-medium text-foreground/70">{TRIGGER_LABELS[auto.trigger_type] ?? auto.trigger_type}</span>
-                        {auto.keyword && <span className="ml-1 rounded bg-muted px-1 font-mono text-[10px]">"{auto.keyword}"</span>}
-                        <span className="mx-1.5 text-muted-foreground/30">→</span>
-                        {ACTION_LABELS[auto.action] ?? auto.action}
-                      </p>
-                      <p className="text-xs text-muted-foreground/60 italic line-clamp-1">"{auto.reply_message}"</p>
+                      <div className="pt-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h2 className="text-2xl font-semibold tracking-normal text-white">{displayRule.account_name ?? displayRule.account_id}</h2>
+                          <span className={cn('rounded-full border px-2.5 py-1 text-xs font-bold uppercase', displayRule.enabled ? 'border-[#40ff2a]/30 bg-[#40ff2a]/10 text-[#40ff2a]' : 'border-slate-500/30 bg-slate-500/10 text-slate-300')}>
+                            {displayRule.enabled ? 'Ativa' : 'Pausada'}
+                          </span>
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <RulePill tone="purple"><InstagramMark className="h-4 w-4 rounded-full" /> Instagram</RulePill>
+                          <RulePill tone="blue"><MetaMark className="text-xl" /> Facebook</RulePill>
+                        </div>
+                        <p className="mt-4 text-sm text-slate-400">Automação criada em {createdAt}</p>
+                      </div>
                     </div>
 
-                    {/* Actions */}
-                    <div className="flex items-center gap-1 shrink-0">
-                      {/* Subscribe page button */}
-                      {(() => {
-                        const key = `${auto.platform}::${auto.account_id}`;
-                        const result = subscribeResults[key];
-                        return (
-                          <button type="button" onClick={() => void subscribePageForAutomation(auto)}
-                            disabled={subscribing === key}
-                            title="Inscrever página no webhook"
-                            className={cn('rounded-lg p-1.5 transition-colors text-xs',
-                              result === 'ok' ? 'text-emerald-500 bg-emerald-500/10' :
-                              result === 'error' ? 'text-rose-500 bg-rose-500/10' :
-                              'text-muted-foreground hover:text-amber-400 hover:bg-amber-400/10'
-                            )}>
-                            {subscribing === key ? <RefreshCw className="h-4 w-4 animate-spin" /> :
-                             result === 'ok' ? <CheckCircle2 className="h-4 w-4" /> :
-                             result === 'error' ? <AlertCircle className="h-4 w-4" /> :
-                             <Zap className="h-4 w-4" />}
-                          </button>
-                        );
-                      })()}
-                      <button type="button" onClick={() => startEdit(auto)} title="Editar"
-                        className={cn('rounded-lg p-1.5 transition-colors',
-                          editingId === auto.id
-                            ? 'text-primary bg-primary/10'
-                            : 'text-muted-foreground hover:text-primary hover:bg-primary/10'
-                        )}>
-                        <Pencil className="h-4 w-4" />
-                      </button>
-                      <button type="button" onClick={() => toggle(auto)} title={auto.enabled ? 'Desativar' : 'Ativar'}
-                        className="rounded-lg p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
-                        {auto.enabled ? <ToggleRight className="h-4 w-4 text-emerald-500" /> : <ToggleLeft className="h-4 w-4" />}
-                      </button>
-                      <button type="button" onClick={() => remove(auto.id)}
-                        className="rounded-lg p-1.5 text-muted-foreground hover:text-rose-500 hover:bg-rose-500/10 transition-colors">
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                    <div className="flex flex-wrap gap-2">
+                      <RulePill tone="green"><MessageCircle className="h-3.5 w-3.5" /> DM</RulePill>
+                      <RulePill tone="purple">Instagram</RulePill>
+                      <RulePill tone="blue">Facebook</RulePill>
+                      <RulePill>Resposta automática</RulePill>
                     </div>
                   </div>
-                  {/* Error message */}
-                  {subscribeErrors[`${auto.platform}::${auto.account_id}`] && (
-                    <div className="px-4 pb-3 flex items-start gap-2 text-xs text-rose-400">
-                      <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                      <span>{subscribeErrors[`${auto.platform}::${auto.account_id}`]}</span>
+
+                  <div className="border-slate-700/70 lg:border-l lg:pl-8">
+                    <div className="grid items-start gap-5 md:grid-cols-[1fr_auto_1fr]">
+                      <div className="space-y-2">
+                        <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Gatilho</p>
+                        <div className="flex items-start gap-3">
+                          <MessageCircle className="mt-1 h-6 w-6 text-slate-300" />
+                          <div>
+                            <p className="text-base font-semibold text-white">{displayTrigger}</p>
+                            <p className="mt-1 text-sm text-slate-400">{displayRule.trigger_type.includes('dm') ? 'Mensagens diretas (DM)' : 'Comentários Meta'}</p>
+                          </div>
+                        </div>
+                      </div>
+                      <span className="hidden pt-8 text-2xl text-slate-400 md:block">→</span>
+                      <div className="space-y-2">
+                        <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Ação</p>
+                        <div className="flex items-start gap-3">
+                          <Send className="mt-1 h-6 w-6 text-slate-300" />
+                          <div>
+                            <p className="text-base font-semibold text-white">{displayAction}</p>
+                            <p className="mt-1 text-sm text-slate-400">Resposta automática</p>
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                  )}
+
+                    <div className="mt-8 space-y-2">
+                      <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Resposta</p>
+                      <div className="rounded-xl border border-slate-800/70 bg-slate-900/75 px-5 py-4 text-lg text-slate-200 shadow-inner shadow-black/20">
+                        “{displayRule.reply_message}”
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="border-slate-700/70 lg:border-l lg:pl-6">
+                    <div className="space-y-7">
+                      <div className="flex items-center gap-4">
+                        <span className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-800 text-slate-300"><MessageCircle className="h-6 w-6" /></span>
+                        <div>
+                          <p className="text-sm text-slate-400">Respostas hoje</p>
+                          <p className="text-2xl font-semibold text-white">{primaryLogCount}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <span className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-800 text-slate-300"><Timer className="h-6 w-6" /></span>
+                        <div>
+                          <p className="text-sm text-slate-400">Último disparo</p>
+                          <p className="text-lg font-semibold text-white">—</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <span className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-800 text-slate-300"><Clock3 className="h-6 w-6" /></span>
+                        <div>
+                          <p className="text-sm text-slate-400">Tempo médio</p>
+                          <p className="text-lg font-semibold text-white">—</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-row gap-2 lg:flex-col">
+                    <button type="button" className="flex h-10 w-10 items-center justify-center rounded-lg border border-blue-400/25 bg-blue-500/5 text-blue-300"><Eye className="h-5 w-5" /></button>
+                    <button type="button" disabled={!hasPrimaryAutomation} onClick={() => primaryAutomation && startEdit(primaryAutomation)} className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-500/30 bg-slate-500/5 text-slate-300 disabled:opacity-40"><Pencil className="h-5 w-5" /></button>
+                    <button type="button" disabled={!hasPrimaryAutomation} onClick={() => primaryAutomation && toggle(primaryAutomation)} className="flex h-10 w-10 items-center justify-center rounded-lg border border-[#40ff2a]/30 bg-[#40ff2a]/10 text-[#40ff2a] disabled:opacity-40">{displayRule.enabled ? <ToggleRight className="h-6 w-6" /> : <ToggleLeft className="h-6 w-6" />}</button>
+                    <button type="button" disabled={!hasPrimaryAutomation} onClick={() => primaryAutomation && void subscribePageForAutomation(primaryAutomation)} className={cn('flex h-10 w-10 items-center justify-center rounded-lg border border-cyan-400/25 bg-cyan-500/5 text-cyan-300 disabled:opacity-40', subscribing === primaryKey && 'animate-pulse')}><Copy className="h-5 w-5" /></button>
+                    <button type="button" disabled={!hasPrimaryAutomation} onClick={() => primaryAutomation && remove(primaryAutomation.id)} className="flex h-10 w-10 items-center justify-center rounded-lg border border-rose-400/25 bg-rose-500/5 text-rose-400 disabled:opacity-40"><Trash2 className="h-5 w-5" /></button>
+                  </div>
                 </div>
-              ))}
-            </div>
+                {subscribeErrors[primaryKey] && (
+                  <div className="border-t border-rose-500/20 px-6 py-3 text-sm text-rose-300">{subscribeErrors[primaryKey]}</div>
+                )}
+              </div>
+
+              <div className="grid gap-5 lg:grid-cols-[1.35fr_0.9fr]">
+                <div className="relative overflow-hidden rounded-2xl border border-slate-700/70 bg-slate-900/40 p-6 shadow-xl shadow-black/15">
+                  <MetaMark className="pointer-events-none absolute right-12 top-6 text-8xl text-blue-500/15" />
+                  <h3 className="text-lg font-semibold text-white">Como funciona</h3>
+                  <p className="mt-1 text-sm text-slate-400">Entenda o fluxo da sua automação de DM.</p>
+                  <div className="mt-6 grid gap-5 md:grid-cols-3">
+                    {[
+                      { icon: MessageCircle, title: 'Mensagem recebida', text: 'O contato envia uma DM no Instagram ou Facebook.', tone: 'text-[#40ff2a] bg-[#40ff2a]/10', n: 1 },
+                      { icon: ShieldCheck, title: 'Validação da regra', text: 'Verificamos se a mensagem se encaixa na sua regra ativa.', tone: 'text-purple-300 bg-purple-500/10', n: 2 },
+                      { icon: Send, title: 'Resposta automática enviada', text: 'Enviamos sua resposta automaticamente para o contato via DM.', tone: 'text-blue-300 bg-blue-500/10', n: 3 },
+                    ].map(item => (
+                      <div key={item.title} className="relative rounded-xl border border-slate-700/70 bg-slate-950/35 p-5">
+                        <span className={cn('mb-8 flex h-12 w-12 items-center justify-center rounded-xl', item.tone)}><item.icon className="h-7 w-7" /></span>
+                        <span className="absolute right-4 top-4 flex h-7 w-7 items-center justify-center rounded-full bg-slate-700 text-sm font-semibold text-slate-300">{item.n}</span>
+                        <p className="font-semibold text-white">{item.title}</p>
+                        <p className="mt-2 text-sm leading-relaxed text-slate-400">{item.text}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-7 flex items-center gap-3 text-sm text-slate-400">
+                    <Info className="h-5 w-5 text-[#40ff2a]" />
+                    Respostas automáticas ajudam a engajar mais rápido e não deixar nenhum cliente sem atenção.
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-slate-700/70 bg-slate-900/40 p-6 shadow-xl shadow-black/15">
+                  <h3 className="text-lg font-semibold text-white">Boas práticas</h3>
+                  <p className="mt-1 text-sm text-slate-400">Dicas para automações de DM que geram resultado.</p>
+                  <div className="mt-5 space-y-3">
+                    {[
+                      { icon: MessageSquare, title: 'Use mensagens curtas e objetivas', text: 'Facilite a leitura e aumente as chances de resposta.', tone: 'text-[#40ff2a] bg-[#40ff2a]/10' },
+                      { icon: MessageCircle, title: 'Evite respostas muito genéricas', text: 'Personalize quando possível para criar conexão.', tone: 'text-purple-300 bg-purple-500/10' },
+                      { icon: ShieldCheck, title: 'Personalize com variáveis', text: 'Use o nome do contato ou informações do contexto.', tone: 'text-indigo-300 bg-indigo-500/10' },
+                    ].map(item => (
+                      <div key={item.title} className="flex gap-4 rounded-xl bg-slate-800/35 p-4">
+                        <span className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-xl', item.tone)}><item.icon className="h-5 w-5" /></span>
+                        <div>
+                          <p className="font-semibold text-white">{item.title}</p>
+                          <p className="mt-1 text-sm text-slate-400">{item.text}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <button type="button" className="mt-6 flex items-center gap-2 text-sm font-semibold text-blue-400">Ver mais dicas e exemplos <span>›</span></button>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-700/70 bg-slate-900/40 p-6 shadow-xl shadow-black/15">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h3 className="text-lg font-semibold text-white">Outras regras</h3>
+                    <p className="mt-1 text-sm text-slate-400">Gerencie outras automações ou crie novas regras.</p>
+                  </div>
+                  <button type="button" onClick={() => setShowForm(true)} className="flex h-10 items-center gap-2 rounded-xl bg-[#40ff2a] px-5 text-sm font-bold text-black">
+                    <Plus className="h-4 w-4" />
+                    Nova Automação
+                  </button>
+                </div>
+                {otherAutomations.length > 0 ? (
+                  <div className="mt-5 space-y-2">
+                    {otherAutomations.map(auto => (
+                      <div key={auto.id} className="flex items-center justify-between gap-4 rounded-xl border border-slate-700/60 bg-slate-950/30 px-4 py-3">
+                        <div className="min-w-0">
+                          <p className="truncate font-semibold text-white">{auto.account_name ?? auto.account_id}</p>
+                          <p className="truncate text-sm text-slate-400">{TRIGGER_LABELS[auto.trigger_type] ?? auto.trigger_type} → {ACTION_LABELS[auto.action] ?? auto.action}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button type="button" onClick={() => startEdit(auto)} className="rounded-lg p-2 text-slate-300 hover:bg-slate-800"><Pencil className="h-4 w-4" /></button>
+                          <button type="button" onClick={() => toggle(auto)} className="rounded-lg p-2 text-[#40ff2a] hover:bg-slate-800">{auto.enabled ? <ToggleRight className="h-5 w-5" /> : <ToggleLeft className="h-5 w-5" />}</button>
+                          <button type="button" onClick={() => remove(auto.id)} className="rounded-lg p-2 text-rose-400 hover:bg-rose-500/10"><Trash2 className="h-4 w-4" /></button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="mt-5 flex min-h-24 items-center justify-center gap-4 rounded-xl border border-dashed border-slate-600/80 bg-slate-950/25">
+                    <span className="flex h-14 w-14 items-center justify-center rounded-full bg-[#40ff2a]/10 text-[#40ff2a]"><MessageSquare className="h-7 w-7" /></span>
+                    <div>
+                      <p className="font-semibold text-white">Ainda não há outras automações criadas.</p>
+                      <p className="text-sm text-slate-400">Crie uma nova automação para começar.</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
           )}
         </div>
       )}
 
       {/* ── Logs tab ── */}
       {tab === 'logs' && (
-        <div className="space-y-2">
-          {logs.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-border py-16 text-center">
-              <p className="text-sm text-muted-foreground">Nenhum evento processado ainda.</p>
+        <div className="space-y-6">
+          <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+            {[
+              { label: 'Eventos hoje', value: logsToday.length, caption: '0% vs ontem', icon: CalendarDays, tone: 'blue' },
+              { label: 'Sucesso', value: successLogs.length, caption: `${percentOfLogs(successLogs.length)}% do total`, icon: CheckCircle2, tone: 'green' },
+              { label: 'Falhas', value: failureLogs.length, caption: `${percentOfLogs(failureLogs.length)}% do total`, icon: XCircle, tone: 'red' },
+              { label: 'Último evento', value: latestLog ? new Date(latestLog.triggered_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '—', caption: latestLog ? new Date(latestLog.triggered_at).toLocaleDateString('pt-BR') : 'Nenhum evento ainda', icon: Clock3, tone: 'purple' },
+            ].map(card => {
+              const toneClass = card.tone === 'blue'
+                ? 'bg-blue-500/15 text-blue-400 shadow-blue-500/15'
+                : card.tone === 'green'
+                  ? 'bg-[#40ff2a]/15 text-[#40ff2a] shadow-[#40ff2a]/15'
+                  : card.tone === 'red'
+                    ? 'bg-red-500/15 text-red-400 shadow-red-500/15'
+                    : 'bg-purple-500/15 text-purple-300 shadow-purple-500/15';
+              return (
+                <div key={card.label} className="flex h-28 items-center gap-5 rounded-xl border border-slate-700/70 bg-slate-900/45 px-6 shadow-xl shadow-black/15">
+                  <span className={cn('flex h-14 w-14 items-center justify-center rounded-full shadow-[0_0_30px_currentColor]', toneClass)}>
+                    <card.icon className="h-7 w-7" />
+                  </span>
+                  <div>
+                    <p className="text-sm text-slate-400">{card.label}</p>
+                    <p className="mt-1 text-3xl font-semibold text-white">{card.value}</p>
+                    <p className="mt-1 text-sm text-slate-400">{card.caption}</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="rounded-xl border border-slate-700/70 bg-slate-900/45 p-5 shadow-xl shadow-black/15">
+            <div className="grid gap-4 lg:grid-cols-[150px_150px_160px_1fr_auto]">
+              <label className="space-y-2">
+                <span className="text-sm text-slate-400">Status</span>
+                <select className="h-10 w-full rounded-lg border border-slate-700 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-[#40ff2a]">
+                  <option>Todos</option>
+                  <option>Sucesso</option>
+                  <option>Falhas</option>
+                  <option>Ignorados</option>
+                </select>
+              </label>
+              <label className="space-y-2">
+                <span className="text-sm text-slate-400">Canal</span>
+                <select className="h-10 w-full rounded-lg border border-slate-700 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-[#40ff2a]">
+                  <option>Todos</option>
+                  <option>Instagram</option>
+                  <option>Facebook</option>
+                  <option>DM</option>
+                </select>
+              </label>
+              <label className="space-y-2">
+                <span className="text-sm text-slate-400">Data</span>
+                <select className="h-10 w-full rounded-lg border border-slate-700 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-[#40ff2a]">
+                  <option>Hoje</option>
+                  <option>7 dias</option>
+                  <option>30 dias</option>
+                  <option>Todos</option>
+                </select>
+              </label>
+              <label className="space-y-2">
+                <span className="text-sm text-slate-400">&nbsp;</span>
+                <span className="flex h-10 items-center gap-3 rounded-lg border border-slate-700 bg-slate-950/60 px-4 text-sm text-slate-500">
+                  <Search className="h-4 w-4" />
+                  Buscar por regra ou usuário...
+                </span>
+              </label>
+              <div className="flex items-end gap-3">
+                <button type="button" className="flex h-10 items-center gap-2 rounded-lg border border-pink-400/30 bg-pink-500/10 px-4 text-sm font-semibold text-white"><InstagramMark className="h-5 w-5 rounded-md" />Instagram</button>
+                <button type="button" className="flex h-10 items-center gap-2 rounded-lg border border-blue-400/30 bg-blue-500/10 px-4 text-sm font-semibold text-white"><span className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 text-xs font-bold">f</span>Facebook</button>
+                <button type="button" className="flex h-10 items-center gap-2 rounded-lg border border-[#40ff2a]/30 bg-[#40ff2a]/5 px-4 text-sm font-semibold text-white"><MessageCircle className="h-5 w-5 text-[#40ff2a]" />DM</button>
+                <button type="button" className="flex h-10 items-center gap-2 rounded-lg border border-purple-400/30 bg-purple-500/10 px-4 text-sm font-semibold text-white"><MessageSquare className="h-5 w-5 text-purple-300" />Comentário</button>
+              </div>
             </div>
-          ) : logs.map(log => (
-            <div key={log.id} className="rounded-xl border border-border bg-card p-3 space-y-1">
-              <div className="flex items-center gap-2">
-                {statusIcon(log.status)}
-                <span className={cn('rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase',
-                  log.platform === 'instagram' ? 'bg-pink-500/10 text-pink-500' : 'bg-blue-500/10 text-blue-500'
-                )}>{log.platform}</span>
-                <span className="text-xs font-medium text-foreground">{log.event_type}</span>
-                {log.account_name && <span className="text-xs text-muted-foreground">{log.account_name}</span>}
-                {log.action_taken && <span className="text-xs text-muted-foreground/60">→ {log.action_taken}</span>}
-                <span className="ml-auto text-[10px] text-muted-foreground/50">{new Date(log.triggered_at).toLocaleString('pt-BR')}</span>
-                <button type="button" onClick={() => setExpandedLog(expandedLog === log.id ? null : log.id)}
-                  className="text-muted-foreground hover:text-foreground">
-                  {expandedLog === log.id ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+          </div>
+
+          <div className="rounded-xl border border-slate-700/70 bg-slate-900/45 p-5 shadow-xl shadow-black/15">
+            <div className="flex items-center justify-between gap-4">
+              <h3 className="flex items-center gap-2 text-lg font-semibold text-white">
+                <CalendarDays className="h-5 w-5 text-slate-300" />
+                Timeline de eventos
+              </h3>
+              <div className="flex items-center gap-3">
+                <button type="button" className="flex h-9 items-center gap-2 rounded-lg border border-slate-700 bg-slate-950/40 px-4 text-sm text-slate-400">
+                  <ArrowUpDown className="h-4 w-4" />
+                  Mais recentes
+                  <ChevronDown className="h-4 w-4" />
+                </button>
+                <button type="button" className="flex h-9 w-10 items-center justify-center rounded-lg bg-[#40ff2a]/20 text-[#40ff2a]"><List className="h-5 w-5" /></button>
+                <button type="button" className="flex h-9 w-10 items-center justify-center rounded-lg border border-slate-700 text-slate-400"><Grid2X2 className="h-5 w-5" /></button>
+              </div>
+            </div>
+
+            {logs.length === 0 ? (
+              <div className="mt-5 flex min-h-[285px] flex-col items-center justify-center rounded-xl border border-dashed border-slate-700/80 bg-[radial-gradient(circle_at_50%_20%,rgba(59,130,246,0.12),transparent_38%),rgba(15,23,42,0.16)] px-6 text-center">
+                <span className="flex h-24 w-24 items-center justify-center rounded-full border border-blue-400/30 bg-blue-500/10 text-blue-400 shadow-[0_0_36px_rgba(59,130,246,0.18)]">
+                  <Inbox className="h-12 w-12" />
+                </span>
+                <h4 className="mt-5 text-xl font-semibold text-white">Nenhum evento processado ainda.</h4>
+                <p className="mt-3 max-w-[560px] text-sm leading-relaxed text-slate-400">
+                  Os eventos de comentários e DMs recebidos pelo Instagram e Facebook aparecerão aqui conforme suas automações forem acionadas.
+                </p>
+                <button type="button" onClick={() => setTab('rules')} className="mt-6 flex h-10 items-center gap-2 rounded-lg border border-slate-700 bg-slate-900/80 px-5 text-sm font-semibold text-white">
+                  <Zap className="h-5 w-5 text-[#40ff2a]" />
+                  Ver regras ativas
                 </button>
               </div>
-              {log.error_msg && <p className="text-xs text-rose-400 pl-5">{log.error_msg}</p>}
-              {expandedLog === log.id && (
-                <div className="pl-5 pt-1 space-y-0.5 text-xs text-muted-foreground">
-                  <p><span className="font-medium">Texto:</span> {log.trigger_text}</p>
-                  <p><span className="font-medium">Remetente:</span> {log.sender_id}</p>
-                  <p><span className="font-medium">Conta:</span> {log.account_id}</p>
+            ) : (
+              <div className="mt-5 space-y-3">
+                {logs.map(log => (
+                  <div key={log.id} className="rounded-xl border border-slate-700/70 bg-slate-950/35 p-4">
+                    <div className="flex items-center gap-3">
+                      {statusIcon(log.status)}
+                      <span className={cn('rounded-full px-2 py-1 text-[10px] font-bold uppercase',
+                        log.platform === 'instagram' ? 'bg-pink-500/10 text-pink-300' : 'bg-blue-500/10 text-blue-300'
+                      )}>{log.platform}</span>
+                      <span className="text-sm font-semibold text-white">{log.event_type}</span>
+                      {log.account_name && <span className="text-sm text-slate-400">{log.account_name}</span>}
+                      {log.action_taken && <span className="text-sm text-slate-500">→ {log.action_taken}</span>}
+                      <span className="ml-auto text-xs text-slate-500">{new Date(log.triggered_at).toLocaleString('pt-BR')}</span>
+                      <button type="button" onClick={() => setExpandedLog(expandedLog === log.id ? null : log.id)} className="text-slate-400 hover:text-white">
+                        {expandedLog === log.id ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                      </button>
+                    </div>
+                    {log.error_msg && <p className="mt-2 pl-7 text-sm text-rose-300">{log.error_msg}</p>}
+                    {expandedLog === log.id && (
+                      <div className="mt-3 grid gap-2 border-t border-slate-800 pt-3 pl-7 text-sm text-slate-400 md:grid-cols-3">
+                        <p><span className="font-medium text-slate-300">Texto:</span> {log.trigger_text}</p>
+                        <p><span className="font-medium text-slate-300">Remetente:</span> {log.sender_id}</p>
+                        <p><span className="font-medium text-slate-300">Conta:</span> {log.account_id}</p>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-slate-700/70 bg-slate-900/45 p-6 shadow-xl shadow-black/15">
+            <h3 className="text-lg font-semibold text-white">Como os logs ajudam</h3>
+            <p className="mt-1 text-sm text-slate-400">Acompanhe cada etapa das suas automações em tempo real.</p>
+            <div className="mt-6 grid gap-5 lg:grid-cols-4">
+              {[
+                { icon: Inbox, title: 'Recebimento', text: 'Registramos quando um comentário ou DM é recebido pelas plataformas.', tone: 'bg-blue-500/15 text-blue-400' },
+                { icon: ShieldCheck, title: 'Validação', text: 'Verificamos se o evento atende às regras da automação.', tone: 'bg-[#40ff2a]/15 text-[#40ff2a]' },
+                { icon: Send, title: 'Resposta enviada', text: 'Enviamos a resposta automática e registramos o envio com sucesso.', tone: 'bg-blue-500/15 text-blue-400' },
+                { icon: AlertCircle, title: 'Erro', text: 'Se algo falhar, registramos o erro para você analisar e corrigir.', tone: 'bg-red-500/15 text-red-400' },
+              ].map((item, index) => (
+                <div key={item.title} className={cn('flex gap-4', index > 0 && 'lg:border-l lg:border-slate-700/70 lg:pl-6')}>
+                  <span className={cn('flex h-14 w-14 shrink-0 items-center justify-center rounded-full', item.tone)}>
+                    <item.icon className="h-7 w-7" />
+                  </span>
+                  <div>
+                    <p className="font-semibold text-white">{item.title}</p>
+                    <p className="mt-2 text-sm leading-relaxed text-slate-400">{item.text}</p>
+                  </div>
                 </div>
-              )}
+              ))}
             </div>
-          ))}
+          </div>
         </div>
       )}
 
       {/* ── Setup tab ── */}
       {tab === 'setup' && (
-        <div className="space-y-4 max-w-2xl">
-
-          {/* Status card */}
-          <div className="rounded-xl border border-border bg-card p-4 space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-sm font-semibold text-foreground">Status da integração</p>
-              <button type="button" onClick={() => void loadWebhookStatus()}
-                className="flex items-center gap-1 rounded-lg border border-border bg-background px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
-                <RefreshCw className="h-3 w-3" /> Atualizar
-              </button>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {/* Webhook configurado */}
-              <div className={cn('rounded-lg border p-3 flex flex-col gap-1',
-                webhookStatus?.configured ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-rose-500/30 bg-rose-500/5'
-              )}>
-                {webhookStatus?.configured
-                  ? <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                  : <AlertCircle className="h-4 w-4 text-rose-500" />}
-                <p className="text-[11px] font-medium text-foreground">Webhook</p>
-                <p className={cn('text-[10px]', webhookStatus?.configured ? 'text-emerald-500' : 'text-rose-500')}>
-                  {webhookStatus === null ? 'Verificando...' : webhookStatus.configured ? 'Configurado' : 'Não configurado'}
-                </p>
-              </div>
-
-              {/* Último evento */}
-              <div className="rounded-lg border border-border bg-background p-3 flex flex-col gap-1">
-                <Zap className="h-4 w-4 text-primary" />
-                <p className="text-[11px] font-medium text-foreground">Último evento</p>
-                <p className="text-[10px] text-muted-foreground">
-                  {webhookStatus?.last_event_at
-                    ? new Date(webhookStatus.last_event_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
-                    : 'Nenhum ainda'}
-                </p>
-              </div>
-
-              {/* Eventos hoje */}
-              <div className="rounded-lg border border-border bg-background p-3 flex flex-col gap-1">
-                <MessageCircle className="h-4 w-4 text-blue-400" />
-                <p className="text-[11px] font-medium text-foreground">Hoje</p>
-                <p className="text-[10px] text-muted-foreground">
-                  {webhookStatus?.events_today ?? '—'} evento{webhookStatus?.events_today !== 1 ? 's' : ''}
-                </p>
-              </div>
-
-              {/* Erros hoje */}
-              <div className={cn('rounded-lg border p-3 flex flex-col gap-1',
-                (webhookStatus?.errors_today ?? 0) > 0 ? 'border-rose-500/30 bg-rose-500/5' : 'border-border bg-background'
-              )}>
-                <AlertCircle className={cn('h-4 w-4', (webhookStatus?.errors_today ?? 0) > 0 ? 'text-rose-500' : 'text-muted-foreground')} />
-                <p className="text-[11px] font-medium text-foreground">Erros hoje</p>
-                <p className={cn('text-[10px]', (webhookStatus?.errors_today ?? 0) > 0 ? 'text-rose-500' : 'text-muted-foreground')}>
-                  {webhookStatus?.errors_today ?? '—'}
-                </p>
-              </div>
-            </div>
-
-            {/* Test button */}
-            <div className="flex items-center gap-3 pt-1">
-              <button type="button" onClick={() => void testWebhook()} disabled={testingWebhook || !verifyToken}
-                className="flex items-center gap-1.5 rounded-lg bg-primary/10 border border-primary/30 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 transition-colors disabled:opacity-50">
-                {testingWebhook ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
-                {testingWebhook ? 'Testando...' : 'Testar conexão'}
-              </button>
-              {testResult === 'ok' && (
-                <span className="flex items-center gap-1 text-xs text-emerald-500 font-medium">
-                  <CheckCircle2 className="h-3.5 w-3.5" /> Webhook respondendo corretamente!
+        <div className="space-y-5">
+          <div className="rounded-xl border border-slate-700/70 bg-slate-900/45 p-6 shadow-xl shadow-black/15">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <h3 className="text-lg font-semibold text-white">Status da integração</h3>
+                <span className={cn('flex items-center gap-2 text-sm', webhookStatus?.configured ? 'text-slate-300' : 'text-amber-300')}>
+                  <span className={cn('h-3 w-3 rounded-full shadow-[0_0_18px_currentColor]', webhookStatus?.configured ? 'bg-[#40ff2a] text-[#40ff2a]' : 'bg-amber-400 text-amber-400')} />
+                  {webhookStatus?.configured ? 'Tudo funcionando!' : 'Verificando configuração'}
                 </span>
-              )}
-              {testResult === 'error' && (
-                <span className="flex items-center gap-1 text-xs text-rose-500 font-medium">
-                  <AlertCircle className="h-3.5 w-3.5" /> Falha na verificação — confira a URL e o token.
+              </div>
+              <div className="flex items-center gap-3">
+                <button type="button" onClick={() => void loadWebhookStatus()} className="flex h-9 items-center gap-2 rounded-lg border border-slate-700 bg-slate-950/40 px-4 text-sm font-semibold text-slate-300">
+                  <RefreshCw className="h-4 w-4" />
+                  Atualizar
+                </button>
+                <button type="button" onClick={() => void testWebhook()} disabled={testingWebhook || !verifyToken} className="flex h-9 items-center gap-2 rounded-lg border border-[#40ff2a]/40 bg-[#40ff2a]/10 px-4 text-sm font-semibold text-[#40ff2a] disabled:opacity-50">
+                  {testingWebhook ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4 fill-current" />}
+                  {testingWebhook ? 'Testando...' : 'Testar conexão'}
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <div className={cn('flex h-20 items-center gap-4 rounded-xl border px-5', webhookStatus?.configured ? 'border-[#40ff2a]/25 bg-[#40ff2a]/8' : 'border-amber-400/25 bg-amber-500/8')}>
+                <span className={cn('flex h-12 w-12 items-center justify-center rounded-full', webhookStatus?.configured ? 'bg-[#40ff2a]/15 text-[#40ff2a]' : 'bg-amber-500/15 text-amber-300')}>
+                  {webhookStatus?.configured ? <CheckCircle2 className="h-8 w-8" /> : <AlertCircle className="h-8 w-8" />}
                 </span>
-              )}
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-amber-200 bg-amber-50/50 dark:bg-amber-950/20 dark:border-amber-900/50 p-4 flex gap-3">
-            <Info className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-            <p className="text-sm text-amber-800 dark:text-amber-200 leading-relaxed">
-              Para as automações funcionarem, você precisa registrar o webhook no painel do Meta for Developers e ativar as assinaturas de campos <strong>comments</strong> e <strong>messages</strong>.
-            </p>
-          </div>
-
-          <div className="rounded-xl border border-border bg-card p-5 space-y-4">
-            <p className="text-sm font-semibold text-foreground flex items-center gap-2">
-              <Zap className="h-4 w-4 text-primary" />
-              1. URL do Webhook
-            </p>
-            <p className="text-xs text-muted-foreground">Cole esta URL no campo "Callback URL" no Meta for Developers:</p>
-            <div className="flex items-center gap-2 rounded-lg bg-muted/50 border border-border px-3 py-2">
-              <code className="flex-1 text-xs font-mono text-foreground">{BASE}/api/meta/webhook</code>
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-border bg-card p-5 space-y-4">
-            <p className="text-sm font-semibold text-foreground flex items-center gap-2">
-              <Check className="h-4 w-4 text-primary" />
-              2. Token de Verificação
-            </p>
-            <p className="text-xs text-muted-foreground">Cole este valor no campo "Verify Token" no Meta for Developers:</p>
-            <div className="flex items-center gap-2 rounded-lg bg-muted/50 border border-border px-3 py-2">
-              <code className="flex-1 text-xs font-mono text-foreground">{verifyToken || 'Carregando...'}</code>
-              <button type="button" onClick={copyToken}
-                className={cn('flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-medium transition-colors',
-                  copied ? 'bg-emerald-500/10 text-emerald-600' : 'bg-muted text-muted-foreground hover:text-foreground'
-                )}>
-                {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                {copied ? 'Copiado!' : 'Copiar'}
-              </button>
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-border bg-card p-5 space-y-3">
-            <p className="text-sm font-semibold text-foreground">3. Campos a ativar</p>
-            <p className="text-xs text-muted-foreground">Após validar o webhook, ative as assinaturas:</p>
-            <div className="space-y-2">
-              {[
-                { label: 'instagram → comments', desc: 'Comentários no Instagram' },
-                { label: 'instagram → messages', desc: 'DMs recebidas no Instagram' },
-                { label: 'page → feed', desc: 'Comentários no Facebook' },
-                { label: 'page → messages', desc: 'DMs no Messenger' },
-              ].map(item => (
-                <div key={item.label} className="flex items-center gap-3 rounded-lg bg-muted/30 px-3 py-2">
-                  <code className="text-xs font-mono text-foreground">{item.label}</code>
-                  <span className="text-xs text-muted-foreground">— {item.desc}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-border bg-card p-5 space-y-3">
-            <p className="text-sm font-semibold text-foreground">4. Encontrar o ID da conta</p>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              O campo "ID da Conta / Página" nas regras deve ser o <strong>Instagram User ID</strong> ou <strong>Facebook Page ID</strong> — não o nome de usuário. Você pode encontrar esse ID na aba Integrações do sistema ou no Meta Business Suite → Configurações da conta.
-            </p>
-          </div>
-
-          <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-5 space-y-3">
-            <p className="text-sm font-semibold text-amber-400 flex items-center gap-2">
-              <Zap className="h-4 w-4" />
-              5. Inscrever as páginas no app — passo obrigatório
-            </p>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              Verificar o webhook não é suficiente. Cada página precisa ser inscrita individualmente no app para que a Meta envie eventos.
-              Clique no ícone <strong className="text-amber-400">⚡</strong> (raio) ao lado de cada automação na aba <strong>Regras</strong> para inscrever a página automaticamente.
-            </p>
-            {automations.length > 0 && (
-              <div className="space-y-2 pt-1">
-                <p className="text-xs font-medium text-muted-foreground">Inscrever todas as páginas de uma vez:</p>
-                <div className="flex flex-wrap gap-2">
-                  {automations.map(auto => {
-                    const key = `${auto.platform}::${auto.account_id}`;
-                    const result = subscribeResults[key];
-                    return (
-                      <button key={key} type="button" onClick={() => void subscribePageForAutomation(auto)}
-                        disabled={subscribing === key}
-                        className={cn(
-                          'flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition-all',
-                          result === 'ok' ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400' :
-                          result === 'error' ? 'border-rose-500/40 bg-rose-500/10 text-rose-400' :
-                          'border-border bg-card text-muted-foreground hover:text-foreground hover:border-primary/40'
-                        )}>
-                        {subscribing === key ? <RefreshCw className="h-3 w-3 animate-spin" /> :
-                         result === 'ok' ? <CheckCircle2 className="h-3 w-3" /> :
-                         result === 'error' ? <AlertCircle className="h-3 w-3" /> :
-                         <Zap className="h-3 w-3" />}
-                        {auto.account_name ?? auto.account_id}
-                        <span className={cn('text-[9px] font-bold uppercase',
-                          auto.platform === 'instagram' ? 'text-pink-400' : 'text-blue-400'
-                        )}>{auto.platform === 'instagram' ? 'IG' : 'FB'}</span>
-                      </button>
-                    );
-                  })}
+                <div>
+                  <p className="font-semibold text-white">Webhook configurado</p>
+                  <p className="mt-1 text-sm text-slate-400">{webhookStatus?.configured ? 'Ativo e recebendo eventos' : 'Aguardando validação'}</p>
                 </div>
               </div>
+
+              <div className="flex h-20 items-center gap-4 rounded-xl border border-slate-700/70 bg-slate-950/25 px-5">
+                <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[#40ff2a]/10 text-[#40ff2a]">
+                  <Zap className="h-8 w-8 fill-current" />
+                </span>
+                <div>
+                  <p className="font-semibold text-white">Último evento</p>
+                  <p className="mt-1 text-sm text-slate-400">
+                    {webhookStatus?.last_event_at
+                      ? new Date(webhookStatus.last_event_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+                      : 'Nenhum ainda'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex h-20 items-center gap-4 rounded-xl border border-slate-700/70 bg-slate-950/25 px-5">
+                <span className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-500/15 text-blue-400">
+                  <MessageCircle className="h-8 w-8" />
+                </span>
+                <div>
+                  <p className="font-semibold text-white">Hoje</p>
+                  <p className="mt-1 text-sm text-slate-400">{webhookStatus?.events_today ?? 0} eventos</p>
+                </div>
+              </div>
+
+              <div className="flex h-20 items-center gap-4 rounded-xl border border-slate-700/70 bg-slate-950/25 px-5">
+                <span className="flex h-12 w-12 items-center justify-center rounded-full bg-pink-500/15 text-pink-400">
+                  <AlertCircle className="h-8 w-8" />
+                </span>
+                <div>
+                  <p className="font-semibold text-white">Erros hoje</p>
+                  <p className="mt-1 text-sm text-slate-400">{webhookStatus?.errors_today ?? 0}</p>
+                </div>
+              </div>
+            </div>
+
+            {testResult === 'ok' && (
+              <p className="mt-4 flex items-center gap-2 text-sm font-semibold text-[#40ff2a]"><CheckCircle2 className="h-4 w-4" /> Webhook respondendo corretamente!</p>
             )}
+            {testResult === 'error' && (
+              <p className="mt-4 flex items-center gap-2 text-sm font-semibold text-rose-300"><AlertCircle className="h-4 w-4" /> Falha na verificação. Confira a URL e o token.</p>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-amber-500/45 bg-amber-500/8 px-6 py-4 text-amber-200 shadow-xl shadow-black/15">
+            <div className="flex items-start gap-4">
+              <Info className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
+              <p className="max-w-4xl text-sm leading-relaxed">
+                Para as automações funcionarem, você precisa registrar o webhook no painel do Meta for Developers e ativar as assinaturas de campos <strong>comments</strong> e <strong>messages</strong>.
+              </p>
+            </div>
+            <a href="https://developers.facebook.com/apps/" target="_blank" rel="noreferrer" className="flex h-10 items-center gap-2 rounded-lg border border-slate-700 bg-slate-900/80 px-4 text-sm font-semibold text-slate-300">
+              <ExternalLink className="h-4 w-4" />
+              Abrir Meta for Developers
+            </a>
+          </div>
+
+          <div className="grid gap-5 xl:grid-cols-[1.35fr_0.95fr]">
+            <div className="rounded-xl border border-slate-700/70 bg-slate-900/45 p-6 shadow-xl shadow-black/15">
+              <div className="relative space-y-8 before:absolute before:left-3.5 before:top-7 before:h-[calc(100%-5rem)] before:border-l before:border-dashed before:border-slate-600">
+                <div className="relative pl-10">
+                  <span className="absolute left-0 top-0 flex h-7 w-7 items-center justify-center rounded-full bg-[#40ff2a]/20 text-sm font-bold text-[#40ff2a]">1</span>
+                  <h4 className="text-base font-semibold text-white">1. URL do Webhook</h4>
+                  <p className="mt-2 text-sm text-slate-400">Cole esta URL no campo "Callback URL" no Meta for Developers.</p>
+                  <div className="mt-4 flex items-center gap-3 rounded-lg border border-slate-700 bg-slate-950/40 p-3">
+                    <code className="min-w-0 flex-1 truncate font-mono text-sm text-white">{BASE}/api/meta/webhook</code>
+                    <button type="button" onClick={() => void navigator.clipboard.writeText(`${BASE}/api/meta/webhook`)} className="flex h-8 items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/70 px-3 text-sm text-slate-300">
+                      <Copy className="h-4 w-4" />
+                      Copiar
+                    </button>
+                  </div>
+                </div>
+
+                <div className="relative pl-10">
+                  <span className="absolute left-0 top-0 flex h-7 w-7 items-center justify-center rounded-full bg-[#40ff2a]/20 text-sm font-bold text-[#40ff2a]">2</span>
+                  <h4 className="text-base font-semibold text-white">2. Token de Verificação</h4>
+                  <p className="mt-2 text-sm text-slate-400">Cole este valor no campo "Verify Token" no Meta for Developers.</p>
+                  <div className="mt-4 flex items-center gap-3 rounded-lg border border-slate-700 bg-slate-950/40 p-3">
+                    <code className="min-w-0 flex-1 truncate font-mono text-sm text-white">{verifyToken || 'Carregando...'}</code>
+                    <button type="button" onClick={copyToken} className={cn('flex h-8 items-center gap-2 rounded-lg border px-3 text-sm', copied ? 'border-[#40ff2a]/35 bg-[#40ff2a]/10 text-[#40ff2a]' : 'border-slate-700 bg-slate-800/70 text-slate-300')}>
+                      {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                      {copied ? 'Copiado!' : 'Copiar'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="relative pl-10">
+                  <span className="absolute left-0 top-0 flex h-7 w-7 items-center justify-center rounded-full bg-[#40ff2a]/20 text-sm font-bold text-[#40ff2a]">3</span>
+                  <h4 className="text-base font-semibold text-white">3. Campos a ativar</h4>
+                  <p className="mt-2 text-sm text-slate-400">Após validar o webhook, ative as assinaturas abaixo.</p>
+                  <div className="mt-4 overflow-hidden rounded-lg border border-slate-700">
+                    {[
+                      { label: 'instagram — comments', desc: 'Comentários no Instagram', icon: <InstagramMark className="h-6 w-6 rounded-md" /> },
+                      { label: 'instagram — messages', desc: 'DMs recebidas no Instagram', icon: <InstagramMark className="h-6 w-6 rounded-md" /> },
+                      { label: 'page — feed', desc: 'Comentários no Facebook', icon: <span className="flex h-6 w-6 items-center justify-center rounded-md bg-blue-500 text-sm font-bold text-white">f</span> },
+                    ].map(item => (
+                      <div key={item.label} className="flex items-center gap-4 border-b border-slate-700/70 bg-slate-950/35 px-4 py-3 last:border-b-0">
+                        {item.icon}
+                        <code className="w-52 font-mono text-sm font-semibold text-white">{item.label}</code>
+                        <span className="flex-1 text-sm text-slate-400">{item.desc}</span>
+                        <span className="rounded-md border border-[#40ff2a]/25 bg-[#40ff2a]/10 px-2 py-1 text-xs font-semibold text-[#40ff2a]">Obrigatório</span>
+                        <CheckCircle2 className="h-5 w-5 text-[#40ff2a]" />
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-3 flex items-center gap-3 rounded-lg border border-slate-700 bg-slate-950/35 px-4 py-3 text-sm text-slate-300">
+                    <Info className="h-5 w-5 text-[#40ff2a]" />
+                    Todos os campos obrigatórios ativados
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-5">
+              <div className="rounded-xl border border-slate-700/70 bg-slate-900/45 p-6 shadow-xl shadow-black/15">
+                <h3 className="flex items-center gap-3 text-lg font-semibold text-white">
+                  <BookOpen className="h-5 w-5 text-blue-400" />
+                  Guia rápido
+                </h3>
+                <p className="mt-1 text-sm text-slate-400">Siga este passo a passo para conectar a ONMID.</p>
+                <div className="mt-5 space-y-2">
+                  {[
+                    ['Acesse o Meta for Developers', 'Entre no painel de desenvolvedores da Meta.'],
+                    ['Selecione seu app', 'Escolha o app que será usado para as automações.'],
+                    ['Configure o Webhook', 'Cole a URL e o token de verificação nos campos indicados.'],
+                    ['Assine os campos', 'Ative os campos comments e messages.'],
+                    ['Testar conexão', 'Clique em "Testar conexão" para validar o recebimento de eventos.'],
+                  ].map(([title, text], index) => (
+                    <div key={title} className="flex items-center gap-4 rounded-lg bg-slate-800/35 px-4 py-3">
+                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-blue-400/50 text-xs font-semibold text-blue-400">{index + 1}</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-white">{title}</p>
+                        <p className="text-sm text-slate-400">{text}</p>
+                      </div>
+                      {index === 0 && <ExternalLink className="h-4 w-4 text-blue-400" />}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-700/70 bg-slate-900/45 p-6 shadow-xl shadow-black/15">
+                <h3 className="flex items-center gap-3 text-lg font-semibold text-white">
+                  <ShieldCheck className="h-5 w-5 text-[#40ff2a]" />
+                  Checklist de validação
+                </h3>
+                <p className="mt-1 text-sm text-slate-400">Use esta lista para garantir que tudo está correto.</p>
+                <div className="mt-5 space-y-3">
+                  {[
+                    'Webhook configurado e respondendo 200 OK',
+                    'Token de verificação salvo corretamente',
+                    'Campos comments e messages ativados',
+                    'Eventos sendo recebidos sem erros',
+                  ].map(item => (
+                    <p key={item} className="flex items-center gap-3 text-sm text-slate-300">
+                      <CheckCircle2 className="h-5 w-5 text-[#40ff2a]" />
+                      {item}
+                    </p>
+                  ))}
+                </div>
+                <p className="mt-5 flex items-center gap-3 text-sm font-semibold text-[#40ff2a]">
+                  <Rocket className="h-5 w-5" />
+                  Tudo certo! Sua integração está pronta para rodar.
+                </p>
+              </div>
+            </div>
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }
