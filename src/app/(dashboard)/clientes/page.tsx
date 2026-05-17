@@ -308,8 +308,15 @@ export default function ClientesPage() {
             key={cliente.id}
             className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 hover:border-border/80 hover:bg-muted/20 transition-all"
           >
-            {/* Gestor column */}
-            <div className="hidden sm:flex w-36 shrink-0 items-center gap-2">
+            {/* Gestor column — clickable for admins */}
+            <div
+              className={cn(
+                'hidden sm:flex w-36 shrink-0 items-center gap-2 rounded-lg px-2 py-1 transition-colors',
+                isAdmin && 'cursor-pointer hover:bg-primary/10 hover:ring-1 hover:ring-primary/30'
+              )}
+              onClick={isAdmin ? () => openGestorDialog(cliente) : undefined}
+              title={isAdmin ? 'Alterar gestor' : undefined}
+            >
               {cliente.gestor_name ? (
                 <>
                   <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-bold text-primary ring-1 ring-primary/30">
@@ -318,7 +325,9 @@ export default function ClientesPage() {
                   <span className="text-xs font-medium text-foreground truncate">{cliente.gestor_name}</span>
                 </>
               ) : (
-                <span className="text-xs text-muted-foreground/40 italic">Sem gestor</span>
+                <span className={cn('text-xs italic', isAdmin ? 'text-muted-foreground/60' : 'text-muted-foreground/40')}>
+                  {isAdmin ? '+ Atribuir' : 'Sem gestor'}
+                </span>
               )}
             </div>
 
