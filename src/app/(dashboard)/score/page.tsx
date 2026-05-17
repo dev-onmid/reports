@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import {
   Trophy, RefreshCw, TrendingUp, TrendingDown, Minus,
@@ -10,11 +10,19 @@ import { Button } from '@/components/ui/button';
 import { ClientAvatar } from '@/components/client-avatar';
 
 type ScoreDetails = {
-  cpl: { score: number; current: number; previous: number };
-  leads: { score: number; current: number; previous: number };
-  ctr: { score: number; current: number; previous: number };
-  creative: { score: number; count: number; avgAge: number; stale: number };
-  spend: { current: number; previous: number };
+  cpl:             { score: number; max: number; current: number; previous: number };
+  leads:           { score: number; max: number; current: number; previous: number };
+  ctr:             { score: number; max: number; current: number; previous: number };
+  frequency:       { score: number; max: number; avg: number; count: number };
+  creativeCount:   { score: number; max: number; count: number };
+  creativeAge:     { score: number; max: number; avgAge: number; stale: number };
+  formatDiversity: { score: number; max: number; formats: string[]; unique: number };
+  consistency:     { score: number; max: number; cv: number | null; weeklySpends: number[] };
+  budgetPaused:    { score: number; max: number; count: number };
+  crmConversion:   { score: number; max: number; rate: number | null; total: number; advanced: number };
+  reports:         { score: number; max: number; count: number };
+  spend:           { current: number; previous: number };
+  convRate:        { current: number; previous: number };
 };
 
 type ClientScore = {
@@ -61,26 +69,106 @@ function currency(n: number) {
 
 function ScoreBreakdown({ details }: { details: ScoreDetails }) {
   const criteria = [
-    { label: 'CPL', score: details.cpl.score, max: 35, desc: `Atual: ${currency(details.cpl.current)} vs Anterior: ${currency(details.cpl.previous)}`, icon: trend(details.cpl.previous || 1, details.cpl.current || 1) },
-    { label: 'Leads', score: details.leads.score, max: 25, desc: `Atual: ${details.leads.current} vs Anterior: ${details.leads.previous}`, icon: trend(details.leads.current, details.leads.previous) },
-    { label: 'CTR', score: details.ctr.score, max: 20, desc: `Atual: ${details.ctr.current.toFixed(2)}% vs Anterior: ${details.ctr.previous.toFixed(2)}%`, icon: trend(details.ctr.current, details.ctr.previous) },
-    { label: 'Criativos', score: details.creative.score, max: 20, desc: `${details.creative.count} ativos · Idade média: ${details.creative.avgAge}d · ${details.creative.stale} obsoletos`, icon: details.creative.stale > 0 ? <AlertTriangle className="w-3 h-3 text-orange-400" /> : <Star className="w-3 h-3 text-green-400" /> },
+    {
+      label: 'CPL',
+      score: details.cpl.score, max: details.cpl.max,
+      desc: `Atual: ${currency(details.cpl.current)} vs Anterior: ${currency(details.cpl.previous)}`,
+      icon: trend(details.cpl.previous || 1, details.cpl.current || 1),
+    },
+    {
+      label: 'Leads',
+      score: details.leads.score, max: details.leads.max,
+      desc: `Atual: ${details.leads.current} vs Anterior: ${details.leads.previous}`,
+      icon: trend(details.leads.current, details.leads.previous),
+    },
+    {
+      label: 'CTR',
+      score: details.ctr.score, max: details.ctr.max,
+      desc: `Atual: ${details.ctr.current.toFixed(2)}% vs Anterior: ${details.ctr.previous.toFixed(2)}%`,
+      icon: trend(details.ctr.current, details.ctr.previous),
+    },
+    {
+      label: 'Frequência',
+      score: details.frequency.score, max: details.frequency.max,
+      desc: details.frequency.count > 0 ? `Média: ${details.frequency.avg}x por pessoa` : 'Sem dados de frequência',
+      icon: details.frequency.avg > 4 ? <AlertTriangle className="w-3 h-3 text-orange-400" /> : <Star className="w-3 h-3 text-green-400" />,
+    },
+    {
+      label: 'Qtd. Criativos',
+      score: details.creativeCount.score, max: details.creativeCount.max,
+      desc: `${details.creativeCount.count} anúncios ativos`,
+      icon: details.creativeCount.count < 2 ? <AlertTriangle className="w-3 h-3 text-orange-400" /> : <Star className="w-3 h-3 text-green-400" />,
+    },
+    {
+      label: 'Idade Criativos',
+      score: details.creativeAge.score, max: details.creativeAge.max,
+      desc: `Idade média: ${details.creativeAge.avgAge}d · ${details.creativeAge.stale} obsoletos (+45d)`,
+      icon: details.creativeAge.stale > 0 ? <AlertTriangle className="w-3 h-3 text-orange-400" /> : <Star className="w-3 h-3 text-green-400" />,
+    },
+    {
+      label: 'Formatos',
+      score: details.formatDiversity.score, max: details.formatDiversity.max,
+      desc: details.formatDiversity.unique > 0 ? `${details.formatDiversity.formats.join(', ')} (${details.formatDiversity.unique} tipo${details.formatDiversity.unique !== 1 ? 's' : ''})` : 'Sem criativos ativos',
+      icon: details.formatDiversity.unique >= 3 ? <Star className="w-3 h-3 text-green-400" /> : <Minus className="w-3 h-3 text-muted-foreground" />,
+    },
+    {
+      label: 'Consistência',
+      score: details.consistency.score, max: details.consistency.max,
+      desc: details.consistency.cv !== null ? `Variação semanal: ${details.consistency.cv}%` : 'Dados insuficientes',
+      icon: (details.consistency.cv ?? 100) <= 30 ? <Star className="w-3 h-3 text-green-400" /> : <AlertTriangle className="w-3 h-3 text-orange-400" />,
+    },
+    {
+      label: 'Pausa Saldo',
+      score: details.budgetPaused.score, max: details.budgetPaused.max,
+      desc: details.budgetPaused.count === 0 ? 'Nenhuma pausa por saldo' : `${details.budgetPaused.count} campanha${details.budgetPaused.count !== 1 ? 's' : ''} pausada${details.budgetPaused.count !== 1 ? 's' : ''} por saldo`,
+      icon: details.budgetPaused.count > 0 ? <AlertTriangle className="w-3 h-3 text-red-400" /> : <Star className="w-3 h-3 text-green-400" />,
+    },
+    {
+      label: 'CRM',
+      score: details.crmConversion.score, max: details.crmConversion.max,
+      desc: details.crmConversion.rate !== null ? `${details.crmConversion.rate}% conversão · ${details.crmConversion.advanced}/${details.crmConversion.total} leads` : 'Sem dados CRM',
+      icon: (details.crmConversion.rate ?? 0) >= 20 ? <Star className="w-3 h-3 text-green-400" /> : <Minus className="w-3 h-3 text-muted-foreground" />,
+    },
+    {
+      label: 'Relatórios',
+      score: details.reports.score, max: details.reports.max,
+      desc: `${details.reports.count} relatório${details.reports.count !== 1 ? 's' : ''} entregue${details.reports.count !== 1 ? 's' : ''} no mês`,
+      icon: details.reports.count >= 3 ? <Star className="w-3 h-3 text-green-400" /> : <Minus className="w-3 h-3 text-muted-foreground" />,
+    },
   ];
 
   return (
-    <div className="mt-3 grid grid-cols-2 gap-2">
-      {criteria.map(c => (
-        <div key={c.label} className="rounded-lg border border-border bg-background/50 p-3">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-xs font-bold text-foreground flex items-center gap-1">{c.icon}{c.label}</span>
-            <span className="text-xs font-bold text-primary">{c.score}/{c.max}</span>
-          </div>
-          <div className="h-1.5 w-full rounded-full bg-muted">
-            <div className={cn('h-1.5 rounded-full transition-all', scoreBarColor(c.score / c.max * 100))} style={{ width: `${(c.score / c.max) * 100}%` }} />
-          </div>
-          <p className="text-[10px] text-muted-foreground mt-1 truncate">{c.desc}</p>
-        </div>
-      ))}
+    <div className="mt-3 space-y-2">
+      <div className="grid grid-cols-3 gap-2">
+        {criteria.slice(0, 3).map(c => (
+          <CritCard key={c.label} {...c} />
+        ))}
+      </div>
+      <div className="grid grid-cols-4 gap-2">
+        {criteria.slice(3, 7).map(c => (
+          <CritCard key={c.label} {...c} />
+        ))}
+      </div>
+      <div className="grid grid-cols-4 gap-2">
+        {criteria.slice(7).map(c => (
+          <CritCard key={c.label} {...c} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CritCard({ label, score, max, desc, icon }: { label: string; score: number; max: number; desc: string; icon: React.ReactNode }) {
+  return (
+    <div className="rounded-lg border border-border bg-background/50 p-3">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-xs font-bold text-foreground flex items-center gap-1">{icon}{label}</span>
+        <span className="text-xs font-bold text-primary">{score}/{max}</span>
+      </div>
+      <div className="h-1.5 w-full rounded-full bg-muted">
+        <div className={cn('h-1.5 rounded-full transition-all', scoreBarColor(score / max * 100))} style={{ width: `${(score / max) * 100}%` }} />
+      </div>
+      <p className="text-[10px] text-muted-foreground mt-1 line-clamp-1">{desc}</p>
     </div>
   );
 }
@@ -107,7 +195,7 @@ export default function ScorePage() {
     try {
       const res = await fetch(`/api/score?clientId=${clientId}&recalc=true`);
       if (res.ok) {
-        const updated = await res.json() as { score: number; grade: string; details: ScoreDetails; calculated_at: string };
+        const updated = await res.json() as { score: number; grade: string; details: ScoreDetails; calculated_at: string; client_id: string };
         setClients(prev => prev.map(c => c.id === clientId ? { ...c, ...updated } : c));
         setExpanded(prev => new Set(prev).add(clientId));
       }
