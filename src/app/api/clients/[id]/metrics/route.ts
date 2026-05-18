@@ -124,15 +124,6 @@ const SITE_LEAD_ACTIONS = [
   'onsite_web_lead',                  // lead via Instant Experience web
 ];
 
-// Conversas iniciadas (WhatsApp / Messenger)
-const CONVERSATION_ACTIONS = [
-  'onsite_conversion.messaging_conversation_started_7d',
-  'onsite_conversion.total_messaging_connection',
-  'messaging_conversation_started_7d',
-  'total_messaging_connection',
-  'onsite_conversion.messaging_first_reply',
-];
-
 async function fetchMetaAccountMetrics(accountId: string, accessToken: string, metaPeriod: string) {
   const url = new URL(`https://graph.facebook.com/v21.0/${toMetaAccountNodeId(accountId)}/insights`);
   url.searchParams.set('fields', 'spend,impressions,clicks,actions');
@@ -147,12 +138,25 @@ async function fetchMetaAccountMetrics(accountId: string, accessToken: string, m
   const row = data.data?.[0] ?? {};
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const actions = ((row.actions as { action_type: string; value: string }[]) ?? []);
+
+  const getAction = (type: string) => {
+    const found = actions.find(a => a.action_type === type);
+    return found ? parseInt(found.value || '0', 10) : 0;
+  };
   const sumActions = (types: string[]) => actions
     .filter(a => types.includes(a.action_type))
     .reduce((sum, a) => sum + parseInt(a.value || '0', 10), 0);
-  const formLeads      = sumActions(META_FORM_ACTIONS);
-  const siteLeads      = sumActions(SITE_LEAD_ACTIONS);
-  const conversations  = sumActions(CONVERSATION_ACTIONS);
+
+  const formLeads = sumActions(META_FORM_ACTIONS);
+  const siteLeads = sumActions(SITE_LEAD_ACTIONS);
+
+  // Meta reporta conversas com dois nomes diferentes dependendo da versão da campanha.
+  // Pegar o maior entre os dois para evitar double-counting quando ambos retornam.
+  const conversations = Math.max(
+    getAction('messaging_conversation_started_7d'),
+    getAction('onsite_conversion.messaging_conversation_started_7d'),
+  );
+
   return {
     spend: parseFloat(row.spend || '0'),
     impressions: parseInt(row.impressions || '0', 10),
