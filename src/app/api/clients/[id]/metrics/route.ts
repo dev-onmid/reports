@@ -113,16 +113,18 @@ async function buildMccMap(accessToken: string): Promise<Record<string, string>>
   return mccMap;
 }
 
-const FORM_LEAD_ACTIONS = [
-  'lead',
-  'onsite_conversion.lead_grouped',
-  'offsite_conversion.fb_pixel_lead',
-  'offsite_conversion.lead',
-  'onsite_conversion.lead',
-  'onsite_web_lead',
-  'onsite_web_app_lead',
+// Formulários Meta (Instant Forms / Lead Ads) — mutuamente exclusivos com SITE
+const META_FORM_ACTIONS = [
+  'onsite_conversion.lead_grouped', // formulários on-Meta (Instant Form, Lead Ad)
 ];
 
+// Conversões de site via Pixel (offsite) — mutuamente exclusivos com META_FORM
+const SITE_LEAD_ACTIONS = [
+  'offsite_conversion.fb_pixel_lead', // pixel Meta disparado no site
+  'onsite_web_lead',                  // lead via Instant Experience web
+];
+
+// Conversas iniciadas (WhatsApp / Messenger)
 const CONVERSATION_ACTIONS = [
   'onsite_conversion.messaging_conversation_started_7d',
   'onsite_conversion.total_messaging_connection',
@@ -148,14 +150,16 @@ async function fetchMetaAccountMetrics(accountId: string, accessToken: string, m
   const sumActions = (types: string[]) => actions
     .filter(a => types.includes(a.action_type))
     .reduce((sum, a) => sum + parseInt(a.value || '0', 10), 0);
-  const formLeads = sumActions(FORM_LEAD_ACTIONS);
-  const conversations = sumActions(CONVERSATION_ACTIONS);
+  const formLeads      = sumActions(META_FORM_ACTIONS);
+  const siteLeads      = sumActions(SITE_LEAD_ACTIONS);
+  const conversations  = sumActions(CONVERSATION_ACTIONS);
   return {
     spend: parseFloat(row.spend || '0'),
     impressions: parseInt(row.impressions || '0', 10),
     clicks: parseInt(row.clicks || '0', 10),
-    leads: formLeads + conversations,
+    leads: formLeads + siteLeads + conversations,
     formLeads,
+    siteLeads,
     conversations,
   };
 }
@@ -321,11 +325,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   // ── Meta Ads ───────────────────────────────────────────────────────────────
-  type MResult = { spend: number; impressions: number; clicks: number; leads: number; formLeads: number; conversations: number; cpl: number };
+  type MResult = { spend: number; impressions: number; clicks: number; leads: number; formLeads: number; siteLeads: number; conversations: number; cpl: number };
   let metaResult: MResult | null = null;
 
   if (metaLinks.length > 0) {
-    const allMetrics: Array<{ spend: number; impressions: number; clicks: number; leads: number; formLeads: number; conversations: number }> = [];
+    const allMetrics: Array<{ spend: number; impressions: number; clicks: number; leads: number; formLeads: number; siteLeads: number; conversations: number }> = [];
     await Promise.allSettled(
       metaLinks.map(async (link) => {
         const conn = metaConns.find(c => c.id === link.connection_id);
@@ -340,8 +344,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       const agg = allMetrics.reduce((a, m) => ({
         spend: a.spend + m.spend, impressions: a.impressions + m.impressions,
         clicks: a.clicks + m.clicks, leads: a.leads + m.leads,
-        formLeads: a.formLeads + m.formLeads, conversations: a.conversations + m.conversations, cpl: 0,
-      }), { spend: 0, impressions: 0, clicks: 0, leads: 0, formLeads: 0, conversations: 0, cpl: 0 });
+        formLeads: a.formLeads + m.formLeads, siteLeads: a.siteLeads + m.siteLeads,
+        conversations: a.conversations + m.conversations, cpl: 0,
+      }), { spend: 0, impressions: 0, clicks: 0, leads: 0, formLeads: 0, siteLeads: 0, conversations: 0, cpl: 0 });
       agg.cpl = agg.leads > 0 ? agg.spend / agg.leads : 0;
       metaResult = agg;
     }

@@ -276,10 +276,11 @@ function autoPartial(target: number, period: Period): number {
 }
 
 // ── KPI Card ────────────────────────────────────────────────────────────────
-function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: Icon, iconColor, iconBg, loading = false, inverseGoal = false, inverseChange = false }: {
+function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: Icon, iconColor, iconBg, loading = false, inverseGoal = false, inverseChange = false, footer }: {
   title: string; value: number; prevValue?: number; goalValue?: number;
   format?: 'currency' | 'number' | 'percent' | 'times';
   icon: React.ElementType; iconColor: string; iconBg: string; loading?: boolean; inverseGoal?: boolean; inverseChange?: boolean;
+  footer?: React.ReactNode;
 }) {
   const fmt = (v: number) =>
     format === 'currency' ? formatCurrencyBRL(v)
@@ -332,6 +333,7 @@ function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: 
               trend={change === null ? 'up' : change > 0 ? 'up' : change < 0 ? 'down' : 'flat'}
             />
           </div>
+          {footer && <div className="mt-2 pt-2 border-t border-white/5">{footer}</div>}
         </>
       )}
     </div>
@@ -2639,7 +2641,7 @@ export default function GeneralDashboard() {
   }, [selectedIds, period, customDateFrom, customDateTo, customReady]);
 
   // ── Aggregate metrics ────────────────────────────────────────────────────
-  let metaLeads = 0, metaFormLeads = 0, metaConversations = 0, metaSpend = 0, metaImpressions = 0, metaClicks = 0;
+  let metaLeads = 0, metaFormLeads = 0, metaSiteLeads = 0, metaConversations = 0, metaSpend = 0, metaImpressions = 0, metaClicks = 0;
   let googleConv = 0, googleCost = 0;
 
   for (const id of selectedIds) {
@@ -2647,6 +2649,7 @@ export default function GeneralDashboard() {
     if (m?.meta) {
       metaLeads += m.meta.leads;
       metaFormLeads += m.meta.formLeads ?? 0;
+      metaSiteLeads += (m.meta as { siteLeads?: number }).siteLeads ?? 0;
       metaConversations += m.meta.conversations ?? 0;
       metaSpend += m.meta.spend;
       metaImpressions += m.meta.impressions;
@@ -2961,7 +2964,23 @@ export default function GeneralDashboard() {
       <div className="grid items-start gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard title="Resultado" value={revenue} prevValue={prevTotalSpend > 0 ? undefined : undefined} goalValue={effectiveRevenueGoal > 0 ? effectiveRevenueGoal : undefined} format="currency" icon={DollarSign} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} />
         <KpiCard title="ROI" value={roi} prevValue={prevRoi > 0 ? prevRoi : undefined} goalValue={roiGoal > 0 ? roiGoal : undefined} format="times" icon={TrendingUp} iconColor="#a78bfa" iconBg="#a78bfa" loading={metricsLoading} />
-        <KpiCard title="Total de Leads" value={totalLeads} prevValue={prevTotalLeads > 0 ? prevTotalLeads : undefined} goalValue={effectiveLeadsGoal > 0 ? effectiveLeadsGoal : undefined} format="number" icon={Users} iconColor="#2dd4bf" iconBg="#2dd4bf" loading={metricsLoading} />
+        <KpiCard title="Total de Leads" value={totalLeads} prevValue={prevTotalLeads > 0 ? prevTotalLeads : undefined} goalValue={effectiveLeadsGoal > 0 ? effectiveLeadsGoal : undefined} format="number" icon={Users} iconColor="#2dd4bf" iconBg="#2dd4bf" loading={metricsLoading}
+          footer={
+            <div className="flex flex-wrap gap-x-3 gap-y-1">
+              {[
+                { label: 'Formulários', value: metaFormLeads, color: '#0668E1' },
+                { label: 'Site', value: metaSiteLeads, color: '#34A853' },
+                { label: 'Conversas', value: metaConversations, color: '#25D366' },
+                { label: 'Google', value: googleConv, color: '#EA4335' },
+              ].map(item => (
+                <span key={item.label} className="flex items-center gap-1 text-[10px] font-semibold text-muted-foreground">
+                  <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ background: item.color }} />
+                  {item.label}: {item.value.toLocaleString('pt-BR')}
+                </span>
+              ))}
+            </div>
+          }
+        />
         <KpiCard title="Custo por Lead" value={totalCostPerLead} prevValue={prevCpl > 0 ? prevCpl : undefined} goalValue={cplGoal > 0 ? cplGoal : undefined} format="currency" icon={Tag} iconColor="#94a3b8" iconBg="#94a3b8" loading={metricsLoading} inverseGoal inverseChange />
       </div>
 
