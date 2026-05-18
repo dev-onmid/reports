@@ -44,7 +44,7 @@ type Period = 'yesterday' | 'last_7d' | 'last_14d' | 'last_30d' | 'this_month' |
 type FunnelEntry = { date: string; stage: string; amount?: number };
 type ClientSheetsSummary = { entries: FunnelEntry[]; stages: string[] };
 type ApiMetrics = {
-  meta: { spend: number; impressions: number; clicks: number; leads: number; formLeads?: number; conversations?: number; cpl: number } | null;
+  meta: { spend: number; impressions: number; clicks: number; leads: number; formLeads?: number; siteLeads?: number; conversations?: number; cpl: number } | null;
   google: { cost: number; impressions: number; clicks: number; cpc: number; conversions: number; cpa: number } | null;
   crm?: { revenue: number; sales: number; leads: number; ticket: number } | null;
 };
@@ -2649,7 +2649,7 @@ export default function GeneralDashboard() {
     if (m?.meta) {
       metaLeads += m.meta.leads;
       metaFormLeads += m.meta.formLeads ?? 0;
-      metaSiteLeads += (m.meta as { siteLeads?: number }).siteLeads ?? 0;
+      metaSiteLeads += m.meta.siteLeads ?? 0;
       metaConversations += m.meta.conversations ?? 0;
       metaSpend += m.meta.spend;
       metaImpressions += m.meta.impressions;
