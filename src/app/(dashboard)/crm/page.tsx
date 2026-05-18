@@ -29,40 +29,89 @@ type CrmLead = {
 
 type Draft = Partial<Omit<CrmLead, 'id' | 'client_id' | 'created_at'>>;
 
-const STATUS_OPTIONS = ['Em Atendimento', 'Agendado', 'Reagendado', 'Fechado', 'Não Retorna', 'Distante', 'Sem Interesse', 'Desqualificado'];
-const CANAL_OPTIONS  = ['Facebook', 'Instagram', 'Google', 'WHATS PRINCIPAL', 'FACHADA', 'Outro'];
+const STATUS_OPTIONS = ['Em Atendimento', 'Agendado', 'Reagendado', 'Fechado', 'Comprou', 'Paciente', 'Não Retorna', 'Distante', 'Sem Interesse', 'Desqualificado'];
+const CANAL_OPTIONS  = ['Whatsapp', 'Facebook', 'Instagram', 'Google', 'WHATS PRINCIPAL', 'FACHADA', 'Indicação', 'Site', 'TikTok', 'YouTube', 'Outro'];
 const PAGAMENTO_OPTIONS = ['Boleto', 'Cartão', 'PIX', 'Dinheiro', 'Financiamento'];
 
-const STATUS_BADGE: Record<string, { pill: string; dot: string }> = {
-  'Em Atendimento': { pill: 'bg-blue-500/15 text-blue-400 border border-blue-500/25',   dot: 'bg-blue-400' },
-  'Agendado':       { pill: 'bg-amber-500/15 text-amber-400 border border-amber-500/25', dot: 'bg-amber-400' },
-  'Reagendado':     { pill: 'bg-orange-500/15 text-orange-400 border border-orange-500/25', dot: 'bg-orange-400' },
-  'Fechado':         { pill: 'bg-primary/15 text-primary border border-primary/25', dot: 'bg-primary' },
-  'Não Retorna':    { pill: 'bg-gray-500/15 text-gray-400 border border-gray-500/25',    dot: 'bg-gray-400' },
-  'Distante':       { pill: 'bg-gray-500/15 text-gray-400 border border-gray-500/25',    dot: 'bg-gray-400' },
-  'Sem Interesse':  { pill: 'bg-red-500/15 text-red-400 border border-red-500/25',       dot: 'bg-red-400' },
-  'Desqualificado': { pill: 'bg-red-500/15 text-red-400 border border-red-500/25',       dot: 'bg-red-400' },
+const STATUS_BADGE: Record<string, string> = {
+  'Em Atendimento': 'bg-sky-100 text-sky-900',
+  'Agendado':       'bg-blue-700 text-white',
+  'Reagendado':     'bg-sky-200 text-blue-800',
+  'Fechado':         'bg-emerald-700 text-white',
+  'Comprou':         'bg-emerald-700 text-white',
+  'Paciente':        'bg-zinc-200 text-zinc-800',
+  'Não Retorna':    'bg-zinc-700 text-white',
+  'Distante':       'bg-orange-500 text-black',
+  'Sem Interesse':  'bg-red-700 text-white',
+  'Desqualificado': 'bg-red-700 text-white',
 };
 
 const STATUS_COLOR: Record<string, string> = {
-  'Em Atendimento': 'text-blue-400',
-  'Agendado':       'text-amber-400',
-  'Reagendado':     'text-orange-400',
-  'Fechado':         'text-primary',
-  'Não Retorna':    'text-gray-400',
-  'Distante':       'text-gray-400',
+  'Em Atendimento': 'text-sky-300',
+  'Agendado':       'text-blue-400',
+  'Reagendado':     'text-sky-300',
+  'Fechado':         'text-emerald-400',
+  'Comprou':         'text-emerald-400',
+  'Paciente':        'text-zinc-300',
+  'Não Retorna':    'text-zinc-300',
+  'Distante':       'text-orange-400',
   'Sem Interesse':  'text-red-400',
   'Desqualificado': 'text-red-400',
 };
 
-const CANAL_BADGE: Record<string, { bg: string; short: string }> = {
-  'Facebook':        { bg: 'bg-[#1877F2]', short: 'fb' },
-  'Instagram':       { bg: 'bg-pink-600',  short: 'ig' },
-  'Google':          { bg: 'bg-red-500',   short: 'G'  },
-  'WHATS PRINCIPAL': { bg: 'bg-green-600', short: 'wp' },
-  'FACHADA':         { bg: 'bg-slate-500', short: 'fc' },
-  'Outro':           { bg: 'bg-purple-600',short: '?'  },
+type ChannelMatch = {
+  id: string;
+  label: string;
+  bg: string;
+  icon: React.ReactNode;
+  keywords: string[];
 };
+
+function IconWhatsapp() {
+  return (
+    <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" aria-hidden="true">
+      <path fill="currentColor" d="M10 2.4A7.2 7.2 0 0 0 3.8 13.2l-.9 3.3 3.4-.9A7.2 7.2 0 1 0 10 2.4Zm3.9 10.4c-.2.5-1.1.9-1.5 1-.4.1-.9.2-2.8-.6-2.3-1-3.8-3.4-3.9-3.6-.1-.1-.9-1.2-.9-2.3s.6-1.7.8-1.9c.2-.2.4-.3.6-.3h.4c.1 0 .3 0 .4.3.1.3.5 1.3.6 1.4 0 .1.1.3 0 .5l-.3.4c-.1.1-.2.3-.1.4.1.2.5.9 1.1 1.4.8.7 1.4.9 1.6 1 .1.1.3.1.4 0 .1-.2.5-.6.6-.8.2-.2.3-.2.5-.1l1.4.7c.3.1.4.2.5.3.1 0 .1.6-.1 1.1Z" />
+    </svg>
+  );
+}
+
+function IconFacebook() {
+  return (
+    <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" aria-hidden="true">
+      <path fill="currentColor" d="M11 5H9.6C8.7 5 8 5.7 8 6.6V8H6v2.5h2V17h3v-6.5h2.4L14 8h-3V6.8c0-.4.2-.6.6-.6H14V5h-3Z" />
+    </svg>
+  );
+}
+
+function IconInstagram() {
+  return (
+    <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" aria-hidden="true">
+      <rect x="3.2" y="3.2" width="13.6" height="13.6" rx="4" fill="none" stroke="currentColor" strokeWidth="1.6" />
+      <circle cx="10" cy="10" r="2.8" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <circle cx="14.2" cy="5.8" r="1" fill="currentColor" />
+    </svg>
+  );
+}
+
+function IconGoogleChannel() {
+  return <span className="text-[12px] font-black leading-none">G</span>;
+}
+
+function IconText({ value }: { value: string }) {
+  return <span className="text-[9px] font-black uppercase leading-none">{value}</span>;
+}
+
+const CHANNEL_MATCHES: ChannelMatch[] = [
+  { id: 'whatsapp',  label: 'WhatsApp',  bg: 'bg-[#25D366]', icon: <IconWhatsapp />,      keywords: ['whatsapp', 'whats', 'zap', 'wpp', 'whats principal'] },
+  { id: 'facebook',  label: 'Facebook',  bg: 'bg-[#1877F2]', icon: <IconFacebook />,      keywords: ['facebook', 'face', 'fb'] },
+  { id: 'instagram', label: 'Instagram', bg: 'bg-[#E1306C]', icon: <IconInstagram />,     keywords: ['instagram', 'insta', 'ig'] },
+  { id: 'google',    label: 'Google',    bg: 'bg-[#4285F4]', icon: <IconGoogleChannel />, keywords: ['google', 'adwords', 'pesquisa', 'gmb', 'google ads'] },
+  { id: 'fachada',   label: 'Fachada',   bg: 'bg-slate-500', icon: <IconText value="fc" />, keywords: ['fachada', 'passou em frente', 'frente', 'placa', 'loja'] },
+  { id: 'indicacao', label: 'Indicação', bg: 'bg-violet-600', icon: <IconText value="in" />, keywords: ['indicacao', 'indicação', 'indicado', 'recomendacao', 'recomendação'] },
+  { id: 'site',      label: 'Site',      bg: 'bg-cyan-600',  icon: <IconText value="www" />, keywords: ['site', 'website', 'landing', 'lp'] },
+  { id: 'tiktok',    label: 'TikTok',    bg: 'bg-zinc-900',  icon: <IconText value="tk" />, keywords: ['tiktok', 'tik tok'] },
+  { id: 'youtube',   label: 'YouTube',   bg: 'bg-red-600',   icon: <IconText value="yt" />, keywords: ['youtube', 'you tube'] },
+];
 
 function freshDraft(): Draft {
   return {
@@ -99,6 +148,19 @@ function fmtN(v: number | string | null) {
   return value ? formatCurrencyBRL(value) : '';
 }
 function plain(v: unknown) { return String(v ?? '').toLowerCase(); }
+function normalizeChannelText(v: string) {
+  return v
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+function detectChannels(value: string | null | undefined) {
+  const normalized = normalizeChannelText(value ?? '');
+  if (!normalized.trim()) return [];
+  return CHANNEL_MATCHES.filter(channel => (
+    channel.keywords.some(keyword => normalized.includes(normalizeChannelText(keyword)))
+  ));
+}
 function dateText(v: string | null) {
   const shortDate = fmtD(v);
   const rawDate = toD(v);
@@ -853,8 +915,8 @@ export default function CrmPage() {
                 {paginated.map((lead, idx) => {
                   const isEditing = editId === lead.id;
                   const d = isEditing ? editDraft : lead;
-                  const canal = lead.canal ? CANAL_BADGE[lead.canal] : null;
-                  const badge = lead.status ? STATUS_BADGE[lead.status] : null;
+                  const channels = detectChannels(lead.canal);
+                  const statusBadge = lead.status ? STATUS_BADGE[lead.status] ?? 'bg-zinc-600 text-white' : null;
                   return (
                     <tr
                       key={lead.id}
@@ -895,13 +957,24 @@ export default function CrmPage() {
                         {isEditing
                           ? <select value={d.canal ?? ''} onChange={e => setE('canal', e.target.value || null)} className={cellSel}>
                               <option value=""></option>
+                              {d.canal && !CANAL_OPTIONS.includes(String(d.canal)) && <option>{d.canal}</option>}
                               {CANAL_OPTIONS.map(o => <option key={o}>{o}</option>)}
                             </select>
-                          : canal
-                            ? <div className="px-2 flex items-center">
-                                <span className={cn('inline-flex h-6 w-6 items-center justify-center rounded-full text-[9px] font-bold text-white', canal.bg)}>
-                                  {canal.short}
-                                </span>
+                          : channels.length > 0
+                            ? <div className="flex items-center gap-1 px-2" title={lead.canal ?? undefined}>
+                                {channels.slice(0, 3).map(channel => (
+                                  <span
+                                    key={channel.id}
+                                    className={cn('inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-white shadow-sm ring-1 ring-white/10', channel.bg)}
+                                    title={channel.label}
+                                    aria-label={channel.label}
+                                  >
+                                    {channel.icon}
+                                  </span>
+                                ))}
+                                {channels.length > 3 && (
+                                  <span className="text-[10px] font-bold text-muted-foreground">+{channels.length - 3}</span>
+                                )}
                               </div>
                             : lead.canal
                               ? <span className="block truncate px-2 text-[11px] font-semibold text-primary" title={lead.canal}>{lead.canal}</span>
@@ -913,10 +986,9 @@ export default function CrmPage() {
                           ? <select value={d.status ?? ''} onChange={e => setE('status', e.target.value || null)} className={cn(cellSel, STATUS_COLOR[d.status ?? ''] ?? '')}>
                               {STATUS_OPTIONS.map(o => <option key={o}>{o}</option>)}
                             </select>
-                          : badge
+                          : statusBadge
                             ? <div className="px-1">
-                                <span className={cn('inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap', badge.pill)}>
-                                  <span className={cn('h-1.5 w-1.5 rounded-full shrink-0', badge.dot)} />
+                                <span className={cn('inline-flex items-center rounded-lg px-2.5 py-1 text-[10px] font-bold leading-none shadow-sm whitespace-nowrap', statusBadge)}>
                                   {lead.status}
                                 </span>
                               </div>
