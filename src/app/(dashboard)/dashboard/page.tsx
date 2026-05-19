@@ -2970,63 +2970,6 @@ export default function GeneralDashboard() {
       {/* AI RECOMMENDATIONS */}
       <AiRecommendationsBox insights={aiInsights} loading={aiLoading} onAnalyze={analyzeWithAI} />
 
-      {/* KPIs — Resultado + ROI (ocultos sem dados) + Leads + CPL */}
-      <div className={cn('grid gap-4 sm:grid-cols-2', revenue > 0 ? 'xl:grid-cols-4' : 'xl:grid-cols-2')}>
-        {revenue > 0 && (
-          <KpiCard title="Resultado" value={revenue} prevValue={prevTotalSpend > 0 ? undefined : undefined} goalValue={effectiveRevenueGoal > 0 ? effectiveRevenueGoal : undefined} format="currency" icon={DollarSign} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} />
-        )}
-        {revenue > 0 && (
-          <KpiCard title="ROI" value={roi} prevValue={prevRoi > 0 ? prevRoi : undefined} goalValue={roiGoal > 0 ? roiGoal : undefined} format="times" icon={TrendingUp} iconColor="#a78bfa" iconBg="#a78bfa" loading={metricsLoading} />
-        )}
-        <KpiCard title="Total de Leads" value={totalLeads} prevValue={prevTotalLeads > 0 ? prevTotalLeads : undefined} goalValue={effectiveLeadsGoal > 0 ? effectiveLeadsGoal : undefined} format="number" icon={Users} iconColor="#2dd4bf" iconBg="#2dd4bf" loading={metricsLoading}
-          footer={
-            <div className="flex flex-wrap gap-x-3 gap-y-1">
-              {[
-                { label: 'Formulários', value: metaFormLeads, color: '#0668E1' },
-                { label: 'Site', value: metaSiteLeads, color: '#34A853' },
-                { label: 'Conversas', value: metaConversations, color: '#25D366' },
-                { label: 'Google', value: googleConv, color: '#EA4335' },
-              ].map(item => (
-                <span key={item.label} className="flex items-center gap-1 text-[10px] font-semibold text-muted-foreground">
-                  <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ background: item.color }} />
-                  {item.label}: {item.value.toLocaleString('pt-BR')}
-                </span>
-              ))}
-            </div>
-          }
-        />
-        <KpiCard title="Custo por Lead" value={totalCostPerLead} prevValue={prevCpl > 0 ? prevCpl : undefined} goalValue={cplGoal > 0 ? cplGoal : undefined} format="currency" icon={Tag} iconColor="#94a3b8" iconBg="#94a3b8" loading={metricsLoading} inverseGoal inverseChange />
-      </div>
-
-      {/* KPIs — Leads Meta + CPL Meta + Conversões Google + Custo/Conv Google */}
-      {(metaSpend > 0 || metaLeads > 0 || googleCost > 0 || googleConv > 0) && (
-        <div className={cn(
-          'grid gap-4 sm:grid-cols-2',
-          (metaSpend > 0 || metaLeads > 0) && (googleCost > 0 || googleConv > 0) ? 'xl:grid-cols-4' : 'xl:grid-cols-2',
-        )}>
-          {(metaSpend > 0 || metaLeads > 0) && (
-            <>
-              <KpiCard title="Leads Meta Ads" value={metaLeads} prevValue={prevMetaLeads > 0 ? prevMetaLeads : undefined} format="number" icon={Target} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} />
-              <KpiCard title="CPL Meta Ads" value={avgCpl} format="currency" icon={Zap} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} inverseGoal inverseChange logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} />
-            </>
-          )}
-          {(googleCost > 0 || googleConv > 0) && (
-            <>
-              <KpiCard title="Conversões Google" value={googleConv} prevValue={prevGoogleConv > 0 ? prevGoogleConv : undefined} format="number" icon={BarChart3} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} />
-              <KpiCard title="Custo por Conversão Google" value={avgCpa} format="currency" icon={Briefcase} iconColor="#34A853" iconBg="#34A853" loading={metricsLoading} inverseGoal inverseChange logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} />
-            </>
-          )}
-        </div>
-      )}
-
-      {/* KPIs — Saldos + CTR + Gasto */}
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard title="Saldo Meta Ads" value={metaBalance} format="currency" icon={PiggyBank} iconColor="#0668E1" iconBg="#0668E1" loading={balancesLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} />
-        <KpiCard title="Saldo Google Ads" value={googleBalance} format="currency" icon={Wallet} iconColor="#34A853" iconBg="#34A853" loading={balancesLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} />
-        <KpiCard title="CTR Médio" value={avgCtr} format="percent" icon={MousePointerClick} iconColor="#f59e0b" iconBg="#f59e0b" loading={metricsLoading} />
-        <KpiCard title="Valor Gasto Total" value={totalSpend} format="currency" icon={CreditCard} iconColor="#e879f9" iconBg="#e879f9" loading={metricsLoading} />
-      </div>
-
       {/* AI ERROR */}
       {aiError && (
         <div className="rounded-xl border border-red-400/30 bg-red-500/5 px-4 py-3 text-xs text-red-400">{aiError}</div>
@@ -3060,57 +3003,56 @@ export default function GeneralDashboard() {
         </div>
       )}
 
-      {/* 3-COLUMN MIDDLE SECTION */}
-      <div className="grid items-stretch gap-4 xl:grid-cols-3">
-
-        {/* LEFT: Funil de Performance */}
-        <div className="flex min-h-[430px] flex-col rounded-2xl border border-white/5 bg-card p-5">
-          <div className="mb-5 flex items-start justify-between">
-            <div>
-              <p className="text-sm font-bold uppercase tracking-wider text-foreground">Funil de Performance</p>
-              <p className="mt-0.5 text-[11px] text-muted-foreground">Período: {PERIODS.find(p => p.value === period)?.label ?? period}</p>
-            </div>
+      {/* 1. MÉTRICAS GERAIS */}
+      <section className="rounded-2xl border border-white/5 bg-card p-5">
+        <div className="mb-4 flex items-center gap-3">
+          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-xs font-black text-black">1</span>
+          <div>
+            <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">Métricas Gerais</h2>
+            <p className="text-[11px] text-muted-foreground">Consolidado do período antes da leitura por canal.</p>
           </div>
+        </div>
+        <div className={cn('grid gap-4 sm:grid-cols-2', revenue > 0 ? 'xl:grid-cols-4' : 'xl:grid-cols-3')}>
+          {revenue > 0 && (
+            <KpiCard title="Resultado" value={revenue} goalValue={effectiveRevenueGoal > 0 ? effectiveRevenueGoal : undefined} format="currency" icon={DollarSign} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} />
+          )}
+          {revenue > 0 && (
+            <KpiCard title="ROI" value={roi} prevValue={prevRoi > 0 ? prevRoi : undefined} goalValue={roiGoal > 0 ? roiGoal : undefined} format="times" icon={TrendingUp} iconColor="#a78bfa" iconBg="#a78bfa" loading={metricsLoading} />
+          )}
+          <KpiCard title="Total de Leads" value={totalLeads} prevValue={prevTotalLeads > 0 ? prevTotalLeads : undefined} goalValue={effectiveLeadsGoal > 0 ? effectiveLeadsGoal : undefined} format="number" icon={Users} iconColor="#2dd4bf" iconBg="#2dd4bf" loading={metricsLoading} />
+          <KpiCard title="CPL Geral" value={totalCostPerLead} prevValue={prevCpl > 0 ? prevCpl : undefined} goalValue={cplGoal > 0 ? cplGoal : undefined} format="currency" icon={Tag} iconColor="#c084fc" iconBg="#c084fc" loading={metricsLoading} inverseGoal inverseChange />
+          <KpiCard title="Investimento Total" value={totalSpend} format="currency" icon={CreditCard} iconColor="#22d3ee" iconBg="#22d3ee" loading={metricsLoading} />
+          <KpiCard title="CTR Médio" value={avgCtr} format="percent" icon={MousePointerClick} iconColor="#f59e0b" iconBg="#f59e0b" loading={metricsLoading} />
+        </div>
+        <div className="mt-4 rounded-xl border border-white/5 bg-background/30 p-4">
+          <p className="text-sm font-bold uppercase tracking-wider text-foreground">Funil de Performance</p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">Período: {PERIODS.find(p => p.value === period)?.label ?? period}</p>
           {(() => {
-            // Pega os estágios do planejamento do primeiro cliente selecionado
             const firstId = [...selectedIds][0];
             const clientPlanning = firstId ? readPlanningFromStorage(firstId) : DEFAULT_PLANNING;
             const stages = clientPlanning.stages.length >= 2 ? clientPlanning.stages : DEFAULT_PLANNING.stages;
-
-            // Mapeia estágios do planejamento para valores do CRM
-            // stages[0] = Contatos/Leads → totalLeads
-            // stages[1..4] → funnelCounts por ordem do FUNNEL_ORDER
             const crmValues = [
               totalLeads,
-              funnelCounts[FUNNEL_ORDER[0]] ?? 0, // Atendimento
-              funnelCounts[FUNNEL_ORDER[1]] ?? 0, // Agendamento
-              funnelCounts[FUNNEL_ORDER[2]] ?? 0, // Comparecimento
-              funnelCounts[FUNNEL_ORDER[3]] ?? 0, // Fechamento
+              funnelCounts[FUNNEL_ORDER[0]] ?? 0,
+              funnelCounts[FUNNEL_ORDER[1]] ?? 0,
+              funnelCounts[FUNNEL_ORDER[2]] ?? 0,
+              funnelCounts[FUNNEL_ORDER[3]] ?? 0,
             ];
-
-            const totalReach = metaImpressions + googleImpressions;
-            const totalClicks = metaClicks + googleClicks;
-
             const funnelRows: { label: string; value: number; badge?: string }[] = [
-              { label: 'Alcance Total', value: totalReach, badge: 'Meta + Google' },
-              { label: 'Cliques Totais', value: totalClicks, badge: 'Meta + Google' },
-              ...stages.map((s, i) => ({
-                label: s.name.replace(/^\d+º\s*—\s*/, ''), // remove "5º — " prefix
-                value: crmValues[i] ?? 0,
-              })),
+              { label: 'Alcance Total', value: metaImpressions + googleImpressions, badge: 'Meta + Google' },
+              { label: 'Cliques Totais', value: metaClicks + googleClicks, badge: 'Meta + Google' },
+              ...stages.map((s, i) => ({ label: s.name.replace(/^\d+º\s*—\s*/, ''), value: crmValues[i] ?? 0 })),
             ];
-
             const maxVal = funnelRows[0]?.value || 1;
             const FUNNEL_COLORS = ['#4C1D95', '#5B21B6', '#6D28D9', '#7C3AED', '#8B5CF6', '#9333EA', '#A855F7'];
             return (
-              <div className="flex flex-1 flex-col justify-between gap-3">
+              <div className="mt-4 grid gap-3 lg:grid-cols-2">
                 {funnelRows.map((row, i) => {
                   const barPct = maxVal > 0 ? (row.value / maxVal) * 100 : 0;
                   const prev = funnelRows[i - 1]?.value;
                   const convPct = prev && prev > 0 ? ((row.value / prev) * 100).toFixed(1) : null;
-                  const indent = ((100 - barPct) / 2).toFixed(1);
                   return (
-                    <div key={row.label} className="space-y-1">
+                    <div key={row.label} className="space-y-1.5">
                       <div className="flex items-center justify-between text-[11px] font-semibold">
                         <div className="flex items-center gap-1.5">
                           <span className="text-foreground/80">{row.label}</span>
@@ -3121,15 +3063,8 @@ export default function GeneralDashboard() {
                           {convPct && <span className="text-emerald-400">{convPct}%</span>}
                         </div>
                       </div>
-                      <div className="relative h-7" style={{ paddingLeft: `${indent}%`, paddingRight: `${indent}%` }}>
-                        <div
-                          className="h-full rounded"
-                          style={{
-                            background: `linear-gradient(90deg, ${FUNNEL_COLORS[i % FUNNEL_COLORS.length]}, ${FUNNEL_COLORS[Math.min(i + 1, FUNNEL_COLORS.length - 1)]})`,
-                            boxShadow: `0 0 8px ${FUNNEL_COLORS[i % FUNNEL_COLORS.length]}60`,
-                            opacity: Math.max(0.55, 1 - i * 0.06),
-                          }}
-                        />
+                      <div className="h-2 overflow-hidden rounded-full bg-muted/40">
+                        <div className="h-full rounded-full" style={{ width: `${Math.max(4, barPct)}%`, background: FUNNEL_COLORS[i % FUNNEL_COLORS.length] }} />
                       </div>
                     </div>
                   );
@@ -3138,233 +3073,144 @@ export default function GeneralDashboard() {
             );
           })()}
         </div>
+      </section>
 
-        {/* CENTER: Meta Ads vs Google Ads — Circular gauges */}
-        {(() => {
-          const metaLeadCost = metaLeads > 0 ? metaSpend / metaLeads : null;
-          const googleLeadCost = googleConv > 0 ? googleCost / googleConv : null;
-          return (
-            <div className="flex min-h-[430px] flex-col rounded-2xl border border-white/5 bg-card p-5">
-              <div className="mb-4 flex items-start justify-between">
-                <div>
-                  <p className="text-sm font-bold uppercase tracking-wider text-foreground">Meta Ads vs Google Ads</p>
-                  <p className="mt-0.5 text-[11px] text-muted-foreground">Comparativo de performance</p>
-                </div>
-              </div>
+      {/* 2. META ADS */}
+      <section className="rounded-2xl border border-blue-500/40 bg-card p-5 shadow-[0_0_45px_rgba(6,104,225,0.08)]">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-600 text-xs font-black text-white">2</span>
+            <h2 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-foreground">
+              Meta Ads <MetaAdsMark className="h-5 w-5" />
+            </h2>
+          </div>
+          <p className="text-[11px] text-muted-foreground">{metaFormLeads.toLocaleString('pt-BR')} formulários + {metaConversations.toLocaleString('pt-BR')} conversas no período</p>
+        </div>
 
-              {/* Platform cards */}
-              <div className="grid flex-1 grid-cols-2 gap-3">
-                {/* Meta */}
-                <div className="flex flex-col rounded-xl border border-white/5 bg-background/40 p-4">
-                  <div className="flex items-center gap-1.5 mb-3">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src="/brand/meta-ads-logo.webp" alt="Meta" className="h-5 w-auto object-contain" />
-                    <span className="text-xs font-bold text-foreground">META ADS</span>
-                  </div>
-                  <div className="flex flex-1 items-center justify-center py-2">
-                    <CircularQuality pct={metricsLoading ? 0 : Math.round(metaLeads > 0 ? Math.min((metaLeads / Math.max(metaLeads + googleConv, 1)) * 100, 100) : 0)} color="#0B84FF" size={180} />
-                  </div>
-                  <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2.5 text-xs border-t border-white/5 pt-3">
-                    <div><p className="text-muted-foreground leading-none mb-0.5">Investimento</p><p className="font-bold">{formatCurrencyBRL(metaSpend)}</p></div>
-                    <div><p className="text-muted-foreground leading-none mb-0.5">Leads</p><p className="font-bold">{metaLeads.toLocaleString('pt-BR')}</p></div>
-                    <div><p className="text-muted-foreground leading-none mb-0.5">CPL</p><p className={cn('font-bold', metaLeadCost !== null && metaLeadCost > 0 ? 'text-foreground' : 'text-muted-foreground')}>{metaLeadCost !== null ? formatCurrencyBRL(metaLeadCost) : '—'}</p></div>
-                    <div><p className="text-muted-foreground leading-none mb-0.5">ROI</p><p className={cn('font-bold', metaRoi > 0 ? 'text-emerald-400' : 'text-muted-foreground')}>{metaRoi.toFixed(2)}x</p></div>
-                  </div>
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <KpiCard title="Leads Meta Ads" value={metaLeads} prevValue={prevMetaLeads > 0 ? prevMetaLeads : undefined} format="number" icon={Target} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} />
+          <KpiCard title="CPL Meta Ads" value={avgCpl} format="currency" icon={Zap} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} inverseGoal inverseChange logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} />
+          <KpiCard title="Saldo Meta Ads" value={metaBalance} format="currency" icon={PiggyBank} iconColor="#0668E1" iconBg="#0668E1" loading={balancesLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} />
+          <KpiCard title="Gasto Meta Ads" value={metaSpend} format="currency" icon={Wallet} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} />
+          <KpiCard title="CTR Meta Ads" value={metaCtr} format="percent" icon={MousePointerClick} iconColor="#38bdf8" iconBg="#38bdf8" loading={metricsLoading} />
+          <KpiCard title="CPC Meta Ads" value={metaCpc} format="currency" icon={MousePointerClick} iconColor="#7dd3fc" iconBg="#7dd3fc" loading={metricsLoading} inverseGoal inverseChange />
+          <KpiCard title="Impressões Meta" value={metaImpressions} format="number" icon={BarChart3} iconColor="#60a5fa" iconBg="#60a5fa" loading={metricsLoading} />
+          <KpiCard title="Cliques Meta" value={metaClicks} format="number" icon={MousePointerClick} iconColor="#93c5fd" iconBg="#93c5fd" loading={metricsLoading} />
+        </div>
+
+        <div className="mt-4 grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+          <div className="rounded-xl border border-white/5 bg-background/30 p-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Campanhas Meta Ads</p>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Ordenar por</span>
+                <div className="flex overflow-hidden rounded-lg border border-white/5 bg-background/40">
+                  {SORT_OPTIONS.map(opt => (
+                    <button key={opt.value} onClick={() => setCampaignSortBy(opt.value)}
+                      className={cn('px-3 py-1.5 text-[11px] font-semibold transition-colors', campaignSortBy === opt.value ? 'bg-primary text-black shadow-[0_0_10px_rgba(85,245,47,0.28)]' : 'text-muted-foreground hover:text-foreground')}>
+                      {opt.label}
+                    </button>
+                  ))}
                 </div>
-                {/* Google */}
-                <div className="flex flex-col rounded-xl border border-white/5 bg-background/40 p-4">
-                  <div className="flex items-center gap-1.5 mb-3">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src="/brand/google-ads-logo.png" alt="Google" className="h-5 w-auto object-contain" />
-                    <span className="text-xs font-bold text-foreground">GOOGLE ADS</span>
-                  </div>
-                  <div className="flex flex-1 items-center justify-center py-2">
-                    <CircularQuality pct={metricsLoading ? 0 : Math.round(googleConv > 0 ? Math.min((googleConv / Math.max(metaLeads + googleConv, 1)) * 100, 100) : 0)} color="#EA4335" size={180} />
-                  </div>
-                  {googleCost === 0 && !metricsLoading ? (
-                    <p className="mt-3 text-[11px] text-muted-foreground border-t border-white/5 pt-3">Sem investimento no período</p>
-                  ) : (
-                    <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2.5 text-xs border-t border-white/5 pt-3">
-                      <div><p className="text-muted-foreground leading-none mb-0.5">Investimento</p><p className="font-bold">{formatCurrencyBRL(googleCost)}</p></div>
-                      <div><p className="text-muted-foreground leading-none mb-0.5">Conversões</p><p className="font-bold">{googleConv.toLocaleString('pt-BR')}</p></div>
-                      <div><p className="text-muted-foreground leading-none mb-0.5">CPA</p><p className={cn('font-bold', googleLeadCost !== null && googleLeadCost > 0 ? 'text-foreground' : 'text-muted-foreground')}>{googleLeadCost !== null ? formatCurrencyBRL(googleLeadCost) : '—'}</p></div>
-                      <div><p className="text-muted-foreground leading-none mb-0.5">ROI</p><p className={cn('font-bold', googleRoi > 0 ? 'text-emerald-400' : 'text-muted-foreground')}>{googleRoi.toFixed(2)}x</p></div>
-                    </div>
-                  )}
-                </div>
+                {campaignsLoading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
               </div>
             </div>
-          );
-        })()}
-
-        {/* RIGHT: Resumo de Público */}
-        <div className="flex min-h-[430px] flex-col rounded-2xl border border-white/5 bg-card p-5">
-          <p className="text-sm font-bold uppercase tracking-wider text-foreground">Resumo de Público</p>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">Total de pessoas alcançadas</p>
-          <div className="mt-2 flex items-baseline gap-2">
-            <p className="font-heading font-normal text-4xl text-foreground">{metaImpressions.toLocaleString('pt-BR')}</p>
-            {pctChange(metaImpressions, prevMetaSpend > 0 ? metaImpressions * 0.92 : 0) !== null && prevMetaSpend > 0 && (
-              <span className="text-sm font-semibold text-emerald-400">+8,2% vs mês passado</span>
-            )}
+            <CampaignPerformanceTable campaigns={metaCampaigns} loading={campaignsLoading} period={period} dateFrom={customDateFrom} dateTo={customDateTo} />
           </div>
-          <div className="mt-6 flex flex-1 items-center">
-            {audienceLoading ? (
-              <div className="flex w-full justify-center"><div className="h-44 w-44 animate-pulse rounded-full bg-muted/30" /></div>
+          <AudiencePlatformBlock title="Meta Ads" description="Recortes por idade, gênero, plataforma e dispositivo." color="#0B84FF" colors={META_AUDIENCE_COLORS} data={audience.meta} />
+        </div>
+
+        <div className="mt-4 rounded-xl border border-white/5 bg-background/30 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Criativos Meta Ads</p>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">Anúncios e previews com melhor desempenho no período selecionado.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Ordenar por</span>
+              <div className="flex overflow-hidden rounded-lg border border-border">
+                {([{ value: 'spend' as SortKey, label: 'Investimento' }, { value: 'leads' as SortKey, label: 'Leads' }, { value: 'cpl' as SortKey, label: 'CPL' }, { value: 'ctr' as SortKey, label: 'CTR' }]).map(opt => (
+                  <button key={opt.value} onClick={() => setSortBy(opt.value)}
+                    className={cn('px-3 py-1.5 text-[11px] font-semibold transition-colors', sortBy === opt.value ? 'bg-primary text-black' : 'bg-card text-muted-foreground hover:bg-muted/50')}>
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              {creativesLoading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+            </div>
+          </div>
+          <div className="mt-4">
+            {creativesLoading ? (
+              <div className="flex gap-3 overflow-hidden">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className="w-[175px] shrink-0 animate-pulse rounded-xl border border-border bg-muted/10">
+                    <div className="bg-muted/30 rounded-t-xl" style={{ aspectRatio: '9/16' }} />
+                    <div className="p-2.5 space-y-2"><div className="h-3 bg-muted/40 rounded w-3/4" /></div>
+                  </div>
+                ))}
+              </div>
+            ) : creatives.length === 0 ? (
+              <div className="py-10 text-center">
+                <ImageIcon className="mx-auto mb-2 h-8 w-8 text-muted-foreground/30" />
+                <p className="text-sm text-muted-foreground">Nenhum criativo encontrado.</p>
+                <p className="mt-1 text-xs text-muted-foreground/60">Conecte uma conta Meta Ads em Integrações.</p>
+              </div>
             ) : (
-              (() => {
-                const ageData = audience.meta.age;
-                const total = ageData.reduce((s, d) => s + d.value, 0);
-                if (ageData.length === 0) return <p className="py-4 text-xs text-muted-foreground">Sem dados de público no período.</p>;
-                let curAngle = 0;
-                const slices = ageData.map((d, i) => {
-                  const ang = total > 0 ? (d.value / total) * 360 : 0;
-                  const s = {
-                    ...d,
-                    color: META_AUDIENCE_COLORS[i % META_AUDIENCE_COLORS.length],
-                    pct: total > 0 ? Math.round((d.value / total) * 100) : 0,
-                    startAngle: curAngle,
-                    endAngle: curAngle + ang,
-                  };
-                  curAngle += ang;
-                  return s;
-                });
-                return (
-                  <div className="flex w-full items-center gap-8">
-                    <svg viewBox="0 0 120 120" className="h-48 w-48 shrink-0 -rotate-90 overflow-visible">
-                      {slices.map(sl => (
-                        <path key={sl.label} d={describeDonutSlice(60, 60, 56, 30, sl.startAngle, sl.endAngle)} fill={sl.color} />
-                      ))}
-                      <circle cx="60" cy="60" r="27" className="fill-card" />
-                      <text x="60" y="64" textAnchor="middle" fontSize="13" fontWeight="bold" className="fill-foreground" transform="rotate(90,60,60)">
-                        {(metaImpressions / 1000).toFixed(0)}K
-                      </text>
-                    </svg>
-                    <div className="flex-1 space-y-4">
-                      {slices.slice(0, 6).map(sl => (
-                        <div key={sl.label} className="flex items-center gap-3 text-base">
-                          <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: sl.color }} />
-                          <span className="min-w-0 flex-1 truncate text-muted-foreground">{sl.label}</span>
-                          <span className="font-bold text-foreground">{sl.pct}%</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })()
+              <div className="flex gap-3 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
+                {creatives.map((c, idx) => (
+                  <CreativeCarouselCard key={c.adId} creative={c} idx={idx} sortBy={sortBy} onPreview={setPreviewCreative} />
+                ))}
+              </div>
             )}
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* CRIATIVOS COM MELHOR PERFORMANCE */}
-      <div className="rounded-2xl border border-white/5 bg-card p-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="text-sm font-bold uppercase tracking-wider text-foreground">Criativos com Melhor Performance</p>
-            <p className="mt-0.5 text-[11px] text-muted-foreground">Anúncios e previews com melhor desempenho no período selecionado</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Ordenar por</span>
-            <div className="flex overflow-hidden rounded-lg border border-border">
-              {([{ value: 'spend' as SortKey, label: 'Investimento' }, { value: 'leads' as SortKey, label: 'Leads' }, { value: 'cpl' as SortKey, label: 'CPL' }, { value: 'ctr' as SortKey, label: 'CTR' }]).map(opt => (
-                <button key={opt.value} onClick={() => setSortBy(opt.value)}
-                  className={cn('px-3 py-1.5 text-[11px] font-semibold transition-colors', sortBy === opt.value ? 'bg-primary text-black' : 'bg-card text-muted-foreground hover:bg-muted/50')}>
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-            {creativesLoading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
-          </div>
+      {/* 3. GOOGLE ADS */}
+      <section className="rounded-2xl border border-red-500/40 bg-card p-5 shadow-[0_0_45px_rgba(234,67,53,0.08)]">
+        <div className="mb-4 flex items-center gap-3">
+          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-red-600 text-xs font-black text-white">3</span>
+          <h2 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-foreground">
+            Google Ads <GoogleAdsMark className="h-5 w-5" />
+          </h2>
         </div>
-        <div className="mt-4">
-          {creativesLoading ? (
-            <div className="flex gap-3 overflow-hidden">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className="w-[175px] shrink-0 animate-pulse rounded-xl border border-border bg-muted/10">
-                  <div className="bg-muted/30 rounded-t-xl" style={{ aspectRatio: '9/16' }} />
-                  <div className="p-2.5 space-y-2"><div className="h-3 bg-muted/40 rounded w-3/4" /></div>
+
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <KpiCard title="Conversões Google" value={googleConv} prevValue={prevGoogleConv > 0 ? prevGoogleConv : undefined} format="number" icon={BarChart3} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} />
+          <KpiCard title="Custo por Conversão" value={avgCpa} format="currency" icon={Briefcase} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} inverseGoal inverseChange logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} />
+          <KpiCard title="Saldo Google Ads" value={googleBalance} format="currency" icon={Wallet} iconColor="#EA4335" iconBg="#EA4335" loading={balancesLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} />
+          <KpiCard title="Gasto Google Ads" value={googleCost} format="currency" icon={CreditCard} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} />
+          <KpiCard title="CTR Google Ads" value={googleCtrValue} format="percent" icon={MousePointerClick} iconColor="#f59e0b" iconBg="#f59e0b" loading={metricsLoading} />
+          <KpiCard title="CPC Google Ads" value={googleCpc} format="currency" icon={MousePointerClick} iconColor="#34A853" iconBg="#34A853" loading={metricsLoading} inverseGoal inverseChange />
+          <KpiCard title="Impressões Google" value={googleImpressions} format="number" icon={BarChart3} iconColor="#4285F4" iconBg="#4285F4" loading={metricsLoading} />
+          <KpiCard title="Cliques Google" value={googleClicks} format="number" icon={MousePointerClick} iconColor="#FBBC05" iconBg="#FBBC05" loading={metricsLoading} />
+        </div>
+
+        <div className="mt-4 grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+          <div className="rounded-xl border border-white/5 bg-background/30 p-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Campanhas Google Ads</p>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Ordenar por</span>
+                <div className="flex overflow-hidden rounded-lg border border-white/5 bg-background/40">
+                  {SORT_OPTIONS.map(opt => (
+                    <button key={opt.value} onClick={() => setCampaignSortBy(opt.value)}
+                      className={cn('px-3 py-1.5 text-[11px] font-semibold transition-colors', campaignSortBy === opt.value ? 'bg-primary text-black shadow-[0_0_10px_rgba(85,245,47,0.28)]' : 'text-muted-foreground hover:text-foreground')}>
+                      {opt.label}
+                    </button>
+                  ))}
                 </div>
-              ))}
+                {campaignsLoading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+              </div>
             </div>
-          ) : creatives.length === 0 ? (
-            <div className="py-10 text-center">
-              <ImageIcon className="mx-auto mb-2 h-8 w-8 text-muted-foreground/30" />
-              <p className="text-sm text-muted-foreground">Nenhum criativo encontrado.</p>
-              <p className="mt-1 text-xs text-muted-foreground/60">Conecte uma conta Meta Ads em Integrações.</p>
-            </div>
-          ) : (
-            <div className="flex gap-3 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
-              {creatives.map((c, idx) => (
-                <CreativeCarouselCard key={c.adId} creative={c} idx={idx} sortBy={sortBy} onPreview={setPreviewCreative} />
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* CAMPANHAS E AUDIÊNCIA — seções detalhadas */}
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-        <SortableContext items={widgetOrder} strategy={verticalListSortingStrategy}>
-          <div className="grid gap-8">
-            {widgetOrder.map(id => (
-              <SortableWidget key={id} id={id} editMode={editMode} collapsed={collapsedWidgets.has(id)} onToggleCollapse={() => toggleCollapse(id)}>
-                {id === 'meta' && (
-                  <MetricSection title="Campanhas Meta Ads" description={`${metaFormLeads.toLocaleString('pt-BR')} formulários + ${metaConversations.toLocaleString('pt-BR')} conversas no período`} accent="#0B84FF">
-                    <div className="space-y-4">
-                      <div className="space-y-3">
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                          <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Campanhas ativas</p>
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Ordenar por</span>
-                            <div className="flex overflow-hidden rounded-lg border border-white/5 bg-background/40">
-                              {SORT_OPTIONS.map(opt => (
-                                <button key={opt.value} onClick={() => setCampaignSortBy(opt.value)}
-                                  className={cn('px-3 py-1.5 text-[11px] font-semibold transition-colors', campaignSortBy === opt.value ? 'bg-primary text-black shadow-[0_0_10px_rgba(85,245,47,0.28)]' : 'text-muted-foreground hover:text-foreground')}>
-                                  {opt.label}
-                                </button>
-                              ))}
-                            </div>
-                            {campaignsLoading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
-                          </div>
-                        </div>
-                        <CampaignPerformanceTable campaigns={metaCampaigns} loading={campaignsLoading} period={period} dateFrom={customDateFrom} dateTo={customDateTo} />
-                      </div>
-                      <AudiencePlatformBlock title="Meta Ads" description="Recortes por idade, gênero, plataforma e dispositivo." color="#0B84FF" colors={META_AUDIENCE_COLORS} data={audience.meta} />
-                    </div>
-                  </MetricSection>
-                )}
-                {id === 'google' && (
-                  <MetricSection title="Campanhas Google Ads" description="Conversões e custos vindos das contas Google Ads vinculadas." accent="#55F52F">
-                    <div className="space-y-4">
-                      <div className="space-y-3">
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                          <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Campanhas ativas</p>
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Ordenar por</span>
-                            <div className="flex overflow-hidden rounded-lg border border-white/5 bg-background/40">
-                              {SORT_OPTIONS.map(opt => (
-                                <button key={opt.value} onClick={() => setCampaignSortBy(opt.value)}
-                                  className={cn('px-3 py-1.5 text-[11px] font-semibold transition-colors', campaignSortBy === opt.value ? 'bg-primary text-black shadow-[0_0_10px_rgba(85,245,47,0.28)]' : 'text-muted-foreground hover:text-foreground')}>
-                                  {opt.label}
-                                </button>
-                              ))}
-                            </div>
-                            {campaignsLoading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
-                          </div>
-                        </div>
-                        <CampaignPerformanceTable campaigns={googleCampaigns} loading={campaignsLoading} period={period} dateFrom={customDateFrom} dateTo={customDateTo} />
-                      </div>
-                      <TopKeywordsTable keywords={keywords} loading={keywordsLoading} />
-                      <AudiencePlatformBlock title="Google Ads" description="Recortes por idade, gênero, plataforma, dispositivo e conversões." color="#EA4335" colors={GOOGLE_AUDIENCE_COLORS} data={audience.google} extraKeys={['platformConversions', 'deviceConversions']} />
-                    </div>
-                  </MetricSection>
-                )}
-                {(id === 'general' || id === 'funnel') && null}
-              </SortableWidget>
-            ))}
+            <CampaignPerformanceTable campaigns={googleCampaigns} loading={campaignsLoading} period={period} dateFrom={customDateFrom} dateTo={customDateTo} />
           </div>
-        </SortableContext>
-      </DndContext>
+          <div className="space-y-4">
+            <TopKeywordsTable keywords={keywords} loading={keywordsLoading} />
+            <AudiencePlatformBlock title="Google Ads" description="Recortes por idade, gênero, plataforma, dispositivo e conversões." color="#EA4335" colors={GOOGLE_AUDIENCE_COLORS} data={audience.google} extraKeys={['platformConversions', 'deviceConversions']} />
+          </div>
+        </div>
+      </section>
 
       {/* Resumo por cliente */}
       {selectedClients.length > 1 && (
