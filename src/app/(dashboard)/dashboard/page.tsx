@@ -259,7 +259,7 @@ function PlatformMarkForText({ text }: { text: string }) {
 
 function PlatformTableIcon({ platform }: { platform: AdsPlatform }) {
   return (
-    <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-white/5 bg-background/50">
+    <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-white/15 bg-white/10 shadow-[0_0_18px_rgba(255,255,255,0.12)]">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={platform === 'meta' ? '/brand/meta-ads-logo.webp' : '/brand/google-ads-logo.png'}
@@ -301,16 +301,20 @@ function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: 
     : null;
   const goalGood = goalProgress !== null && goalProgress >= 100;
   return (
-    <div className="relative h-full overflow-hidden rounded-2xl border border-white/5 bg-card p-5">
-      <div className="pointer-events-none absolute inset-0" style={{ background: `radial-gradient(circle at 85% 15%, ${iconBg}18, transparent 55%)` }} />
+    <div
+      className="relative h-full overflow-hidden rounded-2xl border bg-[#070B14] p-5 shadow-[0_22px_70px_rgba(0,0,0,0.38)]"
+      style={{ borderColor: `${iconBg}66`, boxShadow: `0 0 34px ${iconBg}24, 0 22px 70px rgba(0,0,0,0.38)` }}
+    >
+      <div className="pointer-events-none absolute inset-0" style={{ background: `linear-gradient(135deg, ${iconBg}24, transparent 42%), radial-gradient(circle at 86% 14%, ${iconBg}44, transparent 42%)` }} />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px" style={{ background: `linear-gradient(90deg, transparent, ${iconBg}, transparent)` }} />
       <div className="flex items-start justify-between gap-2">
-        <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">{title}</p>
+        <p className="text-[11px] font-bold uppercase tracking-widest text-foreground/90">{title}</p>
         {logo ? (
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl" style={{ background: `${iconBg}18` }}>
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/15" style={{ background: `${iconBg}2B`, boxShadow: `0 0 22px ${iconBg}55` }}>
             {logo}
           </span>
         ) : (
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl" style={{ background: `${iconBg}25` }}>
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/15" style={{ background: `${iconBg}30`, boxShadow: `0 0 22px ${iconBg}55` }}>
             <Icon className="h-[18px] w-[18px]" style={{ color: iconColor }} />
           </span>
         )}
@@ -345,7 +349,7 @@ function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: 
               />
             </div>
           )}
-          {footer && <div className="mt-2 pt-2 border-t border-white/5">{footer}</div>}
+          {footer && <div className="mt-2 border-t border-white/10 pt-2">{footer}</div>}
         </>
       )}
     </div>
@@ -373,16 +377,17 @@ function TargetSummaryCard({
   const targetPct = target > 0 ? Math.min(100, Math.round((value / target) * 100)) : 0;
   const progress = Math.max(0, Math.min(100, targetPct));
   return (
-    <div className="relative overflow-hidden rounded-xl border bg-background/35 p-5" style={{ borderColor: `${accent}66`, boxShadow: `0 0 30px ${accent}14` }}>
-      <div className="pointer-events-none absolute inset-0" style={{ background: `radial-gradient(circle at 18% 0%, ${accent}16, transparent 34%)` }} />
+    <div className="relative overflow-hidden rounded-xl border bg-[#06100D] p-5" style={{ borderColor: `${accent}99`, boxShadow: `0 0 42px ${accent}33, inset 0 0 36px ${accent}12` }}>
+      <div className="pointer-events-none absolute inset-0" style={{ background: `linear-gradient(140deg, ${accent}24, transparent 46%), radial-gradient(circle at 18% 0%, ${accent}55, transparent 34%)` }} />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px" style={{ background: `linear-gradient(90deg, transparent, ${accent}, transparent)` }} />
       <div className="relative flex items-start justify-between gap-3">
         <div className="flex items-center gap-3">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full" style={{ background: `${accent}24`, color: accent, boxShadow: `0 0 18px ${accent}33` }}>
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/15" style={{ background: `${accent}35`, color: accent, boxShadow: `0 0 24px ${accent}88` }}>
             <Icon className="h-4 w-4" />
           </span>
           <p className="text-sm font-bold uppercase tracking-widest text-foreground">{title}</p>
         </div>
-        <span className="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-white/5 text-muted-foreground">
+        <span className="flex h-7 w-7 items-center justify-center rounded-full border border-white/15 bg-white/10 text-foreground/70">
           <CircleDot className="h-3.5 w-3.5" />
         </span>
       </div>
@@ -394,11 +399,11 @@ function TargetSummaryCard({
         ].map(item => (
           <div key={item.label} className="min-w-0">
             <p className="truncate text-base font-semibold text-foreground">{item.val > 0 ? fmt(item.val) : '—'}</p>
-            <p className="mt-1 text-xs font-semibold text-muted-foreground">{item.label}</p>
+            <p className="mt-1 text-xs font-semibold text-foreground/65">{item.label}</p>
           </div>
         ))}
       </div>
-      <div className="relative mt-5 h-8 overflow-hidden rounded-lg border" style={{ borderColor: `${accent}55`, background: `${accent}12` }}>
+      <div className="relative mt-5 h-8 overflow-hidden rounded-lg border" style={{ borderColor: `${accent}99`, background: `${accent}18`, boxShadow: `inset 0 0 18px ${accent}20` }}>
         <div
           className="flex h-full items-center justify-center rounded-md text-sm font-black text-black transition-all"
           style={{
@@ -432,17 +437,18 @@ function CompactInfoCard({
   helper?: string;
 }) {
   return (
-    <div className="rounded-xl border border-white/5 bg-background/35 p-4">
+    <div className="relative overflow-hidden rounded-xl border bg-[#070B14] p-4" style={{ borderColor: `${color}66`, boxShadow: `0 0 28px ${color}1F` }}>
+      <div className="pointer-events-none absolute inset-0" style={{ background: `radial-gradient(circle at 86% 12%, ${color}40, transparent 44%)` }} />
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{title}</p>
+        <div className="relative">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-foreground/75">{title}</p>
           <p className="mt-2 font-heading text-2xl leading-none text-foreground">{typeof value === 'number' ? value.toLocaleString('pt-BR') : value}</p>
         </div>
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ background: `${color}20`, color }}>
+        <span className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/15" style={{ background: `${color}35`, color, boxShadow: `0 0 22px ${color}66` }}>
           <Icon className="h-[18px] w-[18px]" />
         </span>
       </div>
-      {helper && <p className="mt-2 text-[10px] text-muted-foreground">{helper}</p>}
+      {helper && <p className="relative mt-2 text-[10px] text-foreground/55">{helper}</p>}
     </div>
   );
 }
@@ -600,8 +606,9 @@ function MetricSection({
   children: ReactNode;
 }) {
   return (
-    <section className="relative overflow-hidden rounded-2xl border border-white/5 bg-card p-5">
-      <div className="pointer-events-none absolute inset-0" style={{ background: `radial-gradient(circle at 92% 0%, ${accent}12, transparent 36%)` }} />
+    <section className="relative overflow-hidden rounded-2xl border bg-[#050914] p-5" style={{ borderColor: `${accent}66`, boxShadow: `0 0 48px ${accent}22` }}>
+      <div className="pointer-events-none absolute inset-0" style={{ background: `linear-gradient(135deg, ${accent}20, transparent 44%), radial-gradient(circle at 92% 0%, ${accent}4D, transparent 36%)` }} />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px" style={{ background: `linear-gradient(90deg, transparent, ${accent}, transparent)` }} />
       <div className="relative mb-5 flex items-end justify-between gap-4">
         {title && (
         <div>
@@ -609,7 +616,7 @@ function MetricSection({
             <PlatformMarkForText text={title} />
             <span>{title}</span>
           </h2>
-          {description && <p className="mt-0.5 text-[11px] text-muted-foreground">{description}</p>}
+          {description && <p className="mt-0.5 text-[11px] text-foreground/60">{description}</p>}
         </div>
         )}
       </div>
@@ -658,42 +665,42 @@ function MetricTile({
 
   return (
     <div className={cn(
-      'relative flex flex-col overflow-hidden rounded-xl border border-border bg-card/95 p-8 shadow-[0_22px_80px_rgba(0,0,0,0.18)]',
+      'relative flex flex-col overflow-hidden rounded-xl border bg-[#070B14] p-8 shadow-[0_22px_80px_rgba(0,0,0,0.38)]',
       hasProgressPanel ? 'min-h-[320px]' : 'min-h-[260px]'
     )}>
-      <div className="absolute inset-x-0 top-0 h-1" style={{ backgroundColor: hasProgressPanel ? progressColor : accent }} />
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_85%_18%,rgba(123,44,255,0.10),transparent_40%)]" />
+      <div className="absolute inset-x-0 top-0 h-1" style={{ backgroundColor: hasProgressPanel ? progressColor : accent, boxShadow: `0 0 24px ${hasProgressPanel ? progressColor : accent}` }} />
+      <div className="pointer-events-none absolute inset-0" style={{ background: `linear-gradient(135deg, ${accent}22, transparent 42%), radial-gradient(circle at 85% 18%, ${accent}44, transparent 40%)` }} />
       <div className="relative flex h-full flex-col">
         <p className="flex items-center gap-2 text-lg font-bold text-foreground">
           <PlatformMarkForText text={title} />
           <span>{title}</span>
         </p>
-        {description && <p className="mt-1 text-[11px] text-foreground/75">{description}</p>}
+        {description && <p className="mt-1 text-[11px] text-foreground/65">{description}</p>}
         {loading ? (
-          <div className="mt-8 flex flex-1 items-center rounded-lg border border-border bg-background/70 p-7">
+          <div className="mt-8 flex flex-1 items-center rounded-lg border border-white/15 bg-black/35 p-7">
             <div className="flex items-center gap-2 text-muted-foreground/60">
               <RefreshCw className="h-3.5 w-3.5 animate-spin" />
               <span className="text-xs">Carregando...</span>
             </div>
           </div>
         ) : hasProgressPanel ? (
-          <div className="mt-8 flex flex-1 flex-col justify-center rounded-lg border border-border bg-background/70 p-8">
+          <div className="mt-8 flex flex-1 flex-col justify-center rounded-lg border border-white/15 bg-black/35 p-8">
             <div className={cn('grid gap-8 text-center', partial !== undefined ? 'sm:grid-cols-3' : 'sm:grid-cols-2')}>
               {meta !== undefined && (
                 <div>
                   <p className="font-heading font-normal text-2xl leading-none text-foreground">{meta > 0 ? fmt(meta) : 'Sem meta'}</p>
-                  <p className="mt-2 text-sm font-bold text-muted-foreground">Meta</p>
+                  <p className="mt-2 text-sm font-bold text-foreground/60">Meta</p>
                 </div>
               )}
               {partial !== undefined && (
                 <div>
                   <p className="font-heading font-normal text-2xl leading-none text-foreground">{partial > 0 ? fmt(partial) : '—'}</p>
-                  <p className="mt-2 text-sm font-bold text-muted-foreground">Meta Parcial</p>
+                  <p className="mt-2 text-sm font-bold text-foreground/60">Meta Parcial</p>
                 </div>
               )}
               <div>
                 <p className="font-heading font-normal text-2xl leading-none text-foreground">{fmt(value)}</p>
-                <p className="mt-2 text-sm font-bold text-muted-foreground">Realizado</p>
+                <p className="mt-2 text-sm font-bold text-foreground/60">Realizado</p>
               </div>
             </div>
             {progress !== null && progressLabel && (
@@ -715,14 +722,14 @@ function MetricTile({
                     }}
                   />
                   <div className="absolute inset-0 flex items-center justify-center">
-                    <span className="rounded bg-background/65 px-3 py-0.5 text-base font-bold text-foreground">{progressLabel}</span>
+                    <span className="rounded bg-black/70 px-3 py-0.5 text-base font-bold text-white shadow-[0_0_16px_rgba(255,255,255,0.14)]">{progressLabel}</span>
                   </div>
                 </div>
               </div>
             )}
           </div>
         ) : (
-          <div className="mt-8 flex flex-1 items-center rounded-lg border border-border bg-background/70 p-7">
+          <div className="mt-8 flex flex-1 items-center rounded-lg border border-white/15 bg-black/35 p-7">
             <div>
               <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Realizado</p>
               <p className="mt-3 font-heading font-normal text-4xl leading-none" style={{ color: accent }}>
@@ -1476,8 +1483,8 @@ function TopKeywordsTable({ keywords, loading }: { keywords: GoogleKeyword[]; lo
   ];
 
   return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+    <div className="overflow-hidden rounded-xl border border-[#EA4335]/40 bg-black/35 shadow-[0_0_30px_rgba(234,67,53,0.18)]">
+      <div className="flex items-center justify-between border-b border-[#EA4335]/25 bg-[#EA4335]/10 px-4 py-3">
         <div className="flex items-center gap-2">
           <GoogleMark />
           <p className="text-sm font-bold uppercase tracking-wider">Top Palavras-chave</p>
@@ -1493,8 +1500,8 @@ function TopKeywordsTable({ keywords, loading }: { keywords: GoogleKeyword[]; lo
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[780px] text-left">
-            <thead className="border-b border-border bg-muted/20">
-              <tr className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+            <thead className="border-b border-[#EA4335]/25 bg-black/35">
+              <tr className="text-[10px] font-bold uppercase tracking-widest text-foreground/60">
                 <th className="px-4 py-2.5">Palavra-chave</th>
                 {cols.map(c => (
                   <th key={c.key} className="px-3 py-2.5 text-right">
@@ -1510,7 +1517,7 @@ function TopKeywordsTable({ keywords, loading }: { keywords: GoogleKeyword[]; lo
             </thead>
             <tbody>
               {sorted.map((kw, i) => (
-                <tr key={i} className="border-t border-border/50 hover:bg-muted/10 transition-colors">
+                <tr key={i} className="border-t border-white/10 transition-colors hover:bg-[#EA4335]/10">
                   <td className="px-4 py-2.5 max-w-[320px]">
                     <div className="flex items-center gap-2 min-w-0">
                       <span className={cn('shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide', MATCH_COLORS[kw.matchType] ?? 'bg-muted/30 text-muted-foreground border-border')}>
@@ -1518,7 +1525,7 @@ function TopKeywordsTable({ keywords, loading }: { keywords: GoogleKeyword[]; lo
                       </span>
                       <span className="truncate text-xs font-semibold">{kw.text}</span>
                     </div>
-                    <p className="mt-0.5 truncate pl-[42px] text-[10px] text-muted-foreground">{kw.adGroupName}</p>
+                    <p className="mt-0.5 truncate pl-[42px] text-[10px] text-foreground/45">{kw.adGroupName}</p>
                   </td>
                   <td className="px-3 py-2.5 text-right text-xs font-semibold">{kw.impressions.toLocaleString('pt-BR')}</td>
                   <td className="px-3 py-2.5 text-right text-xs font-semibold">{kw.clicks.toLocaleString('pt-BR')}</td>
@@ -1747,7 +1754,7 @@ function CampaignPerformanceTable({
 
   if (loading) {
     return (
-      <div className="rounded-xl border border-white/5 bg-background/40 p-6">
+      <div className="rounded-xl border border-white/15 bg-black/35 p-6">
         <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
           <RefreshCw className="h-4 w-4 animate-spin" /> Carregando campanhas do período...
         </div>
@@ -1756,7 +1763,7 @@ function CampaignPerformanceTable({
   }
   if (campaigns.length === 0) {
     return (
-      <div className="rounded-xl border border-white/5 bg-background/40 px-5 py-7">
+      <div className="rounded-xl border border-white/15 bg-black/35 px-5 py-7">
         <p className="text-sm font-semibold text-foreground">Nenhuma campanha ativa no período.</p>
         <p className="mt-1 text-xs text-muted-foreground">Quando houver gasto nas contas vinculadas, as campanhas aparecem aqui com métricas e ações rápidas.</p>
       </div>
@@ -1842,12 +1849,12 @@ function CampaignPerformanceTable({
 
     isActive = displayStatus === 'ACTIVE' || displayStatus === 'ENABLED';
 
-    const levelBg = row.level === 0 ? '' : row.level === 1 ? 'bg-muted/10' : 'bg-muted/5';
+    const levelBg = row.level === 0 ? '' : row.level === 1 ? 'bg-white/[0.04]' : 'bg-white/[0.025]';
 
     const isMetaAd = row.kind === 'meta-ad';
 
     return (
-      <tr key={row.key} className={cn('border-t border-border/50 hover:bg-muted/20 transition-colors', !isActive && 'opacity-60', levelBg)}>
+      <tr key={row.key} className={cn('border-t border-white/10 transition-colors hover:bg-white/[0.07]', !isActive && 'opacity-60', levelBg)}>
         {/* Name column — whole name area is clickable when expandable */}
         <td
           className="max-w-[300px] px-2 py-0"
@@ -1888,14 +1895,14 @@ function CampaignPerformanceTable({
 
             <CampaignStatusDot status={displayStatus} />
             <div className="min-w-0">
-              <p className={cn('truncate font-semibold', row.level === 0 ? 'text-sm font-bold' : row.level === 1 ? 'text-xs' : 'text-[11px] text-muted-foreground')}>
+              <p className={cn('truncate font-semibold', row.level === 0 ? 'text-sm font-bold' : row.level === 1 ? 'text-xs' : 'text-[11px] text-foreground/55')}>
                 {displayName}
               </p>
               {row.kind === 'campaign' && (
-                <p className="truncate text-[11px] text-muted-foreground">{row.data.accountName}</p>
+                <p className="truncate text-[11px] text-foreground/45">{row.data.accountName}</p>
               )}
               {row.kind === 'adset' && (row.data.targeting?.geo_locations?.countries?.length ?? 0) > 0 && (
-                <p className="truncate text-[10px] text-muted-foreground">{(row.data.targeting.geo_locations?.countries ?? []).join(', ')}</p>
+                <p className="truncate text-[10px] text-foreground/45">{(row.data.targeting.geo_locations?.countries ?? []).join(', ')}</p>
               )}
               {err && <p className="text-[10px] text-red-400 mt-0.5 truncate">{err}</p>}
             </div>
@@ -2023,7 +2030,7 @@ function CampaignPerformanceTable({
                 type="button"
                 onClick={() => setOptimizeCampaign(row.data as CampaignPerformance)}
                 title="Otimizar público e copy"
-                className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-violet-500/30 bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 transition-colors"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-violet-500/60 bg-violet-500/20 text-violet-300 shadow-[0_0_16px_rgba(139,92,246,0.32)] transition-colors hover:bg-violet-500/30"
               >
                 <Settings2 className="h-3.5 w-3.5" />
               </button>
@@ -2038,11 +2045,11 @@ function CampaignPerformanceTable({
     <>
       {optimizeCampaign && <CampaignOptimizeDrawer campaign={optimizeCampaign} onClose={() => setOptimizeCampaign(null)} />}
       {adPreview && <AdCreativePreview ad={adPreview.ad} x={adPreview.x} y={adPreview.y} />}
-      <div className="overflow-hidden rounded-xl border border-border bg-card">
+      <div className="overflow-hidden rounded-xl border border-white/15 bg-black/35 shadow-[0_0_28px_rgba(255,255,255,0.08)]">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[1080px] text-left">
-            <thead className="border-b border-border bg-muted/30">
-              <tr className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+            <thead className="border-b border-white/15 bg-white/[0.06]">
+              <tr className="text-[10px] font-bold uppercase tracking-widest text-foreground/62">
                 <th className="px-4 py-3">Nome</th>
                 <th className="px-4 py-3 text-center">Plataforma</th>
                 <th className="px-4 py-3 text-right">Verba/dia</th>
@@ -2093,10 +2100,10 @@ function AudiencePieCard({
   });
 
   return (
-    <div className="flex min-h-[300px] flex-col rounded-xl border border-white/5 bg-background/40 p-4">
+    <div className="flex min-h-[300px] flex-col rounded-xl border border-white/15 bg-black/35 p-4 shadow-[inset_0_0_24px_rgba(255,255,255,0.05)]">
       <div>
         <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground">{title}</h4>
-        <p className="mt-0.5 text-[11px] text-muted-foreground">{total.toLocaleString('pt-BR')} pessoas/imp.</p>
+        <p className="mt-0.5 text-[11px] text-foreground/55">{total.toLocaleString('pt-BR')} pessoas/imp.</p>
       </div>
       {variant === 'donut' && (
         <div className="mt-4 flex justify-center">
@@ -2113,7 +2120,7 @@ function AudiencePieCard({
                 style={{
                   opacity: activeIndex === null || activeIndex === slice.index ? 1 : 0.35,
                   transform: activeIndex === slice.index ? 'scale(1.07)' : 'scale(1)',
-                  filter: activeIndex === slice.index ? 'drop-shadow(0 12px 18px rgba(0,0,0,0.45))' : 'none',
+                  filter: `drop-shadow(0 0 ${activeIndex === slice.index ? 16 : 8}px ${slice.color}AA)`,
                 }}
                 onMouseEnter={() => setActiveIndex(slice.index)}
                 onMouseLeave={() => setActiveIndex(null)}
@@ -2141,10 +2148,10 @@ function AudiencePieCard({
             onMouseLeave={() => setActiveIndex(null)}
             className={cn(
               'flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[11px] transition-colors',
-              activeIndex === item.index ? 'bg-muted/60 text-foreground' : 'text-muted-foreground hover:bg-muted/40'
+              activeIndex === item.index ? 'bg-white/[0.12] text-foreground' : 'text-foreground/60 hover:bg-white/[0.08] hover:text-foreground'
             )}
           >
-            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />
+            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color, boxShadow: `0 0 12px ${item.color}` }} />
             <span className="min-w-0 flex-1 truncate">{item.label}</span>
             <span className="font-bold text-foreground">{item.pct}%</span>
           </button>
@@ -2179,13 +2186,13 @@ function AudiencePlatformBlock({
   const allKeys = extraKeys ? [...baseKeys, ...extraKeys] : baseKeys;
   const colClass = allKeys.length > 4 ? 'md:grid-cols-2 xl:grid-cols-3' : 'md:grid-cols-2 xl:grid-cols-4';
   return (
-    <div className="relative flex h-full flex-col overflow-hidden rounded-xl border border-white/5 bg-background/30 p-4">
-      <div className="pointer-events-none absolute inset-0" style={{ background: `radial-gradient(circle at 8% 0%, ${color}14, transparent 34%)` }} />
+    <div className="relative flex h-full flex-col overflow-hidden rounded-xl border bg-black/35 p-4" style={{ borderColor: `${color}66`, boxShadow: `0 0 34px ${color}1F, inset 0 0 28px ${color}10` }}>
+      <div className="pointer-events-none absolute inset-0" style={{ background: `linear-gradient(135deg, ${color}18, transparent 44%), radial-gradient(circle at 8% 0%, ${color}3D, transparent 34%)` }} />
       <div className="relative flex items-start gap-2">
         <span className="mt-0.5">{title === 'Meta Ads' ? <MetaMark /> : <GoogleMark />}</span>
         <div>
           <h3 className="text-sm font-bold uppercase tracking-wider text-foreground">{title}</h3>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">{description}</p>
+          <p className="mt-0.5 text-[11px] text-foreground/55">{description}</p>
         </div>
       </div>
       <div className={`relative mt-4 grid flex-1 gap-3 ${colClass}`}>
@@ -2512,41 +2519,42 @@ function AiRecommendationsBox({
   const icons = [BarChart3, Zap, Target, Briefcase];
   const styles = [
     {
-      wrap: 'border-violet-500/18 bg-violet-500/12 shadow-[0_0_24px_rgba(139,92,246,0.08)]',
-      icon: 'bg-violet-500/25 text-violet-400 shadow-[0_0_16px_rgba(139,92,246,0.26)]',
-      badge: 'bg-violet-500/20 text-violet-300',
+      wrap: 'border-violet-500/45 bg-violet-500/20 shadow-[0_0_30px_rgba(139,92,246,0.24)]',
+      icon: 'bg-violet-500/35 text-violet-300 shadow-[0_0_20px_rgba(139,92,246,0.54)]',
+      badge: 'bg-violet-500/30 text-violet-200',
       label: 'Alto impacto',
     },
     {
-      wrap: 'border-emerald-500/16 bg-emerald-500/10 shadow-[0_0_24px_rgba(34,197,94,0.07)]',
-      icon: 'bg-emerald-500/25 text-emerald-400 shadow-[0_0_16px_rgba(34,197,94,0.22)]',
-      badge: 'bg-emerald-500/18 text-emerald-300',
+      wrap: 'border-emerald-500/45 bg-emerald-500/18 shadow-[0_0_30px_rgba(34,197,94,0.22)]',
+      icon: 'bg-emerald-500/35 text-emerald-300 shadow-[0_0_20px_rgba(34,197,94,0.50)]',
+      badge: 'bg-emerald-500/30 text-emerald-200',
       label: 'Médio impacto',
     },
     {
-      wrap: 'border-blue-500/16 bg-blue-500/10 shadow-[0_0_24px_rgba(59,130,246,0.08)]',
-      icon: 'bg-blue-500/25 text-blue-400 shadow-[0_0_16px_rgba(59,130,246,0.22)]',
-      badge: 'bg-blue-500/18 text-blue-300',
+      wrap: 'border-blue-500/45 bg-blue-500/18 shadow-[0_0_30px_rgba(59,130,246,0.23)]',
+      icon: 'bg-blue-500/35 text-blue-300 shadow-[0_0_20px_rgba(59,130,246,0.52)]',
+      badge: 'bg-blue-500/30 text-blue-200',
       label: 'Médio impacto',
     },
     {
-      wrap: 'border-amber-500/16 bg-amber-500/10 shadow-[0_0_24px_rgba(245,158,11,0.08)]',
-      icon: 'bg-amber-500/25 text-amber-400 shadow-[0_0_16px_rgba(245,158,11,0.22)]',
-      badge: 'bg-amber-500/18 text-amber-300',
+      wrap: 'border-amber-500/45 bg-amber-500/18 shadow-[0_0_30px_rgba(245,158,11,0.24)]',
+      icon: 'bg-amber-500/35 text-amber-300 shadow-[0_0_20px_rgba(245,158,11,0.54)]',
+      badge: 'bg-amber-500/30 text-amber-100',
       label: 'Alto impacto',
     },
   ];
 
   return (
-    <aside className="relative overflow-hidden rounded-2xl border border-white/5 bg-card p-3.5">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_88%_0%,rgba(139,92,246,0.14),transparent_38%)]" />
+    <aside className="relative overflow-hidden rounded-2xl border border-violet-500/45 bg-[#090716] p-3.5 shadow-[0_0_48px_rgba(139,92,246,0.22)]">
+      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(139,92,246,0.20),transparent_42%),radial-gradient(circle_at_88%_0%,rgba(139,92,246,0.34),transparent_38%)]" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,#A855F7,transparent)]" />
       <div className="relative flex items-center justify-between gap-3">
         <p className="text-[10px] font-bold uppercase tracking-widest text-foreground">Recomendações com IA</p>
         <button
           type="button"
           onClick={onAnalyze}
           disabled={loading}
-          className="rounded-md border border-white/5 bg-background/50 px-2 py-1 text-[9px] font-bold text-muted-foreground transition-colors hover:text-foreground disabled:opacity-60"
+          className="rounded-md border border-violet-500/35 bg-violet-500/15 px-2 py-1 text-[9px] font-bold text-violet-200 transition-colors hover:bg-violet-500/25 disabled:opacity-60"
         >
           {loading ? 'Gerando...' : 'Ver todas'}
         </button>
@@ -2567,7 +2575,7 @@ function AiRecommendationsBox({
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[11px] font-bold leading-tight text-foreground">{item.title}</span>
-                <span className="mt-1 block text-[9.5px] leading-snug text-muted-foreground line-clamp-2">{item.suggestion}</span>
+                <span className="mt-1 block text-[9.5px] leading-snug text-foreground/58 line-clamp-2">{item.suggestion}</span>
                 <span className={cn('mt-2 inline-flex rounded-full px-2 py-0.5 text-[8.5px] font-bold', style.badge)}>{style.label}</span>
               </span>
             </button>
@@ -2610,8 +2618,8 @@ function CreativeCarouselCard({ creative, idx, sortBy, onPreview }: {
     : sortBy === 'ctr' ? `${creative.ctr.toFixed(2)}%`
     : formatCurrencyBRL(creative.spend);
   return (
-    <div className="w-[175px] shrink-0 rounded-xl border border-border bg-background overflow-hidden hover:border-primary/30 transition-colors">
-      <div className="relative bg-muted/20 overflow-hidden" style={{ aspectRatio: '9/16' }}>
+    <div className="w-[175px] shrink-0 overflow-hidden rounded-xl border border-[#0B84FF]/35 bg-black/45 shadow-[0_0_24px_rgba(11,132,255,0.16)] transition-colors hover:border-[#55F52F]/65 hover:shadow-[0_0_30px_rgba(85,245,47,0.26)]">
+      <div className="relative overflow-hidden bg-[#07101F]" style={{ aspectRatio: '9/16' }}>
         {imgUrl && !imgErr ? (
           <button type="button" onClick={() => onPreview(creative)} className="block h-full w-full">
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -2624,8 +2632,8 @@ function CreativeCarouselCard({ creative, idx, sortBy, onPreview }: {
             <Play className="h-3 w-3 fill-white text-white" />
           </span>
         )}
-        <span className="absolute left-2 bottom-2 flex h-6 w-6 items-center justify-center rounded-full bg-black/80 text-[11px] font-bold text-white">{idx + 1}</span>
-        <span className="absolute right-2 top-2 rounded-full bg-primary/90 px-2 py-0.5 text-[10px] font-bold text-black">{metricValue}</span>
+        <span className="absolute left-2 bottom-2 flex h-6 w-6 items-center justify-center rounded-full bg-black/85 text-[11px] font-bold text-white shadow-[0_0_14px_rgba(255,255,255,0.18)]">{idx + 1}</span>
+        <span className="absolute right-2 top-2 rounded-full bg-primary px-2 py-0.5 text-[10px] font-bold text-black shadow-[0_0_16px_rgba(85,245,47,0.72)]">{metricValue}</span>
       </div>
       <div className="p-2.5 space-y-2">
         <p className="text-[11px] font-bold truncate">{creative.adName}</p>
@@ -2636,8 +2644,8 @@ function CreativeCarouselCard({ creative, idx, sortBy, onPreview }: {
             { label: 'CPL', val: creative.cpl > 0 ? formatCurrencyBRL(creative.cpl) : '—' },
             { label: 'CTR', val: `${creative.ctr.toFixed(2)}%` },
           ] as const).map(m => (
-            <div key={m.label} className="rounded bg-muted/20 px-1.5 py-1">
-              <p className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">{m.label}</p>
+            <div key={m.label} className="rounded border border-white/10 bg-white/[0.06] px-1.5 py-1">
+              <p className="text-[9px] font-bold uppercase tracking-wider text-foreground/52">{m.label}</p>
               <p className="text-[11px] font-bold text-foreground">{m.val}</p>
             </div>
           ))}
@@ -3347,14 +3355,16 @@ export default function GeneralDashboard() {
       )}
 
       {/* 1. MÉTRICAS GERAIS */}
-      <section className="rounded-2xl border border-white/5 bg-card p-5">
-        <div className="mb-4 flex items-center gap-3">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-primary/40 bg-primary/15 text-primary shadow-[0_0_18px_rgba(85,245,47,0.18)]">
+      <section className="relative overflow-hidden rounded-2xl border border-[#55F52F]/55 bg-[#050C0A] p-5 shadow-[0_0_56px_rgba(85,245,47,0.22)]">
+        <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(85,245,47,0.16),transparent_38%),radial-gradient(circle_at_92%_8%,rgba(85,245,47,0.28),transparent_34%)]" />
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,#55F52F,transparent)]" />
+        <div className="relative mb-4 flex items-center gap-3">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#55F52F]/70 bg-[#55F52F]/25 text-primary shadow-[0_0_24px_rgba(85,245,47,0.65)]">
             <LayoutDashboard className="h-[18px] w-[18px]" />
           </span>
           <div>
             <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">Métricas Gerais</h2>
-            <p className="text-[11px] text-muted-foreground">Consolidado do período antes da leitura por canal.</p>
+            <p className="text-[11px] text-foreground/60">Consolidado do período antes da leitura por canal.</p>
           </div>
         </div>
         <div className="grid gap-4 xl:grid-cols-4">
@@ -3380,9 +3390,9 @@ export default function GeneralDashboard() {
           </DashboardGridItem>
         </div>
         <DashboardGridItem id="general-funnel" prefs={dashboardPrefs}>
-        <div className="mt-4 rounded-xl border border-white/5 bg-background/30 p-4">
+        <div className="mt-4 rounded-xl border border-[#55F52F]/35 bg-black/35 p-4 shadow-[inset_0_0_30px_rgba(85,245,47,0.08),0_0_28px_rgba(85,245,47,0.14)]">
           <p className="text-sm font-bold uppercase tracking-wider text-foreground">Funil de Performance</p>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">Período: {PERIODS.find(p => p.value === period)?.label ?? period}</p>
+          <p className="mt-0.5 text-[11px] text-foreground/60">Período: {PERIODS.find(p => p.value === period)?.label ?? period}</p>
           {(() => {
             const firstId = [...selectedIds][0];
             const clientPlanning = firstId ? readPlanningFromStorage(firstId) : DEFAULT_PLANNING;
@@ -3394,37 +3404,64 @@ export default function GeneralDashboard() {
               funnelCounts[FUNNEL_ORDER[2]] ?? 0,
               funnelCounts[FUNNEL_ORDER[3]] ?? 0,
             ];
-            const funnelRows: { label: string; value: number; badge?: string }[] = [
-              { label: 'Alcance Total', value: (metaReach || metaImpressions) + googleImpressions, badge: 'Meta + Google' },
-              { label: 'Cliques Totais', value: metaClicks + googleClicks, badge: 'Meta + Google' },
-              ...stages.map((s, i) => ({ label: s.name.replace(/^\d+º\s*—\s*/, ''), value: crmValues[i] ?? 0 })),
+            const funnelRows: { label: string; value: number }[] = [
+              { label: 'Visitantes', value: (metaReach || metaImpressions) + googleImpressions },
+              { label: 'Leads', value: totalLeads },
+              ...stages.slice(1).map((s, i) => ({ label: s.name.replace(/^\d+º\s*—\s*/, '').replace(/\s*\(.+\)/, ''), value: crmValues[i + 1] ?? 0 })),
             ];
             const maxVal = funnelRows[0]?.value || 1;
-            const FUNNEL_COLORS = ['#4C1D95', '#5B21B6', '#6D28D9', '#7C3AED', '#8B5CF6', '#9333EA', '#A855F7'];
+            const FUNNEL_COLORS = ['#0EA5E9', '#7C3AED', '#EC4899', '#F97316', '#22C55E'];
+            const funnelHeight = 28;
+            const funnelGap = 3;
+            const funnelTop = 12;
+            const funnelWidth = 260;
+            const funnelCenter = funnelWidth / 2;
             return (
-              <div className="mt-4 grid gap-3 lg:grid-cols-2">
-                {funnelRows.map((row, i) => {
-                  const barPct = maxVal > 0 ? (row.value / maxVal) * 100 : 0;
-                  const prev = funnelRows[i - 1]?.value;
-                  const convPct = prev && prev > 0 ? ((row.value / prev) * 100).toFixed(1) : null;
-                  return (
-                    <div key={row.label} className="space-y-1.5">
-                      <div className="flex items-center justify-between text-[11px] font-semibold">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-foreground/80">{row.label}</span>
-                          {row.badge && <span className="text-[9px] text-muted-foreground/60">{row.badge}</span>}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-foreground">{row.value.toLocaleString('pt-BR')}</span>
-                          {convPct && <span className="text-emerald-400">{convPct}%</span>}
-                        </div>
+              <div className="mt-4 grid items-center gap-5 lg:grid-cols-[320px_1fr]">
+                <div className="relative h-[190px] rounded-xl border border-white/15 bg-black/45 p-3 shadow-[inset_0_0_32px_rgba(14,165,233,0.12)]">
+                  <svg viewBox="0 0 260 170" className="h-full w-full overflow-visible" role="img" aria-label="Funil de vendas">
+                    <defs>
+                      <filter id="dashboard-funnel-glow" x="-30%" y="-30%" width="160%" height="160%">
+                        <feGaussianBlur stdDeviation="3" result="blur" />
+                        <feMerge>
+                          <feMergeNode in="blur" />
+                          <feMergeNode in="SourceGraphic" />
+                        </feMerge>
+                      </filter>
+                    </defs>
+                    {funnelRows.slice(0, 5).map((row, i) => {
+                      const topRatio = Math.max(0.28, 1 - i * 0.14);
+                      const bottomRatio = Math.max(0.22, 1 - (i + 1) * 0.14);
+                      const topWidth = funnelWidth * topRatio;
+                      const bottomWidth = funnelWidth * bottomRatio;
+                      const y = funnelTop + i * (funnelHeight + funnelGap);
+                      const color = FUNNEL_COLORS[i % FUNNEL_COLORS.length];
+                      const d = [
+                        `M ${funnelCenter - topWidth / 2} ${y}`,
+                        `L ${funnelCenter + topWidth / 2} ${y}`,
+                        `L ${funnelCenter + bottomWidth / 2} ${y + funnelHeight}`,
+                        `L ${funnelCenter - bottomWidth / 2} ${y + funnelHeight}`,
+                        'Z',
+                      ].join(' ');
+                      return <path key={row.label} d={d} fill={color} opacity={0.92} filter="url(#dashboard-funnel-glow)" />;
+                    })}
+                  </svg>
+                </div>
+                <div className="space-y-3">
+                  {funnelRows.slice(0, 5).map((row, i) => {
+                    const pct = maxVal > 0 ? (row.value / maxVal) * 100 : 0;
+                    return (
+                      <div key={row.label} className="grid grid-cols-[1fr_auto_auto] items-center gap-4 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs">
+                        <span className="flex min-w-0 items-center gap-2 text-foreground/75">
+                          <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: FUNNEL_COLORS[i % FUNNEL_COLORS.length], boxShadow: `0 0 14px ${FUNNEL_COLORS[i % FUNNEL_COLORS.length]}` }} />
+                          <span className="truncate">{row.label}</span>
+                        </span>
+                        <span className="font-semibold text-foreground">{row.value.toLocaleString('pt-BR')}</span>
+                        <span className="w-14 text-right font-semibold text-foreground/65">{pct.toFixed(2)}%</span>
                       </div>
-                      <div className="h-2 overflow-hidden rounded-full bg-muted/40">
-                        <div className="h-full rounded-full" style={{ width: `${Math.max(4, barPct)}%`, background: FUNNEL_COLORS[i % FUNNEL_COLORS.length] }} />
-                      </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
             );
           })()}
@@ -3433,20 +3470,22 @@ export default function GeneralDashboard() {
       </section>
 
       {/* 2. META ADS */}
-      <section className="rounded-2xl border border-blue-500/40 bg-card p-5 shadow-[0_0_45px_rgba(6,104,225,0.08)]">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <section className="relative overflow-hidden rounded-2xl border border-[#0B84FF]/70 bg-[#050A16] p-5 shadow-[0_0_64px_rgba(11,132,255,0.28)]">
+        <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(11,132,255,0.20),transparent_42%),radial-gradient(circle_at_92%_0%,rgba(0,194,255,0.30),transparent_36%)]" />
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,#00C2FF,#0B84FF,transparent)]" />
+        <div className="relative mb-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-blue-500/35 bg-blue-500/10 shadow-[0_0_18px_rgba(6,104,225,0.2)]">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#0B84FF]/70 bg-[#0B84FF]/25 shadow-[0_0_26px_rgba(11,132,255,0.72)]">
               <MetaAdsMark className="h-5 w-5" />
             </span>
             <h2 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-foreground">
               Meta Ads
             </h2>
           </div>
-          <p className="text-[11px] text-muted-foreground">{metaFormLeads.toLocaleString('pt-BR')} formulários + {metaConversations.toLocaleString('pt-BR')} conversas no período</p>
+          <p className="text-[11px] text-foreground/60">{metaFormLeads.toLocaleString('pt-BR')} formulários + {metaConversations.toLocaleString('pt-BR')} conversas no período</p>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="relative grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <DashboardGridItem id="meta-reach" prefs={dashboardPrefs}><KpiCard title="Alcance Meta" value={metaReach} format="number" icon={Users} iconColor="#38bdf8" iconBg="#38bdf8" loading={metricsLoading} chart={dashboardPrefs.cards['meta-reach'].chart} /></DashboardGridItem>
           <DashboardGridItem id="meta-impressions" prefs={dashboardPrefs}><KpiCard title="Impressões Meta" value={metaImpressions} format="number" icon={BarChart3} iconColor="#60a5fa" iconBg="#60a5fa" loading={metricsLoading} chart={dashboardPrefs.cards['meta-impressions'].chart} /></DashboardGridItem>
           <DashboardGridItem id="meta-leads" prefs={dashboardPrefs}><KpiCard title="Leads Meta Ads" value={metaLeads} prevValue={prevMetaLeads > 0 ? prevMetaLeads : undefined} format="number" icon={Target} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['meta-leads'].chart} /></DashboardGridItem>
@@ -3461,14 +3500,14 @@ export default function GeneralDashboard() {
           <DashboardGridItem id="meta-clicks" prefs={dashboardPrefs}><KpiCard title="Cliques Meta" value={metaClicks} format="number" icon={MousePointerClick} iconColor="#93c5fd" iconBg="#93c5fd" loading={metricsLoading} chart={dashboardPrefs.cards['meta-clicks'].chart} /></DashboardGridItem>
         </div>
 
-        <div className="mt-4 grid gap-4 xl:grid-cols-4">
+        <div className="relative mt-4 grid gap-4 xl:grid-cols-4">
           <DashboardGridItem id="meta-campaigns" prefs={dashboardPrefs}>
-          <div className="rounded-xl border border-white/5 bg-background/30 p-4">
+          <div className="rounded-xl border border-[#0B84FF]/35 bg-black/35 p-4 shadow-[inset_0_0_30px_rgba(11,132,255,0.10),0_0_28px_rgba(11,132,255,0.16)]">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-              <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Campanhas Meta Ads</p>
+              <p className="text-[11px] font-bold uppercase tracking-widest text-foreground/75">Campanhas Meta Ads</p>
               <div className="flex items-center gap-2">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Ordenar por</span>
-                <div className="flex overflow-hidden rounded-lg border border-white/5 bg-background/40">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-foreground/55">Ordenar por</span>
+                <div className="flex overflow-hidden rounded-lg border border-[#0B84FF]/30 bg-black/45">
                   {SORT_OPTIONS.map(opt => (
                     <button key={opt.value} onClick={() => setCampaignSortBy(opt.value)}
                       className={cn('px-3 py-1.5 text-[11px] font-semibold transition-colors', campaignSortBy === opt.value ? 'bg-primary text-black shadow-[0_0_10px_rgba(85,245,47,0.28)]' : 'text-muted-foreground hover:text-foreground')}>
@@ -3488,18 +3527,18 @@ export default function GeneralDashboard() {
         </div>
 
         <DashboardGridItem id="meta-creative-preview" prefs={dashboardPrefs}>
-        <div className="mt-4 rounded-xl border border-white/5 bg-background/30 p-4">
+        <div className="relative mt-4 rounded-xl border border-[#0B84FF]/35 bg-black/35 p-4 shadow-[inset_0_0_30px_rgba(11,132,255,0.10),0_0_28px_rgba(11,132,255,0.16)]">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Criativos Meta Ads</p>
-              <p className="mt-0.5 text-[11px] text-muted-foreground">Anúncios e previews com melhor desempenho no período selecionado.</p>
+              <p className="text-[11px] font-bold uppercase tracking-widest text-foreground/75">Criativos Meta Ads</p>
+              <p className="mt-0.5 text-[11px] text-foreground/55">Anúncios e previews com melhor desempenho no período selecionado.</p>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Ordenar por</span>
-              <div className="flex overflow-hidden rounded-lg border border-border">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-foreground/55">Ordenar por</span>
+              <div className="flex overflow-hidden rounded-lg border border-[#0B84FF]/30 bg-black/45">
                 {([{ value: 'spend' as SortKey, label: 'Investimento' }, { value: 'leads' as SortKey, label: 'Leads' }, { value: 'cpl' as SortKey, label: 'CPL' }, { value: 'ctr' as SortKey, label: 'CTR' }]).map(opt => (
                   <button key={opt.value} onClick={() => setSortBy(opt.value)}
-                    className={cn('px-3 py-1.5 text-[11px] font-semibold transition-colors', sortBy === opt.value ? 'bg-primary text-black' : 'bg-card text-muted-foreground hover:bg-muted/50')}>
+                    className={cn('px-3 py-1.5 text-[11px] font-semibold transition-colors', sortBy === opt.value ? 'bg-primary text-black shadow-[0_0_14px_rgba(85,245,47,0.42)]' : 'text-foreground/60 hover:bg-white/10 hover:text-foreground')}>
                     {opt.label}
                   </button>
                 ))}
@@ -3536,9 +3575,11 @@ export default function GeneralDashboard() {
       </section>
 
       {/* 3. GOOGLE ADS */}
-      <section className="rounded-2xl border border-red-500/40 bg-card p-5 shadow-[0_0_45px_rgba(234,67,53,0.08)]">
-        <div className="mb-4 flex items-center gap-3">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-red-500/35 bg-red-500/10 shadow-[0_0_18px_rgba(234,67,53,0.18)]">
+      <section className="relative overflow-hidden rounded-2xl border border-[#EA4335]/75 bg-[#120607] p-5 shadow-[0_0_64px_rgba(234,67,53,0.30)]">
+        <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(234,67,53,0.22),transparent_42%),radial-gradient(circle_at_92%_0%,rgba(251,188,5,0.24),transparent_34%)]" />
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,#EA4335,#FBBC05,transparent)]" />
+        <div className="relative mb-4 flex items-center gap-3">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#EA4335]/75 bg-[#EA4335]/25 shadow-[0_0_26px_rgba(234,67,53,0.70)]">
             <GoogleAdsMark className="h-5 w-5" />
           </span>
           <h2 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-foreground">
@@ -3546,7 +3587,7 @@ export default function GeneralDashboard() {
           </h2>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="relative grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <DashboardGridItem id="google-impressions" prefs={dashboardPrefs}><KpiCard title="Impressões Google" value={googleImpressions} format="number" icon={BarChart3} iconColor="#4285F4" iconBg="#4285F4" loading={metricsLoading} chart={dashboardPrefs.cards['google-impressions'].chart} /></DashboardGridItem>
           <DashboardGridItem id="google-conversions" prefs={dashboardPrefs}><KpiCard title="Conversões Google" value={googleConv} prevValue={prevGoogleConv > 0 ? prevGoogleConv : undefined} format="number" icon={BarChart3} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-conversions'].chart} /></DashboardGridItem>
           <DashboardGridItem id="google-cpa" prefs={dashboardPrefs}><KpiCard title="Custo por Conversão" value={avgCpa} format="currency" icon={Briefcase} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} inverseGoal inverseChange logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-cpa'].chart} /></DashboardGridItem>
@@ -3558,14 +3599,14 @@ export default function GeneralDashboard() {
           <DashboardGridItem id="google-keyword-count" prefs={dashboardPrefs}><CompactInfoCard title="Top Palavras-chave" value={keywords.length} icon={Search} color="#FBBC05" helper="Lista ordenada abaixo." /></DashboardGridItem>
         </div>
 
-        <div className="mt-4 grid gap-4 xl:grid-cols-4">
+        <div className="relative mt-4 grid gap-4 xl:grid-cols-4">
           <DashboardGridItem id="google-campaigns" prefs={dashboardPrefs}>
-          <div className="rounded-xl border border-white/5 bg-background/30 p-4">
+          <div className="rounded-xl border border-[#EA4335]/40 bg-black/35 p-4 shadow-[inset_0_0_30px_rgba(234,67,53,0.10),0_0_28px_rgba(234,67,53,0.18)]">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-              <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Campanhas Google Ads</p>
+              <p className="text-[11px] font-bold uppercase tracking-widest text-foreground/75">Campanhas Google Ads</p>
               <div className="flex items-center gap-2">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Ordenar por</span>
-                <div className="flex overflow-hidden rounded-lg border border-white/5 bg-background/40">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-foreground/55">Ordenar por</span>
+                <div className="flex overflow-hidden rounded-lg border border-[#EA4335]/35 bg-black/45">
                   {SORT_OPTIONS.map(opt => (
                     <button key={opt.value} onClick={() => setCampaignSortBy(opt.value)}
                       className={cn('px-3 py-1.5 text-[11px] font-semibold transition-colors', campaignSortBy === opt.value ? 'bg-primary text-black shadow-[0_0_10px_rgba(85,245,47,0.28)]' : 'text-muted-foreground hover:text-foreground')}>
