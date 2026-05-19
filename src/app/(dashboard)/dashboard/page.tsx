@@ -2364,7 +2364,7 @@ function DashboardCustomizer({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm">
-      <div className="absolute right-4 top-4 flex max-h-[calc(100vh-2rem)] w-[min(720px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl">
+      <div className="absolute right-4 top-4 flex max-h-[calc(100vh-2rem)] w-[min(920px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl">
         <div className="flex items-center justify-between border-b border-border px-5 py-4">
           <div>
             <p className="text-sm font-bold uppercase tracking-wider text-foreground">Customizar dashboard</p>
@@ -2404,39 +2404,53 @@ function DashboardCustomizer({
                     const cfg = prefs.cards[id];
                     const isPanel = id.includes('campaigns') || id.includes('audience') || id.includes('preview') || id.includes('keywords') || id === 'general-funnel';
                     return (
-                      <div key={id} className="grid gap-3 bg-background/35 p-3 md:grid-cols-[1fr_104px_118px_110px_110px_96px]">
-                        <label className="flex min-w-0 items-center gap-2 text-xs font-semibold text-foreground">
-                          <input type="checkbox" checked={cfg.visible} onChange={e => updateCard(id, { visible: e.target.checked })} className="h-4 w-4 accent-primary" />
-                          <span className="truncate">{CARD_LABELS[id]}</span>
+                      <div key={id} className="space-y-3 bg-background/35 p-3">
+                        <label className="flex min-w-0 items-start gap-2 text-xs font-semibold text-foreground">
+                          <input type="checkbox" checked={cfg.visible} onChange={e => updateCard(id, { visible: e.target.checked })} className="mt-0.5 h-4 w-4 shrink-0 accent-primary" />
+                          <span className="min-w-0 flex-1 whitespace-normal break-words leading-snug">{CARD_LABELS[id]}</span>
+                          <span className="shrink-0 rounded-full border border-border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted-foreground">{isPanel ? 'Painel' : 'Widget'}</span>
                         </label>
-                        <select value={cfg.size} onChange={e => updateCard(id, { size: e.target.value as DashboardWidgetSize })} className="rounded-lg border border-border bg-card px-2 py-1.5 text-xs">
-                          <option value="sm">1 coluna</option>
-                          <option value="md">2 colunas</option>
-                          <option value="lg">4 colunas</option>
-                        </select>
-                        <input
-                          type="number"
-                          min={120}
-                          step={20}
-                          value={cfg.height ?? ''}
-                          onChange={e => updateCard(id, { height: e.target.value ? Math.max(120, Number(e.target.value)) : undefined })}
-                          placeholder="Auto"
-                          className="rounded-lg border border-border bg-card px-2 py-1.5 text-xs"
-                          aria-label={`Altura de ${CARD_LABELS[id]}`}
-                        />
-                        <div className="flex overflow-hidden rounded-lg border border-border bg-card">
-                          <button type="button" onClick={() => moveCard(group.ids, id, -1)} className="flex flex-1 items-center justify-center px-2 py-1.5 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Mover para cima">
-                            <ChevronUp className="h-3.5 w-3.5" />
-                          </button>
-                          <button type="button" onClick={() => moveCard(group.ids, id, 1)} className="flex flex-1 items-center justify-center border-l border-border px-2 py-1.5 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Mover para baixo">
-                            <ChevronDown className="h-3.5 w-3.5" />
-                          </button>
+                        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-[132px_132px_112px_132px]">
+                          <label className="space-y-1">
+                            <span className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground">Largura</span>
+                            <select value={cfg.size} onChange={e => updateCard(id, { size: e.target.value as DashboardWidgetSize })} className="w-full rounded-lg border border-border bg-card px-2 py-1.5 text-xs">
+                              <option value="sm">1 coluna</option>
+                              <option value="md">2 colunas</option>
+                              <option value="lg">4 colunas</option>
+                            </select>
+                          </label>
+                          <label className="space-y-1">
+                            <span className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground">Altura</span>
+                            <input
+                              type="number"
+                              min={120}
+                              step={20}
+                              value={cfg.height ?? ''}
+                              onChange={e => updateCard(id, { height: e.target.value ? Math.max(120, Number(e.target.value)) : undefined })}
+                              placeholder="Auto"
+                              className="w-full rounded-lg border border-border bg-card px-2 py-1.5 text-xs"
+                              aria-label={`Altura de ${CARD_LABELS[id]}`}
+                            />
+                          </label>
+                          <label className="space-y-1">
+                            <span className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground">Ordem</span>
+                            <div className="flex overflow-hidden rounded-lg border border-border bg-card">
+                              <button type="button" onClick={() => moveCard(group.ids, id, -1)} className="flex flex-1 items-center justify-center px-2 py-1.5 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Mover para cima">
+                                <ChevronUp className="h-3.5 w-3.5" />
+                              </button>
+                              <button type="button" onClick={() => moveCard(group.ids, id, 1)} className="flex flex-1 items-center justify-center border-l border-border px-2 py-1.5 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Mover para baixo">
+                                <ChevronDown className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          </label>
+                          <label className="space-y-1">
+                            <span className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground">Gráfico</span>
+                            <select value={cfg.chart} disabled={isPanel} onChange={e => updateCard(id, { chart: e.target.value as DashboardCardChart })} className="w-full rounded-lg border border-border bg-card px-2 py-1.5 text-xs disabled:opacity-40">
+                              <option value="sparkline">Linha</option>
+                              <option value="none">Sem gráfico</option>
+                            </select>
+                          </label>
                         </div>
-                        <select value={cfg.chart} disabled={isPanel} onChange={e => updateCard(id, { chart: e.target.value as DashboardCardChart })} className="rounded-lg border border-border bg-card px-2 py-1.5 text-xs disabled:opacity-40">
-                          <option value="sparkline">Linha</option>
-                          <option value="none">Sem gráfico</option>
-                        </select>
-                        <span className="self-center text-[10px] text-muted-foreground">{isPanel ? 'Painel' : 'Widget'}</span>
                       </div>
                     );
                   })}
