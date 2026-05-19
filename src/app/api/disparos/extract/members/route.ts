@@ -3,14 +3,9 @@ import { makeServerPool } from '@/lib/server-db';
 
 const BASE = 'https://api.z-api.io/instances';
 
-function normalizeGroupId(raw: string): string {
-  return raw.replace(/-group$/i, '').replace(/@g\.us$/, '');
-}
-
 function isErrorBody(body: unknown): boolean {
   if (body && typeof body === 'object') {
-    const obj = body as Record<string, unknown>;
-    return typeof obj.error === 'string';
+    return typeof (body as Record<string, unknown>).error === 'string';
   }
   return false;
 }
@@ -39,7 +34,7 @@ function extractMembers(body: unknown): Array<Record<string, unknown>> | null {
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const clientId = searchParams.get('clientId');
-  const groupId = searchParams.get('groupId');
+  const groupId = searchParams.get('groupId'); // e.g. "120363427351645831-group"
 
   if (!clientId || !groupId) {
     return Response.json({ error: 'clientId e groupId são obrigatórios' }, { status: 400 });
@@ -61,35 +56,39 @@ export async function GET(request: NextRequest) {
     if (security_token) headers['Client-Token'] = security_token;
 
     const base = `${BASE}/${instance_id}/token/${token}`;
-    const stripped = normalizeGroupId(groupId); // "120363427351645831"
-    const withSuffix = `${stripped}@g.us`;      // "120363427351645831@g.us"
 
-    // Z-API can use the phone either in the PATH or as a query string
-    // Try path-based first (most likely correct for modern Z-API), then query-string
-    const attempts = [
-      // PATH-based: phone in the URL path
-      `${base}/group-members/${encodeURIComponent(withSuffix)}`,
-      `${base}/group-members/${stripped}@g.us`,    // literal @ in path
-      `${base}/group-members/${stripped}`,
-      `${base}/group-members/${encodeURIComponent(groupId)}`,
-      `${base}/group-participants/${encodeURIComponent(withSuffix)}`,
-      `${base}/group-participants/${stripped}@g.us`,
-      `${base}/group-participants/${stripped}`,
-      `${base}/group-metadata/${encodeURIComponent(withSuffix)}`,
-      `${base}/group-metadata/${stripped}@g.us`,
-      `${base}/group-metadata/${stripped}`,
-      // QUERY-based fallback
-      `${base}/group-members?phone=${stripped}@g.us`,
-      `${base}/group-members?phone=${stripped}`,
-      `${base}/group-members?groupId=${stripped}@g.us`,
+    // Build all phone format variants from the raw groupId
+    const stripped = groupId.replace(/-group$/i, '').replace(/@g\.us$/, '');
+    const withSuffix = `${stripped}@g.us`;
+    const rawId = groupId; // "120363427351645831-group" as returned by /chats
+
+    // All formats to try
+    const phones = [
+      rawId,         // 120363427351645831-group   (exact value from /chats)
+      withSuffix,    // 120363427351645831@g.us
+      stripped,      // 120363427351645831
     ];
+
+    // /group-metadata is the only endpoint that recognises its own route.
+    // Try both path-based and query-param variants.
+    const attempts: string[] = [];
+    for (const phone of phones) {
+      // path-based (no encoding first, then encoded)
+      attempts.push(`${base}/group-metadata/${phone}`);
+      attempts.push(`${base}/group-metadata/${encodeURIComponent(phone)}`);
+      // query-param variants
+      attempts.push(`${base}/group-metadata?phone=${phone}`);
+      attempts.push(`${base}/group-metadata?phone=${encodeURIComponent(phone)}`);
+      attempts.push(`${base}/group-metadata?groupId=${phone}`);
+      attempts.push(`${base}/group-metadata?groupId=${encodeURIComponent(phone)}`);
+    }
 
     const logs: string[] = [];
 
     for (const url of attempts) {
       const { ok, status, body, text } = await tryFetch(url, headers);
       const path = url.replace(base, '');
-      const preview = text.slice(0, 100).replace(/\n/g, ' ');
+      const preview = text.slice(0, 120).replace(/\n/g, ' ');
       logs.push(`[${status}] ${path} → ${preview}`);
 
       if (ok) {
