@@ -46,7 +46,7 @@ type Period = 'yesterday' | 'last_7d' | 'last_14d' | 'last_30d' | 'this_month' |
 type FunnelEntry = { date: string; stage: string; amount?: number };
 type ClientSheetsSummary = { entries: FunnelEntry[]; stages: string[] };
 type ApiMetrics = {
-  meta: { spend: number; impressions: number; clicks: number; leads: number; formLeads?: number; siteLeads?: number; conversations?: number; cpl: number } | null;
+  meta: { spend: number; reach?: number; impressions: number; clicks: number; leads: number; formLeads?: number; siteLeads?: number; conversations?: number; cpl: number } | null;
   google: { cost: number; impressions: number; clicks: number; cpc: number; conversions: number; cpa: number } | null;
   crm?: { revenue: number; sales: number; leads: number; ticket: number } | null;
 };
@@ -345,6 +345,83 @@ function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: 
           {footer && <div className="mt-2 pt-2 border-t border-white/5">{footer}</div>}
         </>
       )}
+    </div>
+  );
+}
+
+function TargetSummaryCard({
+  title,
+  value,
+  partial,
+  target,
+  format = 'number',
+  accent,
+}: {
+  title: string;
+  value: number;
+  partial: number;
+  target: number;
+  format?: 'currency' | 'number';
+  accent: string;
+}) {
+  const fmt = (v: number) => format === 'currency' ? formatCurrencyBRL(v) : v.toLocaleString('pt-BR');
+  const partialPct = partial > 0 ? Math.min(100, Math.round((value / partial) * 100)) : 0;
+  const targetPct = target > 0 ? Math.min(100, Math.round((value / target) * 100)) : 0;
+  return (
+    <div className="rounded-xl border border-white/5 bg-background/35 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{title}</p>
+          <p className="mt-2 font-heading text-3xl leading-none text-foreground">{fmt(value)}</p>
+        </div>
+        <span className="h-9 w-1.5 rounded-full" style={{ background: accent }} />
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        {[
+          { label: 'Parcial', val: partial, pct: partialPct },
+          { label: 'Meta', val: target, pct: targetPct },
+        ].map(item => (
+          <div key={item.label} className="rounded-lg border border-white/5 bg-card/70 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{item.label}</p>
+              <p className="text-[11px] font-bold text-foreground">{item.val > 0 ? fmt(item.val) : '—'}</p>
+            </div>
+            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted/50">
+              <div className="h-full rounded-full" style={{ width: `${item.pct}%`, background: accent }} />
+            </div>
+            <p className="mt-1 text-[10px] font-semibold text-muted-foreground">{item.val > 0 ? `${item.pct}% realizado` : 'Sem meta configurada'}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CompactInfoCard({
+  title,
+  value,
+  icon: Icon,
+  color,
+  helper,
+}: {
+  title: string;
+  value: string | number;
+  icon: React.ElementType;
+  color: string;
+  helper?: string;
+}) {
+  return (
+    <div className="rounded-xl border border-white/5 bg-background/35 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{title}</p>
+          <p className="mt-2 font-heading text-2xl leading-none text-foreground">{typeof value === 'number' ? value.toLocaleString('pt-BR') : value}</p>
+        </div>
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ background: `${color}20`, color }}>
+          <Icon className="h-[18px] w-[18px]" />
+        </span>
+      </div>
+      {helper && <p className="mt-2 text-[10px] text-muted-foreground">{helper}</p>}
     </div>
   );
 }
@@ -2060,6 +2137,7 @@ function AudiencePlatformBlock({
   color,
   colors,
   data,
+  keys,
   extraKeys,
 }: {
   title: string;
@@ -2067,9 +2145,10 @@ function AudiencePlatformBlock({
   color: string;
   colors: string[];
   data: AudienceBreakdowns;
+  keys?: AudienceKey[];
   extraKeys?: AudienceKey[];
 }) {
-  const baseKeys: AudienceKey[] = ['age', 'gender', 'platform', 'device'];
+  const baseKeys: AudienceKey[] = keys ?? ['age', 'gender', 'platform', 'device'];
   const allKeys = extraKeys ? [...baseKeys, ...extraKeys] : baseKeys;
   const colClass = allKeys.length > 4 ? 'md:grid-cols-2 xl:grid-cols-3' : 'md:grid-cols-2 xl:grid-cols-4';
   return (
@@ -2650,7 +2729,7 @@ export default function GeneralDashboard() {
   }, [selectedIds, period, customDateFrom, customDateTo, customReady]);
 
   // ── Aggregate metrics ────────────────────────────────────────────────────
-  let metaLeads = 0, metaFormLeads = 0, metaSiteLeads = 0, metaConversations = 0, metaSpend = 0, metaImpressions = 0, metaClicks = 0;
+  let metaLeads = 0, metaFormLeads = 0, metaSiteLeads = 0, metaConversations = 0, metaSpend = 0, metaReach = 0, metaImpressions = 0, metaClicks = 0;
   let googleConv = 0, googleCost = 0;
 
   for (const id of selectedIds) {
@@ -2661,6 +2740,7 @@ export default function GeneralDashboard() {
       metaSiteLeads += m.meta.siteLeads ?? 0;
       metaConversations += m.meta.conversations ?? 0;
       metaSpend += m.meta.spend;
+      metaReach += m.meta.reach ?? 0;
       metaImpressions += m.meta.impressions;
       metaClicks += m.meta.clicks;
     }
@@ -2808,6 +2888,11 @@ export default function GeneralDashboard() {
   const selectedClients = clients.filter(c => selectedIds.has(c.id));
   const metaCampaigns = campaigns.filter((campaign) => campaign.platform === 'meta');
   const googleCampaigns = campaigns.filter((campaign) => campaign.platform === 'google');
+  const metaCampaignSpend = metaCampaigns.reduce((sum, campaign) => sum + campaign.spend, 0);
+  const googleCampaignSpend = googleCampaigns.reduce((sum, campaign) => sum + campaign.spend, 0);
+  const activeMetaCampaigns = metaCampaigns.filter((campaign) => campaign.status === 'ACTIVE' || campaign.status === 'ENABLED').length;
+  const activeGoogleCampaigns = googleCampaigns.filter((campaign) => campaign.status === 'ACTIVE' || campaign.status === 'ENABLED').length;
+  const metaCreativeCount = creatives.length;
 
   async function analyzeWithAI() {
     if (selectedIds.size === 0) return;
@@ -3007,24 +3092,22 @@ export default function GeneralDashboard() {
       <section className="rounded-2xl border border-white/5 bg-card p-5">
         <div className="mb-4 flex items-center gap-3">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-primary/40 bg-primary/15 text-primary shadow-[0_0_18px_rgba(85,245,47,0.18)]">
-            <LayoutDashboard className="h-4.5 w-4.5" />
+            <LayoutDashboard className="h-[18px] w-[18px]" />
           </span>
           <div>
             <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">Métricas Gerais</h2>
             <p className="text-[11px] text-muted-foreground">Consolidado do período antes da leitura por canal.</p>
           </div>
         </div>
-        <div className={cn('grid gap-4 sm:grid-cols-2', revenue > 0 ? 'xl:grid-cols-4' : 'xl:grid-cols-3')}>
-          {revenue > 0 && (
-            <KpiCard title="Resultado" value={revenue} goalValue={effectiveRevenueGoal > 0 ? effectiveRevenueGoal : undefined} format="currency" icon={DollarSign} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} />
-          )}
-          {revenue > 0 && (
-            <KpiCard title="ROI" value={roi} prevValue={prevRoi > 0 ? prevRoi : undefined} goalValue={roiGoal > 0 ? roiGoal : undefined} format="times" icon={TrendingUp} iconColor="#a78bfa" iconBg="#a78bfa" loading={metricsLoading} />
-          )}
-          <KpiCard title="Total de Leads" value={totalLeads} prevValue={prevTotalLeads > 0 ? prevTotalLeads : undefined} goalValue={effectiveLeadsGoal > 0 ? effectiveLeadsGoal : undefined} format="number" icon={Users} iconColor="#2dd4bf" iconBg="#2dd4bf" loading={metricsLoading} />
+        <div className="grid gap-4 xl:grid-cols-2">
+          <TargetSummaryCard title="Faturamento / Resultado" value={revenue} partial={effectiveRevenueGoal} target={plannedRevenue} format="currency" accent="#22c55e" />
+          <TargetSummaryCard title="Leads Total" value={totalLeads} partial={effectiveLeadsGoal} target={leadsGoal} format="number" accent="#2dd4bf" />
+        </div>
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <KpiCard title="ROI" value={roi} prevValue={prevRoi > 0 ? prevRoi : undefined} goalValue={roiGoal > 0 ? roiGoal : undefined} format="times" icon={TrendingUp} iconColor="#a78bfa" iconBg="#a78bfa" loading={metricsLoading} />
           <KpiCard title="CPL Geral" value={totalCostPerLead} prevValue={prevCpl > 0 ? prevCpl : undefined} goalValue={cplGoal > 0 ? cplGoal : undefined} format="currency" icon={Tag} iconColor="#c084fc" iconBg="#c084fc" loading={metricsLoading} inverseGoal inverseChange />
-          <KpiCard title="Investimento Total" value={totalSpend} format="currency" icon={CreditCard} iconColor="#22d3ee" iconBg="#22d3ee" loading={metricsLoading} />
-          <KpiCard title="CTR Médio" value={avgCtr} format="percent" icon={MousePointerClick} iconColor="#f59e0b" iconBg="#f59e0b" loading={metricsLoading} />
+          <KpiCard title="Valor Gasto" value={totalSpend} format="currency" icon={CreditCard} iconColor="#22d3ee" iconBg="#22d3ee" loading={metricsLoading} />
+          <KpiCard title="CTR Geral" value={avgCtr} format="percent" icon={MousePointerClick} iconColor="#f59e0b" iconBg="#f59e0b" loading={metricsLoading} />
         </div>
         <div className="mt-4 rounded-xl border border-white/5 bg-background/30 p-4">
           <p className="text-sm font-bold uppercase tracking-wider text-foreground">Funil de Performance</p>
@@ -3041,7 +3124,7 @@ export default function GeneralDashboard() {
               funnelCounts[FUNNEL_ORDER[3]] ?? 0,
             ];
             const funnelRows: { label: string; value: number; badge?: string }[] = [
-              { label: 'Alcance Total', value: metaImpressions + googleImpressions, badge: 'Meta + Google' },
+              { label: 'Alcance Total', value: (metaReach || metaImpressions) + googleImpressions, badge: 'Meta + Google' },
               { label: 'Cliques Totais', value: metaClicks + googleClicks, badge: 'Meta + Google' },
               ...stages.map((s, i) => ({ label: s.name.replace(/^\d+º\s*—\s*/, ''), value: crmValues[i] ?? 0 })),
             ];
@@ -3092,13 +3175,17 @@ export default function GeneralDashboard() {
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <KpiCard title="Alcance Meta" value={metaReach} format="number" icon={Users} iconColor="#38bdf8" iconBg="#38bdf8" loading={metricsLoading} />
+          <KpiCard title="Impressões Meta" value={metaImpressions} format="number" icon={BarChart3} iconColor="#60a5fa" iconBg="#60a5fa" loading={metricsLoading} />
           <KpiCard title="Leads Meta Ads" value={metaLeads} prevValue={prevMetaLeads > 0 ? prevMetaLeads : undefined} format="number" icon={Target} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} />
           <KpiCard title="CPL Meta Ads" value={avgCpl} format="currency" icon={Zap} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} inverseGoal inverseChange logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} />
-          <KpiCard title="Saldo Meta Ads" value={metaBalance} format="currency" icon={PiggyBank} iconColor="#0668E1" iconBg="#0668E1" loading={balancesLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} />
-          <KpiCard title="Gasto Meta Ads" value={metaSpend} format="currency" icon={Wallet} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} />
+          <KpiCard title="Valor Gasto Meta" value={metaSpend} format="currency" icon={Wallet} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} />
           <KpiCard title="CTR Meta Ads" value={metaCtr} format="percent" icon={MousePointerClick} iconColor="#38bdf8" iconBg="#38bdf8" loading={metricsLoading} />
-          <KpiCard title="CPC Meta Ads" value={metaCpc} format="currency" icon={MousePointerClick} iconColor="#7dd3fc" iconBg="#7dd3fc" loading={metricsLoading} inverseGoal inverseChange />
-          <KpiCard title="Impressões Meta" value={metaImpressions} format="number" icon={BarChart3} iconColor="#60a5fa" iconBg="#60a5fa" loading={metricsLoading} />
+          <KpiCard title="Total Gasto Meta" value={metaCampaignSpend || metaSpend} format="currency" icon={CreditCard} iconColor="#7dd3fc" iconBg="#7dd3fc" loading={campaignsLoading || metricsLoading} />
+          <KpiCard title="Saldo da Conta Meta" value={metaBalance} format="currency" icon={PiggyBank} iconColor="#0668E1" iconBg="#0668E1" loading={balancesLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} />
+          <CompactInfoCard title="Campanhas Ativas" value={activeMetaCampaigns} icon={Briefcase} color="#0668E1" />
+          <CompactInfoCard title="Conjuntos" value="Ver na tabela" icon={LayoutDashboard} color="#38bdf8" helper="Expanda uma campanha para visualizar conjuntos e anúncios." />
+          <CompactInfoCard title="Criativos" value={metaCreativeCount} icon={ImageIcon} color="#60a5fa" helper="Com preview no carrossel abaixo." />
           <KpiCard title="Cliques Meta" value={metaClicks} format="number" icon={MousePointerClick} iconColor="#93c5fd" iconBg="#93c5fd" loading={metricsLoading} />
         </div>
 
@@ -3182,14 +3269,15 @@ export default function GeneralDashboard() {
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <KpiCard title="Impressões Google" value={googleImpressions} format="number" icon={BarChart3} iconColor="#4285F4" iconBg="#4285F4" loading={metricsLoading} />
           <KpiCard title="Conversões Google" value={googleConv} prevValue={prevGoogleConv > 0 ? prevGoogleConv : undefined} format="number" icon={BarChart3} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} />
           <KpiCard title="Custo por Conversão" value={avgCpa} format="currency" icon={Briefcase} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} inverseGoal inverseChange logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} />
-          <KpiCard title="Saldo Google Ads" value={googleBalance} format="currency" icon={Wallet} iconColor="#EA4335" iconBg="#EA4335" loading={balancesLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} />
-          <KpiCard title="Gasto Google Ads" value={googleCost} format="currency" icon={CreditCard} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} />
+          <KpiCard title="Valor Gasto Google" value={googleCost} format="currency" icon={CreditCard} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} />
           <KpiCard title="CTR Google Ads" value={googleCtrValue} format="percent" icon={MousePointerClick} iconColor="#f59e0b" iconBg="#f59e0b" loading={metricsLoading} />
-          <KpiCard title="CPC Google Ads" value={googleCpc} format="currency" icon={MousePointerClick} iconColor="#34A853" iconBg="#34A853" loading={metricsLoading} inverseGoal inverseChange />
-          <KpiCard title="Impressões Google" value={googleImpressions} format="number" icon={BarChart3} iconColor="#4285F4" iconBg="#4285F4" loading={metricsLoading} />
-          <KpiCard title="Cliques Google" value={googleClicks} format="number" icon={MousePointerClick} iconColor="#FBBC05" iconBg="#FBBC05" loading={metricsLoading} />
+          <KpiCard title="Total Gasto Google" value={googleCampaignSpend || googleCost} format="currency" icon={Wallet} iconColor="#34A853" iconBg="#34A853" loading={campaignsLoading || metricsLoading} />
+          <KpiCard title="Saldo da Conta Google" value={googleBalance} format="currency" icon={Wallet} iconColor="#EA4335" iconBg="#EA4335" loading={balancesLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} />
+          <CompactInfoCard title="Campanhas Ativas" value={activeGoogleCampaigns} icon={Briefcase} color="#EA4335" />
+          <CompactInfoCard title="Top Palavras-chave" value={keywords.length} icon={Search} color="#FBBC05" helper="Lista ordenada abaixo." />
         </div>
 
         <div className="mt-4 grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
@@ -3213,7 +3301,7 @@ export default function GeneralDashboard() {
           </div>
           <div className="space-y-4">
             <TopKeywordsTable keywords={keywords} loading={keywordsLoading} />
-            <AudiencePlatformBlock title="Google Ads" description="Recortes por idade, gênero, plataforma, dispositivo e conversões." color="#EA4335" colors={GOOGLE_AUDIENCE_COLORS} data={audience.google} extraKeys={['platformConversions', 'deviceConversions']} />
+            <AudiencePlatformBlock title="Google Ads" description="Recortes por gênero e dispositivo." color="#EA4335" colors={GOOGLE_AUDIENCE_COLORS} data={audience.google} keys={['gender', 'device']} />
           </div>
         </div>
       </section>

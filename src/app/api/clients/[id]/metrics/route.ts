@@ -126,7 +126,7 @@ const SITE_LEAD_ACTIONS = [
 
 async function fetchMetaAccountMetrics(accountId: string, accessToken: string, metaPeriod: string) {
   const url = new URL(`https://graph.facebook.com/v21.0/${toMetaAccountNodeId(accountId)}/insights`);
-  url.searchParams.set('fields', 'spend,impressions,clicks,actions');
+  url.searchParams.set('fields', 'spend,reach,impressions,clicks,actions');
   url.searchParams.set('level', 'account');
   url.searchParams.set('access_token', accessToken);
   applyMetaDateToUrl(url, metaPeriod);
@@ -159,6 +159,7 @@ async function fetchMetaAccountMetrics(accountId: string, accessToken: string, m
 
   return {
     spend: parseFloat(row.spend || '0'),
+    reach: parseInt(row.reach || '0', 10),
     impressions: parseInt(row.impressions || '0', 10),
     clicks: parseInt(row.clicks || '0', 10),
     leads: formLeads + siteLeads + conversations,
@@ -329,11 +330,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   // ── Meta Ads ───────────────────────────────────────────────────────────────
-  type MResult = { spend: number; impressions: number; clicks: number; leads: number; formLeads: number; siteLeads: number; conversations: number; cpl: number };
+  type MResult = { spend: number; reach: number; impressions: number; clicks: number; leads: number; formLeads: number; siteLeads: number; conversations: number; cpl: number };
   let metaResult: MResult | null = null;
 
   if (metaLinks.length > 0) {
-    const allMetrics: Array<{ spend: number; impressions: number; clicks: number; leads: number; formLeads: number; siteLeads: number; conversations: number }> = [];
+    const allMetrics: Array<{ spend: number; reach: number; impressions: number; clicks: number; leads: number; formLeads: number; siteLeads: number; conversations: number }> = [];
     await Promise.allSettled(
       metaLinks.map(async (link) => {
         const conn = metaConns.find(c => c.id === link.connection_id);
@@ -346,11 +347,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     if (allMetrics.length > 0) {
       const agg = allMetrics.reduce((a, m) => ({
-        spend: a.spend + m.spend, impressions: a.impressions + m.impressions,
+        spend: a.spend + m.spend, reach: a.reach + m.reach, impressions: a.impressions + m.impressions,
         clicks: a.clicks + m.clicks, leads: a.leads + m.leads,
         formLeads: a.formLeads + m.formLeads, siteLeads: a.siteLeads + m.siteLeads,
         conversations: a.conversations + m.conversations, cpl: 0,
-      }), { spend: 0, impressions: 0, clicks: 0, leads: 0, formLeads: 0, siteLeads: 0, conversations: 0, cpl: 0 });
+      }), { spend: 0, reach: 0, impressions: 0, clicks: 0, leads: 0, formLeads: 0, siteLeads: 0, conversations: 0, cpl: 0 });
       agg.cpl = agg.leads > 0 ? agg.spend / agg.leads : 0;
       metaResult = agg;
     }
