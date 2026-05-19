@@ -3,46 +3,28 @@ import { makeServerPool } from '@/lib/server-db';
 
 const BASE = 'https://api.z-api.io/instances';
 
-function normalizeGroupId(groupId: string): string {
-  // Remove -group suffix and @g.us, then rebuild the canonical Z-API format
-  // Z-API accepts: "120363427351645831-group" or "5511999999999-1234567890@g.us"
-  // The chats endpoint returns phones with -group suffix — strip it to get the raw ID
-  return groupId
-    .replace('@g.us', '')
-    .replace(/-group$/i, '');
+function normalizeGroupId(raw: string): string {
+  return raw.replace(/-group$/i, '').replace(/@g\.us$/, '');
 }
 
-async function fetchMembers(
-  instanceId: string,
-  token: string,
-  headers: Record<string, string>,
-  groupId: string,
-): Promise<{ ok: boolean; members?: Array<Record<string, unknown>>; error?: string }> {
-  const res = await fetch(
-    `${BASE}/${instanceId}/token/${token}/group-members?groupId=${encodeURIComponent(groupId)}`,
-    { headers },
-  );
-
+async function tryFetch(url: string, headers: Record<string, string>) {
+  const res = await fetch(url, { headers });
   const text = await res.text().catch(() => '');
+  let body: unknown;
+  try { body = JSON.parse(text); } catch { body = text; }
+  return { status: res.status, ok: res.ok, body, text };
+}
 
-  if (!res.ok) {
-    return { ok: false, error: `Z-API ${res.status}: ${text.slice(0, 200)}` };
+function extractMembers(body: unknown): Array<Record<string, unknown>> | null {
+  if (Array.isArray(body) && body.length > 0) return body as Array<Record<string, unknown>>;
+  if (body && typeof body === 'object') {
+    const obj = body as Record<string, unknown>;
+    for (const key of ['participants', 'value', 'members', 'data']) {
+      if (Array.isArray(obj[key]) && (obj[key] as unknown[]).length > 0)
+        return obj[key] as Array<Record<string, unknown>>;
+    }
   }
-
-  let raw: unknown;
-  try { raw = JSON.parse(text); } catch { return { ok: false, error: `Resposta inválida: ${text.slice(0, 80)}` }; }
-
-  let members: Array<Record<string, unknown>> = [];
-  if (Array.isArray(raw)) {
-    members = raw as Array<Record<string, unknown>>;
-  } else if (raw && typeof raw === 'object') {
-    const obj = raw as Record<string, unknown>;
-    if (Array.isArray(obj.participants)) members = obj.participants as Array<Record<string, unknown>>;
-    else if (Array.isArray(obj.value)) members = obj.value as Array<Record<string, unknown>>;
-    else if (Array.isArray(obj.members)) members = obj.members as Array<Record<string, unknown>>;
-  }
-
-  return { ok: true, members };
+  return null;
 }
 
 export async function GET(request: NextRequest) {
@@ -69,33 +51,45 @@ export async function GET(request: NextRequest) {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (security_token) headers['Client-Token'] = security_token;
 
-    // Try multiple groupId formats — Z-API can be inconsistent
-    const candidates = [
-      groupId,                              // as-is from chats
-      normalizeGroupId(groupId),            // stripped
-      `${normalizeGroupId(groupId)}@g.us`,  // with @g.us
-    ].filter((v, i, arr) => arr.indexOf(v) === i); // deduplicate
+    const base = `${BASE}/${instance_id}/token/${token}`;
+    const stripped = normalizeGroupId(groupId);
+    const withSuffix = `${stripped}@g.us`;
 
-    let lastError = '';
-    for (const candidate of candidates) {
-      const result = await fetchMembers(instance_id, token, headers, candidate);
-      if (result.ok && result.members && result.members.length > 0) {
-        const normalized = result.members.map((m) => ({
-          phone: String(m.phone ?? m.id ?? '')
+    // Try all combinations of endpoint param name × groupId format
+    const attempts = [
+      `${base}/group-members?phone=${encodeURIComponent(withSuffix)}`,
+      `${base}/group-members?phone=${encodeURIComponent(stripped)}`,
+      `${base}/group-members?phone=${encodeURIComponent(groupId)}`,
+      `${base}/group-members?groupId=${encodeURIComponent(withSuffix)}`,
+      `${base}/group-members?groupId=${encodeURIComponent(stripped)}`,
+      `${base}/group-members?groupId=${encodeURIComponent(groupId)}`,
+    ];
+
+    const logs: string[] = [];
+
+    for (const url of attempts) {
+      const { ok, status, body, text } = await tryFetch(url, headers);
+      const members = extractMembers(body);
+      logs.push(`[${status}] ${url.split('?')[1]} → ${text.slice(0, 60)}`);
+
+      if (ok && members) {
+        const result = members.map((m) => ({
+          phone: String(m.phone ?? m.id ?? m.jid ?? '')
             .replace('@s.whatsapp.net', '')
             .replace('@c.us', '')
             .replace(/@g\.us$/, '')
             .replace(/\D/g, ''),
-          name: String(m.name ?? m.pushname ?? m.phone ?? ''),
+          name: String(m.name ?? m.pushname ?? m.notify ?? ''),
           admin: m.admin === true || m.isSuperAdmin === true || m.isAdmin === true,
         })).filter((m) => m.phone.length >= 8);
-        return Response.json(normalized);
+
+        if (result.length > 0) return Response.json(result);
       }
-      if (result.error) lastError = result.error;
-      // If ok but empty, keep trying other formats
     }
 
-    return Response.json({ error: lastError || 'Nenhum membro encontrado' }, { status: 502 });
+    return Response.json({
+      error: `Nenhum membro encontrado. Tentativas:\n${logs.join('\n')}`,
+    }, { status: 502 });
   } finally {
     await pool.end();
   }
