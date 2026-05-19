@@ -10,7 +10,7 @@ function normalizeGroupId(raw: string): string {
 function isErrorBody(body: unknown): boolean {
   if (body && typeof body === 'object') {
     const obj = body as Record<string, unknown>;
-    return typeof obj.error === 'string' || typeof obj.message === 'string';
+    return typeof obj.error === 'string';
   }
   return false;
 }
@@ -34,36 +34,6 @@ function extractMembers(body: unknown): Array<Record<string, unknown>> | null {
     }
   }
   return null;
-}
-
-function buildAttempts(base: string, stripped: string, withSuffix: string, raw: string): string[] {
-  // Try different endpoints × different phone formats
-  // Note: @g.us sent both URL-encoded (%40) and literal (@) since Z-API behaves inconsistently
-  const endpoints = ['group-members', 'group-participants', 'group-metadata'];
-  const params = ['phone', 'groupId'];
-  const values = [
-    withSuffix,                          // 120363427351645831@g.us
-    stripped,                            // 120363427351645831
-    raw,                                 // 120363427351645831-group (as-is from chats)
-    `${stripped}-group`,                 // explicit -group suffix
-  ];
-
-  const seen = new Set<string>();
-  const urls: string[] = [];
-
-  for (const endpoint of endpoints) {
-    for (const param of params) {
-      for (const value of values) {
-        // Try with encodeURIComponent (standard) and without encoding @ (some APIs need literal @)
-        const encoded = `${base}/${endpoint}?${param}=${encodeURIComponent(value)}`;
-        const literal = `${base}/${endpoint}?${param}=${value}`;
-        for (const url of [encoded, literal]) {
-          if (!seen.has(url)) { seen.add(url); urls.push(url); }
-        }
-      }
-    }
-  }
-  return urls;
 }
 
 export async function GET(request: NextRequest) {
@@ -91,16 +61,35 @@ export async function GET(request: NextRequest) {
     if (security_token) headers['Client-Token'] = security_token;
 
     const base = `${BASE}/${instance_id}/token/${token}`;
-    const stripped = normalizeGroupId(groupId);
-    const withSuffix = `${stripped}@g.us`;
+    const stripped = normalizeGroupId(groupId); // "120363427351645831"
+    const withSuffix = `${stripped}@g.us`;      // "120363427351645831@g.us"
 
-    const attempts = buildAttempts(base, stripped, withSuffix, groupId);
+    // Z-API can use the phone either in the PATH or as a query string
+    // Try path-based first (most likely correct for modern Z-API), then query-string
+    const attempts = [
+      // PATH-based: phone in the URL path
+      `${base}/group-members/${encodeURIComponent(withSuffix)}`,
+      `${base}/group-members/${stripped}@g.us`,    // literal @ in path
+      `${base}/group-members/${stripped}`,
+      `${base}/group-members/${encodeURIComponent(groupId)}`,
+      `${base}/group-participants/${encodeURIComponent(withSuffix)}`,
+      `${base}/group-participants/${stripped}@g.us`,
+      `${base}/group-participants/${stripped}`,
+      `${base}/group-metadata/${encodeURIComponent(withSuffix)}`,
+      `${base}/group-metadata/${stripped}@g.us`,
+      `${base}/group-metadata/${stripped}`,
+      // QUERY-based fallback
+      `${base}/group-members?phone=${stripped}@g.us`,
+      `${base}/group-members?phone=${stripped}`,
+      `${base}/group-members?groupId=${stripped}@g.us`,
+    ];
+
     const logs: string[] = [];
 
     for (const url of attempts) {
       const { ok, status, body, text } = await tryFetch(url, headers);
       const path = url.replace(base, '');
-      const preview = text.slice(0, 80).replace(/\n/g, ' ');
+      const preview = text.slice(0, 100).replace(/\n/g, ' ');
       logs.push(`[${status}] ${path} → ${preview}`);
 
       if (ok) {
@@ -122,7 +111,7 @@ export async function GET(request: NextRequest) {
     }
 
     return Response.json({
-      error: `Nenhum membro encontrado.\n${logs.slice(0, 10).join('\n')}`,
+      error: `Nenhum membro encontrado.\n${logs.join('\n')}`,
     }, { status: 502 });
   } finally {
     await pool.end();
