@@ -7,6 +7,14 @@ function normalizeGroupId(raw: string): string {
   return raw.replace(/-group$/i, '').replace(/@g\.us$/, '');
 }
 
+function isErrorBody(body: unknown): boolean {
+  if (body && typeof body === 'object') {
+    const obj = body as Record<string, unknown>;
+    return typeof obj.error === 'string' || typeof obj.message === 'string';
+  }
+  return false;
+}
+
 async function tryFetch(url: string, headers: Record<string, string>) {
   const res = await fetch(url, { headers });
   const text = await res.text().catch(() => '');
@@ -16,6 +24,7 @@ async function tryFetch(url: string, headers: Record<string, string>) {
 }
 
 function extractMembers(body: unknown): Array<Record<string, unknown>> | null {
+  if (isErrorBody(body)) return null;
   if (Array.isArray(body) && body.length > 0) return body as Array<Record<string, unknown>>;
   if (body && typeof body === 'object') {
     const obj = body as Record<string, unknown>;
@@ -25,6 +34,36 @@ function extractMembers(body: unknown): Array<Record<string, unknown>> | null {
     }
   }
   return null;
+}
+
+function buildAttempts(base: string, stripped: string, withSuffix: string, raw: string): string[] {
+  // Try different endpoints × different phone formats
+  // Note: @g.us sent both URL-encoded (%40) and literal (@) since Z-API behaves inconsistently
+  const endpoints = ['group-members', 'group-participants', 'group-metadata'];
+  const params = ['phone', 'groupId'];
+  const values = [
+    withSuffix,                          // 120363427351645831@g.us
+    stripped,                            // 120363427351645831
+    raw,                                 // 120363427351645831-group (as-is from chats)
+    `${stripped}-group`,                 // explicit -group suffix
+  ];
+
+  const seen = new Set<string>();
+  const urls: string[] = [];
+
+  for (const endpoint of endpoints) {
+    for (const param of params) {
+      for (const value of values) {
+        // Try with encodeURIComponent (standard) and without encoding @ (some APIs need literal @)
+        const encoded = `${base}/${endpoint}?${param}=${encodeURIComponent(value)}`;
+        const literal = `${base}/${endpoint}?${param}=${value}`;
+        for (const url of [encoded, literal]) {
+          if (!seen.has(url)) { seen.add(url); urls.push(url); }
+        }
+      }
+    }
+  }
+  return urls;
 }
 
 export async function GET(request: NextRequest) {
@@ -55,40 +94,35 @@ export async function GET(request: NextRequest) {
     const stripped = normalizeGroupId(groupId);
     const withSuffix = `${stripped}@g.us`;
 
-    // Try all combinations of endpoint param name × groupId format
-    const attempts = [
-      `${base}/group-members?phone=${encodeURIComponent(withSuffix)}`,
-      `${base}/group-members?phone=${encodeURIComponent(stripped)}`,
-      `${base}/group-members?phone=${encodeURIComponent(groupId)}`,
-      `${base}/group-members?groupId=${encodeURIComponent(withSuffix)}`,
-      `${base}/group-members?groupId=${encodeURIComponent(stripped)}`,
-      `${base}/group-members?groupId=${encodeURIComponent(groupId)}`,
-    ];
-
+    const attempts = buildAttempts(base, stripped, withSuffix, groupId);
     const logs: string[] = [];
 
     for (const url of attempts) {
       const { ok, status, body, text } = await tryFetch(url, headers);
-      const members = extractMembers(body);
-      logs.push(`[${status}] ${url.split('?')[1]} → ${text.slice(0, 60)}`);
+      const path = url.replace(base, '');
+      const preview = text.slice(0, 80).replace(/\n/g, ' ');
+      logs.push(`[${status}] ${path} → ${preview}`);
 
-      if (ok && members) {
-        const result = members.map((m) => ({
-          phone: String(m.phone ?? m.id ?? m.jid ?? '')
-            .replace('@s.whatsapp.net', '')
-            .replace('@c.us', '')
-            .replace(/@g\.us$/, '')
-            .replace(/\D/g, ''),
-          name: String(m.name ?? m.pushname ?? m.notify ?? ''),
-          admin: m.admin === true || m.isSuperAdmin === true || m.isAdmin === true,
-        })).filter((m) => m.phone.length >= 8);
+      if (ok) {
+        const members = extractMembers(body);
+        if (members) {
+          const result = members.map((m) => ({
+            phone: String(m.phone ?? m.id ?? m.jid ?? '')
+              .replace('@s.whatsapp.net', '')
+              .replace('@c.us', '')
+              .replace(/@g\.us$/, '')
+              .replace(/\D/g, ''),
+            name: String(m.name ?? m.pushname ?? m.notify ?? ''),
+            admin: m.admin === true || m.isSuperAdmin === true || m.isAdmin === true,
+          })).filter((m) => m.phone.length >= 8);
 
-        if (result.length > 0) return Response.json(result);
+          if (result.length > 0) return Response.json(result);
+        }
       }
     }
 
     return Response.json({
-      error: `Nenhum membro encontrado. Tentativas:\n${logs.join('\n')}`,
+      error: `Nenhum membro encontrado.\n${logs.slice(0, 10).join('\n')}`,
     }, { status: 502 });
   } finally {
     await pool.end();
