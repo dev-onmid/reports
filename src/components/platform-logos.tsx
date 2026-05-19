@@ -1,13 +1,13 @@
 export function MetaAdsMark({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" className={className ?? 'h-4 w-4'} fill="none">
+    <svg viewBox="0 0 24 24" className={className ?? 'h-4 w-4 text-[#0668E1]'} fill="none">
       <path
         d="M4.15 15.45c0-3.92 1.98-7.03 4.34-7.03 1.38 0 2.47 1.03 3.52 2.68 1.05-1.65 2.14-2.68 3.52-2.68 2.36 0 4.34 3.11 4.34 7.03 0 2.5-1.08 4.13-2.8 4.13-1.46 0-2.54-.95-4.96-5.18-2.42 4.23-3.5 5.18-4.96 5.18-1.72 0-3-1.63-3-4.13Z"
-        stroke="#0668E1" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"
+        stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"
       />
       <path
         d="M12.01 11.1c2.4 3.78 3.45 5.47 5.06 5.47.74 0 1.19-.53 1.19-1.23 0-2.32-1.28-4.58-2.72-4.58-1.05 0-1.85.94-3.53 3.64-1.68-2.7-2.48-3.64-3.53-3.64-1.44 0-2.72 2.26-2.72 4.58 0 .7.45 1.23 1.19 1.23 1.61 0 2.66-1.69 5.06-5.47Z"
-        stroke="#0668E1" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"
+        stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"
       />
     </svg>
   );

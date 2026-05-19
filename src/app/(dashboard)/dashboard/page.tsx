@@ -3544,8 +3544,8 @@ export default function GeneralDashboard() {
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,#00C2FF,#0B84FF,transparent)]" />
         <div className="relative mb-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#0B84FF]/70 bg-[#0B84FF]/25 shadow-[0_0_26px_rgba(11,132,255,0.72)]">
-              <MetaAdsMark className="h-5 w-5" />
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#41A5FF]/80 bg-[#0B84FF] text-white shadow-[0_0_28px_rgba(11,132,255,0.78)]">
+              <MetaAdsMark className="h-[18px] w-[18px] translate-y-px text-white" />
             </span>
             <h2 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-foreground">
               Meta Ads
