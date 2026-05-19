@@ -3006,7 +3006,9 @@ export default function GeneralDashboard() {
       {/* 1. MÉTRICAS GERAIS */}
       <section className="rounded-2xl border border-white/5 bg-card p-5">
         <div className="mb-4 flex items-center gap-3">
-          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-xs font-black text-black">1</span>
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-primary/40 bg-primary/15 text-primary shadow-[0_0_18px_rgba(85,245,47,0.18)]">
+            <LayoutDashboard className="h-4.5 w-4.5" />
+          </span>
           <div>
             <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">Métricas Gerais</h2>
             <p className="text-[11px] text-muted-foreground">Consolidado do período antes da leitura por canal.</p>
@@ -3079,9 +3081,11 @@ export default function GeneralDashboard() {
       <section className="rounded-2xl border border-blue-500/40 bg-card p-5 shadow-[0_0_45px_rgba(6,104,225,0.08)]">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-600 text-xs font-black text-white">2</span>
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-blue-500/35 bg-blue-500/10 shadow-[0_0_18px_rgba(6,104,225,0.2)]">
+              <MetaAdsMark className="h-5 w-5" />
+            </span>
             <h2 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-foreground">
-              Meta Ads <MetaAdsMark className="h-5 w-5" />
+              Meta Ads
             </h2>
           </div>
           <p className="text-[11px] text-muted-foreground">{metaFormLeads.toLocaleString('pt-BR')} formulários + {metaConversations.toLocaleString('pt-BR')} conversas no período</p>
@@ -3169,9 +3173,11 @@ export default function GeneralDashboard() {
       {/* 3. GOOGLE ADS */}
       <section className="rounded-2xl border border-red-500/40 bg-card p-5 shadow-[0_0_45px_rgba(234,67,53,0.08)]">
         <div className="mb-4 flex items-center gap-3">
-          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-red-600 text-xs font-black text-white">3</span>
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-red-500/35 bg-red-500/10 shadow-[0_0_18px_rgba(234,67,53,0.18)]">
+            <GoogleAdsMark className="h-5 w-5" />
+          </span>
           <h2 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-foreground">
-            Google Ads <GoogleAdsMark className="h-5 w-5" />
+            Google Ads
           </h2>
         </div>
 
