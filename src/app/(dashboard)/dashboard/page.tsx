@@ -3595,29 +3595,27 @@ export default function GeneralDashboard() {
             <p className="text-[11px] text-foreground/60">Consolidado do período antes da leitura por canal.</p>
           </div>
         </div>
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,0.92fr)_minmax(420px,1.08fr)]">
-          <div className="flex min-w-0 flex-col gap-4">
-            <DashboardGridItem id="general-revenue" prefs={dashboardPrefs} ignoreSpan>
-              <TargetSummaryCard title="Faturamento" value={revenue} partial={effectiveRevenueGoal} target={plannedRevenue} format="currency" accent="#22c55e" icon={DollarSign} />
-            </DashboardGridItem>
-            <DashboardGridItem id="general-leads" prefs={dashboardPrefs} ignoreSpan>
-              <TargetSummaryCard title="Leads" value={totalLeads} partial={effectiveLeadsGoal} target={leadsGoal} format="number" accent="#22c55e" icon={Users} />
-            </DashboardGridItem>
-            <DashboardGridItem id="general-roi" prefs={dashboardPrefs} ignoreSpan>
-              <KpiCard title="ROI" value={roi} prevValue={prevRoi > 0 ? prevRoi : undefined} goalValue={roiGoal > 0 ? roiGoal : undefined} format="times" icon={TrendingUp} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} chart={dashboardPrefs.cards['general-roi'].chart} series={seriesOrPacing(roiSeries, roi)} />
-            </DashboardGridItem>
-            <DashboardGridItem id="general-cpl" prefs={dashboardPrefs} ignoreSpan>
-              <KpiCard title="CPL Geral" value={totalCostPerLead} prevValue={prevCpl > 0 ? prevCpl : undefined} goalValue={cplGoal > 0 ? cplGoal : undefined} format="currency" icon={Tag} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} inverseGoal inverseChange chart={dashboardPrefs.cards['general-cpl'].chart} series={seriesOrPacing(cplSeries, totalCostPerLead)} />
-            </DashboardGridItem>
-            <DashboardGridItem id="general-spend" prefs={dashboardPrefs} ignoreSpan>
-              <KpiCard title="Valor Gasto" value={totalSpend} format="currency" icon={CreditCard} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} chart={dashboardPrefs.cards['general-spend'].chart} series={seriesOrPacing(totalSpendSeries, totalSpend)} />
-            </DashboardGridItem>
-            <DashboardGridItem id="general-ctr" prefs={dashboardPrefs} ignoreSpan>
-              <KpiCard title="CTR Geral" value={avgCtr} format="percent" icon={MousePointerClick} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} chart={dashboardPrefs.cards['general-ctr'].chart} series={seriesOrPacing(avgCtrSeries, avgCtr)} />
-            </DashboardGridItem>
-          </div>
-          <DashboardGridItem id="general-funnel" prefs={dashboardPrefs} ignoreSpan>
-            <div className="flex h-full min-h-[560px] flex-col rounded-xl border border-[#55F52F]/35 bg-black/35 p-4 shadow-[inset_0_0_30px_rgba(85,245,47,0.08),0_0_28px_rgba(85,245,47,0.14)] xl:min-h-[720px]">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(480px,1.16fr)]">
+          <DashboardGridItem id="general-revenue" prefs={dashboardPrefs} className="xl:col-span-2" ignoreSpan>
+            <TargetSummaryCard title="Faturamento" value={revenue} partial={effectiveRevenueGoal} target={plannedRevenue} format="currency" accent="#22c55e" icon={DollarSign} />
+          </DashboardGridItem>
+          <DashboardGridItem id="general-leads" prefs={dashboardPrefs} className="xl:col-span-2 xl:row-start-2" ignoreSpan>
+            <TargetSummaryCard title="Leads" value={totalLeads} partial={effectiveLeadsGoal} target={leadsGoal} format="number" accent="#22c55e" icon={Users} />
+          </DashboardGridItem>
+          <DashboardGridItem id="general-roi" prefs={dashboardPrefs} className="xl:row-start-3" ignoreSpan>
+            <KpiCard title="ROI" value={roi} prevValue={prevRoi > 0 ? prevRoi : undefined} goalValue={roiGoal > 0 ? roiGoal : undefined} format="times" icon={TrendingUp} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} chart={dashboardPrefs.cards['general-roi'].chart} series={seriesOrPacing(roiSeries, roi)} />
+          </DashboardGridItem>
+          <DashboardGridItem id="general-cpl" prefs={dashboardPrefs} className="xl:row-start-3" ignoreSpan>
+            <KpiCard title="CPL Geral" value={totalCostPerLead} prevValue={prevCpl > 0 ? prevCpl : undefined} goalValue={cplGoal > 0 ? cplGoal : undefined} format="currency" icon={Tag} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} inverseGoal inverseChange chart={dashboardPrefs.cards['general-cpl'].chart} series={seriesOrPacing(cplSeries, totalCostPerLead)} />
+          </DashboardGridItem>
+          <DashboardGridItem id="general-ctr" prefs={dashboardPrefs} className="xl:row-start-4" ignoreSpan>
+            <KpiCard title="CTR Geral" value={avgCtr} format="percent" icon={MousePointerClick} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} chart={dashboardPrefs.cards['general-ctr'].chart} series={seriesOrPacing(avgCtrSeries, avgCtr)} />
+          </DashboardGridItem>
+          <DashboardGridItem id="general-spend" prefs={dashboardPrefs} className="xl:row-start-4" ignoreSpan>
+            <KpiCard title="Valor Gasto" value={totalSpend} format="currency" icon={CreditCard} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} chart={dashboardPrefs.cards['general-spend'].chart} series={seriesOrPacing(totalSpendSeries, totalSpend)} />
+          </DashboardGridItem>
+          <DashboardGridItem id="general-funnel" prefs={dashboardPrefs} className="xl:col-start-3 xl:row-span-4 xl:row-start-1" ignoreSpan>
+            <div className="flex h-full min-h-[680px] flex-col rounded-xl border border-[#55F52F]/35 bg-black/35 p-4 shadow-[inset_0_0_30px_rgba(85,245,47,0.08),0_0_28px_rgba(85,245,47,0.14)] xl:min-h-[820px]">
               <p className="text-sm font-bold uppercase tracking-wider text-foreground">Funil de Performance</p>
               <p className="mt-0.5 text-[11px] text-foreground/60">Período: {PERIODS.find(p => p.value === period)?.label ?? period}</p>
               {(() => {
@@ -3638,15 +3636,15 @@ export default function GeneralDashboard() {
                 ];
                 const maxVal = funnelRows[0]?.value || 1;
                 const FUNNEL_COLORS = ['#0EA5E9', '#7C3AED', '#EC4899', '#F97316', '#22C55E'];
-                const funnelHeight = 34;
-                const funnelGap = 4;
-                const funnelTop = 18;
+                const funnelHeight = 56;
+                const funnelGap = 8;
+                const funnelTop = 26;
                 const funnelWidth = 320;
                 const funnelCenter = funnelWidth / 2;
                 return (
-                  <div className="mt-4 grid flex-1 items-stretch gap-5 2xl:grid-cols-[360px_1fr]">
-                    <div className="relative min-h-[320px] rounded-xl border border-white/15 bg-black/45 p-4 shadow-[inset_0_0_32px_rgba(14,165,233,0.12)]">
-                      <svg viewBox="0 0 320 220" className="h-full w-full overflow-visible" role="img" aria-label="Funil de vendas">
+                  <div className="mt-4 grid flex-1 items-stretch gap-5">
+                    <div className="relative min-h-[430px] rounded-xl border border-white/15 bg-black/45 p-4 shadow-[inset_0_0_32px_rgba(14,165,233,0.12)] xl:min-h-[520px]">
+                      <svg viewBox="0 0 320 360" className="h-full w-full overflow-visible" role="img" aria-label="Funil de vendas">
                         <defs>
                           <filter id="dashboard-funnel-glow" x="-30%" y="-30%" width="160%" height="160%">
                             <feGaussianBlur stdDeviation="3" result="blur" />
@@ -3674,7 +3672,7 @@ export default function GeneralDashboard() {
                         })}
                       </svg>
                     </div>
-                    <div className="flex h-full min-h-[320px] flex-col justify-between gap-2">
+                    <div className="flex min-h-[230px] flex-col justify-between gap-2">
                       {funnelRows.slice(0, 5).map((row, i) => {
                         const pct = maxVal > 0 ? (row.value / maxVal) * 100 : 0;
                         return (
