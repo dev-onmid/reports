@@ -1,7 +1,7 @@
 "use client";
 
 import Link from 'next/link';
-import { type ElementType, type ReactNode, useCallback, useEffect, useState } from 'react';
+import { type ElementType, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   BarChart3,
@@ -1273,7 +1273,9 @@ export default function PagamentosPage() {
     amount: 500,
     channel: 'Meta ADS',
     status: 'Pendente',
+    extra: false,
   });
+  const formRef = useRef<HTMLDivElement>(null);
 
   type RecurMode = 'none' | 'weekdays' | 'interval' | 'monthly';
   const [recurMode, setRecurMode] = useState<RecurMode>('none');
@@ -1399,7 +1401,7 @@ export default function PagamentosPage() {
       if (dates.length > 0) setSelectedDate(dates[0]);
     }
 
-    setNewPayment((prev) => ({ ...prev, destination: `${prev.clientName} - Novo investimento`, amount: 500 }));
+    setNewPayment((prev) => ({ ...prev, destination: `${prev.clientName} - Novo investimento`, amount: 500, extra: false }));
     setRecurMode('none');
     setRecurHasEnd(false);
     setRecurUntil('');
@@ -1476,7 +1478,7 @@ export default function PagamentosPage() {
         )}
       </div>
 
-      {viewMode !== 'dia' && <div className="rounded-xl border border-violet-400/25 bg-card/80 p-4 shadow-[0_0_34px_rgba(124,58,237,0.08)]">
+      {viewMode !== 'dia' && <div ref={formRef} id="novo-pagamento-form" className="rounded-xl border border-violet-400/25 bg-card/80 p-4 shadow-[0_0_34px_rgba(124,58,237,0.08)]">
         <div className="mb-4 flex items-center gap-3">
           <span className="flex h-8 w-8 items-center justify-center rounded-full bg-violet-500/20 text-violet-300 shadow-[0_0_18px_rgba(124,58,237,0.25)]">
             <Plus className="h-4 w-4" />
@@ -1484,7 +1486,7 @@ export default function PagamentosPage() {
           <h2 className="text-sm font-bold uppercase tracking-wider">Novo Pagamento</h2>
           <p className="text-xs text-muted-foreground">Cadastre um novo Pix ou agende para futuras datas.</p>
         </div>
-        <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr_1.25fr_0.9fr_0.7fr_0.75fr_0.8fr]">
+        <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr_1.25fr_0.9fr_0.7fr_0.75fr_auto_0.8fr]">
           <label className="space-y-2">
             <span className="text-xs font-bold text-foreground">Cliente</span>
             <select value={newPayment.clientId} onChange={(e) => handleClientChange(e.target.value)} className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm text-muted-foreground outline-none focus:border-primary">
@@ -1518,6 +1520,22 @@ export default function PagamentosPage() {
               {PAYMENT_STATUS_OPTIONS.map((status) => <option key={status}>{status}</option>)}
             </select>
           </label>
+          <div className="flex flex-col items-center justify-end gap-1">
+            <span className="text-xs font-bold text-foreground">Extra</span>
+            <button
+              type="button"
+              onClick={() => setNewPayment((p) => ({ ...p, extra: !p.extra }))}
+              title={newPayment.extra ? 'Remover destaque extra' : 'Marcar como pagamento extra'}
+              className={cn(
+                'flex h-10 w-14 items-center justify-center rounded-lg border transition-all',
+                newPayment.extra
+                  ? 'border-violet-500/60 bg-violet-500/20 text-violet-300 shadow-[0_0_14px_rgba(168,85,247,0.4)]'
+                  : 'border-border bg-background text-muted-foreground hover:border-violet-500/40 hover:text-violet-400',
+              )}
+            >
+              <Zap className={cn('h-4 w-4', newPayment.extra && 'fill-violet-400')} />
+            </button>
+          </div>
           <button
             type="button"
             onClick={handleAddPayment}
@@ -1761,7 +1779,7 @@ export default function PagamentosPage() {
                 return (
                   <div
                     key={`${wi}-${di}`}
-                    className={cn('min-h-[148px] border-r border-border/70 p-2.5 last:border-r-0 transition-colors', !date && 'bg-muted/5 opacity-40', dragOverDate === date && date && 'bg-violet-500/10 ring-1 ring-inset ring-violet-500/30')}
+                    className={cn('group min-h-[148px] border-r border-border/70 p-2.5 last:border-r-0 transition-colors', !date && 'bg-muted/5 opacity-40', dragOverDate === date && date && 'bg-violet-500/10 ring-1 ring-inset ring-violet-500/30')}
                     onDragOver={(e) => { if (date) { e.preventDefault(); setDragOverDate(date); } }}
                     onDragLeave={() => setDragOverDate(null)}
                     onDrop={(e) => { e.preventDefault(); const id = e.dataTransfer.getData('text/plain'); if (id && date) movePaymentDate(id, date); setDragOverDate(null); }}
@@ -1769,10 +1787,21 @@ export default function PagamentosPage() {
                     {date && (
                       <>
                         {wi > 0 && (
-                          <div className="mb-2 flex h-5 items-center justify-center">
+                          <div className="mb-2 flex h-5 items-center justify-between">
                             <span className={cn('text-sm font-bold text-muted-foreground', isToday && 'rounded-full bg-primary px-2 text-black shadow-[0_0_14px_rgba(85,245,47,0.4)]')}>
                               {date.split('-')[2]}
                             </span>
+                            <button
+                              type="button"
+                              title="Criar pagamento neste dia"
+                              onClick={() => {
+                                setNewPayment((p) => ({ ...p, date }));
+                                formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                              }}
+                              className="flex h-4 w-4 items-center justify-center rounded text-muted-foreground/40 opacity-0 transition-all hover:bg-violet-500/20 hover:text-violet-400 group-hover:opacity-100"
+                            >
+                              <Plus className="h-3 w-3" />
+                            </button>
                           </div>
                         )}
                         <div className="space-y-2">

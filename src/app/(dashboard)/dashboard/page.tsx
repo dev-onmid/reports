@@ -3006,14 +3006,14 @@ export default function GeneralDashboard() {
         )}>
           {(metaSpend > 0 || metaLeads > 0) && (
             <>
-              <KpiCard title="Leads Meta Ads" value={metaLeads} prevValue={prevMetaLeads > 0 ? prevMetaLeads : undefined} format="number" icon={Target} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} logo={<MetaAdsMark className="h-6 w-6" />} />
-              <KpiCard title="CPL Meta Ads" value={avgCpl} format="currency" icon={Zap} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} inverseGoal inverseChange logo={<MetaAdsMark className="h-6 w-6" />} />
+              <KpiCard title="Leads Meta Ads" value={metaLeads} prevValue={prevMetaLeads > 0 ? prevMetaLeads : undefined} format="number" icon={Target} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} />
+              <KpiCard title="CPL Meta Ads" value={avgCpl} format="currency" icon={Zap} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} inverseGoal inverseChange logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} />
             </>
           )}
           {(googleCost > 0 || googleConv > 0) && (
             <>
-              <KpiCard title="Conversões Google" value={googleConv} prevValue={prevGoogleConv > 0 ? prevGoogleConv : undefined} format="number" icon={BarChart3} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} logo={<GoogleAdsMark className="h-6 w-6" />} />
-              <KpiCard title="Custo por Conversão Google" value={avgCpa} format="currency" icon={Briefcase} iconColor="#34A853" iconBg="#34A853" loading={metricsLoading} inverseGoal inverseChange logo={<GoogleAdsMark className="h-6 w-6" />} />
+              <KpiCard title="Conversões Google" value={googleConv} prevValue={prevGoogleConv > 0 ? prevGoogleConv : undefined} format="number" icon={BarChart3} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} />
+              <KpiCard title="Custo por Conversão Google" value={avgCpa} format="currency" icon={Briefcase} iconColor="#34A853" iconBg="#34A853" loading={metricsLoading} inverseGoal inverseChange logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} />
             </>
           )}
         </div>
@@ -3021,8 +3021,8 @@ export default function GeneralDashboard() {
 
       {/* KPIs — Saldos + CTR + Gasto */}
       <div className="grid items-start gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard title="Saldo Meta Ads" value={metaBalance} format="currency" icon={PiggyBank} iconColor="#0668E1" iconBg="#0668E1" loading={balancesLoading} />
-        <KpiCard title="Saldo Google Ads" value={googleBalance} format="currency" icon={Wallet} iconColor="#34A853" iconBg="#34A853" loading={balancesLoading} />
+        <KpiCard title="Saldo Meta Ads" value={metaBalance} format="currency" icon={PiggyBank} iconColor="#0668E1" iconBg="#0668E1" loading={balancesLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} />
+        <KpiCard title="Saldo Google Ads" value={googleBalance} format="currency" icon={Wallet} iconColor="#34A853" iconBg="#34A853" loading={balancesLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} />
         <KpiCard title="CTR Médio" value={avgCtr} format="percent" icon={MousePointerClick} iconColor="#f59e0b" iconBg="#f59e0b" loading={metricsLoading} />
         <KpiCard title="Valor Gasto Total" value={totalSpend} format="currency" icon={CreditCard} iconColor="#e879f9" iconBg="#e879f9" loading={metricsLoading} />
       </div>
