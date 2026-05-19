@@ -3480,15 +3480,15 @@ export default function GeneralDashboard() {
             ];
             const maxVal = funnelRows[0]?.value || 1;
             const FUNNEL_COLORS = ['#0EA5E9', '#7C3AED', '#EC4899', '#F97316', '#22C55E'];
-            const funnelHeight = 28;
-            const funnelGap = 3;
-            const funnelTop = 12;
-            const funnelWidth = 260;
+            const funnelHeight = 34;
+            const funnelGap = 4;
+            const funnelTop = 18;
+            const funnelWidth = 320;
             const funnelCenter = funnelWidth / 2;
             return (
-              <div className="mt-4 grid items-center gap-5 lg:grid-cols-[320px_1fr]">
-                <div className="relative h-[190px] rounded-xl border border-white/15 bg-black/45 p-3 shadow-[inset_0_0_32px_rgba(14,165,233,0.12)]">
-                  <svg viewBox="0 0 260 170" className="h-full w-full overflow-visible" role="img" aria-label="Funil de vendas">
+              <div className="mt-4 grid items-stretch gap-5 lg:grid-cols-[360px_1fr]">
+                <div className="relative min-h-[230px] rounded-xl border border-white/15 bg-black/45 p-4 shadow-[inset_0_0_32px_rgba(14,165,233,0.12)]">
+                  <svg viewBox="0 0 320 220" className="h-full w-full overflow-visible" role="img" aria-label="Funil de vendas">
                     <defs>
                       <filter id="dashboard-funnel-glow" x="-30%" y="-30%" width="160%" height="160%">
                         <feGaussianBlur stdDeviation="3" result="blur" />
@@ -3516,7 +3516,7 @@ export default function GeneralDashboard() {
                     })}
                   </svg>
                 </div>
-                <div className="space-y-3">
+                <div className="flex h-full min-h-[230px] flex-col justify-between gap-2">
                   {funnelRows.slice(0, 5).map((row, i) => {
                     const pct = maxVal > 0 ? (row.value / maxVal) * 100 : 0;
                     return (
