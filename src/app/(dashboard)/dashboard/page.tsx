@@ -2216,6 +2216,8 @@ type DashboardCardId =
 type DashboardCardConfig = {
   visible: boolean;
   size: DashboardWidgetSize;
+  height?: number;
+  order: number;
   chart: DashboardCardChart;
 };
 
@@ -2287,7 +2289,8 @@ const DEFAULT_CARD_OVERRIDES: Partial<Record<DashboardCardId, Partial<DashboardC
 
 const DEFAULT_DASHBOARD_PREFS: DashboardPrefs = {
   cards: (Object.keys(CARD_LABELS) as DashboardCardId[]).reduce((acc, id) => {
-    acc[id] = { visible: true, size: 'sm', chart: 'sparkline', ...DEFAULT_CARD_OVERRIDES[id] };
+    const groupIndex = CARD_GROUPS.find(group => group.ids.includes(id))?.ids.indexOf(id) ?? 0;
+    acc[id] = { visible: true, size: 'sm', height: undefined, order: groupIndex, chart: 'sparkline', ...DEFAULT_CARD_OVERRIDES[id] };
     return acc;
   }, {} as Record<DashboardCardId, DashboardCardConfig>),
   metaAudienceChart: 'donut',
@@ -2301,7 +2304,7 @@ function mergeDashboardPrefs(input: unknown): DashboardPrefs {
   const cards = { ...DEFAULT_DASHBOARD_PREFS.cards };
   if (raw?.cards) {
     for (const id of Object.keys(CARD_LABELS) as DashboardCardId[]) {
-      cards[id] = { ...cards[id], ...raw.cards[id] };
+      cards[id] = { ...cards[id], ...raw.cards[id], order: raw.cards[id]?.order ?? cards[id].order };
     }
   }
   return {
@@ -2318,7 +2321,14 @@ function gridSpan(size: DashboardWidgetSize) {
 function DashboardGridItem({ id, prefs, children }: { id: DashboardCardId; prefs: DashboardPrefs; children: ReactNode }) {
   const cfg = prefs.cards[id] ?? DEFAULT_DASHBOARD_PREFS.cards[id];
   if (!cfg.visible) return null;
-  return <div className={cn('min-w-0', gridSpan(cfg.size))}>{children}</div>;
+  return (
+    <div
+      className={cn('min-w-0 [&>*]:h-full', gridSpan(cfg.size))}
+      style={{ order: cfg.order, minHeight: cfg.height ? `${cfg.height}px` : undefined }}
+    >
+      {children}
+    </div>
+  );
 }
 
 function DashboardCustomizer({
@@ -2332,6 +2342,23 @@ function DashboardCustomizer({
 }) {
   function updateCard(id: DashboardCardId, patch: Partial<DashboardCardConfig>) {
     onPrefsChange({ ...prefs, cards: { ...prefs.cards, [id]: { ...prefs.cards[id], ...patch } } });
+  }
+  function moveCard(groupIds: DashboardCardId[], id: DashboardCardId, direction: -1 | 1) {
+    const ordered = [...groupIds].sort((a, b) => {
+      const aOrder = prefs.cards[a]?.order ?? groupIds.indexOf(a);
+      const bOrder = prefs.cards[b]?.order ?? groupIds.indexOf(b);
+      return aOrder - bOrder;
+    });
+    const currentIndex = ordered.indexOf(id);
+    const nextIndex = currentIndex + direction;
+    if (nextIndex < 0 || nextIndex >= ordered.length) return;
+    const next = [...ordered];
+    [next[currentIndex], next[nextIndex]] = [next[nextIndex], next[currentIndex]];
+    const cards = { ...prefs.cards };
+    next.forEach((cardId, index) => {
+      cards[cardId] = { ...cards[cardId], order: index };
+    });
+    onPrefsChange({ ...prefs, cards });
   }
   function reset() { onPrefsChange(DEFAULT_DASHBOARD_PREFS); }
 
@@ -2369,20 +2396,42 @@ function DashboardCustomizer({
               <section key={group.title} className="space-y-2">
                 <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{group.title}</p>
                 <div className="divide-y divide-border overflow-hidden rounded-xl border border-border">
-                  {group.ids.map(id => {
+                  {[...group.ids].sort((a, b) => {
+                    const aOrder = prefs.cards[a]?.order ?? group.ids.indexOf(a);
+                    const bOrder = prefs.cards[b]?.order ?? group.ids.indexOf(b);
+                    return aOrder - bOrder;
+                  }).map(id => {
                     const cfg = prefs.cards[id];
                     const isPanel = id.includes('campaigns') || id.includes('audience') || id.includes('preview') || id.includes('keywords') || id === 'general-funnel';
                     return (
-                      <div key={id} className="grid gap-3 bg-background/35 p-3 md:grid-cols-[1fr_90px_110px_120px]">
+                      <div key={id} className="grid gap-3 bg-background/35 p-3 md:grid-cols-[1fr_104px_118px_110px_110px_96px]">
                         <label className="flex min-w-0 items-center gap-2 text-xs font-semibold text-foreground">
                           <input type="checkbox" checked={cfg.visible} onChange={e => updateCard(id, { visible: e.target.checked })} className="h-4 w-4 accent-primary" />
                           <span className="truncate">{CARD_LABELS[id]}</span>
                         </label>
                         <select value={cfg.size} onChange={e => updateCard(id, { size: e.target.value as DashboardWidgetSize })} className="rounded-lg border border-border bg-card px-2 py-1.5 text-xs">
-                          <option value="sm">P</option>
-                          <option value="md">M</option>
-                          <option value="lg">G</option>
+                          <option value="sm">1 coluna</option>
+                          <option value="md">2 colunas</option>
+                          <option value="lg">4 colunas</option>
                         </select>
+                        <input
+                          type="number"
+                          min={120}
+                          step={20}
+                          value={cfg.height ?? ''}
+                          onChange={e => updateCard(id, { height: e.target.value ? Math.max(120, Number(e.target.value)) : undefined })}
+                          placeholder="Auto"
+                          className="rounded-lg border border-border bg-card px-2 py-1.5 text-xs"
+                          aria-label={`Altura de ${CARD_LABELS[id]}`}
+                        />
+                        <div className="flex overflow-hidden rounded-lg border border-border bg-card">
+                          <button type="button" onClick={() => moveCard(group.ids, id, -1)} className="flex flex-1 items-center justify-center px-2 py-1.5 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Mover para cima">
+                            <ChevronUp className="h-3.5 w-3.5" />
+                          </button>
+                          <button type="button" onClick={() => moveCard(group.ids, id, 1)} className="flex flex-1 items-center justify-center border-l border-border px-2 py-1.5 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Mover para baixo">
+                            <ChevronDown className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
                         <select value={cfg.chart} disabled={isPanel} onChange={e => updateCard(id, { chart: e.target.value as DashboardCardChart })} className="rounded-lg border border-border bg-card px-2 py-1.5 text-xs disabled:opacity-40">
                           <option value="sparkline">Linha</option>
                           <option value="none">Sem gráfico</option>
@@ -2659,6 +2708,7 @@ function CreativeCarouselCard({ creative, idx, sortBy, onPreview }: {
 export default function GeneralDashboard() {
   const { clients } = useClients();
   const session = getAuthSession();
+  const isAdmin = session?.role === 'Administrador';
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [prevMetricsByClient, setPrevMetricsByClient] = useState<Record<string, ApiMetrics>>({});
@@ -2763,6 +2813,9 @@ export default function GeneralDashboard() {
   useEffect(() => {
     localStorage.setItem(LS_DASHBOARD_PREFS, JSON.stringify(dashboardPrefs));
   }, [dashboardPrefs]);
+  useEffect(() => {
+    if (!isAdmin && customizerOpen) setCustomizerOpen(false);
+  }, [customizerOpen, isAdmin]);
 
   // Initialize: all clients selected (or pre-select from ?client=ID param)
   useEffect(() => {
@@ -3210,7 +3263,7 @@ export default function GeneralDashboard() {
 
   return (
     <div className="space-y-6 pb-10">
-      {customizerOpen && (
+      {customizerOpen && isAdmin && (
         <DashboardCustomizer
           prefs={dashboardPrefs}
           onPrefsChange={setDashboardPrefs}
@@ -3278,14 +3331,16 @@ export default function GeneralDashboard() {
             {aiLoading ? 'Analisando...' : 'Analisar com IA'}
           </button>
 
-          <button
-            type="button"
-            onClick={() => setCustomizerOpen(true)}
-            className="flex items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2 text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <Settings2 className="h-3.5 w-3.5" />
-            Customizar
-          </button>
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => setCustomizerOpen(true)}
+              className="flex items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2 text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <Settings2 className="h-3.5 w-3.5" />
+              Customizar
+            </button>
+          )}
 
           {/* Theme + bell + user */}
           <ThemeToggle />
