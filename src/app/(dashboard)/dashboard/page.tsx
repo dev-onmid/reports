@@ -300,7 +300,7 @@ function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: 
     : null;
   const goalGood = goalProgress !== null && goalProgress >= 100;
   return (
-    <div className="relative h-fit overflow-hidden rounded-2xl border border-white/5 bg-card p-5">
+    <div className="relative h-full overflow-hidden rounded-2xl border border-white/5 bg-card p-5">
       <div className="pointer-events-none absolute inset-0" style={{ background: `radial-gradient(circle at 85% 15%, ${iconBg}18, transparent 55%)` }} />
       <div className="flex items-start justify-between gap-2">
         <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">{title}</p>
@@ -2971,7 +2971,7 @@ export default function GeneralDashboard() {
       <AiRecommendationsBox insights={aiInsights} loading={aiLoading} onAnalyze={analyzeWithAI} />
 
       {/* KPIs — Resultado + ROI (ocultos sem dados) + Leads + CPL */}
-      <div className={cn('grid items-start gap-4 sm:grid-cols-2', revenue > 0 ? 'xl:grid-cols-4' : 'xl:grid-cols-2')}>
+      <div className={cn('grid gap-4 sm:grid-cols-2', revenue > 0 ? 'xl:grid-cols-4' : 'xl:grid-cols-2')}>
         {revenue > 0 && (
           <KpiCard title="Resultado" value={revenue} prevValue={prevTotalSpend > 0 ? undefined : undefined} goalValue={effectiveRevenueGoal > 0 ? effectiveRevenueGoal : undefined} format="currency" icon={DollarSign} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} />
         )}
@@ -3001,7 +3001,7 @@ export default function GeneralDashboard() {
       {/* KPIs — Leads Meta + CPL Meta + Conversões Google + Custo/Conv Google */}
       {(metaSpend > 0 || metaLeads > 0 || googleCost > 0 || googleConv > 0) && (
         <div className={cn(
-          'grid items-start gap-4 sm:grid-cols-2',
+          'grid gap-4 sm:grid-cols-2',
           (metaSpend > 0 || metaLeads > 0) && (googleCost > 0 || googleConv > 0) ? 'xl:grid-cols-4' : 'xl:grid-cols-2',
         )}>
           {(metaSpend > 0 || metaLeads > 0) && (
@@ -3020,7 +3020,7 @@ export default function GeneralDashboard() {
       )}
 
       {/* KPIs — Saldos + CTR + Gasto */}
-      <div className="grid items-start gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard title="Saldo Meta Ads" value={metaBalance} format="currency" icon={PiggyBank} iconColor="#0668E1" iconBg="#0668E1" loading={balancesLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} />
         <KpiCard title="Saldo Google Ads" value={googleBalance} format="currency" icon={Wallet} iconColor="#34A853" iconBg="#34A853" loading={balancesLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} />
         <KpiCard title="CTR Médio" value={avgCtr} format="percent" icon={MousePointerClick} iconColor="#f59e0b" iconBg="#f59e0b" loading={metricsLoading} />
