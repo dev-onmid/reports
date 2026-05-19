@@ -463,8 +463,9 @@ function TargetSummaryCard({
   icon: React.ElementType;
 }) {
   const fmt = (v: number) => format === 'currency' ? formatCurrencyBRL(v) : v.toLocaleString('pt-BR');
-  const targetPct = target > 0 ? Math.min(100, Math.round((value / target) * 100)) : 0;
-  const progress = Math.max(0, Math.min(100, targetPct));
+  const partialPct = partial > 0 ? Math.round((value / partial) * 100) : 0;
+  const progress = Math.max(0, Math.min(100, partialPct));
+  const progressAccent = partialPct >= 80 ? '#22c55e' : partialPct >= 50 ? '#facc15' : '#ef4444';
   return (
     <div className="relative overflow-hidden rounded-xl border bg-[#06100D] p-5" style={{ borderColor: `${accent}99`, boxShadow: `0 0 42px ${accent}33, inset 0 0 36px ${accent}12` }}>
       <div className="pointer-events-none absolute inset-0" style={{ background: `linear-gradient(140deg, ${accent}24, transparent 46%), radial-gradient(circle at 18% 0%, ${accent}55, transparent 34%)` }} />
@@ -482,9 +483,9 @@ function TargetSummaryCard({
       </div>
       <div className="relative mt-5 grid grid-cols-3 gap-4 text-center">
         {[
-          { label: 'Meta', val: target, pct: targetPct },
-          { label: 'Meta Parcial', val: partial, pct: partial > 0 ? Math.round((value / partial) * 100) : 0 },
-          { label: 'Realizado', val: value, pct: targetPct },
+          { label: 'Meta', val: target },
+          { label: 'Meta Parcial', val: partial },
+          { label: 'Realizado', val: value },
         ].map(item => (
           <div key={item.label} className="min-w-0">
             <p className="truncate text-base font-semibold text-foreground">{item.val > 0 ? fmt(item.val) : '—'}</p>
@@ -492,17 +493,17 @@ function TargetSummaryCard({
           </div>
         ))}
       </div>
-      <div className="relative mt-5 h-8 overflow-hidden rounded-lg border" style={{ borderColor: `${accent}99`, background: `${accent}18`, boxShadow: `inset 0 0 18px ${accent}20` }}>
+      <div className="relative mt-5 h-8 overflow-hidden rounded-lg border" style={{ borderColor: `${progressAccent}99`, background: `${progressAccent}18`, boxShadow: `inset 0 0 18px ${progressAccent}20` }}>
         <div
           className="flex h-full items-center justify-center rounded-md text-sm font-black text-black transition-all"
           style={{
             width: `${progress}%`,
             minWidth: progress > 0 ? '64px' : '0',
-            background: `repeating-linear-gradient(45deg, ${accent}, ${accent} 14px, color-mix(in srgb, ${accent} 78%, white) 14px, color-mix(in srgb, ${accent} 78%, white) 28px)`,
-            boxShadow: `0 0 22px ${accent}66`,
+            background: `repeating-linear-gradient(45deg, ${progressAccent}, ${progressAccent} 14px, color-mix(in srgb, ${progressAccent} 78%, white) 14px, color-mix(in srgb, ${progressAccent} 78%, white) 28px)`,
+            boxShadow: `0 0 22px ${progressAccent}66`,
           }}
         >
-          {progress > 0 ? `${targetPct.toFixed(2)}%` : ''}
+          {progress > 0 ? `${partialPct.toFixed(2)}%` : ''}
         </div>
       </div>
       <button type="button" className="relative mt-4 flex items-center gap-1.5 text-xs font-bold" style={{ color: accent }}>
@@ -3636,15 +3637,15 @@ export default function GeneralDashboard() {
                 ];
                 const maxVal = funnelRows[0]?.value || 1;
                 const FUNNEL_COLORS = ['#0EA5E9', '#7C3AED', '#EC4899', '#F97316', '#22C55E'];
-                const funnelHeight = 56;
-                const funnelGap = 8;
+                const funnelHeight = 62;
+                const funnelGap = 10;
                 const funnelTop = 26;
                 const funnelWidth = 320;
                 const funnelCenter = funnelWidth / 2;
                 return (
                   <div className="mt-4 grid flex-1 items-stretch gap-5">
-                    <div className="relative min-h-[430px] rounded-xl border border-white/15 bg-black/45 p-4 shadow-[inset_0_0_32px_rgba(14,165,233,0.12)] xl:min-h-[520px]">
-                      <svg viewBox="0 0 320 360" className="h-full w-full overflow-visible" role="img" aria-label="Funil de vendas">
+                    <div className="relative min-h-[620px] rounded-xl border border-white/15 bg-black/45 p-4 shadow-[inset_0_0_32px_rgba(14,165,233,0.12)]">
+                      <svg viewBox="0 0 320 410" className="h-full w-full overflow-visible" role="img" aria-label="Funil de vendas">
                         <defs>
                           <filter id="dashboard-funnel-glow" x="-30%" y="-30%" width="160%" height="160%">
                             <feGaussianBlur stdDeviation="3" result="blur" />
@@ -3655,6 +3656,7 @@ export default function GeneralDashboard() {
                           </filter>
                         </defs>
                         {funnelRows.slice(0, 5).map((row, i) => {
+                          const pct = maxVal > 0 ? (row.value / maxVal) * 100 : 0;
                           const topRatio = Math.max(0.28, 1 - i * 0.14);
                           const bottomRatio = Math.max(0.22, 1 - (i + 1) * 0.14);
                           const topWidth = funnelWidth * topRatio;
@@ -3668,24 +3670,31 @@ export default function GeneralDashboard() {
                             `L ${funnelCenter - bottomWidth / 2} ${y + funnelHeight}`,
                             'Z',
                           ].join(' ');
-                          return <path key={row.label} d={d} fill={color} opacity={0.92} filter="url(#dashboard-funnel-glow)" />;
+                          return (
+                            <g key={row.label} filter="url(#dashboard-funnel-glow)">
+                              <path d={d} fill={color} opacity={0.92} />
+                              <text
+                                x={funnelCenter}
+                                y={y + 25}
+                                textAnchor="middle"
+                                className="fill-white text-[13px] font-black uppercase tracking-wide"
+                                style={{ paintOrder: 'stroke', stroke: 'rgba(0,0,0,0.7)', strokeWidth: 4 }}
+                              >
+                                {row.label}
+                              </text>
+                              <text
+                                x={funnelCenter}
+                                y={y + 46}
+                                textAnchor="middle"
+                                className="fill-white text-[12px] font-bold"
+                                style={{ paintOrder: 'stroke', stroke: 'rgba(0,0,0,0.72)', strokeWidth: 4 }}
+                              >
+                                {row.value.toLocaleString('pt-BR')} • {pct.toFixed(2)}%
+                              </text>
+                            </g>
+                          );
                         })}
                       </svg>
-                    </div>
-                    <div className="flex min-h-[230px] flex-col justify-between gap-2">
-                      {funnelRows.slice(0, 5).map((row, i) => {
-                        const pct = maxVal > 0 ? (row.value / maxVal) * 100 : 0;
-                        return (
-                          <div key={row.label} className="grid grid-cols-[1fr_auto_auto] items-center gap-4 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs">
-                            <span className="flex min-w-0 items-center gap-2 text-foreground/75">
-                              <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: FUNNEL_COLORS[i % FUNNEL_COLORS.length], boxShadow: `0 0 14px ${FUNNEL_COLORS[i % FUNNEL_COLORS.length]}` }} />
-                              <span className="truncate">{row.label}</span>
-                            </span>
-                            <span className="font-semibold text-foreground">{row.value.toLocaleString('pt-BR')}</span>
-                            <span className="w-14 text-right font-semibold text-foreground/65">{pct.toFixed(2)}%</span>
-                          </div>
-                        );
-                      })}
                     </div>
                   </div>
                 );
