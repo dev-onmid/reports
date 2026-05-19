@@ -75,6 +75,37 @@ async function fetchGadsAccountMetrics(customerId: string, accessToken: string, 
   };
 }
 
+type DailyMetrics = {
+  date: string;
+  meta?: { spend: number; reach: number; impressions: number; clicks: number; leads: number };
+  google?: { cost: number; impressions: number; clicks: number; conversions: number };
+  crm?: { revenue: number; sales: number; leads: number };
+};
+type CrmDailyRow = { date: string; revenue: number; sales: number; leads: number };
+
+async function fetchGadsAccountDailyMetrics(customerId: string, accessToken: string, loginCustomerId: string | undefined, gaqlPeriod: string) {
+  const data = await gadsSearch(
+    customerId,
+    `SELECT segments.date, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions
+     FROM customer WHERE ${gaqlPeriod}
+     ORDER BY segments.date`,
+    accessToken,
+    loginCustomerId,
+  );
+  if (!data) return [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return ((data.results ?? []) as any[]).map((row) => {
+    const m = row.metrics ?? {};
+    return {
+      date: row.segments?.date as string,
+      cost: Number(m.costMicros ?? 0) / 1_000_000,
+      impressions: Number(m.impressions ?? 0),
+      clicks: Number(m.clicks ?? 0),
+      conversions: Number(m.conversions ?? 0),
+    };
+  }).filter((row) => row.date);
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function buildMccMap(accessToken: string): Promise<Record<string, string>> {
   const listRes = await fetch('https://googleads.googleapis.com/v20/customers:listAccessibleCustomers', {
@@ -169,6 +200,51 @@ async function fetchMetaAccountMetrics(accountId: string, accessToken: string, m
   };
 }
 
+function readMetaInsightRow(row: Record<string, unknown>) {
+  const actions = ((row.actions as { action_type: string; value: string }[]) ?? []);
+  const getAction = (type: string) => {
+    const found = actions.find(a => a.action_type === type);
+    return found ? parseInt(found.value || '0', 10) : 0;
+  };
+  const sumActions = (types: string[]) => actions
+    .filter(a => types.includes(a.action_type))
+    .reduce((sum, a) => sum + parseInt(a.value || '0', 10), 0);
+  const formLeads = sumActions(META_FORM_ACTIONS);
+  const siteLeads = sumActions(SITE_LEAD_ACTIONS);
+  const conversations = Math.max(
+    getAction('messaging_conversation_started_7d'),
+    getAction('onsite_conversion.messaging_conversation_started_7d'),
+  );
+  return {
+    spend: parseFloat(String(row.spend || '0')),
+    reach: parseInt(String(row.reach || '0'), 10),
+    impressions: parseInt(String(row.impressions || '0'), 10),
+    clicks: parseInt(String(row.clicks || '0'), 10),
+    leads: formLeads + siteLeads + conversations,
+    formLeads,
+    siteLeads,
+    conversations,
+  };
+}
+
+async function fetchMetaAccountDailyMetrics(accountId: string, accessToken: string, metaPeriod: string) {
+  const url = new URL(`https://graph.facebook.com/v21.0/${toMetaAccountNodeId(accountId)}/insights`);
+  url.searchParams.set('fields', 'spend,reach,impressions,clicks,actions,date_start');
+  url.searchParams.set('level', 'account');
+  url.searchParams.set('time_increment', '1');
+  url.searchParams.set('access_token', accessToken);
+  applyMetaDateToUrl(url, metaPeriod);
+  const res = await fetch(url.toString());
+  if (!res.ok) return [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const data = await res.json() as any;
+  if (data.error) return [];
+  return ((data.data ?? []) as Record<string, unknown>[]).map((row) => ({
+    date: String(row.date_start ?? ''),
+    ...readMetaInsightRow(row),
+  })).filter((row) => row.date);
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function safeRows(pool: ReturnType<typeof makeServerPool>, query: string, params: unknown[] = []): Promise<any[]> {
   try {
@@ -216,7 +292,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const metaPeriod = resolveMetaPeriod(period, dateFrom, dateTo);
   const crmPeriod = crmDateRange(period, dateFrom, dateTo);
 
-  const cacheKey = `metrics:${clientId}:${period}:${dateFrom}:${dateTo}`;
+  const cacheKey = `metrics:v2:${clientId}:${period}:${dateFrom}:${dateTo}`;
   const cached = getCached(cacheKey);
   if (cached) return cachedJson(cached.data, true, cached.cachedAt);
 
@@ -224,6 +300,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let links: any[], googleConns: any[], metaConns: any[];
   let crmResult: { revenue: number; sales: number; leads: number; ticket: number } | null = null;
+  let crmDailyRows: CrmDailyRow[] = [];
   try {
     await ensureCrmMetricsColumns(pool);
     const [newLinks, g, m, legacyMetaLinks, legacyMetaIntegration] = await Promise.all([
@@ -262,6 +339,20 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         ticket: sales > 0 ? revenue / sales : 0,
       };
     }
+    crmDailyRows = await safeRows(
+      pool,
+      `SELECT
+          COALESCE(lead_date, data)::text AS date,
+          COALESCE(SUM(COALESCE(NULLIF(revenue, 0), valor_rs, 0)), 0)::float AS revenue,
+          COUNT(*) FILTER (WHERE COALESCE(NULLIF(revenue, 0), valor_rs, 0) > 0 OR fechou = TRUE)::int AS sales,
+          COUNT(*)::int AS leads
+         FROM public.crm_leads
+        WHERE client_id = $1
+          AND COALESCE(lead_date, data) BETWEEN $2 AND $3
+        GROUP BY COALESCE(lead_date, data)
+        ORDER BY COALESCE(lead_date, data)`,
+      [clientId, crmPeriod.from, crmPeriod.to],
+    ) as CrmDailyRow[];
 
     const legacyMeta = legacyMetaIntegration[0];
     if (legacyMeta?.access_token) {
@@ -286,6 +377,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   // ── Google Ads ─────────────────────────────────────────────────────────────
   type GResult = { cost: number; impressions: number; clicks: number; cpc: number; conversions: number; cpa: number };
   let googleResult: GResult | null = null;
+  const dailyMap: Record<string, DailyMetrics> = {};
 
   if (gadsLinks.length > 0) {
     // Collect unique account IDs regardless of connection_id
@@ -297,6 +389,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     console.log(`[metrics] client=${clientId} gads uniqueAccounts=${uniqueAccountIds.join(',')} connections=${googleConns.length}`);
 
     const connMetrics: GResult[] = [];
+    const connDaily: Awaited<ReturnType<typeof fetchGadsAccountDailyMetrics>> = [];
     const seenAccounts = new Set<string>();
 
     await Promise.allSettled(
@@ -312,6 +405,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
             if (m) {
               seenAccounts.add(accountId);
               connMetrics.push(m);
+              const daily = await fetchGadsAccountDailyMetrics(accountId, accessToken, loginCustomerId, gaqlPeriod);
+              connDaily.push(...daily);
             }
           })
         );
@@ -327,6 +422,15 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       agg.cpa = agg.conversions > 0 ? agg.cost / agg.conversions : 0;
       googleResult = agg;
     }
+    for (const row of connDaily) {
+      const item = dailyMap[row.date] ?? { date: row.date };
+      const google = item.google ?? { cost: 0, impressions: 0, clicks: 0, conversions: 0 };
+      google.cost += row.cost;
+      google.impressions += row.impressions;
+      google.clicks += row.clicks;
+      google.conversions += row.conversions;
+      dailyMap[row.date] = { ...item, google };
+    }
   }
 
   // ── Meta Ads ───────────────────────────────────────────────────────────────
@@ -335,6 +439,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   if (metaLinks.length > 0) {
     const allMetrics: Array<{ spend: number; reach: number; impressions: number; clicks: number; leads: number; formLeads: number; siteLeads: number; conversations: number }> = [];
+    const allDaily: Awaited<ReturnType<typeof fetchMetaAccountDailyMetrics>> = [];
     await Promise.allSettled(
       metaLinks.map(async (link) => {
         const conn = metaConns.find(c => c.id === link.connection_id);
@@ -342,6 +447,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         const token = await getFreshMetaToken(conn);
         const m = await fetchMetaAccountMetrics(link.account_id, token, metaPeriod);
         if (m) allMetrics.push(m);
+        const daily = await fetchMetaAccountDailyMetrics(link.account_id, token, metaPeriod);
+        allDaily.push(...daily);
       })
     );
 
@@ -355,9 +462,32 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       agg.cpl = agg.leads > 0 ? agg.spend / agg.leads : 0;
       metaResult = agg;
     }
+    for (const row of allDaily) {
+      const item = dailyMap[row.date] ?? { date: row.date };
+      const meta = item.meta ?? { spend: 0, reach: 0, impressions: 0, clicks: 0, leads: 0 };
+      meta.spend += row.spend;
+      meta.reach += row.reach;
+      meta.impressions += row.impressions;
+      meta.clicks += row.clicks;
+      meta.leads += row.leads;
+      dailyMap[row.date] = { ...item, meta };
+    }
   }
 
-  const result = { google: googleResult, meta: metaResult, crm: crmResult };
+  for (const row of crmDailyRows) {
+    const date = String(row.date).split('T')[0];
+    const item = dailyMap[date] ?? { date };
+    dailyMap[date] = {
+      ...item,
+      crm: {
+        revenue: Number(row.revenue ?? 0),
+        sales: Number(row.sales ?? 0),
+        leads: Number(row.leads ?? 0),
+      },
+    };
+  }
+
+  const result = { google: googleResult, meta: metaResult, crm: crmResult, daily: Object.values(dailyMap).sort((a, b) => a.date.localeCompare(b.date)) };
   setCached(cacheKey, result);
   return cachedJson(result, false);
 }

@@ -49,6 +49,13 @@ type ApiMetrics = {
   meta: { spend: number; reach?: number; impressions: number; clicks: number; leads: number; formLeads?: number; siteLeads?: number; conversations?: number; cpl: number } | null;
   google: { cost: number; impressions: number; clicks: number; cpc: number; conversions: number; cpa: number } | null;
   crm?: { revenue: number; sales: number; leads: number; ticket: number } | null;
+  daily?: DailyMetricPoint[];
+};
+type DailyMetricPoint = {
+  date: string;
+  meta?: { spend: number; reach: number; impressions: number; clicks: number; leads: number };
+  google?: { cost: number; impressions: number; clicks: number; conversions: number };
+  crm?: { revenue: number; sales: number; leads: number };
 };
 type GoalConfig = { type: string; target: number; label?: string; format?: 'currency' | 'number' };
 type FunnelStage = { id: string; name: string; conversion: number };
@@ -197,6 +204,86 @@ function entriesInRange(entries: FunnelEntry[], from: Date, to: Date): FunnelEnt
   return entries.filter(e => { const d = new Date(e.date); return d >= from && d <= toEnd; });
 }
 
+function dateKey(date: Date) {
+  return date.toISOString().split('T')[0];
+}
+
+function dateKeysInRange(from: Date, to: Date) {
+  const keys: string[] = [];
+  const cursor = new Date(from);
+  cursor.setHours(0, 0, 0, 0);
+  const end = new Date(to);
+  end.setHours(0, 0, 0, 0);
+  while (cursor <= end) {
+    keys.push(dateKey(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return keys;
+}
+
+function cumulative(values: number[]) {
+  let sum = 0;
+  return values.map((value) => {
+    sum += value;
+    return sum;
+  });
+}
+
+function ratioSeries(numerators: number[], denominators: number[], multiplier = 1) {
+  let n = 0;
+  let d = 0;
+  return numerators.map((value, index) => {
+    n += value;
+    d += denominators[index] ?? 0;
+    return d > 0 ? (n / d) * multiplier : 0;
+  });
+}
+
+function pacingSeries(total: number, length: number) {
+  if (length <= 1) return [total, total];
+  return Array.from({ length }, (_, index) => total * ((index + 1) / length));
+}
+
+function aggregateDailySeries(
+  metrics: Record<string, ApiMetrics>,
+  ids: Set<string>,
+  keys: string[],
+) {
+  const byDate = new Map<string, DailyMetricPoint>();
+  for (const key of keys) byDate.set(key, { date: key });
+  for (const id of ids) {
+    for (const row of metrics[id]?.daily ?? []) {
+      const current = byDate.get(row.date) ?? { date: row.date };
+      if (row.meta) {
+        const meta = current.meta ?? { spend: 0, reach: 0, impressions: 0, clicks: 0, leads: 0 };
+        meta.spend += row.meta.spend ?? 0;
+        meta.reach += row.meta.reach ?? 0;
+        meta.impressions += row.meta.impressions ?? 0;
+        meta.clicks += row.meta.clicks ?? 0;
+        meta.leads += row.meta.leads ?? 0;
+        current.meta = meta;
+      }
+      if (row.google) {
+        const google = current.google ?? { cost: 0, impressions: 0, clicks: 0, conversions: 0 };
+        google.cost += row.google.cost ?? 0;
+        google.impressions += row.google.impressions ?? 0;
+        google.clicks += row.google.clicks ?? 0;
+        google.conversions += row.google.conversions ?? 0;
+        current.google = google;
+      }
+      if (row.crm) {
+        const crm = current.crm ?? { revenue: 0, sales: 0, leads: 0 };
+        crm.revenue += row.crm.revenue ?? 0;
+        crm.sales += row.crm.sales ?? 0;
+        crm.leads += row.crm.leads ?? 0;
+        current.crm = crm;
+      }
+      byDate.set(row.date, current);
+    }
+  }
+  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
 function computeFunnel(stages: FunnelStage[], revenueTarget: number, ticket: number): number[] {
   const volumes = new Array<number>(stages.length).fill(0);
   if (stages.length === 0 || revenueTarget <= 0 || ticket <= 0) return volumes;
@@ -278,13 +365,14 @@ function autoPartial(target: number, period: Period): number {
 }
 
 // ── KPI Card ────────────────────────────────────────────────────────────────
-function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: Icon, iconColor, iconBg, loading = false, inverseGoal = false, inverseChange = false, footer, logo, chart = 'sparkline' }: {
+function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: Icon, iconColor, iconBg, loading = false, inverseGoal = false, inverseChange = false, footer, logo, chart = 'sparkline', series }: {
   title: string; value: number; prevValue?: number; goalValue?: number;
   format?: 'currency' | 'number' | 'percent' | 'times';
   icon: React.ElementType; iconColor: string; iconBg: string; loading?: boolean; inverseGoal?: boolean; inverseChange?: boolean;
   footer?: React.ReactNode;
   logo?: React.ReactNode;
   chart?: 'sparkline' | 'none';
+  series?: number[];
 }) {
   const fmt = (v: number) =>
     format === 'currency' ? formatCurrencyBRL(v)
@@ -346,6 +434,7 @@ function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: 
               <MiniTrendLine
                 color={change === null ? iconColor : isPositive ? '#34d399' : '#f87171'}
                 trend={change === null ? 'up' : change > 0 ? 'up' : change < 0 ? 'down' : 'flat'}
+                values={series}
               />
             </div>
           )}
@@ -457,15 +546,26 @@ const TREND_UP   = "M0 76 C28 65 45 56 68 67 S111 79 132 61 S158 62 178 47 S204 
 const TREND_DOWN = "M0 16 C28 27 45 36 68 25 S111 13 132 31 S158 30 178 45 S204 76 229 61 S264 40 287 56 S306 66 320 76";
 const TREND_FLAT = "M0 46 C28 43 45 48 68 45 S111 42 132 46 S158 44 178 46 S204 44 229 46 S264 44 287 46 S306 44 320 46";
 
-function MiniTrendLine({ color, trend = 'up' }: { color: string; trend?: 'up' | 'down' | 'flat' }) {
+function sparkPathFromValues(values: number[], width = 320, height = 92) {
+  const clean = values.filter(v => Number.isFinite(v));
+  if (clean.length < 2) return null;
+  const min = Math.min(...clean);
+  const max = Math.max(...clean);
+  const range = max - min || 1;
+  const points = clean.map((value, index) => {
+    const x = clean.length === 1 ? 0 : (index / (clean.length - 1)) * width;
+    const y = height - 12 - ((value - min) / range) * (height - 24);
+    return { x, y };
+  });
+  return points.map((point, index) => `${index === 0 ? 'M' : 'L'}${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(' ');
+}
+
+function MiniTrendLine({ color, trend = 'up', values }: { color: string; trend?: 'up' | 'down' | 'flat'; values?: number[] }) {
   const safeId = color.replace(/[^a-zA-Z0-9]/g, '');
   const gradientId = `trend-${safeId}-${trend}`;
-  const path = trend === 'down' ? TREND_DOWN : trend === 'flat' ? TREND_FLAT : TREND_UP;
-  const closedPath = trend === 'down'
-    ? `${TREND_DOWN} L320 92 L0 92 Z`
-    : trend === 'flat'
-    ? `${TREND_FLAT} L320 92 L0 92 Z`
-    : `${TREND_UP} L320 92 L0 92 Z`;
+  const realPath = sparkPathFromValues(values ?? []);
+  const path = realPath ?? (trend === 'down' ? TREND_DOWN : trend === 'flat' ? TREND_FLAT : TREND_UP);
+  const closedPath = `${path} L320 92 L0 92 Z`;
   return (
     <svg viewBox="0 0 320 92" className="h-20 w-full overflow-visible" aria-hidden="true">
       <defs>
@@ -3085,6 +3185,46 @@ export default function GeneralDashboard() {
   const googleCtrValue = googleImpressions > 0 ? (googleClicks / googleImpressions) * 100 : 0;
   const ctrPlatformCount = (metaCtr > 0 ? 1 : 0) + (googleCtrValue > 0 ? 1 : 0);
   const avgCtr = ctrPlatformCount > 0 ? (metaCtr + googleCtrValue) / ctrPlatformCount : 0;
+  const selectedRange = periodToDateRange(period, customDateFrom, customDateTo);
+  const selectedDateKeys = dateKeysInRange(selectedRange.from, selectedRange.to);
+  const dailySeries = aggregateDailySeries(metricsByClient, selectedIds, selectedDateKeys);
+  const metaSpendSeries = cumulative(dailySeries.map((row) => row.meta?.spend ?? 0));
+  const metaReachSeries = cumulative(dailySeries.map((row) => row.meta?.reach ?? 0));
+  const metaImpressionsSeries = cumulative(dailySeries.map((row) => row.meta?.impressions ?? 0));
+  const metaClicksSeries = cumulative(dailySeries.map((row) => row.meta?.clicks ?? 0));
+  const metaLeadsSeries = cumulative(dailySeries.map((row) => row.meta?.leads ?? 0));
+  const metaCplSeries = ratioSeries(
+    dailySeries.map((row) => row.meta?.spend ?? 0),
+    dailySeries.map((row) => row.meta?.leads ?? 0),
+  );
+  const metaCtrSeries = ratioSeries(
+    dailySeries.map((row) => row.meta?.clicks ?? 0),
+    dailySeries.map((row) => row.meta?.impressions ?? 0),
+    100,
+  );
+  const googleCostSeries = cumulative(dailySeries.map((row) => row.google?.cost ?? 0));
+  const googleImpressionsSeries = cumulative(dailySeries.map((row) => row.google?.impressions ?? 0));
+  const googleClicksSeries = cumulative(dailySeries.map((row) => row.google?.clicks ?? 0));
+  const googleConversionsSeries = cumulative(dailySeries.map((row) => row.google?.conversions ?? 0));
+  const googleCpaSeries = ratioSeries(
+    dailySeries.map((row) => row.google?.cost ?? 0),
+    dailySeries.map((row) => row.google?.conversions ?? 0),
+  );
+  const googleCtrSeries = ratioSeries(
+    dailySeries.map((row) => row.google?.clicks ?? 0),
+    dailySeries.map((row) => row.google?.impressions ?? 0),
+    100,
+  );
+  const revenueSeries = cumulative(dailySeries.map((row) => row.crm?.revenue ?? 0));
+  const totalLeadsSeries = dailySeries.map((_, index) => (metaLeadsSeries[index] ?? 0) + (googleConversionsSeries[index] ?? 0));
+  const totalSpendSeries = dailySeries.map((_, index) => (metaSpendSeries[index] ?? 0) + (googleCostSeries[index] ?? 0));
+  const cplSeries = totalSpendSeries.map((spend, index) => (totalLeadsSeries[index] ?? 0) > 0 ? spend / totalLeadsSeries[index] : 0);
+  const roiSeries = totalSpendSeries.map((spend, index) => spend > 0 ? (revenueSeries[index] ?? 0) / spend : 0);
+  const avgCtrSeries = dailySeries.map((_, index) => {
+    const values = [metaCtrSeries[index] ?? 0, googleCtrSeries[index] ?? 0].filter(value => value > 0);
+    return values.length > 0 ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+  });
+  const seriesOrPacing = (series: number[], total: number) => series.some(value => value > 0) ? series : pacingSeries(total, Math.max(2, selectedDateKeys.length || 2));
 
   // ── Aggregate planning ───────────────────────────────────────────────────
   let leadsGoal = 0;
@@ -3449,16 +3589,16 @@ export default function GeneralDashboard() {
         </div>
         <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <DashboardGridItem id="general-roi" prefs={dashboardPrefs}>
-            <KpiCard title="ROI" value={roi} prevValue={prevRoi > 0 ? prevRoi : undefined} goalValue={roiGoal > 0 ? roiGoal : undefined} format="times" icon={TrendingUp} iconColor="#a78bfa" iconBg="#a78bfa" loading={metricsLoading} chart={dashboardPrefs.cards['general-roi'].chart} />
+            <KpiCard title="ROI" value={roi} prevValue={prevRoi > 0 ? prevRoi : undefined} goalValue={roiGoal > 0 ? roiGoal : undefined} format="times" icon={TrendingUp} iconColor="#a78bfa" iconBg="#a78bfa" loading={metricsLoading} chart={dashboardPrefs.cards['general-roi'].chart} series={seriesOrPacing(roiSeries, roi)} />
           </DashboardGridItem>
           <DashboardGridItem id="general-cpl" prefs={dashboardPrefs}>
-            <KpiCard title="CPL Geral" value={totalCostPerLead} prevValue={prevCpl > 0 ? prevCpl : undefined} goalValue={cplGoal > 0 ? cplGoal : undefined} format="currency" icon={Tag} iconColor="#c084fc" iconBg="#c084fc" loading={metricsLoading} inverseGoal inverseChange chart={dashboardPrefs.cards['general-cpl'].chart} />
+            <KpiCard title="CPL Geral" value={totalCostPerLead} prevValue={prevCpl > 0 ? prevCpl : undefined} goalValue={cplGoal > 0 ? cplGoal : undefined} format="currency" icon={Tag} iconColor="#c084fc" iconBg="#c084fc" loading={metricsLoading} inverseGoal inverseChange chart={dashboardPrefs.cards['general-cpl'].chart} series={seriesOrPacing(cplSeries, totalCostPerLead)} />
           </DashboardGridItem>
           <DashboardGridItem id="general-spend" prefs={dashboardPrefs}>
-            <KpiCard title="Valor Gasto" value={totalSpend} format="currency" icon={CreditCard} iconColor="#22d3ee" iconBg="#22d3ee" loading={metricsLoading} chart={dashboardPrefs.cards['general-spend'].chart} />
+            <KpiCard title="Valor Gasto" value={totalSpend} format="currency" icon={CreditCard} iconColor="#22d3ee" iconBg="#22d3ee" loading={metricsLoading} chart={dashboardPrefs.cards['general-spend'].chart} series={seriesOrPacing(totalSpendSeries, totalSpend)} />
           </DashboardGridItem>
           <DashboardGridItem id="general-ctr" prefs={dashboardPrefs}>
-            <KpiCard title="CTR Geral" value={avgCtr} format="percent" icon={MousePointerClick} iconColor="#f59e0b" iconBg="#f59e0b" loading={metricsLoading} chart={dashboardPrefs.cards['general-ctr'].chart} />
+            <KpiCard title="CTR Geral" value={avgCtr} format="percent" icon={MousePointerClick} iconColor="#f59e0b" iconBg="#f59e0b" loading={metricsLoading} chart={dashboardPrefs.cards['general-ctr'].chart} series={seriesOrPacing(avgCtrSeries, avgCtr)} />
           </DashboardGridItem>
         </div>
         <DashboardGridItem id="general-funnel" prefs={dashboardPrefs}>
@@ -3558,18 +3698,18 @@ export default function GeneralDashboard() {
         </div>
 
         <div className="relative grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <DashboardGridItem id="meta-reach" prefs={dashboardPrefs}><KpiCard title="Alcance Meta" value={metaReach} format="number" icon={Users} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} chart={dashboardPrefs.cards['meta-reach'].chart} /></DashboardGridItem>
-          <DashboardGridItem id="meta-impressions" prefs={dashboardPrefs}><KpiCard title="Impressões Meta" value={metaImpressions} format="number" icon={BarChart3} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} chart={dashboardPrefs.cards['meta-impressions'].chart} /></DashboardGridItem>
-          <DashboardGridItem id="meta-leads" prefs={dashboardPrefs}><KpiCard title="Leads Meta Ads" value={metaLeads} prevValue={prevMetaLeads > 0 ? prevMetaLeads : undefined} format="number" icon={Target} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['meta-leads'].chart} /></DashboardGridItem>
-          <DashboardGridItem id="meta-cpl" prefs={dashboardPrefs}><KpiCard title="CPL Meta Ads" value={avgCpl} format="currency" icon={Zap} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} inverseGoal inverseChange logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['meta-cpl'].chart} /></DashboardGridItem>
-          <DashboardGridItem id="meta-spend" prefs={dashboardPrefs}><KpiCard title="Valor Gasto Meta" value={metaSpend} format="currency" icon={Wallet} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['meta-spend'].chart} /></DashboardGridItem>
-          <DashboardGridItem id="meta-ctr" prefs={dashboardPrefs}><KpiCard title="CTR Meta Ads" value={metaCtr} format="percent" icon={MousePointerClick} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} chart={dashboardPrefs.cards['meta-ctr'].chart} /></DashboardGridItem>
-          <DashboardGridItem id="meta-total-spend" prefs={dashboardPrefs}><KpiCard title="Total Gasto Meta" value={metaCampaignSpend || metaSpend} format="currency" icon={CreditCard} iconColor="#0668E1" iconBg="#0668E1" loading={campaignsLoading || metricsLoading} chart={dashboardPrefs.cards['meta-total-spend'].chart} /></DashboardGridItem>
-          <DashboardGridItem id="meta-balance" prefs={dashboardPrefs}><KpiCard title="Saldo da Conta Meta" value={metaBalance} format="currency" icon={PiggyBank} iconColor="#0668E1" iconBg="#0668E1" loading={balancesLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['meta-balance'].chart} /></DashboardGridItem>
+          <DashboardGridItem id="meta-reach" prefs={dashboardPrefs}><KpiCard title="Alcance Meta" value={metaReach} format="number" icon={Users} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} chart={dashboardPrefs.cards['meta-reach'].chart} series={seriesOrPacing(metaReachSeries, metaReach)} /></DashboardGridItem>
+          <DashboardGridItem id="meta-impressions" prefs={dashboardPrefs}><KpiCard title="Impressões Meta" value={metaImpressions} format="number" icon={BarChart3} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} chart={dashboardPrefs.cards['meta-impressions'].chart} series={seriesOrPacing(metaImpressionsSeries, metaImpressions)} /></DashboardGridItem>
+          <DashboardGridItem id="meta-leads" prefs={dashboardPrefs}><KpiCard title="Leads Meta Ads" value={metaLeads} prevValue={prevMetaLeads > 0 ? prevMetaLeads : undefined} format="number" icon={Target} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['meta-leads'].chart} series={seriesOrPacing(metaLeadsSeries, metaLeads)} /></DashboardGridItem>
+          <DashboardGridItem id="meta-cpl" prefs={dashboardPrefs}><KpiCard title="CPL Meta Ads" value={avgCpl} format="currency" icon={Zap} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} inverseGoal inverseChange logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['meta-cpl'].chart} series={seriesOrPacing(metaCplSeries, avgCpl)} /></DashboardGridItem>
+          <DashboardGridItem id="meta-spend" prefs={dashboardPrefs}><KpiCard title="Valor Gasto Meta" value={metaSpend} format="currency" icon={Wallet} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['meta-spend'].chart} series={seriesOrPacing(metaSpendSeries, metaSpend)} /></DashboardGridItem>
+          <DashboardGridItem id="meta-ctr" prefs={dashboardPrefs}><KpiCard title="CTR Meta Ads" value={metaCtr} format="percent" icon={MousePointerClick} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} chart={dashboardPrefs.cards['meta-ctr'].chart} series={seriesOrPacing(metaCtrSeries, metaCtr)} /></DashboardGridItem>
+          <DashboardGridItem id="meta-total-spend" prefs={dashboardPrefs}><KpiCard title="Total Gasto Meta" value={metaCampaignSpend || metaSpend} format="currency" icon={CreditCard} iconColor="#0668E1" iconBg="#0668E1" loading={campaignsLoading || metricsLoading} chart={dashboardPrefs.cards['meta-total-spend'].chart} series={seriesOrPacing(metaSpendSeries, metaCampaignSpend || metaSpend)} /></DashboardGridItem>
+          <DashboardGridItem id="meta-balance" prefs={dashboardPrefs}><KpiCard title="Saldo da Conta Meta" value={metaBalance} format="currency" icon={PiggyBank} iconColor="#0668E1" iconBg="#0668E1" loading={balancesLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['meta-balance'].chart} series={pacingSeries(metaBalance, Math.max(2, selectedDateKeys.length || 2))} /></DashboardGridItem>
           <DashboardGridItem id="meta-active-campaigns" prefs={dashboardPrefs}><CompactInfoCard title="Campanhas Ativas" value={activeMetaCampaigns} icon={Briefcase} color="#0668E1" /></DashboardGridItem>
           <DashboardGridItem id="meta-adsets" prefs={dashboardPrefs}><CompactInfoCard title="Conjuntos" value="Ver na tabela" icon={LayoutDashboard} color="#0668E1" helper="Expanda uma campanha para visualizar conjuntos e anúncios." /></DashboardGridItem>
           <DashboardGridItem id="meta-creatives" prefs={dashboardPrefs}><CompactInfoCard title="Criativos" value={metaCreativeCount} icon={ImageIcon} color="#0668E1" helper="Com preview no carrossel abaixo." /></DashboardGridItem>
-          <DashboardGridItem id="meta-clicks" prefs={dashboardPrefs}><KpiCard title="Cliques Meta" value={metaClicks} format="number" icon={MousePointerClick} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} chart={dashboardPrefs.cards['meta-clicks'].chart} /></DashboardGridItem>
+          <DashboardGridItem id="meta-clicks" prefs={dashboardPrefs}><KpiCard title="Cliques Meta" value={metaClicks} format="number" icon={MousePointerClick} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} chart={dashboardPrefs.cards['meta-clicks'].chart} series={seriesOrPacing(metaClicksSeries, metaClicks)} /></DashboardGridItem>
         </div>
 
         <div className="relative mt-4 grid gap-4 xl:grid-cols-4">
@@ -3660,13 +3800,13 @@ export default function GeneralDashboard() {
         </div>
 
         <div className="relative grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <DashboardGridItem id="google-impressions" prefs={dashboardPrefs}><KpiCard title="Impressões Google" value={googleImpressions} format="number" icon={BarChart3} iconColor="#4285F4" iconBg="#4285F4" loading={metricsLoading} chart={dashboardPrefs.cards['google-impressions'].chart} /></DashboardGridItem>
-          <DashboardGridItem id="google-conversions" prefs={dashboardPrefs}><KpiCard title="Conversões Google" value={googleConv} prevValue={prevGoogleConv > 0 ? prevGoogleConv : undefined} format="number" icon={BarChart3} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-conversions'].chart} /></DashboardGridItem>
-          <DashboardGridItem id="google-cpa" prefs={dashboardPrefs}><KpiCard title="Custo por Conversão" value={avgCpa} format="currency" icon={Briefcase} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} inverseGoal inverseChange logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-cpa'].chart} /></DashboardGridItem>
-          <DashboardGridItem id="google-spend" prefs={dashboardPrefs}><KpiCard title="Valor Gasto Google" value={googleCost} format="currency" icon={CreditCard} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-spend'].chart} /></DashboardGridItem>
-          <DashboardGridItem id="google-ctr" prefs={dashboardPrefs}><KpiCard title="CTR Google Ads" value={googleCtrValue} format="percent" icon={MousePointerClick} iconColor="#f59e0b" iconBg="#f59e0b" loading={metricsLoading} chart={dashboardPrefs.cards['google-ctr'].chart} /></DashboardGridItem>
-          <DashboardGridItem id="google-total-spend" prefs={dashboardPrefs}><KpiCard title="Total Gasto Google" value={googleCampaignSpend || googleCost} format="currency" icon={Wallet} iconColor="#34A853" iconBg="#34A853" loading={campaignsLoading || metricsLoading} chart={dashboardPrefs.cards['google-total-spend'].chart} /></DashboardGridItem>
-          <DashboardGridItem id="google-balance" prefs={dashboardPrefs}><KpiCard title="Saldo da Conta Google" value={googleBalance} format="currency" icon={Wallet} iconColor="#EA4335" iconBg="#EA4335" loading={balancesLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-balance'].chart} /></DashboardGridItem>
+          <DashboardGridItem id="google-impressions" prefs={dashboardPrefs}><KpiCard title="Impressões Google" value={googleImpressions} format="number" icon={BarChart3} iconColor="#4285F4" iconBg="#4285F4" loading={metricsLoading} chart={dashboardPrefs.cards['google-impressions'].chart} series={seriesOrPacing(googleImpressionsSeries, googleImpressions)} /></DashboardGridItem>
+          <DashboardGridItem id="google-conversions" prefs={dashboardPrefs}><KpiCard title="Conversões Google" value={googleConv} prevValue={prevGoogleConv > 0 ? prevGoogleConv : undefined} format="number" icon={BarChart3} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-conversions'].chart} series={seriesOrPacing(googleConversionsSeries, googleConv)} /></DashboardGridItem>
+          <DashboardGridItem id="google-cpa" prefs={dashboardPrefs}><KpiCard title="Custo por Conversão" value={avgCpa} format="currency" icon={Briefcase} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} inverseGoal inverseChange logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-cpa'].chart} series={seriesOrPacing(googleCpaSeries, avgCpa)} /></DashboardGridItem>
+          <DashboardGridItem id="google-spend" prefs={dashboardPrefs}><KpiCard title="Valor Gasto Google" value={googleCost} format="currency" icon={CreditCard} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-spend'].chart} series={seriesOrPacing(googleCostSeries, googleCost)} /></DashboardGridItem>
+          <DashboardGridItem id="google-ctr" prefs={dashboardPrefs}><KpiCard title="CTR Google Ads" value={googleCtrValue} format="percent" icon={MousePointerClick} iconColor="#f59e0b" iconBg="#f59e0b" loading={metricsLoading} chart={dashboardPrefs.cards['google-ctr'].chart} series={seriesOrPacing(googleCtrSeries, googleCtrValue)} /></DashboardGridItem>
+          <DashboardGridItem id="google-total-spend" prefs={dashboardPrefs}><KpiCard title="Total Gasto Google" value={googleCampaignSpend || googleCost} format="currency" icon={Wallet} iconColor="#34A853" iconBg="#34A853" loading={campaignsLoading || metricsLoading} chart={dashboardPrefs.cards['google-total-spend'].chart} series={seriesOrPacing(googleCostSeries, googleCampaignSpend || googleCost)} /></DashboardGridItem>
+          <DashboardGridItem id="google-balance" prefs={dashboardPrefs}><KpiCard title="Saldo da Conta Google" value={googleBalance} format="currency" icon={Wallet} iconColor="#EA4335" iconBg="#EA4335" loading={balancesLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-balance'].chart} series={pacingSeries(googleBalance, Math.max(2, selectedDateKeys.length || 2))} /></DashboardGridItem>
           <DashboardGridItem id="google-active-campaigns" prefs={dashboardPrefs}><CompactInfoCard title="Campanhas Ativas" value={activeGoogleCampaigns} icon={Briefcase} color="#EA4335" /></DashboardGridItem>
           <DashboardGridItem id="google-keyword-count" prefs={dashboardPrefs}><CompactInfoCard title="Top Palavras-chave" value={keywords.length} icon={Search} color="#FBBC05" helper="Lista ordenada abaixo." /></DashboardGridItem>
         </div>
