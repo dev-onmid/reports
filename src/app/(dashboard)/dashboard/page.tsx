@@ -278,12 +278,13 @@ function autoPartial(target: number, period: Period): number {
 }
 
 // ── KPI Card ────────────────────────────────────────────────────────────────
-function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: Icon, iconColor, iconBg, loading = false, inverseGoal = false, inverseChange = false, footer, logo }: {
+function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: Icon, iconColor, iconBg, loading = false, inverseGoal = false, inverseChange = false, footer, logo, chart = 'sparkline' }: {
   title: string; value: number; prevValue?: number; goalValue?: number;
   format?: 'currency' | 'number' | 'percent' | 'times';
   icon: React.ElementType; iconColor: string; iconBg: string; loading?: boolean; inverseGoal?: boolean; inverseChange?: boolean;
   footer?: React.ReactNode;
   logo?: React.ReactNode;
+  chart?: 'sparkline' | 'none';
 }) {
   const fmt = (v: number) =>
     format === 'currency' ? formatCurrencyBRL(v)
@@ -336,12 +337,14 @@ function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: 
           ) : (
             <p className="mt-1 text-[11px] text-muted-foreground/70">— vs meta</p>
           )}
-          <div className="mt-3 -mx-1">
-            <MiniTrendLine
-              color={change === null ? iconColor : isPositive ? '#34d399' : '#f87171'}
-              trend={change === null ? 'up' : change > 0 ? 'up' : change < 0 ? 'down' : 'flat'}
-            />
-          </div>
+          {chart === 'sparkline' && (
+            <div className="mt-3 -mx-1">
+              <MiniTrendLine
+                color={change === null ? iconColor : isPositive ? '#34d399' : '#f87171'}
+                trend={change === null ? 'up' : change > 0 ? 'up' : change < 0 ? 'down' : 'flat'}
+              />
+            </div>
+          )}
           {footer && <div className="mt-2 pt-2 border-t border-white/5">{footer}</div>}
         </>
       )}
@@ -2047,10 +2050,12 @@ function AudiencePieCard({
   title,
   data,
   colors,
+  variant = 'donut',
 }: {
   title: string;
   data: AudienceSlice[];
   colors: string[];
+  variant?: 'donut' | 'list';
 }) {
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const total = data.reduce((sum, item) => sum + item.value, 0);
@@ -2075,8 +2080,9 @@ function AudiencePieCard({
         <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground">{title}</h4>
         <p className="mt-0.5 text-[11px] text-muted-foreground">{total.toLocaleString('pt-BR')} pessoas/imp.</p>
       </div>
-      <div className="mt-4 flex justify-center">
-        {slices.length > 0 ? (
+      {variant === 'donut' && (
+        <div className="mt-4 flex justify-center">
+          {slices.length > 0 ? (
           <svg viewBox="0 0 220 220" className="h-36 w-36 overflow-visible" role="img" aria-label={`Gráfico de ${title}`}>
             {slices.map((slice) => (
               <path
@@ -2101,12 +2107,13 @@ function AudiencePieCard({
             <text x="110" y="106" textAnchor="middle" className="fill-muted-foreground text-[10px] font-bold uppercase tracking-widest">Total</text>
             <text x="110" y="124" textAnchor="middle" className="fill-foreground text-[18px] font-bold">{total.toLocaleString('pt-BR')}</text>
           </svg>
-        ) : (
-          <div className="relative h-36 w-36 rounded-full bg-muted/20">
-            <div className="absolute inset-8 rounded-full bg-card" />
-          </div>
-        )}
-      </div>
+          ) : (
+            <div className="relative h-36 w-36 rounded-full bg-muted/20">
+              <div className="absolute inset-8 rounded-full bg-card" />
+            </div>
+          )}
+        </div>
+      )}
       <div className="mt-4 flex-1 space-y-1.5">
         {slices.length > 0 ? slices.slice(0, 7).map((item) => (
           <button
@@ -2138,6 +2145,7 @@ function AudiencePlatformBlock({
   colors,
   data,
   keys,
+  chartVariant = 'donut',
   extraKeys,
 }: {
   title: string;
@@ -2146,6 +2154,7 @@ function AudiencePlatformBlock({
   colors: string[];
   data: AudienceBreakdowns;
   keys?: AudienceKey[];
+  chartVariant?: 'donut' | 'list';
   extraKeys?: AudienceKey[];
 }) {
   const baseKeys: AudienceKey[] = keys ?? ['age', 'gender', 'platform', 'device'];
@@ -2163,8 +2172,209 @@ function AudiencePlatformBlock({
       </div>
       <div className={`relative mt-4 grid flex-1 gap-3 ${colClass}`}>
         {allKeys.map((key) => (
-          <AudiencePieCard key={key} title={AUDIENCE_TITLES[key]} data={data[key]} colors={colors} />
+          <AudiencePieCard key={key} title={AUDIENCE_TITLES[key]} data={data[key]} colors={colors} variant={chartVariant} />
         ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Dashboard Customization ─────────────────────────────────────────────────
+type DashboardWidgetSize = 'sm' | 'md' | 'lg';
+type DashboardCardChart = 'sparkline' | 'none';
+type AudienceChartVariant = 'donut' | 'list';
+type DashboardCardId =
+  | 'general-revenue' | 'general-leads' | 'general-roi' | 'general-cpl' | 'general-spend' | 'general-ctr' | 'general-funnel'
+  | 'meta-reach' | 'meta-impressions' | 'meta-leads' | 'meta-cpl' | 'meta-spend' | 'meta-ctr' | 'meta-total-spend' | 'meta-balance' | 'meta-active-campaigns' | 'meta-adsets' | 'meta-creatives' | 'meta-clicks' | 'meta-campaigns' | 'meta-audience' | 'meta-creative-preview'
+  | 'google-impressions' | 'google-conversions' | 'google-cpa' | 'google-spend' | 'google-ctr' | 'google-total-spend' | 'google-balance' | 'google-active-campaigns' | 'google-keyword-count' | 'google-campaigns' | 'google-keywords' | 'google-audience';
+
+type DashboardCardConfig = {
+  visible: boolean;
+  size: DashboardWidgetSize;
+  chart: DashboardCardChart;
+};
+
+type DashboardPrefs = {
+  cards: Record<DashboardCardId, DashboardCardConfig>;
+  metaAudienceChart: AudienceChartVariant;
+  googleAudienceChart: AudienceChartVariant;
+};
+
+const CARD_LABELS: Record<DashboardCardId, string> = {
+  'general-revenue': 'Faturamento / Resultado',
+  'general-leads': 'Leads total / parcial / meta',
+  'general-roi': 'ROI',
+  'general-cpl': 'CPL geral',
+  'general-spend': 'Valor gasto',
+  'general-ctr': 'CTR geral',
+  'general-funnel': 'Funil de vendas',
+  'meta-reach': 'Meta: Alcance',
+  'meta-impressions': 'Meta: Impressões',
+  'meta-leads': 'Meta: Leads',
+  'meta-cpl': 'Meta: CPL',
+  'meta-spend': 'Meta: Valor gasto',
+  'meta-ctr': 'Meta: CTR',
+  'meta-total-spend': 'Meta: Total gasto',
+  'meta-balance': 'Meta: Saldo da conta',
+  'meta-active-campaigns': 'Meta: Campanhas ativas',
+  'meta-adsets': 'Meta: Conjuntos',
+  'meta-creatives': 'Meta: Criativos',
+  'meta-clicks': 'Meta: Cliques',
+  'meta-campaigns': 'Meta: Tabela de campanhas',
+  'meta-audience': 'Meta: Audiências e recortes',
+  'meta-creative-preview': 'Meta: Preview de criativos',
+  'google-impressions': 'Google: Impressões',
+  'google-conversions': 'Google: Conversões',
+  'google-cpa': 'Google: Custo por conversão',
+  'google-spend': 'Google: Valor gasto',
+  'google-ctr': 'Google: CTR',
+  'google-total-spend': 'Google: Total gasto',
+  'google-balance': 'Google: Saldo da conta',
+  'google-active-campaigns': 'Google: Campanhas ativas',
+  'google-keyword-count': 'Google: Contador top palavras-chave',
+  'google-campaigns': 'Google: Tabela de campanhas',
+  'google-keywords': 'Google: Top palavras-chave',
+  'google-audience': 'Google: Recortes por gênero/dispositivo',
+};
+
+const CARD_GROUPS: Array<{ title: string; ids: DashboardCardId[] }> = [
+  { title: 'Métricas Gerais', ids: ['general-revenue', 'general-leads', 'general-roi', 'general-cpl', 'general-spend', 'general-ctr', 'general-funnel'] },
+  { title: 'Meta Ads', ids: ['meta-reach', 'meta-impressions', 'meta-leads', 'meta-cpl', 'meta-spend', 'meta-ctr', 'meta-total-spend', 'meta-balance', 'meta-active-campaigns', 'meta-adsets', 'meta-creatives', 'meta-clicks', 'meta-campaigns', 'meta-audience', 'meta-creative-preview'] },
+  { title: 'Google Ads', ids: ['google-impressions', 'google-conversions', 'google-cpa', 'google-spend', 'google-ctr', 'google-total-spend', 'google-balance', 'google-active-campaigns', 'google-keyword-count', 'google-campaigns', 'google-keywords', 'google-audience'] },
+];
+
+const DEFAULT_CARD_OVERRIDES: Partial<Record<DashboardCardId, Partial<DashboardCardConfig>>> = {
+  'general-revenue': { size: 'lg', chart: 'none' },
+  'general-leads': { size: 'lg', chart: 'none' },
+  'general-funnel': { size: 'lg', chart: 'none' },
+  'meta-campaigns': { size: 'lg', chart: 'none' },
+  'meta-audience': { size: 'lg', chart: 'none' },
+  'meta-creative-preview': { size: 'lg', chart: 'none' },
+  'google-campaigns': { size: 'lg', chart: 'none' },
+  'google-keywords': { size: 'md', chart: 'none' },
+  'google-audience': { size: 'md', chart: 'none' },
+  'meta-adsets': { chart: 'none' },
+  'meta-creatives': { chart: 'none' },
+  'meta-active-campaigns': { chart: 'none' },
+  'google-active-campaigns': { chart: 'none' },
+  'google-keyword-count': { chart: 'none' },
+};
+
+const DEFAULT_DASHBOARD_PREFS: DashboardPrefs = {
+  cards: (Object.keys(CARD_LABELS) as DashboardCardId[]).reduce((acc, id) => {
+    acc[id] = { visible: true, size: 'sm', chart: 'sparkline', ...DEFAULT_CARD_OVERRIDES[id] };
+    return acc;
+  }, {} as Record<DashboardCardId, DashboardCardConfig>),
+  metaAudienceChart: 'donut',
+  googleAudienceChart: 'donut',
+};
+
+const LS_DASHBOARD_PREFS = 'dashboard_global_preferences_v2';
+
+function mergeDashboardPrefs(input: unknown): DashboardPrefs {
+  const raw = input as Partial<DashboardPrefs> | null;
+  const cards = { ...DEFAULT_DASHBOARD_PREFS.cards };
+  if (raw?.cards) {
+    for (const id of Object.keys(CARD_LABELS) as DashboardCardId[]) {
+      cards[id] = { ...cards[id], ...raw.cards[id] };
+    }
+  }
+  return {
+    cards,
+    metaAudienceChart: raw?.metaAudienceChart ?? DEFAULT_DASHBOARD_PREFS.metaAudienceChart,
+    googleAudienceChart: raw?.googleAudienceChart ?? DEFAULT_DASHBOARD_PREFS.googleAudienceChart,
+  };
+}
+
+function gridSpan(size: DashboardWidgetSize) {
+  return size === 'lg' ? 'xl:col-span-4' : size === 'md' ? 'xl:col-span-2' : 'xl:col-span-1';
+}
+
+function DashboardGridItem({ id, prefs, children }: { id: DashboardCardId; prefs: DashboardPrefs; children: ReactNode }) {
+  const cfg = prefs.cards[id] ?? DEFAULT_DASHBOARD_PREFS.cards[id];
+  if (!cfg.visible) return null;
+  return <div className={cn('min-w-0', gridSpan(cfg.size))}>{children}</div>;
+}
+
+function DashboardCustomizer({
+  prefs,
+  onPrefsChange,
+  onClose,
+}: {
+  prefs: DashboardPrefs;
+  onPrefsChange: (prefs: DashboardPrefs) => void;
+  onClose: () => void;
+}) {
+  function updateCard(id: DashboardCardId, patch: Partial<DashboardCardConfig>) {
+    onPrefsChange({ ...prefs, cards: { ...prefs.cards, [id]: { ...prefs.cards[id], ...patch } } });
+  }
+  function reset() { onPrefsChange(DEFAULT_DASHBOARD_PREFS); }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm">
+      <div className="absolute right-4 top-4 flex max-h-[calc(100vh-2rem)] w-[min(720px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl">
+        <div className="flex items-center justify-between border-b border-border px-5 py-4">
+          <div>
+            <p className="text-sm font-bold uppercase tracking-wider text-foreground">Customizar dashboard</p>
+            <p className="text-[11px] text-muted-foreground">Configuração global, aplicada para todos os clientes.</p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto px-5 py-4">
+          <div className="mb-4 grid gap-3 sm:grid-cols-2">
+            <label className="rounded-xl border border-border bg-background/50 p-3">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Gráfico público Meta</span>
+              <select value={prefs.metaAudienceChart} onChange={e => onPrefsChange({ ...prefs, metaAudienceChart: e.target.value as AudienceChartVariant })} className="mt-2 w-full rounded-lg border border-border bg-card px-3 py-2 text-xs">
+                <option value="donut">Donut</option>
+                <option value="list">Lista</option>
+              </select>
+            </label>
+            <label className="rounded-xl border border-border bg-background/50 p-3">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Gráfico público Google</span>
+              <select value={prefs.googleAudienceChart} onChange={e => onPrefsChange({ ...prefs, googleAudienceChart: e.target.value as AudienceChartVariant })} className="mt-2 w-full rounded-lg border border-border bg-card px-3 py-2 text-xs">
+                <option value="donut">Donut</option>
+                <option value="list">Lista</option>
+              </select>
+            </label>
+          </div>
+          <div className="space-y-5">
+            {CARD_GROUPS.map(group => (
+              <section key={group.title} className="space-y-2">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{group.title}</p>
+                <div className="divide-y divide-border overflow-hidden rounded-xl border border-border">
+                  {group.ids.map(id => {
+                    const cfg = prefs.cards[id];
+                    const isPanel = id.includes('campaigns') || id.includes('audience') || id.includes('preview') || id.includes('keywords') || id === 'general-funnel';
+                    return (
+                      <div key={id} className="grid gap-3 bg-background/35 p-3 md:grid-cols-[1fr_90px_110px_120px]">
+                        <label className="flex min-w-0 items-center gap-2 text-xs font-semibold text-foreground">
+                          <input type="checkbox" checked={cfg.visible} onChange={e => updateCard(id, { visible: e.target.checked })} className="h-4 w-4 accent-primary" />
+                          <span className="truncate">{CARD_LABELS[id]}</span>
+                        </label>
+                        <select value={cfg.size} onChange={e => updateCard(id, { size: e.target.value as DashboardWidgetSize })} className="rounded-lg border border-border bg-card px-2 py-1.5 text-xs">
+                          <option value="sm">P</option>
+                          <option value="md">M</option>
+                          <option value="lg">G</option>
+                        </select>
+                        <select value={cfg.chart} disabled={isPanel} onChange={e => updateCard(id, { chart: e.target.value as DashboardCardChart })} className="rounded-lg border border-border bg-card px-2 py-1.5 text-xs disabled:opacity-40">
+                          <option value="sparkline">Linha</option>
+                          <option value="none">Sem gráfico</option>
+                        </select>
+                        <span className="self-center text-[10px] text-muted-foreground">{isPanel ? 'Painel' : 'Widget'}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
+          </div>
+        </div>
+        <div className="flex items-center justify-between border-t border-border px-5 py-4">
+          <button type="button" onClick={reset} className="rounded-lg border border-border px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground">Restaurar padrão</button>
+          <button type="button" onClick={onClose} className="rounded-lg bg-primary px-4 py-2 text-xs font-bold text-black">Salvar padrão global</button>
+        </div>
       </div>
     </div>
   );
@@ -2454,6 +2664,8 @@ export default function GeneralDashboard() {
   const [aiInsights, setAiInsights] = useState<AiInsight[]>([]);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
+  const [customizerOpen, setCustomizerOpen] = useState(false);
+  const [dashboardPrefs, setDashboardPrefs] = useState<DashboardPrefs>(DEFAULT_DASHBOARD_PREFS);
   const [alertsCollapsed, setAlertsCollapsed] = useState(() => {
     if (typeof window === 'undefined') return false;
     return localStorage.getItem('dashboard:alerts:collapsed') === '1';
@@ -2514,6 +2726,17 @@ export default function GeneralDashboard() {
 
   useEffect(() => { localStorage.setItem(LS_ORDER, JSON.stringify(widgetOrder)); }, [widgetOrder]);
   useEffect(() => { localStorage.setItem(LS_COLLAPSED, JSON.stringify([...collapsedWidgets])); }, [collapsedWidgets]);
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(LS_DASHBOARD_PREFS);
+      setDashboardPrefs(stored ? mergeDashboardPrefs(JSON.parse(stored)) : DEFAULT_DASHBOARD_PREFS);
+    } catch {
+      setDashboardPrefs(DEFAULT_DASHBOARD_PREFS);
+    }
+  }, []);
+  useEffect(() => {
+    localStorage.setItem(LS_DASHBOARD_PREFS, JSON.stringify(dashboardPrefs));
+  }, [dashboardPrefs]);
 
   // Initialize: all clients selected (or pre-select from ?client=ID param)
   useEffect(() => {
@@ -2961,6 +3184,14 @@ export default function GeneralDashboard() {
 
   return (
     <div className="space-y-6 pb-10">
+      {customizerOpen && (
+        <DashboardCustomizer
+          prefs={dashboardPrefs}
+          onPrefsChange={setDashboardPrefs}
+          onClose={() => setCustomizerOpen(false)}
+        />
+      )}
+
       {/* UNIFIED TOP BAR */}
       <div className="sticky top-0 z-20 -mx-6 -mt-6 bg-background/95 backdrop-blur-sm border-b border-border">
         <div className="flex items-center gap-2 px-6 h-20">
@@ -3019,6 +3250,15 @@ export default function GeneralDashboard() {
           >
             {aiLoading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
             {aiLoading ? 'Analisando...' : 'Analisar com IA'}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setCustomizerOpen(true)}
+            className="flex items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2 text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <Settings2 className="h-3.5 w-3.5" />
+            Customizar
           </button>
 
           {/* Theme + bell + user */}
@@ -3099,16 +3339,29 @@ export default function GeneralDashboard() {
             <p className="text-[11px] text-muted-foreground">Consolidado do período antes da leitura por canal.</p>
           </div>
         </div>
-        <div className="grid gap-4 xl:grid-cols-2">
-          <TargetSummaryCard title="Faturamento / Resultado" value={revenue} partial={effectiveRevenueGoal} target={plannedRevenue} format="currency" accent="#22c55e" />
-          <TargetSummaryCard title="Leads Total" value={totalLeads} partial={effectiveLeadsGoal} target={leadsGoal} format="number" accent="#2dd4bf" />
+        <div className="grid gap-4 xl:grid-cols-4">
+          <DashboardGridItem id="general-revenue" prefs={dashboardPrefs}>
+            <TargetSummaryCard title="Faturamento / Resultado" value={revenue} partial={effectiveRevenueGoal} target={plannedRevenue} format="currency" accent="#22c55e" />
+          </DashboardGridItem>
+          <DashboardGridItem id="general-leads" prefs={dashboardPrefs}>
+            <TargetSummaryCard title="Leads Total" value={totalLeads} partial={effectiveLeadsGoal} target={leadsGoal} format="number" accent="#2dd4bf" />
+          </DashboardGridItem>
         </div>
         <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <KpiCard title="ROI" value={roi} prevValue={prevRoi > 0 ? prevRoi : undefined} goalValue={roiGoal > 0 ? roiGoal : undefined} format="times" icon={TrendingUp} iconColor="#a78bfa" iconBg="#a78bfa" loading={metricsLoading} />
-          <KpiCard title="CPL Geral" value={totalCostPerLead} prevValue={prevCpl > 0 ? prevCpl : undefined} goalValue={cplGoal > 0 ? cplGoal : undefined} format="currency" icon={Tag} iconColor="#c084fc" iconBg="#c084fc" loading={metricsLoading} inverseGoal inverseChange />
-          <KpiCard title="Valor Gasto" value={totalSpend} format="currency" icon={CreditCard} iconColor="#22d3ee" iconBg="#22d3ee" loading={metricsLoading} />
-          <KpiCard title="CTR Geral" value={avgCtr} format="percent" icon={MousePointerClick} iconColor="#f59e0b" iconBg="#f59e0b" loading={metricsLoading} />
+          <DashboardGridItem id="general-roi" prefs={dashboardPrefs}>
+            <KpiCard title="ROI" value={roi} prevValue={prevRoi > 0 ? prevRoi : undefined} goalValue={roiGoal > 0 ? roiGoal : undefined} format="times" icon={TrendingUp} iconColor="#a78bfa" iconBg="#a78bfa" loading={metricsLoading} chart={dashboardPrefs.cards['general-roi'].chart} />
+          </DashboardGridItem>
+          <DashboardGridItem id="general-cpl" prefs={dashboardPrefs}>
+            <KpiCard title="CPL Geral" value={totalCostPerLead} prevValue={prevCpl > 0 ? prevCpl : undefined} goalValue={cplGoal > 0 ? cplGoal : undefined} format="currency" icon={Tag} iconColor="#c084fc" iconBg="#c084fc" loading={metricsLoading} inverseGoal inverseChange chart={dashboardPrefs.cards['general-cpl'].chart} />
+          </DashboardGridItem>
+          <DashboardGridItem id="general-spend" prefs={dashboardPrefs}>
+            <KpiCard title="Valor Gasto" value={totalSpend} format="currency" icon={CreditCard} iconColor="#22d3ee" iconBg="#22d3ee" loading={metricsLoading} chart={dashboardPrefs.cards['general-spend'].chart} />
+          </DashboardGridItem>
+          <DashboardGridItem id="general-ctr" prefs={dashboardPrefs}>
+            <KpiCard title="CTR Geral" value={avgCtr} format="percent" icon={MousePointerClick} iconColor="#f59e0b" iconBg="#f59e0b" loading={metricsLoading} chart={dashboardPrefs.cards['general-ctr'].chart} />
+          </DashboardGridItem>
         </div>
+        <DashboardGridItem id="general-funnel" prefs={dashboardPrefs}>
         <div className="mt-4 rounded-xl border border-white/5 bg-background/30 p-4">
           <p className="text-sm font-bold uppercase tracking-wider text-foreground">Funil de Performance</p>
           <p className="mt-0.5 text-[11px] text-muted-foreground">Período: {PERIODS.find(p => p.value === period)?.label ?? period}</p>
@@ -3158,6 +3411,7 @@ export default function GeneralDashboard() {
             );
           })()}
         </div>
+        </DashboardGridItem>
       </section>
 
       {/* 2. META ADS */}
@@ -3175,21 +3429,22 @@ export default function GeneralDashboard() {
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <KpiCard title="Alcance Meta" value={metaReach} format="number" icon={Users} iconColor="#38bdf8" iconBg="#38bdf8" loading={metricsLoading} />
-          <KpiCard title="Impressões Meta" value={metaImpressions} format="number" icon={BarChart3} iconColor="#60a5fa" iconBg="#60a5fa" loading={metricsLoading} />
-          <KpiCard title="Leads Meta Ads" value={metaLeads} prevValue={prevMetaLeads > 0 ? prevMetaLeads : undefined} format="number" icon={Target} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} />
-          <KpiCard title="CPL Meta Ads" value={avgCpl} format="currency" icon={Zap} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} inverseGoal inverseChange logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} />
-          <KpiCard title="Valor Gasto Meta" value={metaSpend} format="currency" icon={Wallet} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} />
-          <KpiCard title="CTR Meta Ads" value={metaCtr} format="percent" icon={MousePointerClick} iconColor="#38bdf8" iconBg="#38bdf8" loading={metricsLoading} />
-          <KpiCard title="Total Gasto Meta" value={metaCampaignSpend || metaSpend} format="currency" icon={CreditCard} iconColor="#7dd3fc" iconBg="#7dd3fc" loading={campaignsLoading || metricsLoading} />
-          <KpiCard title="Saldo da Conta Meta" value={metaBalance} format="currency" icon={PiggyBank} iconColor="#0668E1" iconBg="#0668E1" loading={balancesLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} />
-          <CompactInfoCard title="Campanhas Ativas" value={activeMetaCampaigns} icon={Briefcase} color="#0668E1" />
-          <CompactInfoCard title="Conjuntos" value="Ver na tabela" icon={LayoutDashboard} color="#38bdf8" helper="Expanda uma campanha para visualizar conjuntos e anúncios." />
-          <CompactInfoCard title="Criativos" value={metaCreativeCount} icon={ImageIcon} color="#60a5fa" helper="Com preview no carrossel abaixo." />
-          <KpiCard title="Cliques Meta" value={metaClicks} format="number" icon={MousePointerClick} iconColor="#93c5fd" iconBg="#93c5fd" loading={metricsLoading} />
+          <DashboardGridItem id="meta-reach" prefs={dashboardPrefs}><KpiCard title="Alcance Meta" value={metaReach} format="number" icon={Users} iconColor="#38bdf8" iconBg="#38bdf8" loading={metricsLoading} chart={dashboardPrefs.cards['meta-reach'].chart} /></DashboardGridItem>
+          <DashboardGridItem id="meta-impressions" prefs={dashboardPrefs}><KpiCard title="Impressões Meta" value={metaImpressions} format="number" icon={BarChart3} iconColor="#60a5fa" iconBg="#60a5fa" loading={metricsLoading} chart={dashboardPrefs.cards['meta-impressions'].chart} /></DashboardGridItem>
+          <DashboardGridItem id="meta-leads" prefs={dashboardPrefs}><KpiCard title="Leads Meta Ads" value={metaLeads} prevValue={prevMetaLeads > 0 ? prevMetaLeads : undefined} format="number" icon={Target} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['meta-leads'].chart} /></DashboardGridItem>
+          <DashboardGridItem id="meta-cpl" prefs={dashboardPrefs}><KpiCard title="CPL Meta Ads" value={avgCpl} format="currency" icon={Zap} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} inverseGoal inverseChange logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['meta-cpl'].chart} /></DashboardGridItem>
+          <DashboardGridItem id="meta-spend" prefs={dashboardPrefs}><KpiCard title="Valor Gasto Meta" value={metaSpend} format="currency" icon={Wallet} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['meta-spend'].chart} /></DashboardGridItem>
+          <DashboardGridItem id="meta-ctr" prefs={dashboardPrefs}><KpiCard title="CTR Meta Ads" value={metaCtr} format="percent" icon={MousePointerClick} iconColor="#38bdf8" iconBg="#38bdf8" loading={metricsLoading} chart={dashboardPrefs.cards['meta-ctr'].chart} /></DashboardGridItem>
+          <DashboardGridItem id="meta-total-spend" prefs={dashboardPrefs}><KpiCard title="Total Gasto Meta" value={metaCampaignSpend || metaSpend} format="currency" icon={CreditCard} iconColor="#7dd3fc" iconBg="#7dd3fc" loading={campaignsLoading || metricsLoading} chart={dashboardPrefs.cards['meta-total-spend'].chart} /></DashboardGridItem>
+          <DashboardGridItem id="meta-balance" prefs={dashboardPrefs}><KpiCard title="Saldo da Conta Meta" value={metaBalance} format="currency" icon={PiggyBank} iconColor="#0668E1" iconBg="#0668E1" loading={balancesLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['meta-balance'].chart} /></DashboardGridItem>
+          <DashboardGridItem id="meta-active-campaigns" prefs={dashboardPrefs}><CompactInfoCard title="Campanhas Ativas" value={activeMetaCampaigns} icon={Briefcase} color="#0668E1" /></DashboardGridItem>
+          <DashboardGridItem id="meta-adsets" prefs={dashboardPrefs}><CompactInfoCard title="Conjuntos" value="Ver na tabela" icon={LayoutDashboard} color="#38bdf8" helper="Expanda uma campanha para visualizar conjuntos e anúncios." /></DashboardGridItem>
+          <DashboardGridItem id="meta-creatives" prefs={dashboardPrefs}><CompactInfoCard title="Criativos" value={metaCreativeCount} icon={ImageIcon} color="#60a5fa" helper="Com preview no carrossel abaixo." /></DashboardGridItem>
+          <DashboardGridItem id="meta-clicks" prefs={dashboardPrefs}><KpiCard title="Cliques Meta" value={metaClicks} format="number" icon={MousePointerClick} iconColor="#93c5fd" iconBg="#93c5fd" loading={metricsLoading} chart={dashboardPrefs.cards['meta-clicks'].chart} /></DashboardGridItem>
         </div>
 
-        <div className="mt-4 grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+        <div className="mt-4 grid gap-4 xl:grid-cols-4">
+          <DashboardGridItem id="meta-campaigns" prefs={dashboardPrefs}>
           <div className="rounded-xl border border-white/5 bg-background/30 p-4">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Campanhas Meta Ads</p>
@@ -3208,9 +3463,13 @@ export default function GeneralDashboard() {
             </div>
             <CampaignPerformanceTable campaigns={metaCampaigns} loading={campaignsLoading} period={period} dateFrom={customDateFrom} dateTo={customDateTo} />
           </div>
-          <AudiencePlatformBlock title="Meta Ads" description="Recortes por idade, gênero, plataforma e dispositivo." color="#0B84FF" colors={META_AUDIENCE_COLORS} data={audience.meta} />
+          </DashboardGridItem>
+          <DashboardGridItem id="meta-audience" prefs={dashboardPrefs}>
+            <AudiencePlatformBlock title="Meta Ads" description="Recortes por idade, gênero, plataforma e dispositivo." color="#0B84FF" colors={META_AUDIENCE_COLORS} data={audience.meta} chartVariant={dashboardPrefs.metaAudienceChart} />
+          </DashboardGridItem>
         </div>
 
+        <DashboardGridItem id="meta-creative-preview" prefs={dashboardPrefs}>
         <div className="mt-4 rounded-xl border border-white/5 bg-background/30 p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -3255,6 +3514,7 @@ export default function GeneralDashboard() {
             )}
           </div>
         </div>
+        </DashboardGridItem>
       </section>
 
       {/* 3. GOOGLE ADS */}
@@ -3269,18 +3529,19 @@ export default function GeneralDashboard() {
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <KpiCard title="Impressões Google" value={googleImpressions} format="number" icon={BarChart3} iconColor="#4285F4" iconBg="#4285F4" loading={metricsLoading} />
-          <KpiCard title="Conversões Google" value={googleConv} prevValue={prevGoogleConv > 0 ? prevGoogleConv : undefined} format="number" icon={BarChart3} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} />
-          <KpiCard title="Custo por Conversão" value={avgCpa} format="currency" icon={Briefcase} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} inverseGoal inverseChange logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} />
-          <KpiCard title="Valor Gasto Google" value={googleCost} format="currency" icon={CreditCard} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} />
-          <KpiCard title="CTR Google Ads" value={googleCtrValue} format="percent" icon={MousePointerClick} iconColor="#f59e0b" iconBg="#f59e0b" loading={metricsLoading} />
-          <KpiCard title="Total Gasto Google" value={googleCampaignSpend || googleCost} format="currency" icon={Wallet} iconColor="#34A853" iconBg="#34A853" loading={campaignsLoading || metricsLoading} />
-          <KpiCard title="Saldo da Conta Google" value={googleBalance} format="currency" icon={Wallet} iconColor="#EA4335" iconBg="#EA4335" loading={balancesLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} />
-          <CompactInfoCard title="Campanhas Ativas" value={activeGoogleCampaigns} icon={Briefcase} color="#EA4335" />
-          <CompactInfoCard title="Top Palavras-chave" value={keywords.length} icon={Search} color="#FBBC05" helper="Lista ordenada abaixo." />
+          <DashboardGridItem id="google-impressions" prefs={dashboardPrefs}><KpiCard title="Impressões Google" value={googleImpressions} format="number" icon={BarChart3} iconColor="#4285F4" iconBg="#4285F4" loading={metricsLoading} chart={dashboardPrefs.cards['google-impressions'].chart} /></DashboardGridItem>
+          <DashboardGridItem id="google-conversions" prefs={dashboardPrefs}><KpiCard title="Conversões Google" value={googleConv} prevValue={prevGoogleConv > 0 ? prevGoogleConv : undefined} format="number" icon={BarChart3} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-conversions'].chart} /></DashboardGridItem>
+          <DashboardGridItem id="google-cpa" prefs={dashboardPrefs}><KpiCard title="Custo por Conversão" value={avgCpa} format="currency" icon={Briefcase} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} inverseGoal inverseChange logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-cpa'].chart} /></DashboardGridItem>
+          <DashboardGridItem id="google-spend" prefs={dashboardPrefs}><KpiCard title="Valor Gasto Google" value={googleCost} format="currency" icon={CreditCard} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-spend'].chart} /></DashboardGridItem>
+          <DashboardGridItem id="google-ctr" prefs={dashboardPrefs}><KpiCard title="CTR Google Ads" value={googleCtrValue} format="percent" icon={MousePointerClick} iconColor="#f59e0b" iconBg="#f59e0b" loading={metricsLoading} chart={dashboardPrefs.cards['google-ctr'].chart} /></DashboardGridItem>
+          <DashboardGridItem id="google-total-spend" prefs={dashboardPrefs}><KpiCard title="Total Gasto Google" value={googleCampaignSpend || googleCost} format="currency" icon={Wallet} iconColor="#34A853" iconBg="#34A853" loading={campaignsLoading || metricsLoading} chart={dashboardPrefs.cards['google-total-spend'].chart} /></DashboardGridItem>
+          <DashboardGridItem id="google-balance" prefs={dashboardPrefs}><KpiCard title="Saldo da Conta Google" value={googleBalance} format="currency" icon={Wallet} iconColor="#EA4335" iconBg="#EA4335" loading={balancesLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-balance'].chart} /></DashboardGridItem>
+          <DashboardGridItem id="google-active-campaigns" prefs={dashboardPrefs}><CompactInfoCard title="Campanhas Ativas" value={activeGoogleCampaigns} icon={Briefcase} color="#EA4335" /></DashboardGridItem>
+          <DashboardGridItem id="google-keyword-count" prefs={dashboardPrefs}><CompactInfoCard title="Top Palavras-chave" value={keywords.length} icon={Search} color="#FBBC05" helper="Lista ordenada abaixo." /></DashboardGridItem>
         </div>
 
-        <div className="mt-4 grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+        <div className="mt-4 grid gap-4 xl:grid-cols-4">
+          <DashboardGridItem id="google-campaigns" prefs={dashboardPrefs}>
           <div className="rounded-xl border border-white/5 bg-background/30 p-4">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Campanhas Google Ads</p>
@@ -3299,10 +3560,15 @@ export default function GeneralDashboard() {
             </div>
             <CampaignPerformanceTable campaigns={googleCampaigns} loading={campaignsLoading} period={period} dateFrom={customDateFrom} dateTo={customDateTo} />
           </div>
+          </DashboardGridItem>
+          <DashboardGridItem id="google-keywords" prefs={dashboardPrefs}>
           <div className="space-y-4">
             <TopKeywordsTable keywords={keywords} loading={keywordsLoading} />
-            <AudiencePlatformBlock title="Google Ads" description="Recortes por gênero e dispositivo." color="#EA4335" colors={GOOGLE_AUDIENCE_COLORS} data={audience.google} keys={['gender', 'device']} />
           </div>
+          </DashboardGridItem>
+          <DashboardGridItem id="google-audience" prefs={dashboardPrefs}>
+            <AudiencePlatformBlock title="Google Ads" description="Recortes por gênero e dispositivo." color="#EA4335" colors={GOOGLE_AUDIENCE_COLORS} data={audience.google} keys={['gender', 'device']} chartVariant={dashboardPrefs.googleAudienceChart} />
+          </DashboardGridItem>
         </div>
       </section>
 
