@@ -977,34 +977,35 @@ function CreativePreviewOverlay({
       >
         Fechar
       </button>
-      <div className="mx-auto flex h-full max-w-6xl items-center justify-center gap-6">
-        <div className="flex h-full max-h-[88vh] w-full max-w-[min(56vh,520px)] items-center justify-center">
+      <div className="mx-auto grid h-full max-w-7xl items-center justify-center gap-6 px-4 py-8 lg:grid-cols-[minmax(360px,560px)_360px]">
+        <div
+          className="flex h-[min(78vh,760px)] w-[min(82vw,560px)] items-center justify-center overflow-hidden rounded-2xl border border-white/15 bg-black shadow-[0_0_60px_rgba(11,132,255,0.18)]"
+          onClick={(event) => event.stopPropagation()}
+        >
           {creative.videoUrl ? (
             <video
               src={creative.videoUrl}
               poster={imgUrl}
               controls
               autoPlay
-              className="max-h-full w-full rounded-xl border border-white/15 bg-black object-contain"
-              onClick={(event) => event.stopPropagation()}
+              className="h-full w-full bg-black object-contain"
             />
           ) : imgUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={imgUrl}
               alt={creative.adName}
-              className="max-h-full max-w-full rounded-xl border border-white/15 bg-black object-contain"
+              className="h-full w-full bg-black object-contain"
               style={{ imageRendering: 'auto' }}
               loading="eager"
-              onClick={(event) => event.stopPropagation()}
             />
           ) : (
-            <div className="flex aspect-[9/16] w-full items-center justify-center rounded-xl border border-white/15 bg-white/5">
+            <div className="flex h-full w-full items-center justify-center bg-white/5">
               <ImageIcon className="h-10 w-10 text-white/30" />
             </div>
           )}
         </div>
-        <div className="hidden w-80 shrink-0 rounded-xl border border-white/15 bg-white/10 p-4 text-white lg:block" onClick={(event) => event.stopPropagation()}>
+        <div className="w-[min(82vw,560px)] rounded-xl border border-white/15 bg-white/10 p-4 text-white shadow-[0_0_40px_rgba(255,255,255,0.08)] backdrop-blur-md lg:w-full" onClick={(event) => event.stopPropagation()}>
           <p className="text-xs font-bold uppercase tracking-widest text-white/50">Criativo</p>
           <h3 className="mt-2 text-lg font-bold leading-snug">{creative.adName}</h3>
           {creative.headline && <p className="mt-3 text-sm font-semibold text-white/80">{creative.headline}</p>}
