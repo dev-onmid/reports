@@ -359,6 +359,7 @@ function TargetSummaryCard({
   target,
   format = 'number',
   accent,
+  icon: Icon,
 }: {
   title: string;
   value: number;
@@ -366,36 +367,53 @@ function TargetSummaryCard({
   target: number;
   format?: 'currency' | 'number';
   accent: string;
+  icon: React.ElementType;
 }) {
   const fmt = (v: number) => format === 'currency' ? formatCurrencyBRL(v) : v.toLocaleString('pt-BR');
-  const partialPct = partial > 0 ? Math.min(100, Math.round((value / partial) * 100)) : 0;
   const targetPct = target > 0 ? Math.min(100, Math.round((value / target) * 100)) : 0;
+  const progress = Math.max(0, Math.min(100, targetPct));
   return (
-    <div className="rounded-xl border border-white/5 bg-background/35 p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{title}</p>
-          <p className="mt-2 font-heading text-3xl leading-none text-foreground">{fmt(value)}</p>
+    <div className="relative overflow-hidden rounded-xl border bg-background/35 p-5" style={{ borderColor: `${accent}66`, boxShadow: `0 0 30px ${accent}14` }}>
+      <div className="pointer-events-none absolute inset-0" style={{ background: `radial-gradient(circle at 18% 0%, ${accent}16, transparent 34%)` }} />
+      <div className="relative flex items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full" style={{ background: `${accent}24`, color: accent, boxShadow: `0 0 18px ${accent}33` }}>
+            <Icon className="h-4 w-4" />
+          </span>
+          <p className="text-sm font-bold uppercase tracking-widest text-foreground">{title}</p>
         </div>
-        <span className="h-9 w-1.5 rounded-full" style={{ background: accent }} />
+        <span className="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-white/5 text-muted-foreground">
+          <CircleDot className="h-3.5 w-3.5" />
+        </span>
       </div>
-      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+      <div className="relative mt-5 grid grid-cols-3 gap-4 text-center">
         {[
-          { label: 'Parcial', val: partial, pct: partialPct },
           { label: 'Meta', val: target, pct: targetPct },
+          { label: 'Meta Parcial', val: partial, pct: partial > 0 ? Math.round((value / partial) * 100) : 0 },
+          { label: 'Realizado', val: value, pct: targetPct },
         ].map(item => (
-          <div key={item.label} className="rounded-lg border border-white/5 bg-card/70 p-3">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{item.label}</p>
-              <p className="text-[11px] font-bold text-foreground">{item.val > 0 ? fmt(item.val) : '—'}</p>
-            </div>
-            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted/50">
-              <div className="h-full rounded-full" style={{ width: `${item.pct}%`, background: accent }} />
-            </div>
-            <p className="mt-1 text-[10px] font-semibold text-muted-foreground">{item.val > 0 ? `${item.pct}% realizado` : 'Sem meta configurada'}</p>
+          <div key={item.label} className="min-w-0">
+            <p className="truncate text-base font-semibold text-foreground">{item.val > 0 ? fmt(item.val) : '—'}</p>
+            <p className="mt-1 text-xs font-semibold text-muted-foreground">{item.label}</p>
           </div>
         ))}
       </div>
+      <div className="relative mt-5 h-8 overflow-hidden rounded-lg border" style={{ borderColor: `${accent}55`, background: `${accent}12` }}>
+        <div
+          className="flex h-full items-center justify-center rounded-md text-sm font-black text-black transition-all"
+          style={{
+            width: `${progress}%`,
+            minWidth: progress > 0 ? '64px' : '0',
+            background: `repeating-linear-gradient(45deg, ${accent}, ${accent} 14px, color-mix(in srgb, ${accent} 78%, white) 14px, color-mix(in srgb, ${accent} 78%, white) 28px)`,
+            boxShadow: `0 0 22px ${accent}66`,
+          }}
+        >
+          {progress > 0 ? `${targetPct.toFixed(2)}%` : ''}
+        </div>
+      </div>
+      <button type="button" className="relative mt-4 flex items-center gap-1.5 text-xs font-bold" style={{ color: accent }}>
+        Ver detalhes <ChevronRight className="h-3.5 w-3.5" />
+      </button>
     </div>
   );
 }
@@ -3341,10 +3359,10 @@ export default function GeneralDashboard() {
         </div>
         <div className="grid gap-4 xl:grid-cols-4">
           <DashboardGridItem id="general-revenue" prefs={dashboardPrefs}>
-            <TargetSummaryCard title="Faturamento / Resultado" value={revenue} partial={effectiveRevenueGoal} target={plannedRevenue} format="currency" accent="#22c55e" />
+            <TargetSummaryCard title="Faturamento" value={revenue} partial={effectiveRevenueGoal} target={plannedRevenue} format="currency" accent="#22c55e" icon={DollarSign} />
           </DashboardGridItem>
           <DashboardGridItem id="general-leads" prefs={dashboardPrefs}>
-            <TargetSummaryCard title="Leads Total" value={totalLeads} partial={effectiveLeadsGoal} target={leadsGoal} format="number" accent="#2dd4bf" />
+            <TargetSummaryCard title="Leads" value={totalLeads} partial={effectiveLeadsGoal} target={leadsGoal} format="number" accent="#0ea5e9" icon={Users} />
           </DashboardGridItem>
         </div>
         <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
