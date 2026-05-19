@@ -1772,6 +1772,7 @@ function ExtratorTab({ onUseCampaign }: { onUseCampaign: (numbers: string) => vo
   const [extracting, setExtracting] = useState(false);
   const [extracted, setExtracted] = useState<MemberItem[]>([]);
   const [extractError, setExtractError] = useState('');
+  const [extractDone, setExtractDone] = useState(false);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -1832,9 +1833,9 @@ function ExtratorTab({ onUseCampaign }: { onUseCampaign: (numbers: string) => vo
     setExtracting(true);
     setExtractError('');
     setExtracted([]);
+    setExtractDone(false);
 
     if (extractType === 'conversations') {
-      // For conversations, phone IS the number to extract
       const members: MemberItem[] = filtered
         .filter((c) => selected.has(c.phone))
         .map((c) => ({
@@ -1844,6 +1845,7 @@ function ExtratorTab({ onUseCampaign }: { onUseCampaign: (numbers: string) => vo
         }))
         .filter((m) => m.phone.length >= 8);
       setExtracted(members);
+      setExtractDone(true);
       setExtracting(false);
       return;
     }
@@ -1858,14 +1860,17 @@ function ExtratorTab({ onUseCampaign }: { onUseCampaign: (numbers: string) => vo
         const res = await fetch(
           `/api/disparos/extract/members?clientId=${clientId}&groupId=${encodeURIComponent(group.phone)}`,
         );
-        const data = await res.json() as MemberItem[] | { error: string };
-        if (!res.ok || 'error' in data) {
-          errors.push(`${group.name}: ${(data as { error: string }).error ?? 'Erro'}`);
+        const text = await res.text();
+        let data: MemberItem[] | { error: string };
+        try { data = JSON.parse(text); } catch { data = { error: `Resposta inválida: ${text.slice(0, 80)}` }; }
+
+        if (!res.ok || ('error' in (data as object))) {
+          errors.push(`${group.name}: ${(data as { error: string }).error ?? `HTTP ${res.status}`}`);
         } else {
           results.push(...(data as MemberItem[]));
         }
-      } catch {
-        errors.push(`${group.name}: falha na conexão`);
+      } catch (e) {
+        errors.push(`${group.name}: ${String(e)}`);
       }
     }
 
@@ -1878,7 +1883,8 @@ function ExtratorTab({ onUseCampaign }: { onUseCampaign: (numbers: string) => vo
     });
 
     setExtracted(unique);
-    if (errors.length > 0) setExtractError(errors.join(' | '));
+    setExtractError(errors.join('\n'));
+    setExtractDone(true);
     setExtracting(false);
   }
 
@@ -2028,7 +2034,12 @@ function ExtratorTab({ onUseCampaign }: { onUseCampaign: (numbers: string) => vo
             ))}
           </div>
 
-          <div className="mt-4 flex justify-end">
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex-1">
+              {extractDone && !extracting && extractError && extracted.length === 0 && (
+                <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400 whitespace-pre-wrap">{extractError}</div>
+              )}
+            </div>
             <button
               type="button"
               onClick={extract}
@@ -2041,6 +2052,13 @@ function ExtratorTab({ onUseCampaign }: { onUseCampaign: (numbers: string) => vo
                 : `Extrair números (${selected.size} selecionados)`}
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Empty state after extraction */}
+      {extractDone && !extracting && extracted.length === 0 && !extractError && (
+        <div className="rounded-xl border border-border bg-card/80 p-8 text-center text-sm text-muted-foreground">
+          Nenhum número encontrado nos {extractType === 'groups' ? 'grupos' : 'conversas'} selecionados.
         </div>
       )}
 
