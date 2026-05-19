@@ -8,6 +8,7 @@ import {
   Send, AlertTriangle, Monitor, Calendar, Zap,
   Eye, ChevronRight, Info, BookOpen, UserCog,
   Search, Pencil, ChevronLeft, FileText, Smile, Sparkles,
+  Download, Filter, Hash, ArrowRight,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -1754,9 +1755,359 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances }: {
   );
 }
 
+// ─── Tab: Extrator ────────────────────────────────────────────────────────────
+
+type ChatItem = { phone: string; name: string; isGroup: boolean; membersCount?: number };
+type MemberItem = { phone: string; name: string; admin: boolean };
+
+function ExtratorTab({ onUseCampaign }: { onUseCampaign: (numbers: string) => void }) {
+  const [clients, setClients] = useState<ZClient[]>([]);
+  const [clientId, setClientId] = useState('');
+  const [extractType, setExtractType] = useState<'groups' | 'conversations'>('groups');
+  const [chats, setChats] = useState<ChatItem[]>([]);
+  const [chatsLoading, setChatsLoading] = useState(false);
+  const [chatsError, setChatsError] = useState('');
+  const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [extracting, setExtracting] = useState(false);
+  const [extracted, setExtracted] = useState<MemberItem[]>([]);
+  const [extractError, setExtractError] = useState('');
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/disparos/clients')
+      .then((r) => r.json())
+      .then((rows: ZClient[]) => {
+        setClients(rows);
+        if (rows.length > 0) setClientId(rows[0].id);
+      })
+      .catch(() => {});
+  }, []);
+
+  async function loadChats() {
+    if (!clientId) return;
+    setChatsLoading(true);
+    setChatsError('');
+    setChats([]);
+    setSelected(new Set());
+    setExtracted([]);
+    try {
+      const res = await fetch(`/api/disparos/extract/chats?clientId=${clientId}&type=${extractType}`);
+      const data = await res.json() as ChatItem[] | { error: string };
+      if (!res.ok || 'error' in data) {
+        setChatsError((data as { error: string }).error ?? 'Erro ao carregar');
+      } else {
+        setChats(data as ChatItem[]);
+      }
+    } catch {
+      setChatsError('Falha na conexão');
+    } finally {
+      setChatsLoading(false);
+    }
+  }
+
+  const filtered = chats.filter((c) =>
+    c.name.toLowerCase().includes(search.toLowerCase()) ||
+    c.phone.includes(search),
+  );
+
+  function toggleAll() {
+    if (selected.size === filtered.length) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(filtered.map((c) => c.phone)));
+    }
+  }
+
+  function toggle(phone: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(phone) ? next.delete(phone) : next.add(phone);
+      return next;
+    });
+  }
+
+  async function extract() {
+    if (selected.size === 0) return;
+    setExtracting(true);
+    setExtractError('');
+    setExtracted([]);
+
+    if (extractType === 'conversations') {
+      // For conversations, phone IS the number to extract
+      const members: MemberItem[] = filtered
+        .filter((c) => selected.has(c.phone))
+        .map((c) => ({
+          phone: c.phone.replace(/\D/g, ''),
+          name: c.name,
+          admin: false,
+        }))
+        .filter((m) => m.phone.length >= 8);
+      setExtracted(members);
+      setExtracting(false);
+      return;
+    }
+
+    // Groups: fetch members for each selected group
+    const results: MemberItem[] = [];
+    const errors: string[] = [];
+    const selectedGroups = filtered.filter((c) => selected.has(c.phone));
+
+    for (const group of selectedGroups) {
+      try {
+        const res = await fetch(
+          `/api/disparos/extract/members?clientId=${clientId}&groupId=${encodeURIComponent(group.phone)}`,
+        );
+        const data = await res.json() as MemberItem[] | { error: string };
+        if (!res.ok || 'error' in data) {
+          errors.push(`${group.name}: ${(data as { error: string }).error ?? 'Erro'}`);
+        } else {
+          results.push(...(data as MemberItem[]));
+        }
+      } catch {
+        errors.push(`${group.name}: falha na conexão`);
+      }
+    }
+
+    // Deduplicate by phone
+    const seen = new Set<string>();
+    const unique = results.filter((m) => {
+      if (seen.has(m.phone)) return false;
+      seen.add(m.phone);
+      return true;
+    });
+
+    setExtracted(unique);
+    if (errors.length > 0) setExtractError(errors.join(' | '));
+    setExtracting(false);
+  }
+
+  const extractedNumbers = extracted.map((m) => m.phone).join('\n');
+
+  function copyNumbers() {
+    navigator.clipboard.writeText(extractedNumbers).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  function exportCSV() {
+    const csv = ['phone,name', ...extracted.map((m) => `${m.phone},${m.name.replace(/,/g, ' ')}`)].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `extrato-${extractType}-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <div className="space-y-5">
+      {/* Config row */}
+      <div className="rounded-xl border border-border bg-card/80 p-5">
+        <div className="mb-4 flex items-center gap-3">
+          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400 shadow-[0_0_16px_rgba(52,211,153,0.25)]">
+            <Hash className="h-4 w-4" />
+          </span>
+          <h2 className="text-sm font-bold uppercase tracking-wider">Extrator de Números</h2>
+          <p className="text-xs text-muted-foreground">Extraia membros de grupos ou contatos de conversas via Z-API.</p>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-3">
+          <label className="space-y-2">
+            <span className="text-xs font-bold text-foreground">Instância</span>
+            <select
+              value={clientId}
+              onChange={(e) => setClientId(e.target.value)}
+              className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none focus:border-primary"
+            >
+              {clients.length === 0 && <option value="">Nenhuma instância</option>}
+              {clients.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="space-y-2">
+            <span className="text-xs font-bold text-foreground">Tipo</span>
+            <div className="flex h-10 rounded-lg border border-border overflow-hidden">
+              {(['groups', 'conversations'] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setExtractType(t)}
+                  className={cn(
+                    'flex-1 text-xs font-bold transition-colors',
+                    extractType === t
+                      ? 'bg-primary/20 text-primary'
+                      : 'bg-background text-muted-foreground hover:bg-muted/40',
+                  )}
+                >
+                  {t === 'groups' ? '👥 Grupos' : '💬 Conversas'}
+                </button>
+              ))}
+            </div>
+          </label>
+
+          <div className="flex items-end">
+            <button
+              type="button"
+              onClick={loadChats}
+              disabled={!clientId || chatsLoading}
+              className="flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 text-sm font-bold text-emerald-400 transition-all hover:bg-emerald-500/20 disabled:opacity-50"
+            >
+              {chatsLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Filter className="h-4 w-4" />}
+              {chatsLoading ? 'Carregando...' : 'Buscar lista'}
+            </button>
+          </div>
+        </div>
+
+        {chatsError && (
+          <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">{chatsError}</p>
+        )}
+      </div>
+
+      {/* Chat list */}
+      {chats.length > 0 && (
+        <div className="rounded-xl border border-border bg-card/80 p-5">
+          <div className="mb-3 flex flex-wrap items-center gap-3">
+            <div className="relative flex-1 min-w-48">
+              <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder={`Buscar ${extractType === 'groups' ? 'grupos' : 'conversas'}...`}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="h-9 w-full rounded-lg border border-border bg-background pl-8 pr-3 text-sm outline-none focus:border-primary"
+              />
+            </div>
+            <span className="text-xs text-muted-foreground">{filtered.length} {extractType === 'groups' ? 'grupos' : 'conversas'}</span>
+            <button type="button" onClick={toggleAll} className="text-xs font-bold text-primary hover:underline">
+              {selected.size === filtered.length ? 'Desmarcar tudo' : 'Selecionar tudo'}
+            </button>
+            <span className={cn('text-xs font-bold', selected.size > 0 ? 'text-emerald-400' : 'text-muted-foreground')}>
+              {selected.size} selecionado{selected.size !== 1 ? 's' : ''}
+            </span>
+          </div>
+
+          <div className="max-h-72 overflow-y-auto space-y-1 pr-1">
+            {filtered.map((chat) => (
+              <button
+                key={chat.phone}
+                type="button"
+                onClick={() => toggle(chat.phone)}
+                className={cn(
+                  'flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-all',
+                  selected.has(chat.phone)
+                    ? 'border-emerald-500/40 bg-emerald-500/10'
+                    : 'border-transparent hover:border-border hover:bg-muted/30',
+                )}
+              >
+                <div className={cn(
+                  'flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors',
+                  selected.has(chat.phone)
+                    ? 'border-emerald-500 bg-emerald-500'
+                    : 'border-border bg-background',
+                )}>
+                  {selected.has(chat.phone) && <CheckCircle2 className="h-3 w-3 text-black" />}
+                </div>
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-bold text-muted-foreground">
+                  {chat.name.charAt(0).toUpperCase()}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-foreground">{chat.name || chat.phone}</p>
+                  <p className="text-[10px] text-muted-foreground">{chat.phone}</p>
+                </div>
+                {chat.membersCount !== undefined && (
+                  <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-bold text-muted-foreground">
+                    {chat.membersCount} membros
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          <div className="mt-4 flex justify-end">
+            <button
+              type="button"
+              onClick={extract}
+              disabled={selected.size === 0 || extracting}
+              className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-bold text-black transition-all hover:bg-primary/90 disabled:opacity-50"
+            >
+              {extracting ? <RefreshCw className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+              {extracting
+                ? `Extraindo (${selected.size} ${extractType === 'groups' ? 'grupos' : 'conversas'})...`
+                : `Extrair números (${selected.size} selecionados)`}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Results */}
+      {extracted.length > 0 && (
+        <div className="rounded-xl border border-emerald-500/25 bg-card/80 p-5 shadow-[0_0_28px_rgba(52,211,153,0.07)]">
+          <div className="mb-4 flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+              <span className="text-sm font-bold text-foreground">
+                {extracted.length} número{extracted.length !== 1 ? 's' : ''} extraído{extracted.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+            {extractError && (
+              <span className="text-xs text-amber-400">⚠ {extractError}</span>
+            )}
+            <div className="ml-auto flex gap-2">
+              <button
+                type="button"
+                onClick={copyNumbers}
+                className="flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-bold text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+              >
+                <Copy className="h-3.5 w-3.5" />
+                {copied ? 'Copiado!' : 'Copiar números'}
+              </button>
+              <button
+                type="button"
+                onClick={exportCSV}
+                className="flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-bold text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+              >
+                <Download className="h-3.5 w-3.5" />
+                Exportar CSV
+              </button>
+              <button
+                type="button"
+                onClick={() => onUseCampaign(extractedNumbers)}
+                className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-black transition-colors hover:bg-primary/90"
+              >
+                <Send className="h-3.5 w-3.5" />
+                Usar em campanha
+              </button>
+            </div>
+          </div>
+
+          <div className="max-h-56 overflow-y-auto rounded-lg border border-border bg-background/50 p-3">
+            <div className="grid gap-1 sm:grid-cols-2 lg:grid-cols-3">
+              {extracted.map((m, i) => (
+                <div key={i} className="flex items-center gap-2 rounded px-2 py-1 text-xs hover:bg-muted/30">
+                  <Users className="h-3 w-3 shrink-0 text-muted-foreground" />
+                  <span className="font-mono text-foreground">{m.phone}</span>
+                  {m.name && m.name !== m.phone && (
+                    <span className="truncate text-muted-foreground">{m.name}</span>
+                  )}
+                  {m.admin && <span className="ml-auto rounded bg-amber-500/15 px-1 text-[9px] font-bold text-amber-400">ADM</span>}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-const TABS = ['dashboard', 'clientes', 'nova'] as const;
+const TABS = ['dashboard', 'clientes', 'nova', 'extrator'] as const;
 type Tab = typeof TABS[number];
 
 export default function DisparosPage() {
@@ -1764,6 +2115,11 @@ export default function DisparosPage() {
   const [prefill, setPrefill] = useState<CampaignPrefill | null>(null);
 
   function handleReuse(p: CampaignPrefill) { setPrefill(p); setTab('nova'); }
+
+  function handleExtractCampaign(numbers: string) {
+    setPrefill({ clientId: '', name: 'Campanha do extrator', message: '', numbers, intervalMin: 10, intervalMax: 30 });
+    setTab('nova');
+  }
 
   return (
     <div className="space-y-6 pb-10">
@@ -1790,6 +2146,11 @@ export default function DisparosPage() {
                 tab === 'clientes' ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border bg-card text-muted-foreground hover:bg-muted/50')}>
               <Server className="h-3.5 w-3.5" />Instâncias
             </button>
+            <button type="button" onClick={() => setTab('extrator')}
+              className={cn('flex items-center gap-1.5 rounded-lg border px-4 py-2 text-xs font-bold uppercase tracking-wider transition-colors',
+                tab === 'extrator' ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400' : 'border-border bg-card text-muted-foreground hover:bg-muted/50')}>
+              <Hash className="h-3.5 w-3.5" />Extrator
+            </button>
             <button type="button" onClick={() => { setPrefill(null); setTab('nova'); }}
               className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-bold uppercase tracking-wider text-black hover:bg-primary/90 transition-colors">
               <Plus className="h-3.5 w-3.5" />Nova campanha
@@ -1803,6 +2164,7 @@ export default function DisparosPage() {
       {tab === 'nova' && (
         <NovaCampanhaTab key={prefill ? JSON.stringify(prefill).slice(0, 40) : 'new'} prefill={prefill} onCreated={() => { setPrefill(null); setTab('dashboard'); }} />
       )}
+      {tab === 'extrator' && <ExtratorTab onUseCampaign={handleExtractCampaign} />}
     </div>
   );
 }
