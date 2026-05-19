@@ -1,6 +1,6 @@
 import { google } from 'googleapis';
 import { makeServerPool } from '@/lib/server-db';
-import { getCached, setCached, cachedJson } from '@/lib/api-cache';
+import { getCached, setCached, cachedJson, TTL_4H } from '@/lib/api-cache';
 
 type GoogleConnectionRow = {
   id: string;
@@ -222,6 +222,6 @@ export async function GET() {
   );
 
   const result = [...accountMap.values()].sort((a, b) => a.name.localeCompare(b.name));
-  setCached(cacheKey, result);
+  setCached(cacheKey, result, TTL_4H);
   return cachedJson(result, false);
 }

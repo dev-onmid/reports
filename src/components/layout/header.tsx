@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { getAuthSession, type AuthSession } from '@/lib/auth-store';
-
+import { BackButton } from './back-button';
 import { ThemeToggle } from '@/components/theme-toggle';
 
 export function Header() {
@@ -24,7 +24,8 @@ export function Header() {
     .toUpperCase() || 'ON';
 
   return (
-    <header className="h-20 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 flex items-center justify-between px-6 sticky top-0 z-10">
+    <header className="h-20 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 flex items-center gap-4 justify-between px-6 sticky top-0 z-10">
+      <BackButton />
       <div className="flex-1 max-w-md">
         <div className="relative">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />

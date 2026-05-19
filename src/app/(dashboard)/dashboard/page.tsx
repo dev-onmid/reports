@@ -39,6 +39,7 @@ import { ThemeToggle } from '@/components/theme-toggle';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Input } from '@/components/ui/input';
 import { APP_VERSION } from '@/lib/app-version';
+import { BackButton } from '@/components/layout/back-button';
 
 type Period = 'yesterday' | 'last_7d' | 'last_14d' | 'last_30d' | 'this_month' | 'last_month' | 'custom';
 type FunnelEntry = { date: string; stage: string; amount?: number };
@@ -2870,6 +2871,7 @@ export default function GeneralDashboard() {
       {/* UNIFIED TOP BAR */}
       <div className="sticky top-0 z-20 -mx-6 -mt-6 bg-background/95 backdrop-blur-sm border-b border-border">
         <div className="flex items-center gap-2 px-6 h-20">
+          <BackButton />
           {/* Client selector */}
           <ClientSelector clients={clients} selected={selectedIds} onChange={setSelectedIds} />
 
@@ -2960,10 +2962,14 @@ export default function GeneralDashboard() {
       {/* AI RECOMMENDATIONS */}
       <AiRecommendationsBox insights={aiInsights} loading={aiLoading} onAnalyze={analyzeWithAI} />
 
-      {/* KPIs */}
-      <div className="grid items-start gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard title="Resultado" value={revenue} prevValue={prevTotalSpend > 0 ? undefined : undefined} goalValue={effectiveRevenueGoal > 0 ? effectiveRevenueGoal : undefined} format="currency" icon={DollarSign} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} />
-        <KpiCard title="ROI" value={roi} prevValue={prevRoi > 0 ? prevRoi : undefined} goalValue={roiGoal > 0 ? roiGoal : undefined} format="times" icon={TrendingUp} iconColor="#a78bfa" iconBg="#a78bfa" loading={metricsLoading} />
+      {/* KPIs — Resultado + ROI (ocultos sem dados) + Leads + CPL */}
+      <div className={cn('grid items-start gap-4 sm:grid-cols-2', revenue > 0 ? 'xl:grid-cols-4' : 'xl:grid-cols-2')}>
+        {revenue > 0 && (
+          <KpiCard title="Resultado" value={revenue} prevValue={prevTotalSpend > 0 ? undefined : undefined} goalValue={effectiveRevenueGoal > 0 ? effectiveRevenueGoal : undefined} format="currency" icon={DollarSign} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} />
+        )}
+        {revenue > 0 && (
+          <KpiCard title="ROI" value={roi} prevValue={prevRoi > 0 ? prevRoi : undefined} goalValue={roiGoal > 0 ? roiGoal : undefined} format="times" icon={TrendingUp} iconColor="#a78bfa" iconBg="#a78bfa" loading={metricsLoading} />
+        )}
         <KpiCard title="Total de Leads" value={totalLeads} prevValue={prevTotalLeads > 0 ? prevTotalLeads : undefined} goalValue={effectiveLeadsGoal > 0 ? effectiveLeadsGoal : undefined} format="number" icon={Users} iconColor="#2dd4bf" iconBg="#2dd4bf" loading={metricsLoading}
           footer={
             <div className="flex flex-wrap gap-x-3 gap-y-1">
@@ -2983,6 +2989,27 @@ export default function GeneralDashboard() {
         />
         <KpiCard title="Custo por Lead" value={totalCostPerLead} prevValue={prevCpl > 0 ? prevCpl : undefined} goalValue={cplGoal > 0 ? cplGoal : undefined} format="currency" icon={Tag} iconColor="#94a3b8" iconBg="#94a3b8" loading={metricsLoading} inverseGoal inverseChange />
       </div>
+
+      {/* KPIs — Leads Meta + CPL Meta + Conversões Google + Custo/Conv Google */}
+      {(metaSpend > 0 || metaLeads > 0 || googleCost > 0 || googleConv > 0) && (
+        <div className={cn(
+          'grid items-start gap-4 sm:grid-cols-2',
+          (metaSpend > 0 || metaLeads > 0) && (googleCost > 0 || googleConv > 0) ? 'xl:grid-cols-4' : 'xl:grid-cols-2',
+        )}>
+          {(metaSpend > 0 || metaLeads > 0) && (
+            <>
+              <KpiCard title="Leads Meta Ads" value={metaLeads} prevValue={prevMetaLeads > 0 ? prevMetaLeads : undefined} format="number" icon={Target} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} />
+              <KpiCard title="CPL Meta Ads" value={avgCpl} format="currency" icon={Zap} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} inverseGoal inverseChange />
+            </>
+          )}
+          {(googleCost > 0 || googleConv > 0) && (
+            <>
+              <KpiCard title="Conversões Google" value={googleConv} prevValue={prevGoogleConv > 0 ? prevGoogleConv : undefined} format="number" icon={BarChart3} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} />
+              <KpiCard title="Custo por Conversão Google" value={avgCpa} format="currency" icon={Briefcase} iconColor="#34A853" iconBg="#34A853" loading={metricsLoading} inverseGoal inverseChange />
+            </>
+          )}
+        </div>
+      )}
 
       {/* KPIs — Saldos + CTR + Gasto */}
       <div className="grid items-start gap-4 sm:grid-cols-2 xl:grid-cols-4">

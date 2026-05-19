@@ -1,7 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { google } from 'googleapis';
 import { makeServerPool } from '@/lib/server-db';
-import { getCached, setCached, cachedJson } from '@/lib/api-cache';
+import { getCached, setCached, cachedJson, TTL_4H } from '@/lib/api-cache';
 
 
 async function getFreshAccessToken(conn: { access_token: string; refresh_token: string; token_expiry: string | null }): Promise<string> {
@@ -229,6 +229,6 @@ export async function GET(request: NextRequest) {
     .filter((r): r is PromiseFulfilledResult<AdsAccount> => r.status === 'fulfilled')
     .map((r) => r.value);
 
-  setCached(cacheKey, result);
+  setCached(cacheKey, result, TTL_4H);
   return cachedJson(result, false);
 }

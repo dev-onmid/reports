@@ -14,6 +14,7 @@ export type InvestmentPayment = {
   amount: number;
   channel: PaymentChannel;
   status: PaymentStatus;
+  extra?: boolean;
 };
 
 export const PAYMENT_STATUS_OPTIONS: PaymentStatus[] = ['Pendente', 'Enviado', 'Pago', 'Em atraso'];
@@ -34,6 +35,8 @@ type PaymentContextValue = {
   addPayment: (payment: Omit<InvestmentPayment, 'id'>) => void;
   updatePaymentStatus: (id: string, status: PaymentStatus) => void;
   deletePayment: (id: string) => void;
+  movePaymentDate: (id: string, date: string) => void;
+  togglePaymentExtra: (id: string) => void;
 };
 
 const PaymentContext = createContext<PaymentContextValue | null>(null);
@@ -96,9 +99,31 @@ export function PaymentProvider({ children }: { children: React.ReactNode }) {
       .catch((e) => console.error('Erro ao excluir pagamento:', e));
   }
 
+  function movePaymentDate(id: string, date: string) {
+    setPayments((prev) => prev.map((p) => p.id === id ? { ...p, date } : p));
+    void fetch(`/api/payments?id=${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date }),
+    }).catch((e) => console.error('Erro ao mover pagamento:', e));
+  }
+
+  function togglePaymentExtra(id: string) {
+    setPayments((prev) => prev.map((p) => {
+      if (p.id !== id) return p;
+      const extra = !p.extra;
+      void fetch(`/api/payments?id=${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ extra }),
+      }).catch((e) => console.error('Erro ao marcar extra:', e));
+      return { ...p, extra };
+    }));
+  }
+
   return React.createElement(
     PaymentContext.Provider,
-    { value: { payments, loading, setPayments, addPayment, updatePaymentStatus, deletePayment } },
+    { value: { payments, loading, setPayments, addPayment, updatePaymentStatus, deletePayment, movePaymentDate, togglePaymentExtra } },
     children,
   );
 }

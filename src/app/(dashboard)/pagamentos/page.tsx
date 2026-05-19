@@ -20,6 +20,7 @@ import {
   Send,
   Trash2,
   WalletCards,
+  Zap,
 } from 'lucide-react';
 import {
   AreaChart, Area, PieChart, Pie, Cell,
@@ -850,10 +851,14 @@ function MonthPaymentCard({
   payment,
   index,
   onStatusChange,
+  onDelete,
+  onToggleExtra,
 }: {
   payment: InvestmentPayment;
   index: number;
   onStatusChange: (status: PaymentStatus) => void;
+  onDelete: () => void;
+  onToggleExtra: () => void;
 }) {
   const statusTone: Record<PaymentStatus, { border: string; bg: string; text: string; amount: string }> = {
     Pendente: { border: 'border-orange-400/55', bg: 'bg-orange-500/13', text: 'text-orange-300', amount: 'text-orange-300' },
@@ -861,16 +866,19 @@ function MonthPaymentCard({
     Pago: { border: 'border-primary/55', bg: 'bg-primary/13', text: 'text-primary', amount: 'text-primary' },
     'Em atraso': { border: 'border-rose-400/55', bg: 'bg-rose-500/13', text: 'text-rose-300', amount: 'text-rose-300' },
   };
-  const tone = statusTone[payment.status];
+  const extraTone = { border: 'border-violet-400/55', bg: 'bg-violet-500/13', text: 'text-violet-300', amount: 'text-violet-300' };
+  const tone = payment.extra ? extraTone : statusTone[payment.status];
   const times = ['08:00', '09:30', '10:30', '11:30', '13:00', '14:00', '15:30', '16:00', '18:00'];
   const time = times[index % times.length];
 
   return (
     <div
-      className={cn('group min-h-[68px] rounded-lg border px-2.5 py-2 transition-colors hover:bg-card/80', tone.border, tone.bg)}
+      draggable
+      onDragStart={(e) => { e.dataTransfer.setData('text/plain', payment.id); e.dataTransfer.effectAllowed = 'move'; }}
+      className={cn('group min-h-[68px] cursor-grab rounded-lg border px-2.5 py-2 transition-colors hover:bg-card/80 active:cursor-grabbing', tone.border, tone.bg)}
       style={{ boxShadow: `0 0 16px ${tone.amount === 'text-primary' ? 'rgba(85,245,47,0.12)' : 'rgba(0,0,0,0.16)'}, inset 0 0 18px rgba(0,0,0,0.18)` }}
     >
-      <div className="grid grid-cols-[42px_minmax(0,1fr)_22px] items-center gap-2">
+      <div className="grid grid-cols-[42px_minmax(0,1fr)_auto] items-center gap-2">
         <PaymentChannelLogo channel={payment.channel} className="h-9 w-10" />
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-2">
@@ -882,17 +890,35 @@ function MonthPaymentCard({
             {formatCurrencyBRL(payment.amount)}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            const current = PAYMENT_STATUS_OPTIONS.indexOf(payment.status);
-            onStatusChange(PAYMENT_STATUS_OPTIONS[(current + 1) % PAYMENT_STATUS_OPTIONS.length]);
-          }}
-          title="Alterar status"
-          className="justify-self-end rounded-full opacity-90 transition-opacity group-hover:opacity-100"
-        >
-          <MonthStatusIcon status={payment.status} />
-        </button>
+        <div className="flex items-center gap-0.5">
+          <button
+            type="button"
+            onClick={onToggleExtra}
+            title={payment.extra ? 'Remover destaque extra' : 'Marcar como extra'}
+            className={cn('rounded-full p-0.5 transition-all', payment.extra ? 'text-violet-400' : 'opacity-0 text-muted-foreground/30 group-hover:opacity-100 hover:text-violet-400')}
+          >
+            <Zap className="h-3 w-3" />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const current = PAYMENT_STATUS_OPTIONS.indexOf(payment.status);
+              onStatusChange(PAYMENT_STATUS_OPTIONS[(current + 1) % PAYMENT_STATUS_OPTIONS.length]);
+            }}
+            title="Alterar status"
+            className="rounded-full opacity-90 transition-opacity group-hover:opacity-100"
+          >
+            <MonthStatusIcon status={payment.status} />
+          </button>
+          <button
+            type="button"
+            onClick={onDelete}
+            title="Excluir pagamento"
+            className="rounded-full p-0.5 text-muted-foreground/30 opacity-0 transition-all group-hover:opacity-100 hover:text-red-400"
+          >
+            <Trash2 className="h-3 w-3" />
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -902,10 +928,14 @@ function DayTimelinePaymentCard({
   payment,
   index,
   onStatusChange,
+  onDelete,
+  onToggleExtra,
 }: {
   payment: InvestmentPayment;
   index: number;
   onStatusChange: (status: PaymentStatus) => void;
+  onDelete: () => void;
+  onToggleExtra: () => void;
 }) {
   const config: Record<PaymentStatus, { border: string; bg: string; text: string; pill: string; glow: string }> = {
     Pendente: {
@@ -937,13 +967,14 @@ function DayTimelinePaymentCard({
       glow: 'rgba(255,71,120,0.16)',
     },
   };
-  const tone = config[payment.status];
+  const extraConfig = { border: 'border-violet-400/60', bg: 'bg-violet-500/12', text: 'text-violet-300', pill: 'border-violet-400/35 bg-violet-500/15 text-violet-300', glow: 'rgba(168,85,247,0.16)' };
+  const tone = payment.extra ? extraConfig : config[payment.status];
   const times = ['08:30', '09:45', '10:30', '11:30', '12:30', '13:30', '14:30', '15:30', '16:30', '17:30'];
   const time = times[index % times.length];
 
   return (
     <div
-      className={cn('rounded-xl border px-4 py-3', tone.border, tone.bg)}
+      className={cn('group rounded-xl border px-4 py-3', tone.border, tone.bg)}
       style={{
         background: `radial-gradient(circle at 8% 50%, ${tone.glow}, transparent 34%), rgba(10,14,24,0.82)`,
         boxShadow: `0 0 24px ${tone.glow}, inset 0 0 0 1px rgba(255,255,255,0.025)`,
@@ -956,23 +987,42 @@ function DayTimelinePaymentCard({
             <div className="flex items-center gap-6">
               <p className={cn('text-xs font-bold tabular-nums', tone.text)}>{time}</p>
               <p className="truncate text-sm font-bold text-foreground">{payment.clientName}</p>
+              {payment.extra && <span className="rounded-full border border-violet-400/40 bg-violet-500/15 px-1.5 py-0.5 text-[9px] font-bold text-violet-300">EXTRA</span>}
             </div>
             <p className="mt-1 text-xs font-medium text-muted-foreground">{payment.channel.replace(' ADS', ' Ads')}</p>
           </div>
         </div>
-        <div className="shrink-0 text-right">
+        <div className="shrink-0 flex flex-col items-end gap-1">
           <p className="font-heading font-normal text-sm text-foreground tabular-nums">{formatCurrencyBRL(payment.amount)}</p>
-          <button
-            type="button"
-            onClick={() => {
-              const current = PAYMENT_STATUS_OPTIONS.indexOf(payment.status);
-              onStatusChange(PAYMENT_STATUS_OPTIONS[(current + 1) % PAYMENT_STATUS_OPTIONS.length]);
-            }}
-            className={cn('mt-2 inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-bold', tone.pill)}
-          >
-            {payment.status}
-            <MonthStatusIcon status={payment.status} />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={onToggleExtra}
+              title={payment.extra ? 'Remover destaque extra' : 'Marcar como extra'}
+              className={cn('rounded-full p-1 transition-all', payment.extra ? 'text-violet-400' : 'opacity-0 text-muted-foreground/30 group-hover:opacity-100 hover:text-violet-400')}
+            >
+              <Zap className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const current = PAYMENT_STATUS_OPTIONS.indexOf(payment.status);
+                onStatusChange(PAYMENT_STATUS_OPTIONS[(current + 1) % PAYMENT_STATUS_OPTIONS.length]);
+              }}
+              className={cn('inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-bold', tone.pill)}
+            >
+              {payment.status}
+              <MonthStatusIcon status={payment.status} />
+            </button>
+            <button
+              type="button"
+              onClick={onDelete}
+              title="Excluir pagamento"
+              className="rounded-full border border-border p-1 text-muted-foreground/40 transition-colors hover:border-red-500/40 hover:text-red-400"
+            >
+              <Trash2 className="h-3 w-3" />
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -983,43 +1033,68 @@ function WeekPaymentCard({
   payment,
   index,
   onStatusChange,
+  onDelete,
+  onToggleExtra,
 }: {
   payment: InvestmentPayment;
   index: number;
   onStatusChange: (status: PaymentStatus) => void;
+  onDelete: () => void;
+  onToggleExtra: () => void;
 }) {
-  const tone: Record<PaymentStatus, { border: string; bg: string; text: string; dot: string; label: string }> = {
+  const toneMap: Record<PaymentStatus, { border: string; bg: string; text: string; dot: string; label: string }> = {
     Pendente: { border: 'border-orange-400/45', bg: 'bg-orange-500/10', text: 'text-orange-300', dot: '#f59e0b', label: 'PENDENTE' },
     Enviado: { border: 'border-sky-400/45', bg: 'bg-sky-500/10', text: 'text-sky-300', dot: '#2498ff', label: 'ENVIADO' },
     Pago: { border: 'border-primary/45', bg: 'bg-primary/10', text: 'text-primary', dot: '#55f52f', label: 'PAGO' },
     'Em atraso': { border: 'border-rose-400/45', bg: 'bg-rose-500/10', text: 'text-rose-300', dot: '#ff4778', label: 'ATRASO' },
   };
-  const cfg = tone[payment.status];
+  const extraCfg = { border: 'border-violet-400/45', bg: 'bg-violet-500/10', text: 'text-violet-300', dot: '#a855f7', label: 'EXTRA' };
+  const cfg = payment.extra ? extraCfg : toneMap[payment.status];
   const times = ['09:00', '09:30', '10:00', '11:00', '11:30', '12:00', '13:00', '14:00', '14:30', '15:00', '16:30', '17:00'];
   const time = times[index % times.length];
 
   return (
     <div
-      className={cn('rounded-lg border px-3 py-2.5 transition-colors hover:bg-card/80', cfg.border, cfg.bg)}
+      draggable
+      onDragStart={(e) => { e.dataTransfer.setData('text/plain', payment.id); e.dataTransfer.effectAllowed = 'move'; }}
+      className={cn('group cursor-grab rounded-lg border px-3 py-2.5 transition-colors hover:bg-card/80 active:cursor-grabbing', cfg.border, cfg.bg)}
       style={{
         boxShadow: `0 0 18px ${cfg.dot}14, inset 0 0 0 1px rgba(255,255,255,0.02)`,
       }}
     >
       <div className="mb-2 flex items-start justify-between gap-2">
         <span className="text-[11px] font-bold text-muted-foreground tabular-nums">{time}</span>
-        <button
-          type="button"
-          onClick={() => {
-            const current = PAYMENT_STATUS_OPTIONS.indexOf(payment.status);
-            onStatusChange(PAYMENT_STATUS_OPTIONS[(current + 1) % PAYMENT_STATUS_OPTIONS.length]);
-          }}
-          className={cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[8px] font-bold', cfg.text)}
-          style={{ background: `${cfg.dot}18` }}
-          title="Alterar status"
-        >
-          {cfg.label}
-          <span className="h-2.5 w-2.5 rounded-full" style={{ background: cfg.dot }} />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => {
+              const current = PAYMENT_STATUS_OPTIONS.indexOf(payment.status);
+              onStatusChange(PAYMENT_STATUS_OPTIONS[(current + 1) % PAYMENT_STATUS_OPTIONS.length]);
+            }}
+            className={cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[8px] font-bold', cfg.text)}
+            style={{ background: `${cfg.dot}18` }}
+            title="Alterar status"
+          >
+            {cfg.label}
+            <span className="h-2.5 w-2.5 rounded-full" style={{ background: cfg.dot }} />
+          </button>
+          <button
+            type="button"
+            onClick={onToggleExtra}
+            title={payment.extra ? 'Remover destaque extra' : 'Marcar como extra'}
+            className={cn('rounded-full p-0.5 transition-all', payment.extra ? 'text-violet-400' : 'opacity-0 text-muted-foreground/30 group-hover:opacity-100 hover:text-violet-400')}
+          >
+            <Zap className="h-3 w-3" />
+          </button>
+          <button
+            type="button"
+            onClick={onDelete}
+            title="Excluir pagamento"
+            className="rounded-full p-0.5 text-muted-foreground/30 opacity-0 transition-all group-hover:opacity-100 hover:text-red-400"
+          >
+            <Trash2 className="h-3 w-3" />
+          </button>
+        </div>
       </div>
       <div className="flex items-center gap-3">
         <PaymentChannelLogo channel={payment.channel} className="h-9 w-9" />
@@ -1073,7 +1148,7 @@ function WeekChannelSummaryCard({
 
 export default function PagamentosPage() {
   const { clients } = useClients();
-  const { payments, addPayment, updatePaymentStatus, deletePayment } = useInvestmentPayments();
+  const { payments, addPayment, updatePaymentStatus, deletePayment, movePaymentDate, togglePaymentExtra } = useInvestmentPayments();
   const visibleClientIds = new Set(clients.map((client) => client.id));
   const visiblePayments = payments.filter((payment) => visibleClientIds.has(payment.clientId));
 
@@ -1157,6 +1232,8 @@ export default function PagamentosPage() {
   }
   const [selectedDate, setSelectedDate] = useState(makeDate(6));
   const [viewMode, setViewMode] = useState<ViewMode>('mes');
+  const [dragOverDate, setDragOverDate] = useState<string | null>(null);
+  const [expandedDates, setExpandedDates] = useState<Set<string>>(new Set());
   const [statusFilter, setStatusFilter] = useState<PaymentStatus | 'Todos'>('Todos');
   const [channelFilter, setChannelFilter] = useState<PaymentChannel | 'Todos'>('Todos');
   const [newPayment, setNewPayment] = useState<Omit<InvestmentPayment, 'id'>>({
@@ -1169,10 +1246,11 @@ export default function PagamentosPage() {
     status: 'Pendente',
   });
 
-  type RecurMode = 'none' | 'weekdays' | 'interval';
+  type RecurMode = 'none' | 'weekdays' | 'interval' | 'monthly';
   const [recurMode, setRecurMode] = useState<RecurMode>('none');
   const [recurWeekdays, setRecurWeekdays] = useState<number[]>([1, 2, 3, 4, 5]); // 0=Dom,1=Seg..6=Sáb
   const [recurInterval, setRecurInterval] = useState(7);
+  const [recurHasEnd, setRecurHasEnd] = useState(false);
   const [recurUntil, setRecurUntil] = useState('');
 
   function getMonthEnd(dateStr: string): string {
@@ -1180,9 +1258,15 @@ export default function PagamentosPage() {
     return toISODate(new Date(d.getFullYear(), d.getMonth() + 1, 0));
   }
 
+  function addMonthsToDate(dateStr: string, months: number): string {
+    const d = parseDate(dateStr);
+    d.setMonth(d.getMonth() + months);
+    return toISODate(d);
+  }
+
   function generateRecurDates(
     startDate: string,
-    mode: 'weekdays' | 'interval',
+    mode: Exclude<RecurMode, 'none'>,
     weekdays: number[],
     intervalDays: number,
     until: string,
@@ -1198,18 +1282,26 @@ export default function PagamentosPage() {
         if (weekdays.includes(cur.getDay())) dates.push(toISODate(cur));
         cur.setDate(cur.getDate() + 1);
       }
-    } else {
+    } else if (mode === 'interval') {
       const step = Math.max(1, intervalDays);
       const cur = new Date(start);
       while (cur <= end) {
         dates.push(toISODate(cur));
         cur.setDate(cur.getDate() + step);
       }
+    } else if (mode === 'monthly') {
+      const cur = new Date(start);
+      while (cur <= end) {
+        dates.push(toISODate(cur));
+        cur.setMonth(cur.getMonth() + 1);
+      }
     }
     return dates;
   }
 
-  const recurUntilResolved = recurUntil || getMonthEnd(newPayment.date);
+  const recurUntilResolved = recurHasEnd && recurUntil
+    ? recurUntil
+    : addMonthsToDate(newPayment.date, 12);
   const previewDates = recurMode !== 'none'
     ? generateRecurDates(newPayment.date, recurMode, recurWeekdays, recurInterval, recurUntilResolved)
     : [];
@@ -1279,6 +1371,9 @@ export default function PagamentosPage() {
     }
 
     setNewPayment((prev) => ({ ...prev, destination: `${prev.clientName} - Novo investimento`, amount: 500 }));
+    setRecurMode('none');
+    setRecurHasEnd(false);
+    setRecurUntil('');
   }
 
   const todayStr = toISODate(new Date());
@@ -1404,6 +1499,156 @@ export default function PagamentosPage() {
             Adicionar Pix
           </button>
         </div>
+        {/* ── Recorrência ─────────────────────────────────────────── */}
+        <div className="mt-4 border-t border-border/50 pt-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setRecurMode(prev => prev === 'none' ? 'weekdays' : 'none')}
+              className={cn(
+                'flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-bold transition-all',
+                recurMode !== 'none'
+                  ? 'border-violet-400/40 bg-violet-500/15 text-violet-300 shadow-[0_0_14px_rgba(168,85,247,0.2)]'
+                  : 'border-border text-muted-foreground hover:border-violet-400/30 hover:text-violet-400',
+              )}
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              Recorrência
+            </button>
+            {recurMode !== 'none' && (
+              <div className="flex gap-1">
+                {([
+                  { key: 'weekdays' as const, label: 'Dias da semana' },
+                  { key: 'interval' as const, label: 'A cada N dias' },
+                  { key: 'monthly' as const, label: 'Mensal' },
+                ]).map(m => (
+                  <button
+                    key={m.key}
+                    type="button"
+                    onClick={() => setRecurMode(m.key)}
+                    className={cn(
+                      'rounded-full border px-3 py-1 text-xs font-bold transition-all',
+                      recurMode === m.key
+                        ? 'border-violet-400/40 bg-violet-500/15 text-violet-300'
+                        : 'border-border text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {recurMode !== 'none' && (
+            <div className="mt-3 space-y-3">
+              {/* Config by mode */}
+              {recurMode === 'weekdays' && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-bold text-muted-foreground">Repetir em:</span>
+                  {[
+                    { day: 1, label: 'Seg' },
+                    { day: 2, label: 'Ter' },
+                    { day: 3, label: 'Qua' },
+                    { day: 4, label: 'Qui' },
+                    { day: 5, label: 'Sex' },
+                    { day: 6, label: 'Sáb' },
+                    { day: 0, label: 'Dom' },
+                  ].map(({ day, label }) => (
+                    <button
+                      key={day}
+                      type="button"
+                      onClick={() => setRecurWeekdays(prev =>
+                        prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]
+                      )}
+                      className={cn(
+                        'h-7 w-10 rounded-md border text-xs font-bold transition-all',
+                        recurWeekdays.includes(day)
+                          ? 'border-violet-400/40 bg-violet-500/20 text-violet-300'
+                          : 'border-border text-muted-foreground hover:text-foreground',
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {recurMode === 'interval' && (
+                <div className="flex items-center gap-3">
+                  <span className="text-xs font-bold text-muted-foreground">Repetir a cada</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={365}
+                    value={recurInterval}
+                    onChange={(e) => setRecurInterval(Math.max(1, parseInt(e.target.value) || 1))}
+                    className="h-8 w-16 rounded-lg border border-border bg-background px-2 text-center text-sm font-bold text-foreground outline-none focus:border-violet-400/50"
+                  />
+                  <span className="text-xs font-bold text-muted-foreground">dia(s)</span>
+                  <span className="text-xs text-muted-foreground/60">(7 = semanal · 14 = quinzenal · 30 = mensal)</span>
+                </div>
+              )}
+
+              {recurMode === 'monthly' && (
+                <p className="text-xs text-muted-foreground">
+                  Todo dia <span className="font-bold text-violet-300">{parseDate(newPayment.date).getDate()}</span> de cada mês, a partir de <span className="font-bold text-violet-300">{formatDateBR(newPayment.date)}</span>.
+                </p>
+              )}
+
+              {/* Duration */}
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-xs font-bold text-muted-foreground">Duração:</span>
+                <button
+                  type="button"
+                  onClick={() => setRecurHasEnd(false)}
+                  className={cn(
+                    'rounded-full border px-3 py-1 text-xs font-bold transition-all',
+                    !recurHasEnd ? 'border-violet-400/40 bg-violet-500/15 text-violet-300' : 'border-border text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  Sem prazo
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setRecurHasEnd(true); if (!recurUntil) setRecurUntil(addMonthsToDate(newPayment.date, 3)); }}
+                  className={cn(
+                    'rounded-full border px-3 py-1 text-xs font-bold transition-all',
+                    recurHasEnd ? 'border-violet-400/40 bg-violet-500/15 text-violet-300' : 'border-border text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  Até:
+                </button>
+                {recurHasEnd && (
+                  <Input
+                    type="date"
+                    value={recurUntil}
+                    min={newPayment.date}
+                    onChange={(e) => setRecurUntil(e.target.value)}
+                    className="h-7 w-36 bg-background text-xs"
+                  />
+                )}
+              </div>
+
+              {/* Preview */}
+              {previewCount > 0 ? (
+                <div className="flex items-center gap-3 rounded-lg border border-violet-400/20 bg-violet-500/8 px-3 py-2">
+                  <span className="text-xs font-bold text-violet-300">{previewCount} pagamento{previewCount !== 1 ? 's' : ''} serão criados</span>
+                  <span className="text-xs text-muted-foreground">·</span>
+                  <span className="text-xs text-muted-foreground">
+                    {formatDateBR(previewDates[0])}
+                    {previewDates.length > 1 && ` → ${formatDateBR(previewDates[previewDates.length - 1])}`}
+                  </span>
+                  {!recurHasEnd && <span className="ml-auto rounded-full border border-violet-400/20 bg-violet-500/10 px-2 py-0.5 text-[10px] font-bold text-violet-400">prévia 12 meses</span>}
+                </div>
+              ) : (
+                recurMode === 'weekdays' && recurWeekdays.length === 0 && (
+                  <p className="text-xs text-amber-400">Selecione pelo menos um dia da semana.</p>
+                )
+              )}
+            </div>
+          )}
+        </div>
         <HolidayPaymentNotice date={newPayment.date} />
       </div>}
 
@@ -1485,7 +1730,13 @@ export default function PagamentosPage() {
                 const dayPayments = date ? filteredPayments.filter(p => p.date === date) : [];
                 const isToday = date === todayStr;
                 return (
-                  <div key={`${wi}-${di}`} className={cn('min-h-[148px] border-r border-border/70 p-2.5 last:border-r-0', !date && 'bg-muted/5 opacity-40')}>
+                  <div
+                    key={`${wi}-${di}`}
+                    className={cn('min-h-[148px] border-r border-border/70 p-2.5 last:border-r-0 transition-colors', !date && 'bg-muted/5 opacity-40', dragOverDate === date && date && 'bg-violet-500/10 ring-1 ring-inset ring-violet-500/30')}
+                    onDragOver={(e) => { if (date) { e.preventDefault(); setDragOverDate(date); } }}
+                    onDragLeave={() => setDragOverDate(null)}
+                    onDrop={(e) => { e.preventDefault(); const id = e.dataTransfer.getData('text/plain'); if (id && date) movePaymentDate(id, date); setDragOverDate(null); }}
+                  >
                     {date && (
                       <>
                         {wi > 0 && (
@@ -1496,12 +1747,22 @@ export default function PagamentosPage() {
                           </div>
                         )}
                         <div className="space-y-2">
-                          {dayPayments.slice(0, 2).map((payment, idx) => (
-                            <MonthPaymentCard key={payment.id} payment={payment} index={idx + wi + di} onStatusChange={(status) => updatePaymentStatus(payment.id, status)} />
+                          {(expandedDates.has(date) ? dayPayments : dayPayments.slice(0, 2)).map((payment, idx) => (
+                            <MonthPaymentCard key={payment.id} payment={payment} index={idx + wi + di} onStatusChange={(status) => updatePaymentStatus(payment.id, status)} onDelete={() => deletePayment(payment.id)} onToggleExtra={() => togglePaymentExtra(payment.id)} />
                           ))}
                           {dayPayments.length > 2 && (
-                            <button type="button" onClick={() => { setSelectedDate(date); setViewMode('dia'); }} className="w-full rounded-md py-1 text-center text-xs font-bold text-muted-foreground hover:text-primary">
-                              + Ver {dayPayments.length - 2} pagamento{dayPayments.length - 2 !== 1 ? 's' : ''}
+                            <button
+                              type="button"
+                              onClick={() => setExpandedDates(prev => {
+                                const next = new Set(prev);
+                                next.has(date) ? next.delete(date) : next.add(date);
+                                return next;
+                              })}
+                              className="w-full rounded-md py-1 text-center text-xs font-bold text-muted-foreground hover:text-primary"
+                            >
+                              {expandedDates.has(date)
+                                ? '▲ Recolher'
+                                : `+ Ver ${dayPayments.length - 2} pagamento${dayPayments.length - 2 !== 1 ? 's' : ''}`}
                             </button>
                           )}
                         </div>
@@ -1567,7 +1828,7 @@ export default function PagamentosPage() {
                             <span className="absolute left-0 top-2 h-5 w-px bg-border" />
                             {payment && (
                               <div className={cn('w-[46%]', index % 2 === 0 ? 'ml-5' : 'ml-[48%]')}>
-                                <DayTimelinePaymentCard payment={payment} index={index} onStatusChange={(status) => updatePaymentStatus(payment.id, status)} />
+                                <DayTimelinePaymentCard payment={payment} index={index} onStatusChange={(status) => updatePaymentStatus(payment.id, status)} onDelete={() => deletePayment(payment.id)} onToggleExtra={() => togglePaymentExtra(payment.id)} />
                               </div>
                             )}
                           </div>
@@ -1727,10 +1988,16 @@ export default function PagamentosPage() {
               </div>
               <div className="grid min-h-[370px] grid-cols-5">
                 {dailyData.map((day, di) => (
-                  <div key={day.date} className="flex flex-col border-r border-border/70 last:border-r-0">
+                  <div
+                    key={day.date}
+                    className={cn('flex flex-col border-r border-border/70 last:border-r-0 transition-colors', dragOverDate === day.date && 'bg-violet-500/10 ring-1 ring-inset ring-violet-500/30')}
+                    onDragOver={(e) => { e.preventDefault(); setDragOverDate(day.date); }}
+                    onDragLeave={() => setDragOverDate(null)}
+                    onDrop={(e) => { e.preventDefault(); const id = e.dataTransfer.getData('text/plain'); if (id) movePaymentDate(id, day.date); setDragOverDate(null); }}
+                  >
                     <div className="min-h-[342px] flex-1 space-y-2.5 p-3">
                       {day.payments.slice(0, 4).map((payment, index) => (
-                        <WeekPaymentCard key={payment.id} payment={payment} index={index + di} onStatusChange={(status) => updatePaymentStatus(payment.id, status)} />
+                        <WeekPaymentCard key={payment.id} payment={payment} index={index + di} onStatusChange={(status) => updatePaymentStatus(payment.id, status)} onDelete={() => deletePayment(payment.id)} onToggleExtra={() => togglePaymentExtra(payment.id)} />
                       ))}
                       {day.payments.length > 4 && (
                         <button type="button" onClick={() => { setSelectedDate(day.date); setViewMode('dia'); }} className="w-full rounded-lg py-2 text-center text-xs font-bold text-muted-foreground hover:bg-muted/30 hover:text-primary">

@@ -1072,6 +1072,14 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
                             >
                               {v.editing ? <CheckCircle2 className="h-3 w-3" /> : <Pencil className="h-3 w-3" />}
                             </button>
+                            <button
+                              type="button"
+                              title="Excluir variação"
+                              onClick={() => setVariations(prev => prev.filter((_, j) => j !== i))}
+                              className="flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-[10px] font-bold text-muted-foreground transition-colors hover:border-red-500/40 hover:text-red-400"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
                           </div>
                         </div>
                         {v.editing ? (

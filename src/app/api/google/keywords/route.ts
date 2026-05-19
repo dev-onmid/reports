@@ -2,7 +2,7 @@ import type { NextRequest } from 'next/server';
 import { google } from 'googleapis';
 import { makeServerPool } from '@/lib/server-db';
 import { resolveGaqlPeriod } from '@/lib/period-utils';
-import { getCached, setCached, cachedJson } from '@/lib/api-cache';
+import { getCached, setCached, cachedJson, TTL_4H } from '@/lib/api-cache';
 
 const DEV_TOKEN = process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? '1vR8GhAk4UMZoPaqo7Qq8Q';
 
@@ -220,6 +220,6 @@ export async function GET(req: NextRequest) {
   keywords.sort((a, b) => b.impressions - a.impressions);
 
   const result = keywords.slice(0, limit);
-  setCached(cacheKey, result);
+  setCached(cacheKey, result, TTL_4H);
   return cachedJson(result, false);
 }

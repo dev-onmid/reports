@@ -1,19 +1,20 @@
-const TTL_MS = 15 * 60 * 1000; // 15 minutes
+export const TTL_15MIN = 15 * 60 * 1000;
+export const TTL_4H = 4 * 60 * 60 * 1000;
 
-const store = new Map<string, { data: unknown; cachedAt: number }>();
+const store = new Map<string, { data: unknown; cachedAt: number; ttl: number }>();
 
 export function getCached(key: string): { data: unknown; cachedAt: number } | null {
   const entry = store.get(key);
   if (!entry) return null;
-  if (Date.now() > entry.cachedAt + TTL_MS) {
+  if (Date.now() > entry.cachedAt + entry.ttl) {
     store.delete(key);
     return null;
   }
   return entry;
 }
 
-export function setCached(key: string, data: unknown): void {
-  store.set(key, { data, cachedAt: Date.now() });
+export function setCached(key: string, data: unknown, ttl = TTL_15MIN): void {
+  store.set(key, { data, cachedAt: Date.now(), ttl });
 }
 
 export function cachedJson(data: unknown, hit: boolean, cachedAt?: number): Response {
