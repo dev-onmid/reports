@@ -40,6 +40,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Input } from '@/components/ui/input';
 import { APP_VERSION } from '@/lib/app-version';
 import { BackButton } from '@/components/layout/back-button';
+import { MetaAdsMark, GoogleAdsMark } from '@/components/platform-logos';
 
 type Period = 'yesterday' | 'last_7d' | 'last_14d' | 'last_30d' | 'this_month' | 'last_month' | 'custom';
 type FunnelEntry = { date: string; stage: string; amount?: number };
@@ -277,11 +278,12 @@ function autoPartial(target: number, period: Period): number {
 }
 
 // ── KPI Card ────────────────────────────────────────────────────────────────
-function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: Icon, iconColor, iconBg, loading = false, inverseGoal = false, inverseChange = false, footer }: {
+function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: Icon, iconColor, iconBg, loading = false, inverseGoal = false, inverseChange = false, footer, logo }: {
   title: string; value: number; prevValue?: number; goalValue?: number;
   format?: 'currency' | 'number' | 'percent' | 'times';
   icon: React.ElementType; iconColor: string; iconBg: string; loading?: boolean; inverseGoal?: boolean; inverseChange?: boolean;
   footer?: React.ReactNode;
+  logo?: React.ReactNode;
 }) {
   const fmt = (v: number) =>
     format === 'currency' ? formatCurrencyBRL(v)
@@ -302,9 +304,15 @@ function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: 
       <div className="pointer-events-none absolute inset-0" style={{ background: `radial-gradient(circle at 85% 15%, ${iconBg}18, transparent 55%)` }} />
       <div className="flex items-start justify-between gap-2">
         <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">{title}</p>
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl" style={{ background: `${iconBg}25` }}>
-          <Icon className="h-[18px] w-[18px]" style={{ color: iconColor }} />
-        </span>
+        {logo ? (
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl" style={{ background: `${iconBg}18` }}>
+            {logo}
+          </span>
+        ) : (
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl" style={{ background: `${iconBg}25` }}>
+            <Icon className="h-[18px] w-[18px]" style={{ color: iconColor }} />
+          </span>
+        )}
       </div>
       {loading ? (
         <div className="mt-3 h-8 w-32 animate-pulse rounded bg-muted/30" />
@@ -2998,14 +3006,14 @@ export default function GeneralDashboard() {
         )}>
           {(metaSpend > 0 || metaLeads > 0) && (
             <>
-              <KpiCard title="Leads Meta Ads" value={metaLeads} prevValue={prevMetaLeads > 0 ? prevMetaLeads : undefined} format="number" icon={Target} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} />
-              <KpiCard title="CPL Meta Ads" value={avgCpl} format="currency" icon={Zap} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} inverseGoal inverseChange />
+              <KpiCard title="Leads Meta Ads" value={metaLeads} prevValue={prevMetaLeads > 0 ? prevMetaLeads : undefined} format="number" icon={Target} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} logo={<MetaAdsMark className="h-6 w-6" />} />
+              <KpiCard title="CPL Meta Ads" value={avgCpl} format="currency" icon={Zap} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} inverseGoal inverseChange logo={<MetaAdsMark className="h-6 w-6" />} />
             </>
           )}
           {(googleCost > 0 || googleConv > 0) && (
             <>
-              <KpiCard title="Conversões Google" value={googleConv} prevValue={prevGoogleConv > 0 ? prevGoogleConv : undefined} format="number" icon={BarChart3} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} />
-              <KpiCard title="Custo por Conversão Google" value={avgCpa} format="currency" icon={Briefcase} iconColor="#34A853" iconBg="#34A853" loading={metricsLoading} inverseGoal inverseChange />
+              <KpiCard title="Conversões Google" value={googleConv} prevValue={prevGoogleConv > 0 ? prevGoogleConv : undefined} format="number" icon={BarChart3} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} logo={<GoogleAdsMark className="h-6 w-6" />} />
+              <KpiCard title="Custo por Conversão Google" value={avgCpa} format="currency" icon={Briefcase} iconColor="#34A853" iconBg="#34A853" loading={metricsLoading} inverseGoal inverseChange logo={<GoogleAdsMark className="h-6 w-6" />} />
             </>
           )}
         </div>

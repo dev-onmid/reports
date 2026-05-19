@@ -875,9 +875,12 @@ function MonthPaymentCard({
     <div
       draggable
       onDragStart={(e) => { e.dataTransfer.setData('text/plain', payment.id); e.dataTransfer.effectAllowed = 'move'; }}
-      className={cn('group min-h-[68px] cursor-grab rounded-lg border px-2.5 py-2 transition-colors hover:bg-card/80 active:cursor-grabbing', tone.border, tone.bg)}
-      style={{ boxShadow: `0 0 16px ${tone.amount === 'text-primary' ? 'rgba(85,245,47,0.12)' : 'rgba(0,0,0,0.16)'}, inset 0 0 18px rgba(0,0,0,0.18)` }}
+      className={cn('group relative min-h-[68px] cursor-grab overflow-hidden rounded-lg border px-2.5 py-2 transition-colors hover:bg-card/80 active:cursor-grabbing', tone.border, tone.bg)}
+      style={{ boxShadow: payment.extra ? '0 0 22px rgba(168,85,247,0.35), inset 0 0 18px rgba(0,0,0,0.18)' : `0 0 16px ${tone.amount === 'text-primary' ? 'rgba(85,245,47,0.12)' : 'rgba(0,0,0,0.16)'}, inset 0 0 18px rgba(0,0,0,0.18)` }}
     >
+      {payment.extra && (
+        <span className="absolute inset-y-0 left-0 w-[3px] bg-violet-500 shadow-[2px_0_10px_rgba(168,85,247,0.7)]" />
+      )}
       <div className="grid grid-cols-[42px_minmax(0,1fr)_auto] items-center gap-2">
         <PaymentChannelLogo channel={payment.channel} className="h-9 w-10" />
         <div className="min-w-0">
@@ -886,9 +889,16 @@ function MonthPaymentCard({
             <p className="truncate text-xs font-bold leading-tight text-foreground">{payment.clientName}</p>
           </div>
           <p className="mt-0.5 truncate text-[10px] leading-tight text-muted-foreground">{payment.channel.replace(' ADS', ' Ads')}</p>
-          <p className={cn('mt-1 font-heading font-normal text-sm leading-none tabular-nums', tone.amount)}>
-            {formatCurrencyBRL(payment.amount)}
-          </p>
+          <div className="mt-1 flex items-center gap-1.5">
+            <p className={cn('font-heading font-normal text-sm leading-none tabular-nums', tone.amount)}>
+              {formatCurrencyBRL(payment.amount)}
+            </p>
+            {payment.extra && (
+              <span className="inline-flex items-center gap-0.5 rounded border border-violet-500/50 bg-violet-500/20 px-1 py-0.5 text-[8px] font-black uppercase tracking-wide text-violet-300">
+                <Zap className="h-2 w-2 fill-violet-400" /> EXTRA
+              </span>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-0.5">
           <button
@@ -974,12 +984,17 @@ function DayTimelinePaymentCard({
 
   return (
     <div
-      className={cn('group rounded-xl border px-4 py-3', tone.border, tone.bg)}
+      className={cn('group relative overflow-hidden rounded-xl border px-4 py-3', tone.border, tone.bg)}
       style={{
         background: `radial-gradient(circle at 8% 50%, ${tone.glow}, transparent 34%), rgba(10,14,24,0.82)`,
-        boxShadow: `0 0 24px ${tone.glow}, inset 0 0 0 1px rgba(255,255,255,0.025)`,
+        boxShadow: payment.extra
+          ? '0 0 22px rgba(168,85,247,0.35), inset 0 0 18px rgba(0,0,0,0.18)'
+          : `0 0 24px ${tone.glow}, inset 0 0 0 1px rgba(255,255,255,0.025)`,
       }}
     >
+      {payment.extra && (
+        <span className="absolute inset-y-0 left-0 w-[3px] bg-violet-500 shadow-[2px_0_10px_rgba(168,85,247,0.7)]" />
+      )}
       <div className="flex items-center justify-between gap-4">
         <div className="flex min-w-0 items-center gap-4">
           <PaymentChannelLogo channel={payment.channel} className="h-11 w-11" />
@@ -987,7 +1002,11 @@ function DayTimelinePaymentCard({
             <div className="flex items-center gap-6">
               <p className={cn('text-xs font-bold tabular-nums', tone.text)}>{time}</p>
               <p className="truncate text-sm font-bold text-foreground">{payment.clientName}</p>
-              {payment.extra && <span className="rounded-full border border-violet-400/40 bg-violet-500/15 px-1.5 py-0.5 text-[9px] font-bold text-violet-300">EXTRA</span>}
+              {payment.extra && (
+                <span className="inline-flex items-center gap-0.5 rounded border border-violet-500/50 bg-violet-500/20 px-1 py-0.5 text-[8px] font-black uppercase tracking-wide text-violet-300">
+                  <Zap className="h-2 w-2 fill-violet-400" /> EXTRA
+                </span>
+              )}
             </div>
             <p className="mt-1 text-xs font-medium text-muted-foreground">{payment.channel.replace(' ADS', ' Ads')}</p>
           </div>
@@ -1057,13 +1076,23 @@ function WeekPaymentCard({
     <div
       draggable
       onDragStart={(e) => { e.dataTransfer.setData('text/plain', payment.id); e.dataTransfer.effectAllowed = 'move'; }}
-      className={cn('group cursor-grab rounded-lg border px-3 py-2.5 transition-colors hover:bg-card/80 active:cursor-grabbing', cfg.border, cfg.bg)}
+      className={cn('group relative cursor-grab overflow-hidden rounded-lg border px-3 py-2.5 transition-colors hover:bg-card/80 active:cursor-grabbing', cfg.border, cfg.bg)}
       style={{
-        boxShadow: `0 0 18px ${cfg.dot}14, inset 0 0 0 1px rgba(255,255,255,0.02)`,
+        boxShadow: payment.extra ? '0 0 22px rgba(168,85,247,0.35), inset 0 0 0 1px rgba(255,255,255,0.02)' : `0 0 18px ${cfg.dot}14, inset 0 0 0 1px rgba(255,255,255,0.02)`,
       }}
     >
+      {payment.extra && (
+        <span className="absolute inset-y-0 left-0 w-[3px] bg-violet-500 shadow-[2px_0_10px_rgba(168,85,247,0.7)]" />
+      )}
       <div className="mb-2 flex items-start justify-between gap-2">
-        <span className="text-[11px] font-bold text-muted-foreground tabular-nums">{time}</span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-[11px] font-bold text-muted-foreground tabular-nums">{time}</span>
+          {payment.extra && (
+            <span className="inline-flex items-center gap-0.5 rounded border border-violet-500/50 bg-violet-500/20 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wide text-violet-300">
+              <Zap className="h-2.5 w-2.5 fill-violet-400" /> EXTRA
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-1">
           <button
             type="button"
