@@ -2425,13 +2425,25 @@ function gridSpan(size: DashboardWidgetSize) {
   return size === 'lg' ? 'xl:col-span-4' : size === 'md' ? 'xl:col-span-2' : 'xl:col-span-1';
 }
 
-function DashboardGridItem({ id, prefs, children }: { id: DashboardCardId; prefs: DashboardPrefs; children: ReactNode }) {
+function DashboardGridItem({
+  id,
+  prefs,
+  children,
+  className,
+  ignoreSpan = false,
+}: {
+  id: DashboardCardId;
+  prefs: DashboardPrefs;
+  children: ReactNode;
+  className?: string;
+  ignoreSpan?: boolean;
+}) {
   const cfg = prefs.cards[id] ?? DEFAULT_DASHBOARD_PREFS.cards[id];
   if (!cfg.visible) return null;
   return (
     <div
-      className={cn('min-w-0 [&>*]:h-full', gridSpan(cfg.size))}
-      style={{ order: cfg.order, minHeight: cfg.height ? `${cfg.height}px` : undefined }}
+      className={cn('min-w-0 [&>*]:h-full', !ignoreSpan && gridSpan(cfg.size), className)}
+      style={{ order: ignoreSpan ? undefined : cfg.order, minHeight: cfg.height ? `${cfg.height}px` : undefined }}
     >
       {children}
     </div>
@@ -3583,106 +3595,106 @@ export default function GeneralDashboard() {
             <p className="text-[11px] text-foreground/60">Consolidado do período antes da leitura por canal.</p>
           </div>
         </div>
-        <div className="grid gap-4 xl:grid-cols-4">
-          <DashboardGridItem id="general-revenue" prefs={dashboardPrefs}>
-            <TargetSummaryCard title="Faturamento" value={revenue} partial={effectiveRevenueGoal} target={plannedRevenue} format="currency" accent="#22c55e" icon={DollarSign} />
-          </DashboardGridItem>
-          <DashboardGridItem id="general-leads" prefs={dashboardPrefs}>
-            <TargetSummaryCard title="Leads" value={totalLeads} partial={effectiveLeadsGoal} target={leadsGoal} format="number" accent="#22c55e" icon={Users} />
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,0.92fr)_minmax(420px,1.08fr)]">
+          <div className="flex min-w-0 flex-col gap-4">
+            <DashboardGridItem id="general-revenue" prefs={dashboardPrefs} ignoreSpan>
+              <TargetSummaryCard title="Faturamento" value={revenue} partial={effectiveRevenueGoal} target={plannedRevenue} format="currency" accent="#22c55e" icon={DollarSign} />
+            </DashboardGridItem>
+            <DashboardGridItem id="general-leads" prefs={dashboardPrefs} ignoreSpan>
+              <TargetSummaryCard title="Leads" value={totalLeads} partial={effectiveLeadsGoal} target={leadsGoal} format="number" accent="#22c55e" icon={Users} />
+            </DashboardGridItem>
+            <DashboardGridItem id="general-roi" prefs={dashboardPrefs} ignoreSpan>
+              <KpiCard title="ROI" value={roi} prevValue={prevRoi > 0 ? prevRoi : undefined} goalValue={roiGoal > 0 ? roiGoal : undefined} format="times" icon={TrendingUp} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} chart={dashboardPrefs.cards['general-roi'].chart} series={seriesOrPacing(roiSeries, roi)} />
+            </DashboardGridItem>
+            <DashboardGridItem id="general-cpl" prefs={dashboardPrefs} ignoreSpan>
+              <KpiCard title="CPL Geral" value={totalCostPerLead} prevValue={prevCpl > 0 ? prevCpl : undefined} goalValue={cplGoal > 0 ? cplGoal : undefined} format="currency" icon={Tag} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} inverseGoal inverseChange chart={dashboardPrefs.cards['general-cpl'].chart} series={seriesOrPacing(cplSeries, totalCostPerLead)} />
+            </DashboardGridItem>
+            <DashboardGridItem id="general-spend" prefs={dashboardPrefs} ignoreSpan>
+              <KpiCard title="Valor Gasto" value={totalSpend} format="currency" icon={CreditCard} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} chart={dashboardPrefs.cards['general-spend'].chart} series={seriesOrPacing(totalSpendSeries, totalSpend)} />
+            </DashboardGridItem>
+            <DashboardGridItem id="general-ctr" prefs={dashboardPrefs} ignoreSpan>
+              <KpiCard title="CTR Geral" value={avgCtr} format="percent" icon={MousePointerClick} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} chart={dashboardPrefs.cards['general-ctr'].chart} series={seriesOrPacing(avgCtrSeries, avgCtr)} />
+            </DashboardGridItem>
+          </div>
+          <DashboardGridItem id="general-funnel" prefs={dashboardPrefs} ignoreSpan>
+            <div className="flex h-full min-h-[560px] flex-col rounded-xl border border-[#55F52F]/35 bg-black/35 p-4 shadow-[inset_0_0_30px_rgba(85,245,47,0.08),0_0_28px_rgba(85,245,47,0.14)] xl:min-h-[720px]">
+              <p className="text-sm font-bold uppercase tracking-wider text-foreground">Funil de Performance</p>
+              <p className="mt-0.5 text-[11px] text-foreground/60">Período: {PERIODS.find(p => p.value === period)?.label ?? period}</p>
+              {(() => {
+                const firstId = [...selectedIds][0];
+                const clientPlanning = firstId ? readPlanningFromStorage(firstId) : DEFAULT_PLANNING;
+                const stages = clientPlanning.stages.length >= 2 ? clientPlanning.stages : DEFAULT_PLANNING.stages;
+                const crmValues = [
+                  totalLeads,
+                  funnelCounts[FUNNEL_ORDER[0]] ?? 0,
+                  funnelCounts[FUNNEL_ORDER[1]] ?? 0,
+                  funnelCounts[FUNNEL_ORDER[2]] ?? 0,
+                  funnelCounts[FUNNEL_ORDER[3]] ?? 0,
+                ];
+                const funnelRows: { label: string; value: number }[] = [
+                  { label: 'Visitantes', value: (metaReach || metaImpressions) + googleImpressions },
+                  { label: 'Leads', value: totalLeads },
+                  ...stages.slice(1).map((s, i) => ({ label: s.name.replace(/^\d+º\s*—\s*/, '').replace(/\s*\(.+\)/, ''), value: crmValues[i + 1] ?? 0 })),
+                ];
+                const maxVal = funnelRows[0]?.value || 1;
+                const FUNNEL_COLORS = ['#0EA5E9', '#7C3AED', '#EC4899', '#F97316', '#22C55E'];
+                const funnelHeight = 34;
+                const funnelGap = 4;
+                const funnelTop = 18;
+                const funnelWidth = 320;
+                const funnelCenter = funnelWidth / 2;
+                return (
+                  <div className="mt-4 grid flex-1 items-stretch gap-5 2xl:grid-cols-[360px_1fr]">
+                    <div className="relative min-h-[320px] rounded-xl border border-white/15 bg-black/45 p-4 shadow-[inset_0_0_32px_rgba(14,165,233,0.12)]">
+                      <svg viewBox="0 0 320 220" className="h-full w-full overflow-visible" role="img" aria-label="Funil de vendas">
+                        <defs>
+                          <filter id="dashboard-funnel-glow" x="-30%" y="-30%" width="160%" height="160%">
+                            <feGaussianBlur stdDeviation="3" result="blur" />
+                            <feMerge>
+                              <feMergeNode in="blur" />
+                              <feMergeNode in="SourceGraphic" />
+                            </feMerge>
+                          </filter>
+                        </defs>
+                        {funnelRows.slice(0, 5).map((row, i) => {
+                          const topRatio = Math.max(0.28, 1 - i * 0.14);
+                          const bottomRatio = Math.max(0.22, 1 - (i + 1) * 0.14);
+                          const topWidth = funnelWidth * topRatio;
+                          const bottomWidth = funnelWidth * bottomRatio;
+                          const y = funnelTop + i * (funnelHeight + funnelGap);
+                          const color = FUNNEL_COLORS[i % FUNNEL_COLORS.length];
+                          const d = [
+                            `M ${funnelCenter - topWidth / 2} ${y}`,
+                            `L ${funnelCenter + topWidth / 2} ${y}`,
+                            `L ${funnelCenter + bottomWidth / 2} ${y + funnelHeight}`,
+                            `L ${funnelCenter - bottomWidth / 2} ${y + funnelHeight}`,
+                            'Z',
+                          ].join(' ');
+                          return <path key={row.label} d={d} fill={color} opacity={0.92} filter="url(#dashboard-funnel-glow)" />;
+                        })}
+                      </svg>
+                    </div>
+                    <div className="flex h-full min-h-[320px] flex-col justify-between gap-2">
+                      {funnelRows.slice(0, 5).map((row, i) => {
+                        const pct = maxVal > 0 ? (row.value / maxVal) * 100 : 0;
+                        return (
+                          <div key={row.label} className="grid grid-cols-[1fr_auto_auto] items-center gap-4 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs">
+                            <span className="flex min-w-0 items-center gap-2 text-foreground/75">
+                              <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: FUNNEL_COLORS[i % FUNNEL_COLORS.length], boxShadow: `0 0 14px ${FUNNEL_COLORS[i % FUNNEL_COLORS.length]}` }} />
+                              <span className="truncate">{row.label}</span>
+                            </span>
+                            <span className="font-semibold text-foreground">{row.value.toLocaleString('pt-BR')}</span>
+                            <span className="w-14 text-right font-semibold text-foreground/65">{pct.toFixed(2)}%</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
           </DashboardGridItem>
         </div>
-        <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <DashboardGridItem id="general-roi" prefs={dashboardPrefs}>
-            <KpiCard title="ROI" value={roi} prevValue={prevRoi > 0 ? prevRoi : undefined} goalValue={roiGoal > 0 ? roiGoal : undefined} format="times" icon={TrendingUp} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} chart={dashboardPrefs.cards['general-roi'].chart} series={seriesOrPacing(roiSeries, roi)} />
-          </DashboardGridItem>
-          <DashboardGridItem id="general-cpl" prefs={dashboardPrefs}>
-            <KpiCard title="CPL Geral" value={totalCostPerLead} prevValue={prevCpl > 0 ? prevCpl : undefined} goalValue={cplGoal > 0 ? cplGoal : undefined} format="currency" icon={Tag} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} inverseGoal inverseChange chart={dashboardPrefs.cards['general-cpl'].chart} series={seriesOrPacing(cplSeries, totalCostPerLead)} />
-          </DashboardGridItem>
-          <DashboardGridItem id="general-spend" prefs={dashboardPrefs}>
-            <KpiCard title="Valor Gasto" value={totalSpend} format="currency" icon={CreditCard} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} chart={dashboardPrefs.cards['general-spend'].chart} series={seriesOrPacing(totalSpendSeries, totalSpend)} />
-          </DashboardGridItem>
-          <DashboardGridItem id="general-ctr" prefs={dashboardPrefs}>
-            <KpiCard title="CTR Geral" value={avgCtr} format="percent" icon={MousePointerClick} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} chart={dashboardPrefs.cards['general-ctr'].chart} series={seriesOrPacing(avgCtrSeries, avgCtr)} />
-          </DashboardGridItem>
-        </div>
-        <DashboardGridItem id="general-funnel" prefs={dashboardPrefs}>
-        <div className="mt-4 rounded-xl border border-[#55F52F]/35 bg-black/35 p-4 shadow-[inset_0_0_30px_rgba(85,245,47,0.08),0_0_28px_rgba(85,245,47,0.14)]">
-          <p className="text-sm font-bold uppercase tracking-wider text-foreground">Funil de Performance</p>
-          <p className="mt-0.5 text-[11px] text-foreground/60">Período: {PERIODS.find(p => p.value === period)?.label ?? period}</p>
-          {(() => {
-            const firstId = [...selectedIds][0];
-            const clientPlanning = firstId ? readPlanningFromStorage(firstId) : DEFAULT_PLANNING;
-            const stages = clientPlanning.stages.length >= 2 ? clientPlanning.stages : DEFAULT_PLANNING.stages;
-            const crmValues = [
-              totalLeads,
-              funnelCounts[FUNNEL_ORDER[0]] ?? 0,
-              funnelCounts[FUNNEL_ORDER[1]] ?? 0,
-              funnelCounts[FUNNEL_ORDER[2]] ?? 0,
-              funnelCounts[FUNNEL_ORDER[3]] ?? 0,
-            ];
-            const funnelRows: { label: string; value: number }[] = [
-              { label: 'Visitantes', value: (metaReach || metaImpressions) + googleImpressions },
-              { label: 'Leads', value: totalLeads },
-              ...stages.slice(1).map((s, i) => ({ label: s.name.replace(/^\d+º\s*—\s*/, '').replace(/\s*\(.+\)/, ''), value: crmValues[i + 1] ?? 0 })),
-            ];
-            const maxVal = funnelRows[0]?.value || 1;
-            const FUNNEL_COLORS = ['#0EA5E9', '#7C3AED', '#EC4899', '#F97316', '#22C55E'];
-            const funnelHeight = 34;
-            const funnelGap = 4;
-            const funnelTop = 18;
-            const funnelWidth = 320;
-            const funnelCenter = funnelWidth / 2;
-            return (
-              <div className="mt-4 grid items-stretch gap-5 lg:grid-cols-[360px_1fr]">
-                <div className="relative min-h-[230px] rounded-xl border border-white/15 bg-black/45 p-4 shadow-[inset_0_0_32px_rgba(14,165,233,0.12)]">
-                  <svg viewBox="0 0 320 220" className="h-full w-full overflow-visible" role="img" aria-label="Funil de vendas">
-                    <defs>
-                      <filter id="dashboard-funnel-glow" x="-30%" y="-30%" width="160%" height="160%">
-                        <feGaussianBlur stdDeviation="3" result="blur" />
-                        <feMerge>
-                          <feMergeNode in="blur" />
-                          <feMergeNode in="SourceGraphic" />
-                        </feMerge>
-                      </filter>
-                    </defs>
-                    {funnelRows.slice(0, 5).map((row, i) => {
-                      const topRatio = Math.max(0.28, 1 - i * 0.14);
-                      const bottomRatio = Math.max(0.22, 1 - (i + 1) * 0.14);
-                      const topWidth = funnelWidth * topRatio;
-                      const bottomWidth = funnelWidth * bottomRatio;
-                      const y = funnelTop + i * (funnelHeight + funnelGap);
-                      const color = FUNNEL_COLORS[i % FUNNEL_COLORS.length];
-                      const d = [
-                        `M ${funnelCenter - topWidth / 2} ${y}`,
-                        `L ${funnelCenter + topWidth / 2} ${y}`,
-                        `L ${funnelCenter + bottomWidth / 2} ${y + funnelHeight}`,
-                        `L ${funnelCenter - bottomWidth / 2} ${y + funnelHeight}`,
-                        'Z',
-                      ].join(' ');
-                      return <path key={row.label} d={d} fill={color} opacity={0.92} filter="url(#dashboard-funnel-glow)" />;
-                    })}
-                  </svg>
-                </div>
-                <div className="flex h-full min-h-[230px] flex-col justify-between gap-2">
-                  {funnelRows.slice(0, 5).map((row, i) => {
-                    const pct = maxVal > 0 ? (row.value / maxVal) * 100 : 0;
-                    return (
-                      <div key={row.label} className="grid grid-cols-[1fr_auto_auto] items-center gap-4 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs">
-                        <span className="flex min-w-0 items-center gap-2 text-foreground/75">
-                          <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: FUNNEL_COLORS[i % FUNNEL_COLORS.length], boxShadow: `0 0 14px ${FUNNEL_COLORS[i % FUNNEL_COLORS.length]}` }} />
-                          <span className="truncate">{row.label}</span>
-                        </span>
-                        <span className="font-semibold text-foreground">{row.value.toLocaleString('pt-BR')}</span>
-                        <span className="w-14 text-right font-semibold text-foreground/65">{pct.toFixed(2)}%</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })()}
-        </div>
-        </DashboardGridItem>
       </section>
 
       {/* 2. META ADS */}
