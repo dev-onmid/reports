@@ -2100,19 +2100,19 @@ function AudiencePieCard({
   });
 
   return (
-    <div className="flex min-h-[300px] flex-col rounded-xl border border-white/15 bg-black/35 p-4 shadow-[inset_0_0_24px_rgba(255,255,255,0.05)]">
+    <div className="flex min-h-[360px] flex-col rounded-xl border border-white/15 bg-black/35 p-4 shadow-[inset_0_0_24px_rgba(255,255,255,0.05)]">
       <div>
         <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground">{title}</h4>
         <p className="mt-0.5 text-[11px] text-foreground/55">{total.toLocaleString('pt-BR')} pessoas/imp.</p>
       </div>
       {variant === 'donut' && (
-        <div className="mt-4 flex justify-center">
+        <div className="mt-3 flex justify-center">
           {slices.length > 0 ? (
-          <svg viewBox="0 0 220 220" className="h-36 w-36 overflow-visible" role="img" aria-label={`Gráfico de ${title}`}>
+          <svg viewBox="0 0 240 240" className="h-44 w-44 overflow-visible" role="img" aria-label={`Gráfico de ${title}`}>
             {slices.map((slice) => (
               <path
                 key={slice.label}
-                d={describeDonutSlice(110, 110, 100, 48, slice.startAngle, slice.endAngle)}
+                d={describeDonutSlice(120, 120, 108, 50, slice.startAngle, slice.endAngle)}
                 fill={slice.color}
                 stroke="rgba(0,0,0,0.35)"
                 strokeWidth="1"
@@ -2128,18 +2128,18 @@ function AudiencePieCard({
                 <title>{`${slice.label}: ${slice.pct}%`}</title>
               </path>
             ))}
-            <circle cx="110" cy="110" r="40" className="fill-card" />
-            <text x="110" y="106" textAnchor="middle" className="fill-muted-foreground text-[10px] font-bold uppercase tracking-widest">Total</text>
-            <text x="110" y="124" textAnchor="middle" className="fill-foreground text-[18px] font-bold">{total.toLocaleString('pt-BR')}</text>
+            <circle cx="120" cy="120" r="42" className="fill-card" />
+            <text x="120" y="116" textAnchor="middle" className="fill-muted-foreground text-[10px] font-bold uppercase tracking-widest">Total</text>
+            <text x="120" y="134" textAnchor="middle" className="fill-foreground text-[18px] font-bold">{total.toLocaleString('pt-BR')}</text>
           </svg>
           ) : (
-            <div className="relative h-36 w-36 rounded-full bg-muted/20">
+            <div className="relative h-44 w-44 rounded-full bg-muted/20">
               <div className="absolute inset-8 rounded-full bg-card" />
             </div>
           )}
         </div>
       )}
-      <div className="mt-4 flex-1 space-y-1.5">
+      <div className="mt-4 grid flex-1 content-start gap-1.5 sm:grid-cols-2">
         {slices.length > 0 ? slices.slice(0, 7).map((item) => (
           <button
             key={item.label}
@@ -2147,16 +2147,18 @@ function AudiencePieCard({
             onMouseEnter={() => setActiveIndex(item.index)}
             onMouseLeave={() => setActiveIndex(null)}
             className={cn(
-              'flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[11px] transition-colors',
+              'grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[11px] transition-colors',
               activeIndex === item.index ? 'bg-white/[0.12] text-foreground' : 'text-foreground/60 hover:bg-white/[0.08] hover:text-foreground'
             )}
           >
-            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color, boxShadow: `0 0 12px ${item.color}` }} />
-            <span className="min-w-0 flex-1 truncate">{item.label}</span>
+            <span className="flex min-w-0 items-center gap-2">
+              <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: item.color, boxShadow: `0 0 12px ${item.color}` }} />
+              <span className="min-w-0 truncate">{item.label}</span>
+            </span>
             <span className="font-bold text-foreground">{item.pct}%</span>
           </button>
         )) : (
-          <p className="text-[11px] text-muted-foreground">Sem dados no período.</p>
+          <p className="col-span-full text-[11px] text-muted-foreground">Sem dados no período.</p>
         )}
       </div>
     </div>
