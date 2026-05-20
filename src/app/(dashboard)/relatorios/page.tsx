@@ -21,12 +21,36 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Settings2,
+  Zap,
+  Play,
+  ExternalLink,
+  Pencil,
+  X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ClientAvatar } from '@/components/client-avatar';
 import { useClients } from '@/lib/client-store';
 import { deleteReport, downloadReportPdf, readReports, subscribeReports, type StoredReport } from '@/lib/report-store';
 import { cn } from '@/lib/utils';
+
+type ReportConfig = {
+  id: string;
+  client_id: string;
+  client_name: string;
+  name: string;
+  whatsapp_group: string | null;
+  zapi_client_id: string | null;
+  zapi_name: string | null;
+  send_day: number;
+  active: boolean;
+  report_count: number;
+  last_run_at: string | null;
+  last_token: string | null;
+  created_at: string;
+};
+
+type ZapiClient = { id: string; name: string };
 
 type DiagnosticReport = {
   id: string;
@@ -57,7 +81,16 @@ export default function RelatoriosPage() {
   const { clients } = useClients();
   const [libraryReports, setLibraryReports] = useState<StoredReport[]>([]);
   const [diagnostics, setDiagnostics] = useState<DiagnosticReport[]>([]);
-  const [tab, setTab] = useState<'diagnostico' | 'widget'>('diagnostico');
+  const [tab, setTab] = useState<'diagnostico' | 'widget' | 'automacoes'>('diagnostico');
+
+  // Report configs (automações)
+  const [configs, setConfigs] = useState<ReportConfig[]>([]);
+  const [zapiClients, setZapiClients] = useState<ZapiClient[]>([]);
+  const [showConfigForm, setShowConfigForm] = useState(false);
+  const [editingConfig, setEditingConfig] = useState<ReportConfig | null>(null);
+  const [configForm, setConfigForm] = useState({ clientId: '', name: '', whatsappGroup: '', zapiClientId: '', sendDay: 1 });
+  const [savingConfig, setSavingConfig] = useState(false);
+  const [runningId, setRunningId] = useState<string | null>(null);
 
   // Filters
   const [search, setSearch] = useState('');
@@ -80,6 +113,89 @@ export default function RelatoriosPage() {
       .then((rows: DiagnosticReport[]) => setDiagnostics(rows))
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    Promise.all([
+      fetch('/api/reports/configs').then(r => r.ok ? r.json() : []),
+      fetch('/api/disparos/clients').then(r => r.ok ? r.json() : []),
+    ]).then(([cfgs, zapis]) => {
+      setConfigs(cfgs as ReportConfig[]);
+      setZapiClients(zapis as ZapiClient[]);
+    }).catch(() => {});
+  }, []);
+
+  async function saveConfig() {
+    setSavingConfig(true);
+    try {
+      if (editingConfig) {
+        await fetch(`/api/reports/configs/${editingConfig.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: configForm.name,
+            whatsappGroup: configForm.whatsappGroup,
+            zapiClientId: configForm.zapiClientId || undefined,
+            sendDay: configForm.sendDay,
+          }),
+        });
+        setConfigs(prev => prev.map(c => c.id === editingConfig.id ? { ...c, ...configForm, zapi_name: zapiClients.find(z => z.id === configForm.zapiClientId)?.name ?? null, whatsapp_group: configForm.whatsappGroup || null } : c));
+      } else {
+        const res = await fetch('/api/reports/configs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            clientId: configForm.clientId,
+            name: configForm.name,
+            whatsappGroup: configForm.whatsappGroup,
+            zapiClientId: configForm.zapiClientId || undefined,
+            sendDay: configForm.sendDay,
+          }),
+        });
+        const created = await res.json() as ReportConfig;
+        setConfigs(prev => [{ ...created, client_name: clients.find(c => c.id === configForm.clientId)?.name ?? configForm.clientId, zapi_name: zapiClients.find(z => z.id === configForm.zapiClientId)?.name ?? null, report_count: 0, last_run_at: null, last_token: null }, ...prev]);
+      }
+      setShowConfigForm(false);
+      setEditingConfig(null);
+    } finally {
+      setSavingConfig(false);
+    }
+  }
+
+  async function runConfig(cfg: ReportConfig) {
+    setRunningId(cfg.id);
+    try {
+      const res = await fetch(`/api/reports/run/${cfg.id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json() as { public_token?: string };
+      if (data.public_token) {
+        setConfigs(prev => prev.map(c => c.id === cfg.id ? { ...c, last_token: data.public_token ?? null, last_run_at: new Date().toISOString(), report_count: (c.report_count || 0) + 1 } : c));
+        window.open(`/relatorio/${data.public_token}`, '_blank');
+      }
+    } finally {
+      setRunningId(null);
+    }
+  }
+
+  async function deleteConfig(id: string) {
+    if (!confirm('Excluir esta automação de relatório?')) return;
+    await fetch(`/api/reports/configs/${id}`, { method: 'DELETE' });
+    setConfigs(prev => prev.filter(c => c.id !== id));
+  }
+
+  function openEditConfig(cfg: ReportConfig) {
+    setEditingConfig(cfg);
+    setConfigForm({ clientId: cfg.client_id, name: cfg.name, whatsappGroup: cfg.whatsapp_group ?? '', zapiClientId: cfg.zapi_client_id ?? '', sendDay: cfg.send_day });
+    setShowConfigForm(true);
+  }
+
+  function openNewConfig() {
+    setEditingConfig(null);
+    setConfigForm({ clientId: '', name: '', whatsappGroup: '', zapiClientId: '', sendDay: 1 });
+    setShowConfigForm(true);
+  }
 
   const visibleClientIds = new Set(clients.map((c) => c.id));
   const widgetReports = libraryReports.filter((r) => visibleClientIds.has(r.clientId));
@@ -205,6 +321,7 @@ export default function RelatoriosPage() {
         {([
           ['diagnostico', 'Diagnósticos de Performance', Sparkles],
           ['widget', 'Relatórios Personalizados', FileText],
+          ['automacoes', 'Automações', Settings2],
         ] as const).map(([key, label, Icon]) => (
           <button
             key={key}
@@ -270,7 +387,7 @@ export default function RelatoriosPage() {
       </div>
 
       {/* ── SEARCH + FILTERS ── */}
-      <div className="flex flex-wrap items-center gap-2">
+      {tab !== 'automacoes' && <div className="flex flex-wrap items-center gap-2">
         {/* Search */}
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
@@ -350,9 +467,10 @@ export default function RelatoriosPage() {
           <RefreshCw className="w-3.5 h-3.5" />
           Limpar filtros
         </button>
-      </div>
+      </div>}
 
       {/* ── TABLE ── */}
+      {tab !== 'automacoes' &&
       <div className="bg-card border border-border rounded-xl overflow-hidden">
         <table className="w-full text-sm text-left">
           <thead className="border-b border-border">
@@ -567,7 +685,206 @@ export default function RelatoriosPage() {
             </button>
           </div>
         </div>
-      </div>
+      </div>}
+
+      {/* ── AUTOMAÇÕES TAB ── */}
+      {tab === 'automacoes' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-muted-foreground">
+              Configure relatórios automáticos mensais por cliente.
+            </p>
+            <Button
+              onClick={openNewConfig}
+              className="bg-violet-600 hover:bg-violet-700 text-white gap-2 text-sm"
+            >
+              <Plus className="w-4 h-4" />
+              Nova automação
+            </Button>
+          </div>
+
+          {showConfigForm && (
+            <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold text-foreground text-sm">
+                  {editingConfig ? 'Editar automação' : 'Nova automação de relatório'}
+                </h3>
+                <button onClick={() => setShowConfigForm(false)} className="text-muted-foreground hover:text-foreground">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                {!editingConfig && (
+                  <div className="space-y-1.5">
+                    <label className="text-xs text-muted-foreground font-medium">Cliente</label>
+                    <select
+                      value={configForm.clientId}
+                      onChange={e => setConfigForm(f => ({ ...f, clientId: e.target.value }))}
+                      className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50"
+                    >
+                      <option value="">Selecionar cliente...</option>
+                      {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  </div>
+                )}
+                <div className="space-y-1.5">
+                  <label className="text-xs text-muted-foreground font-medium">Nome da automação</label>
+                  <input
+                    type="text"
+                    value={configForm.name}
+                    onChange={e => setConfigForm(f => ({ ...f, name: e.target.value }))}
+                    placeholder="Ex: Relatório mensal Sorrifácil"
+                    className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs text-muted-foreground font-medium">ID do Grupo WhatsApp</label>
+                  <input
+                    type="text"
+                    value={configForm.whatsappGroup}
+                    onChange={e => setConfigForm(f => ({ ...f, whatsappGroup: e.target.value }))}
+                    placeholder="Ex: 5583999999999-1234567890@g.us"
+                    className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs text-muted-foreground font-medium">Instância Z-API</label>
+                  <select
+                    value={configForm.zapiClientId}
+                    onChange={e => setConfigForm(f => ({ ...f, zapiClientId: e.target.value }))}
+                    className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50"
+                  >
+                    <option value="">Nenhuma (sem envio automático)</option>
+                    {zapiClients.map(z => <option key={z.id} value={z.id}>{z.name}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs text-muted-foreground font-medium">Dia de envio (do mês)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={28}
+                    value={configForm.sendDay}
+                    onChange={e => setConfigForm(f => ({ ...f, sendDay: Number(e.target.value) }))}
+                    className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  onClick={() => setShowConfigForm(false)}
+                  className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Cancelar
+                </button>
+                <Button
+                  onClick={saveConfig}
+                  disabled={savingConfig}
+                  className="bg-violet-600 hover:bg-violet-700 text-white gap-2 text-sm"
+                >
+                  {savingConfig ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+                  {editingConfig ? 'Salvar' : 'Criar'}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          <div className="bg-card border border-border rounded-xl overflow-hidden">
+            <table className="w-full text-sm text-left">
+              <thead className="border-b border-border">
+                <tr>
+                  <th className="px-5 py-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Cliente</th>
+                  <th className="px-5 py-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Grupo WhatsApp</th>
+                  <th className="px-5 py-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Z-API</th>
+                  <th className="px-5 py-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Dia</th>
+                  <th className="px-5 py-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Relatórios</th>
+                  <th className="px-5 py-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Último envio</th>
+                  <th className="px-5 py-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Ações</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {configs.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="py-14 text-center">
+                      <div className="flex flex-col items-center gap-3">
+                        <Settings2 className="w-8 h-8 text-muted-foreground/40" />
+                        <p className="text-sm text-muted-foreground">Nenhuma automação configurada.</p>
+                        <button onClick={openNewConfig} className="text-xs text-violet-400 hover:underline">
+                          Criar primeira automação →
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                {configs.map(cfg => (
+                  <tr key={cfg.id} className="hover:bg-muted/40 transition-colors group">
+                    <td className="px-5 py-3.5">
+                      <p className="font-medium text-foreground text-sm">{cfg.client_name}</p>
+                      <p className="text-[11px] text-muted-foreground">{cfg.name}</p>
+                    </td>
+                    <td className="px-5 py-3.5">
+                      {cfg.whatsapp_group
+                        ? <span className="text-xs text-foreground font-mono truncate block max-w-[160px]">{cfg.whatsapp_group}</span>
+                        : <span className="text-xs text-muted-foreground/50">–</span>}
+                    </td>
+                    <td className="px-5 py-3.5 text-xs text-foreground">
+                      {cfg.zapi_name ?? <span className="text-muted-foreground/50">–</span>}
+                    </td>
+                    <td className="px-5 py-3.5">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-300 border border-violet-400/30 text-[11px] font-semibold">
+                        Dia {cfg.send_day}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3.5 text-xs text-foreground">{cfg.report_count ?? 0}</td>
+                    <td className="px-5 py-3.5 text-xs text-muted-foreground">
+                      {cfg.last_run_at ? fmtDate(cfg.last_run_at) : '–'}
+                    </td>
+                    <td className="px-5 py-3.5">
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          title="Gerar agora"
+                          disabled={runningId === cfg.id}
+                          onClick={() => runConfig(cfg)}
+                          className="p-1.5 rounded-md text-muted-foreground hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors disabled:opacity-40"
+                        >
+                          {runningId === cfg.id
+                            ? <RefreshCw className="w-4 h-4 animate-spin" />
+                            : <Play className="w-4 h-4" />}
+                        </button>
+                        {cfg.last_token && (
+                          <a
+                            href={`/relatorio/${cfg.last_token}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Ver último relatório"
+                            className="p-1.5 rounded-md text-muted-foreground hover:text-blue-400 hover:bg-blue-500/10 transition-colors"
+                          >
+                            <ExternalLink className="w-4 h-4" />
+                          </a>
+                        )}
+                        <button
+                          title="Editar"
+                          onClick={() => openEditConfig(cfg)}
+                          className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          title="Excluir"
+                          onClick={() => deleteConfig(cfg.id)}
+                          className="p-1.5 rounded-md text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

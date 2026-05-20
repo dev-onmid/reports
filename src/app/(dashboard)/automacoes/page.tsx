@@ -9,7 +9,29 @@ import {
   AlertCircle, CheckCircle2, MinusCircle, Globe, MessageCircle, ArrowRight,
   Code2, Camera, Flame, Target, Filter, ArrowUpDown, Grid2X2,
   List, Play, Pause, MoreVertical, Send, Hash, UserRound, MessageSquareReply,
+  Pencil, Users,
 } from 'lucide-react';
+import MultiChannelBuilder, { type GmailAccount, type ZapiClient, type MetaConn } from './MultiChannelBuilder';
+import type { Node, Edge } from '@xyflow/react';
+
+type MCAutomation = {
+  id: string;
+  name: string;
+  status: string;
+  token: string;
+  active_contacts: number;
+  total_contacts: number;
+  created_at: string;
+};
+
+type BuilderState = {
+  open: boolean;
+  automationId?: string;
+  name?: string;
+  nodes?: Node[];
+  edges?: Edge[];
+  webhookToken?: string;
+};
 
 type WebhookConfig = {
   id: string;
@@ -114,6 +136,10 @@ export default function AutomacoesPage() {
   const [configs, setConfigs] = useState<WebhookConfig[]>([]);
   const [logs, setLogs] = useState<WebhookLog[]>([]);
   const [igConnections, setIgConnections] = useState<{ id: string; userName: string; status: string }[]>([]);
+  const [mcAutomations, setMcAutomations] = useState<MCAutomation[]>([]);
+  const [gmailAccounts, setGmailAccounts] = useState<GmailAccount[]>([]);
+  const [zapiClients, setZapiClients] = useState<ZapiClient[]>([]);
+  const [metaConns, setMetaConns] = useState<MetaConn[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
@@ -122,18 +148,36 @@ export default function AutomacoesPage() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [expandedDoc, setExpandedDoc] = useState<string | null>(null);
   const [expandedLog, setExpandedLog] = useState<string | null>(null);
-  const [tab, setTab] = useState<'webhooks' | 'logs' | 'docs'>('webhooks');
+  const [tab, setTab] = useState<'webhooks' | 'multi' | 'logs' | 'docs'>('webhooks');
+  const [builder, setBuilder] = useState<BuilderState>({ open: false });
 
   async function load() {
     setLoading(true);
-    const [cfgRes, logRes, igRes] = await Promise.all([
+    const [cfgRes, logRes, igRes, mcRes, gmailRes, zapiRes, metaRes] = await Promise.all([
       fetch('/api/automacoes'),
       fetch('/api/automacoes/logs'),
+      fetch('/api/meta/connections'),
+      fetch('/api/automations/multi'),
+      fetch('/api/email/accounts'),
+      fetch('/api/disparos/clients'),
       fetch('/api/meta/connections'),
     ]);
     if (cfgRes.ok) setConfigs(await cfgRes.json());
     if (logRes.ok) setLogs(await logRes.json());
     if (igRes.ok) setIgConnections(await igRes.json() as { id: string; userName: string; status: string }[]);
+    if (mcRes.ok) setMcAutomations(await mcRes.json() as MCAutomation[]);
+    if (gmailRes.ok) {
+      const accounts = await gmailRes.json() as { email: string }[];
+      setGmailAccounts(accounts.map((a) => ({ email: a.email })));
+    }
+    if (zapiRes.ok) {
+      const clients = await zapiRes.json() as { id: string; name: string }[];
+      setZapiClients(clients);
+    }
+    if (metaRes.ok) {
+      const conns = await metaRes.json() as { id: string; userName?: string; page_name?: string }[];
+      setMetaConns(conns.map((c) => ({ id: c.id, display: c.userName ?? c.page_name ?? c.id })));
+    }
     setLoading(false);
   }
 
@@ -179,6 +223,31 @@ export default function AutomacoesPage() {
     setTimeout(() => setCopiedId(null), 2000);
   }
 
+  async function openMcBuilder(mc?: MCAutomation) {
+    if (mc) {
+      const res = await fetch(`/api/automations/multi/${mc.id}`);
+      if (res.ok) {
+        const data = await res.json() as { automation: { nodes_json: Node[]; edges_json: Edge[]; name: string }; contacts: unknown[] };
+        setBuilder({
+          open: true,
+          automationId: mc.id,
+          name: mc.name,
+          nodes: data.automation.nodes_json,
+          edges: data.automation.edges_json,
+          webhookToken: mc.token,
+        });
+      }
+    } else {
+      setBuilder({ open: true });
+    }
+  }
+
+  async function deleteMcAutomation(id: string) {
+    if (!confirm('Excluir esta automação multi-canal?')) return;
+    await fetch(`/api/automations/multi/${id}`, { method: 'DELETE' });
+    setMcAutomations((prev) => prev.filter((a) => a.id !== id));
+  }
+
   const statusIcon = (s: WebhookLog['status']) => {
     if (s === 'success') return <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />;
     if (s === 'error')   return <AlertCircle  className="h-4 w-4 text-rose-500 shrink-0" />;
@@ -221,6 +290,14 @@ export default function AutomacoesPage() {
           >
             <Code2 className="h-4 w-4" />
             Novo Webhook
+          </button>
+          <button
+            type="button"
+            onClick={() => void openMcBuilder()}
+            className="flex h-12 items-center gap-2 rounded-xl border border-white/15 bg-transparent px-5 text-sm font-semibold text-white transition-colors hover:border-white/25 hover:bg-white/5"
+          >
+            <Plus className="h-4 w-4" />
+            Automação multi-canal
           </button>
           <Link
             href="/automacoes/meta"
@@ -304,7 +381,7 @@ export default function AutomacoesPage() {
       </section>
 
       <div className="flex gap-8 border-b border-white/10">
-        {(['webhooks', 'logs', 'docs'] as const).map(t => (
+        {(['webhooks', 'multi', 'logs', 'docs'] as const).map(t => (
           <button
             key={t}
             type="button"
@@ -314,7 +391,7 @@ export default function AutomacoesPage() {
               tab === t ? 'border-primary text-primary' : 'border-transparent text-slate-300 hover:text-white',
             )}
           >
-            {t === 'webhooks' ? 'Webhooks' : t === 'logs' ? 'Logs' : 'Documentação'}
+            {t === 'webhooks' ? 'Webhooks' : t === 'multi' ? 'Multi-canal' : t === 'logs' ? 'Logs' : 'Documentação'}
           </button>
         ))}
       </div>
@@ -402,6 +479,62 @@ export default function AutomacoesPage() {
         </section>
       )}
 
+      {tab === 'multi' && (
+        <section className="space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-slate-400">{mcAutomations.length} automação(ões) multi-canal</p>
+            <button
+              type="button"
+              onClick={() => void openMcBuilder()}
+              className="flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-black"
+            >
+              <Plus className="h-4 w-4" />
+              Nova automação
+            </button>
+          </div>
+          {loading && <div className="py-12 text-center text-sm text-slate-500">Carregando...</div>}
+          {!loading && mcAutomations.length === 0 && (
+            <div className="rounded-2xl border border-dashed border-white/10 py-16 text-center">
+              <Zap className="mx-auto mb-3 h-10 w-10 text-slate-600" />
+              <p className="text-sm font-semibold text-slate-400">Nenhuma automação criada</p>
+              <p className="mt-1 text-xs text-slate-600">Crie fluxos que combinam E-mail, WhatsApp e Instagram.</p>
+              <button
+                type="button"
+                onClick={() => void openMcBuilder()}
+                className="mt-4 rounded-xl bg-primary px-5 py-2 text-sm font-semibold text-black"
+              >
+                Criar primeira automação
+              </button>
+            </div>
+          )}
+          {mcAutomations.map((mc) => (
+            <div key={mc.id} className="flex items-center gap-4 rounded-2xl border border-white/10 bg-[#111722] p-4">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#55F52F]/10">
+                <Zap className="h-5 w-5 text-[#55F52F]" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold text-white">{mc.name}</p>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  <Users className="mr-1 inline h-3 w-3" />
+                  {mc.active_contacts} ativos · {mc.total_contacts} total
+                </p>
+              </div>
+              <span className={cn('rounded-lg px-2.5 py-1 text-xs font-semibold', mc.status === 'active' ? 'bg-[#55F52F]/15 text-[#55F52F]' : 'bg-slate-500/15 text-slate-400')}>
+                {mc.status === 'active' ? 'Ativa' : 'Pausada'}
+              </span>
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={() => void openMcBuilder(mc)} className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/5 text-slate-400 hover:text-white">
+                  <Pencil className="h-4 w-4" />
+                </button>
+                <button type="button" onClick={() => void deleteMcAutomation(mc.id)} className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/5 text-slate-400 hover:text-rose-400">
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </section>
+      )}
+
       {tab === 'logs' && (
         <section className="space-y-3">
           {logs.length === 0 ? (
@@ -445,6 +578,29 @@ export default function AutomacoesPage() {
             </div>
           ))}
         </section>
+      )}
+
+      {builder.open && (
+        <MultiChannelBuilder
+          automationId={builder.automationId}
+          initialName={builder.name}
+          initialNodes={builder.nodes}
+          initialEdges={builder.edges}
+          webhookToken={builder.webhookToken}
+          gmailAccounts={gmailAccounts}
+          zapiClients={zapiClients}
+          metaConns={metaConns}
+          onClose={() => setBuilder({ open: false })}
+          onSaved={(id, name) => {
+            setBuilder({ open: false });
+            setMcAutomations((prev) => {
+              const exists = prev.find((a) => a.id === id);
+              if (exists) return prev.map((a) => a.id === id ? { ...a, name } : a);
+              return [{ id, name, status: 'active', token: '', active_contacts: 0, total_contacts: 0, created_at: new Date().toISOString() }, ...prev];
+            });
+            void load();
+          }}
+        />
       )}
     </div>
   );
