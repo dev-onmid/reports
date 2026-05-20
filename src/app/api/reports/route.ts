@@ -6,7 +6,7 @@ export async function GET(req: NextRequest) {
   const pool = makeServerPool();
   try {
     const { rows } = await pool.query(
-      `SELECT id, client_id, client_name, title, period_from, period_to, generated_by, created_at
+      `SELECT id, client_id, client_name, title, period_from, period_to, generated_by, public_token, created_at
          FROM public.diagnostic_reports
          ${clientId ? 'WHERE client_id = $1' : ''}
          ORDER BY created_at DESC
