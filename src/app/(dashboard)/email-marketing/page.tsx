@@ -5,9 +5,12 @@ import {
   Mail, Plus, Play, Pause, X, Users, BarChart2, Server,
   CheckCircle2, AlertCircle, Clock, RefreshCw, Send,
   ChevronDown, Zap, ArrowRight, Trash2, GitBranch,
-  Search, Copy, Download,
+  Search, Copy, Download, Pencil,
 } from 'lucide-react';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
+import { FlowBuilder } from './FlowBuilder';
+import type { GmailAccount as FlowBuilderAccount } from './FlowBuilder';
+import type { Node, Edge } from '@xyflow/react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -27,7 +30,7 @@ type Campaign = {
 
 type Flow = {
   id: string; account_email: string; name: string; status: string;
-  steps_count: number; active_contacts: number; created_at: string;
+  flow_mode?: string; steps_count: number; active_contacts: number; created_at: string;
 };
 
 type FlowStep = { subject: string; bodyHtml: string; delayDays: number };
@@ -289,7 +292,10 @@ function NovaCampanhaTab({ accounts, onCreated }: { accounts: GmailAccount[]; on
 
 // ─── Tab: Fluxos ──────────────────────────────────────────────────────────────
 
-function FluxosTab({ accounts }: { accounts: GmailAccount[] }) {
+function FluxosTab({ accounts, onOpenBuilder }: {
+  accounts: GmailAccount[];
+  onOpenBuilder: (flowId: string | null, flow?: Flow) => void;
+}) {
   const [flows, setFlows] = useState<Flow[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNew, setShowNew] = useState(false);
@@ -328,10 +334,16 @@ function FluxosTab({ accounts }: { accounts: GmailAccount[] }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">{flows.length} fluxo{flows.length !== 1 ? 's' : ''}</p>
-        <button type="button" onClick={() => setShowNew(!showNew)}
-          className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-bold text-black hover:bg-primary/90">
-          <Plus className="h-4 w-4" />Novo fluxo
-        </button>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={() => setShowNew(!showNew)}
+            className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-bold text-muted-foreground hover:text-foreground">
+            <Plus className="h-4 w-4" />Fluxo linear
+          </button>
+          <button type="button" onClick={() => onOpenBuilder(null)}
+            className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-bold text-black hover:bg-primary/90">
+            <GitBranch className="h-4 w-4" />Fluxo visual
+          </button>
+        </div>
       </div>
 
       {showNew && (
@@ -420,16 +432,28 @@ function FluxosTab({ accounts }: { accounts: GmailAccount[] }) {
         <div className="space-y-2">
           {flows.map((flow) => (
             <div key={flow.id} className="flex items-center gap-4 rounded-xl border border-border bg-card/80 p-4">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-violet-500/15 text-violet-400">
+              <div className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-full',
+                flow.flow_mode === 'graph' ? 'bg-primary/10 text-primary' : 'bg-violet-500/15 text-violet-400')}>
                 <GitBranch className="h-5 w-5" />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold text-foreground">{flow.name}</p>
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-semibold text-foreground">{flow.name}</p>
+                  {flow.flow_mode === 'graph' && (
+                    <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-primary">visual</span>
+                  )}
+                </div>
                 <p className="text-xs text-muted-foreground">{flow.account_email} · {flow.steps_count} etapa{flow.steps_count !== 1 ? 's' : ''}</p>
               </div>
-              <div className="flex items-center gap-4 text-xs">
+              <div className="flex items-center gap-3 text-xs">
                 <span className={cn('font-bold', STATUS_COLOR[flow.status] ?? 'text-muted-foreground')}>{STATUS_LABEL[flow.status] ?? flow.status}</span>
                 <span className="text-muted-foreground">{flow.active_contacts} contato{flow.active_contacts !== 1 ? 's' : ''} ativos</span>
+                {flow.flow_mode === 'graph' && (
+                  <button type="button" onClick={() => onOpenBuilder(flow.id, flow)}
+                    className="rounded p-1 text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors">
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                )}
               </div>
             </div>
           ))}
@@ -609,9 +633,18 @@ function DashboardTab() {
 const TABS = ['dashboard', 'contas', 'campanha', 'fluxos'] as const;
 type Tab = typeof TABS[number];
 
+type BuilderState = {
+  flowId: string | null;
+  name: string;
+  accountEmail: string;
+  nodes?: Node[];
+  edges?: Edge[];
+};
+
 export default function EmailMarketingPage() {
   const [tab, setTab] = useState<Tab>('dashboard');
   const [accounts, setAccounts] = useState<GmailAccount[]>([]);
+  const [builder, setBuilder] = useState<BuilderState | null>(null);
 
   async function loadAccounts() {
     const res = await fetch('/api/email/accounts');
@@ -619,6 +652,25 @@ export default function EmailMarketingPage() {
   }
 
   useEffect(() => { loadAccounts(); }, []);
+
+  async function openBuilder(flowId: string | null, flow?: Flow) {
+    if (flowId && flow?.flow_mode === 'graph') {
+      // Load existing graph
+      const res = await fetch(`/api/email/flows/${flowId}`);
+      if (res.ok) {
+        const data = await res.json() as { flow: { nodes_json: Node[]; edges_json: Edge[]; name: string; account_email: string } };
+        setBuilder({
+          flowId,
+          name: data.flow?.name ?? flow.name,
+          accountEmail: data.flow?.account_email ?? flow.account_email,
+          nodes: data.flow?.nodes_json ?? undefined,
+          edges: data.flow?.edges_json ?? undefined,
+        });
+        return;
+      }
+    }
+    setBuilder({ flowId: null, name: '', accountEmail: accounts[0]?.email ?? '' });
+  }
 
   return (
     <div className="space-y-6 pb-10">
@@ -671,7 +723,21 @@ export default function EmailMarketingPage() {
       {tab === 'dashboard' && <DashboardTab />}
       {tab === 'contas' && <ContasTab accounts={accounts} onRefresh={loadAccounts} />}
       {tab === 'campanha' && <NovaCampanhaTab accounts={accounts} onCreated={() => setTab('dashboard')} />}
-      {tab === 'fluxos' && <FluxosTab accounts={accounts} />}
+      {tab === 'fluxos' && <FluxosTab accounts={accounts} onOpenBuilder={openBuilder} />}
+
+      {/* Full-screen flow builder overlay */}
+      {builder && (
+        <FlowBuilder
+          flowId={builder.flowId}
+          initialName={builder.name}
+          initialAccountEmail={builder.accountEmail}
+          initialNodes={builder.nodes}
+          initialEdges={builder.edges}
+          accounts={accounts as FlowBuilderAccount[]}
+          onClose={() => setBuilder(null)}
+          onSaved={() => { setBuilder(null); setTab('fluxos'); }}
+        />
+      )}
     </div>
   );
 }

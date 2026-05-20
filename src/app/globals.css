@@ -128,3 +128,27 @@
     @apply font-sans overflow-x-hidden;
   }
 }
+
+/* ── React Flow dark theme overrides ──────────────────────────────────────── */
+@import "@xyflow/react/dist/style.css";
+
+.react-flow__background { background: transparent !important; }
+.react-flow__controls { box-shadow: none !important; }
+.react-flow__controls button {
+  background: var(--card) !important;
+  border-color: var(--border) !important;
+  color: var(--muted-foreground) !important;
+  fill: var(--muted-foreground) !important;
+}
+.react-flow__controls button:hover {
+  background: var(--muted) !important;
+  color: var(--foreground) !important;
+  fill: var(--foreground) !important;
+}
+.react-flow__edge-path { stroke-opacity: 0.9; }
+.react-flow__node { box-shadow: none !important; }
+.react-flow__node.selected { outline: none !important; }
+.react-flow__handle {
+  border-radius: 50% !important;
+}
+.react-flow__attribution { display: none !important; }

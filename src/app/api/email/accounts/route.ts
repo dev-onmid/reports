@@ -61,6 +61,13 @@ async function ensureTables(pool: ReturnType<typeof makeServerPool>) {
       enrolled_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS idx_flow_contacts_next ON public.email_flow_contacts (flow_id, status, next_send_at);
+    -- Graph flow support
+    ALTER TABLE public.email_flows ADD COLUMN IF NOT EXISTS flow_mode TEXT NOT NULL DEFAULT 'linear';
+    ALTER TABLE public.email_flows ADD COLUMN IF NOT EXISTS nodes_json JSONB;
+    ALTER TABLE public.email_flows ADD COLUMN IF NOT EXISTS edges_json JSONB;
+    ALTER TABLE public.email_flow_contacts ADD COLUMN IF NOT EXISTS current_node_id TEXT DEFAULT 'start';
+    ALTER TABLE public.email_flow_contacts ADD COLUMN IF NOT EXISTS graph_opens  INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE public.email_flow_contacts ADD COLUMN IF NOT EXISTS graph_clicks INTEGER NOT NULL DEFAULT 0;
   `);
 }
 

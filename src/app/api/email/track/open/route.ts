@@ -6,16 +6,25 @@ const GIF = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA
 
 export async function GET(request: NextRequest) {
   const rid = request.nextUrl.searchParams.get('rid');
+  const fcid = request.nextUrl.searchParams.get('fcid');
 
-  if (rid) {
+  if (rid || fcid) {
     const pool = makeServerPool();
     try {
-      await pool.query(
-        `UPDATE public.email_recipients
-         SET opened_at = COALESCE(opened_at, NOW()), open_count = open_count + 1
-         WHERE id = $1`,
-        [rid],
-      );
+      if (rid) {
+        await pool.query(
+          `UPDATE public.email_recipients
+           SET opened_at = COALESCE(opened_at, NOW()), open_count = open_count + 1
+           WHERE id = $1`,
+          [rid],
+        );
+      }
+      if (fcid) {
+        await pool.query(
+          `UPDATE public.email_flow_contacts SET graph_opens = graph_opens + 1 WHERE id = $1`,
+          [fcid],
+        );
+      }
     } catch {
       // best-effort — never block pixel delivery
     } finally {
