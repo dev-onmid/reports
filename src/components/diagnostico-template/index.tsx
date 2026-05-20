@@ -1,3 +1,5 @@
+'use client';
+
 import type { DiagnosticoData, CriativoItem, OrigemItem, ClienteItem } from './types';
 
 // ── Shared constants ────────────────────────────────────────────────────────
