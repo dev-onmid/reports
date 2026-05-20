@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { sendGmail } from '@/lib/gmail';
+import { injectTracking } from '@/lib/email-tracking';
 
 // Vercel Cron: runs every minute
 export async function GET(request: NextRequest) {
@@ -46,9 +47,12 @@ export async function GET(request: NextRequest) {
       }
 
       const recip = recipRows[0] as { id: string; email: string; name: string | null };
-      const html = (camp.body_html as string)
-        .replace(/\{email\}/g, recip.email)
-        .replace(/\{nome\}/g, recip.name ?? '');
+      const html = injectTracking(
+        (camp.body_html as string)
+          .replace(/\{email\}/g, recip.email)
+          .replace(/\{nome\}/g, recip.name ?? ''),
+        recip.id,
+      );
 
       const result = await sendGmail(
         { email: camp.account_email, refreshToken: camp.refresh_token },
@@ -95,9 +99,12 @@ export async function GET(request: NextRequest) {
       }
 
       const step = stepRows[0] as { subject: string; body_html: string; delay_days: number };
-      const html = step.body_html
-        .replace(/\{email\}/g, fc.email)
-        .replace(/\{nome\}/g, fc.name ?? '');
+      const html = injectTracking(
+        step.body_html
+          .replace(/\{email\}/g, fc.email)
+          .replace(/\{nome\}/g, fc.name ?? ''),
+        fc.id,
+      );
 
       const result = await sendGmail(
         { email: fc.account_email, refreshToken: fc.refresh_token },

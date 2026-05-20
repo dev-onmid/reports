@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { sendGmail } from '@/lib/gmail';
+import { injectTracking } from '@/lib/email-tracking';
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -47,10 +48,13 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
 
     const recip = recipRows[0] as { id: string; email: string; name: string | null };
 
-    // Replace template vars
-    const html = camp.body_html
-      .replace(/\{email\}/g, recip.email)
-      .replace(/\{nome\}/g, recip.name ?? '');
+    // Replace template vars then inject tracking
+    const html = injectTracking(
+      camp.body_html
+        .replace(/\{email\}/g, recip.email)
+        .replace(/\{nome\}/g, recip.name ?? ''),
+      recip.id,
+    );
 
     const result = await sendGmail(
       { email: camp.account_email, refreshToken: camp.refresh_token },

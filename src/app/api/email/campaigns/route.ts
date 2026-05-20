@@ -5,9 +5,16 @@ export async function GET() {
   const pool = makeServerPool();
   try {
     const { rows } = await pool.query(
-      `SELECT id, account_email, name, subject, status, scheduled_at, finished_at,
-              total, sent, failed, interval_min, interval_max, created_at
-       FROM public.email_campaigns ORDER BY created_at DESC LIMIT 100`,
+      `SELECT c.id, c.account_email, c.name, c.subject, c.status, c.scheduled_at, c.finished_at,
+              c.total, c.sent, c.failed, c.interval_min, c.interval_max, c.created_at,
+              COALESCE(SUM(r.open_count), 0)::int  AS total_opens,
+              COUNT(r.id) FILTER (WHERE r.open_count > 0)::int  AS unique_opens,
+              COALESCE(SUM(r.click_count), 0)::int AS total_clicks,
+              COUNT(r.id) FILTER (WHERE r.click_count > 0)::int AS unique_clicks
+       FROM public.email_campaigns c
+       LEFT JOIN public.email_recipients r ON r.campaign_id = c.id
+       GROUP BY c.id
+       ORDER BY c.created_at DESC LIMIT 100`,
     );
     return Response.json(rows);
   } finally {

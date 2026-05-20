@@ -21,6 +21,8 @@ type Campaign = {
   total: number; sent: number; failed: number;
   interval_min: number; interval_max: number;
   scheduled_at: string | null; finished_at: string | null; created_at: string;
+  total_opens: number; unique_opens: number;
+  total_clicks: number; unique_clicks: number;
 };
 
 type Flow = {
@@ -471,6 +473,8 @@ function DashboardTab() {
 
   const totalSent = campaigns.reduce((s, c) => s + c.sent, 0);
   const totalFailed = campaigns.reduce((s, c) => s + c.failed, 0);
+  const totalOpens = campaigns.reduce((s, c) => s + (c.unique_opens ?? 0), 0);
+  const totalClicks = campaigns.reduce((s, c) => s + (c.unique_clicks ?? 0), 0);
   const running = campaigns.filter((c) => c.status === 'running').length;
   const done = campaigns.filter((c) => c.status === 'done').length;
 
@@ -480,9 +484,9 @@ function DashboardTab() {
       <div className="grid gap-4 sm:grid-cols-4">
         {[
           { label: 'E-mails enviados', value: totalSent, color: '#55f52f' },
+          { label: 'Aberturas únicas', value: totalOpens, color: '#2498ff' },
+          { label: 'Cliques únicos', value: totalClicks, color: '#f59e0b' },
           { label: 'Falhas', value: totalFailed, color: '#ff4778' },
-          { label: 'Campanhas ativas', value: running, color: '#2498ff' },
-          { label: 'Concluídas', value: done, color: '#a855f7' },
         ].map((k) => (
           <div key={k.label} className="rounded-xl border border-white/5 bg-card p-5">
             <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">{k.label}</p>
@@ -509,6 +513,8 @@ function DashboardTab() {
                 <th className="py-3 px-4 text-left">Conta</th>
                 <th className="py-3 px-4 text-center">Status</th>
                 <th className="py-3 px-4 text-center">Progresso</th>
+                <th className="py-3 px-4 text-center">Aberturas</th>
+                <th className="py-3 px-4 text-center">Cliques</th>
                 <th className="py-3 px-4 text-right">Ações</th>
               </tr>
             </thead>
@@ -532,6 +538,26 @@ function DashboardTab() {
                         </div>
                         <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{c.sent}/{c.total}</span>
                       </div>
+                    </td>
+                    <td className="py-3 px-4 text-center">
+                      {c.sent > 0 ? (
+                        <div className="flex flex-col items-center">
+                          <span className="text-sm font-bold text-sky-400">{c.unique_opens ?? 0}</span>
+                          <span className="text-[10px] text-muted-foreground">
+                            {c.sent > 0 ? Math.round(((c.unique_opens ?? 0) / c.sent) * 100) : 0}%
+                          </span>
+                        </div>
+                      ) : <span className="text-xs text-muted-foreground/40">—</span>}
+                    </td>
+                    <td className="py-3 px-4 text-center">
+                      {c.sent > 0 ? (
+                        <div className="flex flex-col items-center">
+                          <span className="text-sm font-bold text-amber-400">{c.unique_clicks ?? 0}</span>
+                          <span className="text-[10px] text-muted-foreground">
+                            {c.sent > 0 ? Math.round(((c.unique_clicks ?? 0) / c.sent) * 100) : 0}%
+                          </span>
+                        </div>
+                      ) : <span className="text-xs text-muted-foreground/40">—</span>}
                     </td>
                     <td className="py-3 px-4">
                       <div className="flex items-center justify-end gap-1">

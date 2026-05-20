@@ -30,6 +30,10 @@ async function ensureTables(pool: ReturnType<typeof makeServerPool>) {
       position     INTEGER     NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_email_recipients_campaign ON public.email_recipients (campaign_id, status);
+    ALTER TABLE public.email_recipients ADD COLUMN IF NOT EXISTS open_count  INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE public.email_recipients ADD COLUMN IF NOT EXISTS opened_at   TIMESTAMPTZ;
+    ALTER TABLE public.email_recipients ADD COLUMN IF NOT EXISTS click_count INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE public.email_recipients ADD COLUMN IF NOT EXISTS clicked_at  TIMESTAMPTZ;
     CREATE INDEX IF NOT EXISTS idx_email_campaigns_status ON public.email_campaigns (status);
     CREATE TABLE IF NOT EXISTS public.email_flows (
       id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
