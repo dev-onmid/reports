@@ -22,6 +22,7 @@ import {
   Bot,
   Trophy,
   ShieldCheck,
+  Mail,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { APP_VERSION } from '@/lib/app-version';
@@ -36,6 +37,7 @@ const navItems: { name: string; href: string; icon: React.ElementType; roles: Ro
   { name: 'Radar',       href: '/resultados',  icon: BarChart3,       roles: ['Administrador', 'Usuário'] },
   { name: 'Pagamentos',  href: '/pagamentos',  icon: WalletCards,     roles: ['Administrador', 'Usuário'] },
   { name: 'Disparos',    href: '/disparos',    icon: MessageCircle,   roles: ['Administrador', 'Usuário'] },
+  { name: 'E-mail',      href: '/email-marketing', icon: Mail,        roles: ['Administrador', 'Usuário'] },
   { name: 'Luna IA',     href: '/agente',      icon: Bot,             roles: ['Administrador', 'Usuário'] },
   { name: 'Score',       href: '/score',       icon: Trophy,          roles: ['Administrador', 'Usuário'] },
   { name: 'Cofre',       href: '/vault',       icon: ShieldCheck,     roles: ['Administrador', 'Usuário'] },

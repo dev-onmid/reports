@@ -15,6 +15,13 @@ const GOOGLE_ADS_SCOPES = [
   'openid',
 ];
 
+const GMAIL_SCOPES = [
+  'https://www.googleapis.com/auth/gmail.send',
+  'https://www.googleapis.com/auth/userinfo.email',
+  'https://www.googleapis.com/auth/userinfo.profile',
+  'openid',
+];
+
 export async function GET(request: NextRequest) {
   const type = request.nextUrl.searchParams.get('type') ?? 'gmb';
   const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000').replace(/\/$/, '');
@@ -35,7 +42,7 @@ export async function GET(request: NextRequest) {
     `${appUrl}/api/auth/google/callback`
   );
 
-  const scopes = type === 'google_ads' ? GOOGLE_ADS_SCOPES : GMB_SCOPES;
+  const scopes = type === 'google_ads' ? GOOGLE_ADS_SCOPES : type === 'gmail' ? GMAIL_SCOPES : GMB_SCOPES;
 
   const url = oauth2Client.generateAuthUrl({
     access_type: 'offline',
