@@ -3,6 +3,9 @@ import { subscribe } from '@/lib/campaign-queue';
 
 export const dynamic = 'force-dynamic';
 
+// Max SSE lifetime — browser EventSource reconnects automatically after close
+const MAX_DURATION_MS = 10 * 60 * 1000; // 10 minutes
+
 export async function GET(request: NextRequest) {
   const campaignId = request.nextUrl.searchParams.get('campaignId');
   if (!campaignId) return new Response('campaignId obrigatório', { status: 400 });
@@ -29,7 +32,16 @@ export async function GET(request: NextRequest) {
         }
       }, 20000);
 
+      // Close after MAX_DURATION_MS so Vercel doesn't bill CPU indefinitely.
+      // The browser's EventSource reconnects automatically with a new request.
+      const maxTimer = setTimeout(() => {
+        clearInterval(ping);
+        unsub();
+        try { controller.close(); } catch { /* already closed */ }
+      }, MAX_DURATION_MS);
+
       request.signal.addEventListener('abort', () => {
+        clearTimeout(maxTimer);
         clearInterval(ping);
         unsub();
         controller.close();

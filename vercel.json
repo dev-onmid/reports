@@ -1,8 +1,8 @@
 {
   "crons": [
     {
-      "path": "/api/reports/auto",
-      "schedule": "0 8 28-31 * *"
+      "path": "/api/disparos/worker?secret=${CRON_SECRET}",
+      "schedule": "* * * * *"
     },
     {
       "path": "/api/reports/cron-monthly?secret=${CRON_SECRET}",
