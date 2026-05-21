@@ -13,7 +13,7 @@ const TX = '#111827';
 const TG = '#6b7280';
 const TM = '#374151';
 const BD = '#f1f5f9';
-const SH = '0 1px 4px rgba(0,0,0,0.07), 0 1px 2px rgba(0,0,0,0.04)';
+const SH = '0 12px 34px rgba(15,23,42,0.10), 0 1px 2px rgba(15,23,42,0.04)';
 
 // ── Primitives ─────────────────────────────────────────────────────────────
 
@@ -86,14 +86,16 @@ function Leitura({ text, title = 'Leitura', style }: { text: string; title?: str
 function Logo() {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-      <span style={{ fontWeight: 800, fontSize: 20, color: TX, letterSpacing: -0.5 }}>onmid</span>
+      <span style={{ fontWeight: 900, fontSize: 31, color: TX, letterSpacing: -1.4, lineHeight: 1 }}>onmid</span>
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
-        background: G, borderRadius: 40, width: 42, height: 22,
-        paddingRight: 3, gap: 2, boxSizing: 'border-box',
+        background: 'linear-gradient(90deg, #25e10f 0%, #22c55e 100%)',
+        borderRadius: 40, width: 48, height: 25,
+        paddingRight: 4, gap: 2, boxSizing: 'border-box',
+        boxShadow: '0 10px 22px rgba(34,197,94,0.24)',
       }}>
-        <div style={{ width: 13, height: 13, borderRadius: '50%', background: 'rgba(255,255,255,0.4)' }} />
-        <div style={{ width: 13, height: 13, borderRadius: '50%', background: '#fff' }} />
+        <div style={{ width: 14, height: 14, borderRadius: '50%', background: 'rgba(255,255,255,0.38)' }} />
+        <div style={{ width: 14, height: 14, borderRadius: '50%', background: '#fff' }} />
       </div>
       <span style={{ fontSize: 9, color: '#aaa' }}>®</span>
     </div>
@@ -133,17 +135,17 @@ function Footer() {
 
 function Slide({ n, children }: { n: number; children: ReactNode }) {
   return (
-    <div style={{
-      position: 'relative', width: '100%', aspectRatio: '16/9',
+    <section className="onmid-report-page" aria-label={`Página ${n}`} style={{
+      position: 'relative', width: 'min(100%, var(--screen-w))', aspectRatio: '16 / 9',
       background: '#fff', overflow: 'hidden', boxSizing: 'border-box',
       fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
       pageBreakAfter: 'always', breakAfter: 'page',
     }}>
       {/* Background arc top-right */}
       <div style={{
-        position: 'absolute', top: -110, right: -110, width: 520, height: 520,
+        position: 'absolute', top: -100, right: -86, width: 520, height: 520,
         borderRadius: '50%', pointerEvents: 'none', zIndex: 0,
-        background: 'radial-gradient(circle at 38% 38%, rgba(214,230,253,0.55) 0%, rgba(226,232,240,0.18) 55%, transparent 75%)',
+        background: 'radial-gradient(circle at 42% 44%, rgba(255,255,255,0.82) 0%, rgba(226,232,240,0.42) 38%, rgba(203,213,225,0.22) 58%, transparent 76%)',
       }} />
       {/* Logo — always top-left */}
       <div style={{ position: 'absolute', top: 26, left: 44, zIndex: 2 }}>
@@ -158,7 +160,7 @@ function Slide({ n, children }: { n: number; children: ReactNode }) {
         {children}
       </div>
       <Footer />
-    </div>
+    </section>
   );
 }
 
@@ -747,11 +749,43 @@ function Page10({ d }: { d: DiagnosticoData }) {
 
 export default function DiagnosticoTemplate({ data: d }: { data: DiagnosticoData }) {
   return (
-    <div>
+    <main className="onmid-report" aria-label="Relatório de Performance Onmid">
       <style>{`
+        :root {
+          --slide-w: 13.333in;
+          --slide-h: 7.5in;
+          --screen-w: 1180px;
+          --report-bg: #f4f6f8;
+        }
+        html, body {
+          margin: 0;
+          padding: 0;
+          background: var(--report-bg);
+        }
+        .onmid-report {
+          width: 100%;
+          min-height: 100vh;
+          padding: 24px 12px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 24px;
+          background: var(--report-bg);
+        }
+        .onmid-report-page {
+          box-shadow: 0 14px 40px rgba(15, 23, 42, 0.16);
+        }
         @media print {
-          @page { size: 1200px 675px landscape; margin: 0; }
-          body { margin: 0; background: white; }
+          html, body { width: var(--slide-w); background: #fff; }
+          @page { size: 13.333in 7.5in; margin: 0; }
+          .onmid-report { padding: 0; gap: 0; display: block; background: #fff; }
+          .onmid-report-page {
+            width: var(--slide-w) !important;
+            height: var(--slide-h) !important;
+            aspect-ratio: auto !important;
+            box-shadow: none !important;
+          }
+          .onmid-report-page:last-child { page-break-after: auto; break-after: auto; }
           .no-print { display: none !important; }
           * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
         }
@@ -785,6 +819,6 @@ export default function DiagnosticoTemplate({ data: d }: { data: DiagnosticoData
       <Page8 d={d} />
       <Page9 d={d} />
       <Page10 d={d} />
-    </div>
+    </main>
   );
 }
