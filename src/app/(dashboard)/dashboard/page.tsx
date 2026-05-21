@@ -32,6 +32,7 @@ import { useClients } from '@/lib/client-store';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 import { ClientAvatar } from '@/components/client-avatar';
 import type { TopCreative } from '@/app/api/meta/top-creatives/route';
+import type { PageInsightsResult, FacebookPageData, InstagramPageData } from '@/app/api/meta/page-insights/route';
 import type { CampaignPerformance } from '@/app/api/campaigns/route';
 import type { GoogleKeyword } from '@/app/api/google/keywords/route';
 import type { AudienceBreakdowns, AudienceResponse, AudienceSlice } from '@/app/api/audience/route';
@@ -2838,6 +2839,101 @@ function CreativeCarouselCard({ creative, idx, sortBy, onPreview }: {
   );
 }
 
+// ── Social Page Cards ─────────────────────────────────────────────────────────
+function numK(n: number) {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return n.toLocaleString('pt-BR');
+}
+
+function SocialMetricRow({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="flex items-center justify-between gap-2 text-xs">
+      <span className="text-foreground/55">{label}</span>
+      <span className="font-bold tabular-nums text-foreground">{numK(value)}</span>
+    </div>
+  );
+}
+
+function FbCard({ data }: { data: FacebookPageData }) {
+  const FB = '#1877F2';
+  return (
+    <div className="relative overflow-hidden rounded-xl border bg-[#070B14] p-4" style={{ borderColor: `${FB}55`, boxShadow: `0 0 28px ${FB}18` }}>
+      <div className="pointer-events-none absolute inset-0" style={{ background: `radial-gradient(circle at 88% 10%, ${FB}30, transparent 46%)` }} />
+      <div className="relative flex items-center gap-3 mb-3">
+        {data.picture
+          ? <img src={data.picture} alt={data.pageName} className="h-10 w-10 rounded-full object-cover border-2" style={{ borderColor: `${FB}88` }} />
+          : <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 text-white text-lg" style={{ borderColor: `${FB}88`, background: `${FB}33` }}>f</span>
+        }
+        <div className="min-w-0">
+          <p className="truncate text-[11px] font-bold uppercase tracking-widest" style={{ color: FB }}>Facebook</p>
+          <p className="truncate text-sm font-semibold text-foreground">{data.pageName}</p>
+        </div>
+      </div>
+      <div className="relative">
+        <p className="text-[10px] font-bold uppercase tracking-widest text-foreground/50 mb-0.5">Curtidas / Seguidores</p>
+        <p className="font-heading text-3xl leading-none font-normal mb-3" style={{ color: FB }}>{numK(data.fans)}</p>
+        <div className="space-y-1.5 border-t border-white/10 pt-2">
+          {data.fanAdds > 0 && <SocialMetricRow label="Novas curtidas no período" value={data.fanAdds} />}
+          <SocialMetricRow label="Alcance" value={data.reach} />
+          <SocialMetricRow label="Impressões" value={data.impressions} />
+          <SocialMetricRow label="Engajamentos" value={data.engagements} />
+          <SocialMetricRow label="Visitas à página" value={data.pageViews} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function IgCard({ data }: { data: InstagramPageData }) {
+  const IG = '#E1306C';
+  return (
+    <div className="relative overflow-hidden rounded-xl border bg-[#070B14] p-4" style={{ borderColor: `${IG}55`, boxShadow: `0 0 28px ${IG}18` }}>
+      <div className="pointer-events-none absolute inset-0" style={{ background: `radial-gradient(circle at 88% 10%, ${IG}28, transparent 46%)` }} />
+      <div className="relative flex items-center gap-3 mb-3">
+        {data.picture
+          ? <img src={data.picture} alt={data.username} className="h-10 w-10 rounded-full object-cover border-2" style={{ borderColor: `${IG}88` }} />
+          : <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 text-white text-lg" style={{ borderColor: `${IG}88`, background: `${IG}33` }}>ig</span>
+        }
+        <div className="min-w-0">
+          <p className="truncate text-[11px] font-bold uppercase tracking-widest" style={{ color: IG }}>Instagram</p>
+          <p className="truncate text-sm font-semibold text-foreground">{data.username}</p>
+        </div>
+      </div>
+      <div className="relative">
+        <p className="text-[10px] font-bold uppercase tracking-widest text-foreground/50 mb-0.5">Seguidores</p>
+        <p className="font-heading text-3xl leading-none font-normal mb-3" style={{ color: IG }}>{numK(data.followers)}</p>
+        <div className="space-y-1.5 border-t border-white/10 pt-2">
+          <SocialMetricRow label="Alcance" value={data.reach} />
+          <SocialMetricRow label="Impressões" value={data.impressions} />
+          <SocialMetricRow label="Visitas ao perfil" value={data.profileViews} />
+          {data.websiteClicks > 0 && <SocialMetricRow label="Cliques no site" value={data.websiteClicks} />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SocialPageCards({
+  clientName, showClientName, facebook, instagram,
+}: {
+  clientName?: string;
+  showClientName?: boolean;
+  facebook: FacebookPageData | null;
+  instagram: InstagramPageData | null;
+}) {
+  if (!facebook && !instagram) return null;
+  return (
+    <div className="contents">
+      {showClientName && (facebook ?? instagram) && (
+        <p className="col-span-full text-[10px] font-bold uppercase tracking-widest text-foreground/50 mt-1">{clientName}</p>
+      )}
+      {facebook && <FbCard data={facebook} />}
+      {instagram && <IgCard data={instagram} />}
+    </div>
+  );
+}
+
 // ── Main Dashboard ───────────────────────────────────────────────────────────
 export default function GeneralDashboard() {
   const { clients } = useClients();
@@ -2876,6 +2972,8 @@ export default function GeneralDashboard() {
   const [aiError, setAiError] = useState('');
   const [customizerOpen, setCustomizerOpen] = useState(false);
   const [dashboardPrefs, setDashboardPrefs] = useState<DashboardPrefs>(DEFAULT_DASHBOARD_PREFS);
+  const [pageInsights, setPageInsights] = useState<PageInsightsResult[]>([]);
+  const [pageInsightsLoading, setPageInsightsLoading] = useState(false);
   const [alertsCollapsed, setAlertsCollapsed] = useState(() => {
     if (typeof window === 'undefined') return false;
     return localStorage.getItem('dashboard:alerts:collapsed') === '1';
@@ -3162,6 +3260,29 @@ export default function GeneralDashboard() {
       .then(r => r.ok ? r.json() as Promise<AiInsight[]> : [])
       .then(setAiInsights)
       .catch(() => setAiInsights([]));
+  }, [selectedIds, period, customDateFrom, customDateTo, customReady]);
+
+  // Fetch page/profile insights (Facebook Page + Instagram organic)
+  useEffect(() => {
+    let cancelled = false;
+    setPageInsightsLoading(true);
+    setPageInsights([]);
+    if (selectedIds.size === 0 || !customReady) {
+      setPageInsightsLoading(false);
+      return () => { cancelled = true; };
+    }
+    const { from, to } = periodToDateRange(period, customDateFrom, customDateTo);
+    const params = new URLSearchParams({
+      clientIds: [...selectedIds].join(','),
+      from: from.toISOString().split('T')[0],
+      to: to.toISOString().split('T')[0],
+    });
+    fetch(`/api/meta/page-insights?${params}`)
+      .then(r => r.ok ? r.json() as Promise<PageInsightsResult[]> : [])
+      .then(data => { if (!cancelled) setPageInsights(data); })
+      .catch(() => { if (!cancelled) setPageInsights([]); })
+      .finally(() => { if (!cancelled) setPageInsightsLoading(false); });
+    return () => { cancelled = true; };
   }, [selectedIds, period, customDateFrom, customDateTo, customReady]);
 
   // ── Aggregate metrics ────────────────────────────────────────────────────
@@ -3865,6 +3986,41 @@ export default function GeneralDashboard() {
           </DashboardGridItem>
         </div>
       </section>
+
+      {/* 4. PÁGINAS SOCIAIS */}
+      {(pageInsightsLoading || pageInsights.some(p => p.facebook ?? p.instagram)) && (
+        <section className="relative overflow-hidden rounded-2xl border border-[#E1306C]/50 bg-[#0D060C] p-5 shadow-[0_0_56px_rgba(225,48,108,0.18)]">
+          <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(225,48,108,0.14),transparent_42%),radial-gradient(circle_at_92%_0%,rgba(131,58,180,0.22),transparent_36%)]" />
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,#E1306C,#833AB4,transparent)]" />
+          <div className="relative mb-5 flex items-center gap-3">
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#E1306C]/60 bg-[#E1306C]/20 shadow-[0_0_24px_rgba(225,48,108,0.50)]">
+              <svg viewBox="0 0 24 24" className="h-[18px] w-[18px] fill-[#E1306C]"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z" /></svg>
+            </span>
+            <div>
+              <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">Páginas &amp; Perfis Sociais</h2>
+              <p className="text-[11px] text-foreground/60">Métricas orgânicas — Facebook Page + Instagram Business</p>
+            </div>
+            {pageInsightsLoading && <RefreshCw className="ml-2 h-4 w-4 animate-spin text-muted-foreground" />}
+          </div>
+
+          <div className="relative grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            {pageInsightsLoading
+              ? Array.from({ length: 2 }).map((_, i) => (
+                  <div key={i} className="h-52 animate-pulse rounded-xl border border-white/10 bg-white/5" />
+                ))
+              : pageInsights.map(({ clientId, clientName, facebook, instagram }) => (
+                  <SocialPageCards
+                    key={clientId}
+                    clientName={clientName}
+                    showClientName={pageInsights.length > 1}
+                    facebook={facebook}
+                    instagram={instagram}
+                  />
+                ))
+            }
+          </div>
+        </section>
+      )}
 
       {/* Resumo por cliente */}
       {selectedClients.length > 1 && (
