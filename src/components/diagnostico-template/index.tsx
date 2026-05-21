@@ -1,207 +1,222 @@
 'use client';
 
+import { type ReactNode, type CSSProperties } from 'react';
 import type { DiagnosticoData, CriativoItem, OrigemItem, ClienteItem } from './types';
 
-// ── Shared constants ────────────────────────────────────────────────────────
-const GREEN = '#3EE649';
-const LIGHT_GREEN = '#f0fdf2';
-const BLUE_LIGHT = '#eff6ff';
+// ── Tokens ─────────────────────────────────────────────────────────────────
+const G  = '#22c55e';
+const GL = '#f0fdf4';
+const GB = '#bbf7d0';
+const B  = '#3b82f6';
+const BL = '#eff6ff';
+const TX = '#111827';
+const TG = '#6b7280';
+const TM = '#374151';
+const BD = '#f1f5f9';
+const SH = '0 1px 4px rgba(0,0,0,0.07), 0 1px 2px rgba(0,0,0,0.04)';
 
-// ── Sub-components ──────────────────────────────────────────────────────────
+// ── Primitives ─────────────────────────────────────────────────────────────
 
-function Logo() {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-      <span style={{ fontWeight: 700, fontSize: 20, letterSpacing: -0.5, color: '#111' }}>onmid</span>
-      <span style={{
-        display: 'inline-flex', alignItems: 'center', background: GREEN,
-        borderRadius: 20, padding: '2px 5px', gap: 2,
-      }}>
-        <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#fff' }} />
-        <span style={{ width: 10, height: 10, borderRadius: '50%', background: 'rgba(255,255,255,0.45)' }} />
-      </span>
-      <span style={{ fontSize: 9, color: '#666', marginLeft: 1 }}>®</span>
-    </div>
-  );
-}
-
-function PageNum({ n, total = 10 }: { n: number; total?: number }) {
-  return (
-    <div style={{ textAlign: 'right' }}>
-      <span style={{ fontWeight: 700, fontSize: 15, color: '#111' }}>
-        {String(n).padStart(2, '0')}<span style={{ color: '#ccc' }}>/{total}</span>
-      </span>
-      <div style={{ height: 2, background: GREEN, marginTop: 2, width: '100%' }} />
-    </div>
-  );
-}
-
-function PageHeader({ n }: { n: number }) {
-  return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 28 }}>
-      <Logo />
-      <PageNum n={n} />
-    </div>
-  );
-}
-
-function PageFooter() {
-  return (
-    <div style={{ position: 'absolute', bottom: 22, left: 36, display: 'flex', alignItems: 'center', gap: 6 }}>
-      <span style={{
-        display: 'inline-flex', alignItems: 'center', background: GREEN,
-        borderRadius: 20, padding: '2px 5px', gap: 2,
-      }}>
-        <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#fff' }} />
-        <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'rgba(255,255,255,0.45)' }} />
-      </span>
-      <span style={{ fontWeight: 600, fontSize: 11, color: '#555' }}>
-        <span style={{ fontWeight: 700 }}>ONMID</span> Reports
-      </span>
-    </div>
-  );
-}
-
-function Slide({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
+function IBox({ icon, green, size = 30 }: { icon: string; green?: boolean; size?: number }) {
   return (
     <div style={{
-      position: 'relative', width: '100%', aspectRatio: '16/9',
-      background: '#fff', padding: '28px 36px 60px',
-      fontFamily: 'Inter, -apple-system, sans-serif',
-      overflow: 'hidden', boxSizing: 'border-box',
-      pageBreakAfter: 'always', breakAfter: 'page',
-      ...style,
-    }}>
-      {/* Decorative background blobs */}
-      <div style={{
-        position: 'absolute', top: -80, right: -80, width: 280, height: 280,
-        borderRadius: '50%',
-        background: 'radial-gradient(circle, rgba(62,230,73,0.07) 0%, transparent 70%)',
-        pointerEvents: 'none',
-      }} />
-      <div style={{
-        position: 'absolute', bottom: -60, left: -60, width: 220, height: 220,
-        borderRadius: '50%',
-        background: 'radial-gradient(circle, rgba(96,165,250,0.08) 0%, transparent 70%)',
-        pointerEvents: 'none',
-      }} />
-      {children}
-      <PageFooter />
-    </div>
-  );
-}
-
-function Card({ children, style, accent }: { children: React.ReactNode; style?: React.CSSProperties; accent?: boolean }) {
-  return (
-    <div style={{
-      background: accent ? LIGHT_GREEN : '#fff',
-      border: accent ? `1.5px solid ${GREEN}` : '1.5px solid #f0f0f0',
-      borderRadius: 12, padding: '14px 18px',
-      boxShadow: '0 1px 6px rgba(0,0,0,0.05)',
-      ...style,
-    }}>
-      {children}
-    </div>
-  );
-}
-
-function IconBox({ color, bg, children }: { color: string; bg: string; children: React.ReactNode }) {
-  return (
-    <div style={{
-      width: 32, height: 32, borderRadius: 8, background: bg,
+      width: size, height: size, borderRadius: 9, flexShrink: 0,
+      background: green ? GL : BL,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontSize: 15, flexShrink: 0,
-    }}>
-      <span style={{ color }}>{children}</span>
+      fontSize: size * 0.48,
+    }}>{icon}</div>
+  );
+}
+
+function Bar({ pct, color = G }: { pct: number; color?: string }) {
+  return (
+    <div style={{ flex: 1, height: 6, background: '#eee', borderRadius: 3, overflow: 'hidden' }}>
+      <div style={{ width: `${Math.max(2, pct)}%`, height: '100%', background: color, borderRadius: 3 }} />
     </div>
   );
 }
 
-function Leitura({ text, color = GREEN }: { text: string; color?: string }) {
+function Card({ children, style, accent }: { children: ReactNode; style?: CSSProperties; accent?: boolean }) {
   return (
     <div style={{
-      display: 'flex', gap: 14, background: LIGHT_GREEN,
-      border: `1.5px solid ${color}30`, borderRadius: 12, padding: '14px 18px',
-      borderLeft: `4px solid ${color}`,
+      background: accent ? GL : '#fff',
+      border: `1.5px solid ${accent ? GB : BD}`,
+      borderRadius: 14, padding: '14px 18px',
+      boxShadow: accent ? 'none' : SH,
+      ...style,
+    }}>{children}</div>
+  );
+}
+
+function Kpi({ icon, label, value, green, accent }: {
+  icon: string; label: string; value: string | number; green?: boolean; accent?: boolean;
+}) {
+  return (
+    <Card accent={accent} style={{ padding: '13px 15px' }}>
+      <div style={{ display: 'flex', gap: 9, alignItems: 'flex-start', marginBottom: 8 }}>
+        <IBox icon={icon} green={green || accent} size={28} />
+        <span style={{ fontSize: 10.5, color: TG, lineHeight: 1.35, paddingTop: 1 }}>{label}</span>
+      </div>
+      <p style={{ fontWeight: 800, fontSize: 20, color: accent ? G : TX, margin: 0, lineHeight: 1 }}>
+        {String(value)}
+      </p>
+    </Card>
+  );
+}
+
+function Leitura({ text, title = 'Leitura', style }: { text: string; title?: string; style?: CSSProperties }) {
+  return (
+    <div style={{
+      display: 'flex', gap: 14, alignItems: 'flex-start',
+      background: GL, border: `1.5px solid ${GB}`,
+      borderLeft: `4px solid ${G}`, borderRadius: 12,
+      padding: '13px 17px', ...style,
     }}>
-      <IconBox color={color} bg={`${color}20`}>💡</IconBox>
+      <IBox icon="💡" green size={32} />
       <div>
-        <p style={{ fontWeight: 700, fontSize: 13, color: color, marginBottom: 4 }}>Leitura</p>
-        <p style={{ fontSize: 11.5, color: '#444', lineHeight: 1.55, margin: 0 }}>{text}</p>
+        <p style={{ fontWeight: 700, fontSize: 13, color: G, margin: '0 0 4px' }}>{title}</p>
+        <p style={{ fontSize: 11.5, color: TM, lineHeight: 1.6, margin: 0 }}>{text}</p>
       </div>
     </div>
   );
 }
 
-function ProgressBar({ pct, color = GREEN }: { pct: number; color?: string }) {
+// ── Persistent header / footer elements ────────────────────────────────────
+
+function Logo() {
   return (
-    <div style={{ flex: 1, height: 7, background: '#f0f0f0', borderRadius: 4, overflow: 'hidden' }}>
-      <div style={{ width: `${Math.max(2, pct)}%`, height: '100%', background: color, borderRadius: 4 }} />
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <span style={{ fontWeight: 800, fontSize: 20, color: TX, letterSpacing: -0.5 }}>onmid</span>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+        background: G, borderRadius: 40, width: 42, height: 22,
+        paddingRight: 3, gap: 2, boxSizing: 'border-box',
+      }}>
+        <div style={{ width: 13, height: 13, borderRadius: '50%', background: 'rgba(255,255,255,0.4)' }} />
+        <div style={{ width: 13, height: 13, borderRadius: '50%', background: '#fff' }} />
+      </div>
+      <span style={{ fontSize: 9, color: '#aaa' }}>®</span>
     </div>
   );
 }
 
-// ── Page 1 — Capa ───────────────────────────────────────────────────────────
+function PageNum({ n }: { n: number }) {
+  return (
+    <div style={{ textAlign: 'right' }}>
+      <span style={{ fontWeight: 800, fontSize: 17, color: TX }}>{String(n).padStart(2, '0')}</span>
+      <span style={{ fontWeight: 400, fontSize: 17, color: '#c8d3dc' }}>/10</span>
+      <div style={{ height: 2.5, background: G, borderRadius: 2, marginTop: 4 }} />
+    </div>
+  );
+}
 
-function CapaKpiCard({ label, value, varStr }: { label: string; value: string; varStr?: string }) {
+function Footer() {
   return (
     <div style={{
-      background: '#fff', borderRadius: 10, padding: '10px 14px',
-      boxShadow: '0 2px 10px rgba(0,0,0,0.07)',
+      position: 'absolute', bottom: 17, left: 44, zIndex: 2,
+      display: 'flex', alignItems: 'center', gap: 7,
     }}>
-      <p style={{ fontSize: 10, color: '#888', margin: '0 0 2px' }}>{label}</p>
-      <p style={{ fontWeight: 700, fontSize: 16, color: '#111', margin: 0 }}>{value}</p>
-      {varStr && (
-        <p style={{ fontSize: 10, color: GREEN, margin: '2px 0 0', fontWeight: 600 }}>▲ {varStr} vs período anterior</p>
-      )}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+        background: G, borderRadius: 40, width: 34, height: 18,
+        paddingRight: 2, gap: 2, boxSizing: 'border-box',
+      }}>
+        <div style={{ width: 11, height: 11, borderRadius: '50%', background: 'rgba(255,255,255,0.4)' }} />
+        <div style={{ width: 11, height: 11, borderRadius: '50%', background: '#fff' }} />
+      </div>
+      <span style={{ fontSize: 11, color: '#555' }}><strong style={{ color: '#333' }}>ONMID</strong> Reports</span>
     </div>
   );
 }
+
+// ── Slide (every page uses this — header/footer always at same coordinates) ──
+
+function Slide({ n, children }: { n: number; children: ReactNode }) {
+  return (
+    <div style={{
+      position: 'relative', width: '100%', aspectRatio: '16/9',
+      background: '#fff', overflow: 'hidden', boxSizing: 'border-box',
+      fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+      pageBreakAfter: 'always', breakAfter: 'page',
+    }}>
+      {/* Background arc top-right */}
+      <div style={{
+        position: 'absolute', top: -110, right: -110, width: 520, height: 520,
+        borderRadius: '50%', pointerEvents: 'none', zIndex: 0,
+        background: 'radial-gradient(circle at 38% 38%, rgba(214,230,253,0.55) 0%, rgba(226,232,240,0.18) 55%, transparent 75%)',
+      }} />
+      {/* Logo — always top-left */}
+      <div style={{ position: 'absolute', top: 26, left: 44, zIndex: 2 }}>
+        <Logo />
+      </div>
+      {/* Page number — always top-right */}
+      <div style={{ position: 'absolute', top: 26, right: 44, zIndex: 2 }}>
+        <PageNum n={n} />
+      </div>
+      {/* Content starts below header */}
+      <div style={{ position: 'relative', zIndex: 1, padding: '72px 44px 50px', height: '100%', boxSizing: 'border-box' }}>
+        {children}
+      </div>
+      <Footer />
+    </div>
+  );
+}
+
+// ── Page 1 — Capa ──────────────────────────────────────────────────────────
 
 function Page1({ d }: { d: DiagnosticoData }) {
   return (
-    <Slide>
-      <PageHeader n={1} />
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.1fr', gap: 24, height: 'calc(100% - 80px)' }}>
-        {/* Left */}
-        <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-          <h1 style={{ fontWeight: 800, fontSize: 42, lineHeight: 1.1, color: '#111', margin: '0 0 10px' }}>
+    <Slide n={1}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.1fr', gap: 36, height: '100%', alignItems: 'center' }}>
+        <div>
+          <h1 style={{ fontWeight: 800, fontSize: 50, lineHeight: 1.04, color: TX, margin: '0 0 10px' }}>
             Diagnóstico de<br />Performance
           </h1>
-          <p style={{ fontWeight: 700, fontSize: 22, color: GREEN, margin: '0 0 18px' }}>{d.cliente}</p>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8 }}>
-            <span style={{ fontSize: 13 }}>📅</span>
-            <span style={{ fontWeight: 700, fontSize: 13, color: '#111' }}>Período analisado:</span>
-            <span style={{ fontSize: 13, color: '#444' }}>{d.periodo}</span>
+          <p style={{ fontWeight: 700, fontSize: 22, color: G, margin: '0 0 18px' }}>{d.cliente}</p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+            <span style={{ fontSize: 14 }}>📅</span>
+            <strong style={{ fontSize: 13, color: TX }}>Período analisado:</strong>
+            <span style={{ fontSize: 13, color: TG }}> {d.periodo}</span>
           </div>
           <div style={{
-            display: 'inline-flex', alignItems: 'center', gap: 7,
-            background: '#f5f5f5', borderRadius: 8, padding: '6px 12px',
-            fontSize: 12, color: '#555', fontWeight: 500, marginTop: 4,
+            display: 'inline-flex', alignItems: 'center', gap: 8,
+            background: '#f8fafc', border: `1px solid ${BD}`, borderRadius: 10, padding: '7px 14px',
           }}>
-            <span>📊</span> {d.subtitulo}
+            <span style={{ fontSize: 13 }}>📊</span>
+            <span style={{ fontSize: 12, color: TG, fontWeight: 500 }}>{d.subtitulo}</span>
           </div>
         </div>
-
-        {/* Right — KPI mockup cards */}
-        <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 10 }}>
-          <div style={{
-            background: '#fff', borderRadius: 14, padding: 16,
-            boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
-          }}>
-            <p style={{ fontSize: 11, color: '#888', margin: '0 0 4px' }}>Faturamento</p>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <p style={{ fontWeight: 800, fontSize: 22, color: '#111', margin: 0 }}>{d.capa.faturamento}</p>
-              <span style={{ fontSize: 14, color: GREEN }}>↗</span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <Card style={{ padding: '18px 22px' }}>
+            <div style={{ height: 55, marginBottom: 14 }}>
+              <svg viewBox="0 0 300 55" width="100%" height="100%" preserveAspectRatio="none">
+                <polyline points="0,52 60,42 120,30 180,20 240,11 300,4" fill="none" stroke={G} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                <polyline points="0,52 60,46 120,39 180,30 240,25 300,18" fill="none" stroke={B} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="5,3" />
+              </svg>
             </div>
-            {d.capa.faturamento_var && (
-              <p style={{ fontSize: 10, color: GREEN, margin: '3px 0 0', fontWeight: 600 }}>▲ {d.capa.faturamento_var} vs período anterior</p>
-            )}
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-            <CapaKpiCard label="Investimento" value={d.capa.investimento} varStr={d.capa.investimento_var} />
-            <CapaKpiCard label="ROAS" value={d.capa.roas} varStr={d.capa.roas_var} />
-            <CapaKpiCard label="Leads" value={d.capa.leads} varStr={d.capa.leads_var} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <p style={{ fontSize: 11, color: TG, margin: '0 0 3px' }}>Faturamento</p>
+                <p style={{ fontWeight: 800, fontSize: 26, color: TX, margin: 0 }}>{d.capa.faturamento}</p>
+                {d.capa.faturamento_var && (
+                  <p style={{ fontSize: 10, color: G, margin: '3px 0 0', fontWeight: 600 }}>▲ {d.capa.faturamento_var} vs período anterior</p>
+                )}
+              </div>
+              <div style={{ width: 30, height: 30, borderRadius: 8, background: GL, border: `1.5px solid ${GB}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, color: G }}>↗</div>
+            </div>
+          </Card>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8 }}>
+            {([
+              ['Investimento', d.capa.investimento, d.capa.investimento_var],
+              ['ROAS', d.capa.roas, d.capa.roas_var],
+              ['Leads', d.capa.leads, d.capa.leads_var],
+            ] as [string, string, string | undefined][]).map(([lbl, val, vari]) => (
+              <Card key={lbl} style={{ padding: '11px 14px' }}>
+                <p style={{ fontSize: 10, color: TG, margin: '0 0 3px' }}>{lbl}</p>
+                <p style={{ fontWeight: 800, fontSize: 15, color: TX, margin: 0 }}>{val}</p>
+                {vari && <p style={{ fontSize: 9, color: G, margin: '2px 0 0', fontWeight: 600 }}>▲ {vari} vs período anterior</p>}
+              </Card>
+            ))}
           </div>
         </div>
       </div>
@@ -209,203 +224,176 @@ function Page1({ d }: { d: DiagnosticoData }) {
   );
 }
 
-// ── Page 2 — Visão geral mídia paga ────────────────────────────────────────
-
-function KpiCard({ icon, label, value, green }: { icon: string; label: string; value: string; green?: boolean }) {
-  return (
-    <Card>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-        <IconBox color={green ? GREEN : '#3b82f6'} bg={green ? LIGHT_GREEN : BLUE_LIGHT}>{icon}</IconBox>
-        <span style={{ fontSize: 10.5, color: '#666', lineHeight: 1.3 }}>{label}</span>
-      </div>
-      <p style={{ fontWeight: 800, fontSize: 20, color: '#111', margin: 0 }}>{value}</p>
-    </Card>
-  );
-}
+// ── Page 2 — Visão geral ────────────────────────────────────────────────────
 
 function Page2({ d }: { d: DiagnosticoData }) {
   const m = d.meta;
   return (
-    <Slide>
-      <PageHeader n={2} />
-      <h1 style={{ fontWeight: 800, fontSize: 30, color: '#111', margin: '0 0 4px' }}>Visão geral da mídia paga</h1>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 16 }}>
-        <span style={{ fontSize: 12 }}>📅</span>
-        <span style={{ fontWeight: 600, fontSize: 12, color: '#111' }}>Período analisado:</span>
-        <span style={{ fontSize: 12, color: '#555' }}>{d.periodo}</span>
+    <Slide n={2}>
+      <h1 style={{ fontWeight: 800, fontSize: 32, color: TX, margin: '0 0 4px' }}>Visão geral da mídia paga</h1>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 14 }}>
+        <span style={{ fontSize: 13 }}>📅</span>
+        <strong style={{ fontSize: 12.5, color: TX }}>Período analisado:</strong>
+        <span style={{ fontSize: 12.5, color: TG }}> {d.periodo}</span>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 10, marginBottom: 10 }}>
-        <KpiCard icon="$" label="Investimento total" value={m.investimento_total} green />
-        <KpiCard icon="💬" label="Resultados / conversas iniciadas" value={String(m.resultados)} green />
-        <KpiCard icon="$" label="Custo por resultado" value={m.custo_resultado} green />
-        <KpiCard icon="👁" label="Impressões" value={m.impressoes} />
-        <KpiCard icon="👥" label="Alcance somado" value={m.alcance} />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 9, marginBottom: 9 }}>
+        <Kpi icon="$" label="Investimento total" value={m.investimento_total} green />
+        <Kpi icon="💬" label="Resultados / conversas iniciadas" value={m.resultados} green />
+        <Kpi icon="$" label="Custo por resultado" value={m.custo_resultado} green />
+        <Kpi icon="👁" label="Impressões" value={m.impressoes} />
+        <Kpi icon="👥" label="Alcance somado" value={m.alcance} />
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10, marginBottom: 14 }}>
-        <KpiCard icon="💬" label="Total de contatos por mensagem" value={String(m.total_contatos)} />
-        <KpiCard icon="➕" label="Novos contatos de mensagem" value={String(m.novos_contatos)} green />
-        <KpiCard icon="$" label="Custo por novo contato" value={m.custo_novo_contato} green />
-        <KpiCard icon="🛒" label="Compras registradas no Meta Ads" value={String(m.compras)} />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 9, marginBottom: 12 }}>
+        <Kpi icon="💬" label="Total de contatos por mensagem" value={m.total_contatos} />
+        <Kpi icon="👤" label="Novos contatos de mensagem" value={m.novos_contatos} green />
+        <Kpi icon="$" label="Custo por novo contato" value={m.custo_novo_contato} green />
+        <Kpi icon="🛒" label="Compras registradas no Meta Ads" value={m.compras} />
       </div>
       <Leitura text={m.leitura} />
     </Slide>
   );
 }
 
-// ── Page 3 — Desempenho por plataforma ─────────────────────────────────────
-
-function PlatformCard({ name, icon, data, color }: {
-  name: string;
-  icon: string;
-  color: string;
-  data: { investimento: string; resultados: number; custo_resultado: string; novos_contatos: number; custo_novo_contato: string };
-}) {
-  const rows = [
-    { icon: '$', label: 'Investimento', value: data.investimento, highlight: false },
-    { icon: '↗', label: 'Resultados', value: String(data.resultados), highlight: false },
-    { icon: '🏷', label: 'Custo por resultado', value: data.custo_resultado, highlight: true },
-    { icon: '👤', label: 'Novos contatos', value: String(data.novos_contatos), highlight: false },
-    { icon: '➕', label: 'Custo por novo contato', value: data.custo_novo_contato, highlight: true },
-  ];
-  return (
-    <Card style={{ flex: 1 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-        <span style={{ fontSize: 24 }}>{icon}</span>
-        <p style={{ fontWeight: 800, fontSize: 18, color: '#111', margin: 0 }}>{name}</p>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {rows.map(r => (
-          <div key={r.label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #f5f5f5' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <IconBox color={color} bg={`${color}15`}>{r.icon}</IconBox>
-              <span style={{ fontSize: 11.5, color: '#555' }}>{r.label}</span>
-            </div>
-            <span style={{ fontWeight: 700, fontSize: 13, color: r.highlight ? color : '#111' }}>{r.value}</span>
-          </div>
-        ))}
-      </div>
-    </Card>
-  );
-}
+// ── Page 3 — Plataformas ────────────────────────────────────────────────────
 
 function Page3({ d }: { d: DiagnosticoData }) {
+  const m = d.meta;
+  type PD = typeof m.facebook;
+  function PlatCard({ name, icon, data }: { name: string; icon: string; data: PD }) {
+    const rows: [string, string, string | number, boolean][] = [
+      ['$',  'Investimento',        data.investimento,      false],
+      ['↗',  'Resultados',          data.resultados,        false],
+      ['🏷', 'Custo por resultado', data.custo_resultado,   true],
+      ['👤', 'Novos contatos',      data.novos_contatos,    false],
+      ['➕', 'Custo por novo contato', data.custo_novo_contato, true],
+    ];
+    return (
+      <Card style={{ flex: 1, padding: '16px 20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+          <span style={{ fontSize: 26 }}>{icon}</span>
+          <p style={{ fontWeight: 800, fontSize: 18, color: TX, margin: 0 }}>{name}</p>
+        </div>
+        {rows.map(([ico, lbl, val, hi]) => (
+          <div key={lbl} style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '7px 0', borderBottom: `1px solid ${BD}`,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <IBox icon={String(ico)} size={26} />
+              <span style={{ fontSize: 11.5, color: TM }}>{lbl}</span>
+            </div>
+            <span style={{ fontWeight: 700, fontSize: 13, color: hi ? G : TX }}>{String(val)}</span>
+          </div>
+        ))}
+      </Card>
+    );
+  }
   return (
-    <Slide>
-      <PageHeader n={3} />
-      <h1 style={{ fontWeight: 800, fontSize: 30, color: '#111', margin: '0 0 4px' }}>Desempenho por plataforma</h1>
-      <p style={{ fontWeight: 700, fontSize: 16, color: GREEN, margin: '0 0 18px' }}>Facebook x Instagram</p>
-      <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
-        <PlatformCard name="Facebook" icon="🔵" color="#1877f2" data={d.meta.facebook} />
-        <PlatformCard name="Instagram" icon="📸" color="#e1306c" data={d.meta.instagram} />
+    <Slide n={3}>
+      <h1 style={{ fontWeight: 800, fontSize: 34, color: TX, margin: '0 0 4px' }}>Desempenho por plataforma</h1>
+      <p style={{ fontWeight: 700, fontSize: 17, color: G, margin: '0 0 16px' }}>Facebook x Instagram</p>
+      <div style={{ display: 'flex', gap: 16, marginBottom: 14 }}>
+        <PlatCard name="Facebook" icon="🔵" data={m.facebook} />
+        <PlatCard name="Instagram" icon="📸" data={m.instagram} />
       </div>
-      <Leitura text={d.meta.leitura_plataformas} />
+      <Leitura text={m.leitura_plataformas} />
     </Slide>
   );
 }
 
-// ── Page 4 — Principais criativos ──────────────────────────────────────────
+// ── Page 4 — Criativos ──────────────────────────────────────────────────────
 
 function Page4({ d }: { d: DiagnosticoData }) {
-  const criativos = d.meta.criativos.slice(0, 10);
+  const list = d.meta.criativos.slice(0, 10);
   return (
-    <Slide>
-      <PageHeader n={4} />
-      <h1 style={{ fontWeight: 800, fontSize: 28, color: '#111', margin: '0 0 14px' }}>
+    <Slide n={4}>
+      <h1 style={{ fontWeight: 800, fontSize: 30, color: TX, margin: '0 0 14px' }}>
         Principais criativos<br />por volume de resultados
       </h1>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 16 }}>
-        {/* Table */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 260px', gap: 16 }}>
         <div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px 70px 110px', gap: 4, padding: '0 8px 6px', borderBottom: '1px solid #eee' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px 80px 120px', gap: 4, padding: '0 8px 6px', borderBottom: `1px solid ${BD}` }}>
             {['Criativo', 'Investimento', 'Resultados', 'Custo por resultado'].map(h => (
-              <span key={h} style={{ fontSize: 9.5, color: '#888', fontWeight: 600 }}>{h}</span>
+              <span key={h} style={{ fontSize: 9.5, color: TG, fontWeight: 600 }}>{h}</span>
             ))}
           </div>
-          {criativos.map((c: CriativoItem, i: number) => (
+          {list.map((c: CriativoItem, i: number) => (
             <div key={i} style={{
-              display: 'grid', gridTemplateColumns: '1fr 90px 70px 110px',
-              gap: 4, padding: '6px 8px', borderBottom: '1px solid #f5f5f5',
-              alignItems: 'center',
+              display: 'grid', gridTemplateColumns: '1fr 90px 80px 120px',
+              gap: 4, padding: '5.5px 8px', borderBottom: `1px solid ${BD}`, alignItems: 'center',
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
-                <span style={{
-                  width: 18, height: 18, borderRadius: '50%', background: GREEN,
+                <div style={{
+                  width: 18, height: 18, borderRadius: '50%', background: G,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   fontSize: 9, fontWeight: 700, color: '#fff', flexShrink: 0,
-                }}>{i + 1}</span>
-                <span style={{ fontSize: 11, color: '#222', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.nome}</span>
-                <ProgressBar pct={c.bar_pct} />
+                }}>{i + 1}</div>
+                <span style={{ fontSize: 11, color: TX, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.nome}</span>
+                <Bar pct={c.bar_pct} />
               </div>
-              <span style={{ fontSize: 11.5, color: '#333' }}>{c.investimento}</span>
-              <span style={{ fontSize: 11.5, fontWeight: 600 }}>{c.resultados}</span>
-              <span style={{ fontSize: 11.5, fontWeight: 700, color: c.custo_resultado.includes('R$') && parseFloat(c.custo_resultado.replace(/[^0-9,.]/g, '').replace(',', '.')) < 10 ? GREEN : '#333' }}>
-                {c.custo_resultado}
-              </span>
+              <span style={{ fontSize: 11, color: TM }}>{c.investimento}</span>
+              <span style={{ fontSize: 11.5, fontWeight: 700, color: TX }}>{c.resultados}</span>
+              <span style={{ fontSize: 11.5, fontWeight: 700, color: G }}>{c.custo_resultado}</span>
             </div>
           ))}
+          {list.length === 0 && (
+            <p style={{ fontSize: 12, color: TG, padding: '20px 8px' }}>Nenhum criativo registrado no período.</p>
+          )}
         </div>
-        {/* Leitura aside */}
-        <div style={{
-          background: LIGHT_GREEN, border: `1.5px solid ${GREEN}30`,
-          borderLeft: `4px solid ${GREEN}`, borderRadius: 12, padding: 14,
-        }}>
+        <Card style={{ padding: '14px 16px', alignSelf: 'start' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8 }}>
-            <span style={{ fontSize: 14 }}>📖</span>
-            <p style={{ fontWeight: 700, fontSize: 13, color: GREEN, margin: 0 }}>Leitura</p>
+            <IBox icon="📖" green size={28} />
+            <p style={{ fontWeight: 700, fontSize: 13, color: G, margin: 0 }}>Leitura</p>
           </div>
-          <p style={{ fontSize: 11, color: '#444', lineHeight: 1.55, margin: 0 }}>{d.meta.leitura_criativos}</p>
-        </div>
+          <p style={{ fontSize: 11, color: TM, lineHeight: 1.6, margin: 0 }}>{d.meta.leitura_criativos}</p>
+        </Card>
       </div>
     </Slide>
   );
 }
 
-// ── Page 5 — Faturamento base interna ──────────────────────────────────────
+// ── Page 5 — Faturamento ────────────────────────────────────────────────────
 
 function Page5({ d }: { d: DiagnosticoData }) {
   const c = d.crm;
   return (
-    <Slide>
-      <PageHeader n={5} />
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 220px', gap: 24, height: 'calc(100% - 64px)' }}>
+    <Slide n={5}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 200px', gap: 28 }}>
         <div>
-          <h1 style={{ fontWeight: 800, fontSize: 30, color: '#111', margin: '0 0 4px' }}>Faturamento registrado<br />na base interna</h1>
-          <p style={{ fontWeight: 700, fontSize: 13, color: GREEN, margin: '0 0 16px' }}>Base filtrada: {d.cliente} | {d.periodo}</p>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 10 }}>
-            <KpiCard icon="📄" label="Registros de faturamento" value={String(c.registros)} />
-            <KpiCard icon="👤" label="Pacientes únicos" value={String(c.pacientes_unicos)} />
-            <Card accent>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                <IconBox color={GREEN} bg={`${GREEN}25`}>$</IconBox>
-                <span style={{ fontSize: 10.5, color: '#555' }}>Faturamento líquido total</span>
-              </div>
-              <p style={{ fontWeight: 800, fontSize: 22, color: GREEN, margin: 0 }}>{c.faturamento_total}</p>
-            </Card>
+          <h1 style={{ fontWeight: 800, fontSize: 32, color: TX, margin: '0 0 4px', lineHeight: 1.1 }}>
+            Faturamento registrado<br />na base interna
+          </h1>
+          <p style={{ fontWeight: 700, fontSize: 13, color: G, margin: '0 0 14px' }}>
+            Base filtrada: {d.cliente} | {d.periodo}
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1.1fr', gap: 9, marginBottom: 9 }}>
+            <Kpi icon="📄" label="Registros de faturamento" value={c.registros} green />
+            <Kpi icon="👤" label="Pacientes únicos" value={c.pacientes_unicos} green />
+            <Kpi icon="$" label="Faturamento líquido total" value={c.faturamento_total} accent />
           </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 14 }}>
-            <KpiCard icon="🏷" label="Ticket médio por registro" value={c.ticket_medio_registro} />
-            <KpiCard icon="👤" label="Ticket médio por paciente único" value={c.ticket_medio_paciente} />
-            <KpiCard icon="📈" label="Relação faturamento / investimento" value={c.relacao_fat_investimento} green />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 9, marginBottom: 12 }}>
+            <Kpi icon="🏷" label="Ticket médio por registro" value={c.ticket_medio_registro} green />
+            <Kpi icon="👤" label="Ticket médio por paciente único" value={c.ticket_medio_paciente} green />
+            <Kpi icon="📊" label="Relação faturamento / investimento" value={c.relacao_fat_investimento} green />
           </div>
           <Leitura text={c.leitura_faturamento} />
         </div>
-        {/* Decorative chart mockup */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{
-            background: '#f8fef9', border: `2px solid ${GREEN}25`,
-            borderRadius: 16, padding: 16, width: '100%',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 5, height: 100, justifyContent: 'center' }}>
-              {[40, 55, 65, 50, 70, 80, 95, 100].map((h, i) => (
-                <div key={i} style={{
-                  flex: 1, height: `${h}%`, background: i === 7 ? GREEN : `${GREEN}40`,
-                  borderRadius: '4px 4px 0 0',
-                }} />
-              ))}
-            </div>
+        {/* Decorative bar chart */}
+        <div style={{
+          background: GL, border: `1.5px solid ${GB}`, borderRadius: 14,
+          display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
+          padding: '14px 14px 10px', gap: 6,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 5, height: 130, justifyContent: 'center' }}>
+            {[35, 50, 45, 65, 72, 82, 90, 100].map((h, i) => (
+              <div key={i} style={{
+                flex: 1, background: i === 7 ? G : `${G}50`,
+                borderRadius: '4px 4px 0 0', height: `${h}%`,
+                minWidth: 12,
+              }} />
+            ))}
           </div>
+          <p style={{ fontSize: 10, color: G, fontWeight: 600, textAlign: 'center', margin: 0 }}>Evolução do período</p>
         </div>
       </div>
     </Slide>
@@ -414,103 +402,152 @@ function Page5({ d }: { d: DiagnosticoData }) {
 
 // ── Page 6 — Faturamento por origem ────────────────────────────────────────
 
-const CHANNEL_ICONS: Record<string, string> = {
-  whatsapp: '💚', facebook: '🔵', instagram: '📸', google: '🔴',
-  site: '🌐', indicacao: '🤝', indicação: '🤝', tiktok: '🎵',
+const ORIGIN_ICON: Record<string, string> = {
+  facebook: '🔵', instagram: '📸', whatsapp: '🟢',
+  google: '🔴', indicacao: '⭐', organico: '🌿',
 };
-function channelIcon(c: string) { return CHANNEL_ICONS[c.toLowerCase().split(' ')[0]] ?? '📍'; }
+
+function getOriginIcon(canal: string) {
+  const k = canal.toLowerCase();
+  if (k.includes('instagram') && k.includes('whatsapp')) return '📸🟢';
+  if (k.includes('facebook') && k.includes('whatsapp')) return '🔵🟢';
+  if (k.includes('instagram')) return '📸';
+  if (k.includes('facebook')) return '🔵';
+  if (k.includes('whatsapp')) return '🟢';
+  if (k.includes('google')) return '🔴';
+  return '📍';
+}
 
 function Page6({ d }: { d: DiagnosticoData }) {
+  const origins = d.crm.por_origem;
+  const maxReg = Math.max(...origins.map(o => o.registros), 1);
   return (
-    <Slide>
-      <PageHeader n={6} />
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr', gap: 24, height: 'calc(100% - 64px)' }}>
-        {/* Left */}
+    <Slide n={6}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.3fr', gap: 32, height: '100%', alignItems: 'start' }}>
         <div>
-          <h1 style={{ fontWeight: 800, fontSize: 28, color: '#111', margin: '0 0 18px' }}>
+          <h1 style={{ fontWeight: 800, fontSize: 34, color: TX, margin: '0 0 24px', lineHeight: 1.1 }}>
             Faturamento<br />por origem registrada
           </h1>
-          <Card style={{ borderLeft: `4px solid ${GREEN}`, background: LIGHT_GREEN }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-              <IconBox color={GREEN} bg={`${GREEN}20`}>ℹ</IconBox>
-              <div>
-                <p style={{ fontWeight: 700, fontSize: 13, color: GREEN, margin: '0 0 4px' }}>Leitura importante</p>
-                <p style={{ fontSize: 11, color: '#444', lineHeight: 1.55, margin: 0 }}>{d.crm.leitura_origem}</p>
-              </div>
+          <div style={{
+            background: GL, border: `1.5px solid ${GB}`, borderLeft: `4px solid ${G}`,
+            borderRadius: 12, padding: '14px 16px',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <div style={{ width: 22, height: 22, borderRadius: '50%', background: G, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11 }}>ℹ</div>
+              <p style={{ fontWeight: 700, fontSize: 13, color: G, margin: 0 }}>Leitura importante</p>
             </div>
-          </Card>
-        </div>
-
-        {/* Right — table */}
-        <div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 120px', padding: '0 8px 8px', borderBottom: '2px solid #eee' }}>
-            {['Origem registrada', 'Registros', 'Faturamento'].map((h, i) => (
-              <span key={h} style={{ fontSize: 11, fontWeight: 700, color: i === 2 ? GREEN : '#555' }}>{h}</span>
-            ))}
+            <p style={{ fontSize: 11.5, color: TM, lineHeight: 1.65, margin: 0 }}>{d.crm.leitura_origem}</p>
           </div>
-          {d.crm.por_origem.map((o: OrigemItem) => (
+        </div>
+        <Card style={{ padding: '16px 20px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 70px 90px', gap: 8, padding: '0 0 8px', borderBottom: `1.5px solid ${BD}`, marginBottom: 4 }}>
+            <span style={{ fontSize: 10.5, color: TM, fontWeight: 600 }}>Origem registrada</span>
+            <span style={{ fontSize: 10.5, color: B, fontWeight: 700, textAlign: 'right' }}>Registros</span>
+            <span style={{ fontSize: 10.5, color: G, fontWeight: 700, textAlign: 'right' }}>Faturamento</span>
+          </div>
+          {origins.map((o: OrigemItem) => (
             <div key={o.canal} style={{
-              display: 'grid', gridTemplateColumns: '1fr 80px 120px',
-              padding: '10px 8px', borderBottom: '1px solid #f0f0f0', alignItems: 'center',
+              display: 'grid', gridTemplateColumns: '1fr 70px 90px', gap: 8,
+              padding: '9px 0', borderBottom: `1px solid ${BD}`, alignItems: 'center',
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                <span style={{ fontSize: 16 }}>{channelIcon(o.canal)}</span>
-                <span style={{ fontSize: 12, fontWeight: 500, color: '#222' }}>{o.canal}</span>
-                <ProgressBar pct={o.bar_pct} color="#3b82f6" />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                <span style={{ fontSize: 17 }}>{getOriginIcon(o.canal)}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ fontSize: 12, color: TX, fontWeight: 500 }}>{o.canal}</span>
+                  <div style={{ marginTop: 4 }}>
+                    <Bar pct={Math.round((o.registros / maxReg) * 100)} color={B} />
+                  </div>
+                </div>
               </div>
-              <span style={{ fontSize: 13, fontWeight: 700, color: '#3b82f6' }}>{o.registros}</span>
-              <span style={{ fontSize: 13, fontWeight: 700, color: GREEN }}>{o.faturamento}</span>
+              <span style={{ fontSize: 13, fontWeight: 800, color: B, textAlign: 'right' }}>{o.registros}</span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: G, textAlign: 'right' }}>{o.faturamento}</span>
             </div>
           ))}
-        </div>
+          {origins.length === 0 && (
+            <p style={{ fontSize: 12, color: TG, padding: '16px 0' }}>Nenhuma origem registrada no período.</p>
+          )}
+        </Card>
       </div>
     </Slide>
   );
 }
 
-// ── Page 7 — Todos os clientes faturados ───────────────────────────────────
+// ── Page 7 — Clientes ───────────────────────────────────────────────────────
 
 function Page7({ d }: { d: DiagnosticoData }) {
-  const clientes = d.crm.clientes;
-  const half = Math.ceil(clientes.length / 2);
-  const left = clientes.slice(0, half);
-  const right = clientes.slice(half);
-  const top4 = [...clientes].sort((a, b) => b.valor_num - a.valor_num).slice(0, 4);
-
-  return (
-    <Slide>
-      <PageHeader n={7} />
-      <h1 style={{ fontWeight: 800, fontSize: 26, color: '#111', margin: '0 0 3px' }}>Todos os clientes faturados no período</h1>
-      <p style={{ fontSize: 11, color: '#888', margin: '0 0 10px' }}>Nomes duplicados foram agrupados e os valores foram somados</p>
-
-      <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-        <Card style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontWeight: 800, fontSize: 20, color: GREEN }}>{d.crm.registros}</span>
-          <span style={{ fontSize: 11, color: '#555' }}>registros de faturamento</span>
-        </Card>
-        <Card style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontWeight: 800, fontSize: 20, color: GREEN }}>{d.crm.pacientes_unicos}</span>
-          <span style={{ fontSize: 11, color: '#555' }}>clientes únicos</span>
-        </Card>
+  const all = d.crm.clientes;
+  const col1 = all.slice(0, 10);
+  const col2 = all.slice(10, 20);
+  const top4 = all.slice(0, 4);
+  const rowStyle: CSSProperties = {
+    display: 'grid', gridTemplateColumns: '18px 1fr 80px 50px 80px',
+    gap: 6, padding: '5px 0', borderBottom: `1px solid ${BD}`, alignItems: 'center',
+  };
+  const headStyle: CSSProperties = {
+    display: 'grid', gridTemplateColumns: '18px 1fr 80px 50px 80px',
+    gap: 6, padding: '0 0 6px', borderBottom: `1.5px solid ${BD}`, marginBottom: 2,
+  };
+  function TableHead() {
+    return (
+      <div style={headStyle}>
+        <span />
+        {['Cliente', 'Origem registrada', 'Reg.', 'Valor total'].map(h => (
+          <span key={h} style={{ fontSize: 9, color: TG, fontWeight: 600 }}>{h}</span>
+        ))}
       </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 220px', gap: 10 }}>
-        {/* Left column */}
-        <ClientTable rows={left} startIdx={1} />
-        {/* Right column */}
-        <ClientTable rows={right} startIdx={half + 1} />
-        {/* Top 4 sidebar */}
-        <Card style={{ background: '#fafafa' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
-            <span style={{ fontSize: 14 }}>⭐</span>
-            <p style={{ fontWeight: 700, fontSize: 12, color: GREEN, margin: 0 }}>4 maiores valores</p>
+    );
+  }
+  function Row({ c, i }: { c: ClienteItem; i: number }) {
+    return (
+      <div style={rowStyle}>
+        <span style={{ fontSize: 10, color: TG, fontWeight: 600 }}>{i + 1}</span>
+        <span style={{ fontSize: 10, color: TX, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.nome}</span>
+        <span style={{ fontSize: 10, color: TG }}>{c.origem}</span>
+        <span style={{ fontSize: 10, color: TX, fontWeight: 600, textAlign: 'center' }}>{c.registros}</span>
+        <span style={{ fontSize: 10, color: G, fontWeight: 700 }}>{c.valor_total}</span>
+      </div>
+    );
+  }
+  return (
+    <Slide n={7}>
+      <h1 style={{ fontWeight: 800, fontSize: 28, color: TX, margin: '0 0 2px' }}>Todos os clientes faturados no período</h1>
+      <p style={{ fontSize: 11, color: TG, margin: '0 0 10px' }}>Nomes duplicados foram agrupados e os valores foram somados</p>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
+        {[
+          ['📄', d.crm.registros, 'registros de faturamento'],
+          ['👥', d.crm.pacientes_unicos, 'clientes únicos'],
+        ].map(([icon, val, lbl]) => (
+          <div key={String(lbl)} style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            background: GL, border: `1.5px solid ${GB}`, borderRadius: 10, padding: '8px 16px',
+          }}>
+            <IBox icon={String(icon)} green size={28} />
+            <span style={{ fontWeight: 800, fontSize: 18, color: G }}>{String(val)}</span>
+            <span style={{ fontSize: 11, color: TM }}>{String(lbl)}</span>
           </div>
-          {top4.map((c: ClienteItem, i: number) => (
+        ))}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 200px', gap: 12 }}>
+        <div>
+          <TableHead />
+          {col1.map((c, i) => <Row key={i} c={c} i={i} />)}
+        </div>
+        <div>
+          <TableHead />
+          {col2.map((c, i) => <Row key={i} c={c} i={i + 10} />)}
+        </div>
+        <Card style={{ padding: '12px 14px', alignSelf: 'start' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 10 }}>
+            <div style={{ width: 22, height: 22, borderRadius: '50%', background: G, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: '#fff' }}>★</div>
+            <p style={{ fontWeight: 700, fontSize: 12, color: G, margin: 0 }}>{top4.length} maiores valores</p>
+          </div>
+          {top4.map((c, i) => (
             <div key={i} style={{ marginBottom: 10 }}>
-              <p style={{ fontWeight: 700, fontSize: 12, margin: '0 0 2px', color: '#111' }}>
-                <span style={{ color: GREEN }}>{i + 1} </span>{c.nome}
-              </p>
-              <p style={{ fontWeight: 800, fontSize: 14, color: GREEN, margin: 0 }}>{c.valor_total}</p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                <span style={{ fontWeight: 800, fontSize: 14, color: TX }}>{i + 1}</span>
+                <span style={{ fontSize: 11, color: TM, fontWeight: 500 }}>{c.nome.length > 22 ? c.nome.slice(0, 22) + '…' : c.nome}</span>
+              </div>
+              <p style={{ fontWeight: 700, fontSize: 13, color: G, margin: 0, paddingLeft: 20 }}>{c.valor_total}</p>
             </div>
           ))}
         </Card>
@@ -519,94 +556,72 @@ function Page7({ d }: { d: DiagnosticoData }) {
   );
 }
 
-function ClientTable({ rows, startIdx }: { rows: ClienteItem[]; startIdx: number }) {
-  return (
-    <div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px 60px 90px', padding: '0 4px 4px', borderBottom: '1px solid #eee' }}>
-        {['Cliente', 'Origem', 'Reg.', 'Valor'].map(h => (
-          <span key={h} style={{ fontSize: 9.5, color: '#888', fontWeight: 600 }}>{h}</span>
-        ))}
-      </div>
-      {rows.map((c: ClienteItem, i: number) => (
-        <div key={i} style={{
-          display: 'grid', gridTemplateColumns: '1fr 90px 60px 90px',
-          padding: '4px 4px', borderBottom: '1px solid #f5f5f5', alignItems: 'center',
-        }}>
-          <span style={{ fontSize: 9.5, color: '#222', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {startIdx + i}. {c.nome}
-          </span>
-          <span style={{ fontSize: 9.5, color: '#555' }}>{c.origem}</span>
-          <span style={{ fontSize: 9.5, color: '#555' }}>{c.registros}</span>
-          <span style={{ fontSize: 10, fontWeight: 700, color: '#111' }}>{c.valor_total}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ── Page 8 — Ponto de atenção ───────────────────────────────────────────────
+// ── Page 8 — Validação de origem ────────────────────────────────────────────
 
 function Page8({ d }: { d: DiagnosticoData }) {
-  // Detect which origins need attention
-  const waOrigens = d.crm.por_origem
+  const waOrigins = d.crm.por_origem
     .filter(o => o.canal.toLowerCase().includes('whatsapp'))
     .map(o => o.canal);
 
   return (
-    <Slide>
-      <PageHeader n={8} />
-      <h1 style={{ fontWeight: 800, fontSize: 32, color: '#111', margin: '0 0 4px' }}>Ponto de atenção sobre</h1>
-      <p style={{ fontWeight: 800, fontSize: 32, color: GREEN, margin: '0 0 24px' }}>validação de origem</p>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginBottom: 16 }}>
-        <Card>
+    <Slide n={8}>
+      <h1 style={{ fontWeight: 800, fontSize: 36, color: TX, margin: '0 0 4px', lineHeight: 1.05 }}>
+        Ponto de atenção sobre
+      </h1>
+      <p style={{ fontWeight: 800, fontSize: 34, color: G, margin: '0 0 18px', lineHeight: 1.05 }}>
+        validação de origem
+      </p>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12, marginBottom: 14 }}>
+        <Card style={{ padding: '16px 18px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-            <IconBox color={GREEN} bg={LIGHT_GREEN}>🛡</IconBox>
-            <p style={{ fontWeight: 700, fontSize: 13, color: '#111', margin: 0 }}>Por que validar?</p>
+            <IBox icon="🛡" green size={30} />
+            <p style={{ fontWeight: 700, fontSize: 13, color: TX, margin: 0 }}>Por que validar?</p>
           </div>
-          <p style={{ fontSize: 11.5, color: '#555', lineHeight: 1.55, margin: 0 }}>
+          <p style={{ fontSize: 11.5, color: TM, lineHeight: 1.65, margin: 0 }}>
             A origem registrada na base deve ser usada como referência, mas precisa ser validada no atendimento para garantir que a análise esteja correta.
           </p>
         </Card>
-        <Card>
+        <Card style={{ padding: '16px 18px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-            <IconBox color="#3b82f6" bg={BLUE_LIGHT}>🔍</IconBox>
-            <p style={{ fontWeight: 700, fontSize: 13, color: '#111', margin: 0 }}>Quando redobrar a atenção</p>
+            <IBox icon="🔍" green size={30} />
+            <p style={{ fontWeight: 700, fontSize: 13, color: TX, margin: 0 }}>Quando redobrar a atenção</p>
           </div>
-          {waOrigens.length > 0 ? (
-            <ul style={{ fontSize: 11.5, color: '#555', lineHeight: 1.7, margin: 0, paddingLeft: 14 }}>
-              {waOrigens.map(o => <li key={o}>{o}</li>)}
-            </ul>
-          ) : (
-            <p style={{ fontSize: 11.5, color: '#555', lineHeight: 1.55, margin: 0 }}>Todos os clientes com origem "WhatsApp" ou combinações.</p>
-          )}
-          <p style={{ fontSize: 11, color: '#888', lineHeight: 1.5, margin: '8px 0 0' }}>
-            O WhatsApp pode ser apenas o canal onde a conversa aconteceu, e não necessariamente o primeiro ponto de contato.
+          <div style={{ marginBottom: 8 }}>
+            {(waOrigins.length > 0 ? waOrigins : ['WhatsApp', 'Facebook - WhatsApp', 'Instagram - WhatsApp']).map(o => (
+              <div key={o} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                <div style={{ width: 6, height: 6, borderRadius: '50%', background: G, flexShrink: 0 }} />
+                <span style={{ fontSize: 11.5, color: TM }}>{o}</span>
+              </div>
+            ))}
+          </div>
+          <p style={{ fontSize: 11, color: TG, lineHeight: 1.55, margin: 0 }}>
+            O WhatsApp pode ser apenas o canal onde a conversa aconteceu, e não necessariamente o primeiro ponto de contato do paciente.
           </p>
         </Card>
-        <Card>
+        <Card style={{ padding: '16px 18px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-            <IconBox color="#8b5cf6" bg="#f5f3ff">💬</IconBox>
-            <p style={{ fontWeight: 700, fontSize: 13, color: '#111', margin: 0 }}>Pergunta sugerida para o atendimento</p>
+            <IBox icon="💬" green size={30} />
+            <p style={{ fontWeight: 700, fontSize: 13, color: TX, margin: 0 }}>Pergunta sugerida para o atendimento</p>
           </div>
-          <div style={{ background: '#f9f9f9', borderRadius: 8, padding: 10, position: 'relative' }}>
-            <span style={{ fontSize: 20, color: '#ccc', position: 'absolute', top: 4, left: 8 }}>"</span>
-            <p style={{ fontSize: 11.5, color: '#555', lineHeight: 1.55, margin: '8px 0 0', paddingLeft: 16 }}>
+          <div style={{
+            background: GL, border: `1.5px solid ${GB}`, borderRadius: 10, padding: '10px 12px',
+            position: 'relative',
+          }}>
+            <span style={{ fontSize: 22, color: G, position: 'absolute', top: 4, left: 8, lineHeight: 1 }}>"</span>
+            <p style={{ fontSize: 11.5, color: TM, lineHeight: 1.6, margin: '12px 0 0', paddingLeft: 12 }}>
               Só para registrarmos certinho: você conheceu a clínica por anúncio, Instagram, Facebook, Google, WhatsApp, link da bio ou outro canal?
             </p>
-            <span style={{ fontSize: 20, color: '#ccc', float: 'right' }}>"</span>
+            <span style={{ fontSize: 22, color: G, position: 'absolute', bottom: 4, right: 8, lineHeight: 1 }}>"</span>
           </div>
         </Card>
       </div>
-
       <div style={{
         display: 'flex', alignItems: 'center', gap: 12,
-        background: '#f9fef9', borderRadius: 12, padding: '12px 16px',
-        border: `1px solid ${GREEN}25`,
+        background: GL, border: `1.5px solid ${GB}`, borderRadius: 12, padding: '12px 18px',
       }}>
-        <span style={{ fontSize: 20 }}>🎯</span>
-        <p style={{ fontSize: 12, color: '#444', lineHeight: 1.5, margin: 0 }}>
-          Essa validação ajuda a <strong style={{ color: GREEN }}>entender melhor</strong> quais canais estão influenciando os fechamentos e <strong style={{ color: GREEN }}>evita uma leitura errada dos resultados</strong>.
+        <IBox icon="🎯" green size={32} />
+        <p style={{ fontSize: 12, color: TM, margin: 0, lineHeight: 1.6 }}>
+          Essa validação ajuda a <strong style={{ color: G }}>entender melhor</strong> quais canais estão influenciando os fechamentos e <strong style={{ color: G }}>evita uma leitura errada dos resultados</strong>.
         </p>
       </div>
     </Slide>
@@ -618,60 +633,78 @@ function Page8({ d }: { d: DiagnosticoData }) {
 function Page9({ d }: { d: DiagnosticoData }) {
   const m = d.meta;
   const c = d.crm;
+  const fbBetter = m.facebook.resultados >= m.instagram.resultados;
   return (
-    <Slide>
-      <PageHeader n={9} />
-      <h1 style={{ fontWeight: 800, fontSize: 32, color: '#111', margin: '0 0 18px' }}>Diagnóstico geral</h1>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 12, marginBottom: 16 }}>
-        <Card>
-          <p style={{ fontWeight: 700, fontSize: 11, color: GREEN, margin: '0 0 8px' }}>Geração de conversas</p>
-          <p style={{ fontWeight: 800, fontSize: 24, color: '#111', margin: '0 0 2px' }}>{m.resultados}</p>
-          <p style={{ fontSize: 10, color: '#888', margin: '0 0 8px' }}>resultados</p>
-          <div style={{ width: '100%', height: 2, background: GREEN, borderRadius: 2, marginBottom: 6 }} />
-          <p style={{ fontSize: 10.5, color: '#555', margin: 0 }}>custo médio de <strong style={{ color: GREEN }}>{m.custo_resultado}</strong> por conversa iniciada</p>
-        </Card>
-        <Card>
-          <p style={{ fontWeight: 700, fontSize: 11, color: GREEN, margin: '0 0 8px' }}>Eficiência por plataforma</p>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-            <span>🔵</span>
-            <p style={{ fontSize: 11, color: '#444', margin: 0 }}>Facebook teve <strong>melhor eficiência</strong> de custo</p>
+    <Slide n={9}>
+      <h1 style={{ fontWeight: 800, fontSize: 34, color: TX, margin: '0 0 16px' }}>Diagnóstico geral</h1>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 14 }}>
+        {/* Geração de conversas */}
+        <Card style={{ padding: '14px 16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <IBox icon="💬" green size={28} />
+            <span style={{ fontSize: 11, color: G, fontWeight: 700 }}>Geração de conversas</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span>📸</span>
-            <p style={{ fontSize: 11, color: '#444', margin: 0 }}>Instagram manteve <strong>bom volume</strong>, mas com custo mais elevado</p>
-          </div>
-        </Card>
-        <Card>
-          <p style={{ fontWeight: 700, fontSize: 11, color: GREEN, margin: '0 0 8px' }}>Faturamento da base interna</p>
-          <p style={{ fontWeight: 800, fontSize: 20, color: '#111', margin: '0 0 2px' }}>{c.faturamento_total}</p>
-          <div style={{ width: '100%', height: 2, background: GREEN, borderRadius: 2, margin: '6px 0' }} />
-          <p style={{ fontSize: 11, color: '#555', margin: 0 }}>{c.pacientes_unicos} <span style={{ color: '#888' }}>clientes únicos</span></p>
-        </Card>
-        <Card>
-          <p style={{ fontWeight: 700, fontSize: 11, color: '#f59e0b', margin: '0 0 8px' }}>⚠ Principal ponto de atenção</p>
-          <p style={{ fontSize: 11.5, color: '#444', lineHeight: 1.5, margin: 0 }}>
-            validar a origem real dos pacientes, principalmente quando a origem aparece como <strong style={{ color: '#555' }}>WhatsApp</strong>
+          <p style={{ fontWeight: 800, fontSize: 22, color: TX, margin: '0 0 4px' }}>{m.resultados}</p>
+          <p style={{ fontSize: 10.5, color: TG, margin: '0 0 4px' }}>resultados</p>
+          <div style={{ height: 2, background: G, borderRadius: 2, width: 28, marginBottom: 6 }} />
+          <p style={{ fontSize: 10.5, color: TG, margin: 0 }}>
+            custo médio de <strong style={{ color: G }}>{m.custo_resultado}</strong><br />por conversa iniciada
           </p>
         </Card>
+        {/* Eficiência */}
+        <Card style={{ padding: '14px 16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <IBox icon="📊" green size={28} />
+            <span style={{ fontSize: 11, color: G, fontWeight: 700 }}>Eficiência por plataforma</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 6 }}>
+            <span style={{ fontSize: 16 }}>🔵</span>
+            <p style={{ fontSize: 11, color: TM, margin: 0 }}>
+              Facebook teve <strong>melhor eficiência</strong> de custo
+            </p>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <span style={{ fontSize: 16 }}>📸</span>
+            <p style={{ fontSize: 11, color: TM, margin: 0 }}>
+              Instagram manteve <strong>bom volume</strong>, mas com custo mais elevado
+            </p>
+          </div>
+        </Card>
+        {/* Faturamento */}
+        <Card style={{ padding: '14px 16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <IBox icon="$" green size={28} />
+            <span style={{ fontSize: 11, color: G, fontWeight: 700 }}>Faturamento da base interna</span>
+          </div>
+          <p style={{ fontWeight: 800, fontSize: 20, color: TX, margin: '0 0 4px', lineHeight: 1.1 }}>{c.faturamento_total}</p>
+          <div style={{ height: 2, background: G, borderRadius: 2, width: 28, marginBottom: 6 }} />
+          <p style={{ fontSize: 11, color: TG, margin: 0 }}>{c.pacientes_unicos} clientes únicos</p>
+        </Card>
+        {/* Ponto de atenção */}
+        <Card style={{ padding: '14px 16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <IBox icon="⚠️" green size={28} />
+            <span style={{ fontSize: 11, color: G, fontWeight: 700 }}>Principal ponto de atenção</span>
+          </div>
+          <p style={{ fontSize: 11, color: TM, lineHeight: 1.6, margin: 0 }}>{d.diagnostico.proximo_passo}</p>
+        </Card>
       </div>
-
       <div style={{
-        display: 'flex', gap: 14, background: LIGHT_GREEN,
-        border: `1.5px solid ${GREEN}30`, borderRadius: 12, padding: '14px 18px',
-        borderLeft: `4px solid ${GREEN}`,
+        display: 'flex', alignItems: 'flex-start', gap: 14,
+        background: GL, border: `1.5px solid ${GB}`, borderLeft: `4px solid ${G}`,
+        borderRadius: 12, padding: '14px 18px',
       }}>
-        <IconBox color={GREEN} bg={`${GREEN}20`}>🎯</IconBox>
+        <IBox icon="🎯" green size={34} />
         <div>
-          <p style={{ fontWeight: 700, fontSize: 13, color: GREEN, marginBottom: 4 }}>Diagnóstico</p>
-          <p style={{ fontSize: 12, color: '#444', lineHeight: 1.6, margin: 0 }}>{d.diagnostico.texto}</p>
+          <p style={{ fontWeight: 700, fontSize: 13, color: G, margin: '0 0 5px' }}>Diagnóstico</p>
+          <p style={{ fontSize: 12, color: TM, lineHeight: 1.65, margin: 0 }}>{d.diagnostico.texto}</p>
         </div>
       </div>
     </Slide>
   );
 }
 
-// ── Page 10 — Conclusão ─────────────────────────────────────────────────────
+// ── Page 10 — Conclusão ────────────────────────────────────────────────────
 
 function Page10({ d }: { d: DiagnosticoData }) {
   const cards = [
@@ -680,77 +713,78 @@ function Page10({ d }: { d: DiagnosticoData }) {
     { icon: '🎯', title: 'Próximo passo', text: d.diagnostico.proximo_passo },
   ];
   return (
-    <Slide>
-      <PageHeader n={10} />
-      <h1 style={{ fontWeight: 800, fontSize: 44, color: '#111', margin: '0 0 4px' }}>Conclusão</h1>
-      <p style={{ fontWeight: 700, fontSize: 18, color: GREEN, margin: '0 0 28px' }}>{d.cliente}</p>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginBottom: 20 }}>
+    <Slide n={10}>
+      <h1 style={{ fontWeight: 800, fontSize: 52, color: TX, margin: '0 0 4px', lineHeight: 1.04 }}>Conclusão</h1>
+      <p style={{ fontWeight: 700, fontSize: 20, color: G, margin: '0 0 22px' }}>{d.cliente}</p>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 14 }}>
         {cards.map(card => (
           <Card key={card.title} style={{ padding: '18px 20px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-              <span style={{ fontSize: 18 }}>{card.icon}</span>
-              <p style={{ fontWeight: 700, fontSize: 13, color: '#111', margin: 0 }}>{card.title}</p>
+              <IBox icon={card.icon} green size={30} />
+              <p style={{ fontWeight: 700, fontSize: 13, color: TX, margin: 0 }}>{card.title}</p>
             </div>
-            <div style={{ height: 2, background: GREEN, borderRadius: 2, marginBottom: 12, width: 32 }} />
-            <p style={{ fontSize: 12, color: '#555', lineHeight: 1.6, margin: 0 }}>{card.text}</p>
+            <div style={{ height: 2, background: G, borderRadius: 2, width: 24, marginBottom: 10 }} />
+            <p style={{ fontSize: 12, color: TM, lineHeight: 1.7, margin: 0 }}>{card.text}</p>
           </Card>
         ))}
       </div>
-
-      <div style={{ position: 'absolute', bottom: 22, right: 36, display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span style={{ fontSize: 11, color: '#888' }}>
-          <strong style={{ color: GREEN }}>Onmid</strong> | Diagnóstico de Performance
+      {/* Custom footer for last page */}
+      <div style={{
+        position: 'absolute', bottom: 17, left: 44,
+        display: 'flex', alignItems: 'center', gap: 10,
+      }}>
+        <div style={{ width: 28, height: 2.5, background: G, borderRadius: 2 }} />
+        <span style={{ fontSize: 12, color: TG }}>
+          <strong style={{ color: G }}>Onmid</strong>
+          {' '}|{' '}Diagnóstico de Performance
         </span>
       </div>
     </Slide>
   );
 }
 
-// ── Main export ─────────────────────────────────────────────────────────────
+// ── Export ─────────────────────────────────────────────────────────────────
 
-export default function DiagnosticoTemplate({ data }: { data: DiagnosticoData }) {
+export default function DiagnosticoTemplate({ data: d }: { data: DiagnosticoData }) {
   return (
-    <div style={{ background: '#e8e8e8', padding: '20px 0' }}>
-      {/* Print button — hidden on print */}
-      <div style={{ textAlign: 'center', marginBottom: 20 }} className="no-print">
+    <div>
+      <style>{`
+        @media print {
+          @page { size: 1200px 675px landscape; margin: 0; }
+          body { margin: 0; background: white; }
+          .no-print { display: none !important; }
+          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+        }
+      `}</style>
+
+      {/* Print button */}
+      <div className="no-print" style={{
+        position: 'fixed', top: 20, right: 20, zIndex: 9999,
+        display: 'flex', gap: 10,
+      }}>
         <button
           onClick={() => window.print()}
           style={{
-            background: GREEN, color: '#fff', border: 'none', borderRadius: 10,
-            padding: '10px 28px', fontSize: 14, fontWeight: 700, cursor: 'pointer',
+            background: G, color: '#fff', border: 'none', borderRadius: 10,
+            padding: '10px 20px', fontWeight: 700, fontSize: 14, cursor: 'pointer',
+            boxShadow: '0 4px 12px rgba(34,197,94,0.4)',
+            fontFamily: 'inherit',
           }}
         >
-          Baixar / Imprimir PDF
+          ⬇ Baixar PDF
         </button>
       </div>
 
-      <div style={{ maxWidth: 1200, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <Page1 d={data} />
-        <Page2 d={data} />
-        <Page3 d={data} />
-        <Page4 d={data} />
-        <Page5 d={data} />
-        <Page6 d={data} />
-        <Page7 d={data} />
-        <Page8 d={data} />
-        <Page9 d={data} />
-        <Page10 d={data} />
-      </div>
-
-      <style>{`
-        @media print {
-          body { margin: 0; background: white; }
-          .no-print { display: none !important; }
-          @page { size: 1200px 675px landscape; margin: 0; }
-          body > div { padding: 0 !important; background: white !important; }
-          body > div > div:last-child { max-width: 100% !important; gap: 0 !important; }
-          body > div > div:last-child > div {
-            width: 100vw !important; max-width: 100% !important;
-            page-break-after: always !important; break-after: page !important;
-          }
-        }
-      `}</style>
+      <Page1 d={d} />
+      <Page2 d={d} />
+      <Page3 d={d} />
+      <Page4 d={d} />
+      <Page5 d={d} />
+      <Page6 d={d} />
+      <Page7 d={d} />
+      <Page8 d={d} />
+      <Page9 d={d} />
+      <Page10 d={d} />
     </div>
   );
 }
