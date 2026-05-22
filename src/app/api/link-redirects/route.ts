@@ -8,10 +8,38 @@ function randomSlug(len = 6) {
   return s;
 }
 
+async function ensureTables(pool: ReturnType<typeof makeServerPool>) {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS public.link_redirects (
+      id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      client_id   UUID REFERENCES public.clients(id) ON DELETE CASCADE,
+      name        TEXT NOT NULL,
+      slug        TEXT NOT NULL UNIQUE,
+      whatsapp    TEXT NOT NULL,
+      message     TEXT NOT NULL DEFAULT 'Olá, vim pelo anúncio!',
+      created_at  TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS public.link_redirect_clicks (
+      id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      redirect_id UUID REFERENCES public.link_redirects(id) ON DELETE CASCADE,
+      utm_source  TEXT,
+      utm_medium  TEXT,
+      utm_campaign TEXT,
+      utm_content TEXT,
+      utm_term    TEXT,
+      ip          TEXT,
+      user_agent  TEXT,
+      referer     TEXT,
+      created_at  TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+}
+
 export async function GET(req: NextRequest) {
   const clientId = req.nextUrl.searchParams.get('clientId');
   const pool = makeServerPool();
   try {
+    await ensureTables(pool);
     const { rows } = await pool.query(
       `SELECT lr.*, c.name AS client_name,
               COUNT(lrc.id)::int AS clicks,
@@ -25,10 +53,6 @@ export async function GET(req: NextRequest) {
       clientId ? [clientId] : [],
     );
     return Response.json(rows);
-  } catch (e) {
-    const code = (e as { code?: string }).code;
-    if (code === '42P01') return Response.json([]);
-    throw e;
   } finally {
     await pool.end();
   }
@@ -49,6 +73,7 @@ export async function POST(req: NextRequest) {
   const slug = (body.slug ?? '').trim() || randomSlug();
   const pool = makeServerPool();
   try {
+    await ensureTables(pool);
     const { rows: [row] } = await pool.query(
       `INSERT INTO public.link_redirects (client_id, name, slug, whatsapp, message)
        VALUES ($1, $2, $3, $4, $5)

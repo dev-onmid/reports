@@ -116,8 +116,11 @@ export default function RastreamentoPage() {
           message: form.message,
         }),
       });
-      const data = await res.json() as { error?: string };
-      if (!res.ok) { setError(data.error ?? 'Erro ao salvar.'); return; }
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({})) as { error?: string };
+        setError(data.error ?? 'Erro ao salvar.');
+        return;
+      }
       setShowForm(false);
       setEditingId(null);
       setForm({ clientId: '', name: '', slug: '', whatsapp: '', message: 'Olá, vim pelo anúncio!' });
