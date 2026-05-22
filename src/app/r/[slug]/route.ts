@@ -15,7 +15,7 @@ export async function GET(
     await pool.query(`
       CREATE TABLE IF NOT EXISTS public.link_redirects (
         id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        client_id   UUID REFERENCES public.clients(id) ON DELETE CASCADE,
+        client_id   TEXT,
         name        TEXT NOT NULL,
         slug        TEXT NOT NULL UNIQUE,
         whatsapp    TEXT NOT NULL,

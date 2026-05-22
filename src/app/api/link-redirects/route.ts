@@ -12,7 +12,7 @@ async function ensureTables(pool: ReturnType<typeof makeServerPool>) {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS public.link_redirects (
       id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      client_id   UUID REFERENCES public.clients(id) ON DELETE CASCADE,
+      client_id   TEXT,
       name        TEXT NOT NULL,
       slug        TEXT NOT NULL UNIQUE,
       whatsapp    TEXT NOT NULL,
@@ -32,6 +32,20 @@ async function ensureTables(pool: ReturnType<typeof makeServerPool>) {
       referer     TEXT,
       created_at  TIMESTAMPTZ DEFAULT NOW()
     );
+  `);
+  // Fix column type if table was previously created with UUID client_id
+  await pool.query(`
+    DO $$ BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'link_redirects'
+          AND column_name = 'client_id' AND data_type = 'uuid'
+      ) THEN
+        ALTER TABLE public.link_redirects
+          DROP CONSTRAINT IF EXISTS link_redirects_client_id_fkey,
+          ALTER COLUMN client_id TYPE TEXT USING client_id::TEXT;
+      END IF;
+    END $$;
   `);
 }
 
