@@ -2947,6 +2947,7 @@ export default function GeneralDashboard() {
   const [customDateTo, setCustomDateTo] = useState('');
   const [metricsByClient, setMetricsByClient] = useState<Record<string, ApiMetrics>>({});
   const [goalsByClient, setGoalsByClient] = useState<Record<string, GoalConfig | null>>({});
+  const [planningsByClient, setPlanningsByClient] = useState<Record<string, PlanningConfig>>({});
   const [crmSummary, setCrmSummary] = useState<Record<string, ClientSheetsSummary>>({});
   const [campaigns, setCampaigns] = useState<CampaignPerformance[]>([]);
   const [keywords, setKeywords] = useState<GoogleKeyword[]>([]);
@@ -3062,11 +3063,38 @@ export default function GeneralDashboard() {
     });
   }, [clients]);
 
-  // Read goals from localStorage
+  // Load goals + planning: localStorage fallback, then DB as source of truth
   useEffect(() => {
+    if (clients.length === 0) return;
     const g: Record<string, GoalConfig | null> = {};
-    for (const c of clients) g[c.id] = readGoalFromStorage(c.id);
+    const p: Record<string, PlanningConfig> = {};
+    for (const c of clients) {
+      g[c.id] = readGoalFromStorage(c.id);
+      p[c.id] = readPlanningFromStorage(c.id);
+    }
     setGoalsByClient(g);
+    setPlanningsByClient(p);
+
+    const ids = clients.map(c => c.id).join(',');
+    fetch(`/api/clients/bulk-settings?clientIds=${ids}`)
+      .then(r => r.json())
+      .then((data: { goals: Record<string, GoalConfig>; planning: Record<string, { tkm: number; cplMeta: number; stages: FunnelStage[] }> }) => {
+        if (Object.keys(data.goals).length > 0) {
+          setGoalsByClient(prev => ({ ...prev, ...data.goals }));
+        }
+        if (Object.keys(data.planning).length > 0) {
+          const dbPlanning: Record<string, PlanningConfig> = {};
+          for (const [id, raw] of Object.entries(data.planning)) {
+            dbPlanning[id] = {
+              tkm: raw.tkm || DEFAULT_PLANNING.tkm,
+              cplMeta: raw.cplMeta || DEFAULT_PLANNING.cplMeta,
+              stages: Array.isArray(raw.stages) && raw.stages.length >= 2 ? raw.stages : DEFAULT_STAGES,
+            };
+          }
+          setPlanningsByClient(prev => ({ ...prev, ...dbPlanning }));
+        }
+      })
+      .catch(() => {});
   }, [clients]);
 
   // Skip fetching when custom period but dates not yet filled
@@ -3387,7 +3415,7 @@ export default function GeneralDashboard() {
 
   for (const id of selectedIds) {
     const goal = goalsByClient[id];
-    const planning = readPlanningFromStorage(id);
+    const planning = planningsByClient[id] ?? readPlanningFromStorage(id);
     const plannedFunnel = plannedFunnelFromGoal(goal, planning);
     const topVolume = plannedFunnel[0] ?? 0;
     leadsGoal += topVolume;
@@ -3421,7 +3449,7 @@ export default function GeneralDashboard() {
   // Receita efetiva: usa CRM se disponível, senão estima via fechamentos × TKM médio
   let totalTkm = 0, tkmCount = 0;
   for (const id of selectedIds) {
-    const planning = readPlanningFromStorage(id);
+    const planning = planningsByClient[id] ?? readPlanningFromStorage(id);
     if (planning.tkm > 0) { totalTkm += planning.tkm; tkmCount++; }
   }
   const avgTkm = tkmCount > 0 ? totalTkm / tkmCount : DEFAULT_PLANNING.tkm;
@@ -3465,7 +3493,7 @@ export default function GeneralDashboard() {
     if (!client) continue;
     const m = metricsByClient[id];
     const goal = goalsByClient[id];
-    const planning = readPlanningFromStorage(id);
+    const planning = planningsByClient[id] ?? readPlanningFromStorage(id);
     const clientPlannedLeads = plannedFunnelFromGoal(goal, planning)[0] ?? 0;
     const clientLeads = (m?.meta?.leads ?? 0) + (m?.google?.conversions ?? 0);
     const clientLeadsPartial = autoPartial(clientPlannedLeads, period);
@@ -3742,7 +3770,7 @@ export default function GeneralDashboard() {
               <p className="mt-0.5 text-[11px] text-foreground/60">Período: {PERIODS.find(p => p.value === period)?.label ?? period}</p>
               {(() => {
                 const firstId = [...selectedIds][0];
-                const clientPlanning = firstId ? readPlanningFromStorage(firstId) : DEFAULT_PLANNING;
+                const clientPlanning = firstId ? (planningsByClient[firstId] ?? readPlanningFromStorage(firstId)) : DEFAULT_PLANNING;
                 const stages = clientPlanning.stages.length >= 2 ? clientPlanning.stages : DEFAULT_PLANNING.stages;
                 const crmValues = [
                   totalLeads,
@@ -4032,7 +4060,7 @@ export default function GeneralDashboard() {
               const leads = (m?.meta?.leads ?? 0) + (m?.google?.conversions ?? 0);
               const spend = (m?.meta?.spend ?? 0) + (m?.google?.cost ?? 0);
               const goal = goalsByClient[client.id];
-              const clientLeadsGoal = plannedFunnelFromGoal(goal, readPlanningFromStorage(client.id))[0] ?? 0;
+              const clientLeadsGoal = plannedFunnelFromGoal(goal, planningsByClient[client.id] ?? readPlanningFromStorage(client.id))[0] ?? 0;
               const pct = clientLeadsGoal > 0 ? Math.min(100, Math.round(leads / clientLeadsGoal * 100)) : null;
               return (
                 <div key={client.id} className="flex items-center gap-4 py-2.5">

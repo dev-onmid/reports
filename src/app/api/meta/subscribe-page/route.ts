@@ -48,14 +48,9 @@ export async function POST(request: NextRequest) {
       pageToken = page?.access_token ?? userToken;
     }
 
-    // Instagram: app-level webhook subscription handles event delivery.
-    // Per-account subscribed_apps requires capabilities only available after App Review.
-    if (platform === 'instagram') {
-      return Response.json({ ok: true, ig_id: pageId });
-    }
-
-    // Facebook Pages: subscribe the page to receive feed + messages events
-    const fields = 'feed,messages';
+    // Subscribe the Facebook Page (parent page for Instagram, or the page itself for Facebook)
+    // to receive feed + messages events via subscribed_apps.
+    const fields = platform === 'instagram' ? 'messages,feed' : 'feed,messages';
 
     const subRes = await fetch(
       `https://graph.facebook.com/v21.0/${fbPageId}/subscribed_apps`,

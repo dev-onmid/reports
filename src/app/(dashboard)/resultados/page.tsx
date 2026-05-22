@@ -235,8 +235,9 @@ export default function ResultadosPage() {
   const [planningByClient, setPlanningByClient] = useState<Record<string, ClientPlanningConfig>>({});
   const [loadingMetrics, setLoadingMetrics] = useState(false);
 
-  // Read localStorage goals and planning (client-side only)
+  // Load goals and planning: localStorage first, then DB
   useEffect(() => {
+    if (clients.length === 0) return;
     const goals: Record<string, GoalConfig | null> = {};
     const planning: Record<string, ClientPlanningConfig> = {};
     for (const c of clients) {
@@ -245,6 +246,19 @@ export default function ResultadosPage() {
     }
     setGoalsByClient(goals);
     setPlanningByClient(planning);
+
+    const ids = clients.map(c => c.id).join(',');
+    fetch(`/api/clients/bulk-settings?clientIds=${ids}`)
+      .then(r => r.json())
+      .then((data: { goals: Record<string, GoalConfig>; planning: Record<string, ClientPlanningConfig> }) => {
+        if (Object.keys(data.goals).length > 0) {
+          setGoalsByClient(prev => ({ ...prev, ...data.goals }));
+        }
+        if (Object.keys(data.planning).length > 0) {
+          setPlanningByClient(prev => ({ ...prev, ...data.planning }));
+        }
+      })
+      .catch(() => {});
   }, [clients]);
 
   // Fetch real metrics for all clients

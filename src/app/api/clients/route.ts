@@ -1,8 +1,9 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 
-async function ensureGestorColumn(pool: ReturnType<typeof makeServerPool>) {
+async function ensureColumns(pool: ReturnType<typeof makeServerPool>) {
   await pool.query('ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS gestor_id TEXT').catch(() => {});
+  await pool.query(`ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS ads_billing_mode TEXT NOT NULL DEFAULT 'prepaid'`).catch(() => {});
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -14,15 +15,16 @@ function rowToJson(r: any) {
     status: r.status,
     gestor_id: r.gestor_id ?? null,
     gestor_name: r.gestor_name ?? null,
+    ads_billing_mode: r.ads_billing_mode ?? 'prepaid',
   };
 }
 
 export async function GET() {
   const pool = makeServerPool();
   try {
-    await ensureGestorColumn(pool);
+    await ensureColumns(pool);
     const { rows } = await pool.query(`
-      SELECT c.id, c.name, c.segment, c.status, c.gestor_id, u.name as gestor_name
+      SELECT c.id, c.name, c.segment, c.status, c.gestor_id, c.ads_billing_mode, u.name as gestor_name
       FROM public.clients c
       LEFT JOIN public.users u ON c.gestor_id = u.id
       ORDER BY c.name ASC
@@ -37,7 +39,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json() as { id: string; name: string; segment: string; status: string; gestor_id?: string };
   const pool = makeServerPool();
   try {
-    await ensureGestorColumn(pool);
+    await ensureColumns(pool);
     const { rows } = await pool.query(
       `INSERT INTO public.clients (id, name, segment, status, gestor_id)
        VALUES ($1, $2, $3, $4, $5)
@@ -64,7 +66,7 @@ export async function PATCH(req: NextRequest) {
   const body = await req.json() as Partial<{ name: string; segment: string; status: string; gestor_id: string | null }>;
   const pool = makeServerPool();
   try {
-    await ensureGestorColumn(pool);
+    await ensureColumns(pool);
     const sets: string[] = [];
     const vals: unknown[] = [];
     let idx = 1;

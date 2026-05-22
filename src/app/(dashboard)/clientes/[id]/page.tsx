@@ -354,6 +354,11 @@ function readSavedClientPlanning(clientId: string): ClientPlanningConfig {
 function saveClientPlanning(clientId: string, planning: ClientPlanningConfig) {
   if (typeof window === 'undefined') return;
   window.localStorage.setItem(`clientPlanning_${clientId}`, JSON.stringify(planning));
+  fetch(`/api/clients/${clientId}/planning`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tkm: planning.tkm, cplMeta: planning.cplMeta, stages: planning.stages }),
+  }).catch(() => {});
 }
 
 // ── Funnel planning tab ────────────────────────────────────────────────────────
@@ -364,11 +369,28 @@ function FunnelTab({ clientId, clientName, goalConfig }: { clientId: string; cli
   const [stages, setStages] = useState<FunnelStage[]>(() => readSavedClientPlanning(clientId).stages);
 
   useEffect(() => {
+    let cancelled = false;
     const saved = readSavedClientPlanning(clientId);
     setTkm(saved.tkm);
     setCplMeta(saved.cplMeta);
     setStages(saved.stages);
     setPlanningLoadedFor(clientId);
+    fetch(`/api/clients/${clientId}/planning`)
+      .then(r => r.json())
+      .then((dbData: { tkm: number; cplMeta: number; stages: FunnelStage[] } | null) => {
+        if (cancelled || !dbData) return;
+        const planning: ClientPlanningConfig = {
+          tkm: dbData.tkm || saved.tkm,
+          cplMeta: dbData.cplMeta || saved.cplMeta,
+          stages: sanitizePlanningStages(dbData.stages),
+        };
+        setTkm(planning.tkm);
+        setCplMeta(planning.cplMeta);
+        setStages(planning.stages);
+        window.localStorage.setItem(`clientPlanning_${clientId}`, JSON.stringify(planning));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
   }, [clientId]);
 
   useEffect(() => {
@@ -994,6 +1016,11 @@ function readSavedClientGoal(clientId: string, fallback: ClientGoalConfig): Clie
 function saveClientGoal(clientId: string, goal: ClientGoalConfig) {
   if (typeof window === 'undefined') return;
   window.localStorage.setItem(`clientGoal_${clientId}`, JSON.stringify(goal));
+  fetch(`/api/clients/${clientId}/goal`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(goal),
+  }).catch(() => {});
 }
 
 function buildDashboardDataFromMetaAds(metrics: MetaAdsMetrics): typeof mockDashboardData {
@@ -1510,6 +1537,21 @@ function ClientDnaTab({ clientId, clientName }: { clientId: string; clientName: 
   const [form, setForm] = useState({ name: '', role: TEAM_ROLES[0], phone: '' });
   const [saved, setSaved] = useState(false);
 
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/clients/${clientId}/dna`)
+      .then(r => r.json())
+      .then((dbMembers: ClientTeamMember[]) => {
+        if (cancelled) return;
+        if (Array.isArray(dbMembers) && dbMembers.length > 0) {
+          setMembers(dbMembers);
+          localStorage.setItem(DNA_STORAGE_KEY(clientId), JSON.stringify(dbMembers));
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [clientId]);
+
   function addMember() {
     if (!form.name.trim()) return;
     setMembers((prev) => [...prev, { id: `team-${Date.now()}`, name: form.name.trim(), role: form.role, phone: form.phone.trim() }]);
@@ -1524,6 +1566,11 @@ function ClientDnaTab({ clientId, clientName }: { clientId: string; clientName: 
 
   function handleSave() {
     localStorage.setItem(DNA_STORAGE_KEY(clientId), JSON.stringify(members));
+    fetch(`/api/clients/${clientId}/dna`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(members),
+    }).catch(() => {});
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   }
@@ -2451,11 +2498,26 @@ function ClientIntegrationsTab({ clientId, clientName }: { clientId: string; cli
   useEffect(() => {
     const stored = localStorage.getItem(`${CLIENT_BILLING_MODE_PREFIX}${clientId}`);
     setBillingMode(stored === 'card' ? 'card' : 'prepaid');
+    let cancelled = false;
+    fetch(`/api/clients/${clientId}/billing-mode`)
+      .then(r => r.json())
+      .then((data: { mode: 'prepaid' | 'card' }) => {
+        if (cancelled) return;
+        setBillingMode(data.mode);
+        localStorage.setItem(`${CLIENT_BILLING_MODE_PREFIX}${clientId}`, data.mode);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
   }, [clientId]);
 
   function updateBillingMode(next: 'prepaid' | 'card') {
     setBillingMode(next);
     localStorage.setItem(`${CLIENT_BILLING_MODE_PREFIX}${clientId}`, next);
+    fetch(`/api/clients/${clientId}/billing-mode`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: next }),
+    }).catch(() => {});
   }
 
   return (
@@ -2900,8 +2962,25 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
   const [clientGoalLoadedFor, setClientGoalLoadedFor] = useState(id);
 
   useEffect(() => {
+    let cancelled = false;
     setClientGoal(readSavedClientGoal(id, isNewClient ? ZERO_CLIENT_GOAL : DEFAULT_CLIENT_GOAL));
     setClientGoalLoadedFor(id);
+    fetch(`/api/clients/${id}/goal`)
+      .then(r => r.json())
+      .then((dbData: Partial<ClientGoalConfig> | null) => {
+        if (cancelled || !dbData?.type) return;
+        const option = GOAL_TYPE_OPTIONS.find(o => o.type === dbData.type);
+        if (!option) return;
+        const target = Number(dbData.target ?? 0);
+        const goal: ClientGoalConfig = {
+          type: option.type, label: option.label, format: option.format,
+          target, partial: autoPartial(target), realized: Number(dbData.realized ?? 0),
+        };
+        setClientGoal(goal);
+        window.localStorage.setItem(`clientGoal_${id}`, JSON.stringify(goal));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
   }, [id, isNewClient]);
 
   useEffect(() => {

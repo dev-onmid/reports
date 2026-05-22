@@ -68,11 +68,6 @@ type ClientAccountLink = {
 const LOW_BALANCE_THRESHOLD = 100; // R$100
 const CLIENT_BILLING_MODE_PREFIX = 'clientAdsBillingMode_';
 
-function isClientCardBilling(clientId: string): boolean {
-  if (typeof window === 'undefined') return false;
-  return localStorage.getItem(`${CLIENT_BILLING_MODE_PREFIX}${clientId}`) === 'card';
-}
-
 function MetaAdsMark({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" className={className ?? 'h-4 w-4'} fill="none">
@@ -1230,7 +1225,13 @@ export default function PagamentosPage() {
 
   const activeClientIds = new Set(clients.filter(c => c.status === 'Ativo').map(c => c.id));
   const activeClientLinks = clientLinks.filter(l => activeClientIds.has(l.clientId));
-  const balanceAlertClientLinks = activeClientLinks.filter((link) => !isClientCardBilling(link.clientId));
+  const balanceAlertClientLinks = activeClientLinks.filter((link) => {
+    const client = clients.find(c => c.id === link.clientId);
+    const billingMode = client?.ads_billing_mode
+      ?? (typeof window !== 'undefined' ? localStorage.getItem(`${CLIENT_BILLING_MODE_PREFIX}${link.clientId}`) : null)
+      ?? 'prepaid';
+    return billingMode !== 'card';
+  });
   const activeBalances = balances.filter(b =>
     balanceAlertClientLinks.some(l => {
       if (l.platform === 'meta_ads' && b.platform === 'meta')

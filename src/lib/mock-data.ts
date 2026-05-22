@@ -38,6 +38,7 @@ export type Client = {
   status: ClientStatus;
   gestor_id?: string;
   gestor_name?: string;
+  ads_billing_mode?: 'prepaid' | 'card';
 };
 
 export const mockClients: Client[] = [
