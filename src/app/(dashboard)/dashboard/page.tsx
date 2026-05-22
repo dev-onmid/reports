@@ -882,15 +882,16 @@ function ClientSelector({
     }
     const next = new Set(selected);
     if (next.has(id)) { next.delete(id); } else { next.add(id); }
-    if (next.size === 0) onChange(new Set(clients.map(c => c.id)));
-    else onChange(next);
+    onChange(next);
   }
 
   function toggleAll() {
     onChange(new Set(clients.map(c => c.id)));
   }
 
-  const label = showingAllClients
+  const label = selected.size === 0
+    ? 'Selecionar cliente...'
+    : showingAllClients
     ? 'Todos os clientes'
     : selected.size === 1
     ? clients.find(c => selected.has(c.id))?.name ?? '1 cliente'
@@ -3050,16 +3051,15 @@ export default function GeneralDashboard() {
     if (!isAdmin && customizerOpen) setCustomizerOpen(false);
   }, [customizerOpen, isAdmin]);
 
-  // Initialize: all clients selected (or pre-select from ?client=ID param)
+  // Initialize: pre-select from ?client=ID param, otherwise start empty (force client picker)
   useEffect(() => {
     if (clients.length === 0) return;
     const clientIds = new Set(clients.map(c => c.id));
     const preselect = new URLSearchParams(window.location.search).get('client');
     setSelectedIds((current) => {
       if (preselect && clientIds.has(preselect)) return new Set([preselect]);
-      if (current.size === 0) return new Set(clientIds);
       const valid = [...current].filter((id) => clientIds.has(id));
-      return valid.length > 0 ? new Set(valid) : new Set(clientIds);
+      return new Set(valid);
     });
   }, [clients]);
 
@@ -3696,6 +3696,45 @@ export default function GeneralDashboard() {
         )}
       </div>
 
+      {/* ── CLIENT PICKER EMPTY STATE ── */}
+      {selectedIds.size === 0 && clients.length > 0 && (
+        <div className="flex flex-col items-center justify-center py-16 gap-8">
+          <div className="text-center">
+            <h2 className="font-heading font-normal text-3xl uppercase tracking-wide text-foreground">Escolha um cliente</h2>
+            <p className="mt-2 text-sm text-muted-foreground">Selecione para abrir o dashboard</p>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-w-3xl w-full">
+            {clients.map(c => (
+              <button
+                key={c.id}
+                onClick={() => setSelectedIds(new Set([c.id]))}
+                className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card px-4 py-6 hover:border-primary/50 hover:bg-primary/5 transition-all group"
+              >
+                <ClientAvatar clientId={c.id} name={c.name} size="lg" />
+                <div className="text-center">
+                  <p className="font-bold text-sm text-foreground group-hover:text-primary transition-colors">{c.name}</p>
+                  {(c.category_name ?? c.segment) && (
+                    <p className="text-[10px] text-muted-foreground mt-0.5 uppercase tracking-wide">{c.category_name ?? c.segment}</p>
+                  )}
+                  {c.dashboard_type && (
+                    <span className={cn(
+                      'mt-1.5 inline-block text-[10px] font-bold px-2 py-0.5 rounded-full uppercase',
+                      c.dashboard_type === 'leads' ? 'text-violet-400 bg-violet-500/15' :
+                      c.dashboard_type === 'branding' ? 'text-blue-400 bg-blue-500/15' :
+                      'text-emerald-400 bg-emerald-500/15'
+                    )}>
+                      {c.dashboard_type === 'leads' ? 'Leads' : c.dashboard_type === 'branding' ? 'Branding' : 'Conversão'}
+                    </span>
+                  )}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {selectedIds.size > 0 && <>
+
       {/* AI RECOMMENDATIONS */}
       <AiRecommendationsBox insights={aiInsights} loading={aiLoading} onAnalyze={analyzeWithAI} />
 
@@ -4081,6 +4120,8 @@ export default function GeneralDashboard() {
       )}
 
       <CreativePreviewOverlay creative={previewCreative} onClose={() => setPreviewCreative(null)} />
+
+      </>}
     </div>
   );
 }
