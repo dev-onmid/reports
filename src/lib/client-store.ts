@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { logActivity } from '@/lib/activity-log-store';
-import { type Client, type ClientStatus } from '@/lib/mock-data';
+import { type Client, type ClientStatus, type DashboardType } from '@/lib/mock-data';
 
 const CLIENTS_UPDATED_EVENT = 'clients-updated';
 
@@ -13,6 +13,8 @@ export type NewClientInput = {
   segment: string;
   status: ClientStatus;
   gestor_id?: string;
+  category_id?: string;
+  dashboard_type?: DashboardType;
 };
 
 export function canManageClients(role = CURRENT_USER_ROLE): boolean {
@@ -63,6 +65,8 @@ export function useClients() {
         segment: input.segment.trim(),
         status: input.status,
         gestor_id: input.gestor_id,
+        category_id: input.category_id,
+        dashboard_type: input.dashboard_type ?? 'leads',
       };
       setClients((prev) => [...prev, client]);
       void apiClients('POST', client).then(() => {

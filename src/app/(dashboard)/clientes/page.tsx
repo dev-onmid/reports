@@ -16,7 +16,7 @@ import {
 import { canManageClients, useClients } from '@/lib/client-store';
 import { getAuthSession, verifyUserCredentials } from '@/lib/auth-store';
 import { useInvestmentPayments } from '@/lib/payment-store';
-import type { ClientStatus } from '@/lib/mock-data';
+import type { ClientStatus, DashboardType } from '@/lib/mock-data';
 import { LinkAccountsDialog } from '@/components/link-accounts-dialog';
 import { PlatformIconButton, ALL_PLATFORMS, type PlatformId } from '@/components/platform-icons';
 import { ClientAvatar } from '@/components/client-avatar';
@@ -55,11 +55,16 @@ export default function ClientesPage() {
   const [securityPassword, setSecurityPassword]   = useState('');
   const [securityError, setSecurityError]         = useState('');
   const [securityLoading, setSecurityLoading]     = useState(false);
-  const [name, setName]                           = useState('');
-  const [segment, setSegment]                     = useState('');
-  const [status, setStatus]                       = useState<ClientStatus>('Ativo');
-  const [search, setSearch]                       = useState('');
-  const [segmentFilter, setSegmentFilter]         = useState('');
+  const [name, setName]                                 = useState('');
+  const [segment, setSegment]                           = useState('');
+  const [status, setStatus]                             = useState<ClientStatus>('Ativo');
+  const [search, setSearch]                             = useState('');
+  const [segmentFilter, setSegmentFilter]               = useState('');
+  const [categories, setCategories]                     = useState<{ id: string; name: string; is_default: boolean }[]>([]);
+  const [categoryId, setCategoryId]                     = useState('');
+  const [newClientDashType, setNewClientDashType]       = useState<DashboardType>('leads');
+  const [newCategoryName, setNewCategoryName]           = useState('');
+  const [showNewCategory, setShowNewCategory]           = useState(false);
   const [gestorFilter, setGestorFilter]           = useState('');
   const [sortOrder, setSortOrder]                 = useState<'az' | 'za'>('az');
   const [menuId, setMenuId]                       = useState<string | null>(null);
@@ -88,11 +93,14 @@ export default function ClientesPage() {
 
   const baseClients = showArchived ? archivedClients : clients;
   const displayedClients = baseClients
-    .filter(c =>
-      (c.name.toLowerCase().includes(search.toLowerCase()) || c.segment.toLowerCase().includes(search.toLowerCase())) &&
-      (!segmentFilter || c.segment === segmentFilter) &&
-      (!gestorFilter || c.gestor_name === gestorFilter)
-    )
+    .filter(c => {
+      const catLabel = c.category_name ?? c.segment;
+      return (
+        (c.name.toLowerCase().includes(search.toLowerCase()) || catLabel.toLowerCase().includes(search.toLowerCase())) &&
+        (!segmentFilter || catLabel === segmentFilter) &&
+        (!gestorFilter || c.gestor_name === gestorFilter)
+      );
+    })
     .sort((a, b) => sortOrder === 'az' ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name));
 
   useEffect(() => {
@@ -100,6 +108,7 @@ export default function ClientesPage() {
     setCurrentRole(session?.role ?? '');
     setSecurityEmail(session?.email ?? '');
     fetch('/api/users').then(r => r.ok ? r.json() : []).then(setUsers).catch(() => {});
+    fetch('/api/clients/categories').then(r => r.ok ? r.json() : []).then(setCategories).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -127,9 +136,38 @@ export default function ClientesPage() {
   }, []);
 
   function handleAddClient() {
-    if (!name.trim() || !segment.trim()) return;
-    addClient({ name, segment, status, gestor_id: newClientGestorId || undefined });
-    setName(''); setSegment(''); setStatus('Ativo'); setNewClientGestorId(''); setDialogOpen(false);
+    if (!name.trim() || !categoryId) return;
+    const cat = categories.find(c => c.id === categoryId);
+    addClient({
+      name,
+      segment: cat?.name ?? segment,
+      status,
+      gestor_id: newClientGestorId || undefined,
+      category_id: categoryId,
+      dashboard_type: newClientDashType,
+    });
+    setName(''); setSegment(''); setCategoryId(''); setStatus('Ativo');
+    setNewClientGestorId(''); setNewClientDashType('leads');
+    setShowNewCategory(false); setNewCategoryName('');
+    setDialogOpen(false);
+  }
+
+  async function handleCreateCategory() {
+    if (!newCategoryName.trim()) return;
+    const res = await fetch('/api/clients/categories', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: newCategoryName.trim() }),
+    });
+    if (res.ok) {
+      const newCat = await res.json() as { id: string; name: string; is_default: boolean };
+      setCategories(prev => [...prev, newCat].sort((a, b) =>
+        (b.is_default ? 1 : 0) - (a.is_default ? 1 : 0) || a.name.localeCompare(b.name)
+      ));
+      setCategoryId(newCat.id);
+      setNewCategoryName('');
+      setShowNewCategory(false);
+    }
   }
 
   function openArchiveDialog(client: { id: string; name: string }) {
@@ -274,7 +312,7 @@ export default function ClientesPage() {
           />
         </div>
 
-        {/* Segment filter */}
+        {/* Category filter */}
         <div className="relative">
           <SlidersHorizontal className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
           <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
@@ -283,8 +321,8 @@ export default function ClientesPage() {
             onChange={e => setSegmentFilter(e.target.value)}
             className="appearance-none rounded-lg border border-border bg-card pl-9 pr-8 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary min-w-[170px]"
           >
-            <option value="">Todos os segmentos</option>
-            {allSegments.map(s => <option key={s} value={s}>{s}</option>)}
+            <option value="">Todas as categorias</option>
+            {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
           </select>
         </div>
 
@@ -393,7 +431,23 @@ export default function ClientesPage() {
               <ClientAvatar clientId={cliente.id} name={cliente.name} size="md" />
               <div className="min-w-0">
                 <p className="font-bold text-sm text-foreground truncate">{cliente.name}</p>
-                <p className="text-xs text-muted-foreground truncate">{cliente.segment}</p>
+                <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                  {(cliente.category_name ?? cliente.segment) && (
+                    <span className="text-[10px] font-semibold text-muted-foreground bg-muted/50 px-1.5 py-0.5 rounded truncate">
+                      {cliente.category_name ?? cliente.segment}
+                    </span>
+                  )}
+                  {cliente.dashboard_type && (
+                    <span className={cn(
+                      'text-[10px] font-bold px-1.5 py-0.5 rounded uppercase',
+                      cliente.dashboard_type === 'leads' ? 'text-violet-400 bg-violet-500/15' :
+                      cliente.dashboard_type === 'branding' ? 'text-blue-400 bg-blue-500/15' :
+                      'text-emerald-400 bg-emerald-500/15'
+                    )}>
+                      {cliente.dashboard_type === 'leads' ? 'Leads' : cliente.dashboard_type === 'branding' ? 'Branding' : 'Conversão'}
+                    </span>
+                  )}
+                </div>
               </div>
             </Link>
 
@@ -553,7 +607,10 @@ export default function ClientesPage() {
       {/* ── DIALOGS ── */}
 
       {/* Novo cliente */}
-      <Dialog open={dialogOpen} onOpenChange={(v) => { setDialogOpen(v); if (!v) { setName(''); setSegment(''); setStatus('Ativo'); setNewClientGestorId(''); } }}>
+      <Dialog open={dialogOpen} onOpenChange={(v) => {
+        setDialogOpen(v);
+        if (!v) { setName(''); setSegment(''); setCategoryId(''); setStatus('Ativo'); setNewClientGestorId(''); setNewClientDashType('leads'); setShowNewCategory(false); setNewCategoryName(''); }
+      }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader><DialogTitle>Novo Cliente</DialogTitle></DialogHeader>
           <div className="space-y-4">
@@ -562,8 +619,35 @@ export default function ClientesPage() {
               <Input id="client-name" value={name} onChange={e => setName(e.target.value)} placeholder="Ex: Clínica Nova Vida" className="bg-background" />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="client-segment">Segmento</Label>
-              <Input id="client-segment" value={segment} onChange={e => setSegment(e.target.value)} placeholder="Ex: Saúde" className="bg-background" />
+              <Label htmlFor="client-category">Categoria <span className="text-destructive">*</span></Label>
+              <select id="client-category" value={categoryId} onChange={e => { if (e.target.value === '__new__') { setShowNewCategory(true); } else { setCategoryId(e.target.value); setShowNewCategory(false); } }}
+                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
+                <option value="">Selecione uma categoria...</option>
+                {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                <option value="__new__">+ Nova categoria</option>
+              </select>
+              {showNewCategory && (
+                <div className="flex gap-2 mt-1.5">
+                  <Input
+                    value={newCategoryName}
+                    onChange={e => setNewCategoryName(e.target.value)}
+                    placeholder="Nome da nova categoria"
+                    className="bg-background flex-1"
+                    onKeyDown={e => e.key === 'Enter' && void handleCreateCategory()}
+                  />
+                  <Button size="sm" onClick={() => void handleCreateCategory()} disabled={!newCategoryName.trim()}>Criar</Button>
+                  <Button size="sm" variant="outline" onClick={() => { setShowNewCategory(false); setNewCategoryName(''); }}>✕</Button>
+                </div>
+              )}
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="client-dash-type">Tipo de Dashboard</Label>
+              <select id="client-dash-type" value={newClientDashType} onChange={e => setNewClientDashType(e.target.value as DashboardType)}
+                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
+                <option value="leads">Leads — foco em captação e custo por lead</option>
+                <option value="branding">Branding — métricas de alcance e entrega</option>
+                <option value="conversao">Conversão — vendas, ROAS e receita</option>
+              </select>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="client-status">Status</Label>
@@ -584,7 +668,7 @@ export default function ClientesPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
-            <Button onClick={handleAddClient} disabled={!name.trim() || !segment.trim()}
+            <Button onClick={handleAddClient} disabled={!name.trim() || !categoryId}
               className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
               <Plus className="w-4 h-4 mr-1" /> Criar Cliente
             </Button>

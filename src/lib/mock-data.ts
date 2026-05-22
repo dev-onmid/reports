@@ -31,6 +31,8 @@ export const mockPermissions: Record<string, Permission> = {
 
 export type ClientStatus = 'Ativo' | 'Alerta' | 'Arquivado' | 'Inativo';
 
+export type DashboardType = 'leads' | 'branding' | 'conversao';
+
 export type Client = {
   id: string;
   name: string;
@@ -39,6 +41,9 @@ export type Client = {
   gestor_id?: string;
   gestor_name?: string;
   ads_billing_mode?: 'prepaid' | 'card';
+  category_id?: string;
+  category_name?: string;
+  dashboard_type?: DashboardType;
 };
 
 export const mockClients: Client[] = [

@@ -2,7 +2,7 @@
 
 import { use, useEffect, useState, type ComponentType } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { mockDashboardData, mockClients, type ClientStatus } from '@/lib/mock-data';
+import { mockDashboardData, mockClients, type ClientStatus, type DashboardType } from '@/lib/mock-data';
 import { useClients } from '@/lib/client-store';
 import { getAuthSession, verifyUserCredentials } from '@/lib/auth-store';
 import {
@@ -2956,6 +2956,28 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
   const [securityPassword, setSecurityPassword] = useState('');
   const [securityError, setSecurityError] = useState('');
   const [securityLoading, setSecurityLoading] = useState(false);
+
+  const [categories, setCategories] = useState<{ id: string; name: string; is_default: boolean }[]>([]);
+  const [clientCategoryId, setClientCategoryId] = useState<string>(storedClient?.category_id ?? '');
+  const [clientDashType, setClientDashType] = useState<DashboardType>(storedClient?.dashboard_type ?? 'leads');
+
+  useEffect(() => {
+    fetch('/api/clients/categories').then(r => r.ok ? r.json() : []).then(setCategories).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    setClientCategoryId(storedClient?.category_id ?? '');
+    setClientDashType(storedClient?.dashboard_type ?? 'leads');
+  }, [storedClient?.category_id, storedClient?.dashboard_type]);
+
+  async function patchClient(patch: Record<string, unknown>) {
+    await fetch(`/api/clients?id=${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    window.dispatchEvent(new Event('clients-updated'));
+  }
   const [clientGoal, setClientGoal] = useState<ClientGoalConfig>(() =>
     readSavedClientGoal(id, isNewClient ? ZERO_CLIENT_GOAL : DEFAULT_CLIENT_GOAL)
   );
@@ -3057,7 +3079,19 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
               {client.status}
             </div>
             <h1 className="font-heading font-normal text-4xl uppercase leading-none tracking-wide text-foreground">{client.name}</h1>
-            <p className="text-sm text-muted-foreground mt-1 uppercase tracking-wide">{client.segment}</p>
+            <div className="flex items-center gap-2 mt-1 flex-wrap">
+              <p className="text-sm text-muted-foreground uppercase tracking-wide">
+                {storedClient?.category_name ?? storedClient?.segment ?? client.segment}
+              </p>
+              <span className={cn(
+                'text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase',
+                clientDashType === 'leads' ? 'text-violet-400 border-violet-500/40 bg-violet-500/10' :
+                clientDashType === 'branding' ? 'text-blue-400 border-blue-500/40 bg-blue-500/10' :
+                'text-emerald-400 border-emerald-500/40 bg-emerald-500/10'
+              )}>
+                {clientDashType === 'leads' ? 'Leads' : clientDashType === 'branding' ? 'Branding' : 'Conversão'}
+              </span>
+            </div>
           </div>
           {/* Balance KPIs */}
           <div className="hidden md:flex items-center gap-3 ml-4 pl-4 border-l border-border">
@@ -3113,6 +3147,41 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
             <Link2 className="w-4 h-4 text-primary" />
             Vincular Contas
           </Button>
+        </div>
+      </div>
+
+      {/* Client settings row — category & dashboard type */}
+      <div className="flex items-center gap-3 flex-wrap rounded-xl border border-border bg-card/50 px-4 py-3">
+        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Configurações do cliente</span>
+        <div className="flex items-center gap-2">
+          <label className="text-xs text-muted-foreground">Categoria:</label>
+          <select
+            value={clientCategoryId}
+            onChange={e => {
+              setClientCategoryId(e.target.value);
+              void patchClient({ category_id: e.target.value || null });
+            }}
+            className="h-7 rounded-lg border border-border bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+          >
+            <option value="">Sem categoria</option>
+            {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="text-xs text-muted-foreground">Dashboard:</label>
+          <select
+            value={clientDashType}
+            onChange={e => {
+              const v = e.target.value as DashboardType;
+              setClientDashType(v);
+              void patchClient({ dashboard_type: v });
+            }}
+            className="h-7 rounded-lg border border-border bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+          >
+            <option value="leads">Leads</option>
+            <option value="branding">Branding</option>
+            <option value="conversao">Conversão</option>
+          </select>
         </div>
       </div>
 
