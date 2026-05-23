@@ -83,6 +83,13 @@ export function useClients() {
         .catch((e) => console.error('Erro ao atualizar gestor:', e));
     },
 
+    updateClientMeta(id: string, updates: { category_id?: string; dashboard_type?: DashboardType }) {
+      setClients((prev) => prev.map((c) => c.id === id ? { ...c, ...updates } : c));
+      void apiClients('PATCH', updates, id)
+        .then(() => window.dispatchEvent(new Event(CLIENTS_UPDATED_EVENT)))
+        .catch((e) => console.error('Erro ao atualizar cliente:', e));
+    },
+
     archiveClient(id: string) {
       setClients((prev) => prev.map((c) => c.id === id ? { ...c, status: 'Arquivado' as ClientStatus } : c));
       void apiClients('PATCH', { status: 'Arquivado' }, id)

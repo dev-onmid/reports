@@ -127,6 +127,38 @@
   html {
     @apply font-sans overflow-x-hidden;
   }
+
+  button,
+  a,
+  [role="button"],
+  label[for],
+  input[type="checkbox"],
+  input[type="radio"],
+  input[type="submit"],
+  input[type="button"],
+  select,
+  .cursor-pointer {
+    cursor: pointer;
+  }
+}
+
+@keyframes neon-glow-click {
+  0% {
+    box-shadow:
+      0 0 4px 1px rgba(85, 245, 47, 0.9),
+      0 0 16px 4px rgba(85, 245, 47, 0.5),
+      0 0 32px 8px rgba(85, 245, 47, 0.2);
+  }
+  100% {
+    box-shadow:
+      0 0 0px 0px rgba(85, 245, 47, 0),
+      0 0 0px 0px rgba(85, 245, 47, 0),
+      0 0 0px 0px rgba(85, 245, 47, 0);
+  }
+}
+
+.neon-clicked {
+  animation: neon-glow-click 0.5s ease-out forwards;
 }
 
 /* ── React Flow dark theme overrides ──────────────────────────────────────── */

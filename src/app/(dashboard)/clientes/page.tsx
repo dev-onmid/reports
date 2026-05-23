@@ -36,7 +36,7 @@ type ActivityLog = {
 export default function ClientesPage() {
   const {
     clients, archivedClients, addClient, archiveClient,
-    restoreClient, setClientStatus, deleteClient, updateClientGestor,
+    restoreClient, setClientStatus, deleteClient, updateClientGestor, updateClientMeta,
   } = useClients();
   const { setPayments } = useInvestmentPayments();
 
@@ -79,7 +79,10 @@ export default function ClientesPage() {
   const [activityLoading, setActivityLoading]      = useState(false);
   const [selectedIds, setSelectedIds]              = useState<Set<string>>(new Set());
   const [bulkGestorId, setBulkGestorId]            = useState('');
+  const [bulkCategoryId, setBulkCategoryId]        = useState('');
+  const [bulkDashType, setBulkDashType]            = useState('');
   const [bulkConfirm, setBulkConfirm]              = useState<'delete' | 'archive' | 'inativar' | null>(null);
+  const [inlineEdit, setInlineEdit]                = useState<{ id: string; field: 'category' | 'dashtype' } | null>(null);
 
   const isAdmin = canManageClients(currentRole);
 
@@ -217,11 +220,23 @@ export default function ClientesPage() {
     setSelectedIds(prev => prev.size === displayedClients.length ? new Set() : new Set(displayedClients.map(c => c.id)));
   }
 
-  function clearSelection() { setSelectedIds(new Set()); setBulkConfirm(null); setBulkGestorId(''); }
+  function clearSelection() { setSelectedIds(new Set()); setBulkConfirm(null); setBulkGestorId(''); setBulkCategoryId(''); setBulkDashType(''); }
 
   function bulkSetGestor() {
     if (!bulkGestorId || !isAdmin) return;
     selectedIds.forEach(id => updateClientGestor(id, bulkGestorId));
+    clearSelection();
+  }
+
+  function bulkSetCategory() {
+    if (!bulkCategoryId || !isAdmin) return;
+    selectedIds.forEach(id => updateClientMeta(id, { category_id: bulkCategoryId }));
+    clearSelection();
+  }
+
+  function bulkSetDashType() {
+    if (!bulkDashType || !isAdmin) return;
+    selectedIds.forEach(id => updateClientMeta(id, { dashboard_type: bulkDashType as DashboardType }));
     clearSelection();
   }
 
@@ -427,29 +442,73 @@ export default function ClientesPage() {
             </div>
 
             {/* Avatar + name */}
-            <Link href={`/clientes/${cliente.id}`} className="flex items-center gap-3 min-w-0 flex-1">
-              <ClientAvatar clientId={cliente.id} name={cliente.name} size="md" />
+            <div className="flex items-center gap-3 min-w-0 flex-1">
+              <Link href={`/clientes/${cliente.id}`}>
+                <ClientAvatar clientId={cliente.id} name={cliente.name} size="md" />
+              </Link>
               <div className="min-w-0">
-                <p className="font-bold text-sm text-foreground truncate">{cliente.name}</p>
+                <Link href={`/clientes/${cliente.id}`}>
+                  <p className="font-bold text-sm text-foreground truncate">{cliente.name}</p>
+                </Link>
                 <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                  {(cliente.category_name ?? cliente.segment) && (
-                    <span className="text-[10px] font-semibold text-muted-foreground bg-muted/50 px-1.5 py-0.5 rounded truncate">
-                      {cliente.category_name ?? cliente.segment}
+                  {/* Category badge — click to edit inline */}
+                  {inlineEdit?.id === cliente.id && inlineEdit.field === 'category' ? (
+                    <select
+                      autoFocus
+                      value={cliente.category_id ?? ''}
+                      onChange={e => {
+                        updateClientMeta(cliente.id, { category_id: e.target.value || undefined });
+                        setInlineEdit(null);
+                      }}
+                      onBlur={() => setInlineEdit(null)}
+                      className="text-[10px] rounded border border-primary/50 bg-background px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-primary"
+                    >
+                      <option value="">Sem categoria</option>
+                      {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  ) : (
+                    <span
+                      onClick={() => setInlineEdit({ id: cliente.id, field: 'category' })}
+                      className="text-[10px] font-semibold text-muted-foreground bg-muted/50 px-1.5 py-0.5 rounded truncate cursor-pointer hover:bg-primary/10 hover:text-primary transition-colors"
+                      title="Clique para alterar categoria"
+                    >
+                      {cliente.category_name ?? cliente.segment ?? '+ categoria'}
                     </span>
                   )}
-                  {cliente.dashboard_type && (
-                    <span className={cn(
-                      'text-[10px] font-bold px-1.5 py-0.5 rounded uppercase',
-                      cliente.dashboard_type === 'leads' ? 'text-violet-400 bg-violet-500/15' :
-                      cliente.dashboard_type === 'branding' ? 'text-blue-400 bg-blue-500/15' :
-                      'text-emerald-400 bg-emerald-500/15'
-                    )}>
+
+                  {/* Dashboard type badge — click to edit inline */}
+                  {inlineEdit?.id === cliente.id && inlineEdit.field === 'dashtype' ? (
+                    <select
+                      autoFocus
+                      value={cliente.dashboard_type ?? 'leads'}
+                      onChange={e => {
+                        updateClientMeta(cliente.id, { dashboard_type: e.target.value as DashboardType });
+                        setInlineEdit(null);
+                      }}
+                      onBlur={() => setInlineEdit(null)}
+                      className="text-[10px] rounded border border-primary/50 bg-background px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-primary"
+                    >
+                      <option value="leads">Leads</option>
+                      <option value="branding">Branding</option>
+                      <option value="conversao">Conversão</option>
+                    </select>
+                  ) : (
+                    <span
+                      onClick={() => setInlineEdit({ id: cliente.id, field: 'dashtype' })}
+                      className={cn(
+                        'text-[10px] font-bold px-1.5 py-0.5 rounded uppercase cursor-pointer transition-colors',
+                        cliente.dashboard_type === 'leads' ? 'text-violet-400 bg-violet-500/15 hover:bg-violet-500/30' :
+                        cliente.dashboard_type === 'branding' ? 'text-blue-400 bg-blue-500/15 hover:bg-blue-500/30' :
+                        'text-emerald-400 bg-emerald-500/15 hover:bg-emerald-500/30'
+                      )}
+                      title="Clique para alterar tipo de dashboard"
+                    >
                       {cliente.dashboard_type === 'leads' ? 'Leads' : cliente.dashboard_type === 'branding' ? 'Branding' : 'Conversão'}
                     </span>
                   )}
                 </div>
               </div>
-            </Link>
+            </div>
 
             {/* Right side */}
             <div className="flex items-center gap-4 shrink-0">
@@ -821,6 +880,46 @@ export default function ClientesPage() {
               <button
                 onClick={bulkSetGestor}
                 disabled={!bulkGestorId}
+                className="h-8 rounded-lg bg-primary/10 px-2.5 text-xs font-semibold text-primary hover:bg-primary/20 disabled:opacity-40 transition-colors"
+              >
+                Aplicar
+              </button>
+            </div>
+
+            {/* Category picker */}
+            <div className="flex items-center gap-1.5 border-r border-border pr-3">
+              <select
+                value={bulkCategoryId}
+                onChange={e => setBulkCategoryId(e.target.value)}
+                className="h-8 rounded-lg border border-border bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary max-w-[140px]"
+              >
+                <option value="">Categoria…</option>
+                {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+              <button
+                onClick={bulkSetCategory}
+                disabled={!bulkCategoryId}
+                className="h-8 rounded-lg bg-primary/10 px-2.5 text-xs font-semibold text-primary hover:bg-primary/20 disabled:opacity-40 transition-colors"
+              >
+                Aplicar
+              </button>
+            </div>
+
+            {/* Dashboard type picker */}
+            <div className="flex items-center gap-1.5 border-r border-border pr-3">
+              <select
+                value={bulkDashType}
+                onChange={e => setBulkDashType(e.target.value)}
+                className="h-8 rounded-lg border border-border bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary max-w-[130px]"
+              >
+                <option value="">Tipo dashboard…</option>
+                <option value="leads">Leads</option>
+                <option value="branding">Branding</option>
+                <option value="conversao">Conversão</option>
+              </select>
+              <button
+                onClick={bulkSetDashType}
+                disabled={!bulkDashType}
                 className="h-8 rounded-lg bg-primary/10 px-2.5 text-xs font-semibold text-primary hover:bg-primary/20 disabled:opacity-40 transition-colors"
               >
                 Aplicar
