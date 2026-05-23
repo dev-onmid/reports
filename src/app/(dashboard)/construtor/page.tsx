@@ -1,506 +1,486 @@
 "use client";
 
-import type React from 'react';
-import { useMemo, useState } from 'react';
-import { Plus, X, BarChart2, TrendingUp, Layers, Hash, Check, Search } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  BarChart, Bar, LineChart, Line, AreaChart, Area,
-  XAxis, YAxis, Tooltip, ResponsiveContainer, Legend,
-} from 'recharts';
-import { Button } from '@/components/ui/button';
+  DndContext, DragOverlay, closestCenter, useDroppable,
+  type DragEndEvent, type DragStartEvent,
+} from '@dnd-kit/core';
+import { SortableContext, arrayMove, rectSortingStrategy } from '@dnd-kit/sortable';
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
-} from '@/components/ui/dialog';
+  Plus, Save, Download, Upload, Copy, ChevronDown, Check, Loader2,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { METRIC_BY_KEY, generateMockSeries } from '@/lib/metrics-registry';
 import {
-  ALL_UNIFIED_METRICS,
-  METRIC_BY_KEY,
-  METRIC_GROUPS,
-  SOURCE_LABELS,
-  SOURCE_COLORS,
-  generateMockSeries,
-  computeMockKpi,
-  formatMetricValue,
-  type UnifiedMetric,
-  type MockPoint,
-} from '@/lib/metrics-registry';
+  type DashBlock as DashBlockType,
+  getDefaultViz, getDefaultSize,
+} from '@/components/builder/types';
+import { BlockLibrary, LibraryDragPreview } from '@/components/builder/block-library';
+import { DashBlock } from '@/components/builder/dash-block';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-type ChartType = 'kpi' | 'bar' | 'line' | 'area';
-type Period = '7d' | '30d' | '90d';
-type WidgetSize = 1 | 2 | 3;
 
-type Widget = {
-  id: string;
-  title: string;
-  metrics: string[];
-  chartType: ChartType;
-  size: WidgetSize;
-};
+type Period  = '7d' | '30d' | '90d';
+type Client  = { id: string; name: string };
+type SavedConfig = { blocks: DashBlockType[]; updatedAt: string | null };
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-const TOOLTIP_STYLE = { backgroundColor: '#1B1D24', borderColor: '#2A2D3A', borderRadius: '8px', color: '#F5F5F5', fontSize: '12px' };
-const AXIS_TICK = { fill: '#A0AEC0', fontSize: 11 };
+// ── Drop zone ─────────────────────────────────────────────────────────────────
 
-function autoTitle(keys: string[]): string {
-  if (keys.length === 0) return 'Novo Bloco';
-  return keys.map((k) => METRIC_BY_KEY[k]?.shortLabel ?? k).join(' vs. ');
+function DropZone({ children, isEmpty }: { children: React.ReactNode; isEmpty: boolean }) {
+  const { setNodeRef, isOver } = useDroppable({ id: 'dashboard-drop-zone' });
+  return (
+    <div ref={setNodeRef} className={cn(
+      'min-h-[200px] rounded-xl transition-all duration-200',
+      isOver && 'ring-2 ring-primary/40 bg-primary/5',
+    )}>
+      {isEmpty ? (
+        <div className={cn(
+          'flex flex-col items-center justify-center py-24 border-2 border-dashed rounded-xl transition-all',
+          isOver ? 'border-primary/60 bg-primary/5' : 'border-border/50',
+        )}>
+          <Plus className={cn('w-10 h-10 mb-3', isOver ? 'text-primary' : 'text-muted-foreground/40')} />
+          <p className={cn('font-semibold text-sm', isOver ? 'text-primary' : 'text-muted-foreground/50')}>
+            {isOver ? 'Solte para adicionar' : 'Arraste métricas da biblioteca'}
+          </p>
+          <p className="text-xs text-muted-foreground/40 mt-1">ou clique em + para adicionar manualmente</p>
+        </div>
+      ) : children}
+    </div>
+  );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function tooltipFormatter(series: UnifiedMetric[]): (...args: any[]) => any {
-  return (value: unknown, _name: unknown, item: { dataKey?: string | number }) => {
-    const metric = series.find((m) => m.key === item?.dataKey);
-    const n = typeof value === 'number' ? value : Number(value ?? 0);
-    return [Number.isFinite(n) ? formatMetricValue(n, metric?.format ?? 'number') : String(value ?? ''), metric?.shortLabel ?? _name];
-  };
-}
+// ── Client selector ───────────────────────────────────────────────────────────
 
-function sourceBadgeClass(source: string): string {
-  const map: Record<string, string> = {
-    meta_ads:  'bg-blue-500/20 text-blue-400',
-    google_ads:'bg-violet-500/20 text-violet-400',
-    facebook:  'bg-blue-600/20 text-blue-300',
-    instagram: 'bg-pink-500/20 text-pink-400',
-    crm:       'bg-emerald-500/20 text-emerald-400',
-  };
-  return map[source] ?? 'bg-muted text-muted-foreground';
-}
+function ClientSelector({
+  clients, selected, onSelect,
+}: { clients: Client[]; selected: string; onSelect: (id: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const current = clients.find(c => c.id === selected);
 
-// ── Widget chart ──────────────────────────────────────────────────────────────
-function WidgetChart({ widget, data }: { widget: Widget; data: MockPoint[] }) {
-  const metrics = widget.metrics.map((k) => METRIC_BY_KEY[k]).filter((m): m is UnifiedMetric => !!m);
-  const series  = metrics.filter((m) => m.hasTimeSeries);
-  const h = widget.size === 1 ? 120 : 160;
-  const allCurrency = series.length > 0 && series.every((m) => m.format === 'currency');
-  const yFmt = allCurrency ? (v: number) => formatMetricValue(v, 'currency') : undefined;
-
-  if (widget.chartType === 'kpi') {
-    return (
-      <div className={cn('flex py-4', metrics.length === 1 ? 'flex-col items-center justify-center gap-2' : 'flex-row items-center justify-around gap-4 flex-wrap')}>
-        {metrics.map((m) => {
-          const value = computeMockKpi(m, data);
-          return (
-            <div key={m.key} className="flex flex-col items-center gap-0.5 text-center">
-              <div className="w-2 h-2 rounded-full mb-1" style={{ backgroundColor: m.color }} />
-              <p className={cn('font-heading font-normal', metrics.length === 1 ? 'text-4xl' : 'text-2xl')} style={{ color: m.color }}>
-                {formatMetricValue(value, m.format)}
-              </p>
-              <p className="text-[11px] text-muted-foreground leading-tight">{m.label}</p>
-            </div>
-          );
-        })}
-      </div>
-    );
-  }
-
-  if (series.length === 0) return (
-    <p className="py-6 text-center text-xs text-muted-foreground">Métricas calculadas só exibem como número (KPI).</p>
-  );
-
-  if (widget.chartType === 'bar') return (
-    <ResponsiveContainer width="100%" height={h}>
-      <BarChart data={data} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
-        <XAxis dataKey="label" tick={AXIS_TICK} axisLine={false} tickLine={false} />
-        <YAxis tick={AXIS_TICK} axisLine={false} tickLine={false} tickFormatter={yFmt} />
-        <Tooltip contentStyle={TOOLTIP_STYLE} formatter={tooltipFormatter(series)} />
-        {series.length > 1 && <Legend iconType="circle" wrapperStyle={{ fontSize: 11 }} />}
-        {series.map((m) => <Bar key={m.key} dataKey={m.key} fill={m.color} radius={[4, 4, 0, 0]} name={m.shortLabel} />)}
-      </BarChart>
-    </ResponsiveContainer>
-  );
-
-  if (widget.chartType === 'line') return (
-    <ResponsiveContainer width="100%" height={h}>
-      <LineChart data={data} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
-        <XAxis dataKey="label" tick={AXIS_TICK} axisLine={false} tickLine={false} />
-        <YAxis tick={AXIS_TICK} axisLine={false} tickLine={false} tickFormatter={yFmt} />
-        <Tooltip contentStyle={TOOLTIP_STYLE} formatter={tooltipFormatter(series)} />
-        {series.length > 1 && <Legend iconType="circle" wrapperStyle={{ fontSize: 11 }} />}
-        {series.map((m) => <Line key={m.key} type="monotone" dataKey={m.key} stroke={m.color} strokeWidth={2} dot={false} name={m.shortLabel} />)}
-      </LineChart>
-    </ResponsiveContainer>
-  );
-
-  if (widget.chartType === 'area') return (
-    <ResponsiveContainer width="100%" height={h}>
-      <AreaChart data={data} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
-        <defs>
-          {series.map((m) => (
-            <linearGradient key={m.key} id={`g-${widget.id}-${m.key}`} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%"  stopColor={m.color} stopOpacity={0.4} />
-              <stop offset="95%" stopColor={m.color} stopOpacity={0}   />
-            </linearGradient>
-          ))}
-        </defs>
-        <XAxis dataKey="label" tick={AXIS_TICK} axisLine={false} tickLine={false} />
-        <YAxis tick={AXIS_TICK} axisLine={false} tickLine={false} tickFormatter={yFmt} />
-        <Tooltip contentStyle={TOOLTIP_STYLE} formatter={tooltipFormatter(series)} />
-        {series.length > 1 && <Legend iconType="circle" wrapperStyle={{ fontSize: 11 }} />}
-        {series.map((m) => (
-          <Area key={m.key} type="monotone" dataKey={m.key} stroke={m.color} strokeWidth={2}
-            fillOpacity={1} fill={`url(#g-${widget.id}-${m.key})`} name={m.shortLabel} />
-        ))}
-      </AreaChart>
-    </ResponsiveContainer>
-  );
-
-  return null;
-}
-
-// ── Widget card ───────────────────────────────────────────────────────────────
-function WidgetCard({ widget, data, onRemove }: { widget: Widget; data: MockPoint[]; onRemove: () => void }) {
-  const metrics = widget.metrics.map((k) => METRIC_BY_KEY[k]).filter((m): m is UnifiedMetric => !!m);
-  const primarySource = metrics[0]?.source ?? 'meta_ads';
-  const hasMixed = metrics.some((m) => m.source !== primarySource);
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
 
   return (
-    <div className={cn(
-      'bg-card border border-border rounded-xl overflow-hidden',
-      widget.size === 1 && 'col-span-1',
-      widget.size === 2 && 'col-span-1 md:col-span-2',
-      widget.size === 3 && 'col-span-1 md:col-span-3',
-    )}>
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-        <div className="flex items-center gap-2 min-w-0 flex-1">
-          <span className="font-semibold text-sm truncate">{widget.title}</span>
-          {hasMixed ? (
-            <span className="text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider shrink-0 bg-violet-500/20 text-violet-400">Cruzado</span>
-          ) : (
-            <span className={cn('text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider shrink-0', sourceBadgeClass(primarySource))}>
-              {SOURCE_LABELS[primarySource as keyof typeof SOURCE_LABELS] ?? primarySource}
-            </span>
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-2 h-8 pl-3 pr-2 rounded-lg border border-border bg-card text-sm hover:border-primary/40 transition-colors"
+      >
+        <span className="max-w-[160px] truncate">
+          {current?.name ?? 'Selecionar cliente'}
+        </span>
+        <ChevronDown className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+      </button>
+
+      {open && (
+        <div className="absolute top-full mt-1 left-0 z-50 min-w-[220px] rounded-xl border border-border bg-popover shadow-xl py-1 max-h-64 overflow-y-auto">
+          <p className="px-3 py-1.5 text-[10px] uppercase tracking-widest text-muted-foreground font-bold">
+            Cliente
+          </p>
+          {clients.map(c => (
+            <button key={c.id} onClick={() => { onSelect(c.id); setOpen(false); }}
+              className={cn(
+                'flex items-center gap-2 w-full px-3 py-2 text-sm hover:bg-muted/50 transition-colors',
+                c.id === selected && 'text-primary',
+              )}>
+              {c.id === selected && <Check className="w-3.5 h-3.5 shrink-0" />}
+              <span className={cn('truncate', c.id !== selected && 'pl-5')}>{c.name}</span>
+            </button>
+          ))}
+          {clients.length === 0 && (
+            <p className="px-3 py-3 text-xs text-muted-foreground text-center">Nenhum cliente encontrado.</p>
           )}
         </div>
-        <button onClick={onRemove} className="ml-2 shrink-0 text-muted-foreground hover:text-foreground transition-colors">
-          <X className="w-4 h-4" />
-        </button>
-      </div>
-      <div className="p-4">
-        <WidgetChart widget={widget} data={data} />
+      )}
+    </div>
+  );
+}
+
+// ── Copy from client dialog ───────────────────────────────────────────────────
+
+function CopyDialog({
+  clients, currentId, onCopy, onClose,
+}: { clients: Client[]; currentId: string; onCopy: (id: string) => void; onClose: () => void }) {
+  const [picked, setPicked] = useState('');
+  const others = clients.filter(c => c.id !== currentId);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="bg-card rounded-2xl border border-border shadow-2xl w-full max-w-sm p-5 space-y-4">
+        <p className="font-semibold text-sm">Copiar configuração de outro cliente</p>
+        <p className="text-xs text-muted-foreground">
+          A configuração atual será substituída pela do cliente selecionado.
+        </p>
+        <div className="space-y-1 max-h-52 overflow-y-auto">
+          {others.map(c => (
+            <button key={c.id} onClick={() => setPicked(c.id)}
+              className={cn(
+                'flex items-center gap-2 w-full px-3 py-2 rounded-lg border text-sm transition-colors',
+                picked === c.id
+                  ? 'border-primary bg-primary/10 text-primary'
+                  : 'border-border bg-card hover:bg-muted/50 text-muted-foreground hover:text-foreground',
+              )}>
+              {picked === c.id && <Check className="w-3.5 h-3.5 shrink-0" />}
+              <span className={cn('truncate', picked !== c.id && 'pl-5')}>{c.name}</span>
+            </button>
+          ))}
+          {others.length === 0 && (
+            <p className="text-center text-xs text-muted-foreground py-4">Nenhum outro cliente com configuração salva.</p>
+          )}
+        </div>
+        <div className="flex gap-2 pt-1">
+          <button onClick={onClose}
+            className="flex-1 py-2 rounded-lg border border-border text-xs text-muted-foreground hover:text-foreground transition-colors">
+            Cancelar
+          </button>
+          <button onClick={() => { if (picked) { onCopy(picked); onClose(); } }}
+            disabled={!picked}
+            className="flex-1 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors">
+            Copiar
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
-// ── Add widget dialog ─────────────────────────────────────────────────────────
-const CHART_TYPE_OPTIONS: { key: ChartType; label: string; Icon: React.ComponentType<{ className?: string }> }[] = [
-  { key: 'kpi',  label: 'Número(s)', Icon: Hash      },
-  { key: 'bar',  label: 'Barras',    Icon: BarChart2  },
-  { key: 'line', label: 'Linha',     Icon: TrendingUp },
-  { key: 'area', label: 'Área',      Icon: Layers     },
-];
+// ── Default blocks ────────────────────────────────────────────────────────────
 
-function AddWidgetDialog({ open, onClose, onAdd }: {
-  open: boolean; onClose: () => void; onAdd: (w: Omit<Widget, 'id'>) => void;
-}) {
-  const [selected,    setSelected]    = useState<string[]>([]);
-  const [chart,       setChart]       = useState<ChartType>('bar');
-  const [size,        setSize]        = useState<WidgetSize>(2);
-  const [customTitle, setCustomTitle] = useState('');
-  const [search,      setSearch]      = useState('');
-  const [activeGroup, setActiveGroup] = useState<string | null>(null);
-
-  const filteredMetrics = useMemo(() => {
-    const q = search.toLowerCase();
-    return ALL_UNIFIED_METRICS.filter((m) => {
-      const matchGroup = !activeGroup || m.group === activeGroup;
-      const matchSearch = !q || m.label.toLowerCase().includes(q) || m.shortLabel.toLowerCase().includes(q) || m.description.toLowerCase().includes(q);
-      return matchGroup && matchSearch;
-    });
-  }, [search, activeGroup]);
-
-  const groupsInView = useMemo(() => {
-    return METRIC_GROUPS.filter((g) => filteredMetrics.some((m) => m.group === g));
-  }, [filteredMetrics]);
-
-  const allHaveTimeSeries = selected.length > 0 && selected.every((k) => METRIC_BY_KEY[k]?.hasTimeSeries);
-  const availableCharts: ChartType[] = allHaveTimeSeries ? ['kpi', 'bar', 'line', 'area'] : ['kpi'];
-
-  function toggle(key: string) {
-    if (selected.includes(key)) {
-      const next = selected.filter((k) => k !== key);
-      setSelected(next);
-      const nextAllTime = next.length > 0 && next.every((k) => METRIC_BY_KEY[k]?.hasTimeSeries);
-      if (!nextAllTime && chart !== 'kpi') setChart('kpi');
-    } else {
-      if (selected.length >= 3) return;
-      setSelected([...selected, key]);
-      if (!METRIC_BY_KEY[key]?.hasTimeSeries && chart !== 'kpi') setChart('kpi');
-    }
-  }
-
-  function handleClose() {
-    setSelected([]); setChart('bar'); setSize(2); setCustomTitle(''); setSearch(''); setActiveGroup(null);
-    onClose();
-  }
-
-  function handleAdd() {
-    if (selected.length === 0) return;
-    onAdd({ title: customTitle.trim() || autoTitle(selected), metrics: selected, chartType: chart, size });
-    handleClose();
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
-      <DialogContent className="sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Adicionar Bloco ao Dashboard</DialogTitle>
-        </DialogHeader>
-
-        <div className="space-y-4 py-1 max-h-[65vh] overflow-y-auto pr-1">
-
-          {/* Selected chips */}
-          {selected.length > 0 && (
-            <div className="flex items-center gap-2 flex-wrap p-3 bg-muted/40 rounded-lg">
-              <span className="text-[11px] text-muted-foreground font-semibold uppercase tracking-wider">Comparando:</span>
-              {selected.map((k) => {
-                const m = METRIC_BY_KEY[k];
-                return (
-                  <span key={k} className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-medium"
-                    style={{ borderColor: `${m?.color}66`, color: m?.color, backgroundColor: `${m?.color}18` }}>
-                    {m?.shortLabel ?? k}
-                    <button onClick={() => toggle(k)} className="opacity-60 hover:opacity-100 ml-0.5">×</button>
-                  </span>
-                );
-              })}
-              {selected.length < 3 && (
-                <span className="text-[11px] text-muted-foreground/50">+ até {3 - selected.length} mais</span>
-              )}
-            </div>
-          )}
-
-          {/* 1 — Metrics */}
-          <div>
-            <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground mb-3">
-              1. Selecione as Métricas <span className="normal-case font-normal text-muted-foreground/50">(até 3 para comparar / cruzar)</span>
-            </p>
-
-            {/* Search */}
-            <div className="relative mb-3">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Buscar métrica..."
-                className="w-full h-8 pl-8 pr-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-              />
-            </div>
-
-            {/* Platform filter pills */}
-            <div className="flex gap-1.5 flex-wrap mb-3">
-              <button
-                onClick={() => setActiveGroup(null)}
-                className={cn('px-2.5 py-1 rounded-full text-[11px] font-bold border transition-colors',
-                  !activeGroup ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:border-primary/50')}
-              >
-                Todas
-              </button>
-              {METRIC_GROUPS.map((g) => {
-                const src = ALL_UNIFIED_METRICS.find((m) => m.group === g)?.source;
-                const color = src ? SOURCE_COLORS[src as keyof typeof SOURCE_COLORS] : '#888';
-                return (
-                  <button key={g} onClick={() => setActiveGroup(activeGroup === g ? null : g)}
-                    className={cn('px-2.5 py-1 rounded-full text-[11px] font-bold border transition-colors',
-                      activeGroup === g ? 'text-white border-transparent' : 'border-border text-muted-foreground hover:border-primary/50')}
-                    style={activeGroup === g ? { backgroundColor: color, borderColor: color } : {}}>
-                    {g}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Metric list grouped */}
-            {groupsInView.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-4">Nenhuma métrica encontrada.</p>
-            ) : groupsInView.map((group) => {
-              const groupMetrics = filteredMetrics.filter((m) => m.group === group);
-              const src = groupMetrics[0]?.source;
-              const color = src ? SOURCE_COLORS[src as keyof typeof SOURCE_COLORS] : '#888';
-              return (
-                <div key={group} className="mb-4">
-                  <p className="text-[10px] uppercase tracking-widest font-bold mb-2 px-0.5" style={{ color }}>
-                    {group}
-                  </p>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    {groupMetrics.map((m) => {
-                      const isSelected = selected.includes(m.key);
-                      const isDisabled = !isSelected && selected.length >= 3;
-                      return (
-                        <button
-                          key={m.key}
-                          onClick={() => !isDisabled && toggle(m.key)}
-                          disabled={isDisabled}
-                          title={m.description}
-                          className={cn(
-                            'flex items-start gap-2.5 p-2.5 rounded-lg border text-left transition-colors',
-                            isSelected  ? 'border-primary/60 bg-primary/10' : 'border-border bg-card',
-                            isDisabled  ? 'opacity-30 cursor-not-allowed' : 'hover:bg-muted/50',
-                          )}
-                        >
-                          <div
-                            className="w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 mt-0.5 transition-colors"
-                            style={isSelected ? { backgroundColor: m.color, borderColor: m.color } : { borderColor: '#4B5563' }}
-                          >
-                            {isSelected && <Check className="w-2.5 h-2.5 text-black" />}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="font-medium text-xs leading-tight truncate">{m.label}</p>
-                            {!m.hasTimeSeries && (
-                              <p className="text-[10px] text-muted-foreground/50 mt-0.5">Só KPI</p>
-                            )}
-                          </div>
-                          <div className="w-2 h-2 rounded-full shrink-0 mt-1" style={{ backgroundColor: m.color }} />
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* 2 — Chart type */}
-          {selected.length > 0 && (
-            <div>
-              <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground mb-2">2. Visualização</p>
-              <div className="flex gap-2 flex-wrap">
-                {CHART_TYPE_OPTIONS.filter((o) => availableCharts.includes(o.key)).map(({ key, label, Icon }) => (
-                  <button key={key} onClick={() => setChart(key)}
-                    className={cn('flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm font-medium transition-colors',
-                      chart === key ? 'border-primary bg-primary/10 text-primary' : 'border-border bg-card hover:bg-muted/50 text-muted-foreground'
-                    )}>
-                    <Icon className="w-4 h-4" />
-                    {label}
-                  </button>
-                ))}
-              </div>
-              {!allHaveTimeSeries && (
-                <p className="text-[11px] text-muted-foreground/60 mt-1.5">
-                  Métricas calculadas (CPL, CTR, ROI…) só exibem como número.
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* 3 — Title */}
-          {selected.length > 0 && (
-            <div>
-              <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground mb-2">3. Título (opcional)</p>
-              <input
-                type="text"
-                value={customTitle}
-                onChange={(e) => setCustomTitle(e.target.value)}
-                placeholder={autoTitle(selected)}
-                className="w-full h-9 px-3 rounded-lg border border-border bg-card text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
-              />
-            </div>
-          )}
-
-          {/* 4 — Size */}
-          {selected.length > 0 && (
-            <div>
-              <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground mb-2">4. Tamanho</p>
-              <div className="flex gap-2">
-                {([
-                  { key: 1 as WidgetSize, label: '1 Coluna',  sub: 'Compacto' },
-                  { key: 2 as WidgetSize, label: '2 Colunas', sub: 'Médio'    },
-                  { key: 3 as WidgetSize, label: '3 Colunas', sub: 'Largo'    },
-                ]).map((s) => (
-                  <button key={s.key} onClick={() => setSize(s.key)}
-                    className={cn('flex-1 p-2 rounded-lg border text-center transition-colors',
-                      size === s.key ? 'border-primary bg-primary/10 text-primary' : 'border-border bg-card hover:bg-muted/50 text-muted-foreground'
-                    )}>
-                    <p className="font-semibold text-xs">{s.label}</p>
-                    <p className="text-[10px] text-muted-foreground">{s.sub}</p>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={handleClose}>Cancelar</Button>
-          <Button onClick={handleAdd} disabled={selected.length === 0} className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40">
-            <Plus className="w-4 h-4 mr-1" />
-            Adicionar Bloco
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ── Default widgets ───────────────────────────────────────────────────────────
-const DEFAULT_WIDGETS: Widget[] = [
-  { id: 'w1', title: 'Leads Meta vs. Qualificados CRM',    metrics: ['meta_leads', 'crm_qualified'],                chartType: 'bar',  size: 2 },
-  { id: 'w2', title: 'Receita',                             metrics: ['crm_revenue'],                               chartType: 'kpi',  size: 1 },
-  { id: 'w3', title: 'Leads → Agendamentos → Vendas',       metrics: ['crm_leads', 'crm_appointments', 'crm_sales'], chartType: 'line', size: 3 },
-  { id: 'w4', title: 'CPL + ROI',                          metrics: ['meta_cpl', 'crm_roi'],                        chartType: 'kpi',  size: 1 },
-  { id: 'w5', title: 'Investimento Meta vs. Google',        metrics: ['meta_spend', 'google_spend'],                 chartType: 'bar',  size: 2 },
-  { id: 'w6', title: 'Alcance Instagram vs. Facebook',      metrics: ['ig_reach', 'fb_page_reach'],                  chartType: 'area', size: 2 },
+const DEFAULT_BLOCKS: DashBlockType[] = [
+  { id: 'b1', metricKeys: ['meta_leads'],                       vizType: 'box-meta', size: 1, level: 'conta', comparativo: 'none', meta: null, position: 0 },
+  { id: 'b2', metricKeys: ['meta_cpl'],                         vizType: 'box-meta', size: 1, level: 'conta', comparativo: 'none', meta: 30,   position: 1 },
+  { id: 'b3', metricKeys: ['meta_spend', 'google_spend'],       vizType: 'pizza',    size: 2, level: 'conta', comparativo: 'none', meta: null, position: 2 },
+  { id: 'b4', metricKeys: ['meta_frequency'],                   vizType: 'gauge',    size: 1, level: 'conta', comparativo: 'none', meta: null, position: 3 },
+  { id: 'b5', metricKeys: ['meta_leads', 'google_conversions'], vizType: 'bar',      size: 4, level: 'conta', comparativo: 'none', meta: null, position: 4 },
+  { id: 'b6', metricKeys: ['crm_conv_rate'],                    vizType: 'gauge',    size: 1, level: 'conta', comparativo: 'none', meta: null, position: 5 },
+  { id: 'b7', metricKeys: ['crm_revenue'],                      vizType: 'line',     size: 3, level: 'conta', comparativo: 'none', meta: null, position: 6 },
 ];
 
 // ── Page ──────────────────────────────────────────────────────────────────────
+
 export default function ConstruitorPage() {
-  const [period,     setPeriod]     = useState<Period>('30d');
-  const [widgets,    setWidgets]    = useState<Widget[]>(DEFAULT_WIDGETS);
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const [period,       setPeriod]       = useState<Period>('30d');
+  const [blocks,       setBlocks]       = useState<DashBlockType[]>(DEFAULT_BLOCKS);
+  const [libCollapsed, setLibCollapsed] = useState(false);
+  const [newBlockId,   setNewBlockId]   = useState<string | null>(null);
+  const [dragLibKey,   setDragLibKey]   = useState<string | null>(null);
+
+  // Clients + persistence
+  const [clients,      setClients]      = useState<Client[]>([]);
+  const [selectedId,   setSelectedId]   = useState('');
+  const [savedClients, setSavedClients] = useState<Client[]>([]);
+  const [saving,       setSaving]       = useState(false);
+  const [savedAt,      setSavedAt]      = useState<string | null>(null);
+  const [copyOpen,     setCopyOpen]     = useState(false);
 
   const data = useMemo(() => generateMockSeries(period), [period]);
 
-  function addWidget(config: Omit<Widget, 'id'>) {
-    setWidgets((prev) => [...prev, { ...config, id: `w${Date.now()}` }]);
+  // ── Load clients ──────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    fetch('/api/clients')
+      .then(r => r.ok ? r.json() as Promise<Client[]> : [])
+      .then(list => { setClients(list); if (list.length > 0 && !selectedId) setSelectedId(list[0].id); })
+      .catch(() => {});
+
+    // Load clients that have saved configs
+    fetch('/api/dashboard-configs', { method: 'PATCH' })
+      .then(r => r.ok ? r.json() as Promise<Array<{ client_id: string; client_name: string }>> : [])
+      .then(rows => setSavedClients(rows.map(r => ({ id: r.client_id, name: r.client_name }))))
+      .catch(() => {});
+  }, []);
+
+  // ── Load config when client changes ───────────────────────────────────────
+
+  const loadConfig = useCallback(async (clientId: string) => {
+    if (!clientId) return;
+    try {
+      const res = await fetch(`/api/dashboard-configs?clientId=${clientId}`);
+      if (!res.ok) return;
+      const data = await res.json() as SavedConfig;
+      if (data.blocks && data.blocks.length > 0) {
+        setBlocks(data.blocks);
+        setSavedAt(data.updatedAt);
+      } else {
+        setBlocks(DEFAULT_BLOCKS);
+        setSavedAt(null);
+      }
+    } catch {
+      setBlocks(DEFAULT_BLOCKS);
+      setSavedAt(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (selectedId) void loadConfig(selectedId);
+  }, [selectedId, loadConfig]);
+
+  // ── Save ─────────────────────────────────────────────────────────────────
+
+  async function handleSave() {
+    if (!selectedId) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/dashboard-configs?clientId=${selectedId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ blocks }),
+      });
+      if (res.ok) {
+        const d = await res.json() as { updatedAt: string };
+        setSavedAt(d.updatedAt);
+        // Refresh saved-clients list
+        const rows = await fetch('/api/dashboard-configs', { method: 'PATCH' })
+          .then(r => r.ok ? r.json() as Promise<Array<{ client_id: string; client_name: string }>> : []);
+        setSavedClients(rows.map(r => ({ id: r.client_id, name: r.client_name })));
+      }
+    } finally {
+      setSaving(false);
+    }
   }
 
-  function removeWidget(id: string) {
-    setWidgets((prev) => prev.filter((w) => w.id !== id));
+  // ── Copy from client ─────────────────────────────────────────────────────
+
+  async function handleCopy(fromClientId: string) {
+    try {
+      const res = await fetch(`/api/dashboard-configs?clientId=${fromClientId}`);
+      if (!res.ok) return;
+      const d = await res.json() as SavedConfig;
+      if (d.blocks && d.blocks.length > 0) {
+        // Re-assign new ids to avoid collisions
+        setBlocks(d.blocks.map((b, i) => ({ ...b, id: `b${Date.now()}${i}`, position: i })));
+        setSavedAt(null);
+      }
+    } catch { /* ignore */ }
   }
+
+  // ── Export / Import ───────────────────────────────────────────────────────
+
+  function handleExport() {
+    const client = clients.find(c => c.id === selectedId);
+    const json = JSON.stringify({
+      clientId: selectedId,
+      clientName: client?.name ?? '',
+      blocks,
+      exportedAt: new Date().toISOString(),
+    }, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url;
+    a.download = `dashboard-${client?.name ?? selectedId}-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function handleImport() {
+    const input = document.createElement('input');
+    input.type   = 'file';
+    input.accept = '.json';
+    input.onchange = () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const parsed = JSON.parse(e.target?.result as string) as { blocks: DashBlockType[] };
+          if (Array.isArray(parsed.blocks)) {
+            setBlocks(parsed.blocks.map((b, i) => ({ ...b, id: `b${Date.now()}${i}` })));
+            setSavedAt(null);
+          }
+        } catch { /* invalid JSON */ }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
+  }
+
+  // ── DnD ──────────────────────────────────────────────────────────────────
+
+  function handleDragStart(e: DragStartEvent) {
+    const d = e.active.data.current;
+    setDragLibKey(d?.type === 'library' ? (d.metricKey as string) : null);
+  }
+
+  function handleDragEnd(e: DragEndEvent) {
+    const { active, over } = e;
+    setDragLibKey(null);
+    const d = active.data.current;
+
+    if (d?.type === 'library') {
+      if (!over) return;
+      const metric = METRIC_BY_KEY[d.metricKey as string];
+      if (!metric) return;
+      const viz  = getDefaultViz(metric);
+      const size = getDefaultSize(metric, viz);
+      const id   = `b${Date.now()}`;
+      setBlocks(prev => [...prev, {
+        id, metricKeys: [d.metricKey as string], vizType: viz, size,
+        level: 'conta', comparativo: 'none', meta: null, position: prev.length,
+      }]);
+      setNewBlockId(id);
+      return;
+    }
+
+    if (over && active.id !== over.id) {
+      setBlocks(prev => {
+        const from = prev.findIndex(b => b.id === active.id);
+        const to   = prev.findIndex(b => b.id === over.id);
+        if (from === -1 || to === -1) return prev;
+        return arrayMove(prev, from, to).map((b, i) => ({ ...b, position: i }));
+      });
+    }
+  }
+
+  function updateBlock(updated: DashBlockType) {
+    setBlocks(prev => prev.map(b => b.id === updated.id ? updated : b));
+    if (newBlockId === updated.id) setNewBlockId(null);
+  }
+
+  function removeBlock(id: string) {
+    setBlocks(prev => prev.filter(b => b.id !== id));
+    if (newBlockId === id) setNewBlockId(null);
+  }
+
+  function addEmptyBlock() {
+    const metric = METRIC_BY_KEY['meta_leads'];
+    if (!metric) return;
+    const id = `b${Date.now()}`;
+    setBlocks(prev => [...prev, {
+      id, metricKeys: ['meta_leads'], vizType: getDefaultViz(metric), size: 2,
+      level: 'conta', comparativo: 'none', meta: null, position: prev.length,
+    }]);
+    setNewBlockId(id);
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between flex-wrap gap-4">
-        <div>
-          <h1 className="font-heading font-normal text-4xl uppercase leading-none tracking-wide text-foreground">Construtor de Dashboard</h1>
-          <p className="text-muted-foreground mt-1">
-            60+ métricas de Meta Ads, Google Ads, Facebook, Instagram e CRM. Cruze qualquer combinação.
-          </p>
-        </div>
-        <div className="flex items-center gap-3 flex-wrap">
-          <div className="flex rounded-lg border border-border bg-card overflow-hidden">
-            {(['7d', '30d', '90d'] as Period[]).map((p) => (
-              <button key={p} onClick={() => setPeriod(p)}
-                className={cn('px-4 py-2 text-sm font-semibold transition-colors',
-                  period === p ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
-                )}>
-                {p === '7d' ? '7 dias' : p === '30d' ? '30 dias' : '90 dias'}
-              </button>
-            ))}
+    <>
+      <DndContext
+        collisionDetection={closestCenter}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+      >
+        <div className="flex h-full gap-0 -mx-6 -mt-4">
+
+          {/* Sidebar */}
+          <BlockLibrary collapsed={libCollapsed} onToggle={() => setLibCollapsed(p => !p)} />
+
+          {/* Main */}
+          <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+
+            {/* Toolbar */}
+            <div className="flex items-center justify-between flex-wrap gap-3 px-6 py-4 border-b border-border">
+              <div>
+                <h1 className="font-heading font-normal text-3xl uppercase leading-none tracking-wide">
+                  Construtor de Dashboard
+                </h1>
+                <div className="flex items-center gap-2 mt-1 flex-wrap">
+                  <p className="text-xs text-muted-foreground">
+                    {blocks.length} bloco{blocks.length !== 1 ? 's' : ''}
+                  </p>
+                  {savedAt && (
+                    <span className="text-[10px] text-muted-foreground/50">
+                      · salvo {new Date(savedAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+
+                {/* Client selector */}
+                <ClientSelector
+                  clients={clients}
+                  selected={selectedId}
+                  onSelect={id => { setSelectedId(id); setSavedAt(null); }}
+                />
+
+                {/* Period */}
+                <div className="flex rounded-lg border border-border bg-card overflow-hidden">
+                  {(['7d', '30d', '90d'] as Period[]).map(p => (
+                    <button key={p} onClick={() => setPeriod(p)}
+                      className={cn('px-3 py-1.5 text-sm font-semibold transition-colors',
+                        period === p ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}>
+                      {p === '7d' ? '7d' : p === '30d' ? '30d' : '90d'}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Actions */}
+                <button onClick={() => setCopyOpen(true)} title="Copiar de outro cliente"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-card text-sm text-muted-foreground hover:text-foreground transition-colors">
+                  <Copy className="w-3.5 h-3.5" /> Copiar de
+                </button>
+
+                <button onClick={handleImport} title="Importar JSON"
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border bg-card text-sm text-muted-foreground hover:text-foreground transition-colors">
+                  <Upload className="w-3.5 h-3.5" />
+                </button>
+
+                <button onClick={handleExport} title="Exportar JSON"
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border bg-card text-sm text-muted-foreground hover:text-foreground transition-colors">
+                  <Download className="w-3.5 h-3.5" />
+                </button>
+
+                <button onClick={addEmptyBlock}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-card text-sm text-muted-foreground hover:text-foreground transition-colors">
+                  <Plus className="w-3.5 h-3.5" /> Adicionar
+                </button>
+
+                <button onClick={() => void handleSave()} disabled={!selectedId || saving}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-50 transition-colors">
+                  {saving
+                    ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Salvando</>
+                    : <><Save className="w-3.5 h-3.5" /> Salvar</>
+                  }
+                </button>
+              </div>
+            </div>
+
+            {/* Grid */}
+            <div className="flex-1 overflow-y-auto px-6 py-5">
+              <SortableContext items={blocks.map(b => b.id)} strategy={rectSortingStrategy}>
+                <DropZone isEmpty={blocks.length === 0}>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-start">
+                    {blocks.map(block => (
+                      <DashBlock
+                        key={block.id}
+                        block={block}
+                        data={data}
+                        onUpdate={updateBlock}
+                        onRemove={() => removeBlock(block.id)}
+                        openConfig={newBlockId === block.id}
+                      />
+                    ))}
+                  </div>
+                </DropZone>
+              </SortableContext>
+            </div>
           </div>
-          <Button onClick={() => setDialogOpen(true)} className="bg-primary text-primary-foreground hover:bg-primary/90">
-            <Plus className="w-4 h-4 mr-2" />
-            Adicionar Bloco
-          </Button>
         </div>
-      </div>
 
-      {widgets.length === 0 ? (
-        <button onClick={() => setDialogOpen(true)}
-          className="w-full flex flex-col items-center justify-center py-24 border border-dashed border-border rounded-xl hover:border-primary/40 transition-colors">
-          <Plus className="w-10 h-10 text-muted-foreground mb-3" />
-          <p className="font-semibold text-muted-foreground">Nenhum bloco adicionado</p>
-          <p className="text-sm text-muted-foreground/60 mt-1">Clique para montar seu painel</p>
-        </button>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {widgets.map((w) => (
-            <WidgetCard key={w.id} widget={w} data={data} onRemove={() => removeWidget(w.id)} />
-          ))}
-        </div>
+        <DragOverlay>
+          {dragLibKey && <LibraryDragPreview metricKey={dragLibKey} />}
+        </DragOverlay>
+      </DndContext>
+
+      {/* Copy dialog */}
+      {copyOpen && (
+        <CopyDialog
+          clients={savedClients}
+          currentId={selectedId}
+          onCopy={id => void handleCopy(id)}
+          onClose={() => setCopyOpen(false)}
+        />
       )}
-
-      <AddWidgetDialog open={dialogOpen} onClose={() => setDialogOpen(false)} onAdd={addWidget} />
-    </div>
+    </>
   );
 }
