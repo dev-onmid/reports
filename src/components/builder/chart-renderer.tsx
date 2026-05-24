@@ -229,10 +229,11 @@ export function ChartRenderer({ metricKeys, vizType, data, meta, compact }: Prop
 
   const allCurrency = series.every(m => m.format === 'currency');
   const yFmt = allCurrency ? (v: number) => formatMetricValue(v, 'currency') : undefined;
-  const tooltipFmt = (value: unknown, _name: unknown, item: { dataKey?: string | number }) => {
-    const m = series.find(m => m.key === item?.dataKey);
+  const tooltipFmt = (value: unknown, _name: unknown, item: unknown) => {
+    const dataKey = (item as { dataKey?: unknown })?.dataKey;
+    const m = typeof dataKey === 'string' ? series.find(m => m.key === dataKey) : undefined;
     const n = typeof value === 'number' ? value : Number(value ?? 0);
-    return [Number.isFinite(n) ? formatMetricValue(n, m?.format ?? 'number') : String(value ?? ''), m?.shortLabel ?? _name];
+    return [Number.isFinite(n) ? formatMetricValue(n, m?.format ?? 'number') : String(value ?? ''), m?.shortLabel ?? String(_name ?? '')];
   };
 
   const isHorizontal = vizType === 'barra-horizontal';
