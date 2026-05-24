@@ -204,10 +204,11 @@ export function ChartRenderer({ metricKeys, vizType, data, meta, compact }: Prop
             {pieData.map((e, i) => <Cell key={i} fill={e.color} strokeWidth={0} />)}
           </Pie>
           <Tooltip contentStyle={TOOLTIP_STYLE}
-            formatter={(v: unknown, name: string) => {
+            formatter={(v: unknown, name: unknown) => {
               const val = typeof v === 'number' ? v : Number(v ?? 0);
-              const m = metrics.find(m => m.shortLabel === name);
-              return [formatMetricValue(val, m?.format ?? 'number'), name];
+              const key = String(name ?? '');
+              const m = metrics.find(m => m.shortLabel === key);
+              return [formatMetricValue(val, m?.format ?? 'number'), key];
             }} />
           <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />
         </PieChart>
