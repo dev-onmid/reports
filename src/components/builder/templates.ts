@@ -10,7 +10,7 @@ export type Template = {
   blocks: Omit<DashBlock, 'id'>[];
 };
 
-function makeBlocks(defs: Omit<DashBlock, 'id'>[]): Omit<DashBlock, 'id'>[] {
+function makeBlocks(defs: Omit<DashBlock, 'id' | 'position'>[]): Omit<DashBlock, 'id'>[] {
   return defs.map((b, i) => ({ ...b, position: i }));
 }
 
