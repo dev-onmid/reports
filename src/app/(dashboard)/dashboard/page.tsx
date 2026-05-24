@@ -3,27 +3,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import {
-  DndContext, DragOverlay, closestCenter, useDroppable,
-  type DragEndEvent, type DragStartEvent,
+  DndContext, DragOverlay, closestCenter,
+  type DragEndEvent,
 } from '@dnd-kit/core';
 import { SortableContext, arrayMove, rectSortingStrategy } from '@dnd-kit/sortable';
 import {
-  LayoutDashboard, Plus, Settings2, ChevronDown, Check, RefreshCw,
+  ChevronDown, Check, RefreshCw, Save, Loader2, RotateCcw,
 } from 'lucide-react';
-import Link from 'next/link';
 import { cn } from '@/lib/utils';
-import { METRIC_BY_KEY, generateMockSeries } from '@/lib/metrics-registry';
-import {
-  type DashBlock as DashBlockType,
-  getDefaultViz, getDefaultSize,
-} from '@/components/builder/types';
-import { BlockLibrary, LibraryDragPreview } from '@/components/builder/block-library';
+import { generateMockSeries, SOURCE_COLORS, SOURCE_LABELS, METRIC_BY_KEY, type MetricSource } from '@/lib/metrics-registry';
+import { type DashBlock as DashBlockType } from '@/components/builder/types';
 import { DashBlock } from '@/components/builder/dash-block';
+import { buildDefaultDashboard } from '@/lib/default-dashboard';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type Period = '7d' | '30d' | '90d';
 type Client = { id: string; name: string };
+
+const SOURCE_ORDER: MetricSource[] = ['meta_ads', 'google_ads', 'facebook', 'instagram', 'crm'];
 
 // ── Client selector ───────────────────────────────────────────────────────────
 
@@ -68,30 +66,18 @@ function ClientSelector({
   );
 }
 
-// ── Drop zone ─────────────────────────────────────────────────────────────────
+// ── Source section header ─────────────────────────────────────────────────────
 
-function DropZone({ children, isEmpty }: { children: React.ReactNode; isEmpty: boolean }) {
-  const { setNodeRef, isOver } = useDroppable({ id: 'dash-drop-zone' });
+function SourceHeader({ source }: { source: MetricSource }) {
+  const color = SOURCE_COLORS[source];
+  const label = SOURCE_LABELS[source];
   return (
-    <div ref={setNodeRef} className={cn('min-h-[200px] rounded-xl transition-all', isOver && 'ring-2 ring-primary/40 bg-primary/5')}>
-      {isEmpty ? (
-        <div className={cn('flex flex-col items-center justify-center py-32 border-2 border-dashed rounded-xl transition-all',
-          isOver ? 'border-primary/60 bg-primary/5' : 'border-border/40')}>
-          <LayoutDashboard className={cn('w-12 h-12 mb-4', isOver ? 'text-primary' : 'text-muted-foreground/30')} />
-          <p className={cn('font-semibold text-sm', isOver ? 'text-primary' : 'text-muted-foreground/50')}>
-            {isOver ? 'Solte para adicionar' : 'Dashboard vazio'}
-          </p>
-          <p className="text-xs text-muted-foreground/40 mt-1 mb-5">
-            {isOver ? '' : 'Arraste métricas da biblioteca ou vá ao Construtor'}
-          </p>
-          {!isOver && (
-            <Link href="/construtor"
-              className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors">
-              <Settings2 className="w-4 h-4" /> Ir para o Construtor
-            </Link>
-          )}
-        </div>
-      ) : children}
+    <div className="col-span-full flex items-center gap-3 pt-2 pb-1">
+      <span className="w-2 h-2 rounded-full shrink-0" style={{ background: color }} />
+      <span className="text-xs font-bold uppercase tracking-widest" style={{ color }}>
+        {label}
+      </span>
+      <div className="flex-1 h-px bg-border" />
     </div>
   );
 }
@@ -99,17 +85,17 @@ function DropZone({ children, isEmpty }: { children: React.ReactNode; isEmpty: b
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
-  const searchParams  = useSearchParams();
-  const router        = useRouter();
+  const searchParams = useSearchParams();
+  const router       = useRouter();
 
-  const [period,       setPeriod]       = useState<Period>('30d');
-  const [clients,      setClients]      = useState<Client[]>([]);
-  const [selectedId,   setSelectedId]   = useState(searchParams.get('client') ?? '');
-  const [blocks,       setBlocks]       = useState<DashBlockType[]>([]);
-  const [loading,      setLoading]      = useState(false);
-  const [libCollapsed, setLibCollapsed] = useState(true);
-  const [newBlockId,   setNewBlockId]   = useState<string | null>(null);
-  const [dragLibKey,   setDragLibKey]   = useState<string | null>(null);
+  const [period,     setPeriod]     = useState<Period>('30d');
+  const [clients,    setClients]    = useState<Client[]>([]);
+  const [selectedId, setSelectedId] = useState(searchParams.get('client') ?? '');
+  const [blocks,     setBlocks]     = useState<DashBlockType[]>([]);
+  const [loading,    setLoading]    = useState(false);
+  const [saving,     setSaving]     = useState(false);
+  const [savedAt,    setSavedAt]    = useState<string | null>(null);
+  const [isDirty,    setIsDirty]    = useState(false);
 
   const data = useMemo(() => generateMockSeries(period), [period]);
 
@@ -125,18 +111,25 @@ export default function DashboardPage() {
       .catch(() => {});
   }, [selectedId]);
 
-  // ── Load blocks when client changes ───────────────────────────────────────
+  // ── Load blocks ───────────────────────────────────────────────────────────
 
   const loadBlocks = useCallback(async (clientId: string) => {
     if (!clientId) return;
     setLoading(true);
     try {
       const res = await fetch(`/api/dashboard-configs?clientId=${clientId}`);
-      if (!res.ok) { setBlocks([]); return; }
-      const d = await res.json() as { blocks: DashBlockType[] };
-      setBlocks(Array.isArray(d.blocks) ? d.blocks : []);
+      if (!res.ok) { setBlocks(buildDefaultDashboard()); return; }
+      const d = await res.json() as { blocks: DashBlockType[]; updatedAt: string | null };
+      if (Array.isArray(d.blocks) && d.blocks.length > 0) {
+        setBlocks(d.blocks);
+        setSavedAt(d.updatedAt);
+      } else {
+        setBlocks(buildDefaultDashboard());
+        setSavedAt(null);
+      }
+      setIsDirty(false);
     } catch {
-      setBlocks([]);
+      setBlocks(buildDefaultDashboard());
     } finally {
       setLoading(false);
     }
@@ -149,175 +142,171 @@ export default function DashboardPage() {
     }
   }, [selectedId, loadBlocks, router]);
 
-  // ── Auto-save on block changes ────────────────────────────────────────────
+  // ── Save ─────────────────────────────────────────────────────────────────
 
-  const saveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  function scheduleAutoSave(updated: DashBlockType[]) {
+  async function handleSave() {
     if (!selectedId) return;
-    if (saveTimeout.current) clearTimeout(saveTimeout.current);
-    saveTimeout.current = setTimeout(() => {
-      void fetch(`/api/dashboard-configs?clientId=${selectedId}`, {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/dashboard-configs?clientId=${selectedId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ blocks: updated }),
+        body: JSON.stringify({ blocks }),
       });
-    }, 1500);
+      if (res.ok) {
+        const d = await res.json() as { updatedAt: string };
+        setSavedAt(d.updatedAt);
+        setIsDirty(false);
+      }
+    } finally {
+      setSaving(false);
+    }
   }
 
-  // ── DnD ──────────────────────────────────────────────────────────────────
+  // ── Reset to full default ─────────────────────────────────────────────────
 
-  function handleDragStart(e: DragStartEvent) {
-    const d = e.active.data.current;
-    setDragLibKey(d?.type === 'library' ? (d.metricKey as string) : null);
+  function handleReset() {
+    setBlocks(buildDefaultDashboard());
+    setIsDirty(true);
   }
+
+  // ── Remove block ──────────────────────────────────────────────────────────
+
+  function removeBlock(id: string) {
+    setBlocks(prev => prev.filter(b => b.id !== id));
+    setIsDirty(true);
+  }
+
+  function updateBlock(updated: DashBlockType) {
+    setBlocks(prev => prev.map(b => b.id === updated.id ? updated : b));
+    setIsDirty(true);
+  }
+
+  // ── DnD reorder ───────────────────────────────────────────────────────────
 
   function handleDragEnd(e: DragEndEvent) {
     const { active, over } = e;
-    setDragLibKey(null);
-    const d = active.data.current;
-
-    if (d?.type === 'library') {
-      if (!over) return;
-      const metric = METRIC_BY_KEY[d.metricKey as string];
-      if (!metric) return;
-      const viz  = getDefaultViz(metric);
-      const size = getDefaultSize(metric, viz);
-      const id   = `b${Date.now()}`;
-      const next = [...blocks, {
-        id, metricKeys: [d.metricKey as string], vizType: viz, size,
-        level: 'conta' as const, comparativo: 'none' as const, meta: null, position: blocks.length,
-      }];
-      setBlocks(next);
-      setNewBlockId(id);
-      scheduleAutoSave(next);
-      return;
-    }
-
     if (over && active.id !== over.id) {
       setBlocks(prev => {
         const from = prev.findIndex(b => b.id === active.id);
         const to   = prev.findIndex(b => b.id === over.id);
         if (from === -1 || to === -1) return prev;
-        const next = arrayMove(prev, from, to).map((b, i) => ({ ...b, position: i }));
-        scheduleAutoSave(next);
-        return next;
+        return arrayMove(prev, from, to).map((b, i) => ({ ...b, position: i }));
       });
+      setIsDirty(true);
     }
   }
 
-  function updateBlock(updated: DashBlockType) {
-    const next = blocks.map(b => b.id === updated.id ? updated : b);
-    setBlocks(next);
-    scheduleAutoSave(next);
-    if (newBlockId === updated.id) setNewBlockId(null);
-  }
+  // ── Group blocks by source ────────────────────────────────────────────────
 
-  function removeBlock(id: string) {
-    const next = blocks.filter(b => b.id !== id);
-    setBlocks(next);
-    scheduleAutoSave(next);
-    if (newBlockId === id) setNewBlockId(null);
-  }
+  const grouped = useMemo(() => {
+    const map = new Map<MetricSource, DashBlockType[]>();
+    for (const src of SOURCE_ORDER) map.set(src, []);
+    for (const b of blocks) {
+      const src = (METRIC_BY_KEY[b.metricKeys[0]]?.source ?? 'meta_ads') as MetricSource;
+      map.get(src)?.push(b);
+    }
+    return map;
+  }, [blocks]);
 
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <DndContext collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-      <div className="flex h-full gap-0 -mx-6 -mt-4">
+    <DndContext collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+      <div className="flex flex-col h-full -mx-6 -mt-4 overflow-hidden">
 
-        {/* Sidebar biblioteca */}
-        <BlockLibrary collapsed={libCollapsed} onToggle={() => setLibCollapsed(p => !p)} />
-
-        {/* Conteúdo */}
-        <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-
-          {/* Toolbar */}
-          <div className="flex items-center justify-between flex-wrap gap-3 px-6 py-4 border-b border-border">
-            <div>
-              <h1 className="font-heading font-normal text-3xl uppercase leading-none tracking-wide">Dashboard</h1>
-              <p className="text-xs text-muted-foreground mt-1">
-                {loading ? 'Carregando...' : `${blocks.length} bloco${blocks.length !== 1 ? 's' : ''}`}
+        {/* Toolbar */}
+        <div className="flex items-center justify-between flex-wrap gap-3 px-6 py-4 border-b border-border shrink-0">
+          <div>
+            <h1 className="font-heading font-normal text-3xl uppercase leading-none tracking-wide">Dashboard</h1>
+            <div className="flex items-center gap-2 mt-1">
+              <p className="text-xs text-muted-foreground">
+                {loading ? 'Carregando...' : `${blocks.length} métricas`}
               </p>
-            </div>
-
-            <div className="flex items-center gap-2 flex-wrap">
-              <ClientSelector clients={clients} selected={selectedId} onSelect={setSelectedId} />
-
-              {/* Period */}
-              <div className="flex rounded-lg border border-border bg-card overflow-hidden">
-                {(['7d', '30d', '90d'] as Period[]).map(p => (
-                  <button key={p} onClick={() => setPeriod(p)}
-                    className={cn('px-3 py-1.5 text-sm font-semibold transition-colors',
-                      period === p ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}>
-                    {p === '7d' ? '7d' : p === '30d' ? '30d' : '90d'}
-                  </button>
-                ))}
-              </div>
-
-              {/* Reload */}
-              <button onClick={() => selectedId && void loadBlocks(selectedId)}
-                className="p-2 rounded-lg border border-border bg-card text-muted-foreground hover:text-foreground transition-colors"
-                title="Recarregar">
-                <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
-              </button>
-
-              {/* Link ao Construtor */}
-              <Link href={`/construtor${selectedId ? `?client=${selectedId}` : ''}`}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-card text-sm text-muted-foreground hover:text-foreground transition-colors">
-                <Settings2 className="w-3.5 h-3.5" /> Construtor
-              </Link>
-
-              {/* Adicionar bloco rápido */}
-              <button onClick={() => {
-                const metric = METRIC_BY_KEY['meta_leads'];
-                if (!metric) return;
-                const id = `b${Date.now()}`;
-                const next = [...blocks, {
-                  id, metricKeys: ['meta_leads'], vizType: getDefaultViz(metric), size: 2 as const,
-                  level: 'conta' as const, comparativo: 'none' as const, meta: null, position: blocks.length,
-                }];
-                setBlocks(next);
-                setNewBlockId(id);
-                scheduleAutoSave(next);
-              }}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors">
-                <Plus className="w-3.5 h-3.5" /> Bloco
-              </button>
+              {savedAt && !isDirty && (
+                <span className="text-[10px] text-muted-foreground/50">
+                  · salvo {new Date(savedAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                </span>
+              )}
+              {isDirty && (
+                <span className="text-[10px] text-amber-500">· não salvo</span>
+              )}
             </div>
           </div>
 
-          {/* Grid */}
-          <div className="flex-1 overflow-y-auto px-6 py-5">
-            {loading ? (
-              <div className="flex items-center justify-center py-24 text-sm text-muted-foreground gap-2">
-                <RefreshCw className="w-4 h-4 animate-spin" /> Carregando dashboard...
-              </div>
-            ) : (
-              <SortableContext items={blocks.map(b => b.id)} strategy={rectSortingStrategy}>
-                <DropZone isEmpty={blocks.length === 0}>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-start">
-                    {blocks.map(block => (
-                      <DashBlock
-                        key={block.id}
-                        block={block}
-                        data={data}
-                        onUpdate={updateBlock}
-                        onRemove={() => removeBlock(block.id)}
-                        openConfig={newBlockId === block.id}
-                      />
-                    ))}
-                  </div>
-                </DropZone>
-              </SortableContext>
-            )}
+          <div className="flex items-center gap-2 flex-wrap">
+            <ClientSelector clients={clients} selected={selectedId} onSelect={setSelectedId} />
+
+            {/* Period */}
+            <div className="flex rounded-lg border border-border bg-card overflow-hidden">
+              {(['7d', '30d', '90d'] as Period[]).map(p => (
+                <button key={p} onClick={() => setPeriod(p)}
+                  className={cn('px-3 py-1.5 text-sm font-semibold transition-colors',
+                    period === p ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}>
+                  {p}
+                </button>
+              ))}
+            </div>
+
+            {/* Reload */}
+            <button onClick={() => selectedId && void loadBlocks(selectedId)}
+              className="p-2 rounded-lg border border-border bg-card text-muted-foreground hover:text-foreground transition-colors"
+              title="Recarregar">
+              <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
+            </button>
+
+            {/* Reset to default */}
+            <button onClick={handleReset}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-card text-sm text-muted-foreground hover:text-foreground transition-colors"
+              title="Restaurar todas as métricas">
+              <RotateCcw className="w-3.5 h-3.5" /> Restaurar
+            </button>
+
+            {/* Save */}
+            <button onClick={() => void handleSave()} disabled={!selectedId || saving || !isDirty}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-50 transition-colors">
+              {saving
+                ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Salvando</>
+                : <><Save className="w-3.5 h-3.5" /> Salvar</>}
+            </button>
           </div>
+        </div>
+
+        {/* Grid */}
+        <div className="flex-1 overflow-y-auto px-6 py-5">
+          {loading ? (
+            <div className="flex items-center justify-center py-24 text-sm text-muted-foreground gap-2">
+              <RefreshCw className="w-4 h-4 animate-spin" /> Carregando...
+            </div>
+          ) : (
+            <SortableContext items={blocks.map(b => b.id)} strategy={rectSortingStrategy}>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-start">
+                {SOURCE_ORDER.map(src => {
+                  const srcBlocks = grouped.get(src) ?? [];
+                  if (srcBlocks.length === 0) return null;
+                  return (
+                    <>
+                      <SourceHeader key={`hdr-${src}`} source={src} />
+                      {srcBlocks.map(block => (
+                        <DashBlock
+                          key={block.id}
+                          block={block}
+                          data={data}
+                          onUpdate={updateBlock}
+                          onRemove={() => removeBlock(block.id)}
+                          openConfig={false}
+                        />
+                      ))}
+                    </>
+                  );
+                })}
+              </div>
+            </SortableContext>
+          )}
         </div>
       </div>
 
-      <DragOverlay>
-        {dragLibKey && <LibraryDragPreview metricKey={dragLibKey} />}
-      </DragOverlay>
+      <DragOverlay />
     </DndContext>
   );
 }
