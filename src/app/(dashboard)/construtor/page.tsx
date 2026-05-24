@@ -7,16 +7,17 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, arrayMove, rectSortingStrategy } from '@dnd-kit/sortable';
 import {
-  Plus, Save, Download, Upload, Copy, ChevronDown, Check, Loader2,
+  Plus, Save, Download, Upload, Copy, ChevronDown, Check, Loader2, LayoutTemplate, X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { METRIC_BY_KEY, generateMockSeries } from '@/lib/metrics-registry';
+import { METRIC_BY_KEY, generateMockSeries, ALL_UNIFIED_METRICS } from '@/lib/metrics-registry';
 import {
   type DashBlock as DashBlockType,
   getDefaultViz, getDefaultSize,
 } from '@/components/builder/types';
 import { BlockLibrary, LibraryDragPreview } from '@/components/builder/block-library';
 import { DashBlock } from '@/components/builder/dash-block';
+import { TEMPLATES, type Template } from '@/components/builder/templates';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -102,6 +103,105 @@ function ClientSelector({
   );
 }
 
+// ── Template picker ───────────────────────────────────────────────────────────
+
+function TemplateCard({ tpl, onSelect }: { tpl: Template; onSelect: () => void }) {
+  const metricLabels = tpl.blocks
+    .flatMap(b => b.metricKeys)
+    .slice(0, 6)
+    .map(k => ALL_UNIFIED_METRICS.find(m => m.key === k)?.shortLabel ?? k);
+
+  return (
+    <button onClick={onSelect}
+      className="group text-left rounded-2xl border border-border bg-card hover:border-primary/50 hover:shadow-lg hover:shadow-primary/10 transition-all p-5 flex flex-col gap-3">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <p className="font-semibold text-base leading-tight">{tpl.name}</p>
+          <p className="text-xs text-muted-foreground mt-0.5">{tpl.subtitle}</p>
+        </div>
+        <div className="w-8 h-8 rounded-lg shrink-0 mt-0.5" style={{ background: tpl.color + '33', border: `1px solid ${tpl.color}55` }}>
+          <div className="w-full h-full rounded-lg flex items-center justify-center">
+            <span className="w-2 h-2 rounded-full" style={{ background: tpl.color }} />
+          </div>
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground leading-relaxed">{tpl.description}</p>
+      <div className="flex flex-wrap gap-1 mt-auto pt-1">
+        {tpl.tags.map(t => (
+          <span key={t} className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-muted text-muted-foreground">
+            {t}
+          </span>
+        ))}
+      </div>
+      <div className="border-t border-border pt-3">
+        <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-2 font-semibold">
+          {tpl.blocks.length} blocos · inclui
+        </p>
+        <div className="flex flex-wrap gap-1">
+          {metricLabels.map((l, i) => (
+            <span key={i} className="px-1.5 py-0.5 rounded text-[10px] bg-muted/60 text-muted-foreground">{l}</span>
+          ))}
+          {tpl.blocks.flatMap(b => b.metricKeys).length > 6 && (
+            <span className="px-1.5 py-0.5 rounded text-[10px] bg-muted/60 text-muted-foreground">
+              +{tpl.blocks.flatMap(b => b.metricKeys).length - 6} mais
+            </span>
+          )}
+        </div>
+      </div>
+    </button>
+  );
+}
+
+function TemplatePicker({
+  onSelect, onDismiss, isModal,
+}: { onSelect: (tpl: Template) => void; onDismiss?: () => void; isModal?: boolean }) {
+  const content = (
+    <div className={cn(isModal && 'bg-card rounded-2xl border border-border shadow-2xl w-full max-w-3xl p-6')}>
+      <div className="flex items-center justify-between mb-5">
+        <div>
+          <p className="font-heading font-normal text-2xl uppercase tracking-wide">Escolha um template</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Pré-configurado com os blocos mais usados. Customize depois à vontade.
+          </p>
+        </div>
+        {isModal && onDismiss && (
+          <button onClick={onDismiss}
+            className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+            <X className="w-4 h-4" />
+          </button>
+        )}
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {TEMPLATES.map(tpl => (
+          <TemplateCard key={tpl.id} tpl={tpl} onSelect={() => onSelect(tpl)} />
+        ))}
+      </div>
+      {isModal && (
+        <div className="mt-4 pt-4 border-t border-border">
+          <button onClick={onDismiss}
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors">
+            Cancelar e continuar editando
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
+  if (isModal) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 overflow-y-auto">
+        {content}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1 overflow-y-auto px-6 py-8">
+      {content}
+    </div>
+  );
+}
+
 // ── Copy from client dialog ───────────────────────────────────────────────────
 
 function CopyDialog({
@@ -150,26 +250,16 @@ function CopyDialog({
   );
 }
 
-// ── Default blocks ────────────────────────────────────────────────────────────
-
-const DEFAULT_BLOCKS: DashBlockType[] = [
-  { id: 'b1', metricKeys: ['meta_leads'],                       vizType: 'box-meta', size: 1, level: 'conta', comparativo: 'none', meta: null, position: 0 },
-  { id: 'b2', metricKeys: ['meta_cpl'],                         vizType: 'box-meta', size: 1, level: 'conta', comparativo: 'none', meta: 30,   position: 1 },
-  { id: 'b3', metricKeys: ['meta_spend', 'google_spend'],       vizType: 'pizza',    size: 2, level: 'conta', comparativo: 'none', meta: null, position: 2 },
-  { id: 'b4', metricKeys: ['meta_frequency'],                   vizType: 'gauge',    size: 1, level: 'conta', comparativo: 'none', meta: null, position: 3 },
-  { id: 'b5', metricKeys: ['meta_leads', 'google_conversions'], vizType: 'bar',      size: 4, level: 'conta', comparativo: 'none', meta: null, position: 4 },
-  { id: 'b6', metricKeys: ['crm_conv_rate'],                    vizType: 'gauge',    size: 1, level: 'conta', comparativo: 'none', meta: null, position: 5 },
-  { id: 'b7', metricKeys: ['crm_revenue'],                      vizType: 'line',     size: 3, level: 'conta', comparativo: 'none', meta: null, position: 6 },
-];
-
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function ConstruitorPage() {
-  const [period,       setPeriod]       = useState<Period>('30d');
-  const [blocks,       setBlocks]       = useState<DashBlockType[]>(DEFAULT_BLOCKS);
-  const [libCollapsed, setLibCollapsed] = useState(false);
-  const [newBlockId,   setNewBlockId]   = useState<string | null>(null);
-  const [dragLibKey,   setDragLibKey]   = useState<string | null>(null);
+  const [period,         setPeriod]         = useState<Period>('30d');
+  const [blocks,         setBlocks]         = useState<DashBlockType[]>([]);
+  const [libCollapsed,   setLibCollapsed]   = useState(false);
+  const [newBlockId,     setNewBlockId]     = useState<string | null>(null);
+  const [dragLibKey,     setDragLibKey]     = useState<string | null>(null);
+  const [showTplPicker,  setShowTplPicker]  = useState(false);
+  const [clientLoaded,   setClientLoaded]   = useState(false);
 
   // Clients + persistence
   const [clients,      setClients]      = useState<Client[]>([]);
@@ -189,7 +279,6 @@ export default function ConstruitorPage() {
       .then(list => { setClients(list); if (list.length > 0 && !selectedId) setSelectedId(list[0].id); })
       .catch(() => {});
 
-    // Load clients that have saved configs
     fetch('/api/dashboard-configs', { method: 'PATCH' })
       .then(r => r.ok ? r.json() as Promise<Array<{ client_id: string; client_name: string }>> : [])
       .then(rows => setSavedClients(rows.map(r => ({ id: r.client_id, name: r.client_name }))))
@@ -200,26 +289,45 @@ export default function ConstruitorPage() {
 
   const loadConfig = useCallback(async (clientId: string) => {
     if (!clientId) return;
+    setClientLoaded(false);
     try {
       const res = await fetch(`/api/dashboard-configs?clientId=${clientId}`);
-      if (!res.ok) return;
-      const data = await res.json() as SavedConfig;
-      if (data.blocks && data.blocks.length > 0) {
-        setBlocks(data.blocks);
-        setSavedAt(data.updatedAt);
+      if (!res.ok) { setBlocks([]); setShowTplPicker(true); return; }
+      const d = await res.json() as SavedConfig;
+      if (d.blocks && d.blocks.length > 0) {
+        setBlocks(d.blocks);
+        setSavedAt(d.updatedAt);
+        setShowTplPicker(false);
       } else {
-        setBlocks(DEFAULT_BLOCKS);
+        setBlocks([]);
         setSavedAt(null);
+        setShowTplPicker(true); // no blocks saved → show template picker
       }
     } catch {
-      setBlocks(DEFAULT_BLOCKS);
-      setSavedAt(null);
+      setBlocks([]);
+      setShowTplPicker(true);
+    } finally {
+      setClientLoaded(true);
     }
   }, []);
 
   useEffect(() => {
     if (selectedId) void loadConfig(selectedId);
   }, [selectedId, loadConfig]);
+
+  // ── Apply template ────────────────────────────────────────────────────────
+
+  function applyTemplate(tpl: Template) {
+    const now = Date.now();
+    const newBlocks: DashBlockType[] = tpl.blocks.map((b, i) => ({
+      ...b,
+      id: `b${now}${i}`,
+      position: i,
+    }));
+    setBlocks(newBlocks);
+    setSavedAt(null);
+    setShowTplPicker(false);
+  }
 
   // ── Save ─────────────────────────────────────────────────────────────────
 
@@ -235,7 +343,6 @@ export default function ConstruitorPage() {
       if (res.ok) {
         const d = await res.json() as { updatedAt: string };
         setSavedAt(d.updatedAt);
-        // Refresh saved-clients list
         const rows = await fetch('/api/dashboard-configs', { method: 'PATCH' })
           .then(r => r.ok ? r.json() as Promise<Array<{ client_id: string; client_name: string }>> : []);
         setSavedClients(rows.map(r => ({ id: r.client_id, name: r.client_name })));
@@ -253,7 +360,6 @@ export default function ConstruitorPage() {
       if (!res.ok) return;
       const d = await res.json() as SavedConfig;
       if (d.blocks && d.blocks.length > 0) {
-        // Re-assign new ids to avoid collisions
         setBlocks(d.blocks.map((b, i) => ({ ...b, id: `b${Date.now()}${i}`, position: i })));
         setSavedAt(null);
       }
@@ -265,10 +371,8 @@ export default function ConstruitorPage() {
   function handleExport() {
     const client = clients.find(c => c.id === selectedId);
     const json = JSON.stringify({
-      clientId: selectedId,
-      clientName: client?.name ?? '',
-      blocks,
-      exportedAt: new Date().toISOString(),
+      clientId: selectedId, clientName: client?.name ?? '',
+      blocks, exportedAt: new Date().toISOString(),
     }, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
     const url  = URL.createObjectURL(blob);
@@ -361,6 +465,9 @@ export default function ConstruitorPage() {
 
   // ── Render ────────────────────────────────────────────────────────────────
 
+  // When no blocks and client loaded → show template picker inline (not modal)
+  const showInlinePicker = clientLoaded && blocks.length === 0 && showTplPicker;
+
   return (
     <>
       <DndContext
@@ -395,8 +502,6 @@ export default function ConstruitorPage() {
               </div>
 
               <div className="flex items-center gap-2 flex-wrap">
-
-                {/* Client selector */}
                 <ClientSelector
                   clients={clients}
                   selected={selectedId}
@@ -409,12 +514,17 @@ export default function ConstruitorPage() {
                     <button key={p} onClick={() => setPeriod(p)}
                       className={cn('px-3 py-1.5 text-sm font-semibold transition-colors',
                         period === p ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}>
-                      {p === '7d' ? '7d' : p === '30d' ? '30d' : '90d'}
+                      {p}
                     </button>
                   ))}
                 </div>
 
-                {/* Actions */}
+                {/* Templates button */}
+                <button onClick={() => setShowTplPicker(true)} title="Usar template"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-card text-sm text-muted-foreground hover:text-foreground transition-colors">
+                  <LayoutTemplate className="w-3.5 h-3.5" /> Templates
+                </button>
+
                 <button onClick={() => setCopyOpen(true)} title="Copiar de outro cliente"
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-card text-sm text-muted-foreground hover:text-foreground transition-colors">
                   <Copy className="w-3.5 h-3.5" /> Copiar de
@@ -439,31 +549,34 @@ export default function ConstruitorPage() {
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-50 transition-colors">
                   {saving
                     ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Salvando</>
-                    : <><Save className="w-3.5 h-3.5" /> Salvar</>
-                  }
+                    : <><Save className="w-3.5 h-3.5" /> Salvar</>}
                 </button>
               </div>
             </div>
 
-            {/* Grid */}
-            <div className="flex-1 overflow-y-auto px-6 py-5">
-              <SortableContext items={blocks.map(b => b.id)} strategy={rectSortingStrategy}>
-                <DropZone isEmpty={blocks.length === 0}>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-start">
-                    {blocks.map(block => (
-                      <DashBlock
-                        key={block.id}
-                        block={block}
-                        data={data}
-                        onUpdate={updateBlock}
-                        onRemove={() => removeBlock(block.id)}
-                        openConfig={newBlockId === block.id}
-                      />
-                    ))}
-                  </div>
-                </DropZone>
-              </SortableContext>
-            </div>
+            {/* Template picker inline (when no blocks) or modal (when blocks exist) */}
+            {showInlinePicker ? (
+              <TemplatePicker onSelect={applyTemplate} />
+            ) : (
+              <div className="flex-1 overflow-y-auto px-6 py-5">
+                <SortableContext items={blocks.map(b => b.id)} strategy={rectSortingStrategy}>
+                  <DropZone isEmpty={blocks.length === 0}>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-start">
+                      {blocks.map(block => (
+                        <DashBlock
+                          key={block.id}
+                          block={block}
+                          data={data}
+                          onUpdate={updateBlock}
+                          onRemove={() => removeBlock(block.id)}
+                          openConfig={newBlockId === block.id}
+                        />
+                      ))}
+                    </div>
+                  </DropZone>
+                </SortableContext>
+              </div>
+            )}
           </div>
         </div>
 
@@ -471,6 +584,15 @@ export default function ConstruitorPage() {
           {dragLibKey && <LibraryDragPreview metricKey={dragLibKey} />}
         </DragOverlay>
       </DndContext>
+
+      {/* Template picker modal (when blocks already exist) */}
+      {showTplPicker && !showInlinePicker && (
+        <TemplatePicker
+          isModal
+          onSelect={tpl => { applyTemplate(tpl); setShowTplPicker(false); }}
+          onDismiss={() => setShowTplPicker(false)}
+        />
+      )}
 
       {/* Copy dialog */}
       {copyOpen && (
