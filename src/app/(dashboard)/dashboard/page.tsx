@@ -2380,6 +2380,12 @@ const CARD_GROUPS: Array<{ title: string; ids: DashboardCardId[] }> = [
   { title: 'Google Ads', ids: ['google-impressions', 'google-conversions', 'google-cpa', 'google-spend', 'google-ctr', 'google-total-spend', 'google-balance', 'google-active-campaigns', 'google-keyword-count', 'google-campaigns', 'google-keywords', 'google-audience'] },
 ];
 
+const CHANNEL_GROUPS: Array<{ id: string; label: string; color: string; ids: DashboardCardId[] }> = [
+  { id: 'geral',  label: 'Métricas Gerais', color: '#55F52F', ids: CARD_GROUPS[0].ids },
+  { id: 'meta',   label: 'Meta Ads',         color: '#0668E1', ids: CARD_GROUPS[1].ids },
+  { id: 'google', label: 'Google Ads',        color: '#7B2CFF', ids: CARD_GROUPS[2].ids },
+];
+
 const DEFAULT_CARD_OVERRIDES: Partial<Record<DashboardCardId, Partial<DashboardCardConfig>>> = {
   'general-revenue': { size: 'lg', chart: 'none' },
   'general-leads': { size: 'lg', chart: 'none' },
@@ -2448,12 +2454,24 @@ function DashboardGridItem({
   ignoreSpan?: boolean;
 }) {
   const { editMode, hideCard, toggleChart } = useContext(DashboardEditCtx);
+  const [hiding, setHiding] = useState(false);
   const cfg = prefs.cards[id] ?? DEFAULT_DASHBOARD_PREFS.cards[id];
   const isPanel = id.includes('campaigns') || id.includes('audience') || id.includes('preview') || id.includes('keywords') || id === 'general-funnel';
   if (!cfg.visible) return null;
+
+  function handleHide() {
+    setHiding(true);
+    setTimeout(() => hideCard(id), 180);
+  }
+
   return (
     <div
-      className={cn('min-w-0 [&>*]:h-full relative group/card', !ignoreSpan && gridSpan(cfg.size), className)}
+      className={cn(
+        'min-w-0 [&>*]:h-full relative group/card transition-all duration-200',
+        !ignoreSpan && gridSpan(cfg.size),
+        hiding && 'opacity-0 scale-95',
+        className,
+      )}
       style={{ order: ignoreSpan ? undefined : cfg.order, minHeight: cfg.height ? `${cfg.height}px` : undefined }}
     >
       {children}
@@ -2472,7 +2490,7 @@ function DashboardGridItem({
           <button
             type="button"
             title="Ocultar métrica"
-            onClick={() => hideCard(id)}
+            onClick={handleHide}
             className="flex items-center justify-center w-6 h-6 rounded-md bg-card border border-border text-muted-foreground hover:text-destructive transition-colors shadow-md"
           >
             <X className="w-3 h-3" />
@@ -2483,7 +2501,7 @@ function DashboardGridItem({
   );
 }
 
-function DashboardCustomizer({
+function MetricConfigPanel({
   prefs,
   onPrefsChange,
   onClose,
@@ -2492,128 +2510,194 @@ function DashboardCustomizer({
   onPrefsChange: (prefs: DashboardPrefs) => void;
   onClose: () => void;
 }) {
+  const [search, setSearch] = useState('');
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+
   function updateCard(id: DashboardCardId, patch: Partial<DashboardCardConfig>) {
     onPrefsChange({ ...prefs, cards: { ...prefs.cards, [id]: { ...prefs.cards[id], ...patch } } });
   }
-  function moveCard(groupIds: DashboardCardId[], id: DashboardCardId, direction: -1 | 1) {
-    const ordered = [...groupIds].sort((a, b) => {
-      const aOrder = prefs.cards[a]?.order ?? groupIds.indexOf(a);
-      const bOrder = prefs.cards[b]?.order ?? groupIds.indexOf(b);
-      return aOrder - bOrder;
-    });
-    const currentIndex = ordered.indexOf(id);
-    const nextIndex = currentIndex + direction;
-    if (nextIndex < 0 || nextIndex >= ordered.length) return;
-    const next = [...ordered];
-    [next[currentIndex], next[nextIndex]] = [next[nextIndex], next[currentIndex]];
+
+  function toggleChannel(ids: DashboardCardId[]) {
+    const allOn = ids.every(id => prefs.cards[id]?.visible !== false);
     const cards = { ...prefs.cards };
-    next.forEach((cardId, index) => {
-      cards[cardId] = { ...cards[cardId], order: index };
-    });
+    ids.forEach(id => { cards[id] = { ...cards[id], visible: !allOn }; });
     onPrefsChange({ ...prefs, cards });
   }
-  function reset() { onPrefsChange(DEFAULT_DASHBOARD_PREFS); }
+
+  function moveCard(groupIds: DashboardCardId[], id: DashboardCardId, dir: -1 | 1) {
+    const ordered = [...groupIds].sort((a, b) =>
+      (prefs.cards[a]?.order ?? groupIds.indexOf(a)) - (prefs.cards[b]?.order ?? groupIds.indexOf(b))
+    );
+    const cur = ordered.indexOf(id);
+    const nxt = cur + dir;
+    if (nxt < 0 || nxt >= ordered.length) return;
+    [ordered[cur], ordered[nxt]] = [ordered[nxt], ordered[cur]];
+    const cards = { ...prefs.cards };
+    ordered.forEach((cid, i) => { cards[cid] = { ...cards[cid], order: i }; });
+    onPrefsChange({ ...prefs, cards });
+  }
+
+  const filteredChannels = CHANNEL_GROUPS.map(ch => ({
+    ...ch,
+    ids: search
+      ? ch.ids.filter(id => CARD_LABELS[id]?.toLowerCase().includes(search.toLowerCase()))
+      : ch.ids,
+  })).filter(ch => ch.ids.length > 0);
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm">
-      <div className="absolute right-4 top-4 flex max-h-[calc(100vh-2rem)] w-[min(920px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl">
-        <div className="flex items-center justify-between border-b border-border px-5 py-4">
+    <div className="fixed inset-0 z-50 flex items-start justify-end bg-black/60 backdrop-blur-sm p-4 pt-16">
+      <div className="flex h-full max-h-[calc(100vh-5rem)] w-full max-w-[360px] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl">
+
+        {/* Header */}
+        <div className="flex shrink-0 items-center justify-between border-b border-border px-5 py-4">
           <div>
-            <p className="text-sm font-bold uppercase tracking-wider text-foreground">Customizar dashboard</p>
-            <p className="text-[11px] text-muted-foreground">Configuração global, aplicada para todos os clientes.</p>
+            <p className="text-sm font-bold uppercase tracking-wider">Configurar métricas</p>
+            <p className="text-[11px] text-muted-foreground mt-0.5">Ative ou oculte por canal</p>
           </div>
           <button type="button" onClick={onClose} className="rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground">
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto px-5 py-4">
-          <div className="mb-4 grid gap-3 sm:grid-cols-2">
-            <label className="rounded-xl border border-border bg-background/50 p-3">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Gráfico público Meta</span>
-              <select value={prefs.metaAudienceChart} onChange={e => onPrefsChange({ ...prefs, metaAudienceChart: e.target.value as AudienceChartVariant })} className="mt-2 w-full rounded-lg border border-border bg-card px-3 py-2 text-xs">
-                <option value="donut">Donut</option>
-                <option value="list">Lista</option>
-              </select>
-            </label>
-            <label className="rounded-xl border border-border bg-background/50 p-3">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Gráfico público Google</span>
-              <select value={prefs.googleAudienceChart} onChange={e => onPrefsChange({ ...prefs, googleAudienceChart: e.target.value as AudienceChartVariant })} className="mt-2 w-full rounded-lg border border-border bg-card px-3 py-2 text-xs">
-                <option value="donut">Donut</option>
-                <option value="list">Lista</option>
-              </select>
-            </label>
-          </div>
-          <div className="space-y-5">
-            {CARD_GROUPS.map(group => (
-              <section key={group.title} className="space-y-2">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{group.title}</p>
-                <div className="divide-y divide-border overflow-hidden rounded-xl border border-border">
-                  {[...group.ids].sort((a, b) => {
-                    const aOrder = prefs.cards[a]?.order ?? group.ids.indexOf(a);
-                    const bOrder = prefs.cards[b]?.order ?? group.ids.indexOf(b);
-                    return aOrder - bOrder;
-                  }).map(id => {
-                    const cfg = prefs.cards[id];
-                    const isPanel = id.includes('campaigns') || id.includes('audience') || id.includes('preview') || id.includes('keywords') || id === 'general-funnel';
-                    return (
-                      <div key={id} className="space-y-3 bg-background/35 p-3">
-                        <label className="flex min-w-0 items-start gap-2 text-xs font-semibold text-foreground">
-                          <input type="checkbox" checked={cfg.visible} onChange={e => updateCard(id, { visible: e.target.checked })} className="mt-0.5 h-4 w-4 shrink-0 accent-primary" />
-                          <span className="min-w-0 flex-1 whitespace-normal break-words leading-snug">{CARD_LABELS[id]}</span>
-                          <span className="shrink-0 rounded-full border border-border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted-foreground">{isPanel ? 'Painel' : 'Widget'}</span>
-                        </label>
-                        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-[132px_132px_112px_132px]">
-                          <label className="space-y-1">
-                            <span className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground">Largura</span>
-                            <select value={cfg.size} onChange={e => updateCard(id, { size: e.target.value as DashboardWidgetSize })} className="w-full rounded-lg border border-border bg-card px-2 py-1.5 text-xs">
-                              <option value="sm">1 coluna</option>
-                              <option value="md">2 colunas</option>
-                              <option value="lg">4 colunas</option>
-                            </select>
-                          </label>
-                          <label className="space-y-1">
-                            <span className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground">Altura</span>
-                            <input
-                              type="number"
-                              min={120}
-                              step={20}
-                              value={cfg.height ?? ''}
-                              onChange={e => updateCard(id, { height: e.target.value ? Math.max(120, Number(e.target.value)) : undefined })}
-                              placeholder="Auto"
-                              className="w-full rounded-lg border border-border bg-card px-2 py-1.5 text-xs"
-                              aria-label={`Altura de ${CARD_LABELS[id]}`}
-                            />
-                          </label>
-                          <label className="space-y-1">
-                            <span className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground">Ordem</span>
-                            <div className="flex overflow-hidden rounded-lg border border-border bg-card">
-                              <button type="button" onClick={() => moveCard(group.ids, id, -1)} className="flex flex-1 items-center justify-center px-2 py-1.5 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Mover para cima">
-                                <ChevronUp className="h-3.5 w-3.5" />
-                              </button>
-                              <button type="button" onClick={() => moveCard(group.ids, id, 1)} className="flex flex-1 items-center justify-center border-l border-border px-2 py-1.5 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Mover para baixo">
-                                <ChevronDown className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
-                          </label>
-                          <label className="space-y-1">
-                            <span className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground">Gráfico</span>
-                            <select value={cfg.chart} disabled={isPanel} onChange={e => updateCard(id, { chart: e.target.value as DashboardCardChart })} className="w-full rounded-lg border border-border bg-card px-2 py-1.5 text-xs disabled:opacity-40">
-                              <option value="sparkline">Linha</option>
-                              <option value="none">Sem gráfico</option>
-                            </select>
-                          </label>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </section>
-            ))}
+
+        {/* Search */}
+        <div className="shrink-0 px-4 py-3 border-b border-border">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Buscar métrica..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="w-full rounded-lg border border-border bg-background pl-9 pr-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+            />
           </div>
         </div>
-        <div className="flex items-center justify-between border-t border-border px-5 py-4">
-          <button type="button" onClick={reset} className="rounded-lg border border-border px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground">Restaurar padrão</button>
-          <button type="button" onClick={onClose} className="rounded-lg bg-primary px-4 py-2 text-xs font-bold text-black">Salvar padrão global</button>
+
+        {/* Audience chart global settings */}
+        <div className="shrink-0 grid grid-cols-2 gap-2 px-4 py-3 border-b border-border">
+          <label className="space-y-1">
+            <span className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground">Gráfico público Meta</span>
+            <select value={prefs.metaAudienceChart} onChange={e => onPrefsChange({ ...prefs, metaAudienceChart: e.target.value as AudienceChartVariant })}
+              className="w-full rounded-lg border border-border bg-card px-2 py-1.5 text-xs">
+              <option value="donut">Donut</option>
+              <option value="list">Lista</option>
+            </select>
+          </label>
+          <label className="space-y-1">
+            <span className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground">Gráfico público Google</span>
+            <select value={prefs.googleAudienceChart} onChange={e => onPrefsChange({ ...prefs, googleAudienceChart: e.target.value as AudienceChartVariant })}
+              className="w-full rounded-lg border border-border bg-card px-2 py-1.5 text-xs">
+              <option value="donut">Donut</option>
+              <option value="list">Lista</option>
+            </select>
+          </label>
+        </div>
+
+        {/* Channel sections */}
+        <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2">
+          {filteredChannels.map(ch => {
+            const allOn   = ch.ids.every(id => prefs.cards[id]?.visible !== false);
+            const someOn  = ch.ids.some(id => prefs.cards[id]?.visible !== false);
+            const isCollapsed = collapsed.has(ch.id);
+            const visibleCount = ch.ids.filter(id => prefs.cards[id]?.visible !== false).length;
+            const orderedIds = [...ch.ids].sort((a, b) =>
+              (prefs.cards[a]?.order ?? ch.ids.indexOf(a)) - (prefs.cards[b]?.order ?? ch.ids.indexOf(b))
+            );
+
+            return (
+              <div key={ch.id} className="overflow-hidden rounded-xl border border-border">
+                {/* Channel header */}
+                <div
+                  className="flex items-center gap-2.5 px-3 py-2.5 cursor-pointer select-none hover:bg-muted/20 transition-colors"
+                  style={{ borderLeft: `3px solid ${ch.color}` }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={allOn}
+                    ref={el => { if (el) el.indeterminate = !allOn && someOn; }}
+                    onChange={() => toggleChannel(ch.ids)}
+                    onClick={e => e.stopPropagation()}
+                    className="h-3.5 w-3.5 shrink-0 accent-primary"
+                  />
+                  <span
+                    className="flex-1 text-[10px] font-bold uppercase tracking-widest"
+                    style={{ color: ch.color }}
+                    onClick={() => setCollapsed(prev => {
+                      const next = new Set(prev);
+                      next.has(ch.id) ? next.delete(ch.id) : next.add(ch.id);
+                      return next;
+                    })}
+                  >
+                    {ch.label}
+                  </span>
+                  <span className="text-[10px] text-muted-foreground">{visibleCount}/{ch.ids.length}</span>
+                  <ChevronDown
+                    className={cn('h-3.5 w-3.5 text-muted-foreground transition-transform', !isCollapsed && 'rotate-180')}
+                    onClick={() => setCollapsed(prev => {
+                      const next = new Set(prev);
+                      next.has(ch.id) ? next.delete(ch.id) : next.add(ch.id);
+                      return next;
+                    })}
+                  />
+                </div>
+
+                {/* Metric rows */}
+                {!isCollapsed && (
+                  <div className="divide-y divide-border border-t border-border">
+                    {orderedIds.map(id => {
+                      const cfg = prefs.cards[id];
+                      const isPanel = id.includes('campaigns') || id.includes('audience') || id.includes('preview') || id.includes('keywords') || id === 'general-funnel';
+                      return (
+                        <div key={id} className={cn('flex items-center gap-2 px-3 py-2 transition-colors', !cfg.visible && 'opacity-40')}>
+                          <input
+                            type="checkbox"
+                            checked={cfg.visible}
+                            onChange={e => updateCard(id, { visible: e.target.checked })}
+                            className="h-3.5 w-3.5 shrink-0 accent-primary"
+                          />
+                          <span className="flex-1 min-w-0 text-xs leading-tight truncate">{CARD_LABELS[id]}</span>
+                          {isPanel && (
+                            <span className="shrink-0 rounded-full border border-border px-1.5 py-0.5 text-[9px] text-muted-foreground">painel</span>
+                          )}
+                          <select
+                            value={cfg.size}
+                            onChange={e => updateCard(id, { size: e.target.value as DashboardWidgetSize })}
+                            className="shrink-0 rounded border border-border bg-card px-1 py-0.5 text-[10px]"
+                          >
+                            <option value="sm">1col</option>
+                            <option value="md">2col</option>
+                            <option value="lg">4col</option>
+                          </select>
+                          <div className="flex shrink-0 gap-0 overflow-hidden rounded border border-border">
+                            <button type="button" onClick={() => moveCard(ch.ids, id, -1)}
+                              className="px-1 py-0.5 text-muted-foreground hover:bg-muted hover:text-foreground">
+                              <ChevronUp className="h-3 w-3" />
+                            </button>
+                            <button type="button" onClick={() => moveCard(ch.ids, id, 1)}
+                              className="border-l border-border px-1 py-0.5 text-muted-foreground hover:bg-muted hover:text-foreground">
+                              <ChevronDown className="h-3 w-3" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Footer */}
+        <div className="shrink-0 flex items-center justify-between border-t border-border px-5 py-4">
+          <button type="button" onClick={() => onPrefsChange(DEFAULT_DASHBOARD_PREFS)}
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors">
+            Restaurar padrão
+          </button>
+          <button type="button" onClick={onClose}
+            className="rounded-lg bg-primary px-4 py-2 text-xs font-bold text-black">
+            Fechar
+          </button>
         </div>
       </div>
     </div>
@@ -3631,8 +3715,8 @@ export default function GeneralDashboard() {
 
   return (
     <div className="space-y-6 pb-10">
-      {customizerOpen && isAdmin && (
-        <DashboardCustomizer
+      {customizerOpen && (
+        <MetricConfigPanel
           prefs={dashboardPrefs}
           onPrefsChange={setDashboardPrefs}
           onClose={() => setCustomizerOpen(false)}
