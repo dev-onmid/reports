@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
@@ -2428,6 +2428,12 @@ function gridSpan(size: DashboardWidgetSize) {
   return size === 'lg' ? 'xl:col-span-4' : size === 'md' ? 'xl:col-span-2' : 'xl:col-span-1';
 }
 
+const DashboardEditCtx = createContext<{
+  editMode: boolean;
+  hideCard: (id: DashboardCardId) => void;
+  toggleChart: (id: DashboardCardId) => void;
+}>({ editMode: false, hideCard: () => {}, toggleChart: () => {} });
+
 function DashboardGridItem({
   id,
   prefs,
@@ -2441,14 +2447,38 @@ function DashboardGridItem({
   className?: string;
   ignoreSpan?: boolean;
 }) {
+  const { editMode, hideCard, toggleChart } = useContext(DashboardEditCtx);
   const cfg = prefs.cards[id] ?? DEFAULT_DASHBOARD_PREFS.cards[id];
+  const isPanel = id.includes('campaigns') || id.includes('audience') || id.includes('preview') || id.includes('keywords') || id === 'general-funnel';
   if (!cfg.visible) return null;
   return (
     <div
-      className={cn('min-w-0 [&>*]:h-full', !ignoreSpan && gridSpan(cfg.size), className)}
+      className={cn('min-w-0 [&>*]:h-full relative group/card', !ignoreSpan && gridSpan(cfg.size), className)}
       style={{ order: ignoreSpan ? undefined : cfg.order, minHeight: cfg.height ? `${cfg.height}px` : undefined }}
     >
       {children}
+      {editMode && (
+        <div className="absolute top-1.5 right-1.5 z-20 flex items-center gap-1 opacity-0 group-hover/card:opacity-100 transition-opacity">
+          {!isPanel && (
+            <button
+              type="button"
+              title={cfg.chart === 'sparkline' ? 'Ocultar gráfico' : 'Mostrar gráfico'}
+              onClick={() => toggleChart(id)}
+              className="flex items-center justify-center w-6 h-6 rounded-md bg-card border border-border text-muted-foreground hover:text-foreground transition-colors shadow-md"
+            >
+              <BarChart3 className="w-3 h-3" />
+            </button>
+          )}
+          <button
+            type="button"
+            title="Ocultar métrica"
+            onClick={() => hideCard(id)}
+            className="flex items-center justify-center w-6 h-6 rounded-md bg-card border border-border text-muted-foreground hover:text-destructive transition-colors shadow-md"
+          >
+            <X className="w-3 h-3" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -3013,6 +3043,23 @@ export default function GeneralDashboard() {
     });
   }
 
+  function hideCard(id: DashboardCardId) {
+    setDashboardPrefs(prev => ({
+      ...prev,
+      cards: { ...prev.cards, [id]: { ...prev.cards[id], visible: false } },
+    }));
+  }
+
+  function toggleChart(id: DashboardCardId) {
+    setDashboardPrefs(prev => {
+      const current = prev.cards[id]?.chart ?? 'sparkline';
+      return {
+        ...prev,
+        cards: { ...prev.cards, [id]: { ...prev.cards[id], chart: current === 'sparkline' ? 'none' : 'sparkline' } },
+      };
+    });
+  }
+
   // Load layout from localStorage
   useEffect(() => {
     try {
@@ -3047,9 +3094,7 @@ export default function GeneralDashboard() {
   useEffect(() => {
     localStorage.setItem(LS_DASHBOARD_PREFS, JSON.stringify(dashboardPrefs));
   }, [dashboardPrefs]);
-  useEffect(() => {
-    if (!isAdmin && customizerOpen) setCustomizerOpen(false);
-  }, [customizerOpen, isAdmin]);
+  // customizerOpen available to all users
 
   // Initialize: pre-select from ?client=ID param, otherwise start empty (force client picker)
   useEffect(() => {
@@ -3654,16 +3699,28 @@ export default function GeneralDashboard() {
             {aiLoading ? 'Analisando...' : 'Analisar com IA'}
           </button>
 
-          {isAdmin && (
-            <button
-              type="button"
-              onClick={() => setCustomizerOpen(true)}
-              className="flex items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2 text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground"
-            >
-              <Settings2 className="h-3.5 w-3.5" />
-              Customizar
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => setEditMode(e => !e)}
+            className={cn(
+              'flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold transition-colors',
+              editMode
+                ? 'border-primary bg-primary/10 text-primary'
+                : 'border-border bg-card text-muted-foreground hover:text-foreground',
+            )}
+          >
+            <GripVertical className="h-3.5 w-3.5" />
+            {editMode ? 'Sair do modo edição' : 'Editar layout'}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setCustomizerOpen(true)}
+            className="flex items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2 text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <Settings2 className="h-3.5 w-3.5" />
+            Personalizar
+          </button>
 
           {/* Theme + bell + user */}
           <ThemeToggle />
@@ -3733,7 +3790,7 @@ export default function GeneralDashboard() {
         </div>
       )}
 
-      {selectedIds.size > 0 && <>
+      {selectedIds.size > 0 && <DashboardEditCtx.Provider value={{ editMode, hideCard, toggleChart }}>
 
       {/* AI RECOMMENDATIONS */}
       <AiRecommendationsBox insights={aiInsights} loading={aiLoading} onAnalyze={analyzeWithAI} />
@@ -4121,7 +4178,7 @@ export default function GeneralDashboard() {
 
       <CreativePreviewOverlay creative={previewCreative} onClose={() => setPreviewCreative(null)} />
 
-      </>}
+      </DashboardEditCtx.Provider>}
     </div>
   );
 }
