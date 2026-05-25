@@ -58,12 +58,19 @@ async function fetchFbPage(
     const since = Math.floor(new Date(from).getTime() / 1000);
     const until = Math.floor(new Date(to + 'T23:59:59').getTime() / 1000);
 
-    const [fanRes, insRes] = await Promise.all([
+    // Request metrics in two groups — some metrics were deprecated in v17+ and cause the
+    // entire batch to fail with "(#100) The value must be a valid insights metric".
+    // We fetch fan_adds_unique separately so a deprecation doesn't zero out everything.
+    const [fanRes, insRes, fanAddsRes] = await Promise.all([
       fetch(`https://graph.facebook.com/v21.0/${pageId}?fields=fan_count&access_token=${pageToken}`),
       fetch(
         `https://graph.facebook.com/v21.0/${pageId}/insights` +
-        `?metric=page_fan_adds,page_impressions_unique,page_impressions,page_post_engagements,page_views_total` +
+        `?metric=page_impressions_unique,page_impressions,page_post_engagements,page_views_total` +
         `&period=day&since=${since}&until=${until}&access_token=${pageToken}`,
+      ),
+      fetch(
+        `https://graph.facebook.com/v21.0/${pageId}/insights` +
+        `?metric=page_fan_adds_unique&period=day&since=${since}&until=${until}&access_token=${pageToken}`,
       ),
     ]);
 
@@ -73,11 +80,15 @@ async function fetchFbPage(
       const insData = await insRes.json() as { data?: { name: string; values: { value: number }[] }[] };
       for (const m of insData.data ?? []) metricMap[m.name] = sumValues(m.values);
     }
+    if (fanAddsRes.ok) {
+      const fanAddsData = await fanAddsRes.json() as { data?: { name: string; values: { value: number }[] }[] };
+      for (const m of fanAddsData.data ?? []) metricMap[m.name] = sumValues(m.values);
+    }
 
     return {
       pageId, pageName, picture,
       fans: (fanData as { fan_count?: number }).fan_count ?? 0,
-      fanAdds: metricMap.page_fan_adds ?? 0,
+      fanAdds: metricMap.page_fan_adds_unique ?? 0,
       reach: metricMap.page_impressions_unique ?? 0,
       impressions: metricMap.page_impressions ?? 0,
       engagements: metricMap.page_post_engagements ?? 0,
