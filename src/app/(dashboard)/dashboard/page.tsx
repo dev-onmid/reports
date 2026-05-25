@@ -2505,7 +2505,7 @@ const CHANNEL_GROUPS: Array<{ id: string; label: string; color: string; ids: Das
 ];
 
 // ── React Grid Layout ────────────────────────────────────────────────────────
-const LS_RGL_LAYOUT = 'dashboard_rgl_layout_v1';
+const LS_RGL_LAYOUT = 'dashboard_rgl_layout_v2';
 const RGL_COLS = 12;
 const RGL_ROW_H = 100; // px per row unit
 const RGL_MARGIN: [number, number] = [16, 16];
@@ -2544,7 +2544,7 @@ const DEFAULT_GENERAL_LAYOUT: RglLayout[] = [
   { i: 'general-cpl',     x: 4, y: 4, w: 4, h: 2, minW: 2, minH: 1 },
   { i: 'general-ctr',     x: 0, y: 6, w: 4, h: 2, minW: 2, minH: 1 },
   { i: 'general-spend',   x: 4, y: 6, w: 4, h: 2, minW: 2, minH: 1 },
-  { i: 'general-funnel',  x: 0, y: 8, w: 12, h: 12, minW: 8, minH: 10 },
+  { i: 'general-funnel',  x: 0, y: 8, w: 12, h: 5,  minW: 8, minH: 4  },
 ];
 
 const DEFAULT_META_PANELS_LAYOUT: RglLayout[] = [
