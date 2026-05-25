@@ -3030,29 +3030,29 @@ function DashboardPerformanceFunnel({ periodLabel, rows }: { periodLabel: string
   const generalConversion = stageConversion(stages[4]?.value ?? 0, stages[0]?.value ?? 0);
 
   return (
-    <section className="relative h-full overflow-hidden rounded-[20px] border border-[#55F52F]/45 bg-[#06120f] p-4 shadow-[0_0_0_1px_rgba(85,245,47,0.16),0_0_42px_rgba(85,245,47,0.18)] sm:p-6">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(85,245,47,0.12),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.035),transparent_22%)]" />
-      <div className="pointer-events-none absolute inset-0 opacity-[0.12] [background-image:radial-gradient(circle,rgba(255,255,255,0.38)_1px,transparent_1px)] [background-size:16px_16px]" />
+    <section className="relative h-full overflow-hidden rounded-[var(--radius)] border border-border bg-card p-4 sm:p-5">
+      {/* Accent bar */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5 bg-primary" />
 
-      <div className="relative flex flex-wrap items-start justify-between gap-4">
+      <div className="relative flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div className="flex items-center gap-3">
-            <h3 className="text-xl font-black uppercase tracking-[0.16em] text-white">Funil de Performance</h3>
-            <Info className="h-4 w-4 text-white/55" />
+          <div className="flex items-center gap-2">
+            <h3 className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Funil de Performance</h3>
+            <Info className="h-3 w-3 text-muted-foreground/60" />
           </div>
-          <p className="mt-2 text-sm font-semibold text-white/55">Período: <span className="text-white/72">{periodLabel}</span></p>
+          <p className="mt-1 text-[11px] text-muted-foreground">Período: <span className="text-foreground font-semibold">{periodLabel}</span></p>
         </div>
         <button
           type="button"
-          className="flex h-12 items-center gap-3 rounded-xl border border-white/10 bg-[#171925] px-4 text-sm font-bold text-white/80 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]"
+          className="flex h-8 items-center gap-2 rounded-[var(--radius)] border border-border bg-muted px-3 text-xs font-bold text-muted-foreground"
         >
-          <span className="text-white/45">Exibir</span>
+          <span className="text-muted-foreground/60">Exibir</span>
           Conversão %
-          <ChevronDown className="h-4 w-4 text-white/55" />
+          <ChevronDown className="h-3 w-3" />
         </button>
       </div>
 
-      <div className="relative mt-9">
+      <div className="relative mt-4 space-y-0">
         {stages.map((stage, index) => {
           const Icon = stage.Icon;
           const nextConversion = conversions[index + 1] ?? 0;
@@ -3060,46 +3060,42 @@ function DashboardPerformanceFunnel({ periodLabel, rows }: { periodLabel: string
           return (
             <div key={stage.label}>
               <div
-                className="relative grid min-h-[118px] grid-cols-[96px_52px_1fr_auto] items-center overflow-hidden rounded-xl border bg-[#0A1218]/82 pr-8 shadow-[inset_0_0_44px_rgba(255,255,255,0.025)] max-sm:grid-cols-[74px_38px_1fr] max-sm:pr-4"
-                style={{
-                  borderColor: `${stage.color}cc`,
-                  boxShadow: `inset 0 0 46px ${stage.color}22, 0 0 18px ${stage.color}26`,
-                }}
+                className="relative grid min-h-[64px] grid-cols-[48px_36px_1fr_auto] items-center overflow-hidden rounded-[var(--radius)] border pr-5 max-sm:grid-cols-[40px_30px_1fr] max-sm:pr-3"
+                style={{ borderColor: `${stage.color}80` }}
               >
                 <div
                   className="absolute inset-0"
-                  style={{ background: `linear-gradient(90deg, ${stage.color}33 0%, ${stage.color}24 14%, ${stage.color}10 48%, ${stage.color}08 100%)` }}
+                  style={{ background: `linear-gradient(90deg, ${stage.color}22 0%, ${stage.color}10 40%, transparent 100%)` }}
                 />
                 <div
-                  className="relative flex h-full min-h-[118px] items-center justify-center border-r bg-black/10"
-                  style={{ borderColor: `${stage.color}aa`, boxShadow: `inset 0 0 32px ${stage.color}44` }}
+                  className="relative flex h-full min-h-[64px] items-center justify-center border-r"
+                  style={{ borderColor: `${stage.color}55` }}
                 >
-                  <Icon className="h-11 w-11" style={{ color: stage.color }} />
+                  <Icon className="h-5 w-5" style={{ color: stage.color }} />
                 </div>
                 <div className="relative flex justify-center">
                   <span
-                    className="flex h-9 w-9 items-center justify-center rounded-full text-sm font-black text-white shadow-[0_0_24px_rgba(255,255,255,0.16)]"
-                    style={{ backgroundColor: `${stage.color}aa` }}
+                    className="flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-black text-white"
+                    style={{ backgroundColor: `${stage.color}cc` }}
                   >
                     {index + 1}
                   </span>
                 </div>
-                <p className="relative text-2xl font-black uppercase tracking-[0.13em] text-white max-sm:text-base">{stage.label}</p>
-                <div className="relative text-right max-sm:col-span-3 max-sm:pb-4 max-sm:pr-1">
-                  <p className="text-4xl font-black leading-none text-white max-sm:text-3xl">{funnelNumber(stage.value)}</p>
-                  <p className="mt-3 text-xl font-semibold text-white/65 max-sm:text-base">{funnelPercent(conversions[index], index === 0 ? 1 : 2)}</p>
+                <p className="relative text-xs font-bold uppercase tracking-[0.1em] text-foreground max-sm:text-[10px]">{stage.label}</p>
+                <div className="relative text-right max-sm:col-span-3 max-sm:pb-2 max-sm:pr-1">
+                  <p className="font-heading text-xl font-normal leading-none text-foreground max-sm:text-lg">{funnelNumber(stage.value)}</p>
+                  <p className="mt-1 text-[11px] font-semibold text-muted-foreground">{funnelPercent(conversions[index], index === 0 ? 1 : 2)}</p>
                 </div>
               </div>
 
               {index < stages.length - 1 && (
-                <div className="relative flex h-[74px] justify-center">
-                  <div className="absolute left-1/2 top-0 h-full border-l-2 border-dotted" style={{ borderColor: `${stage.color}cc` }} />
-                  <span className="absolute top-[-6px] h-3 w-3 rounded-full" style={{ backgroundColor: stage.color, boxShadow: `0 0 18px ${stage.color}` }} />
-                  <div className="relative z-10 mt-7 flex h-10 items-center gap-5 rounded-lg border border-white/10 bg-[#171B25] px-4 shadow-[0_12px_30px_rgba(0,0,0,0.34)]">
-                    <span className="text-xs font-black text-white/58">Taxa de conversão</span>
-                    <span className="text-lg font-black" style={{ color: stage.color }}>{funnelPercent(nextConversion)}</span>
+                <div className="relative flex h-[44px] justify-center">
+                  <div className="absolute left-1/2 top-0 h-full border-l border-dashed" style={{ borderColor: `${stage.color}88` }} />
+                  <span className="absolute top-[-4px] h-2 w-2 rounded-full" style={{ backgroundColor: stage.color }} />
+                  <div className="relative z-10 mt-4 flex h-8 items-center gap-3 rounded-[var(--radius)] border border-border bg-card px-3">
+                    <span className="text-[10px] font-bold text-muted-foreground">Taxa de conversão</span>
+                    <span className="text-xs font-bold" style={{ color: stage.color }}>{funnelPercent(nextConversion)}</span>
                   </div>
-                  <ChevronDown className="absolute bottom-2 h-5 w-5" style={{ color: stage.color, filter: `drop-shadow(0 0 8px ${stage.color})` }} />
                 </div>
               )}
             </div>
@@ -3107,35 +3103,35 @@ function DashboardPerformanceFunnel({ periodLabel, rows }: { periodLabel: string
         })}
       </div>
 
-      <div className="relative mt-8 grid gap-0 overflow-hidden rounded-2xl border border-white/10 bg-[#131923]/86 shadow-[inset_0_0_36px_rgba(255,255,255,0.025)] md:grid-cols-3">
-        <div className="flex gap-4 p-6 md:border-r md:border-white/10">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#ff4d61]/25 text-[#ff8a95] shadow-[0_0_22px_rgba(255,77,97,0.25)]">
-            <AlertTriangle className="h-5 w-5" />
+      <div className="relative mt-4 grid gap-0 overflow-hidden rounded-[var(--radius)] border border-border bg-muted/30 md:grid-cols-3">
+        <div className="flex gap-3 p-4 md:border-r md:border-border">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius)] border border-border text-destructive">
+            <AlertTriangle className="h-4 w-4" />
           </div>
           <div>
-            <p className="text-sm font-black uppercase tracking-[0.12em] text-white/78">Maior Gargalo</p>
-            <p className="mt-4 text-lg font-black text-white">{bottleneck}</p>
-            <p className="mt-3 text-sm font-semibold text-white/45">Conversão de {funnelPercent(transitionConversions[bottleneckIndex] ?? 0)}</p>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Maior Gargalo</p>
+            <p className="mt-2 text-sm font-bold text-foreground">{bottleneck}</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">Conversão de {funnelPercent(transitionConversions[bottleneckIndex] ?? 0)}</p>
           </div>
         </div>
-        <div className="flex gap-4 p-6 md:border-r md:border-white/10">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#35E84B]/18 text-[#67ff76] shadow-[0_0_22px_rgba(53,232,75,0.25)]">
-            <TrendingUp className="h-5 w-5" />
+        <div className="flex gap-3 p-4 md:border-r md:border-border">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius)] border border-border" style={{ color: '#55f52f' }}>
+            <TrendingUp className="h-4 w-4" />
           </div>
           <div>
-            <p className="text-sm font-black uppercase tracking-[0.12em] text-white/78">Conversão Geral</p>
-            <p className="mt-4 text-3xl font-black text-white">{funnelPercent(generalConversion)}</p>
-            <p className="mt-2 text-sm font-semibold text-white/45">{funnelNumber(stages[4]?.value ?? 0)} de {funnelNumber(stages[0]?.value ?? 0)} visitantes</p>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Conversão Geral</p>
+            <p className="mt-2 font-heading text-xl font-normal leading-none text-foreground">{funnelPercent(generalConversion)}</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">{funnelNumber(stages[4]?.value ?? 0)} de {funnelNumber(stages[0]?.value ?? 0)} visitantes</p>
           </div>
         </div>
-        <div className="flex gap-4 p-6">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#35E84B]/18 text-[#B7FF7A] shadow-[0_0_22px_rgba(53,232,75,0.25)]">
-            <Lightbulb className="h-5 w-5" />
+        <div className="flex gap-3 p-4">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius)] border border-border" style={{ color: '#55f52f' }}>
+            <Lightbulb className="h-4 w-4" />
           </div>
           <div>
-            <p className="text-sm font-black uppercase tracking-[0.12em] text-white/78">Oportunidade</p>
-            <p className="mt-4 text-lg font-black text-white">Melhore a qualificação</p>
-            <p className="mt-3 text-sm font-semibold text-white/45">Ative automações e nutrições</p>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Oportunidade</p>
+            <p className="mt-2 text-sm font-bold text-foreground">Melhore a qualificação</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">Ative automações e nutrições</p>
           </div>
         </div>
       </div>
