@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useState, type ComponentType } from 'react';
+import { use, useEffect, useState, type ComponentType, type CSSProperties } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { mockDashboardData, mockClients, type ClientStatus, type DashboardType } from '@/lib/mock-data';
 import { useClients } from '@/lib/client-store';
@@ -17,7 +17,7 @@ import {
   WalletCards, Send, CheckCircle2, Clock3, AlertTriangle, Filter, Trash2,
   UserRound, Phone, Mail, Briefcase, SlidersHorizontal, Check, Hash, BarChart2, Layers,
   Power, PowerOff, Search, BookMarked, ExternalLink, RefreshCw, ChevronRight,
-  PiggyBank, Wallet,
+  PiggyBank, Wallet, Info, Lightbulb, UserPlus,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -1485,6 +1485,183 @@ function PlanningGoalsDashboard({ goalConfig, todayProgress }: { goalConfig: Cli
   );
 }
 
+type SalesFunnelStageView = {
+  label: string;
+  value: number;
+  color: string;
+  Icon: ComponentType<{ className?: string; style?: CSSProperties }>;
+};
+
+function formatFunnelNumber(value: number): string {
+  return Math.round(value).toLocaleString('pt-BR');
+}
+
+function formatFunnelPercent(value: number): string {
+  return `${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+}
+
+function conversionPercent(current: number, previous: number): number {
+  if (previous <= 0) return 0;
+  return (current / previous) * 100;
+}
+
+function SalesFunnelPerformance({
+  dashboardData,
+  todayProgress,
+}: {
+  dashboardData: typeof mockDashboardData;
+  todayProgress: TodayProgress;
+}) {
+  const leads = dashboardData.newLeadsData.reduce((sum, item) => sum + item.facebook + item.instagram, 0);
+  const visitors = Math.max(dashboardData.salesTargets.marketing.value, leads);
+  const stages: SalesFunnelStageView[] = [
+    { label: 'VISITANTES', value: visitors, color: '#14B8FF', Icon: Users },
+    { label: 'LEADS', value: leads, color: '#9B5CFF', Icon: UserPlus },
+    { label: 'QUALIFICADOS', value: todayProgress.funnel[1] ?? 0, color: '#F03A9C', Icon: CheckCircle2 },
+    { label: 'AGENDAMENTOS', value: todayProgress.funnel[2] ?? 0, color: '#FF7A00', Icon: Calendar },
+    { label: 'COMPARECIMENTOS', value: todayProgress.funnel[3] ?? 0, color: '#35E84B', Icon: Users },
+  ];
+  const conversions = stages.map((stage, index) => (
+    index === 0 ? 100 : conversionPercent(stage.value, stages[index - 1].value)
+  ));
+  const transitionConversions = conversions.slice(1);
+  const bottleneckIndex = transitionConversions.reduce((lowest, value, index) => (
+    value < transitionConversions[lowest] ? index : lowest
+  ), 0);
+  const bottleneck = `${stages[bottleneckIndex].label[0]}${stages[bottleneckIndex].label.slice(1).toLowerCase()} → ${stages[bottleneckIndex + 1].label[0]}${stages[bottleneckIndex + 1].label.slice(1).toLowerCase()}`;
+  const generalConversion = conversionPercent(stages[4].value, stages[0].value);
+
+  return (
+    <section className="relative overflow-hidden rounded-[20px] border border-[#55F52F]/45 bg-[#06120f] p-4 shadow-[0_0_0_1px_rgba(85,245,47,0.16),0_0_42px_rgba(85,245,47,0.18)] sm:p-6">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(85,245,47,0.12),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.035),transparent_22%)]" />
+      <div className="pointer-events-none absolute inset-0 opacity-[0.12] [background-image:radial-gradient(circle,rgba(255,255,255,0.38)_1px,transparent_1px)] [background-size:16px_16px]" />
+
+      <div className="relative flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-3">
+            <h3 className="text-xl font-black uppercase tracking-[0.16em] text-white">Funil de Performance</h3>
+            <Info className="h-4 w-4 text-white/55" />
+          </div>
+          <p className="mt-2 text-sm font-semibold text-white/55">Período: <span className="text-white/72">Este mês</span></p>
+        </div>
+        <button
+          type="button"
+          className="flex h-12 items-center gap-3 rounded-xl border border-white/10 bg-[#171925] px-4 text-sm font-bold text-white/80 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]"
+        >
+          <span className="text-white/45">Exibir</span>
+          Conversão %
+          <ChevronDown className="h-4 w-4 text-white/55" />
+        </button>
+      </div>
+
+      <div className="relative mt-9">
+        {stages.map((stage, index) => {
+          const Icon = stage.Icon;
+          const conversion = conversions[index];
+          const nextConversion = conversions[index + 1] ?? 0;
+
+          return (
+            <div key={stage.label}>
+              <div
+                className="relative grid min-h-[118px] grid-cols-[96px_52px_1fr_auto] items-center overflow-hidden rounded-xl border bg-[#0A1218]/82 pr-8 shadow-[inset_0_0_44px_rgba(255,255,255,0.025)] max-sm:grid-cols-[74px_38px_1fr] max-sm:pr-4"
+                style={{
+                  borderColor: `${stage.color}cc`,
+                  boxShadow: `inset 0 0 46px ${stage.color}22, 0 0 18px ${stage.color}26`,
+                }}
+              >
+                <div
+                  className="absolute inset-0"
+                  style={{
+                    background: `linear-gradient(90deg, ${stage.color}33 0%, ${stage.color}24 14%, ${stage.color}10 48%, ${stage.color}08 100%)`,
+                  }}
+                />
+                <div
+                  className="relative flex h-full min-h-[118px] items-center justify-center border-r bg-black/10"
+                  style={{
+                    borderColor: `${stage.color}aa`,
+                    boxShadow: `inset 0 0 32px ${stage.color}44`,
+                  }}
+                >
+                  <Icon className="h-11 w-11" style={{ color: stage.color }} />
+                </div>
+                <div className="relative flex justify-center">
+                  <span
+                    className="flex h-9 w-9 items-center justify-center rounded-full text-sm font-black text-white shadow-[0_0_24px_rgba(255,255,255,0.16)]"
+                    style={{ backgroundColor: `${stage.color}aa` }}
+                  >
+                    {index + 1}
+                  </span>
+                </div>
+                <p className="relative text-2xl font-black uppercase tracking-[0.13em] text-white max-sm:text-base">
+                  {stage.label}
+                </p>
+                <div className="relative text-right max-sm:col-span-3 max-sm:pb-4 max-sm:pr-1">
+                  <p className="text-4xl font-black leading-none text-white max-sm:text-3xl">{formatFunnelNumber(stage.value)}</p>
+                  <p className="mt-3 text-xl font-semibold text-white/65 max-sm:text-base">{formatFunnelPercent(conversion)}</p>
+                </div>
+              </div>
+
+              {index < stages.length - 1 && (
+                <div className="relative flex h-[74px] justify-center">
+                  <div
+                    className="absolute left-1/2 top-0 h-full border-l-2 border-dotted"
+                    style={{ borderColor: `${stage.color}cc` }}
+                  />
+                  <span
+                    className="absolute top-[-6px] h-3 w-3 rounded-full"
+                    style={{ backgroundColor: stage.color, boxShadow: `0 0 18px ${stage.color}` }}
+                  />
+                  <div className="relative z-10 mt-7 flex h-10 items-center gap-5 rounded-lg border border-white/10 bg-[#171B25] px-4 shadow-[0_12px_30px_rgba(0,0,0,0.34)]">
+                    <span className="text-xs font-black text-white/58">Taxa de conversão</span>
+                    <span className="text-lg font-black" style={{ color: stage.color }}>{formatFunnelPercent(nextConversion)}</span>
+                  </div>
+                  <ChevronDown
+                    className="absolute bottom-2 h-5 w-5"
+                    style={{ color: stage.color, filter: `drop-shadow(0 0 8px ${stage.color})` }}
+                  />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="relative mt-8 grid gap-0 overflow-hidden rounded-2xl border border-white/10 bg-[#131923]/86 shadow-[inset_0_0_36px_rgba(255,255,255,0.025)] md:grid-cols-3">
+        <div className="flex gap-4 p-6 md:border-r md:border-white/10">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#ff4d61]/25 text-[#ff8a95] shadow-[0_0_22px_rgba(255,77,97,0.25)]">
+            <AlertTriangle className="h-5 w-5" />
+          </div>
+          <div>
+            <p className="text-sm font-black uppercase tracking-[0.12em] text-white/78">Maior Gargalo</p>
+            <p className="mt-4 text-lg font-black text-white">{bottleneck}</p>
+            <p className="mt-3 text-sm font-semibold text-white/45">Conversão de {formatFunnelPercent(transitionConversions[bottleneckIndex] ?? 0)}</p>
+          </div>
+        </div>
+        <div className="flex gap-4 p-6 md:border-r md:border-white/10">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#35E84B]/18 text-[#67ff76] shadow-[0_0_22px_rgba(53,232,75,0.25)]">
+            <TrendingUp className="h-5 w-5" />
+          </div>
+          <div>
+            <p className="text-sm font-black uppercase tracking-[0.12em] text-white/78">Conversão Geral</p>
+            <p className="mt-4 text-3xl font-black text-white">{formatFunnelPercent(generalConversion)}</p>
+            <p className="mt-2 text-sm font-semibold text-white/45">{formatFunnelNumber(stages[4].value)} de {formatFunnelNumber(stages[0].value)} visitantes</p>
+          </div>
+        </div>
+        <div className="flex gap-4 p-6">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#35E84B]/18 text-[#B7FF7A] shadow-[0_0_22px_rgba(53,232,75,0.25)]">
+            <Lightbulb className="h-5 w-5" />
+          </div>
+          <div>
+            <p className="text-sm font-black uppercase tracking-[0.12em] text-white/78">Oportunidade</p>
+            <p className="mt-4 text-lg font-black text-white">Melhore a qualificação</p>
+            <p className="mt-3 text-sm font-semibold text-white/45">Ative automações e nutrições</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 // ── Client team tab ────────────────────────────────────────────────────────────
 type ClientTeamRole =
   | 'Responsável'
@@ -2064,7 +2241,7 @@ function ClientDashboardTab({
         onAdd={onAddCustomBlock}
       />
 
-      <PlanningGoalsDashboard goalConfig={goalConfig} todayProgress={todayProgress} />
+      <SalesFunnelPerformance dashboardData={dashboardData} todayProgress={todayProgress} />
 
       <div className="grid gap-5 md:grid-cols-3">
         {Object.entries(dashboardData.salesTargets).map(([key, target]) => (

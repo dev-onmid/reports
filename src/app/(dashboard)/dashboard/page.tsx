@@ -3,7 +3,7 @@
 import RGL, { WidthProvider } from 'react-grid-layout';
 import type { Layout as RglLayout } from 'react-grid-layout';
 const RglGrid = WidthProvider(RGL);
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
@@ -12,7 +12,7 @@ import {
   LayoutDashboard, Play, RefreshCw, Search, Sparkles, Check, X,
   Pause, CircleDot, Pencil, Settings2, Users, Copy,
   Bell, DollarSign, Tag, TrendingUp, Calendar, BarChart3, Zap, Target, Briefcase,
-  Wallet, MousePointerClick, CreditCard, PiggyBank, Clock,
+  Wallet, MousePointerClick, CreditCard, PiggyBank, Clock, Info, Lightbulb, UserPlus, CheckCircle2,
 } from 'lucide-react';
 import { getAuthSession } from '@/lib/auth-store';
 import type { AiInsight } from '@/app/api/ai/insights/route';
@@ -2542,7 +2542,7 @@ const DEFAULT_GENERAL_LAYOUT: RglLayout[] = [
   { i: 'general-cpl',     x: 4, y: 4, w: 4, h: 2, minW: 2, minH: 1 },
   { i: 'general-ctr',     x: 0, y: 6, w: 4, h: 2, minW: 2, minH: 1 },
   { i: 'general-spend',   x: 4, y: 6, w: 4, h: 2, minW: 2, minH: 1 },
-  { i: 'general-funnel',  x: 8, y: 0, w: 4, h: 8, minW: 3, minH: 4 },
+  { i: 'general-funnel',  x: 0, y: 8, w: 12, h: 12, minW: 8, minH: 10 },
 ];
 
 const DEFAULT_META_PANELS_LAYOUT: RglLayout[] = [
@@ -2988,6 +2988,156 @@ function MetricConfigPanel({
         </div>
       </div>
     </div>
+  );
+}
+
+type PerformanceFunnelRow = {
+  label: string;
+  value: number;
+  color: string;
+  Icon: ComponentType<{ className?: string; style?: CSSProperties }>;
+};
+
+function funnelNumber(value: number) {
+  return Math.round(value).toLocaleString('pt-BR');
+}
+
+function funnelPercent(value: number, digits = 2) {
+  return `${value.toLocaleString('pt-BR', { minimumFractionDigits: digits, maximumFractionDigits: digits })}%`;
+}
+
+function stageConversion(current: number, previous: number) {
+  return previous > 0 ? (current / previous) * 100 : 0;
+}
+
+function displayStageName(label: string) {
+  const lower = label.toLowerCase();
+  return `${lower.charAt(0).toUpperCase()}${lower.slice(1)}`;
+}
+
+function DashboardPerformanceFunnel({ periodLabel, rows }: { periodLabel: string; rows: PerformanceFunnelRow[] }) {
+  const stages = rows.slice(0, 5);
+  const conversions = stages.map((stage, index) => (
+    index === 0 ? 100 : stageConversion(stage.value, stages[index - 1].value)
+  ));
+  const transitionConversions = conversions.slice(1);
+  const bottleneckIndex = transitionConversions.reduce((lowest, value, index) => (
+    value < transitionConversions[lowest] ? index : lowest
+  ), 0);
+  const bottleneck = `${displayStageName(stages[bottleneckIndex]?.label ?? '')} → ${displayStageName(stages[bottleneckIndex + 1]?.label ?? '')}`;
+  const generalConversion = stageConversion(stages[4]?.value ?? 0, stages[0]?.value ?? 0);
+
+  return (
+    <section className="relative h-full overflow-hidden rounded-[20px] border border-[#55F52F]/45 bg-[#06120f] p-4 shadow-[0_0_0_1px_rgba(85,245,47,0.16),0_0_42px_rgba(85,245,47,0.18)] sm:p-6">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(85,245,47,0.12),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.035),transparent_22%)]" />
+      <div className="pointer-events-none absolute inset-0 opacity-[0.12] [background-image:radial-gradient(circle,rgba(255,255,255,0.38)_1px,transparent_1px)] [background-size:16px_16px]" />
+
+      <div className="relative flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-3">
+            <h3 className="text-xl font-black uppercase tracking-[0.16em] text-white">Funil de Performance</h3>
+            <Info className="h-4 w-4 text-white/55" />
+          </div>
+          <p className="mt-2 text-sm font-semibold text-white/55">Período: <span className="text-white/72">{periodLabel}</span></p>
+        </div>
+        <button
+          type="button"
+          className="flex h-12 items-center gap-3 rounded-xl border border-white/10 bg-[#171925] px-4 text-sm font-bold text-white/80 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]"
+        >
+          <span className="text-white/45">Exibir</span>
+          Conversão %
+          <ChevronDown className="h-4 w-4 text-white/55" />
+        </button>
+      </div>
+
+      <div className="relative mt-9">
+        {stages.map((stage, index) => {
+          const Icon = stage.Icon;
+          const nextConversion = conversions[index + 1] ?? 0;
+
+          return (
+            <div key={stage.label}>
+              <div
+                className="relative grid min-h-[118px] grid-cols-[96px_52px_1fr_auto] items-center overflow-hidden rounded-xl border bg-[#0A1218]/82 pr-8 shadow-[inset_0_0_44px_rgba(255,255,255,0.025)] max-sm:grid-cols-[74px_38px_1fr] max-sm:pr-4"
+                style={{
+                  borderColor: `${stage.color}cc`,
+                  boxShadow: `inset 0 0 46px ${stage.color}22, 0 0 18px ${stage.color}26`,
+                }}
+              >
+                <div
+                  className="absolute inset-0"
+                  style={{ background: `linear-gradient(90deg, ${stage.color}33 0%, ${stage.color}24 14%, ${stage.color}10 48%, ${stage.color}08 100%)` }}
+                />
+                <div
+                  className="relative flex h-full min-h-[118px] items-center justify-center border-r bg-black/10"
+                  style={{ borderColor: `${stage.color}aa`, boxShadow: `inset 0 0 32px ${stage.color}44` }}
+                >
+                  <Icon className="h-11 w-11" style={{ color: stage.color }} />
+                </div>
+                <div className="relative flex justify-center">
+                  <span
+                    className="flex h-9 w-9 items-center justify-center rounded-full text-sm font-black text-white shadow-[0_0_24px_rgba(255,255,255,0.16)]"
+                    style={{ backgroundColor: `${stage.color}aa` }}
+                  >
+                    {index + 1}
+                  </span>
+                </div>
+                <p className="relative text-2xl font-black uppercase tracking-[0.13em] text-white max-sm:text-base">{stage.label}</p>
+                <div className="relative text-right max-sm:col-span-3 max-sm:pb-4 max-sm:pr-1">
+                  <p className="text-4xl font-black leading-none text-white max-sm:text-3xl">{funnelNumber(stage.value)}</p>
+                  <p className="mt-3 text-xl font-semibold text-white/65 max-sm:text-base">{funnelPercent(conversions[index], index === 0 ? 1 : 2)}</p>
+                </div>
+              </div>
+
+              {index < stages.length - 1 && (
+                <div className="relative flex h-[74px] justify-center">
+                  <div className="absolute left-1/2 top-0 h-full border-l-2 border-dotted" style={{ borderColor: `${stage.color}cc` }} />
+                  <span className="absolute top-[-6px] h-3 w-3 rounded-full" style={{ backgroundColor: stage.color, boxShadow: `0 0 18px ${stage.color}` }} />
+                  <div className="relative z-10 mt-7 flex h-10 items-center gap-5 rounded-lg border border-white/10 bg-[#171B25] px-4 shadow-[0_12px_30px_rgba(0,0,0,0.34)]">
+                    <span className="text-xs font-black text-white/58">Taxa de conversão</span>
+                    <span className="text-lg font-black" style={{ color: stage.color }}>{funnelPercent(nextConversion)}</span>
+                  </div>
+                  <ChevronDown className="absolute bottom-2 h-5 w-5" style={{ color: stage.color, filter: `drop-shadow(0 0 8px ${stage.color})` }} />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="relative mt-8 grid gap-0 overflow-hidden rounded-2xl border border-white/10 bg-[#131923]/86 shadow-[inset_0_0_36px_rgba(255,255,255,0.025)] md:grid-cols-3">
+        <div className="flex gap-4 p-6 md:border-r md:border-white/10">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#ff4d61]/25 text-[#ff8a95] shadow-[0_0_22px_rgba(255,77,97,0.25)]">
+            <AlertTriangle className="h-5 w-5" />
+          </div>
+          <div>
+            <p className="text-sm font-black uppercase tracking-[0.12em] text-white/78">Maior Gargalo</p>
+            <p className="mt-4 text-lg font-black text-white">{bottleneck}</p>
+            <p className="mt-3 text-sm font-semibold text-white/45">Conversão de {funnelPercent(transitionConversions[bottleneckIndex] ?? 0)}</p>
+          </div>
+        </div>
+        <div className="flex gap-4 p-6 md:border-r md:border-white/10">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#35E84B]/18 text-[#67ff76] shadow-[0_0_22px_rgba(53,232,75,0.25)]">
+            <TrendingUp className="h-5 w-5" />
+          </div>
+          <div>
+            <p className="text-sm font-black uppercase tracking-[0.12em] text-white/78">Conversão Geral</p>
+            <p className="mt-4 text-3xl font-black text-white">{funnelPercent(generalConversion)}</p>
+            <p className="mt-2 text-sm font-semibold text-white/45">{funnelNumber(stages[4]?.value ?? 0)} de {funnelNumber(stages[0]?.value ?? 0)} visitantes</p>
+          </div>
+        </div>
+        <div className="flex gap-4 p-6">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#35E84B]/18 text-[#B7FF7A] shadow-[0_0_22px_rgba(53,232,75,0.25)]">
+            <Lightbulb className="h-5 w-5" />
+          </div>
+          <div>
+            <p className="text-sm font-black uppercase tracking-[0.12em] text-white/78">Oportunidade</p>
+            <p className="mt-4 text-lg font-black text-white">Melhore a qualificação</p>
+            <p className="mt-3 text-sm font-semibold text-white/45">Ative automações e nutrições</p>
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -3497,7 +3647,11 @@ export default function GeneralDashboard() {
       if (stored) {
         const parsed = JSON.parse(stored) as { meta?: RglLayout[]; google?: RglLayout[]; general?: RglLayout[]; metaPanels?: RglLayout[]; googlePanels?: RglLayout[] };
         const merge = (setter: React.Dispatch<React.SetStateAction<RglLayout[]>>, saved?: RglLayout[]) => {
-          if (saved) setter(prev => prev.map(item => { const s = saved.find(l => l.i === item.i); return s ? { ...item, x: s.x, y: s.y, w: s.w, h: s.h } : item; }));
+          if (saved) setter(prev => prev.map(item => {
+            if (item.i === 'general-funnel') return item;
+            const s = saved.find(l => l.i === item.i);
+            return s ? { ...item, x: s.x, y: s.y, w: s.w, h: s.h } : item;
+          }));
         };
         merge(setMetaKpiLayout, parsed.meta);
         merge(setGoogleKpiLayout, parsed.google);
@@ -4254,90 +4408,36 @@ export default function GeneralDashboard() {
             'general-ctr':     <KpiCard title="CTR Geral" value={avgCtr} format="percent" icon={MousePointerClick} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} chart={dashboardPrefs.cards['general-ctr'].chart} series={seriesOrPacing(avgCtrSeries, avgCtr)} />,
             'general-spend':   <KpiCard title="Valor Gasto" value={totalSpend} format="currency" icon={CreditCard} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} chart={dashboardPrefs.cards['general-spend'].chart} series={seriesOrPacing(totalSpendSeries, totalSpend)} />,
             'general-funnel':
-            <div className="flex h-full min-h-[680px] flex-col rounded-xl border border-[#55F52F]/35 bg-black/35 p-4 shadow-[inset_0_0_30px_rgba(85,245,47,0.08),0_0_28px_rgba(85,245,47,0.14)] xl:min-h-[820px]">
-              <p className="text-sm font-bold uppercase tracking-wider text-foreground">Funil de Performance</p>
-              <p className="mt-0.5 text-[11px] text-foreground/60">Período: {PERIODS.find(p => p.value === period)?.label ?? period}</p>
-              {(() => {
-                const firstId = [...selectedIds][0];
-                const clientPlanning = firstId ? (planningsByClient[firstId] ?? readPlanningFromStorage(firstId)) : DEFAULT_PLANNING;
-                const stages = clientPlanning.stages.length >= 2 ? clientPlanning.stages : DEFAULT_PLANNING.stages;
-                const crmValues = [
-                  totalLeads,
-                  funnelCounts[FUNNEL_ORDER[0]] ?? 0,
-                  funnelCounts[FUNNEL_ORDER[1]] ?? 0,
-                  funnelCounts[FUNNEL_ORDER[2]] ?? 0,
-                  funnelCounts[FUNNEL_ORDER[3]] ?? 0,
-                ];
-                const funnelRows: { label: string; value: number }[] = [
-                  { label: 'Visitantes', value: (metaReach || metaImpressions) + googleImpressions },
-                  { label: 'Leads', value: totalLeads },
-                  ...stages.slice(1).map((s, i) => ({ label: s.name.replace(/^\d+º\s*—\s*/, '').replace(/\s*\(.+\)/, ''), value: crmValues[i + 1] ?? 0 })),
-                ];
-                const maxVal = funnelRows[0]?.value || 1;
-                const FUNNEL_COLORS = ['#0EA5E9', '#7C3AED', '#EC4899', '#F97316', '#22C55E'];
-                const funnelHeight = 62;
-                const funnelGap = 10;
-                const funnelTop = 26;
-                const funnelWidth = 320;
-                const funnelCenter = funnelWidth / 2;
-                return (
-                  <div className="mt-4 grid flex-1 items-stretch gap-5">
-                    <div className="relative min-h-[620px] rounded-xl border border-white/15 bg-black/45 p-4 shadow-[inset_0_0_32px_rgba(14,165,233,0.12)]">
-                      <svg viewBox="0 0 320 410" className="h-full w-full overflow-visible" role="img" aria-label="Funil de vendas">
-                        <defs>
-                          <filter id="dashboard-funnel-glow" x="-30%" y="-30%" width="160%" height="160%">
-                            <feGaussianBlur stdDeviation="3" result="blur" />
-                            <feMerge>
-                              <feMergeNode in="blur" />
-                              <feMergeNode in="SourceGraphic" />
-                            </feMerge>
-                          </filter>
-                        </defs>
-                        {funnelRows.slice(0, 5).map((row, i) => {
-                          const pct = maxVal > 0 ? (row.value / maxVal) * 100 : 0;
-                          const topRatio = Math.max(0.28, 1 - i * 0.14);
-                          const bottomRatio = Math.max(0.22, 1 - (i + 1) * 0.14);
-                          const topWidth = funnelWidth * topRatio;
-                          const bottomWidth = funnelWidth * bottomRatio;
-                          const y = funnelTop + i * (funnelHeight + funnelGap);
-                          const color = FUNNEL_COLORS[i % FUNNEL_COLORS.length];
-                          const d = [
-                            `M ${funnelCenter - topWidth / 2} ${y}`,
-                            `L ${funnelCenter + topWidth / 2} ${y}`,
-                            `L ${funnelCenter + bottomWidth / 2} ${y + funnelHeight}`,
-                            `L ${funnelCenter - bottomWidth / 2} ${y + funnelHeight}`,
-                            'Z',
-                          ].join(' ');
-                          return (
-                            <g key={row.label} filter="url(#dashboard-funnel-glow)">
-                              <path d={d} fill={color} opacity={0.92} />
-                              <text
-                                x={funnelCenter}
-                                y={y + 25}
-                                textAnchor="middle"
-                                className="fill-white text-[13px] font-black uppercase tracking-wide"
-                                style={{ paintOrder: 'stroke', stroke: 'rgba(0,0,0,0.7)', strokeWidth: 4 }}
-                              >
-                                {row.label}
-                              </text>
-                              <text
-                                x={funnelCenter}
-                                y={y + 46}
-                                textAnchor="middle"
-                                className="fill-white text-[12px] font-bold"
-                                style={{ paintOrder: 'stroke', stroke: 'rgba(0,0,0,0.72)', strokeWidth: 4 }}
-                              >
-                                {row.value.toLocaleString('pt-BR')} • {pct.toFixed(2)}%
-                              </text>
-                            </g>
-                          );
-                        })}
-                      </svg>
-                    </div>
-                  </div>
-                );
-              })()}
-            </div>,
+            (() => {
+              const crmValues = [
+                totalLeads,
+                funnelCounts[FUNNEL_ORDER[0]] ?? 0,
+                funnelCounts[FUNNEL_ORDER[1]] ?? 0,
+                funnelCounts[FUNNEL_ORDER[2]] ?? 0,
+                funnelCounts[FUNNEL_ORDER[3]] ?? 0,
+              ];
+              const labels = ['VISITANTES', 'LEADS', 'QUALIFICADOS', 'AGENDAMENTOS', 'COMPARECIMENTOS'];
+              const values = [
+                Math.max((metaReach || metaImpressions) + googleImpressions, totalLeads),
+                totalLeads,
+                ...crmValues.slice(1),
+              ];
+              const colors = ['#14B8FF', '#9B5CFF', '#F03A9C', '#FF7A00', '#35E84B'];
+              const icons = [Users, UserPlus, CheckCircle2, Calendar, Users];
+              const rows = labels.slice(0, 5).map((label, index) => ({
+                label,
+                value: values[index] ?? 0,
+                color: colors[index],
+                Icon: icons[index],
+              }));
+
+              return (
+                <DashboardPerformanceFunnel
+                  periodLabel={PERIODS.find(p => p.value === period)?.label ?? period}
+                  rows={rows}
+                />
+              );
+            })(),
           };
           const visibleLayout = generalLayout.filter(l => dashboardPrefs.cards[l.i as DashboardCardId]?.visible !== false);
           return (
