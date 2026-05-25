@@ -3052,7 +3052,7 @@ function DashboardPerformanceFunnel({ periodLabel, rows }: { periodLabel: string
         </button>
       </div>
 
-      <div className="relative mt-4 space-y-0">
+      <div className="relative mt-3 space-y-0">
         {stages.map((stage, index) => {
           const Icon = stage.Icon;
           const nextConversion = conversions[index + 1] ?? 0;
@@ -3060,7 +3060,7 @@ function DashboardPerformanceFunnel({ periodLabel, rows }: { periodLabel: string
           return (
             <div key={stage.label}>
               <div
-                className="relative grid min-h-[64px] grid-cols-[48px_36px_1fr_auto] items-center overflow-hidden rounded-[var(--radius)] border pr-5 max-sm:grid-cols-[40px_30px_1fr] max-sm:pr-3"
+                className="relative grid min-h-[44px] grid-cols-[40px_32px_1fr_auto] items-center overflow-hidden rounded-[var(--radius)] border pr-4 max-sm:grid-cols-[36px_28px_1fr] max-sm:pr-3"
                 style={{ borderColor: `${stage.color}80` }}
               >
                 <div
@@ -3068,14 +3068,14 @@ function DashboardPerformanceFunnel({ periodLabel, rows }: { periodLabel: string
                   style={{ background: `linear-gradient(90deg, ${stage.color}22 0%, ${stage.color}10 40%, transparent 100%)` }}
                 />
                 <div
-                  className="relative flex h-full min-h-[64px] items-center justify-center border-r"
+                  className="relative flex h-full min-h-[44px] items-center justify-center border-r"
                   style={{ borderColor: `${stage.color}55` }}
                 >
-                  <Icon className="h-5 w-5" style={{ color: stage.color }} />
+                  <Icon className="h-4 w-4" style={{ color: stage.color }} />
                 </div>
                 <div className="relative flex justify-center">
                   <span
-                    className="flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-black text-white"
+                    className="flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-black text-white"
                     style={{ backgroundColor: `${stage.color}cc` }}
                   >
                     {index + 1}
@@ -3083,16 +3083,16 @@ function DashboardPerformanceFunnel({ periodLabel, rows }: { periodLabel: string
                 </div>
                 <p className="relative text-xs font-bold uppercase tracking-[0.1em] text-foreground max-sm:text-[10px]">{stage.label}</p>
                 <div className="relative text-right max-sm:col-span-3 max-sm:pb-2 max-sm:pr-1">
-                  <p className="font-heading text-xl font-normal leading-none text-foreground max-sm:text-lg">{funnelNumber(stage.value)}</p>
-                  <p className="mt-1 text-[11px] font-semibold text-muted-foreground">{funnelPercent(conversions[index], index === 0 ? 1 : 2)}</p>
+                  <p className="font-heading text-base font-normal leading-none text-foreground">{funnelNumber(stage.value)}</p>
+                  <p className="mt-0.5 text-[10px] font-semibold text-muted-foreground">{funnelPercent(conversions[index], index === 0 ? 1 : 2)}</p>
                 </div>
               </div>
 
               {index < stages.length - 1 && (
-                <div className="relative flex h-[44px] justify-center">
+                <div className="relative flex h-[28px] justify-center">
                   <div className="absolute left-1/2 top-0 h-full border-l border-dashed" style={{ borderColor: `${stage.color}88` }} />
                   <span className="absolute top-[-4px] h-2 w-2 rounded-full" style={{ backgroundColor: stage.color }} />
-                  <div className="relative z-10 mt-4 flex h-8 items-center gap-3 rounded-[var(--radius)] border border-border bg-card px-3">
+                  <div className="relative z-10 mt-2 flex h-6 items-center gap-2 rounded-[var(--radius)] border border-border bg-card px-2">
                     <span className="text-[10px] font-bold text-muted-foreground">Taxa de conversão</span>
                     <span className="text-xs font-bold" style={{ color: stage.color }}>{funnelPercent(nextConversion)}</span>
                   </div>
@@ -3103,35 +3103,35 @@ function DashboardPerformanceFunnel({ periodLabel, rows }: { periodLabel: string
         })}
       </div>
 
-      <div className="relative mt-4 grid gap-0 overflow-hidden rounded-[var(--radius)] border border-border bg-muted/30 md:grid-cols-3">
-        <div className="flex gap-3 p-4 md:border-r md:border-border">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius)] border border-border text-destructive">
-            <AlertTriangle className="h-4 w-4" />
+      <div className="relative mt-3 grid gap-0 overflow-hidden rounded-[var(--radius)] border border-border bg-muted/30 md:grid-cols-3">
+        <div className="flex gap-2 p-3 md:border-r md:border-border">
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius)] border border-border text-destructive">
+            <AlertTriangle className="h-3.5 w-3.5" />
           </div>
           <div>
             <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Maior Gargalo</p>
-            <p className="mt-2 text-sm font-bold text-foreground">{bottleneck}</p>
-            <p className="mt-1 text-[11px] text-muted-foreground">Conversão de {funnelPercent(transitionConversions[bottleneckIndex] ?? 0)}</p>
+            <p className="mt-1 text-xs font-bold text-foreground">{bottleneck}</p>
+            <p className="mt-0.5 text-[10px] text-muted-foreground">Conversão de {funnelPercent(transitionConversions[bottleneckIndex] ?? 0)}</p>
           </div>
         </div>
-        <div className="flex gap-3 p-4 md:border-r md:border-border">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius)] border border-border" style={{ color: '#55f52f' }}>
-            <TrendingUp className="h-4 w-4" />
+        <div className="flex gap-2 p-3 md:border-r md:border-border">
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius)] border border-border" style={{ color: '#55f52f' }}>
+            <TrendingUp className="h-3.5 w-3.5" />
           </div>
           <div>
             <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Conversão Geral</p>
-            <p className="mt-2 font-heading text-xl font-normal leading-none text-foreground">{funnelPercent(generalConversion)}</p>
-            <p className="mt-1 text-[11px] text-muted-foreground">{funnelNumber(stages[4]?.value ?? 0)} de {funnelNumber(stages[0]?.value ?? 0)} visitantes</p>
+            <p className="mt-1 font-heading text-base font-normal leading-none text-foreground">{funnelPercent(generalConversion)}</p>
+            <p className="mt-0.5 text-[10px] text-muted-foreground">{funnelNumber(stages[4]?.value ?? 0)} de {funnelNumber(stages[0]?.value ?? 0)} visitantes</p>
           </div>
         </div>
-        <div className="flex gap-3 p-4">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius)] border border-border" style={{ color: '#55f52f' }}>
-            <Lightbulb className="h-4 w-4" />
+        <div className="flex gap-2 p-3">
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius)] border border-border" style={{ color: '#55f52f' }}>
+            <Lightbulb className="h-3.5 w-3.5" />
           </div>
           <div>
             <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Oportunidade</p>
-            <p className="mt-2 text-sm font-bold text-foreground">Melhore a qualificação</p>
-            <p className="mt-1 text-[11px] text-muted-foreground">Ative automações e nutrições</p>
+            <p className="mt-1 text-xs font-bold text-foreground">Melhore a qualificação</p>
+            <p className="mt-0.5 text-[10px] text-muted-foreground">Ative automações e nutrições</p>
           </div>
         </div>
       </div>
