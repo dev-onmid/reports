@@ -3,34 +3,56 @@ import { cva, type VariantProps } from "class-variance-authority"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * Button system aligned with ON_Reports design language:
+ * - Angular geometry: rounded-[--radius] (2px)
+ * - Single accent: primary (Verde Onmid) carries all CTAs
+ * - Outline: green border, transparent fill — secondary actions
+ * - All interactive elements: min 44px height (WCAG AA touch target)
+ */
 const buttonVariants = cva(
-  "group/button inline-flex shrink-0 items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-all outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 active:not-aria-[haspopup]:translate-y-px disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "group/button inline-flex shrink-0 items-center justify-center gap-2 border border-transparent bg-clip-padding font-bold whitespace-nowrap transition-all outline-none select-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 active:not-aria-[haspopup]:translate-y-px disabled:pointer-events-none disabled:opacity-40 aria-invalid:border-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground [a]:hover:bg-primary/80",
+        /* Primary CTA — Verde Onmid fill, pressed drops to primary-dark */
+        default:
+          "bg-primary text-primary-foreground hover:bg-[var(--primary-dark)] active:bg-[var(--primary-dark)]",
+        /* Outline — primary border, transparent fill */
         outline:
-          "border-border bg-background hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
-        secondary:
-          "bg-secondary text-secondary-foreground hover:bg-secondary/80 aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
+          "border-2 border-primary bg-transparent text-foreground hover:bg-primary/10",
+        /* Outline on dark surfaces — white border */
+        "outline-dark":
+          "border border-foreground/80 bg-transparent text-foreground hover:bg-foreground/10",
+        /* Ghost — no chrome, just text affordance */
         ghost:
-          "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
+          "hover:bg-muted hover:text-foreground aria-expanded:bg-muted",
+        /* Ghost link — arrow-link style CTA below cards */
+        link:
+          "text-primary underline-offset-4 hover:underline",
+        /* Destructive */
         destructive:
-          "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive/40",
-        link: "text-primary underline-offset-4 hover:underline",
+          "bg-destructive text-white hover:bg-destructive/90",
+        /* Disabled appearance as standalone variant */
+        muted:
+          "bg-muted text-muted-foreground cursor-not-allowed",
+        /* Secondary (editorial use — Roxo Onmid) */
+        secondary:
+          "bg-secondary text-secondary-foreground hover:bg-secondary/85",
       },
       size: {
-        default:
-          "h-8 gap-1.5 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
-        xs: "h-6 gap-1 rounded-[min(var(--radius-md),10px)] px-2 text-xs in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3",
-        sm: "h-7 gap-1 rounded-[min(var(--radius-md),12px)] px-2.5 text-[0.8rem] in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3.5",
-        lg: "h-9 gap-1.5 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
-        icon: "size-8",
-        "icon-xs":
-          "size-6 rounded-[min(var(--radius-md),10px)] in-data-[slot=button-group]:rounded-lg [&_svg:not([class*='size-'])]:size-3",
-        "icon-sm":
-          "size-7 rounded-[min(var(--radius-md),12px)] in-data-[slot=button-group]:rounded-lg",
-        "icon-lg": "size-9",
+        /* Standard CTA — 44px height (WCAG AA) */
+        default: "h-11 rounded-[var(--radius)] px-6 text-base leading-tight",
+        /* Hero CTA — 48px, larger copy */
+        lg:      "h-12 rounded-[var(--radius)] px-8 text-lg leading-tight",
+        /* Compact CTA — 36px */
+        sm:      "h-9  rounded-[var(--radius)] px-4 text-sm",
+        /* Micro: pill-tab, filter chips — 32px */
+        xs:      "h-8  rounded-[var(--radius)] px-3 text-xs",
+        /* Icon-only variants */
+        icon:    "size-11 rounded-[var(--radius)]",
+        "icon-sm": "size-9 rounded-[var(--radius)]",
+        "icon-xs": "size-8 rounded-[var(--radius)]",
       },
     },
     defaultVariants: {

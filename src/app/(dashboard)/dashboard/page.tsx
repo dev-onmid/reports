@@ -393,31 +393,30 @@ function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: 
     : null;
   const goalGood = goalProgress !== null && goalProgress >= 100;
   return (
-    <div
-      className="relative flex flex-col h-full overflow-hidden rounded-2xl border bg-[#070B14] p-5 shadow-[0_22px_70px_rgba(0,0,0,0.38)]"
-      style={{ borderColor: `${iconBg}66`, boxShadow: `0 0 34px ${iconBg}24, 0 22px 70px rgba(0,0,0,0.38)` }}
-    >
-      <div className="pointer-events-none absolute inset-0" style={{ background: `linear-gradient(135deg, ${iconBg}24, transparent 42%), radial-gradient(circle at 86% 14%, ${iconBg}44, transparent 42%)` }} />
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-px" style={{ background: `linear-gradient(90deg, transparent, ${iconBg}, transparent)` }} />
-      <div className="flex items-start justify-between gap-2">
-        <p className="text-[11px] font-bold uppercase tracking-widest text-foreground/90">{title}</p>
+    <div className="relative flex flex-col h-full overflow-hidden rounded-[var(--radius)] border border-border bg-card p-5">
+      {/* Accent bar — 2px top stripe in platform color */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5" style={{ backgroundColor: iconColor }} />
+      {/* Corner square — NVIDIA-inspired decorative motif */}
+      <div className="pointer-events-none absolute top-0 left-0 h-3 w-3" style={{ backgroundColor: iconColor }} />
+      <div className="flex items-start justify-between gap-2 mt-1">
+        <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">{title}</p>
         {logo ? (
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/15" style={{ background: `${iconBg}2B`, boxShadow: `0 0 22px ${iconBg}55` }}>
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius)] border border-border bg-card">
             {logo}
           </span>
         ) : (
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/15" style={{ background: `${iconBg}30`, boxShadow: `0 0 22px ${iconBg}55` }}>
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius)] border border-border bg-card">
             <Icon className="h-[18px] w-[18px]" style={{ color: iconColor }} />
           </span>
         )}
       </div>
       {loading ? (
-        <div className="mt-3 h-8 w-32 animate-pulse rounded bg-muted/30" />
+        <div className="mt-3 h-8 w-32 animate-pulse rounded-[var(--radius)] bg-muted/30" />
       ) : (
         <>
           <p className="mt-3 font-heading font-normal text-3xl leading-none text-foreground">{fmt(value)}</p>
           {change !== null ? (
-            <p className={cn('mt-1.5 flex items-center gap-0.5 text-xs font-semibold', isPositive ? 'text-emerald-400' : 'text-red-400')}>
+            <p className={cn('mt-1.5 flex items-center gap-0.5 text-xs font-semibold', isPositive ? 'text-emerald-500' : 'text-red-500')}>
               {change >= 0 ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
               {change >= 0 ? '+' : ''}{change.toFixed(1)}% vs mês passado
             </p>
@@ -425,7 +424,7 @@ function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: 
             <p className="mt-1.5 text-[11px] text-muted-foreground">— vs mês passado</p>
           )}
           {goalProgress !== null ? (
-            <p className={cn('mt-1 flex items-center gap-1 text-[11px] font-semibold', goalGood ? 'text-emerald-400' : 'text-amber-400')}>
+            <p className={cn('mt-1 flex items-center gap-1 text-[11px] font-semibold', goalGood ? 'text-emerald-500' : 'text-amber-500')}>
               <CircleDot className="h-2.5 w-2.5" />
               {goalProgress.toFixed(0)}% vs meta
               <span className="text-muted-foreground/70">({fmt(goalValue!)})</span>
@@ -443,18 +442,17 @@ function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: 
             </div>
           )}
           {goalProgress !== null && (
-            <div className="mt-3 h-1 overflow-hidden rounded-full bg-white/10">
+            <div className="mt-3 h-[3px] overflow-hidden rounded-none bg-border">
               <div
-                className="h-full rounded-full transition-all"
+                className="h-full transition-all"
                 style={{
                   width: `${Math.min(100, goalProgress)}%`,
                   backgroundColor: goalGood ? '#22c55e' : goalProgress >= 50 ? '#facc15' : '#ef4444',
-                  boxShadow: `0 0 6px ${goalGood ? '#22c55e' : goalProgress >= 50 ? '#facc15' : '#ef4444'}88`,
                 }}
               />
             </div>
           )}
-          {footer && <div className="mt-2 border-t border-white/10 pt-2">{footer}</div>}
+          {footer && <div className="mt-2 border-t border-border pt-2">{footer}</div>}
         </>
       )}
     </div>
@@ -633,18 +631,21 @@ function CompactInfoCard({
   helper?: string;
 }) {
   return (
-    <div className="relative overflow-hidden rounded-xl border bg-[#070B14] p-4" style={{ borderColor: `${color}66`, boxShadow: `0 0 28px ${color}1F` }}>
-      <div className="pointer-events-none absolute inset-0" style={{ background: `radial-gradient(circle at 86% 12%, ${color}40, transparent 44%)` }} />
-      <div className="flex items-start justify-between gap-3">
-        <div className="relative">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-foreground/75">{title}</p>
+    <div className="relative overflow-hidden rounded-[var(--radius)] border border-border bg-card p-4">
+      {/* Accent bar */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5" style={{ backgroundColor: color }} />
+      {/* Corner square */}
+      <div className="pointer-events-none absolute top-0 left-0 h-3 w-3" style={{ backgroundColor: color }} />
+      <div className="flex items-start justify-between gap-3 mt-1">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{title}</p>
           <p className="mt-2 font-heading text-2xl leading-none text-foreground">{typeof value === 'number' ? value.toLocaleString('pt-BR') : value}</p>
         </div>
-        <span className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/15" style={{ background: `${color}35`, color, boxShadow: `0 0 22px ${color}66` }}>
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius)] border border-border" style={{ color }}>
           <Icon className="h-[18px] w-[18px]" />
         </span>
       </div>
-      {helper && <p className="relative mt-2 text-[10px] text-foreground/55">{helper}</p>}
+      {helper && <p className="mt-2 text-[10px] text-muted-foreground">{helper}</p>}
     </div>
   );
 }
@@ -813,9 +814,9 @@ function MetricSection({
   children: ReactNode;
 }) {
   return (
-    <section className="relative overflow-hidden rounded-2xl border bg-[#050914] p-5" style={{ borderColor: `${accent}66`, boxShadow: `0 0 48px ${accent}22` }}>
-      <div className="pointer-events-none absolute inset-0" style={{ background: `linear-gradient(135deg, ${accent}20, transparent 44%), radial-gradient(circle at 92% 0%, ${accent}4D, transparent 36%)` }} />
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-px" style={{ background: `linear-gradient(90deg, transparent, ${accent}, transparent)` }} />
+    <section className="relative overflow-hidden rounded-[var(--radius)] border border-border bg-card p-5">
+      {/* Platform accent bar */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5" style={{ backgroundColor: accent }} />
       <div className="relative mb-5 flex items-end justify-between gap-4">
         {title && (
         <div>
@@ -823,7 +824,7 @@ function MetricSection({
             <PlatformMarkForText text={title} />
             <span>{title}</span>
           </h2>
-          {description && <p className="mt-0.5 text-[11px] text-foreground/60">{description}</p>}
+          {description && <p className="mt-0.5 text-[11px] text-muted-foreground">{description}</p>}
         </div>
         )}
       </div>
@@ -2309,10 +2310,10 @@ function AudiencePieCard({
   });
 
   return (
-    <div className="flex min-h-[360px] flex-col rounded-xl border border-white/15 bg-black/35 p-4 shadow-[inset_0_0_24px_rgba(255,255,255,0.05)]">
+    <div className="flex min-h-[360px] flex-col rounded-[var(--radius)] border border-border bg-card p-4">
       <div>
         <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground">{title}</h4>
-        <p className="mt-0.5 text-[11px] text-foreground/55">{total.toLocaleString('pt-BR')} pessoas/imp.</p>
+        <p className="mt-0.5 text-[11px] text-muted-foreground">{total.toLocaleString('pt-BR')} pessoas/imp.</p>
       </div>
       {variant === 'donut' && (
         <div className="mt-3 flex flex-1 min-h-0 justify-center items-center overflow-hidden">
@@ -2401,9 +2402,10 @@ function AudiencePlatformBlock({
     ? 'md:grid-cols-2 xl:grid-cols-3'
     : 'md:grid-cols-2 xl:grid-cols-4';
   return (
-    <div className="relative flex h-full flex-col overflow-hidden rounded-xl border bg-black/35 p-4" style={{ borderColor: `${color}66`, boxShadow: `0 0 34px ${color}1F, inset 0 0 28px ${color}10` }}>
-      <div className="pointer-events-none absolute inset-0" style={{ background: `linear-gradient(135deg, ${color}18, transparent 44%), radial-gradient(circle at 8% 0%, ${color}3D, transparent 34%)` }} />
-      <div className="relative flex items-start gap-2">
+    <div className="relative flex h-full flex-col overflow-hidden rounded-[var(--radius)] border border-border bg-card p-4">
+      {/* Platform accent bar */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5" style={{ backgroundColor: color }} />
+      <div className="relative flex items-start gap-2 mt-1">
         <span className="mt-0.5">{title === 'Meta Ads' ? <MetaMark /> : <GoogleMark />}</span>
         <div>
           <h3 className="text-sm font-bold uppercase tracking-wider text-foreground">{title}</h3>
