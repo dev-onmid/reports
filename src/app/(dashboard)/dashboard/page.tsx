@@ -4350,7 +4350,7 @@ export default function GeneralDashboard() {
               isDraggable
               isResizable
               draggableHandle=".drag-handle"
-              compactType={null}
+              compactType="vertical"
               onLayoutChange={nl => setGeneralLayout(prev => prev.map(item => { const u = nl.find(l => l.i === item.i); return u ? { ...item, x: u.x, y: u.y, w: u.w, h: u.h } : item; }))}
             >
               {visibleLayout.map(l => (
