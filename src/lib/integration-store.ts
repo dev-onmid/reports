@@ -209,7 +209,9 @@ const FB_SCOPE = [
   'pages_read_engagement',
   'pages_manage_metadata',
   'pages_messaging',
+  'read_insights',
   'instagram_basic',
+  'instagram_manage_insights',
   'instagram_manage_comments',
   'instagram_manage_messages',
 ].join(',');
