@@ -16,8 +16,10 @@ export default function DashboardLayout({
           <Sidebar />
           <div className="flex flex-col flex-1 overflow-hidden">
             <HeaderWrapper />
-            <main className="flex-1 overflow-y-auto p-6">
-              {children}
+            <main className="flex-1 overflow-y-auto overflow-x-hidden p-6">
+              <div className="w-full min-w-0">
+                {children}
+              </div>
             </main>
           </div>
           <HolidayPaymentAlert />

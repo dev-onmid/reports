@@ -24,9 +24,9 @@ export function Header() {
     .toUpperCase() || 'ON';
 
   return (
-    <header className="h-20 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 flex items-center gap-4 justify-between px-6 sticky top-0 z-10">
+    <header className="min-h-14 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 flex items-center gap-3 justify-between px-4 sm:px-6 sticky top-0 z-10">
       <BackButton />
-      <div className="flex-1 max-w-md">
+      <div className="hidden md:block flex-1 min-w-0 max-w-md">
         <div className="relative">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
@@ -37,21 +37,21 @@ export function Header() {
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5 ml-auto">
         <ThemeToggle />
         <Button variant="ghost" size="icon" className="relative text-muted-foreground hover:text-foreground">
           <Bell className="h-5 w-5" />
           <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-primary" />
         </Button>
-        
-        <div className="flex items-center gap-3 border-l border-border pl-4">
-          <div className="flex flex-col items-end">
+
+        <div className="flex items-center gap-2.5 border-l border-border pl-3">
+          <div className="hidden sm:flex flex-col items-end">
             <span className="text-sm font-medium">{session?.name ?? 'Usuário'}</span>
             <span className="text-xs text-muted-foreground">{session?.role ?? 'Sem sessão'}</span>
           </div>
-          <Avatar className="h-9 w-9 border border-border">
+          <Avatar className="h-8 w-8 border border-border">
             <AvatarImage src="" alt="User" />
-            <AvatarFallback className="bg-primary/20 text-primary">{initials}</AvatarFallback>
+            <AvatarFallback className="bg-primary/20 text-primary text-xs">{initials}</AvatarFallback>
           </Avatar>
         </div>
       </div>

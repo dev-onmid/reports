@@ -2506,6 +2506,10 @@ const CHANNEL_GROUPS: Array<{ id: string; label: string; color: string; ids: Das
 
 // ── React Grid Layout ────────────────────────────────────────────────────────
 const LS_RGL_LAYOUT = 'dashboard_rgl_layout_v2';
+function lsClientSuffix(ids: Set<string>): string {
+  if (ids.size === 1) return `__${[...ids][0]}`;
+  return '';
+}
 const RGL_COLS = 12;
 const RGL_ROW_H = 100; // px per row unit
 const RGL_MARGIN: [number, number] = [16, 16];
@@ -3530,6 +3534,10 @@ export default function GeneralDashboard() {
   const [googlePanelsLayout, setGooglePanelsLayout] = useState<RglLayout[]>(DEFAULT_GOOGLE_PANELS_LAYOUT);
   const [pageInsights, setPageInsights] = useState<PageInsightsResult[]>([]);
   const [pageInsightsLoading, setPageInsightsLoading] = useState(false);
+  // Stable string key derived from selectedIds — used as useEffect dependency
+  const selectedKey = [...selectedIds].sort().join(',');
+  // Ref always points to the suffix currently in use (updated synchronously in load effect)
+  const currentLsSuffixRef = useRef('');
   const [alertsCollapsed, setAlertsCollapsed] = useState(() => {
     if (typeof window === 'undefined') return false;
     return localStorage.getItem('dashboard:alerts:collapsed') === '1';
@@ -3605,43 +3613,41 @@ export default function GeneralDashboard() {
     });
   }
 
-  // Load layout from localStorage
+  // Load preferences from localStorage — re-runs whenever the selected client changes
   useEffect(() => {
+    if (selectedIds.size === 0) return;
+    const suffix = lsClientSuffix(selectedIds);
+    currentLsSuffixRef.current = suffix;
+
+    // Reset to defaults first so switching clients never leaks one client's state into another
+    setWidgetOrder(DEFAULT_WIDGET_ORDER);
+    setCollapsedWidgets(new Set());
+    setDashboardPrefs(DEFAULT_DASHBOARD_PREFS);
+    setMetaKpiLayout(DEFAULT_META_KPI_LAYOUT);
+    setGoogleKpiLayout(DEFAULT_GOOGLE_KPI_LAYOUT);
+    setGeneralLayout(DEFAULT_GENERAL_LAYOUT);
+    setMetaPanelsLayout(DEFAULT_META_PANELS_LAYOUT);
+    setGooglePanelsLayout(DEFAULT_GOOGLE_PANELS_LAYOUT);
+
     try {
-      const order = localStorage.getItem(LS_ORDER);
+      const order = localStorage.getItem(LS_ORDER + suffix);
       if (order) {
         const parsed = JSON.parse(order) as WidgetId[];
-        if (
-          Array.isArray(parsed) &&
-          parsed.every(id => DEFAULT_WIDGET_ORDER.includes(id)) &&
-          DEFAULT_WIDGET_ORDER.every(id => parsed.includes(id))
-        ) {
+        if (Array.isArray(parsed) && parsed.every(id => DEFAULT_WIDGET_ORDER.includes(id)) && DEFAULT_WIDGET_ORDER.every(id => parsed.includes(id))) {
           setWidgetOrder(parsed);
-        } else {
-          setWidgetOrder(DEFAULT_WIDGET_ORDER);
         }
       }
-      const collapsed = localStorage.getItem(LS_COLLAPSED);
+      const collapsed = localStorage.getItem(LS_COLLAPSED + suffix);
       if (collapsed) setCollapsedWidgets(new Set(JSON.parse(collapsed) as WidgetId[]));
     } catch {}
-  }, []);
 
-  useEffect(() => { localStorage.setItem(LS_ORDER, JSON.stringify(widgetOrder)); }, [widgetOrder]);
-  useEffect(() => { localStorage.setItem(LS_COLLAPSED, JSON.stringify([...collapsedWidgets])); }, [collapsedWidgets]);
-  useEffect(() => {
     try {
-      const stored = localStorage.getItem(LS_DASHBOARD_PREFS);
-      setDashboardPrefs(stored ? mergeDashboardPrefs(JSON.parse(stored)) : DEFAULT_DASHBOARD_PREFS);
-    } catch {
-      setDashboardPrefs(DEFAULT_DASHBOARD_PREFS);
-    }
-  }, []);
-  useEffect(() => {
-    localStorage.setItem(LS_DASHBOARD_PREFS, JSON.stringify(dashboardPrefs));
-  }, [dashboardPrefs]);
-  useEffect(() => {
+      const stored = localStorage.getItem(LS_DASHBOARD_PREFS + suffix);
+      if (stored) setDashboardPrefs(mergeDashboardPrefs(JSON.parse(stored)));
+    } catch {}
+
     try {
-      const stored = localStorage.getItem(LS_RGL_LAYOUT);
+      const stored = localStorage.getItem(LS_RGL_LAYOUT + suffix);
       if (stored) {
         const parsed = JSON.parse(stored) as { meta?: RglLayout[]; google?: RglLayout[]; general?: RglLayout[]; metaPanels?: RglLayout[]; googlePanels?: RglLayout[] };
         const merge = (setter: React.Dispatch<React.SetStateAction<RglLayout[]>>, saved?: RglLayout[]) => {
@@ -3658,12 +3664,28 @@ export default function GeneralDashboard() {
         merge(setGooglePanelsLayout, parsed.googlePanels);
       }
     } catch {}
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedKey]);
+
+  // Save — always write to the key that was active when this client was loaded
   useEffect(() => {
+    if (!currentLsSuffixRef.current && selectedIds.size === 0) return;
+    localStorage.setItem(LS_ORDER + currentLsSuffixRef.current, JSON.stringify(widgetOrder));
+  }, [widgetOrder]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!currentLsSuffixRef.current && selectedIds.size === 0) return;
+    localStorage.setItem(LS_COLLAPSED + currentLsSuffixRef.current, JSON.stringify([...collapsedWidgets]));
+  }, [collapsedWidgets]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!currentLsSuffixRef.current && selectedIds.size === 0) return;
+    localStorage.setItem(LS_DASHBOARD_PREFS + currentLsSuffixRef.current, JSON.stringify(dashboardPrefs));
+  }, [dashboardPrefs]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!currentLsSuffixRef.current && selectedIds.size === 0) return;
     try {
-      localStorage.setItem(LS_RGL_LAYOUT, JSON.stringify({ meta: metaKpiLayout, google: googleKpiLayout, general: generalLayout, metaPanels: metaPanelsLayout, googlePanels: googlePanelsLayout }));
+      localStorage.setItem(LS_RGL_LAYOUT + currentLsSuffixRef.current, JSON.stringify({ meta: metaKpiLayout, google: googleKpiLayout, general: generalLayout, metaPanels: metaPanelsLayout, googlePanels: googlePanelsLayout }));
     } catch {}
-  }, [metaKpiLayout, googleKpiLayout, generalLayout, metaPanelsLayout, googlePanelsLayout]);
+  }, [metaKpiLayout, googleKpiLayout, generalLayout, metaPanelsLayout, googlePanelsLayout]); // eslint-disable-line react-hooks/exhaustive-deps
   // customizerOpen available to all users
 
   // Initialize: pre-select from ?client=ID param, otherwise start empty (force client picker)
@@ -4219,7 +4241,7 @@ export default function GeneralDashboard() {
 
       {/* UNIFIED TOP BAR */}
       <div className="sticky top-0 z-20 -mx-6 -mt-6 bg-background/95 backdrop-blur-sm border-b border-border">
-        <div className="flex items-center gap-2 px-6 h-20">
+        <div className="flex flex-wrap items-center gap-2 px-6 py-3 min-h-[56px]">
           <BackButton />
           {/* Client selector */}
           <ClientSelector clients={clients} selected={selectedIds} onChange={setSelectedIds} />
@@ -4257,7 +4279,7 @@ export default function GeneralDashboard() {
           <div className="flex-1" />
 
           {/* Search */}
-          <div className="relative w-52">
+          <div className="relative hidden lg:block w-44 xl:w-52">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
             <Input
               type="search"
@@ -4274,7 +4296,7 @@ export default function GeneralDashboard() {
             className="flex items-center gap-1.5 rounded-xl border border-violet-500/40 bg-violet-500/15 px-3 py-2 text-xs font-semibold text-violet-400 hover:bg-violet-500/25 transition-colors disabled:opacity-50 whitespace-nowrap"
           >
             {aiLoading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-            {aiLoading ? 'Analisando...' : 'Analisar com IA'}
+            <span className="hidden sm:inline">{aiLoading ? 'Analisando...' : 'Analisar com IA'}</span>
           </button>
 
 
@@ -4285,7 +4307,7 @@ export default function GeneralDashboard() {
             <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-primary" />
           </button>
           <div className="flex items-center gap-2.5 border-l border-border pl-3">
-            <div className="flex flex-col items-end leading-none gap-0.5">
+            <div className="hidden md:flex flex-col items-end leading-none gap-0.5">
               <span className="text-sm font-medium">{session?.name ?? 'Usuário'}</span>
               <span className="text-[11px] text-muted-foreground">{session?.role ?? ''}</span>
             </div>
