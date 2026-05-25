@@ -12,12 +12,12 @@ export default function DashboardLayout({
   return (
     <PaymentProviderWrapper>
       <AuthGuard>
-        <div className="flex h-screen overflow-hidden bg-background">
+        <div className="flex h-screen w-full overflow-hidden bg-background">
           <Sidebar />
-          <div className="flex flex-col flex-1 overflow-hidden">
+          <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
             <HeaderWrapper />
-            <main className="flex-1 overflow-y-auto overflow-x-hidden p-6">
-              <div className="w-full min-w-0">
+            <main className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-6">
+              <div className="w-full min-w-0 max-w-full">
                 {children}
               </div>
             </main>
