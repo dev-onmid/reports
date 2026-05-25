@@ -1,6 +1,8 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+@import "react-grid-layout/css/styles.css";
+@import "react-grid-layout/css/placeholder.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -184,3 +186,26 @@
   border-radius: 50% !important;
 }
 .react-flow__attribution { display: none !important; }
+/* react-grid-layout — tema onmid */
+.react-grid-item.react-grid-placeholder {
+  background: rgba(85, 245, 47, 0.12) !important;
+  border: 1px dashed rgba(85, 245, 47, 0.5) !important;
+  border-radius: 12px !important;
+  opacity: 1 !important;
+}
+.react-resizable-handle {
+  width: 18px !important;
+  height: 18px !important;
+  border-right: 2px solid #55F52F !important;
+  border-bottom: 2px solid #55F52F !important;
+  border-radius: 0 0 6px 0 !important;
+  opacity: 0.35;
+  transition: opacity 0.15s;
+}
+.react-grid-item:hover .react-resizable-handle {
+  opacity: 1;
+}
+.react-grid-item.rgl-edit-mode {
+  border: 1px dashed rgba(85, 245, 47, 0.35);
+  border-radius: 12px;
+}

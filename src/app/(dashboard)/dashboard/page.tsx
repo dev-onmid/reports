@@ -1,5 +1,7 @@
 "use client";
 
+import RGL from 'react-grid-layout';
+import type { Layout as RglLayout } from 'react-grid-layout';
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { ReactNode } from 'react';
@@ -2499,6 +2501,39 @@ const CHANNEL_GROUPS: Array<{ id: string; label: string; color: string; ids: Das
   { id: 'google', label: 'Google Ads',        color: '#7B2CFF', ids: CARD_GROUPS[2].ids },
 ];
 
+// ── React Grid Layout ────────────────────────────────────────────────────────
+const LS_RGL_LAYOUT = 'dashboard_rgl_layout_v1';
+const RGL_COLS = 12;
+const RGL_ROW_H = 100; // px per row unit
+const RGL_MARGIN: [number, number] = [16, 16];
+
+const DEFAULT_META_KPI_LAYOUT: RglLayout[] = [
+  { i: 'meta-reach',            x: 0, y: 0, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'meta-impressions',      x: 3, y: 0, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'meta-leads',            x: 6, y: 0, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'meta-cpl',              x: 9, y: 0, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'meta-spend',            x: 0, y: 2, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'meta-ctr',              x: 3, y: 2, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'meta-total-spend',      x: 6, y: 2, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'meta-balance',          x: 9, y: 2, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'meta-active-campaigns', x: 0, y: 4, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'meta-adsets',           x: 3, y: 4, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'meta-creatives',        x: 6, y: 4, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'meta-clicks',           x: 9, y: 4, w: 3, h: 2, minW: 2, minH: 1 },
+];
+
+const DEFAULT_GOOGLE_KPI_LAYOUT: RglLayout[] = [
+  { i: 'google-impressions',      x: 0, y: 0, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'google-conversions',      x: 3, y: 0, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'google-cpa',              x: 6, y: 0, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'google-spend',            x: 9, y: 0, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'google-ctr',              x: 0, y: 2, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'google-total-spend',      x: 3, y: 2, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'google-balance',          x: 6, y: 2, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'google-active-campaigns', x: 9, y: 2, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'google-keyword-count',    x: 0, y: 4, w: 3, h: 2, minW: 2, minH: 1 },
+];
+
 const DEFAULT_CARD_OVERRIDES: Partial<Record<DashboardCardId, Partial<DashboardCardConfig>>> = {
   'general-revenue': { size: 'lg', chart: 'none' },
   'general-leads': { size: 'lg', chart: 'none' },
@@ -2672,6 +2707,59 @@ function SortableGridItem({
               title="Ocultar métrica"
               onClick={handleHide}
               className="flex items-center justify-center w-6 h-6 rounded-md bg-card border border-border text-muted-foreground hover:text-destructive transition-colors shadow-md"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function RglCardShell({
+  id, prefs, children,
+}: {
+  id: DashboardCardId; prefs: DashboardPrefs; children: ReactNode;
+}) {
+  const { editMode, hideCard, toggleChart } = useContext(DashboardEditCtx);
+  const [hiding, setHiding] = useState(false);
+  const cfg = prefs.cards[id] ?? DEFAULT_DASHBOARD_PREFS.cards[id];
+  const isPanel = id.includes('campaigns') || id.includes('audience') || id.includes('preview') || id.includes('keywords');
+
+  function handleHide() {
+    setHiding(true);
+    setTimeout(() => hideCard(id), 180);
+  }
+
+  return (
+    <div className={cn(
+      'relative h-full w-full group/card transition-all duration-200',
+      hiding && 'opacity-0 scale-95',
+      editMode && 'rgl-edit-mode',
+    )}>
+      <div className="h-full w-full [&>*]:h-full">{children}</div>
+      {editMode && (
+        <>
+          <div className="drag-handle absolute top-1.5 left-1.5 z-20 opacity-0 group-hover/card:opacity-100 transition-opacity cursor-grab active:cursor-grabbing flex items-center justify-center w-6 h-6 rounded-md bg-card/90 border border-border text-muted-foreground hover:text-foreground shadow-md backdrop-blur-sm">
+            <GripVertical className="w-3 h-3" />
+          </div>
+          <div className="absolute top-1.5 right-1.5 z-20 flex items-center gap-1 opacity-0 group-hover/card:opacity-100 transition-opacity">
+            {!isPanel && (
+              <button
+                type="button"
+                title={cfg.chart === 'sparkline' ? 'Ocultar gráfico' : 'Mostrar gráfico'}
+                onClick={() => toggleChart(id)}
+                className="flex items-center justify-center w-6 h-6 rounded-md bg-card/90 border border-border text-muted-foreground hover:text-foreground transition-colors shadow-md"
+              >
+                <BarChart3 className="w-3 h-3" />
+              </button>
+            )}
+            <button
+              type="button"
+              title="Ocultar métrica"
+              onClick={handleHide}
+              className="flex items-center justify-center w-6 h-6 rounded-md bg-card/90 border border-border text-muted-foreground hover:text-destructive transition-colors shadow-md"
             >
               <X className="w-3 h-3" />
             </button>
@@ -3269,6 +3357,8 @@ export default function GeneralDashboard() {
   const [aiError, setAiError] = useState('');
   const [customizerOpen, setCustomizerOpen] = useState(false);
   const [dashboardPrefs, setDashboardPrefs] = useState<DashboardPrefs>(DEFAULT_DASHBOARD_PREFS);
+  const [metaKpiLayout, setMetaKpiLayout] = useState<RglLayout[]>(DEFAULT_META_KPI_LAYOUT);
+  const [googleKpiLayout, setGoogleKpiLayout] = useState<RglLayout[]>(DEFAULT_GOOGLE_KPI_LAYOUT);
   const [pageInsights, setPageInsights] = useState<PageInsightsResult[]>([]);
   const [pageInsightsLoading, setPageInsightsLoading] = useState(false);
   const [alertsCollapsed, setAlertsCollapsed] = useState(() => {
@@ -3380,6 +3470,27 @@ export default function GeneralDashboard() {
   useEffect(() => {
     localStorage.setItem(LS_DASHBOARD_PREFS, JSON.stringify(dashboardPrefs));
   }, [dashboardPrefs]);
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(LS_RGL_LAYOUT);
+      if (stored) {
+        const parsed = JSON.parse(stored) as { meta?: RglLayout[]; google?: RglLayout[] };
+        if (parsed.meta) setMetaKpiLayout(prev => prev.map(item => {
+          const s = parsed.meta!.find(l => l.i === item.i);
+          return s ? { ...item, x: s.x, y: s.y, w: s.w, h: s.h } : item;
+        }));
+        if (parsed.google) setGoogleKpiLayout(prev => prev.map(item => {
+          const s = parsed.google!.find(l => l.i === item.i);
+          return s ? { ...item, x: s.x, y: s.y, w: s.w, h: s.h } : item;
+        }));
+      }
+    } catch {}
+  }, []);
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_RGL_LAYOUT, JSON.stringify({ meta: metaKpiLayout, google: googleKpiLayout }));
+    } catch {}
+  }, [metaKpiLayout, googleKpiLayout]);
   // customizerOpen available to all users
 
   // Initialize: pre-select from ?client=ID param, otherwise start empty (force client picker)
@@ -4273,24 +4384,48 @@ export default function GeneralDashboard() {
           <p className="text-[11px] text-foreground/60">{metaFormLeads.toLocaleString('pt-BR')} formulários + {metaConversations.toLocaleString('pt-BR')} conversas no período</p>
         </div>
 
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleCardDragEnd(META_KPI_IDS)}>
-          <SortableContext items={META_KPI_IDS} strategy={rectSortingStrategy}>
-            <div className="relative grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <SortableGridItem id="meta-reach" prefs={dashboardPrefs}><KpiCard title="Alcance Meta" value={metaReach} format="number" icon={Users} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} chart={dashboardPrefs.cards['meta-reach'].chart} series={seriesOrPacing(metaReachSeries, metaReach)} /></SortableGridItem>
-              <SortableGridItem id="meta-impressions" prefs={dashboardPrefs}><KpiCard title="Impressões Meta" value={metaImpressions} format="number" icon={BarChart3} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} chart={dashboardPrefs.cards['meta-impressions'].chart} series={seriesOrPacing(metaImpressionsSeries, metaImpressions)} /></SortableGridItem>
-              <SortableGridItem id="meta-leads" prefs={dashboardPrefs}><KpiCard title="Leads Meta Ads" value={metaLeads} prevValue={prevMetaLeads > 0 ? prevMetaLeads : undefined} format="number" icon={Target} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['meta-leads'].chart} series={seriesOrPacing(metaLeadsSeries, metaLeads)} /></SortableGridItem>
-              <SortableGridItem id="meta-cpl" prefs={dashboardPrefs}><KpiCard title="CPL Meta Ads" value={avgCpl} format="currency" icon={Zap} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} inverseGoal inverseChange logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['meta-cpl'].chart} series={seriesOrPacing(metaCplSeries, avgCpl)} /></SortableGridItem>
-              <SortableGridItem id="meta-spend" prefs={dashboardPrefs}><KpiCard title="Valor Gasto Meta" value={metaSpend} format="currency" icon={Wallet} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['meta-spend'].chart} series={seriesOrPacing(metaSpendSeries, metaSpend)} /></SortableGridItem>
-              <SortableGridItem id="meta-ctr" prefs={dashboardPrefs}><KpiCard title="CTR Meta Ads" value={metaCtr} format="percent" icon={MousePointerClick} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} chart={dashboardPrefs.cards['meta-ctr'].chart} series={seriesOrPacing(metaCtrSeries, metaCtr)} /></SortableGridItem>
-              <SortableGridItem id="meta-total-spend" prefs={dashboardPrefs}><KpiCard title="Total Gasto Meta" value={metaCampaignSpend || metaSpend} format="currency" icon={CreditCard} iconColor="#0668E1" iconBg="#0668E1" loading={campaignsLoading || metricsLoading} chart={dashboardPrefs.cards['meta-total-spend'].chart} series={seriesOrPacing(metaSpendSeries, metaCampaignSpend || metaSpend)} /></SortableGridItem>
-              <SortableGridItem id="meta-balance" prefs={dashboardPrefs}><KpiCard title="Saldo da Conta Meta" value={metaBalance} format="currency" icon={PiggyBank} iconColor="#0668E1" iconBg="#0668E1" loading={balancesLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['meta-balance'].chart} series={pacingSeries(metaBalance, Math.max(2, selectedDateKeys.length || 2))} /></SortableGridItem>
-              <SortableGridItem id="meta-active-campaigns" prefs={dashboardPrefs}><CompactInfoCard title="Campanhas Ativas" value={activeMetaCampaigns} icon={Briefcase} color="#0668E1" /></SortableGridItem>
-              <SortableGridItem id="meta-adsets" prefs={dashboardPrefs}><CompactInfoCard title="Conjuntos" value="Ver na tabela" icon={LayoutDashboard} color="#0668E1" helper="Expanda uma campanha para visualizar conjuntos e anúncios." /></SortableGridItem>
-              <SortableGridItem id="meta-creatives" prefs={dashboardPrefs}><CompactInfoCard title="Criativos" value={metaCreativeCount} icon={ImageIcon} color="#0668E1" helper="Com preview no carrossel abaixo." /></SortableGridItem>
-              <SortableGridItem id="meta-clicks" prefs={dashboardPrefs}><KpiCard title="Cliques Meta" value={metaClicks} format="number" icon={MousePointerClick} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} chart={dashboardPrefs.cards['meta-clicks'].chart} series={seriesOrPacing(metaClicksSeries, metaClicks)} /></SortableGridItem>
-            </div>
-          </SortableContext>
-        </DndContext>
+        {(() => {
+          const metaCards: Record<string, ReactNode> = {
+            'meta-reach':            <KpiCard title="Alcance Meta" value={metaReach} format="number" icon={Users} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} chart={dashboardPrefs.cards['meta-reach'].chart} series={seriesOrPacing(metaReachSeries, metaReach)} />,
+            'meta-impressions':      <KpiCard title="Impressões Meta" value={metaImpressions} format="number" icon={BarChart3} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} chart={dashboardPrefs.cards['meta-impressions'].chart} series={seriesOrPacing(metaImpressionsSeries, metaImpressions)} />,
+            'meta-leads':            <KpiCard title="Leads Meta Ads" value={metaLeads} prevValue={prevMetaLeads > 0 ? prevMetaLeads : undefined} format="number" icon={Target} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['meta-leads'].chart} series={seriesOrPacing(metaLeadsSeries, metaLeads)} />,
+            'meta-cpl':              <KpiCard title="CPL Meta Ads" value={avgCpl} format="currency" icon={Zap} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} inverseGoal inverseChange logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['meta-cpl'].chart} series={seriesOrPacing(metaCplSeries, avgCpl)} />,
+            'meta-spend':            <KpiCard title="Valor Gasto Meta" value={metaSpend} format="currency" icon={Wallet} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['meta-spend'].chart} series={seriesOrPacing(metaSpendSeries, metaSpend)} />,
+            'meta-ctr':              <KpiCard title="CTR Meta Ads" value={metaCtr} format="percent" icon={MousePointerClick} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} chart={dashboardPrefs.cards['meta-ctr'].chart} series={seriesOrPacing(metaCtrSeries, metaCtr)} />,
+            'meta-total-spend':      <KpiCard title="Total Gasto Meta" value={metaCampaignSpend || metaSpend} format="currency" icon={CreditCard} iconColor="#0668E1" iconBg="#0668E1" loading={campaignsLoading || metricsLoading} chart={dashboardPrefs.cards['meta-total-spend'].chart} series={seriesOrPacing(metaSpendSeries, metaCampaignSpend || metaSpend)} />,
+            'meta-balance':          <KpiCard title="Saldo da Conta Meta" value={metaBalance} format="currency" icon={PiggyBank} iconColor="#0668E1" iconBg="#0668E1" loading={balancesLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['meta-balance'].chart} series={pacingSeries(metaBalance, Math.max(2, selectedDateKeys.length || 2))} />,
+            'meta-active-campaigns': <CompactInfoCard title="Campanhas Ativas" value={activeMetaCampaigns} icon={Briefcase} color="#0668E1" />,
+            'meta-adsets':           <CompactInfoCard title="Conjuntos" value="Ver na tabela" icon={LayoutDashboard} color="#0668E1" helper="Expanda uma campanha para visualizar conjuntos e anúncios." />,
+            'meta-creatives':        <CompactInfoCard title="Criativos" value={metaCreativeCount} icon={ImageIcon} color="#0668E1" helper="Com preview no carrossel abaixo." />,
+            'meta-clicks':           <KpiCard title="Cliques Meta" value={metaClicks} format="number" icon={MousePointerClick} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} chart={dashboardPrefs.cards['meta-clicks'].chart} series={seriesOrPacing(metaClicksSeries, metaClicks)} />,
+          };
+          const visibleLayout = metaKpiLayout.filter(l => dashboardPrefs.cards[l.i as DashboardCardId]?.visible !== false);
+          return (
+            <RGL
+              layout={visibleLayout}
+              cols={RGL_COLS}
+              rowHeight={RGL_ROW_H}
+              margin={RGL_MARGIN}
+              containerPadding={[0, 0]}
+              isDraggable={editMode}
+              isResizable={editMode}
+              draggableHandle=".drag-handle"
+              compactType="vertical"
+              onLayoutChange={nl => setMetaKpiLayout(prev => prev.map(item => {
+                const u = nl.find(l => l.i === item.i);
+                return u ? { ...item, x: u.x, y: u.y, w: u.w, h: u.h } : item;
+              }))}
+            >
+              {visibleLayout.map(l => (
+                <div key={l.i} className="h-full">
+                  <RglCardShell id={l.i as DashboardCardId} prefs={dashboardPrefs}>
+                    {metaCards[l.i]}
+                  </RglCardShell>
+                </div>
+              ))}
+            </RGL>
+          );
+        })()}
 
         <div className="relative mt-4 grid gap-4 xl:grid-cols-4">
           <DashboardGridItem id="meta-campaigns" prefs={dashboardPrefs}>
@@ -4379,21 +4514,45 @@ export default function GeneralDashboard() {
           </h2>
         </div>
 
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleCardDragEnd(GOOGLE_KPI_IDS)}>
-          <SortableContext items={GOOGLE_KPI_IDS} strategy={rectSortingStrategy}>
-            <div className="relative grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <SortableGridItem id="google-impressions" prefs={dashboardPrefs}><KpiCard title="Impressões Google" value={googleImpressions} format="number" icon={BarChart3} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} chart={dashboardPrefs.cards['google-impressions'].chart} series={seriesOrPacing(googleImpressionsSeries, googleImpressions)} /></SortableGridItem>
-              <SortableGridItem id="google-conversions" prefs={dashboardPrefs}><KpiCard title="Conversões Google" value={googleConv} prevValue={prevGoogleConv > 0 ? prevGoogleConv : undefined} format="number" icon={BarChart3} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-conversions'].chart} series={seriesOrPacing(googleConversionsSeries, googleConv)} /></SortableGridItem>
-              <SortableGridItem id="google-cpa" prefs={dashboardPrefs}><KpiCard title="Custo por Conversão" value={avgCpa} format="currency" icon={Briefcase} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} inverseGoal inverseChange logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-cpa'].chart} series={seriesOrPacing(googleCpaSeries, avgCpa)} /></SortableGridItem>
-              <SortableGridItem id="google-spend" prefs={dashboardPrefs}><KpiCard title="Valor Gasto Google" value={googleCost} format="currency" icon={CreditCard} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-spend'].chart} series={seriesOrPacing(googleCostSeries, googleCost)} /></SortableGridItem>
-              <SortableGridItem id="google-ctr" prefs={dashboardPrefs}><KpiCard title="CTR Google Ads" value={googleCtrValue} format="percent" icon={MousePointerClick} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} chart={dashboardPrefs.cards['google-ctr'].chart} series={seriesOrPacing(googleCtrSeries, googleCtrValue)} /></SortableGridItem>
-              <SortableGridItem id="google-total-spend" prefs={dashboardPrefs}><KpiCard title="Total Gasto Google" value={googleCampaignSpend || googleCost} format="currency" icon={Wallet} iconColor="#EA4335" iconBg="#EA4335" loading={campaignsLoading || metricsLoading} chart={dashboardPrefs.cards['google-total-spend'].chart} series={seriesOrPacing(googleCostSeries, googleCampaignSpend || googleCost)} /></SortableGridItem>
-              <SortableGridItem id="google-balance" prefs={dashboardPrefs}><KpiCard title="Saldo da Conta Google" value={googleBalance} format="currency" icon={Wallet} iconColor="#EA4335" iconBg="#EA4335" loading={balancesLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-balance'].chart} series={pacingSeries(googleBalance, Math.max(2, selectedDateKeys.length || 2))} /></SortableGridItem>
-              <SortableGridItem id="google-active-campaigns" prefs={dashboardPrefs}><CompactInfoCard title="Campanhas Ativas" value={activeGoogleCampaigns} icon={Briefcase} color="#EA4335" /></SortableGridItem>
-              <SortableGridItem id="google-keyword-count" prefs={dashboardPrefs}><CompactInfoCard title="Top Palavras-chave" value={keywords.length} icon={Search} color="#EA4335" helper="Lista ordenada abaixo." /></SortableGridItem>
-            </div>
-          </SortableContext>
-        </DndContext>
+        {(() => {
+          const googleCards: Record<string, ReactNode> = {
+            'google-impressions':      <KpiCard title="Impressões Google" value={googleImpressions} format="number" icon={BarChart3} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} chart={dashboardPrefs.cards['google-impressions'].chart} series={seriesOrPacing(googleImpressionsSeries, googleImpressions)} />,
+            'google-conversions':      <KpiCard title="Conversões Google" value={googleConv} prevValue={prevGoogleConv > 0 ? prevGoogleConv : undefined} format="number" icon={BarChart3} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-conversions'].chart} series={seriesOrPacing(googleConversionsSeries, googleConv)} />,
+            'google-cpa':              <KpiCard title="Custo por Conversão" value={avgCpa} format="currency" icon={Briefcase} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} inverseGoal inverseChange logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-cpa'].chart} series={seriesOrPacing(googleCpaSeries, avgCpa)} />,
+            'google-spend':            <KpiCard title="Valor Gasto Google" value={googleCost} format="currency" icon={CreditCard} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-spend'].chart} series={seriesOrPacing(googleCostSeries, googleCost)} />,
+            'google-ctr':              <KpiCard title="CTR Google Ads" value={googleCtrValue} format="percent" icon={MousePointerClick} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} chart={dashboardPrefs.cards['google-ctr'].chart} series={seriesOrPacing(googleCtrSeries, googleCtrValue)} />,
+            'google-total-spend':      <KpiCard title="Total Gasto Google" value={googleCampaignSpend || googleCost} format="currency" icon={Wallet} iconColor="#EA4335" iconBg="#EA4335" loading={campaignsLoading || metricsLoading} chart={dashboardPrefs.cards['google-total-spend'].chart} series={seriesOrPacing(googleCostSeries, googleCampaignSpend || googleCost)} />,
+            'google-balance':          <KpiCard title="Saldo da Conta Google" value={googleBalance} format="currency" icon={Wallet} iconColor="#EA4335" iconBg="#EA4335" loading={balancesLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-balance'].chart} series={pacingSeries(googleBalance, Math.max(2, selectedDateKeys.length || 2))} />,
+            'google-active-campaigns': <CompactInfoCard title="Campanhas Ativas" value={activeGoogleCampaigns} icon={Briefcase} color="#EA4335" />,
+            'google-keyword-count':    <CompactInfoCard title="Top Palavras-chave" value={keywords.length} icon={Search} color="#EA4335" helper="Lista ordenada abaixo." />,
+          };
+          const visibleLayout = googleKpiLayout.filter(l => dashboardPrefs.cards[l.i as DashboardCardId]?.visible !== false);
+          return (
+            <RGL
+              layout={visibleLayout}
+              cols={RGL_COLS}
+              rowHeight={RGL_ROW_H}
+              margin={RGL_MARGIN}
+              containerPadding={[0, 0]}
+              isDraggable={editMode}
+              isResizable={editMode}
+              draggableHandle=".drag-handle"
+              compactType="vertical"
+              onLayoutChange={nl => setGoogleKpiLayout(prev => prev.map(item => {
+                const u = nl.find(l => l.i === item.i);
+                return u ? { ...item, x: u.x, y: u.y, w: u.w, h: u.h } : item;
+              }))}
+            >
+              {visibleLayout.map(l => (
+                <div key={l.i} className="h-full">
+                  <RglCardShell id={l.i as DashboardCardId} prefs={dashboardPrefs}>
+                    {googleCards[l.i]}
+                  </RglCardShell>
+                </div>
+              ))}
+            </RGL>
+          );
+        })()}
 
         <div className="relative mt-4 grid gap-4 xl:grid-cols-4">
           <DashboardGridItem id="google-campaigns" prefs={dashboardPrefs}>
