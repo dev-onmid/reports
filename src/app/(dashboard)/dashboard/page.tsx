@@ -3,7 +3,7 @@
 import RGL, { WidthProvider } from 'react-grid-layout';
 import type { Layout as RglLayout } from 'react-grid-layout';
 const RglGrid = WidthProvider(RGL);
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties } from 'react';
+import React, { Fragment, createContext, useContext, useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
@@ -3062,12 +3062,37 @@ function DashboardPerformanceFunnel({ periodLabel, rows }: { periodLabel: string
   const bottleneck = `${displayStageName(stages[bottleneckIndex]?.label ?? '')} → ${displayStageName(stages[bottleneckIndex + 1]?.label ?? '')}`;
   const generalConversion = stageConversion(stages[4]?.value ?? 0, stages[0]?.value ?? 0);
 
+  const sectionRef = useRef<HTMLElement>(null);
+  const [scale, setScale] = useState(1);
+  useEffect(() => {
+    const el = sectionRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => {
+      // 400px = scale 1.0 (default h=4 grid rows); clamp 0.75–1.8
+      const s = Math.min(Math.max(entry.contentRect.height / 400, 0.75), 1.8);
+      setScale(s);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const iconSz = Math.round(14 * scale);
+  const badgeSz = Math.round(18 * scale);
+  const connH = Math.round(26 * scale);
+  const labelFs = Math.round(10 * scale);
+  const valueFs = Math.round(14 * scale);
+  const subFs = Math.round(9 * scale);
+  const convFs = Math.round(9 * scale);
+  const footerFs = Math.round(9 * scale);
+  const footerValueFs = Math.round(12 * scale);
+
   return (
-    <section className="relative h-full overflow-hidden rounded-[var(--radius)] border border-border bg-card p-4 sm:p-5">
+    <section ref={sectionRef} className="relative h-full flex flex-col overflow-hidden rounded-[var(--radius)] border border-border bg-card p-4 sm:p-5">
       {/* Accent bar */}
       <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5 bg-primary" />
 
-      <div className="relative flex flex-wrap items-start justify-between gap-3">
+      {/* Header */}
+      <div className="relative flex-none flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
             <h3 className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Funil de Performance</h3>
@@ -3085,86 +3110,91 @@ function DashboardPerformanceFunnel({ periodLabel, rows }: { periodLabel: string
         </button>
       </div>
 
-      <div className="relative mt-3 space-y-0">
+      {/* Stages — fills remaining height */}
+      <div className="relative flex-1 flex flex-col mt-3 min-h-0">
         {stages.map((stage, index) => {
           const Icon = stage.Icon;
           const nextConversion = conversions[index + 1] ?? 0;
+          const isLast = index === stages.length - 1;
 
           return (
-            <div key={stage.label}>
+            <Fragment key={stage.label}>
+              {/* Stage row — grows proportionally */}
               <div
-                className="relative grid min-h-[44px] grid-cols-[40px_32px_1fr_auto] items-center overflow-hidden rounded-[var(--radius)] border pr-4 max-sm:grid-cols-[36px_28px_1fr] max-sm:pr-3"
-                style={{ borderColor: `${stage.color}80` }}
+                className="relative flex-1 grid grid-cols-[40px_28px_1fr_auto] items-center overflow-hidden rounded-[var(--radius)] border pr-3"
+                style={{ borderColor: `${stage.color}80`, minHeight: Math.round(36 * scale) }}
               >
                 <div
                   className="absolute inset-0"
                   style={{ background: `linear-gradient(90deg, ${stage.color}22 0%, ${stage.color}10 40%, transparent 100%)` }}
                 />
                 <div
-                  className="relative flex h-full min-h-[44px] items-center justify-center border-r"
+                  className="relative flex h-full items-center justify-center border-r"
                   style={{ borderColor: `${stage.color}55` }}
                 >
-                  <Icon className="h-4 w-4" style={{ color: stage.color }} />
+                  <Icon style={{ color: stage.color, width: iconSz, height: iconSz }} />
                 </div>
                 <div className="relative flex justify-center">
                   <span
-                    className="flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-black text-white"
-                    style={{ backgroundColor: `${stage.color}cc` }}
+                    className="flex items-center justify-center rounded-full font-black text-white"
+                    style={{ backgroundColor: `${stage.color}cc`, width: badgeSz, height: badgeSz, fontSize: Math.round(8 * scale) }}
                   >
                     {index + 1}
                   </span>
                 </div>
-                <p className="relative text-xs font-bold uppercase tracking-[0.1em] text-foreground max-sm:text-[10px]">{stage.label}</p>
-                <div className="relative text-right max-sm:col-span-3 max-sm:pb-2 max-sm:pr-1">
-                  <p className="font-heading text-base font-normal leading-none text-foreground">{funnelNumber(stage.value)}</p>
-                  <p className="mt-0.5 text-[10px] font-semibold text-muted-foreground">{funnelPercent(conversions[index], index === 0 ? 1 : 2)}</p>
+                <p className="relative font-bold uppercase text-foreground" style={{ fontSize: labelFs, letterSpacing: '0.08em' }}>{stage.label}</p>
+                <div className="relative text-right">
+                  <p className="font-heading font-normal leading-none text-foreground" style={{ fontSize: valueFs }}>{funnelNumber(stage.value)}</p>
+                  <p className="mt-0.5 font-semibold text-muted-foreground" style={{ fontSize: subFs }}>{funnelPercent(conversions[index], index === 0 ? 1 : 2)}</p>
                 </div>
               </div>
 
-              {index < stages.length - 1 && (
-                <div className="relative flex h-[28px] justify-center">
+              {/* Connector — fixed proportional height */}
+              {!isLast && (
+                <div className="relative flex-none flex justify-center" style={{ height: connH }}>
                   <div className="absolute left-1/2 top-0 h-full border-l border-dashed" style={{ borderColor: `${stage.color}88` }} />
-                  <span className="absolute top-[-4px] h-2 w-2 rounded-full" style={{ backgroundColor: stage.color }} />
-                  <div className="relative z-10 mt-2 flex h-6 items-center gap-2 rounded-[var(--radius)] border border-border bg-card px-2">
-                    <span className="text-[10px] font-bold text-muted-foreground">Taxa de conversão</span>
-                    <span className="text-xs font-bold" style={{ color: stage.color }}>{funnelPercent(nextConversion)}</span>
+                  <span className="absolute rounded-full" style={{ backgroundColor: stage.color, width: Math.round(7 * scale), height: Math.round(7 * scale), top: -Math.round(3 * scale) }} />
+                  <div className="relative z-10 flex items-center gap-1.5 rounded-[var(--radius)] border border-border bg-card px-2 self-center">
+                    <span className="font-bold text-muted-foreground" style={{ fontSize: convFs }}>Taxa de conversão</span>
+                    <span className="font-bold" style={{ color: stage.color, fontSize: convFs }}>{funnelPercent(nextConversion)}</span>
                   </div>
                 </div>
               )}
-            </div>
+            </Fragment>
           );
         })}
       </div>
 
-      <div className="relative mt-3 grid gap-0 overflow-hidden rounded-[var(--radius)] border border-border bg-muted/30 md:grid-cols-3">
-        <div className="flex gap-2 p-3 md:border-r md:border-border">
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius)] border border-border text-destructive">
-            <AlertTriangle className="h-3.5 w-3.5" />
+      {/* Footer */}
+      <div className="relative flex-none mt-3 grid gap-0 overflow-hidden rounded-[var(--radius)] border border-border bg-muted/30 md:grid-cols-3">
+        <div className="flex gap-2 p-2.5 md:border-r md:border-border">
+          <div className="flex shrink-0 items-center justify-center rounded-[var(--radius)] border border-border text-destructive" style={{ width: Math.round(26 * scale), height: Math.round(26 * scale) }}>
+            <AlertTriangle style={{ width: Math.round(12 * scale), height: Math.round(12 * scale) }} />
           </div>
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Maior Gargalo</p>
-            <p className="mt-1 text-xs font-bold text-foreground">{bottleneck}</p>
-            <p className="mt-0.5 text-[10px] text-muted-foreground">Conversão de {funnelPercent(transitionConversions[bottleneckIndex] ?? 0)}</p>
+            <p className="font-bold uppercase tracking-widest text-muted-foreground" style={{ fontSize: footerFs }}>Maior Gargalo</p>
+            <p className="mt-0.5 font-bold text-foreground" style={{ fontSize: footerValueFs }}>{bottleneck}</p>
+            <p className="mt-0.5 text-muted-foreground" style={{ fontSize: footerFs }}>Conversão de {funnelPercent(transitionConversions[bottleneckIndex] ?? 0)}</p>
           </div>
         </div>
-        <div className="flex gap-2 p-3 md:border-r md:border-border">
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius)] border border-border" style={{ color: '#55f52f' }}>
-            <TrendingUp className="h-3.5 w-3.5" />
+        <div className="flex gap-2 p-2.5 md:border-r md:border-border">
+          <div className="flex shrink-0 items-center justify-center rounded-[var(--radius)] border border-border" style={{ color: '#55f52f', width: Math.round(26 * scale), height: Math.round(26 * scale) }}>
+            <TrendingUp style={{ width: Math.round(12 * scale), height: Math.round(12 * scale) }} />
           </div>
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Conversão Geral</p>
-            <p className="mt-1 font-heading text-base font-normal leading-none text-foreground">{funnelPercent(generalConversion)}</p>
-            <p className="mt-0.5 text-[10px] text-muted-foreground">{funnelNumber(stages[4]?.value ?? 0)} de {funnelNumber(stages[0]?.value ?? 0)} visitantes</p>
+            <p className="font-bold uppercase tracking-widest text-muted-foreground" style={{ fontSize: footerFs }}>Conversão Geral</p>
+            <p className="mt-0.5 font-heading font-normal leading-none text-foreground" style={{ fontSize: Math.round(16 * scale) }}>{funnelPercent(generalConversion)}</p>
+            <p className="mt-0.5 text-muted-foreground" style={{ fontSize: footerFs }}>{funnelNumber(stages[4]?.value ?? 0)} de {funnelNumber(stages[0]?.value ?? 0)} visitantes</p>
           </div>
         </div>
-        <div className="flex gap-2 p-3">
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius)] border border-border" style={{ color: '#55f52f' }}>
-            <Lightbulb className="h-3.5 w-3.5" />
+        <div className="flex gap-2 p-2.5">
+          <div className="flex shrink-0 items-center justify-center rounded-[var(--radius)] border border-border" style={{ color: '#55f52f', width: Math.round(26 * scale), height: Math.round(26 * scale) }}>
+            <Lightbulb style={{ width: Math.round(12 * scale), height: Math.round(12 * scale) }} />
           </div>
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Oportunidade</p>
-            <p className="mt-1 text-xs font-bold text-foreground">Melhore a qualificação</p>
-            <p className="mt-0.5 text-[10px] text-muted-foreground">Ative automações e nutrições</p>
+            <p className="font-bold uppercase tracking-widest text-muted-foreground" style={{ fontSize: footerFs }}>Oportunidade</p>
+            <p className="mt-0.5 font-bold text-foreground" style={{ fontSize: footerValueFs }}>Melhore a qualificação</p>
+            <p className="mt-0.5 text-muted-foreground" style={{ fontSize: footerFs }}>Ative automações e nutrições</p>
           </div>
         </div>
       </div>
@@ -3683,7 +3713,6 @@ export default function GeneralDashboard() {
         const parsed = JSON.parse(stored) as { meta?: RglLayout[]; google?: RglLayout[]; general?: RglLayout[]; metaPanels?: RglLayout[]; googlePanels?: RglLayout[]; social?: RglLayout[] };
         const merge = (setter: React.Dispatch<React.SetStateAction<RglLayout[]>>, saved?: RglLayout[]) => {
           if (saved) setter(prev => prev.map(item => {
-            if (item.i === 'general-funnel') return item;
             const s = saved.find(l => l.i === item.i);
             return s ? { ...item, x: s.x, y: s.y, w: s.w, h: s.h } : item;
           }));

@@ -1326,6 +1326,9 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances }: {
   const [expandedNumbers, setExpandedNumbers] = useState<Record<string, NumberDetail[]>>({});
   const [loadingDetail, setLoadingDetail] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [showAllCampaigns, setShowAllCampaigns] = useState(false);
+  const [showAllUpcoming, setShowAllUpcoming] = useState(false);
+  const campaignsTableRef = useRef<HTMLDivElement>(null);
 
   async function load() {
     const [cData, iData] = await Promise.all([
@@ -1421,15 +1424,17 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances }: {
     ].filter(d => d.value > 0);
   }, [campaigns]);
 
-  const upcoming = useMemo(() =>
-    [...campaigns].filter(c => ['pending', 'running'].includes(c.status)).sort((a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime()).slice(0, 3),
+  const allUpcoming = useMemo(() =>
+    [...campaigns].filter(c => ['pending', 'running'].includes(c.status)).sort((a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime()),
     [campaigns]
   );
+  const upcoming = useMemo(() => showAllUpcoming ? allUpcoming : allUpcoming.slice(0, 3), [allUpcoming, showAllUpcoming]);
 
-  const recent = useMemo(() =>
-    [...campaigns].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 8),
+  const allRecent = useMemo(() =>
+    [...campaigns].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
     [campaigns]
   );
+  const recent = useMemo(() => showAllCampaigns ? allRecent : allRecent.slice(0, 8), [allRecent, showAllCampaigns]);
 
   const maxWeekly = useMemo(() => Math.max(...weeklyData.map(d => d.enviados), 1), [weeklyData]);
 
@@ -1520,7 +1525,7 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances }: {
           </div>
 
           {/* Recent campaigns table */}
-          <div className="rounded-[var(--radius)] border border-border bg-card overflow-hidden">
+          <div ref={campaignsTableRef} className="rounded-[var(--radius)] border border-border bg-card overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <div className="flex items-center gap-2">
                 <p className="font-semibold text-sm">Campanhas recentes</p>
@@ -1634,9 +1639,15 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances }: {
                   </table>
                 </div>
                 <div className="px-5 py-3 border-t border-border">
-                  <button type="button" className="text-xs text-primary hover:underline flex items-center gap-1">
-                    Ver todas as campanhas <ChevronRight className="h-3.5 w-3.5" />
-                  </button>
+                  {!showAllCampaigns ? (
+                    <button type="button" onClick={() => setShowAllCampaigns(true)} className="text-xs text-primary hover:underline flex items-center gap-1">
+                      Ver todas as campanhas ({allRecent.length}) <ChevronRight className="h-3.5 w-3.5" />
+                    </button>
+                  ) : (
+                    <button type="button" onClick={() => setShowAllCampaigns(false)} className="text-xs text-muted-foreground hover:underline flex items-center gap-1">
+                      Mostrar menos <ChevronRight className="h-3.5 w-3.5 rotate-90" />
+                    </button>
+                  )}
                 </div>
               </>
             )}
@@ -1684,7 +1695,7 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances }: {
               </div>
             )}
             <div className="mt-4 pt-3 border-t border-border">
-              <button type="button" className="text-xs text-primary hover:underline flex items-center gap-1">
+              <button type="button" onClick={() => { setShowAllCampaigns(true); campaignsTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }} className="text-xs text-primary hover:underline flex items-center gap-1">
                 Ver todas as campanhas <ChevronRight className="h-3.5 w-3.5" />
               </button>
             </div>
@@ -1719,9 +1730,15 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances }: {
               </div>
             )}
             <div className="mt-4 pt-3 border-t border-border">
-              <button type="button" className="text-xs text-primary hover:underline flex items-center gap-1">
-                Ver agenda completa <ChevronRight className="h-3.5 w-3.5" />
-              </button>
+              {!showAllUpcoming ? (
+                <button type="button" onClick={() => setShowAllUpcoming(true)} className="text-xs text-primary hover:underline flex items-center gap-1">
+                  Ver agenda completa ({allUpcoming.length}) <ChevronRight className="h-3.5 w-3.5" />
+                </button>
+              ) : (
+                <button type="button" onClick={() => setShowAllUpcoming(false)} className="text-xs text-muted-foreground hover:underline flex items-center gap-1">
+                  Mostrar menos <ChevronRight className="h-3.5 w-3.5 rotate-90" />
+                </button>
+              )}
             </div>
           </div>
 
