@@ -36,7 +36,7 @@ function sleep(ms: number) {
   return new Promise<void>(r => setTimeout(r, ms));
 }
 
-export async function POST(req: NextRequest) {
+async function runWorker(req: NextRequest) {
   const secret = process.env.CRON_SECRET;
   if (secret) {
     const authHeader = req.headers.get('authorization');
@@ -196,3 +196,7 @@ export async function POST(req: NextRequest) {
     await pool.end();
   }
 }
+
+// Vercel Cron sends GET; external cron-job.org can POST with ?secret=
+export async function GET(req: NextRequest) { return runWorker(req); }
+export async function POST(req: NextRequest) { return runWorker(req); }
