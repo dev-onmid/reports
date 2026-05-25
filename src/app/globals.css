@@ -2,7 +2,6 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "react-grid-layout/css/styles.css";
-@import "react-grid-layout/css/placeholder.css";
 
 @custom-variant dark (&:is(.dark *));
 
