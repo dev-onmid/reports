@@ -610,7 +610,7 @@ export default function CrmPage() {
           {clientId ? <Users className="h-5 w-5 text-violet-400" /> : <Sparkles className="h-5 w-5 text-violet-400" />}
         </div>
         <div>
-          <h1 className="font-heading font-normal text-4xl uppercase leading-none tracking-wide text-foreground">
+          <h1 className="font-heading font-normal text-xl uppercase leading-none tracking-wide text-foreground">
             {clientId ? 'CRM' : 'Escolha um cliente'}
           </h1>
           <p className="text-xs text-muted-foreground">
@@ -630,7 +630,7 @@ export default function CrmPage() {
                 value={clientSearch}
                 onChange={e => setClientSearch(e.target.value)}
                 placeholder="Buscar cliente ou segmento..."
-                className="h-12 w-full rounded-xl border border-border bg-card pl-11 pr-4 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-primary"
+                className="h-12 w-full rounded-[var(--radius)] border border-border bg-card pl-11 pr-4 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-primary"
               />
             </div>
             <div className="relative">
@@ -639,7 +639,7 @@ export default function CrmPage() {
               <select
                 value={segmentChoice}
                 onChange={e => setSegmentChoice(e.target.value)}
-                className="h-12 min-w-56 appearance-none rounded-xl border border-border bg-card pl-10 pr-10 text-sm font-semibold outline-none transition-colors focus:border-primary"
+                className="h-12 min-w-56 appearance-none rounded-[var(--radius)] border border-border bg-card pl-10 pr-10 text-sm font-semibold outline-none transition-colors focus:border-primary"
               >
                 <option value="">Todos os segmentos</option>
                 {clientSegments.map(segment => <option key={segment} value={segment}>{segment}</option>)}
@@ -648,12 +648,12 @@ export default function CrmPage() {
             <button
               type="button"
               onClick={() => setClientSort(value => value === 'az' ? 'za' : 'az')}
-              className="flex h-12 items-center gap-2 rounded-xl border border-border bg-card px-4 text-sm font-semibold text-muted-foreground transition-colors hover:text-foreground"
+              className="flex h-12 items-center gap-2 rounded-[var(--radius)] border border-border bg-card px-4 text-sm font-semibold text-muted-foreground transition-colors hover:text-foreground"
             >
               <ArrowUpDown className="h-4 w-4" />
               Ordenar: {clientSort === 'az' ? 'A-Z' : 'Z-A'}
             </button>
-            <div className="flex h-12 overflow-hidden rounded-xl border border-border bg-card p-1">
+            <div className="flex h-12 overflow-hidden rounded-[var(--radius)] border border-border bg-card p-1">
               <button
                 type="button"
                 onClick={() => setClientView('grid')}
@@ -699,7 +699,7 @@ export default function CrmPage() {
               Todos os clientes
             </h2>
             {filteredClients.length === 0 ? (
-              <div className="rounded-xl border border-border bg-card p-12 text-center text-sm text-muted-foreground">
+              <div className="rounded-[var(--radius)] border border-border bg-card p-12 text-center text-sm text-muted-foreground">
                 Nenhum cliente encontrado com os filtros atuais.
               </div>
             ) : clientView === 'grid' ? (
@@ -709,7 +709,7 @@ export default function CrmPage() {
                 ))}
               </div>
             ) : (
-              <div className="overflow-hidden rounded-xl border border-border bg-card">
+              <div className="overflow-hidden rounded-[var(--radius)] border border-border bg-card">
                 {filteredClients.map(client => (
                   <button
                     key={client.id}
@@ -781,7 +781,7 @@ export default function CrmPage() {
               </div>
               <div className="min-w-0">
                 <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
-                <p className="font-heading font-normal text-3xl leading-none">{fmt === 'c' ? formatCurrencyBRL(value) : value.toLocaleString('pt-BR')}</p>
+                <p className="font-heading font-normal text-xl leading-none">{fmt === 'c' ? formatCurrencyBRL(value) : value.toLocaleString('pt-BR')}</p>
                 <p className="text-[10px] text-muted-foreground">{sub}</p>
               </div>
             </div>
@@ -790,12 +790,12 @@ export default function CrmPage() {
       )}
 
       {clientId && loading && (
-        <div className="rounded-xl border border-border bg-card p-12 text-center text-sm text-muted-foreground">Carregando...</div>
+        <div className="rounded-[var(--radius)] border border-border bg-card p-12 text-center text-sm text-muted-foreground">Carregando...</div>
       )}
 
       {/* ── TABLE ───────────────────────────────────────────────────── */}
       {clientId && !loading && (
-        <div className="flex flex-col flex-1 min-h-0 rounded-xl border border-border bg-card overflow-hidden">
+        <div className="flex flex-col flex-1 min-h-0 rounded-[var(--radius)] border border-border bg-card overflow-hidden">
 
           {/* Table toolbar */}
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-border shrink-0">

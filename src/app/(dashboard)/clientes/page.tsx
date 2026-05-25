@@ -299,7 +299,7 @@ export default function ClientesPage() {
       {/* ── HEADER ── */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="font-heading font-normal text-4xl uppercase leading-none tracking-wide text-foreground">Meus Clientes</h1>
+          <h1 className="font-heading font-normal text-xl uppercase leading-none tracking-wide text-foreground">Meus Clientes</h1>
           <div className="mt-1 h-[3px] w-14 rounded-full bg-violet-500" />
           <p className="mt-2 text-sm text-muted-foreground">
             Gerencie a base de clientes e acesse os dashboards individuais.
@@ -852,7 +852,7 @@ export default function ClientesPage() {
       {/* ── BULK ACTION BAR ── */}
       {selectedIds.size > 0 && (
         <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 w-max max-w-[calc(100vw-2rem)]">
-          <div className="flex items-center gap-2 rounded-2xl border border-border bg-card/95 px-4 py-3 shadow-2xl backdrop-blur-md ring-1 ring-white/5">
+          <div className="flex items-center gap-2 rounded-[var(--radius)] border border-border bg-card/95 px-4 py-3 shadow-2xl backdrop-blur-md ring-1 ring-white/5">
             {/* Count + select all */}
             <div className="flex items-center gap-2 border-r border-border pr-3">
               <input

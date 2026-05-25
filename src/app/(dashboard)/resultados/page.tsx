@@ -192,7 +192,7 @@ function ResultKpiCard({
 }) {
   return (
     <div
-      className="relative min-h-[170px] overflow-hidden rounded-2xl border border-border bg-card px-7 py-7"
+      className="relative min-h-[170px] overflow-hidden rounded-[var(--radius)] border border-border bg-card px-7 py-7"
       style={{
         background: `radial-gradient(circle at 11% 36%, ${color}18, transparent 31%), linear-gradient(145deg, rgba(17,22,35,0.92), rgba(8,11,18,0.97))`,
         boxShadow: `0 0 30px ${color}0d, inset 0 0 0 1px rgba(255,255,255,0.025)`,
@@ -215,7 +215,7 @@ function ResultKpiCard({
             <Icon className="h-3.5 w-3.5" style={{ color }} />
             <p className="text-sm font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
           </div>
-          <p className="mt-3 font-heading font-normal text-3xl leading-none tabular-nums" style={{ color }}>
+          <p className="mt-3 font-heading font-normal text-xl leading-none tabular-nums" style={{ color }}>
             {value}
           </p>
         </div>
@@ -346,14 +346,14 @@ export default function ResultadosPage() {
       {/* ── Header ── */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="font-heading font-normal text-4xl uppercase leading-none tracking-wide text-foreground">Radar Geral</h1>
+          <h1 className="font-heading font-normal text-xl uppercase leading-none tracking-wide text-foreground">Radar Geral</h1>
           <p className="mt-4 text-lg font-medium text-muted-foreground">
             Métricas reais das contas vinculadas — leads e CPL do Meta Ads, CAC do Google Ads.
           </p>
         </div>
         <div
           className={cn(
-            'mt-2 flex h-11 items-center gap-3 rounded-xl border border-border bg-card px-5 text-sm font-bold text-muted-foreground shadow-[0_0_22px_rgba(15,23,42,0.18)]',
+            'mt-2 flex h-11 items-center gap-3 rounded-[var(--radius)] border border-border bg-card px-5 text-sm font-bold text-muted-foreground shadow-[0_0_22px_rgba(15,23,42,0.18)]',
             !loadingMetrics && 'opacity-70',
           )}
         >
@@ -397,7 +397,7 @@ export default function ResultadosPage() {
       </div>
 
       {/* ── Table ── */}
-      <div className="bg-card border border-border rounded-xl overflow-hidden">
+      <div className="bg-card border border-border rounded-[var(--radius)] overflow-hidden">
         <div className="overflow-x-auto">
           <table className="min-w-[1100px] w-full">
             <thead>

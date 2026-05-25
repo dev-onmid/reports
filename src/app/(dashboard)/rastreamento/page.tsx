@@ -239,7 +239,7 @@ export default function RastreamentoPage() {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-4 py-3">
+      <div className="flex flex-wrap items-center gap-3 rounded-[var(--radius)] border border-border bg-card px-4 py-3">
         <Filter className="h-4 w-4 text-muted-foreground shrink-0" />
 
         {/* Client filter */}
@@ -297,7 +297,7 @@ export default function RastreamentoPage() {
               <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
               <Icon className="h-4 w-4" style={{ color }} />
             </div>
-            <p className="mt-2 text-2xl font-bold tabular-nums" style={{ color }}>
+            <p className="mt-2 text-base font-bold tabular-nums" style={{ color }}>
               {analyticsLoading ? <span className="inline-block h-7 w-16 animate-pulse rounded bg-muted" /> : value}
             </p>
           </div>
@@ -307,7 +307,7 @@ export default function RastreamentoPage() {
       {/* Charts row */}
       <div className="grid gap-4 xl:grid-cols-[1fr_340px]">
         {/* Clicks over time */}
-        <div className="rounded-xl border border-border bg-card p-5">
+        <div className="rounded-[var(--radius)] border border-border bg-card p-5">
           <p className="mb-4 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Cliques por dia</p>
           {analyticsLoading ? (
             <div className="h-40 animate-pulse rounded-lg bg-muted/30" />
@@ -337,7 +337,7 @@ export default function RastreamentoPage() {
         </div>
 
         {/* Top sources */}
-        <div className="rounded-xl border border-border bg-card p-5">
+        <div className="rounded-[var(--radius)] border border-border bg-card p-5">
           <p className="mb-4 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Top origens (utm_source)</p>
           {analyticsLoading ? (
             <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="h-6 animate-pulse rounded bg-muted/30" />)}</div>
@@ -364,7 +364,7 @@ export default function RastreamentoPage() {
       {/* Second charts row */}
       <div className="grid gap-4 sm:grid-cols-2">
         {/* Top links */}
-        <div className="rounded-xl border border-border bg-card p-5">
+        <div className="rounded-[var(--radius)] border border-border bg-card p-5">
           <p className="mb-4 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Top links por cliques</p>
           {analyticsLoading ? (
             <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="h-7 animate-pulse rounded bg-muted/30" />)}</div>
@@ -395,7 +395,7 @@ export default function RastreamentoPage() {
         </div>
 
         {/* Top campaigns */}
-        <div className="rounded-xl border border-border bg-card p-5">
+        <div className="rounded-[var(--radius)] border border-border bg-card p-5">
           <p className="mb-4 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Top campanhas (utm_campaign)</p>
           {analyticsLoading ? (
             <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="h-7 animate-pulse rounded bg-muted/30" />)}</div>
@@ -429,7 +429,7 @@ export default function RastreamentoPage() {
       {/* Form Modal */}
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="w-full max-w-lg rounded-2xl border border-border bg-card p-6 shadow-2xl">
+          <div className="w-full max-w-lg rounded-[var(--radius)] border border-border bg-card p-6 shadow-2xl">
             <div className="mb-5 flex items-center justify-between">
               <h2 className="font-bold text-lg">{editingId ? 'Editar Link' : 'Novo Link de Rastreamento'}</h2>
               <button onClick={() => setShowForm(false)} className="text-muted-foreground hover:text-foreground">
@@ -513,7 +513,7 @@ export default function RastreamentoPage() {
               const isExpanded = expandedId === link.id;
               const rows = breakdown[link.id];
               return (
-                <div key={link.id} className="rounded-xl border border-border bg-card overflow-hidden">
+                <div key={link.id} className="rounded-[var(--radius)] border border-border bg-card overflow-hidden">
                   <div className="flex flex-wrap items-center gap-3 p-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">

@@ -68,7 +68,7 @@ export default function VaultPage() {
             <ShieldCheck className="w-6 h-6 text-primary" />
           </span>
           <div>
-            <h1 className="font-heading font-normal text-3xl uppercase leading-none tracking-wide text-foreground">
+            <h1 className="font-heading font-normal text-xl uppercase leading-none tracking-wide text-foreground">
               Cofre de Credenciais
             </h1>
             <p className="text-sm text-muted-foreground mt-1">

@@ -773,7 +773,7 @@ export default function AgentePage() {
             <span className="absolute inset-[-8px] rounded-full border border-primary/15" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold tracking-[-0.03em] text-white">Luna</h1>
+            <h1 className="text-base font-bold tracking-tight text-white">Luna</h1>
             <p className="mt-1 text-sm text-slate-400">
               Assistente de tráfego pago <span className="mx-1 text-primary">•</span>
               <span className="font-semibold text-primary">Online</span>
@@ -808,7 +808,7 @@ export default function AgentePage() {
                   <Bot className="relative h-14 w-14 text-primary" />
                   <span className="absolute inset-[-18px] rounded-full border border-white/8" />
                 </div>
-                <h2 className="text-4xl font-bold tracking-[-0.04em] text-white">
+                <h2 className="text-xl font-bold tracking-tight text-white">
                   Olá! Sou a <span className="text-primary">Luna</span>
                 </h2>
                 <p className="mt-4 text-xl text-slate-300">Seu copiloto de tráfego pago e gestão.</p>

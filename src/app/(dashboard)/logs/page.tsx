@@ -176,7 +176,7 @@ export default function LogsPage() {
             <Activity className="w-6 h-6 text-emerald-400" />
           </div>
           <div>
-            <h1 className="font-heading font-normal text-4xl uppercase leading-none tracking-wide text-foreground">Logs de Atividade</h1>
+            <h1 className="font-heading font-normal text-xl uppercase leading-none tracking-wide text-foreground">Logs de Atividade</h1>
             <p className="text-muted-foreground text-sm mt-1 max-w-xl">
               Histórico completo de todas as ações realizadas no sistema. Acompanhe, filtre e audite cada evento com facilidade.
             </p>
@@ -239,7 +239,7 @@ export default function LogsPage() {
       </div>
 
       {/* TABLE */}
-      <div className="bg-card border border-border rounded-xl overflow-hidden">
+      <div className="bg-card border border-border rounded-[var(--radius)] overflow-hidden">
         {filtered.length === 0 ? (
           <div className="py-20 text-center">
             <ClipboardList className="w-8 h-8 text-muted-foreground/40 mx-auto mb-3" />

@@ -364,7 +364,7 @@ function ClientInvestmentSummary({
       <button
         type="button"
         onClick={() => setExpanded((value) => !value)}
-        className="flex w-full items-center justify-between gap-4 rounded-xl border border-border bg-card px-4 py-3 text-left transition-colors hover:border-primary/30"
+        className="flex w-full items-center justify-between gap-4 rounded-[var(--radius)] border border-border bg-card px-4 py-3 text-left transition-colors hover:border-primary/30"
       >
         <div>
           <h2 className="font-bold text-sm uppercase tracking-wider">Compilado por Cliente</h2>
@@ -385,7 +385,7 @@ function ClientInvestmentSummary({
       </button>
 
       {expanded && (
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
+      <div className="rounded-[var(--radius)] border border-border bg-card overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-muted text-muted-foreground text-[10px] uppercase tracking-widest">
             <tr>
@@ -770,7 +770,7 @@ function PaymentMetricCard({
         </span>
         <div className="min-w-0">
           <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color }}>{label}</p>
-          <p className="mt-2 font-heading font-normal text-3xl leading-none text-foreground tabular-nums">
+          <p className="mt-2 font-heading font-normal text-xl leading-none text-foreground tabular-nums">
             {formatCurrencyBRL(value)}
           </p>
           <div className="mt-4 text-[11px] font-bold leading-none">{sub}</div>
@@ -816,7 +816,7 @@ function DayMetricCard({
         </span>
         <div>
           <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color }}>{label}</p>
-          <p className="mt-3 font-heading font-normal text-3xl leading-none text-foreground tabular-nums">
+          <p className="mt-3 font-heading font-normal text-xl leading-none text-foreground tabular-nums">
             {formatCurrencyBRL(value)}
           </p>
           <p className="mt-5 text-xs font-bold" style={{ color }}>{count}</p>
@@ -1159,7 +1159,7 @@ function WeekChannelSummaryCard({
         {isMeta ? <MetaAdsMark className="h-10 w-10 shrink-0" /> : <GoogleAdsMark className="h-10 w-10 shrink-0" />}
         <div>
           <p className="text-sm font-medium text-muted-foreground">{channel}</p>
-          <p className="mt-2 font-heading font-normal text-3xl leading-none text-foreground tabular-nums">{formatCurrencyBRL(value)}</p>
+          <p className="mt-2 font-heading font-normal text-xl leading-none text-foreground tabular-nums">{formatCurrencyBRL(value)}</p>
           <p className="mt-2 text-xs font-bold text-muted-foreground">{pct.toFixed(1)}% do total</p>
         </div>
       </div>
@@ -1414,11 +1414,11 @@ export default function PagamentosPage() {
     <div className="space-y-5 pb-10">
       <div className="flex flex-wrap items-start justify-between gap-4 pt-2">
         <div>
-          <h1 className="font-heading font-normal text-4xl uppercase leading-none tracking-wide text-foreground">Acompanhamento de Pagamentos</h1>
+          <h1 className="font-heading font-normal text-xl uppercase leading-none tracking-wide text-foreground">Acompanhamento de Pagamentos</h1>
           <p className="mt-1 text-sm text-muted-foreground">Gerencie investimentos, recorrências e status dos pagamentos dos clientes.</p>
         </div>
         <div className="flex items-center gap-4">
-          <div className="flex h-11 items-center gap-1 rounded-xl border border-border bg-card/70 p-1">
+          <div className="flex h-11 items-center gap-1 rounded-[var(--radius)] border border-border bg-card/70 p-1">
             {([
               { key: 'dia' as ViewMode, label: 'Dia' },
               { key: 'semana' as ViewMode, label: 'Semana' },
@@ -1439,7 +1439,7 @@ export default function PagamentosPage() {
               </button>
             ))}
           </div>
-          <div className="flex h-11 items-center gap-3 rounded-xl border border-border bg-card/70 px-4">
+          <div className="flex h-11 items-center gap-3 rounded-[var(--radius)] border border-border bg-card/70 px-4">
             <CalendarDays className="h-4 w-4 text-muted-foreground" />
             <input
               type="date"
@@ -1701,7 +1701,7 @@ export default function PagamentosPage() {
       </div>}
 
       {viewMode === 'mes' && (
-        <div className="overflow-hidden rounded-xl border border-border bg-card shadow-[0_0_38px_rgba(15,23,42,0.28)]">
+        <div className="overflow-hidden rounded-[var(--radius)] border border-border bg-card shadow-[0_0_38px_rgba(15,23,42,0.28)]">
           <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border/70 px-5 py-5">
             <div className="flex items-start gap-3">
               <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-primary/35 bg-primary/10 text-primary shadow-[0_0_16px_rgba(85,245,47,0.2)]">
@@ -1855,7 +1855,7 @@ export default function PagamentosPage() {
 
         return (
           <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_430px] 2xl:grid-cols-[minmax(0,1fr)_460px]">
-            <div className="overflow-hidden rounded-xl border border-border bg-card shadow-[0_0_34px_rgba(15,23,42,0.28)]">
+            <div className="overflow-hidden rounded-[var(--radius)] border border-border bg-card shadow-[0_0_34px_rgba(15,23,42,0.28)]">
               <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border/70 px-5 py-5">
                 <div className="flex items-center gap-3">
                   <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-background text-foreground">
@@ -1905,7 +1905,7 @@ export default function PagamentosPage() {
               )}
             </div>
 
-            <div className="rounded-xl border border-border bg-card p-5 shadow-[0_0_34px_rgba(15,23,42,0.28)]">
+            <div className="rounded-[var(--radius)] border border-border bg-card p-5 shadow-[0_0_34px_rgba(15,23,42,0.28)]">
               <div className="mb-4 flex items-center gap-3">
                 <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-500/15 text-violet-300 shadow-[0_0_18px_rgba(124,58,237,0.2)]">
                   <BarChart3 className="h-4 w-4" />
@@ -1913,15 +1913,15 @@ export default function PagamentosPage() {
                 <h3 className="font-heading font-normal text-lg">Resumo do dia</h3>
               </div>
 
-              <div className="rounded-xl border border-border bg-background/40 p-5">
+              <div className="rounded-[var(--radius)] border border-border bg-background/40 p-5">
                 <p className="text-sm text-muted-foreground">Total de pagamentos</p>
                 <div className="mt-3 flex items-end justify-between gap-4">
-                  <p className="font-heading font-normal text-3xl leading-none tabular-nums">{selectedScopePayments.length}</p>
+                  <p className="font-heading font-normal text-xl leading-none tabular-nums">{selectedScopePayments.length}</p>
                   <p className="text-lg font-bold text-primary tabular-nums">{formatCurrencyBRL(totalDay)}</p>
                 </div>
               </div>
 
-              <div className="mt-4 rounded-xl border border-border bg-background/40 p-5">
+              <div className="mt-4 rounded-[var(--radius)] border border-border bg-background/40 p-5">
                 <p className="mb-4 text-sm font-bold text-foreground">Por canal</p>
                 {channelData.length > 0 ? (
                   <div className="grid grid-cols-[1fr_132px] items-center gap-4">
@@ -1962,7 +1962,7 @@ export default function PagamentosPage() {
                 )}
               </div>
 
-              <div className="mt-4 rounded-xl border border-border bg-background/40 p-5">
+              <div className="mt-4 rounded-[var(--radius)] border border-border bg-background/40 p-5">
                 <p className="mb-4 text-sm font-bold text-foreground">Status dos pagamentos</p>
                 <div className="space-y-3">
                   {PAYMENT_STATUS_OPTIONS.map((status) => {
@@ -1989,7 +1989,7 @@ export default function PagamentosPage() {
                 </div>
               </div>
 
-              <Link href="/relatorios" className="mt-4 flex h-11 items-center justify-between rounded-xl border border-border bg-background/40 px-4 text-sm font-medium text-foreground transition-colors hover:border-primary/40">
+              <Link href="/relatorios" className="mt-4 flex h-11 items-center justify-between rounded-[var(--radius)] border border-border bg-background/40 px-4 text-sm font-medium text-foreground transition-colors hover:border-primary/40">
                 Ver relatórios completos
                 <ChevronRight className="h-4 w-4 text-muted-foreground" />
               </Link>
@@ -2034,7 +2034,7 @@ export default function PagamentosPage() {
         });
         return (
           <div className="space-y-4">
-            <div className="overflow-hidden rounded-xl border border-border bg-card shadow-[0_0_34px_rgba(15,23,42,0.28)]">
+            <div className="overflow-hidden rounded-[var(--radius)] border border-border bg-card shadow-[0_0_34px_rgba(15,23,42,0.28)]">
               <div className="grid grid-cols-5 border-b border-border/70">
                 {dailyData.map((day, i) => (
                   <div key={day.date} className="border-r border-border/70 px-4 py-5 text-center last:border-r-0">
@@ -2073,7 +2073,7 @@ export default function PagamentosPage() {
               </div>
             </div>
 
-            <div className="grid overflow-hidden rounded-xl border border-border bg-card shadow-[0_0_34px_rgba(15,23,42,0.28)] xl:grid-cols-[1.15fr_1.05fr_0.55fr]">
+            <div className="grid overflow-hidden rounded-[var(--radius)] border border-border bg-card shadow-[0_0_34px_rgba(15,23,42,0.28)] xl:grid-cols-[1.15fr_1.05fr_0.55fr]">
               <div className="border-r border-border/70 p-5">
                 <h3 className="mb-4 text-sm font-bold uppercase tracking-wider">Resumo da semana por canal</h3>
                 <div className="grid gap-4 sm:grid-cols-2">

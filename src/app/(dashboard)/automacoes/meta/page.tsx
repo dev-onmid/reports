@@ -422,7 +422,7 @@ export default function MetaAutomacoesPage() {
               <Zap className="h-7 w-7 fill-current" />
             </div>
             <div>
-              <p className="text-2xl font-semibold text-white">{activeAutomations.length}</p>
+              <p className="text-base font-semibold text-white">{activeAutomations.length}</p>
               <p className="text-sm text-slate-400">{activeAutomations.length === 1 ? 'automação ativa' : 'automações ativas'}</p>
             </div>
           </div>
@@ -432,7 +432,7 @@ export default function MetaAutomacoesPage() {
               <Pause className="h-6 w-6 fill-current" />
             </div>
             <div>
-              <p className="text-2xl font-semibold text-white">{pausedAutomations.length}</p>
+              <p className="text-base font-semibold text-white">{pausedAutomations.length}</p>
               <p className="text-sm text-slate-400">pausadas</p>
             </div>
           </div>
@@ -689,7 +689,7 @@ export default function MetaAutomacoesPage() {
                       </div>
                       <div className="pt-2">
                         <div className="flex flex-wrap items-center gap-2">
-                          <h2 className="text-2xl font-semibold tracking-normal text-white">{displayRule.account_name ?? displayRule.account_id}</h2>
+                          <h2 className="text-base font-semibold tracking-normal text-white">{displayRule.account_name ?? displayRule.account_id}</h2>
                           <span className={cn('rounded-full border px-2.5 py-1 text-xs font-bold uppercase', displayRule.enabled ? 'border-[#40ff2a]/30 bg-[#40ff2a]/10 text-[#40ff2a]' : 'border-slate-500/30 bg-slate-500/10 text-slate-300')}>
                             {displayRule.enabled ? 'Ativa' : 'Pausada'}
                           </span>
@@ -749,7 +749,7 @@ export default function MetaAutomacoesPage() {
                         <span className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-800 text-slate-300"><MessageCircle className="h-6 w-6" /></span>
                         <div>
                           <p className="text-sm text-slate-400">Respostas hoje</p>
-                          <p className="text-2xl font-semibold text-white">{primaryLogCount}</p>
+                          <p className="text-base font-semibold text-white">{primaryLogCount}</p>
                         </div>
                       </div>
                       <div className="flex items-center gap-4">
@@ -895,7 +895,7 @@ export default function MetaAutomacoesPage() {
                   </span>
                   <div>
                     <p className="text-sm text-slate-400">{card.label}</p>
-                    <p className="mt-1 text-3xl font-semibold text-white">{card.value}</p>
+                    <p className="mt-1 text-xl font-semibold text-white">{card.value}</p>
                     <p className="mt-1 text-sm text-slate-400">{card.caption}</p>
                   </div>
                 </div>

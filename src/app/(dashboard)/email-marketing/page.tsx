@@ -98,7 +98,7 @@ function ContasTab({ accounts, onRefresh }: { accounts: GmailAccount[]; onRefres
       ) : (
         <div className="space-y-2">
           {accounts.map((acc) => (
-            <div key={acc.id} className="flex items-center gap-4 rounded-xl border border-border bg-card/80 p-4">
+            <div key={acc.id} className="flex items-center gap-4 rounded-[var(--radius)] border border-border bg-card/80 p-4">
               {acc.picture
                 ? <img src={acc.picture} alt="" className="h-10 w-10 rounded-full border border-border" />
                 : <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/20 text-primary font-bold">{acc.email[0].toUpperCase()}</div>
@@ -197,7 +197,7 @@ function NovaCampanhaTab({ accounts, onCreated }: { accounts: GmailAccount[]; on
 
   return (
     <div className="space-y-5">
-      <div className="rounded-xl border border-border bg-card/80 p-5">
+      <div className="rounded-[var(--radius)] border border-border bg-card/80 p-5">
         <h2 className="mb-4 text-sm font-bold uppercase tracking-wider">Configuração da Campanha</h2>
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="space-y-2">
@@ -222,7 +222,7 @@ function NovaCampanhaTab({ accounts, onCreated }: { accounts: GmailAccount[]; on
         </div>
       </div>
 
-      <div className="rounded-xl border border-border bg-card/80 p-5">
+      <div className="rounded-[var(--radius)] border border-border bg-card/80 p-5">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-sm font-bold uppercase tracking-wider">Corpo do E-mail</h2>
           <button type="button" onClick={generateVariation} disabled={aiLoading || !form.bodyHtml}
@@ -238,7 +238,7 @@ function NovaCampanhaTab({ accounts, onCreated }: { accounts: GmailAccount[]; on
           placeholder="<p>Olá {nome},</p><p>Seu conteúdo aqui...</p>" />
       </div>
 
-      <div className="rounded-xl border border-border bg-card/80 p-5">
+      <div className="rounded-[var(--radius)] border border-border bg-card/80 p-5">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-sm font-bold uppercase tracking-wider">Destinatários</h2>
           <span className={cn('text-xs font-bold', recipients.length > 0 ? 'text-emerald-400' : 'text-muted-foreground')}>
@@ -252,7 +252,7 @@ function NovaCampanhaTab({ accounts, onCreated }: { accounts: GmailAccount[]; on
           placeholder={"joao@email.com\nMaria Silva <maria@email.com>\ncarlos@email.com"} />
       </div>
 
-      <div className="rounded-xl border border-border bg-card/80 p-5">
+      <div className="rounded-[var(--radius)] border border-border bg-card/80 p-5">
         <h2 className="mb-4 text-sm font-bold uppercase tracking-wider">Intervalo de Envio</h2>
         <div className="grid gap-4 sm:grid-cols-3">
           <label className="space-y-2">
@@ -431,7 +431,7 @@ function FluxosTab({ accounts, onOpenBuilder }: {
       ) : (
         <div className="space-y-2">
           {flows.map((flow) => (
-            <div key={flow.id} className="flex items-center gap-4 rounded-xl border border-border bg-card/80 p-4">
+            <div key={flow.id} className="flex items-center gap-4 rounded-[var(--radius)] border border-border bg-card/80 p-4">
               <div className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-full',
                 flow.flow_mode === 'graph' ? 'bg-primary/10 text-primary' : 'bg-violet-500/15 text-violet-400')}>
                 <GitBranch className="h-5 w-5" />
@@ -514,13 +514,13 @@ function DashboardTab() {
         ].map((k) => (
           <div key={k.label} className="rounded-xl border border-white/5 bg-card p-5">
             <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">{k.label}</p>
-            <p className="mt-3 font-heading text-3xl leading-none text-foreground">{k.value.toLocaleString('pt-BR')}</p>
+            <p className="mt-3 font-heading text-xl leading-none text-foreground">{k.value.toLocaleString('pt-BR')}</p>
           </div>
         ))}
       </div>
 
       {/* Campaigns table */}
-      <div className="rounded-xl border border-border bg-card/80 overflow-hidden">
+      <div className="rounded-[var(--radius)] border border-border bg-card/80 overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <h2 className="text-sm font-bold uppercase tracking-wider">Campanhas</h2>
           <button type="button" onClick={load} className="text-muted-foreground hover:text-foreground"><RefreshCw className="h-4 w-4" /></button>
@@ -683,7 +683,7 @@ export default function EmailMarketingPage() {
               <Mail className="h-5 w-5 text-white" />
             </div>
             <div>
-              <h1 className="font-heading font-normal text-4xl uppercase leading-none tracking-wide text-foreground">E-mail Marketing</h1>
+              <h1 className="font-heading font-normal text-xl uppercase leading-none tracking-wide text-foreground">E-mail Marketing</h1>
               <p className="mt-0.5 text-muted-foreground text-sm">Campanhas e fluxos automáticos via Gmail.</p>
             </div>
           </div>

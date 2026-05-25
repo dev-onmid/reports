@@ -438,7 +438,7 @@ function FunnelTab({ clientId, clientName, goalConfig }: { clientId: string; cli
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="bg-card border border-border rounded-xl p-4">
           <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">META ({goalConfig.label})</p>
-          <p className="font-heading font-normal text-3xl leading-none text-foreground">{goalValue}</p>
+          <p className="font-heading font-normal text-xl leading-none text-foreground">{goalValue}</p>
           <p className="text-[11px] text-muted-foreground mt-1">Configurada na meta principal do cliente</p>
         </div>
         {[
@@ -452,7 +452,7 @@ function FunnelTab({ clientId, clientName, goalConfig }: { clientId: string; cli
               <CurrencyInput
                 value={value}
                 onChange={set}
-                className={cn('font-heading font-normal text-3xl leading-none flex-1 min-w-0', color, inputCls)}
+                className={cn('font-heading font-normal text-xl leading-none flex-1 min-w-0', color, inputCls)}
               />
             </div>
             <p className="text-[11px] text-muted-foreground mt-1">{desc}</p>
@@ -569,21 +569,21 @@ function FunnelTab({ clientId, clientName, goalConfig }: { clientId: string; cli
         <div className="flex flex-col gap-4">
           <div className="bg-primary/10 border border-primary/30 rounded-xl p-5">
             <p className="text-[9px] font-bold uppercase tracking-widest text-primary mb-2">INV. PLANEJADO</p>
-            <p className="text-4xl font-heading font-normal text-primary">{fmtBRL(invPla)}</p>
+            <p className="text-xl font-heading font-normal text-primary">{fmtBRL(invPla)}</p>
             <p className="text-xs text-muted-foreground mt-2">{topVol} leads × {fmtBRL(cplPlanejado)} CPL planejado</p>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-card border border-border rounded-xl p-5">
               <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">{lastStageLabel.toUpperCase()} NECESSÁRIAS</p>
-              <p className="text-3xl font-heading font-normal">{botVol}</p>
+              <p className="text-xl font-heading font-normal">{botVol}</p>
               <p className="text-xs text-muted-foreground mt-2">
                 {goalConfig.type === 'revenue' ? `${goalValue} ÷ ${fmtBRL(tkm)}` : `Meta principal: ${goalValue}`}
               </p>
             </div>
             <div className="bg-card border border-border rounded-xl p-5">
               <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">CAC</p>
-              <p className="text-3xl font-heading font-normal">{fmtBRL(cac)}</p>
+              <p className="text-xl font-heading font-normal">{fmtBRL(cac)}</p>
               <p className="text-xs text-muted-foreground mt-2">Custo por aquisição</p>
             </div>
           </div>
@@ -592,7 +592,7 @@ function FunnelTab({ clientId, clientName, goalConfig }: { clientId: string; cli
             <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">
               {goalConfig.type === 'revenue' ? 'ROI ESPERADO' : `CUSTO POR ${goalConfig.label.toUpperCase()}`}
             </p>
-            <p className={cn('text-4xl font-heading font-normal', goalConfig.type === 'revenue' ? (roi >= 3 ? 'text-primary' : roi >= 1.5 ? 'text-yellow-400' : 'text-red-400') : 'text-primary')}>
+            <p className={cn('text-xl font-heading font-normal', goalConfig.type === 'revenue' ? (roi >= 3 ? 'text-primary' : roi >= 1.5 ? 'text-yellow-400' : 'text-red-400') : 'text-primary')}>
               {goalConfig.type === 'revenue' ? `${roi.toFixed(1)}x` : fmtBRL(goalConfig.target > 0 ? invPla / goalConfig.target : 0)}
             </p>
             <p className="text-xs text-muted-foreground mt-2">
@@ -695,7 +695,7 @@ function InvestmentPaymentsTab({ clientId, clientName }: { clientId: string; cli
               <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
               <Icon className={cn('w-4 h-4 shrink-0', tone)} />
             </div>
-            <p className={cn('font-heading font-normal text-3xl leading-none mt-3', tone)}>{fmtBRL(value)}</p>
+            <p className={cn('font-heading font-normal text-xl leading-none mt-3', tone)}>{fmtBRL(value)}</p>
           </div>
         ))}
       </div>
@@ -1254,12 +1254,12 @@ function GoalProgressCard({ goal }: { goal: GoalProgress }) {
           <div className="relative flex min-h-28 items-center justify-between gap-4 p-4">
             <div className="rounded-lg bg-background/80 px-4 py-3 shadow-[0_12px_30px_rgba(0,0,0,0.35)] backdrop-blur">
               <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Realizado</p>
-              <p className="mt-1 font-heading font-normal text-4xl leading-none tracking-wide text-foreground">
+              <p className="mt-1 font-heading font-normal text-xl leading-none tracking-wide text-foreground">
                 {formatGoalValue(goal.realized, goal.format)}
               </p>
             </div>
             <div className="rounded-lg bg-background/80 px-3 py-2 text-right shadow-[0_12px_30px_rgba(0,0,0,0.35)] backdrop-blur">
-              <p className="font-heading font-normal text-3xl leading-none" style={{ color }}>{progress}%</p>
+              <p className="font-heading font-normal text-xl leading-none" style={{ color }}>{progress}%</p>
               <p className="mt-1 text-[10px] font-bold uppercase tracking-widest" style={{ color }}>{goalToneLabel(progress)}</p>
             </div>
           </div>
@@ -1302,7 +1302,7 @@ function FunnelStageCard({ stage, target, partial, current, progress }: {
           </div>
           <div>
             <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Realizado</p>
-            <p className="mt-1 font-heading font-normal text-4xl leading-none" style={{ color }}>
+            <p className="mt-1 font-heading font-normal text-xl leading-none" style={{ color }}>
               {current.toLocaleString('pt-BR')}
             </p>
           </div>
@@ -1345,7 +1345,7 @@ function TargetSummaryCard({ label, value, max }: {
       <CardContent>
         <div className="rounded-lg bg-background/60 p-4">
           <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Valor atual</p>
-          <span className="mt-1 block font-heading font-normal text-4xl leading-none tracking-wide" style={{ color }}>
+          <span className="mt-1 block font-heading font-normal text-xl leading-none tracking-wide" style={{ color }}>
             {fmtBRL(value)}
           </span>
         </div>
@@ -1373,7 +1373,7 @@ function DataHighlightCard({ label, value, detail, color }: {
       <div className="h-1.5" style={{ backgroundColor: color }} />
       <div className="p-4">
         <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
-        <p className="mt-2 font-heading font-normal text-4xl leading-none tracking-wide" style={{ color }}>
+        <p className="mt-2 font-heading font-normal text-xl leading-none tracking-wide" style={{ color }}>
           {value}
         </p>
         <p className="mt-2 text-xs text-muted-foreground">{detail}</p>
@@ -1592,7 +1592,7 @@ function SalesFunnelPerformance({
                     {index + 1}
                   </span>
                 </div>
-                <p className="relative text-2xl font-black uppercase tracking-[0.13em] text-white max-sm:text-base">
+                <p className="relative text-xs font-black uppercase tracking-[0.1em] text-white max-sm:text-[10px]">
                   {stage.label}
                 </p>
                 <div className="relative text-right max-sm:col-span-3 max-sm:pb-4 max-sm:pr-1">
@@ -1643,7 +1643,7 @@ function SalesFunnelPerformance({
           </div>
           <div>
             <p className="text-sm font-black uppercase tracking-[0.12em] text-white/78">Conversão Geral</p>
-            <p className="mt-4 text-3xl font-black text-white">{formatFunnelPercent(generalConversion)}</p>
+            <p className="mt-4 text-xl font-black text-white">{formatFunnelPercent(generalConversion)}</p>
             <p className="mt-2 text-sm font-semibold text-white/45">{formatFunnelNumber(stages[4].value)} de {formatFunnelNumber(stages[0].value)} visitantes</p>
           </div>
         </div>
@@ -1955,7 +1955,7 @@ function ClientWidgetCard({ widget, editable, onRemove }: {
                 <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{metric.short}</p>
                 <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: metric.color }} />
               </div>
-              <p className="mt-2 font-heading font-normal text-4xl leading-none tracking-wide" style={{ color: metric.color }}>
+              <p className="mt-2 font-heading font-normal text-xl leading-none tracking-wide" style={{ color: metric.color }}>
                 {formatClientMetricValue(metric.value, metric.format)}
               </p>
               <p className="mt-2 text-xs text-muted-foreground">{metric.label}</p>
@@ -2377,7 +2377,7 @@ function MetaAdsConnectionDialog({
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
       <DialogContent className="max-w-lg border-border bg-card">
         <DialogHeader>
-          <DialogTitle className="font-heading font-normal text-2xl uppercase tracking-wider">Configurar Meta Ads</DialogTitle>
+          <DialogTitle className="font-heading font-normal text-xl uppercase tracking-wider">Configurar Meta Ads</DialogTitle>
           <p className="text-sm text-muted-foreground">
             Selecione a(s) conta(s) de anúncio de <strong>{clientName}</strong>.
           </p>
@@ -2555,7 +2555,7 @@ function GoogleAdsConnectionDialog({
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
       <DialogContent className="max-w-lg border-border bg-card">
         <DialogHeader>
-          <DialogTitle className="font-heading font-normal text-2xl uppercase tracking-wider">Configurar Google Ads</DialogTitle>
+          <DialogTitle className="font-heading font-normal text-xl uppercase tracking-wider">Configurar Google Ads</DialogTitle>
           <p className="text-sm text-muted-foreground">
             Selecione as contas Google Ads de <strong>{clientName}</strong>.
           </p>
@@ -3000,7 +3000,7 @@ function SheetsResultsTab({ clientId }: { clientId: string }) {
           <div className="rounded-xl border border-primary/20 bg-primary/5 p-5 flex items-center justify-between">
             <div>
               <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Total de Vendas</p>
-              <p className="text-3xl font-bold text-primary mt-1">{fmtBRL(result.total)}</p>
+              <p className="text-xl font-bold text-primary mt-1">{fmtBRL(result.total)}</p>
               {result.note && <p className="text-xs text-muted-foreground mt-2 max-w-md">{result.note}</p>}
             </div>
           </div>
@@ -3255,7 +3255,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
             <div className="px-2 py-0.5 rounded text-[10px] font-bold tracking-widest bg-primary/20 text-primary border border-primary/30 uppercase w-fit mb-2">
               {client.status}
             </div>
-            <h1 className="font-heading font-normal text-4xl uppercase leading-none tracking-wide text-foreground">{client.name}</h1>
+            <h1 className="font-heading font-normal text-xl uppercase leading-none tracking-wide text-foreground">{client.name}</h1>
             <div className="flex items-center gap-2 mt-1 flex-wrap">
               <p className="text-sm text-muted-foreground uppercase tracking-wide">
                 {storedClient?.category_name ?? storedClient?.segment ?? client.segment}

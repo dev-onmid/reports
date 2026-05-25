@@ -219,7 +219,7 @@ export default function ConfiguracoesPage() {
       {/* ── HEADER ── */}
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="font-heading font-normal text-4xl uppercase leading-none tracking-wide text-foreground">
+          <h1 className="font-heading font-normal text-xl uppercase leading-none tracking-wide text-foreground">
             CONFIGURAÇÕES
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
@@ -261,12 +261,12 @@ export default function ConfiguracoesPage() {
           {/* ── KPI CARDS ── */}
           <div className="grid grid-cols-4 gap-4">
             {/* Card 1: Total */}
-            <div className="bg-card border border-border rounded-xl p-5 space-y-3">
+            <div className="bg-card border border-border rounded-[var(--radius)] p-5 space-y-3">
               <div className="w-12 h-12 rounded-full bg-violet-500/15 border border-violet-500/25 flex items-center justify-center">
                 <Users2 className="w-5 h-5 text-violet-400" />
               </div>
               <div>
-                <p className="text-3xl font-bold leading-none">{totalUsers}</p>
+                <p className="text-xl font-bold leading-none">{totalUsers}</p>
                 <p className="text-xs text-muted-foreground mt-1">Total de usuários</p>
               </div>
               <div>
@@ -276,12 +276,12 @@ export default function ConfiguracoesPage() {
             </div>
 
             {/* Card 2: Admins */}
-            <div className="bg-card border border-border rounded-xl p-5 space-y-3">
+            <div className="bg-card border border-border rounded-[var(--radius)] p-5 space-y-3">
               <div className="w-12 h-12 rounded-full bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center">
                 <Shield className="w-5 h-5 text-emerald-400" />
               </div>
               <div>
-                <p className="text-3xl font-bold leading-none">{admins}</p>
+                <p className="text-xl font-bold leading-none">{admins}</p>
                 <p className="text-xs text-muted-foreground mt-1">Administradores</p>
               </div>
               <div>
@@ -291,12 +291,12 @@ export default function ConfiguracoesPage() {
             </div>
 
             {/* Card 3: Ativos */}
-            <div className="bg-card border border-border rounded-xl p-5 space-y-3">
+            <div className="bg-card border border-border rounded-[var(--radius)] p-5 space-y-3">
               <div className="w-12 h-12 rounded-full bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center">
                 <User className="w-5 h-5 text-emerald-400" />
               </div>
               <div>
-                <p className="text-3xl font-bold leading-none">{activeUsers}</p>
+                <p className="text-xl font-bold leading-none">{activeUsers}</p>
                 <p className="text-xs text-muted-foreground mt-1">Usuários ativos</p>
               </div>
               <div>
@@ -306,12 +306,12 @@ export default function ConfiguracoesPage() {
             </div>
 
             {/* Card 4: Convites */}
-            <div className="bg-card border border-border rounded-xl p-5 space-y-3">
+            <div className="bg-card border border-border rounded-[var(--radius)] p-5 space-y-3">
               <div className="w-12 h-12 rounded-full bg-violet-500/15 border border-violet-500/25 flex items-center justify-center">
                 <Mail className="w-5 h-5 text-violet-400" />
               </div>
               <div>
-                <p className="text-3xl font-bold leading-none">{pendingInvites}</p>
+                <p className="text-xl font-bold leading-none">{pendingInvites}</p>
                 <p className="text-xs text-muted-foreground mt-1">Convite pendente</p>
               </div>
               <div>
@@ -322,7 +322,7 @@ export default function ConfiguracoesPage() {
           </div>
 
           {/* ── USUÁRIOS CADASTRADOS CARD ── */}
-          <div className="bg-card border border-border rounded-xl overflow-hidden">
+          <div className="bg-card border border-border rounded-[var(--radius)] overflow-hidden">
             {/* Card header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-border">
               <div>
@@ -466,7 +466,7 @@ export default function ConfiguracoesPage() {
           TAB: PERMISSÕES
       ══════════════════════════════════ */}
       {activeTab === 'permissoes' && (
-        <div className="bg-card border border-border rounded-xl overflow-hidden">
+        <div className="bg-card border border-border rounded-[var(--radius)] overflow-hidden">
           <table className="w-full text-sm text-left">
             <thead>
               <tr className="border-b border-border">
@@ -548,7 +548,7 @@ export default function ConfiguracoesPage() {
               url: 'https://post.onmid.app/data-deletion',
             },
           ].map(({ title, description, url }) => (
-            <div key={url} className="bg-card border border-border rounded-xl overflow-hidden">
+            <div key={url} className="bg-card border border-border rounded-[var(--radius)] overflow-hidden">
               <div className="flex items-center justify-between px-5 py-4 border-b border-border">
                 <div>
                   <p className="text-sm font-bold">{title}</p>

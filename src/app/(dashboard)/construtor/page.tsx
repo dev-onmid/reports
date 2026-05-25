@@ -83,7 +83,7 @@ function WidgetChart({ widget, data }: { widget: Widget; data: MockPoint[] }) {
           return (
             <div key={m.key} className="flex flex-col items-center gap-0.5 text-center">
               <div className="w-2 h-2 rounded-full mb-1" style={{ backgroundColor: m.color }} />
-              <p className={cn('font-heading font-normal', metrics.length === 1 ? 'text-4xl' : 'text-2xl')} style={{ color: m.color }}>
+              <p className={cn('font-heading font-normal', metrics.length === 1 ? 'text-xl' : 'text-lg')} style={{ color: m.color }}>
                 {formatMetricValue(value, m.format)}
               </p>
               <p className="text-[11px] text-muted-foreground leading-tight">{m.label}</p>
@@ -156,7 +156,7 @@ function WidgetCard({ widget, data, onRemove }: { widget: Widget; data: MockPoin
 
   return (
     <div className={cn(
-      'bg-card border border-border rounded-xl overflow-hidden',
+      'bg-card border border-border rounded-[var(--radius)] overflow-hidden',
       widget.size === 1 && 'col-span-1',
       widget.size === 2 && 'col-span-1 md:col-span-2',
       widget.size === 3 && 'col-span-1 md:col-span-3',
@@ -462,7 +462,7 @@ export default function ConstruitorPage() {
     <div className="space-y-6">
       <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
-          <h1 className="font-heading font-normal text-4xl uppercase leading-none tracking-wide text-foreground">Construtor de Dashboard</h1>
+          <h1 className="font-heading font-normal text-xl uppercase leading-none tracking-wide text-foreground">Construtor de Dashboard</h1>
           <p className="text-muted-foreground mt-1">
             60+ métricas de Meta Ads, Google Ads, Facebook, Instagram e CRM. Cruze qualquer combinação.
           </p>

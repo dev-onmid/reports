@@ -87,7 +87,7 @@ function AutomationStatCard({
         </div>
         <div className="min-w-0 flex-1">
           <p className="text-sm text-slate-300">{label}</p>
-          <p className="mt-1 text-3xl font-semibold leading-none text-white">{value}</p>
+          <p className="mt-1 text-xl font-semibold leading-none text-white">{value}</p>
         </div>
         <MiniSparkline color={color} />
       </div>
@@ -278,7 +278,7 @@ export default function AutomacoesPage() {
             <Zap className="h-8 w-8" />
           </div>
           <div>
-            <h1 className="text-4xl font-semibold tracking-[-0.04em] text-white">Automações</h1>
+            <h1 className="text-xl font-semibold tracking-tight text-white">Automações</h1>
             <p className="mt-1 text-base text-slate-400">Integre com Webhooks, ClickUp, Google Forms, Zapier, Make e outros.</p>
           </div>
         </div>
@@ -339,7 +339,7 @@ export default function AutomacoesPage() {
             </div>
             <div>
               <p className="text-xl text-slate-300">Automações</p>
-              <h2 className="text-4xl font-semibold tracking-[-0.04em] text-white">Instagram <span className="rounded-full bg-violet-500/35 px-3 py-1 text-sm font-bold text-violet-200">PRO</span></h2>
+              <h2 className="text-xl font-semibold tracking-tight text-white">Instagram <span className="rounded-full bg-violet-500/35 px-3 py-1 text-sm font-bold text-violet-200">PRO</span></h2>
               <p className="mt-3 max-w-md text-base leading-relaxed text-slate-300">Conecte seu Instagram e automatize interações, DMs e qualificação de leads com inteligência.</p>
               <div className="mt-5 flex flex-wrap items-center gap-2">
                 {igConnected ? (

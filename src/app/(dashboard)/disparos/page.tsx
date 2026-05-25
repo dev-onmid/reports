@@ -102,13 +102,13 @@ function DisparoKpiCard({
   change?: string; changeGood?: boolean;
 }) {
   return (
-    <div className="rounded-xl border border-border bg-card p-4 flex items-start gap-4">
+    <div className="rounded-[var(--radius)] border border-border bg-card p-4 flex items-start gap-4">
       <div className="shrink-0 rounded-xl p-2.5" style={{ background: iconBg }}>
         <Icon className="h-5 w-5" style={{ color: iconColor }} />
       </div>
       <div className="min-w-0 flex-1">
         <p className="text-xs text-muted-foreground">{title}</p>
-        <p className="font-heading font-normal text-3xl leading-none text-foreground mt-0.5">{value}</p>
+        <p className="font-heading font-normal text-xl leading-none text-foreground mt-0.5">{value}</p>
         {sub && <p className="text-[11px] text-muted-foreground mt-1">{sub}</p>}
         {change && (
           <p className={cn('text-[11px] mt-1 font-semibold', changeGood ? 'text-emerald-400' : 'text-red-400')}>
@@ -307,7 +307,7 @@ function CampaignCard({ campaign, onAction, onRefresh }: {
   const pct = total > 0 ? Math.round(((sent + failed) / total) * 100) : 0;
 
   return (
-    <div className="rounded-xl border border-border bg-card/50 p-4 space-y-3">
+    <div className="rounded-[var(--radius)] border border-border bg-card/50 p-4 space-y-3">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="font-semibold text-sm truncate">{campaign.name}</p>
@@ -491,13 +491,13 @@ function ClientesTab() {
           { label: 'Mensagens hoje',         value: '—',               sub: 'Dados Z-API',                                                                          subColor: 'text-muted-foreground', icon: MessageSquare, iconColor: '#A855F7', iconBg: 'rgba(168,85,247,0.15)', chart: <BarSparkline2 /> },
           { label: 'Uptime médio',           value: clients.length > 0 ? `${Math.round((connected/clients.length)*100)}%` : '—', sub: 'Últimos 7 dias', subColor: 'text-muted-foreground', icon: Zap, iconColor: '#22C55E', iconBg: 'rgba(34,197,94,0.15)', chart: <LineSparkline positive color="#22C55E" /> },
         ].map(({ label, value, sub, subColor, icon: Icon, iconColor, iconBg, chart }) => (
-          <div key={label} className="relative overflow-hidden rounded-xl border border-border bg-card p-4 flex items-center gap-3">
+          <div key={label} className="relative overflow-hidden rounded-[var(--radius)] border border-border bg-card p-4 flex items-center gap-3">
             <div className="rounded-xl p-2.5 shrink-0" style={{ background: iconBg }}>
               <Icon className="h-5 w-5" style={{ color: iconColor }} />
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-xs text-muted-foreground leading-tight">{label}</p>
-              <p className="font-heading font-normal text-3xl leading-none text-foreground mt-0.5">{value}</p>
+              <p className="font-heading font-normal text-xl leading-none text-foreground mt-0.5">{value}</p>
               <p className={cn('text-[11px] font-semibold mt-1', subColor)}>{sub}</p>
             </div>
             <div className="shrink-0 opacity-80">{chart}</div>
@@ -514,9 +514,9 @@ function ClientesTab() {
             {/* Decorative Z-API 3D box */}
             <div className="pointer-events-none absolute right-5 top-1/2 -translate-y-1/2 opacity-15 hidden lg:flex items-center justify-center" style={{ width: 100, height: 100 }}>
               <div className="relative w-20 h-20">
-                <div className="absolute inset-0 rounded-2xl border-2 border-emerald-400 rotate-6" style={{ background: 'linear-gradient(135deg, rgba(34,197,94,0.25), rgba(6,182,212,0.15))' }} />
+                <div className="absolute inset-0 rounded-[var(--radius)] border-2 border-emerald-400 rotate-6" style={{ background: 'linear-gradient(135deg, rgba(34,197,94,0.25), rgba(6,182,212,0.15))' }} />
                 <div className="absolute inset-0 flex items-center justify-center">
-                  <span className="text-3xl font-bold text-emerald-400 rotate-6 select-none">Z</span>
+                  <span className="text-xl font-bold text-emerald-400 rotate-6 select-none">Z</span>
                 </div>
                 <div className="absolute -bottom-2 -right-2 w-5 h-5 rounded-full bg-emerald-500/30 border border-emerald-400/50" />
                 <div className="absolute -top-2 -left-2 w-4 h-4 rounded-full bg-cyan-500/30 border border-cyan-400/50" />
@@ -559,7 +559,7 @@ function ClientesTab() {
           </div>
 
           {/* Instances table */}
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
+          <div className="rounded-[var(--radius)] border border-border bg-card overflow-hidden">
             <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-border">
               <div className="flex items-center gap-2">
                 <p className="font-semibold text-sm">Suas instâncias</p>
@@ -708,7 +708,7 @@ function ClientesTab() {
 
         {/* Right: Diagnóstico */}
         <div className="space-y-4">
-          <div className="rounded-xl border border-border bg-card p-5">
+          <div className="rounded-[var(--radius)] border border-border bg-card p-5">
             <div className="flex items-center gap-2 mb-5">
               <div className="rounded-lg p-1.5 shrink-0" style={{ background: 'rgba(34,197,94,0.12)' }}>
                 <Zap className="h-4 w-4 text-emerald-400" />
@@ -933,7 +933,7 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
           <div className="space-y-4">
 
             {/* Section 1: Informações */}
-            <div className="rounded-xl border border-border bg-card p-5">
+            <div className="rounded-[var(--radius)] border border-border bg-card p-5">
               <div className="flex items-center gap-3 mb-4">
                 <div className="rounded-lg p-1.5 shrink-0" style={{ background: 'rgba(6,182,212,0.15)' }}>
                   <Info className="h-4 w-4 text-cyan-400" />
@@ -960,7 +960,7 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
             </div>
 
             {/* Section 2: Mensagem */}
-            <div className="rounded-xl border border-border bg-card p-5">
+            <div className="rounded-[var(--radius)] border border-border bg-card p-5">
               <div className="flex items-center gap-3 mb-4">
                 <div className="rounded-lg p-1.5 shrink-0" style={{ background: 'rgba(6,182,212,0.15)' }}>
                   <MessageSquare className="h-4 w-4 text-cyan-400" />
@@ -1104,7 +1104,7 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
             </div>
 
             {/* Section 3: Mídias */}
-            <div className="rounded-xl border border-border bg-card p-5">
+            <div className="rounded-[var(--radius)] border border-border bg-card p-5">
               <div className="flex items-center gap-3 mb-4">
                 <div className="rounded-lg p-1.5 shrink-0" style={{ background: 'rgba(6,182,212,0.15)' }}>
                   <Upload className="h-4 w-4 text-cyan-400" />
@@ -1155,7 +1155,7 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
           <div className="space-y-4">
 
             {/* Section 4: Base de contatos */}
-            <div className="rounded-xl border border-border bg-card p-5">
+            <div className="rounded-[var(--radius)] border border-border bg-card p-5">
               <div className="flex items-center gap-3 mb-4">
                 <div className="rounded-lg p-1.5 shrink-0" style={{ background: 'rgba(6,182,212,0.15)' }}>
                   <Users className="h-4 w-4 text-cyan-400" />
@@ -1196,7 +1196,7 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
             </div>
 
             {/* Section 5: Agendamento */}
-            <div className="rounded-xl border border-border bg-card p-5">
+            <div className="rounded-[var(--radius)] border border-border bg-card p-5">
               <div className="flex items-center gap-3 mb-4">
                 <div className="rounded-lg p-1.5 shrink-0" style={{ background: 'rgba(6,182,212,0.15)' }}>
                   <Clock className="h-4 w-4 text-cyan-400" />
@@ -1435,10 +1435,10 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances }: {
 
   if (loading) return (
     <div className="space-y-6">
-      <div className="grid grid-cols-5 gap-4">{[1,2,3,4,5].map(i => <div key={i} className="h-24 animate-pulse rounded-xl border border-border bg-card" />)}</div>
+      <div className="grid grid-cols-5 gap-4">{[1,2,3,4,5].map(i => <div key={i} className="h-24 animate-pulse rounded-[var(--radius)] border border-border bg-card" />)}</div>
       <div className="grid grid-cols-[1fr_380px] gap-6">
-        <div className="space-y-4">{[1,2].map(i => <div key={i} className="h-64 animate-pulse rounded-xl border border-border bg-card" />)}</div>
-        <div className="space-y-4">{[1,2,3].map(i => <div key={i} className="h-40 animate-pulse rounded-xl border border-border bg-card" />)}</div>
+        <div className="space-y-4">{[1,2].map(i => <div key={i} className="h-64 animate-pulse rounded-[var(--radius)] border border-border bg-card" />)}</div>
+        <div className="space-y-4">{[1,2,3].map(i => <div key={i} className="h-40 animate-pulse rounded-[var(--radius)] border border-border bg-card" />)}</div>
       </div>
     </div>
   );
@@ -1497,7 +1497,7 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances }: {
         <div className="space-y-6 min-w-0">
 
           {/* Weekly chart */}
-          <div className="rounded-xl border border-border bg-card p-5">
+          <div className="rounded-[var(--radius)] border border-border bg-card p-5">
             <div className="flex items-center justify-between mb-5">
               <div className="flex items-center gap-2">
                 <p className="font-semibold text-sm">Envios na semana</p>
@@ -1520,7 +1520,7 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances }: {
           </div>
 
           {/* Recent campaigns table */}
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
+          <div className="rounded-[var(--radius)] border border-border bg-card overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <div className="flex items-center gap-2">
                 <p className="font-semibold text-sm">Campanhas recentes</p>
@@ -1647,7 +1647,7 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances }: {
         <div className="space-y-5">
 
           {/* Donut chart */}
-          <div className="rounded-xl border border-border bg-card p-5">
+          <div className="rounded-[var(--radius)] border border-border bg-card p-5">
             <div className="flex items-center gap-2 mb-4">
               <p className="font-semibold text-sm">Resumo de campanhas</p>
               <Info className="h-3.5 w-3.5 text-muted-foreground/50" />
@@ -1663,7 +1663,7 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances }: {
                     </Pie>
                   </PieChart>
                   <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                    <span className="font-heading font-normal text-3xl leading-none text-foreground">{donutTotal}</span>
+                    <span className="font-heading font-normal text-xl leading-none text-foreground">{donutTotal}</span>
                     <span className="text-[11px] text-muted-foreground mt-0.5">Total</span>
                   </div>
                 </div>
@@ -1691,7 +1691,7 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances }: {
           </div>
 
           {/* Upcoming sends */}
-          <div className="rounded-xl border border-border bg-card p-5">
+          <div className="rounded-[var(--radius)] border border-border bg-card p-5">
             <div className="flex items-center gap-2 mb-4">
               <Calendar className="h-4 w-4 text-muted-foreground" />
               <p className="font-semibold text-sm">Próximos envios</p>
@@ -1726,7 +1726,7 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances }: {
           </div>
 
           {/* Quick actions */}
-          <div className="rounded-xl border border-border bg-card p-5">
+          <div className="rounded-[var(--radius)] border border-border bg-card p-5">
             <div className="flex items-center gap-2 mb-4">
               <Zap className="h-4 w-4 text-muted-foreground" />
               <p className="font-semibold text-sm">Ações rápidas</p>
@@ -1911,7 +1911,7 @@ function ExtratorTab({ onUseCampaign }: { onUseCampaign: (numbers: string) => vo
   return (
     <div className="space-y-5">
       {/* Config row */}
-      <div className="rounded-xl border border-border bg-card/80 p-5">
+      <div className="rounded-[var(--radius)] border border-border bg-card/80 p-5">
         <div className="mb-4 flex items-center gap-3">
           <span className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400 shadow-[0_0_16px_rgba(52,211,153,0.25)]">
             <Hash className="h-4 w-4" />
@@ -1976,7 +1976,7 @@ function ExtratorTab({ onUseCampaign }: { onUseCampaign: (numbers: string) => vo
 
       {/* Chat list */}
       {chats.length > 0 && (
-        <div className="rounded-xl border border-border bg-card/80 p-5">
+        <div className="rounded-[var(--radius)] border border-border bg-card/80 p-5">
           <div className="mb-3 flex flex-wrap items-center gap-3">
             <div className="relative flex-1 min-w-48">
               <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
@@ -2057,7 +2057,7 @@ function ExtratorTab({ onUseCampaign }: { onUseCampaign: (numbers: string) => vo
 
       {/* Empty state after extraction */}
       {extractDone && !extracting && extracted.length === 0 && !extractError && (
-        <div className="rounded-xl border border-border bg-card/80 p-8 text-center text-sm text-muted-foreground">
+        <div className="rounded-[var(--radius)] border border-border bg-card/80 p-8 text-center text-sm text-muted-foreground">
           Nenhum número encontrado nos {extractType === 'groups' ? 'grupos' : 'conversas'} selecionados.
         </div>
       )}
@@ -2149,7 +2149,7 @@ export default function DisparosPage() {
               <MessageSquare className="h-5 w-5 text-white" />
             </div>
             <div>
-              <h1 className="font-heading font-normal text-4xl uppercase leading-none tracking-wide text-foreground">Disparos WhatsApp</h1>
+              <h1 className="font-heading font-normal text-xl uppercase leading-none tracking-wide text-foreground">Disparos WhatsApp</h1>
               <p className="mt-0.5 text-muted-foreground text-sm">Gerencie campanhas de disparo via Z-API.</p>
             </div>
           </div>
