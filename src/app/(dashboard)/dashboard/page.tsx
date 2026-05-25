@@ -2535,6 +2535,28 @@ const DEFAULT_GOOGLE_KPI_LAYOUT: RglLayout[] = [
   { i: 'google-keyword-count',    x: 0, y: 4, w: 3, h: 2, minW: 2, minH: 1 },
 ];
 
+const DEFAULT_GENERAL_LAYOUT: RglLayout[] = [
+  { i: 'general-revenue', x: 0, y: 0, w: 8, h: 2, minW: 3, minH: 2 },
+  { i: 'general-leads',   x: 0, y: 2, w: 8, h: 2, minW: 3, minH: 2 },
+  { i: 'general-roi',     x: 0, y: 4, w: 4, h: 2, minW: 2, minH: 1 },
+  { i: 'general-cpl',     x: 4, y: 4, w: 4, h: 2, minW: 2, minH: 1 },
+  { i: 'general-ctr',     x: 0, y: 6, w: 4, h: 2, minW: 2, minH: 1 },
+  { i: 'general-spend',   x: 4, y: 6, w: 4, h: 2, minW: 2, minH: 1 },
+  { i: 'general-funnel',  x: 8, y: 0, w: 4, h: 8, minW: 3, minH: 4 },
+];
+
+const DEFAULT_META_PANELS_LAYOUT: RglLayout[] = [
+  { i: 'meta-campaigns',       x: 0, y: 0, w: 8, h: 4, minW: 4, minH: 2 },
+  { i: 'meta-audience',        x: 8, y: 0, w: 4, h: 4, minW: 3, minH: 2 },
+  { i: 'meta-creative-preview',x: 0, y: 4, w: 12, h: 4, minW: 4, minH: 2 },
+];
+
+const DEFAULT_GOOGLE_PANELS_LAYOUT: RglLayout[] = [
+  { i: 'google-campaigns', x: 0, y: 0, w: 8, h: 4, minW: 4, minH: 2 },
+  { i: 'google-keywords',  x: 8, y: 0, w: 4, h: 4, minW: 3, minH: 2 },
+  { i: 'google-audience',  x: 8, y: 4, w: 4, h: 4, minW: 3, minH: 2 },
+];
+
 const DEFAULT_CARD_OVERRIDES: Partial<Record<DashboardCardId, Partial<DashboardCardConfig>>> = {
   'general-revenue': { size: 'lg', chart: 'none' },
   'general-leads': { size: 'lg', chart: 'none' },
@@ -3355,6 +3377,9 @@ export default function GeneralDashboard() {
   const [dashboardPrefs, setDashboardPrefs] = useState<DashboardPrefs>(DEFAULT_DASHBOARD_PREFS);
   const [metaKpiLayout, setMetaKpiLayout] = useState<RglLayout[]>(DEFAULT_META_KPI_LAYOUT);
   const [googleKpiLayout, setGoogleKpiLayout] = useState<RglLayout[]>(DEFAULT_GOOGLE_KPI_LAYOUT);
+  const [generalLayout, setGeneralLayout] = useState<RglLayout[]>(DEFAULT_GENERAL_LAYOUT);
+  const [metaPanelsLayout, setMetaPanelsLayout] = useState<RglLayout[]>(DEFAULT_META_PANELS_LAYOUT);
+  const [googlePanelsLayout, setGooglePanelsLayout] = useState<RglLayout[]>(DEFAULT_GOOGLE_PANELS_LAYOUT);
   const [pageInsights, setPageInsights] = useState<PageInsightsResult[]>([]);
   const [pageInsightsLoading, setPageInsightsLoading] = useState(false);
   const [alertsCollapsed, setAlertsCollapsed] = useState(() => {
@@ -3470,23 +3495,23 @@ export default function GeneralDashboard() {
     try {
       const stored = localStorage.getItem(LS_RGL_LAYOUT);
       if (stored) {
-        const parsed = JSON.parse(stored) as { meta?: RglLayout[]; google?: RglLayout[] };
-        if (parsed.meta) setMetaKpiLayout(prev => prev.map(item => {
-          const s = parsed.meta!.find(l => l.i === item.i);
-          return s ? { ...item, x: s.x, y: s.y, w: s.w, h: s.h } : item;
-        }));
-        if (parsed.google) setGoogleKpiLayout(prev => prev.map(item => {
-          const s = parsed.google!.find(l => l.i === item.i);
-          return s ? { ...item, x: s.x, y: s.y, w: s.w, h: s.h } : item;
-        }));
+        const parsed = JSON.parse(stored) as { meta?: RglLayout[]; google?: RglLayout[]; general?: RglLayout[]; metaPanels?: RglLayout[]; googlePanels?: RglLayout[] };
+        const merge = (setter: React.Dispatch<React.SetStateAction<RglLayout[]>>, saved?: RglLayout[]) => {
+          if (saved) setter(prev => prev.map(item => { const s = saved.find(l => l.i === item.i); return s ? { ...item, x: s.x, y: s.y, w: s.w, h: s.h } : item; }));
+        };
+        merge(setMetaKpiLayout, parsed.meta);
+        merge(setGoogleKpiLayout, parsed.google);
+        merge(setGeneralLayout, parsed.general);
+        merge(setMetaPanelsLayout, parsed.metaPanels);
+        merge(setGooglePanelsLayout, parsed.googlePanels);
       }
     } catch {}
   }, []);
   useEffect(() => {
     try {
-      localStorage.setItem(LS_RGL_LAYOUT, JSON.stringify({ meta: metaKpiLayout, google: googleKpiLayout }));
+      localStorage.setItem(LS_RGL_LAYOUT, JSON.stringify({ meta: metaKpiLayout, google: googleKpiLayout, general: generalLayout, metaPanels: metaPanelsLayout, googlePanels: googlePanelsLayout }));
     } catch {}
-  }, [metaKpiLayout, googleKpiLayout]);
+  }, [metaKpiLayout, googleKpiLayout, generalLayout, metaPanelsLayout, googlePanelsLayout]);
   // customizerOpen available to all users
 
   // Initialize: pre-select from ?client=ID param, otherwise start empty (force client picker)
@@ -4220,26 +4245,15 @@ export default function GeneralDashboard() {
             <p className="text-[11px] text-foreground/60">Consolidado do período antes da leitura por canal.</p>
           </div>
         </div>
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(480px,1.16fr)]">
-          <DashboardGridItem id="general-revenue" prefs={dashboardPrefs} className="xl:col-span-2" ignoreSpan>
-            <TargetSummaryCard title="Faturamento" value={revenue} partial={effectiveRevenueGoal} target={plannedRevenue} format="currency" accent="#22c55e" icon={DollarSign} />
-          </DashboardGridItem>
-          <DashboardGridItem id="general-leads" prefs={dashboardPrefs} className="xl:col-span-2 xl:row-start-2" ignoreSpan>
-            <TargetSummaryCard title="Leads" value={totalLeads} partial={effectiveLeadsGoal} target={leadsGoal} format="number" accent="#22c55e" icon={Users} />
-          </DashboardGridItem>
-          <DashboardGridItem id="general-roi" prefs={dashboardPrefs} className="xl:row-start-3" ignoreSpan>
-            <KpiCard title="ROI" value={roi} prevValue={prevRoi > 0 ? prevRoi : undefined} goalValue={roiGoal > 0 ? roiGoal : undefined} format="times" icon={TrendingUp} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} chart={dashboardPrefs.cards['general-roi'].chart} series={seriesOrPacing(roiSeries, roi)} />
-          </DashboardGridItem>
-          <DashboardGridItem id="general-cpl" prefs={dashboardPrefs} className="xl:row-start-3" ignoreSpan>
-            <KpiCard title="CPL Geral" value={totalCostPerLead} prevValue={prevCpl > 0 ? prevCpl : undefined} goalValue={cplGoal > 0 ? cplGoal : undefined} format="currency" icon={Tag} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} inverseGoal inverseChange chart={dashboardPrefs.cards['general-cpl'].chart} series={seriesOrPacing(cplSeries, totalCostPerLead)} />
-          </DashboardGridItem>
-          <DashboardGridItem id="general-ctr" prefs={dashboardPrefs} className="xl:row-start-4" ignoreSpan>
-            <KpiCard title="CTR Geral" value={avgCtr} format="percent" icon={MousePointerClick} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} chart={dashboardPrefs.cards['general-ctr'].chart} series={seriesOrPacing(avgCtrSeries, avgCtr)} />
-          </DashboardGridItem>
-          <DashboardGridItem id="general-spend" prefs={dashboardPrefs} className="xl:row-start-4" ignoreSpan>
-            <KpiCard title="Valor Gasto" value={totalSpend} format="currency" icon={CreditCard} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} chart={dashboardPrefs.cards['general-spend'].chart} series={seriesOrPacing(totalSpendSeries, totalSpend)} />
-          </DashboardGridItem>
-          <DashboardGridItem id="general-funnel" prefs={dashboardPrefs} className="xl:col-start-3 xl:row-span-4 xl:row-start-1" ignoreSpan>
+        {(() => {
+          const generalCards: Record<string, ReactNode> = {
+            'general-revenue': <TargetSummaryCard title="Faturamento" value={revenue} partial={effectiveRevenueGoal} target={plannedRevenue} format="currency" accent="#22c55e" icon={DollarSign} />,
+            'general-leads':   <TargetSummaryCard title="Leads" value={totalLeads} partial={effectiveLeadsGoal} target={leadsGoal} format="number" accent="#22c55e" icon={Users} />,
+            'general-roi':     <KpiCard title="ROI" value={roi} prevValue={prevRoi > 0 ? prevRoi : undefined} goalValue={roiGoal > 0 ? roiGoal : undefined} format="times" icon={TrendingUp} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} chart={dashboardPrefs.cards['general-roi'].chart} series={seriesOrPacing(roiSeries, roi)} />,
+            'general-cpl':     <KpiCard title="CPL Geral" value={totalCostPerLead} prevValue={prevCpl > 0 ? prevCpl : undefined} goalValue={cplGoal > 0 ? cplGoal : undefined} format="currency" icon={Tag} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} inverseGoal inverseChange chart={dashboardPrefs.cards['general-cpl'].chart} series={seriesOrPacing(cplSeries, totalCostPerLead)} />,
+            'general-ctr':     <KpiCard title="CTR Geral" value={avgCtr} format="percent" icon={MousePointerClick} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} chart={dashboardPrefs.cards['general-ctr'].chart} series={seriesOrPacing(avgCtrSeries, avgCtr)} />,
+            'general-spend':   <KpiCard title="Valor Gasto" value={totalSpend} format="currency" icon={CreditCard} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} chart={dashboardPrefs.cards['general-spend'].chart} series={seriesOrPacing(totalSpendSeries, totalSpend)} />,
+            'general-funnel':
             <div className="flex h-full min-h-[680px] flex-col rounded-xl border border-[#55F52F]/35 bg-black/35 p-4 shadow-[inset_0_0_30px_rgba(85,245,47,0.08),0_0_28px_rgba(85,245,47,0.14)] xl:min-h-[820px]">
               <p className="text-sm font-bold uppercase tracking-wider text-foreground">Funil de Performance</p>
               <p className="mt-0.5 text-[11px] text-foreground/60">Período: {PERIODS.find(p => p.value === period)?.label ?? period}</p>
@@ -4323,9 +4337,32 @@ export default function GeneralDashboard() {
                   </div>
                 );
               })()}
-            </div>
-          </DashboardGridItem>
-        </div>
+            </div>,
+          };
+          const visibleLayout = generalLayout.filter(l => dashboardPrefs.cards[l.i as DashboardCardId]?.visible !== false);
+          return (
+            <RglGrid
+              layout={visibleLayout}
+              cols={RGL_COLS}
+              rowHeight={RGL_ROW_H}
+              margin={RGL_MARGIN}
+              containerPadding={[0, 0]}
+              isDraggable
+              isResizable
+              draggableHandle=".drag-handle"
+              compactType={null}
+              onLayoutChange={nl => setGeneralLayout(prev => prev.map(item => { const u = nl.find(l => l.i === item.i); return u ? { ...item, x: u.x, y: u.y, w: u.w, h: u.h } : item; }))}
+            >
+              {visibleLayout.map(l => (
+                <div key={l.i} className="h-full">
+                  <RglCardShell id={l.i as DashboardCardId} prefs={dashboardPrefs}>
+                    {generalCards[l.i]}
+                  </RglCardShell>
+                </div>
+              ))}
+            </RglGrid>
+          );
+        })()}
 
         {hasCrmData && (
           <div className="relative mt-4">
@@ -4401,78 +4438,100 @@ export default function GeneralDashboard() {
           );
         })()}
 
-        <div className="relative mt-4 grid gap-4 xl:grid-cols-4">
-          <DashboardGridItem id="meta-campaigns" prefs={dashboardPrefs}>
-          <div className="rounded-xl border border-[#0B84FF]/35 bg-black/35 p-4 shadow-[inset_0_0_30px_rgba(11,132,255,0.10),0_0_28px_rgba(11,132,255,0.16)]">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-              <p className="text-[11px] font-bold uppercase tracking-widest text-foreground/75">Campanhas Meta Ads</p>
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-foreground/55">Ordenar por</span>
-                <div className="flex overflow-hidden rounded-lg border border-[#0B84FF]/30 bg-black/45">
-                  {SORT_OPTIONS.map(opt => (
-                    <button key={opt.value} onClick={() => setCampaignSortBy(opt.value)}
-                      className={cn('px-3 py-1.5 text-[11px] font-semibold transition-colors', campaignSortBy === opt.value ? 'bg-primary text-black shadow-[0_0_10px_rgba(85,245,47,0.28)]' : 'text-muted-foreground hover:text-foreground')}>
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-                {campaignsLoading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
-              </div>
-            </div>
-            <CampaignPerformanceTable campaigns={metaCampaigns} loading={campaignsLoading} period={period} dateFrom={customDateFrom} dateTo={customDateTo} />
-          </div>
-          </DashboardGridItem>
-          <DashboardGridItem id="meta-audience" prefs={dashboardPrefs}>
-            <AudiencePlatformBlock title="Meta Ads" description="Recortes por idade, gênero, plataforma e dispositivo." color="#0B84FF" colors={META_AUDIENCE_COLORS} data={audience.meta} chartVariant={dashboardPrefs.metaAudienceChart} />
-          </DashboardGridItem>
-        </div>
-
-        <DashboardGridItem id="meta-creative-preview" prefs={dashboardPrefs}>
-        <div className="relative mt-4 rounded-xl border border-[#0B84FF]/35 bg-black/35 p-4 shadow-[inset_0_0_30px_rgba(11,132,255,0.10),0_0_28px_rgba(11,132,255,0.16)]">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-[11px] font-bold uppercase tracking-widest text-foreground/75">Criativos Meta Ads</p>
-              <p className="mt-0.5 text-[11px] text-foreground/55">Anúncios e previews com melhor desempenho no período selecionado.</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-foreground/55">Ordenar por</span>
-              <div className="flex overflow-hidden rounded-lg border border-[#0B84FF]/30 bg-black/45">
-                {([{ value: 'spend' as SortKey, label: 'Investimento' }, { value: 'leads' as SortKey, label: 'Leads' }, { value: 'cpl' as SortKey, label: 'CPL' }, { value: 'ctr' as SortKey, label: 'CTR' }]).map(opt => (
-                  <button key={opt.value} onClick={() => setSortBy(opt.value)}
-                    className={cn('px-3 py-1.5 text-[11px] font-semibold transition-colors', sortBy === opt.value ? 'bg-primary text-black shadow-[0_0_14px_rgba(85,245,47,0.42)]' : 'text-foreground/60 hover:bg-white/10 hover:text-foreground')}>
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-              {creativesLoading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
-            </div>
-          </div>
-          <div className="mt-4">
-            {creativesLoading ? (
-              <div className="flex gap-3 overflow-hidden">
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <div key={i} className="w-[175px] shrink-0 animate-pulse rounded-xl border border-border bg-muted/10">
-                    <div className="bg-muted/30 rounded-t-xl" style={{ aspectRatio: '9/16' }} />
-                    <div className="p-2.5 space-y-2"><div className="h-3 bg-muted/40 rounded w-3/4" /></div>
+        {(() => {
+          const metaPanelCards: Record<string, ReactNode> = {
+            'meta-campaigns': (
+              <div className="rounded-xl border border-[#0B84FF]/35 bg-black/35 p-4 shadow-[inset_0_0_30px_rgba(11,132,255,0.10),0_0_28px_rgba(11,132,255,0.16)] h-full overflow-auto">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-foreground/75">Campanhas Meta Ads</p>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-foreground/55">Ordenar por</span>
+                    <div className="flex overflow-hidden rounded-lg border border-[#0B84FF]/30 bg-black/45">
+                      {SORT_OPTIONS.map(opt => (
+                        <button key={opt.value} onClick={() => setCampaignSortBy(opt.value)}
+                          className={cn('px-3 py-1.5 text-[11px] font-semibold transition-colors', campaignSortBy === opt.value ? 'bg-primary text-black shadow-[0_0_10px_rgba(85,245,47,0.28)]' : 'text-muted-foreground hover:text-foreground')}>
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                    {campaignsLoading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
                   </div>
-                ))}
+                </div>
+                <CampaignPerformanceTable campaigns={metaCampaigns} loading={campaignsLoading} period={period} dateFrom={customDateFrom} dateTo={customDateTo} />
               </div>
-            ) : creatives.length === 0 ? (
-              <div className="py-10 text-center">
-                <ImageIcon className="mx-auto mb-2 h-8 w-8 text-muted-foreground/30" />
-                <p className="text-sm text-muted-foreground">Nenhum criativo encontrado.</p>
-                <p className="mt-1 text-xs text-muted-foreground/60">Conecte uma conta Meta Ads em Integrações.</p>
+            ),
+            'meta-audience': <AudiencePlatformBlock title="Meta Ads" description="Recortes por idade, gênero, plataforma e dispositivo." color="#0B84FF" colors={META_AUDIENCE_COLORS} data={audience.meta} chartVariant={dashboardPrefs.metaAudienceChart} />,
+            'meta-creative-preview': (
+              <div className="rounded-xl border border-[#0B84FF]/35 bg-black/35 p-4 shadow-[inset_0_0_30px_rgba(11,132,255,0.10),0_0_28px_rgba(11,132,255,0.16)] h-full overflow-hidden">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] font-bold uppercase tracking-widest text-foreground/75">Criativos Meta Ads</p>
+                    <p className="mt-0.5 text-[11px] text-foreground/55">Anúncios e previews com melhor desempenho no período selecionado.</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-foreground/55">Ordenar por</span>
+                    <div className="flex overflow-hidden rounded-lg border border-[#0B84FF]/30 bg-black/45">
+                      {([{ value: 'spend' as SortKey, label: 'Investimento' }, { value: 'leads' as SortKey, label: 'Leads' }, { value: 'cpl' as SortKey, label: 'CPL' }, { value: 'ctr' as SortKey, label: 'CTR' }]).map(opt => (
+                        <button key={opt.value} onClick={() => setSortBy(opt.value)}
+                          className={cn('px-3 py-1.5 text-[11px] font-semibold transition-colors', sortBy === opt.value ? 'bg-primary text-black shadow-[0_0_14px_rgba(85,245,47,0.42)]' : 'text-foreground/60 hover:bg-white/10 hover:text-foreground')}>
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                    {creativesLoading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+                  </div>
+                </div>
+                <div className="mt-4">
+                  {creativesLoading ? (
+                    <div className="flex gap-3 overflow-hidden">
+                      {Array.from({ length: 5 }).map((_, i) => (
+                        <div key={i} className="w-[175px] shrink-0 animate-pulse rounded-xl border border-border bg-muted/10">
+                          <div className="bg-muted/30 rounded-t-xl" style={{ aspectRatio: '9/16' }} />
+                          <div className="p-2.5 space-y-2"><div className="h-3 bg-muted/40 rounded w-3/4" /></div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : creatives.length === 0 ? (
+                    <div className="py-10 text-center">
+                      <ImageIcon className="mx-auto mb-2 h-8 w-8 text-muted-foreground/30" />
+                      <p className="text-sm text-muted-foreground">Nenhum criativo encontrado.</p>
+                      <p className="mt-1 text-xs text-muted-foreground/60">Conecte uma conta Meta Ads em Integrações.</p>
+                    </div>
+                  ) : (
+                    <div className="flex gap-3 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
+                      {creatives.map((c, idx) => (
+                        <CreativeCarouselCard key={c.adId} creative={c} idx={idx} sortBy={sortBy} onPreview={setPreviewCreative} />
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
-            ) : (
-              <div className="flex gap-3 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
-                {creatives.map((c, idx) => (
-                  <CreativeCarouselCard key={c.adId} creative={c} idx={idx} sortBy={sortBy} onPreview={setPreviewCreative} />
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-        </DashboardGridItem>
+            ),
+          };
+          const visibleLayout = metaPanelsLayout.filter(l => dashboardPrefs.cards[l.i as DashboardCardId]?.visible !== false);
+          return (
+            <RglGrid
+              layout={visibleLayout}
+              cols={RGL_COLS}
+              rowHeight={RGL_ROW_H}
+              margin={RGL_MARGIN}
+              containerPadding={[0, 0]}
+              isDraggable
+              isResizable
+              draggableHandle=".drag-handle"
+              compactType="vertical"
+              onLayoutChange={nl => setMetaPanelsLayout(prev => prev.map(item => { const u = nl.find(l => l.i === item.i); return u ? { ...item, x: u.x, y: u.y, w: u.w, h: u.h } : item; }))}
+            >
+              {visibleLayout.map(l => (
+                <div key={l.i} className="h-full">
+                  <RglCardShell id={l.i as DashboardCardId} prefs={dashboardPrefs}>
+                    {metaPanelCards[l.i]}
+                  </RglCardShell>
+                </div>
+              ))}
+            </RglGrid>
+          );
+        })()}
       </section>
 
       {/* 3. GOOGLE ADS */}
@@ -4528,36 +4587,59 @@ export default function GeneralDashboard() {
           );
         })()}
 
-        <div className="relative mt-4 grid gap-4 xl:grid-cols-4">
-          <DashboardGridItem id="google-campaigns" prefs={dashboardPrefs}>
-          <div className="rounded-xl border border-[#EA4335]/40 bg-black/35 p-4 shadow-[inset_0_0_30px_rgba(234,67,53,0.10),0_0_28px_rgba(234,67,53,0.18)]">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-              <p className="text-[11px] font-bold uppercase tracking-widest text-foreground/75">Campanhas Google Ads</p>
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-foreground/55">Ordenar por</span>
-                <div className="flex overflow-hidden rounded-lg border border-[#EA4335]/35 bg-black/45">
-                  {SORT_OPTIONS.map(opt => (
-                    <button key={opt.value} onClick={() => setCampaignSortBy(opt.value)}
-                      className={cn('px-3 py-1.5 text-[11px] font-semibold transition-colors', campaignSortBy === opt.value ? 'bg-primary text-black shadow-[0_0_10px_rgba(85,245,47,0.28)]' : 'text-muted-foreground hover:text-foreground')}>
-                      {opt.label}
-                    </button>
-                  ))}
+        {(() => {
+          const googlePanelCards: Record<string, ReactNode> = {
+            'google-campaigns': (
+              <div className="rounded-xl border border-[#EA4335]/40 bg-black/35 p-4 shadow-[inset_0_0_30px_rgba(234,67,53,0.10),0_0_28px_rgba(234,67,53,0.18)] h-full overflow-auto">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-foreground/75">Campanhas Google Ads</p>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-foreground/55">Ordenar por</span>
+                    <div className="flex overflow-hidden rounded-lg border border-[#EA4335]/35 bg-black/45">
+                      {SORT_OPTIONS.map(opt => (
+                        <button key={opt.value} onClick={() => setCampaignSortBy(opt.value)}
+                          className={cn('px-3 py-1.5 text-[11px] font-semibold transition-colors', campaignSortBy === opt.value ? 'bg-primary text-black shadow-[0_0_10px_rgba(85,245,47,0.28)]' : 'text-muted-foreground hover:text-foreground')}>
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                    {campaignsLoading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+                  </div>
                 </div>
-                {campaignsLoading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+                <CampaignPerformanceTable campaigns={googleCampaigns} loading={campaignsLoading} period={period} dateFrom={customDateFrom} dateTo={customDateTo} />
               </div>
-            </div>
-            <CampaignPerformanceTable campaigns={googleCampaigns} loading={campaignsLoading} period={period} dateFrom={customDateFrom} dateTo={customDateTo} />
-          </div>
-          </DashboardGridItem>
-          <DashboardGridItem id="google-keywords" prefs={dashboardPrefs}>
-          <div className="space-y-4">
-            <TopKeywordsTable keywords={keywords} loading={keywordsLoading} />
-          </div>
-          </DashboardGridItem>
-          <DashboardGridItem id="google-audience" prefs={dashboardPrefs}>
-            <AudiencePlatformBlock title="Google Ads" description="Recortes por gênero e dispositivo." color="#EA4335" colors={GOOGLE_AUDIENCE_COLORS} data={audience.google} keys={['gender', 'device']} chartVariant={dashboardPrefs.googleAudienceChart} />
-          </DashboardGridItem>
-        </div>
+            ),
+            'google-keywords': (
+              <div className="space-y-4 h-full overflow-auto">
+                <TopKeywordsTable keywords={keywords} loading={keywordsLoading} />
+              </div>
+            ),
+            'google-audience': <AudiencePlatformBlock title="Google Ads" description="Recortes por gênero e dispositivo." color="#EA4335" colors={GOOGLE_AUDIENCE_COLORS} data={audience.google} keys={['gender', 'device']} chartVariant={dashboardPrefs.googleAudienceChart} />,
+          };
+          const visibleLayout = googlePanelsLayout.filter(l => dashboardPrefs.cards[l.i as DashboardCardId]?.visible !== false);
+          return (
+            <RglGrid
+              layout={visibleLayout}
+              cols={RGL_COLS}
+              rowHeight={RGL_ROW_H}
+              margin={RGL_MARGIN}
+              containerPadding={[0, 0]}
+              isDraggable
+              isResizable
+              draggableHandle=".drag-handle"
+              compactType="vertical"
+              onLayoutChange={nl => setGooglePanelsLayout(prev => prev.map(item => { const u = nl.find(l => l.i === item.i); return u ? { ...item, x: u.x, y: u.y, w: u.w, h: u.h } : item; }))}
+            >
+              {visibleLayout.map(l => (
+                <div key={l.i} className="h-full">
+                  <RglCardShell id={l.i as DashboardCardId} prefs={dashboardPrefs}>
+                    {googlePanelCards[l.i]}
+                  </RglCardShell>
+                </div>
+              ))}
+            </RglGrid>
+          );
+        })()}
       </section>
 
       {/* 4. PÁGINAS SOCIAIS */}
