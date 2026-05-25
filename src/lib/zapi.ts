@@ -17,6 +17,20 @@ export interface SendResult {
   error?: string;
 }
 
+function parseZapiResponse(res: Response, body: Record<string, unknown>): SendResult {
+  if (!res.ok) {
+    return { ok: false, error: (body.message as string) ?? (body.error as string) ?? `HTTP ${res.status}` };
+  }
+  // Z-API returns HTTP 200 even for failures — check the body
+  if (body.value === 'false' || body.value === false) {
+    return { ok: false, error: (body.message as string) ?? (body.status as string) ?? 'Z-API recusou o envio' };
+  }
+  if (body.error) {
+    return { ok: false, error: String(body.error) };
+  }
+  return { ok: true };
+}
+
 export async function sendText(
   client: ZApiClient,
   phone: string,
@@ -31,9 +45,8 @@ export async function sendText(
         body: JSON.stringify({ phone, message }),
       },
     );
-    if (res.ok) return { ok: true };
-    const body = await res.json().catch(() => ({}));
-    return { ok: false, error: (body as { message?: string }).message ?? `HTTP ${res.status}` };
+    const body = await res.json().catch(() => ({})) as Record<string, unknown>;
+    return parseZapiResponse(res, body);
   } catch (err) {
     return { ok: false, error: String(err) };
   }
@@ -54,9 +67,8 @@ export async function sendImage(
         body: JSON.stringify({ phone, image, caption }),
       },
     );
-    if (res.ok) return { ok: true };
-    const body = await res.json().catch(() => ({}));
-    return { ok: false, error: (body as { message?: string }).message ?? `HTTP ${res.status}` };
+    const body = await res.json().catch(() => ({})) as Record<string, unknown>;
+    return parseZapiResponse(res, body);
   } catch (err) {
     return { ok: false, error: String(err) };
   }

@@ -57,6 +57,14 @@ export async function POST(req: NextRequest) {
       ADD COLUMN IF NOT EXISTS next_tick_at TIMESTAMPTZ
     `);
 
+    // Transition pending campaigns whose start time has arrived
+    await pool.query(`
+      UPDATE public.zapi_campaigns
+         SET status = 'running', next_tick_at = NULL
+       WHERE status = 'pending'
+         AND starts_at <= NOW()
+    `);
+
     const { rows: campaigns } = await pool.query<{
       id: string;
       status: string;

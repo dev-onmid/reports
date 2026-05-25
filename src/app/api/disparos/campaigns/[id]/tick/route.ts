@@ -48,8 +48,17 @@ export async function POST(
       return Response.json({ error: 'Campanha não encontrada' }, { status: 404 });
     }
 
+    // Auto-start pending campaigns whose scheduled time has arrived
+    if (campaign.status === 'pending' && new Date(campaign.starts_at) <= new Date()) {
+      await pool.query(
+        `UPDATE public.zapi_campaigns SET status = 'running', next_tick_at = NULL WHERE id = $1`,
+        [id],
+      );
+      campaign.status = 'running';
+    }
+
     if (campaign.status !== 'running') {
-      return Response.json({ status: campaign.status, done: true });
+      return Response.json({ status: campaign.status, done: campaign.status === 'done' || campaign.status === 'cancelled' });
     }
 
     // Check end time
