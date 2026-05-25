@@ -414,7 +414,7 @@ function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: 
         <div className="mt-3 h-8 w-32 animate-pulse rounded-[var(--radius)] bg-muted/30" />
       ) : (
         <>
-          <p className="mt-3 font-heading font-normal text-3xl leading-none text-foreground">{fmt(value)}</p>
+          <p className="mt-3 font-heading font-normal text-xl leading-none text-foreground">{fmt(value)}</p>
           {change !== null ? (
             <p className={cn('mt-1.5 flex items-center gap-0.5 text-xs font-semibold', isPositive ? 'text-emerald-500' : 'text-red-500')}>
               {change >= 0 ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
@@ -639,7 +639,7 @@ function CompactInfoCard({
       <div className="flex items-start justify-between gap-3 mt-1">
         <div>
           <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{title}</p>
-          <p className="mt-2 font-heading text-2xl leading-none text-foreground">{typeof value === 'number' ? value.toLocaleString('pt-BR') : value}</p>
+          <p className="mt-2 font-heading text-xl leading-none text-foreground">{typeof value === 'number' ? value.toLocaleString('pt-BR') : value}</p>
         </div>
         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius)] border border-border" style={{ color }}>
           <Icon className="h-[18px] w-[18px]" />
@@ -703,7 +703,7 @@ function ChannelMetricBox({
   return (
     <div className="h-full rounded-xl border border-border bg-background/70 p-9">
       <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
-      <p className="mt-6 font-heading font-normal text-4xl leading-none" style={{ color }}>
+      <p className="mt-4 font-heading font-normal text-2xl leading-none" style={{ color }}>
         {formatted}
       </p>
     </div>
@@ -735,7 +735,7 @@ function RealizedOnlyCard({
     <div className="relative h-full overflow-hidden rounded-xl border border-border bg-card/95 p-10 shadow-[0_22px_80px_rgba(0,0,0,0.18)]">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_75%_30%,rgba(139,53,255,0.14),transparent_42%)]" />
       <div className="relative">
-      <p className="font-bold text-lg text-foreground">{title}</p>
+      <p className="font-bold text-sm text-foreground">{title}</p>
       <p className="mt-1 text-[11px] text-muted-foreground">{description}</p>
       <div className="mt-10 rounded-lg border border-border bg-background/70 p-10">
         {loading ? (
@@ -746,7 +746,7 @@ function RealizedOnlyCard({
         ) : (
           <>
             <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Realizado</p>
-            <p className="mt-2 font-heading font-normal text-4xl leading-none text-foreground">{formatted}</p>
+            <p className="mt-2 font-heading font-normal text-xl leading-none text-foreground">{formatted}</p>
           </>
         )}
       </div>
@@ -784,7 +784,7 @@ function ChannelCard({
       <div className="relative flex items-start gap-8">
         {mark}
         <div>
-          <h3 className="flex items-center gap-3 font-heading font-normal text-3xl uppercase tracking-wide text-foreground">
+          <h3 className="flex items-center gap-3 font-heading font-normal text-xl uppercase tracking-wide text-foreground">
             <PlatformMarkForText text={title} />
             <span>{title}</span>
           </h3>
@@ -879,7 +879,7 @@ function MetricTile({
       <div className="absolute inset-x-0 top-0 h-1" style={{ backgroundColor: hasProgressPanel ? progressColor : accent, boxShadow: `0 0 24px ${hasProgressPanel ? progressColor : accent}` }} />
       <div className="pointer-events-none absolute inset-0" style={{ background: `linear-gradient(135deg, ${accent}22, transparent 42%), radial-gradient(circle at 85% 18%, ${accent}44, transparent 40%)` }} />
       <div className="relative flex h-full flex-col">
-        <p className="flex items-center gap-2 text-lg font-bold text-foreground">
+        <p className="flex items-center gap-2 text-sm font-bold text-foreground">
           <PlatformMarkForText text={title} />
           <span>{title}</span>
         </p>
@@ -896,18 +896,18 @@ function MetricTile({
             <div className={cn('grid gap-8 text-center', partial !== undefined ? 'sm:grid-cols-3' : 'sm:grid-cols-2')}>
               {meta !== undefined && (
                 <div>
-                  <p className="font-heading font-normal text-2xl leading-none text-foreground">{meta > 0 ? fmt(meta) : 'Sem meta'}</p>
+                  <p className="font-heading font-normal text-[22px] leading-none text-foreground">{meta > 0 ? fmt(meta) : 'Sem meta'}</p>
                   <p className="mt-2 text-sm font-bold text-foreground/60">Meta</p>
                 </div>
               )}
               {partial !== undefined && (
                 <div>
-                  <p className="font-heading font-normal text-2xl leading-none text-foreground">{partial > 0 ? fmt(partial) : '—'}</p>
+                  <p className="font-heading font-normal text-[22px] leading-none text-foreground">{partial > 0 ? fmt(partial) : '—'}</p>
                   <p className="mt-2 text-sm font-bold text-foreground/60">Meta Parcial</p>
                 </div>
               )}
               <div>
-                <p className="font-heading font-normal text-2xl leading-none text-foreground">{fmt(value)}</p>
+                <p className="font-heading font-normal text-[22px] leading-none text-foreground">{fmt(value)}</p>
                 <p className="mt-2 text-sm font-bold text-foreground/60">Realizado</p>
               </div>
             </div>
@@ -930,7 +930,7 @@ function MetricTile({
                     }}
                   />
                   <div className="absolute inset-0 flex items-center justify-center">
-                    <span className="rounded bg-black/70 px-3 py-0.5 text-base font-bold text-white shadow-[0_0_16px_rgba(255,255,255,0.14)]">{progressLabel}</span>
+                    <span className="rounded-[var(--radius)] bg-black/70 px-2 py-0.5 text-xs font-bold text-white">{progressLabel}</span>
                   </div>
                 </div>
               </div>
@@ -940,7 +940,7 @@ function MetricTile({
           <div className="mt-8 flex flex-1 items-center rounded-lg border border-white/15 bg-black/35 p-7">
             <div>
               <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Realizado</p>
-              <p className="mt-3 font-heading font-normal text-4xl leading-none" style={{ color: accent }}>
+              <p className="mt-3 font-heading font-normal text-[22px] leading-none" style={{ color: accent }}>
                 {fmt(value)}
               </p>
             </div>
@@ -3426,7 +3426,7 @@ function FbCard({ data }: { data: FacebookPageData }) {
       </div>
       <div className="relative">
         <p className="text-[10px] font-bold uppercase tracking-widest text-foreground/50 mb-0.5">Curtidas / Seguidores</p>
-        <p className="font-heading text-3xl leading-none font-normal mb-3" style={{ color: FB }}>{numK(data.fans)}</p>
+        <p className="font-heading text-xl leading-none font-normal mb-3" style={{ color: FB }}>{numK(data.fans)}</p>
         <div className="space-y-1.5 border-t border-white/10 pt-2">
           {data.fanAdds > 0 && <SocialMetricRow label="Novas curtidas no período" value={data.fanAdds} />}
           <SocialMetricRow label="Alcance" value={data.reach} />
@@ -3456,7 +3456,7 @@ function IgCard({ data }: { data: InstagramPageData }) {
       </div>
       <div className="relative">
         <p className="text-[10px] font-bold uppercase tracking-widest text-foreground/50 mb-0.5">Seguidores</p>
-        <p className="font-heading text-3xl leading-none font-normal mb-3" style={{ color: IG }}>{numK(data.followers)}</p>
+        <p className="font-heading text-xl leading-none font-normal mb-3" style={{ color: IG }}>{numK(data.followers)}</p>
         <div className="space-y-1.5 border-t border-white/10 pt-2">
           <SocialMetricRow label="Alcance" value={data.reach} />
           <SocialMetricRow label="Impressões" value={data.impressions} />
@@ -4317,7 +4317,7 @@ export default function GeneralDashboard() {
       {selectedIds.size === 0 && clients.length > 0 && (
         <div className="flex flex-col items-center justify-center py-16 gap-8">
           <div className="text-center">
-            <h2 className="font-heading font-normal text-3xl uppercase tracking-wide text-foreground">Escolha um cliente</h2>
+            <h2 className="font-heading font-normal text-xl uppercase tracking-wide text-foreground">Escolha um cliente</h2>
             <p className="mt-2 text-sm text-muted-foreground">Selecione para abrir o dashboard</p>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-w-3xl w-full">
