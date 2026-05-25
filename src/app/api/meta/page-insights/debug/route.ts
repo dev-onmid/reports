@@ -72,43 +72,50 @@ export async function GET(req: NextRequest) {
             .filter(needed => !(permsData.data ?? []).some((p: { permission: string; status: string }) => p.permission === needed && p.status === 'granted')),
         });
 
-        // 5. If pages exist, test a single page insights call
+        // 5. Test each FB metric individually to find which are valid in v21.0
         const firstPage = accountsData.data?.[0];
         if (firstPage) {
           const pageTokenRes = await fetch(
             `https://graph.facebook.com/v21.0/${firstPage.id}?fields=access_token&access_token=${token}`,
           );
-          const pageTokenData = await pageTokenRes.json() as { access_token?: string; error?: { message: string } };
+          const pageTokenData = await pageTokenRes.json() as { access_token?: string };
           const pageToken = pageTokenData.access_token ?? token;
 
-          const insightsRes = await fetch(
-            `https://graph.facebook.com/v21.0/${firstPage.id}/insights` +
-            `?metric=page_fan_adds,page_impressions_unique,page_impressions,page_post_engagements,page_views_total` +
-            `&period=day&since=1748736000&until=1748822400&access_token=${pageToken}`,
-          );
-          const insightsData = await insightsRes.json();
-          log.push({
-            step: `4_page_insights_test_${firstPage.id}`,
-            page_name: firstPage.name,
-            ok: insightsRes.ok,
-            response: insightsData,
-          });
+          // Use recent date range (last 3 days)
+          const until = Math.floor(Date.now() / 1000);
+          const since = until - 3 * 86400;
 
-          // 6. Test Instagram insights if available
-          const igAcc = firstPage.instagram_business_account;
-          if (igAcc?.id) {
-            const igInsRes = await fetch(
-              `https://graph.facebook.com/v21.0/${igAcc.id}/insights` +
-              `?metric=reach,impressions,profile_views,website_clicks` +
-              `&period=day&since=1748736000&until=1748822400&access_token=${token}`,
+          const fbMetrics = [
+            'page_fan_adds', 'page_fan_adds_unique',
+            'page_impressions', 'page_impressions_unique',
+            'page_post_engagements', 'page_engaged_users',
+            'page_views_total', 'page_daily_scheduled_published_posts',
+          ];
+          const fbResults: Record<string, unknown> = {};
+          await Promise.all(fbMetrics.map(async (metric) => {
+            const r = await fetch(
+              `https://graph.facebook.com/v21.0/${firstPage.id}/insights` +
+              `?metric=${metric}&period=day&since=${since}&until=${until}&access_token=${pageToken}`,
             );
-            const igInsData = await igInsRes.json();
-            log.push({
-              step: `5_ig_insights_test_${igAcc.id}`,
-              ig_username: igAcc.username,
-              ok: igInsRes.ok,
-              response: igInsData,
-            });
+            const d = await r.json() as { data?: { values: { value: number }[] }[]; error?: { message: string } };
+            fbResults[metric] = r.ok ? `OK — ${d.data?.[0]?.values?.slice(-1)[0]?.value ?? 0}` : `ERR: ${d.error?.message}`;
+          }));
+          log.push({ step: `4_fb_metrics_test_${firstPage.id}`, page_name: firstPage.name, results: fbResults });
+
+          // 6. Test each IG metric individually
+          const igAcc = firstPage.instagram_business_account ?? accountsData.data?.find((p: { instagram_business_account?: { id: string } }) => p.instagram_business_account)?.instagram_business_account;
+          if (igAcc?.id) {
+            const igMetrics = ['reach', 'impressions', 'profile_views', 'website_clicks', 'accounts_engaged', 'total_interactions'];
+            const igResults: Record<string, unknown> = {};
+            await Promise.all(igMetrics.map(async (metric) => {
+              const r = await fetch(
+                `https://graph.facebook.com/v21.0/${igAcc.id}/insights` +
+                `?metric=${metric}&period=day&since=${since}&until=${until}&access_token=${pageToken}`,
+              );
+              const d = await r.json() as { data?: { values: { value: number }[] }[]; error?: { message: string } };
+              igResults[metric] = r.ok ? `OK — ${d.data?.[0]?.values?.slice(-1)[0]?.value ?? 0}` : `ERR: ${d.error?.message}`;
+            }));
+            log.push({ step: `5_ig_metrics_test_${igAcc.id}`, ig_username: igAcc.username, results: igResults });
           }
         }
       } catch (e) {
