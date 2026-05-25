@@ -13,6 +13,7 @@ import {
   Pause, CircleDot, Pencil, Settings2, Users, Copy,
   Bell, DollarSign, Tag, TrendingUp, Calendar, BarChart3, Zap, Target, Briefcase,
   Wallet, MousePointerClick, CreditCard, PiggyBank, Clock, Info, Lightbulb, UserPlus, CheckCircle2,
+  Eye, Heart, Monitor, ExternalLink,
 } from 'lucide-react';
 import { getAuthSession } from '@/lib/auth-store';
 import type { AiInsight } from '@/app/api/ai/insights/route';
@@ -2428,7 +2429,9 @@ type AudienceChartVariant = 'donut' | 'list';
 type DashboardCardId =
   | 'general-revenue' | 'general-leads' | 'general-roi' | 'general-cpl' | 'general-spend' | 'general-ctr' | 'general-funnel'
   | 'meta-reach' | 'meta-impressions' | 'meta-leads' | 'meta-cpl' | 'meta-spend' | 'meta-ctr' | 'meta-total-spend' | 'meta-balance' | 'meta-active-campaigns' | 'meta-adsets' | 'meta-creatives' | 'meta-clicks' | 'meta-campaigns' | 'meta-audience' | 'meta-creative-preview'
-  | 'google-impressions' | 'google-conversions' | 'google-cpa' | 'google-spend' | 'google-ctr' | 'google-total-spend' | 'google-balance' | 'google-active-campaigns' | 'google-keyword-count' | 'google-campaigns' | 'google-keywords' | 'google-audience';
+  | 'google-impressions' | 'google-conversions' | 'google-cpa' | 'google-spend' | 'google-ctr' | 'google-total-spend' | 'google-balance' | 'google-active-campaigns' | 'google-keyword-count' | 'google-campaigns' | 'google-keywords' | 'google-audience'
+  | 'social-fb-fans' | 'social-fb-fan-adds' | 'social-fb-reach' | 'social-fb-impressions' | 'social-fb-engagements' | 'social-fb-views'
+  | 'social-ig-followers' | 'social-ig-reach' | 'social-ig-impressions' | 'social-ig-profile-views' | 'social-ig-website-clicks';
 
 type DashboardCardConfig = {
   visible: boolean;
@@ -2479,12 +2482,24 @@ const CARD_LABELS: Record<DashboardCardId, string> = {
   'google-campaigns': 'Google: Tabela de campanhas',
   'google-keywords': 'Google: Top palavras-chave',
   'google-audience': 'Google: Recortes por gênero/dispositivo',
+  'social-fb-fans': 'FB: Curtidas/Seguidores',
+  'social-fb-fan-adds': 'FB: Novas curtidas',
+  'social-fb-reach': 'FB: Alcance',
+  'social-fb-impressions': 'FB: Impressões',
+  'social-fb-engagements': 'FB: Engajamentos',
+  'social-fb-views': 'FB: Visitas à página',
+  'social-ig-followers': 'IG: Seguidores',
+  'social-ig-reach': 'IG: Alcance',
+  'social-ig-impressions': 'IG: Impressões',
+  'social-ig-profile-views': 'IG: Visitas ao perfil',
+  'social-ig-website-clicks': 'IG: Cliques no site',
 };
 
 const CARD_GROUPS: Array<{ title: string; ids: DashboardCardId[] }> = [
   { title: 'Métricas Gerais', ids: ['general-revenue', 'general-leads', 'general-roi', 'general-cpl', 'general-spend', 'general-ctr', 'general-funnel'] },
   { title: 'Meta Ads', ids: ['meta-reach', 'meta-impressions', 'meta-leads', 'meta-cpl', 'meta-spend', 'meta-ctr', 'meta-total-spend', 'meta-balance', 'meta-active-campaigns', 'meta-adsets', 'meta-creatives', 'meta-clicks', 'meta-campaigns', 'meta-audience', 'meta-creative-preview'] },
   { title: 'Google Ads', ids: ['google-impressions', 'google-conversions', 'google-cpa', 'google-spend', 'google-ctr', 'google-total-spend', 'google-balance', 'google-active-campaigns', 'google-keyword-count', 'google-campaigns', 'google-keywords', 'google-audience'] },
+  { title: 'Páginas & Perfis Sociais', ids: ['social-fb-fans', 'social-fb-fan-adds', 'social-fb-reach', 'social-fb-impressions', 'social-fb-engagements', 'social-fb-views', 'social-ig-followers', 'social-ig-reach', 'social-ig-impressions', 'social-ig-profile-views', 'social-ig-website-clicks'] },
 ];
 
 const META_KPI_IDS: DashboardCardId[] = [
@@ -2505,7 +2520,7 @@ const CHANNEL_GROUPS: Array<{ id: string; label: string; color: string; ids: Das
 ];
 
 // ── React Grid Layout ────────────────────────────────────────────────────────
-const LS_RGL_LAYOUT = 'dashboard_rgl_layout_v2';
+const LS_RGL_LAYOUT = 'dashboard_rgl_layout_v3';
 function lsClientSuffix(ids: Set<string>): string {
   if (ids.size === 1) return `__${[...ids][0]}`;
   return '';
@@ -2548,7 +2563,21 @@ const DEFAULT_GENERAL_LAYOUT: RglLayout[] = [
   { i: 'general-cpl',     x: 4, y: 4, w: 4, h: 2, minW: 2, minH: 1 },
   { i: 'general-ctr',     x: 0, y: 6, w: 4, h: 2, minW: 2, minH: 1 },
   { i: 'general-spend',   x: 4, y: 6, w: 4, h: 2, minW: 2, minH: 1 },
-  { i: 'general-funnel',  x: 0, y: 8, w: 12, h: 5,  minW: 8, minH: 4  },
+  { i: 'general-funnel',  x: 0, y: 8, w: 8,  h: 5,  minW: 3, minH: 4  },
+];
+
+const DEFAULT_SOCIAL_KPI_LAYOUT: RglLayout[] = [
+  { i: 'social-fb-fans',           x: 0, y: 0, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'social-fb-fan-adds',       x: 3, y: 0, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'social-fb-reach',          x: 6, y: 0, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'social-fb-impressions',    x: 9, y: 0, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'social-fb-engagements',    x: 0, y: 2, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'social-fb-views',          x: 3, y: 2, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'social-ig-followers',      x: 0, y: 4, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'social-ig-reach',          x: 3, y: 4, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'social-ig-impressions',    x: 6, y: 4, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'social-ig-profile-views',  x: 9, y: 4, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'social-ig-website-clicks', x: 0, y: 6, w: 3, h: 2, minW: 2, minH: 1 },
 ];
 
 const DEFAULT_META_PANELS_LAYOUT: RglLayout[] = [
@@ -3532,6 +3561,7 @@ export default function GeneralDashboard() {
   const [generalLayout, setGeneralLayout] = useState<RglLayout[]>(DEFAULT_GENERAL_LAYOUT);
   const [metaPanelsLayout, setMetaPanelsLayout] = useState<RglLayout[]>(DEFAULT_META_PANELS_LAYOUT);
   const [googlePanelsLayout, setGooglePanelsLayout] = useState<RglLayout[]>(DEFAULT_GOOGLE_PANELS_LAYOUT);
+  const [socialKpiLayout, setSocialKpiLayout] = useState<RglLayout[]>(DEFAULT_SOCIAL_KPI_LAYOUT);
   const [pageInsights, setPageInsights] = useState<PageInsightsResult[]>([]);
   const [pageInsightsLoading, setPageInsightsLoading] = useState(false);
   // Stable string key derived from selectedIds — used as useEffect dependency
@@ -3628,6 +3658,7 @@ export default function GeneralDashboard() {
     setGeneralLayout(DEFAULT_GENERAL_LAYOUT);
     setMetaPanelsLayout(DEFAULT_META_PANELS_LAYOUT);
     setGooglePanelsLayout(DEFAULT_GOOGLE_PANELS_LAYOUT);
+    setSocialKpiLayout(DEFAULT_SOCIAL_KPI_LAYOUT);
 
     try {
       const order = localStorage.getItem(LS_ORDER + suffix);
@@ -3649,7 +3680,7 @@ export default function GeneralDashboard() {
     try {
       const stored = localStorage.getItem(LS_RGL_LAYOUT + suffix);
       if (stored) {
-        const parsed = JSON.parse(stored) as { meta?: RglLayout[]; google?: RglLayout[]; general?: RglLayout[]; metaPanels?: RglLayout[]; googlePanels?: RglLayout[] };
+        const parsed = JSON.parse(stored) as { meta?: RglLayout[]; google?: RglLayout[]; general?: RglLayout[]; metaPanels?: RglLayout[]; googlePanels?: RglLayout[]; social?: RglLayout[] };
         const merge = (setter: React.Dispatch<React.SetStateAction<RglLayout[]>>, saved?: RglLayout[]) => {
           if (saved) setter(prev => prev.map(item => {
             if (item.i === 'general-funnel') return item;
@@ -3662,6 +3693,7 @@ export default function GeneralDashboard() {
         merge(setGeneralLayout, parsed.general);
         merge(setMetaPanelsLayout, parsed.metaPanels);
         merge(setGooglePanelsLayout, parsed.googlePanels);
+        merge(setSocialKpiLayout, parsed.social);
       }
     } catch {}
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -3683,9 +3715,9 @@ export default function GeneralDashboard() {
   useEffect(() => {
     if (!currentLsSuffixRef.current && selectedIds.size === 0) return;
     try {
-      localStorage.setItem(LS_RGL_LAYOUT + currentLsSuffixRef.current, JSON.stringify({ meta: metaKpiLayout, google: googleKpiLayout, general: generalLayout, metaPanels: metaPanelsLayout, googlePanels: googlePanelsLayout }));
+      localStorage.setItem(LS_RGL_LAYOUT + currentLsSuffixRef.current, JSON.stringify({ meta: metaKpiLayout, google: googleKpiLayout, general: generalLayout, metaPanels: metaPanelsLayout, googlePanels: googlePanelsLayout, social: socialKpiLayout }));
     } catch {}
-  }, [metaKpiLayout, googleKpiLayout, generalLayout, metaPanelsLayout, googlePanelsLayout]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [metaKpiLayout, googleKpiLayout, generalLayout, metaPanelsLayout, googlePanelsLayout, socialKpiLayout]); // eslint-disable-line react-hooks/exhaustive-deps
   // customizerOpen available to all users
 
   // Initialize: pre-select from ?client=ID param, otherwise start empty (force client picker)
@@ -4763,39 +4795,97 @@ export default function GeneralDashboard() {
       </section>
 
       {/* 4. PÁGINAS SOCIAIS */}
-      {(pageInsightsLoading || pageInsights.some(p => p.facebook ?? p.instagram)) && (
-        <section className="relative overflow-hidden rounded-2xl border border-[#E1306C]/50 bg-[#0D060C] p-5 shadow-[0_0_56px_rgba(225,48,108,0.18)]">
-          <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(225,48,108,0.14),transparent_42%),radial-gradient(circle_at_92%_0%,rgba(131,58,180,0.22),transparent_36%)]" />
-          <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,#E1306C,#833AB4,transparent)]" />
-          <div className="relative mb-5 flex items-center gap-3">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#E1306C]/60 bg-[#E1306C]/20 shadow-[0_0_24px_rgba(225,48,108,0.50)]">
-              <svg viewBox="0 0 24 24" className="h-[18px] w-[18px] fill-[#E1306C]"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z" /></svg>
-            </span>
-            <div>
-              <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">Páginas &amp; Perfis Sociais</h2>
-              <p className="text-[11px] text-foreground/60">Métricas orgânicas — Facebook Page + Instagram Business</p>
-            </div>
-            {pageInsightsLoading && <RefreshCw className="ml-2 h-4 w-4 animate-spin text-muted-foreground" />}
-          </div>
+      {(pageInsightsLoading || pageInsights.some(p => p.facebook ?? p.instagram)) && (() => {
+        const allFbData = pageInsights.filter(p => p.facebook).map(p => p.facebook!);
+        const allIgData = pageInsights.filter(p => p.instagram).map(p => p.instagram!);
+        const hasFb = allFbData.length > 0;
+        const hasIg = allIgData.length > 0;
+        const fbFans    = allFbData.reduce((s, d) => s + d.fans, 0);
+        const fbAdds    = allFbData.reduce((s, d) => s + d.fanAdds, 0);
+        const fbReach   = allFbData.reduce((s, d) => s + d.reach, 0);
+        const fbImpr    = allFbData.reduce((s, d) => s + d.impressions, 0);
+        const fbEngage  = allFbData.reduce((s, d) => s + d.engagements, 0);
+        const fbViews   = allFbData.reduce((s, d) => s + d.pageViews, 0);
+        const igFollow  = allIgData.reduce((s, d) => s + d.followers, 0);
+        const igReach   = allIgData.reduce((s, d) => s + d.reach, 0);
+        const igImpr    = allIgData.reduce((s, d) => s + d.impressions, 0);
+        const igPViews  = allIgData.reduce((s, d) => s + d.profileViews, 0);
+        const igClicks  = allIgData.reduce((s, d) => s + d.websiteClicks, 0);
 
-          <div className="relative grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {pageInsightsLoading
-              ? Array.from({ length: 2 }).map((_, i) => (
-                  <div key={i} className="h-52 animate-pulse rounded-xl border border-white/10 bg-white/5" />
-                ))
-              : pageInsights.map(({ clientId, clientName, facebook, instagram }) => (
-                  <SocialPageCards
-                    key={clientId}
-                    clientName={clientName}
-                    showClientName={pageInsights.length > 1}
-                    facebook={facebook}
-                    instagram={instagram}
-                  />
-                ))
-            }
-          </div>
-        </section>
-      )}
+        const socialCards: Record<string, ReactNode> = {
+          'social-fb-fans':           <KpiCard title="Curtidas / Seg." value={fbFans}   format="number" icon={Users}         iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} />,
+          'social-fb-fan-adds':       <KpiCard title="Novas curtidas"  value={fbAdds}   format="number" icon={UserPlus}      iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} />,
+          'social-fb-reach':          <KpiCard title="Alcance FB"      value={fbReach}  format="number" icon={Eye}           iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} />,
+          'social-fb-impressions':    <KpiCard title="Impressões FB"   value={fbImpr}   format="number" icon={BarChart3}     iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} />,
+          'social-fb-engagements':    <KpiCard title="Engajamentos"    value={fbEngage} format="number" icon={Heart}         iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} />,
+          'social-fb-views':          <KpiCard title="Visitas à página" value={fbViews} format="number" icon={Monitor}       iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} />,
+          'social-ig-followers':      <KpiCard title="Seguidores IG"   value={igFollow} format="number" icon={Users}         iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} />,
+          'social-ig-reach':          <KpiCard title="Alcance IG"      value={igReach}  format="number" icon={Eye}           iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} />,
+          'social-ig-impressions':    <KpiCard title="Impressões IG"   value={igImpr}   format="number" icon={BarChart3}     iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} />,
+          'social-ig-profile-views':  <KpiCard title="Visitas ao perfil" value={igPViews} format="number" icon={Monitor}    iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} />,
+          'social-ig-website-clicks': <KpiCard title="Cliques no site" value={igClicks} format="number" icon={ExternalLink} iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} />,
+        };
+
+        const visibleSocialLayout = socialKpiLayout.filter(l => {
+          if (l.i.startsWith('social-fb-') && !hasFb && !pageInsightsLoading) return false;
+          if (l.i.startsWith('social-ig-') && !hasIg && !pageInsightsLoading) return false;
+          return dashboardPrefs.cards[l.i as DashboardCardId]?.visible !== false;
+        });
+
+        return (
+          <section className="relative overflow-hidden rounded-[var(--radius)] border border-border bg-card p-5">
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5" style={{ background: 'linear-gradient(90deg,#1877F2,#E1306C)' }} />
+            <div className="pointer-events-none absolute top-0 left-0 h-3 w-3 bg-[#1877F2]" />
+            <div className="relative mb-4 flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-2">
+                <svg viewBox="0 0 24 24" className="h-4 w-4 fill-[#E1306C]"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z" /></svg>
+                <h2 className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Páginas &amp; Perfis Sociais</h2>
+                {pageInsightsLoading && <RefreshCw className="h-3 w-3 animate-spin text-muted-foreground" />}
+              </div>
+              {/* Account chips */}
+              <div className="flex flex-wrap gap-2">
+                {pageInsights.map(({ clientId, facebook, instagram }) => (
+                  <span key={clientId} className="flex items-center gap-2">
+                    {facebook && (
+                      <span className="flex items-center gap-1 rounded-[var(--radius)] border border-[#1877F2]/30 bg-[#1877F2]/10 px-2 py-0.5 text-[10px] font-semibold text-[#1877F2]">
+                        {facebook.picture && <img src={facebook.picture} alt="" className="h-4 w-4 rounded-full" />}
+                        {facebook.pageName}
+                      </span>
+                    )}
+                    {instagram && (
+                      <span className="flex items-center gap-1 rounded-[var(--radius)] border border-[#E1306C]/30 bg-[#E1306C]/10 px-2 py-0.5 text-[10px] font-semibold text-[#E1306C]">
+                        {instagram.picture && <img src={instagram.picture} alt="" className="h-4 w-4 rounded-full" />}
+                        @{instagram.username}
+                      </span>
+                    )}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <RglGrid
+              layout={visibleSocialLayout}
+              cols={RGL_COLS}
+              rowHeight={RGL_ROW_H}
+              margin={RGL_MARGIN}
+              containerPadding={[0, 0]}
+              isDraggable
+              isResizable
+              draggableHandle=".drag-handle"
+              compactType="vertical"
+              onLayoutChange={nl => setSocialKpiLayout(prev => prev.map(item => { const u = nl.find(l => l.i === item.i); return u ? { ...item, x: u.x, y: u.y, w: u.w, h: u.h } : item; }))}
+            >
+              {visibleSocialLayout.map(l => (
+                <div key={l.i} className="h-full">
+                  <RglCardShell id={l.i as DashboardCardId} prefs={dashboardPrefs}>
+                    {socialCards[l.i]}
+                  </RglCardShell>
+                </div>
+              ))}
+            </RglGrid>
+          </section>
+        );
+      })()}
 
       {/* Resumo por cliente */}
       {selectedClients.length > 1 && (
