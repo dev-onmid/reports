@@ -133,6 +133,8 @@ async function fetchIgPage(
   }
 }
 
+type ConnRow = { id: string; app_id: string; access_token: string; token_expiry: string | null };
+
 export async function GET(req: NextRequest) {
   const clientIds = (req.nextUrl.searchParams.get('clientIds') ?? '')
     .split(',').filter(Boolean);
@@ -144,6 +146,7 @@ export async function GET(req: NextRequest) {
 
   const pool = makeServerPool();
   try {
+    // Get clients linked via meta_ads ad accounts
     const { rows: links } = await pool.query(
       `SELECT DISTINCT ON (cal.client_id)
               cal.client_id, cal.connection_id, c.name AS client_name
@@ -155,19 +158,41 @@ export async function GET(req: NextRequest) {
       [clientIds],
     );
 
-    if (!links.length) return Response.json([]);
+    // Build per-client map: clientId → { connId, name }
+    const clientConnMap = new Map<string, { connId: string; name: string }>(
+      links.map((l: { client_id: string; connection_id: string; client_name: string }) =>
+        [l.client_id, { connId: l.connection_id, name: l.client_name }]),
+    );
 
-    const connIds = [...new Set(links.map((l: { connection_id: string }) => l.connection_id))];
+    // Clients without a meta_ads link — try fallback to any active connection
+    const unlinkedIds = clientIds.filter(id => !clientConnMap.has(id));
+    let fallbackConn: ConnRow | null = null;
+    if (unlinkedIds.length > 0) {
+      const { rows: fallbackRows } = await pool.query(
+        `SELECT * FROM public.meta_connections WHERE status = 'connected' ORDER BY connected_at DESC LIMIT 1`,
+      );
+      fallbackConn = fallbackRows[0] ?? null;
+      if (fallbackConn) {
+        const { rows: clientRows } = await pool.query(
+          `SELECT id, name FROM public.clients WHERE id = ANY($1)`,
+          [unlinkedIds],
+        );
+        const nameMap = new Map(clientRows.map((r: { id: string; name: string }) => [r.id, r.name]));
+        for (const id of unlinkedIds) {
+          clientConnMap.set(id, { connId: fallbackConn.id, name: nameMap.get(id) ?? id });
+        }
+      }
+    }
+
+    if (clientConnMap.size === 0) return Response.json([]);
+
+    // Load all unique connections
+    const connIds = [...new Set([...clientConnMap.values()].map(e => e.connId))];
     const { rows: conns } = await pool.query(
       `SELECT * FROM public.meta_connections WHERE id = ANY($1) AND status = 'connected'`,
       [connIds],
     );
-
-    const connMap = new Map(conns.map((c: { id: string; app_id: string; access_token: string; token_expiry: string | null }) => [c.id, c]));
-    const clientConnMap = new Map(
-      links.map((l: { client_id: string; connection_id: string; client_name: string }) =>
-        [l.client_id, { connId: l.connection_id, name: l.client_name }]),
-    );
+    const connMap = new Map<string, ConnRow>(conns.map((c: ConnRow) => [c.id, c]));
 
     const results = await Promise.all(
       clientIds.map(async (clientId): Promise<PageInsightsResult> => {
