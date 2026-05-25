@@ -394,7 +394,7 @@ function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: 
   const goalGood = goalProgress !== null && goalProgress >= 100;
   return (
     <div
-      className="relative h-full overflow-hidden rounded-2xl border bg-[#070B14] p-5 shadow-[0_22px_70px_rgba(0,0,0,0.38)]"
+      className="relative flex flex-col h-full overflow-hidden rounded-2xl border bg-[#070B14] p-5 shadow-[0_22px_70px_rgba(0,0,0,0.38)]"
       style={{ borderColor: `${iconBg}66`, boxShadow: `0 0 34px ${iconBg}24, 0 22px 70px rgba(0,0,0,0.38)` }}
     >
       <div className="pointer-events-none absolute inset-0" style={{ background: `linear-gradient(135deg, ${iconBg}24, transparent 42%), radial-gradient(circle at 86% 14%, ${iconBg}44, transparent 42%)` }} />
@@ -434,7 +434,7 @@ function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: 
             <p className="mt-1 text-[11px] text-muted-foreground/70">— vs meta</p>
           )}
           {chart === 'sparkline' && (
-            <div className="mt-3 -mx-1">
+            <div className="mt-3 -mx-1 flex-1 min-h-0">
               <MiniTrendLine
                 color={change === null ? iconColor : isPositive ? '#34d399' : '#f87171'}
                 trend={change === null ? 'up' : change > 0 ? 'up' : change < 0 ? 'down' : 'flat'}
@@ -674,7 +674,7 @@ function MiniTrendLine({ color, trend = 'up', values }: { color: string; trend?:
   const path = realPath ?? (trend === 'down' ? TREND_DOWN : trend === 'flat' ? TREND_FLAT : TREND_UP);
   const closedPath = `${path} L320 92 L0 92 Z`;
   return (
-    <svg viewBox="0 0 320 92" className="h-20 w-full overflow-visible" aria-hidden="true">
+    <svg viewBox="0 0 320 92" className="h-full min-h-[48px] w-full overflow-visible" aria-hidden="true">
       <defs>
         <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
           <stop offset="0%" stopColor={color} stopOpacity="0.35" />
@@ -2315,9 +2315,9 @@ function AudiencePieCard({
         <p className="mt-0.5 text-[11px] text-foreground/55">{total.toLocaleString('pt-BR')} pessoas/imp.</p>
       </div>
       {variant === 'donut' && (
-        <div className="mt-3 flex justify-center">
+        <div className="mt-3 flex flex-1 min-h-0 justify-center items-center overflow-hidden">
           {slices.length > 0 ? (
-          <svg viewBox="0 0 240 240" className="h-44 w-44 overflow-visible" role="img" aria-label={`Gráfico de ${title}`}>
+          <svg viewBox="0 0 240 240" className="h-full w-auto max-w-full overflow-visible" role="img" aria-label={`Gráfico de ${title}`}>
             {slices.map((slice) => (
               <path
                 key={slice.label}
@@ -2342,13 +2342,13 @@ function AudiencePieCard({
             <text x="120" y="134" textAnchor="middle" className="fill-foreground text-[18px] font-bold">{total.toLocaleString('pt-BR')}</text>
           </svg>
           ) : (
-            <div className="relative h-44 w-44 rounded-full bg-muted/20">
+            <div className="relative h-full w-auto max-w-full aspect-square rounded-full bg-muted/20">
               <div className="absolute inset-8 rounded-full bg-card" />
             </div>
           )}
         </div>
       )}
-      <div className="mt-4 grid flex-1 content-start gap-1.5 sm:grid-cols-2">
+      <div className="mt-4 grid content-start gap-1.5 sm:grid-cols-2">
         {slices.length > 0 ? slices.slice(0, 7).map((item) => (
           <button
             key={item.label}
