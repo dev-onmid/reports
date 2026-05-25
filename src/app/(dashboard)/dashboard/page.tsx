@@ -582,7 +582,7 @@ function CrmResultCard({
   ];
 
   return (
-    <div className="relative overflow-hidden rounded-xl border bg-[#06100D] p-5" style={{ borderColor: `${accent}80`, boxShadow: `0 0 42px ${accent}22, inset 0 0 36px ${accent}0a` }}>
+    <div className="relative h-full overflow-hidden rounded-xl border bg-[#06100D] p-5" style={{ borderColor: `${accent}80`, boxShadow: `0 0 42px ${accent}22, inset 0 0 36px ${accent}0a` }}>
       <div className="pointer-events-none absolute inset-0" style={{ background: `linear-gradient(135deg, ${accent}18, transparent 46%)` }} />
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px" style={{ background: `linear-gradient(90deg, transparent, ${accent}, transparent)` }} />
       <div className="relative mb-4 flex items-center gap-2">
@@ -2427,7 +2427,7 @@ type DashboardWidgetSize = 'sm' | 'md' | 'lg';
 type DashboardCardChart = 'sparkline' | 'none';
 type AudienceChartVariant = 'donut' | 'list';
 type DashboardCardId =
-  | 'general-revenue' | 'general-leads' | 'general-roi' | 'general-cpl' | 'general-spend' | 'general-ctr' | 'general-funnel'
+  | 'general-revenue' | 'general-leads' | 'general-roi' | 'general-cpl' | 'general-spend' | 'general-ctr' | 'general-funnel' | 'general-crm'
   | 'meta-reach' | 'meta-impressions' | 'meta-leads' | 'meta-cpl' | 'meta-spend' | 'meta-ctr' | 'meta-total-spend' | 'meta-balance' | 'meta-active-campaigns' | 'meta-adsets' | 'meta-creatives' | 'meta-clicks' | 'meta-campaigns' | 'meta-audience' | 'meta-creative-preview'
   | 'google-impressions' | 'google-conversions' | 'google-cpa' | 'google-spend' | 'google-ctr' | 'google-total-spend' | 'google-balance' | 'google-active-campaigns' | 'google-keyword-count' | 'google-campaigns' | 'google-keywords' | 'google-audience'
   | 'social-fb-fans' | 'social-fb-fan-adds' | 'social-fb-reach' | 'social-fb-impressions' | 'social-fb-engagements' | 'social-fb-views'
@@ -2455,6 +2455,7 @@ const CARD_LABELS: Record<DashboardCardId, string> = {
   'general-spend': 'Valor gasto',
   'general-ctr': 'CTR geral',
   'general-funnel': 'Funil de vendas',
+  'general-crm': 'Resultado CRM',
   'meta-reach': 'Meta: Alcance',
   'meta-impressions': 'Meta: Impressões',
   'meta-leads': 'Meta: Leads',
@@ -2496,7 +2497,7 @@ const CARD_LABELS: Record<DashboardCardId, string> = {
 };
 
 const CARD_GROUPS: Array<{ title: string; ids: DashboardCardId[] }> = [
-  { title: 'Métricas Gerais', ids: ['general-revenue', 'general-leads', 'general-roi', 'general-cpl', 'general-spend', 'general-ctr', 'general-funnel'] },
+  { title: 'Métricas Gerais', ids: ['general-revenue', 'general-leads', 'general-roi', 'general-cpl', 'general-spend', 'general-ctr', 'general-funnel', 'general-crm'] },
   { title: 'Meta Ads', ids: ['meta-reach', 'meta-impressions', 'meta-leads', 'meta-cpl', 'meta-spend', 'meta-ctr', 'meta-total-spend', 'meta-balance', 'meta-active-campaigns', 'meta-adsets', 'meta-creatives', 'meta-clicks', 'meta-campaigns', 'meta-audience', 'meta-creative-preview'] },
   { title: 'Google Ads', ids: ['google-impressions', 'google-conversions', 'google-cpa', 'google-spend', 'google-ctr', 'google-total-spend', 'google-balance', 'google-active-campaigns', 'google-keyword-count', 'google-campaigns', 'google-keywords', 'google-audience'] },
   { title: 'Páginas & Perfis Sociais', ids: ['social-fb-fans', 'social-fb-fan-adds', 'social-fb-reach', 'social-fb-impressions', 'social-fb-engagements', 'social-fb-views', 'social-ig-followers', 'social-ig-reach', 'social-ig-impressions', 'social-ig-profile-views', 'social-ig-website-clicks'] },
@@ -2514,13 +2515,14 @@ const GOOGLE_KPI_IDS: DashboardCardId[] = [
 ];
 
 const CHANNEL_GROUPS: Array<{ id: string; label: string; color: string; ids: DashboardCardId[] }> = [
-  { id: 'geral',  label: 'Métricas Gerais', color: '#55F52F', ids: CARD_GROUPS[0].ids },
-  { id: 'meta',   label: 'Meta Ads',         color: '#0668E1', ids: CARD_GROUPS[1].ids },
-  { id: 'google', label: 'Google Ads',        color: '#7B2CFF', ids: CARD_GROUPS[2].ids },
+  { id: 'geral',   label: 'Métricas Gerais',          color: '#55F52F', ids: CARD_GROUPS[0].ids },
+  { id: 'meta',    label: 'Meta Ads',                  color: '#0668E1', ids: CARD_GROUPS[1].ids },
+  { id: 'google',  label: 'Google Ads',                color: '#7B2CFF', ids: CARD_GROUPS[2].ids },
+  { id: 'social',  label: 'Páginas & Perfis Sociais',  color: '#F59E0B', ids: CARD_GROUPS[3].ids },
 ];
 
 // ── React Grid Layout ────────────────────────────────────────────────────────
-const LS_RGL_LAYOUT = 'dashboard_rgl_layout_v3';
+const LS_RGL_LAYOUT = 'dashboard_rgl_layout_v4';
 function lsClientSuffix(ids: Set<string>): string {
   if (ids.size === 1) return `__${[...ids][0]}`;
   return '';
@@ -2564,6 +2566,7 @@ const DEFAULT_GENERAL_LAYOUT: RglLayout[] = [
   { i: 'general-ctr',     x: 0, y: 6, w: 4, h: 2, minW: 2, minH: 1 },
   { i: 'general-spend',   x: 4, y: 6, w: 4, h: 2, minW: 2, minH: 1 },
   { i: 'general-funnel',  x: 0, y: 8, w: 8,  h: 5,  minW: 3, minH: 4  },
+  { i: 'general-crm',    x: 0, y: 13, w: 12, h: 2, minW: 4, minH: 2  },
 ];
 
 const DEFAULT_SOCIAL_KPI_LAYOUT: RglLayout[] = [
@@ -2596,6 +2599,7 @@ const DEFAULT_CARD_OVERRIDES: Partial<Record<DashboardCardId, Partial<DashboardC
   'general-revenue': { size: 'lg', chart: 'none' },
   'general-leads': { size: 'lg', chart: 'none' },
   'general-funnel': { size: 'lg', chart: 'none' },
+  'general-crm': { size: 'lg', chart: 'none' },
   'meta-campaigns': { size: 'lg', chart: 'none' },
   'meta-audience': { size: 'lg', chart: 'none' },
   'meta-creative-preview': { size: 'lg', chart: 'none' },
@@ -2662,7 +2666,7 @@ function DashboardGridItem({
   const { editMode, hideCard, toggleChart } = useContext(DashboardEditCtx);
   const [hiding, setHiding] = useState(false);
   const cfg = prefs.cards[id] ?? DEFAULT_DASHBOARD_PREFS.cards[id];
-  const isPanel = id.includes('campaigns') || id.includes('audience') || id.includes('preview') || id.includes('keywords') || id === 'general-funnel';
+  const isPanel = id.includes('campaigns') || id.includes('audience') || id.includes('preview') || id.includes('keywords') || id === 'general-funnel' || id === 'general-crm';
   if (!cfg.visible) return null;
 
   function handleHide() {
@@ -2716,7 +2720,7 @@ function SortableGridItem({
   const [hiding, setHiding] = useState(false);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
   const cfg = prefs.cards[id] ?? DEFAULT_DASHBOARD_PREFS.cards[id];
-  const isPanel = id.includes('campaigns') || id.includes('audience') || id.includes('preview') || id.includes('keywords');
+  const isPanel = id.includes('campaigns') || id.includes('audience') || id.includes('preview') || id.includes('keywords') || id === 'general-funnel' || id === 'general-crm';
   if (!cfg.visible) return null;
 
   function handleHide() {
@@ -2783,7 +2787,7 @@ function RglCardShell({
   const { editMode, hideCard, toggleChart } = useContext(DashboardEditCtx);
   const [hiding, setHiding] = useState(false);
   const cfg = prefs.cards[id] ?? DEFAULT_DASHBOARD_PREFS.cards[id];
-  const isPanel = id.includes('campaigns') || id.includes('audience') || id.includes('preview') || id.includes('keywords');
+  const isPanel = id.includes('campaigns') || id.includes('audience') || id.includes('preview') || id.includes('keywords') || id === 'general-funnel' || id === 'general-crm';
 
   function handleHide() {
     setHiding(true);
@@ -2968,7 +2972,7 @@ function MetricConfigPanel({
                   <div className="divide-y divide-border border-t border-border">
                     {orderedIds.map(id => {
                       const cfg = prefs.cards[id];
-                      const isPanel = id.includes('campaigns') || id.includes('audience') || id.includes('preview') || id.includes('keywords') || id === 'general-funnel';
+                      const isPanel = id.includes('campaigns') || id.includes('audience') || id.includes('preview') || id.includes('keywords') || id === 'general-funnel' || id === 'general-crm';
                       return (
                         <div key={id} className={cn('flex items-center gap-2 px-3 py-2 transition-colors', !cfg.visible && 'opacity-40')}>
                           <input
@@ -4130,7 +4134,6 @@ export default function GeneralDashboard() {
   const avgCrmTicket = crmSales > 0 ? revenue / crmSales : 0;
   const plannedSalesPartial = autoPartial(plannedSalesTotal, period);
   const effectiveSalesGoal = plannedSalesPartial > 0 ? plannedSalesPartial : plannedSalesTotal;
-  const hasCrmData = metricsRevenue > 0 || crmSales > 0 || crmLeads > 0;
 
   const revenuePartial = autoPartial(plannedRevenue, period);
   const leadsPartial = autoPartial(leadsGoal, period);
@@ -4488,6 +4491,15 @@ export default function GeneralDashboard() {
             'general-cpl':     <KpiCard title="CPL Geral" value={totalCostPerLead} prevValue={prevCpl > 0 ? prevCpl : undefined} goalValue={cplGoal > 0 ? cplGoal : undefined} format="currency" icon={Tag} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} inverseGoal inverseChange chart={dashboardPrefs.cards['general-cpl'].chart} series={seriesOrPacing(cplSeries, totalCostPerLead)} />,
             'general-ctr':     <KpiCard title="CTR Geral" value={avgCtr} format="percent" icon={MousePointerClick} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} chart={dashboardPrefs.cards['general-ctr'].chart} series={seriesOrPacing(avgCtrSeries, avgCtr)} />,
             'general-spend':   <KpiCard title="Valor Gasto" value={totalSpend} format="currency" icon={CreditCard} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} chart={dashboardPrefs.cards['general-spend'].chart} series={seriesOrPacing(totalSpendSeries, totalSpend)} />,
+            'general-crm': <CrmResultCard
+              revenue={revenue}
+              revenueGoal={plannedRevenue}
+              revenuePartial={effectiveRevenueGoal}
+              sales={crmSales}
+              salesGoal={plannedSalesTotal}
+              salesPartial={effectiveSalesGoal}
+              ticket={avgCrmTicket}
+            />,
             'general-funnel':
             (() => {
               const crmValues = [
@@ -4545,19 +4557,6 @@ export default function GeneralDashboard() {
           );
         })()}
 
-        {hasCrmData && (
-          <div className="relative mt-4">
-            <CrmResultCard
-              revenue={revenue}
-              revenueGoal={plannedRevenue}
-              revenuePartial={effectiveRevenueGoal}
-              sales={crmSales}
-              salesGoal={plannedSalesTotal}
-              salesPartial={effectiveSalesGoal}
-              ticket={avgCrmTicket}
-            />
-          </div>
-        )}
       </section>
 
       {/* 2. META ADS */}
