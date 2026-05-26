@@ -3531,9 +3531,11 @@ function IgCard({ data }: { data: InstagramPageData }) {
         <p className="font-heading text-xl leading-none font-normal mb-3" style={{ color: IG }}>{numK(data.followers)}</p>
         <div className="space-y-1.5 border-t border-white/10 pt-2">
           <SocialMetricRow label="Alcance" value={data.reach} />
-          <SocialMetricRow label="Impressões" value={data.impressions} />
+          <SocialMetricRow label="Visualizações" value={data.views} />
           <SocialMetricRow label="Visitas ao perfil" value={data.profileViews} />
           {data.websiteClicks > 0 && <SocialMetricRow label="Cliques no site" value={data.websiteClicks} />}
+          {data.accountsEngaged > 0 && <SocialMetricRow label="Contas engajadas" value={data.accountsEngaged} />}
+          {data.totalInteractions > 0 && <SocialMetricRow label="Interações" value={data.totalInteractions} />}
         </div>
       </div>
     </div>
