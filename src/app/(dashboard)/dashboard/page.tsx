@@ -1689,7 +1689,7 @@ function TopKeywordsTable({ keywords, loading }: { keywords: GoogleKeyword[]; lo
     { key: 'impressions', label: 'Impressões' },
     { key: 'clicks', label: 'Cliques' },
     { key: 'ctr', label: 'CTR' },
-    { key: 'spend', label: 'Gasto' },
+    { key: 'spend', label: 'Investido' },
     { key: 'conversions', label: 'Conv.' },
     { key: 'cpl', label: 'CPL' },
   ];
@@ -1787,7 +1787,7 @@ function AdCreativePreview({ ad, x, y }: { ad: MetaAdWithMetrics; x: number; y: 
           <p className="text-[11px] font-semibold">{ad.name}</p>
         )}
         <div className="flex gap-3 pt-0.5 text-[10px] border-t border-border">
-          <span className="text-muted-foreground">Gasto <strong className="text-foreground">{formatCurrencyBRL(ad.spend)}</strong></span>
+          <span className="text-muted-foreground">Investido <strong className="text-foreground">{formatCurrencyBRL(ad.spend)}</strong></span>
           {ad.leads > 0 && <span className="text-muted-foreground">CPL <strong className="text-foreground">{formatCurrencyBRL(ad.cpl)}</strong></span>}
           {ad.impressions > 0 && <span className="text-muted-foreground">CTR <strong className="text-foreground">{ad.ctr.toFixed(1)}%</strong></span>}
         </div>
@@ -1977,7 +1977,7 @@ function CampaignPerformanceTable({
     return (
       <div className="rounded-xl border border-white/15 bg-black/35 px-5 py-7">
         <p className="text-sm font-semibold text-foreground">Nenhuma campanha ativa no período.</p>
-        <p className="mt-1 text-xs text-muted-foreground">Quando houver gasto nas contas vinculadas, as campanhas aparecem aqui com métricas e ações rápidas.</p>
+        <p className="mt-1 text-xs text-muted-foreground">Quando houver investido nas contas vinculadas, as campanhas aparecem aqui com métricas e ações rápidas.</p>
       </div>
     );
   }
@@ -2265,7 +2265,7 @@ function CampaignPerformanceTable({
                 <th className="px-4 py-3">Nome</th>
                 <th className="px-4 py-3 text-center">Plataforma</th>
                 <th className="px-4 py-3 text-right">Verba/dia</th>
-                <th className="px-4 py-3 text-right">Gasto</th>
+                <th className="px-4 py-3 text-right">Investido</th>
                 <th className="px-4 py-3 text-right">Resultados</th>
                 <th className="px-4 py-3 text-right">CPL</th>
                 <th className="px-4 py-3 text-right">Impressões</th>
@@ -2454,7 +2454,7 @@ const CARD_LABELS: Record<DashboardCardId, string> = {
   'general-leads': 'Leads total / parcial / meta',
   'general-roi': 'ROI',
   'general-cpl': 'CPL geral',
-  'general-spend': 'Valor gasto',
+  'general-spend': 'Valor investido',
   'general-ctr': 'CTR geral',
   'general-funnel': 'Funil de vendas',
   'general-crm': 'Resultado CRM',
@@ -2462,9 +2462,9 @@ const CARD_LABELS: Record<DashboardCardId, string> = {
   'meta-impressions': 'Meta: Impressões',
   'meta-leads': 'Meta: Leads',
   'meta-cpl': 'Meta: CPL',
-  'meta-spend': 'Meta: Valor gasto',
+  'meta-spend': 'Meta: Valor investido',
   'meta-ctr': 'Meta: CTR',
-  'meta-total-spend': 'Meta: Total gasto',
+  'meta-total-spend': 'Meta: Total investido',
   'meta-balance': 'Meta: Saldo da conta',
   'meta-active-campaigns': 'Meta: Campanhas ativas',
   'meta-adsets': 'Meta: Conjuntos',
@@ -2476,9 +2476,9 @@ const CARD_LABELS: Record<DashboardCardId, string> = {
   'google-impressions': 'Google: Impressões',
   'google-conversions': 'Google: Conversões',
   'google-cpa': 'Google: Custo por conversão',
-  'google-spend': 'Google: Valor gasto',
+  'google-spend': 'Google: Valor investido',
   'google-ctr': 'Google: CTR',
-  'google-total-spend': 'Google: Total gasto',
+  'google-total-spend': 'Google: Total investido',
   'google-balance': 'Google: Saldo da conta',
   'google-active-campaigns': 'Google: Campanhas ativas',
   'google-keyword-count': 'Google: Contador top palavras-chave',
@@ -4551,7 +4551,7 @@ export default function GeneralDashboard() {
             'general-roi':     <KpiCard title="ROI" value={roi} prevValue={prevRoi > 0 ? prevRoi : undefined} goalValue={roiGoal > 0 ? roiGoal : undefined} format="times" icon={TrendingUp} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} chart={dashboardPrefs.cards['general-roi'].chart} series={seriesOrPacing(roiSeries, roi)} />,
             'general-cpl':     <KpiCard title="CPL Geral" value={totalCostPerLead} prevValue={prevCpl > 0 ? prevCpl : undefined} goalValue={cplGoal > 0 ? cplGoal : undefined} format="currency" icon={Tag} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} inverseGoal inverseChange chart={dashboardPrefs.cards['general-cpl'].chart} series={seriesOrPacing(cplSeries, totalCostPerLead)} />,
             'general-ctr':     <KpiCard title="CTR Geral" value={avgCtr} format="percent" icon={MousePointerClick} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} chart={dashboardPrefs.cards['general-ctr'].chart} series={seriesOrPacing(avgCtrSeries, avgCtr)} />,
-            'general-spend':   <KpiCard title="Valor Gasto" value={totalSpend} format="currency" icon={CreditCard} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} chart={dashboardPrefs.cards['general-spend'].chart} series={seriesOrPacing(totalSpendSeries, totalSpend)} />,
+            'general-spend':   <KpiCard title="Valor Investido" value={totalSpend} format="currency" icon={CreditCard} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} chart={dashboardPrefs.cards['general-spend'].chart} series={seriesOrPacing(totalSpendSeries, totalSpend)} />,
             'general-crm': <CrmResultCard
               revenue={revenue}
               revenueGoal={plannedRevenue}
@@ -4648,9 +4648,9 @@ export default function GeneralDashboard() {
             'meta-impressions':      <KpiCard title="Impressões Meta" value={metaImpressions} format="number" icon={BarChart3} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} chart={dashboardPrefs.cards['meta-impressions'].chart} series={seriesOrPacing(metaImpressionsSeries, metaImpressions)} />,
             'meta-leads':            <KpiCard title="Leads Meta Ads" value={metaLeads} prevValue={prevMetaLeads > 0 ? prevMetaLeads : undefined} format="number" icon={Target} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['meta-leads'].chart} series={seriesOrPacing(metaLeadsSeries, metaLeads)} />,
             'meta-cpl':              <KpiCard title="CPL Meta Ads" value={avgCpl} format="currency" icon={Zap} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} inverseGoal inverseChange logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['meta-cpl'].chart} series={seriesOrPacing(metaCplSeries, avgCpl)} />,
-            'meta-spend':            <KpiCard title="Valor Gasto Meta" value={metaSpend} format="currency" icon={Wallet} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['meta-spend'].chart} series={seriesOrPacing(metaSpendSeries, metaSpend)} />,
+            'meta-spend':            <KpiCard title="Valor Investido Meta" value={metaSpend} format="currency" icon={Wallet} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['meta-spend'].chart} series={seriesOrPacing(metaSpendSeries, metaSpend)} />,
             'meta-ctr':              <KpiCard title="CTR Meta Ads" value={metaCtr} format="percent" icon={MousePointerClick} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} chart={dashboardPrefs.cards['meta-ctr'].chart} series={seriesOrPacing(metaCtrSeries, metaCtr)} />,
-            'meta-total-spend':      <KpiCard title="Total Gasto Meta" value={metaCampaignSpend || metaSpend} format="currency" icon={CreditCard} iconColor="#0668E1" iconBg="#0668E1" loading={campaignsLoading || metricsLoading} chart={dashboardPrefs.cards['meta-total-spend'].chart} series={seriesOrPacing(metaSpendSeries, metaCampaignSpend || metaSpend)} />,
+            'meta-total-spend':      <KpiCard title="Total Investido Meta" value={metaCampaignSpend || metaSpend} format="currency" icon={CreditCard} iconColor="#0668E1" iconBg="#0668E1" loading={campaignsLoading || metricsLoading} chart={dashboardPrefs.cards['meta-total-spend'].chart} series={seriesOrPacing(metaSpendSeries, metaCampaignSpend || metaSpend)} />,
             'meta-balance':          <KpiCard title="Saldo da Conta Meta" value={metaBalance} format="currency" icon={PiggyBank} iconColor="#0668E1" iconBg="#0668E1" loading={balancesLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['meta-balance'].chart} series={pacingSeries(metaBalance, Math.max(2, selectedDateKeys.length || 2))} />,
             'meta-active-campaigns': <CompactInfoCard title="Campanhas Ativas" value={activeMetaCampaigns} icon={Briefcase} color="#0668E1" />,
             'meta-adsets':           <CompactInfoCard title="Conjuntos" value="Ver na tabela" icon={LayoutDashboard} color="#0668E1" helper="Expanda uma campanha para visualizar conjuntos e anúncios." />,
@@ -4805,9 +4805,9 @@ export default function GeneralDashboard() {
             'google-impressions':      <KpiCard title="Impressões Google" value={googleImpressions} format="number" icon={BarChart3} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} chart={dashboardPrefs.cards['google-impressions'].chart} series={seriesOrPacing(googleImpressionsSeries, googleImpressions)} />,
             'google-conversions':      <KpiCard title="Conversões Google" value={googleConv} prevValue={prevGoogleConv > 0 ? prevGoogleConv : undefined} format="number" icon={BarChart3} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-conversions'].chart} series={seriesOrPacing(googleConversionsSeries, googleConv)} />,
             'google-cpa':              <KpiCard title="Custo por Conversão" value={avgCpa} format="currency" icon={Briefcase} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} inverseGoal inverseChange logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-cpa'].chart} series={seriesOrPacing(googleCpaSeries, avgCpa)} />,
-            'google-spend':            <KpiCard title="Valor Gasto Google" value={googleCost} format="currency" icon={CreditCard} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-spend'].chart} series={seriesOrPacing(googleCostSeries, googleCost)} />,
+            'google-spend':            <KpiCard title="Valor Investido Google" value={googleCost} format="currency" icon={CreditCard} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-spend'].chart} series={seriesOrPacing(googleCostSeries, googleCost)} />,
             'google-ctr':              <KpiCard title="CTR Google Ads" value={googleCtrValue} format="percent" icon={MousePointerClick} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} chart={dashboardPrefs.cards['google-ctr'].chart} series={seriesOrPacing(googleCtrSeries, googleCtrValue)} />,
-            'google-total-spend':      <KpiCard title="Total Gasto Google" value={googleCampaignSpend || googleCost} format="currency" icon={Wallet} iconColor="#EA4335" iconBg="#EA4335" loading={campaignsLoading || metricsLoading} chart={dashboardPrefs.cards['google-total-spend'].chart} series={seriesOrPacing(googleCostSeries, googleCampaignSpend || googleCost)} />,
+            'google-total-spend':      <KpiCard title="Total Investido Google" value={googleCampaignSpend || googleCost} format="currency" icon={Wallet} iconColor="#EA4335" iconBg="#EA4335" loading={campaignsLoading || metricsLoading} chart={dashboardPrefs.cards['google-total-spend'].chart} series={seriesOrPacing(googleCostSeries, googleCampaignSpend || googleCost)} />,
             'google-balance':          <KpiCard title="Saldo da Conta Google" value={googleBalance} format="currency" icon={Wallet} iconColor="#EA4335" iconBg="#EA4335" loading={balancesLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-balance'].chart} series={pacingSeries(googleBalance, Math.max(2, selectedDateKeys.length || 2))} />,
             'google-active-campaigns': <CompactInfoCard title="Campanhas Ativas" value={activeGoogleCampaigns} icon={Briefcase} color="#EA4335" />,
             'google-keyword-count':    <CompactInfoCard title="Top Palavras-chave" value={keywords.length} icon={Search} color="#EA4335" helper="Lista ordenada abaixo." />,
