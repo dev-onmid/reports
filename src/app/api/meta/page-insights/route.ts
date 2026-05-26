@@ -132,10 +132,11 @@ async function fetchIgPage(
     const untilRaw = Math.floor(new Date(to + 'T23:59:59Z').getTime() / 1000);
     const until = Math.min(untilRaw, Math.floor(Date.now() / 1000));
 
-    // IG account-level metrics (/{ig-user-id}/insights) v21.0:
-    //   period=day (sum of daily values): reach, impressions, profile_views, website_clicks
-    //   period=total_over_range + metric_type=total_value: accounts_engaged, total_interactions, likes, saves
-    // NOTE: 'views' is a media-level metric, not valid for account insights → use 'impressions'
+    // IG account-level metrics (/{ig-user-id}/insights) v21.0 — confirmed via debug:
+    //   reach       → period=day, NO metric_type
+    //   all others  → period=day + metric_type=total_value
+    //   (total_over_range is incompatible with all these metrics for this account type;
+    //    impressions is not in the valid metric list — views is the correct one)
     const [
       profileRes,
       reach, views, profileViews, websiteClicks,
@@ -143,13 +144,13 @@ async function fetchIgPage(
     ] = await Promise.all([
       fetch(`https://graph.facebook.com/v21.0/${ig.id}?fields=followers_count&access_token=${pageToken}`),
       fetchOneMetric(ig.id, 'reach',              'day', since, until, pageToken),
-      fetchOneMetric(ig.id, 'impressions',        'day', since, until, pageToken),
-      fetchOneMetric(ig.id, 'profile_views',      'day', since, until, pageToken),
-      fetchOneMetric(ig.id, 'website_clicks',     'day', since, until, pageToken),
-      fetchOneMetric(ig.id, 'accounts_engaged',   'total_over_range', since, until, pageToken, 'total_value'),
-      fetchOneMetric(ig.id, 'total_interactions', 'total_over_range', since, until, pageToken, 'total_value'),
-      fetchOneMetric(ig.id, 'likes',              'total_over_range', since, until, pageToken, 'total_value'),
-      fetchOneMetric(ig.id, 'saves',              'total_over_range', since, until, pageToken, 'total_value'),
+      fetchOneMetric(ig.id, 'views',              'day', since, until, pageToken, 'total_value'),
+      fetchOneMetric(ig.id, 'profile_views',      'day', since, until, pageToken, 'total_value'),
+      fetchOneMetric(ig.id, 'website_clicks',     'day', since, until, pageToken, 'total_value'),
+      fetchOneMetric(ig.id, 'accounts_engaged',   'day', since, until, pageToken, 'total_value'),
+      fetchOneMetric(ig.id, 'total_interactions', 'day', since, until, pageToken, 'total_value'),
+      fetchOneMetric(ig.id, 'likes',              'day', since, until, pageToken, 'total_value'),
+      fetchOneMetric(ig.id, 'saves',              'day', since, until, pageToken, 'total_value'),
     ]);
 
     const profileData = profileRes.ok ? await profileRes.json() as { followers_count?: number } : {};
