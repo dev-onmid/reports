@@ -88,8 +88,10 @@ async function fetchFbPage(
   to: string,
 ): Promise<FacebookPageData | null> {
   try {
-    const since = Math.floor(new Date(from).getTime() / 1000);
-    const until = Math.floor(new Date(to + 'T23:59:59').getTime() / 1000);
+    const since = Math.floor(new Date(from + 'T00:00:00Z').getTime() / 1000);
+    // Cap until at now to avoid future timestamps (Meta rejects them)
+    const untilRaw = Math.floor(new Date(to + 'T23:59:59Z').getTime() / 1000);
+    const until = Math.min(untilRaw, Math.floor(Date.now() / 1000));
 
     // Each metric in its own request — a deprecated metric won't zero out the others.
     // page_post_engagements was deprecated in v18+; page_engaged_users is the replacement.
@@ -125,8 +127,10 @@ async function fetchIgPage(
   to: string,
 ): Promise<InstagramPageData | null> {
   try {
-    const since = Math.floor(new Date(from).getTime() / 1000);
-    const until = Math.floor(new Date(to + 'T23:59:59').getTime() / 1000);
+    const since = Math.floor(new Date(from + 'T00:00:00Z').getTime() / 1000);
+    // Cap until at now to avoid future timestamps (Meta rejects them for insights)
+    const untilRaw = Math.floor(new Date(to + 'T23:59:59Z').getTime() / 1000);
+    const until = Math.min(untilRaw, Math.floor(Date.now() / 1000));
 
     // Periods confirmed from debug error messages (v21.0):
     // reach → period=day, no metric_type (total_over_range explicitly incompatible)

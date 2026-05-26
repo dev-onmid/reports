@@ -4037,7 +4037,7 @@ export default function GeneralDashboard() {
     });
     fetch(`/api/meta/page-insights?${params}`)
       .then(r => r.ok ? r.json() as Promise<PageInsightsResult[]> : [])
-      .then(data => { if (!cancelled) setPageInsights(data); })
+      .then(data => { console.log('[page-insights] raw response', data); if (!cancelled) setPageInsights(data); })
       .catch(() => { if (!cancelled) setPageInsights([]); })
       .finally(() => { if (!cancelled) setPageInsightsLoading(false); });
     return () => { cancelled = true; };
