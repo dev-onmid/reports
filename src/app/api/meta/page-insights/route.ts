@@ -132,20 +132,20 @@ async function fetchIgPage(
     const untilRaw = Math.floor(new Date(to + 'T23:59:59Z').getTime() / 1000);
     const until = Math.min(untilRaw, Math.floor(Date.now() / 1000));
 
-    // Periods confirmed from debug error messages (v21.0):
-    // reach → period=day, no metric_type (total_over_range explicitly incompatible)
-    // All others → period=total_over_range + metric_type=total_value
-    //   (debug: "should be specified with parameter metric_type=total_value" with total_over_range)
+    // IG account-level metrics (/{ig-user-id}/insights) v21.0:
+    //   period=day (sum of daily values): reach, impressions, profile_views, website_clicks
+    //   period=total_over_range + metric_type=total_value: accounts_engaged, total_interactions, likes, saves
+    // NOTE: 'views' is a media-level metric, not valid for account insights → use 'impressions'
     const [
       profileRes,
       reach, views, profileViews, websiteClicks,
       accountsEngaged, totalInteractions, likes, saves,
     ] = await Promise.all([
       fetch(`https://graph.facebook.com/v21.0/${ig.id}?fields=followers_count&access_token=${pageToken}`),
-      fetchOneMetric(ig.id, 'reach',              'day',              since, until, pageToken),
-      fetchOneMetric(ig.id, 'views',              'total_over_range', since, until, pageToken, 'total_value'),
-      fetchOneMetric(ig.id, 'profile_views',      'total_over_range', since, until, pageToken, 'total_value'),
-      fetchOneMetric(ig.id, 'website_clicks',     'total_over_range', since, until, pageToken, 'total_value'),
+      fetchOneMetric(ig.id, 'reach',              'day', since, until, pageToken),
+      fetchOneMetric(ig.id, 'impressions',        'day', since, until, pageToken),
+      fetchOneMetric(ig.id, 'profile_views',      'day', since, until, pageToken),
+      fetchOneMetric(ig.id, 'website_clicks',     'day', since, until, pageToken),
       fetchOneMetric(ig.id, 'accounts_engaged',   'total_over_range', since, until, pageToken, 'total_value'),
       fetchOneMetric(ig.id, 'total_interactions', 'total_over_range', since, until, pageToken, 'total_value'),
       fetchOneMetric(ig.id, 'likes',              'total_over_range', since, until, pageToken, 'total_value'),
