@@ -51,6 +51,27 @@ function extractMetric(m: { values?: { value: number }[]; total_value?: { value:
   return sumValues(m.values ?? []);
 }
 
+// Fetches a single metric; returns 0 on any error (deprecation, permission, etc.)
+async function fetchOneMetric(
+  id: string,
+  metric: string,
+  period: string,
+  since: number,
+  until: number,
+  token: string,
+): Promise<number> {
+  try {
+    const res = await fetch(
+      `https://graph.facebook.com/v21.0/${id}/insights` +
+      `?metric=${metric}&period=${period}&since=${since}&until=${until}&access_token=${token}`,
+    );
+    if (!res.ok) return 0;
+    const d = await res.json() as { data?: { values?: { value: number }[]; total_value?: { value: number } }[] };
+    if (!d.data?.[0]) return 0;
+    return extractMetric(d.data[0]);
+  } catch { return 0; }
+}
+
 async function fetchFbPage(
   pageId: string,
   pageToken: string,
@@ -63,41 +84,27 @@ async function fetchFbPage(
     const since = Math.floor(new Date(from).getTime() / 1000);
     const until = Math.floor(new Date(to + 'T23:59:59').getTime() / 1000);
 
-    // Request metrics in two groups — some metrics were deprecated in v17+ and cause the
-    // entire batch to fail with "(#100) The value must be a valid insights metric".
-    // We fetch fan_adds_unique separately so a deprecation doesn't zero out everything.
-    const [fanRes, insRes, fanAddsRes] = await Promise.all([
+    // Each metric in its own request — a deprecated metric won't zero out the others.
+    // page_post_engagements was deprecated in v18+; page_engaged_users is the replacement.
+    const [fanRes, reach, impressions, engagements, pageViews, fanAdds] = await Promise.all([
       fetch(`https://graph.facebook.com/v21.0/${pageId}?fields=fan_count&access_token=${pageToken}`),
-      fetch(
-        `https://graph.facebook.com/v21.0/${pageId}/insights` +
-        `?metric=page_impressions_unique,page_impressions,page_post_engagements,page_views_total` +
-        `&period=day&since=${since}&until=${until}&access_token=${pageToken}`,
-      ),
-      fetch(
-        `https://graph.facebook.com/v21.0/${pageId}/insights` +
-        `?metric=page_fan_adds_unique&period=day&since=${since}&until=${until}&access_token=${pageToken}`,
-      ),
+      fetchOneMetric(pageId, 'page_impressions_unique', 'day', since, until, pageToken),
+      fetchOneMetric(pageId, 'page_impressions',        'day', since, until, pageToken),
+      fetchOneMetric(pageId, 'page_engaged_users',      'day', since, until, pageToken),
+      fetchOneMetric(pageId, 'page_views_total',        'day', since, until, pageToken),
+      fetchOneMetric(pageId, 'page_fan_adds_unique',    'day', since, until, pageToken),
     ]);
 
     const fanData = fanRes.ok ? await fanRes.json() as { fan_count?: number } : {};
-    const metricMap: Record<string, number> = {};
-    if (insRes.ok) {
-      const insData = await insRes.json() as { data?: { name: string; values?: { value: number }[]; total_value?: { value: number } }[]; error?: unknown };
-      for (const m of insData.data ?? []) metricMap[m.name] = extractMetric(m);
-    }
-    if (fanAddsRes.ok) {
-      const fanAddsData = await fanAddsRes.json() as { data?: { name: string; values?: { value: number }[]; total_value?: { value: number } }[] };
-      for (const m of fanAddsData.data ?? []) metricMap[m.name] = extractMetric(m);
-    }
 
     return {
       pageId, pageName, picture,
-      fans: (fanData as { fan_count?: number }).fan_count ?? 0,
-      fanAdds: metricMap.page_fan_adds_unique ?? 0,
-      reach: metricMap.page_impressions_unique ?? 0,
-      impressions: metricMap.page_impressions ?? 0,
-      engagements: metricMap.page_post_engagements ?? 0,
-      pageViews: metricMap.page_views_total ?? 0,
+      fans:        fanData.fan_count ?? 0,
+      fanAdds,
+      reach,
+      impressions,
+      engagements,
+      pageViews,
     };
   } catch {
     return null;
@@ -114,42 +121,28 @@ async function fetchIgPage(
     const since = Math.floor(new Date(from).getTime() / 1000);
     const until = Math.floor(new Date(to + 'T23:59:59').getTime() / 1000);
 
-    // IG insights v20+ changed: period=total_over_range returns total_value instead of values[]
-    // Some metrics (profile_views, website_clicks) may only work with period=day, so we try both
-    const [profileRes, insRangeRes, insDayRes] = await Promise.all([
+    // Each metric fetched individually — a deprecated/unsupported metric won't zero out others.
+    // reach/impressions: period=total_over_range (v20+ requirement for IG business accounts).
+    // profile_views/website_clicks: period=day (total_over_range not supported for these).
+    const [profileRes, reach, impressions, profileViews, websiteClicks] = await Promise.all([
       fetch(`https://graph.facebook.com/v21.0/${ig.id}?fields=followers_count&access_token=${pageToken}`),
-      fetch(
-        `https://graph.facebook.com/v21.0/${ig.id}/insights` +
-        `?metric=reach,impressions` +
-        `&period=total_over_range&since=${since}&until=${until}&access_token=${pageToken}`,
-      ),
-      fetch(
-        `https://graph.facebook.com/v21.0/${ig.id}/insights` +
-        `?metric=profile_views,website_clicks` +
-        `&period=day&since=${since}&until=${until}&access_token=${pageToken}`,
-      ),
+      fetchOneMetric(ig.id, 'reach',           'total_over_range', since, until, pageToken),
+      fetchOneMetric(ig.id, 'impressions',      'total_over_range', since, until, pageToken),
+      fetchOneMetric(ig.id, 'profile_views',    'day',              since, until, pageToken),
+      fetchOneMetric(ig.id, 'website_clicks',   'day',              since, until, pageToken),
     ]);
 
     const profileData = profileRes.ok ? await profileRes.json() as { followers_count?: number } : {};
-    const metricMap: Record<string, number> = {};
-    if (insRangeRes.ok) {
-      const d = await insRangeRes.json() as { data?: { name: string; values?: { value: number }[]; total_value?: { value: number } }[] };
-      for (const m of d.data ?? []) metricMap[m.name] = extractMetric(m);
-    }
-    if (insDayRes.ok) {
-      const d = await insDayRes.json() as { data?: { name: string; values?: { value: number }[]; total_value?: { value: number } }[] };
-      for (const m of d.data ?? []) metricMap[m.name] = extractMetric(m);
-    }
 
     return {
       igUserId: ig.id,
       username: ig.username ? `@${ig.username}` : (ig.name ?? ig.id),
       picture: ig.profile_picture_url ?? null,
       followers: profileData.followers_count ?? 0,
-      reach: metricMap.reach ?? 0,
-      impressions: metricMap.impressions ?? 0,
-      profileViews: metricMap.profile_views ?? 0,
-      websiteClicks: metricMap.website_clicks ?? 0,
+      reach,
+      impressions,
+      profileViews,
+      websiteClicks,
     };
   } catch {
     return null;
