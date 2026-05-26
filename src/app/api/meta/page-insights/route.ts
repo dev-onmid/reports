@@ -128,24 +128,24 @@ async function fetchIgPage(
     const since = Math.floor(new Date(from).getTime() / 1000);
     const until = Math.floor(new Date(to + 'T23:59:59').getTime() / 1000);
 
-    // Confirmed valid periods from debug endpoint errors (v21.0):
-    // reach       → period=day only (total_over_range incompatible)
-    // views, profile_views, website_clicks, accounts_engaged,
-    // total_interactions, likes, saves → need metric_type=total_value + period=day
+    // Periods confirmed from debug error messages (v21.0):
+    // reach → period=day, no metric_type (total_over_range explicitly incompatible)
+    // All others → period=total_over_range + metric_type=total_value
+    //   (debug: "should be specified with parameter metric_type=total_value" with total_over_range)
     const [
       profileRes,
       reach, views, profileViews, websiteClicks,
       accountsEngaged, totalInteractions, likes, saves,
     ] = await Promise.all([
       fetch(`https://graph.facebook.com/v21.0/${ig.id}?fields=followers_count&access_token=${pageToken}`),
-      fetchOneMetric(ig.id, 'reach',              'day', since, until, pageToken),
-      fetchOneMetric(ig.id, 'views',              'day', since, until, pageToken, 'total_value'),
-      fetchOneMetric(ig.id, 'profile_views',      'day', since, until, pageToken, 'total_value'),
-      fetchOneMetric(ig.id, 'website_clicks',     'day', since, until, pageToken, 'total_value'),
-      fetchOneMetric(ig.id, 'accounts_engaged',   'day', since, until, pageToken, 'total_value'),
-      fetchOneMetric(ig.id, 'total_interactions', 'day', since, until, pageToken, 'total_value'),
-      fetchOneMetric(ig.id, 'likes',              'day', since, until, pageToken, 'total_value'),
-      fetchOneMetric(ig.id, 'saves',              'day', since, until, pageToken, 'total_value'),
+      fetchOneMetric(ig.id, 'reach',              'day',              since, until, pageToken),
+      fetchOneMetric(ig.id, 'views',              'total_over_range', since, until, pageToken, 'total_value'),
+      fetchOneMetric(ig.id, 'profile_views',      'total_over_range', since, until, pageToken, 'total_value'),
+      fetchOneMetric(ig.id, 'website_clicks',     'total_over_range', since, until, pageToken, 'total_value'),
+      fetchOneMetric(ig.id, 'accounts_engaged',   'total_over_range', since, until, pageToken, 'total_value'),
+      fetchOneMetric(ig.id, 'total_interactions', 'total_over_range', since, until, pageToken, 'total_value'),
+      fetchOneMetric(ig.id, 'likes',              'total_over_range', since, until, pageToken, 'total_value'),
+      fetchOneMetric(ig.id, 'saves',              'total_over_range', since, until, pageToken, 'total_value'),
     ]);
 
     const profileData = profileRes.ok ? await profileRes.json() as { followers_count?: number } : {};
