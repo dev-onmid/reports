@@ -25,7 +25,7 @@ type ZClient = {
 
 type Campaign = {
   id: string; name: string; client_name: string; client_id: string;
-  message: string; image_url: string | null;
+  message: string; messages?: string | string[] | null; image_url: string | null;
   status: 'pending' | 'running' | 'paused' | 'done' | 'cancelled';
   starts_at: string; ends_at: string | null;
   interval_min: number; interval_max: number;
@@ -267,6 +267,35 @@ function CampaignCard({ campaign, onAction, onRefresh }: {
   const [lastSendError, setLastSendError] = useState<string | null>(null);
   const [sleeping, setSleeping] = useState(false);
   const runningRef = useRef(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  function buildInitialMessages(): string[] {
+    if (campaign.messages) {
+      try {
+        const parsed = typeof campaign.messages === 'string' ? JSON.parse(campaign.messages) : campaign.messages;
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch { /* fall through */ }
+    }
+    return [campaign.message];
+  }
+  const [editMsgs, setEditMsgs] = useState<string[]>(buildInitialMessages);
+  const [editImg, setEditImg] = useState(campaign.image_url ?? '');
+
+  async function saveEdit() {
+    setSaving(true);
+    try {
+      await fetch(`/api/disparos/campaigns/${campaign.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: editMsgs[0], messages: editMsgs, image_url: editImg || null }),
+      });
+      setIsEditing(false);
+      onRefresh();
+    } finally {
+      setSaving(false);
+    }
+  }
   const isRunning = campaign.status === 'running';
 
   useEffect(() => {
@@ -338,7 +367,7 @@ function CampaignCard({ campaign, onAction, onRefresh }: {
       )}
       {tickError && <div className="rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2 text-[11px] text-red-400">{tickError}</div>}
       {lastSendError && !tickError && <div className="rounded-lg bg-orange-500/10 border border-orange-500/20 px-3 py-2 text-[11px] text-orange-400">Último erro Z-API: {lastSendError}</div>}
-      <div className="flex gap-2 pt-1 border-t border-border">
+      <div className="flex gap-2 pt-1 border-t border-border flex-wrap">
         {status === 'running' && (
           <button type="button" onClick={() => onAction(campaign.id, 'pause')} className="flex items-center gap-1 rounded-lg border border-orange-500/30 bg-orange-500/10 px-3 py-1.5 text-[11px] font-semibold text-orange-400 hover:bg-orange-500/20">
             <Pause className="h-3 w-3" />Pausar
@@ -350,11 +379,58 @@ function CampaignCard({ campaign, onAction, onRefresh }: {
           </button>
         )}
         {(status === 'running' || status === 'paused' || status === 'pending') && (
-          <button type="button" onClick={() => onAction(campaign.id, 'cancel')} className="flex items-center gap-1 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-[11px] font-semibold text-red-400 hover:bg-red-500/20">
-            <X className="h-3 w-3" />Cancelar
-          </button>
+          <>
+            <button type="button" onClick={() => setIsEditing(e => !e)} className="flex items-center gap-1 rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-1.5 text-[11px] font-semibold text-blue-400 hover:bg-blue-500/20">
+              <Pencil className="h-3 w-3" />{isEditing ? 'Fechar' : 'Editar'}
+            </button>
+            <button type="button" onClick={() => onAction(campaign.id, 'cancel')} className="flex items-center gap-1 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-[11px] font-semibold text-red-400 hover:bg-red-500/20">
+              <X className="h-3 w-3" />Cancelar
+            </button>
+          </>
         )}
       </div>
+
+      {isEditing && (
+        <div className="mt-3 pt-3 border-t border-border space-y-3">
+          <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Editar campanha</p>
+          {editMsgs.map((msg, i) => (
+            <div key={i} className="space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-muted-foreground">Mensagem {editMsgs.length > 1 ? i + 1 : ''}</span>
+                {editMsgs.length > 1 && (
+                  <button type="button" onClick={() => setEditMsgs(prev => prev.filter((_, j) => j !== i))}
+                    className="text-[10px] text-red-400 hover:text-red-300">remover</button>
+                )}
+              </div>
+              <textarea
+                value={msg}
+                onChange={e => setEditMsgs(prev => prev.map((m, j) => j === i ? e.target.value : m))}
+                rows={3}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs resize-none focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+            </div>
+          ))}
+          <button type="button" onClick={() => setEditMsgs(prev => [...prev, ''])}
+            className="text-[11px] text-primary hover:underline flex items-center gap-1">
+            <Plus className="h-3 w-3" />Adicionar variação
+          </button>
+          <div className="space-y-1">
+            <span className="text-[11px] text-muted-foreground">URL da imagem (opcional)</span>
+            <input type="text" value={editImg} onChange={e => setEditImg(e.target.value)} placeholder="https://..."
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary" />
+          </div>
+          <div className="flex gap-2">
+            <button type="button" onClick={saveEdit} disabled={saving}
+              className="flex items-center gap-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-[11px] font-semibold text-emerald-400 hover:bg-emerald-500/20 disabled:opacity-50">
+              <CheckCircle2 className="h-3 w-3" />{saving ? 'Salvando...' : 'Salvar e continuar'}
+            </button>
+            <button type="button" onClick={() => setIsEditing(false)}
+              className="flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-[11px] text-muted-foreground hover:text-foreground">
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

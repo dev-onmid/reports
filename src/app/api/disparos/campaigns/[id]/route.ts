@@ -26,6 +26,29 @@ export async function GET(
   }
 }
 
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
+  const pool = makeServerPool();
+  try {
+    const body = await request.json() as { message?: string; messages?: string[]; image_url?: string | null };
+    const { message, messages, image_url } = body;
+    await pool.query(
+      `UPDATE public.zapi_campaigns
+          SET message   = COALESCE($1, message),
+              messages  = COALESCE($2, messages),
+              image_url = $3
+        WHERE id = $4`,
+      [message ?? null, messages ? JSON.stringify(messages) : null, image_url ?? null, id],
+    );
+    return Response.json({ ok: true });
+  } finally {
+    await pool.end();
+  }
+}
+
 export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
