@@ -1693,7 +1693,7 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances, onEdit }: {
                                 <td colSpan={6} className="px-4 py-3">
                                   {['running','paused','pending'].includes(c.status) && (
                                     <div className="mb-3">
-                                      <CampaignCard campaign={c} onAction={handleAction} onRefresh={load} />
+                                      <CampaignCard campaign={c} onAction={handleAction} onRefresh={load} onEdit={onEdit} />
                                     </div>
                                   )}
                                   {loadingDetail === c.id || !nums ? (
