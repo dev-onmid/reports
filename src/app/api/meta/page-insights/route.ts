@@ -20,9 +20,13 @@ export type InstagramPageData = {
   picture: string | null;
   followers: number;
   reach: number;
-  impressions: number;
+  views: number;
   profileViews: number;
   websiteClicks: number;
+  accountsEngaged: number;
+  totalInteractions: number;
+  likes: number;
+  saves: number;
 };
 
 export type PageInsightsResult = {
@@ -52,6 +56,7 @@ function extractMetric(m: { values?: { value: number }[]; total_value?: { value:
 }
 
 // Fetches a single metric; returns 0 on any error (deprecation, permission, etc.)
+// metricType: pass 'total_value' for IG metrics that require metric_type=total_value
 async function fetchOneMetric(
   id: string,
   metric: string,
@@ -59,11 +64,13 @@ async function fetchOneMetric(
   since: number,
   until: number,
   token: string,
+  metricType?: string,
 ): Promise<number> {
   try {
+    const mt = metricType ? `&metric_type=${metricType}` : '';
     const res = await fetch(
       `https://graph.facebook.com/v21.0/${id}/insights` +
-      `?metric=${metric}&period=${period}&since=${since}&until=${until}&access_token=${token}`,
+      `?metric=${metric}&period=${period}&since=${since}&until=${until}${mt}&access_token=${token}`,
     );
     if (!res.ok) return 0;
     const d = await res.json() as { data?: { values?: { value: number }[]; total_value?: { value: number } }[] };
@@ -121,28 +128,41 @@ async function fetchIgPage(
     const since = Math.floor(new Date(from).getTime() / 1000);
     const until = Math.floor(new Date(to + 'T23:59:59').getTime() / 1000);
 
-    // Each metric fetched individually — a deprecated/unsupported metric won't zero out others.
-    // reach/impressions: period=total_over_range (v20+ requirement for IG business accounts).
-    // profile_views/website_clicks: period=day (total_over_range not supported for these).
-    const [profileRes, reach, impressions, profileViews, websiteClicks] = await Promise.all([
+    // Confirmed valid periods from debug endpoint errors (v21.0):
+    // reach       → period=day only (total_over_range incompatible)
+    // views, profile_views, website_clicks, accounts_engaged,
+    // total_interactions, likes, saves → need metric_type=total_value + period=day
+    const [
+      profileRes,
+      reach, views, profileViews, websiteClicks,
+      accountsEngaged, totalInteractions, likes, saves,
+    ] = await Promise.all([
       fetch(`https://graph.facebook.com/v21.0/${ig.id}?fields=followers_count&access_token=${pageToken}`),
-      fetchOneMetric(ig.id, 'reach',           'total_over_range', since, until, pageToken),
-      fetchOneMetric(ig.id, 'impressions',      'total_over_range', since, until, pageToken),
-      fetchOneMetric(ig.id, 'profile_views',    'day',              since, until, pageToken),
-      fetchOneMetric(ig.id, 'website_clicks',   'day',              since, until, pageToken),
+      fetchOneMetric(ig.id, 'reach',              'day', since, until, pageToken),
+      fetchOneMetric(ig.id, 'views',              'day', since, until, pageToken, 'total_value'),
+      fetchOneMetric(ig.id, 'profile_views',      'day', since, until, pageToken, 'total_value'),
+      fetchOneMetric(ig.id, 'website_clicks',     'day', since, until, pageToken, 'total_value'),
+      fetchOneMetric(ig.id, 'accounts_engaged',   'day', since, until, pageToken, 'total_value'),
+      fetchOneMetric(ig.id, 'total_interactions', 'day', since, until, pageToken, 'total_value'),
+      fetchOneMetric(ig.id, 'likes',              'day', since, until, pageToken, 'total_value'),
+      fetchOneMetric(ig.id, 'saves',              'day', since, until, pageToken, 'total_value'),
     ]);
 
     const profileData = profileRes.ok ? await profileRes.json() as { followers_count?: number } : {};
 
     return {
       igUserId: ig.id,
-      username: ig.username ? `@${ig.username}` : (ig.name ?? ig.id),
+      username: ig.username ?? (ig.name ?? ig.id),
       picture: ig.profile_picture_url ?? null,
       followers: profileData.followers_count ?? 0,
       reach,
-      impressions,
+      views,
       profileViews,
       websiteClicks,
+      accountsEngaged,
+      totalInteractions,
+      likes,
+      saves,
     };
   } catch {
     return null;

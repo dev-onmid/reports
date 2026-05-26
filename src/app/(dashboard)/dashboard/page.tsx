@@ -13,7 +13,7 @@ import {
   Pause, CircleDot, Pencil, Settings2, Users, Copy,
   Bell, DollarSign, Tag, TrendingUp, Calendar, BarChart3, Zap, Target, Briefcase,
   Wallet, MousePointerClick, CreditCard, PiggyBank, Clock, Info, Lightbulb, UserPlus, CheckCircle2,
-  Eye, Heart, Monitor, ExternalLink,
+  Eye, Heart, Monitor, ExternalLink, Bookmark,
 } from 'lucide-react';
 import { getAuthSession } from '@/lib/auth-store';
 import type { AiInsight } from '@/app/api/ai/insights/route';
@@ -2431,7 +2431,8 @@ type DashboardCardId =
   | 'meta-reach' | 'meta-impressions' | 'meta-leads' | 'meta-cpl' | 'meta-spend' | 'meta-ctr' | 'meta-total-spend' | 'meta-balance' | 'meta-active-campaigns' | 'meta-adsets' | 'meta-creatives' | 'meta-clicks' | 'meta-campaigns' | 'meta-audience' | 'meta-creative-preview'
   | 'google-impressions' | 'google-conversions' | 'google-cpa' | 'google-spend' | 'google-ctr' | 'google-total-spend' | 'google-balance' | 'google-active-campaigns' | 'google-keyword-count' | 'google-campaigns' | 'google-keywords' | 'google-audience'
   | 'social-fb-fans' | 'social-fb-fan-adds' | 'social-fb-reach' | 'social-fb-impressions' | 'social-fb-engagements' | 'social-fb-views'
-  | 'social-ig-followers' | 'social-ig-reach' | 'social-ig-impressions' | 'social-ig-profile-views' | 'social-ig-website-clicks';
+  | 'social-ig-followers' | 'social-ig-reach' | 'social-ig-views' | 'social-ig-profile-views' | 'social-ig-website-clicks'
+  | 'social-ig-engaged' | 'social-ig-interactions' | 'social-ig-likes' | 'social-ig-saves';
 
 type DashboardCardConfig = {
   visible: boolean;
@@ -2491,16 +2492,20 @@ const CARD_LABELS: Record<DashboardCardId, string> = {
   'social-fb-views': 'FB: Visitas à página',
   'social-ig-followers': 'IG: Seguidores',
   'social-ig-reach': 'IG: Alcance',
-  'social-ig-impressions': 'IG: Impressões',
+  'social-ig-views': 'IG: Visualizações',
   'social-ig-profile-views': 'IG: Visitas ao perfil',
   'social-ig-website-clicks': 'IG: Cliques no site',
+  'social-ig-engaged': 'IG: Contas engajadas',
+  'social-ig-interactions': 'IG: Interações',
+  'social-ig-likes': 'IG: Curtidas',
+  'social-ig-saves': 'IG: Salvamentos',
 };
 
 const CARD_GROUPS: Array<{ title: string; ids: DashboardCardId[] }> = [
   { title: 'Métricas Gerais', ids: ['general-revenue', 'general-leads', 'general-roi', 'general-cpl', 'general-spend', 'general-ctr', 'general-funnel', 'general-crm'] },
   { title: 'Meta Ads', ids: ['meta-reach', 'meta-impressions', 'meta-leads', 'meta-cpl', 'meta-spend', 'meta-ctr', 'meta-total-spend', 'meta-balance', 'meta-active-campaigns', 'meta-adsets', 'meta-creatives', 'meta-clicks', 'meta-campaigns', 'meta-audience', 'meta-creative-preview'] },
   { title: 'Google Ads', ids: ['google-impressions', 'google-conversions', 'google-cpa', 'google-spend', 'google-ctr', 'google-total-spend', 'google-balance', 'google-active-campaigns', 'google-keyword-count', 'google-campaigns', 'google-keywords', 'google-audience'] },
-  { title: 'Páginas & Perfis Sociais', ids: ['social-fb-fans', 'social-fb-fan-adds', 'social-fb-reach', 'social-fb-impressions', 'social-fb-engagements', 'social-fb-views', 'social-ig-followers', 'social-ig-reach', 'social-ig-impressions', 'social-ig-profile-views', 'social-ig-website-clicks'] },
+  { title: 'Páginas & Perfis Sociais', ids: ['social-fb-fans', 'social-fb-fan-adds', 'social-fb-reach', 'social-fb-impressions', 'social-fb-engagements', 'social-fb-views', 'social-ig-followers', 'social-ig-reach', 'social-ig-views', 'social-ig-profile-views', 'social-ig-website-clicks', 'social-ig-engaged', 'social-ig-interactions', 'social-ig-likes', 'social-ig-saves'] },
 ];
 
 const META_KPI_IDS: DashboardCardId[] = [
@@ -2576,11 +2581,15 @@ const DEFAULT_SOCIAL_KPI_LAYOUT: RglLayout[] = [
   { i: 'social-fb-impressions',    x: 9, y: 0, w: 3, h: 2, minW: 2, minH: 1 },
   { i: 'social-fb-engagements',    x: 0, y: 2, w: 3, h: 2, minW: 2, minH: 1 },
   { i: 'social-fb-views',          x: 3, y: 2, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'social-ig-followers',      x: 0, y: 4, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'social-ig-reach',          x: 3, y: 4, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'social-ig-impressions',    x: 6, y: 4, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'social-ig-profile-views',  x: 9, y: 4, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'social-ig-website-clicks', x: 0, y: 6, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'social-ig-followers',     x: 0, y: 4, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'social-ig-reach',         x: 3, y: 4, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'social-ig-views',         x: 6, y: 4, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'social-ig-profile-views', x: 9, y: 4, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'social-ig-website-clicks',x: 0, y: 6, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'social-ig-engaged',       x: 3, y: 6, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'social-ig-interactions',  x: 6, y: 6, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'social-ig-likes',         x: 9, y: 6, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'social-ig-saves',         x: 0, y: 8, w: 3, h: 2, minW: 2, minH: 1 },
 ];
 
 const DEFAULT_META_PANELS_LAYOUT: RglLayout[] = [
@@ -4880,24 +4889,32 @@ export default function GeneralDashboard() {
         const fbImpr    = allFbData.reduce((s, d) => s + d.impressions, 0);
         const fbEngage  = allFbData.reduce((s, d) => s + d.engagements, 0);
         const fbViews   = allFbData.reduce((s, d) => s + d.pageViews, 0);
-        const igFollow  = allIgData.reduce((s, d) => s + d.followers, 0);
-        const igReach   = allIgData.reduce((s, d) => s + d.reach, 0);
-        const igImpr    = allIgData.reduce((s, d) => s + d.impressions, 0);
-        const igPViews  = allIgData.reduce((s, d) => s + d.profileViews, 0);
-        const igClicks  = allIgData.reduce((s, d) => s + d.websiteClicks, 0);
+        const igFollow   = allIgData.reduce((s, d) => s + d.followers, 0);
+        const igReach    = allIgData.reduce((s, d) => s + d.reach, 0);
+        const igViews    = allIgData.reduce((s, d) => s + d.views, 0);
+        const igPViews   = allIgData.reduce((s, d) => s + d.profileViews, 0);
+        const igClicks   = allIgData.reduce((s, d) => s + d.websiteClicks, 0);
+        const igEngaged  = allIgData.reduce((s, d) => s + d.accountsEngaged, 0);
+        const igInteract = allIgData.reduce((s, d) => s + d.totalInteractions, 0);
+        const igLikes    = allIgData.reduce((s, d) => s + d.likes, 0);
+        const igSaves    = allIgData.reduce((s, d) => s + d.saves, 0);
 
         const socialCards: Record<string, ReactNode> = {
-          'social-fb-fans':           <KpiCard title="Curtidas / Seg." value={fbFans}   format="number" icon={Users}         iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} />,
-          'social-fb-fan-adds':       <KpiCard title="Novas curtidas"  value={fbAdds}   format="number" icon={UserPlus}      iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} />,
-          'social-fb-reach':          <KpiCard title="Alcance FB"      value={fbReach}  format="number" icon={Eye}           iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} />,
-          'social-fb-impressions':    <KpiCard title="Impressões FB"   value={fbImpr}   format="number" icon={BarChart3}     iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} />,
-          'social-fb-engagements':    <KpiCard title="Engajamentos"    value={fbEngage} format="number" icon={Heart}         iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} />,
-          'social-fb-views':          <KpiCard title="Visitas à página" value={fbViews} format="number" icon={Monitor}       iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} />,
-          'social-ig-followers':      <KpiCard title="Seguidores IG"   value={igFollow} format="number" icon={Users}         iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} />,
-          'social-ig-reach':          <KpiCard title="Alcance IG"      value={igReach}  format="number" icon={Eye}           iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} />,
-          'social-ig-impressions':    <KpiCard title="Impressões IG"   value={igImpr}   format="number" icon={BarChart3}     iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} />,
-          'social-ig-profile-views':  <KpiCard title="Visitas ao perfil" value={igPViews} format="number" icon={Monitor}    iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} />,
-          'social-ig-website-clicks': <KpiCard title="Cliques no site" value={igClicks} format="number" icon={ExternalLink} iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} />,
+          'social-fb-fans':            <KpiCard title="Curtidas / Seg."   value={fbFans}    format="number" icon={Users}         iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} />,
+          'social-fb-fan-adds':        <KpiCard title="Novas curtidas"    value={fbAdds}    format="number" icon={UserPlus}      iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} />,
+          'social-fb-reach':           <KpiCard title="Alcance FB"        value={fbReach}   format="number" icon={Eye}           iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} />,
+          'social-fb-impressions':     <KpiCard title="Impressões FB"     value={fbImpr}    format="number" icon={BarChart3}     iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} />,
+          'social-fb-engagements':     <KpiCard title="Engajamentos FB"   value={fbEngage}  format="number" icon={Heart}         iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} />,
+          'social-fb-views':           <KpiCard title="Visitas à página"  value={fbViews}   format="number" icon={Monitor}       iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} />,
+          'social-ig-followers':       <KpiCard title="Seguidores IG"     value={igFollow}  format="number" icon={Users}         iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} />,
+          'social-ig-reach':           <KpiCard title="Alcance IG"        value={igReach}   format="number" icon={Eye}           iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} />,
+          'social-ig-views':           <KpiCard title="Visualizações IG"  value={igViews}   format="number" icon={BarChart3}     iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} />,
+          'social-ig-profile-views':   <KpiCard title="Visitas ao perfil" value={igPViews}  format="number" icon={Monitor}       iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} />,
+          'social-ig-website-clicks':  <KpiCard title="Cliques no site"   value={igClicks}  format="number" icon={ExternalLink}  iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} />,
+          'social-ig-engaged':         <KpiCard title="Contas engajadas"  value={igEngaged} format="number" icon={Heart}         iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} />,
+          'social-ig-interactions':    <KpiCard title="Interações IG"     value={igInteract}format="number" icon={Zap}           iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} />,
+          'social-ig-likes':           <KpiCard title="Curtidas IG"       value={igLikes}   format="number" icon={Heart}         iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} />,
+          'social-ig-saves':           <KpiCard title="Salvamentos IG"    value={igSaves}   format="number" icon={Bookmark}      iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} />,
         };
 
         const visibleSocialLayout = socialKpiLayout.filter(l => {
