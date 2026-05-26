@@ -259,43 +259,14 @@ type TickResult = {
   total?: number; sent?: number; failed?: number; lastPhone?: string; lastError?: string | null;
 };
 
-function CampaignCard({ campaign, onAction, onRefresh }: {
-  campaign: Campaign; onAction: (id: string, action: string) => void; onRefresh: () => void;
+function CampaignCard({ campaign, onAction, onRefresh, onEdit }: {
+  campaign: Campaign; onAction: (id: string, action: string) => void; onRefresh: () => void; onEdit: (c: Campaign) => void;
 }) {
   const [live, setLive] = useState<Progress | null>(null);
   const [tickError, setTickError] = useState('');
   const [lastSendError, setLastSendError] = useState<string | null>(null);
   const [sleeping, setSleeping] = useState(false);
   const runningRef = useRef(false);
-  const [isEditing, setIsEditing] = useState(false);
-  const [saving, setSaving] = useState(false);
-
-  function buildInitialMessages(): string[] {
-    if (campaign.messages) {
-      try {
-        const parsed = typeof campaign.messages === 'string' ? JSON.parse(campaign.messages) : campaign.messages;
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      } catch { /* fall through */ }
-    }
-    return [campaign.message];
-  }
-  const [editMsgs, setEditMsgs] = useState<string[]>(buildInitialMessages);
-  const [editImg, setEditImg] = useState(campaign.image_url ?? '');
-
-  async function saveEdit() {
-    setSaving(true);
-    try {
-      await fetch(`/api/disparos/campaigns/${campaign.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: editMsgs[0], messages: editMsgs, image_url: editImg || null }),
-      });
-      setIsEditing(false);
-      onRefresh();
-    } finally {
-      setSaving(false);
-    }
-  }
   const isRunning = campaign.status === 'running';
 
   useEffect(() => {
@@ -380,8 +351,8 @@ function CampaignCard({ campaign, onAction, onRefresh }: {
         )}
         {(status === 'running' || status === 'paused' || status === 'pending') && (
           <>
-            <button type="button" onClick={() => setIsEditing(e => !e)} className="flex items-center gap-1 rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-1.5 text-[11px] font-semibold text-blue-400 hover:bg-blue-500/20">
-              <Pencil className="h-3 w-3" />{isEditing ? 'Fechar' : 'Editar'}
+            <button type="button" onClick={() => onEdit(campaign)} className="flex items-center gap-1 rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-1.5 text-[11px] font-semibold text-blue-400 hover:bg-blue-500/20">
+              <Pencil className="h-3 w-3" />Editar
             </button>
             <button type="button" onClick={() => onAction(campaign.id, 'cancel')} className="flex items-center gap-1 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-[11px] font-semibold text-red-400 hover:bg-red-500/20">
               <X className="h-3 w-3" />Cancelar
@@ -389,48 +360,6 @@ function CampaignCard({ campaign, onAction, onRefresh }: {
           </>
         )}
       </div>
-
-      {isEditing && (
-        <div className="mt-3 pt-3 border-t border-border space-y-3">
-          <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Editar campanha</p>
-          {editMsgs.map((msg, i) => (
-            <div key={i} className="space-y-1">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] text-muted-foreground">Mensagem {editMsgs.length > 1 ? i + 1 : ''}</span>
-                {editMsgs.length > 1 && (
-                  <button type="button" onClick={() => setEditMsgs(prev => prev.filter((_, j) => j !== i))}
-                    className="text-[10px] text-red-400 hover:text-red-300">remover</button>
-                )}
-              </div>
-              <textarea
-                value={msg}
-                onChange={e => setEditMsgs(prev => prev.map((m, j) => j === i ? e.target.value : m))}
-                rows={3}
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs resize-none focus:outline-none focus:ring-1 focus:ring-primary"
-              />
-            </div>
-          ))}
-          <button type="button" onClick={() => setEditMsgs(prev => [...prev, ''])}
-            className="text-[11px] text-primary hover:underline flex items-center gap-1">
-            <Plus className="h-3 w-3" />Adicionar variação
-          </button>
-          <div className="space-y-1">
-            <span className="text-[11px] text-muted-foreground">URL da imagem (opcional)</span>
-            <input type="text" value={editImg} onChange={e => setEditImg(e.target.value)} placeholder="https://..."
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary" />
-          </div>
-          <div className="flex gap-2">
-            <button type="button" onClick={saveEdit} disabled={saving}
-              className="flex items-center gap-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-[11px] font-semibold text-emerald-400 hover:bg-emerald-500/20 disabled:opacity-50">
-              <CheckCircle2 className="h-3 w-3" />{saving ? 'Salvando...' : 'Salvar e continuar'}
-            </button>
-            <button type="button" onClick={() => setIsEditing(false)}
-              className="flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-[11px] text-muted-foreground hover:text-foreground">
-              Cancelar
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -851,7 +780,8 @@ const FORM_STEPS = [
   { num: 6, label: 'Revisão',          sub: 'Confira e publique' },
 ];
 
-function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefill?: CampaignPrefill | null }) {
+function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () => void; prefill?: CampaignPrefill | null; editCampaign?: Campaign | null }) {
+  const isEdit = !!editCampaign;
   const [clients, setClients] = useState<ZClient[]>([]);
   const [form, setForm] = useState({
     clientId: '', name: '', message: '', numbers: '',
@@ -871,6 +801,13 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
   const fileRef   = useRef<HTMLInputElement>(null);
   const csvRef    = useRef<HTMLInputElement>(null);
 
+  function utcToLocalTime(utcHHMM: string) {
+    if (!utcHHMM) return '';
+    const [h, m] = utcHHMM.split(':').map(Number);
+    const d = new Date(); d.setUTCHours(h, m, 0, 0);
+    return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+  }
+
   useEffect(() => {
     fetch('/api/disparos/clients').then(r => r.json() as Promise<ZClient[]>).then(data => {
       setClients(data);
@@ -883,6 +820,46 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
     setForm({ clientId: prefill.clientId, name: prefill.name + ' (cópia)', message: prefill.message, numbers: prefill.numbers, isNow: true, startsAt: '', endsAt: '', activeFrom: prefill.activeFrom ?? '', activeUntil: prefill.activeUntil ?? '', intervalMin: prefill.intervalMin, intervalMax: prefill.intervalMax });
     setImageUrls(prefill.imageUrls ?? []);
   }, [prefill]);
+
+  useEffect(() => {
+    if (!editCampaign) return;
+    let msgs: string[] = [];
+    if (editCampaign.messages) {
+      try {
+        const p = typeof editCampaign.messages === 'string' ? JSON.parse(editCampaign.messages) : editCampaign.messages;
+        if (Array.isArray(p) && p.length > 0) msgs = p;
+      } catch { /* ignore */ }
+    }
+    const mainMsg = msgs[0] || editCampaign.message;
+    const vars = msgs.slice(1).map(t => ({ text: t, label: '', editing: false }));
+    setForm(p => ({
+      ...p,
+      clientId: editCampaign.client_id,
+      name: editCampaign.name,
+      message: mainMsg,
+      numbers: '',
+      isNow: true,
+      startsAt: '',
+      endsAt: editCampaign.ends_at ? new Date(editCampaign.ends_at).toISOString().slice(0, 16) : '',
+      activeFrom: utcToLocalTime(editCampaign.active_from ?? ''),
+      activeUntil: utcToLocalTime(editCampaign.active_until ?? ''),
+      intervalMin: editCampaign.interval_min,
+      intervalMax: editCampaign.interval_max,
+    }));
+    // Parse image_url (may be JSON array or plain string)
+    if (editCampaign.image_url) {
+      try {
+        const parsed = JSON.parse(editCampaign.image_url);
+        setImageUrls(Array.isArray(parsed) ? parsed : [editCampaign.image_url]);
+      } catch {
+        setImageUrls([editCampaign.image_url]);
+      }
+    } else {
+      setImageUrls([]);
+    }
+    setVariations(vars);
+    setPreviewVariationIdx(null);
+  }, [editCampaign]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function addImages(files: FileList | null) {
     if (!files) return;
@@ -960,15 +937,35 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
   }
 
   async function create() {
-    if (!form.clientId || !form.name || !form.message || !form.numbers) { setError('Preencha todos os campos obrigatórios.'); return; }
-    if (!form.isNow && !form.startsAt) { setError('Selecione o horário de início ou escolha "Agora".'); return; }
+    if (!isEdit && (!form.clientId || !form.name || !form.message || !form.numbers)) { setError('Preencha todos os campos obrigatórios.'); return; }
+    if (!isEdit && !form.isNow && !form.startsAt) { setError('Selecione o horário de início ou escolha "Agora".'); return; }
     setSaving(true); setError('');
     try {
-      const startsAt   = form.isNow ? new Date().toISOString() : toISO(form.startsAt);
-      const endsAt     = form.endsAt ? toISO(form.endsAt) : undefined;
-      const activeFrom  = form.activeFrom  && form.activeUntil ? localTimeToUTC(form.activeFrom)  : undefined;
-      const activeUntil = form.activeFrom  && form.activeUntil ? localTimeToUTC(form.activeUntil) : undefined;
+      const endsAt     = form.endsAt ? toISO(form.endsAt) : null;
+      const activeFrom  = form.activeFrom  && form.activeUntil ? localTimeToUTC(form.activeFrom)  : null;
+      const activeUntil = form.activeFrom  && form.activeUntil ? localTimeToUTC(form.activeUntil) : null;
       const allMessages = variations.length > 0 ? [form.message, ...variations.map(v => v.text)] : undefined;
+
+      if (isEdit && editCampaign) {
+        const body: Record<string, unknown> = {
+          name: form.name,
+          message: form.message,
+          messages: allMessages ?? [form.message],
+          image_url: imageUrls.length > 0 ? (imageUrls.length === 1 ? imageUrls[0] : JSON.stringify(imageUrls)) : null,
+          ends_at: endsAt,
+          active_from: activeFrom,
+          active_until: activeUntil,
+          interval_min: form.intervalMin,
+          interval_max: form.intervalMax,
+        };
+        const res = await fetch(`/api/disparos/campaigns/${editCampaign.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const data = await res.json() as { error?: string };
+        if (!res.ok) { setError(data.error ?? 'Erro ao salvar.'); return; }
+        onCreated();
+        return;
+      }
+
+      const startsAt = form.isNow ? new Date().toISOString() : toISO(form.startsAt);
       const res = await fetch('/api/disparos/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId: form.clientId, name: form.name, message: form.message, messages: allMessages, numbers: form.numbers, startsAt, endsAt, activeFrom, activeUntil, intervalMin: form.intervalMin, intervalMax: form.intervalMax, imageUrls: imageUrls.length > 0 ? imageUrls : undefined }) });
       const data = await res.json() as { error?: string };
       if (!res.ok) { setError(data.error ?? 'Erro ao criar campanha.'); return; }
@@ -1238,36 +1235,44 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
                 </div>
                 <p className="font-semibold">4. Base de contatos</p>
               </div>
-              <div className="space-y-1.5 mb-4">
-                <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-                  Números * — um por linha, com DDD e código do país
-                </label>
-                <textarea value={form.numbers} onChange={e => setForm(p => ({ ...p, numbers: e.target.value }))}
-                  placeholder={"(43) 9 9999-1111,João\n1198888-7777\n+55 43 9 6666-4444,Maria"}
-
-
-                  rows={6} className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-xs font-mono outline-none focus:ring-1 focus:ring-primary resize-none" />
-              </div>
-
-              {/* CSV Import */}
-              <div className="space-y-2">
-                <p className="text-[11px] text-muted-foreground">Importe sua base de contatos</p>
-                <div className="flex items-center gap-2">
-                  <button type="button" onClick={() => csvRef.current?.click()}
-                    className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors">
-                    <Upload className="h-3.5 w-3.5" />Importar arquivo
-                  </button>
-                  <span className="text-[11px] text-muted-foreground/50">CSV ou TXT (máx. 5MB)</span>
+              {isEdit ? (
+                <div className="rounded-lg border border-blue-500/25 bg-blue-500/10 px-4 py-3 space-y-1">
+                  <p className="text-xs font-semibold text-blue-400">Contatos não são alterados ao editar</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {editCampaign!.total} contato{editCampaign!.total !== 1 ? 's' : ''} cadastrados —{' '}
+                    {editCampaign!.sent} enviado{editCampaign!.sent !== 1 ? 's' : ''},{' '}
+                    {editCampaign!.total - editCampaign!.sent - editCampaign!.failed} pendente{editCampaign!.total - editCampaign!.sent - editCampaign!.failed !== 1 ? 's' : ''}.
+                  </p>
                 </div>
-                <input ref={csvRef} type="file" accept=".csv,.txt" className="hidden"
-                  onChange={e => { if (e.target.files?.[0]) { importCSV(e.target.files[0]); e.target.value = ''; } }} />
-              </div>
-
-              {contactCount > 0 && (
-                <div className="mt-3 flex items-center gap-2 rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
-                  <span className="text-xs font-semibold text-emerald-400">{contactCount} contato{contactCount !== 1 ? 's' : ''} carregado{contactCount !== 1 ? 's' : ''}</span>
-                </div>
+              ) : (
+                <>
+                  <div className="space-y-1.5 mb-4">
+                    <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                      Números * — um por linha, com DDD e código do país
+                    </label>
+                    <textarea value={form.numbers} onChange={e => setForm(p => ({ ...p, numbers: e.target.value }))}
+                      placeholder={"(43) 9 9999-1111,João\n1198888-7777\n+55 43 9 6666-4444,Maria"}
+                      rows={6} className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-xs font-mono outline-none focus:ring-1 focus:ring-primary resize-none" />
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-[11px] text-muted-foreground">Importe sua base de contatos</p>
+                    <div className="flex items-center gap-2">
+                      <button type="button" onClick={() => csvRef.current?.click()}
+                        className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors">
+                        <Upload className="h-3.5 w-3.5" />Importar arquivo
+                      </button>
+                      <span className="text-[11px] text-muted-foreground/50">CSV ou TXT (máx. 5MB)</span>
+                    </div>
+                    <input ref={csvRef} type="file" accept=".csv,.txt" className="hidden"
+                      onChange={e => { if (e.target.files?.[0]) { importCSV(e.target.files[0]); e.target.value = ''; } }} />
+                  </div>
+                  {contactCount > 0 && (
+                    <div className="mt-3 flex items-center gap-2 rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                      <span className="text-xs font-semibold text-emerald-400">{contactCount} contato{contactCount !== 1 ? 's' : ''} carregado{contactCount !== 1 ? 's' : ''}</span>
+                    </div>
+                  )}
+                </>
               )}
             </div>
 
@@ -1281,33 +1286,35 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
               </div>
 
               <div className="space-y-4">
-                {/* Início */}
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Início do envio *</label>
-                  <div className="flex gap-2">
-                    <button type="button" onClick={() => setForm(p => ({ ...p, isNow: true, startsAt: '' }))}
-                      className={cn('flex-1 h-9 flex items-center justify-center gap-2 rounded-lg border text-xs font-bold uppercase tracking-wider transition-colors',
-                        form.isNow ? 'border-primary/40 bg-primary text-black' : 'border-border bg-card text-muted-foreground hover:bg-muted/50')}>
-                      <Play className="h-3.5 w-3.5" />Agora
-                    </button>
-                    <button type="button" onClick={() => setForm(p => ({ ...p, isNow: false }))}
-                      className={cn('flex-1 h-9 flex items-center justify-center gap-2 rounded-lg border text-xs font-bold uppercase tracking-wider transition-colors',
-                        !form.isNow ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border bg-card text-muted-foreground hover:bg-muted/50')}>
-                      <Calendar className="h-3.5 w-3.5" />Agendar
-                    </button>
-                  </div>
-                </div>
-
-                {/* Date + time */}
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Data e hora (opcional)</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <input type="date" value={form.startsAt.split('T')[0] || ''} onChange={e => setForm(p => ({ ...p, startsAt: e.target.value + (p.startsAt.includes('T') ? p.startsAt.slice(10) : 'T00:00'), isNow: false }))}
-                      className="h-9 rounded-lg border border-border bg-background px-3 text-sm outline-none focus:ring-1 focus:ring-primary" />
-                    <input type="time" value={form.startsAt.split('T')[1]?.slice(0,5) || ''} onChange={e => setForm(p => ({ ...p, startsAt: (p.startsAt.split('T')[0] || new Date().toISOString().split('T')[0]) + 'T' + e.target.value, isNow: false }))}
-                      className="h-9 rounded-lg border border-border bg-background px-3 text-sm outline-none focus:ring-1 focus:ring-primary" />
-                  </div>
-                </div>
+                {/* Início — oculto em modo edição (campanha já iniciada) */}
+                {!isEdit && (
+                  <>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Início do envio *</label>
+                      <div className="flex gap-2">
+                        <button type="button" onClick={() => setForm(p => ({ ...p, isNow: true, startsAt: '' }))}
+                          className={cn('flex-1 h-9 flex items-center justify-center gap-2 rounded-lg border text-xs font-bold uppercase tracking-wider transition-colors',
+                            form.isNow ? 'border-primary/40 bg-primary text-black' : 'border-border bg-card text-muted-foreground hover:bg-muted/50')}>
+                          <Play className="h-3.5 w-3.5" />Agora
+                        </button>
+                        <button type="button" onClick={() => setForm(p => ({ ...p, isNow: false }))}
+                          className={cn('flex-1 h-9 flex items-center justify-center gap-2 rounded-lg border text-xs font-bold uppercase tracking-wider transition-colors',
+                            !form.isNow ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border bg-card text-muted-foreground hover:bg-muted/50')}>
+                          <Calendar className="h-3.5 w-3.5" />Agendar
+                        </button>
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Data e hora (opcional)</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input type="date" value={form.startsAt.split('T')[0] || ''} onChange={e => setForm(p => ({ ...p, startsAt: e.target.value + (p.startsAt.includes('T') ? p.startsAt.slice(10) : 'T00:00'), isNow: false }))}
+                          className="h-9 rounded-lg border border-border bg-background px-3 text-sm outline-none focus:ring-1 focus:ring-primary" />
+                        <input type="time" value={form.startsAt.split('T')[1]?.slice(0,5) || ''} onChange={e => setForm(p => ({ ...p, startsAt: (p.startsAt.split('T')[0] || new Date().toISOString().split('T')[0]) + 'T' + e.target.value, isNow: false }))}
+                          className="h-9 rounded-lg border border-border bg-background px-3 text-sm outline-none focus:ring-1 focus:ring-primary" />
+                      </div>
+                    </div>
+                  </>
+                )}
 
                 {/* Janela de envio */}
                 <div className="space-y-1.5">
@@ -1371,8 +1378,17 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
               <Info className="h-4 w-4 text-primary" />
             </div>
             <div className="min-w-0">
-              <p className="text-sm font-medium">A campanha será criada com base nas configurações acima.</p>
-              <p className="text-xs text-muted-foreground">Você poderá revisar tudo antes de enviar.</p>
+              {isEdit ? (
+                <>
+                  <p className="text-sm font-medium">Editando campanha em andamento.</p>
+                  <p className="text-xs text-muted-foreground">Os contatos pendentes receberão o novo conteúdo.</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm font-medium">A campanha será criada com base nas configurações acima.</p>
+                  <p className="text-xs text-muted-foreground">Você poderá revisar tudo antes de enviar.</p>
+                </>
+              )}
             </div>
           </div>
           {error && <p className="text-xs text-red-400 shrink-0">{error}</p>}
@@ -1380,7 +1396,7 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
             className="flex items-center gap-2 rounded-xl bg-primary px-8 py-3 text-sm font-bold uppercase tracking-wider text-black hover:bg-primary/90 disabled:opacity-50 transition-colors shrink-0"
             style={{ boxShadow: '0 0 20px rgba(85,245,47,0.3)' }}>
             {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            Criar campanha
+            {isEdit ? 'Salvar alterações' : 'Criar campanha'}
           </button>
         </div>
       </div>
@@ -1390,10 +1406,11 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
 
 // ─── Dashboard Tab ────────────────────────────────────────────────────────────
 
-function DashboardTab({ onReuse, onNewCampaign, onManageInstances }: {
+function DashboardTab({ onReuse, onNewCampaign, onManageInstances, onEdit }: {
   onReuse: (p: CampaignPrefill) => void;
   onNewCampaign: () => void;
   onManageInstances: () => void;
+  onEdit: (c: Campaign) => void;
 }) {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1565,7 +1582,7 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances }: {
           <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Em andamento agora</p>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {activeCampaigns.filter(c => c.status === 'running').map(c => (
-              <CampaignCard key={c.id} campaign={c} onAction={handleAction} onRefresh={load} />
+              <CampaignCard key={c.id} campaign={c} onAction={handleAction} onRefresh={load} onEdit={onEdit} />
             ))}
           </div>
         </div>
@@ -2224,8 +2241,10 @@ type Tab = typeof TABS[number];
 export default function DisparosPage() {
   const [tab, setTab] = useState<Tab>('dashboard');
   const [prefill, setPrefill] = useState<CampaignPrefill | null>(null);
+  const [editCampaign, setEditCampaign] = useState<Campaign | null>(null);
 
-  function handleReuse(p: CampaignPrefill) { setPrefill(p); setTab('nova'); }
+  function handleReuse(p: CampaignPrefill) { setPrefill(p); setEditCampaign(null); setTab('nova'); }
+  function handleEdit(c: Campaign) { setEditCampaign(c); setPrefill(null); setTab('nova'); }
 
   function handleExtractCampaign(numbers: string) {
     setPrefill({ clientId: '', name: 'Campanha do extrator', message: '', numbers, intervalMin: 10, intervalMax: 30 });
@@ -2270,10 +2289,15 @@ export default function DisparosPage() {
         </div>
       </div>
 
-      {tab === 'dashboard' && <DashboardTab onReuse={handleReuse} onNewCampaign={() => { setPrefill(null); setTab('nova'); }} onManageInstances={() => setTab('clientes')} />}
+      {tab === 'dashboard' && <DashboardTab onReuse={handleReuse} onNewCampaign={() => { setPrefill(null); setEditCampaign(null); setTab('nova'); }} onManageInstances={() => setTab('clientes')} onEdit={handleEdit} />}
       {tab === 'clientes' && <ClientesTab />}
       {tab === 'nova' && (
-        <NovaCampanhaTab key={prefill ? JSON.stringify(prefill).slice(0, 40) : 'new'} prefill={prefill} onCreated={() => { setPrefill(null); setTab('dashboard'); }} />
+        <NovaCampanhaTab
+          key={editCampaign ? `edit-${editCampaign.id}` : prefill ? JSON.stringify(prefill).slice(0, 40) : 'new'}
+          prefill={prefill}
+          editCampaign={editCampaign}
+          onCreated={() => { setPrefill(null); setEditCampaign(null); setTab('dashboard'); }}
+        />
       )}
       {tab === 'extrator' && <ExtratorTab onUseCampaign={handleExtractCampaign} />}
     </div>

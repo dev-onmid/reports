@@ -33,16 +33,26 @@ export async function PATCH(
   const { id } = await params;
   const pool = makeServerPool();
   try {
-    const body = await request.json() as { message?: string; messages?: string[]; image_url?: string | null };
-    const { message, messages, image_url } = body;
-    await pool.query(
-      `UPDATE public.zapi_campaigns
-          SET message   = COALESCE($1, message),
-              messages  = COALESCE($2, messages),
-              image_url = $3
-        WHERE id = $4`,
-      [message ?? null, messages ? JSON.stringify(messages) : null, image_url ?? null, id],
-    );
+    const body = await request.json() as Record<string, unknown>;
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    let i = 1;
+
+    const str  = (k: string) => { if (body[k] !== undefined) { sets.push(`${k} = $${i++}`); vals.push(body[k] ?? null); } };
+    const num  = (k: string) => { if (body[k] !== undefined) { sets.push(`${k} = $${i++}`); vals.push(body[k]); } };
+
+    str('name'); str('message'); str('image_url');
+    str('active_from'); str('active_until'); str('ends_at');
+    num('interval_min'); num('interval_max');
+
+    if (body.messages !== undefined) {
+      sets.push(`messages = $${i++}`);
+      vals.push(body.messages ? JSON.stringify(body.messages) : null);
+    }
+
+    if (!sets.length) return Response.json({ ok: true });
+    vals.push(id);
+    await pool.query(`UPDATE public.zapi_campaigns SET ${sets.join(', ')} WHERE id = $${i}`, vals);
     return Response.json({ ok: true });
   } finally {
     await pool.end();
