@@ -2312,7 +2312,7 @@ function AudiencePieCard({
   });
 
   return (
-    <div className="flex min-h-[360px] flex-col rounded-[var(--radius)] border border-border bg-card p-4">
+    <div className="flex min-h-[240px] flex-col rounded-[var(--radius)] border border-border bg-card p-4">
       <div>
         <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground">{title}</h4>
         <p className="mt-0.5 text-[11px] text-muted-foreground">{total.toLocaleString('pt-BR')} pessoas/imp.</p>
