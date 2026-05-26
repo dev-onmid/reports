@@ -370,7 +370,7 @@ function autoPartial(target: number, period: Period): number {
 }
 
 // ── KPI Card ────────────────────────────────────────────────────────────────
-function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: Icon, iconColor, iconBg, loading = false, inverseGoal = false, inverseChange = false, footer, logo, chart = 'sparkline', series }: {
+function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: Icon, iconColor, iconBg, loading = false, inverseGoal = false, inverseChange = false, footer, logo, chart = 'sparkline', series, hideGoal = false }: {
   title: string; value: number; prevValue?: number; goalValue?: number;
   format?: 'currency' | 'number' | 'percent' | 'times';
   icon: React.ElementType; iconColor: string; iconBg: string; loading?: boolean; inverseGoal?: boolean; inverseChange?: boolean;
@@ -378,6 +378,7 @@ function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: 
   logo?: React.ReactNode;
   chart?: 'sparkline' | 'none';
   series?: number[];
+  hideGoal?: boolean;
 }) {
   const fmt = (v: number) =>
     format === 'currency' ? formatCurrencyBRL(v)
@@ -424,7 +425,7 @@ function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: 
           ) : (
             <p className="mt-1.5 text-[11px] text-muted-foreground">— vs mês passado</p>
           )}
-          {goalProgress !== null ? (
+          {!hideGoal && (goalProgress !== null ? (
             <p className={cn('mt-1 flex items-center gap-1 text-[11px] font-semibold', goalGood ? 'text-emerald-500' : 'text-amber-500')}>
               <CircleDot className="h-2.5 w-2.5" />
               {goalProgress.toFixed(0)}% vs meta
@@ -432,7 +433,7 @@ function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: 
             </p>
           ) : (
             <p className="mt-1 text-[11px] text-muted-foreground/70">— vs meta</p>
-          )}
+          ))}
           {chart === 'sparkline' && (
             <div className="mt-3 -mx-1 flex-1 min-h-0">
               <MiniTrendLine
@@ -3608,6 +3609,7 @@ export default function GeneralDashboard() {
   const [googlePanelsLayout, setGooglePanelsLayout] = useState<RglLayout[]>(DEFAULT_GOOGLE_PANELS_LAYOUT);
   const [socialKpiLayout, setSocialKpiLayout] = useState<RglLayout[]>(DEFAULT_SOCIAL_KPI_LAYOUT);
   const [pageInsights, setPageInsights] = useState<PageInsightsResult[]>([]);
+  const [prevPageInsights, setPrevPageInsights] = useState<PageInsightsResult[]>([]);
   const [pageInsightsLoading, setPageInsightsLoading] = useState(false);
   // Stable string key derived from selectedIds — used as useEffect dependency
   const selectedKey = [...selectedIds].sort().join(',');
@@ -4025,21 +4027,33 @@ export default function GeneralDashboard() {
     let cancelled = false;
     setPageInsightsLoading(true);
     setPageInsights([]);
+    setPrevPageInsights([]);
     if (selectedIds.size === 0 || !customReady) {
       setPageInsightsLoading(false);
       return () => { cancelled = true; };
     }
     const { from, to } = periodToDateRange(period, customDateFrom, customDateTo);
+    const durationMs = to.getTime() - from.getTime() + 86400000;
+    const prevTo = new Date(from.getTime() - 86400000);
+    const prevFrom = new Date(prevTo.getTime() - durationMs + 86400000);
     const params = new URLSearchParams({
       clientIds: [...selectedIds].join(','),
       from: from.toISOString().split('T')[0],
       to: to.toISOString().split('T')[0],
     });
-    fetch(`/api/meta/page-insights?${params}`)
-      .then(r => r.ok ? r.json() as Promise<PageInsightsResult[]> : [])
-      .then(data => { console.log('[page-insights] raw response', data); if (!cancelled) setPageInsights(data); })
-      .catch(() => { if (!cancelled) setPageInsights([]); })
-      .finally(() => { if (!cancelled) setPageInsightsLoading(false); });
+    const prevParams = new URLSearchParams({
+      clientIds: [...selectedIds].join(','),
+      from: prevFrom.toISOString().split('T')[0],
+      to: prevTo.toISOString().split('T')[0],
+    });
+    Promise.all([
+      fetch(`/api/meta/page-insights?${params}`).then(r => r.ok ? r.json() as Promise<PageInsightsResult[]> : []),
+      fetch(`/api/meta/page-insights?${prevParams}`).then(r => r.ok ? r.json() as Promise<PageInsightsResult[]> : []),
+    ]).then(([cur, prev]) => {
+      if (!cancelled) { setPageInsights(cur); setPrevPageInsights(prev); }
+    }).catch(() => {
+      if (!cancelled) { setPageInsights([]); setPrevPageInsights([]); }
+    }).finally(() => { if (!cancelled) setPageInsightsLoading(false); });
     return () => { cancelled = true; };
   }, [selectedIds, period, customDateFrom, customDateTo, customReady]);
 
@@ -4883,6 +4897,8 @@ export default function GeneralDashboard() {
       {(pageInsightsLoading || pageInsights.some(p => p.facebook ?? p.instagram)) && CARD_GROUPS[3].ids.some(id => dashboardPrefs.cards[id]?.visible !== false) && (() => {
         const allFbData = pageInsights.filter(p => p.facebook).map(p => p.facebook!);
         const allIgData = pageInsights.filter(p => p.instagram).map(p => p.instagram!);
+        const prevFbData = prevPageInsights.filter(p => p.facebook).map(p => p.facebook!);
+        const prevIgData = prevPageInsights.filter(p => p.instagram).map(p => p.instagram!);
         const hasFb = allFbData.length > 0;
         const hasIg = allIgData.length > 0;
         const fbFans    = allFbData.reduce((s, d) => s + d.fans, 0);
@@ -4900,23 +4916,39 @@ export default function GeneralDashboard() {
         const igInteract = allIgData.reduce((s, d) => s + d.totalInteractions, 0);
         const igLikes    = allIgData.reduce((s, d) => s + d.likes, 0);
         const igSaves    = allIgData.reduce((s, d) => s + d.saves, 0);
+        // Previous period aggregates
+        const prevFbFans    = prevFbData.reduce((s, d) => s + d.fans, 0);
+        const prevFbAdds    = prevFbData.reduce((s, d) => s + d.fanAdds, 0);
+        const prevFbReach   = prevFbData.reduce((s, d) => s + d.reach, 0);
+        const prevFbImpr    = prevFbData.reduce((s, d) => s + d.impressions, 0);
+        const prevFbEngage  = prevFbData.reduce((s, d) => s + d.engagements, 0);
+        const prevFbViews   = prevFbData.reduce((s, d) => s + d.pageViews, 0);
+        const prevIgFollow  = prevIgData.reduce((s, d) => s + d.followers, 0);
+        const prevIgReach   = prevIgData.reduce((s, d) => s + d.reach, 0);
+        const prevIgViews   = prevIgData.reduce((s, d) => s + d.views, 0);
+        const prevIgPViews  = prevIgData.reduce((s, d) => s + d.profileViews, 0);
+        const prevIgClicks  = prevIgData.reduce((s, d) => s + d.websiteClicks, 0);
+        const prevIgEngaged = prevIgData.reduce((s, d) => s + d.accountsEngaged, 0);
+        const prevIgInteract= prevIgData.reduce((s, d) => s + d.totalInteractions, 0);
+        const prevIgLikes   = prevIgData.reduce((s, d) => s + d.likes, 0);
+        const prevIgSaves   = prevIgData.reduce((s, d) => s + d.saves, 0);
 
         const socialCards: Record<string, ReactNode> = {
-          'social-fb-fans':            <KpiCard title="Curtidas / Seg."   value={fbFans}    format="number" icon={Users}         iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} />,
-          'social-fb-fan-adds':        <KpiCard title="Novas curtidas"    value={fbAdds}    format="number" icon={UserPlus}      iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} />,
-          'social-fb-reach':           <KpiCard title="Alcance FB"        value={fbReach}   format="number" icon={Eye}           iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} />,
-          'social-fb-impressions':     <KpiCard title="Impressões FB"     value={fbImpr}    format="number" icon={BarChart3}     iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} />,
-          'social-fb-engagements':     <KpiCard title="Engajamentos FB"   value={fbEngage}  format="number" icon={Heart}         iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} />,
-          'social-fb-views':           <KpiCard title="Visitas à página"  value={fbViews}   format="number" icon={Monitor}       iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} />,
-          'social-ig-followers':       <KpiCard title="Seguidores IG"     value={igFollow}  format="number" icon={Users}         iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} />,
-          'social-ig-reach':           <KpiCard title="Alcance IG"        value={igReach}   format="number" icon={Eye}           iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} />,
-          'social-ig-views':           <KpiCard title="Visualizações IG"  value={igViews}   format="number" icon={BarChart3}     iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} />,
-          'social-ig-profile-views':   <KpiCard title="Visitas ao perfil" value={igPViews}  format="number" icon={Monitor}       iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} />,
-          'social-ig-website-clicks':  <KpiCard title="Cliques no site"   value={igClicks}  format="number" icon={ExternalLink}  iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} />,
-          'social-ig-engaged':         <KpiCard title="Contas engajadas"  value={igEngaged} format="number" icon={Heart}         iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} />,
-          'social-ig-interactions':    <KpiCard title="Interações IG"     value={igInteract}format="number" icon={Zap}           iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} />,
-          'social-ig-likes':           <KpiCard title="Curtidas IG"       value={igLikes}   format="number" icon={Heart}         iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} />,
-          'social-ig-saves':           <KpiCard title="Salvamentos IG"    value={igSaves}   format="number" icon={Bookmark}      iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} />,
+          'social-fb-fans':            <KpiCard title="Curtidas / Seg."   value={fbFans}    prevValue={prevFbFans}    format="number" icon={Users}         iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} hideGoal />,
+          'social-fb-fan-adds':        <KpiCard title="Novas curtidas"    value={fbAdds}    prevValue={prevFbAdds}    format="number" icon={UserPlus}      iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} hideGoal />,
+          'social-fb-reach':           <KpiCard title="Alcance FB"        value={fbReach}   prevValue={prevFbReach}   format="number" icon={Eye}           iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} hideGoal />,
+          'social-fb-impressions':     <KpiCard title="Impressões FB"     value={fbImpr}    prevValue={prevFbImpr}    format="number" icon={BarChart3}     iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} hideGoal />,
+          'social-fb-engagements':     <KpiCard title="Engajamentos FB"   value={fbEngage}  prevValue={prevFbEngage}  format="number" icon={Heart}         iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} hideGoal />,
+          'social-fb-views':           <KpiCard title="Visitas à página"  value={fbViews}   prevValue={prevFbViews}   format="number" icon={Monitor}       iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} hideGoal />,
+          'social-ig-followers':       <KpiCard title="Seguidores IG"     value={igFollow}  prevValue={prevIgFollow}  format="number" icon={Users}         iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal />,
+          'social-ig-reach':           <KpiCard title="Alcance IG"        value={igReach}   prevValue={prevIgReach}   format="number" icon={Eye}           iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal />,
+          'social-ig-views':           <KpiCard title="Visualizações IG"  value={igViews}   prevValue={prevIgViews}   format="number" icon={BarChart3}     iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal />,
+          'social-ig-profile-views':   <KpiCard title="Visitas ao perfil" value={igPViews}  prevValue={prevIgPViews}  format="number" icon={Monitor}       iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal />,
+          'social-ig-website-clicks':  <KpiCard title="Cliques no site"   value={igClicks}  prevValue={prevIgClicks}  format="number" icon={ExternalLink}  iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal />,
+          'social-ig-engaged':         <KpiCard title="Contas engajadas"  value={igEngaged} prevValue={prevIgEngaged} format="number" icon={Heart}         iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal />,
+          'social-ig-interactions':    <KpiCard title="Interações IG"     value={igInteract}prevValue={prevIgInteract}format="number" icon={Zap}           iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal />,
+          'social-ig-likes':           <KpiCard title="Curtidas IG"       value={igLikes}   prevValue={prevIgLikes}   format="number" icon={Heart}         iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal />,
+          'social-ig-saves':           <KpiCard title="Salvamentos IG"    value={igSaves}   prevValue={prevIgSaves}   format="number" icon={Bookmark}      iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal />,
         };
 
         const visibleSocialLayout = socialKpiLayout.filter(l => {
