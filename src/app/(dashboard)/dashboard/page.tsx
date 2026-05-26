@@ -4499,7 +4499,7 @@ export default function GeneralDashboard() {
       )}
 
       {/* 1. MÉTRICAS GERAIS */}
-      <section className="relative overflow-hidden rounded-2xl border border-[#55F52F]/55 bg-[#050C0A] p-5 shadow-[0_0_56px_rgba(85,245,47,0.22)]">
+      {CARD_GROUPS[0].ids.some(id => dashboardPrefs.cards[id]?.visible !== false) && <section className="relative overflow-hidden rounded-2xl border border-[#55F52F]/55 bg-[#050C0A] p-5 shadow-[0_0_56px_rgba(85,245,47,0.22)]">
         <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(85,245,47,0.16),transparent_38%),radial-gradient(circle_at_92%_8%,rgba(85,245,47,0.28),transparent_34%)]" />
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,#55F52F,transparent)]" />
         <div className="relative mb-4 flex items-center justify-between gap-3">
@@ -4591,10 +4591,10 @@ export default function GeneralDashboard() {
           );
         })()}
 
-      </section>
+      </section>}
 
       {/* 2. META ADS */}
-      <section className="relative overflow-hidden rounded-2xl border border-[#0B84FF]/70 bg-[#050A16] p-5 shadow-[0_0_64px_rgba(11,132,255,0.28)]">
+      {CARD_GROUPS[1].ids.some(id => dashboardPrefs.cards[id]?.visible !== false) && <section className="relative overflow-hidden rounded-2xl border border-[#0B84FF]/70 bg-[#050A16] p-5 shadow-[0_0_64px_rgba(11,132,255,0.28)]">
         <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(11,132,255,0.20),transparent_42%),radial-gradient(circle_at_92%_0%,rgba(0,194,255,0.30),transparent_36%)]" />
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,#00C2FF,#0B84FF,transparent)]" />
         <div className="relative mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -4752,10 +4752,10 @@ export default function GeneralDashboard() {
             </RglGrid>
           );
         })()}
-      </section>
+      </section>}
 
       {/* 3. GOOGLE ADS */}
-      <section className="relative overflow-hidden rounded-2xl border border-[#EA4335]/75 bg-[#120607] p-5 shadow-[0_0_64px_rgba(234,67,53,0.30)]">
+      {CARD_GROUPS[2].ids.some(id => dashboardPrefs.cards[id]?.visible !== false) && <section className="relative overflow-hidden rounded-2xl border border-[#EA4335]/75 bg-[#120607] p-5 shadow-[0_0_64px_rgba(234,67,53,0.30)]">
         <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(234,67,53,0.22),transparent_42%),radial-gradient(circle_at_92%_0%,rgba(251,188,5,0.24),transparent_34%)]" />
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,#EA4335,#FBBC05,transparent)]" />
         <div className="relative mb-4 flex items-center justify-between gap-3">
@@ -4866,10 +4866,10 @@ export default function GeneralDashboard() {
             </RglGrid>
           );
         })()}
-      </section>
+      </section>}
 
       {/* 4. PÁGINAS SOCIAIS */}
-      {(pageInsightsLoading || pageInsights.some(p => p.facebook ?? p.instagram)) && (() => {
+      {(pageInsightsLoading || pageInsights.some(p => p.facebook ?? p.instagram)) && CARD_GROUPS[3].ids.some(id => dashboardPrefs.cards[id]?.visible !== false) && (() => {
         const allFbData = pageInsights.filter(p => p.facebook).map(p => p.facebook!);
         const allIgData = pageInsights.filter(p => p.instagram).map(p => p.instagram!);
         const hasFb = allFbData.length > 0;

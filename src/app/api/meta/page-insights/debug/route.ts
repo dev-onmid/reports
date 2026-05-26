@@ -105,16 +105,29 @@ export async function GET(req: NextRequest) {
           // 6. Test each IG metric individually
           const igAcc = firstPage.instagram_business_account ?? accountsData.data?.find((p: { instagram_business_account?: { id: string } }) => p.instagram_business_account)?.instagram_business_account;
           if (igAcc?.id) {
-            const igMetrics = ['reach', 'impressions', 'profile_views', 'website_clicks', 'accounts_engaged', 'total_interactions'];
+            const igMetricsDay = ['profile_views', 'website_clicks'];
+            const igMetricsRange = ['reach', 'impressions', 'accounts_engaged', 'total_interactions'];
             const igResults: Record<string, unknown> = {};
-            await Promise.all(igMetrics.map(async (metric) => {
-              const r = await fetch(
-                `https://graph.facebook.com/v21.0/${igAcc.id}/insights` +
-                `?metric=${metric}&period=day&since=${since}&until=${until}&access_token=${pageToken}`,
-              );
-              const d = await r.json() as { data?: { values: { value: number }[] }[]; error?: { message: string } };
-              igResults[metric] = r.ok ? `OK — ${d.data?.[0]?.values?.slice(-1)[0]?.value ?? 0}` : `ERR: ${d.error?.message}`;
-            }));
+            await Promise.all([
+              ...igMetricsDay.map(async (metric) => {
+                const r = await fetch(
+                  `https://graph.facebook.com/v21.0/${igAcc.id}/insights` +
+                  `?metric=${metric}&period=day&since=${since}&until=${until}&access_token=${pageToken}`,
+                );
+                const d = await r.json() as { data?: { values?: { value: number }[]; total_value?: { value: number } }[]; error?: { message: string } };
+                const val = d.data?.[0]?.total_value?.value ?? d.data?.[0]?.values?.slice(-1)[0]?.value ?? 0;
+                igResults[`${metric}(day)`] = r.ok ? `OK — ${val}` : `ERR: ${d.error?.message}`;
+              }),
+              ...igMetricsRange.map(async (metric) => {
+                const r = await fetch(
+                  `https://graph.facebook.com/v21.0/${igAcc.id}/insights` +
+                  `?metric=${metric}&period=total_over_range&since=${since}&until=${until}&access_token=${pageToken}`,
+                );
+                const d = await r.json() as { data?: { values?: { value: number }[]; total_value?: { value: number } }[]; error?: { message: string } };
+                const val = d.data?.[0]?.total_value?.value ?? d.data?.[0]?.values?.slice(-1)[0]?.value ?? 0;
+                igResults[`${metric}(range)`] = r.ok ? `OK — ${val}` : `ERR: ${d.error?.message}`;
+              }),
+            ]);
             log.push({ step: `5_ig_metrics_test_${igAcc.id}`, ig_username: igAcc.username, results: igResults });
           }
         }

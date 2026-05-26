@@ -46,6 +46,11 @@ function sumValues(values: { value: number }[]): number {
   return (values ?? []).reduce((s, r) => s + (r.value ?? 0), 0);
 }
 
+function extractMetric(m: { values?: { value: number }[]; total_value?: { value: number } }): number {
+  if (m.total_value?.value != null) return m.total_value.value;
+  return sumValues(m.values ?? []);
+}
+
 async function fetchFbPage(
   pageId: string,
   pageToken: string,
@@ -77,12 +82,12 @@ async function fetchFbPage(
     const fanData = fanRes.ok ? await fanRes.json() as { fan_count?: number } : {};
     const metricMap: Record<string, number> = {};
     if (insRes.ok) {
-      const insData = await insRes.json() as { data?: { name: string; values: { value: number }[] }[] };
-      for (const m of insData.data ?? []) metricMap[m.name] = sumValues(m.values);
+      const insData = await insRes.json() as { data?: { name: string; values?: { value: number }[]; total_value?: { value: number } }[]; error?: unknown };
+      for (const m of insData.data ?? []) metricMap[m.name] = extractMetric(m);
     }
     if (fanAddsRes.ok) {
-      const fanAddsData = await fanAddsRes.json() as { data?: { name: string; values: { value: number }[] }[] };
-      for (const m of fanAddsData.data ?? []) metricMap[m.name] = sumValues(m.values);
+      const fanAddsData = await fanAddsRes.json() as { data?: { name: string; values?: { value: number }[]; total_value?: { value: number } }[] };
+      for (const m of fanAddsData.data ?? []) metricMap[m.name] = extractMetric(m);
     }
 
     return {
@@ -109,20 +114,31 @@ async function fetchIgPage(
     const since = Math.floor(new Date(from).getTime() / 1000);
     const until = Math.floor(new Date(to + 'T23:59:59').getTime() / 1000);
 
-    const [profileRes, insRes] = await Promise.all([
+    // IG insights v20+ changed: period=total_over_range returns total_value instead of values[]
+    // Some metrics (profile_views, website_clicks) may only work with period=day, so we try both
+    const [profileRes, insRangeRes, insDayRes] = await Promise.all([
       fetch(`https://graph.facebook.com/v21.0/${ig.id}?fields=followers_count&access_token=${pageToken}`),
       fetch(
         `https://graph.facebook.com/v21.0/${ig.id}/insights` +
-        `?metric=reach,impressions,profile_views,website_clicks` +
+        `?metric=reach,impressions` +
+        `&period=total_over_range&since=${since}&until=${until}&access_token=${pageToken}`,
+      ),
+      fetch(
+        `https://graph.facebook.com/v21.0/${ig.id}/insights` +
+        `?metric=profile_views,website_clicks` +
         `&period=day&since=${since}&until=${until}&access_token=${pageToken}`,
       ),
     ]);
 
     const profileData = profileRes.ok ? await profileRes.json() as { followers_count?: number } : {};
     const metricMap: Record<string, number> = {};
-    if (insRes.ok) {
-      const insData = await insRes.json() as { data?: { name: string; values: { value: number }[] }[] };
-      for (const m of insData.data ?? []) metricMap[m.name] = sumValues(m.values);
+    if (insRangeRes.ok) {
+      const d = await insRangeRes.json() as { data?: { name: string; values?: { value: number }[]; total_value?: { value: number } }[] };
+      for (const m of d.data ?? []) metricMap[m.name] = extractMetric(m);
+    }
+    if (insDayRes.ok) {
+      const d = await insDayRes.json() as { data?: { name: string; values?: { value: number }[]; total_value?: { value: number } }[] };
+      for (const m of d.data ?? []) metricMap[m.name] = extractMetric(m);
     }
 
     return {
