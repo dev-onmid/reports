@@ -4050,6 +4050,8 @@ export default function GeneralDashboard() {
       fetch(`/api/meta/page-insights?${params}`).then(r => r.ok ? r.json() as Promise<PageInsightsResult[]> : []),
       fetch(`/api/meta/page-insights?${prevParams}`).then(r => r.ok ? r.json() as Promise<PageInsightsResult[]> : []),
     ]).then(([cur, prev]) => {
+      console.log('[page-insights] current', cur);
+      console.log('[page-insights] prev', prev);
       if (!cancelled) { setPageInsights(cur); setPrevPageInsights(prev); }
     }).catch(() => {
       if (!cancelled) { setPageInsights([]); setPrevPageInsights([]); }
