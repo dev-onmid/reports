@@ -127,10 +127,9 @@ export async function GET(req: NextRequest) {
                 `https://graph.facebook.com/v21.0/${igAcc.id}/insights` +
                 `?metric=${metric}&period=${p}&since=${since}&until=${until}${mt}&access_token=${pageToken}`,
               );
-              const d = await r.json() as { data?: { values?: { value: number }[]; total_value?: { value: number } }[]; error?: { message: string }; warning?: string };
-              const val = d.data?.[0]?.total_value?.value ?? (d.data?.[0]?.values ?? []).reduce((s: number, v: { value: number }) => s + v.value, 0);
-              igResults[key] = r.ok ? `OK — ${val}` : `ERR: ${d.error?.message}`;
-              if (d.warning) igResults[`${key}_warning`] = d.warning;
+              // Store the FULL raw response so we can see exact structure/errors
+              const raw = await r.json() as Record<string, unknown>;
+              igResults[key] = { http_status: r.status, raw };
             }));
             log.push({ step: `5_ig_metrics_test_${igAcc.id}`, ig_username: igAcc.username, since, until, results: igResults });
           }
