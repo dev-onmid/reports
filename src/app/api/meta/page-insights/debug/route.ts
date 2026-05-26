@@ -102,33 +102,37 @@ export async function GET(req: NextRequest) {
           }));
           log.push({ step: `4_fb_metrics_test_${firstPage.id}`, page_name: firstPage.name, results: fbResults });
 
-          // 6. Test each IG metric individually
+          // 6. Test each IG metric with EXACT same params as the main route
           const igAcc = firstPage.instagram_business_account ?? accountsData.data?.find((p: { instagram_business_account?: { id: string } }) => p.instagram_business_account)?.instagram_business_account;
           if (igAcc?.id) {
-            const igMetricsDay = ['profile_views', 'website_clicks'];
-            const igMetricsRange = ['reach', 'impressions', 'accounts_engaged', 'total_interactions'];
+            // reach → period=day (no metric_type)
+            // all others → period=total_over_range + metric_type=total_value
+            const igTestCases: { metric: string; period: string; metricType?: string }[] = [
+              { metric: 'reach',              period: 'day' },
+              { metric: 'views',              period: 'total_over_range', metricType: 'total_value' },
+              { metric: 'impressions',        period: 'total_over_range', metricType: 'total_value' },
+              { metric: 'profile_views',      period: 'total_over_range', metricType: 'total_value' },
+              { metric: 'profile_views',      period: 'day' },
+              { metric: 'website_clicks',     period: 'total_over_range', metricType: 'total_value' },
+              { metric: 'accounts_engaged',   period: 'total_over_range', metricType: 'total_value' },
+              { metric: 'total_interactions', period: 'total_over_range', metricType: 'total_value' },
+              { metric: 'likes',              period: 'total_over_range', metricType: 'total_value' },
+              { metric: 'saves',              period: 'total_over_range', metricType: 'total_value' },
+            ];
             const igResults: Record<string, unknown> = {};
-            await Promise.all([
-              ...igMetricsDay.map(async (metric) => {
-                const r = await fetch(
-                  `https://graph.facebook.com/v21.0/${igAcc.id}/insights` +
-                  `?metric=${metric}&period=day&since=${since}&until=${until}&access_token=${pageToken}`,
-                );
-                const d = await r.json() as { data?: { values?: { value: number }[]; total_value?: { value: number } }[]; error?: { message: string } };
-                const val = d.data?.[0]?.total_value?.value ?? d.data?.[0]?.values?.slice(-1)[0]?.value ?? 0;
-                igResults[`${metric}(day)`] = r.ok ? `OK — ${val}` : `ERR: ${d.error?.message}`;
-              }),
-              ...igMetricsRange.map(async (metric) => {
-                const r = await fetch(
-                  `https://graph.facebook.com/v21.0/${igAcc.id}/insights` +
-                  `?metric=${metric}&period=total_over_range&since=${since}&until=${until}&access_token=${pageToken}`,
-                );
-                const d = await r.json() as { data?: { values?: { value: number }[]; total_value?: { value: number } }[]; error?: { message: string } };
-                const val = d.data?.[0]?.total_value?.value ?? d.data?.[0]?.values?.slice(-1)[0]?.value ?? 0;
-                igResults[`${metric}(range)`] = r.ok ? `OK — ${val}` : `ERR: ${d.error?.message}`;
-              }),
-            ]);
-            log.push({ step: `5_ig_metrics_test_${igAcc.id}`, ig_username: igAcc.username, results: igResults });
+            await Promise.all(igTestCases.map(async ({ metric, period: p, metricType }) => {
+              const mt = metricType ? `&metric_type=${metricType}` : '';
+              const key = metricType ? `${metric}(${p}+total_value)` : `${metric}(${p})`;
+              const r = await fetch(
+                `https://graph.facebook.com/v21.0/${igAcc.id}/insights` +
+                `?metric=${metric}&period=${p}&since=${since}&until=${until}${mt}&access_token=${pageToken}`,
+              );
+              const d = await r.json() as { data?: { values?: { value: number }[]; total_value?: { value: number } }[]; error?: { message: string }; warning?: string };
+              const val = d.data?.[0]?.total_value?.value ?? (d.data?.[0]?.values ?? []).reduce((s: number, v: { value: number }) => s + v.value, 0);
+              igResults[key] = r.ok ? `OK — ${val}` : `ERR: ${d.error?.message}`;
+              if (d.warning) igResults[`${key}_warning`] = d.warning;
+            }));
+            log.push({ step: `5_ig_metrics_test_${igAcc.id}`, ig_username: igAcc.username, since, until, results: igResults });
           }
         }
       } catch (e) {
