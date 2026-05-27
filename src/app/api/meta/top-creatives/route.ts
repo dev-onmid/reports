@@ -184,8 +184,7 @@ export async function GET(request: NextRequest) {
           const adIds = adsInsights.map(a => a.ad_id as string).filter(Boolean);
           const creativeFields = [
             'body', 'title', 'image_url', 'thumbnail_url',
-            'image_crops{original_image{url,width,height}}',
-            'object_story_spec{link_data{picture,image_url,image_crops{original_image{url,width,height}}},video_data{video_id,image_url},photo_data{url}}',
+            'object_story_spec{link_data{picture,image_url},video_data{video_id,image_url},photo_data{url}}',
             'asset_feed_spec{images{url,hash}}',
             'instagram_permalink_url',
             'effective_object_story_id',
@@ -236,12 +235,6 @@ export async function GET(request: NextRequest) {
             const clicks = parseInt(insight.clicks || '0', 10);
             const impressions = parseInt(insight.impressions || '0', 10);
 
-            // Full-resolution: top-level image_crops, then link_data image_crops
-            const originalImageUrl: string | undefined =
-              creative.image_crops?.original_image?.url ??
-              storySpec.link_data?.image_crops?.original_image?.url ??
-              undefined;
-
             // asset_feed_spec has original URLs for dynamic/carousel ads
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const assetFeedImageUrl: string | undefined = (creative.asset_feed_spec?.images as any[])?.[0]?.url ?? undefined;
@@ -263,7 +256,7 @@ export async function GET(request: NextRequest) {
               campaignName: insight.campaign_name ?? undefined,
               adSetId: insight.adset_id ?? undefined,
               adSetName: insight.adset_name ?? undefined,
-              imageUrl: originalImageUrl ?? assetFeedImageUrl ?? storyImageUrl ?? creative.thumbnail_url ?? creative.image_url ?? undefined,
+              imageUrl: assetFeedImageUrl ?? storyImageUrl ?? creative.thumbnail_url ?? creative.image_url ?? undefined,
               thumbnailUrl: creative.thumbnail_url ?? undefined,
               videoUrl: videoInfo.source ?? undefined,
               permalink,
