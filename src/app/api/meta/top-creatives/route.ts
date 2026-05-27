@@ -193,7 +193,7 @@ export async function GET(request: NextRequest) {
               .filter(Boolean)
           )];
           const videoBatchRes = videoIds.length > 0
-            ? await fetch(`https://graph.facebook.com/v21.0/?ids=${videoIds.join(',')}&fields=source,picture&access_token=${token}`)
+            ? await fetch(`https://graph.facebook.com/v21.0/?ids=${videoIds.join(',')}&fields=source,picture,thumbnails{uri,height,width}&access_token=${token}`)
             : null;
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const videoBatchData: Record<string, any> = videoBatchRes?.ok ? await videoBatchRes.json() : {};
@@ -204,8 +204,13 @@ export async function GET(request: NextRequest) {
             const storySpec = creative.object_story_spec ?? {};
             const videoId = storySpec.video_data?.video_id as string | undefined;
             const videoInfo = videoId ? videoBatchData[videoId] ?? {} : {};
+            // Pick the highest-resolution thumbnail available for video ads
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const videoThumbs: { uri: string; height?: number }[] = videoInfo.thumbnails?.data ?? [];
+            const bestVideoThumb = videoThumbs.sort((a, b) => (b.height ?? 0) - (a.height ?? 0))[0]?.uri;
             const storyImageUrl =
               storySpec.video_data?.image_url ??
+              bestVideoThumb ??
               videoInfo.picture ??
               storySpec.photo_data?.url ??
               storySpec.link_data?.picture ??

@@ -1206,7 +1206,7 @@ function CreativePreviewOverlay({
             <img
               src={imgUrl}
               alt={creative.adName}
-              className="h-full w-full bg-black object-contain"
+              className="h-full w-full bg-black object-cover"
               style={{ imageRendering: 'auto' }}
               loading="eager"
             />
