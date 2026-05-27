@@ -1234,7 +1234,19 @@ function CreativePreviewOverlay({
               <p className="mt-1 font-bold">{creative.leads > 0 ? creative.leads : '—'}</p>
             </div>
           </div>
-          <p className="mt-4 text-xs text-white/40">{creative.accountName}</p>
+          {creative.permalink && (
+            <a
+              href={creative.permalink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-4 flex items-center gap-2 rounded-lg border border-white/20 bg-white/10 px-3 py-2.5 text-xs font-semibold text-white hover:bg-white/20 transition-colors"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+              Ver publicação original
+            </a>
+          )}
+          <p className="mt-3 text-xs text-white/40">{creative.accountName}</p>
         </div>
       </div>
     </div>
@@ -3452,6 +3464,18 @@ function CreativeCarouselCard({ creative, idx, sortBy, onPreview }: {
             <img src={imgUrl} alt={creative.adName} className="h-full w-full object-cover" onError={handleImgError} />
             {creative.videoUrl && <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/20 pointer-events-none" />}
           </button>
+        ) : creative.permalink ? (
+          <a
+            href={creative.permalink}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/40 hover:bg-black/60 transition-colors"
+            title="Ver publicação original"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <ExternalLink className="h-7 w-7 text-white/60" />
+            <span className="text-[10px] font-semibold text-white/50">Ver publicação</span>
+          </a>
         ) : <ImageIcon className="absolute inset-0 m-auto h-8 w-8 text-muted-foreground/30" />}
         {creative.videoUrl && (
           <span className="absolute left-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-black/70">

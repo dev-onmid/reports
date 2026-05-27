@@ -54,6 +54,7 @@ export type TopCreative = {
   imageUrl?: string;
   thumbnailUrl?: string;
   videoUrl?: string;
+  permalink?: string;
   headline?: string;
   body?: string;
   spend: number;
@@ -182,7 +183,7 @@ export async function GET(request: NextRequest) {
           // Batch-fetch creative details
           const adIds = adsInsights.map(a => a.ad_id as string).filter(Boolean);
           const batchRes = await fetch(
-            `https://graph.facebook.com/v21.0/?ids=${adIds.join(',')}&fields=name,creative{body,title,image_url,thumbnail_url,image_crops,object_story_spec,asset_feed_spec}&access_token=${token}`
+            `https://graph.facebook.com/v21.0/?ids=${adIds.join(',')}&fields=name,creative{body,title,image_url,thumbnail_url,image_crops,object_story_spec,asset_feed_spec,instagram_permalink_url,effective_object_story_id}&access_token=${token}`
           );
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const batchData: Record<string, any> = batchRes.ok ? await batchRes.json() : {};
@@ -235,6 +236,14 @@ export async function GET(request: NextRequest) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const assetFeedImageUrl: string | undefined = (creative.asset_feed_spec?.images as any[])?.[0]?.url ?? undefined;
 
+            // Build permalink: prefer Instagram URL, fallback to Facebook post URL
+            const igPermalink: string | undefined = creative.instagram_permalink_url ?? undefined;
+            const storyId: string | undefined = creative.effective_object_story_id ?? undefined;
+            const fbPermalink = storyId
+              ? (() => { const [pageId, postId] = storyId.split('_'); return postId ? `https://www.facebook.com/permalink.php?story_fbid=${postId}&id=${pageId}` : undefined; })()
+              : undefined;
+            const permalink = igPermalink ?? fbPermalink;
+
             allCreatives.push({
               adId: insight.ad_id,
               adName: insight.ad_name ?? adData.name ?? `Ad ${insight.ad_id}`,
@@ -247,6 +256,7 @@ export async function GET(request: NextRequest) {
               imageUrl: originalImageUrl ?? storyImageUrl ?? creative.image_url ?? assetFeedImageUrl ?? undefined,
               thumbnailUrl: creative.thumbnail_url ?? undefined,
               videoUrl: videoInfo.source ?? undefined,
+              permalink,
               headline: creative.title ?? undefined,
               body: creative.body ?? undefined,
               spend,
