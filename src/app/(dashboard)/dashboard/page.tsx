@@ -2543,7 +2543,7 @@ const CHANNEL_GROUPS: Array<{ id: string; label: string; color: string; ids: Das
 ];
 
 // ── React Grid Layout ────────────────────────────────────────────────────────
-const LS_RGL_LAYOUT = 'dashboard_rgl_layout_v4';
+const LS_RGL_LAYOUT = 'dashboard_rgl_layout_v5';
 function lsClientSuffix(ids: Set<string>): string {
   if (ids.size === 1) return `__${[...ids][0]}`;
   return '';
@@ -2553,30 +2553,30 @@ const RGL_ROW_H = 100; // px per row unit
 const RGL_MARGIN: [number, number] = [16, 16];
 
 const DEFAULT_META_KPI_LAYOUT: RglLayout[] = [
-  { i: 'meta-reach',            x: 0, y: 0, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'meta-impressions',      x: 3, y: 0, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'meta-leads',            x: 6, y: 0, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'meta-cpl',              x: 9, y: 0, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'meta-spend',            x: 0, y: 2, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'meta-ctr',              x: 3, y: 2, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'meta-total-spend',      x: 6, y: 2, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'meta-balance',          x: 9, y: 2, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'meta-active-campaigns', x: 0, y: 4, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'meta-adsets',           x: 3, y: 4, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'meta-creatives',        x: 6, y: 4, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'meta-clicks',           x: 9, y: 4, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'meta-reach',            x: 0, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'meta-impressions',      x: 3, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'meta-leads',            x: 6, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'meta-cpl',              x: 9, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'meta-spend',            x: 0, y: 2, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'meta-ctr',              x: 3, y: 2, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'meta-total-spend',      x: 6, y: 2, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'meta-balance',          x: 9, y: 2, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'meta-active-campaigns', x: 0, y: 4, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'meta-adsets',           x: 3, y: 4, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'meta-creatives',        x: 6, y: 4, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'meta-clicks',           x: 9, y: 4, w: 3, h: 2, minW: 2, minH: 2 },
 ];
 
 const DEFAULT_GOOGLE_KPI_LAYOUT: RglLayout[] = [
-  { i: 'google-impressions',      x: 0, y: 0, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'google-conversions',      x: 3, y: 0, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'google-cpa',              x: 6, y: 0, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'google-spend',            x: 9, y: 0, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'google-ctr',              x: 0, y: 2, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'google-total-spend',      x: 3, y: 2, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'google-balance',          x: 6, y: 2, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'google-active-campaigns', x: 9, y: 2, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'google-keyword-count',    x: 0, y: 4, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'google-impressions',      x: 0, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'google-conversions',      x: 3, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'google-cpa',              x: 6, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'google-spend',            x: 9, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'google-ctr',              x: 0, y: 2, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'google-total-spend',      x: 3, y: 2, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'google-balance',          x: 6, y: 2, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'google-active-campaigns', x: 9, y: 2, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'google-keyword-count',    x: 0, y: 4, w: 3, h: 2, minW: 2, minH: 2 },
 ];
 
 const DEFAULT_GENERAL_LAYOUT: RglLayout[] = [
@@ -2591,21 +2591,21 @@ const DEFAULT_GENERAL_LAYOUT: RglLayout[] = [
 ];
 
 const DEFAULT_SOCIAL_KPI_LAYOUT: RglLayout[] = [
-  { i: 'social-fb-fans',           x: 0, y: 0, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'social-fb-fan-adds',       x: 3, y: 0, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'social-fb-reach',          x: 6, y: 0, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'social-fb-impressions',    x: 9, y: 0, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'social-fb-engagements',    x: 0, y: 2, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'social-fb-views',          x: 3, y: 2, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'social-ig-followers',     x: 0, y: 4, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'social-ig-reach',         x: 3, y: 4, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'social-ig-views',         x: 6, y: 4, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'social-ig-profile-views', x: 9, y: 4, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'social-ig-website-clicks',x: 0, y: 6, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'social-ig-engaged',       x: 3, y: 6, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'social-ig-interactions',  x: 6, y: 6, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'social-ig-likes',         x: 9, y: 6, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'social-ig-saves',         x: 0, y: 8, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'social-fb-fans',           x: 0, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'social-fb-fan-adds',       x: 3, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'social-fb-reach',          x: 6, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'social-fb-impressions',    x: 9, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'social-fb-engagements',    x: 0, y: 2, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'social-fb-views',          x: 3, y: 2, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'social-ig-followers',     x: 0, y: 4, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'social-ig-reach',         x: 3, y: 4, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'social-ig-views',         x: 6, y: 4, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'social-ig-profile-views', x: 9, y: 4, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'social-ig-website-clicks',x: 0, y: 6, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'social-ig-engaged',       x: 3, y: 6, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'social-ig-interactions',  x: 6, y: 6, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'social-ig-likes',         x: 9, y: 6, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'social-ig-saves',         x: 0, y: 8, w: 3, h: 2, minW: 2, minH: 2 },
 ];
 
 const DEFAULT_META_PANELS_LAYOUT: RglLayout[] = [
