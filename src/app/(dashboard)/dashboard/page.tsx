@@ -1710,8 +1710,8 @@ function TopKeywordsTable({ keywords, loading }: { keywords: GoogleKeyword[]; lo
   ];
 
   return (
-    <div className="overflow-hidden rounded-xl border border-[#EA4335]/40 bg-black/35 shadow-[0_0_30px_rgba(234,67,53,0.18)]">
-      <div className="flex items-center justify-between border-b border-[#EA4335]/25 bg-[#EA4335]/10 px-4 py-3">
+    <div className="overflow-hidden rounded-xl border border-[#EA4335]/40 bg-black/35 shadow-[0_0_30px_rgba(234,67,53,0.18)] h-full flex flex-col">
+      <div className="shrink-0 flex items-center justify-between border-b border-[#EA4335]/25 bg-[#EA4335]/10 px-4 py-3">
         <div className="flex items-center gap-2">
           <GoogleMark />
           <p className="text-sm font-bold uppercase tracking-wider">Top Palavras-chave</p>
@@ -1725,9 +1725,9 @@ function TopKeywordsTable({ keywords, loading }: { keywords: GoogleKeyword[]; lo
       ) : sorted.length === 0 ? (
         <p className="p-6 text-sm text-muted-foreground">Nenhuma palavra-chave encontrada no período.</p>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="overflow-auto flex-1 min-h-0">
           <table className="w-full min-w-[780px] text-left">
-            <thead className="border-b border-[#EA4335]/25 bg-black/35">
+            <thead className="border-b border-[#EA4335]/25 bg-black/35 sticky top-0 z-10">
               <tr className="text-[10px] font-bold uppercase tracking-widest text-foreground/60">
                 <th className="px-4 py-2.5">Palavra-chave</th>
                 {cols.map(c => (
@@ -2272,10 +2272,10 @@ function CampaignPerformanceTable({
     <>
       {optimizeCampaign && <CampaignOptimizeDrawer campaign={optimizeCampaign} onClose={() => setOptimizeCampaign(null)} />}
       {adPreview && <AdCreativePreview ad={adPreview.ad} x={adPreview.x} y={adPreview.y} />}
-      <div className="overflow-hidden rounded-xl border border-white/15 bg-black/35 shadow-[0_0_28px_rgba(255,255,255,0.08)]">
-        <div className="overflow-x-auto">
+      <div className="overflow-hidden rounded-xl border border-white/15 bg-black/35 shadow-[0_0_28px_rgba(255,255,255,0.08)] h-full">
+        <div className="overflow-auto h-full">
           <table className="w-full min-w-[1080px] text-left">
-            <thead className="border-b border-white/15 bg-white/[0.06]">
+            <thead className="border-b border-white/15 bg-white/[0.06] sticky top-0 z-10">
               <tr className="text-[10px] font-bold uppercase tracking-widest text-foreground/62">
                 <th className="px-4 py-3">Nome</th>
                 <th className="px-4 py-3 text-center">Plataforma</th>
@@ -2445,7 +2445,7 @@ type AudienceChartVariant = 'donut' | 'list';
 type DashboardCardId =
   | 'general-revenue' | 'general-leads' | 'general-roi' | 'general-cpl' | 'general-spend' | 'general-ctr' | 'general-funnel' | 'general-crm'
   | 'meta-reach' | 'meta-impressions' | 'meta-leads' | 'meta-cpl' | 'meta-spend' | 'meta-ctr' | 'meta-total-spend' | 'meta-balance' | 'meta-active-campaigns' | 'meta-adsets' | 'meta-creatives' | 'meta-clicks' | 'meta-campaigns' | 'meta-audience' | 'meta-creative-preview'
-  | 'google-impressions' | 'google-conversions' | 'google-cpa' | 'google-spend' | 'google-ctr' | 'google-total-spend' | 'google-balance' | 'google-active-campaigns' | 'google-keyword-count' | 'google-campaigns' | 'google-keywords' | 'google-audience'
+  | 'google-impressions' | 'google-conversions' | 'google-cpa' | 'google-spend' | 'google-ctr' | 'google-total-spend' | 'google-balance' | 'google-active-campaigns' | 'google-keyword-count' | 'google-clicks' | 'google-cpc' | 'google-campaigns' | 'google-keywords' | 'google-audience'
   | 'social-fb-fans' | 'social-fb-fan-adds' | 'social-fb-reach' | 'social-fb-impressions' | 'social-fb-engagements' | 'social-fb-views'
   | 'social-ig-followers' | 'social-ig-reach' | 'social-ig-views' | 'social-ig-profile-views' | 'social-ig-website-clicks'
   | 'social-ig-engaged' | 'social-ig-interactions' | 'social-ig-likes' | 'social-ig-saves';
@@ -2497,6 +2497,8 @@ const CARD_LABELS: Record<DashboardCardId, string> = {
   'google-balance': 'Google: Saldo da conta',
   'google-active-campaigns': 'Google: Campanhas ativas',
   'google-keyword-count': 'Google: Contador top palavras-chave',
+  'google-clicks': 'Google: Cliques',
+  'google-cpc': 'Google: Custo por Clique (CPC)',
   'google-campaigns': 'Google: Tabela de campanhas',
   'google-keywords': 'Google: Top palavras-chave',
   'google-audience': 'Google: Recortes por gênero/dispositivo',
@@ -2520,7 +2522,7 @@ const CARD_LABELS: Record<DashboardCardId, string> = {
 const CARD_GROUPS: Array<{ title: string; ids: DashboardCardId[] }> = [
   { title: 'Métricas Gerais', ids: ['general-revenue', 'general-leads', 'general-roi', 'general-cpl', 'general-spend', 'general-ctr', 'general-funnel', 'general-crm'] },
   { title: 'Meta Ads', ids: ['meta-reach', 'meta-impressions', 'meta-leads', 'meta-cpl', 'meta-spend', 'meta-ctr', 'meta-total-spend', 'meta-balance', 'meta-active-campaigns', 'meta-adsets', 'meta-creatives', 'meta-clicks', 'meta-campaigns', 'meta-audience', 'meta-creative-preview'] },
-  { title: 'Google Ads', ids: ['google-impressions', 'google-conversions', 'google-cpa', 'google-spend', 'google-ctr', 'google-total-spend', 'google-balance', 'google-active-campaigns', 'google-keyword-count', 'google-campaigns', 'google-keywords', 'google-audience'] },
+  { title: 'Google Ads', ids: ['google-impressions', 'google-conversions', 'google-cpa', 'google-spend', 'google-ctr', 'google-total-spend', 'google-balance', 'google-active-campaigns', 'google-keyword-count', 'google-clicks', 'google-cpc', 'google-campaigns', 'google-keywords', 'google-audience'] },
   { title: 'Páginas & Perfis Sociais', ids: ['social-fb-fans', 'social-fb-fan-adds', 'social-fb-reach', 'social-fb-impressions', 'social-fb-engagements', 'social-fb-views', 'social-ig-followers', 'social-ig-reach', 'social-ig-views', 'social-ig-profile-views', 'social-ig-website-clicks', 'social-ig-engaged', 'social-ig-interactions', 'social-ig-likes', 'social-ig-saves'] },
 ];
 
@@ -2532,7 +2534,7 @@ const META_KPI_IDS: DashboardCardId[] = [
 const GOOGLE_KPI_IDS: DashboardCardId[] = [
   'google-impressions', 'google-conversions', 'google-cpa', 'google-spend',
   'google-ctr', 'google-total-spend', 'google-balance',
-  'google-active-campaigns', 'google-keyword-count',
+  'google-active-campaigns', 'google-keyword-count', 'google-clicks', 'google-cpc',
 ];
 
 const CHANNEL_GROUPS: Array<{ id: string; label: string; color: string; ids: DashboardCardId[] }> = [
@@ -2543,7 +2545,7 @@ const CHANNEL_GROUPS: Array<{ id: string; label: string; color: string; ids: Das
 ];
 
 // ── React Grid Layout ────────────────────────────────────────────────────────
-const LS_RGL_LAYOUT = 'dashboard_rgl_layout_v5';
+const LS_RGL_LAYOUT = 'dashboard_rgl_layout_v6';
 function lsClientSuffix(ids: Set<string>): string {
   if (ids.size === 1) return `__${[...ids][0]}`;
   return '';
@@ -2577,6 +2579,8 @@ const DEFAULT_GOOGLE_KPI_LAYOUT: RglLayout[] = [
   { i: 'google-balance',          x: 6, y: 2, w: 3, h: 2, minW: 2, minH: 2 },
   { i: 'google-active-campaigns', x: 9, y: 2, w: 3, h: 2, minW: 2, minH: 2 },
   { i: 'google-keyword-count',    x: 0, y: 4, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'google-clicks',           x: 3, y: 4, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'google-cpc',              x: 6, y: 4, w: 3, h: 2, minW: 2, minH: 2 },
 ];
 
 const DEFAULT_GENERAL_LAYOUT: RglLayout[] = [
@@ -4208,6 +4212,10 @@ export default function GeneralDashboard() {
     dailySeries.map((row) => row.google?.impressions ?? 0),
     100,
   );
+  const googleCpcSeries = ratioSeries(
+    dailySeries.map((row) => row.google?.cost ?? 0),
+    dailySeries.map((row) => row.google?.clicks ?? 0),
+  );
   const revenueSeries = cumulative(dailySeries.map((row) => row.crm?.revenue ?? 0));
   const totalLeadsSeries = dailySeries.map((_, index) => (metaLeadsSeries[index] ?? 0) + (googleConversionsSeries[index] ?? 0));
   const totalSpendSeries = dailySeries.map((_, index) => (metaSpendSeries[index] ?? 0) + (googleCostSeries[index] ?? 0));
@@ -4862,8 +4870,8 @@ export default function GeneralDashboard() {
         {!collapsedSections.has('meta') && (() => {
           const metaPanelCards: Record<string, ReactNode> = {
             'meta-campaigns': (
-              <div className="rounded-xl border border-[#0B84FF]/35 bg-black/35 p-4 shadow-[inset_0_0_30px_rgba(11,132,255,0.10),0_0_28px_rgba(11,132,255,0.16)] h-full overflow-auto">
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <div className="rounded-xl border border-[#0B84FF]/35 bg-black/35 p-4 shadow-[inset_0_0_30px_rgba(11,132,255,0.10),0_0_28px_rgba(11,132,255,0.16)] h-full flex flex-col">
+                <div className="mb-3 shrink-0 flex flex-wrap items-center justify-between gap-3">
                   <p className="text-[11px] font-bold uppercase tracking-widest text-foreground/75">Campanhas Meta Ads</p>
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] font-bold uppercase tracking-widest text-foreground/55">Ordenar por</span>
@@ -4878,7 +4886,9 @@ export default function GeneralDashboard() {
                     {campaignsLoading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
                   </div>
                 </div>
-                <CampaignPerformanceTable campaigns={metaCampaigns} loading={campaignsLoading} period={period} dateFrom={customDateFrom} dateTo={customDateTo} />
+                <div className="flex-1 min-h-0">
+                  <CampaignPerformanceTable campaigns={metaCampaigns} loading={campaignsLoading} period={period} dateFrom={customDateFrom} dateTo={customDateTo} />
+                </div>
               </div>
             ),
             'meta-audience': <AudiencePlatformBlock title="Meta Ads" description="Recortes por idade, gênero, plataforma e dispositivo." color="#0B84FF" colors={META_AUDIENCE_COLORS} data={audience.meta} chartVariant={dashboardPrefs.metaAudienceChart} />,
@@ -4985,6 +4995,8 @@ export default function GeneralDashboard() {
             'google-balance':          <KpiCard title="Saldo da Conta Google" value={googleBalance} format="currency" icon={Wallet} iconColor="#e2e8f0" iconBg="#e2e8f0" loading={balancesLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-balance'].chart} series={pacingSeries(googleBalance, Math.max(2, selectedDateKeys.length || 2))} />,
             'google-active-campaigns': <CompactInfoCard title="Campanhas Ativas" value={activeGoogleCampaigns} icon={Briefcase} color="#EA4335" />,
             'google-keyword-count':    <CompactInfoCard title="Top Palavras-chave" value={keywords.length} icon={Search} color="#EA4335" helper="Lista ordenada abaixo." />,
+            'google-clicks':           <KpiCard title="Cliques Google" value={googleClicks} format="number" icon={MousePointerClick} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} chart={dashboardPrefs.cards['google-clicks'].chart} series={seriesOrPacing(googleClicksSeries, googleClicks)} />,
+            'google-cpc':              <KpiCard title="CPC Google" value={googleCpc} format="currency" icon={CreditCard} iconColor="#e2e8f0" iconBg="#e2e8f0" loading={metricsLoading} inverseGoal inverseChange logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-cpc'].chart} series={seriesOrPacing(googleCpcSeries, googleCpc)} />,
           };
           const visibleLayout = googleKpiLayout.filter(l => dashboardPrefs.cards[l.i as DashboardCardId]?.visible !== false);
           return (
@@ -5019,8 +5031,8 @@ export default function GeneralDashboard() {
         {!collapsedSections.has('google') && (() => {
           const googlePanelCards: Record<string, ReactNode> = {
             'google-campaigns': (
-              <div className="rounded-xl border border-[#EA4335]/40 bg-black/35 p-4 shadow-[inset_0_0_30px_rgba(234,67,53,0.10),0_0_28px_rgba(234,67,53,0.18)] h-full overflow-auto">
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <div className="rounded-xl border border-[#EA4335]/40 bg-black/35 p-4 shadow-[inset_0_0_30px_rgba(234,67,53,0.10),0_0_28px_rgba(234,67,53,0.18)] h-full flex flex-col">
+                <div className="mb-3 shrink-0 flex flex-wrap items-center justify-between gap-3">
                   <p className="text-[11px] font-bold uppercase tracking-widest text-foreground/75">Campanhas Google Ads</p>
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] font-bold uppercase tracking-widest text-foreground/55">Ordenar por</span>
@@ -5035,11 +5047,13 @@ export default function GeneralDashboard() {
                     {campaignsLoading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
                   </div>
                 </div>
-                <CampaignPerformanceTable campaigns={googleCampaigns} loading={campaignsLoading} period={period} dateFrom={customDateFrom} dateTo={customDateTo} />
+                <div className="flex-1 min-h-0">
+                  <CampaignPerformanceTable campaigns={googleCampaigns} loading={campaignsLoading} period={period} dateFrom={customDateFrom} dateTo={customDateTo} />
+                </div>
               </div>
             ),
             'google-keywords': (
-              <div className="space-y-4 h-full overflow-auto">
+              <div className="h-full">
                 <TopKeywordsTable keywords={keywords} loading={keywordsLoading} />
               </div>
             ),
