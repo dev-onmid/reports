@@ -677,7 +677,7 @@ function MiniTrendLine({ color, trend = 'up', values }: { color: string; trend?:
   const path = realPath ?? (trend === 'down' ? TREND_DOWN : trend === 'flat' ? TREND_FLAT : TREND_UP);
   const closedPath = `${path} L320 92 L0 92 Z`;
   return (
-    <svg viewBox="0 0 320 92" className="h-full min-h-[48px] w-full overflow-visible" aria-hidden="true">
+    <svg viewBox="0 0 320 92" preserveAspectRatio="none" className="h-full min-h-[48px] w-full block overflow-visible" aria-hidden="true">
       <defs>
         <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
           <stop offset="0%" stopColor={color} stopOpacity="0.35" />
@@ -3101,23 +3101,23 @@ function DashboardPerformanceFunnel({ periodLabel, rows }: { periodLabel: string
     const el = sectionRef.current;
     if (!el) return;
     const ro = new ResizeObserver(([entry]) => {
-      // 400px = scale 1.0 (default h=4 grid rows); clamp 0.75–1.8
-      const s = Math.min(Math.max(entry.contentRect.height / 400, 0.75), 1.8);
+      // 500px = scale 1.0 (default h=5 grid rows); clamp 0.65–1.0 (never bigger than KPI cards)
+      const s = Math.min(Math.max(entry.contentRect.height / 500, 0.65), 1.0);
       setScale(s);
     });
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
 
-  const iconSz = Math.round(14 * scale);
-  const badgeSz = Math.round(18 * scale);
-  const connH = Math.round(26 * scale);
-  const labelFs = Math.round(10 * scale);
-  const valueFs = Math.round(14 * scale);
-  const subFs = Math.round(9 * scale);
-  const convFs = Math.round(9 * scale);
-  const footerFs = Math.round(9 * scale);
-  const footerValueFs = Math.round(12 * scale);
+  const iconSz = Math.round(13 * scale);
+  const badgeSz = Math.round(16 * scale);
+  const connH = Math.round(22 * scale);
+  const labelFs = Math.round(11 * scale);
+  const valueFs = Math.round(13 * scale);
+  const subFs = Math.round(10 * scale);
+  const convFs = Math.round(10 * scale);
+  const footerFs = Math.round(10 * scale);
+  const footerValueFs = Math.round(11 * scale);
 
   return (
     <section ref={sectionRef} className="relative h-full flex flex-col overflow-hidden rounded-[var(--radius)] border border-border bg-card p-4 sm:p-5">
@@ -3155,7 +3155,7 @@ function DashboardPerformanceFunnel({ periodLabel, rows }: { periodLabel: string
               {/* Stage row — grows proportionally */}
               <div
                 className="relative flex-1 grid grid-cols-[40px_28px_1fr_auto] items-center overflow-hidden rounded-[var(--radius)] border pr-3"
-                style={{ borderColor: `${stage.color}80`, minHeight: Math.round(36 * scale) }}
+                style={{ borderColor: `${stage.color}80`, minHeight: Math.round(32 * scale) }}
               >
                 <div
                   className="absolute inset-0"
