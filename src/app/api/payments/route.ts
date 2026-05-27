@@ -50,16 +50,26 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const id = req.nextUrl.searchParams.get('id');
   if (!id) return Response.json({ error: 'Missing id' }, { status: 400 });
-  const body = await req.json() as { status?: string; date?: string; extra?: boolean };
+  const body = await req.json() as Partial<{
+    status: string; date: string; extra: boolean;
+    channel: string; amount: number; clientId: string; clientName: string; destination: string;
+  }>;
+  const sets: string[] = [];
+  const vals: unknown[] = [];
+  let i = 1;
+  if (body.status      !== undefined) { sets.push(`status = $${i++}`);      vals.push(body.status); }
+  if (body.date        !== undefined) { sets.push(`date = $${i++}`);         vals.push(body.date); }
+  if (body.extra       !== undefined) { sets.push(`extra = $${i++}`);        vals.push(body.extra); }
+  if (body.channel     !== undefined) { sets.push(`channel = $${i++}`);      vals.push(body.channel); }
+  if (body.amount      !== undefined) { sets.push(`amount = $${i++}`);       vals.push(body.amount); }
+  if (body.clientId    !== undefined) { sets.push(`client_id = $${i++}`);    vals.push(body.clientId); }
+  if (body.clientName  !== undefined) { sets.push(`client_name = $${i++}`);  vals.push(body.clientName); }
+  if (body.destination !== undefined) { sets.push(`destination = $${i++}`);  vals.push(body.destination); }
+  if (sets.length === 0) return new Response(null, { status: 204 });
+  vals.push(id);
   const pool = makeServerPool();
   try {
-    if (body.date !== undefined) {
-      await pool.query('UPDATE public.payments SET date = $1 WHERE id = $2', [body.date, id]);
-    } else if (body.extra !== undefined) {
-      await pool.query('UPDATE public.payments SET extra = $1 WHERE id = $2', [body.extra, id]);
-    } else {
-      await pool.query('UPDATE public.payments SET status = $1 WHERE id = $2', [body.status, id]);
-    }
+    await pool.query(`UPDATE public.payments SET ${sets.join(', ')} WHERE id = $${i}`, vals);
     return new Response(null, { status: 204 });
   } finally {
     await pool.end();

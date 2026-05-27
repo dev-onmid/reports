@@ -14,12 +14,14 @@ import {
   ExternalLink,
   Eye,
   Filter,
+  Pencil,
   Plus,
   PlusCircle,
   RefreshCw,
   Send,
   Trash2,
   WalletCards,
+  X,
   Zap,
 } from 'lucide-react';
 import {
@@ -842,18 +844,180 @@ function MonthStatusIcon({ status }: { status: PaymentStatus }) {
   );
 }
 
+// ── Edit Payment Modal ────────────────────────────────────────────────────────
+function EditPaymentModal({
+  payment,
+  clients,
+  onSave,
+  onClose,
+}: {
+  payment: InvestmentPayment;
+  clients: { id: string; name: string }[];
+  onSave: (fields: Partial<Omit<InvestmentPayment, 'id'>>) => void;
+  onClose: () => void;
+}) {
+  const [form, setForm] = useState({
+    clientId: payment.clientId,
+    clientName: payment.clientName,
+    date: payment.date,
+    destination: payment.destination,
+    channel: payment.channel,
+    amount: payment.amount,
+    status: payment.status,
+    extra: payment.extra ?? false,
+  });
+
+  function handleClientChange(clientId: string) {
+    const client = clients.find(c => c.id === clientId);
+    if (client) setForm(f => ({ ...f, clientId: client.id, clientName: client.name }));
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    onSave({
+      clientId: form.clientId,
+      clientName: form.clientName,
+      date: form.date,
+      destination: form.destination,
+      channel: form.channel,
+      amount: form.amount,
+      status: form.status,
+      extra: form.extra,
+    });
+    onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
+      <div
+        className="w-full max-w-lg rounded-2xl border border-violet-400/30 bg-card shadow-[0_0_60px_rgba(124,58,237,0.20)] p-6"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="mb-5 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-violet-500/20 text-violet-300">
+              <Pencil className="h-3.5 w-3.5" />
+            </span>
+            <h2 className="text-sm font-bold uppercase tracking-wider">Editar Pagamento</h2>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <label className="space-y-1.5">
+              <span className="text-xs font-bold text-foreground">Cliente</span>
+              <select
+                value={form.clientId}
+                onChange={e => handleClientChange(e.target.value)}
+                className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none focus:border-violet-400"
+              >
+                {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </label>
+            <label className="space-y-1.5">
+              <span className="text-xs font-bold text-foreground">Data de envio</span>
+              <Input
+                type="date"
+                value={form.date}
+                onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
+                className="h-10 bg-background focus:border-violet-400"
+              />
+            </label>
+          </div>
+
+          <label className="block space-y-1.5">
+            <span className="text-xs font-bold text-foreground">Destino / Campanha</span>
+            <Input
+              value={form.destination}
+              onChange={e => setForm(f => ({ ...f, destination: e.target.value }))}
+              placeholder="Nome da campanha ou destino"
+              className="h-10 bg-background focus:border-violet-400"
+            />
+          </label>
+
+          <div className="grid grid-cols-2 gap-3">
+            <label className="space-y-1.5">
+              <span className="text-xs font-bold text-foreground">Canal</span>
+              <select
+                value={form.channel}
+                onChange={e => setForm(f => ({ ...f, channel: e.target.value as PaymentChannel }))}
+                className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none focus:border-violet-400"
+              >
+                {PAYMENT_CHANNELS.filter(ch => ch !== 'Todos').map(ch => <option key={ch}>{ch}</option>)}
+              </select>
+            </label>
+            <label className="space-y-1.5">
+              <span className="text-xs font-bold text-foreground">Valor</span>
+              <div className="flex h-10 items-center gap-2 rounded-lg border border-border bg-background px-3 focus-within:border-violet-400">
+                <span className="text-sm font-bold text-muted-foreground">R$</span>
+                <CurrencyInput
+                  value={form.amount}
+                  onChange={amount => setForm(f => ({ ...f, amount }))}
+                  className="min-w-0 flex-1 bg-transparent text-sm font-bold outline-none"
+                />
+              </div>
+            </label>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 items-end">
+            <label className="space-y-1.5">
+              <span className="text-xs font-bold text-foreground">Status</span>
+              <select
+                value={form.status}
+                onChange={e => setForm(f => ({ ...f, status: e.target.value as PaymentStatus }))}
+                className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm font-bold text-amber-400 outline-none focus:border-violet-400"
+              >
+                {PAYMENT_STATUS_OPTIONS.map(s => <option key={s}>{s}</option>)}
+              </select>
+            </label>
+            <div className="flex items-center gap-2 pb-0.5">
+              <button
+                type="button"
+                onClick={() => setForm(f => ({ ...f, extra: !f.extra }))}
+                className={cn(
+                  'flex h-10 flex-1 items-center justify-center gap-2 rounded-lg border text-sm font-bold transition-colors',
+                  form.extra
+                    ? 'border-violet-400/60 bg-violet-500/20 text-violet-300'
+                    : 'border-border bg-background text-muted-foreground hover:text-violet-300',
+                )}
+              >
+                <Zap className={cn('h-3.5 w-3.5', form.extra && 'fill-violet-400')} />
+                Extra
+              </button>
+            </div>
+          </div>
+
+          <div className="flex gap-3 pt-2">
+            <button type="button" onClick={onClose} className="flex-1 h-10 rounded-lg border border-border text-sm font-semibold text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors">
+              Cancelar
+            </button>
+            <button type="submit" className="flex-1 h-10 rounded-lg bg-violet-500 text-sm font-bold text-white hover:bg-violet-400 transition-colors shadow-[0_0_20px_rgba(124,58,237,0.35)]">
+              Salvar alterações
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function MonthPaymentCard({
   payment,
   index,
   onStatusChange,
   onDelete,
   onToggleExtra,
+  onEdit,
 }: {
   payment: InvestmentPayment;
   index: number;
   onStatusChange: (status: PaymentStatus) => void;
   onDelete: () => void;
   onToggleExtra: () => void;
+  onEdit: () => void;
 }) {
   const statusTone: Record<PaymentStatus, { border: string; bg: string; text: string; amount: string }> = {
     Pendente: { border: 'border-orange-400/55', bg: 'bg-orange-500/13', text: 'text-orange-300', amount: 'text-orange-300' },
@@ -876,7 +1040,7 @@ function MonthPaymentCard({
       {payment.extra && (
         <span className="absolute inset-y-0 left-0 w-[3px] bg-violet-500 shadow-[2px_0_10px_rgba(168,85,247,0.7)]" />
       )}
-      <div className="grid grid-cols-[42px_minmax(0,1fr)_auto] items-center gap-2">
+      <button type="button" onClick={onEdit} className="grid w-full grid-cols-[42px_minmax(0,1fr)_auto] items-center gap-2 text-left">
         <PaymentChannelLogo channel={payment.channel} className="h-9 w-10" />
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-2">
@@ -895,7 +1059,7 @@ function MonthPaymentCard({
             )}
           </div>
         </div>
-        <div className="flex items-center gap-0.5">
+        <div className="flex items-center gap-0.5" onClick={e => e.stopPropagation()}>
           <button
             type="button"
             onClick={onToggleExtra}
@@ -924,7 +1088,7 @@ function MonthPaymentCard({
             <Trash2 className="h-3 w-3" />
           </button>
         </div>
-      </div>
+      </button>
     </div>
   );
 }
@@ -935,12 +1099,14 @@ function DayTimelinePaymentCard({
   onStatusChange,
   onDelete,
   onToggleExtra,
+  onEdit,
 }: {
   payment: InvestmentPayment;
   index: number;
   onStatusChange: (status: PaymentStatus) => void;
   onDelete: () => void;
   onToggleExtra: () => void;
+  onEdit: () => void;
 }) {
   const config: Record<PaymentStatus, { border: string; bg: string; text: string; pill: string; glow: string }> = {
     Pendente: {
@@ -990,7 +1156,7 @@ function DayTimelinePaymentCard({
       {payment.extra && (
         <span className="absolute inset-y-0 left-0 w-[3px] bg-violet-500 shadow-[2px_0_10px_rgba(168,85,247,0.7)]" />
       )}
-      <div className="flex items-center justify-between gap-4">
+      <button type="button" onClick={onEdit} className="flex w-full items-center justify-between gap-4 text-left">
         <div className="flex min-w-0 items-center gap-4">
           <PaymentChannelLogo channel={payment.channel} className="h-11 w-11" />
           <div className="min-w-0">
@@ -1006,7 +1172,7 @@ function DayTimelinePaymentCard({
             <p className="mt-1 text-xs font-medium text-muted-foreground">{payment.channel.replace(' ADS', ' Ads')}</p>
           </div>
         </div>
-        <div className="shrink-0 flex flex-col items-end gap-1">
+        <div className="shrink-0 flex flex-col items-end gap-1" onClick={e => e.stopPropagation()}>
           <p className="font-heading font-normal text-sm text-foreground tabular-nums">{formatCurrencyBRL(payment.amount)}</p>
           <div className="flex items-center gap-1">
             <button
@@ -1038,7 +1204,7 @@ function DayTimelinePaymentCard({
             </button>
           </div>
         </div>
-      </div>
+      </button>
     </div>
   );
 }
@@ -1049,12 +1215,14 @@ function WeekPaymentCard({
   onStatusChange,
   onDelete,
   onToggleExtra,
+  onEdit,
 }: {
   payment: InvestmentPayment;
   index: number;
   onStatusChange: (status: PaymentStatus) => void;
   onDelete: () => void;
   onToggleExtra: () => void;
+  onEdit: () => void;
 }) {
   const toneMap: Record<PaymentStatus, { border: string; bg: string; text: string; dot: string; label: string }> = {
     Pendente: { border: 'border-orange-400/45', bg: 'bg-orange-500/10', text: 'text-orange-300', dot: '#f59e0b', label: 'PENDENTE' },
@@ -1120,14 +1288,14 @@ function WeekPaymentCard({
           </button>
         </div>
       </div>
-      <div className="flex items-center gap-3">
+      <button type="button" onClick={onEdit} className="flex w-full items-center gap-3 text-left">
         <PaymentChannelLogo channel={payment.channel} className="h-9 w-9" />
         <div className="min-w-0">
           <p className="truncate text-xs font-bold leading-tight text-foreground">{payment.clientName}</p>
           <p className="mt-0.5 truncate text-[11px] leading-tight text-muted-foreground">{payment.channel.replace(' ADS', ' Ads')}</p>
           <p className={cn('mt-1 font-heading font-normal text-sm leading-none tabular-nums', cfg.text)}>{formatCurrencyBRL(payment.amount)}</p>
         </div>
-      </div>
+      </button>
     </div>
   );
 }
@@ -1172,7 +1340,8 @@ function WeekChannelSummaryCard({
 
 export default function PagamentosPage() {
   const { clients } = useClients();
-  const { payments, addPayment, updatePaymentStatus, deletePayment, movePaymentDate, togglePaymentExtra } = useInvestmentPayments();
+  const { payments, addPayment, updatePayment, updatePaymentStatus, deletePayment, movePaymentDate, togglePaymentExtra } = useInvestmentPayments();
+  const [editingPayment, setEditingPayment] = useState<InvestmentPayment | null>(null);
   const visibleClientIds = new Set(clients.map((client) => client.id));
   const visiblePayments = payments.filter((payment) => visibleClientIds.has(payment.clientId));
 
@@ -1412,6 +1581,14 @@ export default function PagamentosPage() {
 
   return (
     <div className="space-y-5 pb-10">
+      {editingPayment && (
+        <EditPaymentModal
+          payment={editingPayment}
+          clients={clients}
+          onSave={(fields) => updatePayment(editingPayment.id, fields)}
+          onClose={() => setEditingPayment(null)}
+        />
+      )}
       <div className="flex flex-wrap items-start justify-between gap-4 pt-2">
         <div>
           <h1 className="font-heading font-normal text-xl uppercase leading-none tracking-wide text-foreground">Acompanhamento de Pagamentos</h1>
@@ -1807,7 +1984,7 @@ export default function PagamentosPage() {
                         )}
                         <div className="space-y-2">
                           {(expandedDates.has(date) ? dayPayments : dayPayments.slice(0, 2)).map((payment, idx) => (
-                            <MonthPaymentCard key={payment.id} payment={payment} index={idx + wi + di} onStatusChange={(status) => updatePaymentStatus(payment.id, status)} onDelete={() => deletePayment(payment.id)} onToggleExtra={() => togglePaymentExtra(payment.id)} />
+                            <MonthPaymentCard key={payment.id} payment={payment} index={idx + wi + di} onStatusChange={(status) => updatePaymentStatus(payment.id, status)} onDelete={() => deletePayment(payment.id)} onToggleExtra={() => togglePaymentExtra(payment.id)} onEdit={() => setEditingPayment(payment)} />
                           ))}
                           {dayPayments.length > 2 && (
                             <button
@@ -1887,7 +2064,7 @@ export default function PagamentosPage() {
                             <span className="absolute left-0 top-2 h-5 w-px bg-border" />
                             {payment && (
                               <div className={cn('w-[46%]', index % 2 === 0 ? 'ml-5' : 'ml-[48%]')}>
-                                <DayTimelinePaymentCard payment={payment} index={index} onStatusChange={(status) => updatePaymentStatus(payment.id, status)} onDelete={() => deletePayment(payment.id)} onToggleExtra={() => togglePaymentExtra(payment.id)} />
+                                <DayTimelinePaymentCard payment={payment} index={index} onStatusChange={(status) => updatePaymentStatus(payment.id, status)} onDelete={() => deletePayment(payment.id)} onToggleExtra={() => togglePaymentExtra(payment.id)} onEdit={() => setEditingPayment(payment)} />
                               </div>
                             )}
                           </div>
@@ -2056,7 +2233,7 @@ export default function PagamentosPage() {
                   >
                     <div className="min-h-[342px] flex-1 space-y-2.5 p-3">
                       {day.payments.slice(0, 4).map((payment, index) => (
-                        <WeekPaymentCard key={payment.id} payment={payment} index={index + di} onStatusChange={(status) => updatePaymentStatus(payment.id, status)} onDelete={() => deletePayment(payment.id)} onToggleExtra={() => togglePaymentExtra(payment.id)} />
+                        <WeekPaymentCard key={payment.id} payment={payment} index={index + di} onStatusChange={(status) => updatePaymentStatus(payment.id, status)} onDelete={() => deletePayment(payment.id)} onToggleExtra={() => togglePaymentExtra(payment.id)} onEdit={() => setEditingPayment(payment)} />
                       ))}
                       {day.payments.length > 4 && (
                         <button type="button" onClick={() => { setSelectedDate(day.date); setViewMode('dia'); }} className="w-full rounded-lg py-2 text-center text-xs font-bold text-muted-foreground hover:bg-muted/30 hover:text-primary">
