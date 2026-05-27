@@ -9,7 +9,7 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import {
   AlertTriangle, ChevronDown, ChevronUp, ChevronRight, GripVertical, ImageIcon,
-  LayoutDashboard, Play, RefreshCw, Search, Sparkles, Check, X,
+  LayoutDashboard, LayoutTemplate, Play, RefreshCw, Search, Sparkles, Check, X,
   Pause, CircleDot, Pencil, Settings2, Users, Copy,
   Bell, DollarSign, Tag, TrendingUp, Calendar, BarChart3, Zap, Target, Briefcase,
   Wallet, MousePointerClick, CreditCard, PiggyBank, Clock, Info, Lightbulb, UserPlus, CheckCircle2,
@@ -3760,6 +3760,34 @@ export default function GeneralDashboard() {
     });
   }
 
+  // ── Copy layout modal ──────────────────────────────────────────────────────
+  const [copyLayoutOpen, setCopyLayoutOpen] = useState(false);
+  const [copyLayoutDest, setCopyLayoutDest] = useState<Set<string>>(new Set());
+
+  function openCopyLayout() {
+    setCopyLayoutDest(new Set());
+    setCopyLayoutOpen(true);
+  }
+
+  function copyLayoutToClients() {
+    const srcId = [...selectedIds][0];
+    const srcSuffix = `__${srcId}`;
+    const keysToClone = [
+      LS_RGL_LAYOUT,
+      LS_ORDER,
+      LS_COLLAPSED,
+      LS_DASHBOARD_PREFS,
+    ];
+    for (const destId of copyLayoutDest) {
+      const destSuffix = `__${destId}`;
+      for (const key of keysToClone) {
+        const val = localStorage.getItem(key + srcSuffix);
+        if (val !== null) localStorage.setItem(key + destSuffix, val);
+      }
+    }
+    setCopyLayoutOpen(false);
+  }
+
   // Load preferences from localStorage — re-runs whenever the selected client changes
   useEffect(() => {
     if (selectedIds.size === 0) return;
@@ -4400,6 +4428,84 @@ export default function GeneralDashboard() {
         />
       )}
 
+      {/* Copy layout modal */}
+      {copyLayoutOpen && selectedIds.size === 1 && (() => {
+        const srcClient = clients.find(c => selectedIds.has(c.id));
+        const otherClients = clients.filter(c => !selectedIds.has(c.id));
+        const allSelected = copyLayoutDest.size === otherClients.length;
+        return createPortal(
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+            <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md flex flex-col max-h-[80vh]">
+              <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-border shrink-0">
+                <div>
+                  <h2 className="text-sm font-bold">Copiar layout</h2>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    De <span className="font-semibold text-foreground">{srcClient?.name}</span> para:
+                  </p>
+                </div>
+                <button onClick={() => setCopyLayoutOpen(false)} className="text-muted-foreground hover:text-foreground p-1">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="px-5 pt-3 pb-2 border-b border-border shrink-0 flex items-center justify-between gap-2">
+                <span className="text-[11px] text-muted-foreground">{copyLayoutDest.size} de {otherClients.length} selecionado{copyLayoutDest.size !== 1 ? 's' : ''}</span>
+                <button
+                  onClick={() => setCopyLayoutDest(allSelected ? new Set() : new Set(otherClients.map(c => c.id)))}
+                  className="text-[11px] font-semibold text-primary hover:underline"
+                >
+                  {allSelected ? 'Desmarcar todos' : 'Selecionar todos'}
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto px-5 py-3 space-y-1 min-h-0">
+                {otherClients.map(c => {
+                  const checked = copyLayoutDest.has(c.id);
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => setCopyLayoutDest(prev => {
+                        const next = new Set(prev);
+                        if (next.has(c.id)) next.delete(c.id); else next.add(c.id);
+                        return next;
+                      })}
+                      className={cn(
+                        'w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition-colors',
+                        checked ? 'bg-primary/10 border border-primary/30' : 'hover:bg-muted/40 border border-transparent'
+                      )}
+                    >
+                      <div className={cn('h-4 w-4 rounded border flex items-center justify-center shrink-0', checked ? 'bg-primary border-primary' : 'border-border')}>
+                        {checked && <Check className="h-3 w-3 text-black" />}
+                      </div>
+                      <ClientAvatar clientId={c.id} name={c.name} size="sm" />
+                      <span className="font-medium truncate">{c.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="px-5 pb-5 pt-3 border-t border-border shrink-0 flex gap-2 justify-end">
+                <button
+                  onClick={() => setCopyLayoutOpen(false)}
+                  className="px-4 py-2 rounded-xl border border-border text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={copyLayoutToClients}
+                  disabled={copyLayoutDest.size === 0}
+                  className="px-4 py-2 rounded-xl bg-primary text-black text-sm font-bold hover:bg-primary/90 transition-colors disabled:opacity-40"
+                >
+                  Copiar para {copyLayoutDest.size > 0 ? `${copyLayoutDest.size} cliente${copyLayoutDest.size !== 1 ? 's' : ''}` : 'clientes'}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        );
+      })()}
+
       {/* UNIFIED TOP BAR */}
       <div className="sticky top-0 z-20 -mx-6 -mt-6 bg-background/95 backdrop-blur-sm border-b border-border">
         <div className="flex flex-wrap items-center gap-2 px-6 py-3 min-h-[56px]">
@@ -4460,6 +4566,19 @@ export default function GeneralDashboard() {
             <span className="hidden sm:inline">{aiLoading ? 'Analisando...' : 'Analisar com IA'}</span>
           </button>
 
+
+          {/* Copy layout */}
+          {selectedIds.size === 1 && (
+            <button
+              type="button"
+              onClick={openCopyLayout}
+              className="flex items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors whitespace-nowrap"
+              title="Copiar layout para outros clientes"
+            >
+              <LayoutTemplate className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Copiar layout</span>
+            </button>
+          )}
 
           {/* Metric customizer */}
           <button
@@ -4738,6 +4857,8 @@ export default function GeneralDashboard() {
           );
         })()}
 
+        {!collapsedSections.has('meta') && <div className="mt-5" />}
+
         {!collapsedSections.has('meta') && (() => {
           const metaPanelCards: Record<string, ReactNode> = {
             'meta-campaigns': (
@@ -4892,6 +5013,8 @@ export default function GeneralDashboard() {
             </RglGrid>
           );
         })()}
+
+        {!collapsedSections.has('google') && <div className="mt-5" />}
 
         {!collapsedSections.has('google') && (() => {
           const googlePanelCards: Record<string, ReactNode> = {
