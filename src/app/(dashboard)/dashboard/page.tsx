@@ -2448,7 +2448,8 @@ type DashboardCardId =
   | 'google-impressions' | 'google-conversions' | 'google-cpa' | 'google-spend' | 'google-ctr' | 'google-total-spend' | 'google-balance' | 'google-active-campaigns' | 'google-keyword-count' | 'google-clicks' | 'google-cpc' | 'google-campaigns' | 'google-keywords' | 'google-audience'
   | 'social-fb-fans' | 'social-fb-fan-adds' | 'social-fb-reach' | 'social-fb-impressions' | 'social-fb-engagements' | 'social-fb-views'
   | 'social-ig-followers' | 'social-ig-reach' | 'social-ig-views' | 'social-ig-profile-views' | 'social-ig-website-clicks'
-  | 'social-ig-engaged' | 'social-ig-interactions' | 'social-ig-likes' | 'social-ig-saves';
+  | 'social-ig-engaged' | 'social-ig-interactions' | 'social-ig-likes' | 'social-ig-saves'
+  | 'social-ig-top-posts';
 
 type DashboardCardConfig = {
   visible: boolean;
@@ -2517,13 +2518,14 @@ const CARD_LABELS: Record<DashboardCardId, string> = {
   'social-ig-interactions': 'IG: Interações',
   'social-ig-likes': 'IG: Curtidas',
   'social-ig-saves': 'IG: Salvamentos',
+  'social-ig-top-posts': 'IG: Top Postagens',
 };
 
 const CARD_GROUPS: Array<{ title: string; ids: DashboardCardId[] }> = [
   { title: 'Métricas Gerais', ids: ['general-revenue', 'general-leads', 'general-roi', 'general-cpl', 'general-spend', 'general-ctr', 'general-funnel', 'general-crm'] },
   { title: 'Meta Ads', ids: ['meta-reach', 'meta-impressions', 'meta-leads', 'meta-cpl', 'meta-spend', 'meta-ctr', 'meta-total-spend', 'meta-balance', 'meta-active-campaigns', 'meta-adsets', 'meta-creatives', 'meta-clicks', 'meta-campaigns', 'meta-audience', 'meta-creative-preview'] },
   { title: 'Google Ads', ids: ['google-impressions', 'google-conversions', 'google-cpa', 'google-spend', 'google-ctr', 'google-total-spend', 'google-balance', 'google-active-campaigns', 'google-keyword-count', 'google-clicks', 'google-cpc', 'google-campaigns', 'google-keywords', 'google-audience'] },
-  { title: 'Páginas & Perfis Sociais', ids: ['social-fb-fans', 'social-fb-fan-adds', 'social-fb-reach', 'social-fb-impressions', 'social-fb-engagements', 'social-fb-views', 'social-ig-followers', 'social-ig-reach', 'social-ig-views', 'social-ig-profile-views', 'social-ig-website-clicks', 'social-ig-engaged', 'social-ig-interactions', 'social-ig-likes', 'social-ig-saves'] },
+  { title: 'Páginas & Perfis Sociais', ids: ['social-fb-fans', 'social-fb-fan-adds', 'social-fb-reach', 'social-fb-impressions', 'social-fb-engagements', 'social-fb-views', 'social-ig-followers', 'social-ig-reach', 'social-ig-views', 'social-ig-profile-views', 'social-ig-website-clicks', 'social-ig-engaged', 'social-ig-interactions', 'social-ig-likes', 'social-ig-saves', 'social-ig-top-posts'] },
 ];
 
 const META_KPI_IDS: DashboardCardId[] = [
@@ -2545,7 +2547,7 @@ const CHANNEL_GROUPS: Array<{ id: string; label: string; color: string; ids: Das
 ];
 
 // ── React Grid Layout ────────────────────────────────────────────────────────
-const LS_RGL_LAYOUT = 'dashboard_rgl_layout_v6';
+const LS_RGL_LAYOUT = 'dashboard_rgl_layout_v7';
 function lsClientSuffix(ids: Set<string>): string {
   if (ids.size === 1) return `__${[...ids][0]}`;
   return '';
@@ -2553,6 +2555,27 @@ function lsClientSuffix(ids: Set<string>): string {
 const RGL_COLS = 12;
 const RGL_ROW_H = 100; // px per row unit
 const RGL_MARGIN: [number, number] = [16, 16];
+
+// Natural-height helpers — compute the grid row count that fits content with no empty space.
+// chrome = card header/padding, rows capped at 15 to avoid infinite-scroll cards.
+function tableAutoH(rowCount: number, minH: number): number {
+  const total = 72 + (rowCount > 0 ? 34 + rowCount * 36 : 60) + 20;
+  return Math.max(minH, Math.min(15, Math.ceil(total / RGL_ROW_H)));
+}
+function kwAutoH(rowCount: number, minH: number): number {
+  const total = 74 + (rowCount > 0 ? rowCount * 50 : 60) + 20;
+  return Math.max(minH, Math.min(15, Math.ceil(total / RGL_ROW_H)));
+}
+function creativesGridAutoH(count: number, minH: number): number {
+  // 5 cols assumed (~1350px card); each row ≈ 467px (228px col × 16/9 + text + gap)
+  const total = 80 + (count > 0 ? Math.ceil(count / 5) * 467 : 80) + 20;
+  return Math.max(minH, Math.min(15, Math.ceil(total / RGL_ROW_H)));
+}
+function igPostsGridAutoH(count: number, minH: number): number {
+  // 8 cols assumed; each row ≈ 236px (160px sq + info + gap)
+  const total = 60 + (count > 0 ? Math.ceil(count / 8) * 236 : 60) + 20;
+  return Math.max(minH, Math.min(15, Math.ceil(total / RGL_ROW_H)));
+}
 
 const DEFAULT_META_KPI_LAYOUT: RglLayout[] = [
   { i: 'meta-reach',            x: 0, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
@@ -2610,6 +2633,7 @@ const DEFAULT_SOCIAL_KPI_LAYOUT: RglLayout[] = [
   { i: 'social-ig-interactions',  x: 6, y: 6, w: 3, h: 2, minW: 2, minH: 2 },
   { i: 'social-ig-likes',         x: 9, y: 6, w: 3, h: 2, minW: 2, minH: 2 },
   { i: 'social-ig-saves',         x: 0, y: 8, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'social-ig-top-posts',    x: 0, y: 10, w: 12, h: 5, minW: 4, minH: 3 },
 ];
 
 const DEFAULT_META_PANELS_LAYOUT: RglLayout[] = [
@@ -2635,6 +2659,7 @@ const DEFAULT_CARD_OVERRIDES: Partial<Record<DashboardCardId, Partial<DashboardC
   'google-campaigns': { size: 'lg', chart: 'none' },
   'google-keywords': { size: 'md', chart: 'none' },
   'google-audience': { size: 'md', chart: 'none' },
+  'social-ig-top-posts': { size: 'lg', chart: 'none' },
   'meta-adsets': { chart: 'none' },
   'meta-creatives': { chart: 'none' },
   'meta-active-campaigns': { chart: 'none' },
@@ -3620,6 +3645,150 @@ function SocialPageCards({
   );
 }
 
+// ── IgTopPostsCard ────────────────────────────────────────────────────────────
+import type { IgPost } from '@/app/api/meta/ig-posts/route';
+
+type IgSortKey = 'reach' | 'views' | 'likes' | 'saves' | 'comments';
+
+const IG_SORT_OPTIONS: { value: IgSortKey; label: string }[] = [
+  { value: 'reach',    label: 'Alcance' },
+  { value: 'views',   label: 'Visualizações' },
+  { value: 'likes',   label: 'Curtidas' },
+  { value: 'saves',   label: 'Salvamentos' },
+  { value: 'comments',label: 'Comentários' },
+];
+
+function IgTopPostsCard({ posts, loading, sortBy, onSortChange }: {
+  posts: IgPost[];
+  loading: boolean;
+  sortBy: IgSortKey;
+  onSortChange: (s: IgSortKey) => void;
+}) {
+  function fmt(n: number) { return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n); }
+  function relDate(ts: string) {
+    const d = new Date(ts);
+    const diffDays = Math.floor((Date.now() - d.getTime()) / 86400000);
+    if (diffDays === 0) return 'hoje';
+    if (diffDays === 1) return '1d atrás';
+    if (diffDays < 7) return `${diffDays}d atrás`;
+    if (diffDays < 30) return `${Math.floor(diffDays / 7)}sem atrás`;
+    return `${Math.floor(diffDays / 30)}m atrás`;
+  }
+
+  const MEDIA_BADGE: Record<string, { label: string; color: string }> = {
+    REELS:          { label: 'REELS',     color: '#E1306C' },
+    VIDEO:          { label: 'VÍDEO',     color: '#833AB4' },
+    CAROUSEL_ALBUM: { label: 'CARROSSEL', color: '#F77737' },
+    IMAGE:          { label: 'FOTO',      color: '#405DE6' },
+  };
+
+  return (
+    <div className="rounded-xl border border-[#E1306C]/35 bg-black/35 p-4 shadow-[inset_0_0_30px_rgba(225,48,108,0.06),0_0_28px_rgba(225,48,108,0.14)] h-full flex flex-col">
+      <div className="shrink-0 flex flex-wrap items-center justify-between gap-3 mb-3">
+        <div className="flex items-center gap-2">
+          <svg viewBox="0 0 24 24" className="h-4 w-4 fill-[#E1306C]"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z" /></svg>
+          <p className="text-[11px] font-bold uppercase tracking-widest text-foreground/75">Top Postagens Instagram</p>
+          {loading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-foreground/55 mr-1">Ordenar por</span>
+          {IG_SORT_OPTIONS.map(opt => (
+            <button
+              key={opt.value}
+              onClick={() => onSortChange(opt.value)}
+              className={cn(
+                'px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors border',
+                sortBy === opt.value
+                  ? 'bg-[#E1306C] text-white border-[#E1306C] shadow-[0_0_10px_rgba(225,48,108,0.4)]'
+                  : 'text-muted-foreground border-border hover:text-foreground'
+              )}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center gap-2 flex-1 text-sm text-muted-foreground">
+          <RefreshCw className="h-4 w-4 animate-spin" /> Carregando postagens...
+        </div>
+      ) : posts.length === 0 ? (
+        <p className="flex-1 flex items-center justify-center text-sm text-muted-foreground">Nenhuma postagem encontrada no período.</p>
+      ) : (
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <div
+            className="grid gap-3"
+            style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }}
+          >
+            {posts.map((post, idx) => {
+              const badge = MEDIA_BADGE[post.mediaType] ?? MEDIA_BADGE.IMAGE;
+              const thumb = post.thumbnailUrl ?? post.mediaUrl;
+              const mainMetric = sortBy === 'views' ? Math.max(post.videoViews, post.reach)
+                : sortBy === 'likes' ? post.likes
+                : sortBy === 'saves' ? post.saves
+                : sortBy === 'comments' ? post.comments
+                : post.reach;
+              return (
+                <a
+                  key={post.id}
+                  href={post.permalink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="relative flex flex-col overflow-hidden rounded-xl border border-border bg-card/50 hover:border-[#E1306C]/50 transition-colors group"
+                >
+                  {/* Thumbnail */}
+                  <div className="relative bg-muted aspect-square overflow-hidden">
+                    {thumb ? (
+                      <img
+                        src={thumb}
+                        alt={post.caption?.slice(0, 60)}
+                        className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
+                      />
+                    ) : (
+                      <div className="h-full w-full flex items-center justify-center bg-muted/50">
+                        <ImageIcon className="h-8 w-8 text-muted-foreground/30" />
+                      </div>
+                    )}
+                    {/* Rank badge */}
+                    <div className="absolute top-1.5 left-1.5 h-5 w-5 rounded-full bg-black/70 flex items-center justify-center text-[9px] font-black text-white">
+                      {idx + 1}
+                    </div>
+                    {/* Media type badge */}
+                    <span
+                      className="absolute top-1.5 right-1.5 rounded px-1 py-0.5 text-[8px] font-black text-white"
+                      style={{ backgroundColor: `${badge.color}cc` }}
+                    >
+                      {badge.label}
+                    </span>
+                    {/* Main metric overlay */}
+                    <div className="absolute bottom-1.5 right-1.5 rounded-full px-1.5 py-0.5 text-[9px] font-black text-black bg-[#E1306C] shadow">
+                      {fmt(mainMetric)}
+                    </div>
+                  </div>
+                  {/* Info */}
+                  <div className="p-2 flex flex-col gap-1.5">
+                    {post.caption && (
+                      <p className="text-[10px] text-foreground/70 line-clamp-2 leading-tight">{post.caption}</p>
+                    )}
+                    <p className="text-[9px] text-muted-foreground">@{post.username} · {relDate(post.timestamp)}</p>
+                    <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
+                      <span className="text-[9px] text-muted-foreground">Alcance <span className="font-semibold text-foreground">{fmt(post.reach)}</span></span>
+                      <span className="text-[9px] text-muted-foreground">Curtidas <span className="font-semibold text-foreground">{fmt(post.likes)}</span></span>
+                      {post.videoViews > 0 && <span className="text-[9px] text-muted-foreground">Views <span className="font-semibold text-foreground">{fmt(post.videoViews)}</span></span>}
+                      <span className="text-[9px] text-muted-foreground">Salv. <span className="font-semibold text-foreground">{fmt(post.saves)}</span></span>
+                    </div>
+                  </div>
+                </a>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main Dashboard ───────────────────────────────────────────────────────────
 export default function GeneralDashboard() {
   const { clients } = useClients();
@@ -3668,10 +3837,22 @@ export default function GeneralDashboard() {
   const [pageInsights, setPageInsights] = useState<PageInsightsResult[]>([]);
   const [prevPageInsights, setPrevPageInsights] = useState<PageInsightsResult[]>([]);
   const [pageInsightsLoading, setPageInsightsLoading] = useState(false);
+  const [igPosts, setIgPosts] = useState<IgPost[]>([]);
+  const [igPostsLoading, setIgPostsLoading] = useState(false);
+  const [igSortBy, setIgSortBy] = useState<IgSortKey>('reach');
   // Stable string key derived from selectedIds — used as useEffect dependency
   const selectedKey = [...selectedIds].sort().join(',');
   // Ref always points to the suffix currently in use (updated synchronously in load effect)
   const currentLsSuffixRef = useRef('');
+  // Track last auto-resize key per panel group to avoid fighting user manual resizes within a session
+  const metaPanelsResizeKeyRef = useRef('');
+  const googlePanelsResizeKeyRef = useRef('');
+  const socialResizeKeyRef = useRef('');
+  // Track when each fetch has actually started (to ignore the initial mount where loading=false)
+  const campaignsFetchStartedRef = useRef('');
+  const creativesFetchStartedRef = useRef('');
+  const keywordsFetchStartedRef = useRef('');
+  const igPostsFetchStartedRef = useRef('');
   const [alertsCollapsed, setAlertsCollapsed] = useState(() => {
     if (typeof window === 'undefined') return false;
     return localStorage.getItem('dashboard:alerts:collapsed') === '1';
@@ -4143,6 +4324,73 @@ export default function GeneralDashboard() {
     }).finally(() => { if (!cancelled) setPageInsightsLoading(false); });
     return () => { cancelled = true; };
   }, [selectedIds, period, customDateFrom, customDateTo, customReady]);
+
+  // Fetch Instagram top posts
+  useEffect(() => {
+    if (selectedIds.size === 0 || !customReady) { setIgPosts([]); return; }
+    setIgPostsLoading(true);
+    const params = buildPeriodParams({ clientIds: [...selectedIds].join(','), limit: '24', sortBy: igSortBy });
+    fetch(`/api/meta/ig-posts?${params}`)
+      .then(r => r.ok ? r.json() as Promise<IgPost[]> : [])
+      .then(data => setIgPosts(data))
+      .catch(() => setIgPosts([]))
+      .finally(() => setIgPostsLoading(false));
+  }, [selectedIds, period, customDateFrom, customDateTo, customReady, igSortBy]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Auto-fit panel heights to content ────────────────────────────────────
+  // Each effect fires once per (client × period) context. User can expand manually within that session;
+  // switching client or period resets to content-snug height.
+  // The "FetchStarted" refs guard against the initial-mount false-positive where loading=false
+  // but data hasn't been fetched yet — we only auto-resize after a real fetch cycle completes.
+  useEffect(() => {
+    const key = `${selectedKey}:${period}:${customDateFrom}:${customDateTo}`;
+    if (campaignsLoading) campaignsFetchStartedRef.current = key;
+    if (creativesLoading) creativesFetchStartedRef.current = key;
+    if (campaignsLoading || creativesLoading || selectedIds.size === 0) return;
+    if (campaignsFetchStartedRef.current !== key || creativesFetchStartedRef.current !== key) return;
+    if (metaPanelsResizeKeyRef.current === key) return;
+    metaPanelsResizeKeyRef.current = key;
+    const mCount = campaigns.filter(c => c.platform === 'meta').length;
+    const cCount = creatives.length;
+    setMetaPanelsLayout(prev => prev.map(item => {
+      const minH = item.minH ?? 2;
+      if (item.i === 'meta-campaigns')        return { ...item, h: tableAutoH(mCount, minH) };
+      if (item.i === 'meta-creative-preview') return { ...item, h: creativesGridAutoH(cCount, minH) };
+      return item;
+    }));
+  }, [campaignsLoading, creativesLoading]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const key = `${selectedKey}:${period}:${customDateFrom}:${customDateTo}`;
+    if (campaignsLoading) campaignsFetchStartedRef.current = key;
+    if (keywordsLoading) keywordsFetchStartedRef.current = key;
+    if (campaignsLoading || keywordsLoading || selectedIds.size === 0) return;
+    if (campaignsFetchStartedRef.current !== key || keywordsFetchStartedRef.current !== key) return;
+    if (googlePanelsResizeKeyRef.current === key) return;
+    googlePanelsResizeKeyRef.current = key;
+    const gCount = campaigns.filter(c => c.platform === 'google').length;
+    const kCount = keywords.length;
+    setGooglePanelsLayout(prev => prev.map(item => {
+      const minH = item.minH ?? 2;
+      if (item.i === 'google-campaigns') return { ...item, h: tableAutoH(gCount, minH) };
+      if (item.i === 'google-keywords')  return { ...item, h: kwAutoH(kCount, minH) };
+      return item;
+    }));
+  }, [campaignsLoading, keywordsLoading]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const key = `${selectedKey}:${period}:${customDateFrom}:${customDateTo}`;
+    if (igPostsLoading) igPostsFetchStartedRef.current = key;
+    if (igPostsLoading || selectedIds.size === 0) return;
+    if (igPostsFetchStartedRef.current !== key) return;
+    if (socialResizeKeyRef.current === key) return;
+    socialResizeKeyRef.current = key;
+    setSocialKpiLayout(prev => prev.map(item => {
+      const minH = item.minH ?? 3;
+      if (item.i === 'social-ig-top-posts') return { ...item, h: igPostsGridAutoH(igPosts.length, minH) };
+      return item;
+    }));
+  }, [igPostsLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Aggregate metrics ────────────────────────────────────────────────────
   let metaLeads = 0, metaFormLeads = 0, metaSiteLeads = 0, metaConversations = 0, metaSpend = 0, metaReach = 0, metaImpressions = 0, metaClicks = 0;
@@ -5141,6 +5389,7 @@ export default function GeneralDashboard() {
           'social-ig-interactions':    <KpiCard title="Interações IG"     value={igInteract}prevValue={prevIgInteract}format="number" icon={Zap}           iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal />,
           'social-ig-likes':           <KpiCard title="Curtidas IG"       value={igLikes}   prevValue={prevIgLikes}   format="number" icon={Heart}         iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal />,
           'social-ig-saves':           <KpiCard title="Salvamentos IG"    value={igSaves}   prevValue={prevIgSaves}   format="number" icon={Bookmark}      iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal />,
+          'social-ig-top-posts':       <IgTopPostsCard posts={igPosts} loading={igPostsLoading} sortBy={igSortBy} onSortChange={setIgSortBy} />,
         };
 
         const visibleSocialLayout = socialKpiLayout.filter(l => {
