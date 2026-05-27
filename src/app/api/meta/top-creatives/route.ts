@@ -180,17 +180,10 @@ export async function GET(request: NextRequest) {
           const adsInsights: any[] = insightsData.data ?? [];
           if (adsInsights.length === 0) return;
 
-          // Batch-fetch creative details — explicitly expand image subfields for full resolution
+          // Batch-fetch creative details
           const adIds = adsInsights.map(a => a.ad_id as string).filter(Boolean);
-          const creativeFields = [
-            'body', 'title', 'image_url', 'thumbnail_url',
-            'object_story_spec{link_data{picture,image_url},video_data{video_id,image_url},photo_data{url}}',
-            'asset_feed_spec{images{url,hash}}',
-            'instagram_permalink_url',
-            'effective_object_story_id',
-          ].join(',');
           const batchRes = await fetch(
-            `https://graph.facebook.com/v21.0/?ids=${adIds.join(',')}&fields=name,creative{${creativeFields}}&access_token=${token}`
+            `https://graph.facebook.com/v21.0/?ids=${adIds.join(',')}&fields=name,creative{body,title,image_url,thumbnail_url,object_story_spec,asset_feed_spec,instagram_permalink_url,effective_object_story_id}&access_token=${token}`
           );
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const batchData: Record<string, any> = batchRes.ok ? await batchRes.json() : {};
