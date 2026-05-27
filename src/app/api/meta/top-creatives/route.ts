@@ -214,9 +214,9 @@ export async function GET(request: NextRequest) {
             const bestThumbFromFormat = videoFormats.sort((a, b) => (b.width ?? 0) - (a.width ?? 0))[0]?.picture;
             const storyImageUrl =
               storySpec.video_data?.image_url ??
+              videoInfo.picture ??
               bestThumbFromThumbnails ??
               bestThumbFromFormat ??
-              videoInfo.picture ??
               storySpec.photo_data?.url ??
               storySpec.link_data?.picture ??
               undefined;
@@ -253,7 +253,7 @@ export async function GET(request: NextRequest) {
               campaignName: insight.campaign_name ?? undefined,
               adSetId: insight.adset_id ?? undefined,
               adSetName: insight.adset_name ?? undefined,
-              imageUrl: originalImageUrl ?? storyImageUrl ?? creative.image_url ?? assetFeedImageUrl ?? undefined,
+              imageUrl: originalImageUrl ?? storyImageUrl ?? creative.thumbnail_url ?? creative.image_url ?? assetFeedImageUrl ?? undefined,
               thumbnailUrl: creative.thumbnail_url ?? undefined,
               videoUrl: videoInfo.source ?? undefined,
               permalink,
