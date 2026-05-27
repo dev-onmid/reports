@@ -3422,19 +3422,31 @@ function CircularQuality({ pct, color, size = 120 }: { pct: number; color: strin
 function CreativeCarouselCard({ creative, idx, sortBy, onPreview }: {
   creative: TopCreative; idx: number; sortBy: SortKey; onPreview: (c: TopCreative) => void;
 }) {
-  const [imgErr, setImgErr] = useState(false);
-  const imgUrl = creative.imageUrl ?? creative.thumbnailUrl;
+  const [imgStage, setImgStage] = useState<'primary' | 'thumb' | 'error'>('primary');
+  const primaryUrl = creative.imageUrl;
+  const thumbUrl = creative.thumbnailUrl;
+  const imgUrl = imgStage === 'primary' ? (primaryUrl ?? thumbUrl) : imgStage === 'thumb' ? thumbUrl : undefined;
   const metricValue = sortBy === 'leads' ? creative.leads.toLocaleString('pt-BR')
     : sortBy === 'cpl' ? (creative.cpl > 0 ? formatCurrencyBRL(creative.cpl) : '—')
     : sortBy === 'ctr' ? `${creative.ctr.toFixed(2)}%`
     : formatCurrencyBRL(creative.spend);
+
+  function handleImgError() {
+    // Only fall back to thumbnail if imageUrl was actually tried and is distinct from thumbnail
+    if (imgStage === 'primary' && primaryUrl && thumbUrl && thumbUrl !== primaryUrl) {
+      setImgStage('thumb');
+    } else {
+      setImgStage('error');
+    }
+  }
+
   return (
-    <div className="w-[175px] shrink-0 overflow-hidden rounded-xl border border-[#0B84FF]/35 bg-black/45 shadow-[0_0_24px_rgba(11,132,255,0.16)] transition-colors hover:border-[#55F52F]/65 hover:shadow-[0_0_30px_rgba(85,245,47,0.26)]">
+    <div className="w-[228px] shrink-0 overflow-hidden rounded-xl border border-[#0B84FF]/35 bg-black/45 shadow-[0_0_24px_rgba(11,132,255,0.16)] transition-colors hover:border-[#55F52F]/65 hover:shadow-[0_0_30px_rgba(85,245,47,0.26)]">
       <div className="relative overflow-hidden bg-[#07101F]" style={{ aspectRatio: '9/16' }}>
-        {imgUrl && !imgErr ? (
+        {imgUrl && imgStage !== 'error' ? (
           <button type="button" onClick={() => onPreview(creative)} className="block h-full w-full">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={imgUrl} alt={creative.adName} className="h-full w-full object-cover" onError={() => setImgErr(true)} />
+            <img src={imgUrl} alt={creative.adName} className="h-full w-full object-cover" onError={handleImgError} />
             {creative.videoUrl && <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/20 pointer-events-none" />}
           </button>
         ) : <ImageIcon className="absolute inset-0 m-auto h-8 w-8 text-muted-foreground/30" />}
@@ -3448,6 +3460,20 @@ function CreativeCarouselCard({ creative, idx, sortBy, onPreview }: {
       </div>
       <div className="p-2.5 space-y-2">
         <p className="text-[11px] font-bold truncate">{creative.adName}</p>
+        {(creative.campaignName ?? creative.adSetName) && (
+          <div className="space-y-0.5">
+            {creative.campaignName && (
+              <p className="text-[9px] text-foreground/45 truncate" title={creative.campaignName}>
+                <span className="font-semibold text-foreground/60">Camp:</span> {creative.campaignName}
+              </p>
+            )}
+            {creative.adSetName && (
+              <p className="text-[9px] text-foreground/45 truncate" title={creative.adSetName}>
+                <span className="font-semibold text-foreground/60">Conj:</span> {creative.adSetName}
+              </p>
+            )}
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-1">
           {([
             { label: 'INVEST.', val: formatCurrencyBRL(creative.spend) },
@@ -4709,8 +4735,8 @@ export default function GeneralDashboard() {
             ),
             'meta-audience': <AudiencePlatformBlock title="Meta Ads" description="Recortes por idade, gênero, plataforma e dispositivo." color="#0B84FF" colors={META_AUDIENCE_COLORS} data={audience.meta} chartVariant={dashboardPrefs.metaAudienceChart} />,
             'meta-creative-preview': (
-              <div className="rounded-xl border border-[#0B84FF]/35 bg-black/35 p-4 shadow-[inset_0_0_30px_rgba(11,132,255,0.10),0_0_28px_rgba(11,132,255,0.16)] h-full overflow-hidden">
-                <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="rounded-xl border border-[#0B84FF]/35 bg-black/35 p-4 shadow-[inset_0_0_30px_rgba(11,132,255,0.10),0_0_28px_rgba(11,132,255,0.16)] h-full flex flex-col overflow-hidden">
+                <div className="flex-none flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <p className="text-[11px] font-bold uppercase tracking-widest text-foreground/75">Criativos Meta Ads</p>
                     <p className="mt-0.5 text-[11px] text-foreground/55">Anúncios e previews com melhor desempenho no período selecionado.</p>
@@ -4728,11 +4754,11 @@ export default function GeneralDashboard() {
                     {creativesLoading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
                   </div>
                 </div>
-                <div className="mt-4">
+                <div className="mt-4 flex-1 min-h-0 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
                   {creativesLoading ? (
-                    <div className="flex gap-3 overflow-hidden">
+                    <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(228px, 1fr))' }}>
                       {Array.from({ length: 5 }).map((_, i) => (
-                        <div key={i} className="w-[175px] shrink-0 animate-pulse rounded-xl border border-border bg-muted/10">
+                        <div key={i} className="animate-pulse rounded-xl border border-border bg-muted/10">
                           <div className="bg-muted/30 rounded-t-xl" style={{ aspectRatio: '9/16' }} />
                           <div className="p-2.5 space-y-2"><div className="h-3 bg-muted/40 rounded w-3/4" /></div>
                         </div>
@@ -4745,7 +4771,7 @@ export default function GeneralDashboard() {
                       <p className="mt-1 text-xs text-muted-foreground/60">Conecte uma conta Meta Ads em Integrações.</p>
                     </div>
                   ) : (
-                    <div className="flex gap-3 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
+                    <div className="grid gap-3 pb-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(228px, 1fr))' }}>
                       {creatives.map((c, idx) => (
                         <CreativeCarouselCard key={c.adId} creative={c} idx={idx} sortBy={sortBy} onPreview={setPreviewCreative} />
                       ))}

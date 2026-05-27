@@ -47,6 +47,10 @@ export type TopCreative = {
   adName: string;
   accountId: string;
   accountName: string;
+  campaignId?: string;
+  campaignName?: string;
+  adSetId?: string;
+  adSetName?: string;
   imageUrl?: string;
   thumbnailUrl?: string;
   videoUrl?: string;
@@ -161,7 +165,7 @@ export async function GET(request: NextRequest) {
           // Fetch top ads insights sorted by spend
           const insightsUrl = new URL(`https://graph.facebook.com/v21.0/${toMetaAccountNodeId(account.id)}/insights`);
           insightsUrl.searchParams.set('level', 'ad');
-          insightsUrl.searchParams.set('fields', 'ad_id,ad_name,spend,impressions,clicks,actions');
+          insightsUrl.searchParams.set('fields', 'ad_id,ad_name,campaign_id,campaign_name,adset_id,adset_name,spend,impressions,clicks,actions');
           applyMetaDateToUrl(insightsUrl, metaPeriod);
           insightsUrl.searchParams.set('sort', 'spend_descending');
           insightsUrl.searchParams.set('limit', String(limit));
@@ -178,7 +182,7 @@ export async function GET(request: NextRequest) {
           // Batch-fetch creative details
           const adIds = adsInsights.map(a => a.ad_id as string).filter(Boolean);
           const batchRes = await fetch(
-            `https://graph.facebook.com/v21.0/?ids=${adIds.join(',')}&fields=name,creative{body,title,image_url,thumbnail_url,image_crops,object_story_spec}&access_token=${token}`
+            `https://graph.facebook.com/v21.0/?ids=${adIds.join(',')}&fields=name,creative{body,title,image_url,thumbnail_url,image_crops,object_story_spec,asset_feed_spec}&access_token=${token}`
           );
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const batchData: Record<string, any> = batchRes.ok ? await batchRes.json() : {};
@@ -218,12 +222,20 @@ export async function GET(request: NextRequest) {
             const originalImageUrl: string | undefined =
               creative.image_crops?.original_image?.url ?? undefined;
 
+            // Fallback: first image from asset_feed_spec (dynamic/carousel ads)
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const assetFeedImageUrl: string | undefined = (creative.asset_feed_spec?.images as any[])?.[0]?.url ?? undefined;
+
             allCreatives.push({
               adId: insight.ad_id,
               adName: insight.ad_name ?? adData.name ?? `Ad ${insight.ad_id}`,
               accountId: account.id,
               accountName: account.name,
-              imageUrl: originalImageUrl ?? storyImageUrl ?? creative.image_url ?? undefined,
+              campaignId: insight.campaign_id ?? undefined,
+              campaignName: insight.campaign_name ?? undefined,
+              adSetId: insight.adset_id ?? undefined,
+              adSetName: insight.adset_name ?? undefined,
+              imageUrl: originalImageUrl ?? storyImageUrl ?? creative.image_url ?? assetFeedImageUrl ?? undefined,
               thumbnailUrl: creative.thumbnail_url ?? undefined,
               videoUrl: videoInfo.source ?? undefined,
               headline: creative.title ?? undefined,
