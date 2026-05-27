@@ -1176,8 +1176,10 @@ function CreativePreviewOverlay({
   creative: TopCreative | null;
   onClose: () => void;
 }) {
+  const [videoFailed, setVideoFailed] = useState(false);
   if (!creative) return null;
   const imgUrl = creative.imageUrl ?? creative.thumbnailUrl;
+  const showVideo = !!creative.videoUrl && !videoFailed;
 
   return (
     <div className="fixed inset-0 z-[100] bg-black/90 p-4 backdrop-blur-sm" onClick={onClose}>
@@ -1193,13 +1195,14 @@ function CreativePreviewOverlay({
           className="flex h-[min(78vh,760px)] w-[min(82vw,560px)] items-center justify-center overflow-hidden rounded-2xl border border-white/15 bg-black shadow-[0_0_60px_rgba(11,132,255,0.18)]"
           onClick={(event) => event.stopPropagation()}
         >
-          {creative.videoUrl ? (
+          {showVideo ? (
             <video
               src={creative.videoUrl}
               poster={imgUrl}
               controls
               autoPlay
               className="h-full w-full bg-black object-contain"
+              onError={() => setVideoFailed(true)}
             />
           ) : imgUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
