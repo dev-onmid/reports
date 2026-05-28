@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
+import { deleteEvolutionInstance } from '@/lib/evolution-api';
 
 export async function PATCH(
   req: NextRequest,
@@ -29,6 +30,14 @@ export async function DELETE(
   const { id, instanceId } = await params;
   const pool = makeServerPool();
   try {
+    const { rows: [inst] } = await pool.query(
+      `SELECT instance_id, provider FROM public.client_zapi_instances
+       WHERE id = $1 AND client_id = $2`,
+      [instanceId, id],
+    );
+    if (inst?.provider === 'evolution') {
+      await deleteEvolutionInstance(inst.instance_id);
+    }
     await pool.query(
       `DELETE FROM public.client_zapi_instances WHERE id = $1 AND client_id = $2`,
       [instanceId, id],

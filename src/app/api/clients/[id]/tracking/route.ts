@@ -23,10 +23,12 @@ async function ensureTables(pool: ReturnType<typeof makeServerPool>) {
       client_id   TEXT NOT NULL,
       nome        TEXT NOT NULL,
       instance_id TEXT NOT NULL,
-      token       TEXT NOT NULL,
+      token       TEXT NOT NULL DEFAULT '',
       ativo       BOOLEAN NOT NULL DEFAULT true,
+      provider    TEXT NOT NULL DEFAULT 'zapi',
       created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    ALTER TABLE public.client_zapi_instances ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT 'zapi';
     CREATE INDEX IF NOT EXISTS idx_czapi_client_id ON public.client_zapi_instances (client_id);
   `);
   // Evolve whatsapp_leads for multi-tenant

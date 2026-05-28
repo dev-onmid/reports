@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   Copy, Check, Trash2, Plus, RefreshCw, Eye, EyeOff,
-  Zap, Settings2, MessageCircle, ShoppingCart, X, TrendingUp,
+  Settings2, MessageCircle, ShoppingCart, X, TrendingUp, Wifi, WifiOff, QrCode,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -19,12 +19,13 @@ type TrackingConfig = {
   whatsapp_provider: WhatsAppProvider;
 };
 
-type ZapiInstance = {
+type Instance = {
   id: string;
   nome: string;
   instance_id: string;
   token: string;
   ativo: boolean;
+  provider: WhatsAppProvider;
   created_at: string;
 };
 
@@ -41,6 +42,8 @@ type WaLead = {
   created_at: string;
 };
 
+type ConnState = 'open' | 'close' | 'connecting' | 'unknown' | 'n/a';
+
 type LeadPeriod = '7d' | '30d' | '90d';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -52,6 +55,13 @@ function maskPhone(phone: string): string {
     return `+${phone.slice(0, 2)} (${phone.slice(2, 4)}) ****-${phone.slice(-4)}`;
   }
   return `****${phone.slice(-4)}`;
+}
+
+function toSlug(s: string): string {
+  return s.toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
 }
 
 function CopyBtn({ text, label }: { text: string; label?: string }) {
@@ -71,6 +81,23 @@ function CopyBtn({ text, label }: { text: string; label?: string }) {
   );
 }
 
+function StateBadge({ state }: { state: ConnState }) {
+  if (state === 'n/a') return null;
+  const map: Record<ConnState, { label: string; className: string; dot: string }> = {
+    open:       { label: 'Conectado',    className: 'bg-emerald-500/15 text-emerald-400', dot: 'bg-emerald-400' },
+    connecting: { label: 'Aguardando',   className: 'bg-yellow-500/15  text-yellow-400',  dot: 'bg-yellow-400' },
+    close:      { label: 'Desconectado', className: 'bg-muted text-muted-foreground',      dot: 'bg-muted-foreground' },
+    unknown:    { label: 'Desconectado', className: 'bg-muted text-muted-foreground',      dot: 'bg-muted-foreground' },
+  };
+  const s = map[state] ?? map.unknown;
+  return (
+    <span className={cn('flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold', s.className)}>
+      <span className={cn('h-1.5 w-1.5 rounded-full', s.dot)} />
+      {s.label}
+    </span>
+  );
+}
+
 // ── Main component ───────────────────────────────────────────────────────────
 
 export function ClientTrackingTab({ clientId }: { clientId: string }) {
@@ -80,21 +107,58 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
     eventos_ativos: { lead: true, purchase: true },
     whatsapp_provider: 'zapi',
   });
-  const [instances, setInstances] = useState<ZapiInstance[]>([]);
-  const [leads, setLeads]         = useState<WaLead[]>([]);
-  const [loading, setLoading]     = useState(true);
-  const [saving, setSaving]       = useState(false);
-  const [showToken, setShowToken] = useState(false);
+  const [instances, setInstances]   = useState<Instance[]>([]);
+  const [leads, setLeads]           = useState<WaLead[]>([]);
+  const [loading, setLoading]       = useState(true);
+  const [saving, setSaving]         = useState(false);
+  const [showToken, setShowToken]   = useState(false);
+
+  // Instance statuses (Evolution only)
+  const [statuses, setStatuses] = useState<Record<string, ConnState>>({});
+  const statusTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // New instance modal
-  const [showModal, setShowModal] = useState(false);
-  const [instForm, setInstForm]   = useState({ nome: '', instance_id: '', token: '' });
-  const [instError, setInstError] = useState('');
-  const [adding, setAdding]       = useState(false);
+  const [showModal, setShowModal]     = useState(false);
+  const [instProvider, setInstProvider] = useState<WhatsAppProvider>('zapi');
+  const [instForm, setInstForm]       = useState({ nome: '', instance_id: '', token: '' });
+  const [instError, setInstError]     = useState('');
+  const [adding, setAdding]           = useState(false);
 
-  // Leads period
-  const [period, setPeriod] = useState<LeadPeriod>('30d');
+  // QR modal
+  const [qrInst, setQrInst]           = useState<Instance | null>(null);
+  const [qrData, setQrData]           = useState<{ base64?: string; code?: string } | null>(null);
+  const [qrLoading, setQrLoading]     = useState(false);
+
+  // Leads
+  const [period, setPeriod]   = useState<LeadPeriod>('30d');
   const periodDays = { '7d': 7, '30d': 30, '90d': 90 } as const;
+
+  // ── Status polling ───────────────────────────────────────────────────────
+
+  const fetchStatuses = useCallback((insts: Instance[]) => {
+    insts
+      .filter(i => i.provider === 'evolution')
+      .forEach(inst => {
+        fetch(`/api/clients/${clientId}/tracking/instances/${inst.id}/status`)
+          .then(r => r.ok ? r.json() as Promise<{ state: string }> : null)
+          .then(d => {
+            if (d?.state) setStatuses(prev => ({ ...prev, [inst.id]: d.state as ConnState }));
+          })
+          .catch(() => {});
+      });
+  }, [clientId]);
+
+  useEffect(() => {
+    if (statusTimer.current) clearInterval(statusTimer.current);
+    fetchStatuses(instances);
+    const hasEvolution = instances.some(i => i.provider === 'evolution');
+    if (hasEvolution) {
+      statusTimer.current = setInterval(() => fetchStatuses(instances), 30_000);
+    }
+    return () => { if (statusTimer.current) clearInterval(statusTimer.current); };
+  }, [instances, fetchStatuses]);
+
+  // ── Initial load ─────────────────────────────────────────────────────────
 
   const loadLeads = useCallback((p: LeadPeriod) => {
     fetch(`/api/clients/${clientId}/tracking/leads?days=${periodDays[p]}`)
@@ -107,7 +171,7 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
     setLoading(true);
     Promise.all([
       fetch(`/api/clients/${clientId}/tracking`).then(r => r.ok ? r.json() as Promise<TrackingConfig> : null),
-      fetch(`/api/clients/${clientId}/tracking/instances`).then(r => r.ok ? r.json() as Promise<ZapiInstance[]> : []),
+      fetch(`/api/clients/${clientId}/tracking/instances`).then(r => r.ok ? r.json() as Promise<Instance[]> : []),
       fetch(`/api/clients/${clientId}/tracking/leads?days=30`).then(r => r.ok ? r.json() as Promise<WaLead[]> : []),
     ]).then(([cfg, insts, ls]) => {
       if (cfg) setConfig(cfg);
@@ -119,6 +183,8 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
   useEffect(() => {
     if (!loading) loadLeads(period);
   }, [period]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Config save ──────────────────────────────────────────────────────────
 
   async function saveConfig() {
     setSaving(true);
@@ -133,36 +199,51 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
     }
   }
 
+  // ── Instance CRUD ────────────────────────────────────────────────────────
+
+  function openAddModal() {
+    setInstForm({ nome: '', instance_id: '', token: '' });
+    setInstProvider('zapi');
+    setInstError('');
+    setShowModal(true);
+  }
+
   async function addInstance() {
     setInstError('');
-    if (!instForm.nome || !instForm.instance_id || !instForm.token) {
-      setInstError('Todos os campos são obrigatórios.');
-      return;
+    if (!instForm.nome) { setInstError('Nome é obrigatório.'); return; }
+    if (instProvider === 'zapi' && (!instForm.instance_id || !instForm.token)) {
+      setInstError('Instance ID e Token são obrigatórios para Z-API.'); return;
+    }
+    if (instProvider === 'evolution' && !instForm.instance_id) {
+      setInstError('Nome da instância Evolution API é obrigatório.'); return;
     }
     setAdding(true);
     try {
       const res = await fetch(`/api/clients/${clientId}/tracking/instances`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(instForm),
+        body: JSON.stringify({ ...instForm, provider: instProvider }),
       });
-      if (!res.ok) { setInstError('Erro ao salvar instância.'); return; }
-      const newInst = await res.json() as ZapiInstance;
-      setInstances(prev => [...prev, newInst]);
-      setInstForm({ nome: '', instance_id: '', token: '' });
+      const data = await res.json() as Instance & { error?: string };
+      if (!res.ok) { setInstError(data.error ?? 'Erro ao salvar instância.'); return; }
+      setInstances(prev => [...prev, data]);
       setShowModal(false);
     } finally {
       setAdding(false);
     }
   }
 
-  async function removeInstance(instId: string) {
-    if (!confirm('Remover esta instância? Leads vinculados não serão apagados.')) return;
-    await fetch(`/api/clients/${clientId}/tracking/instances/${instId}`, { method: 'DELETE' });
-    setInstances(prev => prev.filter(i => i.id !== instId));
+  async function removeInstance(inst: Instance) {
+    const label = inst.provider === 'evolution'
+      ? 'Remover instância e deletar na Evolution API? Leads não serão apagados.'
+      : 'Remover esta instância? Leads vinculados não serão apagados.';
+    if (!confirm(label)) return;
+    await fetch(`/api/clients/${clientId}/tracking/instances/${inst.id}`, { method: 'DELETE' });
+    setInstances(prev => prev.filter(i => i.id !== inst.id));
+    setStatuses(prev => { const n = { ...prev }; delete n[inst.id]; return n; });
   }
 
-  async function toggleInstance(inst: ZapiInstance) {
+  async function toggleInstance(inst: Instance) {
     await fetch(`/api/clients/${clientId}/tracking/instances/${inst.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -171,9 +252,39 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
     setInstances(prev => prev.map(i => i.id === inst.id ? { ...i, ativo: !i.ativo } : i));
   }
 
+  // ── QR Code ──────────────────────────────────────────────────────────────
+
+  async function openQr(inst: Instance) {
+    setQrInst(inst);
+    setQrData(null);
+    setQrLoading(true);
+    try {
+      const res = await fetch(`/api/clients/${clientId}/tracking/instances/${inst.id}/connect`);
+      if (res.ok) setQrData(await res.json() as { base64?: string; code?: string });
+    } finally {
+      setQrLoading(false);
+    }
+  }
+
+  async function refreshQr() {
+    if (!qrInst) return;
+    setQrLoading(true);
+    setQrData(null);
+    try {
+      const res = await fetch(`/api/clients/${clientId}/tracking/instances/${qrInst.id}/connect`);
+      if (res.ok) setQrData(await res.json() as { base64?: string; code?: string });
+    } finally {
+      setQrLoading(false);
+    }
+  }
+
+  // ── Derived stats ────────────────────────────────────────────────────────
+
   const totalLeads = leads.length;
   const totalConv  = leads.filter(l => l.evento_compra_enviado).length;
   const taxaConv   = totalLeads > 0 ? `${Math.round((totalConv / totalLeads) * 100)}%` : '—';
+
+  // ── Loading skeleton ─────────────────────────────────────────────────────
 
   if (loading) {
     return (
@@ -183,10 +294,12 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
     );
   }
 
+  // ── Render ───────────────────────────────────────────────────────────────
+
   return (
     <div className="space-y-6 pt-2">
 
-      {/* ── Config ─────────────────────────────────────────────────────── */}
+      {/* ── Config Meta Ads ────────────────────────────────────────────── */}
       <div className="rounded-xl border border-border bg-card p-5 space-y-4">
         <div className="flex items-center gap-2 mb-1">
           <Settings2 className="h-4 w-4 text-muted-foreground" />
@@ -221,34 +334,6 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
                 {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-muted-foreground">Provedor WhatsApp</label>
-            <div className="flex items-center gap-1 rounded-lg border border-border bg-background p-0.5 w-fit">
-              {([
-                { value: 'zapi' as WhatsAppProvider, label: 'Z-API' },
-                { value: 'evolution' as WhatsAppProvider, label: 'Evolution API' },
-              ]).map(({ value, label }) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setConfig(p => ({ ...p, whatsapp_provider: value }))}
-                  className={cn(
-                    'rounded-md px-3 py-1 text-xs font-semibold transition-all',
-                    config.whatsapp_provider === value
-                      ? 'bg-primary text-black'
-                      : 'text-muted-foreground hover:text-foreground',
-                  )}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <p className="mt-1 text-[10px] text-muted-foreground">
-              {config.whatsapp_provider === 'evolution'
-                ? 'Evolution API — configure EVOLUTION_API_URL e EVOLUTION_API_KEY no servidor'
-                : 'Z-API — instâncias gerenciadas abaixo'}
-            </p>
           </div>
           <div>
             <label className="mb-1 block text-xs font-semibold text-muted-foreground">Gatilho de compra</label>
@@ -299,17 +384,15 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
         </button>
       </div>
 
-      {/* ── Z-API Instances ─────────────────────────────────────────────── */}
+      {/* ── Instâncias ─────────────────────────────────────────────────── */}
       <div className="rounded-xl border border-border bg-card p-5 space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Zap className="h-4 w-4 text-muted-foreground" />
-            <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
-              Instâncias {config.whatsapp_provider === 'evolution' ? 'Evolution API' : 'Z-API'}
-            </p>
+            <Wifi className="h-4 w-4 text-muted-foreground" />
+            <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Instâncias WhatsApp</p>
           </div>
           <button
-            onClick={() => { setInstForm({ nome: '', instance_id: '', token: '' }); setInstError(''); setShowModal(true); }}
+            onClick={openAddModal}
             className="flex items-center gap-1 rounded-lg bg-primary/10 border border-primary/30 px-3 py-1.5 text-xs font-bold text-primary hover:bg-primary/20 transition-colors"
           >
             <Plus className="h-3.5 w-3.5" /> Adicionar instância
@@ -318,18 +401,30 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
 
         {instances.length === 0 ? (
           <div className="rounded-lg border border-dashed border-border p-6 text-center">
-            <Zap className="mx-auto mb-2 h-6 w-6 text-muted-foreground/40" />
+            <Wifi className="mx-auto mb-2 h-6 w-6 text-muted-foreground/40" />
             <p className="text-xs text-muted-foreground">Nenhuma instância cadastrada.</p>
           </div>
         ) : (
           <div className="space-y-2">
             {instances.map(inst => {
               const webhookUrl = `${BASE}/api/webhook/whatsapp/${inst.id}`;
+              const state: ConnState = statuses[inst.id] ?? 'unknown';
+              const isEvolution = inst.provider === 'evolution';
               return (
                 <div key={inst.id} className="flex flex-col gap-2 rounded-lg border border-border bg-background p-3 sm:flex-row sm:items-center">
-                  <div className="flex-1 min-w-0 space-y-0.5">
+                  <div className="flex-1 min-w-0 space-y-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-semibold">{inst.nome}</span>
+                      {/* Provider badge */}
+                      <span className={cn(
+                        'rounded-full px-2 py-0.5 text-[10px] font-bold',
+                        isEvolution
+                          ? 'bg-violet-500/15 text-violet-400'
+                          : 'bg-blue-500/15 text-blue-400',
+                      )}>
+                        {isEvolution ? 'Evolution API' : 'Z-API'}
+                      </span>
+                      {/* Active badge */}
                       <span className={cn(
                         'rounded-full px-2 py-0.5 text-[10px] font-bold',
                         inst.ativo
@@ -338,16 +433,27 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
                       )}>
                         {inst.ativo ? 'Ativo' : 'Inativo'}
                       </span>
+                      {/* Connection state (Evolution only) */}
+                      {isEvolution && <StateBadge state={state} />}
                     </div>
                     <div className="flex items-center gap-2 flex-wrap">
                       <code className="text-[10px] text-primary font-mono truncate max-w-xs">{webhookUrl}</code>
                       <CopyBtn text={webhookUrl} label="URL" />
                     </div>
                     <p className="text-[10px] text-muted-foreground">
-                      {config.whatsapp_provider === 'evolution' ? 'Instância Evolution' : 'ID Z-API'}: {inst.instance_id}
+                      {isEvolution ? 'Instância Evolution' : 'ID Z-API'}: {inst.instance_id}
                     </p>
                   </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
+                  <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                    {/* Connect QR — Evolution only */}
+                    {isEvolution && state !== 'open' && (
+                      <button
+                        onClick={() => openQr(inst)}
+                        className="flex items-center gap-1 rounded-lg border border-violet-400/30 px-2 py-1 text-xs font-semibold text-violet-400 hover:bg-violet-500/10 transition-colors"
+                      >
+                        <QrCode className="h-3.5 w-3.5" /> Conectar
+                      </button>
+                    )}
                     <button
                       onClick={() => toggleInstance(inst)}
                       className="rounded-lg border border-border px-2 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
@@ -355,7 +461,7 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
                       {inst.ativo ? 'Desativar' : 'Ativar'}
                     </button>
                     <button
-                      onClick={() => removeInstance(inst.id)}
+                      onClick={() => removeInstance(inst)}
                       className="rounded-lg border border-red-400/30 p-1.5 text-red-400 hover:bg-red-500/10 transition-colors"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -370,7 +476,6 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
 
       {/* ── Leads ───────────────────────────────────────────────────────── */}
       <div className="space-y-4">
-        {/* Stats */}
         <div className="grid gap-3 sm:grid-cols-3">
           {[
             { label: 'Leads capturados', value: totalLeads, icon: MessageCircle, color: '#55F52F' },
@@ -388,7 +493,6 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
           ))}
         </div>
 
-        {/* Period + table */}
         <div className="rounded-xl border border-border bg-card p-5 space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-3">
             <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
@@ -401,7 +505,7 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
                     'rounded-md px-3 py-1 text-xs font-semibold transition-all',
                     period === p ? 'bg-primary text-black' : 'text-muted-foreground hover:text-foreground',
                   )}>
-                  {p === '7d' ? '7d' : p === '30d' ? '30d' : '90d'}
+                  {p}
                 </button>
               ))}
             </div>
@@ -458,12 +562,33 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="font-bold text-base">
-                Nova instância {config.whatsapp_provider === 'evolution' ? 'Evolution API' : 'Z-API'}
-              </h3>
+              <h3 className="font-bold text-base">Nova instância WhatsApp</h3>
               <button onClick={() => setShowModal(false)} className="text-muted-foreground hover:text-foreground">
                 <X className="h-5 w-5" />
               </button>
+            </div>
+
+            {/* Provider selector */}
+            <div>
+              <p className="mb-2 text-xs font-semibold text-muted-foreground">Provedor</p>
+              <div className="flex items-center gap-1 rounded-lg border border-border bg-background p-0.5 w-fit">
+                {([
+                  { value: 'zapi' as WhatsAppProvider, label: 'Z-API' },
+                  { value: 'evolution' as WhatsAppProvider, label: 'Evolution API' },
+                ]).map(({ value, label }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => { setInstProvider(value); setInstError(''); }}
+                    className={cn(
+                      'rounded-md px-3 py-1.5 text-xs font-semibold transition-all',
+                      instProvider === value ? 'bg-primary text-black' : 'text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
 
             <div className="space-y-3">
@@ -471,33 +596,46 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
                 <label className="mb-1 block text-xs font-semibold text-muted-foreground">Apelido da instância *</label>
                 <input
                   value={instForm.nome}
-                  onChange={e => setInstForm(p => ({ ...p, nome: e.target.value }))}
+                  onChange={e => {
+                    const nome = e.target.value;
+                    setInstForm(p => ({
+                      ...p,
+                      nome,
+                      // Auto-suggest instance_id slug for Evolution when field is empty
+                      instance_id: instProvider === 'evolution' && !p.instance_id
+                        ? toSlug(nome)
+                        : p.instance_id,
+                    }));
+                  }}
                   placeholder="Ex: Vendas, Suporte, Atendimento"
                   className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
                 />
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-muted-foreground">
-                  {config.whatsapp_provider === 'evolution' ? 'Nome da instância (Evolution API) *' : 'Instance ID (Z-API) *'}
+                  {instProvider === 'evolution' ? 'Nome da instância (Evolution API) *' : 'Instance ID (Z-API) *'}
                 </label>
                 <input
                   value={instForm.instance_id}
                   onChange={e => setInstForm(p => ({ ...p, instance_id: e.target.value }))}
-                  placeholder={config.whatsapp_provider === 'evolution' ? 'Ex: minha-instancia' : 'Ex: 3D8A1B2C...'}
+                  placeholder={instProvider === 'evolution' ? 'Ex: vendas-cliente' : 'Ex: 3D8A1B2C...'}
                   className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary"
                 />
+                {instProvider === 'evolution' && (
+                  <p className="mt-1 text-[10px] text-muted-foreground">Será criado automaticamente na Evolution API com este nome.</p>
+                )}
               </div>
-              <div>
-                <label className="mb-1 block text-xs font-semibold text-muted-foreground">
-                  {config.whatsapp_provider === 'evolution' ? 'API Key da instância *' : 'Token da instância *'}
-                </label>
-                <input
-                  value={instForm.token}
-                  onChange={e => setInstForm(p => ({ ...p, token: e.target.value }))}
-                  placeholder={config.whatsapp_provider === 'evolution' ? 'API Key Evolution' : 'Token Z-API'}
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary"
-                />
-              </div>
+              {instProvider === 'zapi' && (
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-muted-foreground">Token da instância *</label>
+                  <input
+                    value={instForm.token}
+                    onChange={e => setInstForm(p => ({ ...p, token: e.target.value }))}
+                    placeholder="Token Z-API"
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary"
+                  />
+                </div>
+              )}
               {instError && (
                 <p className="rounded-lg border border-red-400/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">{instError}</p>
               )}
@@ -516,9 +654,67 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
                 className="flex-1 flex items-center justify-center gap-1.5 rounded-lg bg-primary py-2 text-sm font-bold text-black hover:bg-primary/90 disabled:opacity-60 transition-colors"
               >
                 {adding && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
-                Adicionar
+                {instProvider === 'evolution' ? 'Criar na Evolution API' : 'Adicionar'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── QR Code Modal ────────────────────────────────────────────────── */}
+      {qrInst && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-bold text-base">Conectar WhatsApp</h3>
+                <p className="text-xs text-muted-foreground">{qrInst.nome} · {qrInst.instance_id}</p>
+              </div>
+              <button onClick={() => { setQrInst(null); setQrData(null); }} className="text-muted-foreground hover:text-foreground">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="flex flex-col items-center gap-3">
+              {qrLoading ? (
+                <div className="flex h-48 w-48 items-center justify-center rounded-xl border border-border bg-muted/20">
+                  <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground/40" />
+                </div>
+              ) : qrData?.base64 ? (
+                <img
+                  src={qrData.base64}
+                  alt="QR Code WhatsApp"
+                  className="h-48 w-48 rounded-xl border border-border object-contain"
+                />
+              ) : (
+                <div className="flex h-48 w-48 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border">
+                  {statuses[qrInst.id] === 'open' ? (
+                    <>
+                      <Wifi className="h-8 w-8 text-emerald-400" />
+                      <p className="text-xs font-bold text-emerald-400">Conectado!</p>
+                    </>
+                  ) : (
+                    <>
+                      <WifiOff className="h-8 w-8 text-muted-foreground/40" />
+                      <p className="text-xs text-muted-foreground">QR não disponível</p>
+                    </>
+                  )}
+                </div>
+              )}
+
+              <p className="text-center text-xs text-muted-foreground">
+                Abra o WhatsApp no celular → Menu → Dispositivos conectados → Conectar dispositivo
+              </p>
+            </div>
+
+            <button
+              onClick={refreshQr}
+              disabled={qrLoading}
+              className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-border py-2 text-sm font-semibold hover:bg-muted/50 disabled:opacity-50 transition-colors"
+            >
+              <RefreshCw className={cn('h-3.5 w-3.5', qrLoading && 'animate-spin')} />
+              Atualizar QR
+            </button>
           </div>
         </div>
       )}

@@ -57,27 +57,26 @@ export async function POST(
   const pool = makeServerPool();
 
   try {
-    // 1. Resolve instance → client
+    // 1. Resolve instance → client + provider
     const { rows: [inst] } = await pool.query(
-      `SELECT client_id FROM public.client_zapi_instances WHERE id = $1 AND ativo = true`,
+      `SELECT client_id, provider FROM public.client_zapi_instances WHERE id = $1 AND ativo = true`,
       [instanceId],
     );
     if (!inst) {
       return Response.json({ ok: false, error: 'Instância não encontrada ou inativa' }, { status: 404 });
     }
     const clientId: string = inst.client_id;
+    const provider: WhatsAppProvider = inst.provider === 'evolution' ? 'evolution' : 'zapi';
 
-    // 2. Load client tracking config (includes provider)
+    // 2. Load client tracking config
     const { rows: [cfg] } = await pool.query(
-      `SELECT pixel_id, meta_token, gatilho_compra, eventos_ativos, whatsapp_provider
+      `SELECT pixel_id, meta_token, gatilho_compra, eventos_ativos
        FROM public.client_tracking_config WHERE client_id = $1`,
       [clientId],
     );
     if (!cfg?.pixel_id || !cfg?.meta_token) {
       return Response.json({ ok: false, error: 'Pixel ID ou Token não configurado para este cliente' }, { status: 400 });
     }
-
-    const provider: WhatsAppProvider = cfg.whatsapp_provider === 'evolution' ? 'evolution' : 'zapi';
     const eventos: { lead: boolean; purchase: boolean } = cfg.eventos_ativos ?? { lead: true, purchase: true };
     const gatilho: string = (cfg.gatilho_compra ?? 'compra aprovada').toLowerCase().trim();
 
