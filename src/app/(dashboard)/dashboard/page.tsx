@@ -4763,7 +4763,7 @@ export default function GeneralDashboard() {
       })()}
 
       {/* UNIFIED TOP BAR */}
-      <div className="sticky top-0 z-20 -mx-6 -mt-6 bg-background/95 backdrop-blur-sm border-b border-border">
+      <div className="sticky top-0 z-20 -mx-6 bg-background/95 backdrop-blur-sm border-b border-border">
         <div className="flex items-center gap-1.5 px-4 h-14 overflow-x-auto">
           <BackButton />
           {/* Client selector */}
