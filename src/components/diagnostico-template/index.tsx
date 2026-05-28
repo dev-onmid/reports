@@ -15,16 +15,51 @@ const TM = '#374151';
 const BD = '#f1f5f9';
 const SH = '0 12px 34px rgba(15,23,42,0.10), 0 1px 2px rgba(15,23,42,0.04)';
 
+// ── SVG icon registry (Lucide-style line icons) ────────────────────────────
+
+const ICONS: Record<string, ReactNode> = {
+  '$':   <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />,
+  '💬':  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />,
+  '👁':  <><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></>,
+  '👥':  <><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></>,
+  '🛒':  <><circle cx="9" cy="21" r="1" /><circle cx="20" cy="21" r="1" /><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" /></>,
+  '📄':  <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /></>,
+  '👤':  <><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></>,
+  '🏷':  <><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" /><line x1="7" y1="7" x2="7.01" y2="7" /></>,
+  '📊':  <><line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" /></>,
+  '📅':  <><rect x="3" y="4" width="18" height="18" rx="2" ry="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></>,
+  '💡':  <><line x1="9" y1="18" x2="15" y2="18" /><line x1="10" y1="22" x2="14" y2="22" /><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14" /></>,
+  '📖':  <><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" /><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" /></>,
+  '↗':   <><polyline points="23 6 13.5 15.5 8.5 10.5 1 18" /><polyline points="17 6 23 6 23 12" /></>,
+  '➕':  <><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="16" /><line x1="8" y1="12" x2="16" y2="12" /></>,
+  '🛡':  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />,
+  '🔍':  <><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></>,
+  '⚠️': <><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></>,
+  '🎯':  <><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="6" /><circle cx="12" cy="12" r="2" /></>,
+  'ℹ':   <><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></>,
+  '★':   <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />,
+};
+
 // ── Primitives ─────────────────────────────────────────────────────────────
 
 function IBox({ icon, green, size = 30 }: { icon: string; green?: boolean; size?: number }) {
+  const svgNode = ICONS[icon];
+  const color = green ? G : B;
   return (
     <div style={{
-      width: size, height: size, borderRadius: 9, flexShrink: 0,
+      width: size, height: size, borderRadius: '50%', flexShrink: 0,
       background: green ? GL : BL,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontSize: size * 0.48,
-    }}>{icon}</div>
+    }}>
+      {svgNode ? (
+        <svg viewBox="0 0 24 24" width={size * 0.52} height={size * 0.52}
+          fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          {svgNode}
+        </svg>
+      ) : (
+        <span style={{ fontSize: size * 0.46 }}>{icon}</span>
+      )}
+    </div>
   );
 }
 
@@ -102,11 +137,11 @@ function Logo() {
   );
 }
 
-function PageNum({ n }: { n: number }) {
+function PageNum({ n, total }: { n: number; total: number }) {
   return (
     <div style={{ textAlign: 'right' }}>
       <span style={{ fontWeight: 800, fontSize: 17, color: TX }}>{String(n).padStart(2, '0')}</span>
-      <span style={{ fontWeight: 400, fontSize: 17, color: '#c8d3dc' }}>/10</span>
+      <span style={{ fontWeight: 400, fontSize: 17, color: '#c8d3dc' }}>/{String(total).padStart(2, '0')}</span>
       <div style={{ height: 2.5, background: G, borderRadius: 2, marginTop: 4 }} />
     </div>
   );
@@ -133,6 +168,8 @@ function Footer() {
 
 // ── Slide (every page uses this — header/footer always at same coordinates) ──
 
+const TOTAL_SLIDES = 10;
+
 function Slide({ n, children }: { n: number; children: ReactNode }) {
   return (
     <section className="onmid-report-page" aria-label={`Página ${n}`} style={{
@@ -141,11 +178,11 @@ function Slide({ n, children }: { n: number; children: ReactNode }) {
       fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
       pageBreakAfter: 'always', breakAfter: 'page',
     }}>
-      {/* Background arc top-right */}
+      {/* Background blob top-right — soft blue-gray circle */}
       <div style={{
-        position: 'absolute', top: -100, right: -86, width: 520, height: 520,
+        position: 'absolute', top: -160, right: -160, width: 580, height: 580,
         borderRadius: '50%', pointerEvents: 'none', zIndex: 0,
-        background: 'radial-gradient(circle at 42% 44%, rgba(255,255,255,0.82) 0%, rgba(226,232,240,0.42) 38%, rgba(203,213,225,0.22) 58%, transparent 76%)',
+        background: 'radial-gradient(circle, rgba(219,234,254,0.55) 0%, rgba(226,232,240,0.30) 45%, transparent 72%)',
       }} />
       {/* Logo — always top-left */}
       <div style={{ position: 'absolute', top: 26, left: 44, zIndex: 2 }}>
@@ -153,7 +190,7 @@ function Slide({ n, children }: { n: number; children: ReactNode }) {
       </div>
       {/* Page number — always top-right */}
       <div style={{ position: 'absolute', top: 26, right: 44, zIndex: 2 }}>
-        <PageNum n={n} />
+        <PageNum n={n} total={TOTAL_SLIDES} />
       </div>
       {/* Content starts below header */}
       <div style={{ position: 'relative', zIndex: 1, padding: '72px 44px 50px', height: '100%', boxSizing: 'border-box' }}>
@@ -171,12 +208,12 @@ function Page1({ d }: { d: DiagnosticoData }) {
     <Slide n={1}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.1fr', gap: 36, height: '100%', alignItems: 'center' }}>
         <div>
-          <h1 style={{ fontWeight: 800, fontSize: 50, lineHeight: 1.04, color: TX, margin: '0 0 10px' }}>
+          <h1 style={{ fontWeight: 800, fontSize: 62, lineHeight: 1.04, color: TX, margin: '0 0 10px' }}>
             Diagnóstico de<br />Performance
           </h1>
           <p style={{ fontWeight: 700, fontSize: 22, color: G, margin: '0 0 18px' }}>{d.cliente}</p>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-            <span style={{ fontSize: 14 }}>📅</span>
+            <IBox icon="📅" green size={22} />
             <strong style={{ fontSize: 13, color: TX }}>Período analisado:</strong>
             <span style={{ fontSize: 13, color: TG }}> {d.periodo}</span>
           </div>
@@ -184,7 +221,7 @@ function Page1({ d }: { d: DiagnosticoData }) {
             display: 'inline-flex', alignItems: 'center', gap: 8,
             background: '#f8fafc', border: `1px solid ${BD}`, borderRadius: 10, padding: '7px 14px',
           }}>
-            <span style={{ fontSize: 13 }}>📊</span>
+            <IBox icon="📊" green size={22} />
             <span style={{ fontSize: 12, color: TG, fontWeight: 500 }}>{d.subtitulo}</span>
           </div>
         </div>
@@ -204,7 +241,7 @@ function Page1({ d }: { d: DiagnosticoData }) {
                   <p style={{ fontSize: 10, color: G, margin: '3px 0 0', fontWeight: 600 }}>▲ {d.capa.faturamento_var} vs período anterior</p>
                 )}
               </div>
-              <div style={{ width: 30, height: 30, borderRadius: 8, background: GL, border: `1.5px solid ${GB}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, color: G }}>↗</div>
+              <IBox icon="↗" green size={30} />
             </div>
           </Card>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8 }}>
@@ -234,7 +271,7 @@ function Page2({ d }: { d: DiagnosticoData }) {
     <Slide n={2}>
       <h1 style={{ fontWeight: 800, fontSize: 32, color: TX, margin: '0 0 4px' }}>Visão geral da mídia paga</h1>
       <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 14 }}>
-        <span style={{ fontSize: 13 }}>📅</span>
+        <IBox icon="📅" green size={20} />
         <strong style={{ fontSize: 12.5, color: TX }}>Período analisado:</strong>
         <span style={{ fontSize: 12.5, color: TG }}> {d.periodo}</span>
       </div>
@@ -272,7 +309,7 @@ function Page3({ d }: { d: DiagnosticoData }) {
     return (
       <Card style={{ flex: 1, padding: '16px 20px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-          <span style={{ fontSize: 26 }}>{icon}</span>
+          <IBox icon={icon} green size={32} />
           <p style={{ fontWeight: 800, fontSize: 18, color: TX, margin: 0 }}>{name}</p>
         </div>
         {rows.map(([ico, lbl, val, hi]) => (
@@ -295,8 +332,8 @@ function Page3({ d }: { d: DiagnosticoData }) {
       <h1 style={{ fontWeight: 800, fontSize: 34, color: TX, margin: '0 0 4px' }}>Desempenho por plataforma</h1>
       <p style={{ fontWeight: 700, fontSize: 17, color: G, margin: '0 0 16px' }}>Facebook x Instagram</p>
       <div style={{ display: 'flex', gap: 16, marginBottom: 14 }}>
-        <PlatCard name="Facebook" icon="🔵" data={m.facebook} />
-        <PlatCard name="Instagram" icon="📸" data={m.instagram} />
+        <PlatCard name="Facebook" icon="👥" data={m.facebook} />
+        <PlatCard name="Instagram" icon="📊" data={m.instagram} />
       </div>
       <Leitura text={m.leitura_plataformas} />
     </Slide>
@@ -404,20 +441,14 @@ function Page5({ d }: { d: DiagnosticoData }) {
 
 // ── Page 6 — Faturamento por origem ────────────────────────────────────────
 
-const ORIGIN_ICON: Record<string, string> = {
-  facebook: '🔵', instagram: '📸', whatsapp: '🟢',
-  google: '🔴', indicacao: '⭐', organico: '🌿',
-};
-
 function getOriginIcon(canal: string) {
   const k = canal.toLowerCase();
-  if (k.includes('instagram') && k.includes('whatsapp')) return '📸🟢';
-  if (k.includes('facebook') && k.includes('whatsapp')) return '🔵🟢';
-  if (k.includes('instagram')) return '📸';
-  if (k.includes('facebook')) return '🔵';
-  if (k.includes('whatsapp')) return '🟢';
-  if (k.includes('google')) return '🔴';
-  return '📍';
+  if (k.includes('instagram')) return '📊';
+  if (k.includes('facebook')) return '👥';
+  if (k.includes('whatsapp')) return '💬';
+  if (k.includes('google')) return '🔍';
+  if (k.includes('indica')) return '★';
+  return '↗';
 }
 
 function Page6({ d }: { d: DiagnosticoData }) {
@@ -435,7 +466,7 @@ function Page6({ d }: { d: DiagnosticoData }) {
             borderRadius: 12, padding: '14px 16px',
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-              <div style={{ width: 22, height: 22, borderRadius: '50%', background: G, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11 }}>ℹ</div>
+              <IBox icon="ℹ" green size={24} />
               <p style={{ fontWeight: 700, fontSize: 13, color: G, margin: 0 }}>Leitura importante</p>
             </div>
             <p style={{ fontSize: 11.5, color: TM, lineHeight: 1.65, margin: 0 }}>{d.crm.leitura_origem}</p>
@@ -453,7 +484,7 @@ function Page6({ d }: { d: DiagnosticoData }) {
               padding: '9px 0', borderBottom: `1px solid ${BD}`, alignItems: 'center',
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-                <span style={{ fontSize: 17 }}>{getOriginIcon(o.canal)}</span>
+                <IBox icon={getOriginIcon(o.canal)} green size={26} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <span style={{ fontSize: 12, color: TX, fontWeight: 500 }}>{o.canal}</span>
                   <div style={{ marginTop: 4 }}>
@@ -540,7 +571,7 @@ function Page7({ d }: { d: DiagnosticoData }) {
         </div>
         <Card style={{ padding: '12px 14px', alignSelf: 'start' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 10 }}>
-            <div style={{ width: 22, height: 22, borderRadius: '50%', background: G, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: '#fff' }}>★</div>
+            <IBox icon="★" green size={22} />
             <p style={{ fontWeight: 700, fontSize: 12, color: G, margin: 0 }}>{top4.length} maiores valores</p>
           </div>
           {top4.map((c, i) => (
@@ -660,13 +691,13 @@ function Page9({ d }: { d: DiagnosticoData }) {
             <span style={{ fontSize: 11, color: G, fontWeight: 700 }}>Eficiência por plataforma</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 6 }}>
-            <span style={{ fontSize: 16 }}>🔵</span>
+            <IBox icon="👥" green size={22} />
             <p style={{ fontSize: 11, color: TM, margin: 0 }}>
               Facebook teve <strong>melhor eficiência</strong> de custo
             </p>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-            <span style={{ fontSize: 16 }}>📸</span>
+            <IBox icon="📊" green size={22} />
             <p style={{ fontSize: 11, color: TM, margin: 0 }}>
               Instagram manteve <strong>bom volume</strong>, mas com custo mais elevado
             </p>
