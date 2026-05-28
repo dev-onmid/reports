@@ -72,19 +72,13 @@ type WaLead = {
   evento_compra_enviado: boolean;
   valor_compra: number | null;
   created_at: string;
-};
-
-type WaConfig = {
-  pixel_id: string;
-  meta_token: string;
+  client_id: string | null;
+  client_name: string | null;
 };
 
 function maskPhone(phone: string): string {
   if (phone.length >= 10) {
-    const ddi  = phone.slice(0, 2);
-    const ddd  = phone.slice(2, 4);
-    const last = phone.slice(-4);
-    return `+${ddi} (${ddd}) ****-${last}`;
+    return `+${phone.slice(0, 2)} (${phone.slice(2, 4)}) ****-${phone.slice(-4)}`;
   }
   return `****${phone.slice(-4)}`;
 }
@@ -172,15 +166,11 @@ export default function RastreamentoPage() {
     clientId: '', name: '', slug: '', whatsapp: '', message: 'Olá, vim pelo anúncio!',
   });
 
-  // WhatsApp tracking state
+  // WhatsApp tracking — consolidated admin view
   const [waLeads, setWaLeads]         = useState<WaLead[]>([]);
-  const [waConfig, setWaConfig]       = useState<WaConfig>({ pixel_id: '', meta_token: '' });
   const [waLoading, setWaLoading]     = useState(true);
-  const [waSaving, setWaSaving]       = useState(false);
-  const [waTesting, setWaTesting]     = useState(false);
-  const [waTestResult, setWaTestResult] = useState<'ok' | 'error' | null>(null);
-  const [waShowToken, setWaShowToken] = useState(false);
-  const [waCopied, setWaCopied]       = useState(false);
+  const [waClientFilter, setWaClientFilter] = useState('');
+  const [waDays, setWaDays]           = useState(30);
 
   function loadLinks() {
     setLoading(true);
@@ -257,54 +247,36 @@ export default function RastreamentoPage() {
     }
   }
 
-  // WhatsApp tracking load
-  useEffect(() => {
-    Promise.all([
-      fetch('/api/whatsapp-leads').then(r => r.ok ? r.json() as Promise<WaLead[]> : []).catch(() => []),
-      fetch('/api/whatsapp-pixel').then(r => r.ok ? r.json() as Promise<WaConfig> : { pixel_id: '', meta_token: '' }).catch(() => ({ pixel_id: '', meta_token: '' })),
-    ]).then(([leads, config]) => {
-      setWaLeads(leads);
-      setWaConfig(config);
-    }).finally(() => setWaLoading(false));
-  }, []);
+  // WhatsApp consolidated load
+  const loadWaLeads = useCallback(() => {
+    setWaLoading(true);
+    const params = new URLSearchParams({ days: String(waDays) });
+    if (waClientFilter) params.set('clientId', waClientFilter);
+    fetch(`/api/whatsapp-leads?${params}`)
+      .then(r => r.ok ? r.json() as Promise<WaLead[]> : [])
+      .then(setWaLeads)
+      .catch(() => setWaLeads([]))
+      .finally(() => setWaLoading(false));
+  }, [waDays, waClientFilter]);
 
-  async function saveWaConfig() {
-    setWaSaving(true);
-    try {
-      const res = await fetch('/api/whatsapp-pixel', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(waConfig),
-      });
-      if (!res.ok) throw new Error();
-    } finally {
-      setWaSaving(false);
+  useEffect(() => { loadWaLeads(); }, [loadWaLeads]);
+
+  // Per-client aggregates derived from waLeads
+  const waByClient = (() => {
+    const map = new Map<string, { name: string; leads: number; conv: number }>();
+    for (const l of waLeads) {
+      const key = l.client_id ?? '__none__';
+      const name = l.client_name ?? 'Sem cliente';
+      const cur = map.get(key) ?? { name, leads: 0, conv: 0 };
+      cur.leads += 1;
+      if (l.evento_compra_enviado) cur.conv += 1;
+      map.set(key, cur);
     }
-  }
+    return Array.from(map.values()).sort((a, b) => b.leads - a.leads);
+  })();
 
-  async function testWaWebhook() {
-    setWaTesting(true);
-    setWaTestResult(null);
-    try {
-      const res = await fetch('/api/webhook/whatsapp');
-      setWaTestResult(res.ok ? 'ok' : 'error');
-    } catch {
-      setWaTestResult('error');
-    } finally {
-      setWaTesting(false);
-      setTimeout(() => setWaTestResult(null), 4000);
-    }
-  }
-
-  function copyWebhookUrl() {
-    navigator.clipboard.writeText(`${BASE}/api/webhook/whatsapp`).then(() => {
-      setWaCopied(true);
-      setTimeout(() => setWaCopied(false), 2000);
-    });
-  }
-
-  const waLeadCount = waLeads.length;
-  const waConvCount = waLeads.filter(l => l.evento_compra_enviado).length;
+  const waLeadTotal = waLeads.length;
+  const waConvTotal = waLeads.filter(l => l.evento_compra_enviado).length;
 
   const { from: periodFrom, to: periodTo } = periodToDates(period, customFrom, customTo);
   const totalLinksFiltered = links.length;
@@ -664,10 +636,10 @@ export default function RastreamentoPage() {
         )}
       </div>
 
-      {/* ── WhatsApp Tracking Section ─────────────────────────────────── */}
+      {/* ── WhatsApp Tracking — Consolidated ───────────────────────────── */}
       <div className="mt-8 border-t border-border pt-8 space-y-6">
 
-        {/* Section header */}
+        {/* Section header + filters */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="flex items-center gap-2 text-xl font-bold">
@@ -675,17 +647,40 @@ export default function RastreamentoPage() {
               Rastreio WhatsApp → Meta Ads
             </h2>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Captura leads do CTWA e envia eventos para a API de Conversões do Meta.
+              Visão consolidada de todos os clientes. Configure por cliente na aba Clientes → Rastreio WA.
             </p>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <select
+              value={waClientFilter}
+              onChange={e => setWaClientFilter(e.target.value)}
+              className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-semibold outline-none focus:border-primary"
+            >
+              <option value="">Todos os clientes</option>
+              {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <div className="flex items-center gap-1 rounded-lg border border-border bg-background p-0.5">
+              {[7, 30, 90].map(d => (
+                <button key={d} onClick={() => setWaDays(d)}
+                  className={cn(
+                    'rounded-md px-3 py-1 text-xs font-semibold transition-all',
+                    waDays === d ? 'bg-primary text-black' : 'text-muted-foreground hover:text-foreground',
+                  )}>{d}d</button>
+              ))}
+            </div>
+            <button onClick={loadWaLeads}
+              className="flex items-center gap-1 rounded-lg border border-border px-2 py-1.5 text-xs font-semibold hover:bg-muted/50 transition-colors">
+              <RefreshCw className={cn('h-3.5 w-3.5', waLoading && 'animate-spin')} />
+            </button>
           </div>
         </div>
 
-        {/* Stats */}
+        {/* Global stats */}
         <div className="grid gap-3 sm:grid-cols-3">
           {[
-            { label: 'Leads capturados', value: waLeadCount, icon: MessageCircle, color: '#55F52F' },
-            { label: 'Compras enviadas', value: waConvCount, icon: ShoppingCart,   color: '#3b82f6' },
-            { label: 'Taxa de conversão', value: waLeadCount > 0 ? `${Math.round((waConvCount / waLeadCount) * 100)}%` : '—', icon: TrendingUp, color: '#a855f7' },
+            { label: 'Total de leads', value: waLeadTotal, icon: MessageCircle, color: '#55F52F' },
+            { label: 'Total compras',  value: waConvTotal, icon: ShoppingCart,  color: '#3b82f6' },
+            { label: 'Taxa de conversão', value: waLeadTotal > 0 ? `${Math.round((waConvTotal / waLeadTotal) * 100)}%` : '—', icon: TrendingUp, color: '#a855f7' },
           ].map(({ label, value, icon: Icon, color }) => (
             <div key={label} className="relative overflow-hidden rounded-xl border bg-card p-4" style={{ borderColor: `${color}44` }}>
               <div className="pointer-events-none absolute inset-0" style={{ background: `radial-gradient(circle at 85% 15%, ${color}22, transparent 50%)` }} />
@@ -700,100 +695,38 @@ export default function RastreamentoPage() {
           ))}
         </div>
 
-        {/* Config + Webhook */}
-        <div className="grid gap-4 md:grid-cols-2">
-
-          {/* Pixel Config */}
-          <div className="rounded-[var(--radius)] border border-border bg-card p-5 space-y-4">
-            <div className="flex items-center gap-2">
-              <Settings className="h-4 w-4 text-muted-foreground" />
-              <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Configuração Meta Ads</p>
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-semibold text-muted-foreground">Pixel ID</label>
-              <input
-                value={waConfig.pixel_id}
-                onChange={e => setWaConfig(p => ({ ...p, pixel_id: e.target.value }))}
-                placeholder="Ex: 1234567890123456"
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary font-mono"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-semibold text-muted-foreground">Token da API de Conversões</label>
-              <div className="relative">
-                <input
-                  type={waShowToken ? 'text' : 'password'}
-                  value={waConfig.meta_token}
-                  onChange={e => setWaConfig(p => ({ ...p, meta_token: e.target.value }))}
-                  placeholder="EAAxxxxxxx..."
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2 pr-9 text-sm outline-none focus:border-primary font-mono"
-                />
-                <button
-                  type="button"
-                  onClick={() => setWaShowToken(v => !v)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  {waShowToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
-            </div>
-            <button
-              onClick={saveWaConfig}
-              disabled={waSaving || !waConfig.pixel_id || !waConfig.meta_token}
-              className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary py-2 text-sm font-bold text-black hover:bg-primary/90 disabled:opacity-50 transition-colors"
-            >
-              {waSaving && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
-              Salvar configuração
-            </button>
+        {/* Per-client cards */}
+        {!waLoading && waByClient.length > 0 && (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {waByClient.map(c => {
+              const taxa = c.leads > 0 ? `${Math.round((c.conv / c.leads) * 100)}%` : '—';
+              return (
+                <div key={c.name} className="rounded-xl border border-border bg-card p-4 space-y-2">
+                  <p className="text-sm font-semibold truncate">{c.name}</p>
+                  <div className="flex items-center gap-4">
+                    <div>
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Leads</p>
+                      <p className="text-base font-bold text-primary tabular-nums">{c.leads}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Compras</p>
+                      <p className="text-base font-bold text-blue-400 tabular-nums">{c.conv}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Taxa</p>
+                      <p className="text-base font-bold text-purple-400 tabular-nums">{taxa}</p>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
+        )}
 
-          {/* Webhook URL */}
-          <div className="rounded-[var(--radius)] border border-border bg-card p-5 space-y-4">
-            <div className="flex items-center gap-2">
-              <Zap className="h-4 w-4 text-muted-foreground" />
-              <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">URL do Webhook (Z-API)</p>
-            </div>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              Configure este endpoint no Z-API como <strong>URL de Notificação</strong> para os eventos de mensagem.
-            </p>
-            <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2">
-              <code className="flex-1 truncate text-xs text-primary font-mono">
-                {BASE}/api/webhook/whatsapp
-              </code>
-              <button
-                onClick={copyWebhookUrl}
-                className="shrink-0 rounded-md border border-border bg-background px-2 py-1 text-xs font-semibold hover:bg-muted/50 transition-colors"
-              >
-                {waCopied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
-              </button>
-            </div>
-            <button
-              onClick={testWaWebhook}
-              disabled={waTesting}
-              className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-border py-2 text-sm font-semibold hover:bg-muted/50 transition-colors"
-            >
-              {waTesting
-                ? <><RefreshCw className="h-3.5 w-3.5 animate-spin" /> Testando...</>
-                : waTestResult === 'ok'
-                  ? <><Check className="h-3.5 w-3.5 text-emerald-400" /> Webhook ativo!</>
-                  : waTestResult === 'error'
-                    ? <><X className="h-3.5 w-3.5 text-red-400" /> Erro na conexão</>
-                    : 'Testar conexão'
-              }
-            </button>
-            <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-1.5 text-xs text-muted-foreground">
-              <p className="font-semibold text-foreground">Gatilho de compra</p>
-              <p>Para registrar uma conversão, envie uma mensagem para o lead contendo:</p>
-              <code className="block rounded bg-muted px-2 py-1 text-primary font-mono">compra aprovada 297</code>
-              <p className="text-[10px]">O valor pode ser inteiro ou decimal (ponto ou vírgula).</p>
-            </div>
-          </div>
-        </div>
-
-        {/* Leads table */}
+        {/* All leads table */}
         <div>
           <p className="mb-3 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
-            {waLeadCount} lead{waLeadCount !== 1 ? 's' : ''} capturado{waLeadCount !== 1 ? 's' : ''}
+            {waLeadTotal} lead{waLeadTotal !== 1 ? 's' : ''} · últimos {waDays} dias
           </p>
 
           {waLoading ? (
@@ -801,15 +734,15 @@ export default function RastreamentoPage() {
           ) : waLeads.length === 0 ? (
             <div className="rounded-xl border border-dashed border-border p-10 text-center">
               <MessageCircle className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" />
-              <p className="font-semibold text-muted-foreground">Nenhum lead capturado ainda.</p>
-              <p className="mt-1 text-xs text-muted-foreground/60">Configure o webhook no Z-API para começar a capturar.</p>
+              <p className="font-semibold text-muted-foreground">Nenhum lead no período.</p>
+              <p className="mt-1 text-xs text-muted-foreground/60">Configure as instâncias Z-API em cada cliente na aba Rastreio WA.</p>
             </div>
           ) : (
             <div className="overflow-x-auto rounded-[var(--radius)] border border-border bg-card">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-border bg-muted/30">
-                    {['Telefone', 'Source ID', 'CTWA', 'Lead', 'Compra', 'Valor', 'Data'].map(h => (
+                    {['Cliente', 'Telefone', 'Source ID', 'Lead', 'Compra', 'Valor', 'Data'].map(h => (
                       <th key={h} className="px-4 py-2.5 text-left font-semibold text-muted-foreground uppercase tracking-wider text-[10px] last:text-right">{h}</th>
                     ))}
                   </tr>
@@ -817,20 +750,18 @@ export default function RastreamentoPage() {
                 <tbody>
                   {waLeads.map((lead, i) => (
                     <tr key={lead.id} className={cn('border-b border-border/50 last:border-0', i % 2 === 0 ? '' : 'bg-muted/10')}>
+                      <td className="px-4 py-2.5 font-medium max-w-[120px] truncate">{lead.client_name ?? '—'}</td>
                       <td className="px-4 py-2.5 font-mono font-medium">{maskPhone(lead.telefone)}</td>
-                      <td className="px-4 py-2.5 text-muted-foreground font-mono text-[10px] max-w-[120px] truncate">{lead.source_id ?? '—'}</td>
-                      <td className="px-4 py-2.5 text-muted-foreground font-mono text-[10px] max-w-[80px] truncate" title={lead.ctwa_clid ?? ''}>
-                        {lead.ctwa_clid ? `${lead.ctwa_clid.slice(0, 10)}…` : '—'}
-                      </td>
+                      <td className="px-4 py-2.5 text-muted-foreground font-mono text-[10px] max-w-[100px] truncate">{lead.source_id ?? '—'}</td>
                       <td className="px-4 py-2.5">
                         {lead.evento_lead_enviado
                           ? <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-400">✓ Enviado</span>
-                          : <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-bold text-muted-foreground">Pendente</span>}
+                          : <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">Pendente</span>}
                       </td>
                       <td className="px-4 py-2.5">
                         {lead.evento_compra_enviado
                           ? <span className="rounded-full bg-blue-500/15 px-2 py-0.5 text-[10px] font-bold text-blue-400">✓ Enviado</span>
-                          : <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-bold text-muted-foreground">—</span>}
+                          : <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">—</span>}
                       </td>
                       <td className="px-4 py-2.5 font-bold tabular-nums">
                         {lead.valor_compra != null
