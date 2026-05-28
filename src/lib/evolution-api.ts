@@ -1,5 +1,14 @@
-const base = () => process.env.EVOLUTION_API_URL ?? '';
-const apiKey = () => process.env.EVOLUTION_API_KEY ?? '';
+function base(): string {
+  const url = process.env.EVOLUTION_API_URL;
+  if (!url) throw new Error('EVOLUTION_API_URL não configurada no servidor');
+  return url.replace(/\/$/, '');
+}
+
+function apiKey(): string {
+  const key = process.env.EVOLUTION_API_KEY;
+  if (!key) throw new Error('EVOLUTION_API_KEY não configurada no servidor');
+  return key;
+}
 
 function headers() {
   return { 'Content-Type': 'application/json', apikey: apiKey() };
