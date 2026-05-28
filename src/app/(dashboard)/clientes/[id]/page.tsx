@@ -51,8 +51,8 @@ type FunnelStage = { id: string; name: string; conversion: number };
 const DEFAULT_STAGES: FunnelStage[] = [
   { id: 's5', name: '5º — Leads',                  conversion: 50 },
   { id: 's4', name: '4º — Contatos',               conversion: 50 },
-  { id: 's3', name: '3º — Reuniões Agendadas',     conversion: 50 },
-  { id: 's2', name: '2º — Reuniões Realizadas',    conversion: 50 },
+  { id: 's3', name: '3º — Agendamentos / Proposta',        conversion: 50 },
+  { id: 's2', name: '2º — Comparecimento / Negociação',   conversion: 50 },
   { id: 's1', name: '1º — Fechamentos (Vendas)',   conversion: 0  },
 ];
 
