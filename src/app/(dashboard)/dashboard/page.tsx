@@ -4764,7 +4764,7 @@ export default function GeneralDashboard() {
 
       {/* UNIFIED TOP BAR */}
       <div className="sticky top-0 z-20 -mx-6 -mt-6 bg-background/95 backdrop-blur-sm border-b border-border">
-        <div className="flex flex-wrap items-center gap-2 px-6 py-3 min-h-[56px]">
+        <div className="flex items-center gap-1.5 px-4 h-14 overflow-x-auto">
           <BackButton />
           {/* Client selector */}
           <ClientSelector clients={clients} selected={selectedIds} onChange={setSelectedIds} />
