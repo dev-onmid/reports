@@ -4,7 +4,8 @@ import { useEffect, useState, useCallback } from 'react';
 import {
   Copy, Check, Trash2, Plus, ExternalLink, RefreshCw,
   Link2, MousePointerClick, ChevronDown, ChevronUp, X, Pencil,
-  BarChart2, TrendingUp, Filter,
+  BarChart2, TrendingUp, Filter, MessageCircle, ShoppingCart,
+  Settings, Zap, Eye, EyeOff,
 } from 'lucide-react';
 import {
   AreaChart, Area, BarChart, Bar,
@@ -57,6 +58,36 @@ const PERIOD_OPTIONS: { value: Period; label: string }[] = [
 const BAR_COLORS = ['#55F52F','#3b82f6','#a855f7','#f59e0b','#ef4444','#10b981','#ec4899','#06b6d4'];
 
 const BASE = typeof window !== 'undefined' ? window.location.origin : '';
+
+// ── WhatsApp Tracking types ──────────────────────────────────────────────────
+
+type WaLead = {
+  id: string;
+  telefone: string;
+  ctwa_clid: string | null;
+  source_id: string | null;
+  campanha: string | null;
+  pixel_id: string | null;
+  evento_lead_enviado: boolean;
+  evento_compra_enviado: boolean;
+  valor_compra: number | null;
+  created_at: string;
+};
+
+type WaConfig = {
+  pixel_id: string;
+  meta_token: string;
+};
+
+function maskPhone(phone: string): string {
+  if (phone.length >= 10) {
+    const ddi  = phone.slice(0, 2);
+    const ddd  = phone.slice(2, 4);
+    const last = phone.slice(-4);
+    return `+${ddi} (${ddd}) ****-${last}`;
+  }
+  return `****${phone.slice(-4)}`;
+}
 
 function toISODate(d: Date) {
   return d.toISOString().slice(0, 10);
@@ -141,6 +172,16 @@ export default function RastreamentoPage() {
     clientId: '', name: '', slug: '', whatsapp: '', message: 'Olá, vim pelo anúncio!',
   });
 
+  // WhatsApp tracking state
+  const [waLeads, setWaLeads]         = useState<WaLead[]>([]);
+  const [waConfig, setWaConfig]       = useState<WaConfig>({ pixel_id: '', meta_token: '' });
+  const [waLoading, setWaLoading]     = useState(true);
+  const [waSaving, setWaSaving]       = useState(false);
+  const [waTesting, setWaTesting]     = useState(false);
+  const [waTestResult, setWaTestResult] = useState<'ok' | 'error' | null>(null);
+  const [waShowToken, setWaShowToken] = useState(false);
+  const [waCopied, setWaCopied]       = useState(false);
+
   function loadLinks() {
     setLoading(true);
     const qs = filterClient ? `?clientId=${filterClient}` : '';
@@ -215,6 +256,55 @@ export default function RastreamentoPage() {
       setBreakdown(prev => ({ ...prev, [id]: rows }));
     }
   }
+
+  // WhatsApp tracking load
+  useEffect(() => {
+    Promise.all([
+      fetch('/api/whatsapp-leads').then(r => r.ok ? r.json() as Promise<WaLead[]> : []).catch(() => []),
+      fetch('/api/whatsapp-pixel').then(r => r.ok ? r.json() as Promise<WaConfig> : { pixel_id: '', meta_token: '' }).catch(() => ({ pixel_id: '', meta_token: '' })),
+    ]).then(([leads, config]) => {
+      setWaLeads(leads);
+      setWaConfig(config);
+    }).finally(() => setWaLoading(false));
+  }, []);
+
+  async function saveWaConfig() {
+    setWaSaving(true);
+    try {
+      const res = await fetch('/api/whatsapp-pixel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(waConfig),
+      });
+      if (!res.ok) throw new Error();
+    } finally {
+      setWaSaving(false);
+    }
+  }
+
+  async function testWaWebhook() {
+    setWaTesting(true);
+    setWaTestResult(null);
+    try {
+      const res = await fetch('/api/webhook/whatsapp');
+      setWaTestResult(res.ok ? 'ok' : 'error');
+    } catch {
+      setWaTestResult('error');
+    } finally {
+      setWaTesting(false);
+      setTimeout(() => setWaTestResult(null), 4000);
+    }
+  }
+
+  function copyWebhookUrl() {
+    navigator.clipboard.writeText(`${BASE}/api/webhook/whatsapp`).then(() => {
+      setWaCopied(true);
+      setTimeout(() => setWaCopied(false), 2000);
+    });
+  }
+
+  const waLeadCount = waLeads.length;
+  const waConvCount = waLeads.filter(l => l.evento_compra_enviado).length;
 
   const { from: periodFrom, to: periodTo } = periodToDates(period, customFrom, customTo);
   const totalLinksFiltered = links.length;
@@ -572,6 +662,191 @@ export default function RastreamentoPage() {
             })}
           </div>
         )}
+      </div>
+
+      {/* ── WhatsApp Tracking Section ─────────────────────────────────── */}
+      <div className="mt-8 border-t border-border pt-8 space-y-6">
+
+        {/* Section header */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="flex items-center gap-2 text-xl font-bold">
+              <MessageCircle className="h-5 w-5 text-primary" />
+              Rastreio WhatsApp → Meta Ads
+            </h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Captura leads do CTWA e envia eventos para a API de Conversões do Meta.
+            </p>
+          </div>
+        </div>
+
+        {/* Stats */}
+        <div className="grid gap-3 sm:grid-cols-3">
+          {[
+            { label: 'Leads capturados', value: waLeadCount, icon: MessageCircle, color: '#55F52F' },
+            { label: 'Compras enviadas', value: waConvCount, icon: ShoppingCart,   color: '#3b82f6' },
+            { label: 'Taxa de conversão', value: waLeadCount > 0 ? `${Math.round((waConvCount / waLeadCount) * 100)}%` : '—', icon: TrendingUp, color: '#a855f7' },
+          ].map(({ label, value, icon: Icon, color }) => (
+            <div key={label} className="relative overflow-hidden rounded-xl border bg-card p-4" style={{ borderColor: `${color}44` }}>
+              <div className="pointer-events-none absolute inset-0" style={{ background: `radial-gradient(circle at 85% 15%, ${color}22, transparent 50%)` }} />
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
+                <Icon className="h-4 w-4" style={{ color }} />
+              </div>
+              <p className="mt-2 text-base font-bold tabular-nums" style={{ color }}>
+                {waLoading ? <span className="inline-block h-7 w-16 animate-pulse rounded bg-muted" /> : value}
+              </p>
+            </div>
+          ))}
+        </div>
+
+        {/* Config + Webhook */}
+        <div className="grid gap-4 md:grid-cols-2">
+
+          {/* Pixel Config */}
+          <div className="rounded-[var(--radius)] border border-border bg-card p-5 space-y-4">
+            <div className="flex items-center gap-2">
+              <Settings className="h-4 w-4 text-muted-foreground" />
+              <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Configuração Meta Ads</p>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-muted-foreground">Pixel ID</label>
+              <input
+                value={waConfig.pixel_id}
+                onChange={e => setWaConfig(p => ({ ...p, pixel_id: e.target.value }))}
+                placeholder="Ex: 1234567890123456"
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary font-mono"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-muted-foreground">Token da API de Conversões</label>
+              <div className="relative">
+                <input
+                  type={waShowToken ? 'text' : 'password'}
+                  value={waConfig.meta_token}
+                  onChange={e => setWaConfig(p => ({ ...p, meta_token: e.target.value }))}
+                  placeholder="EAAxxxxxxx..."
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 pr-9 text-sm outline-none focus:border-primary font-mono"
+                />
+                <button
+                  type="button"
+                  onClick={() => setWaShowToken(v => !v)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {waShowToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+            <button
+              onClick={saveWaConfig}
+              disabled={waSaving || !waConfig.pixel_id || !waConfig.meta_token}
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary py-2 text-sm font-bold text-black hover:bg-primary/90 disabled:opacity-50 transition-colors"
+            >
+              {waSaving && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
+              Salvar configuração
+            </button>
+          </div>
+
+          {/* Webhook URL */}
+          <div className="rounded-[var(--radius)] border border-border bg-card p-5 space-y-4">
+            <div className="flex items-center gap-2">
+              <Zap className="h-4 w-4 text-muted-foreground" />
+              <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">URL do Webhook (Z-API)</p>
+            </div>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Configure este endpoint no Z-API como <strong>URL de Notificação</strong> para os eventos de mensagem.
+            </p>
+            <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2">
+              <code className="flex-1 truncate text-xs text-primary font-mono">
+                {BASE}/api/webhook/whatsapp
+              </code>
+              <button
+                onClick={copyWebhookUrl}
+                className="shrink-0 rounded-md border border-border bg-background px-2 py-1 text-xs font-semibold hover:bg-muted/50 transition-colors"
+              >
+                {waCopied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+              </button>
+            </div>
+            <button
+              onClick={testWaWebhook}
+              disabled={waTesting}
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-border py-2 text-sm font-semibold hover:bg-muted/50 transition-colors"
+            >
+              {waTesting
+                ? <><RefreshCw className="h-3.5 w-3.5 animate-spin" /> Testando...</>
+                : waTestResult === 'ok'
+                  ? <><Check className="h-3.5 w-3.5 text-emerald-400" /> Webhook ativo!</>
+                  : waTestResult === 'error'
+                    ? <><X className="h-3.5 w-3.5 text-red-400" /> Erro na conexão</>
+                    : 'Testar conexão'
+              }
+            </button>
+            <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-1.5 text-xs text-muted-foreground">
+              <p className="font-semibold text-foreground">Gatilho de compra</p>
+              <p>Para registrar uma conversão, envie uma mensagem para o lead contendo:</p>
+              <code className="block rounded bg-muted px-2 py-1 text-primary font-mono">compra aprovada 297</code>
+              <p className="text-[10px]">O valor pode ser inteiro ou decimal (ponto ou vírgula).</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Leads table */}
+        <div>
+          <p className="mb-3 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
+            {waLeadCount} lead{waLeadCount !== 1 ? 's' : ''} capturado{waLeadCount !== 1 ? 's' : ''}
+          </p>
+
+          {waLoading ? (
+            <div className="space-y-2">{[1, 2, 3].map(i => <div key={i} className="h-12 animate-pulse rounded-xl border border-border bg-muted/30" />)}</div>
+          ) : waLeads.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border p-10 text-center">
+              <MessageCircle className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" />
+              <p className="font-semibold text-muted-foreground">Nenhum lead capturado ainda.</p>
+              <p className="mt-1 text-xs text-muted-foreground/60">Configure o webhook no Z-API para começar a capturar.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-[var(--radius)] border border-border bg-card">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border bg-muted/30">
+                    {['Telefone', 'Source ID', 'CTWA', 'Lead', 'Compra', 'Valor', 'Data'].map(h => (
+                      <th key={h} className="px-4 py-2.5 text-left font-semibold text-muted-foreground uppercase tracking-wider text-[10px] last:text-right">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {waLeads.map((lead, i) => (
+                    <tr key={lead.id} className={cn('border-b border-border/50 last:border-0', i % 2 === 0 ? '' : 'bg-muted/10')}>
+                      <td className="px-4 py-2.5 font-mono font-medium">{maskPhone(lead.telefone)}</td>
+                      <td className="px-4 py-2.5 text-muted-foreground font-mono text-[10px] max-w-[120px] truncate">{lead.source_id ?? '—'}</td>
+                      <td className="px-4 py-2.5 text-muted-foreground font-mono text-[10px] max-w-[80px] truncate" title={lead.ctwa_clid ?? ''}>
+                        {lead.ctwa_clid ? `${lead.ctwa_clid.slice(0, 10)}…` : '—'}
+                      </td>
+                      <td className="px-4 py-2.5">
+                        {lead.evento_lead_enviado
+                          ? <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-400">✓ Enviado</span>
+                          : <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-bold text-muted-foreground">Pendente</span>}
+                      </td>
+                      <td className="px-4 py-2.5">
+                        {lead.evento_compra_enviado
+                          ? <span className="rounded-full bg-blue-500/15 px-2 py-0.5 text-[10px] font-bold text-blue-400">✓ Enviado</span>
+                          : <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-bold text-muted-foreground">—</span>}
+                      </td>
+                      <td className="px-4 py-2.5 font-bold tabular-nums">
+                        {lead.valor_compra != null
+                          ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(lead.valor_compra)
+                          : '—'}
+                      </td>
+                      <td className="px-4 py-2.5 text-right text-muted-foreground tabular-nums">
+                        {new Date(lead.created_at).toLocaleDateString('pt-BR')}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
