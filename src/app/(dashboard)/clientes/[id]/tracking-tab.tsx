@@ -88,6 +88,7 @@ function StateBadge({ state }: { state: ConnState }) {
     connecting: { label: 'Aguardando',   className: 'bg-yellow-500/15  text-yellow-400',  dot: 'bg-yellow-400' },
     close:      { label: 'Desconectado', className: 'bg-muted text-muted-foreground',      dot: 'bg-muted-foreground' },
     unknown:    { label: 'Desconectado', className: 'bg-muted text-muted-foreground',      dot: 'bg-muted-foreground' },
+    'n/a':      { label: '',             className: '',                                    dot: '' },
   };
   const s = map[state] ?? map.unknown;
   return (
