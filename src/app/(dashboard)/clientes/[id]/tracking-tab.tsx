@@ -9,11 +9,14 @@ import { cn } from '@/lib/utils';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
+type WhatsAppProvider = 'zapi' | 'evolution';
+
 type TrackingConfig = {
   pixel_id: string;
   meta_token: string;
   gatilho_compra: string;
   eventos_ativos: { lead: boolean; purchase: boolean };
+  whatsapp_provider: WhatsAppProvider;
 };
 
 type ZapiInstance = {
@@ -75,6 +78,7 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
     pixel_id: '', meta_token: '',
     gatilho_compra: 'compra aprovada',
     eventos_ativos: { lead: true, purchase: true },
+    whatsapp_provider: 'zapi',
   });
   const [instances, setInstances] = useState<ZapiInstance[]>([]);
   const [leads, setLeads]         = useState<WaLead[]>([]);
@@ -219,6 +223,34 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
             </div>
           </div>
           <div>
+            <label className="mb-1 block text-xs font-semibold text-muted-foreground">Provedor WhatsApp</label>
+            <div className="flex items-center gap-1 rounded-lg border border-border bg-background p-0.5 w-fit">
+              {([
+                { value: 'zapi' as WhatsAppProvider, label: 'Z-API' },
+                { value: 'evolution' as WhatsAppProvider, label: 'Evolution API' },
+              ]).map(({ value, label }) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setConfig(p => ({ ...p, whatsapp_provider: value }))}
+                  className={cn(
+                    'rounded-md px-3 py-1 text-xs font-semibold transition-all',
+                    config.whatsapp_provider === value
+                      ? 'bg-primary text-black'
+                      : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              {config.whatsapp_provider === 'evolution'
+                ? 'Evolution API — configure EVOLUTION_API_URL e EVOLUTION_API_KEY no servidor'
+                : 'Z-API — instâncias gerenciadas abaixo'}
+            </p>
+          </div>
+          <div>
             <label className="mb-1 block text-xs font-semibold text-muted-foreground">Gatilho de compra</label>
             <input
               value={config.gatilho_compra}
@@ -272,7 +304,9 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Zap className="h-4 w-4 text-muted-foreground" />
-            <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Instâncias Z-API</p>
+            <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
+              Instâncias {config.whatsapp_provider === 'evolution' ? 'Evolution API' : 'Z-API'}
+            </p>
           </div>
           <button
             onClick={() => { setInstForm({ nome: '', instance_id: '', token: '' }); setInstError(''); setShowModal(true); }}
@@ -309,7 +343,9 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
                       <code className="text-[10px] text-primary font-mono truncate max-w-xs">{webhookUrl}</code>
                       <CopyBtn text={webhookUrl} label="URL" />
                     </div>
-                    <p className="text-[10px] text-muted-foreground">ID Z-API: {inst.instance_id}</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      {config.whatsapp_provider === 'evolution' ? 'Instância Evolution' : 'ID Z-API'}: {inst.instance_id}
+                    </p>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
                     <button
@@ -422,7 +458,9 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="font-bold text-base">Nova instância Z-API</h3>
+              <h3 className="font-bold text-base">
+                Nova instância {config.whatsapp_provider === 'evolution' ? 'Evolution API' : 'Z-API'}
+              </h3>
               <button onClick={() => setShowModal(false)} className="text-muted-foreground hover:text-foreground">
                 <X className="h-5 w-5" />
               </button>
@@ -439,20 +477,24 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs font-semibold text-muted-foreground">Instance ID (Z-API) *</label>
+                <label className="mb-1 block text-xs font-semibold text-muted-foreground">
+                  {config.whatsapp_provider === 'evolution' ? 'Nome da instância (Evolution API) *' : 'Instance ID (Z-API) *'}
+                </label>
                 <input
                   value={instForm.instance_id}
                   onChange={e => setInstForm(p => ({ ...p, instance_id: e.target.value }))}
-                  placeholder="Ex: 3D8A1B2C..."
+                  placeholder={config.whatsapp_provider === 'evolution' ? 'Ex: minha-instancia' : 'Ex: 3D8A1B2C...'}
                   className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary"
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs font-semibold text-muted-foreground">Token da instância *</label>
+                <label className="mb-1 block text-xs font-semibold text-muted-foreground">
+                  {config.whatsapp_provider === 'evolution' ? 'API Key da instância *' : 'Token da instância *'}
+                </label>
                 <input
                   value={instForm.token}
                   onChange={e => setInstForm(p => ({ ...p, token: e.target.value }))}
-                  placeholder="Token Z-API"
+                  placeholder={config.whatsapp_provider === 'evolution' ? 'API Key Evolution' : 'Token Z-API'}
                   className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary"
                 />
               </div>

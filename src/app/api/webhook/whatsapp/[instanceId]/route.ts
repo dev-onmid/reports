@@ -1,12 +1,9 @@
 import { createHash } from 'crypto';
 import { makeServerPool } from '@/lib/server-db';
+import { normalizeWebhookPayload, type WhatsAppProvider } from '@/lib/whatsapp-provider';
 import type { NextRequest } from 'next/server';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
-
-function normalizePhone(raw: string): string {
-  return raw.replace('@c.us', '').replace(/\D/g, '');
-}
 
 function hashPhone(phone: string): string {
   return createHash('sha256').update(phone).digest('hex');
@@ -70,9 +67,9 @@ export async function POST(
     }
     const clientId: string = inst.client_id;
 
-    // 2. Load client tracking config
+    // 2. Load client tracking config (includes provider)
     const { rows: [cfg] } = await pool.query(
-      `SELECT pixel_id, meta_token, gatilho_compra, eventos_ativos
+      `SELECT pixel_id, meta_token, gatilho_compra, eventos_ativos, whatsapp_provider
        FROM public.client_tracking_config WHERE client_id = $1`,
       [clientId],
     );
@@ -80,30 +77,26 @@ export async function POST(
       return Response.json({ ok: false, error: 'Pixel ID ou Token não configurado para este cliente' }, { status: 400 });
     }
 
+    const provider: WhatsAppProvider = cfg.whatsapp_provider === 'evolution' ? 'evolution' : 'zapi';
     const eventos: { lead: boolean; purchase: boolean } = cfg.eventos_ativos ?? { lead: true, purchase: true };
     const gatilho: string = (cfg.gatilho_compra ?? 'compra aprovada').toLowerCase().trim();
 
-    // 3. Parse Z-API payload
+    // 3. Parse and normalize payload based on provider
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const body: any = await req.json().catch(() => ({}));
-    const fromMe: boolean = body.fromMe === true;
-    const phone = normalizePhone(body.phone ?? body.phoneNumber ?? '');
-    const messageText: string = (body.text?.message ?? body.body ?? '').trim();
+    const msg = normalizeWebhookPayload(provider, body);
 
-    if (!phone) {
+    if (!msg) {
       return Response.json({ ok: false, error: 'telefone não identificado' }, { status: 400 });
     }
+
+    const { phone, fromMe, text: messageText, ctwaClid, sourceId } = msg;
 
     // ── FLOW 1: Lead (received from ad) ──────────────────────────────────────
     if (!fromMe) {
       if (!eventos.lead) {
         return Response.json({ ok: true, message: 'evento Lead desativado para este cliente' });
       }
-
-      const ctwaClid: string | undefined =
-        body.ctwaClid ?? body.ctwa_clid ?? body.ctwaclid ?? undefined;
-      const sourceId: string | undefined =
-        body.sourceId ?? body.source_id ?? body.adId ?? undefined;
 
       if (!ctwaClid && !sourceId) {
         return Response.json({ ok: true, message: 'mensagem orgânica, ignorada' });
