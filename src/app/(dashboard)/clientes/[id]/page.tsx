@@ -49,11 +49,11 @@ import { VaultTab } from '@/components/vault-tab';
 type FunnelStage = { id: string; name: string; conversion: number };
 
 const DEFAULT_STAGES: FunnelStage[] = [
-  { id: 's5', name: '5º — Contatos (Leads)',     conversion: 50  },
-  { id: 's4', name: '4º — Qualificados',          conversion: 100 },
-  { id: 's3', name: '3º — Agendamentos',          conversion: 50  },
-  { id: 's2', name: '2º — Comparecimentos',       conversion: 47  },
-  { id: 's1', name: '1º — Fechamentos (Vendas)',  conversion: 0   },
+  { id: 's5', name: '5º — Leads',                  conversion: 50 },
+  { id: 's4', name: '4º — Contatos',               conversion: 50 },
+  { id: 's3', name: '3º — Reuniões Agendadas',     conversion: 50 },
+  { id: 's2', name: '2º — Reuniões Realizadas',    conversion: 50 },
+  { id: 's1', name: '1º — Fechamentos (Vendas)',   conversion: 0  },
 ];
 
 const STAGE_COLORS = ['#55F52F', '#7B2CFF', '#3B82F6', '#F59E0B', '#EC4899', '#10B981', '#EF4444'];
