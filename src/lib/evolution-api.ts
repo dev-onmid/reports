@@ -43,7 +43,7 @@ export async function createEvolutionInstance(
 }
 
 export async function getEvolutionQrCode(instanceName: string): Promise<EvolutionQrCode> {
-  const res = await fetch(`${base()}/instance/connect/${instanceName}`, {
+  const res = await fetch(`${base()}/instance/connect/${encodeURIComponent(instanceName)}`, {
     headers: headers(),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -51,7 +51,7 @@ export async function getEvolutionQrCode(instanceName: string): Promise<Evolutio
 }
 
 export async function getEvolutionState(instanceName: string): Promise<EvolutionState> {
-  const res = await fetch(`${base()}/instance/connectionState/${instanceName}`, {
+  const res = await fetch(`${base()}/instance/connectionState/${encodeURIComponent(instanceName)}`, {
     headers: headers(),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -60,7 +60,7 @@ export async function getEvolutionState(instanceName: string): Promise<Evolution
 }
 
 export async function deleteEvolutionInstance(instanceName: string): Promise<void> {
-  await fetch(`${base()}/instance/delete/${instanceName}`, {
+  await fetch(`${base()}/instance/delete/${encodeURIComponent(instanceName)}`, {
     method: 'DELETE',
     headers: headers(),
   }).catch(() => {});

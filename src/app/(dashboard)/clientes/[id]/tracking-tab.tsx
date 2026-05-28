@@ -218,6 +218,9 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
     if (instProvider === 'evolution' && !instForm.instance_id) {
       setInstError('Nome da instância Evolution API é obrigatório.'); return;
     }
+    if (instProvider === 'evolution' && /\s/.test(instForm.instance_id)) {
+      setInstError('O nome da instância não pode ter espaços. Use hífens: ex. celular-matheus'); return;
+    }
     setAdding(true);
     try {
       const res = await fetch(`/api/clients/${clientId}/tracking/instances`, {
@@ -618,12 +621,17 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
                 </label>
                 <input
                   value={instForm.instance_id}
-                  onChange={e => setInstForm(p => ({ ...p, instance_id: e.target.value }))}
+                  onChange={e => {
+                    const val = instProvider === 'evolution'
+                      ? e.target.value.replace(/\s+/g, '-').toLowerCase()
+                      : e.target.value;
+                    setInstForm(p => ({ ...p, instance_id: val }));
+                  }}
                   placeholder={instProvider === 'evolution' ? 'Ex: vendas-cliente' : 'Ex: 3D8A1B2C...'}
                   className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary"
                 />
                 {instProvider === 'evolution' && (
-                  <p className="mt-1 text-[10px] text-muted-foreground">Será criado automaticamente na Evolution API com este nome.</p>
+                  <p className="mt-1 text-[10px] text-muted-foreground">Apenas letras minúsculas, números e hífens. Será criado automaticamente na Evolution API.</p>
                 )}
               </div>
               {instProvider === 'zapi' && (
