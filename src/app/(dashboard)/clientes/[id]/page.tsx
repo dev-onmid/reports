@@ -496,36 +496,66 @@ function FunnelTab({ clientId, clientName, goalConfig }: { clientId: string; cli
           </div>
 
           {/* Simple summary */}
-          {invPlaSimple > 0 && tkm > 0 && (
+          {invPlaSimple > 0 && tkm > 0 && goalConfig.target > 0 && (
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              <div className="bg-card border border-border rounded-xl p-4">
-                <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">VENDAS ESTIMADAS</p>
-                <p className="font-heading font-normal text-xl leading-none">
-                  {Math.floor(invPlaSimple / tkm).toLocaleString('pt-BR')}
-                </p>
-                <p className="text-[11px] text-muted-foreground mt-1">{fmtBRL(invPlaSimple)} ÷ {fmtBRL(tkm)} TKM</p>
-              </div>
-              <div className="bg-card border border-border rounded-xl p-4">
-                <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">FATURAMENTO ESTIMADO</p>
-                <p className="font-heading font-normal text-xl leading-none text-primary">
-                  {fmtBRL(Math.floor(invPlaSimple / tkm) * tkm)}
-                </p>
-                <p className="text-[11px] text-muted-foreground mt-1">Vendas × {fmtBRL(tkm)}</p>
-              </div>
-              <div className="bg-card border border-border rounded-xl p-4 col-span-2 md:col-span-1">
-                <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">ROI ESTIMADO</p>
-                {(() => {
-                  const roi = invPlaSimple > 0 ? (Math.floor(invPlaSimple / tkm) * tkm) / invPlaSimple : 0;
-                  return (
-                    <>
-                      <p className={cn('font-heading font-normal text-xl leading-none', roi >= 3 ? 'text-primary' : roi >= 1.5 ? 'text-yellow-400' : 'text-red-400')}>
-                        {roi.toFixed(1)}x
-                      </p>
-                      <p className="text-[11px] text-muted-foreground mt-1">Faturamento ÷ investimento</p>
-                    </>
-                  );
-                })()}
-              </div>
+              {goalConfig.type === 'revenue' ? (
+                <>
+                  <div className="bg-card border border-border rounded-xl p-4">
+                    <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">VENDAS NECESSÁRIAS</p>
+                    <p className="font-heading font-normal text-xl leading-none">
+                      {Math.ceil(goalConfig.target / tkm).toLocaleString('pt-BR')}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground mt-1">{fmtBRL(goalConfig.target)} meta ÷ {fmtBRL(tkm)} TKM</p>
+                  </div>
+                  <div className="bg-card border border-border rounded-xl p-4">
+                    <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">FATURAMENTO META</p>
+                    <p className="font-heading font-normal text-xl leading-none text-primary">{fmtBRL(goalConfig.target)}</p>
+                    <p className="text-[11px] text-muted-foreground mt-1">Meta principal do cliente</p>
+                  </div>
+                  <div className="bg-card border border-border rounded-xl p-4 col-span-2 md:col-span-1">
+                    <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">ROI ESPERADO</p>
+                    {(() => {
+                      const roi = goalConfig.target / invPlaSimple;
+                      return (
+                        <>
+                          <p className={cn('font-heading font-normal text-xl leading-none', roi >= 3 ? 'text-primary' : roi >= 1.5 ? 'text-yellow-400' : 'text-red-400')}>
+                            {roi.toFixed(1)}x
+                          </p>
+                          <p className="text-[11px] text-muted-foreground mt-1">{fmtBRL(goalConfig.target)} ÷ {fmtBRL(invPlaSimple)}</p>
+                        </>
+                      );
+                    })()}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="bg-card border border-border rounded-xl p-4">
+                    <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">{goalConfig.label.toUpperCase()} NECESSÁRIAS</p>
+                    <p className="font-heading font-normal text-xl leading-none">{goalConfig.target.toLocaleString('pt-BR')}</p>
+                    <p className="text-[11px] text-muted-foreground mt-1">Meta principal do cliente</p>
+                  </div>
+                  <div className="bg-card border border-border rounded-xl p-4">
+                    <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">FATURAMENTO ESTIMADO</p>
+                    <p className="font-heading font-normal text-xl leading-none text-primary">{fmtBRL(goalConfig.target * tkm)}</p>
+                    <p className="text-[11px] text-muted-foreground mt-1">{goalConfig.target} × {fmtBRL(tkm)} TKM</p>
+                  </div>
+                  <div className="bg-card border border-border rounded-xl p-4 col-span-2 md:col-span-1">
+                    <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">ROI ESPERADO</p>
+                    {(() => {
+                      const fat = goalConfig.target * tkm;
+                      const roi = invPlaSimple > 0 ? fat / invPlaSimple : 0;
+                      return (
+                        <>
+                          <p className={cn('font-heading font-normal text-xl leading-none', roi >= 3 ? 'text-primary' : roi >= 1.5 ? 'text-yellow-400' : 'text-red-400')}>
+                            {roi.toFixed(1)}x
+                          </p>
+                          <p className="text-[11px] text-muted-foreground mt-1">{fmtBRL(fat)} ÷ {fmtBRL(invPlaSimple)}</p>
+                        </>
+                      );
+                    })()}
+                  </div>
+                </>
+              )}
             </div>
           )}
         </div>
