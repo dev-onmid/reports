@@ -308,12 +308,16 @@ type ClientPlanningConfig = {
   tkm: number;
   cplMeta: number;
   stages: FunnelStage[];
+  simpleMode: boolean;
+  invPlaSimple: number;
 };
 
 const DEFAULT_CLIENT_PLANNING: ClientPlanningConfig = {
   tkm: 9000,
   cplMeta: 30,
   stages: DEFAULT_STAGES,
+  simpleMode: false,
+  invPlaSimple: 0,
 };
 
 function sanitizePlanningStages(stages: unknown): FunnelStage[] {
@@ -341,10 +345,13 @@ function readSavedClientPlanning(clientId: string): ClientPlanningConfig {
     const parsed = JSON.parse(raw) as Partial<ClientPlanningConfig>;
     const tkm = Number(parsed.tkm ?? DEFAULT_CLIENT_PLANNING.tkm);
     const cplMeta = Number(parsed.cplMeta ?? DEFAULT_CLIENT_PLANNING.cplMeta);
+    const invPlaSimple = Number(parsed.invPlaSimple ?? 0);
     return {
       tkm: Number.isFinite(tkm) ? tkm : DEFAULT_CLIENT_PLANNING.tkm,
       cplMeta: Number.isFinite(cplMeta) ? cplMeta : DEFAULT_CLIENT_PLANNING.cplMeta,
       stages: sanitizePlanningStages(parsed.stages),
+      simpleMode: Boolean(parsed.simpleMode ?? false),
+      invPlaSimple: Number.isFinite(invPlaSimple) ? invPlaSimple : 0,
     };
   } catch {
     return DEFAULT_CLIENT_PLANNING;
@@ -357,7 +364,7 @@ function saveClientPlanning(clientId: string, planning: ClientPlanningConfig) {
   fetch(`/api/clients/${clientId}/planning`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tkm: planning.tkm, cplMeta: planning.cplMeta, stages: planning.stages }),
+    body: JSON.stringify({ tkm: planning.tkm, cplMeta: planning.cplMeta, stages: planning.stages, simpleMode: planning.simpleMode, invPlaSimple: planning.invPlaSimple }),
   }).catch(() => {});
 }
 
@@ -367,6 +374,8 @@ function FunnelTab({ clientId, clientName, goalConfig }: { clientId: string; cli
   const [tkm, setTkm] = useState(() => readSavedClientPlanning(clientId).tkm);
   const [cplMeta, setCplMeta] = useState(() => readSavedClientPlanning(clientId).cplMeta);
   const [stages, setStages] = useState<FunnelStage[]>(() => readSavedClientPlanning(clientId).stages);
+  const [simpleMode, setSimpleMode] = useState(() => readSavedClientPlanning(clientId).simpleMode);
+  const [invPlaSimple, setInvPlaSimple] = useState(() => readSavedClientPlanning(clientId).invPlaSimple);
 
   useEffect(() => {
     let cancelled = false;
@@ -374,19 +383,25 @@ function FunnelTab({ clientId, clientName, goalConfig }: { clientId: string; cli
     setTkm(saved.tkm);
     setCplMeta(saved.cplMeta);
     setStages(saved.stages);
+    setSimpleMode(saved.simpleMode);
+    setInvPlaSimple(saved.invPlaSimple);
     setPlanningLoadedFor(clientId);
     fetch(`/api/clients/${clientId}/planning`)
       .then(r => r.json())
-      .then((dbData: { tkm: number; cplMeta: number; stages: FunnelStage[] } | null) => {
+      .then((dbData: { tkm: number; cplMeta: number; stages: FunnelStage[]; simpleMode?: boolean; invPlaSimple?: number } | null) => {
         if (cancelled || !dbData) return;
         const planning: ClientPlanningConfig = {
           tkm: dbData.tkm || saved.tkm,
           cplMeta: dbData.cplMeta || saved.cplMeta,
           stages: sanitizePlanningStages(dbData.stages),
+          simpleMode: dbData.simpleMode ?? saved.simpleMode,
+          invPlaSimple: dbData.invPlaSimple ?? saved.invPlaSimple,
         };
         setTkm(planning.tkm);
         setCplMeta(planning.cplMeta);
         setStages(planning.stages);
+        setSimpleMode(planning.simpleMode);
+        setInvPlaSimple(planning.invPlaSimple);
         window.localStorage.setItem(`clientPlanning_${clientId}`, JSON.stringify(planning));
       })
       .catch(() => {});
@@ -395,8 +410,8 @@ function FunnelTab({ clientId, clientName, goalConfig }: { clientId: string; cli
 
   useEffect(() => {
     if (planningLoadedFor !== clientId) return;
-    saveClientPlanning(clientId, { tkm, cplMeta, stages });
-  }, [clientId, planningLoadedFor, tkm, cplMeta, stages]);
+    saveClientPlanning(clientId, { tkm, cplMeta, stages, simpleMode, invPlaSimple });
+  }, [clientId, planningLoadedFor, tkm, cplMeta, stages, simpleMode, invPlaSimple]);
 
   const cplPlanejado = cplMeta;
   const vols     = plannedFunnelFromGoal(goalConfig, stages, tkm);
@@ -428,12 +443,97 @@ function FunnelTab({ clientId, clientName, goalConfig }: { clientId: string; cli
 
   return (
     <div className="space-y-5 pt-2">
-      {/* Client context */}
-      <p className="text-sm text-muted-foreground">
-        Configuração do funil de planejamento para <strong className="text-foreground">{clientName}</strong>.
-        A meta principal é <strong className="text-foreground">{goalConfig.label}</strong>; ajuste as taxas de conversão para recalcular o plano.
-      </p>
+      {/* Header row: context + simple mode toggle */}
+      <div className="flex items-start justify-between gap-4">
+        <p className="text-sm text-muted-foreground">
+          {simpleMode
+            ? <>Modo simples ativo para <strong className="text-foreground">{clientName}</strong>. Digite diretamente os valores de planejamento.</>
+            : <>Configuração do funil de planejamento para <strong className="text-foreground">{clientName}</strong>. A meta principal é <strong className="text-foreground">{goalConfig.label}</strong>; ajuste as taxas de conversão para recalcular o plano.</>
+          }
+        </p>
+        <button
+          onClick={() => setSimpleMode(v => !v)}
+          className={cn(
+            'shrink-0 flex items-center gap-2 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors',
+            simpleMode
+              ? 'bg-primary/20 border-primary/40 text-primary hover:bg-primary/30'
+              : 'bg-muted/40 border-border text-muted-foreground hover:bg-muted hover:text-foreground',
+          )}
+        >
+          <Layers className="w-3.5 h-3.5" />
+          {simpleMode ? 'Modo simples' : 'Modo funil'}
+        </button>
+      </div>
 
+      {/* ── SIMPLE MODE ─────────────────────────────────────────────────── */}
+      {simpleMode && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {/* Meta goal (readonly) */}
+            <div className="bg-card border border-border rounded-xl p-4">
+              <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">META ({goalConfig.label})</p>
+              <p className="font-heading font-normal text-xl leading-none text-foreground">{goalValue}</p>
+              <p className="text-[11px] text-muted-foreground mt-1">Configurada na meta do cliente</p>
+            </div>
+            {/* TKM */}
+            <div className="bg-card border border-border rounded-xl p-4">
+              <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">TKM (Ticket Médio)</p>
+              <div className="flex items-baseline gap-1">
+                <span className="text-lg font-bold text-muted-foreground">R$</span>
+                <CurrencyInput value={tkm} onChange={setTkm} className={cn('font-heading font-normal text-xl leading-none flex-1 min-w-0 text-foreground', inputCls)} />
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-1">Valor médio por venda</p>
+            </div>
+            {/* Inv. Planejado — directly editable */}
+            <div className="bg-primary/10 border border-primary/30 rounded-xl p-4">
+              <p className="text-[9px] font-bold uppercase tracking-widest text-primary mb-2">INV. PLANEJADO</p>
+              <div className="flex items-baseline gap-1">
+                <span className="text-lg font-bold text-primary/60">R$</span>
+                <CurrencyInput value={invPlaSimple} onChange={setInvPlaSimple} className={cn('font-heading font-normal text-xl leading-none flex-1 min-w-0 text-primary', inputCls)} />
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-1">Investimento planejado direto</p>
+            </div>
+          </div>
+
+          {/* Simple summary */}
+          {invPlaSimple > 0 && tkm > 0 && (
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              <div className="bg-card border border-border rounded-xl p-4">
+                <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">VENDAS ESTIMADAS</p>
+                <p className="font-heading font-normal text-xl leading-none">
+                  {Math.floor(invPlaSimple / tkm).toLocaleString('pt-BR')}
+                </p>
+                <p className="text-[11px] text-muted-foreground mt-1">{fmtBRL(invPlaSimple)} ÷ {fmtBRL(tkm)} TKM</p>
+              </div>
+              <div className="bg-card border border-border rounded-xl p-4">
+                <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">FATURAMENTO ESTIMADO</p>
+                <p className="font-heading font-normal text-xl leading-none text-primary">
+                  {fmtBRL(Math.floor(invPlaSimple / tkm) * tkm)}
+                </p>
+                <p className="text-[11px] text-muted-foreground mt-1">Vendas × {fmtBRL(tkm)}</p>
+              </div>
+              <div className="bg-card border border-border rounded-xl p-4 col-span-2 md:col-span-1">
+                <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">ROI ESTIMADO</p>
+                {(() => {
+                  const roi = invPlaSimple > 0 ? (Math.floor(invPlaSimple / tkm) * tkm) / invPlaSimple : 0;
+                  return (
+                    <>
+                      <p className={cn('font-heading font-normal text-xl leading-none', roi >= 3 ? 'text-primary' : roi >= 1.5 ? 'text-yellow-400' : 'text-red-400')}>
+                        {roi.toFixed(1)}x
+                      </p>
+                      <p className="text-[11px] text-muted-foreground mt-1">Faturamento ÷ investimento</p>
+                    </>
+                  );
+                })()}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── FULL FUNNEL MODE ─────────────────────────────────────────────── */}
+      {!simpleMode && (
+        <>
       {/* Config row */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="bg-card border border-border rounded-xl p-4">
@@ -635,6 +735,8 @@ function FunnelTab({ clientId, clientName, goalConfig }: { clientId: string; cli
         </div>
 
       </div>
+        </>
+      )}
     </div>
   );
 }

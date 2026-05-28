@@ -11,6 +11,8 @@ async function ensureTable(pool: ReturnType<typeof makeServerPool>) {
       updated_at  TIMESTAMPTZ DEFAULT NOW()
     )
   `);
+  await pool.query(`ALTER TABLE public.client_planning ADD COLUMN IF NOT EXISTS simple_mode BOOLEAN NOT NULL DEFAULT false`);
+  await pool.query(`ALTER TABLE public.client_planning ADD COLUMN IF NOT EXISTS inv_pla_simple NUMERIC NOT NULL DEFAULT 0`);
 }
 
 export async function GET(
@@ -22,7 +24,8 @@ export async function GET(
   try {
     await ensureTable(pool);
     const { rows: [row] } = await pool.query(
-      `SELECT tkm::float, cpl_meta::float AS "cplMeta", stages
+      `SELECT tkm::float, cpl_meta::float AS "cplMeta", stages,
+              simple_mode AS "simpleMode", inv_pla_simple::float AS "invPlaSimple"
          FROM public.client_planning WHERE client_id = $1`,
       [id],
     );
@@ -37,17 +40,18 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const body = await req.json() as { tkm: number; cplMeta: number; stages: unknown[] };
+  const body = await req.json() as { tkm: number; cplMeta: number; stages: unknown[]; simpleMode?: boolean; invPlaSimple?: number };
   const pool = makeServerPool();
   try {
     await ensureTable(pool);
     const { rows: [row] } = await pool.query(
-      `INSERT INTO public.client_planning (client_id, tkm, cpl_meta, stages, updated_at)
-       VALUES ($1, $2, $3, $4, NOW())
+      `INSERT INTO public.client_planning (client_id, tkm, cpl_meta, stages, simple_mode, inv_pla_simple, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW())
        ON CONFLICT (client_id) DO UPDATE
-         SET tkm = $2, cpl_meta = $3, stages = $4, updated_at = NOW()
-       RETURNING tkm::float, cpl_meta::float AS "cplMeta", stages`,
-      [id, body.tkm, body.cplMeta, JSON.stringify(body.stages)],
+         SET tkm = $2, cpl_meta = $3, stages = $4, simple_mode = $5, inv_pla_simple = $6, updated_at = NOW()
+       RETURNING tkm::float, cpl_meta::float AS "cplMeta", stages,
+                 simple_mode AS "simpleMode", inv_pla_simple::float AS "invPlaSimple"`,
+      [id, body.tkm, body.cplMeta, JSON.stringify(body.stages), body.simpleMode ?? false, body.invPlaSimple ?? 0],
     );
     return Response.json(row);
   } finally {
