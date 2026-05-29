@@ -1,21 +1,20 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { cn } from '@/lib/utils';
-import { Search, ChevronDown, ChevronUp, MessageCircle, RefreshCw } from 'lucide-react';
+import { cn, formatCurrencyBRL } from '@/lib/utils';
+import { Search, ChevronDown, ChevronUp, MessageCircle, RefreshCw, Plus } from 'lucide-react';
 
-type CrmContact = {
+type CrmLead = {
   id: string;
-  phone: string;
-  name: string | null;
-  origin: string;
-  utm_source: string | null;
-  utm_medium: string | null;
-  utm_campaign: string | null;
-  status: string;
+  nome: string | null;
+  numero: string | null;
+  canal: string | null;
+  origin: string | null;
+  status: string | null;
+  fechou: boolean;
+  valor_rs: number | null;
+  data: string | null;
   created_at: string;
-  message_count: number;
-  last_message_at: string | null;
 };
 
 type CrmMessage = {
@@ -25,74 +24,56 @@ type CrmMessage = {
   created_at: string;
 };
 
-type OriginStat = { origin: string; count: number };
-
-const ORIGIN_STYLES: Record<string, string> = {
-  meta:       'bg-blue-500/20 text-blue-300 border-blue-400/30',
-  google:     'bg-red-500/20 text-red-300 border-red-400/30',
-  instagram:  'bg-purple-500/20 text-purple-300 border-purple-400/30',
-  tiktok:     'bg-foreground/10 text-foreground border-border',
-  youtube:    'bg-red-600/20 text-red-400 border-red-500/30',
-  anuncio:    'bg-yellow-500/20 text-yellow-300 border-yellow-400/30',
-  indicacao:  'bg-emerald-500/20 text-emerald-300 border-emerald-400/30',
-  cliente:    'bg-primary/20 text-primary border-primary/30',
-  organic:    'bg-muted/40 text-muted-foreground border-border/50',
+const CANAL_STYLES: Record<string, string> = {
+  'Facebook':   'bg-blue-500/20 text-blue-300 border-blue-400/30',
+  'Google':     'bg-red-500/20 text-red-300 border-red-400/30',
+  'Instagram':  'bg-purple-500/20 text-purple-300 border-purple-400/30',
+  'TikTok':     'bg-foreground/10 text-foreground border-border',
+  'YouTube':    'bg-red-600/20 text-red-400 border-red-500/30',
+  'Indicação':  'bg-emerald-500/20 text-emerald-300 border-emerald-400/30',
+  'Whatsapp':   'bg-primary/20 text-primary border-primary/30',
 };
 
 const STATUS_STYLES: Record<string, string> = {
-  novo:            'bg-blue-500/20 text-blue-300 border-blue-400/30',
-  em_atendimento:  'bg-yellow-500/20 text-yellow-300 border-yellow-400/30',
-  convertido:      'bg-primary/20 text-primary border-primary/30',
-  perdido:         'bg-red-500/20 text-red-300 border-red-400/30',
+  'Em Atendimento': 'bg-sky-500/20 text-sky-300 border-sky-400/30',
+  'Agendado':       'bg-blue-500/20 text-blue-300 border-blue-400/30',
+  'Reagendado':     'bg-blue-400/20 text-blue-200 border-blue-300/30',
+  'Fechado':        'bg-primary/20 text-primary border-primary/30',
+  'Comprou':        'bg-primary/20 text-primary border-primary/30',
+  'Não Retorna':    'bg-muted/40 text-muted-foreground border-border/50',
+  'Sem Interesse':  'bg-red-500/20 text-red-300 border-red-400/30',
+  'Desqualificado': 'bg-red-500/20 text-red-300 border-red-400/30',
 };
 
-const STATUS_LABELS: Record<string, string> = {
-  novo:           'Novo',
-  em_atendimento: 'Em atendimento',
-  convertido:     'Convertido',
-  perdido:        'Perdido',
-};
+const STATUS_OPTIONS = ['Em Atendimento', 'Agendado', 'Reagendado', 'Fechado', 'Comprou', 'Paciente', 'Não Retorna', 'Distante', 'Sem Interesse', 'Desqualificado'];
 
-const ORIGIN_LABELS: Record<string, string> = {
-  meta:      'Meta',
-  google:    'Google',
-  instagram: 'Instagram',
-  tiktok:    'TikTok',
-  youtube:   'YouTube',
-  anuncio:   'Anúncio',
-  indicacao: 'Indicação',
-  cliente:   'Já é cliente',
-  organic:   'Orgânico',
-};
-
-function originStyle(origin: string) {
-  return ORIGIN_STYLES[origin] ?? 'bg-muted/40 text-muted-foreground border-border/50';
+function canalStyle(canal: string | null) {
+  return CANAL_STYLES[canal ?? ''] ?? 'bg-muted/40 text-muted-foreground border-border/50';
 }
 
-function originLabel(origin: string) {
-  return ORIGIN_LABELS[origin] ?? origin;
+function statusStyle(status: string | null) {
+  return STATUS_STYLES[status ?? ''] ?? 'bg-muted/40 text-muted-foreground border-border/50';
 }
 
-function formatDate(iso: string) {
+function formatDate(iso: string | null) {
+  if (!iso) return '—';
   const d = new Date(iso);
-  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' }) +
-    ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
 }
 
-function StatusDropdown({ contactId, clientId, value, onChange }: {
-  contactId: string;
-  clientId: string;
-  value: string;
+function StatusDropdown({ leadId, value, onChange }: {
+  leadId: string;
+  value: string | null;
   onChange: (s: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const statuses = Object.keys(STATUS_LABELS);
+  const current = value ?? 'Em Atendimento';
 
   async function pick(s: string) {
     setOpen(false);
     onChange(s);
-    await fetch(`/api/clients/${clientId}/crm/contacts/${contactId}`, {
-      method: 'PATCH',
+    await fetch(`/api/crm/${leadId}`, {
+      method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: s }),
     });
@@ -102,25 +83,16 @@ function StatusDropdown({ contactId, clientId, value, onChange }: {
     <div className="relative">
       <button
         onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }}
-        className={cn(
-          'h-6 rounded-md border px-2 text-[10px] font-bold whitespace-nowrap transition-colors',
-          STATUS_STYLES[value] ?? 'bg-muted text-muted-foreground border-border',
-        )}
+        className={cn('h-6 rounded-md border px-2 text-[10px] font-bold whitespace-nowrap transition-colors', statusStyle(current))}
       >
-        {STATUS_LABELS[value] ?? value}
+        {current}
       </button>
       {open && (
-        <div
-          className="absolute left-0 top-7 z-20 min-w-[140px] rounded-lg border border-border bg-card shadow-lg"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {statuses.filter(s => s !== value).map(s => (
-            <button
-              key={s}
-              onClick={() => pick(s)}
-              className="w-full px-3 py-2 text-left text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground transition-colors first:rounded-t-lg last:rounded-b-lg"
-            >
-              {STATUS_LABELS[s]}
+        <div className="absolute left-0 top-7 z-20 min-w-[160px] rounded-lg border border-border bg-card shadow-lg" onClick={e => e.stopPropagation()}>
+          {STATUS_OPTIONS.filter(s => s !== current).map(s => (
+            <button key={s} onClick={() => pick(s)}
+              className="w-full px-3 py-2 text-left text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground transition-colors first:rounded-t-lg last:rounded-b-lg">
+              {s}
             </button>
           ))}
         </div>
@@ -129,20 +101,20 @@ function StatusDropdown({ contactId, clientId, value, onChange }: {
   );
 }
 
-function MessagePanel({ contactId, clientId }: { contactId: string; clientId: string }) {
+function MessagePanel({ leadId }: { leadId: string }) {
   const [messages, setMessages] = useState<CrmMessage[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setLoading(true);
-    fetch(`/api/clients/${clientId}/crm/contacts/${contactId}`)
+    fetch(`/api/crm/${leadId}/messages`)
       .then(r => r.json())
       .then((d: { messages: CrmMessage[] }) => setMessages(d.messages ?? []))
       .finally(() => setLoading(false));
-  }, [contactId, clientId]);
+  }, [leadId]);
 
   if (loading) return <div className="px-4 py-3 text-xs text-muted-foreground">Carregando...</div>;
-  if (!messages.length) return <div className="px-4 py-3 text-xs text-muted-foreground">Nenhuma mensagem registrada.</div>;
+  if (!messages.length) return <div className="px-4 py-3 text-xs text-muted-foreground italic">Nenhuma mensagem registrada.</div>;
 
   return (
     <div className="max-h-64 overflow-y-auto px-4 py-3 space-y-2 bg-background/40">
@@ -155,7 +127,9 @@ function MessagePanel({ contactId, clientId }: { contactId: string; clientId: st
               : 'bg-muted text-foreground rounded-bl-none',
           )}>
             <p>{m.text}</p>
-            <p className="mt-1 text-[10px] opacity-60 text-right">{formatDate(m.created_at)}</p>
+            <p className="mt-1 text-[10px] opacity-60 text-right">
+              {new Date(m.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+            </p>
           </div>
         </div>
       ))}
@@ -164,54 +138,56 @@ function MessagePanel({ contactId, clientId }: { contactId: string; clientId: st
 }
 
 export function ClientCrmTab({ clientId }: { clientId: string }) {
-  const [contacts, setContacts] = useState<CrmContact[]>([]);
-  const [origins, setOrigins] = useState<OriginStat[]>([]);
-  const [total, setTotal] = useState(0);
+  const [leads, setLeads] = useState<CrmLead[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [filterOrigin, setFilterOrigin] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
-  const [page, setPage] = useState(1);
+  const [filterCanal, setFilterCanal] = useState('');
   const [expanded, setExpanded] = useState<string | null>(null);
 
-  const load = useCallback((p = 1) => {
+  const load = useCallback(() => {
     setLoading(true);
-    const q = new URLSearchParams({ page: String(p) });
-    if (filterOrigin) q.set('origin', filterOrigin);
-    if (filterStatus) q.set('status', filterStatus);
-    if (search) q.set('search', search);
-    fetch(`/api/clients/${clientId}/crm/contacts?${q}`)
+    fetch(`/api/crm?clientId=${clientId}`)
       .then(r => r.json())
-      .then((d: { contacts: CrmContact[]; total: number; origins: OriginStat[] }) => {
-        setContacts(d.contacts ?? []);
-        setTotal(d.total ?? 0);
-        if (p === 1) setOrigins(d.origins ?? []);
-      })
+      .then((rows: CrmLead[]) => setLeads(Array.isArray(rows) ? rows : []))
       .finally(() => setLoading(false));
-  }, [clientId, filterOrigin, filterStatus, search]);
+  }, [clientId]);
 
-  useEffect(() => { setPage(1); load(1); }, [load]);
+  useEffect(() => { load(); }, [load]);
 
-  function updateStatus(contactId: string, status: string) {
-    setContacts(prev => prev.map(c => c.id === contactId ? { ...c, status } : c));
+  const filtered = leads.filter(l => {
+    if (filterStatus && l.status !== filterStatus) return false;
+    if (filterCanal && l.canal !== filterCanal) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      if (!(l.nome ?? '').toLowerCase().includes(q) && !(l.numero ?? '').includes(q)) return false;
+    }
+    return true;
+  });
+
+  const canais = [...new Set(leads.map(l => l.canal).filter(Boolean))] as string[];
+  const total = leads.length;
+  const convertidos = leads.filter(l => l.fechou).length;
+  const faturamento = leads.reduce((s, l) => s + (l.valor_rs ?? 0), 0);
+  const emAtendimento = leads.filter(l => l.status === 'Em Atendimento').length;
+
+  function updateStatus(leadId: string, status: string) {
+    setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status } : l));
   }
-
-  const totalByStatus = (s: string) => contacts.filter(c => c.status === s).length;
-  const pages = Math.ceil(total / 50);
 
   return (
     <div className="space-y-4 pt-1">
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
-          { label: 'Total', value: total, style: 'text-foreground' },
-          { label: 'Novos', value: totalByStatus('novo'), style: 'text-blue-300' },
-          { label: 'Convertidos', value: totalByStatus('convertido'), style: 'text-primary' },
-          { label: 'Perdidos', value: totalByStatus('perdido'), style: 'text-red-300' },
-        ].map(({ label, value, style }) => (
+          { label: 'Total de Leads', value: total, cls: 'text-foreground' },
+          { label: 'Em Atendimento', value: emAtendimento, cls: 'text-sky-300' },
+          { label: 'Convertidos', value: convertidos, cls: 'text-primary' },
+          { label: 'Faturamento', value: formatCurrencyBRL(faturamento), cls: 'text-primary' },
+        ].map(({ label, value, cls }) => (
           <div key={label} className="bg-card border border-border rounded-xl p-4">
             <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
-            <p className={cn('font-heading font-normal text-xl leading-none mt-2', style)}>{value}</p>
+            <p className={cn('font-heading font-normal text-xl leading-none mt-2', cls)}>{value}</p>
           </div>
         ))}
       </div>
@@ -221,140 +197,99 @@ export function ClientCrmTab({ clientId }: { clientId: string }) {
         <div className="relative flex-1 min-w-[180px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
           <input
-            type="text"
-            placeholder="Buscar telefone ou nome..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
+            type="text" placeholder="Buscar nome ou número..."
+            value={search} onChange={e => setSearch(e.target.value)}
             className="h-8 w-full rounded-lg border border-border bg-card pl-8 pr-3 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
           />
         </div>
-
-        <select
-          value={filterOrigin}
-          onChange={e => setFilterOrigin(e.target.value)}
-          className="h-8 rounded-lg border border-border bg-card px-2 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-primary"
-        >
-          <option value="">Todas as origens</option>
-          {origins.map(o => (
-            <option key={o.origin} value={o.origin}>
-              {originLabel(o.origin)} ({o.count})
-            </option>
-          ))}
+        <select value={filterCanal} onChange={e => setFilterCanal(e.target.value)}
+          className="h-8 rounded-lg border border-border bg-card px-2 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-primary">
+          <option value="">Todos os canais</option>
+          {canais.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
-
-        <select
-          value={filterStatus}
-          onChange={e => setFilterStatus(e.target.value)}
-          className="h-8 rounded-lg border border-border bg-card px-2 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-primary"
-        >
+        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
+          className="h-8 rounded-lg border border-border bg-card px-2 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-primary">
           <option value="">Todos os status</option>
-          {Object.entries(STATUS_LABELS).map(([k, v]) => (
-            <option key={k} value={k}>{v}</option>
-          ))}
+          {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
-
-        <button
-          onClick={() => load(page)}
-          className="h-8 w-8 flex items-center justify-center rounded-lg border border-border bg-card text-muted-foreground hover:text-foreground transition-colors"
-        >
+        <button onClick={load}
+          className="h-8 w-8 flex items-center justify-center rounded-lg border border-border bg-card text-muted-foreground hover:text-foreground transition-colors">
           <RefreshCw className="w-3.5 h-3.5" />
         </button>
+        <a href="/crm" className="h-8 flex items-center gap-1.5 px-3 rounded-lg border border-border bg-card text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors">
+          <Plus className="w-3.5 h-3.5" /> Novo lead
+        </a>
       </div>
 
       {/* Table */}
       <div className="rounded-xl border border-border overflow-hidden">
         {loading ? (
           <div className="py-12 text-center text-sm text-muted-foreground">Carregando...</div>
-        ) : contacts.length === 0 ? (
+        ) : filtered.length === 0 ? (
           <div className="py-12 text-center">
-            <p className="text-sm text-muted-foreground">Nenhum contato encontrado.</p>
-            <p className="text-xs text-muted-foreground/60 mt-1">As mensagens recebidas via WhatsApp aparecerão aqui automaticamente.</p>
+            <p className="text-sm text-muted-foreground">Nenhum lead encontrado.</p>
+            <p className="text-xs text-muted-foreground/60 mt-1">Mensagens recebidas via WhatsApp aparecem aqui automaticamente.</p>
           </div>
         ) : (
           <div>
-            {/* Header */}
-            <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-3 px-4 py-2 bg-muted/30 border-b border-border text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+            <div className="grid grid-cols-[1fr_auto_auto_auto_auto_auto] gap-3 px-4 py-2 bg-muted/30 border-b border-border text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
               <span>Contato</span>
-              <span>Origem</span>
+              <span>Canal</span>
               <span>Status</span>
-              <span>Msgs</span>
+              <span>Fechou</span>
+              <span>Valor</span>
               <span>Data</span>
             </div>
 
-            {contacts.map(contact => (
-              <div key={contact.id} className="border-b border-border/50 last:border-0">
+            {filtered.map(lead => (
+              <div key={lead.id} className="border-b border-border/50 last:border-0">
                 <button
-                  onClick={() => setExpanded(expanded === contact.id ? null : contact.id)}
-                  className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-3 w-full px-4 py-3 items-center text-left hover:bg-muted/20 transition-colors"
+                  onClick={() => setExpanded(expanded === lead.id ? null : lead.id)}
+                  className="grid grid-cols-[1fr_auto_auto_auto_auto_auto] gap-3 w-full px-4 py-3 items-center text-left hover:bg-muted/20 transition-colors"
                 >
                   <div className="min-w-0">
-                    <p className="text-sm font-semibold truncate">{contact.name ?? contact.phone}</p>
-                    {contact.name && (
-                      <p className="text-[11px] text-muted-foreground">{contact.phone}</p>
-                    )}
-                    {contact.utm_campaign && (
-                      <p className="text-[10px] text-muted-foreground/60 truncate">Camp: {contact.utm_campaign}</p>
-                    )}
+                    <p className="text-sm font-semibold truncate">{lead.nome ?? '—'}</p>
+                    {lead.numero && <p className="text-[11px] text-muted-foreground">{lead.numero}</p>}
                   </div>
 
-                  <span className={cn('rounded-full border px-2 py-0.5 text-[10px] font-bold whitespace-nowrap', originStyle(contact.origin))}>
-                    {originLabel(contact.origin)}
+                  <span className={cn('rounded-full border px-2 py-0.5 text-[10px] font-bold whitespace-nowrap', canalStyle(lead.canal))}>
+                    {lead.canal ?? '—'}
                   </span>
 
                   <div onClick={e => e.stopPropagation()}>
-                    <StatusDropdown
-                      contactId={contact.id}
-                      clientId={clientId}
-                      value={contact.status}
-                      onChange={s => updateStatus(contact.id, s)}
-                    />
+                    <StatusDropdown leadId={lead.id} value={lead.status} onChange={s => updateStatus(lead.id, s)} />
                   </div>
 
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <MessageCircle className="w-3.5 h-3.5" />
-                    <span>{contact.message_count}</span>
-                  </div>
+                  <span className={cn('text-xs font-bold', lead.fechou ? 'text-primary' : 'text-muted-foreground')}>
+                    {lead.fechou ? 'Sim' : 'Não'}
+                  </span>
+
+                  <span className="text-xs font-semibold text-primary whitespace-nowrap">
+                    {lead.valor_rs ? formatCurrencyBRL(lead.valor_rs) : '—'}
+                  </span>
 
                   <div className="flex items-center gap-1">
-                    <span className="text-[11px] text-muted-foreground whitespace-nowrap">
-                      {formatDate(contact.last_message_at ?? contact.created_at)}
-                    </span>
-                    {expanded === contact.id
+                    <span className="text-[11px] text-muted-foreground whitespace-nowrap">{formatDate(lead.data ?? lead.created_at)}</span>
+                    {expanded === lead.id
                       ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground" />
-                      : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
-                    }
+                      : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />}
                   </div>
                 </button>
 
-                {expanded === contact.id && (
-                  <MessagePanel contactId={contact.id} clientId={clientId} />
+                {expanded === lead.id && (
+                  <div className="border-t border-border/30">
+                    <div className="px-4 py-2 flex items-center gap-2 text-xs text-muted-foreground bg-muted/10">
+                      <MessageCircle className="w-3.5 h-3.5" />
+                      <span>Histórico de mensagens WhatsApp</span>
+                    </div>
+                    <MessagePanel leadId={lead.id} />
+                  </div>
                 )}
               </div>
             ))}
           </div>
         )}
       </div>
-
-      {/* Pagination */}
-      {pages > 1 && (
-        <div className="flex items-center justify-center gap-2">
-          <button
-            disabled={page <= 1}
-            onClick={() => { setPage(p => p - 1); load(page - 1); }}
-            className="h-8 px-3 rounded-lg border border-border bg-card text-xs font-semibold disabled:opacity-40 hover:bg-muted transition-colors"
-          >
-            Anterior
-          </button>
-          <span className="text-xs text-muted-foreground">{page} / {pages}</span>
-          <button
-            disabled={page >= pages}
-            onClick={() => { setPage(p => p + 1); load(page + 1); }}
-            className="h-8 px-3 rounded-lg border border-border bg-card text-xs font-semibold disabled:opacity-40 hover:bg-muted transition-colors"
-          >
-            Próxima
-          </button>
-        </div>
-      )}
     </div>
   );
 }

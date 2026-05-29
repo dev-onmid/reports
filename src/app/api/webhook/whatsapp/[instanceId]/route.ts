@@ -31,6 +31,15 @@ function extractUtm(text: string): { utm_source?: string; utm_medium?: string; u
   return {};
 }
 
+function originToCanal(origin: string): string {
+  const map: Record<string, string> = {
+    meta: 'Facebook', google: 'Google', instagram: 'Instagram',
+    tiktok: 'TikTok', youtube: 'YouTube', indicacao: 'Indicação',
+    anuncio: 'Whatsapp', cliente: 'Whatsapp', organic: 'Whatsapp',
+  };
+  return map[origin] ?? 'Whatsapp';
+}
+
 function detectOriginFromContext(text: string): string | null {
   const t = text.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
   if (/\bgoogle\b|\bpesquisei\b/.test(t)) return 'google';
@@ -137,34 +146,39 @@ export async function POST(
 
     const { phone, fromMe, text: messageText, ctwaClid, sourceId, pushName } = msg;
 
-    // ── CRM: upsert contact + save message (always, regardless of pixel config) ──
+    // ── CRM: upsert lead + save message (always, regardless of pixel config) ──
     const utmData = extractUtm(messageText);
     const origin = detectOrigin(ctwaClid, utmData.utm_source, messageText, fromMe);
 
-    const { rows: [crmContact] } = await pool.query(
-      `INSERT INTO public.crm_contacts
-         (client_id, phone, name, origin, ctwa_clid, utm_source, utm_medium, utm_campaign, instance_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-       ON CONFLICT (client_id, phone) DO UPDATE SET
-         name         = COALESCE(EXCLUDED.name, crm_contacts.name),
-         origin       = CASE
-                          WHEN crm_contacts.origin IN ('organic', 'cliente')
-                               AND EXCLUDED.origin NOT IN ('organic', 'cliente')
-                          THEN EXCLUDED.origin
-                          ELSE crm_contacts.origin
-                        END,
-         updated_at   = NOW()
+    const { rows: [crmLead] } = await pool.query(
+      `INSERT INTO public.crm_leads
+         (client_id, nome, numero, canal, origin, ctwa_clid, utm_source, instance_id, data, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_DATE, 'Em Atendimento')
+       ON CONFLICT (client_id, numero) DO UPDATE SET
+         nome       = COALESCE(EXCLUDED.nome, crm_leads.nome),
+         origin     = CASE
+                        WHEN crm_leads.origin IN ('organic', 'cliente')
+                             AND EXCLUDED.origin NOT IN ('organic', 'cliente')
+                        THEN EXCLUDED.origin
+                        ELSE crm_leads.origin
+                      END,
+         canal      = CASE
+                        WHEN crm_leads.origin IN ('organic', 'cliente')
+                             AND EXCLUDED.origin NOT IN ('organic', 'cliente')
+                        THEN EXCLUDED.canal
+                        ELSE crm_leads.canal
+                      END,
+         updated_at = NOW()
        RETURNING id`,
-      [clientId, phone, pushName ?? null, origin, ctwaClid ?? null,
-       utmData.utm_source ?? null, utmData.utm_medium ?? null, utmData.utm_campaign ?? null,
-       instanceId],
+      [clientId, pushName ?? null, phone, originToCanal(origin),
+       origin, ctwaClid ?? null, utmData.utm_source ?? null, instanceId],
     );
 
-    if (crmContact && messageText) {
+    if (crmLead && messageText) {
       await pool.query(
-        `INSERT INTO public.crm_messages (contact_id, client_id, instance_id, direction, text)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [crmContact.id, clientId, instanceId, fromMe ? 'out' : 'in', messageText],
+        `INSERT INTO public.crm_messages (lead_id, client_id, direction, text)
+         VALUES ($1, $2, $3, $4)`,
+        [crmLead.id, clientId, fromMe ? 'out' : 'in', messageText],
       );
     }
 
