@@ -6,8 +6,9 @@ import {
   Users, CalendarDays, HeartHandshake, CircleDollarSign,
   ChevronLeft, ChevronRight, ChevronDown, SlidersHorizontal,
   AlignJustify, Trash2, Pencil, Sparkles, Clock3, LayoutGrid, List, ArrowUpDown,
-  BarChart3, Plug, UserRound,
+  BarChart3, Plug, UserRound, MessageCircle, X, Send,
 } from 'lucide-react';
+import { ChatView } from './chat-view';
 import { useClients } from '@/lib/client-store';
 import { ClientAvatar, fetchClientPicture } from '@/components/client-avatar';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
@@ -631,6 +632,7 @@ export default function CrmPage() {
     if (typeof window === 'undefined') return 'kanban';
     return (localStorage.getItem('crm:view-mode') as 'list' | 'kanban' | null) ?? 'kanban';
   });
+  const [crmView, setCrmView] = useState<'leads' | 'chat'>('leads');
   const [kanbanEditLead, setKanbanEditLead] = useState<CrmLead | null>(null);
 
   // ── NEW ROW ──────────────────────────────────────────────────────────
@@ -1022,7 +1024,21 @@ export default function CrmPage() {
           {activeClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
         </IconSelect>
 
-        {clientId && (
+        {/* Leads / Chat toggle */}
+        <div className="flex overflow-hidden rounded-lg border border-border bg-card p-0.5">
+          <button type="button" onClick={() => setCrmView('leads')}
+            className={cn('flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold transition-colors',
+              crmView === 'leads' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
+            <Users className="h-3.5 w-3.5" /> Leads
+          </button>
+          <button type="button" onClick={() => setCrmView('chat')}
+            className={cn('flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold transition-colors',
+              crmView === 'chat' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
+            <MessageCircle className="h-3.5 w-3.5" /> Chat
+          </button>
+        </div>
+
+        {clientId && crmView === 'leads' && (
           <>
             <IconSelect icon={SlidersHorizontal} value={statusFilter} onChange={setStatusFilter}
               placeholder="Todos status" className="min-w-[160px]">
@@ -1046,7 +1062,7 @@ export default function CrmPage() {
       )}
 
       {/* ── STATS ───────────────────────────────────────────────────── */}
-      {clientId && !loading && leads.length > 0 && (
+      {clientId && !loading && leads.length > 0 && crmView === 'leads' && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 shrink-0">
           {([
             { label: 'TOTAL',       sub: 'leads cadastrados',   value: stats.total,       fmt: 'n', Icon: Users,             iconCls: 'text-purple-400',  bgCls: 'bg-purple-500/10',  borderCls: 'border-purple-500/25' },
@@ -1068,12 +1084,19 @@ export default function CrmPage() {
         </div>
       )}
 
-      {clientId && loading && (
+      {clientId && loading && crmView === 'leads' && (
         <div className="rounded-[var(--radius)] border border-border bg-card p-12 text-center text-sm text-muted-foreground">Carregando...</div>
       )}
 
-      {/* ── TABLE ───────────────────────────────────────────────────── */}
-      {clientId && !loading && (
+      {/* ── CHAT VIEW ───────────────────────────────────────────────── */}
+      {clientId && crmView === 'chat' && (
+        <div className="flex-1 min-h-0">
+          <ChatView clientId={clientId} />
+        </div>
+      )}
+
+      {/* ── TABLE / KANBAN ──────────────────────────────────────────── */}
+      {clientId && !loading && crmView === 'leads' && (
         <div className="flex flex-col flex-1 min-h-0 rounded-[var(--radius)] border border-border bg-card overflow-hidden">
 
           {/* Table toolbar */}
