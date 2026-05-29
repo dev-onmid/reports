@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
-import { createEvolutionInstance } from '@/lib/evolution-api';
+import { createEvolutionInstance, setEvolutionWebhook } from '@/lib/evolution-api';
 
 export async function GET(
   _req: NextRequest,
@@ -71,6 +71,12 @@ export async function POST(
       VALUES ($1, $2, $3, $4, $5)
       RETURNING id, nome, instance_id, token, ativo, provider, created_at
     `, [id, body.nome, instanceId, token, provider]);
+
+    if (provider === 'evolution') {
+      const appUrl = new URL(req.url).origin;
+      await setEvolutionWebhook(instanceId, `${appUrl}/api/webhook/whatsapp/${row.id}`);
+    }
+
     return Response.json(row, { status: 201 });
   } finally {
     await pool.end();

@@ -65,3 +65,19 @@ export async function deleteEvolutionInstance(instanceName: string): Promise<voi
     headers: headers(),
   }).catch(() => {});
 }
+
+export async function setEvolutionWebhook(instanceName: string, webhookUrl: string): Promise<void> {
+  await fetch(`${base()}/webhook/set/${encodeURIComponent(instanceName)}`, {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify({
+      webhook: {
+        enabled: true,
+        url: webhookUrl,
+        webhookByEvents: false,
+        webhookBase64: false,
+        events: ['MESSAGES_UPSERT'],
+      },
+    }),
+  }).catch(() => {});
+}

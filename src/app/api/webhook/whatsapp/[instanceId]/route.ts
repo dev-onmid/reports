@@ -114,9 +114,10 @@ export async function POST(
   const pool = makeServerPool();
 
   try {
-    // 1. Resolve instance → client + provider
+    // 1. Resolve instance → client + provider (accepts UUID or instance_id name)
     const { rows: [inst] } = await pool.query(
-      `SELECT client_id, provider FROM public.client_zapi_instances WHERE id = $1 AND ativo = true`,
+      `SELECT client_id, provider FROM public.client_zapi_instances
+       WHERE (id::text = $1 OR instance_id = $1) AND ativo = true`,
       [instanceId],
     );
     if (!inst) {
