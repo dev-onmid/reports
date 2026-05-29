@@ -59,6 +59,19 @@ const STATUS_COLOR: Record<string, string> = {
   'Desqualificado': 'text-red-400',
 };
 
+const STATUS_KANBAN_COLOR: Record<string, string> = {
+  'Em Atendimento': '#0ea5e9',
+  'Agendado':       '#3b82f6',
+  'Reagendado':     '#7dd3fc',
+  'Fechado':        '#10b981',
+  'Comprou':        '#34d399',
+  'Paciente':       '#a1a1aa',
+  'Não Retorna':    '#71717a',
+  'Distante':       '#f97316',
+  'Sem Interesse':  '#ef4444',
+  'Desqualificado': '#dc2626',
+};
+
 type ChannelMatch = {
   id: string;
   label: string;
@@ -262,6 +275,245 @@ function clientTheme(clientId: string) {
   };
 }
 
+// ── Quick Edit Modal (Kanban) ────────────────────────────────────────────────
+function QuickEditModal({
+  lead, onSave, onClose, onDelete,
+}: {
+  lead: CrmLead;
+  onSave: (data: Draft) => Promise<void>;
+  onClose: () => void;
+  onDelete: () => void;
+}) {
+  const [draft, setDraft] = useState<Draft>({ ...lead });
+  const [saving, setSaving] = useState(false);
+  function set<K extends keyof Draft>(k: K, v: Draft[K]) { setDraft(prev => ({ ...prev, [k]: v })); }
+
+  async function handleSave() {
+    setSaving(true);
+    await onSave(draft);
+    setSaving(false);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+          <h2 className="text-sm font-bold">Editar Lead</h2>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <label className="space-y-1">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Nome</span>
+              <input type="text" value={draft.nome ?? ''} onChange={e => set('nome', e.target.value || null)}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
+            </label>
+            <label className="space-y-1">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Número</span>
+              <input type="text" value={draft.numero ?? ''} onChange={e => set('numero', e.target.value || null)}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
+            </label>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="space-y-1">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Canal</span>
+              <select value={draft.canal ?? ''} onChange={e => set('canal', e.target.value || null)}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
+                <option value="">—</option>
+                {CANAL_OPTIONS.map(o => <option key={o}>{o}</option>)}
+              </select>
+            </label>
+            <label className="space-y-1">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Status</span>
+              <select value={draft.status ?? ''} onChange={e => set('status', e.target.value || null)}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
+                {STATUS_OPTIONS.map(o => <option key={o}>{o}</option>)}
+              </select>
+            </label>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="space-y-1">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Valor (R$)</span>
+              <input type="number" step="0.01" value={draft.valor_rs ?? ''}
+                onChange={e => set('valor_rs', e.target.value ? parseFloat(e.target.value) : null)}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
+            </label>
+            <label className="space-y-1">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Data</span>
+              <input type="date" value={toD(draft.data)} onChange={e => set('data', e.target.value || null)}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
+            </label>
+          </div>
+          <label className="flex items-center gap-3 cursor-pointer py-1">
+            <input type="checkbox" checked={!!draft.fechou} onChange={e => set('fechou', e.target.checked)} className="h-4 w-4 accent-primary" />
+            <span className="text-sm font-semibold">Fechou negócio</span>
+          </label>
+          <label className="space-y-1">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Observação</span>
+            <textarea value={draft.observacao ?? ''} onChange={e => set('observacao', e.target.value || null)} rows={3}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary resize-none" />
+          </label>
+        </div>
+        <div className="flex items-center justify-between gap-3 px-5 py-4 border-t border-border shrink-0">
+          <button onClick={onDelete} className="flex items-center gap-1.5 rounded-lg border border-red-500/30 px-3 py-2 text-xs font-semibold text-red-400 hover:bg-red-500/10 transition-colors">
+            <Trash2 className="h-3.5 w-3.5" /> Excluir
+          </button>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="rounded-lg border border-border px-4 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors">Cancelar</button>
+            <button onClick={handleSave} disabled={saving}
+              className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors">
+              {saving ? 'Salvando…' : 'Salvar'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Kanban Card ──────────────────────────────────────────────────────────────
+function KanbanCard({
+  lead, onEdit, onDelete, onStatusChange,
+}: {
+  lead: CrmLead;
+  onEdit: (lead: CrmLead) => void;
+  onDelete: (id: string) => void;
+  onStatusChange: (id: string, status: string) => void;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const channels = detectChannels(lead.canal);
+  const value = toMoneyNumber(lead.valor_rs);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    function onDown(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    }
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [menuOpen]);
+
+  return (
+    <div
+      onClick={() => onEdit(lead)}
+      className="group relative rounded-lg border border-border bg-card p-3 shadow-sm hover:border-primary/40 hover:shadow-md transition-all cursor-pointer select-none"
+    >
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-semibold text-foreground truncate">{lead.nome ?? '—'}</p>
+          {lead.numero && <p className="text-[10px] text-muted-foreground mt-0.5">{lead.numero}</p>}
+        </div>
+        <div className="relative shrink-0" ref={menuRef}>
+          <button
+            onClick={e => { e.stopPropagation(); setMenuOpen(v => !v); }}
+            className="opacity-0 group-hover:opacity-100 h-5 w-5 flex items-center justify-center rounded text-muted-foreground hover:text-foreground transition-all"
+          >
+            <MoreVertical className="h-3.5 w-3.5" />
+          </button>
+          {menuOpen && (
+            <div className="absolute right-0 top-6 z-50 min-w-[130px] rounded-lg border border-border bg-popover shadow-xl py-1">
+              <button onClick={e => { e.stopPropagation(); setMenuOpen(false); onEdit(lead); }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-xs hover:bg-muted transition-colors">
+                <Pencil className="h-3.5 w-3.5" /> Editar
+              </button>
+              <button onClick={e => { e.stopPropagation(); setMenuOpen(false); onDelete(lead.id); }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 transition-colors">
+                <Trash2 className="h-3.5 w-3.5" /> Excluir
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-1.5 mt-2.5">
+        {channels.slice(0, 3).map(ch => (
+          <span key={ch.id} className={cn('inline-flex h-5 w-5 items-center justify-center rounded-full text-white ring-1 ring-white/10', ch.bg)}>
+            {ch.icon}
+          </span>
+        ))}
+        <div className="ml-auto flex items-center gap-1.5">
+          {lead.fechou && (
+            <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-bold text-emerald-400">Fechou</span>
+          )}
+          {value > 0 && (
+            <span className="text-[10px] font-bold text-primary">{fmtN(lead.valor_rs)}</span>
+          )}
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between mt-2 pt-2 border-t border-border/30">
+        <span className="text-[10px] text-muted-foreground">{fmtD(lead.data ?? lead.created_at)}</span>
+        <select
+          value={lead.status ?? 'Em Atendimento'}
+          onClick={e => e.stopPropagation()}
+          onChange={e => { e.stopPropagation(); onStatusChange(lead.id, e.target.value); }}
+          className="appearance-none text-[9px] font-bold bg-transparent border-0 outline-none text-muted-foreground hover:text-foreground cursor-pointer max-w-[120px] truncate"
+        >
+          {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </div>
+    </div>
+  );
+}
+
+// ── Kanban View ──────────────────────────────────────────────────────────────
+function KanbanView({
+  leads, onEdit, onDelete, onStatusChange,
+}: {
+  leads: CrmLead[];
+  onEdit: (lead: CrmLead) => void;
+  onDelete: (id: string) => void;
+  onStatusChange: (id: string, status: string) => void;
+}) {
+  const grouped = useMemo(() => {
+    const map = new Map<string, CrmLead[]>();
+    STATUS_OPTIONS.forEach(s => map.set(s, []));
+    leads.forEach(lead => {
+      const s = lead.status ?? 'Em Atendimento';
+      if (map.has(s)) map.get(s)!.push(lead);
+      else { map.set(s, [lead]); }
+    });
+    return map;
+  }, [leads]);
+
+  return (
+    <div className="flex gap-3 overflow-x-auto pb-4 min-h-0 flex-1" style={{ alignItems: 'flex-start' }}>
+      {STATUS_OPTIONS.map(status => {
+        const colLeads = grouped.get(status) ?? [];
+        const total = colLeads.reduce((s, l) => s + toMoneyNumber(l.valor_rs), 0);
+        const color = STATUS_KANBAN_COLOR[status] ?? '#71717a';
+        return (
+          <div key={status} className="flex flex-col w-[255px] shrink-0">
+            <div className="rounded-t-xl border border-b-0 border-border bg-card px-3 py-2.5" style={{ borderTop: `3px solid ${color}` }}>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-bold text-foreground leading-tight">{status}</span>
+                <span className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold leading-none" style={{ background: `${color}25`, color }}>
+                  {colLeads.length}
+                </span>
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-0.5">{total > 0 ? formatCurrencyBRL(total) : 'R$ 0'}</p>
+            </div>
+            <div
+              className="flex flex-col gap-2 rounded-b-xl border border-t-0 border-border bg-muted/10 p-2 overflow-y-auto"
+              style={{ maxHeight: 'calc(100vh - 400px)', minHeight: 100 }}
+            >
+              {colLeads.map(lead => (
+                <KanbanCard key={lead.id} lead={lead} onEdit={onEdit} onDelete={onDelete} onStatusChange={onStatusChange} />
+              ))}
+              {colLeads.length === 0 && (
+                <div className="flex items-center justify-center py-6">
+                  <p className="text-[10px] text-muted-foreground/40 italic">Vazio</p>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function ClientLogoBg({ clientId }: { clientId: string }) {
   const [imgUrl, setImgUrl] = useState<string | null>(null);
   useEffect(() => { void fetchClientPicture(clientId).then(setImgUrl); }, [clientId]);
@@ -375,6 +627,11 @@ export default function CrmPage() {
   const [pageSize, setPageSize]     = useState(10);
   const [menuId, setMenuId]         = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const [viewMode, setViewMode] = useState<'list' | 'kanban'>(() => {
+    if (typeof window === 'undefined') return 'kanban';
+    return (localStorage.getItem('crm:view-mode') as 'list' | 'kanban' | null) ?? 'kanban';
+  });
+  const [kanbanEditLead, setKanbanEditLead] = useState<CrmLead | null>(null);
 
   // ── NEW ROW ──────────────────────────────────────────────────────────
   const [newDraft, setNewDraft] = useState<Draft>(freshDraft());
@@ -435,6 +692,10 @@ export default function CrmPage() {
       // Browser storage can be unavailable in private mode.
     }
   }, [colWidths]);
+
+  useEffect(() => {
+    try { localStorage.setItem('crm:view-mode', viewMode); } catch { /* ignore */ }
+  }, [viewMode]);
 
   function openClientCrm(id: string) {
     setClientId(id);
@@ -564,6 +825,24 @@ export default function CrmPage() {
     setMenuId(null);
     const res = await fetch(`/api/crm/${id}`, { method: 'DELETE' });
     if (res.ok) { setLeads(prev => prev.filter(l => l.id !== id)); if (editId === id) setEditId(null); }
+  }
+
+  async function changeLeadStatus(id: string, status: string) {
+    setLeads(prev => prev.map(l => l.id === id ? { ...l, status } : l));
+    await fetch(`/api/crm/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
+  }
+
+  async function saveKanbanEdit(data: Draft) {
+    if (!kanbanEditLead) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/crm/${kanbanEditLead.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+      if (res.ok) {
+        const saved = await res.json() as CrmLead;
+        setLeads(prev => prev.map(l => l.id === kanbanEditLead.id ? saved : l));
+        setKanbanEditLead(null);
+      }
+    } finally { setSaving(false); }
   }
 
   function onNewBairroKey(e: React.KeyboardEvent) {
@@ -800,32 +1079,54 @@ export default function CrmPage() {
           {/* Table toolbar */}
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-border shrink-0">
             <div className="flex items-center gap-2">
-              <AlignJustify className="h-4 w-4 text-primary" />
+              {viewMode === 'list' ? <AlignJustify className="h-4 w-4 text-primary" /> : <LayoutGrid className="h-4 w-4 text-primary" />}
               <span className="text-sm font-semibold">Leads</span>
             </div>
             <div className="flex items-center gap-2">
-              {Object.keys(columnFilters).length > 0 && (
-                <button
-                  type="button"
-                  onClick={clearColumnFilters}
-                  className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  Limpar filtros
+              {/* View toggle */}
+              <div className="flex overflow-hidden rounded-lg border border-border bg-background/60 p-0.5">
+                <button type="button" onClick={() => setViewMode('kanban')} title="Kanban"
+                  className={cn('flex h-6 w-6 items-center justify-center rounded-md transition-colors', viewMode === 'kanban' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
+                  <LayoutGrid className="h-3.5 w-3.5" />
                 </button>
+                <button type="button" onClick={() => setViewMode('list')} title="Lista"
+                  className={cn('flex h-6 w-6 items-center justify-center rounded-md transition-colors', viewMode === 'list' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
+                  <List className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              {viewMode === 'list' && (
+                <>
+                  {Object.keys(columnFilters).length > 0 && (
+                    <button type="button" onClick={clearColumnFilters}
+                      className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
+                      Limpar filtros
+                    </button>
+                  )}
+                  <button className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
+                    <Download className="h-3.5 w-3.5" /> Exportar <ChevronDown className="h-3 w-3" />
+                  </button>
+                  <button className="flex h-7 w-7 items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-foreground transition-colors">
+                    <Settings2 className="h-3.5 w-3.5" />
+                  </button>
+                </>
               )}
-              <button className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
-                <Download className="h-3.5 w-3.5" />
-                Exportar
-                <ChevronDown className="h-3 w-3" />
-              </button>
-              <button className="flex h-7 w-7 items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-foreground transition-colors">
-                <Settings2 className="h-3.5 w-3.5" />
-              </button>
             </div>
           </div>
 
+          {/* Kanban view */}
+          {viewMode === 'kanban' && (
+            <div className="overflow-auto flex-1 min-h-0 p-3">
+              <KanbanView
+                leads={filtered}
+                onEdit={setKanbanEditLead}
+                onDelete={id => void deleteRow(id)}
+                onStatusChange={(id, status) => void changeLeadStatus(id, status)}
+              />
+            </div>
+          )}
+
           {/* Scrollable table */}
-          <div className="overflow-auto flex-1 min-h-0">
+          {viewMode === 'list' && <div className="overflow-auto flex-1 min-h-0">
             <table className="w-full table-fixed border-collapse text-xs" style={{ minWidth: tableMinWidth }}>
               <colgroup>
                 {COLS.map(col => (
@@ -1089,10 +1390,10 @@ export default function CrmPage() {
                 })}
               </tbody>
             </table>
-          </div>
+          </div>}
 
           {/* ── PAGINATION ── */}
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-card px-4 py-2.5 shrink-0">
+          {viewMode === 'list' && <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-card px-4 py-2.5 shrink-0">
             <div className="flex flex-wrap items-center gap-3">
               <span className="text-xs text-muted-foreground">
                 {filtered.length === 0
@@ -1126,8 +1427,17 @@ export default function CrmPage() {
                 <ChevronDown className="absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground pointer-events-none" />
               </div>
             </div>
-          </div>
+          </div>}
         </div>
+      )}
+
+      {kanbanEditLead && (
+        <QuickEditModal
+          lead={kanbanEditLead}
+          onSave={saveKanbanEdit}
+          onClose={() => setKanbanEditLead(null)}
+          onDelete={() => { void deleteRow(kanbanEditLead.id); setKanbanEditLead(null); }}
+        />
       )}
     </div>
   );
