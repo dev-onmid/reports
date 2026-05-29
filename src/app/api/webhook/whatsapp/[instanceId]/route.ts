@@ -138,6 +138,21 @@ export async function POST(
     // 2. Parse and normalize payload based on provider
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const body: any = await req.json().catch(() => ({}));
+
+    // REGRA ABSOLUTA: mensagens de grupos NUNCA entram no CRM.
+    // JIDs de grupo terminam em @g.us; listas de transmissão em @broadcast.
+    // Esta verificação deve ocorrer antes de qualquer escrita no banco.
+    if (provider === 'evolution') {
+      const remoteJid: string = body?.data?.key?.remoteJid ?? '';
+      if (remoteJid.endsWith('@g.us') || remoteJid.endsWith('@broadcast')) {
+        return Response.json({ ok: true, ignored: true, reason: 'group_message' });
+      }
+    }
+    // Z-API: some payloads expose isGroup flag
+    if (provider === 'zapi' && body?.isGroup === true) {
+      return Response.json({ ok: true, ignored: true, reason: 'group_message' });
+    }
+
     const msg = normalizeWebhookPayload(provider, body);
 
     if (!msg) {
