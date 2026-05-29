@@ -2,6 +2,12 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import {
+  DndContext, PointerSensor, useSensor, useSensors,
+  useDraggable, useDroppable, DragOverlay,
+  type DragEndEvent, type DragStartEvent,
+} from '@dnd-kit/core';
+import { CSS } from '@dnd-kit/utilities';
+import {
   Plus, Search, MoreVertical, Download, Settings2,
   Users, CalendarDays, HeartHandshake, CircleDollarSign,
   ChevronLeft, ChevronRight, ChevronDown, SlidersHorizontal,
@@ -372,15 +378,17 @@ function QuickEditModal({
   );
 }
 
-// ── Kanban Card ──────────────────────────────────────────────────────────────
+// ── Kanban Card (draggable) ──────────────────────────────────────────────────
 function KanbanCard({
-  lead, onEdit, onDelete, onStatusChange,
+  lead, onEdit, onDelete, onStatusChange, isDragOverlay,
 }: {
   lead: CrmLead;
   onEdit: (lead: CrmLead) => void;
   onDelete: (id: string) => void;
   onStatusChange: (id: string, status: string) => void;
+  isDragOverlay?: boolean;
 }) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: lead.id });
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const channels = detectChannels(lead.canal);
@@ -395,10 +403,19 @@ function KanbanCard({
     return () => document.removeEventListener('mousedown', onDown);
   }, [menuOpen]);
 
+  const style = transform ? { transform: CSS.Translate.toString(transform) } : undefined;
+
   return (
     <div
-      onClick={() => onEdit(lead)}
-      className="group relative rounded-lg border border-border bg-card p-3 shadow-sm hover:border-primary/40 hover:shadow-md transition-all cursor-pointer select-none"
+      ref={isDragOverlay ? undefined : setNodeRef}
+      style={isDragOverlay ? undefined : style}
+      {...(isDragOverlay ? {} : { ...attributes, ...listeners })}
+      onClick={() => !isDragging && onEdit(lead)}
+      className={cn(
+        "group relative rounded-lg border border-border bg-card p-3 shadow-sm hover:border-primary/40 hover:shadow-md transition-all cursor-grab select-none",
+        isDragging && "opacity-30",
+        isDragOverlay && "cursor-grabbing shadow-2xl ring-2 ring-primary/40",
+      )}
     >
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
@@ -458,6 +475,55 @@ function KanbanCard({
   );
 }
 
+// ── Kanban Column (droppable) ────────────────────────────────────────────────
+function KanbanColumn({
+  status, leads, onEdit, onDelete, onStatusChange, activeLead,
+}: {
+  status: string;
+  leads: CrmLead[];
+  onEdit: (lead: CrmLead) => void;
+  onDelete: (id: string) => void;
+  onStatusChange: (id: string, status: string) => void;
+  activeLead: CrmLead | null;
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: status });
+  const total = leads.reduce((s, l) => s + toMoneyNumber(l.valor_rs), 0);
+  const color = STATUS_KANBAN_COLOR[status] ?? '#71717a';
+
+  return (
+    <div className="flex flex-col w-[255px] shrink-0">
+      <div className="rounded-t-xl border border-b-0 border-border bg-card px-3 py-2.5" style={{ borderTop: `3px solid ${color}` }}>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] font-bold text-foreground leading-tight">{status}</span>
+          <span className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold leading-none" style={{ background: `${color}25`, color }}>
+            {leads.length}
+          </span>
+        </div>
+        <p className="text-[10px] text-muted-foreground mt-0.5">{total > 0 ? formatCurrencyBRL(total) : 'R$ 0'}</p>
+      </div>
+      <div
+        ref={setNodeRef}
+        className={cn(
+          "flex flex-col gap-2 rounded-b-xl border border-t-0 border-border bg-muted/10 p-2 overflow-y-auto transition-colors",
+          isOver && "bg-primary/5 border-primary/30",
+        )}
+        style={{ maxHeight: 'calc(100vh - 400px)', minHeight: 100 }}
+      >
+        {leads.map(lead => (
+          <KanbanCard key={lead.id} lead={lead} onEdit={onEdit} onDelete={onDelete} onStatusChange={onStatusChange} />
+        ))}
+        {leads.length === 0 && (
+          <div className="flex items-center justify-center py-6">
+            <p className="text-[10px] text-muted-foreground/40 italic">
+              {isOver && activeLead ? 'Soltar aqui' : 'Vazio'}
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Kanban View ──────────────────────────────────────────────────────────────
 function KanbanView({
   leads, onEdit, onDelete, onStatusChange,
@@ -467,6 +533,9 @@ function KanbanView({
   onDelete: (id: string) => void;
   onStatusChange: (id: string, status: string) => void;
 }) {
+  const [activeLead, setActiveLead] = useState<CrmLead | null>(null);
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+
   const grouped = useMemo(() => {
     const map = new Map<string, CrmLead[]>();
     STATUS_OPTIONS.forEach(s => map.set(s, []));
@@ -478,40 +547,48 @@ function KanbanView({
     return map;
   }, [leads]);
 
+  function handleDragStart(event: DragStartEvent) {
+    const lead = leads.find(l => l.id === event.active.id);
+    setActiveLead(lead ?? null);
+  }
+
+  function handleDragEnd(event: DragEndEvent) {
+    setActiveLead(null);
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const targetStatus = String(over.id);
+    if (STATUS_OPTIONS.includes(targetStatus)) {
+      onStatusChange(String(active.id), targetStatus);
+    }
+  }
+
   return (
-    <div className="flex gap-3 overflow-x-auto pb-4 min-h-0 flex-1" style={{ alignItems: 'flex-start' }}>
-      {STATUS_OPTIONS.map(status => {
-        const colLeads = grouped.get(status) ?? [];
-        const total = colLeads.reduce((s, l) => s + toMoneyNumber(l.valor_rs), 0);
-        const color = STATUS_KANBAN_COLOR[status] ?? '#71717a';
-        return (
-          <div key={status} className="flex flex-col w-[255px] shrink-0">
-            <div className="rounded-t-xl border border-b-0 border-border bg-card px-3 py-2.5" style={{ borderTop: `3px solid ${color}` }}>
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[11px] font-bold text-foreground leading-tight">{status}</span>
-                <span className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold leading-none" style={{ background: `${color}25`, color }}>
-                  {colLeads.length}
-                </span>
-              </div>
-              <p className="text-[10px] text-muted-foreground mt-0.5">{total > 0 ? formatCurrencyBRL(total) : 'R$ 0'}</p>
-            </div>
-            <div
-              className="flex flex-col gap-2 rounded-b-xl border border-t-0 border-border bg-muted/10 p-2 overflow-y-auto"
-              style={{ maxHeight: 'calc(100vh - 400px)', minHeight: 100 }}
-            >
-              {colLeads.map(lead => (
-                <KanbanCard key={lead.id} lead={lead} onEdit={onEdit} onDelete={onDelete} onStatusChange={onStatusChange} />
-              ))}
-              {colLeads.length === 0 && (
-                <div className="flex items-center justify-center py-6">
-                  <p className="text-[10px] text-muted-foreground/40 italic">Vazio</p>
-                </div>
-              )}
-            </div>
-          </div>
-        );
-      })}
-    </div>
+    <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+      <div className="flex gap-3 overflow-x-auto pb-4 min-h-0 flex-1" style={{ alignItems: 'flex-start' }}>
+        {STATUS_OPTIONS.map(status => (
+          <KanbanColumn
+            key={status}
+            status={status}
+            leads={grouped.get(status) ?? []}
+            onEdit={onEdit}
+            onDelete={onDelete}
+            onStatusChange={onStatusChange}
+            activeLead={activeLead}
+          />
+        ))}
+      </div>
+      <DragOverlay>
+        {activeLead && (
+          <KanbanCard
+            lead={activeLead}
+            onEdit={() => {}}
+            onDelete={() => {}}
+            onStatusChange={() => {}}
+            isDragOverlay
+          />
+        )}
+      </DragOverlay>
+    </DndContext>
   );
 }
 

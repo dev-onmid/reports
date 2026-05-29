@@ -964,7 +964,9 @@ function ClientSelector({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<'az' | 'za'>('az');
-  const ref = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
   const hasMultipleClients = clients.length > 1;
   const allClientsSelected = clients.length > 0 && selected.size === clients.length;
   const showingAllClients = hasMultipleClients && allClientsSelected;
@@ -977,11 +979,23 @@ function ClientSelector({
 
   useEffect(() => {
     function onOutside(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (
+        buttonRef.current && !buttonRef.current.contains(target) &&
+        dropdownRef.current && !dropdownRef.current.contains(target)
+      ) setOpen(false);
     }
     document.addEventListener('mousedown', onOutside);
     return () => document.removeEventListener('mousedown', onOutside);
   }, []);
+
+  function handleToggleOpen() {
+    if (!open && buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      setDropdownStyle({ position: 'fixed', top: rect.bottom + 6, left: rect.left, zIndex: 9999 });
+    }
+    setOpen(v => !v);
+  }
 
   function toggle(id: string) {
     if (showingAllClients) {
@@ -1005,67 +1019,70 @@ function ClientSelector({
     ? clients.find(c => selected.has(c.id))?.name ?? '1 cliente'
     : `${selected.size} clientes`;
 
+  const dropdown = (
+    <div ref={dropdownRef} style={dropdownStyle} className="w-64 rounded-xl border border-border bg-card shadow-xl p-1">
+      <div className="grid gap-1 p-1">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Buscar cliente..."
+            className="h-8 w-full rounded-lg border border-border bg-background pl-8 pr-2 text-xs outline-none focus:border-primary"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => setSort(sort === 'az' ? 'za' : 'az')}
+          className="h-7 rounded-lg border border-border bg-background px-2 text-[10px] font-bold text-muted-foreground hover:text-foreground"
+        >
+          Ordem {sort === 'az' ? 'A-Z' : 'Z-A'}
+        </button>
+      </div>
+      {hasMultipleClients && (
+        <>
+          <button
+            onClick={toggleAll}
+            className="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-muted/50 transition-colors"
+          >
+            <span className={cn('w-4 h-4 rounded border flex items-center justify-center text-[10px] shrink-0',
+              allClientsSelected ? 'bg-primary border-primary text-black' : 'border-border'
+            )}>{allClientsSelected && '✓'}</span>
+            <span className="font-semibold">Todos</span>
+          </button>
+          <div className="my-1 border-t border-border" />
+        </>
+      )}
+      <div className="max-h-48 overflow-y-auto space-y-0.5">
+        {visibleClients.map(c => (
+          <button
+            key={c.id}
+            onClick={() => toggle(c.id)}
+            className="w-full flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm hover:bg-muted/50 transition-colors"
+          >
+            <span className={cn('w-4 h-4 rounded border flex items-center justify-center text-[10px] shrink-0',
+              selected.has(c.id) ? 'bg-primary border-primary text-black' : 'border-border'
+            )}>{selected.has(c.id) && '✓'}</span>
+            <ClientAvatar clientId={c.id} name={c.name} size="sm" />
+            <span className="truncate">{c.name}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
   return (
-    <div ref={ref} className="relative">
+    <div className="relative">
       <button
-        onClick={() => setOpen(v => !v)}
+        ref={buttonRef}
+        onClick={handleToggleOpen}
         className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm font-semibold hover:bg-muted/50 transition-colors"
       >
         {selected.size === 1 && (() => { const c = clients.find(cl => selected.has(cl.id)); return c ? <ClientAvatar clientId={c.id} name={c.name} size="sm" /> : null; })()}
         {label}
         <ChevronDown className={cn('w-3.5 h-3.5 text-muted-foreground transition-transform', open && 'rotate-180')} />
       </button>
-      {open && (
-        <div className="absolute left-0 top-full mt-1.5 z-50 w-64 rounded-xl border border-border bg-card shadow-xl p-1">
-          <div className="grid gap-1 p-1">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-              <input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Buscar cliente..."
-                className="h-8 w-full rounded-lg border border-border bg-background pl-8 pr-2 text-xs outline-none focus:border-primary"
-              />
-            </div>
-            <button
-              type="button"
-              onClick={() => setSort(sort === 'az' ? 'za' : 'az')}
-              className="h-7 rounded-lg border border-border bg-background px-2 text-[10px] font-bold text-muted-foreground hover:text-foreground"
-            >
-              Ordem {sort === 'az' ? 'A-Z' : 'Z-A'}
-            </button>
-          </div>
-          {hasMultipleClients && (
-            <>
-              <button
-                onClick={toggleAll}
-                className="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-muted/50 transition-colors"
-              >
-                <span className={cn('w-4 h-4 rounded border flex items-center justify-center text-[10px] shrink-0',
-                  allClientsSelected ? 'bg-primary border-primary text-black' : 'border-border'
-                )}>{allClientsSelected && '✓'}</span>
-                <span className="font-semibold">Todos</span>
-              </button>
-              <div className="my-1 border-t border-border" />
-            </>
-          )}
-          <div className="max-h-48 overflow-y-auto space-y-0.5">
-            {visibleClients.map(c => (
-              <button
-                key={c.id}
-                onClick={() => toggle(c.id)}
-                className="w-full flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm hover:bg-muted/50 transition-colors"
-              >
-                <span className={cn('w-4 h-4 rounded border flex items-center justify-center text-[10px] shrink-0',
-                  selected.has(c.id) ? 'bg-primary border-primary text-black' : 'border-border'
-                )}>{selected.has(c.id) && '✓'}</span>
-                <ClientAvatar clientId={c.id} name={c.name} size="sm" />
-                <span className="truncate">{c.name}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+      {open && createPortal(dropdown, document.body)}
     </div>
   );
 }
@@ -2449,7 +2466,8 @@ type DashboardCardId =
   | 'social-fb-fans' | 'social-fb-fan-adds' | 'social-fb-reach' | 'social-fb-impressions' | 'social-fb-engagements' | 'social-fb-views'
   | 'social-ig-followers' | 'social-ig-reach' | 'social-ig-views' | 'social-ig-profile-views' | 'social-ig-website-clicks'
   | 'social-ig-engaged' | 'social-ig-interactions' | 'social-ig-likes' | 'social-ig-saves'
-  | 'social-ig-top-posts';
+  | 'social-ig-top-posts'
+  | 'crm-total' | 'crm-ativos' | 'crm-ganhos' | 'crm-perdidos' | 'crm-funnel';
 
 type DashboardCardConfig = {
   visible: boolean;
@@ -2464,7 +2482,10 @@ type DashboardPrefs = {
   metaAudienceChart: AudienceChartVariant;
   googleAudienceChart: AudienceChartVariant;
   showCrmPanel: boolean;
+  sectionOrder: string[];
 };
+
+const DEFAULT_SECTION_ORDER = ['geral', 'meta', 'google', 'social', 'crm'];
 
 const CARD_LABELS: Record<DashboardCardId, string> = {
   'general-revenue': 'Faturamento / Resultado',
@@ -2520,6 +2541,11 @@ const CARD_LABELS: Record<DashboardCardId, string> = {
   'social-ig-likes': 'IG: Curtidas',
   'social-ig-saves': 'IG: Salvamentos',
   'social-ig-top-posts': 'IG: Top Postagens',
+  'crm-total':    'CRM: Total de Leads',
+  'crm-ativos':   'CRM: Leads Ativos',
+  'crm-ganhos':   'CRM: Leads Ganhos',
+  'crm-perdidos': 'CRM: Leads Perdidos',
+  'crm-funnel':   'CRM: Funil por Status',
 };
 
 const CARD_GROUPS: Array<{ title: string; ids: DashboardCardId[] }> = [
@@ -2527,6 +2553,7 @@ const CARD_GROUPS: Array<{ title: string; ids: DashboardCardId[] }> = [
   { title: 'Meta Ads', ids: ['meta-reach', 'meta-impressions', 'meta-leads', 'meta-cpl', 'meta-spend', 'meta-ctr', 'meta-total-spend', 'meta-balance', 'meta-active-campaigns', 'meta-adsets', 'meta-creatives', 'meta-clicks', 'meta-campaigns', 'meta-audience', 'meta-creative-preview'] },
   { title: 'Google Ads', ids: ['google-impressions', 'google-conversions', 'google-cpa', 'google-spend', 'google-ctr', 'google-total-spend', 'google-balance', 'google-active-campaigns', 'google-keyword-count', 'google-clicks', 'google-cpc', 'google-campaigns', 'google-keywords', 'google-audience'] },
   { title: 'Páginas & Perfis Sociais', ids: ['social-fb-fans', 'social-fb-fan-adds', 'social-fb-reach', 'social-fb-impressions', 'social-fb-engagements', 'social-fb-views', 'social-ig-followers', 'social-ig-reach', 'social-ig-views', 'social-ig-profile-views', 'social-ig-website-clicks', 'social-ig-engaged', 'social-ig-interactions', 'social-ig-likes', 'social-ig-saves', 'social-ig-top-posts'] },
+  { title: 'CRM Leads', ids: ['crm-total', 'crm-ativos', 'crm-ganhos', 'crm-perdidos', 'crm-funnel'] },
 ];
 
 const META_KPI_IDS: DashboardCardId[] = [
@@ -2545,6 +2572,7 @@ const CHANNEL_GROUPS: Array<{ id: string; label: string; color: string; ids: Das
   { id: 'meta',    label: 'Meta Ads',                  color: '#0668E1', ids: CARD_GROUPS[1].ids },
   { id: 'google',  label: 'Google Ads',                color: '#7B2CFF', ids: CARD_GROUPS[2].ids },
   { id: 'social',  label: 'Páginas & Perfis Sociais',  color: '#F59E0B', ids: CARD_GROUPS[3].ids },
+  { id: 'crm',     label: 'CRM Leads',                 color: '#8B5CF6', ids: CARD_GROUPS[4].ids },
 ];
 
 // ── React Grid Layout ────────────────────────────────────────────────────────
@@ -2661,6 +2689,8 @@ const DEFAULT_CARD_OVERRIDES: Partial<Record<DashboardCardId, Partial<DashboardC
   'google-keywords': { size: 'md', chart: 'none' },
   'google-audience': { size: 'md', chart: 'none' },
   'social-ig-top-posts': { size: 'lg', chart: 'none' },
+  'crm-funnel': { size: 'lg', chart: 'none' },
+  'crm-total': { chart: 'none' }, 'crm-ativos': { chart: 'none' }, 'crm-ganhos': { chart: 'none' }, 'crm-perdidos': { chart: 'none' },
   'meta-adsets': { chart: 'none' },
   'meta-creatives': { chart: 'none' },
   'meta-active-campaigns': { chart: 'none' },
@@ -2677,6 +2707,7 @@ const DEFAULT_DASHBOARD_PREFS: DashboardPrefs = {
   metaAudienceChart: 'donut',
   googleAudienceChart: 'donut',
   showCrmPanel: false,
+  sectionOrder: DEFAULT_SECTION_ORDER,
 };
 
 const LS_DASHBOARD_PREFS = 'dashboard_global_preferences_v2';
@@ -2694,6 +2725,13 @@ function mergeDashboardPrefs(input: unknown): DashboardPrefs {
     metaAudienceChart: raw?.metaAudienceChart ?? DEFAULT_DASHBOARD_PREFS.metaAudienceChart,
     googleAudienceChart: raw?.googleAudienceChart ?? DEFAULT_DASHBOARD_PREFS.googleAudienceChart,
     showCrmPanel: raw?.showCrmPanel ?? false,
+    sectionOrder: (() => {
+      const stored = raw?.sectionOrder ?? [];
+      const all = DEFAULT_SECTION_ORDER;
+      const valid = stored.filter((s): s is string => all.includes(s));
+      const missing = all.filter(s => !valid.includes(s));
+      return [...valid, ...missing];
+    })(),
   };
 }
 
@@ -3308,10 +3346,11 @@ const STATUS_FUNNEL_COLOR: Record<string, string> = {
   'Desqualificado': '#dc2626',
 };
 
-function CrmDashboardPanel({ clientIds }: { clientIds: Set<string> }) {
+function CrmDashboardPanel({ clientIds, prefs }: { clientIds: Set<string>; prefs: DashboardPrefs }) {
   const [stats, setStats] = React.useState<CrmStats | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [sortBy, setSortBy] = React.useState<'count' | 'valor'>('count');
+  const cardVisible = (id: DashboardCardId) => prefs.cards[id]?.visible !== false;
 
   React.useEffect(() => {
     if (clientIds.size === 0) return;
@@ -3375,26 +3414,30 @@ function CrmDashboardPanel({ clientIds }: { clientIds: Set<string> }) {
 
   const maxVal = Math.max(...sortedStatuses.map(s => sortBy === 'count' ? s.count : s.valor), 1);
 
+  const summaryCards = [
+    { id: 'crm-total' as DashboardCardId,    label: 'Total de Leads',  value: stats.total,    cls: 'text-foreground',  sub: 'no período' },
+    { id: 'crm-ativos' as DashboardCardId,   label: 'Leads Ativos',    value: stats.ativos,   cls: 'text-sky-400',     sub: 'em andamento' },
+    { id: 'crm-ganhos' as DashboardCardId,   label: 'Leads Ganhos',    value: stats.ganhos,   cls: 'text-emerald-400', sub: 'negócios fechados' },
+    { id: 'crm-perdidos' as DashboardCardId, label: 'Leads Perdidos',  value: stats.perdidos, cls: 'text-red-400',     sub: 'sem interesse / desqualif.' },
+  ].filter(c => cardVisible(c.id));
+
   return (
     <div className="space-y-4">
       {/* Summary cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {[
-          { label: 'Total de Leads',   value: stats.total,                             cls: 'text-foreground',  sub: 'no período' },
-          { label: 'Leads Ativos',     value: stats.ativos,                            cls: 'text-sky-400',     sub: 'em andamento' },
-          { label: 'Leads Ganhos',     value: stats.ganhos,                            cls: 'text-emerald-400', sub: 'negócios fechados' },
-          { label: 'Leads Perdidos',   value: stats.perdidos,                          cls: 'text-red-400',     sub: 'sem interesse / desqualif.' },
-        ].map(({ label, value, cls, sub }) => (
-          <div key={label} className="bg-card border border-border rounded-xl p-4">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
-            <p className={cn('font-heading font-normal text-2xl leading-none mt-2', cls)}>{value.toLocaleString('pt-BR')}</p>
-            <p className="text-[10px] text-muted-foreground mt-1">{sub}</p>
-          </div>
-        ))}
-      </div>
+      {summaryCards.length > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {summaryCards.map(({ label, value, cls, sub }) => (
+            <div key={label} className="bg-card border border-border rounded-xl p-4">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
+              <p className={cn('font-heading font-normal text-2xl leading-none mt-2', cls)}>{value.toLocaleString('pt-BR')}</p>
+              <p className="text-[10px] text-muted-foreground mt-1">{sub}</p>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Funnel chart */}
-      <div className="bg-card border border-border rounded-xl p-5">
+      {cardVisible('crm-funnel') && <div className="bg-card border border-border rounded-xl p-5">
         <div className="flex items-center justify-between mb-4">
           <p className="text-sm font-bold">Funil de Leads por Status</p>
           <div className="flex gap-1 rounded-lg border border-border p-0.5">
@@ -3442,37 +3485,37 @@ function CrmDashboardPanel({ clientIds }: { clientIds: Set<string> }) {
             <span className="text-sm font-bold text-primary">{formatCurrencyBRL(stats.faturamento)}</span>
           </div>
         )}
-      </div>
+      </div>}
     </div>
   );
 }
 
-// ── Dashboard Edit Mode ──────────────────────────────────────────────────────
-type WidgetId = 'general' | 'funnel' | 'meta' | 'google';
-
-const WIDGET_INFO: Record<WidgetId, { label: string }> = {
-  general: { label: 'Métricas Gerais' },
-  funnel: { label: 'Funil de Vendas' },
-  meta: { label: 'Meta Ads' },
-  google: { label: 'Google Ads' },
+// ── Dashboard Section Drag Ordering ─────────────────────────────────────────
+const SECTION_INFO: Record<string, { label: string }> = {
+  geral:   { label: 'Métricas Gerais' },
+  meta:    { label: 'Meta Ads' },
+  google:  { label: 'Google Ads' },
+  social:  { label: 'Páginas & Perfis Sociais' },
+  crm:     { label: 'CRM Leads' },
 };
 
-const DEFAULT_WIDGET_ORDER: WidgetId[] = ['general', 'funnel', 'meta', 'google'];
-const LS_ORDER = 'dashboard_widget_order';
-const LS_COLLAPSED = 'dashboard_widget_collapsed';
-
-function SortableWidget({
-  id, editMode, collapsed, onToggleCollapse, children,
+function SortableSection({
+  id, editMode, orderIndex, children,
 }: {
-  id: WidgetId; editMode: boolean; collapsed: boolean; onToggleCollapse: () => void; children: ReactNode;
+  id: string; editMode: boolean; orderIndex: number; children: ReactNode;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
-  const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 };
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+    order: orderIndex,
+  };
 
   return (
     <div ref={setNodeRef} style={style}>
       {editMode && (
-        <div className="mb-2 flex items-center gap-2 rounded-lg border border-dashed border-primary/40 bg-primary/5 px-3 py-2">
+        <div className="mb-1 flex items-center gap-2 rounded-lg border border-dashed border-primary/40 bg-primary/5 px-3 py-1.5">
           <button
             type="button"
             {...attributes}
@@ -3482,18 +3525,10 @@ function SortableWidget({
           >
             <GripVertical className="h-4 w-4" />
           </button>
-          <span className="flex-1 text-xs font-semibold text-muted-foreground">{WIDGET_INFO[id].label}</span>
-          <button
-            type="button"
-            onClick={onToggleCollapse}
-            className="p-0.5 text-muted-foreground hover:text-foreground"
-            aria-label={collapsed ? 'Expandir seção' : 'Recolher seção'}
-          >
-            {collapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
-          </button>
+          <span className="flex-1 text-xs font-semibold text-muted-foreground">{SECTION_INFO[id]?.label ?? id}</span>
         </div>
       )}
-      {!collapsed && children}
+      {children}
     </div>
   );
 }
@@ -4008,8 +4043,6 @@ export default function GeneralDashboard() {
   const [balancesLoading, setBalancesLoading] = useState(false);
   const [dataCacheAge, setDataCacheAge] = useState<number | null>(null);
   const editMode = true;
-  const [widgetOrder, setWidgetOrder] = useState<WidgetId[]>(DEFAULT_WIDGET_ORDER);
-  const [collapsedWidgets, setCollapsedWidgets] = useState<Set<WidgetId>>(new Set());
   const [aiInsights, setAiInsights] = useState<AiInsight[]>([]);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
@@ -4078,10 +4111,12 @@ export default function GeneralDashboard() {
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
     if (over && active.id !== over.id) {
-      setWidgetOrder(order => {
-        const oldIndex = order.indexOf(active.id as WidgetId);
-        const newIndex = order.indexOf(over.id as WidgetId);
-        return arrayMove(order, oldIndex, newIndex);
+      setDashboardPrefs(prev => {
+        const order = prev.sectionOrder;
+        const oldIndex = order.indexOf(String(active.id));
+        const newIndex = order.indexOf(String(over.id));
+        if (oldIndex === -1 || newIndex === -1) return prev;
+        return { ...prev, sectionOrder: arrayMove(order, oldIndex, newIndex) };
       });
     }
   }
@@ -4105,14 +4140,6 @@ export default function GeneralDashboard() {
         .forEach((id, i) => { cards[id] = { ...cards[id], order: reordered.length + i }; });
       setDashboardPrefs(prev => ({ ...prev, cards }));
     };
-  }
-
-  function toggleCollapse(id: WidgetId) {
-    setCollapsedWidgets(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
   }
 
   function hideCard(id: DashboardCardId) {
@@ -4146,8 +4173,6 @@ export default function GeneralDashboard() {
     const srcSuffix = `__${srcId}`;
     const keysToClone = [
       LS_RGL_LAYOUT,
-      LS_ORDER,
-      LS_COLLAPSED,
       LS_DASHBOARD_PREFS,
     ];
     for (const destId of copyLayoutDest) {
@@ -4167,8 +4192,6 @@ export default function GeneralDashboard() {
     currentLsSuffixRef.current = suffix;
 
     // Reset to defaults first so switching clients never leaks one client's state into another
-    setWidgetOrder(DEFAULT_WIDGET_ORDER);
-    setCollapsedWidgets(new Set());
     setDashboardPrefs(DEFAULT_DASHBOARD_PREFS);
     setMetaKpiLayout(DEFAULT_META_KPI_LAYOUT);
     setGoogleKpiLayout(DEFAULT_GOOGLE_KPI_LAYOUT);
@@ -4177,17 +4200,6 @@ export default function GeneralDashboard() {
     setGooglePanelsLayout(DEFAULT_GOOGLE_PANELS_LAYOUT);
     setSocialKpiLayout(DEFAULT_SOCIAL_KPI_LAYOUT);
 
-    try {
-      const order = localStorage.getItem(LS_ORDER + suffix);
-      if (order) {
-        const parsed = JSON.parse(order) as WidgetId[];
-        if (Array.isArray(parsed) && parsed.every(id => DEFAULT_WIDGET_ORDER.includes(id)) && DEFAULT_WIDGET_ORDER.every(id => parsed.includes(id))) {
-          setWidgetOrder(parsed);
-        }
-      }
-      const collapsed = localStorage.getItem(LS_COLLAPSED + suffix);
-      if (collapsed) setCollapsedWidgets(new Set(JSON.parse(collapsed) as WidgetId[]));
-    } catch {}
 
     try {
       const stored = localStorage.getItem(LS_DASHBOARD_PREFS + suffix);
@@ -4216,14 +4228,6 @@ export default function GeneralDashboard() {
   }, [selectedKey]);
 
   // Save — always write to the key that was active when this client was loaded
-  useEffect(() => {
-    if (!currentLsSuffixRef.current && selectedIds.size === 0) return;
-    localStorage.setItem(LS_ORDER + currentLsSuffixRef.current, JSON.stringify(widgetOrder));
-  }, [widgetOrder]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (!currentLsSuffixRef.current && selectedIds.size === 0) return;
-    localStorage.setItem(LS_COLLAPSED + currentLsSuffixRef.current, JSON.stringify([...collapsedWidgets]));
-  }, [collapsedWidgets]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!currentLsSuffixRef.current && selectedIds.size === 0) return;
     localStorage.setItem(LS_DASHBOARD_PREFS + currentLsSuffixRef.current, JSON.stringify(dashboardPrefs));
@@ -5140,7 +5144,12 @@ export default function GeneralDashboard() {
         </div>
       )}
 
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+      <SortableContext items={dashboardPrefs.sectionOrder} strategy={verticalListSortingStrategy}>
+      <div className="flex flex-col gap-6">
+
       {/* 1. MÉTRICAS GERAIS */}
+      <SortableSection id="geral" editMode={editMode} orderIndex={dashboardPrefs.sectionOrder.indexOf('geral')}>
       {CARD_GROUPS[0].ids.some(id => dashboardPrefs.cards[id]?.visible !== false) && <section className="relative overflow-hidden rounded-2xl border border-[#55F52F]/55 bg-[#050C0A] p-5 shadow-[0_0_56px_rgba(85,245,47,0.22)]">
         <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(85,245,47,0.16),transparent_38%),radial-gradient(circle_at_92%_8%,rgba(85,245,47,0.28),transparent_34%)]" />
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,#55F52F,transparent)]" />
@@ -5234,8 +5243,10 @@ export default function GeneralDashboard() {
         })()}
 
       </section>}
+      </SortableSection>
 
       {/* 2. META ADS */}
+      <SortableSection id="meta" editMode={editMode} orderIndex={dashboardPrefs.sectionOrder.indexOf('meta')}>
       {CARD_GROUPS[1].ids.some(id => dashboardPrefs.cards[id]?.visible !== false) && <section className="relative overflow-hidden rounded-2xl border border-[#0B84FF]/70 bg-[#050A16] p-5 shadow-[0_0_64px_rgba(11,132,255,0.28)]">
         <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(11,132,255,0.20),transparent_42%),radial-gradient(circle_at_92%_0%,rgba(0,194,255,0.30),transparent_36%)]" />
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,#00C2FF,#0B84FF,transparent)]" />
@@ -5399,8 +5410,10 @@ export default function GeneralDashboard() {
           );
         })()}
       </section>}
+      </SortableSection>
 
       {/* 3. GOOGLE ADS */}
+      <SortableSection id="google" editMode={editMode} orderIndex={dashboardPrefs.sectionOrder.indexOf('google')}>
       {CARD_GROUPS[2].ids.some(id => dashboardPrefs.cards[id]?.visible !== false) && <section className="relative overflow-hidden rounded-2xl border border-[#EA4335]/75 bg-[#120607] p-5 shadow-[0_0_64px_rgba(234,67,53,0.30)]">
         <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(234,67,53,0.22),transparent_42%),radial-gradient(circle_at_92%_0%,rgba(251,188,5,0.24),transparent_34%)]" />
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,#EA4335,#FBBC05,transparent)]" />
@@ -5519,8 +5532,10 @@ export default function GeneralDashboard() {
           );
         })()}
       </section>}
+      </SortableSection>
 
       {/* 4. PÁGINAS SOCIAIS */}
+      <SortableSection id="social" editMode={editMode} orderIndex={dashboardPrefs.sectionOrder.indexOf('social')}>
       {(pageInsightsLoading || pageInsights.some(p => p.facebook ?? p.instagram)) && CARD_GROUPS[3].ids.some(id => dashboardPrefs.cards[id]?.visible !== false) && (() => {
         const allFbData = pageInsights.filter(p => p.facebook).map(p => p.facebook!);
         const allIgData = pageInsights.filter(p => p.instagram).map(p => p.instagram!);
@@ -5675,10 +5690,10 @@ export default function GeneralDashboard() {
           </div>
         </div>
       )}
-
-      <CreativePreviewOverlay creative={previewCreative} onClose={() => setPreviewCreative(null)} />
+      </SortableSection>
 
       {/* ── 5. CRM LEADS PANEL (opt-in) ── */}
+      <SortableSection id="crm" editMode={editMode} orderIndex={dashboardPrefs.sectionOrder.indexOf('crm')}>
       {dashboardPrefs.showCrmPanel && selectedIds.size > 0 && (
         <section className="relative overflow-hidden rounded-2xl border border-violet-500/40 bg-violet-950/20 p-5 space-y-1">
           <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(139,92,246,0.12),transparent_50%)]" />
@@ -5697,11 +5712,18 @@ export default function GeneralDashboard() {
           </div>
           {!collapsedSections.has('crm-leads') && (
             <div className="relative">
-              <CrmDashboardPanel clientIds={selectedIds} />
+              <CrmDashboardPanel clientIds={selectedIds} prefs={dashboardPrefs} />
             </div>
           )}
         </section>
       )}
+      </SortableSection>
+
+      </div>
+      </SortableContext>
+      </DndContext>
+
+      <CreativePreviewOverlay creative={previewCreative} onClose={() => setPreviewCreative(null)} />
 
       </DashboardEditCtx.Provider>}
     </div>
