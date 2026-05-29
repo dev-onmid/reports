@@ -8,6 +8,7 @@ export type NormalizedMessage = {
   text: string;
   ctwaClid: string | undefined;
   sourceId: string | undefined;
+  pushName: string | undefined;
 };
 
 function normalizePhone(raw: string): string {
@@ -24,6 +25,7 @@ function normalizeZapiPayload(body: any): NormalizedMessage | null {
     text: (body.text?.message ?? body.body ?? '').trim(),
     ctwaClid: body.ctwaClid ?? body.ctwa_clid ?? body.ctwaclid ?? undefined,
     sourceId: body.sourceId ?? body.source_id ?? body.adId ?? undefined,
+    pushName: body.senderName ?? body.pushName ?? undefined,
   };
 }
 
@@ -53,6 +55,7 @@ function normalizeEvolutionPayload(body: any): NormalizedMessage | null {
     text,
     ctwaClid: adReply?.ctwaClid ?? undefined,
     sourceId: adReply?.sourceId ?? undefined,
+    pushName: data.pushName ?? undefined,
   };
 }
 

@@ -45,6 +45,7 @@ import { ClientAvatar } from '@/components/client-avatar';
 import { HistoricoTab } from '@/components/historico-tab';
 import { VaultTab } from '@/components/vault-tab';
 import { ClientTrackingTab } from './tracking-tab';
+import { ClientCrmTab } from './crm-tab';
 
 // ── Funnel types & logic ───────────────────────────────────────────────────────
 type FunnelStage = { id: string; name: string; conversion: number };
@@ -3213,7 +3214,7 @@ function SheetsResultsTab({ clientId }: { clientId: string }) {
 }
 
 // ── Page ───────────────────────────────────────────────────────────────────────
-const TABS = ['planejamento', 'historico', 'links', 'pagamentos', 'resultados', 'dna', 'rastreio', 'importar'] as const;
+const TABS = ['planejamento', 'historico', 'links', 'pagamentos', 'resultados', 'dna', 'rastreio', 'crm', 'importar'] as const;
 type Tab = typeof TABS[number];
 
 export default function ClientPage({ params }: { params: Promise<{ id: string }> }) {
@@ -3374,6 +3375,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
     resultados:   'Resultados',
     dna:          'DNA do Cliente',
     rastreio:     'Rastreio WA',
+    crm:          'CRM',
     importar:     'Importar Dados',
   };
 
@@ -3531,6 +3533,8 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
       {tab === 'resultados' && <SheetsResultsTab clientId={id} />}
 
       {tab === 'rastreio' && <ClientTrackingTab clientId={id} />}
+
+      {tab === 'crm' && <ClientCrmTab clientId={id} />}
 
       {tab === 'importar' && (
         <div className="grid gap-5 md:grid-cols-2 pt-1">
