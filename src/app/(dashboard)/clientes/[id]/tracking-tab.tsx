@@ -705,15 +705,21 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
                   ) : (
                     <>
                       <WifiOff className="h-8 w-8 text-muted-foreground/40" />
-                      <p className="text-xs text-muted-foreground">QR não disponível</p>
+                      <p className="text-xs text-muted-foreground text-center">QR não disponível</p>
+                      <p className="text-[10px] text-muted-foreground/60 text-center leading-relaxed px-2">
+                        Bug conhecido do Evolution API v2.1.1.<br/>
+                        Adicione <code className="bg-muted px-1 rounded">CACHE_LOCAL_ENABLED=true</code> ao .env do servidor e reinicie.
+                      </p>
                     </>
                   )}
                 </div>
               )}
 
-              <p className="text-center text-xs text-muted-foreground">
-                Abra o WhatsApp no celular → Menu → Dispositivos conectados → Conectar dispositivo
-              </p>
+              {qrData?.base64 && (
+                <p className="text-center text-xs text-muted-foreground">
+                  Abra o WhatsApp no celular → Menu → Dispositivos conectados → Conectar dispositivo
+                </p>
+              )}
             </div>
 
             <button
