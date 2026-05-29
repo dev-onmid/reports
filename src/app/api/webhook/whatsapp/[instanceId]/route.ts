@@ -31,15 +31,35 @@ function extractUtm(text: string): { utm_source?: string; utm_medium?: string; u
   return {};
 }
 
-function detectOrigin(ctwaClid: string | undefined, utmSource: string | undefined): string {
+function detectOriginFromContext(text: string): string | null {
+  const t = text.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  if (/\bgoogle\b|\bpesquisei\b/.test(t)) return 'google';
+  if (/\binstagram\b|\binsta\b/.test(t)) return 'instagram';
+  if (/\bfacebook\b|\bfb\b/.test(t)) return 'meta';
+  if (/\btiktok\b|\btik tok\b/.test(t)) return 'tiktok';
+  if (/\byoutube\b/.test(t)) return 'youtube';
+  if (/\banuncio\b|\bpropaganda\b|\bpublicidade\b/.test(t)) return 'anuncio';
+  if (/\bindicac\w*\b|\bindicou\b|\bindicado\b/.test(t)) return 'indicacao';
+  return null;
+}
+
+function detectOrigin(
+  ctwaClid: string | undefined,
+  utmSource: string | undefined,
+  text: string,
+  fromMe: boolean,
+): string {
   if (ctwaClid) return 'meta';
-  if (!utmSource) return 'organic';
-  const src = utmSource.toLowerCase();
-  if (src.includes('google')) return 'google';
-  if (src.includes('instagram')) return 'instagram';
-  if (src.includes('facebook') || src.includes('fb')) return 'meta';
-  if (src.includes('tiktok')) return 'tiktok';
-  return utmSource;
+  if (fromMe) return 'cliente';
+  if (utmSource) {
+    const src = utmSource.toLowerCase();
+    if (src.includes('google')) return 'google';
+    if (src.includes('instagram')) return 'instagram';
+    if (src.includes('facebook') || src.includes('fb')) return 'meta';
+    if (src.includes('tiktok')) return 'tiktok';
+    return utmSource;
+  }
+  return detectOriginFromContext(text) ?? 'organic';
 }
 
 function hashPhone(phone: string): string {
@@ -118,7 +138,7 @@ export async function POST(
 
     // ── CRM: upsert contact + save message (always, regardless of pixel config) ──
     const utmData = extractUtm(messageText);
-    const origin = detectOrigin(ctwaClid, utmData.utm_source);
+    const origin = detectOrigin(ctwaClid, utmData.utm_source, messageText, fromMe);
 
     const { rows: [crmContact] } = await pool.query(
       `INSERT INTO public.crm_contacts
@@ -126,6 +146,12 @@ export async function POST(
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        ON CONFLICT (client_id, phone) DO UPDATE SET
          name         = COALESCE(EXCLUDED.name, crm_contacts.name),
+         origin       = CASE
+                          WHEN crm_contacts.origin IN ('organic', 'cliente')
+                               AND EXCLUDED.origin NOT IN ('organic', 'cliente')
+                          THEN EXCLUDED.origin
+                          ELSE crm_contacts.origin
+                        END,
          updated_at   = NOW()
        RETURNING id`,
       [clientId, phone, pushName ?? null, origin, ctwaClid ?? null,

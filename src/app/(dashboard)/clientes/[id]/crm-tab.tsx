@@ -32,6 +32,10 @@ const ORIGIN_STYLES: Record<string, string> = {
   google:     'bg-red-500/20 text-red-300 border-red-400/30',
   instagram:  'bg-purple-500/20 text-purple-300 border-purple-400/30',
   tiktok:     'bg-foreground/10 text-foreground border-border',
+  youtube:    'bg-red-600/20 text-red-400 border-red-500/30',
+  anuncio:    'bg-yellow-500/20 text-yellow-300 border-yellow-400/30',
+  indicacao:  'bg-emerald-500/20 text-emerald-300 border-emerald-400/30',
+  cliente:    'bg-primary/20 text-primary border-primary/30',
   organic:    'bg-muted/40 text-muted-foreground border-border/50',
 };
 
@@ -54,6 +58,10 @@ const ORIGIN_LABELS: Record<string, string> = {
   google:    'Google',
   instagram: 'Instagram',
   tiktok:    'TikTok',
+  youtube:   'YouTube',
+  anuncio:   'Anúncio',
+  indicacao: 'Indicação',
+  cliente:   'Já é cliente',
   organic:   'Orgânico',
 };
 
