@@ -2463,6 +2463,7 @@ type DashboardPrefs = {
   cards: Record<DashboardCardId, DashboardCardConfig>;
   metaAudienceChart: AudienceChartVariant;
   googleAudienceChart: AudienceChartVariant;
+  showCrmPanel: boolean;
 };
 
 const CARD_LABELS: Record<DashboardCardId, string> = {
@@ -2675,6 +2676,7 @@ const DEFAULT_DASHBOARD_PREFS: DashboardPrefs = {
   }, {} as Record<DashboardCardId, DashboardCardConfig>),
   metaAudienceChart: 'donut',
   googleAudienceChart: 'donut',
+  showCrmPanel: false,
 };
 
 const LS_DASHBOARD_PREFS = 'dashboard_global_preferences_v2';
@@ -2691,6 +2693,7 @@ function mergeDashboardPrefs(input: unknown): DashboardPrefs {
     cards,
     metaAudienceChart: raw?.metaAudienceChart ?? DEFAULT_DASHBOARD_PREFS.metaAudienceChart,
     googleAudienceChart: raw?.googleAudienceChart ?? DEFAULT_DASHBOARD_PREFS.googleAudienceChart,
+    showCrmPanel: raw?.showCrmPanel ?? false,
   };
 }
 
@@ -3068,6 +3071,23 @@ function MetricConfigPanel({
           })}
         </div>
 
+        {/* Seções opcionais */}
+        <div className="shrink-0 border-t border-border px-4 py-3 space-y-2">
+          <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground px-1">Seções extras</p>
+          <label className="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-muted/20 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={prefs.showCrmPanel}
+              onChange={e => onPrefsChange({ ...prefs, showCrmPanel: e.target.checked })}
+              className="h-3.5 w-3.5 accent-primary shrink-0"
+            />
+            <div>
+              <p className="text-xs font-semibold">Painel de Leads CRM</p>
+              <p className="text-[10px] text-muted-foreground">Cards de Ativos/Ganhos/Perdidos + funil de conversão</p>
+            </div>
+          </label>
+        </div>
+
         {/* Footer */}
         <div className="shrink-0 flex items-center justify-between border-t border-border px-5 py-4">
           <button type="button" onClick={() => onPrefsChange(DEFAULT_DASHBOARD_PREFS)}
@@ -3257,6 +3277,173 @@ function DashboardPerformanceFunnel({ periodLabel, rows }: { periodLabel: string
         </div>
       </div>
     </section>
+  );
+}
+
+// ── CRM Dashboard Panel ──────────────────────────────────────────────────────
+type CrmStats = {
+  total: number;
+  ativos: number;
+  ganhos: number;
+  perdidos: number;
+  faturamento: number;
+  byStatus: Array<{ status: string; count: number; valor: number; pct: number }>;
+};
+
+const STATUS_FUNNEL_ORDER = [
+  'Em Atendimento', 'Agendado', 'Reagendado', 'Fechado', 'Comprou',
+  'Paciente', 'Não Retorna', 'Distante', 'Sem Interesse', 'Desqualificado',
+];
+
+const STATUS_FUNNEL_COLOR: Record<string, string> = {
+  'Em Atendimento': '#0ea5e9',
+  'Agendado':       '#3b82f6',
+  'Reagendado':     '#7dd3fc',
+  'Fechado':        '#10b981',
+  'Comprou':        '#34d399',
+  'Paciente':       '#a1a1aa',
+  'Não Retorna':    '#71717a',
+  'Distante':       '#f97316',
+  'Sem Interesse':  '#ef4444',
+  'Desqualificado': '#dc2626',
+};
+
+function CrmDashboardPanel({ clientIds }: { clientIds: Set<string> }) {
+  const [stats, setStats] = React.useState<CrmStats | null>(null);
+  const [loading, setLoading] = React.useState(false);
+  const [sortBy, setSortBy] = React.useState<'count' | 'valor'>('count');
+
+  React.useEffect(() => {
+    if (clientIds.size === 0) return;
+    setLoading(true);
+    const ids = [...clientIds];
+
+    Promise.all(ids.map(id =>
+      fetch(`/api/dashboard/crm-stats?clientId=${id}`).then(r => r.json()) as Promise<CrmStats>
+    )).then(results => {
+      const merged: CrmStats = {
+        total: 0, ativos: 0, ganhos: 0, perdidos: 0, faturamento: 0,
+        byStatus: [],
+      };
+      const statusMap = new Map<string, { count: number; valor: number }>();
+
+      for (const r of results) {
+        if (!r || typeof r !== 'object' || !('total' in r)) continue;
+        merged.total += r.total ?? 0;
+        merged.ativos += r.ativos ?? 0;
+        merged.ganhos += r.ganhos ?? 0;
+        merged.perdidos += r.perdidos ?? 0;
+        merged.faturamento += r.faturamento ?? 0;
+        for (const s of r.byStatus ?? []) {
+          const cur = statusMap.get(s.status) ?? { count: 0, valor: 0 };
+          statusMap.set(s.status, { count: cur.count + s.count, valor: cur.valor + s.valor });
+        }
+      }
+
+      merged.byStatus = [...statusMap.entries()].map(([status, d]) => ({
+        status,
+        count: d.count,
+        valor: d.valor,
+        pct: merged.total > 0 ? Math.round((d.count / merged.total) * 100) : 0,
+      }));
+
+      setStats(merged);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, [[...clientIds].sort().join(',')]);
+
+  if (loading) {
+    return (
+      <div className="rounded-xl border border-border bg-card p-8 text-center text-sm text-muted-foreground">
+        Carregando dados de leads…
+      </div>
+    );
+  }
+
+  if (!stats || stats.total === 0) {
+    return (
+      <div className="rounded-xl border border-border bg-card p-8 text-center">
+        <p className="text-sm text-muted-foreground">Nenhum lead registrado ainda.</p>
+        <p className="text-xs text-muted-foreground/60 mt-1">Conecte o WhatsApp para capturar leads automaticamente.</p>
+      </div>
+    );
+  }
+
+  const sortedStatuses = STATUS_FUNNEL_ORDER
+    .map(s => stats.byStatus.find(b => b.status === s) ?? { status: s, count: 0, valor: 0, pct: 0 })
+    .filter(s => s.count > 0);
+
+  const maxVal = Math.max(...sortedStatuses.map(s => sortBy === 'count' ? s.count : s.valor), 1);
+
+  return (
+    <div className="space-y-4">
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[
+          { label: 'Total de Leads',   value: stats.total,                             cls: 'text-foreground',  sub: 'no período' },
+          { label: 'Leads Ativos',     value: stats.ativos,                            cls: 'text-sky-400',     sub: 'em andamento' },
+          { label: 'Leads Ganhos',     value: stats.ganhos,                            cls: 'text-emerald-400', sub: 'negócios fechados' },
+          { label: 'Leads Perdidos',   value: stats.perdidos,                          cls: 'text-red-400',     sub: 'sem interesse / desqualif.' },
+        ].map(({ label, value, cls, sub }) => (
+          <div key={label} className="bg-card border border-border rounded-xl p-4">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
+            <p className={cn('font-heading font-normal text-2xl leading-none mt-2', cls)}>{value.toLocaleString('pt-BR')}</p>
+            <p className="text-[10px] text-muted-foreground mt-1">{sub}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Funnel chart */}
+      <div className="bg-card border border-border rounded-xl p-5">
+        <div className="flex items-center justify-between mb-4">
+          <p className="text-sm font-bold">Funil de Leads por Status</p>
+          <div className="flex gap-1 rounded-lg border border-border p-0.5">
+            <button onClick={() => setSortBy('count')}
+              className={cn('px-2.5 py-1 rounded-md text-[10px] font-bold transition-colors',
+                sortBy === 'count' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
+              Por Qtd.
+            </button>
+            <button onClick={() => setSortBy('valor')}
+              className={cn('px-2.5 py-1 rounded-md text-[10px] font-bold transition-colors',
+                sortBy === 'valor' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
+              Por Valor
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-2.5">
+          {sortedStatuses.map(s => {
+            const barVal = sortBy === 'count' ? s.count : s.valor;
+            const barPct = Math.round((barVal / maxVal) * 100);
+            const color = STATUS_FUNNEL_COLOR[s.status] ?? '#71717a';
+            return (
+              <div key={s.status} className="flex items-center gap-3">
+                <span className="w-32 shrink-0 text-[11px] text-right text-muted-foreground">{s.pct}%</span>
+                <div className="flex-1 h-6 bg-muted/30 rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all duration-500"
+                    style={{ width: `${barPct}%`, background: color, opacity: 0.85 }}
+                  />
+                </div>
+                <div className="w-48 shrink-0">
+                  <p className="text-xs font-semibold text-foreground">{s.status}</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    {s.count} leads · {s.valor > 0 ? formatCurrencyBRL(s.valor) : 'R$ 0'}
+                  </p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {stats.faturamento > 0 && (
+          <div className="mt-4 pt-4 border-t border-border flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">Faturamento total CRM:</span>
+            <span className="text-sm font-bold text-primary">{formatCurrencyBRL(stats.faturamento)}</span>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -5490,6 +5677,31 @@ export default function GeneralDashboard() {
       )}
 
       <CreativePreviewOverlay creative={previewCreative} onClose={() => setPreviewCreative(null)} />
+
+      {/* ── 5. CRM LEADS PANEL (opt-in) ── */}
+      {dashboardPrefs.showCrmPanel && selectedIds.size > 0 && (
+        <section className="relative overflow-hidden rounded-2xl border border-violet-500/40 bg-violet-950/20 p-5 space-y-1">
+          <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(139,92,246,0.12),transparent_50%)]" />
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(139,92,246,0.6),transparent)]" />
+          <div className="relative mb-4 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-violet-500/40 bg-violet-500/15 shadow-[0_0_20px_rgba(139,92,246,0.4)]">
+                <UserPlus className="h-4 w-4 text-violet-400" />
+              </span>
+              <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">Leads CRM</h2>
+            </div>
+            <button type="button" onClick={() => toggleSection('crm-leads')} className="flex items-center gap-1 rounded-lg border border-violet-500/30 bg-violet-500/10 px-2.5 py-1.5 text-[11px] font-semibold text-violet-400/80 hover:bg-violet-500/20 transition-colors whitespace-nowrap">
+              <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', collapsedSections.has('crm-leads') && '-rotate-90')} />
+              {collapsedSections.has('crm-leads') ? 'Expandir' : 'Recolher'}
+            </button>
+          </div>
+          {!collapsedSections.has('crm-leads') && (
+            <div className="relative">
+              <CrmDashboardPanel clientIds={selectedIds} />
+            </div>
+          )}
+        </section>
+      )}
 
       </DashboardEditCtx.Provider>}
     </div>
