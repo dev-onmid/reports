@@ -9,7 +9,7 @@ export async function GET(
   const pool = makeServerPool();
   try {
     const { rows } = await pool.query(
-      `SELECT id, ordem, tipo, conteudo, delay_minutos,
+      `SELECT id, ordem, tipo, conteudo, partes, delay_minutos,
               timer_sem_resposta_horas, acao_sem_resposta, status_destino, created_at
          FROM public.crm_followup_mensagens
         WHERE regra_id = $1
@@ -30,15 +30,20 @@ export async function POST(
   const body = await req.json().catch(() => ({})) as {
     tipo?: string;
     conteudo?: string;
+    partes?: { tipo: string; conteudo: string }[];
     delay_minutos?: number;
     timer_sem_resposta_horas?: number;
     acao_sem_resposta?: string;
     status_destino?: string;
   };
 
+  // Derive tipo/conteudo from first parte for backwards compat
+  const firstParte = body.partes?.[0];
+  const tipo    = firstParte?.tipo    ?? body.tipo    ?? 'texto';
+  const conteudo = firstParte?.conteudo ?? body.conteudo ?? '';
+
   const pool = makeServerPool();
   try {
-    // Get next ordem
     const { rows: [{ max_ordem }] } = await pool.query(
       `SELECT COALESCE(MAX(ordem), 0)::int AS max_ordem FROM public.crm_followup_mensagens WHERE regra_id = $1`,
       [regraId],
@@ -46,14 +51,15 @@ export async function POST(
 
     const { rows: [msg] } = await pool.query(
       `INSERT INTO public.crm_followup_mensagens
-         (regra_id, ordem, tipo, conteudo, delay_minutos, timer_sem_resposta_horas, acao_sem_resposta, status_destino)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       RETURNING id, ordem, tipo, conteudo, delay_minutos, timer_sem_resposta_horas, acao_sem_resposta, status_destino`,
+         (regra_id, ordem, tipo, conteudo, partes, delay_minutos, timer_sem_resposta_horas, acao_sem_resposta, status_destino)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING id, ordem, tipo, conteudo, partes, delay_minutos, timer_sem_resposta_horas, acao_sem_resposta, status_destino`,
       [
         regraId,
         (max_ordem as number) + 1,
-        body.tipo ?? 'texto',
-        body.conteudo ?? '',
+        tipo,
+        conteudo,
+        body.partes ? JSON.stringify(body.partes) : null,
         body.delay_minutos ?? 0,
         body.timer_sem_resposta_horas ?? 24,
         body.acao_sem_resposta ?? 'mover_status',

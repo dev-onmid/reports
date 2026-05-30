@@ -10,6 +10,7 @@ export async function PUT(
     ordem?: number;
     tipo?: string;
     conteudo?: string;
+    partes?: { tipo: string; conteudo: string }[] | null;
     delay_minutos?: number;
     timer_sem_resposta_horas?: number;
     acao_sem_resposta?: string;
@@ -24,6 +25,7 @@ export async function PUT(
     if (body.ordem !== undefined)                    { sets.push(`ordem = $${n++}`);                    vals.push(body.ordem); }
     if (body.tipo !== undefined)                     { sets.push(`tipo = $${n++}`);                     vals.push(body.tipo); }
     if (body.conteudo !== undefined)                 { sets.push(`conteudo = $${n++}`);                 vals.push(body.conteudo); }
+    if ('partes' in body)                            { sets.push(`partes = $${n++}`);                   vals.push(body.partes ? JSON.stringify(body.partes) : null); }
     if (body.delay_minutos !== undefined)            { sets.push(`delay_minutos = $${n++}`);            vals.push(body.delay_minutos); }
     if (body.timer_sem_resposta_horas !== undefined) { sets.push(`timer_sem_resposta_horas = $${n++}`); vals.push(body.timer_sem_resposta_horas); }
     if (body.acao_sem_resposta !== undefined)        { sets.push(`acao_sem_resposta = $${n++}`);        vals.push(body.acao_sem_resposta); }
@@ -34,7 +36,7 @@ export async function PUT(
 
     const { rows: [msg] } = await pool.query(
       `UPDATE public.crm_followup_mensagens SET ${sets.join(', ')} WHERE id = $${n}
-       RETURNING id, ordem, tipo, conteudo, delay_minutos, timer_sem_resposta_horas, acao_sem_resposta, status_destino`,
+       RETURNING id, ordem, tipo, conteudo, partes, delay_minutos, timer_sem_resposta_horas, acao_sem_resposta, status_destino`,
       vals,
     );
     if (!msg) return Response.json({ error: 'not found' }, { status: 404 });

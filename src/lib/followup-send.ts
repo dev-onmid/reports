@@ -186,7 +186,16 @@ export async function queueFollowupIfExists(
           status:   newStatus,
           campanha: lead.origin ?? lead.canal ?? '',
         };
-        const result = await sendFollowupMessage({ instance, phone: lead.numero, tipo: msg.tipo, conteudo: msg.conteudo, vars });
+        // Support multi-part messages (partes field)
+        const partes: { tipo: string; conteudo: string }[] =
+          Array.isArray(msg.partes) && msg.partes.length > 0
+            ? msg.partes
+            : [{ tipo: msg.tipo, conteudo: msg.conteudo }];
+        let lastResult = { ok: false, error: 'no parts' };
+        for (const parte of partes) {
+          lastResult = await sendFollowupMessage({ instance, phone: lead.numero, tipo: parte.tipo, conteudo: parte.conteudo, vars });
+        }
+        const result = lastResult;
         const timerHoras = Number(msg.timer_sem_resposta_horas ?? 24);
         const expiraEm = new Date(Date.now() + timerHoras * 3_600_000).toISOString();
         await pool.query(

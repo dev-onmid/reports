@@ -19,11 +19,16 @@ type Regra = {
   total_mensagens: number;
 };
 
+type TipoParte = 'texto' | 'imagem' | 'audio' | 'video' | 'documento';
+
+type Parte = { tipo: TipoParte; conteudo: string };
+
 type Mensagem = {
   id: string;
   ordem: number;
-  tipo: 'texto' | 'imagem' | 'audio' | 'video' | 'documento';
+  tipo: TipoParte;
   conteudo: string;
+  partes: Parte[] | null;
   delay_minutos: number;
   timer_sem_resposta_horas: number;
   acao_sem_resposta: 'mover_status' | 'proxima_mensagem';
@@ -46,13 +51,21 @@ type Execucao = {
   respondido_em: string | null;
 };
 
-const TIPO_OPTIONS = [
-  { value: 'texto',     label: 'Texto' },
-  { value: 'imagem',    label: 'Imagem' },
-  { value: 'audio',     label: 'Áudio (voz)' },
-  { value: 'video',     label: 'Vídeo' },
-  { value: 'documento', label: 'Documento' },
-] as const;
+const TIPO_OPTIONS: { value: TipoParte; label: string; emoji: string }[] = [
+  { value: 'texto',     label: 'Texto',        emoji: '💬' },
+  { value: 'imagem',    label: 'Imagem',       emoji: '🖼️' },
+  { value: 'audio',     label: 'Áudio (voz)',  emoji: '🎤' },
+  { value: 'video',     label: 'Vídeo',        emoji: '🎬' },
+  { value: 'documento', label: 'Documento',    emoji: '📄' },
+];
+
+const FORMATO_GUIDE: Record<TipoParte, { formatos: string; dica: string }> = {
+  texto:     { formatos: '', dica: '' },
+  imagem:    { formatos: '.jpg .jpeg .png .webp .gif', dica: 'Google Drive: Compartilhar → clicar link → trocar /view por /uc?export=download&id=ID_DO_ARQUIVO' },
+  audio:     { formatos: '.mp3 .ogg .opus .m4a (recomendado .ogg ou .opus para voz)', dica: 'Google Drive: mesmo processo da imagem. Arquivo .ogg ativa o ícone de áudio de voz no WhatsApp.' },
+  video:     { formatos: '.mp4 (único formato aceito pelo WhatsApp)', dica: 'Google Drive: mesmo processo. Dropbox: troque ?dl=0 por ?dl=1 no link.' },
+  documento: { formatos: '.pdf .docx .xlsx .pptx .txt', dica: 'Qualquer CDN com link direto funciona. Google Drive: mesmo processo da imagem.' },
+};
 
 const ACAO_OPTIONS = [
   { value: 'mover_status',      label: 'Mover para outro status' },
@@ -91,6 +104,101 @@ const STATUS_LABEL: Record<string, string> = {
   cancelado:           'Cancelado',
 };
 
+// ── Single parte editor row ───────────────────────────────────────────────────
+
+function ParteRow({
+  parte,
+  onChange,
+  onDelete,
+  showDelete,
+}: {
+  parte: Parte;
+  onChange: (p: Parte) => void;
+  onDelete: () => void;
+  showDelete: boolean;
+}) {
+  const [showGuia, setShowGuia] = useState(false);
+  const guia = FORMATO_GUIDE[parte.tipo];
+  const hasGuia = parte.tipo !== 'texto';
+
+  return (
+    <div className="rounded-xl border border-border bg-background/50 p-3 space-y-2">
+      <div className="flex items-center gap-2">
+        {/* Tipo selector */}
+        <div className="flex flex-wrap gap-1 flex-1">
+          {TIPO_OPTIONS.map(o => (
+            <button key={o.value} type="button"
+              onClick={() => onChange({ ...parte, tipo: o.value })}
+              className={cn(
+                'flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold border transition-colors',
+                parte.tipo === o.value
+                  ? 'bg-primary/20 border-primary text-primary'
+                  : 'border-border text-muted-foreground hover:border-primary/50 hover:text-foreground',
+              )}>
+              <span>{o.emoji}</span> {o.label}
+            </button>
+          ))}
+        </div>
+        {showDelete && (
+          <button type="button" onClick={onDelete}
+            className="shrink-0 text-muted-foreground hover:text-red-400 transition-colors p-1">
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
+
+      {/* Content input */}
+      {parte.tipo === 'texto' ? (
+        <div className="space-y-1">
+          <textarea
+            value={parte.conteudo}
+            onChange={e => onChange({ ...parte, conteudo: e.target.value })}
+            rows={3}
+            placeholder="Olá {{nome}}, tudo bem? Gostaria de saber se tem alguma dúvida..."
+            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+          />
+          <p className="text-[10px] text-muted-foreground">
+            Variáveis disponíveis:{' '}
+            {['{{nome}}', '{{telefone}}', '{{status}}', '{{campanha}}'].map(v => (
+              <code key={v} className="bg-muted px-1 rounded mr-1">{v}</code>
+            ))}
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          <input
+            value={parte.conteudo}
+            onChange={e => onChange({ ...parte, conteudo: e.target.value })}
+            placeholder="https://..."
+            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+          />
+          {hasGuia && (
+            <div>
+              <button type="button"
+                onClick={() => setShowGuia(v => !v)}
+                className="flex items-center gap-1 text-[11px] text-primary/80 hover:text-primary font-semibold">
+                <AlertCircle className="h-3 w-3" />
+                {showGuia ? 'Ocultar guia de URL' : 'Como obter o link correto?'}
+              </button>
+              {showGuia && (
+                <div className="mt-1.5 rounded-lg bg-muted/50 border border-border px-3 py-2.5 text-[11px] space-y-1.5">
+                  <p><span className="font-bold text-foreground">Formatos aceitos:</span> <span className="text-muted-foreground">{guia.formatos}</span></p>
+                  <div className="border-t border-border/50 pt-1.5 space-y-1">
+                    <p className="font-bold text-foreground">Como pegar o link:</p>
+                    <p className="text-muted-foreground">{guia.dica}</p>
+                    <p className="text-muted-foreground"><span className="text-emerald-400 font-bold">✓</span> Cloudinary, AWS S3, links de CDN diretos funcionam sem configuração.</p>
+                    <p className="text-muted-foreground"><span className="text-red-400 font-bold">✗</span> Links de preview (ex: YouTube watch, Instagram) <strong>não</strong> funcionam — precisa ser o arquivo direto.</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Message editor modal ──────────────────────────────────────────────────────
 
 function MensagemModal({
@@ -104,20 +212,40 @@ function MensagemModal({
   onSave: (data: Omit<Mensagem, 'id' | 'ordem'>) => Promise<void>;
   onClose: () => void;
 }) {
-  const [tipo,    setTipo]    = useState<Mensagem['tipo']>(initial?.tipo ?? 'texto');
-  const [conteudo, setConteudo] = useState(initial?.conteudo ?? '');
+  const initialPartes: Parte[] = (() => {
+    if (initial?.partes?.length) return initial.partes;
+    if (initial?.conteudo) return [{ tipo: initial.tipo ?? 'texto', conteudo: initial.conteudo }];
+    return [{ tipo: 'texto', conteudo: '' }];
+  })();
+
+  const [partes,   setPartes]   = useState<Parte[]>(initialPartes);
   const [delayMin, setDelayMin] = useState(String(initial?.delay_minutos ?? 0));
-  const [timerH,  setTimerH]  = useState(String(initial?.timer_sem_resposta_horas ?? 24));
-  const [acao,    setAcao]    = useState<Mensagem['acao_sem_resposta']>(initial?.acao_sem_resposta ?? 'mover_status');
-  const [destino, setDestino] = useState(initial?.status_destino ?? '');
-  const [saving,  setSaving]  = useState(false);
+  const [timerH,   setTimerH]   = useState(String(initial?.timer_sem_resposta_horas ?? 24));
+  const [acao,     setAcao]     = useState<Mensagem['acao_sem_resposta']>(initial?.acao_sem_resposta ?? 'mover_status');
+  const [destino,  setDestino]  = useState(initial?.status_destino ?? '');
+  const [saving,   setSaving]   = useState(false);
+
+  function addParte() {
+    setPartes(prev => [...prev, { tipo: 'texto', conteudo: '' }]);
+  }
+
+  function updateParte(i: number, p: Parte) {
+    setPartes(prev => prev.map((x, idx) => idx === i ? p : x));
+  }
+
+  function deleteParte(i: number) {
+    setPartes(prev => prev.filter((_, idx) => idx !== i));
+  }
+
+  const canSave = partes.length > 0 && partes.every(p => p.conteudo.trim().length > 0);
 
   async function handleSave() {
-    if (!conteudo.trim()) return;
+    if (!canSave) return;
     setSaving(true);
     await onSave({
-      tipo,
-      conteudo: conteudo.trim(),
+      tipo: partes[0].tipo,
+      conteudo: partes[0].conteudo.trim(),
+      partes: partes.map(p => ({ tipo: p.tipo, conteudo: p.conteudo.trim() })),
       delay_minutos: Math.max(0, parseInt(delayMin) || 0),
       timer_sem_resposta_horas: Math.max(0.5, parseFloat(timerH) || 24),
       acao_sem_resposta: acao,
@@ -126,86 +254,81 @@ function MensagemModal({
     setSaving(false);
   }
 
-  const isMedia = tipo !== 'texto';
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-lg max-h-[92vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+      <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-xl max-h-[92vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
-          <h2 className="text-sm font-bold">{initial?.id ? 'Editar mensagem' : 'Nova mensagem'}</h2>
+          <h2 className="text-sm font-bold">{initial?.id ? 'Editar passo' : 'Novo passo'}</h2>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-          {/* Tipo */}
-          <label className="block space-y-1.5">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Tipo</span>
-            <select value={tipo} onChange={e => setTipo(e.target.value as Mensagem['tipo'])}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary appearance-none">
-              {TIPO_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-          </label>
-
-          {/* Conteúdo */}
-          <label className="block space-y-1.5">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-              {isMedia ? 'URL do arquivo' : 'Mensagem'}
-            </span>
-            {isMedia ? (
-              <input value={conteudo} onChange={e => setConteudo(e.target.value)} placeholder="https://..."
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
-            ) : (
-              <>
-                <textarea value={conteudo} onChange={e => setConteudo(e.target.value)} rows={4}
-                  placeholder="Olá {{nome}}, tudo bem? Gostaria de saber se tem alguma dúvida..."
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary resize-none" />
-                <p className="text-[10px] text-muted-foreground">
-                  Variáveis: <code className="bg-muted px-1 rounded">{'{{nome}}'}</code> <code className="bg-muted px-1 rounded">{'{{telefone}}'}</code> <code className="bg-muted px-1 rounded">{'{{status}}'}</code> <code className="bg-muted px-1 rounded">{'{{campanha}}'}</code>
-                </p>
-              </>
-            )}
-          </label>
-
-          <div className="grid grid-cols-2 gap-3">
-            {/* Delay */}
-            <label className="block space-y-1.5">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Delay antes de enviar (min)</span>
-              <input type="number" min="0" value={delayMin} onChange={e => setDelayMin(e.target.value)}
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
-            </label>
-            {/* Timer */}
-            <label className="block space-y-1.5">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Timer sem resposta (horas)</span>
-              <input type="number" min="0.5" step="0.5" value={timerH} onChange={e => setTimerH(e.target.value)}
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
-            </label>
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+          {/* Info box */}
+          <div className="rounded-lg bg-primary/5 border border-primary/20 px-3 py-2 text-[11px] text-muted-foreground">
+            💡 Um <strong className="text-foreground">passo</strong> pode ter várias partes enviadas em sequência — misture texto, imagem, áudio e vídeo como quiser.
           </div>
 
-          {/* Ação ao expirar */}
-          <div className="space-y-2">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Ação se não responder</span>
-            <div className="space-y-1.5">
-              {ACAO_OPTIONS.map(o => (
-                <label key={o.value} className="flex items-center gap-2.5 cursor-pointer">
-                  <input type="radio" value={o.value} checked={acao === o.value} onChange={() => setAcao(o.value as Mensagem['acao_sem_resposta'])}
-                    className="accent-primary" />
-                  <span className="text-sm">{o.label}</span>
-                </label>
-              ))}
+          {/* Partes */}
+          {partes.map((p, i) => (
+            <ParteRow key={i} parte={p}
+              onChange={updated => updateParte(i, updated)}
+              onDelete={() => deleteParte(i)}
+              showDelete={partes.length > 1}
+            />
+          ))}
+
+          <button type="button" onClick={addParte}
+            className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-border py-2.5 text-xs font-semibold text-muted-foreground hover:border-primary/50 hover:text-primary transition-colors">
+            <Plus className="h-3.5 w-3.5" /> Adicionar parte
+          </button>
+
+          <div className="border-t border-border pt-3 space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block space-y-1.5">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Delay antes de enviar</span>
+                <div className="relative">
+                  <input type="number" min="0" value={delayMin} onChange={e => setDelayMin(e.target.value)}
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 pr-12 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">min</span>
+                </div>
+                <p className="text-[10px] text-muted-foreground">0 = envia imediatamente</p>
+              </label>
+              <label className="block space-y-1.5">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Timer sem resposta</span>
+                <div className="relative">
+                  <input type="number" min="0.5" step="0.5" value={timerH} onChange={e => setTimerH(e.target.value)}
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 pr-12 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">h</span>
+                </div>
+                <p className="text-[10px] text-muted-foreground">Ex: 24h = 1 dia sem resposta</p>
+              </label>
             </div>
-            {acao === 'mover_status' && (
-              <select value={destino} onChange={e => setDestino(e.target.value)}
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary appearance-none mt-1">
-                <option value="">— Selecionar status destino —</option>
-                {statusOptions.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
-            )}
+
+            <div className="space-y-2">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Se não responder em {timerH}h:</span>
+              <div className="flex gap-3">
+                {ACAO_OPTIONS.map(o => (
+                  <label key={o.value} className="flex items-center gap-2 cursor-pointer flex-1 rounded-lg border border-border p-2.5 has-[:checked]:border-primary has-[:checked]:bg-primary/5 transition-colors">
+                    <input type="radio" value={o.value} checked={acao === o.value} onChange={() => setAcao(o.value as Mensagem['acao_sem_resposta'])}
+                      className="accent-primary shrink-0" />
+                    <span className="text-xs font-semibold">{o.label}</span>
+                  </label>
+                ))}
+              </div>
+              {acao === 'mover_status' && (
+                <select value={destino} onChange={e => setDestino(e.target.value)}
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary appearance-none">
+                  <option value="">— Selecionar status destino —</option>
+                  {statusOptions.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              )}
+            </div>
           </div>
         </div>
 
         <div className="flex justify-end gap-2 px-5 py-4 border-t border-border shrink-0">
           <button onClick={onClose} className="rounded-lg border border-border px-4 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground">Cancelar</button>
-          <button onClick={handleSave} disabled={saving || !conteudo.trim()}
+          <button onClick={handleSave} disabled={saving || !canSave}
             className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
             {saving ? 'Salvando…' : 'Salvar'}
           </button>
@@ -240,17 +363,18 @@ function RegraDetail({
   useEffect(() => { load(); }, [load]);
 
   async function handleSave(data: Omit<Mensagem, 'id' | 'ordem'>) {
+    const payload = { ...data, partes: data.partes ?? null };
     if (editing === 'new') {
       await fetch(`/api/crm/followup/regras/${regra.id}/mensagens`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...data, clientId }),
+        body: JSON.stringify({ ...payload, clientId }),
       });
     } else if (editing !== null && typeof editing === 'object') {
       await fetch(`/api/crm/followup/mensagens/${editing.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
+        body: JSON.stringify(payload),
       });
     }
     setEditing(null);

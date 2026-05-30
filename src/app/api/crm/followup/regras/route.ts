@@ -39,6 +39,8 @@ async function ensureSchema(pool: ReturnType<typeof makeServerPool>) {
       created_at    TIMESTAMPTZ DEFAULT NOW()
     );
 
+    ALTER TABLE public.crm_followup_mensagens ADD COLUMN IF NOT EXISTS partes JSONB;
+
     CREATE INDEX IF NOT EXISTS idx_followup_regras_client ON public.crm_followup_regras(client_id);
     CREATE INDEX IF NOT EXISTS idx_followup_exec_lead ON public.crm_followup_execucoes(lead_id);
     CREATE INDEX IF NOT EXISTS idx_followup_exec_status ON public.crm_followup_execucoes(status);
