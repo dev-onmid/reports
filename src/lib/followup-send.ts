@@ -191,7 +191,7 @@ export async function queueFollowupIfExists(
           Array.isArray(msg.partes) && msg.partes.length > 0
             ? msg.partes
             : [{ tipo: msg.tipo, conteudo: msg.conteudo }];
-        let lastResult = { ok: false, error: 'no parts' };
+        let lastResult: { ok: boolean; error?: string } = { ok: false, error: 'no parts' };
         for (const parte of partes) {
           lastResult = await sendFollowupMessage({ instance, phone: lead.numero, tipo: parte.tipo, conteudo: parte.conteudo, vars });
         }

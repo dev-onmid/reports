@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils';
 import {
   Search, MessageCircle, RefreshCw, Send, Paperclip,
   Image, Mic, Video, FileText, MapPin, X, CheckCircle2,
-  AlertCircle,
+  AlertCircle, History,
 } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -252,6 +252,8 @@ export function ChatView({ clientId }: { clientId: string }) {
   const [sendStatus, setSendStatus] = useState<'ok' | 'err' | null>(null);
   const [attachMenu, setAttachMenu] = useState(false);
   const [mediaModal, setMediaModal] = useState<MediaType | null>(null);
+  const [syncing,    setSyncing]    = useState(false);
+  const [syncResult, setSyncResult] = useState<string | null>(null);
 
   const messagesAreaRef = useRef<HTMLDivElement>(null);
   const pollRef         = useRef<ReturnType<typeof setInterval> | null>(null);
