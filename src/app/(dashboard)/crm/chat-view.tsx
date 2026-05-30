@@ -309,6 +309,31 @@ export function ChatView({ clientId }: { clientId: string }) {
   }, [selectedId, loadMessages]);
 
   // ── Send helpers ────────────────────────────────────────────────────────────
+  async function syncHistory() {
+    if (!selectedId || !selectedLead) return;
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const res = await fetch('/api/crm/sync-history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ leadId: selectedId, clientId }),
+      });
+      const data = await res.json() as { ok?: boolean; imported?: number; error?: string };
+      if (data.ok) {
+        setSyncResult(data.imported === 0 ? 'Nenhuma mensagem nova encontrada.' : `${data.imported} mensagem(ns) importada(s)!`);
+        if ((data.imported ?? 0) > 0) loadMessages(selectedId, true);
+      } else {
+        setSyncResult(data.error ?? 'Erro ao sincronizar');
+      }
+    } catch {
+      setSyncResult('Erro de conexão');
+    } finally {
+      setSyncing(false);
+      setTimeout(() => setSyncResult(null), 5000);
+    }
+  }
+
   async function doSend(payload: Record<string, unknown>) {
     if (!selectedId) return;
     setSending(true);
@@ -460,7 +485,7 @@ export function ChatView({ clientId }: { clientId: string }) {
               {/* Conversation header */}
               <div className="flex items-center gap-3 px-4 py-3 border-b border-border bg-card shrink-0">
                 <div className="h-8 w-8 rounded-full bg-muted/60 flex items-center justify-center shrink-0">
-                  <span className="text-xs font-bold">{(selectedLead.nome ?? '?').slice(0, 1).toUpperCase()}</span>
+                  <span className="text-xs font-bold">{(selectedLead.nome ?? selectedLead.numero ?? '?').slice(0, 1).toUpperCase()}</span>
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
@@ -476,8 +501,24 @@ export function ChatView({ clientId }: { clientId: string }) {
                   {selectedLead.fechou && (
                     <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-emerald-500/15 text-emerald-400">Fechou</span>
                   )}
+                  {/* Sync history button */}
+                  <button
+                    onClick={() => void syncHistory()}
+                    disabled={syncing}
+                    title="Buscar histórico de mensagens anteriores"
+                    className="flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-[11px] font-semibold text-muted-foreground hover:text-foreground hover:border-primary/40 disabled:opacity-50 transition-colors"
+                  >
+                    <History className="h-3 w-3" />
+                    {syncing ? 'Buscando…' : 'Histórico'}
+                  </button>
                 </div>
               </div>
+              {/* Sync result toast */}
+              {syncResult && (
+                <div className="px-4 py-2 text-xs font-semibold bg-primary/10 border-b border-border text-primary">
+                  {syncResult}
+                </div>
+              )}
 
               {/* Messages — ONLY this scrolls */}
               <div

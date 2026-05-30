@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Plus, Pencil, Trash2, X, ChevronDown, ChevronRight,
   ToggleLeft, ToggleRight, Clock, MessageSquare, Zap,
   ArrowRight, AlertCircle, CheckCircle2, Timer, Send,
+  Upload, Mic, Square, Loader2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -104,6 +105,70 @@ const STATUS_LABEL: Record<string, string> = {
   cancelado:           'Cancelado',
 };
 
+// ── File upload helper ────────────────────────────────────────────────────────
+
+async function uploadFile(file: File): Promise<{ url?: string; error?: string }> {
+  const fd = new FormData();
+  fd.append('file', file);
+  const res = await fetch('/api/upload', { method: 'POST', body: fd });
+  const data = await res.json() as { url?: string; error?: string };
+  return data;
+}
+
+// ── Audio recorder hook ───────────────────────────────────────────────────────
+
+function useAudioRecorder(onDone: (url: string) => void) {
+  const [recording, setRecording] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [seconds,   setSeconds]   = useState(0);
+  const [error,     setError]     = useState<string | null>(null);
+  const recRef   = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  async function start() {
+    setError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')
+          ? 'audio/ogg;codecs=opus'
+          : 'audio/webm';
+      const rec = new MediaRecorder(stream, { mimeType });
+      chunksRef.current = [];
+      rec.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      rec.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        setUploading(true);
+        const blob = new Blob(chunksRef.current, { type: mimeType });
+        const ext = mimeType.includes('ogg') ? 'ogg' : 'webm';
+        const file = new File([blob], `audio-${Date.now()}.${ext}`, { type: mimeType });
+        const result = await uploadFile(file);
+        setUploading(false);
+        if (result.url) onDone(result.url);
+        else setError(result.error ?? 'Falha ao fazer upload do áudio');
+      };
+      rec.start(100);
+      recRef.current = rec;
+      setRecording(true);
+      setSeconds(0);
+      timerRef.current = setInterval(() => setSeconds(s => s + 1), 1000);
+    } catch (err) {
+      setError('Não foi possível acessar o microfone: ' + String(err));
+    }
+  }
+
+  function stop() {
+    recRef.current?.stop();
+    recRef.current = null;
+    if (timerRef.current) clearInterval(timerRef.current);
+    setRecording(false);
+  }
+
+  return { recording, uploading, seconds, error, start, stop };
+}
+
 // ── Single parte editor row ───────────────────────────────────────────────────
 
 function ParteRow({
@@ -117,18 +182,46 @@ function ParteRow({
   onDelete: () => void;
   showDelete: boolean;
 }) {
-  const [showGuia, setShowGuia] = useState(false);
+  const [showGuia,   setShowGuia]   = useState(false);
+  const [uploading,  setUploading]  = useState(false);
+  const [uploadErr,  setUploadErr]  = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const guia = FORMATO_GUIDE[parte.tipo];
   const hasGuia = parte.tipo !== 'texto';
 
+  // Accept attrs per type
+  const acceptMap: Record<TipoParte, string> = {
+    texto:     '',
+    imagem:    'image/jpeg,image/png,image/webp,image/gif',
+    audio:     'audio/*',
+    video:     'video/mp4',
+    documento: '.pdf,.docx,.xlsx,.pptx,.txt,application/pdf',
+  };
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadErr(null);
+    setUploading(true);
+    const result = await uploadFile(file);
+    setUploading(false);
+    if (result.url) onChange({ ...parte, conteudo: result.url });
+    else setUploadErr(result.error ?? 'Erro no upload');
+    // Reset input
+    e.target.value = '';
+  }
+
+  const recorder = useAudioRecorder(url => onChange({ ...parte, conteudo: url }));
+
   return (
     <div className="rounded-xl border border-border bg-background/50 p-3 space-y-2">
+      {/* Tipo pills */}
       <div className="flex items-center gap-2">
-        {/* Tipo selector */}
         <div className="flex flex-wrap gap-1 flex-1">
           {TIPO_OPTIONS.map(o => (
             <button key={o.value} type="button"
-              onClick={() => onChange({ ...parte, tipo: o.value })}
+              onClick={() => onChange({ ...parte, tipo: o.value, conteudo: '' })}
               className={cn(
                 'flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold border transition-colors',
                 parte.tipo === o.value
@@ -158,39 +251,100 @@ function ParteRow({
             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary resize-none"
           />
           <p className="text-[10px] text-muted-foreground">
-            Variáveis disponíveis:{' '}
-            {['{{nome}}', '{{telefone}}', '{{status}}', '{{campanha}}'].map(v => (
+            Variáveis: {['{{nome}}', '{{telefone}}', '{{status}}', '{{campanha}}'].map(v => (
               <code key={v} className="bg-muted px-1 rounded mr-1">{v}</code>
             ))}
           </p>
         </div>
       ) : (
-        <div className="space-y-1.5">
+        <div className="space-y-2">
+          {/* URL input */}
           <input
             value={parte.conteudo}
             onChange={e => onChange({ ...parte, conteudo: e.target.value })}
-            placeholder="https://..."
+            placeholder="https://... (ou use os botões abaixo)"
             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
           />
-          {hasGuia && (
-            <div>
+
+          {/* Action buttons */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* File picker */}
+            <button type="button"
+              disabled={uploading}
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground hover:border-primary/50 disabled:opacity-50 transition-colors">
+              {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+              {uploading ? 'Enviando…' : 'Escolher arquivo'}
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              accept={acceptMap[parte.tipo]}
+              onChange={handleFileChange}
+            />
+
+            {/* Audio recorder — only for audio type */}
+            {parte.tipo === 'audio' && (
+              recorder.recording ? (
+                <button type="button" onClick={recorder.stop}
+                  className="flex items-center gap-1.5 rounded-lg border border-red-500/50 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-400 hover:bg-red-500/20 transition-colors animate-pulse">
+                  <Square className="h-3.5 w-3.5" />
+                  Parar ({recorder.seconds}s)
+                </button>
+              ) : (
+                <button type="button" onClick={recorder.start}
+                  disabled={recorder.uploading}
+                  className="flex items-center gap-1.5 rounded-lg border border-violet-500/50 bg-violet-500/10 px-3 py-1.5 text-xs font-semibold text-violet-400 hover:bg-violet-500/20 disabled:opacity-50 transition-colors">
+                  {recorder.uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Mic className="h-3.5 w-3.5" />}
+                  {recorder.uploading ? 'Salvando…' : 'Gravar áudio'}
+                </button>
+              )
+            )}
+
+            {/* Format guide */}
+            {hasGuia && (
               <button type="button"
                 onClick={() => setShowGuia(v => !v)}
-                className="flex items-center gap-1 text-[11px] text-primary/80 hover:text-primary font-semibold">
+                className="ml-auto flex items-center gap-1 text-[11px] text-muted-foreground hover:text-primary transition-colors">
                 <AlertCircle className="h-3 w-3" />
-                {showGuia ? 'Ocultar guia de URL' : 'Como obter o link correto?'}
+                {showGuia ? 'Ocultar guia' : 'Guia de formatos'}
               </button>
-              {showGuia && (
-                <div className="mt-1.5 rounded-lg bg-muted/50 border border-border px-3 py-2.5 text-[11px] space-y-1.5">
-                  <p><span className="font-bold text-foreground">Formatos aceitos:</span> <span className="text-muted-foreground">{guia.formatos}</span></p>
-                  <div className="border-t border-border/50 pt-1.5 space-y-1">
-                    <p className="font-bold text-foreground">Como pegar o link:</p>
-                    <p className="text-muted-foreground">{guia.dica}</p>
-                    <p className="text-muted-foreground"><span className="text-emerald-400 font-bold">✓</span> Cloudinary, AWS S3, links de CDN diretos funcionam sem configuração.</p>
-                    <p className="text-muted-foreground"><span className="text-red-400 font-bold">✗</span> Links de preview (ex: YouTube watch, Instagram) <strong>não</strong> funcionam — precisa ser o arquivo direto.</p>
-                  </div>
-                </div>
-              )}
+            )}
+          </div>
+
+          {/* Audio recorder error */}
+          {recorder.error && (
+            <p className="text-[11px] text-red-400">{recorder.error}</p>
+          )}
+
+          {/* Upload error */}
+          {uploadErr && (
+            <p className="text-[11px] text-red-400">{uploadErr}</p>
+          )}
+
+          {/* Preview when URL is set */}
+          {parte.conteudo && (
+            <div className="text-[11px] text-emerald-400 flex items-center gap-1">
+              <CheckCircle2 className="h-3 w-3 shrink-0" />
+              <span className="truncate">{parte.conteudo}</span>
+            </div>
+          )}
+
+          {/* Format guide panel */}
+          {showGuia && (
+            <div className="rounded-lg bg-muted/50 border border-border px-3 py-2.5 text-[11px] space-y-1.5">
+              <p><span className="font-bold text-foreground">Formatos aceitos:</span> <span className="text-muted-foreground">{guia.formatos}</span></p>
+              <div className="border-t border-border/50 pt-1.5 space-y-1">
+                <p className="font-bold text-foreground">Usando link (URL):</p>
+                <p className="text-muted-foreground">{guia.dica}</p>
+                <p className="text-muted-foreground"><span className="text-emerald-400 font-bold">✓</span> Cloudinary, AWS S3, CDN direto — funcionam sem configuração.</p>
+                <p className="text-muted-foreground"><span className="text-red-400 font-bold">✗</span> YouTube, Instagram, links de preview — não funcionam.</p>
+              </div>
+              <div className="border-t border-border/50 pt-1.5">
+                <p className="font-bold text-foreground">Usando upload direto:</p>
+                <p className="text-muted-foreground">Clique em "Escolher arquivo". Requer <code className="bg-muted px-1 rounded">SUPABASE_SERVICE_ROLE_KEY</code> nas variáveis da Vercel e bucket <code className="bg-muted px-1 rounded">crm-media</code> público no Supabase Storage.</p>
+              </div>
             </div>
           )}
         </div>
