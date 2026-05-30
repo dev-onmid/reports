@@ -246,7 +246,7 @@ function RegraDetail({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...data, clientId }),
       });
-    } else if (editing && editing !== 'new') {
+    } else if (editing !== null && typeof editing === 'object') {
       await fetch(`/api/crm/followup/mensagens/${editing.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
