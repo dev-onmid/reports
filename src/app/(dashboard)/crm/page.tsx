@@ -927,7 +927,10 @@ export default function CrmPage() {
   const { clients } = useClients();
   const activeClients = useMemo(() => clients.filter(c => c.status === 'Ativo'), [clients]);
 
-  const [clientId, setClientId]     = useState('');
+  const [clientId, setClientId] = useState<string>(() => {
+    if (typeof window === 'undefined') return '';
+    return localStorage.getItem('crm:last-client') ?? '';
+  });
   const [clientSearch, setClientSearch] = useState('');
   const [segmentChoice, setSegmentChoice] = useState('');
   const [clientSort, setClientSort] = useState<'az' | 'za'>('az');
@@ -956,7 +959,11 @@ export default function CrmPage() {
     if (typeof window === 'undefined') return 'kanban';
     return (localStorage.getItem('crm:view-mode') as 'list' | 'kanban' | null) ?? 'kanban';
   });
-  const [crmView, setCrmView] = useState<'leads' | 'chat' | 'followup'>('leads');
+  const [crmView, setCrmView] = useState<'leads' | 'chat' | 'followup'>(() => {
+    if (typeof window === 'undefined') return 'leads';
+    const v = localStorage.getItem('crm:tab');
+    return (v === 'leads' || v === 'chat' || v === 'followup') ? v : 'leads';
+  });
   const [kanbanEditLead, setKanbanEditLead] = useState<CrmLead | null>(null);
 
   // ── NEW ROW ──────────────────────────────────────────────────────────
@@ -1023,8 +1030,17 @@ export default function CrmPage() {
     try { localStorage.setItem('crm:view-mode', viewMode); } catch { /* ignore */ }
   }, [viewMode]);
 
+  useEffect(() => {
+    try { if (clientId) localStorage.setItem('crm:last-client', clientId); } catch { /* ignore */ }
+  }, [clientId]);
+
+  useEffect(() => {
+    try { localStorage.setItem('crm:tab', crmView); } catch { /* ignore */ }
+  }, [crmView]);
+
   function openClientCrm(id: string) {
     setClientId(id);
+    try { localStorage.setItem('crm:last-client', id); } catch { /* ignore */ }
     setRecentClientIds(prev => {
       const next = [id, ...prev.filter(item => item !== id)].slice(0, 8);
       localStorage.setItem('crm:recent-clients', JSON.stringify(next));
