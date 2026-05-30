@@ -16,6 +16,7 @@ import {
   BarChart3, Plug, UserRound, MessageCircle, X, Send, GripVertical, Layers,
 } from 'lucide-react';
 import { ChatView } from './chat-view';
+import { FollowupTab, useActiveFollowups, FollowupBadge } from './followup-tab';
 import { useClients } from '@/lib/client-store';
 import { ClientAvatar, fetchClientPicture } from '@/components/client-avatar';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
@@ -392,7 +393,7 @@ function QuickEditModal({
 
 // ── Kanban Card (draggable) ──────────────────────────────────────────────────
 function KanbanCard({
-  lead, onEdit, onDelete, onStatusChange, isDragOverlay, statusOptions,
+  lead, onEdit, onDelete, onStatusChange, isDragOverlay, statusOptions, hasActiveFollowup,
 }: {
   lead: CrmLead;
   onEdit: (lead: CrmLead) => void;
@@ -400,6 +401,7 @@ function KanbanCard({
   onStatusChange: (id: string, status: string) => void;
   isDragOverlay?: boolean;
   statusOptions: string[];
+  hasActiveFollowup?: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: lead.id });
   const [menuOpen, setMenuOpen] = useState(false);
@@ -464,6 +466,7 @@ function KanbanCard({
           </span>
         ))}
         <div className="ml-auto flex items-center gap-1.5">
+          <FollowupBadge active={!!hasActiveFollowup} />
           {lead.fechou && (
             <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-bold text-emerald-400">Fechou</span>
           )}
@@ -490,7 +493,7 @@ function KanbanCard({
 
 // ── Kanban Column (droppable) ────────────────────────────────────────────────
 function KanbanColumn({
-  status, color, leads, onEdit, onDelete, onStatusChange, activeLead, statusOptions,
+  status, color, leads, onEdit, onDelete, onStatusChange, activeLead, statusOptions, activeFollowupIds,
 }: {
   status: string;
   color: string;
@@ -500,6 +503,7 @@ function KanbanColumn({
   onStatusChange: (id: string, status: string) => void;
   activeLead: CrmLead | null;
   statusOptions: string[];
+  activeFollowupIds: Set<string>;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: status });
   const total = leads.reduce((s, l) => s + toMoneyNumber(l.valor_rs), 0);
@@ -524,7 +528,7 @@ function KanbanColumn({
         style={{ maxHeight: 'calc(100vh - 400px)', minHeight: 100 }}
       >
         {leads.map(lead => (
-          <KanbanCard key={lead.id} lead={lead} onEdit={onEdit} onDelete={onDelete} onStatusChange={onStatusChange} statusOptions={statusOptions} />
+          <KanbanCard key={lead.id} lead={lead} onEdit={onEdit} onDelete={onDelete} onStatusChange={onStatusChange} statusOptions={statusOptions} hasActiveFollowup={activeFollowupIds.has(lead.id)} />
         ))}
         {leads.length === 0 && (
           <div className="flex items-center justify-center py-6">
@@ -540,13 +544,14 @@ function KanbanColumn({
 
 // ── Kanban View ──────────────────────────────────────────────────────────────
 function KanbanView({
-  leads, stages, onEdit, onDelete, onStatusChange,
+  leads, stages, onEdit, onDelete, onStatusChange, activeFollowupIds,
 }: {
   leads: CrmLead[];
   stages: CrmStage[];
   onEdit: (lead: CrmLead) => void;
   onDelete: (id: string) => void;
   onStatusChange: (id: string, status: string) => void;
+  activeFollowupIds: Set<string>;
 }) {
   const [activeLead, setActiveLead] = useState<CrmLead | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
@@ -592,6 +597,7 @@ function KanbanView({
             onStatusChange={onStatusChange}
             activeLead={activeLead}
             statusOptions={statusOptions}
+            activeFollowupIds={activeFollowupIds}
           />
         ))}
       </div>
@@ -604,6 +610,7 @@ function KanbanView({
             onStatusChange={() => {}}
             isDragOverlay
             statusOptions={statusOptions}
+            hasActiveFollowup={activeFollowupIds.has(activeLead.id)}
           />
         )}
       </DragOverlay>
@@ -949,7 +956,7 @@ export default function CrmPage() {
     if (typeof window === 'undefined') return 'kanban';
     return (localStorage.getItem('crm:view-mode') as 'list' | 'kanban' | null) ?? 'kanban';
   });
-  const [crmView, setCrmView] = useState<'leads' | 'chat'>('leads');
+  const [crmView, setCrmView] = useState<'leads' | 'chat' | 'followup'>('leads');
   const [kanbanEditLead, setKanbanEditLead] = useState<CrmLead | null>(null);
 
   // ── NEW ROW ──────────────────────────────────────────────────────────
@@ -1097,6 +1104,7 @@ export default function CrmPage() {
   );
 
   const selectedFunnel = funnels.find(f => f.id === selectedFunnelId) ?? null;
+  const activeFollowupLeadIds = useActiveFollowups(clientId, crmView === 'leads');
 
   async function handleFunnelSaved(updatedFunnel: CrmFunnel, updatedStages: CrmStage[]) {
     setFunnels(prev => prev.map(f => f.id === updatedFunnel.id ? updatedFunnel : f));
@@ -1425,7 +1433,7 @@ export default function CrmPage() {
           </div>
         )}
 
-        {/* Leads / Chat toggle */}
+        {/* Leads / Chat / Follow up toggle */}
         <div className="flex overflow-hidden rounded-lg border border-border bg-card p-0.5">
           <button type="button" onClick={() => setCrmView('leads')}
             className={cn('flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold transition-colors',
@@ -1436,6 +1444,11 @@ export default function CrmPage() {
             className={cn('flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold transition-colors',
               crmView === 'chat' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
             <MessageCircle className="h-3.5 w-3.5" /> Chat
+          </button>
+          <button type="button" onClick={() => setCrmView('followup')}
+            className={cn('flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold transition-colors',
+              crmView === 'followup' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
+            <Send className="h-3.5 w-3.5" /> Follow up
           </button>
         </div>
 
@@ -1496,6 +1509,13 @@ export default function CrmPage() {
         </div>
       )}
 
+      {/* ── FOLLOW UP ───────────────────────────────────────────────── */}
+      {clientId && crmView === 'followup' && (
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <FollowupTab clientId={clientId} statusOptions={statusOptions} />
+        </div>
+      )}
+
       {/* ── TABLE / KANBAN ──────────────────────────────────────────── */}
       {clientId && !loading && crmView === 'leads' && (
         <div className="flex flex-col flex-1 min-h-0 rounded-[var(--radius)] border border-border bg-card overflow-hidden">
@@ -1546,6 +1566,7 @@ export default function CrmPage() {
                 onEdit={setKanbanEditLead}
                 onDelete={id => void deleteRow(id)}
                 onStatusChange={(id, status) => void changeLeadStatus(id, status)}
+                activeFollowupIds={activeFollowupLeadIds}
               />
             </div>
           )}

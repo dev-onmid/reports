@@ -1,6 +1,7 @@
 import { createHash } from 'crypto';
 import { makeServerPool } from '@/lib/server-db';
 import { normalizeWebhookPayload, type WhatsAppProvider } from '@/lib/whatsapp-provider';
+import { markLeadResponded } from '@/lib/followup-send';
 import type { NextRequest } from 'next/server';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -195,6 +196,10 @@ export async function POST(
          VALUES ($1, $2, $3, $4)`,
         [crmLead.id, clientId, fromMe ? 'out' : 'in', messageText],
       );
+      // Cancel pending follow-ups when lead sends a message (not fromMe)
+      if (!fromMe) {
+        await markLeadResponded(pool, crmLead.id).catch(() => null);
+      }
     }
 
     // 3. Load client tracking config (optional — only needed for pixel events)

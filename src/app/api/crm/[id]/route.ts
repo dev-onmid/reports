@@ -1,11 +1,18 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
+import { queueFollowupIfExists } from '@/lib/followup-send';
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const f = await req.json() as Record<string, unknown>;
   const pool = makeServerPool();
   try {
+    // Read current status to detect changes
+    const { rows: [current] } = await pool.query(
+      `SELECT status, client_id FROM public.crm_leads WHERE id = $1`,
+      [id],
+    );
+
     const { rows: [lead] } = await pool.query(
       `UPDATE public.crm_leads SET
         mes=$1, data=$2, link_criativo=$3, nome=$4, numero=$5, canal=$6, emoji=$7,
@@ -28,6 +35,13 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       ]
     );
     if (!lead) return Response.json({ error: 'Not found' }, { status: 404 });
+
+    // Queue follow-up if status changed
+    const newStatus = (f.status ?? 'Em Atendimento') as string;
+    if (current && lead.client_id && current.status !== newStatus) {
+      await queueFollowupIfExists(pool, id, lead.client_id, newStatus).catch(() => null);
+    }
+
     return Response.json(lead);
   } finally {
     await pool.end();
