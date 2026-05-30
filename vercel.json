@@ -4,10 +4,6 @@
     {
       "path": "/api/reports/cron-monthly?secret=${CRON_SECRET}",
       "schedule": "0 8 1 * *"
-    },
-    {
-      "path": "/api/crm/followup/worker?secret=${CRON_SECRET}",
-      "schedule": "*/5 * * * *"
     }
   ]
 }

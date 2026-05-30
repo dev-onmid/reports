@@ -357,7 +357,7 @@ function RegraDetail({
 
 // ── Executions monitor ────────────────────────────────────────────────────────
 
-function ExecucoesView({ clientId }: { clientId: string }) {
+function ExecucoesView({ clientId, onProcess, processing }: { clientId: string; onProcess: () => void; processing: boolean }) {
   const [execucoes, setExecucoes] = useState<Execucao[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('');
@@ -392,6 +392,10 @@ function ExecucoesView({ clientId }: { clientId: string }) {
           </button>
         ))}
         <button onClick={load} className="ml-auto text-xs font-semibold text-muted-foreground hover:text-foreground">↻ Atualizar</button>
+        <button onClick={onProcess} disabled={processing}
+          className="flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors">
+          {processing ? '…' : '▶ Processar agora'}
+        </button>
       </div>
 
       {loading ? (
@@ -462,6 +466,7 @@ export function FollowupTab({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [view,       setView]       = useState<'regras' | 'execucoes'>('regras');
   const [showNew,    setShowNew]    = useState(false);
+  const [processing, setProcessing] = useState(false);
 
   // New rule form
   const [newNome,    setNewNome]    = useState('');
@@ -492,6 +497,16 @@ export function FollowupTab({
     await fetch(`/api/crm/followup/regras/${id}`, { method: 'DELETE' });
     if (selectedId === id) setSelectedId(null);
     loadRegras();
+  }
+
+  async function handleProcessNow() {
+    setProcessing(true);
+    await fetch('/api/crm/followup/processar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clientId }),
+    }).catch(() => null);
+    setProcessing(false);
   }
 
   async function handleCreate() {
@@ -540,7 +555,7 @@ export function FollowupTab({
       </div>
 
       {view === 'execucoes' ? (
-        <ExecucoesView clientId={clientId} />
+        <ExecucoesView clientId={clientId} onProcess={handleProcessNow} processing={processing} />
       ) : (
         <>
           {/* Header */}

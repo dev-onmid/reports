@@ -134,6 +134,8 @@ async function sendViaEvolution(
 }
 
 // ── Queue follow-up on status change ─────────────────────────────────────────
+// When delay_minutos = 0, sends immediately (no cron dependency).
+// When delay_minutos > 0, saves as 'aguardando_envio' for the worker to pick up.
 
 export async function queueFollowupIfExists(
   pool: Pool,
@@ -152,7 +154,8 @@ export async function queueFollowupIfExists(
 
   // Get first message (ordem = 1)
   const { rows: [msg] } = await pool.query(
-    `SELECT id, delay_minutos, timer_sem_resposta_horas FROM public.crm_followup_mensagens
+    `SELECT id, delay_minutos, timer_sem_resposta_horas, tipo, conteudo
+     FROM public.crm_followup_mensagens
      WHERE regra_id = $1 ORDER BY ordem ASC LIMIT 1`,
     [regra.id],
   );
@@ -166,10 +169,47 @@ export async function queueFollowupIfExists(
     [leadId],
   );
 
-  // Schedule the send
   const delay = Number(msg.delay_minutos ?? 0);
-  const scheduledAt = new Date(Date.now() + delay * 60_000).toISOString();
 
+  if (delay === 0) {
+    // Send immediately — no cron needed
+    const { rows: [lead] } = await pool.query(
+      `SELECT numero, nome, status, origin, canal FROM public.crm_leads WHERE id = $1`,
+      [leadId],
+    );
+    if (lead?.numero) {
+      const instance = await getClientInstance(pool, clientId);
+      if (instance) {
+        const vars: FollowupVars = {
+          nome:     lead.nome ?? lead.numero,
+          telefone: lead.numero,
+          status:   newStatus,
+          campanha: lead.origin ?? lead.canal ?? '',
+        };
+        const result = await sendFollowupMessage({ instance, phone: lead.numero, tipo: msg.tipo, conteudo: msg.conteudo, vars });
+        const timerHoras = Number(msg.timer_sem_resposta_horas ?? 24);
+        const expiraEm = new Date(Date.now() + timerHoras * 3_600_000).toISOString();
+        await pool.query(
+          `INSERT INTO public.crm_followup_execucoes
+             (lead_id, client_id, regra_id, mensagem_id, status, scheduled_at, enviado_em, expira_em)
+           VALUES ($1, $2, $3, $4, $5, NOW(), NOW(), $6)`,
+          [leadId, clientId, regra.id, msg.id, result.ok ? 'aguardando_resposta' : 'aguardando_envio', expiraEm],
+        );
+        // Save outbound message
+        if (result.ok) {
+          const msgText = msg.tipo === 'texto' ? interpolate(msg.conteudo, vars) : `[${msg.tipo}] ${msg.conteudo}`;
+          await pool.query(
+            `INSERT INTO public.crm_messages (lead_id, client_id, direction, text) VALUES ($1, $2, 'out', $3)`,
+            [leadId, clientId, msgText],
+          ).catch(() => null);
+        }
+        return;
+      }
+    }
+  }
+
+  // Delayed send — worker will pick it up
+  const scheduledAt = new Date(Date.now() + delay * 60_000).toISOString();
   await pool.query(
     `INSERT INTO public.crm_followup_execucoes
        (lead_id, client_id, regra_id, mensagem_id, status, scheduled_at)
