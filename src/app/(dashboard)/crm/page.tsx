@@ -7,12 +7,13 @@ import {
   type DragEndEvent, type DragStartEvent,
 } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
+import { useSortable, SortableContext, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import {
   Plus, Search, MoreVertical, Download, Settings2,
   Users, CalendarDays, HeartHandshake, CircleDollarSign,
   ChevronLeft, ChevronRight, ChevronDown, SlidersHorizontal,
   AlignJustify, Trash2, Pencil, Sparkles, Clock3, LayoutGrid, List, ArrowUpDown,
-  BarChart3, Plug, UserRound, MessageCircle, X, Send,
+  BarChart3, Plug, UserRound, MessageCircle, X, Send, GripVertical, Layers,
 } from 'lucide-react';
 import { ChatView } from './chat-view';
 import { useClients } from '@/lib/client-store';
@@ -35,6 +36,16 @@ type CrmLead = {
 };
 
 type Draft = Partial<Omit<CrmLead, 'id' | 'client_id' | 'created_at'>>;
+
+type CrmFunnel = { id: string; name: string; created_at: string };
+type CrmStage  = { id: string; label: string; color: string; position: number };
+type LocalStage = CrmStage & { _isNew?: boolean };
+
+const STAGE_COLORS = [
+  '#0ea5e9', '#3b82f6', '#7dd3fc', '#10b981', '#34d399',
+  '#a1a1aa', '#71717a', '#f97316', '#ef4444', '#dc2626',
+  '#8b5cf6', '#ec4899', '#f59e0b', '#84cc16',
+];
 
 const STATUS_OPTIONS = ['Em Atendimento', 'Agendado', 'Reagendado', 'Fechado', 'Comprou', 'Paciente', 'Não Retorna', 'Distante', 'Sem Interesse', 'Desqualificado'];
 const CANAL_OPTIONS  = ['Whatsapp', 'Facebook', 'Instagram', 'Google', 'WHATS PRINCIPAL', 'FACHADA', 'Indicação', 'Site', 'TikTok', 'YouTube', 'Outro'];
@@ -284,12 +295,13 @@ function clientTheme(clientId: string) {
 
 // ── Quick Edit Modal (Kanban) ────────────────────────────────────────────────
 function QuickEditModal({
-  lead, onSave, onClose, onDelete,
+  lead, onSave, onClose, onDelete, statusOptions,
 }: {
   lead: CrmLead;
   onSave: (data: Draft) => Promise<void>;
   onClose: () => void;
   onDelete: () => void;
+  statusOptions: string[];
 }) {
   const [draft, setDraft] = useState<Draft>({ ...lead });
   const [saving, setSaving] = useState(false);
@@ -334,7 +346,7 @@ function QuickEditModal({
               <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Status</span>
               <select value={draft.status ?? ''} onChange={e => set('status', e.target.value || null)}
                 className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
-                {STATUS_OPTIONS.map(o => <option key={o}>{o}</option>)}
+                {statusOptions.map(o => <option key={o}>{o}</option>)}
               </select>
             </label>
           </div>
@@ -380,13 +392,14 @@ function QuickEditModal({
 
 // ── Kanban Card (draggable) ──────────────────────────────────────────────────
 function KanbanCard({
-  lead, onEdit, onDelete, onStatusChange, isDragOverlay,
+  lead, onEdit, onDelete, onStatusChange, isDragOverlay, statusOptions,
 }: {
   lead: CrmLead;
   onEdit: (lead: CrmLead) => void;
   onDelete: (id: string) => void;
   onStatusChange: (id: string, status: string) => void;
   isDragOverlay?: boolean;
+  statusOptions: string[];
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: lead.id });
   const [menuOpen, setMenuOpen] = useState(false);
@@ -463,12 +476,12 @@ function KanbanCard({
       <div className="flex items-center justify-between mt-2 pt-2 border-t border-border/30">
         <span className="text-[10px] text-muted-foreground">{fmtD(lead.data ?? lead.created_at)}</span>
         <select
-          value={lead.status ?? 'Em Atendimento'}
+          value={lead.status ?? statusOptions[0] ?? 'Em Atendimento'}
           onClick={e => e.stopPropagation()}
           onChange={e => { e.stopPropagation(); onStatusChange(lead.id, e.target.value); }}
           className="appearance-none text-[9px] font-bold bg-transparent border-0 outline-none text-muted-foreground hover:text-foreground cursor-pointer max-w-[120px] truncate"
         >
-          {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+          {statusOptions.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
       </div>
     </div>
@@ -477,18 +490,19 @@ function KanbanCard({
 
 // ── Kanban Column (droppable) ────────────────────────────────────────────────
 function KanbanColumn({
-  status, leads, onEdit, onDelete, onStatusChange, activeLead,
+  status, color, leads, onEdit, onDelete, onStatusChange, activeLead, statusOptions,
 }: {
   status: string;
+  color: string;
   leads: CrmLead[];
   onEdit: (lead: CrmLead) => void;
   onDelete: (id: string) => void;
   onStatusChange: (id: string, status: string) => void;
   activeLead: CrmLead | null;
+  statusOptions: string[];
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: status });
   const total = leads.reduce((s, l) => s + toMoneyNumber(l.valor_rs), 0);
-  const color = STATUS_KANBAN_COLOR[status] ?? '#71717a';
 
   return (
     <div className="flex flex-col w-[255px] shrink-0">
@@ -510,7 +524,7 @@ function KanbanColumn({
         style={{ maxHeight: 'calc(100vh - 400px)', minHeight: 100 }}
       >
         {leads.map(lead => (
-          <KanbanCard key={lead.id} lead={lead} onEdit={onEdit} onDelete={onDelete} onStatusChange={onStatusChange} />
+          <KanbanCard key={lead.id} lead={lead} onEdit={onEdit} onDelete={onDelete} onStatusChange={onStatusChange} statusOptions={statusOptions} />
         ))}
         {leads.length === 0 && (
           <div className="flex items-center justify-center py-6">
@@ -526,26 +540,28 @@ function KanbanColumn({
 
 // ── Kanban View ──────────────────────────────────────────────────────────────
 function KanbanView({
-  leads, onEdit, onDelete, onStatusChange,
+  leads, stages, onEdit, onDelete, onStatusChange,
 }: {
   leads: CrmLead[];
+  stages: CrmStage[];
   onEdit: (lead: CrmLead) => void;
   onDelete: (id: string) => void;
   onStatusChange: (id: string, status: string) => void;
 }) {
   const [activeLead, setActiveLead] = useState<CrmLead | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+  const statusOptions = stages.map(s => s.label);
 
   const grouped = useMemo(() => {
     const map = new Map<string, CrmLead[]>();
-    STATUS_OPTIONS.forEach(s => map.set(s, []));
+    stages.forEach(s => map.set(s.label, []));
     leads.forEach(lead => {
-      const s = lead.status ?? 'Em Atendimento';
+      const s = lead.status ?? stages[0]?.label ?? 'Em Atendimento';
       if (map.has(s)) map.get(s)!.push(lead);
-      else { map.set(s, [lead]); }
+      else map.set(s, [lead]);
     });
     return map;
-  }, [leads]);
+  }, [leads, stages]);
 
   function handleDragStart(event: DragStartEvent) {
     const lead = leads.find(l => l.id === event.active.id);
@@ -557,7 +573,7 @@ function KanbanView({
     const { active, over } = event;
     if (!over || active.id === over.id) return;
     const targetStatus = String(over.id);
-    if (STATUS_OPTIONS.includes(targetStatus)) {
+    if (statusOptions.includes(targetStatus)) {
       onStatusChange(String(active.id), targetStatus);
     }
   }
@@ -565,15 +581,17 @@ function KanbanView({
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
       <div className="flex gap-3 overflow-x-auto pb-4 min-h-0 flex-1" style={{ alignItems: 'flex-start' }}>
-        {STATUS_OPTIONS.map(status => (
+        {stages.map(stage => (
           <KanbanColumn
-            key={status}
-            status={status}
-            leads={grouped.get(status) ?? []}
+            key={stage.label}
+            status={stage.label}
+            color={stage.color}
+            leads={grouped.get(stage.label) ?? []}
             onEdit={onEdit}
             onDelete={onDelete}
             onStatusChange={onStatusChange}
             activeLead={activeLead}
+            statusOptions={statusOptions}
           />
         ))}
       </div>
@@ -585,10 +603,225 @@ function KanbanView({
             onDelete={() => {}}
             onStatusChange={() => {}}
             isDragOverlay
+            statusOptions={statusOptions}
           />
         )}
       </DragOverlay>
     </DndContext>
+  );
+}
+
+// ── Funnel Editor ────────────────────────────────────────────────────────────
+
+function SortableStageRow({
+  stage, onChange, onDelete,
+}: {
+  stage: LocalStage;
+  onChange: (updates: Partial<CrmStage>) => void;
+  onDelete: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: stage.id });
+  const [showColors, setShowColors] = useState(false);
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} className="flex items-center gap-2 rounded-lg border border-border bg-background/60 px-2 py-1.5">
+      <button type="button" {...attributes} {...listeners}
+        className="cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground p-0.5 shrink-0">
+        <GripVertical className="h-4 w-4" />
+      </button>
+
+      <div className="relative shrink-0">
+        <button type="button" onClick={() => setShowColors(v => !v)}
+          className="h-5 w-5 rounded-full border border-border/50 transition-transform hover:scale-110 shrink-0"
+          style={{ background: stage.color }} />
+        {showColors && (
+          <div className="absolute left-0 top-7 z-50 flex flex-wrap gap-1 rounded-lg border border-border bg-popover p-2 shadow-xl w-36">
+            {STAGE_COLORS.map(c => (
+              <button key={c} type="button"
+                onClick={() => { onChange({ color: c }); setShowColors(false); }}
+                className="h-5 w-5 rounded-full border-2 transition-transform hover:scale-110 shrink-0"
+                style={{ background: c, borderColor: c === stage.color ? 'white' : 'transparent' }}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      <input
+        value={stage.label}
+        onChange={e => onChange({ label: e.target.value })}
+        className="flex-1 min-w-0 bg-transparent text-sm focus:outline-none focus:bg-primary/5 rounded px-1 py-0.5"
+      />
+
+      <button type="button" onClick={onDelete}
+        className="shrink-0 text-muted-foreground hover:text-red-400 transition-colors p-0.5">
+        <Trash2 className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+}
+
+function FunnelEditorModal({
+  funnel, stages: initialStages, clientId, funnelCount,
+  onSaved, onClose, onDeleteFunnel, onNewFunnel,
+}: {
+  funnel: CrmFunnel;
+  stages: CrmStage[];
+  clientId: string;
+  funnelCount: number;
+  onSaved: (funnel: CrmFunnel, stages: CrmStage[]) => void;
+  onClose: () => void;
+  onDeleteFunnel: () => void;
+  onNewFunnel: () => void;
+}) {
+  const [name, setName] = useState(funnel.name);
+  const [localStages, setLocalStages] = useState<LocalStage[]>(initialStages.map(s => ({ ...s })));
+  const [deletedIds, setDeletedIds] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
+
+  const editorSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+
+  function addStage() {
+    setLocalStages(prev => [...prev, {
+      id: `_new_${Date.now()}`,
+      label: 'Nova Etapa',
+      color: '#71717a',
+      position: prev.length,
+      _isNew: true,
+    }]);
+  }
+
+  function deleteStage(id: string) {
+    if (!id.startsWith('_new_')) setDeletedIds(prev => [...prev, id]);
+    setLocalStages(prev => prev.filter(s => s.id !== id));
+  }
+
+  function updateStage(id: string, updates: Partial<CrmStage>) {
+    setLocalStages(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s));
+  }
+
+  function handleStageDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIdx = localStages.findIndex(s => s.id === active.id);
+    const newIdx = localStages.findIndex(s => s.id === over.id);
+    if (oldIdx !== -1 && newIdx !== -1) setLocalStages(prev => arrayMove(prev, oldIdx, newIdx));
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      const funnelRes = await fetch(`/api/crm/funnels/${funnel.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, clientId }),
+      });
+      const savedFunnel: CrmFunnel = funnelRes.ok ? await funnelRes.json() as CrmFunnel : { ...funnel, name };
+
+      await Promise.all(deletedIds.map(id => fetch(`/api/crm/stages/${id}`, { method: 'DELETE' })));
+
+      const savedStages: CrmStage[] = [];
+      for (let i = 0; i < localStages.length; i++) {
+        const s = localStages[i];
+        if (s._isNew) {
+          const res = await fetch(`/api/crm/funnels/${funnel.id}/stages`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ label: s.label, color: s.color, clientId }),
+          });
+          if (res.ok) savedStages.push(await res.json() as CrmStage);
+        } else {
+          const res = await fetch(`/api/crm/stages/${s.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ label: s.label, color: s.color, position: i }),
+          });
+          savedStages.push(res.ok ? await res.json() as CrmStage : { ...s, position: i });
+        }
+      }
+
+      onSaved(savedFunnel, savedStages);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const stageIds = localStages.map(s => s.id);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+          <h2 className="text-sm font-bold flex items-center gap-2"><Layers className="h-4 w-4 text-primary" /> Configurar Funil</h2>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+          <label className="block space-y-1.5">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Nome do funil</span>
+            <input value={name} onChange={e => setName(e.target.value)}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
+          </label>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Etapas ({localStages.length})</span>
+              <button onClick={addStage}
+                className="flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary/80 transition-colors">
+                <Plus className="h-3.5 w-3.5" /> Adicionar etapa
+              </button>
+            </div>
+
+            <DndContext sensors={editorSensors} onDragEnd={handleStageDragEnd}>
+              <SortableContext items={stageIds} strategy={verticalListSortingStrategy}>
+                <div className="space-y-1.5">
+                  {localStages.map(stage => (
+                    <SortableStageRow key={stage.id} stage={stage}
+                      onChange={u => updateStage(stage.id, u)}
+                      onDelete={() => deleteStage(stage.id)} />
+                  ))}
+                </div>
+              </SortableContext>
+            </DndContext>
+
+            {localStages.length === 0 && (
+              <p className="text-center text-xs text-muted-foreground py-6">Nenhuma etapa. Clique em "Adicionar etapa".</p>
+            )}
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between gap-3 px-5 py-4 border-t border-border shrink-0">
+          <div className="flex gap-2">
+            {funnelCount > 1 && (
+              <button onClick={onDeleteFunnel}
+                className="flex items-center gap-1.5 rounded-lg border border-red-500/30 px-3 py-2 text-xs font-semibold text-red-400 hover:bg-red-500/10 transition-colors">
+                <Trash2 className="h-3.5 w-3.5" /> Excluir funil
+              </button>
+            )}
+            <button onClick={onNewFunnel}
+              className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors">
+              <Plus className="h-3.5 w-3.5" /> Novo funil
+            </button>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={onClose}
+              className="rounded-lg border border-border px-4 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors">
+              Cancelar
+            </button>
+            <button onClick={handleSave} disabled={saving}
+              className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors">
+              {saving ? 'Salvando…' : 'Salvar'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -693,6 +926,13 @@ export default function CrmPage() {
   const [clientSort, setClientSort] = useState<'az' | 'za'>('az');
   const [clientView, setClientView] = useState<'grid' | 'list'>('grid');
   const [recentClientIds, setRecentClientIds] = useState<string[]>([]);
+
+  // ── Funnels & Stages ──────────────────────────────────────────────────
+  const [funnels, setFunnels] = useState<CrmFunnel[]>([]);
+  const [selectedFunnelId, setSelectedFunnelId] = useState('');
+  const [stages, setStages] = useState<CrmStage[]>([]);
+  const [showFunnelEditor, setShowFunnelEditor] = useState(false);
+
   const [leads, setLeads]           = useState<CrmLead[]>([]);
   const [loading, setLoading]       = useState(false);
   const [search, setSearch]         = useState('');
@@ -796,14 +1036,30 @@ export default function CrmPage() {
   useEffect(() => { setPage(1); }, [statusFilter, search, clientId, columnFilters]);
 
   useEffect(() => {
-    if (!clientId) { setLeads([]); return; }
+    if (!clientId) { setFunnels([]); setSelectedFunnelId(''); setStages([]); return; }
+    fetch(`/api/crm/funnels?clientId=${clientId}`)
+      .then(r => r.ok ? r.json() as Promise<CrmFunnel[]> : [])
+      .then(data => { setFunnels(data); if (data[0]) setSelectedFunnelId(data[0].id); })
+      .catch(() => setFunnels([]));
+  }, [clientId]);
+
+  useEffect(() => {
+    if (!selectedFunnelId) { setStages([]); return; }
+    fetch(`/api/crm/funnels/${selectedFunnelId}/stages`)
+      .then(r => r.ok ? r.json() as Promise<CrmStage[]> : [])
+      .then(setStages)
+      .catch(() => setStages([]));
+  }, [selectedFunnelId]);
+
+  useEffect(() => {
+    if (!clientId || !selectedFunnelId) { setLeads([]); return; }
     setLoading(true);
-    fetch(`/api/crm?clientId=${clientId}`)
+    fetch(`/api/crm?clientId=${clientId}&funnelId=${selectedFunnelId}`)
       .then(r => r.ok ? r.json() as Promise<CrmLead[]> : [])
       .then(data => setLeads(data))
       .catch(() => setLeads([]))
       .finally(() => setLoading(false));
-  }, [clientId]);
+  }, [clientId, selectedFunnelId]);
 
   const filtered = useMemo(() => leads.filter(l => {
     if (statusFilter && l.status !== statusFilter) return false;
@@ -835,6 +1091,49 @@ export default function CrmPage() {
     faturamento: leads.filter(l => l.fechou).reduce((s, l) => s + toMoneyNumber(l.valor_rs), 0),
   }), [leads]);
 
+  const statusOptions = useMemo(
+    () => stages.length > 0 ? stages.map(s => s.label) : STATUS_OPTIONS,
+    [stages],
+  );
+
+  const selectedFunnel = funnels.find(f => f.id === selectedFunnelId) ?? null;
+
+  async function handleFunnelSaved(updatedFunnel: CrmFunnel, updatedStages: CrmStage[]) {
+    setFunnels(prev => prev.map(f => f.id === updatedFunnel.id ? updatedFunnel : f));
+    setStages(updatedStages);
+    setShowFunnelEditor(false);
+  }
+
+  async function handleNewFunnel() {
+    const name = window.prompt('Nome do novo funil:')?.trim();
+    if (!name) return;
+    const res = await fetch('/api/crm/funnels', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clientId, name }),
+    });
+    if (res.ok) {
+      const newFunnel = await res.json() as CrmFunnel;
+      setFunnels(prev => [...prev, newFunnel]);
+      setSelectedFunnelId(newFunnel.id);
+      setShowFunnelEditor(false);
+    }
+  }
+
+  async function handleDeleteFunnel() {
+    if (!selectedFunnelId || !window.confirm('Excluir este funil? Os leads serão movidos para o próximo funil.')) return;
+    const res = await fetch(`/api/crm/funnels/${selectedFunnelId}`, { method: 'DELETE' });
+    if (res.ok) {
+      const remaining = funnels.filter(f => f.id !== selectedFunnelId);
+      setFunnels(remaining);
+      setSelectedFunnelId(remaining[0]?.id ?? '');
+      setShowFunnelEditor(false);
+    } else {
+      const body = await res.json().catch(() => ({})) as { error?: string };
+      alert(body.error ?? 'Erro ao excluir funil');
+    }
+  }
+
   async function saveNew() {
     if (newSavingRef.current) return;
     const data = newDraftRef.current;
@@ -844,7 +1143,7 @@ export default function CrmPage() {
     try {
       const res = await fetch('/api/crm', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientId, ...data }),
+        body: JSON.stringify({ clientId, funnel_id: selectedFunnelId || null, ...data }),
       });
       if (res.ok) {
         const saved = await res.json() as CrmLead;
@@ -1101,6 +1400,31 @@ export default function CrmPage() {
           {activeClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
         </IconSelect>
 
+        {/* Funnel selector */}
+        {funnels.length > 0 && (
+          <div className="flex items-center gap-1">
+            <div className="relative flex items-center">
+              <Layers className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none z-10" />
+              <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none z-10" />
+              <select
+                value={selectedFunnelId}
+                onChange={e => setSelectedFunnelId(e.target.value)}
+                className="appearance-none pl-8 pr-8 py-2 rounded-lg border border-border bg-card text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                {funnels.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+              </select>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowFunnelEditor(true)}
+              title="Configurar etapas"
+              className="flex h-9 w-9 items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            >
+              <Settings2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+
         {/* Leads / Chat toggle */}
         <div className="flex overflow-hidden rounded-lg border border-border bg-card p-0.5">
           <button type="button" onClick={() => setCrmView('leads')}
@@ -1119,7 +1443,7 @@ export default function CrmPage() {
           <>
             <IconSelect icon={SlidersHorizontal} value={statusFilter} onChange={setStatusFilter}
               placeholder="Todos status" className="min-w-[160px]">
-              {STATUS_OPTIONS.map(s => <option key={s}>{s}</option>)}
+              {statusOptions.map(s => <option key={s}>{s}</option>)}
             </IconSelect>
 
             <div className="relative">
@@ -1218,6 +1542,7 @@ export default function CrmPage() {
             <div className="overflow-auto flex-1 min-h-0 p-3">
               <KanbanView
                 leads={filtered}
+                stages={stages}
                 onEdit={setKanbanEditLead}
                 onDelete={id => void deleteRow(id)}
                 onStatusChange={(id, status) => void changeLeadStatus(id, status)}
@@ -1261,6 +1586,7 @@ export default function CrmPage() {
                         columnKey={col.key}
                         value={columnFilters[col.key] ?? ''}
                         onChange={setColumnFilter}
+                        statusOptions={statusOptions}
                       />
                     </th>
                   ))}
@@ -1287,7 +1613,7 @@ export default function CrmPage() {
                   </Td>
                   <Td>
                     <select value={newDraft.status ?? ''} onChange={e => setN('status', e.target.value || null)} className={cn(cellNew, 'cursor-pointer appearance-none', STATUS_COLOR[newDraft.status ?? ''] ?? '')}>
-                      {STATUS_OPTIONS.map(o => <option key={o}>{o}</option>)}
+                      {statusOptions.map(o => <option key={o}>{o}</option>)}
                     </select>
                   </Td>
                   {(['dia1','dia2','dia3','dia4'] as const).map(k => (
@@ -1385,7 +1711,7 @@ export default function CrmPage() {
                       <Td>
                         {isEditing
                           ? <select value={d.status ?? ''} onChange={e => setE('status', e.target.value || null)} className={cn(cellSel, STATUS_COLOR[d.status ?? ''] ?? '')}>
-                              {STATUS_OPTIONS.map(o => <option key={o}>{o}</option>)}
+                              {statusOptions.map(o => <option key={o}>{o}</option>)}
                             </select>
                           : statusBadge
                             ? <div className="px-1">
@@ -1537,6 +1863,20 @@ export default function CrmPage() {
           onSave={saveKanbanEdit}
           onClose={() => setKanbanEditLead(null)}
           onDelete={() => { void deleteRow(kanbanEditLead.id); setKanbanEditLead(null); }}
+          statusOptions={statusOptions}
+        />
+      )}
+
+      {showFunnelEditor && selectedFunnel && (
+        <FunnelEditorModal
+          funnel={selectedFunnel}
+          stages={stages}
+          clientId={clientId}
+          funnelCount={funnels.length}
+          onSaved={handleFunnelSaved}
+          onClose={() => setShowFunnelEditor(false)}
+          onDeleteFunnel={handleDeleteFunnel}
+          onNewFunnel={handleNewFunnel}
         />
       )}
     </div>
@@ -1556,11 +1896,13 @@ function ColumnFilter({
   columnKey,
   value,
   onChange,
+  statusOptions,
 }: {
   kind: ColumnFilterKind;
   columnKey: ColumnKey;
   value: string;
   onChange: (key: ColumnKey, value: string) => void;
+  statusOptions: string[];
 }) {
   const baseClass = 'h-7 w-full rounded-md border border-border/70 bg-background/70 px-2 text-[10px] font-medium normal-case tracking-normal text-foreground outline-none transition-colors placeholder:text-muted-foreground/40 focus:border-primary';
 
@@ -1578,7 +1920,7 @@ function ColumnFilter({
     return (
       <select value={value} onChange={e => onChange(columnKey, e.target.value)} className={cn(baseClass, 'appearance-none')}>
         <option value="">Todos</option>
-        {STATUS_OPTIONS.map(option => <option key={option}>{option}</option>)}
+        {statusOptions.map(option => <option key={option}>{option}</option>)}
       </select>
     );
   }

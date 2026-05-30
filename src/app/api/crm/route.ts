@@ -55,7 +55,9 @@ async function ensureTable(pool: ReturnType<typeof makeServerPool>) {
 }
 
 export async function GET(req: NextRequest) {
-  const clientId = new URL(req.url).searchParams.get('clientId');
+  const { searchParams } = new URL(req.url);
+  const clientId = searchParams.get('clientId');
+  const funnelId = searchParams.get('funnelId');
   if (!clientId) return Response.json({ error: 'clientId required' }, { status: 400 });
   const pool = makeServerPool();
   try {
@@ -67,8 +69,9 @@ export async function GET(req: NextRequest) {
           COALESCE(NULLIF(revenue, 0), valor_rs, 0)::float AS normalized_revenue
          FROM public.crm_leads
         WHERE client_id = $1
+          AND ($2::uuid IS NULL OR funnel_id = $2::uuid)
         ORDER BY COALESCE(lead_date, data) DESC NULLS LAST, created_at DESC`,
-      [clientId]
+      [clientId, funnelId ?? null]
     );
     return Response.json(rows);
   } finally {
@@ -88,9 +91,9 @@ export async function POST(req: NextRequest) {
         (client_id,mes,data,link_criativo,nome,numero,canal,emoji,
          dia1,dia2,dia3,dia4,status,data_agendada,video_dra,compareceu,
          observacao,orcamento,fechou,valor_rs,pagamento,analise_credito,
-         data_nasc,bairro,motivacoes,dores)
+         data_nasc,bairro,motivacoes,dores,funnel_id)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
-               $17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
+               $17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
        RETURNING *`,
       [
         clientId, f.mes??null, f.data||null, f.link_criativo??null,
@@ -101,6 +104,7 @@ export async function POST(req: NextRequest) {
         f.orcamento||null, f.fechou??false, f.valor_rs||null,
         f.pagamento??null, f.analise_credito??false,
         f.data_nasc||null, f.bairro??null, f.motivacoes??null, f.dores??null,
+        f.funnel_id??null,
       ]
     );
     return Response.json(lead, { status: 201 });
