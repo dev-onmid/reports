@@ -36,6 +36,7 @@ export async function GET(req: NextRequest) {
          ON m2.lead_id = l.id AND m2.direction = 'in'
             AND m2.created_at > COALESCE(l.updated_at, l.created_at - interval '1 day')
        WHERE l.client_id = $1
+         AND (l.numero IS NULL OR l.numero ~ '^[0-9+]{7,15}$')
        GROUP BY l.id, m.text, m.direction, m.created_at
        ORDER BY COALESCE(m.created_at, l.created_at) DESC
        LIMIT 200`,

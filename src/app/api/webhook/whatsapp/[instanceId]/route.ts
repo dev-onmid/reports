@@ -166,6 +166,10 @@ export async function POST(
     const utmData = extractUtm(messageText);
     const origin = detectOrigin(ctwaClid, utmData.utm_source, messageText, fromMe);
 
+    // When fromMe=true the pushName is the instance owner's name, not the contact's.
+    // Only set nome from pushName on incoming messages (fromMe=false).
+    const contactName = fromMe ? null : (pushName ?? null);
+
     const { rows: [crmLead] } = await pool.query(
       `INSERT INTO public.crm_leads
          (client_id, nome, numero, canal, origin, ctwa_clid, utm_source, instance_id, data, status)
@@ -186,7 +190,7 @@ export async function POST(
                       END,
          updated_at = NOW()
        RETURNING id`,
-      [clientId, pushName ?? null, phone, originToCanal(origin),
+      [clientId, contactName, phone, originToCanal(origin),
        origin, ctwaClid ?? null, utmData.utm_source ?? null, instanceId],
     );
 

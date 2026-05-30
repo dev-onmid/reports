@@ -1267,7 +1267,7 @@ export default function CrmPage() {
   }
 
   return (
-    <div className="flex flex-col gap-5 h-full">
+    <div className="flex flex-col gap-5 h-full overflow-hidden">
 
       {/* ── PAGE HEADER ─────────────────────────────────────────────── */}
       <div className="flex items-center gap-3">
@@ -1504,7 +1504,7 @@ export default function CrmPage() {
 
       {/* ── CHAT VIEW ───────────────────────────────────────────────── */}
       {clientId && crmView === 'chat' && (
-        <div className="flex-1 min-h-0 h-full">
+        <div className="flex-1 min-h-0 overflow-hidden">
           <ChatView clientId={clientId} />
         </div>
       )}
