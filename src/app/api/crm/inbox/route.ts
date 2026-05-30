@@ -11,7 +11,13 @@ export async function GET(req: NextRequest) {
     const { rows } = await pool.query(
       `SELECT
          l.id,
-         l.nome,
+         -- Only show the stored nome if we have at least one inbound message from
+         -- this contact. Otherwise the name was set from the instance owner's
+         -- pushName on an outbound-only conversation and would be misleading.
+         CASE WHEN EXISTS (
+           SELECT 1 FROM public.crm_messages ix
+           WHERE ix.lead_id = l.id AND ix.direction = 'in'
+         ) THEN l.nome ELSE NULL END AS nome,
          l.numero,
          l.canal,
          l.origin,
