@@ -358,12 +358,25 @@ export function ChatView({ clientId }: { clientId: string }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ direction: 'out', ...payload }),
       });
-      const data = await res.json() as { wa_sent?: boolean };
-      setSendStatus(data.wa_sent ? 'ok' : 'err');
-      setTimeout(() => setSendStatus(null), 3000);
-      loadMessages(selectedId);
-      loadInbox();
-      requestAnimationFrame(() => scrollToBottom());
+      // Handle non-JSON responses (e.g. Vercel 500 HTML pages)
+      const text = await res.text();
+      let data: { wa_sent?: boolean; error?: string } = {};
+      try { data = JSON.parse(text) as typeof data; } catch { /* non-JSON */ }
+
+      if (!res.ok) {
+        console.error('[doSend error]', res.status, text);
+        setSendStatus('err');
+      } else {
+        setSendStatus(data.wa_sent ? 'ok' : 'err');
+        loadMessages(selectedId);
+        loadInbox();
+        requestAnimationFrame(() => scrollToBottom());
+      }
+      setTimeout(() => setSendStatus(null), 4000);
+    } catch (err) {
+      console.error('[doSend fetch error]', err);
+      setSendStatus('err');
+      setTimeout(() => setSendStatus(null), 4000);
     } finally {
       setSending(false);
     }
@@ -373,7 +386,11 @@ export function ChatView({ clientId }: { clientId: string }) {
     if (!replyText.trim()) return;
     const text = replyText.trim();
     setReplyText('');
-    textareaRef.current?.focus();
+    // Reset textarea height
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.focus();
+    }
     await doSend({ tipo: 'texto', text });
   }
 
@@ -427,9 +444,31 @@ export function ChatView({ clientId }: { clientId: string }) {
                 <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-bold text-primary">{leads.length}</span>
               )}
             </div>
-            <button onClick={loadInbox} className="text-muted-foreground hover:text-foreground transition-colors" title="Atualizar">
-              <RefreshCw className="h-3.5 w-3.5" />
-            </button>
+            <div className="flex items-center gap-1.5">
+              <button onClick={loadInbox} className="text-muted-foreground hover:text-foreground transition-colors" title="Atualizar">
+                <RefreshCw className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={() => {
+                  if (!confirm('Remover grupos e corrigir nomes errados neste cliente?')) return;
+                  fetch('/api/crm/cleanup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ clientId }),
+                  })
+                    .then(r => r.json())
+                    .then((d: { groupsDeleted?: number; namesCleared?: number }) => {
+                      alert(`${d.groupsDeleted ?? 0} grupos removidos, ${d.namesCleared ?? 0} nomes corrigidos.`);
+                      loadInbox();
+                    })
+                    .catch(() => alert('Erro na limpeza'));
+                }}
+                className="text-muted-foreground hover:text-amber-400 transition-colors"
+                title="Limpar grupos e nomes incorretos"
+              >
+                <AlertCircle className="h-3.5 w-3.5" />
+              </button>
+            </div>
           </div>
           {/* Search */}
           <div className="px-3 py-2 border-b border-border shrink-0">
@@ -572,7 +611,7 @@ export function ChatView({ clientId }: { clientId: string }) {
                   )}>
                     {sendStatus === 'ok'
                       ? <><CheckCircle2 className="h-3.5 w-3.5" /> Enviado via WhatsApp</>
-                      : <><AlertCircle  className="h-3.5 w-3.5" /> Salvo — sem instância WA configurada</>}
+                      : <><AlertCircle  className="h-3.5 w-3.5" /> Salvo no histórico — falha ao enviar pelo WhatsApp</>}
                   </div>
                 )}
 

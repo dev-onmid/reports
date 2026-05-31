@@ -122,6 +122,10 @@ export async function POST(
     await pool.query(`UPDATE public.crm_leads SET updated_at = NOW() WHERE id = $1`, [id]);
 
     return Response.json({ ...msg, wa_sent: waSent, wa_error: waError ?? null }, { status: 201 });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[messages POST]', msg);
+    return Response.json({ error: msg, wa_sent: false }, { status: 500 });
   } finally {
     await pool.end();
   }

@@ -58,7 +58,16 @@ export async function GET(req: NextRequest) {
          AND m2.direction = 'in'
          AND m2.created_at > COALESCE(l.updated_at, l.created_at - interval '1 day')
        WHERE l.client_id = $1
-         AND (l.numero IS NULL OR l.numero ~ '^[0-9+]{7,15}$')
+         -- Filtros anti-grupo: exclui JIDs de grupo normalizados (muito longos ou muito curtos)
+         -- Números válidos brasileiros com código do país: 12-13 dígitos
+         -- Sem código do país (legado): 10-11 dígitos. Faixa segura: 10-15.
+         AND (
+           l.numero IS NULL
+           OR (
+             l.numero ~ '^[0-9]{10,15}$'
+             AND l.numero NOT LIKE '%--%'
+           )
+         )
        GROUP BY l.id, m.text, m.direction, m.created_at
        ORDER BY COALESCE(m.created_at, l.created_at) DESC
        LIMIT 200`,
