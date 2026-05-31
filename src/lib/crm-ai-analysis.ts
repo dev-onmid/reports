@@ -19,6 +19,8 @@ type AiResult = {
 type ConversationSignals = {
   outboundAfterLastInbound: number;
   lastDirection: 'in' | 'out' | null;
+  lastInboundAt: string | null;
+  firstOutboundAfterLastInboundAt: string | null;
 };
 
 const DEFAULT_CRITERIA: Record<Temperature, string> = {
@@ -172,6 +174,19 @@ function findStatus(statusOptions: string[], wanted: string) {
   return statusOptions.find(option => normalizeStatusText(option) === wantedKey) ?? null;
 }
 
+function statusMatches(status: string | null | undefined, names: string[]) {
+  if (!status) return false;
+  const normalized = normalizeStatusText(status);
+  return names.some(name => normalizeStatusText(name) === normalized);
+}
+
+function daysSince(iso: string | null) {
+  if (!iso) return Infinity;
+  const time = new Date(iso).getTime();
+  if (!Number.isFinite(time)) return Infinity;
+  return (Date.now() - time) / 86_400_000;
+}
+
 function monthKey(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }
@@ -221,7 +236,12 @@ async function loadStatusOptions(pool: Pool, lead: { client_id: string; funnel_i
 }
 
 async function loadConversationSignals(pool: Pool, leadId: string): Promise<ConversationSignals> {
-  const { rows: [stats] } = await pool.query<{ outbound_after_last_inbound: number; last_direction: 'in' | 'out' | null }>(
+  const { rows: [stats] } = await pool.query<{
+    outbound_after_last_inbound: number;
+    last_direction: 'in' | 'out' | null;
+    last_inbound_at: string | null;
+    first_outbound_after_last_inbound_at: string | null;
+  }>(
     `WITH last_inbound AS (
        SELECT MAX(created_at) AS at
          FROM public.crm_messages
@@ -239,16 +259,30 @@ async function loadConversationSignals(pool: Pool, leadId: string): Promise<Conv
          WHERE m.direction = 'out'
            AND (li.at IS NULL OR m.created_at > li.at)
        )::int AS outbound_after_last_inbound,
+       MAX(li.at) AS last_inbound_at,
+       MIN(m.created_at) FILTER (
+         WHERE m.direction = 'out'
+           AND (li.at IS NULL OR m.created_at > li.at)
+       ) AS first_outbound_after_last_inbound_at,
        (SELECT direction FROM last_message) AS last_direction
       FROM public.crm_messages m
       CROSS JOIN last_inbound li
       WHERE m.lead_id = $1`,
     [leadId],
-  ).catch(() => ({ rows: [] as Array<{ outbound_after_last_inbound: number; last_direction: 'in' | 'out' | null }> }));
+  ).catch(() => ({
+    rows: [] as Array<{
+      outbound_after_last_inbound: number;
+      last_direction: 'in' | 'out' | null;
+      last_inbound_at: string | null;
+      first_outbound_after_last_inbound_at: string | null;
+    }>,
+  }));
 
   return {
     outboundAfterLastInbound: Number(stats?.outbound_after_last_inbound ?? 0),
     lastDirection: stats?.last_direction ?? null,
+    lastInboundAt: stats?.last_inbound_at ?? null,
+    firstOutboundAfterLastInboundAt: stats?.first_outbound_after_last_inbound_at ?? null,
   };
 }
 
@@ -324,6 +358,8 @@ ${history}
 Status atual do lead: ${lead.status ?? 'não definido'}
 Temperatura atual: ${lead.temperatura ?? 'não definida'}
 Tentativas de contato enviadas sem resposta do cliente desde a última resposta: ${signals.outboundAfterLastInbound}
+Dias desde a última resposta do cliente: ${daysSince(signals.lastInboundAt) === Infinity ? 'sem resposta registrada' : daysSince(signals.lastInboundAt).toFixed(1)}
+Dias desde a primeira tentativa sem resposta: ${daysSince(signals.firstOutboundAfterLastInboundAt) === Infinity ? 'sem tentativa registrada' : daysSince(signals.firstOutboundAfterLastInboundAt).toFixed(1)}
 Última mensagem foi de: ${signals.lastDirection === 'out' ? 'Atendente' : signals.lastDirection === 'in' ? 'Cliente' : 'Ninguém'}
 
 Status disponíveis do funil deste cliente. Use exatamente um destes rótulos no campo "status":
@@ -335,7 +371,8 @@ Regras importantes de status:
 - Use "Agendado" somente quando houver data e/ou horário definido e o cliente confirmar ou aceitar explicitamente aquele agendamento.
 - Se cliente pediu novo horário após um agendamento, use "Reagendado" quando existir.
 - Se cliente comprou, pagou ou confirmou fechamento, use "Fechado" ou "Comprou", dando preferência ao rótulo existente no funil.
-- Use "Não Retorna" somente quando houver pelo menos 4 tentativas de contato enviadas pelo atendente sem resposta posterior do cliente.
+- Não mova leads em "Agendado", "Reagendado", "Fechado", "Comprou" ou "Paciente" para "Não Retorna" só por falta de resposta no chat.
+- Use "Não Retorna" somente quando houver pelo menos 4 tentativas de contato enviadas pelo atendente sem resposta posterior do cliente E isso já durar pelo menos 2 dias.
 - Se não houver mudança clara de etapa, mantenha o status atual e retorne status_deve_mudar=false.
 
 Critérios de temperatura:
@@ -372,11 +409,15 @@ Retorne exatamente este JSON:
 
     const noReturnStatus = findStatus(statusOptions, 'Não Retorna');
     const aiStatus = normalizeStatus(parsed.status, statusOptions);
-    const nextStatus = (
+    const protectedNoReturn = statusMatches(lead.status, ['Agendado', 'Reagendado', 'Fechado', 'Comprou', 'Paciente']);
+    const noReturnQualifies = Boolean(
       signals.lastDirection === 'out'
       && signals.outboundAfterLastInbound >= 4
       && noReturnStatus
-    ) ? noReturnStatus : aiStatus;
+      && !protectedNoReturn
+      && daysSince(signals.firstOutboundAfterLastInboundAt) >= 2
+    );
+    const nextStatus = noReturnQualifies ? noReturnStatus : aiStatus;
     const statusConfidence = Number(parsed.status_confianca ?? 0);
     const tempConfidence = Number(parsed.temperatura_confianca ?? 0);
     const nextTemp = parsed.temperatura;
@@ -384,16 +425,11 @@ Retorne exatamente este JSON:
     let appliedStatus = lead.status as string | null;
     let appliedTemp = lead.temperatura as string | null;
 
-    const shouldMoveStatus = (
-      nextStatus === noReturnStatus
-      && signals.lastDirection === 'out'
-      && signals.outboundAfterLastInbound >= 4
-    ) || parsed.status_deve_mudar === true;
-    const effectiveStatusConfidence = (
-      nextStatus === noReturnStatus
-      && signals.lastDirection === 'out'
-      && signals.outboundAfterLastInbound >= 4
-    ) ? Math.max(statusConfidence, 90) : statusConfidence;
+    const shouldMoveStatus = noReturnQualifies || (
+      parsed.status_deve_mudar === true
+      && (nextStatus !== noReturnStatus || noReturnQualifies)
+    );
+    const effectiveStatusConfidence = noReturnQualifies ? Math.max(statusConfidence, 90) : statusConfidence;
     const confidence = Math.max(effectiveStatusConfidence, tempConfidence);
 
     if (shouldMoveStatus && effectiveStatusConfidence >= 70 && nextStatus && nextStatus !== lead.status) {

@@ -1307,6 +1307,21 @@ export default function CrmPage() {
     });
   }
 
+  function refreshLeads(options?: { silent?: boolean }) {
+    if (!clientId || !selectedFunnelId) {
+      setLeads([]);
+      return;
+    }
+    if (!options?.silent) setLoading(true);
+    fetch(`/api/crm?clientId=${clientId}&funnelId=${selectedFunnelId}`)
+      .then(r => r.ok ? r.json() as Promise<CrmLead[]> : [])
+      .then(data => setLeads(data))
+      .catch(() => setLeads([]))
+      .finally(() => {
+        if (!options?.silent) setLoading(false);
+      });
+  }
+
   useEffect(() => {
     function onDown(e: MouseEvent) {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuId(null);
@@ -1334,14 +1349,13 @@ export default function CrmPage() {
   }, [selectedFunnelId]);
 
   useEffect(() => {
-    if (!clientId || !selectedFunnelId) { setLeads([]); return; }
-    setLoading(true);
-    fetch(`/api/crm?clientId=${clientId}&funnelId=${selectedFunnelId}`)
-      .then(r => r.ok ? r.json() as Promise<CrmLead[]> : [])
-      .then(data => setLeads(data))
-      .catch(() => setLeads([]))
-      .finally(() => setLoading(false));
+    refreshLeads();
   }, [clientId, selectedFunnelId]);
+
+  useEffect(() => {
+    if (crmView !== 'leads') return;
+    refreshLeads({ silent: true });
+  }, [crmView]);
 
   const filtered = useMemo(() => leads.filter(l => {
     if (statusFilter && l.status !== statusFilter) return false;
