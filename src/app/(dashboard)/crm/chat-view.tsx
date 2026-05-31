@@ -351,6 +351,8 @@ export function ChatView({ clientId }: { clientId: string }) {
   const [syncResult, setSyncResult] = useState<string | null>(null);
   const [sendError,  setSendError]  = useState<string | null>(null);
   const [chatAvatars, setChatAvatars] = useState<Record<string, string>>({});
+  const [importingChats, setImportingChats] = useState(false);
+  const [importResult, setImportResult] = useState<string | null>(null);
 
   const messagesAreaRef = useRef<HTMLDivElement>(null);
   const pollRef         = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -377,6 +379,39 @@ export function ChatView({ clientId }: { clientId: string }) {
       .then((rows: InboxLead[]) => { setLeads(Array.isArray(rows) ? rows : []); setLoading(false); })
       .catch(() => setLoading(false));
   }, [clientId]);
+
+  async function importConversations(searchTerm = '') {
+    setImportingChats(true);
+    setImportResult(null);
+    try {
+      const res = await fetch(`/api/crm/inbox?clientId=${clientId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ search: searchTerm.trim(), limit: 500 }),
+      });
+      const data = await res.json() as {
+        ok?: boolean;
+        imported?: number;
+        matched?: number;
+        error?: string;
+      };
+      if (!res.ok || !data.ok) {
+        setImportResult(data.error ?? 'Não foi possível puxar conversas.');
+        return;
+      }
+      setImportResult(
+        searchTerm.trim()
+          ? `${data.matched ?? 0} conversa(s) encontrada(s) para a busca.`
+          : `${data.imported ?? 0} conversa(s) sincronizada(s).`,
+      );
+      loadInbox();
+    } catch {
+      setImportResult('Erro ao puxar conversas.');
+    } finally {
+      setImportingChats(false);
+      setTimeout(() => setImportResult(null), 5000);
+    }
+  }
 
   const loadMessages = useCallback((leadId: string, initial = false) => {
     if (initial) setMsgLoading(true);
@@ -594,15 +629,41 @@ export function ChatView({ clientId }: { clientId: string }) {
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
               <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar contato..."
+                onKeyDown={e => {
+                  if (e.key === 'Enter') void importConversations(search);
+                }}
                 className="h-9 w-full rounded-[var(--radius)] border border-border bg-background pl-9 pr-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
             </div>
+            <div className="mt-2 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void importConversations(search)}
+                disabled={importingChats}
+                className="flex-1 rounded-[var(--radius)] border border-border px-3 py-2 text-xs font-semibold text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground disabled:opacity-50"
+              >
+                {importingChats ? 'Puxando...' : search.trim() ? 'Buscar no WhatsApp' : 'Carregar mais conversas'}
+              </button>
+            </div>
+            {importResult && (
+              <p className="mt-2 text-[11px] text-muted-foreground">{importResult}</p>
+            )}
           </div>
           {/* Lead list — ONLY this section scrolls on the left */}
           <div className="flex-1 overflow-y-auto min-h-0">
             {loading ? (
               <div className="p-4 text-xs text-muted-foreground text-center">Carregando…</div>
             ) : filtered.length === 0 ? (
-              <div className="p-6 text-xs text-muted-foreground text-center italic">Nenhuma conversa</div>
+              <div className="space-y-3 p-6 text-center">
+                <p className="text-xs italic text-muted-foreground">Nenhuma conversa</p>
+                <button
+                  type="button"
+                  onClick={() => void importConversations(search)}
+                  disabled={importingChats}
+                  className="rounded-[var(--radius)] border border-primary/35 px-3 py-2 text-xs font-semibold text-primary hover:bg-primary/10 disabled:opacity-50"
+                >
+                  {importingChats ? 'Puxando...' : 'Puxar do WhatsApp'}
+                </button>
+              </div>
             ) : filtered.map(lead => (
               <button key={lead.id} onClick={() => setSelectedId(lead.id)}
                 className={cn(
@@ -641,6 +702,18 @@ export function ChatView({ clientId }: { clientId: string }) {
                 </div>
               </button>
             ))}
+            {!loading && filtered.length > 0 && (
+              <div className="p-3">
+                <button
+                  type="button"
+                  onClick={() => void importConversations(search)}
+                  disabled={importingChats}
+                  className="w-full rounded-[var(--radius)] border border-border px-3 py-2 text-xs font-semibold text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground disabled:opacity-50"
+                >
+                  {importingChats ? 'Puxando conversas...' : 'Carregar mais conversas'}
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
