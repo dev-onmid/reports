@@ -2,10 +2,11 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  Plus, Pencil, Trash2, X, ChevronDown, ChevronRight,
+  Plus, Pencil, Trash2, X,
   ToggleLeft, ToggleRight, Clock, MessageSquare, Zap,
   ArrowRight, AlertCircle, CheckCircle2, Timer, Send,
-  Upload, Mic, Square, Loader2,
+  Upload, Mic, Square, Loader2, Users,
+  CalendarDays, MoreVertical, Paperclip, ExternalLink,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -104,6 +105,39 @@ const STATUS_LABEL: Record<string, string> = {
   expirado:            'Expirado',
   cancelado:           'Cancelado',
 };
+
+function MiniSparkline({
+  color,
+  values,
+}: {
+  color: string;
+  values: number[];
+}) {
+  const width = 180;
+  const height = 28;
+  const max = Math.max(...values, 1);
+  const min = Math.min(...values, 0);
+  const range = Math.max(max - min, 1);
+  const points = values.map((value, index) => {
+    const x = (index / Math.max(values.length - 1, 1)) * width;
+    const y = height - ((value - min) / range) * (height - 4) - 2;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} className="mt-3 h-7 w-full" aria-hidden="true">
+      <polyline
+        points={points}
+        fill="none"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        opacity="0.9"
+      />
+    </svg>
+  );
+}
 
 // ── File upload helper ────────────────────────────────────────────────────────
 
@@ -745,6 +779,7 @@ export function FollowupTab({
   const [view,       setView]       = useState<'regras' | 'execucoes'>('regras');
   const [showNew,    setShowNew]    = useState(false);
   const [processing, setProcessing] = useState(false);
+  const [execSummary, setExecSummary] = useState<Execucao[]>([]);
 
   // New rule form
   const [newNome,    setNewNome]    = useState('');
@@ -759,7 +794,15 @@ export function FollowupTab({
       .catch(() => setLoading(false));
   }, [clientId]);
 
+  const loadExecSummary = useCallback(() => {
+    fetch(`/api/crm/followup/execucoes?clientId=${clientId}`)
+      .then(r => r.ok ? r.json() as Promise<Execucao[]> : [])
+      .then(setExecSummary)
+      .catch(() => setExecSummary([]));
+  }, [clientId]);
+
   useEffect(() => { loadRegras(); }, [loadRegras]);
+  useEffect(() => { loadExecSummary(); }, [loadExecSummary]);
 
   async function handleToggle(regra: Regra) {
     await fetch(`/api/crm/followup/regras/${regra.id}`, {
@@ -785,6 +828,7 @@ export function FollowupTab({
       body: JSON.stringify({ clientId }),
     }).catch(() => null);
     setProcessing(false);
+    loadExecSummary();
   }
 
   async function handleCreate() {
@@ -807,6 +851,55 @@ export function FollowupTab({
   }
 
   const selectedRegra = regras.find(r => r.id === selectedId) ?? null;
+  const regrasAtivas = regras.filter(regra => regra.ativo).length;
+  const mensagensConfiguradas = regras.reduce((sum, regra) => sum + regra.total_mensagens, 0);
+  const mensagensEnviadas = execSummary.filter(execucao => !!execucao.enviado_em).length;
+  const leadsImpactados = new Set(execSummary.map(execucao => execucao.lead_id).filter(Boolean)).size;
+  const taxaEngajamento = execSummary.length
+    ? Math.round((execSummary.filter(execucao => execucao.status === 'respondido').length / execSummary.length) * 100)
+    : 0;
+  const kpis = [
+    {
+      label: 'Total de regras',
+      value: regras.length.toLocaleString('pt-BR'),
+      sub: `${regrasAtivas} ativa${regrasAtivas !== 1 ? 's' : ''} · ${mensagensConfiguradas} mensagens`,
+      Icon: Users,
+      color: '#55f52f',
+      bg: 'bg-primary/10',
+      border: 'border-primary/20',
+      values: [2, 2, 3, 3, 4, regrasAtivas, regras.length, regrasAtivas + 1, regras.length],
+    },
+    {
+      label: 'Mensagens enviadas',
+      value: mensagensEnviadas.toLocaleString('pt-BR'),
+      sub: 'histórico de execuções',
+      Icon: MessageSquare,
+      color: '#60a5fa',
+      bg: 'bg-blue-500/10',
+      border: 'border-blue-500/20',
+      values: [0, 1, 1, 2, 3, mensagensEnviadas * 0.4, mensagensEnviadas * 0.7, mensagensEnviadas],
+    },
+    {
+      label: 'Leads impactados',
+      value: leadsImpactados.toLocaleString('pt-BR'),
+      sub: 'por regras de follow up',
+      Icon: Users,
+      color: '#a855f7',
+      bg: 'bg-purple-500/10',
+      border: 'border-purple-500/20',
+      values: [0, 1, 2, leadsImpactados * 0.35, leadsImpactados * 0.5, leadsImpactados * 0.8, leadsImpactados],
+    },
+    {
+      label: 'Taxa de engajamento',
+      value: `${taxaEngajamento}%`,
+      sub: 'respostas nas execuções',
+      Icon: CalendarDays,
+      color: '#eab308',
+      bg: 'bg-yellow-500/10',
+      border: 'border-yellow-500/20',
+      values: [8, 12, 10, 18, 16, 24, taxaEngajamento],
+    },
+  ];
 
   if (selectedRegra) {
     return (
@@ -821,110 +914,176 @@ export function FollowupTab({
 
   return (
     <div className="space-y-4">
-      {/* Tab switch */}
-      <div className="flex items-center gap-1 border-b border-border pb-0">
-        {([['regras', 'Regras'], ['execucoes', 'Monitoramento']] as const).map(([v, label]) => (
-          <button key={v} onClick={() => setView(v)}
-            className={cn('px-4 py-2 text-xs font-semibold border-b-2 -mb-px transition-colors',
-              view === v ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground')}>
-            {label}
-          </button>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {kpis.map(({ label, value, sub, Icon, color, bg, border, values }) => (
+          <div key={label} className={cn('overflow-hidden rounded-[var(--radius)] border bg-card p-4', border)}>
+            <div className="flex items-start gap-3">
+              <div className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius)] border', bg, border)}>
+                <Icon className="h-5 w-5" style={{ color }} />
+              </div>
+              <div className="min-w-0">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
+                <p className="mt-1 font-heading text-xl font-normal leading-none">{value}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{sub}</p>
+              </div>
+            </div>
+            <MiniSparkline color={color} values={values} />
+          </div>
         ))}
+      </div>
+
+      <div className="flex items-end justify-between gap-3 border-b border-border">
+        <div className="flex items-center gap-1">
+          {([['regras', 'Regras'], ['execucoes', 'Monitoramento']] as const).map(([v, label]) => (
+            <button key={v} onClick={() => setView(v)}
+              className={cn('px-4 py-2 text-xs font-semibold border-b-2 -mb-px transition-colors',
+                view === v ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground')}>
+              {label}
+            </button>
+          ))}
+        </div>
+        {view === 'regras' && (
+          <button onClick={() => setShowNew(v => !v)}
+            className="mb-2 flex items-center gap-1.5 rounded-[var(--radius)] bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors">
+            <Plus className="h-3.5 w-3.5" /> Nova regra
+          </button>
+        )}
       </div>
 
       {view === 'execucoes' ? (
         <ExecucoesView clientId={clientId} onProcess={handleProcessNow} processing={processing} />
       ) : (
         <>
-          {/* Header */}
-          <div className="flex items-center justify-between">
-            <p className="text-xs text-muted-foreground">
-              {regras.length} regra{regras.length !== 1 ? 's' : ''} configurada{regras.length !== 1 ? 's' : ''}
-            </p>
-            <button onClick={() => setShowNew(v => !v)}
-              className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors">
-              <Plus className="h-3.5 w-3.5" /> Nova regra
-            </button>
-          </div>
-
-          {/* New rule form */}
           {showNew && (
-            <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-3">
+            <div className="rounded-[var(--radius)] border border-primary/30 bg-primary/5 p-4 space-y-3">
               <p className="text-xs font-bold text-primary">Nova regra de follow up</p>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-3 md:grid-cols-2">
                 <label className="block space-y-1">
                   <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Nome da regra</span>
                   <input value={newNome} onChange={e => setNewNome(e.target.value)} placeholder="Ex: Follow up proposta"
-                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
+                    className="w-full rounded-[var(--radius)] border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
                 </label>
                 <label className="block space-y-1">
                   <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Status gatilho</span>
                   <select value={newGatilho} onChange={e => setNewGatilho(e.target.value)}
-                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary appearance-none">
+                    className="w-full rounded-[var(--radius)] border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary appearance-none">
                     <option value="">— Selecionar —</option>
                     {statusOptions.map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </label>
               </div>
               <div className="flex justify-end gap-2">
-                <button onClick={() => setShowNew(false)} className="rounded-lg border border-border px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground">Cancelar</button>
+                <button onClick={() => setShowNew(false)} className="rounded-[var(--radius)] border border-border px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground">Cancelar</button>
                 <button onClick={handleCreate} disabled={creating || !newNome.trim() || !newGatilho.trim()}
-                  className="rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+                  className="rounded-[var(--radius)] bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
                   {creating ? 'Criando…' : 'Criar regra'}
                 </button>
               </div>
             </div>
           )}
 
-          {/* Rule list */}
           {loading ? (
-            <div className="text-sm text-muted-foreground text-center py-8">Carregando…</div>
+            <div className="rounded-[var(--radius)] border border-border bg-card py-12 text-center text-sm text-muted-foreground">Carregando…</div>
           ) : regras.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-border p-10 text-center">
+            <div className="rounded-[var(--radius)] border border-dashed border-border bg-card p-10 text-center">
               <Zap className="h-9 w-9 text-muted-foreground/30 mx-auto mb-3" />
               <p className="text-sm font-semibold text-muted-foreground">Nenhuma regra ainda</p>
               <p className="text-xs text-muted-foreground mt-1">Crie uma regra para disparar mensagens automáticas quando um lead muda de status.</p>
             </div>
           ) : (
-            <div className="space-y-2">
-              {regras.map(regra => (
-                <div key={regra.id}
-                  className={cn('group rounded-xl border bg-card p-4 transition-all hover:border-primary/30', regra.ativo ? 'border-border' : 'border-border/50 opacity-60')}>
-                  <div className="flex items-center gap-3">
-                    {/* Toggle */}
-                    <button onClick={() => handleToggle(regra)} title={regra.ativo ? 'Desativar' : 'Ativar'}
-                      className="shrink-0 transition-colors">
-                      {regra.ativo
-                        ? <ToggleRight className="h-5 w-5 text-primary" />
-                        : <ToggleLeft  className="h-5 w-5 text-muted-foreground" />}
-                    </button>
+            <div className="rounded-[var(--radius)] border border-border bg-card p-4">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <p className="text-sm font-semibold">Regras configuradas</p>
+                <p className="text-xs text-muted-foreground">
+                  {regras.length} regra{regras.length !== 1 ? 's' : ''} configurada{regras.length !== 1 ? 's' : ''}
+                </p>
+              </div>
 
-                    <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setSelectedId(regra.id)}>
-                      <p className="text-sm font-bold truncate">{regra.nome}</p>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <span className="text-[10px] text-muted-foreground">Gatilho:</span>
-                        <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">{regra.status_gatilho}</span>
-                        <span className="text-[10px] text-muted-foreground">
-                          {regra.total_mensagens} mensagem{regra.total_mensagens !== 1 ? 's' : ''}
-                        </span>
+              <div className="overflow-hidden rounded-[var(--radius)] border border-border">
+                <div className="hidden grid-cols-[56px_minmax(180px,1fr)_minmax(150px,0.7fr)_minmax(130px,0.6fr)_120px] border-b border-border bg-muted/20 px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-muted-foreground md:grid">
+                  <span>Ordem</span>
+                  <span>Nome da regra</span>
+                  <span>Disparo</span>
+                  <span>Status</span>
+                  <span className="text-right">Ações</span>
+                </div>
+
+                {regras.map((regra, index) => (
+                  <div key={regra.id}
+                    className={cn('group grid gap-3 border-b border-border/60 px-4 py-3 last:border-b-0 md:grid-cols-[56px_minmax(180px,1fr)_minmax(150px,0.7fr)_minmax(130px,0.6fr)_120px] md:items-center', regra.ativo ? '' : 'opacity-60')}>
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-primary/20 bg-primary/10 text-xs font-bold text-primary">
+                        {String(index + 1).padStart(2, '0')}
+                      </div>
+                      <div className="min-w-0 md:hidden">
+                        <p className="text-sm font-bold truncate">{regra.nome}</p>
+                        <p className="text-xs text-muted-foreground">{regra.status_gatilho}</p>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-1 shrink-0">
+                    <button type="button" onClick={() => setSelectedId(regra.id)} className="hidden min-w-0 text-left md:block">
+                      <p className="text-sm font-bold truncate">{regra.nome}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {regra.total_mensagens} mensagem{regra.total_mensagens !== 1 ? 's' : ''} configurada{regra.total_mensagens !== 1 ? 's' : ''}
+                      </p>
+                    </button>
+
+                    <div className="flex items-center gap-2 text-sm">
+                      <Zap className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0">
+                        <p className="font-semibold truncate">{regra.status_gatilho}</p>
+                        <p className="text-xs text-muted-foreground">Após mudança de status</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 text-sm">
+                      <span className={cn('h-1.5 w-1.5 rounded-full', regra.ativo ? 'bg-primary' : 'bg-muted-foreground')} />
+                      <div>
+                        <p className={cn('font-semibold', regra.ativo ? 'text-primary' : 'text-muted-foreground')}>{regra.ativo ? 'Ativa' : 'Inativa'}</p>
+                        <p className="text-xs text-muted-foreground">Execução automática</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-2">
+                      <button onClick={() => handleToggle(regra)} title={regra.ativo ? 'Desativar' : 'Ativar'}
+                        className="shrink-0 transition-colors">
+                        {regra.ativo
+                          ? <ToggleRight className="h-6 w-6 text-primary" />
+                          : <ToggleLeft  className="h-6 w-6 text-muted-foreground" />}
+                      </button>
                       <button onClick={() => setSelectedId(regra.id)}
-                        className="flex h-7 w-7 items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-all">
-                        <ChevronRight className="h-3.5 w-3.5" />
+                        className="flex h-8 w-8 items-center justify-center rounded-[var(--radius)] border border-border text-muted-foreground hover:text-foreground transition-colors">
+                        <Paperclip className="h-3.5 w-3.5" />
                       </button>
                       <button onClick={() => handleDelete(regra.id)}
-                        className="flex h-7 w-7 items-center justify-center rounded-lg border border-red-500/20 text-red-400 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all">
-                        <Trash2 className="h-3.5 w-3.5" />
+                        className="flex h-8 w-8 items-center justify-center rounded-[var(--radius)] border border-border text-muted-foreground hover:text-red-400 transition-colors">
+                        <MoreVertical className="h-3.5 w-3.5" />
                       </button>
                     </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           )}
+
+          <div className="rounded-[var(--radius)] border border-primary/20 bg-primary/10 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-3">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-primary/25 bg-primary/15">
+                  <Zap className="h-4 w-4 text-primary" />
+                </div>
+                <div>
+                  <p className="text-sm font-bold">Como funcionam as regras de follow up?</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    As regras disparam mensagens automáticas conforme o status do lead e o tempo desde o último contato.
+                  </p>
+                </div>
+              </div>
+              <button className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-[var(--radius)] border border-border bg-background px-4 text-xs font-semibold text-foreground hover:bg-muted">
+                Ver guia completo <ExternalLink className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
         </>
       )}
     </div>

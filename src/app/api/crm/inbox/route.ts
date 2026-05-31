@@ -8,6 +8,17 @@ export async function GET(req: NextRequest) {
 
   const pool = makeServerPool();
   try {
+    const { rows: columnRows } = await pool.query(
+      `SELECT column_name
+       FROM information_schema.columns
+       WHERE table_schema = 'public'
+         AND table_name = 'crm_leads'
+         AND column_name IN ('profile_picture_url', 'picture_url', 'avatar_url')`,
+    );
+    const avatarColumn = ['profile_picture_url', 'picture_url', 'avatar_url']
+      .find(column => columnRows.some(row => row.column_name === column));
+    const avatarSelect = avatarColumn ? `l.${avatarColumn}` : `NULL::text`;
+
     const { rows } = await pool.query(
       `SELECT
          l.id,
@@ -28,6 +39,7 @@ export async function GET(req: NextRequest) {
          l.status,
          l.fechou,
          l.valor_rs,
+         ${avatarSelect} AS avatar_url,
          l.created_at,
          l.updated_at,
          m.text        AS last_message,

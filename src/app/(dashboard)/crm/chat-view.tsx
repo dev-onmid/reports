@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { Fragment, useEffect, useState, useRef, useCallback } from 'react';
 import { cn } from '@/lib/utils';
 import {
   Search, MessageCircle, RefreshCw, Send, Paperclip,
   Image, Mic, Video, FileText, MapPin, X, CheckCircle2,
-  AlertCircle, History,
+  AlertCircle, History, Filter, MoreHorizontal, Smile,
 } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -22,6 +22,11 @@ type InboxLead = {
   last_direction: 'in' | 'out' | null;
   last_message_at: string | null;
   unread_count: number;
+  avatar_url?: string | null;
+  profile_picture_url?: string | null;
+  picture_url?: string | null;
+  avatarUrl?: string | null;
+  profilePicUrl?: string | null;
   created_at: string;
 };
 
@@ -54,6 +59,34 @@ function timeFmt(iso: string | null) {
   return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
 }
 
+function msgTimeFmt(iso: string) {
+  return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+}
+
+function leadName(lead: InboxLead | null) {
+  if (!lead) return '—';
+  return lead.nome ?? lead.numero ?? '—';
+}
+
+function leadAvatarUrl(lead: InboxLead | null) {
+  if (!lead) return null;
+  return lead.avatar_url ?? lead.profile_picture_url ?? lead.picture_url ?? lead.avatarUrl ?? lead.profilePicUrl ?? null;
+}
+
+function normalizeNumber(raw: string | null | undefined) {
+  return (raw ?? '').replace(/\D/g, '');
+}
+
+function dateSeparatorLabel(iso: string): string {
+  const d = new Date(iso);
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return 'Hoje';
+  if (d.toDateString() === yesterday.toDateString()) return 'Ontem';
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
 function isImageUrl(url: string) {
   return /\.(jpe?g|png|gif|webp|avif|svg)(\?.*)?$/i.test(url);
 }
@@ -77,61 +110,123 @@ function ChannelDot({ canal }: { canal: string | null }) {
 
 function StatusDot({ status }: { status: string | null }) {
   const active = status === 'Em Atendimento' || status === 'Agendado' || status === 'Reagendado';
-  return <span className={cn('h-2 w-2 rounded-full shrink-0', active ? 'bg-sky-400' : 'bg-zinc-600')} />;
+  return <span className={cn('h-2 w-2 rounded-full shrink-0', active ? 'bg-primary' : 'bg-zinc-600')} />;
+}
+
+function ContactAvatar({
+  lead,
+  size = 'md',
+  showChannel = false,
+  avatarOverride,
+}: {
+  lead: InboxLead;
+  size?: 'sm' | 'md' | 'lg';
+  showChannel?: boolean;
+  avatarOverride?: string | null;
+}) {
+  const avatarUrl = avatarOverride ?? leadAvatarUrl(lead);
+  const sizeClass = size === 'lg' ? 'h-12 w-12' : size === 'sm' ? 'h-9 w-9' : 'h-10 w-10';
+  const initial = leadName(lead).slice(0, 1).toUpperCase();
+
+  return (
+    <div className={cn('relative shrink-0 rounded-full bg-muted/60', sizeClass)}>
+      {avatarUrl ? (
+        <>
+          <div className="flex h-full w-full items-center justify-center rounded-full bg-muted text-xs font-bold text-muted-foreground">
+            {initial}
+          </div>
+          <img
+            src={avatarUrl}
+            alt={leadName(lead)}
+            className="absolute inset-0 h-full w-full rounded-full object-cover"
+            onError={event => { (event.currentTarget as HTMLImageElement).style.display = 'none'; }}
+          />
+        </>
+      ) : (
+        <div className="flex h-full w-full items-center justify-center rounded-full bg-muted text-xs font-bold text-muted-foreground">
+          {initial}
+        </div>
+      )}
+      <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-card bg-primary" />
+      {showChannel && (
+        <span className="absolute -bottom-1 -left-1">
+          <ChannelDot canal={lead.canal} />
+        </span>
+      )}
+    </div>
+  );
+}
+
+function DateSeparator({ label }: { label: string }) {
+  return (
+    <div className="flex items-center justify-center my-3">
+      <span className="rounded-[var(--radius)] border border-border bg-card px-3 py-1 text-[11px] font-medium text-muted-foreground">
+        {label}
+      </span>
+    </div>
+  );
 }
 
 function MessageBubble({ msg }: { msg: CrmMessage }) {
   const isOut = msg.direction === 'out';
-  const time = new Date(msg.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  const t = msg.tipo ?? 'texto';
+  const text = msg.text;
+  const time = msgTimeFmt(msg.created_at);
 
   const content = (() => {
-    const t = msg.tipo ?? 'texto';
-    const text = msg.text;
-
     if (t === 'localizacao') {
       return (
         <div className="flex items-center gap-2">
           <MapPin className="h-4 w-4 shrink-0 text-emerald-400" />
-          <span className="text-xs">{text}</span>
+          <span className="text-sm">{text}</span>
         </div>
       );
     }
     if (t === 'imagem' || (t === 'texto' && isImageUrl(text))) {
       return (
-        <div className="space-y-1.5">
-          <img src={text} alt="Imagem" className="max-w-full rounded-xl object-cover max-h-56" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-          <p className="text-xs text-muted-foreground break-all opacity-70">{text}</p>
+        <div className="space-y-1">
+          <img src={text} alt="Imagem" className="max-w-full rounded-lg object-cover max-h-60"
+            onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
         </div>
       );
     }
     if (t === 'audio' || (t === 'texto' && isAudioUrl(text))) {
-      return <audio controls src={text} className="max-w-full h-10" />;
+      return <audio controls src={text} className="max-w-full h-9 rounded-lg" />;
     }
     if (t === 'video' || (t === 'texto' && isVideoUrl(text))) {
-      return <video controls src={text} className="max-w-full max-h-48 rounded-xl" />;
+      return <video controls src={text} className="max-w-full max-h-52 rounded-lg" />;
     }
     if (t === 'documento') {
       return (
         <a href={text} target="_blank" rel="noopener noreferrer"
-          className="flex items-center gap-2 rounded-lg border border-border/50 bg-background/50 px-3 py-2 text-xs hover:bg-muted/50 transition-colors">
-          <FileText className="h-4 w-4 text-primary shrink-0" />
+          className="flex items-center gap-2 rounded-lg bg-black/20 px-3 py-2 text-xs hover:bg-black/30 transition-colors">
+          <FileText className="h-4 w-4 shrink-0" />
           <span className="truncate">{text.split('/').pop() ?? 'Documento'}</span>
         </a>
       );
     }
-    return <p className="text-sm whitespace-pre-wrap break-words">{text}</p>;
+    return <p className="text-[13.5px] leading-[1.45] whitespace-pre-wrap break-words">{text}</p>;
   })();
 
   return (
-    <div className={cn('flex', isOut ? 'justify-end' : 'justify-start')}>
+    <div className={cn('flex px-3', isOut ? 'justify-end' : 'justify-start')}>
       <div className={cn(
-        'max-w-[72%] rounded-2xl px-3.5 py-2.5 shadow-sm',
+        'relative max-w-[72%] rounded-[var(--radius)] px-3 pb-1.5 pt-2 shadow-sm',
         isOut
-          ? 'bg-primary/25 text-foreground rounded-br-sm'
-          : 'bg-card border border-border text-foreground rounded-bl-sm',
+          ? 'bg-primary/25 text-foreground border border-primary/20'
+          : 'bg-card text-foreground border border-border',
       )}>
         {content}
-        <p className="mt-1 text-[10px] opacity-50 text-right select-none">{time}</p>
+        <div className="flex items-center justify-end gap-1 mt-0.5">
+          <span className={cn('text-[11px] select-none', isOut ? 'text-[#9BB5A8]' : 'text-[#8696A0]')}>
+            {time}
+          </span>
+          {isOut && (
+            <svg viewBox="0 0 18 11" className="h-2.5 w-[18px] shrink-0 text-[#53BDEB]" fill="currentColor">
+              <path d="M17.394.601L6.35 11.648 1.606 6.903l-.803.803L6.35 13.255 18.197 1.404 17.394.601zM1 5.702L.197 6.505l3.396 3.395.803-.803L1 5.702zm10.646.95l-5.26 5.26-.804-.803 5.26-5.26.804.803z" />
+            </svg>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -255,6 +350,7 @@ export function ChatView({ clientId }: { clientId: string }) {
   const [syncing,    setSyncing]    = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
   const [sendError,  setSendError]  = useState<string | null>(null);
+  const [chatAvatars, setChatAvatars] = useState<Record<string, string>>({});
 
   const messagesAreaRef = useRef<HTMLDivElement>(null);
   const pollRef         = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -306,6 +402,20 @@ export function ChatView({ clientId }: { clientId: string }) {
     const id = setInterval(loadInbox, 8_000);
     return () => clearInterval(id);
   }, [loadInbox]);
+
+  useEffect(() => {
+    fetch(`/api/disparos/extract/chats?clientId=${clientId}&type=conversations`)
+      .then(r => r.ok ? r.json() : [])
+      .then((rows: Array<{ phone?: string; profilePicUrl?: string }>) => {
+        const next: Record<string, string> = {};
+        rows.forEach(row => {
+          const phone = normalizeNumber(row.phone);
+          if (phone && row.profilePicUrl) next[phone] = row.profilePicUrl;
+        });
+        setChatAvatars(next);
+      })
+      .catch(() => {});
+  }, [clientId]);
 
   // ── Messages auto-refresh ───────────────────────────────────────────────────
   // Only keeps the 5s poll alive for conversations with activity in the last 3 days.
@@ -431,14 +541,15 @@ export function ChatView({ clientId }: { clientId: string }) {
     { tipo: 'documento',  label: 'Documento',  icon: <FileText  className="h-4 w-4" />, color: 'text-amber-400' },
     { tipo: 'localizacao', label: 'Localização', icon: <MapPin  className="h-4 w-4" />, color: 'text-emerald-400' },
   ];
+  const selectedAvatar = selectedLead ? chatAvatars[normalizeNumber(selectedLead.numero)] : null;
 
   return (
     <>
       {/* ── Main layout: fills available space, no external scroll ── */}
-      <div className="flex h-full min-h-0 rounded-xl border border-border overflow-hidden bg-card">
+      <div className="flex h-full min-h-0 overflow-hidden rounded-[var(--radius)] border border-border bg-card">
 
         {/* ── Left: Inbox list ── */}
-        <div className="flex flex-col w-[300px] shrink-0 border-r border-border bg-card min-h-0">
+        <div className="flex w-[340px] shrink-0 flex-col border-r border-border bg-card min-h-0">
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
             <div className="flex items-center gap-2">
@@ -449,7 +560,7 @@ export function ChatView({ clientId }: { clientId: string }) {
               )}
             </div>
             <div className="flex items-center gap-1.5">
-              <button onClick={loadInbox} className="text-muted-foreground hover:text-foreground transition-colors" title="Atualizar">
+              <button onClick={loadInbox} className="flex h-8 w-8 items-center justify-center rounded-[var(--radius)] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors" title="Atualizar">
                 <RefreshCw className="h-3.5 w-3.5" />
               </button>
               <button
@@ -471,19 +582,19 @@ export function ChatView({ clientId }: { clientId: string }) {
                     })
                     .catch(() => alert('Erro na limpeza'));
                 }}
-                className="text-muted-foreground hover:text-amber-400 transition-colors"
+                className="flex h-8 w-8 items-center justify-center rounded-[var(--radius)] text-muted-foreground hover:bg-muted hover:text-amber-400 transition-colors"
                 title="Limpar grupos e nomes incorretos"
               >
-                <AlertCircle className="h-3.5 w-3.5" />
+                <Filter className="h-3.5 w-3.5" />
               </button>
             </div>
           </div>
           {/* Search */}
-          <div className="px-3 py-2 border-b border-border shrink-0">
+          <div className="px-3 py-3 border-b border-border shrink-0">
             <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground pointer-events-none" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
               <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar contato..."
-                className="w-full rounded-lg border border-border bg-background pl-7 pr-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary" />
+                className="h-9 w-full rounded-[var(--radius)] border border-border bg-background pl-9 pr-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
             </div>
           </div>
           {/* Lead list — ONLY this section scrolls on the left */}
@@ -495,25 +606,22 @@ export function ChatView({ clientId }: { clientId: string }) {
             ) : filtered.map(lead => (
               <button key={lead.id} onClick={() => setSelectedId(lead.id)}
                 className={cn(
-                  'w-full flex items-start gap-3 px-4 py-3 text-left border-b border-border/40 hover:bg-muted/30 transition-colors',
-                  selectedId === lead.id && 'bg-primary/10 border-l-2 border-l-primary',
+                  'w-full flex items-start gap-3 border-b border-border/40 px-4 py-3 text-left transition-colors hover:bg-muted/30',
+                  selectedId === lead.id && 'border-l-2 border-l-primary bg-primary/10',
                 )}>
-                <div className="h-9 w-9 shrink-0 rounded-full bg-muted/60 flex items-center justify-center relative">
-                  <span className="text-xs font-bold text-muted-foreground">
-                    {(lead.nome ?? '?').slice(0, 1).toUpperCase()}
-                  </span>
-                  <div className="absolute -bottom-0.5 -right-0.5">
-                    <ChannelDot canal={lead.canal} />
-                  </div>
-                </div>
+                <ContactAvatar
+                  lead={lead}
+                  size="sm"
+                  showChannel
+                  avatarOverride={chatAvatars[normalizeNumber(lead.numero)]}
+                />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-1">
                     <div className="flex items-center gap-1.5 min-w-0">
-                      <StatusDot status={lead.status} />
-                      <span className="text-xs font-semibold truncate">{lead.nome ?? lead.numero ?? '—'}</span>
+                      <span className="text-sm font-semibold truncate">{leadName(lead)}</span>
                       {/* Live indicator — auto-updates enabled */}
                       {(Date.now() - new Date(lead.last_message_at ?? lead.created_at).getTime()) < 3 * 86_400_000 && (
-                        <span className="shrink-0 h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" title="Tempo real ativo" />
+                        <span className="shrink-0 h-1.5 w-1.5 rounded-full bg-primary animate-pulse" title="Tempo real ativo" />
                       )}
                     </div>
                     <span className="text-[10px] text-muted-foreground shrink-0">{timeFmt(lead.last_message_at ?? lead.created_at)}</span>
@@ -523,7 +631,7 @@ export function ChatView({ clientId }: { clientId: string }) {
                     {lead.last_message ?? 'Nenhuma mensagem'}
                   </p>
                   <div className="flex items-center gap-1.5 mt-1">
-                    {lead.status && <span className="text-[9px] font-bold text-muted-foreground/60">{lead.status}</span>}
+                    {lead.status && <span className="text-[10px] text-muted-foreground">{lead.status}</span>}
                     {Number(lead.unread_count) > 0 && (
                       <span className="ml-auto rounded-full bg-primary px-1.5 py-0.5 text-[9px] font-bold text-black">
                         {lead.unread_count}
@@ -537,7 +645,7 @@ export function ChatView({ clientId }: { clientId: string }) {
         </div>
 
         {/* ── Right: Conversation ── */}
-        <div className="flex flex-col flex-1 min-w-0 min-h-0 bg-background/50">
+        <div className="flex min-w-0 min-h-0 flex-1 flex-col bg-background/50">
           {!selectedLead ? (
             <div className="flex flex-1 items-center justify-center">
               <div className="text-center space-y-2">
@@ -548,28 +656,26 @@ export function ChatView({ clientId }: { clientId: string }) {
           ) : (
             <>
               {/* Conversation header */}
-              <div className="flex items-center gap-3 px-4 py-3 border-b border-border bg-card shrink-0">
-                <div className="h-8 w-8 rounded-full bg-muted/60 flex items-center justify-center shrink-0">
-                  <span className="text-xs font-bold">{(selectedLead.nome ?? selectedLead.numero ?? '?').slice(0, 1).toUpperCase()}</span>
-                </div>
+              <div className="flex items-center gap-3 border-b border-border bg-card px-4 py-3 shrink-0">
+                <ContactAvatar lead={selectedLead} size="md" avatarOverride={selectedAvatar} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <p className="text-sm font-semibold truncate">{selectedLead.nome ?? selectedLead.numero ?? '—'}</p>
-                    <ChannelDot canal={selectedLead.canal} />
+                    <p className="text-sm font-semibold truncate">{leadName(selectedLead)}</p>
+                    <StatusDot status={selectedLead.status} />
                   </div>
-                  {selectedLead.numero && <p className="text-[11px] text-muted-foreground">{selectedLead.numero}</p>}
+                  <p className="text-xs text-muted-foreground">Online agora</p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   {selectedLead.status && (
-                    <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-muted/50 text-muted-foreground">{selectedLead.status}</span>
+                    <span className="hidden text-xs text-muted-foreground sm:inline">{selectedLead.status}</span>
                   )}
                   {selectedLead.fechou && (
-                    <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-emerald-500/15 text-emerald-400">Fechou</span>
+                    <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-primary/15 text-primary">Fechou</span>
                   )}
                   {/* Live / static indicator + sync button */}
                   {isRecentLead ? (
-                    <span className="flex items-center gap-1 text-[10px] font-semibold text-emerald-400 px-2 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20">
-                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    <span className="flex items-center gap-1 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
+                      <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
                       Ao vivo
                     </span>
                   ) : (
@@ -586,6 +692,12 @@ export function ChatView({ clientId }: { clientId: string }) {
                     <History className="h-3 w-3" />
                     {syncing ? 'Buscando…' : 'Histórico'}
                   </button>
+                  <button
+                    className="flex h-9 w-9 items-center justify-center rounded-[var(--radius)] border border-border text-muted-foreground hover:bg-muted hover:text-foreground"
+                    title="Mais opções"
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                  </button>
                 </div>
               </div>
               {/* Sync result toast */}
@@ -598,14 +710,24 @@ export function ChatView({ clientId }: { clientId: string }) {
               {/* Messages — ONLY this scrolls */}
               <div
                 ref={messagesAreaRef}
-                className="flex-1 overflow-y-auto min-h-0 px-4 py-4 space-y-2"
+                className="min-h-0 flex-1 overflow-y-auto px-4 py-4 space-y-2 [background-image:linear-gradient(rgba(14,15,20,0.84),rgba(14,15,20,0.84)),radial-gradient(circle_at_1px_1px,rgba(255,255,255,0.08)_1px,transparent_0)] [background-size:auto,18px_18px]"
               >
                 {msgLoading && messages.length === 0 ? (
                   <div className="text-center text-xs text-muted-foreground py-8">Carregando mensagens…</div>
                 ) : messages.length === 0 ? (
                   <div className="text-center text-xs text-muted-foreground italic py-8">Nenhuma mensagem ainda.</div>
                 ) : (
-                  messages.map(m => <MessageBubble key={m.id} msg={m} />)
+                  messages.map((m, index) => {
+                    const previous = messages[index - 1];
+                    const showDate = !previous
+                      || new Date(previous.created_at).toDateString() !== new Date(m.created_at).toDateString();
+                    return (
+                      <Fragment key={m.id}>
+                        {showDate && <DateSeparator label={dateSeparatorLabel(m.created_at)} />}
+                        <MessageBubble msg={m} />
+                      </Fragment>
+                    );
+                  })
                 )}
               </div>
 
@@ -623,12 +745,12 @@ export function ChatView({ clientId }: { clientId: string }) {
                   </div>
                 )}
 
-                <div className="flex items-end gap-2 px-3 py-2.5">
+                <div className="flex items-end gap-3 px-3 py-3">
                   {/* Attachment button */}
                   <div className="relative shrink-0">
                     <button
                       onClick={() => setAttachMenu(v => !v)}
-                      className="flex h-9 w-9 items-center justify-center rounded-xl border border-border text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                      className="flex h-11 w-11 items-center justify-center rounded-[var(--radius)] border border-border text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
                       title="Anexar mídia"
                     >
                       <Paperclip className="h-4 w-4" />
@@ -655,15 +777,22 @@ export function ChatView({ clientId }: { clientId: string }) {
                     onKeyDown={handleKeyDown}
                     placeholder="Mensagem… (Enter enviar, Shift+Enter quebra linha)"
                     rows={1}
-                    className="flex-1 resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary overflow-hidden"
-                    style={{ minHeight: 36, maxHeight: 140 }}
+                    className="flex-1 resize-none rounded-[var(--radius)] border border-border bg-background px-3 py-3 pr-11 text-sm focus:outline-none focus:ring-1 focus:ring-primary overflow-hidden"
+                    style={{ minHeight: 44, maxHeight: 140 }}
                   />
+                  <button
+                    type="button"
+                    className="-ml-14 mb-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius)] text-muted-foreground hover:text-foreground"
+                    title="Emoji"
+                  >
+                    <Smile className="h-4 w-4" />
+                  </button>
 
                   {/* Send button */}
                   <button
                     onClick={() => void sendText()}
                     disabled={!replyText.trim() || sending}
-                    className="h-9 w-9 shrink-0 flex items-center justify-center rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 transition-colors"
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[var(--radius)] bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 transition-colors"
                     title="Enviar"
                   >
                     <Send className="h-4 w-4" />

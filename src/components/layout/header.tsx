@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import { Bell, Search, User } from 'lucide-react';
+import { Bell, Menu, Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -9,7 +9,7 @@ import { getAuthSession, type AuthSession } from '@/lib/auth-store';
 import { BackButton } from './back-button';
 import { ThemeToggle } from '@/components/theme-toggle';
 
-export function Header() {
+export function Header({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
   const [session, setSession] = useState<AuthSession | null>(null);
 
   useEffect(() => {
@@ -24,7 +24,16 @@ export function Header() {
     .toUpperCase() || 'ON';
 
   return (
-    <header className="h-14 border-b border-border bg-background/95 backdrop-blur-sm sticky top-0 z-10 flex items-center gap-1.5 px-4">
+    <header className="h-14 border-b border-border bg-background/95 backdrop-blur-sm sticky top-0 z-10 flex items-center gap-1.5 px-3 sm:px-4">
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        onClick={onOpenSidebar}
+        className="md:hidden"
+        aria-label="Abrir navegação"
+      >
+        <Menu className="h-5 w-5" />
+      </Button>
       <BackButton />
 
       <div className="flex-1" />
@@ -46,7 +55,7 @@ export function Header() {
         <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-primary" />
       </button>
 
-      <div className="flex items-center gap-2.5 border-l border-border pl-3">
+      <div className="flex items-center gap-2.5 border-l border-border pl-2 sm:pl-3">
         <div className="hidden md:flex flex-col items-end leading-none gap-0.5">
           <span className="text-sm font-medium">{session?.name ?? 'Usuário'}</span>
           <span className="text-[11px] text-muted-foreground">{session?.role ?? ''}</span>

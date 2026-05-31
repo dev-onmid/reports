@@ -160,7 +160,7 @@ export async function POST(
       return Response.json({ ok: false, error: 'telefone não identificado' }, { status: 400 });
     }
 
-    const { phone, fromMe, text: messageText, ctwaClid, sourceId, pushName } = msg;
+    const { phone, fromMe, text: messageText, ctwaClid, sourceId, pushName, profilePictureUrl } = msg;
 
     // ── CRM: upsert lead + save message (always, regardless of pixel config) ──
     const utmData = extractUtm(messageText);
@@ -170,12 +170,17 @@ export async function POST(
     // Only set nome from pushName on incoming messages (fromMe=false).
     const contactName = fromMe ? null : (pushName ?? null);
 
+    await pool.query(
+      `ALTER TABLE public.crm_leads ADD COLUMN IF NOT EXISTS profile_picture_url TEXT`,
+    ).catch(() => null);
+
     const { rows: [crmLead] } = await pool.query(
       `INSERT INTO public.crm_leads
-         (client_id, nome, numero, canal, origin, ctwa_clid, utm_source, instance_id, data, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_DATE, 'Em Atendimento')
+         (client_id, nome, numero, canal, origin, ctwa_clid, utm_source, instance_id, data, status, profile_picture_url)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_DATE, 'Em Atendimento', $9)
        ON CONFLICT (client_id, numero) DO UPDATE SET
          nome       = COALESCE(EXCLUDED.nome, crm_leads.nome),
+         profile_picture_url = COALESCE(EXCLUDED.profile_picture_url, crm_leads.profile_picture_url),
          origin     = CASE
                         WHEN crm_leads.origin IN ('organic', 'cliente')
                              AND EXCLUDED.origin NOT IN ('organic', 'cliente')
@@ -191,7 +196,7 @@ export async function POST(
          updated_at = NOW()
        RETURNING id`,
       [clientId, contactName, phone, originToCanal(origin),
-       origin, ctwaClid ?? null, utmData.utm_source ?? null, instanceId],
+       origin, ctwaClid ?? null, utmData.utm_source ?? null, instanceId, profilePictureUrl ?? null],
     );
 
     if (crmLead && messageText) {
