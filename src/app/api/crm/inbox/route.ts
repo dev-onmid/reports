@@ -11,12 +11,16 @@ export async function GET(req: NextRequest) {
     const { rows } = await pool.query(
       `SELECT
          l.id,
-         -- Only show the stored nome if we have at least one inbound message from
-         -- this contact. Otherwise the name was set from the instance owner's
-         -- pushName on an outbound-only conversation and would be misleading.
+         -- Só mostra o nome salvo se o contato já enviou mensagem de entrada.
+         -- Considera todos os leads com o mesmo número (webhook vs CRM manual).
          CASE WHEN EXISTS (
            SELECT 1 FROM public.crm_messages ix
-           WHERE ix.lead_id = l.id AND ix.direction = 'in'
+           WHERE ix.lead_id IN (
+             SELECT id FROM public.crm_leads l2
+             WHERE l2.client_id = l.client_id AND l2.numero = l.numero AND l2.numero IS NOT NULL
+             UNION SELECT l.id
+           )
+           AND ix.direction = 'in'
          ) THEN l.nome ELSE NULL END AS nome,
          l.numero,
          l.canal,
@@ -32,15 +36,27 @@ export async function GET(req: NextRequest) {
          COUNT(m2.id)  AS unread_count
        FROM public.crm_leads l
        LEFT JOIN LATERAL (
+         -- Busca última mensagem de qualquer lead com o mesmo número do cliente
          SELECT text, direction, created_at
          FROM public.crm_messages
-         WHERE lead_id = l.id
+         WHERE lead_id IN (
+           SELECT id FROM public.crm_leads l2
+           WHERE l2.client_id = l.client_id
+             AND l2.numero    = l.numero
+             AND l2.numero IS NOT NULL
+           UNION SELECT l.id
+         )
          ORDER BY created_at DESC
          LIMIT 1
        ) m ON true
        LEFT JOIN public.crm_messages m2
-         ON m2.lead_id = l.id AND m2.direction = 'in'
-            AND m2.created_at > COALESCE(l.updated_at, l.created_at - interval '1 day')
+         ON m2.lead_id IN (
+           SELECT id FROM public.crm_leads l3
+           WHERE l3.client_id = l.client_id AND l3.numero = l.numero AND l3.numero IS NOT NULL
+           UNION SELECT l.id
+         )
+         AND m2.direction = 'in'
+         AND m2.created_at > COALESCE(l.updated_at, l.created_at - interval '1 day')
        WHERE l.client_id = $1
          AND (l.numero IS NULL OR l.numero ~ '^[0-9+]{7,15}$')
        GROUP BY l.id, m.text, m.direction, m.created_at

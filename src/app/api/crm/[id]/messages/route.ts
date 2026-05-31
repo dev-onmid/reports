@@ -9,12 +9,21 @@ export async function GET(
   const { id } = await params;
   const pool = makeServerPool();
   try {
+    // Busca por lead_id direto E por qualquer outro lead do mesmo cliente
+    // com o mesmo número de telefone — resolve casos onde o webhook criou
+    // um lead com UUID diferente do lead criado pelo formulário do CRM.
     const { rows } = await pool.query(
-      `SELECT id, direction, text, tipo, created_at
+      `SELECT DISTINCT ON (created_at, id) id, direction, text, tipo, created_at
        FROM public.crm_messages
        WHERE lead_id = $1
-       ORDER BY created_at ASC
-       LIMIT 300`,
+          OR lead_id IN (
+            SELECT l2.id FROM public.crm_leads l2
+            WHERE l2.client_id = (SELECT client_id FROM public.crm_leads WHERE id = $1)
+              AND l2.numero    = (SELECT numero    FROM public.crm_leads WHERE id = $1)
+              AND l2.numero IS NOT NULL
+          )
+       ORDER BY created_at ASC, id ASC
+       LIMIT 500`,
       [id],
     );
     return Response.json({ messages: rows });
