@@ -145,8 +145,12 @@ function estimateCostUsd(tokens: number) {
   return tokens * 0.0000008;
 }
 
+function isTemperature(value: unknown): value is Temperature {
+  return value === 'quente' || value === 'morno' || value === 'frio';
+}
+
 async function loadCriteria(pool: Pool, clientId: string): Promise<Record<Temperature, string>> {
-  const { rows } = await pool.query(
+  const { rows } = await pool.query<{ temperatura: string; criterios: string }>(
     `SELECT temperatura, criterios
       FROM public.crm_temperatura_criterios
       WHERE client_id = $1 OR client_id IS NULL
@@ -155,7 +159,7 @@ async function loadCriteria(pool: Pool, clientId: string): Promise<Record<Temper
   );
   const criteria = { ...DEFAULT_CRITERIA };
   for (const row of rows) {
-    if (row.temperatura === 'quente' || row.temperatura === 'morno' || row.temperatura === 'frio') {
+    if (isTemperature(row.temperatura)) {
       criteria[row.temperatura] = row.criterios;
     }
   }
