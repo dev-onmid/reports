@@ -1,6 +1,14 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { getClientInstance, sendFollowupMessage } from '@/lib/followup-send';
+import { analisarConversa } from '@/lib/crm-ai-analysis';
+
+function analyzeLeadInBackground(leadId: string) {
+  const pool = makeServerPool();
+  void analisarConversa(pool, leadId)
+    .catch(err => console.error('[messages analyzeLeadInBackground]', err))
+    .finally(() => { void pool.end(); });
+}
 
 export async function GET(
   _req: NextRequest,
@@ -75,7 +83,7 @@ export async function POST(
   const pool = makeServerPool();
   try {
     const { rows: [lead] } = await pool.query(
-      `SELECT client_id, numero, nome, status, origin, canal FROM public.crm_leads WHERE id = $1`,
+      `SELECT client_id, numero, nome, status, origin, canal, time_interno FROM public.crm_leads WHERE id = $1`,
       [id],
     );
     if (!lead) return Response.json({ error: 'lead not found' }, { status: 404 });
@@ -120,6 +128,7 @@ export async function POST(
       [id, lead.client_id, direction, dbText, tipo],
     );
     await pool.query(`UPDATE public.crm_leads SET updated_at = NOW() WHERE id = $1`, [id]);
+    if (lead.time_interno !== true) analyzeLeadInBackground(id);
 
     return Response.json({ ...msg, wa_sent: waSent, wa_error: waError ?? null }, { status: 201 });
   } catch (err) {

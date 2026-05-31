@@ -235,8 +235,8 @@ export async function POST(
       // Cancel pending follow-ups when lead sends a message (not fromMe)
       if (!fromMe) {
         await markLeadResponded(pool, crmLead.id).catch(() => null);
-        analyzeLeadInBackground(crmLead.id);
       }
+      analyzeLeadInBackground(crmLead.id);
     }
     if (crmLead?.time_interno === true) {
       return Response.json({ ok: true, message: 'Contato interno salvo sem automações.' });

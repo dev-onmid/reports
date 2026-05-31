@@ -16,6 +16,11 @@ type AiResult = {
   motivo?: string;
 };
 
+type ConversationSignals = {
+  outboundAfterLastInbound: number;
+  lastDirection: 'in' | 'out' | null;
+};
+
 const DEFAULT_CRITERIA: Record<Temperature, string> = {
   quente: 'Lead perguntou sobre preço, pediu proposta, demonstrou urgência, disse que quer comprar, perguntou sobre prazo de entrega, pediu para falar com vendedor, comparou com concorrente ativamente',
   morno: 'Lead está respondendo, fazendo perguntas gerais sobre o produto/serviço, pediu mais informações, demonstra interesse mas sem urgência, está avaliando opções',
@@ -162,6 +167,11 @@ function normalizeStatus(status: string | undefined | null, statusOptions: strin
   return statusOptions.find(option => normalizeStatusText(option) === normalizeStatusText(mapped)) ?? mapped;
 }
 
+function findStatus(statusOptions: string[], wanted: string) {
+  const wantedKey = normalizeStatusText(wanted);
+  return statusOptions.find(option => normalizeStatusText(option) === wantedKey) ?? null;
+}
+
 function monthKey(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }
@@ -210,6 +220,38 @@ async function loadStatusOptions(pool: Pool, lead: { client_id: string; funnel_i
   return Array.from(new Set([...labels, ...current, ...fallback]));
 }
 
+async function loadConversationSignals(pool: Pool, leadId: string): Promise<ConversationSignals> {
+  const { rows: [stats] } = await pool.query<{ outbound_after_last_inbound: number; last_direction: 'in' | 'out' | null }>(
+    `WITH last_inbound AS (
+       SELECT MAX(created_at) AS at
+         FROM public.crm_messages
+        WHERE lead_id = $1 AND direction = 'in'
+     ),
+     last_message AS (
+       SELECT direction
+         FROM public.crm_messages
+        WHERE lead_id = $1
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+     )
+     SELECT
+       COUNT(*) FILTER (
+         WHERE m.direction = 'out'
+           AND (li.at IS NULL OR m.created_at > li.at)
+       )::int AS outbound_after_last_inbound,
+       (SELECT direction FROM last_message) AS last_direction
+      FROM public.crm_messages m
+      CROSS JOIN last_inbound li
+      WHERE m.lead_id = $1`,
+    [leadId],
+  ).catch(() => ({ rows: [] as Array<{ outbound_after_last_inbound: number; last_direction: 'in' | 'out' | null }> }));
+
+  return {
+    outboundAfterLastInbound: Number(stats?.outbound_after_last_inbound ?? 0),
+    lastDirection: stats?.last_direction ?? null,
+  };
+}
+
 async function registerAiError(pool: Pool, leadId: string, clientId: string, error: unknown) {
   await pool.query(
     `INSERT INTO public.crm_ia_historico
@@ -231,11 +273,6 @@ export async function analisarConversa(pool: Pool, leadId: string): Promise<void
     );
     if (!lead) return;
     if (lead.time_interno === true) return;
-
-    if (lead.ia_ultimo_analise) {
-      const last = new Date(lead.ia_ultimo_analise).getTime();
-      if (Number.isFinite(last) && Date.now() - last < 5 * 60_000) return;
-    }
 
     const clientId = String(lead.client_id);
     const { rows: [config] } = await pool.query(
@@ -274,6 +311,7 @@ export async function analisarConversa(pool: Pool, leadId: string): Promise<void
 
     const criteria = await loadCriteria(pool, clientId);
     const statusOptions = await loadStatusOptions(pool, lead);
+    const signals = await loadConversationSignals(pool, leadId);
     const history = orderedMessages
       .map(row => `${row.direction === 'out' ? 'Atendente' : 'Cliente'}: ${row.text}`)
       .join('\n');
@@ -285,14 +323,19 @@ ${history}
 
 Status atual do lead: ${lead.status ?? 'não definido'}
 Temperatura atual: ${lead.temperatura ?? 'não definida'}
+Tentativas de contato enviadas sem resposta do cliente desde a última resposta: ${signals.outboundAfterLastInbound}
+Última mensagem foi de: ${signals.lastDirection === 'out' ? 'Atendente' : signals.lastDirection === 'in' ? 'Cliente' : 'Ninguém'}
 
 Status disponíveis do funil deste cliente. Use exatamente um destes rótulos no campo "status":
 ${statusOptions.map(status => `- ${status}`).join('\n')}
 
 Regras importantes de status:
-- Se cliente confirmou dia/horário, aceitou marcar, pediu para reservar agenda ou existe agendamento combinado, use "Agendado" quando esse status existir.
+- Seja objetivo e conclusivo. Não mude status por intenção vaga, especulação ou frase ambígua.
+- "Quero agendar", "tenho interesse em agendar" ou "pode marcar" ainda NÃO é agendamento confirmado se não houver data/horário combinado ou confirmação objetiva.
+- Use "Agendado" somente quando houver data e/ou horário definido e o cliente confirmar ou aceitar explicitamente aquele agendamento.
 - Se cliente pediu novo horário após um agendamento, use "Reagendado" quando existir.
 - Se cliente comprou, pagou ou confirmou fechamento, use "Fechado" ou "Comprou", dando preferência ao rótulo existente no funil.
+- Use "Não Retorna" somente quando houver pelo menos 4 tentativas de contato enviadas pelo atendente sem resposta posterior do cliente.
 - Se não houver mudança clara de etapa, mantenha o status atual e retorne status_deve_mudar=false.
 
 Critérios de temperatura:
@@ -327,16 +370,33 @@ Retorne exatamente este JSON:
       .trim();
     const parsed = extractJson(text);
 
-    const nextStatus = normalizeStatus(parsed.status, statusOptions);
+    const noReturnStatus = findStatus(statusOptions, 'Não Retorna');
+    const aiStatus = normalizeStatus(parsed.status, statusOptions);
+    const nextStatus = (
+      signals.lastDirection === 'out'
+      && signals.outboundAfterLastInbound >= 4
+      && noReturnStatus
+    ) ? noReturnStatus : aiStatus;
     const statusConfidence = Number(parsed.status_confianca ?? 0);
     const tempConfidence = Number(parsed.temperatura_confianca ?? 0);
     const nextTemp = parsed.temperatura;
-    const confidence = Math.max(statusConfidence, tempConfidence);
 
     let appliedStatus = lead.status as string | null;
     let appliedTemp = lead.temperatura as string | null;
 
-    if (parsed.status_deve_mudar === true && statusConfidence >= 70 && nextStatus && nextStatus !== lead.status) {
+    const shouldMoveStatus = (
+      nextStatus === noReturnStatus
+      && signals.lastDirection === 'out'
+      && signals.outboundAfterLastInbound >= 4
+    ) || parsed.status_deve_mudar === true;
+    const effectiveStatusConfidence = (
+      nextStatus === noReturnStatus
+      && signals.lastDirection === 'out'
+      && signals.outboundAfterLastInbound >= 4
+    ) ? Math.max(statusConfidence, 90) : statusConfidence;
+    const confidence = Math.max(effectiveStatusConfidence, tempConfidence);
+
+    if (shouldMoveStatus && effectiveStatusConfidence >= 70 && nextStatus && nextStatus !== lead.status) {
       await pool.query(
         `UPDATE public.crm_leads SET status = $1, updated_at = NOW() WHERE id = $2`,
         [nextStatus, leadId],
