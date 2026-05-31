@@ -93,13 +93,6 @@ function parseProviderTimestamp(value: unknown): string {
   return new Date().toISOString();
 }
 
-function analyzeLeadInBackground(leadId: string) {
-  const pool = makeServerPool();
-  void analisarConversa(pool, leadId)
-    .catch(err => console.error('[webhook analyzeLeadInBackground]', err))
-    .finally(() => { void pool.end(); });
-}
-
 async function sendMetaEvent({
   pixelId, accessToken, eventName, phone, ctwaClid, value,
 }: {
@@ -236,10 +229,12 @@ export async function POST(
       if (!fromMe) {
         await markLeadResponded(pool, crmLead.id).catch(() => null);
       }
-      analyzeLeadInBackground(crmLead.id);
     }
     if (crmLead?.time_interno === true) {
       return Response.json({ ok: true, message: 'Contato interno salvo sem automações.' });
+    }
+    if (crmLead && messageText) {
+      await analisarConversa(pool, crmLead.id).catch(err => console.error('[webhook analisarConversa]', err));
     }
 
     // 3. Load client tracking config (optional — only needed for pixel events)
