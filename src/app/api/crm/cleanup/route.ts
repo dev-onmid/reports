@@ -4,7 +4,10 @@ import { makeServerPool } from '@/lib/server-db';
 // One-time cleanup endpoint — fixes bad data created before the filters were added.
 // Removes group leads and clears wrong contact names set by the instance owner.
 export async function POST(req: NextRequest) {
-  const { clientId } = await req.json().catch(() => ({})) as { clientId?: string };
+  const { clientId, wrongName } = await req.json().catch(() => ({})) as {
+    clientId?: string;
+    wrongName?: string; // optional: specific name to force-clear from all leads
+  };
   if (!clientId) return Response.json({ error: 'clientId required' }, { status: 400 });
 
   const pool = makeServerPool();
@@ -58,10 +61,21 @@ export async function POST(req: NextRequest) {
       instanceNamesCleared += rowCount ?? 0;
     }
 
+    // 4. If a specific wrong name was passed, force-clear it from ALL leads
+    let specificNameCleared = 0;
+    if (wrongName?.trim()) {
+      const { rowCount } = await pool.query(
+        `UPDATE public.crm_leads SET nome = NULL
+         WHERE client_id = $1 AND nome ILIKE $2`,
+        [clientId, wrongName.trim()],
+      );
+      specificNameCleared = rowCount ?? 0;
+    }
+
     return Response.json({
       ok: true,
       groupsDeleted: groupsDeleted ?? 0,
-      namesCleared: (namesCleared ?? 0) + instanceNamesCleared,
+      namesCleared: (namesCleared ?? 0) + instanceNamesCleared + specificNameCleared,
     });
   } finally {
     await pool.end();

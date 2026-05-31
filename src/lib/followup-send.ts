@@ -100,13 +100,30 @@ async function sendViaEvolution(
 
   if (tipo === 'texto') {
     const text = interpolate(conteudo, vars);
-    const res = await fetch(`${base}/message/sendText/${instanceName}`, {
+
+    // Try v2 format first (more common in recent Evolution API versions)
+    const v2Res = await fetch(`${base}/message/sendText/${instanceName}`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ number: phone, options: { delay: 1200 }, textMessage: { text } }),
+      body: JSON.stringify({
+        number: phone,
+        options: { delay: 1200, presence: 'composing' },
+        textMessage: { text },
+      }),
     });
-    if (!res.ok) return { ok: false, error: await res.text() };
-    return { ok: true };
+    if (v2Res.ok) return { ok: true };
+
+    // Fallback: simpler format used by some versions
+    const v1Res = await fetch(`${base}/message/sendText/${instanceName}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ number: phone, text }),
+    });
+    if (v1Res.ok) return { ok: true };
+
+    // Both failed — return the last error body
+    const errText = await v1Res.text().catch(() => 'unknown error');
+    return { ok: false, error: `Evolution sendText failed: ${errText}` };
   }
 
   const mediatype =

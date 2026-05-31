@@ -254,6 +254,7 @@ export function ChatView({ clientId }: { clientId: string }) {
   const [mediaModal, setMediaModal] = useState<MediaType | null>(null);
   const [syncing,    setSyncing]    = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
+  const [sendError,  setSendError]  = useState<string | null>(null);
 
   const messagesAreaRef = useRef<HTMLDivElement>(null);
   const pollRef         = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -359,24 +360,27 @@ export function ChatView({ clientId }: { clientId: string }) {
         body: JSON.stringify({ direction: 'out', ...payload }),
       });
       // Handle non-JSON responses (e.g. Vercel 500 HTML pages)
-      const text = await res.text();
-      let data: { wa_sent?: boolean; error?: string } = {};
-      try { data = JSON.parse(text) as typeof data; } catch { /* non-JSON */ }
+      const rawText = await res.text();
+      let data: { wa_sent?: boolean; error?: string; wa_error?: string } = {};
+      try { data = JSON.parse(rawText) as typeof data; } catch { /* non-JSON */ }
 
       if (!res.ok) {
-        console.error('[doSend error]', res.status, text);
+        console.error('[doSend error]', res.status, rawText);
         setSendStatus('err');
+        setSendError(data.error ?? `Erro ${res.status}`);
       } else {
         setSendStatus(data.wa_sent ? 'ok' : 'err');
+        if (!data.wa_sent && data.wa_error) setSendError(data.wa_error);
         loadMessages(selectedId);
         loadInbox();
         requestAnimationFrame(() => scrollToBottom());
       }
-      setTimeout(() => setSendStatus(null), 4000);
+      setTimeout(() => { setSendStatus(null); setSendError(null); }, 6000);
     } catch (err) {
       console.error('[doSend fetch error]', err);
       setSendStatus('err');
-      setTimeout(() => setSendStatus(null), 4000);
+      setSendError(String(err));
+      setTimeout(() => { setSendStatus(null); setSendError(null); }, 6000);
     } finally {
       setSending(false);
     }
@@ -450,15 +454,19 @@ export function ChatView({ clientId }: { clientId: string }) {
               </button>
               <button
                 onClick={() => {
-                  if (!confirm('Remover grupos e corrigir nomes errados neste cliente?')) return;
+                  const wrongName = window.prompt(
+                    'Nome errado a remover (ex: "Matheus Campos").\nDeixe em branco para limpar só leads sem resposta e grupos:',
+                    '',
+                  );
+                  if (wrongName === null) return; // cancelled
                   fetch('/api/crm/cleanup', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ clientId }),
+                    body: JSON.stringify({ clientId, wrongName: wrongName.trim() || undefined }),
                   })
                     .then(r => r.json())
                     .then((d: { groupsDeleted?: number; namesCleared?: number }) => {
-                      alert(`${d.groupsDeleted ?? 0} grupos removidos, ${d.namesCleared ?? 0} nomes corrigidos.`);
+                      alert(`✓ ${d.groupsDeleted ?? 0} grupos removidos\n✓ ${d.namesCleared ?? 0} nomes corrigidos`);
                       loadInbox();
                     })
                     .catch(() => alert('Erro na limpeza'));
@@ -611,7 +619,7 @@ export function ChatView({ clientId }: { clientId: string }) {
                   )}>
                     {sendStatus === 'ok'
                       ? <><CheckCircle2 className="h-3.5 w-3.5" /> Enviado via WhatsApp</>
-                      : <><AlertCircle  className="h-3.5 w-3.5" /> Salvo no histórico — falha ao enviar pelo WhatsApp</>}
+                      : <><AlertCircle  className="h-3.5 w-3.5" /> {sendError ?? 'Salvo — falha ao enviar pelo WhatsApp'}</>}
                   </div>
                 )}
 
