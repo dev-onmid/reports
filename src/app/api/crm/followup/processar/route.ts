@@ -19,19 +19,21 @@ export async function POST(req: NextRequest) {
       SELECT
         e.id, e.lead_id, e.client_id, e.regra_id, e.mensagem_id,
         m.tipo, m.conteudo, m.timer_sem_resposta_horas,
-        l.numero, l.nome AS lead_nome, l.status AS lead_status, l.canal, l.origin
+        l.numero, l.nome AS lead_nome, l.status AS lead_status, l.canal, l.origin, l.time_interno
       FROM public.crm_followup_execucoes e
       JOIN public.crm_followup_mensagens m ON m.id = e.mensagem_id
       JOIN public.crm_leads l ON l.id = e.lead_id
       WHERE e.status = 'aguardando_envio'
         AND e.scheduled_at <= NOW()
         AND e.client_id = $1
+        AND COALESCE(l.time_interno, false) = false
       ORDER BY e.scheduled_at ASC
       LIMIT 20
     `, [clientId]);
 
     for (const exec of pending) {
       if (!exec.numero) continue;
+      if (exec.time_interno === true) continue;
       const instance = await getClientInstance(pool, exec.client_id);
       if (!instance) continue;
 
@@ -61,7 +63,11 @@ export async function POST(req: NextRequest) {
              m.acao_sem_resposta, m.status_destino, m.ordem AS msg_ordem
       FROM public.crm_followup_execucoes e
       JOIN public.crm_followup_mensagens m ON m.id = e.mensagem_id
-      WHERE e.status = 'aguardando_resposta' AND e.expira_em <= NOW() AND e.client_id = $1
+      JOIN public.crm_leads l ON l.id = e.lead_id
+      WHERE e.status = 'aguardando_resposta'
+        AND e.expira_em <= NOW()
+        AND e.client_id = $1
+        AND COALESCE(l.time_interno, false) = false
       LIMIT 20
     `, [clientId]);
 

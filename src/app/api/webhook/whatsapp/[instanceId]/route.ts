@@ -2,6 +2,7 @@ import { createHash } from 'crypto';
 import { makeServerPool } from '@/lib/server-db';
 import { normalizeWebhookPayload, type WhatsAppProvider } from '@/lib/whatsapp-provider';
 import { markLeadResponded } from '@/lib/followup-send';
+import { analisarConversa } from '@/lib/crm-ai-analysis';
 import type { NextRequest } from 'next/server';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -74,6 +75,29 @@ function detectOrigin(
 
 function hashPhone(phone: string): string {
   return createHash('sha256').update(phone).digest('hex');
+}
+
+function parseProviderTimestamp(value: unknown): string {
+  if (value === null || value === undefined || value === '') return new Date().toISOString();
+  if (typeof value === 'string') {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && value.trim() !== '') return parseProviderTimestamp(numeric);
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+  }
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    const ms = value < 10_000_000_000 ? value * 1000 : value;
+    const parsed = new Date(ms);
+    return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+  }
+  return new Date().toISOString();
+}
+
+function analyzeLeadInBackground(leadId: string) {
+  const pool = makeServerPool();
+  void analisarConversa(pool, leadId)
+    .catch(err => console.error('[webhook analyzeLeadInBackground]', err))
+    .finally(() => { void pool.end(); });
 }
 
 async function sendMetaEvent({
@@ -160,7 +184,8 @@ export async function POST(
       return Response.json({ ok: false, error: 'telefone não identificado' }, { status: 400 });
     }
 
-    const { phone, fromMe, text: messageText, ctwaClid, sourceId, pushName, profilePictureUrl } = msg;
+    const { phone, fromMe, text: messageText, timestamp, ctwaClid, sourceId, pushName, profilePictureUrl } = msg;
+    const messageCreatedAt = parseProviderTimestamp(timestamp);
 
     // ── CRM: upsert lead + save message (always, regardless of pixel config) ──
     const utmData = extractUtm(messageText);
@@ -171,7 +196,9 @@ export async function POST(
     const contactName = fromMe ? null : (pushName ?? null);
 
     await pool.query(
-      `ALTER TABLE public.crm_leads ADD COLUMN IF NOT EXISTS profile_picture_url TEXT`,
+      `ALTER TABLE public.crm_leads
+         ADD COLUMN IF NOT EXISTS profile_picture_url TEXT,
+         ADD COLUMN IF NOT EXISTS time_interno BOOLEAN NOT NULL DEFAULT false`,
     ).catch(() => null);
 
     const { rows: [crmLead] } = await pool.query(
@@ -194,21 +221,25 @@ export async function POST(
                         ELSE crm_leads.canal
                       END,
          updated_at = NOW()
-       RETURNING id`,
+       RETURNING id, time_interno`,
       [clientId, contactName, phone, originToCanal(origin),
        origin, ctwaClid ?? null, utmData.utm_source ?? null, instanceId, profilePictureUrl ?? null],
     );
 
     if (crmLead && messageText) {
       await pool.query(
-        `INSERT INTO public.crm_messages (lead_id, client_id, direction, text)
-         VALUES ($1, $2, $3, $4)`,
-        [crmLead.id, clientId, fromMe ? 'out' : 'in', messageText],
+        `INSERT INTO public.crm_messages (lead_id, client_id, direction, text, created_at)
+         VALUES ($1, $2, $3, $4, $5::timestamptz)`,
+        [crmLead.id, clientId, fromMe ? 'out' : 'in', messageText, messageCreatedAt],
       );
       // Cancel pending follow-ups when lead sends a message (not fromMe)
       if (!fromMe) {
         await markLeadResponded(pool, crmLead.id).catch(() => null);
+        analyzeLeadInBackground(crmLead.id);
       }
+    }
+    if (crmLead?.time_interno === true) {
+      return Response.json({ ok: true, message: 'Contato interno salvo sem automações.' });
     }
 
     // 3. Load client tracking config (optional — only needed for pixel events)

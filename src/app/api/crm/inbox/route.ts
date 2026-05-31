@@ -7,6 +7,78 @@ function normalizePhone(raw: unknown) {
   return String(raw ?? '').replace(/\D/g, '');
 }
 
+function getNested(obj: Record<string, unknown>, path: string[]): unknown {
+  return path.reduce<unknown>((acc, key) => {
+    if (!acc || typeof acc !== 'object') return undefined;
+    return (acc as Record<string, unknown>)[key];
+  }, obj);
+}
+
+function parseProviderTimestamp(value: unknown): string | null {
+  if (value === null || value === undefined || value === '') return null;
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === 'string') {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && value.trim() !== '') return parseProviderTimestamp(numeric);
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+  }
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    const ms = value < 10_000_000_000 ? value * 1000 : value;
+    const parsed = new Date(ms);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+  }
+  return null;
+}
+
+function extractLastMessageAt(chat: Record<string, unknown>): string | null {
+  const candidates = [
+    chat.lastMessageAt,
+    chat.last_message_at,
+    chat.lastMessageTime,
+    chat.lastMessageTimestamp,
+    chat.t,
+    chat.timestamp,
+    chat.messageTimestamp,
+    getNested(chat, ['lastMessage', 'timestamp']),
+    getNested(chat, ['lastMessage', 'messageTimestamp']),
+    getNested(chat, ['lastMessage', 'momment']),
+    getNested(chat, ['lastMessage', 'createdAt']),
+    getNested(chat, ['lastMessage', 'created_at']),
+  ];
+  for (const candidate of candidates) {
+    const parsed = parseProviderTimestamp(candidate);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+function extractLastMessageText(chat: Record<string, unknown>): string | null {
+  const last = chat.lastMessage;
+  const lastObj = last && typeof last === 'object' ? last as Record<string, unknown> : null;
+  const candidates = [
+    chat.lastMessageText,
+    chat.last_message,
+    chat.body,
+    chat.text,
+    lastObj?.message,
+    lastObj?.body,
+    lastObj?.text,
+    getNested(chat, ['lastMessage', 'text', 'message']),
+    getNested(chat, ['lastMessage', 'message', 'conversation']),
+    getNested(chat, ['lastMessage', 'message', 'extendedTextMessage', 'text']),
+  ];
+  const found = candidates.find(value => typeof value === 'string' && value.trim().length > 0);
+  return typeof found === 'string' ? found.trim() : null;
+}
+
+function extractLastDirection(chat: Record<string, unknown>): 'in' | 'out' | null {
+  const fromMe = chat.fromMe ?? getNested(chat, ['lastMessage', 'fromMe']) ?? getNested(chat, ['lastMessage', 'key', 'fromMe']);
+  if (fromMe === true) return 'out';
+  if (fromMe === false) return 'in';
+  return null;
+}
+
 function extractRecords(raw: unknown): Array<Record<string, unknown>> {
   if (Array.isArray(raw)) return raw as Array<Record<string, unknown>>;
   if (raw && typeof raw === 'object') {
@@ -67,6 +139,14 @@ export async function GET(req: NextRequest) {
 
   const pool = makeServerPool();
   try {
+    await pool.query(`
+      ALTER TABLE public.crm_leads
+        ADD COLUMN IF NOT EXISTS profile_picture_url TEXT,
+        ADD COLUMN IF NOT EXISTS whatsapp_last_message_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS whatsapp_last_message_text TEXT,
+        ADD COLUMN IF NOT EXISTS whatsapp_last_direction TEXT;
+    `).catch(() => null);
+
     const { rows: columnRows } = await pool.query(
       `SELECT column_name
        FROM information_schema.columns
@@ -91,9 +171,9 @@ export async function GET(req: NextRequest) {
          ${avatarSelect} AS avatar_url,
          l.created_at,
          l.updated_at,
-         m.text        AS last_message,
-         m.direction   AS last_direction,
-         m.created_at  AS last_message_at,
+         COALESCE(m.text, l.whatsapp_last_message_text) AS last_message,
+         COALESCE(m.direction, l.whatsapp_last_direction) AS last_direction,
+         COALESCE(m.created_at, l.whatsapp_last_message_at) AS last_message_at,
          COUNT(m2.id)  AS unread_count
        FROM public.crm_leads l
        LEFT JOIN LATERAL (
@@ -130,7 +210,7 @@ export async function GET(req: NextRequest) {
            )
          )
        GROUP BY l.id, m.text, m.direction, m.created_at
-       ORDER BY COALESCE(m.created_at, l.created_at) DESC
+       ORDER BY COALESCE(m.created_at, l.whatsapp_last_message_at, l.created_at) DESC
        LIMIT 200`,
       [clientId],
     );
@@ -169,7 +249,11 @@ export async function POST(req: NextRequest) {
     const chats = await fetchProviderChats(instance, limit);
 
     await pool.query(`
-      ALTER TABLE public.crm_leads ADD COLUMN IF NOT EXISTS profile_picture_url TEXT;
+      ALTER TABLE public.crm_leads
+        ADD COLUMN IF NOT EXISTS profile_picture_url TEXT,
+        ADD COLUMN IF NOT EXISTS whatsapp_last_message_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS whatsapp_last_message_text TEXT,
+        ADD COLUMN IF NOT EXISTS whatsapp_last_direction TEXT;
     `);
 
     const contacts = chats
@@ -187,7 +271,15 @@ export async function POST(req: NextRequest) {
               : typeof chat.picture === 'string'
                 ? chat.picture
                 : null;
-        return { phone, name, profilePictureUrl, remoteJid };
+        return {
+          phone,
+          name,
+          profilePictureUrl,
+          remoteJid,
+          lastMessageAt: extractLastMessageAt(chat),
+          lastMessageText: extractLastMessageText(chat),
+          lastDirection: extractLastDirection(chat),
+        };
       })
       .filter(contact => {
         if (String(contact.remoteJid).endsWith('@g.us') || String(contact.remoteJid).endsWith('@broadcast')) return false;
@@ -203,17 +295,37 @@ export async function POST(req: NextRequest) {
         `UPDATE public.crm_leads
          SET nome = COALESCE(NULLIF($3, ''), nome),
              profile_picture_url = COALESCE($4, profile_picture_url),
+             whatsapp_last_message_at = COALESCE($5::timestamptz, whatsapp_last_message_at),
+             whatsapp_last_message_text = COALESCE($6, whatsapp_last_message_text),
+             whatsapp_last_direction = COALESCE($7, whatsapp_last_direction),
              updated_at = NOW()
          WHERE client_id = $1 AND numero = $2
          RETURNING id`,
-        [clientId, contact.phone, contact.name, contact.profilePictureUrl],
+        [
+          clientId,
+          contact.phone,
+          contact.name,
+          contact.profilePictureUrl,
+          contact.lastMessageAt,
+          contact.lastMessageText,
+          contact.lastDirection,
+        ],
       );
       if ((updated.rowCount ?? 0) === 0) {
         await pool.query(
           `INSERT INTO public.crm_leads
-            (client_id, nome, numero, canal, origin, data, status, profile_picture_url)
-           VALUES ($1, $2, $3, 'Whatsapp', 'organic', CURRENT_DATE, 'Em Atendimento', $4)`,
-          [clientId, contact.name, contact.phone, contact.profilePictureUrl],
+            (client_id, nome, numero, canal, origin, data, status, profile_picture_url,
+             whatsapp_last_message_at, whatsapp_last_message_text, whatsapp_last_direction)
+           VALUES ($1, $2, $3, 'Whatsapp', 'organic', CURRENT_DATE, 'Em Atendimento', $4, $5::timestamptz, $6, $7)`,
+          [
+            clientId,
+            contact.name,
+            contact.phone,
+            contact.profilePictureUrl,
+            contact.lastMessageAt,
+            contact.lastMessageText,
+            contact.lastDirection,
+          ],
         );
       }
       imported += 1;

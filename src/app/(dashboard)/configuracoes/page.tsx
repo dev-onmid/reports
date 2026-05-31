@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import {
   Plus, Trash2, ExternalLink, Users2, Shield, User, Mail,
   Edit2, Search, Filter, Download, Eye, ChevronLeft, ChevronRight,
+  Sparkles,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -44,6 +45,17 @@ const defaultPermission: Permission = {
   integracoes: false,
 };
 const emptyForm = { name: '', email: '', password: '', role: 'Usuário', status: 'Ativo' };
+
+type AiUsageRow = {
+  client_id: string;
+  client_name: string;
+  mes_ano: string;
+  chamadas_ia: number;
+  tokens_usados: number;
+  custo_estimado_usd: number;
+  ia_limite_chamadas_dia: number;
+  chamadas_hoje: number;
+};
 
 // Mock registration dates per id for display purposes
 const MOCK_DATES: Record<string, string> = {
@@ -97,8 +109,10 @@ export default function ConfiguracoesPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'usuarios' | 'permissoes' | 'legal'>('usuarios');
+  const [activeTab, setActiveTab] = useState<'usuarios' | 'permissoes' | 'ia' | 'legal'>('usuarios');
   const [search, setSearch] = useState('');
+  const [aiUsage, setAiUsage] = useState<AiUsageRow[]>([]);
+  const [aiUsageLoading, setAiUsageLoading] = useState(false);
 
   // Load from database on mount
   useEffect(() => {
@@ -117,6 +131,16 @@ export default function ConfiguracoesPage() {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    if (activeTab !== 'ia') return;
+    setAiUsageLoading(true);
+    fetch('/api/crm/ai/usage')
+      .then((res) => res.ok ? res.json() as Promise<AiUsageRow[]> : [])
+      .then(setAiUsage)
+      .catch(() => setAiUsage([]))
+      .finally(() => setAiUsageLoading(false));
+  }, [activeTab]);
 
   function openCreateDialog() {
     setEditingUserId(null);
@@ -211,6 +235,7 @@ export default function ConfiguracoesPage() {
   const TABS = [
     { key: 'usuarios' as const, label: 'Usuários' },
     { key: 'permissoes' as const, label: 'Permissões' },
+    { key: 'ia' as const, label: 'Uso IA' },
     { key: 'legal' as const, label: 'Legal' },
   ];
 
@@ -528,6 +553,101 @@ export default function ConfiguracoesPage() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* ══════════════════════════════════
+          TAB: USO IA
+      ══════════════════════════════════ */}
+      {activeTab === 'ia' && (
+        <div className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="bg-card border border-border rounded-[var(--radius)] p-5 space-y-3">
+              <div className="w-12 h-12 rounded-full bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center">
+                <Sparkles className="w-5 h-5 text-emerald-400" />
+              </div>
+              <div>
+                <p className="text-xl font-bold leading-none">{aiUsage.reduce((sum, row) => sum + Number(row.chamadas_ia ?? 0), 0).toLocaleString('pt-BR')}</p>
+                <p className="text-xs text-muted-foreground mt-1">Chamadas registradas</p>
+              </div>
+            </div>
+            <div className="bg-card border border-border rounded-[var(--radius)] p-5 space-y-3">
+              <div className="w-12 h-12 rounded-full bg-violet-500/15 border border-violet-500/25 flex items-center justify-center">
+                <Sparkles className="w-5 h-5 text-violet-400" />
+              </div>
+              <div>
+                <p className="text-xl font-bold leading-none">{aiUsage.reduce((sum, row) => sum + Number(row.tokens_usados ?? 0), 0).toLocaleString('pt-BR')}</p>
+                <p className="text-xs text-muted-foreground mt-1">Tokens usados</p>
+              </div>
+            </div>
+            <div className="bg-card border border-border rounded-[var(--radius)] p-5 space-y-3">
+              <div className="w-12 h-12 rounded-full bg-blue-500/15 border border-blue-500/25 flex items-center justify-center">
+                <Sparkles className="w-5 h-5 text-blue-400" />
+              </div>
+              <div>
+                <p className="text-xl font-bold leading-none">
+                  {aiUsage.reduce((sum, row) => sum + Number(row.custo_estimado_usd ?? 0), 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">Custo estimado</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-card border border-border rounded-[var(--radius)] overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+              <div>
+                <p className="text-sm font-bold">Uso mensal por cliente</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Chamadas automáticas de análise de conversas do CRM.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setAiUsageLoading(true);
+                  fetch('/api/crm/ai/usage')
+                    .then((res) => res.ok ? res.json() as Promise<AiUsageRow[]> : [])
+                    .then(setAiUsage)
+                    .catch(() => setAiUsage([]))
+                    .finally(() => setAiUsageLoading(false));
+                }}
+                className="h-8 px-3 text-xs text-muted-foreground bg-background border border-border rounded-lg hover:text-foreground transition-colors"
+              >
+                Atualizar
+              </button>
+            </div>
+            <table className="w-full text-sm text-left">
+              <thead>
+                <tr className="border-b border-border">
+                  <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Cliente</th>
+                  <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Mês</th>
+                  <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Chamadas</th>
+                  <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Hoje</th>
+                  <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Limite/dia</th>
+                  <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Tokens</th>
+                  <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Custo</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {aiUsageLoading ? (
+                  <tr><td colSpan={7} className="px-6 py-8 text-center text-sm text-muted-foreground">Carregando uso da IA...</td></tr>
+                ) : aiUsage.length === 0 ? (
+                  <tr><td colSpan={7} className="px-6 py-8 text-center text-sm text-muted-foreground">Nenhum uso registrado ainda.</td></tr>
+                ) : aiUsage.map((row) => (
+                  <tr key={`${row.client_id}-${row.mes_ano}`} className="hover:bg-muted/30 transition-colors">
+                    <td className="px-6 py-4">
+                      <p className="font-semibold text-sm">{row.client_name}</p>
+                      <p className="text-[11px] text-muted-foreground">{row.client_id}</p>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-muted-foreground">{row.mes_ano}</td>
+                    <td className="px-6 py-4 text-right font-semibold">{Number(row.chamadas_ia ?? 0).toLocaleString('pt-BR')}</td>
+                    <td className="px-6 py-4 text-right text-muted-foreground">{Number(row.chamadas_hoje ?? 0).toLocaleString('pt-BR')}</td>
+                    <td className="px-6 py-4 text-right text-muted-foreground">{Number(row.ia_limite_chamadas_dia ?? 500).toLocaleString('pt-BR')}</td>
+                    <td className="px-6 py-4 text-right text-muted-foreground">{Number(row.tokens_usados ?? 0).toLocaleString('pt-BR')}</td>
+                    <td className="px-6 py-4 text-right text-muted-foreground">{Number(row.custo_estimado_usd ?? 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

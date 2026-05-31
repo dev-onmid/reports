@@ -160,6 +160,12 @@ export async function queueFollowupIfExists(
   clientId: string,
   newStatus: string,
 ): Promise<void> {
+  const { rows: [guard] } = await pool.query(
+    `SELECT time_interno FROM public.crm_leads WHERE id = $1`,
+    [leadId],
+  ).catch(() => ({ rows: [] as Array<{ time_interno?: boolean }> }));
+  if (guard?.time_interno === true) return;
+
   // Find active rule for this status
   const { rows: [regra] } = await pool.query(
     `SELECT id FROM public.crm_followup_regras
@@ -191,9 +197,10 @@ export async function queueFollowupIfExists(
   if (delay === 0) {
     // Send immediately — no cron needed
     const { rows: [lead] } = await pool.query(
-      `SELECT numero, nome, status, origin, canal FROM public.crm_leads WHERE id = $1`,
+      `SELECT numero, nome, status, origin, canal, time_interno FROM public.crm_leads WHERE id = $1`,
       [leadId],
     );
+    if (lead?.time_interno === true) return;
     if (lead?.numero) {
       const instance = await getClientInstance(pool, clientId);
       if (instance) {
@@ -247,6 +254,12 @@ export async function queueFollowupIfExists(
 // ── Mark executions responded when lead sends a message ──────────────────────
 
 export async function markLeadResponded(pool: Pool, leadId: string): Promise<void> {
+  const { rows: [lead] } = await pool.query(
+    `SELECT time_interno FROM public.crm_leads WHERE id = $1`,
+    [leadId],
+  ).catch(() => ({ rows: [] as Array<{ time_interno?: boolean }> }));
+  if (lead?.time_interno === true) return;
+
   await pool.query(
     `UPDATE public.crm_followup_execucoes
      SET status = 'respondido', respondido_em = NOW()

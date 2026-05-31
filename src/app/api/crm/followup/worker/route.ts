@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
         e.id, e.lead_id, e.client_id, e.regra_id, e.mensagem_id,
         m.tipo, m.conteudo, m.timer_sem_resposta_horas, m.delay_minutos,
         l.numero, l.nome AS lead_nome, l.status AS lead_status, l.canal,
-        l.origin
+        l.origin, l.time_interno
       FROM public.crm_followup_execucoes e
       JOIN public.crm_followup_mensagens m ON m.id = e.mensagem_id
       JOIN public.crm_leads l ON l.id = e.lead_id
@@ -34,6 +34,13 @@ export async function GET(request: NextRequest) {
 
     for (const exec of pending) {
       if (Date.now() > deadline) break;
+      if (exec.time_interno === true) {
+        await pool.query(
+          `UPDATE public.crm_followup_execucoes SET status = 'cancelado' WHERE id = $1`,
+          [exec.id],
+        );
+        continue;
+      }
       if (!exec.numero) {
         await pool.query(
           `UPDATE public.crm_followup_execucoes SET status = 'cancelado' WHERE id = $1`,
@@ -97,7 +104,9 @@ export async function GET(request: NextRequest) {
         m.timer_sem_resposta_horas
       FROM public.crm_followup_execucoes e
       JOIN public.crm_followup_mensagens m ON m.id = e.mensagem_id
+      JOIN public.crm_leads l ON l.id = e.lead_id
       WHERE e.status = 'aguardando_resposta' AND e.expira_em <= NOW()
+        AND COALESCE(l.time_interno, false) = false
       ORDER BY e.expira_em ASC
       LIMIT 20
     `);

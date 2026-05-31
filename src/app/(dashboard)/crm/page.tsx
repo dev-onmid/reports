@@ -25,7 +25,7 @@ import type { Client } from '@/lib/mock-data';
 type CrmLead = {
   id: string; client_id: string; mes: string | null; data: string | null;
   link_criativo: string | null; nome: string | null; numero: string | null;
-  canal: string | null; emoji: string | null;
+  canal: string | null; origin?: string | null; emoji: string | null;
   dia1: boolean; dia2: boolean; dia3: boolean; dia4: boolean;
   status: string | null; data_agendada: string | null;
   video_dra: boolean; compareceu: boolean; observacao: string | null;
@@ -33,6 +33,11 @@ type CrmLead = {
   pagamento: string | null; analise_credito: boolean;
   data_nasc: string | null; bairro: string | null;
   motivacoes: string | null; dores: string | null;
+  temperatura?: 'quente' | 'morno' | 'frio' | null;
+  temperatura_atualizada_em?: string | null;
+  ia_ultimo_analise?: string | null;
+  ia_confianca_ultimo?: number | null;
+  time_interno?: boolean;
   created_at: string | null;
 };
 
@@ -89,6 +94,18 @@ const STATUS_KANBAN_COLOR: Record<string, string> = {
   'Distante':       '#f97316',
   'Sem Interesse':  '#ef4444',
   'Desqualificado': '#dc2626',
+};
+
+const TEMPERATURE_LABEL: Record<string, string> = {
+  quente: 'Quente',
+  morno: 'Morno',
+  frio: 'Frio',
+};
+
+const TEMPERATURE_BADGE: Record<string, string> = {
+  quente: 'border-red-500/30 bg-red-500/15 text-red-300',
+  morno: 'border-orange-500/30 bg-orange-500/15 text-orange-300',
+  frio: 'border-blue-500/30 bg-blue-500/15 text-blue-300',
 };
 
 type ChannelMatch = {
@@ -193,6 +210,46 @@ function detectChannels(value: string | null | undefined) {
     channel.keywords.some(keyword => normalized.includes(normalizeChannelText(keyword)))
   ));
 }
+function originLabel(value: string | null | undefined) {
+  const normalized = normalizeChannelText(value ?? '');
+  if (!normalized) return null;
+  if (normalized.includes('meta')) return 'Facebook';
+  if (normalized.includes('google')) return 'Google';
+  if (normalized.includes('instagram')) return 'Instagram';
+  if (normalized.includes('tiktok')) return 'TikTok';
+  if (normalized.includes('youtube')) return 'YouTube';
+  if (normalized.includes('indicacao')) return 'Indicação';
+  if (normalized.includes('organic')) return 'WhatsApp orgânico';
+  if (normalized.includes('cliente')) return 'WhatsApp';
+  return value;
+}
+function leadOriginPreview(lead: CrmLead) {
+  const sourceText = [lead.canal, originLabel(lead.origin)].filter(Boolean).join(' ');
+  const channels = detectChannels(sourceText);
+  return {
+    label: channels[0]?.label ?? lead.canal ?? originLabel(lead.origin) ?? 'Origem indefinida',
+    channels,
+  };
+}
+function inferLeadAiTag(lead: CrmLead) {
+  const value = toMoneyNumber(lead.valor_rs);
+  const text = normalizeChannelText([
+    lead.observacao,
+    lead.motivacoes,
+    lead.dores,
+    lead.pagamento,
+    lead.bairro,
+  ].filter(Boolean).join(' '));
+
+  if (lead.fechou) return 'Convertido';
+  if (value > 0) return 'Orçamento enviado';
+  if (lead.data_agendada) return 'Agendamento ativo';
+  if (/preco|valor|quanto|orcamento|orçamento|parcel/.test(text)) return 'Sensível a preço';
+  if (/dor|incomoda|problema|urgente|preciso|necessito/.test(text)) return 'Dor mapeada';
+  if (lead.dia1 || lead.dia2 || lead.dia3 || lead.dia4) return 'Em nutrição';
+  if (lead.analise_credito) return 'Análise de crédito';
+  return 'IA: qualificar';
+}
 function dateText(v: string | null) {
   const shortDate = fmtD(v);
   const rawDate = toD(v);
@@ -200,6 +257,20 @@ function dateText(v: string | null) {
 }
 function moneyText(v: number | string | null) {
   return `${v ?? ''} ${fmtN(v)}`.toLowerCase();
+}
+function temperatureBadgeClass(value: string | null | undefined) {
+  return value ? TEMPERATURE_BADGE[value] ?? 'border-border bg-muted text-muted-foreground' : 'border-border bg-muted text-muted-foreground';
+}
+function relativeAnalysisTime(iso: string | null | undefined) {
+  if (!iso) return 'Nunca analisado';
+  const diff = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(diff)) return 'Nunca analisado';
+  const mins = Math.max(0, Math.floor(diff / 60_000));
+  if (mins < 1) return 'Última análise agora';
+  if (mins < 60) return `Última análise há ${mins} min`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `Última análise há ${hours}h`;
+  return `Última análise há ${Math.floor(hours / 24)}d`;
 }
 
 function columnValueText(lead: CrmLead, key: ColumnKey) {
@@ -225,6 +296,9 @@ function columnValueText(lead: CrmLead, key: ColumnKey) {
 
 function passesColumnFilter(lead: CrmLead, key: ColumnKey, value: string) {
   if (!value) return true;
+  if (key === 'temperatura') {
+    return value === 'sem' ? !lead.temperatura : lead.temperatura === value;
+  }
   if (['dia1', 'dia2', 'dia3', 'dia4', 'fechou'].includes(key)) {
     return value === 'yes' ? Boolean(lead[key as 'fechou']) : !lead[key as 'fechou'];
   }
@@ -241,6 +315,7 @@ const COLS = [
   { key: 'numero', label: 'Número', width: 120, min: 96, filter: 'text' },
   { key: 'canal', label: 'Canal', width: 120, min: 90, filter: 'text' },
   { key: 'status', label: 'Status', width: 150, min: 120, filter: 'select' },
+  { key: 'temperatura', label: 'Temp.', width: 115, min: 94, filter: 'select' },
   { key: 'dia1', label: '1D', width: 46, min: 40, filter: 'boolean' },
   { key: 'dia2', label: '2D', width: 46, min: 40, filter: 'boolean' },
   { key: 'dia3', label: '3D', width: 46, min: 40, filter: 'boolean' },
@@ -306,7 +381,27 @@ function QuickEditModal({
 }) {
   const [draft, setDraft] = useState<Draft>({ ...lead });
   const [saving, setSaving] = useState(false);
+  const [aiInfo, setAiInfo] = useState<{ motivo?: string; created_at?: string; confianca?: number } | null>(null);
+  const [, setNowTick] = useState(0);
   function set<K extends keyof Draft>(k: K, v: Draft[K]) { setDraft(prev => ({ ...prev, [k]: v })); }
+
+  useEffect(() => {
+    fetch(`/api/crm/ai/lead/${lead.id}`)
+      .then(r => r.ok ? r.json() : null)
+      .then((data: { last?: { motivo_ia?: string; created_at?: string; confianca?: number } } | null) => {
+        if (data?.last) setAiInfo({
+          motivo: data.last.motivo_ia,
+          created_at: data.last.created_at,
+          confianca: data.last.confianca,
+        });
+      })
+      .catch(() => {});
+  }, [lead.id]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowTick(v => v + 1), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   async function handleSave() {
     setSaving(true);
@@ -368,6 +463,48 @@ function QuickEditModal({
             <input type="checkbox" checked={!!draft.fechou} onChange={e => set('fechou', e.target.checked)} className="h-4 w-4 accent-primary" />
             <span className="text-sm font-semibold">Fechou negócio</span>
           </label>
+          <div className="rounded-lg border border-border bg-background/50 p-3 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Inteligência IA</p>
+                <p className="mt-1 text-xs text-muted-foreground">{relativeAnalysisTime(draft.ia_ultimo_analise ?? aiInfo?.created_at)}</p>
+              </div>
+              <span className={cn('rounded-full border px-2 py-1 text-[10px] font-bold', temperatureBadgeClass(draft.temperatura))}>
+                {draft.temperatura ? TEMPERATURE_LABEL[draft.temperatura] : 'Sem classificação'}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="rounded border border-border/60 bg-card px-2 py-1.5">
+                <span className="text-muted-foreground">Confiança</span>
+                <p className="font-semibold">{draft.ia_confianca_ultimo ?? aiInfo?.confianca ?? 0}%</p>
+              </div>
+              <div className="rounded border border-border/60 bg-card px-2 py-1.5">
+                <span className="text-muted-foreground">Temperatura</span>
+                <p className="font-semibold">{draft.temperatura ? TEMPERATURE_LABEL[draft.temperatura] : 'Não definida'}</p>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              <span className="font-semibold text-foreground">Motivo:</span> {aiInfo?.motivo ?? 'Aguardando próxima análise automática.'}
+            </p>
+            <label className="flex items-start gap-3 rounded border border-border/60 bg-card p-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={!!draft.time_interno}
+                onChange={e => {
+                  if (e.target.checked) {
+                    const ok = window.confirm('Ao marcar como Time Interno, nenhuma automação será executada para este contato. Tem certeza?');
+                    if (!ok) return;
+                  }
+                  set('time_interno', e.target.checked);
+                }}
+                className="mt-0.5 h-4 w-4 accent-primary"
+              />
+              <span>
+                <span className="block text-sm font-semibold">Time Interno</span>
+                <span className="block text-xs text-muted-foreground">Todas as automações ficam desativadas para este contato</span>
+              </span>
+            </label>
+          </div>
           <label className="space-y-1">
             <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Observação</span>
             <textarea value={draft.observacao ?? ''} onChange={e => set('observacao', e.target.value || null)} rows={3}
@@ -393,20 +530,20 @@ function QuickEditModal({
 
 // ── Kanban Card (draggable) ──────────────────────────────────────────────────
 function KanbanCard({
-  lead, onEdit, onDelete, onStatusChange, isDragOverlay, statusOptions, hasActiveFollowup,
+  lead, onEdit, onDelete, isDragOverlay, hasActiveFollowup,
 }: {
   lead: CrmLead;
   onEdit: (lead: CrmLead) => void;
   onDelete: (id: string) => void;
-  onStatusChange: (id: string, status: string) => void;
   isDragOverlay?: boolean;
-  statusOptions: string[];
   hasActiveFollowup?: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: lead.id });
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const channels = detectChannels(lead.canal);
+  const origin = leadOriginPreview(lead);
+  const aiTag = inferLeadAiTag(lead);
   const value = toMoneyNumber(lead.valor_rs);
 
   useEffect(() => {
@@ -466,6 +603,14 @@ function KanbanCard({
           </span>
         ))}
         <div className="ml-auto flex items-center gap-1.5">
+          {lead.time_interno && (
+            <span className="rounded-full bg-zinc-500/15 px-1.5 py-0.5 text-[9px] font-bold text-zinc-300">Time Interno</span>
+          )}
+          {lead.temperatura && (
+            <span className={cn('rounded-full border px-1.5 py-0.5 text-[9px] font-bold', temperatureBadgeClass(lead.temperatura))}>
+              {TEMPERATURE_LABEL[lead.temperatura]}
+            </span>
+          )}
           <FollowupBadge active={!!hasActiveFollowup} />
           {lead.fechou && (
             <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-bold text-emerald-400">Fechou</span>
@@ -478,14 +623,23 @@ function KanbanCard({
 
       <div className="flex items-center justify-between mt-2 pt-2 border-t border-border/30">
         <span className="text-[10px] text-muted-foreground">{fmtD(lead.data ?? lead.created_at)}</span>
-        <select
-          value={lead.status ?? statusOptions[0] ?? 'Em Atendimento'}
-          onClick={e => e.stopPropagation()}
-          onChange={e => { e.stopPropagation(); onStatusChange(lead.id, e.target.value); }}
-          className="appearance-none text-[9px] font-bold bg-transparent border-0 outline-none text-muted-foreground hover:text-foreground cursor-pointer max-w-[120px] truncate"
-        >
-          {statusOptions.map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
+        <div className="ml-2 flex min-w-0 flex-wrap items-center justify-end gap-1">
+          <span
+            className="inline-flex max-w-[110px] items-center gap-1 truncate rounded-full border border-border bg-muted/30 px-1.5 py-0.5 text-[9px] font-semibold text-muted-foreground"
+            title={origin.label}
+          >
+            {origin.channels[0] && (
+              <span className={cn('inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full text-white', origin.channels[0].bg)}>
+                {origin.channels[0].icon}
+              </span>
+            )}
+            <span className="truncate">{origin.label}</span>
+          </span>
+          <span className="inline-flex max-w-[115px] items-center gap-1 truncate rounded-full border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[9px] font-semibold text-primary" title={aiTag}>
+            <Sparkles className="h-2.5 w-2.5 shrink-0" />
+            <span className="truncate">{aiTag}</span>
+          </span>
+        </div>
       </div>
     </div>
   );
@@ -493,16 +647,14 @@ function KanbanCard({
 
 // ── Kanban Column (droppable) ────────────────────────────────────────────────
 function KanbanColumn({
-  status, color, leads, onEdit, onDelete, onStatusChange, activeLead, statusOptions, activeFollowupIds,
+  status, color, leads, onEdit, onDelete, activeLead, activeFollowupIds,
 }: {
   status: string;
   color: string;
   leads: CrmLead[];
   onEdit: (lead: CrmLead) => void;
   onDelete: (id: string) => void;
-  onStatusChange: (id: string, status: string) => void;
   activeLead: CrmLead | null;
-  statusOptions: string[];
   activeFollowupIds: Set<string>;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: status });
@@ -528,7 +680,7 @@ function KanbanColumn({
         style={{ maxHeight: 'calc(100vh - 400px)', minHeight: 100 }}
       >
         {leads.map(lead => (
-          <KanbanCard key={lead.id} lead={lead} onEdit={onEdit} onDelete={onDelete} onStatusChange={onStatusChange} statusOptions={statusOptions} hasActiveFollowup={activeFollowupIds.has(lead.id)} />
+          <KanbanCard key={lead.id} lead={lead} onEdit={onEdit} onDelete={onDelete} hasActiveFollowup={activeFollowupIds.has(lead.id)} />
         ))}
         {leads.length === 0 && (
           <div className="flex items-center justify-center py-6">
@@ -594,9 +746,7 @@ function KanbanView({
             leads={grouped.get(stage.label) ?? []}
             onEdit={onEdit}
             onDelete={onDelete}
-            onStatusChange={onStatusChange}
             activeLead={activeLead}
-            statusOptions={statusOptions}
             activeFollowupIds={activeFollowupIds}
           />
         ))}
@@ -607,9 +757,7 @@ function KanbanView({
             lead={activeLead}
             onEdit={() => {}}
             onDelete={() => {}}
-            onStatusChange={() => {}}
             isDragOverlay
-            statusOptions={statusOptions}
             hasActiveFollowup={activeFollowupIds.has(activeLead.id)}
           />
         )}
@@ -832,6 +980,115 @@ function FunnelEditorModal({
   );
 }
 
+type TemperatureCriteria = Partial<Record<'quente' | 'morno' | 'frio', string>>;
+
+function AiCriteriaModal({
+  clientId,
+  onClose,
+}: {
+  clientId: string;
+  onClose: () => void;
+}) {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [useDefault, setUseDefault] = useState(true);
+  const [defaults, setDefaults] = useState<TemperatureCriteria>({});
+  const [criteria, setCriteria] = useState<TemperatureCriteria>({});
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(`/api/crm/ai/criteria?clientId=${encodeURIComponent(clientId)}`)
+      .then(r => r.ok ? r.json() : null)
+      .then((data: { useDefault?: boolean; defaults?: TemperatureCriteria; custom?: TemperatureCriteria; effective?: TemperatureCriteria } | null) => {
+        setUseDefault(data?.useDefault ?? true);
+        setDefaults(data?.defaults ?? {});
+        setCriteria(data?.useDefault ? data?.effective ?? {} : data?.custom ?? data?.effective ?? {});
+      })
+      .catch(() => {
+        setDefaults({});
+        setCriteria({});
+      })
+      .finally(() => setLoading(false));
+  }, [clientId]);
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      const res = await fetch('/api/crm/ai/criteria', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientId, useDefault, criterios: criteria }),
+      });
+      if (res.ok) onClose();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function setCriterion(key: 'quente' | 'morno' | 'frio', value: string) {
+    setCriteria(prev => ({ ...prev, [key]: value }));
+  }
+
+  const source = useDefault ? defaults : criteria;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+          <h2 className="text-sm font-bold flex items-center gap-2"><Sparkles className="h-4 w-4 text-primary" /> Critérios da IA</h2>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+          <label className="flex items-start gap-3 rounded-lg border border-border bg-background/50 p-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={useDefault}
+              onChange={e => {
+                setUseDefault(e.target.checked);
+                if (e.target.checked) setCriteria(defaults);
+              }}
+              className="mt-0.5 h-4 w-4 accent-primary"
+            />
+            <span>
+              <span className="block text-sm font-semibold">Usar critérios globais</span>
+              <span className="block text-xs text-muted-foreground">Desmarque para definir a régua de temperatura deste cliente.</span>
+            </span>
+          </label>
+
+          {loading ? (
+            <div className="rounded-lg border border-border bg-background/50 p-6 text-center text-sm text-muted-foreground">Carregando critérios...</div>
+          ) : (
+            (['quente', 'morno', 'frio'] as const).map(temp => (
+              <label key={temp} className="block space-y-1.5">
+                <span className={cn('inline-flex rounded-full border px-2 py-1 text-[10px] font-bold', temperatureBadgeClass(temp))}>
+                  {TEMPERATURE_LABEL[temp]}
+                </span>
+                <textarea
+                  value={source[temp] ?? ''}
+                  onChange={e => setCriterion(temp, e.target.value)}
+                  disabled={useDefault}
+                  rows={4}
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary disabled:opacity-70"
+                />
+              </label>
+            ))
+          )}
+        </div>
+        <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border shrink-0">
+          <button onClick={onClose}
+            className="rounded-lg border border-border px-4 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors">
+            Cancelar
+          </button>
+          <button onClick={handleSave} disabled={saving || loading}
+            className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors">
+            {saving ? 'Salvando...' : 'Salvar critérios'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ClientLogoBg({ clientId }: { clientId: string }) {
   const [imgUrl, setImgUrl] = useState<string | null>(null);
   useEffect(() => { void fetchClientPicture(clientId).then(setImgUrl); }, [clientId]);
@@ -942,11 +1199,13 @@ export default function CrmPage() {
   const [selectedFunnelId, setSelectedFunnelId] = useState('');
   const [stages, setStages] = useState<CrmStage[]>([]);
   const [showFunnelEditor, setShowFunnelEditor] = useState(false);
+  const [showAiCriteria, setShowAiCriteria] = useState(false);
 
   const [leads, setLeads]           = useState<CrmLead[]>([]);
   const [loading, setLoading]       = useState(false);
   const [search, setSearch]         = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [temperatureFilter, setTemperatureFilter] = useState('');
   const [columnFilters, setColumnFilters] = useState<Partial<Record<ColumnKey, string>>>({});
   const [colWidths, setColWidths] = useState<Record<ColumnKey, number>>(DEFAULT_COL_WIDTHS);
   const [saving, setSaving]         = useState(false);
@@ -1056,7 +1315,7 @@ export default function CrmPage() {
     return () => document.removeEventListener('mousedown', onDown);
   }, []);
 
-  useEffect(() => { setPage(1); }, [statusFilter, search, clientId, columnFilters]);
+  useEffect(() => { setPage(1); }, [statusFilter, temperatureFilter, search, clientId, columnFilters]);
 
   useEffect(() => {
     if (!clientId) { setFunnels([]); setSelectedFunnelId(''); setStages([]); return; }
@@ -1086,6 +1345,10 @@ export default function CrmPage() {
 
   const filtered = useMemo(() => leads.filter(l => {
     if (statusFilter && l.status !== statusFilter) return false;
+    if (temperatureFilter) {
+      if (temperatureFilter === 'sem' && l.temperatura) return false;
+      if (temperatureFilter !== 'sem' && l.temperatura !== temperatureFilter) return false;
+    }
     if (search) {
       const q = search.toLowerCase();
       const found = l.nome?.toLowerCase().includes(q) || l.numero?.includes(q) ||
@@ -1097,7 +1360,14 @@ export default function CrmPage() {
       if (!passesColumnFilter(l, key, value)) return false;
     }
     return true;
-  }), [leads, search, statusFilter, columnFilters]);
+  }).sort((a, b) => {
+    if (a.time_interno !== b.time_interno) return a.time_interno ? 1 : -1;
+    const order: Record<string, number> = { quente: 0, morno: 1, frio: 2 };
+    const ta = a.temperatura ? order[a.temperatura] ?? 3 : 3;
+    const tb = b.temperatura ? order[b.temperatura] ?? 3 : 3;
+    if (ta !== tb) return ta - tb;
+    return new Date(b.created_at ?? b.data ?? 0).getTime() - new Date(a.created_at ?? a.data ?? 0).getTime();
+  }), [leads, search, statusFilter, temperatureFilter, columnFilters]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const paginated  = filtered.slice((page - 1) * pageSize, page * pageSize);
@@ -1112,6 +1382,10 @@ export default function CrmPage() {
     agendados:   leads.filter(l => l.status === 'Agendado' || l.status === 'Reagendado').length,
     fechamentos: leads.filter(l => l.fechou).length,
     faturamento: leads.filter(l => l.fechou).reduce((s, l) => s + toMoneyNumber(l.valor_rs), 0),
+    quentes: leads.filter(l => l.temperatura === 'quente').length,
+    mornos: leads.filter(l => l.temperatura === 'morno').length,
+    frios: leads.filter(l => l.temperatura === 'frio').length,
+    semClassificacao: leads.filter(l => !l.temperatura).length,
   }), [leads]);
 
   const statusOptions = useMemo(
@@ -1475,11 +1749,27 @@ export default function CrmPage() {
               {statusOptions.map(s => <option key={s}>{s}</option>)}
             </IconSelect>
 
+            <IconSelect icon={Sparkles} value={temperatureFilter} onChange={setTemperatureFilter}
+              placeholder="Temperatura" className="min-w-[150px]">
+              <option value="quente">Quente</option>
+              <option value="morno">Morno</option>
+              <option value="frio">Frio</option>
+              <option value="sem">Sem classificação</option>
+            </IconSelect>
+
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
               <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar leads..."
                 className="pl-8 pr-3 py-2 rounded-lg border border-border bg-card text-sm focus:outline-none focus:ring-1 focus:ring-primary w-48" />
             </div>
+
+            <button
+              type="button"
+              onClick={() => setShowAiCriteria(true)}
+              className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            >
+              <Sparkles className="h-4 w-4" /> Critérios IA
+            </button>
 
             <button onClick={() => void saveNew()}
               className="ml-auto flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
@@ -1493,12 +1783,16 @@ export default function CrmPage() {
 
       {/* ── STATS ───────────────────────────────────────────────────── */}
       {clientId && !loading && leads.length > 0 && crmView === 'leads' && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 shrink-0">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8 shrink-0">
           {([
             { label: 'TOTAL',       sub: 'leads cadastrados',   value: stats.total,       fmt: 'n', Icon: Users,             iconCls: 'text-purple-400',  bgCls: 'bg-purple-500/10',  borderCls: 'border-purple-500/25' },
             { label: 'AGENDADOS',   sub: 'leads agendados',     value: stats.agendados,   fmt: 'n', Icon: CalendarDays,       iconCls: 'text-green-400',   bgCls: 'bg-green-500/10',   borderCls: 'border-green-500/25'  },
             { label: 'FECHAMENTOS', sub: 'negócios fechados',   value: stats.fechamentos, fmt: 'n', Icon: HeartHandshake,     iconCls: 'text-blue-400',    bgCls: 'bg-blue-500/10',    borderCls: 'border-blue-500/25'   },
             { label: 'FATURAMENTO', sub: 'valor total faturado',value: stats.faturamento, fmt: 'c', Icon: CircleDollarSign,   iconCls: 'text-violet-400',  bgCls: 'bg-violet-500/10',  borderCls: 'border-violet-500/25' },
+            { label: 'QUENTES',     sub: 'alta intenção',       value: stats.quentes,     fmt: 'n', Icon: Sparkles,          iconCls: 'text-red-300',     bgCls: 'bg-red-500/10',     borderCls: 'border-red-500/25'    },
+            { label: 'MORNOS',      sub: 'interesse ativo',     value: stats.mornos,      fmt: 'n', Icon: Sparkles,          iconCls: 'text-orange-300',  bgCls: 'bg-orange-500/10',  borderCls: 'border-orange-500/25' },
+            { label: 'FRIOS',       sub: 'baixa resposta',      value: stats.frios,       fmt: 'n', Icon: Sparkles,          iconCls: 'text-blue-300',    bgCls: 'bg-blue-500/10',    borderCls: 'border-blue-500/25'   },
+            { label: 'SEM IA',      sub: 'sem classificação',   value: stats.semClassificacao, fmt: 'n', Icon: Sparkles,     iconCls: 'text-zinc-300',    bgCls: 'bg-zinc-500/10',    borderCls: 'border-zinc-500/25'   },
           ] as const).map(({ label, sub, value, fmt, Icon, iconCls, bgCls, borderCls }) => (
             <div key={label} className={cn('rounded-xl border bg-card px-4 py-3 flex items-center gap-3', borderCls)}>
               <div className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-lg', bgCls)}>
@@ -1653,6 +1947,14 @@ export default function CrmPage() {
                       {statusOptions.map(o => <option key={o}>{o}</option>)}
                     </select>
                   </Td>
+                  <Td>
+                    <select value={newDraft.temperatura ?? ''} onChange={e => setN('temperatura', (e.target.value || null) as Draft['temperatura'])} className={cn(cellNew, 'cursor-pointer appearance-none')}>
+                      <option value=""></option>
+                      <option value="quente">Quente</option>
+                      <option value="morno">Morno</option>
+                      <option value="frio">Frio</option>
+                    </select>
+                  </Td>
                   {(['dia1','dia2','dia3','dia4'] as const).map(k => (
                     <Td key={k} center>
                       <input type="checkbox" checked={!!newDraft[k]} onChange={e => setN(k, e.target.checked)} className="h-3.5 w-3.5 accent-primary cursor-pointer" />
@@ -1757,6 +2059,30 @@ export default function CrmPage() {
                                 </span>
                               </div>
                             : null}
+                      </Td>
+                      {/* Temperatura */}
+                      <Td>
+                        {isEditing
+                          ? <select value={d.temperatura ?? ''} onChange={e => setE('temperatura', (e.target.value || null) as Draft['temperatura'])} className={cellSel}>
+                              <option value=""></option>
+                              <option value="quente">Quente</option>
+                              <option value="morno">Morno</option>
+                              <option value="frio">Frio</option>
+                            </select>
+                          : <div className="flex items-center gap-1 px-1">
+                              {lead.temperatura ? (
+                                <span className={cn('inline-flex rounded-lg border px-2 py-1 text-[10px] font-bold leading-none whitespace-nowrap', temperatureBadgeClass(lead.temperatura))}>
+                                  {TEMPERATURE_LABEL[lead.temperatura]}
+                                </span>
+                              ) : (
+                                <span className="px-1 text-[11px] text-muted-foreground">–</span>
+                              )}
+                              {lead.time_interno && (
+                                <span className="inline-flex rounded-lg border border-zinc-500/25 bg-zinc-500/10 px-1.5 py-1 text-[9px] font-bold leading-none text-zinc-300">
+                                  Interno
+                                </span>
+                              )}
+                            </div>}
                       </Td>
                       {/* 1D–4D */}
                       {(['dia1','dia2','dia3','dia4'] as const).map(k => (
@@ -1916,6 +2242,13 @@ export default function CrmPage() {
           onNewFunnel={handleNewFunnel}
         />
       )}
+
+      {showAiCriteria && clientId && (
+        <AiCriteriaModal
+          clientId={clientId}
+          onClose={() => setShowAiCriteria(false)}
+        />
+      )}
     </div>
   );
 }
@@ -1958,6 +2291,17 @@ function ColumnFilter({
       <select value={value} onChange={e => onChange(columnKey, e.target.value)} className={cn(baseClass, 'appearance-none')}>
         <option value="">Todos</option>
         {statusOptions.map(option => <option key={option}>{option}</option>)}
+      </select>
+    );
+  }
+  if (columnKey === 'temperatura') {
+    return (
+      <select value={value} onChange={e => onChange(columnKey, e.target.value)} className={cn(baseClass, 'appearance-none')}>
+        <option value="">Todos</option>
+        <option value="quente">Quente</option>
+        <option value="morno">Morno</option>
+        <option value="frio">Frio</option>
+        <option value="sem">Sem IA</option>
       </select>
     );
   }

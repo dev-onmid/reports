@@ -456,7 +456,8 @@ export function ChatView({ clientId }: { clientId: string }) {
   // Only keeps the 5s poll alive for conversations with activity in the last 3 days.
   // Older conversations load once and stop — use the manual "Histórico" button instead.
   const isRecentLead = selectedLead
-    ? (Date.now() - new Date(selectedLead.last_message_at ?? selectedLead.created_at).getTime()) < 3 * 86_400_000
+    ? selectedLead.last_message_at !== null
+      && (Date.now() - new Date(selectedLead.last_message_at).getTime()) < 3 * 86_400_000
     : false;
 
   useEffect(() => {
@@ -681,11 +682,11 @@ export function ChatView({ clientId }: { clientId: string }) {
                     <div className="flex items-center gap-1.5 min-w-0">
                       <span className="text-sm font-semibold truncate">{leadName(lead)}</span>
                       {/* Live indicator — auto-updates enabled */}
-                      {(Date.now() - new Date(lead.last_message_at ?? lead.created_at).getTime()) < 3 * 86_400_000 && (
+                      {lead.last_message_at !== null && (Date.now() - new Date(lead.last_message_at).getTime()) < 3 * 86_400_000 && (
                         <span className="shrink-0 h-1.5 w-1.5 rounded-full bg-primary animate-pulse" title="Tempo real ativo" />
                       )}
                     </div>
-                    <span className="text-[10px] text-muted-foreground shrink-0">{timeFmt(lead.last_message_at ?? lead.created_at)}</span>
+                    <span className="text-[10px] text-muted-foreground shrink-0">{timeFmt(lead.last_message_at)}</span>
                   </div>
                   <p className="text-[11px] text-muted-foreground truncate mt-0.5">
                     {lead.last_direction === 'out' && <span className="text-primary/70">Você: </span>}
