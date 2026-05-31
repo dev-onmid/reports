@@ -9,24 +9,33 @@ export async function GET(
   const { id } = await params;
   const pool = makeServerPool();
   try {
+    // Garante que a coluna tipo existe (pode não existir em instalações antigas)
+    await pool.query(
+      `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS tipo TEXT NOT NULL DEFAULT 'texto'`
+    ).catch(() => null);
+
     // Busca por lead_id direto E por qualquer outro lead do mesmo cliente
-    // com o mesmo número de telefone — resolve casos onde o webhook criou
-    // um lead com UUID diferente do lead criado pelo formulário do CRM.
+    // com o mesmo número — resolve o mismatch entre lead do webhook e lead do CRM.
     const { rows } = await pool.query(
-      `SELECT DISTINCT ON (created_at, id) id, direction, text, tipo, created_at
-       FROM public.crm_messages
-       WHERE lead_id = $1
-          OR lead_id IN (
+      `SELECT m.id, m.direction, m.text,
+              COALESCE(m.tipo, 'texto') AS tipo,
+              m.created_at
+       FROM public.crm_messages m
+       WHERE m.lead_id = $1
+          OR m.lead_id IN (
             SELECT l2.id FROM public.crm_leads l2
-            WHERE l2.client_id = (SELECT client_id FROM public.crm_leads WHERE id = $1)
-              AND l2.numero    = (SELECT numero    FROM public.crm_leads WHERE id = $1)
+            WHERE l2.client_id = (SELECT client_id FROM public.crm_leads WHERE id = $1 LIMIT 1)
+              AND l2.numero    = (SELECT numero    FROM public.crm_leads WHERE id = $1 LIMIT 1)
               AND l2.numero IS NOT NULL
           )
-       ORDER BY created_at ASC, id ASC
+       ORDER BY m.created_at ASC, m.id ASC
        LIMIT 500`,
       [id],
     );
     return Response.json({ messages: rows });
+  } catch (err) {
+    console.error('[messages GET]', err);
+    return Response.json({ messages: [], error: String(err) });
   } finally {
     await pool.end();
   }
