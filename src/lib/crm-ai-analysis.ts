@@ -25,9 +25,20 @@ const DEFAULT_CRITERIA: Record<Temperature, string> = {
 const STATUS_MAP: Record<string, string> = {
   novo: 'Novo',
   em_atendimento: 'Em Atendimento',
+  atendimento: 'Em Atendimento',
+  agendado: 'Agendado',
+  reagendado: 'Reagendado',
   proposta: 'Proposta',
   negociacao: 'Negociação',
+  negociação: 'Negociação',
   fechado: 'Fechado',
+  comprou: 'Comprou',
+  paciente: 'Paciente',
+  nao_retorna: 'Não Retorna',
+  não_retorna: 'Não Retorna',
+  distante: 'Distante',
+  sem_interesse: 'Sem Interesse',
+  desqualificado: 'Desqualificado',
   perdido: 'Perdido',
 };
 
@@ -132,9 +143,23 @@ function extractJson(text: string): AiResult {
   return JSON.parse(clean.slice(start, end + 1)) as AiResult;
 }
 
-function normalizeStatus(status: string | undefined | null) {
+function normalizeStatusText(status: string) {
+  return status
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[\s-]+/g, '_');
+}
+
+function normalizeStatus(status: string | undefined | null, statusOptions: string[]) {
   if (!status) return null;
-  return STATUS_MAP[status] ?? status;
+  const direct = statusOptions.find(option => option === status);
+  if (direct) return direct;
+
+  const normalized = normalizeStatusText(status);
+  const mapped = STATUS_MAP[normalized] ?? STATUS_MAP[status] ?? status;
+  return statusOptions.find(option => normalizeStatusText(option) === normalizeStatusText(mapped)) ?? mapped;
 }
 
 function monthKey(date = new Date()) {
@@ -166,6 +191,25 @@ async function loadCriteria(pool: Pool, clientId: string): Promise<Record<Temper
   return criteria;
 }
 
+async function loadStatusOptions(pool: Pool, lead: { client_id: string; funnel_id?: string | null; status?: string | null }) {
+  const params: string[] = [String(lead.client_id)];
+  const funnelFilter = lead.funnel_id ? 'AND funnel_id = $2::uuid' : '';
+  if (lead.funnel_id) params.push(String(lead.funnel_id));
+
+  const { rows } = await pool.query<{ label: string }>(
+    `SELECT label
+       FROM public.crm_stages
+      WHERE client_id = $1 ${funnelFilter}
+      ORDER BY position ASC, created_at ASC`,
+    params,
+  ).catch(() => ({ rows: [] as Array<{ label: string }> }));
+
+  const labels = rows.map(row => row.label).filter(Boolean);
+  const fallback = ['Em Atendimento', 'Agendado', 'Reagendado', 'Fechado', 'Comprou', 'Paciente', 'Não Retorna', 'Distante', 'Sem Interesse', 'Desqualificado'];
+  const current = lead.status ? [lead.status] : [];
+  return Array.from(new Set([...labels, ...current, ...fallback]));
+}
+
 async function registerAiError(pool: Pool, leadId: string, clientId: string, error: unknown) {
   await pool.query(
     `INSERT INTO public.crm_ia_historico
@@ -180,7 +224,7 @@ export async function analisarConversa(pool: Pool, leadId: string): Promise<void
     await ensureCrmAiSchema(pool);
 
     const { rows: [lead] } = await pool.query(
-      `SELECT id, client_id, status, temperatura, ia_ultimo_analise, time_interno
+      `SELECT id, client_id, funnel_id, status, temperatura, ia_ultimo_analise, time_interno
          FROM public.crm_leads
         WHERE id = $1`,
       [leadId],
@@ -229,6 +273,7 @@ export async function analisarConversa(pool: Pool, leadId: string): Promise<void
     if (orderedMessages.length === 0) return;
 
     const criteria = await loadCriteria(pool, clientId);
+    const statusOptions = await loadStatusOptions(pool, lead);
     const history = orderedMessages
       .map(row => `${row.direction === 'out' ? 'Atendente' : 'Cliente'}: ${row.text}`)
       .join('\n');
@@ -241,7 +286,14 @@ ${history}
 Status atual do lead: ${lead.status ?? 'não definido'}
 Temperatura atual: ${lead.temperatura ?? 'não definida'}
 
-Status disponíveis: novo, em_atendimento, proposta, negociacao, fechado, perdido
+Status disponíveis do funil deste cliente. Use exatamente um destes rótulos no campo "status":
+${statusOptions.map(status => `- ${status}`).join('\n')}
+
+Regras importantes de status:
+- Se cliente confirmou dia/horário, aceitou marcar, pediu para reservar agenda ou existe agendamento combinado, use "Agendado" quando esse status existir.
+- Se cliente pediu novo horário após um agendamento, use "Reagendado" quando existir.
+- Se cliente comprou, pagou ou confirmou fechamento, use "Fechado" ou "Comprou", dando preferência ao rótulo existente no funil.
+- Se não houver mudança clara de etapa, mantenha o status atual e retorne status_deve_mudar=false.
 
 Critérios de temperatura:
 - QUENTE: ${criteria.quente}
@@ -250,7 +302,7 @@ Critérios de temperatura:
 
 Retorne exatamente este JSON:
 {
-  "status": "em_atendimento",
+  "status": "${lead.status ?? statusOptions[0] ?? 'Em Atendimento'}",
   "status_confianca": 85,
   "status_deve_mudar": true,
   "temperatura": "quente",
@@ -275,7 +327,7 @@ Retorne exatamente este JSON:
       .trim();
     const parsed = extractJson(text);
 
-    const nextStatus = normalizeStatus(parsed.status);
+    const nextStatus = normalizeStatus(parsed.status, statusOptions);
     const statusConfidence = Number(parsed.status_confianca ?? 0);
     const tempConfidence = Number(parsed.temperatura_confianca ?? 0);
     const nextTemp = parsed.temperatura;
