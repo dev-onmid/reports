@@ -187,6 +187,10 @@ function daysSince(iso: string | null) {
   return (Date.now() - time) / 86_400_000;
 }
 
+function leadIdentityValues(lead: { id: string; client_id: string; numero?: string | null }) {
+  return [String(lead.client_id), String(lead.id), lead.numero ?? null];
+}
+
 function monthKey(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }
@@ -300,7 +304,7 @@ export async function analisarConversa(pool: Pool, leadId: string): Promise<void
     await ensureCrmAiSchema(pool);
 
     const { rows: [lead] } = await pool.query(
-      `SELECT id, client_id, funnel_id, status, temperatura, ia_ultimo_analise, time_interno
+      `SELECT id, client_id, funnel_id, status, temperatura, ia_ultimo_analise, time_interno, numero
          FROM public.crm_leads
         WHERE id = $1`,
       [leadId],
@@ -434,8 +438,18 @@ Retorne exatamente este JSON:
 
     if (shouldMoveStatus && effectiveStatusConfidence >= 70 && nextStatus && nextStatus !== lead.status) {
       await pool.query(
-        `UPDATE public.crm_leads SET status = $1, updated_at = NOW() WHERE id = $2`,
-        [nextStatus, leadId],
+        `UPDATE public.crm_leads
+            SET status = $1, updated_at = NOW()
+          WHERE client_id = $2
+            AND (
+              id = $3::uuid
+              OR (
+                NULLIF(regexp_replace(COALESCE(numero, ''), '\\D', '', 'g'), '') =
+                NULLIF(regexp_replace(COALESCE($4::text, ''), '\\D', '', 'g'), '')
+                AND NULLIF(regexp_replace(COALESCE($4::text, ''), '\\D', '', 'g'), '') IS NOT NULL
+              )
+            )`,
+        [nextStatus, ...leadIdentityValues(lead)],
       );
       await pool.query(
         `INSERT INTO public.crm_status_historico (lead_id, client_id, status_anterior, status_novo, motivo)
@@ -454,8 +468,16 @@ Retorne exatamente este JSON:
       await pool.query(
         `UPDATE public.crm_leads
             SET temperatura = $1, temperatura_atualizada_em = NOW()
-          WHERE id = $2`,
-        [nextTemp, leadId],
+          WHERE client_id = $2
+            AND (
+              id = $3::uuid
+              OR (
+                NULLIF(regexp_replace(COALESCE(numero, ''), '\\D', '', 'g'), '') =
+                NULLIF(regexp_replace(COALESCE($4::text, ''), '\\D', '', 'g'), '')
+                AND NULLIF(regexp_replace(COALESCE($4::text, ''), '\\D', '', 'g'), '') IS NOT NULL
+              )
+            )`,
+        [nextTemp, ...leadIdentityValues(lead)],
       );
       appliedTemp = nextTemp;
     }
@@ -464,8 +486,16 @@ Retorne exatamente este JSON:
       `UPDATE public.crm_leads
           SET ia_ultimo_analise = NOW(),
               ia_confianca_ultimo = $1
-        WHERE id = $2`,
-      [Math.round(confidence), leadId],
+        WHERE client_id = $2
+          AND (
+            id = $3::uuid
+            OR (
+              NULLIF(regexp_replace(COALESCE(numero, ''), '\\D', '', 'g'), '') =
+              NULLIF(regexp_replace(COALESCE($4::text, ''), '\\D', '', 'g'), '')
+              AND NULLIF(regexp_replace(COALESCE($4::text, ''), '\\D', '', 'g'), '') IS NOT NULL
+            )
+          )`,
+      [Math.round(confidence), ...leadIdentityValues(lead)],
     );
 
     await pool.query(

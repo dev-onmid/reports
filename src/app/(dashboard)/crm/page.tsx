@@ -1357,6 +1357,19 @@ export default function CrmPage() {
     refreshLeads({ silent: true });
   }, [crmView]);
 
+  useEffect(() => {
+    if (!clientId || !selectedFunnelId) return;
+    const timer = window.setInterval(() => refreshLeads({ silent: true }), 8_000);
+    function onFocus() { refreshLeads({ silent: true }); }
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onFocus);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onFocus);
+    };
+  }, [clientId, selectedFunnelId]);
+
   const filtered = useMemo(() => leads.filter(l => {
     if (statusFilter && l.status !== statusFilter) return false;
     if (temperatureFilter) {
