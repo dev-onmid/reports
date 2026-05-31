@@ -298,15 +298,29 @@ export function ChatView({ clientId }: { clientId: string }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => { loadInbox(); }, [loadInbox]);
+  // ── Inbox auto-refresh (real-time) ─────────────────────────────────────────
+  // Polls every 8s so new WA messages appear automatically in the sidebar.
+  useEffect(() => {
+    loadInbox();
+    const id = setInterval(loadInbox, 8_000);
+    return () => clearInterval(id);
+  }, [loadInbox]);
+
+  // ── Messages auto-refresh ───────────────────────────────────────────────────
+  // Only keeps the 5s poll alive for conversations with activity in the last 3 days.
+  // Older conversations load once and stop — use the manual "Histórico" button instead.
+  const isRecentLead = selectedLead
+    ? (Date.now() - new Date(selectedLead.last_message_at ?? selectedLead.created_at).getTime()) < 3 * 86_400_000
+    : false;
 
   useEffect(() => {
     if (!selectedId) { setMessages([]); return; }
     loadMessages(selectedId, true);
+    if (!isRecentLead) return; // older conversation: load once, no polling
     if (pollRef.current) clearInterval(pollRef.current);
-    pollRef.current = setInterval(() => loadMessages(selectedId), 5000);
+    pollRef.current = setInterval(() => loadMessages(selectedId), 5_000);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [selectedId, loadMessages]);
+  }, [selectedId, loadMessages, isRecentLead]);
 
   // ── Send helpers ────────────────────────────────────────────────────────────
   async function syncHistory() {
@@ -450,6 +464,10 @@ export function ChatView({ clientId }: { clientId: string }) {
                     <div className="flex items-center gap-1.5 min-w-0">
                       <StatusDot status={lead.status} />
                       <span className="text-xs font-semibold truncate">{lead.nome ?? lead.numero ?? '—'}</span>
+                      {/* Live indicator — auto-updates enabled */}
+                      {(Date.now() - new Date(lead.last_message_at ?? lead.created_at).getTime()) < 3 * 86_400_000 && (
+                        <span className="shrink-0 h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" title="Tempo real ativo" />
+                      )}
                     </div>
                     <span className="text-[10px] text-muted-foreground shrink-0">{timeFmt(lead.last_message_at ?? lead.created_at)}</span>
                   </div>
@@ -501,11 +519,21 @@ export function ChatView({ clientId }: { clientId: string }) {
                   {selectedLead.fechou && (
                     <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-emerald-500/15 text-emerald-400">Fechou</span>
                   )}
-                  {/* Sync history button */}
+                  {/* Live / static indicator + sync button */}
+                  {isRecentLead ? (
+                    <span className="flex items-center gap-1 text-[10px] font-semibold text-emerald-400 px-2 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      Ao vivo
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-semibold text-muted-foreground px-2 py-1 rounded-full bg-muted/40 border border-border">
+                      Arquivado
+                    </span>
+                  )}
                   <button
                     onClick={() => void syncHistory()}
                     disabled={syncing}
-                    title="Buscar histórico de mensagens anteriores"
+                    title="Importar histórico de mensagens da Evolution API"
                     className="flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-[11px] font-semibold text-muted-foreground hover:text-foreground hover:border-primary/40 disabled:opacity-50 transition-colors"
                   >
                     <History className="h-3 w-3" />
