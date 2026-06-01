@@ -69,14 +69,27 @@ export async function GET(req: NextRequest) {
   try {
     await ensureTable(pool);
     const { rows } = await pool.query(
-      `SELECT *,
+      `WITH ranked AS (
+        SELECT *,
           COALESCE(lead_date, data) AS normalized_date,
           COALESCE(lead_name, nome) AS normalized_name,
-          COALESCE(NULLIF(revenue, 0), valor_rs, 0)::float AS normalized_revenue
-         FROM public.crm_leads
+          COALESCE(NULLIF(revenue, 0), valor_rs, 0)::float AS normalized_revenue,
+          ROW_NUMBER() OVER (
+            PARTITION BY COALESCE(NULLIF(regexp_replace(COALESCE(numero, ''), '\\D', '', 'g'), ''), id::text)
+            ORDER BY
+              CASE WHEN $2::uuid IS NOT NULL AND funnel_id = $2::uuid THEN 0 ELSE 1 END,
+              CASE WHEN funnel_id IS NOT NULL THEN 0 ELSE 1 END,
+              COALESCE(updated_at, created_at) DESC,
+              created_at DESC
+          ) AS rn
+        FROM public.crm_leads
         WHERE client_id = $1
           AND ($2::uuid IS NULL OR funnel_id = $2::uuid)
-        ORDER BY COALESCE(lead_date, data) DESC NULLS LAST, created_at DESC`,
+      )
+      SELECT *
+      FROM ranked
+      WHERE rn = 1
+      ORDER BY COALESCE(normalized_date, data) DESC NULLS LAST, created_at DESC`,
       [clientId, funnelId ?? null]
     );
     return Response.json(rows);

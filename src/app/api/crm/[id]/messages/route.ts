@@ -80,6 +80,26 @@ export async function POST(
       [id],
     );
     if (!lead) return Response.json({ error: 'lead not found' }, { status: 404 });
+    const { rows: [canonical] } = await pool.query<{ id: string }>(
+      `SELECT id
+         FROM public.crm_leads
+        WHERE client_id = $1
+          AND (
+            id = $2::uuid
+            OR (
+              NULLIF(regexp_replace(COALESCE(numero, ''), '\\D', '', 'g'), '') =
+              NULLIF(regexp_replace(COALESCE($3::text, ''), '\\D', '', 'g'), '')
+              AND NULLIF(regexp_replace(COALESCE($3::text, ''), '\\D', '', 'g'), '') IS NOT NULL
+            )
+          )
+        ORDER BY
+          CASE WHEN funnel_id IS NOT NULL THEN 0 ELSE 1 END,
+          COALESCE(updated_at, created_at) DESC,
+          created_at DESC
+        LIMIT 1`,
+      [lead.client_id, id, lead.numero ?? null],
+    );
+    const targetLeadId = canonical?.id ?? id;
 
     // Ensure crm_messages has `tipo` column
     await pool.query(`
@@ -118,11 +138,24 @@ export async function POST(
     const { rows: [msg] } = await pool.query(
       `INSERT INTO public.crm_messages (lead_id, client_id, direction, text, tipo)
        VALUES ($1, $2, $3, $4, $5) RETURNING id, direction, text, tipo, created_at`,
-      [id, lead.client_id, direction, dbText, tipo],
+      [targetLeadId, lead.client_id, direction, dbText, tipo],
     );
-    await pool.query(`UPDATE public.crm_leads SET updated_at = NOW() WHERE id = $1`, [id]);
+    await pool.query(
+      `UPDATE public.crm_leads
+          SET updated_at = NOW()
+        WHERE client_id = $1
+          AND (
+            id = $2::uuid
+            OR (
+              NULLIF(regexp_replace(COALESCE(numero, ''), '\\D', '', 'g'), '') =
+              NULLIF(regexp_replace(COALESCE($3::text, ''), '\\D', '', 'g'), '')
+              AND NULLIF(regexp_replace(COALESCE($3::text, ''), '\\D', '', 'g'), '') IS NOT NULL
+            )
+          )`,
+      [lead.client_id, id, lead.numero ?? null],
+    );
     if (lead.time_interno !== true) {
-      await analisarConversa(pool, id).catch(err => console.error('[messages analisarConversa]', err));
+      await analisarConversa(pool, targetLeadId).catch(err => console.error('[messages analisarConversa]', err));
     }
 
     return Response.json({ ...msg, wa_sent: waSent, wa_error: waError ?? null }, { status: 201 });

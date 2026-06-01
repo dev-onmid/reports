@@ -375,7 +375,8 @@ Regras importantes de status:
 - Use "Agendado" somente quando houver data e/ou horário definido e o cliente confirmar ou aceitar explicitamente aquele agendamento.
 - Se cliente pediu novo horário após um agendamento, use "Reagendado" quando existir.
 - Se cliente comprou, pagou ou confirmou fechamento, use "Fechado" ou "Comprou", dando preferência ao rótulo existente no funil.
-- Não mova leads em "Agendado", "Reagendado", "Fechado", "Comprou" ou "Paciente" para "Não Retorna" só por falta de resposta no chat.
+- "Fechado", "Comprou" e "Paciente" não são status congelados. Se um lead que já comprou iniciar novo atendimento, pedir novo orçamento ou combinar novo agendamento, mude para o status adequado da nova conversa.
+- Não mova leads em "Agendado" ou "Reagendado" para "Não Retorna" só por falta de resposta no chat.
 - Use "Não Retorna" somente quando houver pelo menos 4 tentativas de contato enviadas pelo atendente sem resposta posterior do cliente E isso já durar pelo menos 2 dias.
 - Se não houver mudança clara de etapa, mantenha o status atual e retorne status_deve_mudar=false.
 
@@ -413,7 +414,7 @@ Retorne exatamente este JSON:
 
     const noReturnStatus = findStatus(statusOptions, 'Não Retorna');
     const aiStatus = normalizeStatus(parsed.status, statusOptions);
-    const protectedNoReturn = statusMatches(lead.status, ['Agendado', 'Reagendado', 'Fechado', 'Comprou', 'Paciente']);
+    const protectedNoReturn = statusMatches(lead.status, ['Agendado', 'Reagendado']);
     const noReturnQualifies = Boolean(
       signals.lastDirection === 'out'
       && signals.outboundAfterLastInbound >= 4

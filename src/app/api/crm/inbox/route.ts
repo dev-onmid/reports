@@ -159,7 +159,31 @@ export async function GET(req: NextRequest) {
     const avatarSelect = avatarColumn ? `l.${avatarColumn}` : `NULL::text`;
 
     const { rows } = await pool.query(
-       `SELECT
+       `WITH canonical_leads AS (
+         SELECT *
+         FROM (
+           SELECT
+             l.*,
+             ROW_NUMBER() OVER (
+               PARTITION BY COALESCE(NULLIF(regexp_replace(COALESCE(l.numero, ''), '\\D', '', 'g'), ''), l.id::text)
+               ORDER BY
+                 CASE WHEN l.funnel_id IS NOT NULL THEN 0 ELSE 1 END,
+                 COALESCE(l.updated_at, l.created_at) DESC,
+                 l.created_at DESC
+             ) AS rn
+           FROM public.crm_leads l
+           WHERE l.client_id = $1
+             AND (
+               l.numero IS NULL
+               OR (
+                 l.numero ~ '^[0-9]{10,15}$'
+                 AND l.numero NOT LIKE '%--%'
+               )
+             )
+         ) ranked
+         WHERE rn = 1
+       )
+       SELECT
          l.id,
          l.nome,
          l.numero,
@@ -174,8 +198,8 @@ export async function GET(req: NextRequest) {
          COALESCE(m.text, l.whatsapp_last_message_text) AS last_message,
          COALESCE(m.direction, l.whatsapp_last_direction) AS last_direction,
          COALESCE(m.created_at, l.whatsapp_last_message_at) AS last_message_at,
-         COUNT(m2.id)  AS unread_count
-       FROM public.crm_leads l
+         COALESCE(unread.total, 0) AS unread_count
+       FROM canonical_leads l
        LEFT JOIN LATERAL (
          -- Busca última mensagem de qualquer lead com o mesmo número do cliente
          SELECT text, direction, created_at
@@ -190,26 +214,17 @@ export async function GET(req: NextRequest) {
          ORDER BY created_at DESC
          LIMIT 1
        ) m ON true
-       LEFT JOIN public.crm_messages m2
-         ON m2.lead_id IN (
+       LEFT JOIN LATERAL (
+         SELECT COUNT(*)::int AS total
+         FROM public.crm_messages m2
+         WHERE m2.lead_id IN (
            SELECT id FROM public.crm_leads l3
            WHERE l3.client_id = l.client_id AND l3.numero = l.numero AND l3.numero IS NOT NULL
            UNION SELECT l.id
          )
-         AND m2.direction = 'in'
-         AND m2.created_at > COALESCE(l.updated_at, l.created_at - interval '1 day')
-       WHERE l.client_id = $1
-         -- Filtros anti-grupo: exclui JIDs de grupo normalizados (muito longos ou muito curtos)
-         -- Números válidos brasileiros com código do país: 12-13 dígitos
-         -- Sem código do país (legado): 10-11 dígitos. Faixa segura: 10-15.
-         AND (
-           l.numero IS NULL
-           OR (
-             l.numero ~ '^[0-9]{10,15}$'
-             AND l.numero NOT LIKE '%--%'
-           )
-         )
-       GROUP BY l.id, m.text, m.direction, m.created_at
+           AND m2.direction = 'in'
+           AND m2.created_at > COALESCE(l.updated_at, l.created_at - interval '1 day')
+       ) unread ON true
        ORDER BY COALESCE(m.created_at, l.whatsapp_last_message_at, l.created_at) DESC
        LIMIT 200`,
       [clientId],
