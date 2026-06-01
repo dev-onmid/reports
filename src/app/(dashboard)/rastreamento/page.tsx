@@ -4,7 +4,8 @@ import { useEffect, useState, useCallback } from 'react';
 import {
   Copy, Check, Trash2, Plus, ExternalLink, RefreshCw,
   Link2, MousePointerClick, ChevronDown, ChevronUp, X, Pencil,
-  BarChart2, TrendingUp, Filter,
+  BarChart2, TrendingUp, Filter, MessageCircle, ShoppingCart,
+  Settings, Zap, Eye, EyeOff,
 } from 'lucide-react';
 import {
   AreaChart, Area, BarChart, Bar,
@@ -57,6 +58,30 @@ const PERIOD_OPTIONS: { value: Period; label: string }[] = [
 const BAR_COLORS = ['#55F52F','#3b82f6','#a855f7','#f59e0b','#ef4444','#10b981','#ec4899','#06b6d4'];
 
 const BASE = typeof window !== 'undefined' ? window.location.origin : '';
+
+// ── WhatsApp Tracking types ──────────────────────────────────────────────────
+
+type WaLead = {
+  id: string;
+  telefone: string;
+  ctwa_clid: string | null;
+  source_id: string | null;
+  campanha: string | null;
+  pixel_id: string | null;
+  evento_lead_enviado: boolean;
+  evento_compra_enviado: boolean;
+  valor_compra: number | null;
+  created_at: string;
+  client_id: string | null;
+  client_name: string | null;
+};
+
+function maskPhone(phone: string): string {
+  if (phone.length >= 10) {
+    return `+${phone.slice(0, 2)} (${phone.slice(2, 4)}) ****-${phone.slice(-4)}`;
+  }
+  return `****${phone.slice(-4)}`;
+}
 
 function toISODate(d: Date) {
   return d.toISOString().slice(0, 10);
@@ -141,6 +166,12 @@ export default function RastreamentoPage() {
     clientId: '', name: '', slug: '', whatsapp: '', message: 'Olá, vim pelo anúncio!',
   });
 
+  // WhatsApp tracking — consolidated admin view
+  const [waLeads, setWaLeads]         = useState<WaLead[]>([]);
+  const [waLoading, setWaLoading]     = useState(true);
+  const [waClientFilter, setWaClientFilter] = useState('');
+  const [waDays, setWaDays]           = useState(30);
+
   function loadLinks() {
     setLoading(true);
     const qs = filterClient ? `?clientId=${filterClient}` : '';
@@ -216,6 +247,37 @@ export default function RastreamentoPage() {
     }
   }
 
+  // WhatsApp consolidated load
+  const loadWaLeads = useCallback(() => {
+    setWaLoading(true);
+    const params = new URLSearchParams({ days: String(waDays) });
+    if (waClientFilter) params.set('clientId', waClientFilter);
+    fetch(`/api/whatsapp-leads?${params}`)
+      .then(r => r.ok ? r.json() as Promise<WaLead[]> : [])
+      .then(setWaLeads)
+      .catch(() => setWaLeads([]))
+      .finally(() => setWaLoading(false));
+  }, [waDays, waClientFilter]);
+
+  useEffect(() => { loadWaLeads(); }, [loadWaLeads]);
+
+  // Per-client aggregates derived from waLeads
+  const waByClient = (() => {
+    const map = new Map<string, { name: string; leads: number; conv: number }>();
+    for (const l of waLeads) {
+      const key = l.client_id ?? '__none__';
+      const name = l.client_name ?? 'Sem cliente';
+      const cur = map.get(key) ?? { name, leads: 0, conv: 0 };
+      cur.leads += 1;
+      if (l.evento_compra_enviado) cur.conv += 1;
+      map.set(key, cur);
+    }
+    return Array.from(map.values()).sort((a, b) => b.leads - a.leads);
+  })();
+
+  const waLeadTotal = waLeads.length;
+  const waConvTotal = waLeads.filter(l => l.evento_compra_enviado).length;
+
   const { from: periodFrom, to: periodTo } = periodToDates(period, customFrom, customTo);
   const totalLinksFiltered = links.length;
   const totalClicksFiltered = links.reduce((s, l) => s + l.clicks, 0);
@@ -239,7 +301,7 @@ export default function RastreamentoPage() {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-4 py-3">
+      <div className="flex flex-wrap items-center gap-3 rounded-[var(--radius)] border border-border bg-card px-4 py-3">
         <Filter className="h-4 w-4 text-muted-foreground shrink-0" />
 
         {/* Client filter */}
@@ -297,7 +359,7 @@ export default function RastreamentoPage() {
               <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
               <Icon className="h-4 w-4" style={{ color }} />
             </div>
-            <p className="mt-2 text-2xl font-bold tabular-nums" style={{ color }}>
+            <p className="mt-2 text-base font-bold tabular-nums" style={{ color }}>
               {analyticsLoading ? <span className="inline-block h-7 w-16 animate-pulse rounded bg-muted" /> : value}
             </p>
           </div>
@@ -307,7 +369,7 @@ export default function RastreamentoPage() {
       {/* Charts row */}
       <div className="grid gap-4 xl:grid-cols-[1fr_340px]">
         {/* Clicks over time */}
-        <div className="rounded-xl border border-border bg-card p-5">
+        <div className="rounded-[var(--radius)] border border-border bg-card p-5">
           <p className="mb-4 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Cliques por dia</p>
           {analyticsLoading ? (
             <div className="h-40 animate-pulse rounded-lg bg-muted/30" />
@@ -337,7 +399,7 @@ export default function RastreamentoPage() {
         </div>
 
         {/* Top sources */}
-        <div className="rounded-xl border border-border bg-card p-5">
+        <div className="rounded-[var(--radius)] border border-border bg-card p-5">
           <p className="mb-4 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Top origens (utm_source)</p>
           {analyticsLoading ? (
             <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="h-6 animate-pulse rounded bg-muted/30" />)}</div>
@@ -364,7 +426,7 @@ export default function RastreamentoPage() {
       {/* Second charts row */}
       <div className="grid gap-4 sm:grid-cols-2">
         {/* Top links */}
-        <div className="rounded-xl border border-border bg-card p-5">
+        <div className="rounded-[var(--radius)] border border-border bg-card p-5">
           <p className="mb-4 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Top links por cliques</p>
           {analyticsLoading ? (
             <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="h-7 animate-pulse rounded bg-muted/30" />)}</div>
@@ -395,7 +457,7 @@ export default function RastreamentoPage() {
         </div>
 
         {/* Top campaigns */}
-        <div className="rounded-xl border border-border bg-card p-5">
+        <div className="rounded-[var(--radius)] border border-border bg-card p-5">
           <p className="mb-4 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Top campanhas (utm_campaign)</p>
           {analyticsLoading ? (
             <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="h-7 animate-pulse rounded bg-muted/30" />)}</div>
@@ -429,7 +491,7 @@ export default function RastreamentoPage() {
       {/* Form Modal */}
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="w-full max-w-lg rounded-2xl border border-border bg-card p-6 shadow-2xl">
+          <div className="w-full max-w-lg rounded-[var(--radius)] border border-border bg-card p-6 shadow-2xl">
             <div className="mb-5 flex items-center justify-between">
               <h2 className="font-bold text-lg">{editingId ? 'Editar Link' : 'Novo Link de Rastreamento'}</h2>
               <button onClick={() => setShowForm(false)} className="text-muted-foreground hover:text-foreground">
@@ -513,7 +575,7 @@ export default function RastreamentoPage() {
               const isExpanded = expandedId === link.id;
               const rows = breakdown[link.id];
               return (
-                <div key={link.id} className="rounded-xl border border-border bg-card overflow-hidden">
+                <div key={link.id} className="rounded-[var(--radius)] border border-border bg-card overflow-hidden">
                   <div className="flex flex-wrap items-center gap-3 p-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
@@ -572,6 +634,150 @@ export default function RastreamentoPage() {
             })}
           </div>
         )}
+      </div>
+
+      {/* ── WhatsApp Tracking — Consolidated ───────────────────────────── */}
+      <div className="mt-8 border-t border-border pt-8 space-y-6">
+
+        {/* Section header + filters */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="flex items-center gap-2 text-xl font-bold">
+              <MessageCircle className="h-5 w-5 text-primary" />
+              Rastreio WhatsApp → Meta Ads
+            </h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Visão consolidada de todos os clientes. Configure por cliente na aba Clientes → Rastreio WA.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <select
+              value={waClientFilter}
+              onChange={e => setWaClientFilter(e.target.value)}
+              className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-semibold outline-none focus:border-primary"
+            >
+              <option value="">Todos os clientes</option>
+              {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <div className="flex items-center gap-1 rounded-lg border border-border bg-background p-0.5">
+              {[7, 30, 90].map(d => (
+                <button key={d} onClick={() => setWaDays(d)}
+                  className={cn(
+                    'rounded-md px-3 py-1 text-xs font-semibold transition-all',
+                    waDays === d ? 'bg-primary text-black' : 'text-muted-foreground hover:text-foreground',
+                  )}>{d}d</button>
+              ))}
+            </div>
+            <button onClick={loadWaLeads}
+              className="flex items-center gap-1 rounded-lg border border-border px-2 py-1.5 text-xs font-semibold hover:bg-muted/50 transition-colors">
+              <RefreshCw className={cn('h-3.5 w-3.5', waLoading && 'animate-spin')} />
+            </button>
+          </div>
+        </div>
+
+        {/* Global stats */}
+        <div className="grid gap-3 sm:grid-cols-3">
+          {[
+            { label: 'Total de leads', value: waLeadTotal, icon: MessageCircle, color: '#55F52F' },
+            { label: 'Total compras',  value: waConvTotal, icon: ShoppingCart,  color: '#3b82f6' },
+            { label: 'Taxa de conversão', value: waLeadTotal > 0 ? `${Math.round((waConvTotal / waLeadTotal) * 100)}%` : '—', icon: TrendingUp, color: '#a855f7' },
+          ].map(({ label, value, icon: Icon, color }) => (
+            <div key={label} className="relative overflow-hidden rounded-xl border bg-card p-4" style={{ borderColor: `${color}44` }}>
+              <div className="pointer-events-none absolute inset-0" style={{ background: `radial-gradient(circle at 85% 15%, ${color}22, transparent 50%)` }} />
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
+                <Icon className="h-4 w-4" style={{ color }} />
+              </div>
+              <p className="mt-2 text-base font-bold tabular-nums" style={{ color }}>
+                {waLoading ? <span className="inline-block h-7 w-16 animate-pulse rounded bg-muted" /> : value}
+              </p>
+            </div>
+          ))}
+        </div>
+
+        {/* Per-client cards */}
+        {!waLoading && waByClient.length > 0 && (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {waByClient.map(c => {
+              const taxa = c.leads > 0 ? `${Math.round((c.conv / c.leads) * 100)}%` : '—';
+              return (
+                <div key={c.name} className="rounded-xl border border-border bg-card p-4 space-y-2">
+                  <p className="text-sm font-semibold truncate">{c.name}</p>
+                  <div className="flex items-center gap-4">
+                    <div>
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Leads</p>
+                      <p className="text-base font-bold text-primary tabular-nums">{c.leads}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Compras</p>
+                      <p className="text-base font-bold text-blue-400 tabular-nums">{c.conv}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Taxa</p>
+                      <p className="text-base font-bold text-purple-400 tabular-nums">{taxa}</p>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* All leads table */}
+        <div>
+          <p className="mb-3 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
+            {waLeadTotal} lead{waLeadTotal !== 1 ? 's' : ''} · últimos {waDays} dias
+          </p>
+
+          {waLoading ? (
+            <div className="space-y-2">{[1, 2, 3].map(i => <div key={i} className="h-12 animate-pulse rounded-xl border border-border bg-muted/30" />)}</div>
+          ) : waLeads.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border p-10 text-center">
+              <MessageCircle className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" />
+              <p className="font-semibold text-muted-foreground">Nenhum lead no período.</p>
+              <p className="mt-1 text-xs text-muted-foreground/60">Configure as instâncias Z-API em cada cliente na aba Rastreio WA.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-[var(--radius)] border border-border bg-card">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border bg-muted/30">
+                    {['Cliente', 'Telefone', 'Source ID', 'Lead', 'Compra', 'Valor', 'Data'].map(h => (
+                      <th key={h} className="px-4 py-2.5 text-left font-semibold text-muted-foreground uppercase tracking-wider text-[10px] last:text-right">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {waLeads.map((lead, i) => (
+                    <tr key={lead.id} className={cn('border-b border-border/50 last:border-0', i % 2 === 0 ? '' : 'bg-muted/10')}>
+                      <td className="px-4 py-2.5 font-medium max-w-[120px] truncate">{lead.client_name ?? '—'}</td>
+                      <td className="px-4 py-2.5 font-mono font-medium">{maskPhone(lead.telefone)}</td>
+                      <td className="px-4 py-2.5 text-muted-foreground font-mono text-[10px] max-w-[100px] truncate">{lead.source_id ?? '—'}</td>
+                      <td className="px-4 py-2.5">
+                        {lead.evento_lead_enviado
+                          ? <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-400">✓ Enviado</span>
+                          : <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">Pendente</span>}
+                      </td>
+                      <td className="px-4 py-2.5">
+                        {lead.evento_compra_enviado
+                          ? <span className="rounded-full bg-blue-500/15 px-2 py-0.5 text-[10px] font-bold text-blue-400">✓ Enviado</span>
+                          : <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">—</span>}
+                      </td>
+                      <td className="px-4 py-2.5 font-bold tabular-nums">
+                        {lead.valor_compra != null
+                          ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(lead.valor_compra)
+                          : '—'}
+                      </td>
+                      <td className="px-4 py-2.5 text-right text-muted-foreground tabular-nums">
+                        {new Date(lead.created_at).toLocaleDateString('pt-BR')}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

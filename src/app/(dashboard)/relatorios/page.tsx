@@ -256,7 +256,7 @@ export default function RelatoriosPage() {
             <BarChart2 className="w-6 h-6 text-violet-400" />
           </div>
           <div>
-            <h1 className="font-heading font-normal text-4xl uppercase leading-none tracking-wide text-foreground">Relatórios</h1>
+            <h1 className="font-heading font-normal text-xl uppercase leading-none tracking-wide text-foreground">Relatórios</h1>
             <p className="text-sm text-muted-foreground mt-0.5">
               Diagnósticos de performance gerados a partir de Meta Ads, Google Ads e CRM.
             </p>
@@ -296,42 +296,42 @@ export default function RelatoriosPage() {
         <>
           {/* KPI Cards */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="bg-card border border-border rounded-xl p-4 flex items-center gap-3">
+            <div className="bg-card border border-border rounded-[var(--radius)] p-4 flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-emerald-500/15 flex items-center justify-center shrink-0">
                 <FileCheck2 className="w-5 h-5 text-emerald-400" />
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Total de relatórios</p>
-                <p className="font-heading font-normal text-3xl leading-none text-foreground mt-0.5">
+                <p className="font-heading font-normal text-xl leading-none text-foreground mt-0.5">
                   {diagnostics.length}<span className="text-violet-400 text-sm ml-1">✦</span>
                 </p>
               </div>
             </div>
-            <div className="bg-card border border-border rounded-xl p-4 flex items-center gap-3">
+            <div className="bg-card border border-border rounded-[var(--radius)] p-4 flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-violet-500/15 flex items-center justify-center shrink-0">
                 <CalendarDays className="w-5 h-5 text-violet-400" />
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Gerados este mês</p>
-                <p className="font-heading font-normal text-3xl leading-none text-foreground mt-0.5">{thisMonth}</p>
+                <p className="font-heading font-normal text-xl leading-none text-foreground mt-0.5">{thisMonth}</p>
               </div>
             </div>
-            <div className="bg-card border border-border rounded-xl p-4 flex items-center gap-3">
+            <div className="bg-card border border-border rounded-[var(--radius)] p-4 flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-blue-500/15 flex items-center justify-center shrink-0">
                 <Users className="w-5 h-5 text-blue-400" />
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Clientes únicos</p>
-                <p className="font-heading font-normal text-3xl leading-none text-foreground mt-0.5">{uniqueClients}</p>
+                <p className="font-heading font-normal text-xl leading-none text-foreground mt-0.5">{uniqueClients}</p>
               </div>
             </div>
-            <div className="bg-card border border-border rounded-xl p-4 flex items-center gap-3">
+            <div className="bg-card border border-border rounded-[var(--radius)] p-4 flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-amber-500/15 flex items-center justify-center shrink-0">
                 <CheckCircle2 className="w-5 h-5 text-amber-400" />
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Automações ativas</p>
-                <p className="font-heading font-normal text-3xl leading-none text-foreground mt-0.5">{configs.filter(c => c.active).length}</p>
+                <p className="font-heading font-normal text-xl leading-none text-foreground mt-0.5">{configs.filter(c => c.active).length}</p>
               </div>
             </div>
           </div>
@@ -381,7 +381,7 @@ export default function RelatoriosPage() {
           </div>
 
           {/* Table */}
-          <div className="bg-card border border-border rounded-xl overflow-hidden">
+          <div className="bg-card border border-border rounded-[var(--radius)] overflow-hidden">
             <table className="w-full text-sm text-left">
               <thead className="border-b border-border">
                 <tr>
@@ -521,7 +521,7 @@ export default function RelatoriosPage() {
           </div>
 
           {showConfigForm && (
-            <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+            <div className="bg-card border border-border rounded-[var(--radius)] p-5 space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="font-semibold text-foreground text-sm">
                   {editingConfig ? 'Editar automação' : 'Nova automação de relatório'}
@@ -597,7 +597,7 @@ export default function RelatoriosPage() {
             </div>
           )}
 
-          <div className="bg-card border border-border rounded-xl overflow-hidden">
+          <div className="bg-card border border-border rounded-[var(--radius)] overflow-hidden">
             <table className="w-full text-sm text-left">
               <thead className="border-b border-border">
                 <tr>

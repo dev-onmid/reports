@@ -482,17 +482,17 @@ function GestoresTopCards({ stats, clients }: { stats: GestorStat[]; clients: Cl
           <div className="pointer-events-none absolute -right-10 -top-10 h-32 w-32 rounded-full bg-white/5 blur-2xl" />
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-4">
-              <div className={cn('flex h-14 w-14 items-center justify-center rounded-full bg-white/5 shadow-[0_0_22px_currentColor]', card.color)}>
+              <div className={cn('flex h-8 w-8 items-center justify-center rounded-full bg-white/5 shadow-[0_0_22px_currentColor]', card.color)}>
                 <card.icon className="h-7 w-7" />
               </div>
               <div>
                 <p className="text-sm font-bold text-white">{card.label}</p>
-                <p className="mt-1 text-3xl font-bold text-white">{card.value}<span className="ml-1 text-base font-normal text-slate-400">{card.label === 'Score médio' ? '/100' : ''}</span></p>
+                <p className="mt-1 text-xl font-bold text-white">{card.value}<span className="ml-1 text-base font-normal text-slate-400">{card.label === 'Score médio' ? '/100' : ''}</span></p>
                 <p className={cn('mt-2 text-xs', card.color)}>{card.sub}</p>
               </div>
             </div>
             {'grade' in card ? (
-              <div className={cn('flex h-16 w-16 items-center justify-center rounded-full border-4 text-2xl font-black shadow-[0_0_22px_currentColor]', gradeColor(card.grade as string))}>
+              <div className={cn('flex h-10 w-10 items-center justify-center rounded-full border-2 text-sm font-black shadow-[0_0_22px_currentColor]', gradeColor(card.grade as string))}>
                 {card.grade}
               </div>
             ) : (
@@ -602,11 +602,11 @@ export default function ScorePage() {
                     <stat.icon className={cn('w-4 h-4', stat.color)} />
                     <span className="text-sm font-medium text-foreground">{stat.label}</span>
                   </div>
-                  <p className="text-3xl font-bold text-white">{stat.value}</p>
+                  <p className="text-xl font-bold text-white">{stat.value}</p>
                   <p className={cn('mt-3 text-xs', stat.color)}>{stat.sub}</p>
                 </div>
                 {'grade' in stat ? (
-                  <div className={cn('flex h-16 w-16 items-center justify-center rounded-full border-4 text-2xl font-bold shadow-[0_0_22px_currentColor]', gradeColor(stat.grade as string))}>
+                  <div className={cn('flex h-10 w-10 items-center justify-center rounded-full border-2 text-sm font-bold shadow-[0_0_22px_currentColor]', gradeColor(stat.grade as string))}>
                     {stat.grade}
                   </div>
                 ) : (
@@ -689,7 +689,7 @@ export default function ScorePage() {
             </div>
             {selectedRadarClient && (
               <div className="flex items-center gap-4 rounded-xl border border-yellow-400/20 bg-[radial-gradient(circle_at_10%_50%,rgba(250,204,21,0.20),transparent_36%),rgba(15,23,42,0.75)] px-5 py-4 shadow-[0_0_28px_rgba(250,204,21,0.08)]">
-                <div className={cn('flex h-16 w-16 items-center justify-center rounded-full border-4 text-2xl font-bold shadow-[0_0_22px_currentColor]', gradeColor(selectedRadarClient.grade))}>
+                <div className={cn('flex h-10 w-10 items-center justify-center rounded-full border-2 text-sm font-bold shadow-[0_0_22px_currentColor]', gradeColor(selectedRadarClient.grade))}>
                   {selectedRadarClient.grade ?? '?'}
                 </div>
                 <div>

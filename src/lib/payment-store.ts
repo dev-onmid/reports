@@ -33,6 +33,7 @@ type PaymentContextValue = {
   loading: boolean;
   setPayments: React.Dispatch<React.SetStateAction<InvestmentPayment[]>>;
   addPayment: (payment: Omit<InvestmentPayment, 'id'>) => void;
+  updatePayment: (id: string, fields: Partial<Omit<InvestmentPayment, 'id'>>) => void;
   updatePaymentStatus: (id: string, status: PaymentStatus) => void;
   deletePayment: (id: string) => void;
   movePaymentDate: (id: string, date: string) => void;
@@ -75,6 +76,24 @@ export function PaymentProvider({ children }: { children: React.ReactNode }) {
 
     const dateFormatted = payment.date.split('-').reverse().join('/');
     logActivity('payment_added', `Pix de ${fmtBRL(payment.amount)} adicionado para ${payment.clientName} (${payment.channel}) em ${dateFormatted}`);
+  }
+
+  function updatePayment(id: string, fields: Partial<Omit<InvestmentPayment, 'id'>>) {
+    setPayments((prev) => prev.map((p) => p.id === id ? { ...p, ...fields } : p));
+    const body: Record<string, unknown> = {};
+    if (fields.status      !== undefined) body.status      = fields.status;
+    if (fields.date        !== undefined) body.date        = fields.date;
+    if (fields.extra       !== undefined) body.extra       = fields.extra;
+    if (fields.channel     !== undefined) body.channel     = fields.channel;
+    if (fields.amount      !== undefined) body.amount      = fields.amount;
+    if (fields.clientId    !== undefined) body.clientId    = fields.clientId;
+    if (fields.clientName  !== undefined) body.clientName  = fields.clientName;
+    if (fields.destination !== undefined) body.destination = fields.destination;
+    void fetch(`/api/payments?id=${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).catch((e) => console.error('Erro ao atualizar pagamento:', e));
   }
 
   function updatePaymentStatus(id: string, status: PaymentStatus) {
@@ -123,7 +142,7 @@ export function PaymentProvider({ children }: { children: React.ReactNode }) {
 
   return React.createElement(
     PaymentContext.Provider,
-    { value: { payments, loading, setPayments, addPayment, updatePaymentStatus, deletePayment, movePaymentDate, togglePaymentExtra } },
+    { value: { payments, loading, setPayments, addPayment, updatePayment, updatePaymentStatus, deletePayment, movePaymentDate, togglePaymentExtra } },
     children,
   );
 }

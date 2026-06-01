@@ -220,7 +220,7 @@ function MetaAssetsPanel({ connection }: { connection: MetaConnection }) {
   ];
 
   return (
-    <div className="bg-card border border-border rounded-xl overflow-hidden">
+    <div className="bg-card border border-border rounded-[var(--radius)] overflow-hidden">
       <div className="flex items-center justify-between px-5 py-4 border-b border-border">
         <div>
           <p className="text-sm font-bold">Ativos acessíveis</p>
@@ -425,7 +425,7 @@ function GoogleAdsAssetsPanel({ google }: { google: GoogleAdsIntegration }) {
   }
 
   return (
-    <div className="bg-card border border-border rounded-xl overflow-hidden">
+    <div className="bg-card border border-border rounded-[var(--radius)] overflow-hidden">
       <div className="flex items-center justify-between px-5 py-4 border-b border-border">
         <div>
           <p className="text-sm font-bold">Contas Google Ads</p>
@@ -661,7 +661,7 @@ function MetaConnectModal({
       onClick={handleBackdrop}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
     >
-      <div className="w-full max-w-sm bg-card border border-border rounded-2xl shadow-2xl overflow-hidden">
+      <div className="w-full max-w-sm bg-card border border-border rounded-[var(--radius)] shadow-2xl overflow-hidden">
         <div className="flex items-center justify-between px-6 py-4 border-b border-border">
           <h2 className="font-bold text-sm">Conectar conta Meta</h2>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
@@ -742,7 +742,7 @@ function GoogleAdsConnectModal({
       onClick={handleBackdrop}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
     >
-      <div className="w-full max-w-md bg-card border border-border rounded-2xl shadow-2xl overflow-hidden">
+      <div className="w-full max-w-md bg-card border border-border rounded-[var(--radius)] shadow-2xl overflow-hidden">
         <div className="flex items-center justify-between px-6 py-5 border-b border-border">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-background border border-border flex items-center justify-center">
@@ -918,7 +918,7 @@ function MetaConnectionsPanel({
 
   return (
     <div
-      className="overflow-hidden rounded-xl border border-border bg-card"
+      className="overflow-hidden rounded-[var(--radius)] border border-border bg-card"
       style={{
         background: 'linear-gradient(145deg, rgba(17,22,35,0.92), rgba(8,11,18,0.96))',
         boxShadow: '0 0 30px rgba(15,23,42,0.24), inset 0 0 0 1px rgba(255,255,255,0.025)',
@@ -1322,7 +1322,7 @@ function GoogleConnectionsPanel({
   }
 
   return (
-    <div className="bg-card border border-border rounded-xl overflow-hidden">
+    <div className="bg-card border border-border rounded-[var(--radius)] overflow-hidden">
       <div className="flex items-center justify-between px-5 py-4 border-b border-border">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl bg-background border border-border flex items-center justify-center shrink-0">
@@ -1568,7 +1568,7 @@ function SpreadsheetImportPanel() {
   }
 
   return (
-    <div className="rounded-2xl border border-border bg-card overflow-hidden">
+    <div className="rounded-[var(--radius)] border border-border bg-card overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-border">
         <div className="flex items-center gap-3">
@@ -1984,14 +1984,14 @@ export default function IntegracoesPage() {
         {/* ── HEADER ─────────────────────────────────────────────────────────── */}
         <div className="grid gap-6 xl:grid-cols-[1fr_560px] xl:items-end">
           <div>
-            <h1 className="font-heading font-normal text-4xl uppercase leading-none tracking-wide text-foreground">Integrações</h1>
+            <h1 className="font-heading font-normal text-xl uppercase leading-none tracking-wide text-foreground">Integrações</h1>
             <p className="mt-3 max-w-2xl text-base text-muted-foreground">
               Conecte suas plataformas para sincronizar dados automaticamente e potencializar seus resultados.
             </p>
           </div>
 
           <div
-            className="flex items-center justify-between gap-5 rounded-2xl border border-violet-400/35 bg-card px-6 py-5"
+            className="flex items-center justify-between gap-5 rounded-[var(--radius)] border border-violet-400/35 bg-card px-6 py-5"
             style={{
               background: 'radial-gradient(circle at 8% 50%, rgba(124,58,237,0.22), transparent 34%), linear-gradient(135deg, rgba(124,58,237,0.12), rgba(15,18,29,0.82))',
               boxShadow: '0 0 34px rgba(124,58,237,0.16), inset 0 0 0 1px rgba(255,255,255,0.025)',
@@ -2002,11 +2002,11 @@ export default function IntegracoesPage() {
                 <LayoutGrid className="h-6 w-6" />
               </span>
               <div>
-                <p className="font-heading font-normal text-3xl leading-none text-foreground">{totalConnected} de 4</p>
+                <p className="font-heading font-normal text-xl leading-none text-foreground">{totalConnected} de 4</p>
                 <p className="mt-1 text-base font-medium text-muted-foreground">Plataformas conectadas</p>
               </div>
             </div>
-            <button className="flex h-12 items-center gap-4 rounded-xl border border-border bg-background/35 px-6 text-sm font-bold text-foreground transition-colors hover:border-primary/35">
+            <button className="flex h-12 items-center gap-4 rounded-[var(--radius)] border border-border bg-background/35 px-6 text-sm font-bold text-foreground transition-colors hover:border-primary/35">
               Ver status das integrações
               <span className="text-xl leading-none">→</span>
             </button>
@@ -2066,7 +2066,7 @@ export default function IntegracoesPage() {
             return (
               <div
                 key={integration.id}
-                className="relative flex min-h-[250px] flex-col gap-5 overflow-hidden rounded-xl border border-border bg-card p-6"
+                className="relative flex min-h-[250px] flex-col gap-5 overflow-hidden rounded-[var(--radius)] border border-border bg-card p-6"
                 style={{
                   background: `radial-gradient(circle at 16% 18%, ${glow}20, transparent 30%), linear-gradient(145deg, rgba(17,22,35,0.9), rgba(8,11,18,0.96))`,
                   boxShadow: `0 0 28px ${glow}0f, inset 0 0 0 1px rgba(255,255,255,0.025)`,
@@ -2163,7 +2163,7 @@ export default function IntegracoesPage() {
 
         {/* ── FOOTER ──────────────────────────────────────────────────────────── */}
         <div
-          className="flex items-center justify-between gap-4 rounded-xl border border-border bg-card px-6 py-5"
+          className="flex items-center justify-between gap-4 rounded-[var(--radius)] border border-border bg-card px-6 py-5"
           style={{
             background: 'radial-gradient(circle at 2% 50%, rgba(124,58,237,0.16), transparent 26%), rgba(15,18,29,0.86)',
             boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.025)',

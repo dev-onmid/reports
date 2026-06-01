@@ -35,6 +35,7 @@ export async function POST(
 
   try {
     await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS next_tick_at TIMESTAMPTZ`);
+    await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS message_index INT NOT NULL DEFAULT 0`);
 
     const { rows: [campaign] } = await pool.query(
       `SELECT c.*, cl.instance_id, cl.token, cl.security_token
@@ -48,8 +49,17 @@ export async function POST(
       return Response.json({ error: 'Campanha não encontrada' }, { status: 404 });
     }
 
+    // Auto-start pending campaigns whose scheduled time has arrived
+    if (campaign.status === 'pending' && new Date(campaign.starts_at) <= new Date()) {
+      await pool.query(
+        `UPDATE public.zapi_campaigns SET status = 'running', next_tick_at = NULL WHERE id = $1`,
+        [id],
+      );
+      campaign.status = 'running';
+    }
+
     if (campaign.status !== 'running') {
-      return Response.json({ status: campaign.status, done: true });
+      return Response.json({ status: campaign.status, done: campaign.status === 'done' || campaign.status === 'cancelled' });
     }
 
     // Check end time
@@ -102,7 +112,7 @@ export async function POST(
         if (Array.isArray(parsed) && parsed.length > 0) messagePool = parsed;
       } catch { /* keep single message */ }
     }
-    const rawMessage = messagePool[Math.floor(Math.random() * messagePool.length)];
+    const rawMessage = messagePool[(campaign.message_index ?? 0) % messagePool.length];
     const message = interpolate(rawMessage, number.phone, number.name ?? '');
     const client = { instanceId: campaign.instance_id, token: campaign.token, clientToken: campaign.security_token ?? undefined };
 
@@ -137,7 +147,7 @@ export async function POST(
     );
 
     const field = result.ok ? 'sent = sent + 1' : 'failed = failed + 1';
-    await pool.query(`UPDATE public.zapi_campaigns SET ${field} WHERE id = $1`, [id]);
+    await pool.query(`UPDATE public.zapi_campaigns SET ${field}, message_index = message_index + 1 WHERE id = $1`, [id]);
 
     const { rows: [updated] } = await pool.query(
       `SELECT total, sent, failed, status FROM public.zapi_campaigns WHERE id = $1`,

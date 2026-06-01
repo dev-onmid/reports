@@ -50,33 +50,58 @@ async function ensureTable(pool: ReturnType<typeof makeServerPool>) {
       ADD COLUMN IF NOT EXISTS lead_date DATE,
       ADD COLUMN IF NOT EXISTS lead_name TEXT,
       ADD COLUMN IF NOT EXISTS revenue NUMERIC DEFAULT 0,
-      ADD COLUMN IF NOT EXISTS raw JSONB;
+      ADD COLUMN IF NOT EXISTS raw JSONB,
+      ADD COLUMN IF NOT EXISTS origin TEXT,
+      ADD COLUMN IF NOT EXISTS temperatura TEXT,
+      ADD COLUMN IF NOT EXISTS temperatura_atualizada_em TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS ia_ultimo_analise TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS ia_confianca_ultimo INTEGER,
+      ADD COLUMN IF NOT EXISTS time_interno BOOLEAN NOT NULL DEFAULT false;
   `);
 }
 
 export async function GET(req: NextRequest) {
-  const url = new URL(req.url);
-  const clientId = url.searchParams.get('clientId');
-  const since    = url.searchParams.get('since');
+  const { searchParams } = new URL(req.url);
+  const clientId = searchParams.get('clientId');
+  const funnelId = searchParams.get('funnelId');
+  const since    = searchParams.get('since');
   if (!clientId) return Response.json({ error: 'clientId required' }, { status: 400 });
   const pool = makeServerPool();
   try {
     await ensureTable(pool);
-    const { rows } = since
-      ? await pool.query(
-          `SELECT * FROM public.crm_leads WHERE client_id = $1 AND updated_at > $2 ORDER BY updated_at DESC`,
-          [clientId, since],
-        )
-      : await pool.query(
-          `SELECT *,
-              COALESCE(lead_date, data) AS normalized_date,
-              COALESCE(lead_name, nome) AS normalized_name,
-              COALESCE(NULLIF(revenue, 0), valor_rs, 0)::float AS normalized_revenue
-             FROM public.crm_leads
-            WHERE client_id = $1
-            ORDER BY COALESCE(lead_date, data) DESC NULLS LAST, created_at DESC`,
-          [clientId],
-        );
+    if (since) {
+      const { rows } = await pool.query(
+        `SELECT * FROM public.crm_leads WHERE client_id = $1 AND updated_at > $2 ORDER BY updated_at DESC`,
+        [clientId, since],
+      );
+      return Response.json(rows);
+    }
+    const { rows } = await pool.query(
+      `WITH ranked AS (
+        SELECT *,
+          COALESCE(lead_date, data) AS normalized_date,
+          COALESCE(lead_name, nome) AS normalized_name,
+          COALESCE(NULLIF(revenue, 0), valor_rs, 0)::float AS normalized_revenue,
+          ROW_NUMBER() OVER (
+            PARTITION BY COALESCE(NULLIF(regexp_replace(COALESCE(numero, ''), '\\D', '', 'g'), ''), id::text)
+            ORDER BY
+              CASE WHEN $2::uuid IS NOT NULL AND funnel_id = $2::uuid THEN 0 ELSE 1 END,
+              CASE WHEN funnel_id IS NOT NULL THEN 0 ELSE 1 END,
+              COALESCE(updated_at, created_at) DESC,
+              created_at DESC
+          ) AS rn
+        FROM public.crm_leads
+        WHERE client_id = $1
+          AND ($2::uuid IS NULL OR funnel_id = $2::uuid)
+          AND numero ~ '^[0-9]{10,15}$'
+          AND numero NOT LIKE '%--%'
+      )
+      SELECT *
+      FROM ranked
+      WHERE rn = 1
+      ORDER BY COALESCE(normalized_date, data) DESC NULLS LAST, created_at DESC`,
+      [clientId, funnelId ?? null]
+    );
     return Response.json(rows);
   } finally {
     await pool.end();
@@ -95,9 +120,9 @@ export async function POST(req: NextRequest) {
         (client_id,mes,data,link_criativo,nome,numero,canal,emoji,
          dia1,dia2,dia3,dia4,status,data_agendada,video_dra,compareceu,
          observacao,orcamento,fechou,valor_rs,pagamento,analise_credito,
-         data_nasc,bairro,motivacoes,dores)
+         data_nasc,bairro,motivacoes,dores,funnel_id,temperatura,time_interno)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
-               $17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
+               $17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)
        RETURNING *`,
       [
         clientId, f.mes??null, f.data||null, f.link_criativo??null,
@@ -108,6 +133,7 @@ export async function POST(req: NextRequest) {
         f.orcamento||null, f.fechou??false, f.valor_rs||null,
         f.pagamento??null, f.analise_credito??false,
         f.data_nasc||null, f.bairro??null, f.motivacoes??null, f.dores??null,
+        f.funnel_id??null, f.temperatura??null, f.time_interno === true,
       ]
     );
     return Response.json(lead, { status: 201 });

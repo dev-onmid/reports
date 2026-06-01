@@ -36,86 +36,136 @@
   --color-secondary: var(--secondary);
   --color-primary-foreground: var(--primary-foreground);
   --color-primary: var(--primary);
+  --color-primary-dark: var(--primary-dark);
   --color-popover-foreground: var(--popover-foreground);
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
+  --color-surface-soft: var(--surface-soft);
+  --color-surface-dark: var(--surface-dark);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-hairline: var(--hairline);
+  --color-hairline-strong: var(--hairline-strong);
+  --color-ink: var(--ink);
+  --color-mute: var(--mute);
+  /* Radius scale — base 2px (angular, engineering-grade) */
+  --radius-sm: calc(var(--radius) * 0.5);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) * 1.5);
+  --radius-xl: calc(var(--radius) * 2);
+  --radius-2xl: calc(var(--radius) * 3);
+  --radius-3xl: calc(var(--radius) * 4);
+  --radius-4xl: calc(var(--radius) * 5);
+  /* Section rhythm */
+  --spacing-section: 64px;
 }
 
+/* ── Light mode (canvas white + dark hero/footer) ────────────────────────── */
 :root {
-  --background: #F8FAFC; /* Gelo/Slate 50 */
-  --foreground: #0E0F14; /* Grafite */
-  --card: #FFFFFF; /* Branco */
-  --card-foreground: #0E0F14;
-  --popover: #FFFFFF;
-  --popover-foreground: #0E0F14;
-  --primary: #55F52F; /* Verde Onmid */
-  --primary-foreground: #0E0F14;
-  --secondary: #7B2CFF; /* Roxo Onmid */
-  --secondary-foreground: #FFFFFF;
-  --muted: #E2E8F0; /* Slate 200 */
-  --muted-foreground: #64748B; /* Slate 500 */
-  --accent: #55F52F;
-  --accent-foreground: #0E0F14;
-  --destructive: #EF4444;
-  --border: #CBD5E1; /* Slate 300 */
-  --input: #CBD5E1;
-  --ring: #55F52F;
-  --chart-1: #55F52F; /* Verde Onmid */
-  --chart-2: #7B2CFF; /* Roxo Onmid */
-  --chart-3: #0E0F14; /* Grafite */
-  --chart-4: #E2E8F0; /* Support */
-  --chart-5: #CBD5E1; /* Support */
-  --radius: 0.625rem;
-  --sidebar: #FFFFFF;
-  --sidebar-foreground: #0E0F14;
-  --sidebar-primary: #55F52F;
-  --sidebar-primary-foreground: #0E0F14;
-  --sidebar-accent: #F1F5F9;
-  --sidebar-accent-foreground: #0E0F14;
-  --sidebar-border: #E2E8F0;
-  --sidebar-ring: #55F52F;
+  /* Page canvas */
+  --background: #ffffff;
+  --foreground: #0e0e0e;
+
+  /* Card surfaces */
+  --card: #ffffff;
+  --card-foreground: #0e0e0e;
+  --popover: #ffffff;
+  --popover-foreground: #0e0e0e;
+
+  /* Brand accent — Verde Onmid (single accent, used as NVIDIA Green) */
+  --primary: #55f52f;
+  --primary-dark: #3bc411;       /* pressed state — one notch deeper */
+  --primary-foreground: #0e0f14;
+
+  /* Editorial accent — Roxo Onmid (secondary, editorial use only) */
+  --secondary: #7b2cff;
+  --secondary-foreground: #ffffff;
+
+  /* Surface hierarchy */
+  --surface-soft: #f7f7f7;       /* breadcrumb strip, sub-nav, alternating rows */
+  --surface-dark: #000000;       /* hero, footer, primary nav */
+  --surface-elevated: #1a1a1a;   /* nested panels inside dark sections */
+
+  /* Hairlines — no shadows, only borders */
+  --hairline: #cccccc;           /* 1px card border on canvas */
+  --hairline-strong: #5e5e5e;    /* 1px divider on dark surfaces */
+
+  /* Neutral text scale */
+  --ink: #000000;                /* headlines on canvas */
+  --mute: #757575;               /* metadata, breadcrumbs */
+
+  /* Shadcn compatibility aliases */
+  --muted: #f7f7f7;
+  --muted-foreground: #757575;
+  --accent: #55f52f;
+  --accent-foreground: #0e0f14;
+  --destructive: #e52020;
+  --border: #cccccc;
+  --input: #cccccc;
+  --ring: #55f52f;
+
+  /* Charts */
+  --chart-1: #55f52f;
+  --chart-2: #7b2cff;
+  --chart-3: #0e0f14;
+  --chart-4: #cccccc;
+  --chart-5: #f7f7f7;
+
+  /* Geometry — 2px: angular, engineering-grade (NVIDIA {rounded.sm}) */
+  --radius: 0.125rem;
+
+  /* Sidebar */
+  --sidebar: #f7f7f7;
+  --sidebar-foreground: #0e0e0e;
+  --sidebar-primary: #55f52f;
+  --sidebar-primary-foreground: #0e0f14;
+  --sidebar-accent: #f7f7f7;
+  --sidebar-accent-foreground: #0e0e0e;
+  --sidebar-border: #cccccc;
+  --sidebar-ring: #55f52f;
 }
 
+/* ── Dark mode (retains ON_Reports dark-canvas identity) ─────────────────── */
 .dark {
-  --background: #0E0F14; /* Grafite */
-  --foreground: #F5F5F5; /* Branco */
-  --card: #1B1D24; /* Cinza Escuro */
-  --card-foreground: #F5F5F5;
-  --popover: #1B1D24;
-  --popover-foreground: #F5F5F5;
-  --primary: #55F52F; /* Verde Onmid */
-  --primary-foreground: #0E0F14;
-  --secondary: #7B2CFF; /* Roxo Onmid */
-  --secondary-foreground: #F5F5F5;
-  --muted: #2A2D3A;
-  --muted-foreground: #A0AEC0;
-  --accent: #55F52F;
-  --accent-foreground: #0E0F14;
-  --destructive: #EF4444;
-  --border: #2A2D3A;
-  --input: #2A2D3A;
-  --ring: #55F52F;
-  --chart-1: #55F52F;
-  --chart-2: #7B2CFF;
-  --chart-3: #F5F5F5;
-  --chart-4: #2A2D3A;
-  --chart-5: #1B1D24;
-  --sidebar: #0E0F14;
-  --sidebar-foreground: #F5F5F5;
-  --sidebar-primary: #55F52F;
-  --sidebar-primary-foreground: #0E0F14;
-  --sidebar-accent: #1B1D24;
-  --sidebar-accent-foreground: #F5F5F5;
-  --sidebar-border: #2A2D3A;
-  --sidebar-ring: #55F52F;
+  --background: #0e0f14;
+  --foreground: #f5f5f5;
+  --card: #1a1a1a;
+  --card-foreground: #f5f5f5;
+  --popover: #1a1a1a;
+  --popover-foreground: #f5f5f5;
+  --primary: #55f52f;
+  --primary-dark: #3bc411;
+  --primary-foreground: #0e0f14;
+  --secondary: #7b2cff;
+  --secondary-foreground: #f5f5f5;
+  --surface-soft: #1a1a1a;
+  --surface-dark: #000000;
+  --surface-elevated: #242424;
+  --hairline: #2a2d3a;
+  --hairline-strong: #5e5e5e;
+  --ink: #f5f5f5;
+  --mute: #a0aec0;
+  --muted: #1a1a1a;
+  --muted-foreground: #a0aec0;
+  --accent: #55f52f;
+  --accent-foreground: #0e0f14;
+  --destructive: #e52020;
+  --border: #2a2d3a;
+  --input: #2a2d3a;
+  --ring: #55f52f;
+  --chart-1: #55f52f;
+  --chart-2: #7b2cff;
+  --chart-3: #f5f5f5;
+  --chart-4: #2a2d3a;
+  --chart-5: #1a1a1a;
+  --sidebar: #0e0f14;
+  --sidebar-foreground: #f5f5f5;
+  --sidebar-primary: #55f52f;
+  --sidebar-primary-foreground: #0e0f14;
+  --sidebar-accent: #1a1a1a;
+  --sidebar-accent-foreground: #f5f5f5;
+  --sidebar-border: #2a2d3a;
+  --sidebar-ring: #55f52f;
 }
 
 @layer base {
@@ -141,25 +191,38 @@
   .cursor-pointer {
     cursor: pointer;
   }
+
+  /* Typography rhythm — weight-based hierarchy, no tinting */
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-bold leading-tight;
+  }
 }
 
-@keyframes neon-glow-click {
+/* ── ON_Reports brand micro-interaction (kept as identity signature) ──────── */
+@keyframes accent-flash {
   0% {
     box-shadow:
-      0 0 4px 1px rgba(85, 245, 47, 0.9),
-      0 0 16px 4px rgba(85, 245, 47, 0.5),
-      0 0 32px 8px rgba(85, 245, 47, 0.2);
+      0 0 4px 1px rgba(85, 245, 47, 0.6),
+      0 0 12px 3px rgba(85, 245, 47, 0.3);
   }
   100% {
-    box-shadow:
-      0 0 0px 0px rgba(85, 245, 47, 0),
-      0 0 0px 0px rgba(85, 245, 47, 0),
-      0 0 0px 0px rgba(85, 245, 47, 0);
+    box-shadow: none;
   }
 }
 
 .neon-clicked {
-  animation: neon-glow-click 0.5s ease-out forwards;
+  animation: accent-flash 0.4s ease-out forwards;
+}
+
+/* ── Corner square — NVIDIA-inspired decorative motif ────────────────────── */
+.corner-square::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 12px;
+  height: 12px;
+  background-color: var(--primary);
 }
 
 /* ── React Flow dark theme overrides ──────────────────────────────────────── */
@@ -181,30 +244,25 @@
 .react-flow__edge-path { stroke-opacity: 0.9; }
 .react-flow__node { box-shadow: none !important; }
 .react-flow__node.selected { outline: none !important; }
-.react-flow__handle {
-  border-radius: 50% !important;
-}
+.react-flow__handle { border-radius: 50% !important; }
 .react-flow__attribution { display: none !important; }
-/* react-grid-layout — tema onmid */
+
+/* ── React Grid Layout — ON_Reports theme ────────────────────────────────── */
 .react-grid-item.react-grid-placeholder {
-  background: rgba(85, 245, 47, 0.12) !important;
-  border: 1px dashed rgba(85, 245, 47, 0.5) !important;
-  border-radius: 12px !important;
+  background: rgba(85, 245, 47, 0.08) !important;
+  border: 1px dashed rgba(85, 245, 47, 0.4) !important;
+  border-radius: var(--radius) !important;
   opacity: 1 !important;
 }
 .react-resizable-handle {
-  width: 18px !important;
-  height: 18px !important;
-  border-right: 2px solid #55F52F !important;
-  border-bottom: 2px solid #55F52F !important;
-  border-radius: 0 0 6px 0 !important;
-  opacity: 0.35;
+  width: 16px !important;
+  height: 16px !important;
+  border-right: 2px solid var(--primary) !important;
+  border-bottom: 2px solid var(--primary) !important;
+  border-radius: 0 0 2px 0 !important;
+  opacity: 0.3;
   transition: opacity 0.15s;
 }
 .react-grid-item:hover .react-resizable-handle {
-  opacity: 1;
-}
-.react-grid-item.rgl-edit-mode {
-  border: 1px dashed rgba(85, 245, 47, 0.35);
-  border-radius: 12px;
+  opacity: 0.9;
 }

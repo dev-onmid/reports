@@ -47,9 +47,14 @@ export type TopCreative = {
   adName: string;
   accountId: string;
   accountName: string;
+  campaignId?: string;
+  campaignName?: string;
+  adSetId?: string;
+  adSetName?: string;
   imageUrl?: string;
   thumbnailUrl?: string;
   videoUrl?: string;
+  permalink?: string;
   headline?: string;
   body?: string;
   spend: number;
@@ -161,7 +166,7 @@ export async function GET(request: NextRequest) {
           // Fetch top ads insights sorted by spend
           const insightsUrl = new URL(`https://graph.facebook.com/v21.0/${toMetaAccountNodeId(account.id)}/insights`);
           insightsUrl.searchParams.set('level', 'ad');
-          insightsUrl.searchParams.set('fields', 'ad_id,ad_name,spend,impressions,clicks,actions');
+          insightsUrl.searchParams.set('fields', 'ad_id,ad_name,campaign_id,campaign_name,adset_id,adset_name,spend,impressions,clicks,actions');
           applyMetaDateToUrl(insightsUrl, metaPeriod);
           insightsUrl.searchParams.set('sort', 'spend_descending');
           insightsUrl.searchParams.set('limit', String(limit));
@@ -178,7 +183,7 @@ export async function GET(request: NextRequest) {
           // Batch-fetch creative details
           const adIds = adsInsights.map(a => a.ad_id as string).filter(Boolean);
           const batchRes = await fetch(
-            `https://graph.facebook.com/v21.0/?ids=${adIds.join(',')}&fields=name,creative{body,title,image_url,thumbnail_url,image_crops,object_story_spec}&access_token=${token}`
+            `https://graph.facebook.com/v21.0/?ids=${adIds.join(',')}&fields=name,creative{body,title,image_url,thumbnail_url,object_story_spec,asset_feed_spec,instagram_permalink_url,effective_object_story_id}&access_token=${token}`
           );
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const batchData: Record<string, any> = batchRes.ok ? await batchRes.json() : {};
@@ -189,7 +194,7 @@ export async function GET(request: NextRequest) {
               .filter(Boolean)
           )];
           const videoBatchRes = videoIds.length > 0
-            ? await fetch(`https://graph.facebook.com/v21.0/?ids=${videoIds.join(',')}&fields=source,picture&access_token=${token}`)
+            ? await fetch(`https://graph.facebook.com/v21.0/?ids=${videoIds.join(',')}&fields=source,picture,thumbnails{uri,height,width},format{picture,width,height}&access_token=${token}`)
             : null;
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const videoBatchData: Record<string, any> = videoBatchRes?.ok ? await videoBatchRes.json() : {};
@@ -200,9 +205,18 @@ export async function GET(request: NextRequest) {
             const storySpec = creative.object_story_spec ?? {};
             const videoId = storySpec.video_data?.video_id as string | undefined;
             const videoInfo = videoId ? videoBatchData[videoId] ?? {} : {};
+            // Pick the highest-resolution thumbnail: prefer thumbnails API, fallback to format pictures
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const videoThumbs: { uri: string; height?: number }[] = videoInfo.thumbnails?.data ?? [];
+            const bestThumbFromThumbnails = videoThumbs.sort((a, b) => (b.height ?? 0) - (a.height ?? 0))[0]?.uri;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const videoFormats: { picture?: string; width?: number }[] = videoInfo.format ?? [];
+            const bestThumbFromFormat = videoFormats.sort((a, b) => (b.width ?? 0) - (a.width ?? 0))[0]?.picture;
             const storyImageUrl =
               storySpec.video_data?.image_url ??
               videoInfo.picture ??
+              bestThumbFromThumbnails ??
+              bestThumbFromFormat ??
               storySpec.photo_data?.url ??
               storySpec.link_data?.picture ??
               undefined;
@@ -214,18 +228,31 @@ export async function GET(request: NextRequest) {
             const clicks = parseInt(insight.clicks || '0', 10);
             const impressions = parseInt(insight.impressions || '0', 10);
 
-            // Prefer original_image from image_crops (full resolution upload)
-            const originalImageUrl: string | undefined =
-              creative.image_crops?.original_image?.url ?? undefined;
+            // asset_feed_spec has original URLs for dynamic/carousel ads
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const assetFeedImageUrl: string | undefined = (creative.asset_feed_spec?.images as any[])?.[0]?.url ?? undefined;
+
+            // Build permalink: prefer Instagram URL, fallback to Facebook post URL
+            const igPermalink: string | undefined = creative.instagram_permalink_url ?? undefined;
+            const storyId: string | undefined = creative.effective_object_story_id ?? undefined;
+            const fbPermalink = storyId
+              ? (() => { const [pageId, postId] = storyId.split('_'); return postId ? `https://www.facebook.com/permalink.php?story_fbid=${postId}&id=${pageId}` : undefined; })()
+              : undefined;
+            const permalink = igPermalink ?? fbPermalink;
 
             allCreatives.push({
               adId: insight.ad_id,
               adName: insight.ad_name ?? adData.name ?? `Ad ${insight.ad_id}`,
               accountId: account.id,
               accountName: account.name,
-              imageUrl: originalImageUrl ?? storyImageUrl ?? creative.image_url ?? undefined,
+              campaignId: insight.campaign_id ?? undefined,
+              campaignName: insight.campaign_name ?? undefined,
+              adSetId: insight.adset_id ?? undefined,
+              adSetName: insight.adset_name ?? undefined,
+              imageUrl: assetFeedImageUrl ?? storyImageUrl ?? creative.thumbnail_url ?? creative.image_url ?? undefined,
               thumbnailUrl: creative.thumbnail_url ?? undefined,
               videoUrl: videoInfo.source ?? undefined,
+              permalink,
               headline: creative.title ?? undefined,
               body: creative.body ?? undefined,
               spend,

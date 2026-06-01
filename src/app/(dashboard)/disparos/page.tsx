@@ -25,7 +25,7 @@ type ZClient = {
 
 type Campaign = {
   id: string; name: string; client_name: string; client_id: string;
-  message: string; image_url: string | null;
+  message: string; messages?: string | string[] | null; image_url: string | null;
   status: 'pending' | 'running' | 'paused' | 'done' | 'cancelled';
   starts_at: string; ends_at: string | null;
   interval_min: number; interval_max: number;
@@ -102,13 +102,13 @@ function DisparoKpiCard({
   change?: string; changeGood?: boolean;
 }) {
   return (
-    <div className="rounded-xl border border-border bg-card p-4 flex items-start gap-4">
+    <div className="rounded-[var(--radius)] border border-border bg-card p-4 flex items-start gap-4">
       <div className="shrink-0 rounded-xl p-2.5" style={{ background: iconBg }}>
         <Icon className="h-5 w-5" style={{ color: iconColor }} />
       </div>
       <div className="min-w-0 flex-1">
         <p className="text-xs text-muted-foreground">{title}</p>
-        <p className="font-heading font-normal text-3xl leading-none text-foreground mt-0.5">{value}</p>
+        <p className="font-heading font-normal text-xl leading-none text-foreground mt-0.5">{value}</p>
         {sub && <p className="text-[11px] text-muted-foreground mt-1">{sub}</p>}
         {change && (
           <p className={cn('text-[11px] mt-1 font-semibold', changeGood ? 'text-emerald-400' : 'text-red-400')}>
@@ -259,8 +259,8 @@ type TickResult = {
   total?: number; sent?: number; failed?: number; lastPhone?: string; lastError?: string | null;
 };
 
-function CampaignCard({ campaign, onAction, onRefresh }: {
-  campaign: Campaign; onAction: (id: string, action: string) => void; onRefresh: () => void;
+function CampaignCard({ campaign, onAction, onRefresh, onEdit }: {
+  campaign: Campaign; onAction: (id: string, action: string) => void; onRefresh: () => void; onEdit: (c: Campaign) => void;
 }) {
   const [live, setLive] = useState<Progress | null>(null);
   const [tickError, setTickError] = useState('');
@@ -307,7 +307,7 @@ function CampaignCard({ campaign, onAction, onRefresh }: {
   const pct = total > 0 ? Math.round(((sent + failed) / total) * 100) : 0;
 
   return (
-    <div className="rounded-xl border border-border bg-card/50 p-4 space-y-3">
+    <div className="rounded-[var(--radius)] border border-border bg-card/50 p-4 space-y-3">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="font-semibold text-sm truncate">{campaign.name}</p>
@@ -338,7 +338,7 @@ function CampaignCard({ campaign, onAction, onRefresh }: {
       )}
       {tickError && <div className="rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2 text-[11px] text-red-400">{tickError}</div>}
       {lastSendError && !tickError && <div className="rounded-lg bg-orange-500/10 border border-orange-500/20 px-3 py-2 text-[11px] text-orange-400">Último erro Z-API: {lastSendError}</div>}
-      <div className="flex gap-2 pt-1 border-t border-border">
+      <div className="flex gap-2 pt-1 border-t border-border flex-wrap">
         {status === 'running' && (
           <button type="button" onClick={() => onAction(campaign.id, 'pause')} className="flex items-center gap-1 rounded-lg border border-orange-500/30 bg-orange-500/10 px-3 py-1.5 text-[11px] font-semibold text-orange-400 hover:bg-orange-500/20">
             <Pause className="h-3 w-3" />Pausar
@@ -350,9 +350,14 @@ function CampaignCard({ campaign, onAction, onRefresh }: {
           </button>
         )}
         {(status === 'running' || status === 'paused' || status === 'pending') && (
-          <button type="button" onClick={() => onAction(campaign.id, 'cancel')} className="flex items-center gap-1 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-[11px] font-semibold text-red-400 hover:bg-red-500/20">
-            <X className="h-3 w-3" />Cancelar
-          </button>
+          <>
+            <button type="button" onClick={() => onEdit(campaign)} className="flex items-center gap-1 rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-1.5 text-[11px] font-semibold text-blue-400 hover:bg-blue-500/20">
+              <Pencil className="h-3 w-3" />Editar
+            </button>
+            <button type="button" onClick={() => onAction(campaign.id, 'cancel')} className="flex items-center gap-1 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-[11px] font-semibold text-red-400 hover:bg-red-500/20">
+              <X className="h-3 w-3" />Cancelar
+            </button>
+          </>
         )}
       </div>
     </div>
@@ -491,13 +496,13 @@ function ClientesTab() {
           { label: 'Mensagens hoje',         value: '—',               sub: 'Dados Z-API',                                                                          subColor: 'text-muted-foreground', icon: MessageSquare, iconColor: '#A855F7', iconBg: 'rgba(168,85,247,0.15)', chart: <BarSparkline2 /> },
           { label: 'Uptime médio',           value: clients.length > 0 ? `${Math.round((connected/clients.length)*100)}%` : '—', sub: 'Últimos 7 dias', subColor: 'text-muted-foreground', icon: Zap, iconColor: '#22C55E', iconBg: 'rgba(34,197,94,0.15)', chart: <LineSparkline positive color="#22C55E" /> },
         ].map(({ label, value, sub, subColor, icon: Icon, iconColor, iconBg, chart }) => (
-          <div key={label} className="relative overflow-hidden rounded-xl border border-border bg-card p-4 flex items-center gap-3">
+          <div key={label} className="relative overflow-hidden rounded-[var(--radius)] border border-border bg-card p-4 flex items-center gap-3">
             <div className="rounded-xl p-2.5 shrink-0" style={{ background: iconBg }}>
               <Icon className="h-5 w-5" style={{ color: iconColor }} />
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-xs text-muted-foreground leading-tight">{label}</p>
-              <p className="font-heading font-normal text-3xl leading-none text-foreground mt-0.5">{value}</p>
+              <p className="font-heading font-normal text-xl leading-none text-foreground mt-0.5">{value}</p>
               <p className={cn('text-[11px] font-semibold mt-1', subColor)}>{sub}</p>
             </div>
             <div className="shrink-0 opacity-80">{chart}</div>
@@ -514,9 +519,9 @@ function ClientesTab() {
             {/* Decorative Z-API 3D box */}
             <div className="pointer-events-none absolute right-5 top-1/2 -translate-y-1/2 opacity-15 hidden lg:flex items-center justify-center" style={{ width: 100, height: 100 }}>
               <div className="relative w-20 h-20">
-                <div className="absolute inset-0 rounded-2xl border-2 border-emerald-400 rotate-6" style={{ background: 'linear-gradient(135deg, rgba(34,197,94,0.25), rgba(6,182,212,0.15))' }} />
+                <div className="absolute inset-0 rounded-[var(--radius)] border-2 border-emerald-400 rotate-6" style={{ background: 'linear-gradient(135deg, rgba(34,197,94,0.25), rgba(6,182,212,0.15))' }} />
                 <div className="absolute inset-0 flex items-center justify-center">
-                  <span className="text-3xl font-bold text-emerald-400 rotate-6 select-none">Z</span>
+                  <span className="text-xl font-bold text-emerald-400 rotate-6 select-none">Z</span>
                 </div>
                 <div className="absolute -bottom-2 -right-2 w-5 h-5 rounded-full bg-emerald-500/30 border border-emerald-400/50" />
                 <div className="absolute -top-2 -left-2 w-4 h-4 rounded-full bg-cyan-500/30 border border-cyan-400/50" />
@@ -559,7 +564,7 @@ function ClientesTab() {
           </div>
 
           {/* Instances table */}
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
+          <div className="rounded-[var(--radius)] border border-border bg-card overflow-hidden">
             <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-border">
               <div className="flex items-center gap-2">
                 <p className="font-semibold text-sm">Suas instâncias</p>
@@ -708,7 +713,7 @@ function ClientesTab() {
 
         {/* Right: Diagnóstico */}
         <div className="space-y-4">
-          <div className="rounded-xl border border-border bg-card p-5">
+          <div className="rounded-[var(--radius)] border border-border bg-card p-5">
             <div className="flex items-center gap-2 mb-5">
               <div className="rounded-lg p-1.5 shrink-0" style={{ background: 'rgba(34,197,94,0.12)' }}>
                 <Zap className="h-4 w-4 text-emerald-400" />
@@ -775,7 +780,8 @@ const FORM_STEPS = [
   { num: 6, label: 'Revisão',          sub: 'Confira e publique' },
 ];
 
-function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefill?: CampaignPrefill | null }) {
+function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () => void; prefill?: CampaignPrefill | null; editCampaign?: Campaign | null }) {
+  const isEdit = !!editCampaign;
   const [clients, setClients] = useState<ZClient[]>([]);
   const [form, setForm] = useState({
     clientId: '', name: '', message: '', numbers: '',
@@ -795,6 +801,13 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
   const fileRef   = useRef<HTMLInputElement>(null);
   const csvRef    = useRef<HTMLInputElement>(null);
 
+  function utcToLocalTime(utcHHMM: string) {
+    if (!utcHHMM) return '';
+    const [h, m] = utcHHMM.split(':').map(Number);
+    const d = new Date(); d.setUTCHours(h, m, 0, 0);
+    return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+  }
+
   useEffect(() => {
     fetch('/api/disparos/clients').then(r => r.json() as Promise<ZClient[]>).then(data => {
       setClients(data);
@@ -807,6 +820,46 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
     setForm({ clientId: prefill.clientId, name: prefill.name + ' (cópia)', message: prefill.message, numbers: prefill.numbers, isNow: true, startsAt: '', endsAt: '', activeFrom: prefill.activeFrom ?? '', activeUntil: prefill.activeUntil ?? '', intervalMin: prefill.intervalMin, intervalMax: prefill.intervalMax });
     setImageUrls(prefill.imageUrls ?? []);
   }, [prefill]);
+
+  useEffect(() => {
+    if (!editCampaign) return;
+    let msgs: string[] = [];
+    if (editCampaign.messages) {
+      try {
+        const p = typeof editCampaign.messages === 'string' ? JSON.parse(editCampaign.messages) : editCampaign.messages;
+        if (Array.isArray(p) && p.length > 0) msgs = p;
+      } catch { /* ignore */ }
+    }
+    const mainMsg = msgs[0] || editCampaign.message;
+    const vars = msgs.slice(1).map(t => ({ text: t, label: '', editing: false }));
+    setForm(p => ({
+      ...p,
+      clientId: editCampaign.client_id,
+      name: editCampaign.name,
+      message: mainMsg,
+      numbers: '',
+      isNow: true,
+      startsAt: '',
+      endsAt: editCampaign.ends_at ? new Date(editCampaign.ends_at).toISOString().slice(0, 16) : '',
+      activeFrom: utcToLocalTime(editCampaign.active_from ?? ''),
+      activeUntil: utcToLocalTime(editCampaign.active_until ?? ''),
+      intervalMin: editCampaign.interval_min,
+      intervalMax: editCampaign.interval_max,
+    }));
+    // Parse image_url (may be JSON array or plain string)
+    if (editCampaign.image_url) {
+      try {
+        const parsed = JSON.parse(editCampaign.image_url);
+        setImageUrls(Array.isArray(parsed) ? parsed : [editCampaign.image_url]);
+      } catch {
+        setImageUrls([editCampaign.image_url]);
+      }
+    } else {
+      setImageUrls([]);
+    }
+    setVariations(vars);
+    setPreviewVariationIdx(null);
+  }, [editCampaign]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function addImages(files: FileList | null) {
     if (!files) return;
@@ -884,15 +937,35 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
   }
 
   async function create() {
-    if (!form.clientId || !form.name || !form.message || !form.numbers) { setError('Preencha todos os campos obrigatórios.'); return; }
-    if (!form.isNow && !form.startsAt) { setError('Selecione o horário de início ou escolha "Agora".'); return; }
+    if (!isEdit && (!form.clientId || !form.name || !form.message || !form.numbers)) { setError('Preencha todos os campos obrigatórios.'); return; }
+    if (!isEdit && !form.isNow && !form.startsAt) { setError('Selecione o horário de início ou escolha "Agora".'); return; }
     setSaving(true); setError('');
     try {
-      const startsAt   = form.isNow ? new Date().toISOString() : toISO(form.startsAt);
-      const endsAt     = form.endsAt ? toISO(form.endsAt) : undefined;
-      const activeFrom  = form.activeFrom  && form.activeUntil ? localTimeToUTC(form.activeFrom)  : undefined;
-      const activeUntil = form.activeFrom  && form.activeUntil ? localTimeToUTC(form.activeUntil) : undefined;
+      const endsAt     = form.endsAt ? toISO(form.endsAt) : null;
+      const activeFrom  = form.activeFrom  && form.activeUntil ? localTimeToUTC(form.activeFrom)  : null;
+      const activeUntil = form.activeFrom  && form.activeUntil ? localTimeToUTC(form.activeUntil) : null;
       const allMessages = variations.length > 0 ? [form.message, ...variations.map(v => v.text)] : undefined;
+
+      if (isEdit && editCampaign) {
+        const body: Record<string, unknown> = {
+          name: form.name,
+          message: form.message,
+          messages: allMessages ?? [form.message],
+          image_url: imageUrls.length > 0 ? (imageUrls.length === 1 ? imageUrls[0] : JSON.stringify(imageUrls)) : null,
+          ends_at: endsAt,
+          active_from: activeFrom,
+          active_until: activeUntil,
+          interval_min: form.intervalMin,
+          interval_max: form.intervalMax,
+        };
+        const res = await fetch(`/api/disparos/campaigns/${editCampaign.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const data = await res.json() as { error?: string };
+        if (!res.ok) { setError(data.error ?? 'Erro ao salvar.'); return; }
+        onCreated();
+        return;
+      }
+
+      const startsAt = form.isNow ? new Date().toISOString() : toISO(form.startsAt);
       const res = await fetch('/api/disparos/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId: form.clientId, name: form.name, message: form.message, messages: allMessages, numbers: form.numbers, startsAt, endsAt, activeFrom, activeUntil, intervalMin: form.intervalMin, intervalMax: form.intervalMax, imageUrls: imageUrls.length > 0 ? imageUrls : undefined }) });
       const data = await res.json() as { error?: string };
       if (!res.ok) { setError(data.error ?? 'Erro ao criar campanha.'); return; }
@@ -933,7 +1006,7 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
           <div className="space-y-4">
 
             {/* Section 1: Informações */}
-            <div className="rounded-xl border border-border bg-card p-5">
+            <div className="rounded-[var(--radius)] border border-border bg-card p-5">
               <div className="flex items-center gap-3 mb-4">
                 <div className="rounded-lg p-1.5 shrink-0" style={{ background: 'rgba(6,182,212,0.15)' }}>
                   <Info className="h-4 w-4 text-cyan-400" />
@@ -960,7 +1033,7 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
             </div>
 
             {/* Section 2: Mensagem */}
-            <div className="rounded-xl border border-border bg-card p-5">
+            <div className="rounded-[var(--radius)] border border-border bg-card p-5">
               <div className="flex items-center gap-3 mb-4">
                 <div className="rounded-lg p-1.5 shrink-0" style={{ background: 'rgba(6,182,212,0.15)' }}>
                   <MessageSquare className="h-4 w-4 text-cyan-400" />
@@ -1104,7 +1177,7 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
             </div>
 
             {/* Section 3: Mídias */}
-            <div className="rounded-xl border border-border bg-card p-5">
+            <div className="rounded-[var(--radius)] border border-border bg-card p-5">
               <div className="flex items-center gap-3 mb-4">
                 <div className="rounded-lg p-1.5 shrink-0" style={{ background: 'rgba(6,182,212,0.15)' }}>
                   <Upload className="h-4 w-4 text-cyan-400" />
@@ -1155,48 +1228,56 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
           <div className="space-y-4">
 
             {/* Section 4: Base de contatos */}
-            <div className="rounded-xl border border-border bg-card p-5">
+            <div className="rounded-[var(--radius)] border border-border bg-card p-5">
               <div className="flex items-center gap-3 mb-4">
                 <div className="rounded-lg p-1.5 shrink-0" style={{ background: 'rgba(6,182,212,0.15)' }}>
                   <Users className="h-4 w-4 text-cyan-400" />
                 </div>
                 <p className="font-semibold">4. Base de contatos</p>
               </div>
-              <div className="space-y-1.5 mb-4">
-                <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-                  Números * — um por linha, com DDD e código do país
-                </label>
-                <textarea value={form.numbers} onChange={e => setForm(p => ({ ...p, numbers: e.target.value }))}
-                  placeholder={"(43) 9 9999-1111,João\n1198888-7777\n+55 43 9 6666-4444,Maria"}
-
-
-                  rows={6} className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-xs font-mono outline-none focus:ring-1 focus:ring-primary resize-none" />
-              </div>
-
-              {/* CSV Import */}
-              <div className="space-y-2">
-                <p className="text-[11px] text-muted-foreground">Importe sua base de contatos</p>
-                <div className="flex items-center gap-2">
-                  <button type="button" onClick={() => csvRef.current?.click()}
-                    className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors">
-                    <Upload className="h-3.5 w-3.5" />Importar arquivo
-                  </button>
-                  <span className="text-[11px] text-muted-foreground/50">CSV ou TXT (máx. 5MB)</span>
+              {isEdit ? (
+                <div className="rounded-lg border border-blue-500/25 bg-blue-500/10 px-4 py-3 space-y-1">
+                  <p className="text-xs font-semibold text-blue-400">Contatos não são alterados ao editar</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {editCampaign!.total} contato{editCampaign!.total !== 1 ? 's' : ''} cadastrados —{' '}
+                    {editCampaign!.sent} enviado{editCampaign!.sent !== 1 ? 's' : ''},{' '}
+                    {editCampaign!.total - editCampaign!.sent - editCampaign!.failed} pendente{editCampaign!.total - editCampaign!.sent - editCampaign!.failed !== 1 ? 's' : ''}.
+                  </p>
                 </div>
-                <input ref={csvRef} type="file" accept=".csv,.txt" className="hidden"
-                  onChange={e => { if (e.target.files?.[0]) { importCSV(e.target.files[0]); e.target.value = ''; } }} />
-              </div>
-
-              {contactCount > 0 && (
-                <div className="mt-3 flex items-center gap-2 rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
-                  <span className="text-xs font-semibold text-emerald-400">{contactCount} contato{contactCount !== 1 ? 's' : ''} carregado{contactCount !== 1 ? 's' : ''}</span>
-                </div>
+              ) : (
+                <>
+                  <div className="space-y-1.5 mb-4">
+                    <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                      Números * — um por linha, com DDD e código do país
+                    </label>
+                    <textarea value={form.numbers} onChange={e => setForm(p => ({ ...p, numbers: e.target.value }))}
+                      placeholder={"(43) 9 9999-1111,João\n1198888-7777\n+55 43 9 6666-4444,Maria"}
+                      rows={6} className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-xs font-mono outline-none focus:ring-1 focus:ring-primary resize-none" />
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-[11px] text-muted-foreground">Importe sua base de contatos</p>
+                    <div className="flex items-center gap-2">
+                      <button type="button" onClick={() => csvRef.current?.click()}
+                        className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors">
+                        <Upload className="h-3.5 w-3.5" />Importar arquivo
+                      </button>
+                      <span className="text-[11px] text-muted-foreground/50">CSV ou TXT (máx. 5MB)</span>
+                    </div>
+                    <input ref={csvRef} type="file" accept=".csv,.txt" className="hidden"
+                      onChange={e => { if (e.target.files?.[0]) { importCSV(e.target.files[0]); e.target.value = ''; } }} />
+                  </div>
+                  {contactCount > 0 && (
+                    <div className="mt-3 flex items-center gap-2 rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                      <span className="text-xs font-semibold text-emerald-400">{contactCount} contato{contactCount !== 1 ? 's' : ''} carregado{contactCount !== 1 ? 's' : ''}</span>
+                    </div>
+                  )}
+                </>
               )}
             </div>
 
             {/* Section 5: Agendamento */}
-            <div className="rounded-xl border border-border bg-card p-5">
+            <div className="rounded-[var(--radius)] border border-border bg-card p-5">
               <div className="flex items-center gap-3 mb-4">
                 <div className="rounded-lg p-1.5 shrink-0" style={{ background: 'rgba(6,182,212,0.15)' }}>
                   <Clock className="h-4 w-4 text-cyan-400" />
@@ -1205,33 +1286,35 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
               </div>
 
               <div className="space-y-4">
-                {/* Início */}
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Início do envio *</label>
-                  <div className="flex gap-2">
-                    <button type="button" onClick={() => setForm(p => ({ ...p, isNow: true, startsAt: '' }))}
-                      className={cn('flex-1 h-9 flex items-center justify-center gap-2 rounded-lg border text-xs font-bold uppercase tracking-wider transition-colors',
-                        form.isNow ? 'border-primary/40 bg-primary text-black' : 'border-border bg-card text-muted-foreground hover:bg-muted/50')}>
-                      <Play className="h-3.5 w-3.5" />Agora
-                    </button>
-                    <button type="button" onClick={() => setForm(p => ({ ...p, isNow: false }))}
-                      className={cn('flex-1 h-9 flex items-center justify-center gap-2 rounded-lg border text-xs font-bold uppercase tracking-wider transition-colors',
-                        !form.isNow ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border bg-card text-muted-foreground hover:bg-muted/50')}>
-                      <Calendar className="h-3.5 w-3.5" />Agendar
-                    </button>
-                  </div>
-                </div>
-
-                {/* Date + time */}
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Data e hora (opcional)</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <input type="date" value={form.startsAt.split('T')[0] || ''} onChange={e => setForm(p => ({ ...p, startsAt: e.target.value + (p.startsAt.includes('T') ? p.startsAt.slice(10) : 'T00:00'), isNow: false }))}
-                      className="h-9 rounded-lg border border-border bg-background px-3 text-sm outline-none focus:ring-1 focus:ring-primary" />
-                    <input type="time" value={form.startsAt.split('T')[1]?.slice(0,5) || ''} onChange={e => setForm(p => ({ ...p, startsAt: (p.startsAt.split('T')[0] || new Date().toISOString().split('T')[0]) + 'T' + e.target.value, isNow: false }))}
-                      className="h-9 rounded-lg border border-border bg-background px-3 text-sm outline-none focus:ring-1 focus:ring-primary" />
-                  </div>
-                </div>
+                {/* Início — oculto em modo edição (campanha já iniciada) */}
+                {!isEdit && (
+                  <>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Início do envio *</label>
+                      <div className="flex gap-2">
+                        <button type="button" onClick={() => setForm(p => ({ ...p, isNow: true, startsAt: '' }))}
+                          className={cn('flex-1 h-9 flex items-center justify-center gap-2 rounded-lg border text-xs font-bold uppercase tracking-wider transition-colors',
+                            form.isNow ? 'border-primary/40 bg-primary text-black' : 'border-border bg-card text-muted-foreground hover:bg-muted/50')}>
+                          <Play className="h-3.5 w-3.5" />Agora
+                        </button>
+                        <button type="button" onClick={() => setForm(p => ({ ...p, isNow: false }))}
+                          className={cn('flex-1 h-9 flex items-center justify-center gap-2 rounded-lg border text-xs font-bold uppercase tracking-wider transition-colors',
+                            !form.isNow ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border bg-card text-muted-foreground hover:bg-muted/50')}>
+                          <Calendar className="h-3.5 w-3.5" />Agendar
+                        </button>
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Data e hora (opcional)</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input type="date" value={form.startsAt.split('T')[0] || ''} onChange={e => setForm(p => ({ ...p, startsAt: e.target.value + (p.startsAt.includes('T') ? p.startsAt.slice(10) : 'T00:00'), isNow: false }))}
+                          className="h-9 rounded-lg border border-border bg-background px-3 text-sm outline-none focus:ring-1 focus:ring-primary" />
+                        <input type="time" value={form.startsAt.split('T')[1]?.slice(0,5) || ''} onChange={e => setForm(p => ({ ...p, startsAt: (p.startsAt.split('T')[0] || new Date().toISOString().split('T')[0]) + 'T' + e.target.value, isNow: false }))}
+                          className="h-9 rounded-lg border border-border bg-background px-3 text-sm outline-none focus:ring-1 focus:ring-primary" />
+                      </div>
+                    </div>
+                  </>
+                )}
 
                 {/* Janela de envio */}
                 <div className="space-y-1.5">
@@ -1295,8 +1378,17 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
               <Info className="h-4 w-4 text-primary" />
             </div>
             <div className="min-w-0">
-              <p className="text-sm font-medium">A campanha será criada com base nas configurações acima.</p>
-              <p className="text-xs text-muted-foreground">Você poderá revisar tudo antes de enviar.</p>
+              {isEdit ? (
+                <>
+                  <p className="text-sm font-medium">Editando campanha em andamento.</p>
+                  <p className="text-xs text-muted-foreground">Os contatos pendentes receberão o novo conteúdo.</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm font-medium">A campanha será criada com base nas configurações acima.</p>
+                  <p className="text-xs text-muted-foreground">Você poderá revisar tudo antes de enviar.</p>
+                </>
+              )}
             </div>
           </div>
           {error && <p className="text-xs text-red-400 shrink-0">{error}</p>}
@@ -1304,7 +1396,7 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
             className="flex items-center gap-2 rounded-xl bg-primary px-8 py-3 text-sm font-bold uppercase tracking-wider text-black hover:bg-primary/90 disabled:opacity-50 transition-colors shrink-0"
             style={{ boxShadow: '0 0 20px rgba(85,245,47,0.3)' }}>
             {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            Criar campanha
+            {isEdit ? 'Salvar alterações' : 'Criar campanha'}
           </button>
         </div>
       </div>
@@ -1314,10 +1406,11 @@ function NovaCampanhaTab({ onCreated, prefill }: { onCreated: () => void; prefil
 
 // ─── Dashboard Tab ────────────────────────────────────────────────────────────
 
-function DashboardTab({ onReuse, onNewCampaign, onManageInstances }: {
+function DashboardTab({ onReuse, onNewCampaign, onManageInstances, onEdit }: {
   onReuse: (p: CampaignPrefill) => void;
   onNewCampaign: () => void;
   onManageInstances: () => void;
+  onEdit: (c: Campaign) => void;
 }) {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1326,6 +1419,9 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances }: {
   const [expandedNumbers, setExpandedNumbers] = useState<Record<string, NumberDetail[]>>({});
   const [loadingDetail, setLoadingDetail] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [showAllCampaigns, setShowAllCampaigns] = useState(false);
+  const [showAllUpcoming, setShowAllUpcoming] = useState(false);
+  const campaignsTableRef = useRef<HTMLDivElement>(null);
 
   async function load() {
     const [cData, iData] = await Promise.all([
@@ -1421,24 +1517,26 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances }: {
     ].filter(d => d.value > 0);
   }, [campaigns]);
 
-  const upcoming = useMemo(() =>
-    [...campaigns].filter(c => ['pending', 'running'].includes(c.status)).sort((a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime()).slice(0, 3),
+  const allUpcoming = useMemo(() =>
+    [...campaigns].filter(c => ['pending', 'running'].includes(c.status)).sort((a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime()),
     [campaigns]
   );
+  const upcoming = useMemo(() => showAllUpcoming ? allUpcoming : allUpcoming.slice(0, 3), [allUpcoming, showAllUpcoming]);
 
-  const recent = useMemo(() =>
-    [...campaigns].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 8),
+  const allRecent = useMemo(() =>
+    [...campaigns].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
     [campaigns]
   );
+  const recent = useMemo(() => showAllCampaigns ? allRecent : allRecent.slice(0, 8), [allRecent, showAllCampaigns]);
 
   const maxWeekly = useMemo(() => Math.max(...weeklyData.map(d => d.enviados), 1), [weeklyData]);
 
   if (loading) return (
     <div className="space-y-6">
-      <div className="grid grid-cols-5 gap-4">{[1,2,3,4,5].map(i => <div key={i} className="h-24 animate-pulse rounded-xl border border-border bg-card" />)}</div>
+      <div className="grid grid-cols-5 gap-4">{[1,2,3,4,5].map(i => <div key={i} className="h-24 animate-pulse rounded-[var(--radius)] border border-border bg-card" />)}</div>
       <div className="grid grid-cols-[1fr_380px] gap-6">
-        <div className="space-y-4">{[1,2].map(i => <div key={i} className="h-64 animate-pulse rounded-xl border border-border bg-card" />)}</div>
-        <div className="space-y-4">{[1,2,3].map(i => <div key={i} className="h-40 animate-pulse rounded-xl border border-border bg-card" />)}</div>
+        <div className="space-y-4">{[1,2].map(i => <div key={i} className="h-64 animate-pulse rounded-[var(--radius)] border border-border bg-card" />)}</div>
+        <div className="space-y-4">{[1,2,3].map(i => <div key={i} className="h-40 animate-pulse rounded-[var(--radius)] border border-border bg-card" />)}</div>
       </div>
     </div>
   );
@@ -1484,7 +1582,7 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances }: {
           <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Em andamento agora</p>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {activeCampaigns.filter(c => c.status === 'running').map(c => (
-              <CampaignCard key={c.id} campaign={c} onAction={handleAction} onRefresh={load} />
+              <CampaignCard key={c.id} campaign={c} onAction={handleAction} onRefresh={load} onEdit={onEdit} />
             ))}
           </div>
         </div>
@@ -1497,7 +1595,7 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances }: {
         <div className="space-y-6 min-w-0">
 
           {/* Weekly chart */}
-          <div className="rounded-xl border border-border bg-card p-5">
+          <div className="rounded-[var(--radius)] border border-border bg-card p-5">
             <div className="flex items-center justify-between mb-5">
               <div className="flex items-center gap-2">
                 <p className="font-semibold text-sm">Envios na semana</p>
@@ -1520,7 +1618,7 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances }: {
           </div>
 
           {/* Recent campaigns table */}
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
+          <div ref={campaignsTableRef} className="rounded-[var(--radius)] border border-border bg-card overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <div className="flex items-center gap-2">
                 <p className="font-semibold text-sm">Campanhas recentes</p>
@@ -1595,7 +1693,7 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances }: {
                                 <td colSpan={6} className="px-4 py-3">
                                   {['running','paused','pending'].includes(c.status) && (
                                     <div className="mb-3">
-                                      <CampaignCard campaign={c} onAction={handleAction} onRefresh={load} />
+                                      <CampaignCard campaign={c} onAction={handleAction} onRefresh={load} onEdit={onEdit} />
                                     </div>
                                   )}
                                   {loadingDetail === c.id || !nums ? (
@@ -1634,9 +1732,15 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances }: {
                   </table>
                 </div>
                 <div className="px-5 py-3 border-t border-border">
-                  <button type="button" className="text-xs text-primary hover:underline flex items-center gap-1">
-                    Ver todas as campanhas <ChevronRight className="h-3.5 w-3.5" />
-                  </button>
+                  {!showAllCampaigns ? (
+                    <button type="button" onClick={() => setShowAllCampaigns(true)} className="text-xs text-primary hover:underline flex items-center gap-1">
+                      Ver todas as campanhas ({allRecent.length}) <ChevronRight className="h-3.5 w-3.5" />
+                    </button>
+                  ) : (
+                    <button type="button" onClick={() => setShowAllCampaigns(false)} className="text-xs text-muted-foreground hover:underline flex items-center gap-1">
+                      Mostrar menos <ChevronRight className="h-3.5 w-3.5 rotate-90" />
+                    </button>
+                  )}
                 </div>
               </>
             )}
@@ -1647,7 +1751,7 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances }: {
         <div className="space-y-5">
 
           {/* Donut chart */}
-          <div className="rounded-xl border border-border bg-card p-5">
+          <div className="rounded-[var(--radius)] border border-border bg-card p-5">
             <div className="flex items-center gap-2 mb-4">
               <p className="font-semibold text-sm">Resumo de campanhas</p>
               <Info className="h-3.5 w-3.5 text-muted-foreground/50" />
@@ -1663,7 +1767,7 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances }: {
                     </Pie>
                   </PieChart>
                   <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                    <span className="font-heading font-normal text-3xl leading-none text-foreground">{donutTotal}</span>
+                    <span className="font-heading font-normal text-xl leading-none text-foreground">{donutTotal}</span>
                     <span className="text-[11px] text-muted-foreground mt-0.5">Total</span>
                   </div>
                 </div>
@@ -1684,14 +1788,14 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances }: {
               </div>
             )}
             <div className="mt-4 pt-3 border-t border-border">
-              <button type="button" className="text-xs text-primary hover:underline flex items-center gap-1">
+              <button type="button" onClick={() => { setShowAllCampaigns(true); campaignsTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }} className="text-xs text-primary hover:underline flex items-center gap-1">
                 Ver todas as campanhas <ChevronRight className="h-3.5 w-3.5" />
               </button>
             </div>
           </div>
 
           {/* Upcoming sends */}
-          <div className="rounded-xl border border-border bg-card p-5">
+          <div className="rounded-[var(--radius)] border border-border bg-card p-5">
             <div className="flex items-center gap-2 mb-4">
               <Calendar className="h-4 w-4 text-muted-foreground" />
               <p className="font-semibold text-sm">Próximos envios</p>
@@ -1719,14 +1823,20 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances }: {
               </div>
             )}
             <div className="mt-4 pt-3 border-t border-border">
-              <button type="button" className="text-xs text-primary hover:underline flex items-center gap-1">
-                Ver agenda completa <ChevronRight className="h-3.5 w-3.5" />
-              </button>
+              {!showAllUpcoming ? (
+                <button type="button" onClick={() => setShowAllUpcoming(true)} className="text-xs text-primary hover:underline flex items-center gap-1">
+                  Ver agenda completa ({allUpcoming.length}) <ChevronRight className="h-3.5 w-3.5" />
+                </button>
+              ) : (
+                <button type="button" onClick={() => setShowAllUpcoming(false)} className="text-xs text-muted-foreground hover:underline flex items-center gap-1">
+                  Mostrar menos <ChevronRight className="h-3.5 w-3.5 rotate-90" />
+                </button>
+              )}
             </div>
           </div>
 
           {/* Quick actions */}
-          <div className="rounded-xl border border-border bg-card p-5">
+          <div className="rounded-[var(--radius)] border border-border bg-card p-5">
             <div className="flex items-center gap-2 mb-4">
               <Zap className="h-4 w-4 text-muted-foreground" />
               <p className="font-semibold text-sm">Ações rápidas</p>
@@ -1911,7 +2021,7 @@ function ExtratorTab({ onUseCampaign }: { onUseCampaign: (numbers: string) => vo
   return (
     <div className="space-y-5">
       {/* Config row */}
-      <div className="rounded-xl border border-border bg-card/80 p-5">
+      <div className="rounded-[var(--radius)] border border-border bg-card/80 p-5">
         <div className="mb-4 flex items-center gap-3">
           <span className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400 shadow-[0_0_16px_rgba(52,211,153,0.25)]">
             <Hash className="h-4 w-4" />
@@ -1976,7 +2086,7 @@ function ExtratorTab({ onUseCampaign }: { onUseCampaign: (numbers: string) => vo
 
       {/* Chat list */}
       {chats.length > 0 && (
-        <div className="rounded-xl border border-border bg-card/80 p-5">
+        <div className="rounded-[var(--radius)] border border-border bg-card/80 p-5">
           <div className="mb-3 flex flex-wrap items-center gap-3">
             <div className="relative flex-1 min-w-48">
               <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
@@ -2057,7 +2167,7 @@ function ExtratorTab({ onUseCampaign }: { onUseCampaign: (numbers: string) => vo
 
       {/* Empty state after extraction */}
       {extractDone && !extracting && extracted.length === 0 && !extractError && (
-        <div className="rounded-xl border border-border bg-card/80 p-8 text-center text-sm text-muted-foreground">
+        <div className="rounded-[var(--radius)] border border-border bg-card/80 p-8 text-center text-sm text-muted-foreground">
           Nenhum número encontrado nos {extractType === 'groups' ? 'grupos' : 'conversas'} selecionados.
         </div>
       )}
@@ -2131,8 +2241,10 @@ type Tab = typeof TABS[number];
 export default function DisparosPage() {
   const [tab, setTab] = useState<Tab>('dashboard');
   const [prefill, setPrefill] = useState<CampaignPrefill | null>(null);
+  const [editCampaign, setEditCampaign] = useState<Campaign | null>(null);
 
-  function handleReuse(p: CampaignPrefill) { setPrefill(p); setTab('nova'); }
+  function handleReuse(p: CampaignPrefill) { setPrefill(p); setEditCampaign(null); setTab('nova'); }
+  function handleEdit(c: Campaign) { setEditCampaign(c); setPrefill(null); setTab('nova'); }
 
   function handleExtractCampaign(numbers: string) {
     setPrefill({ clientId: '', name: 'Campanha do extrator', message: '', numbers, intervalMin: 10, intervalMax: 30 });
@@ -2149,7 +2261,7 @@ export default function DisparosPage() {
               <MessageSquare className="h-5 w-5 text-white" />
             </div>
             <div>
-              <h1 className="font-heading font-normal text-4xl uppercase leading-none tracking-wide text-foreground">Disparos WhatsApp</h1>
+              <h1 className="font-heading font-normal text-xl uppercase leading-none tracking-wide text-foreground">Disparos WhatsApp</h1>
               <p className="mt-0.5 text-muted-foreground text-sm">Gerencie campanhas de disparo via Z-API.</p>
             </div>
           </div>
@@ -2177,10 +2289,15 @@ export default function DisparosPage() {
         </div>
       </div>
 
-      {tab === 'dashboard' && <DashboardTab onReuse={handleReuse} onNewCampaign={() => { setPrefill(null); setTab('nova'); }} onManageInstances={() => setTab('clientes')} />}
+      {tab === 'dashboard' && <DashboardTab onReuse={handleReuse} onNewCampaign={() => { setPrefill(null); setEditCampaign(null); setTab('nova'); }} onManageInstances={() => setTab('clientes')} onEdit={handleEdit} />}
       {tab === 'clientes' && <ClientesTab />}
       {tab === 'nova' && (
-        <NovaCampanhaTab key={prefill ? JSON.stringify(prefill).slice(0, 40) : 'new'} prefill={prefill} onCreated={() => { setPrefill(null); setTab('dashboard'); }} />
+        <NovaCampanhaTab
+          key={editCampaign ? `edit-${editCampaign.id}` : prefill ? JSON.stringify(prefill).slice(0, 40) : 'new'}
+          prefill={prefill}
+          editCampaign={editCampaign}
+          onCreated={() => { setPrefill(null); setEditCampaign(null); setTab('dashboard'); }}
+        />
       )}
       {tab === 'extrator' && <ExtratorTab onUseCampaign={handleExtractCampaign} />}
     </div>

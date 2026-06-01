@@ -2,14 +2,21 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import {
+  DndContext, PointerSensor, useSensor, useSensors,
+  useDraggable, useDroppable, DragOverlay,
+  type DragEndEvent, type DragStartEvent,
+} from '@dnd-kit/core';
+import { CSS } from '@dnd-kit/utilities';
+import { useSortable, SortableContext, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
+import {
   Plus, Search, MoreVertical, Download, Settings2,
   Users, CalendarDays, HeartHandshake, CircleDollarSign,
   ChevronLeft, ChevronRight, ChevronDown, SlidersHorizontal,
   AlignJustify, Trash2, Pencil, Sparkles, Clock3, LayoutGrid, List, ArrowUpDown,
-  BarChart3, Plug, UserRound, RefreshCw,
+  BarChart3, Plug, UserRound, MessageCircle, X, Send, GripVertical, Layers,
 } from 'lucide-react';
-import { DndContext, DragOverlay, useDroppable, useDraggable, type DragEndEvent } from '@dnd-kit/core';
-import { CSS } from '@dnd-kit/utilities';
+import { ChatView } from './chat-view';
+import { FollowupTab, useActiveFollowups, FollowupBadge } from './followup-tab';
 import { useClients } from '@/lib/client-store';
 import { ClientAvatar, fetchClientPicture } from '@/components/client-avatar';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
@@ -18,7 +25,7 @@ import type { Client } from '@/lib/mock-data';
 type CrmLead = {
   id: string; client_id: string; mes: string | null; data: string | null;
   link_criativo: string | null; nome: string | null; numero: string | null;
-  canal: string | null; emoji: string | null;
+  canal: string | null; origin?: string | null; emoji: string | null;
   dia1: boolean; dia2: boolean; dia3: boolean; dia4: boolean;
   status: string | null; data_agendada: string | null;
   video_dra: boolean; compareceu: boolean; observacao: string | null;
@@ -26,10 +33,25 @@ type CrmLead = {
   pagamento: string | null; analise_credito: boolean;
   data_nasc: string | null; bairro: string | null;
   motivacoes: string | null; dores: string | null;
+  temperatura?: 'quente' | 'morno' | 'frio' | null;
+  temperatura_atualizada_em?: string | null;
+  ia_ultimo_analise?: string | null;
+  ia_confianca_ultimo?: number | null;
+  time_interno?: boolean;
   created_at: string | null;
 };
 
 type Draft = Partial<Omit<CrmLead, 'id' | 'client_id' | 'created_at'>>;
+
+type CrmFunnel = { id: string; name: string; created_at: string };
+type CrmStage  = { id: string; label: string; color: string; position: number };
+type LocalStage = CrmStage & { _isNew?: boolean };
+
+const STAGE_COLORS = [
+  '#0ea5e9', '#3b82f6', '#7dd3fc', '#10b981', '#34d399',
+  '#a1a1aa', '#71717a', '#f97316', '#ef4444', '#dc2626',
+  '#8b5cf6', '#ec4899', '#f59e0b', '#84cc16',
+];
 
 const STATUS_OPTIONS = ['Em Atendimento', 'Agendado', 'Reagendado', 'Fechado', 'Comprou', 'Paciente', 'Não Retorna', 'Distante', 'Sem Interesse', 'Desqualificado'];
 const CANAL_OPTIONS  = ['Whatsapp', 'Facebook', 'Instagram', 'Google', 'WHATS PRINCIPAL', 'FACHADA', 'Indicação', 'Site', 'TikTok', 'YouTube', 'Outro'];
@@ -61,68 +83,30 @@ const STATUS_COLOR: Record<string, string> = {
   'Desqualificado': 'text-red-400',
 };
 
-const KANBAN_COLS: { key: string; color: string; border: string; bg: string }[] = [
-  { key: 'Em Atendimento', color: '#38bdf8', border: 'border-sky-500/30',      bg: 'bg-sky-500/5'      },
-  { key: 'Agendado',       color: '#60a5fa', border: 'border-blue-500/30',     bg: 'bg-blue-500/5'     },
-  { key: 'Reagendado',     color: '#93c5fd', border: 'border-blue-300/30',     bg: 'bg-blue-300/5'     },
-  { key: 'Fechado',        color: '#34d399', border: 'border-emerald-500/30',  bg: 'bg-emerald-500/5'  },
-  { key: 'Comprou',        color: '#4ade80', border: 'border-green-500/30',    bg: 'bg-green-500/5'    },
-  { key: 'Paciente',       color: '#94a3b8', border: 'border-slate-500/30',    bg: 'bg-slate-500/5'    },
-  { key: 'Não Retorna',    color: '#a1a1aa', border: 'border-zinc-500/30',     bg: 'bg-zinc-500/5'     },
-  { key: 'Distante',       color: '#fb923c', border: 'border-orange-500/30',   bg: 'bg-orange-500/5'   },
-  { key: 'Sem Interesse',  color: '#f87171', border: 'border-red-500/30',      bg: 'bg-red-500/5'      },
-  { key: 'Desqualificado', color: '#f87171', border: 'border-red-500/30',      bg: 'bg-red-500/5'      },
-];
+const STATUS_KANBAN_COLOR: Record<string, string> = {
+  'Em Atendimento': '#0ea5e9',
+  'Agendado':       '#3b82f6',
+  'Reagendado':     '#7dd3fc',
+  'Fechado':        '#10b981',
+  'Comprou':        '#34d399',
+  'Paciente':       '#a1a1aa',
+  'Não Retorna':    '#71717a',
+  'Distante':       '#f97316',
+  'Sem Interesse':  '#ef4444',
+  'Desqualificado': '#dc2626',
+};
 
-function KanbanCard({ lead, overlay }: { lead: CrmLead; overlay?: boolean }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: lead.id });
-  const style = { transform: CSS.Translate.toString(transform) };
-  return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      {...listeners}
-      {...attributes}
-      className={cn(
-        'rounded-lg border border-border bg-card p-2.5 cursor-grab active:cursor-grabbing select-none shadow-sm transition-shadow',
-        isDragging && !overlay && 'opacity-30',
-        overlay && 'shadow-xl rotate-1 opacity-95',
-      )}
-    >
-      <p className="text-xs font-semibold truncate">{lead.nome || 'Lead sem nome'}</p>
-      {lead.numero && <p className="mt-0.5 text-[10px] text-muted-foreground truncate">{lead.numero}</p>}
-      {lead.canal && <p className="mt-0.5 text-[9px] text-muted-foreground/60 uppercase tracking-wider">{lead.canal}</p>}
-      {(lead.data ?? lead.created_at) && (
-        <p className="mt-1 text-[9px] text-muted-foreground/50">{fmtD(lead.data ?? lead.created_at)}</p>
-      )}
-    </div>
-  );
-}
+const TEMPERATURE_LABEL: Record<string, string> = {
+  quente: 'Quente',
+  morno: 'Morno',
+  frio: 'Frio',
+};
 
-function KanbanColumn({ col, leads }: { col: typeof KANBAN_COLS[number]; leads: CrmLead[] }) {
-  const { setNodeRef, isOver } = useDroppable({ id: col.key });
-  return (
-    <div
-      ref={setNodeRef}
-      className={cn(
-        'flex w-[200px] shrink-0 flex-col rounded-xl border transition-all',
-        col.border, col.bg,
-        isOver && 'ring-2 ring-primary/60 border-primary/40',
-      )}
-    >
-      <div className="flex items-center justify-between px-3 py-2 border-b border-border/40">
-        <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: col.color }}>{col.key}</span>
-        <span className="text-[10px] font-bold text-muted-foreground">{leads.length}</span>
-      </div>
-      <div className="flex flex-col gap-2 overflow-y-auto p-2 min-h-[120px] flex-1">
-        {leads.map(lead => <KanbanCard key={lead.id} lead={lead} />)}
-        {leads.length === 0 && (
-          <div className="flex flex-1 items-center justify-center text-[10px] text-muted-foreground/40 py-4">Vazio</div>
-        )}
-      </div>
-    </div>
-  );
-}
+const TEMPERATURE_BADGE: Record<string, string> = {
+  quente: 'border-red-500/30 bg-red-500/15 text-red-300',
+  morno: 'border-orange-500/30 bg-orange-500/15 text-orange-300',
+  frio: 'border-blue-500/30 bg-blue-500/15 text-blue-300',
+};
 
 type ChannelMatch = {
   id: string;
@@ -226,6 +210,46 @@ function detectChannels(value: string | null | undefined) {
     channel.keywords.some(keyword => normalized.includes(normalizeChannelText(keyword)))
   ));
 }
+function originLabel(value: string | null | undefined) {
+  const normalized = normalizeChannelText(value ?? '');
+  if (!normalized) return null;
+  if (normalized.includes('meta')) return 'Facebook';
+  if (normalized.includes('google')) return 'Google';
+  if (normalized.includes('instagram')) return 'Instagram';
+  if (normalized.includes('tiktok')) return 'TikTok';
+  if (normalized.includes('youtube')) return 'YouTube';
+  if (normalized.includes('indicacao')) return 'Indicação';
+  if (normalized.includes('organic')) return 'WhatsApp orgânico';
+  if (normalized.includes('cliente')) return 'WhatsApp';
+  return value;
+}
+function leadOriginPreview(lead: CrmLead) {
+  const sourceText = [lead.canal, originLabel(lead.origin)].filter(Boolean).join(' ');
+  const channels = detectChannels(sourceText);
+  return {
+    label: channels[0]?.label ?? lead.canal ?? originLabel(lead.origin) ?? 'Origem indefinida',
+    channels,
+  };
+}
+function inferLeadAiTag(lead: CrmLead) {
+  const value = toMoneyNumber(lead.valor_rs);
+  const text = normalizeChannelText([
+    lead.observacao,
+    lead.motivacoes,
+    lead.dores,
+    lead.pagamento,
+    lead.bairro,
+  ].filter(Boolean).join(' '));
+
+  if (lead.fechou) return 'Convertido';
+  if (value > 0) return 'Orçamento enviado';
+  if (lead.data_agendada) return 'Agendamento ativo';
+  if (/preco|valor|quanto|orcamento|orçamento|parcel/.test(text)) return 'Sensível a preço';
+  if (/dor|incomoda|problema|urgente|preciso|necessito/.test(text)) return 'Dor mapeada';
+  if (lead.dia1 || lead.dia2 || lead.dia3 || lead.dia4) return 'Em nutrição';
+  if (lead.analise_credito) return 'Análise de crédito';
+  return 'IA: qualificar';
+}
 function dateText(v: string | null) {
   const shortDate = fmtD(v);
   const rawDate = toD(v);
@@ -233,6 +257,20 @@ function dateText(v: string | null) {
 }
 function moneyText(v: number | string | null) {
   return `${v ?? ''} ${fmtN(v)}`.toLowerCase();
+}
+function temperatureBadgeClass(value: string | null | undefined) {
+  return value ? TEMPERATURE_BADGE[value] ?? 'border-border bg-muted text-muted-foreground' : 'border-border bg-muted text-muted-foreground';
+}
+function relativeAnalysisTime(iso: string | null | undefined) {
+  if (!iso) return 'Nunca analisado';
+  const diff = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(diff)) return 'Nunca analisado';
+  const mins = Math.max(0, Math.floor(diff / 60_000));
+  if (mins < 1) return 'Última análise agora';
+  if (mins < 60) return `Última análise há ${mins} min`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `Última análise há ${hours}h`;
+  return `Última análise há ${Math.floor(hours / 24)}d`;
 }
 
 function columnValueText(lead: CrmLead, key: ColumnKey) {
@@ -258,6 +296,9 @@ function columnValueText(lead: CrmLead, key: ColumnKey) {
 
 function passesColumnFilter(lead: CrmLead, key: ColumnKey, value: string) {
   if (!value) return true;
+  if (key === 'temperatura') {
+    return value === 'sem' ? !lead.temperatura : lead.temperatura === value;
+  }
   if (['dia1', 'dia2', 'dia3', 'dia4', 'fechou'].includes(key)) {
     return value === 'yes' ? Boolean(lead[key as 'fechou']) : !lead[key as 'fechou'];
   }
@@ -274,6 +315,7 @@ const COLS = [
   { key: 'numero', label: 'Número', width: 120, min: 96, filter: 'text' },
   { key: 'canal', label: 'Canal', width: 120, min: 90, filter: 'text' },
   { key: 'status', label: 'Status', width: 150, min: 120, filter: 'select' },
+  { key: 'temperatura', label: 'Temp.', width: 115, min: 94, filter: 'select' },
   { key: 'dia1', label: '1D', width: 46, min: 40, filter: 'boolean' },
   { key: 'dia2', label: '2D', width: 46, min: 40, filter: 'boolean' },
   { key: 'dia3', label: '3D', width: 46, min: 40, filter: 'boolean' },
@@ -325,6 +367,726 @@ function clientTheme(clientId: string) {
     glow: 'rgba(85,245,47,0.14)',
     bg: 'from-emerald-950/35 via-card to-card',
   };
+}
+
+// ── Quick Edit Modal (Kanban) ────────────────────────────────────────────────
+function QuickEditModal({
+  lead, onSave, onClose, onDelete, statusOptions,
+}: {
+  lead: CrmLead;
+  onSave: (data: Draft) => Promise<void>;
+  onClose: () => void;
+  onDelete: () => void;
+  statusOptions: string[];
+}) {
+  const [draft, setDraft] = useState<Draft>({ ...lead });
+  const [saving, setSaving] = useState(false);
+  const [aiInfo, setAiInfo] = useState<{ motivo?: string; created_at?: string; confianca?: number } | null>(null);
+  const [, setNowTick] = useState(0);
+  function set<K extends keyof Draft>(k: K, v: Draft[K]) { setDraft(prev => ({ ...prev, [k]: v })); }
+
+  useEffect(() => {
+    fetch(`/api/crm/ai/lead/${lead.id}`)
+      .then(r => r.ok ? r.json() : null)
+      .then((data: { last?: { motivo_ia?: string; created_at?: string; confianca?: number } } | null) => {
+        if (data?.last) setAiInfo({
+          motivo: data.last.motivo_ia,
+          created_at: data.last.created_at,
+          confianca: data.last.confianca,
+        });
+      })
+      .catch(() => {});
+  }, [lead.id]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowTick(v => v + 1), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  async function handleSave() {
+    setSaving(true);
+    await onSave(draft);
+    setSaving(false);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+          <h2 className="text-sm font-bold">Editar Lead</h2>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <label className="space-y-1">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Nome</span>
+              <input type="text" value={draft.nome ?? ''} onChange={e => set('nome', e.target.value || null)}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
+            </label>
+            <label className="space-y-1">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Número</span>
+              <input type="text" value={draft.numero ?? ''} onChange={e => set('numero', e.target.value || null)}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
+            </label>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="space-y-1">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Canal</span>
+              <select value={draft.canal ?? ''} onChange={e => set('canal', e.target.value || null)}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
+                <option value="">—</option>
+                {CANAL_OPTIONS.map(o => <option key={o}>{o}</option>)}
+              </select>
+            </label>
+            <label className="space-y-1">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Status</span>
+              <select value={draft.status ?? ''} onChange={e => set('status', e.target.value || null)}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
+                {statusOptions.map(o => <option key={o}>{o}</option>)}
+              </select>
+            </label>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="space-y-1">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Valor (R$)</span>
+              <input type="number" step="0.01" value={draft.valor_rs ?? ''}
+                onChange={e => set('valor_rs', e.target.value ? parseFloat(e.target.value) : null)}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
+            </label>
+            <label className="space-y-1">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Data</span>
+              <input type="date" value={toD(draft.data)} onChange={e => set('data', e.target.value || null)}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
+            </label>
+          </div>
+          <label className="flex items-center gap-3 cursor-pointer py-1">
+            <input type="checkbox" checked={!!draft.fechou} onChange={e => set('fechou', e.target.checked)} className="h-4 w-4 accent-primary" />
+            <span className="text-sm font-semibold">Fechou negócio</span>
+          </label>
+          <div className="rounded-lg border border-border bg-background/50 p-3 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Inteligência IA</p>
+                <p className="mt-1 text-xs text-muted-foreground">{relativeAnalysisTime(draft.ia_ultimo_analise ?? aiInfo?.created_at)}</p>
+              </div>
+              <span className={cn('rounded-full border px-2 py-1 text-[10px] font-bold', temperatureBadgeClass(draft.temperatura))}>
+                {draft.temperatura ? TEMPERATURE_LABEL[draft.temperatura] : 'Sem classificação'}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="rounded border border-border/60 bg-card px-2 py-1.5">
+                <span className="text-muted-foreground">Confiança</span>
+                <p className="font-semibold">{draft.ia_confianca_ultimo ?? aiInfo?.confianca ?? 0}%</p>
+              </div>
+              <div className="rounded border border-border/60 bg-card px-2 py-1.5">
+                <span className="text-muted-foreground">Temperatura</span>
+                <p className="font-semibold">{draft.temperatura ? TEMPERATURE_LABEL[draft.temperatura] : 'Não definida'}</p>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              <span className="font-semibold text-foreground">Motivo:</span> {aiInfo?.motivo ?? 'Aguardando próxima análise automática.'}
+            </p>
+            <label className="flex items-start gap-3 rounded border border-border/60 bg-card p-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={!!draft.time_interno}
+                onChange={e => {
+                  if (e.target.checked) {
+                    const ok = window.confirm('Ao marcar como Time Interno, nenhuma automação será executada para este contato. Tem certeza?');
+                    if (!ok) return;
+                  }
+                  set('time_interno', e.target.checked);
+                }}
+                className="mt-0.5 h-4 w-4 accent-primary"
+              />
+              <span>
+                <span className="block text-sm font-semibold">Time Interno</span>
+                <span className="block text-xs text-muted-foreground">Todas as automações ficam desativadas para este contato</span>
+              </span>
+            </label>
+          </div>
+          <label className="space-y-1">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Observação</span>
+            <textarea value={draft.observacao ?? ''} onChange={e => set('observacao', e.target.value || null)} rows={3}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary resize-none" />
+          </label>
+        </div>
+        <div className="flex items-center justify-between gap-3 px-5 py-4 border-t border-border shrink-0">
+          <button onClick={onDelete} className="flex items-center gap-1.5 rounded-lg border border-red-500/30 px-3 py-2 text-xs font-semibold text-red-400 hover:bg-red-500/10 transition-colors">
+            <Trash2 className="h-3.5 w-3.5" /> Excluir
+          </button>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="rounded-lg border border-border px-4 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors">Cancelar</button>
+            <button onClick={handleSave} disabled={saving}
+              className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors">
+              {saving ? 'Salvando…' : 'Salvar'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Kanban Card (draggable) ──────────────────────────────────────────────────
+function KanbanCard({
+  lead, onEdit, onDelete, isDragOverlay, hasActiveFollowup,
+}: {
+  lead: CrmLead;
+  onEdit: (lead: CrmLead) => void;
+  onDelete: (id: string) => void;
+  isDragOverlay?: boolean;
+  hasActiveFollowup?: boolean;
+}) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: lead.id });
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const channels = detectChannels(lead.canal);
+  const origin = leadOriginPreview(lead);
+  const aiTag = inferLeadAiTag(lead);
+  const value = toMoneyNumber(lead.valor_rs);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    function onDown(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    }
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [menuOpen]);
+
+  const style = transform ? { transform: CSS.Translate.toString(transform) } : undefined;
+
+  return (
+    <div
+      ref={isDragOverlay ? undefined : setNodeRef}
+      style={isDragOverlay ? undefined : style}
+      {...(isDragOverlay ? {} : { ...attributes, ...listeners })}
+      onClick={() => !isDragging && onEdit(lead)}
+      className={cn(
+        "group relative rounded-lg border border-border bg-card p-3 shadow-sm hover:border-primary/40 hover:shadow-md transition-all cursor-grab select-none",
+        isDragging && "opacity-30",
+        isDragOverlay && "cursor-grabbing shadow-2xl ring-2 ring-primary/40",
+      )}
+    >
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-semibold text-foreground truncate">{lead.nome ?? '—'}</p>
+          {lead.numero && <p className="text-[10px] text-muted-foreground mt-0.5">{lead.numero}</p>}
+        </div>
+        <div className="relative shrink-0" ref={menuRef}>
+          <button
+            onClick={e => { e.stopPropagation(); setMenuOpen(v => !v); }}
+            className="opacity-0 group-hover:opacity-100 h-5 w-5 flex items-center justify-center rounded text-muted-foreground hover:text-foreground transition-all"
+          >
+            <MoreVertical className="h-3.5 w-3.5" />
+          </button>
+          {menuOpen && (
+            <div className="absolute right-0 top-6 z-50 min-w-[130px] rounded-lg border border-border bg-popover shadow-xl py-1">
+              <button onClick={e => { e.stopPropagation(); setMenuOpen(false); onEdit(lead); }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-xs hover:bg-muted transition-colors">
+                <Pencil className="h-3.5 w-3.5" /> Editar
+              </button>
+              <button onClick={e => { e.stopPropagation(); setMenuOpen(false); onDelete(lead.id); }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 transition-colors">
+                <Trash2 className="h-3.5 w-3.5" /> Excluir
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-1.5 mt-2.5">
+        {channels.slice(0, 3).map(ch => (
+          <span key={ch.id} className={cn('inline-flex h-5 w-5 items-center justify-center rounded-full text-white ring-1 ring-white/10', ch.bg)}>
+            {ch.icon}
+          </span>
+        ))}
+        <div className="ml-auto flex items-center gap-1.5">
+          {lead.time_interno && (
+            <span className="rounded-full bg-zinc-500/15 px-1.5 py-0.5 text-[9px] font-bold text-zinc-300">Time Interno</span>
+          )}
+          {lead.temperatura && (
+            <span className={cn('rounded-full border px-1.5 py-0.5 text-[9px] font-bold', temperatureBadgeClass(lead.temperatura))}>
+              {TEMPERATURE_LABEL[lead.temperatura]}
+            </span>
+          )}
+          <FollowupBadge active={!!hasActiveFollowup} />
+          {lead.fechou && (
+            <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-bold text-emerald-400">Fechou</span>
+          )}
+          {value > 0 && (
+            <span className="text-[10px] font-bold text-primary">{fmtN(lead.valor_rs)}</span>
+          )}
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between mt-2 pt-2 border-t border-border/30">
+        <span className="text-[10px] text-muted-foreground">{fmtD(lead.data ?? lead.created_at)}</span>
+        <div className="ml-2 flex min-w-0 flex-wrap items-center justify-end gap-1">
+          <span
+            className="inline-flex max-w-[110px] items-center gap-1 truncate rounded-full border border-border bg-muted/30 px-1.5 py-0.5 text-[9px] font-semibold text-muted-foreground"
+            title={origin.label}
+          >
+            {origin.channels[0] && (
+              <span className={cn('inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full text-white', origin.channels[0].bg)}>
+                {origin.channels[0].icon}
+              </span>
+            )}
+            <span className="truncate">{origin.label}</span>
+          </span>
+          <span className="inline-flex max-w-[115px] items-center gap-1 truncate rounded-full border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[9px] font-semibold text-primary" title={aiTag}>
+            <Sparkles className="h-2.5 w-2.5 shrink-0" />
+            <span className="truncate">{aiTag}</span>
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Kanban Column (droppable) ────────────────────────────────────────────────
+function KanbanColumn({
+  status, color, leads, onEdit, onDelete, activeLead, activeFollowupIds,
+}: {
+  status: string;
+  color: string;
+  leads: CrmLead[];
+  onEdit: (lead: CrmLead) => void;
+  onDelete: (id: string) => void;
+  activeLead: CrmLead | null;
+  activeFollowupIds: Set<string>;
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: status });
+  const total = leads.reduce((s, l) => s + toMoneyNumber(l.valor_rs), 0);
+
+  return (
+    <div className="flex flex-col w-[255px] shrink-0">
+      <div className="rounded-t-xl border border-b-0 border-border bg-card px-3 py-2.5" style={{ borderTop: `3px solid ${color}` }}>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] font-bold text-foreground leading-tight">{status}</span>
+          <span className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold leading-none" style={{ background: `${color}25`, color }}>
+            {leads.length}
+          </span>
+        </div>
+        <p className="text-[10px] text-muted-foreground mt-0.5">{total > 0 ? formatCurrencyBRL(total) : 'R$ 0'}</p>
+      </div>
+      <div
+        ref={setNodeRef}
+        className={cn(
+          "flex flex-col gap-2 rounded-b-xl border border-t-0 border-border bg-muted/10 p-2 overflow-y-auto transition-colors",
+          isOver && "bg-primary/5 border-primary/30",
+        )}
+        style={{ maxHeight: 'calc(100vh - 400px)', minHeight: 100 }}
+      >
+        {leads.map(lead => (
+          <KanbanCard key={lead.id} lead={lead} onEdit={onEdit} onDelete={onDelete} hasActiveFollowup={activeFollowupIds.has(lead.id)} />
+        ))}
+        {leads.length === 0 && (
+          <div className="flex items-center justify-center py-6">
+            <p className="text-[10px] text-muted-foreground/40 italic">
+              {isOver && activeLead ? 'Soltar aqui' : 'Vazio'}
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Kanban View ──────────────────────────────────────────────────────────────
+function KanbanView({
+  leads, stages, onEdit, onDelete, onStatusChange, activeFollowupIds,
+}: {
+  leads: CrmLead[];
+  stages: CrmStage[];
+  onEdit: (lead: CrmLead) => void;
+  onDelete: (id: string) => void;
+  onStatusChange: (id: string, status: string) => void;
+  activeFollowupIds: Set<string>;
+}) {
+  const [activeLead, setActiveLead] = useState<CrmLead | null>(null);
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+  const statusOptions = stages.map(s => s.label);
+
+  const grouped = useMemo(() => {
+    const map = new Map<string, CrmLead[]>();
+    stages.forEach(s => map.set(s.label, []));
+    leads.forEach(lead => {
+      const s = lead.status ?? stages[0]?.label ?? 'Em Atendimento';
+      if (map.has(s)) map.get(s)!.push(lead);
+      else map.set(s, [lead]);
+    });
+    return map;
+  }, [leads, stages]);
+
+  function handleDragStart(event: DragStartEvent) {
+    const lead = leads.find(l => l.id === event.active.id);
+    setActiveLead(lead ?? null);
+  }
+
+  function handleDragEnd(event: DragEndEvent) {
+    setActiveLead(null);
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const targetStatus = String(over.id);
+    if (statusOptions.includes(targetStatus)) {
+      onStatusChange(String(active.id), targetStatus);
+    }
+  }
+
+  return (
+    <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+      <div className="flex gap-3 overflow-x-auto pb-4 min-h-0 flex-1" style={{ alignItems: 'flex-start' }}>
+        {stages.map(stage => (
+          <KanbanColumn
+            key={stage.label}
+            status={stage.label}
+            color={stage.color}
+            leads={grouped.get(stage.label) ?? []}
+            onEdit={onEdit}
+            onDelete={onDelete}
+            activeLead={activeLead}
+            activeFollowupIds={activeFollowupIds}
+          />
+        ))}
+      </div>
+      <DragOverlay>
+        {activeLead && (
+          <KanbanCard
+            lead={activeLead}
+            onEdit={() => {}}
+            onDelete={() => {}}
+            isDragOverlay
+            hasActiveFollowup={activeFollowupIds.has(activeLead.id)}
+          />
+        )}
+      </DragOverlay>
+    </DndContext>
+  );
+}
+
+// ── Funnel Editor ────────────────────────────────────────────────────────────
+
+function SortableStageRow({
+  stage, onChange, onDelete,
+}: {
+  stage: LocalStage;
+  onChange: (updates: Partial<CrmStage>) => void;
+  onDelete: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: stage.id });
+  const [showColors, setShowColors] = useState(false);
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} className="flex items-center gap-2 rounded-lg border border-border bg-background/60 px-2 py-1.5">
+      <button type="button" {...attributes} {...listeners}
+        className="cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground p-0.5 shrink-0">
+        <GripVertical className="h-4 w-4" />
+      </button>
+
+      <div className="relative shrink-0">
+        <button type="button" onClick={() => setShowColors(v => !v)}
+          className="h-5 w-5 rounded-full border border-border/50 transition-transform hover:scale-110 shrink-0"
+          style={{ background: stage.color }} />
+        {showColors && (
+          <div className="absolute left-0 top-7 z-50 flex flex-wrap gap-1 rounded-lg border border-border bg-popover p-2 shadow-xl w-36">
+            {STAGE_COLORS.map(c => (
+              <button key={c} type="button"
+                onClick={() => { onChange({ color: c }); setShowColors(false); }}
+                className="h-5 w-5 rounded-full border-2 transition-transform hover:scale-110 shrink-0"
+                style={{ background: c, borderColor: c === stage.color ? 'white' : 'transparent' }}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      <input
+        value={stage.label}
+        onChange={e => onChange({ label: e.target.value })}
+        className="flex-1 min-w-0 bg-transparent text-sm focus:outline-none focus:bg-primary/5 rounded px-1 py-0.5"
+      />
+
+      <button type="button" onClick={onDelete}
+        className="shrink-0 text-muted-foreground hover:text-red-400 transition-colors p-0.5">
+        <Trash2 className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+}
+
+function FunnelEditorModal({
+  funnel, stages: initialStages, clientId, funnelCount,
+  onSaved, onClose, onDeleteFunnel, onNewFunnel,
+}: {
+  funnel: CrmFunnel;
+  stages: CrmStage[];
+  clientId: string;
+  funnelCount: number;
+  onSaved: (funnel: CrmFunnel, stages: CrmStage[]) => void;
+  onClose: () => void;
+  onDeleteFunnel: () => void;
+  onNewFunnel: () => void;
+}) {
+  const [name, setName] = useState(funnel.name);
+  const [localStages, setLocalStages] = useState<LocalStage[]>(initialStages.map(s => ({ ...s })));
+  const [deletedIds, setDeletedIds] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
+
+  const editorSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+
+  function addStage() {
+    setLocalStages(prev => [...prev, {
+      id: `_new_${Date.now()}`,
+      label: 'Nova Etapa',
+      color: '#71717a',
+      position: prev.length,
+      _isNew: true,
+    }]);
+  }
+
+  function deleteStage(id: string) {
+    if (!id.startsWith('_new_')) setDeletedIds(prev => [...prev, id]);
+    setLocalStages(prev => prev.filter(s => s.id !== id));
+  }
+
+  function updateStage(id: string, updates: Partial<CrmStage>) {
+    setLocalStages(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s));
+  }
+
+  function handleStageDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIdx = localStages.findIndex(s => s.id === active.id);
+    const newIdx = localStages.findIndex(s => s.id === over.id);
+    if (oldIdx !== -1 && newIdx !== -1) setLocalStages(prev => arrayMove(prev, oldIdx, newIdx));
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      const funnelRes = await fetch(`/api/crm/funnels/${funnel.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, clientId }),
+      });
+      const savedFunnel: CrmFunnel = funnelRes.ok ? await funnelRes.json() as CrmFunnel : { ...funnel, name };
+
+      await Promise.all(deletedIds.map(id => fetch(`/api/crm/stages/${id}`, { method: 'DELETE' })));
+
+      const savedStages: CrmStage[] = [];
+      for (let i = 0; i < localStages.length; i++) {
+        const s = localStages[i];
+        if (s._isNew) {
+          const res = await fetch(`/api/crm/funnels/${funnel.id}/stages`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ label: s.label, color: s.color, clientId }),
+          });
+          if (res.ok) savedStages.push(await res.json() as CrmStage);
+        } else {
+          const res = await fetch(`/api/crm/stages/${s.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ label: s.label, color: s.color, position: i }),
+          });
+          savedStages.push(res.ok ? await res.json() as CrmStage : { ...s, position: i });
+        }
+      }
+
+      onSaved(savedFunnel, savedStages);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const stageIds = localStages.map(s => s.id);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+          <h2 className="text-sm font-bold flex items-center gap-2"><Layers className="h-4 w-4 text-primary" /> Configurar Funil</h2>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+          <label className="block space-y-1.5">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Nome do funil</span>
+            <input value={name} onChange={e => setName(e.target.value)}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
+          </label>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Etapas ({localStages.length})</span>
+              <button onClick={addStage}
+                className="flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary/80 transition-colors">
+                <Plus className="h-3.5 w-3.5" /> Adicionar etapa
+              </button>
+            </div>
+
+            <DndContext sensors={editorSensors} onDragEnd={handleStageDragEnd}>
+              <SortableContext items={stageIds} strategy={verticalListSortingStrategy}>
+                <div className="space-y-1.5">
+                  {localStages.map(stage => (
+                    <SortableStageRow key={stage.id} stage={stage}
+                      onChange={u => updateStage(stage.id, u)}
+                      onDelete={() => deleteStage(stage.id)} />
+                  ))}
+                </div>
+              </SortableContext>
+            </DndContext>
+
+            {localStages.length === 0 && (
+              <p className="text-center text-xs text-muted-foreground py-6">Nenhuma etapa. Clique em "Adicionar etapa".</p>
+            )}
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between gap-3 px-5 py-4 border-t border-border shrink-0">
+          <div className="flex gap-2">
+            {funnelCount > 1 && (
+              <button onClick={onDeleteFunnel}
+                className="flex items-center gap-1.5 rounded-lg border border-red-500/30 px-3 py-2 text-xs font-semibold text-red-400 hover:bg-red-500/10 transition-colors">
+                <Trash2 className="h-3.5 w-3.5" /> Excluir funil
+              </button>
+            )}
+            <button onClick={onNewFunnel}
+              className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors">
+              <Plus className="h-3.5 w-3.5" /> Novo funil
+            </button>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={onClose}
+              className="rounded-lg border border-border px-4 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors">
+              Cancelar
+            </button>
+            <button onClick={handleSave} disabled={saving}
+              className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors">
+              {saving ? 'Salvando…' : 'Salvar'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type TemperatureCriteria = Partial<Record<'quente' | 'morno' | 'frio', string>>;
+
+function AiCriteriaModal({
+  clientId,
+  onClose,
+}: {
+  clientId: string;
+  onClose: () => void;
+}) {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [useDefault, setUseDefault] = useState(true);
+  const [defaults, setDefaults] = useState<TemperatureCriteria>({});
+  const [criteria, setCriteria] = useState<TemperatureCriteria>({});
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(`/api/crm/ai/criteria?clientId=${encodeURIComponent(clientId)}`)
+      .then(r => r.ok ? r.json() : null)
+      .then((data: { useDefault?: boolean; defaults?: TemperatureCriteria; custom?: TemperatureCriteria; effective?: TemperatureCriteria } | null) => {
+        setUseDefault(data?.useDefault ?? true);
+        setDefaults(data?.defaults ?? {});
+        setCriteria(data?.useDefault ? data?.effective ?? {} : data?.custom ?? data?.effective ?? {});
+      })
+      .catch(() => {
+        setDefaults({});
+        setCriteria({});
+      })
+      .finally(() => setLoading(false));
+  }, [clientId]);
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      const res = await fetch('/api/crm/ai/criteria', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientId, useDefault, criterios: criteria }),
+      });
+      if (res.ok) onClose();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function setCriterion(key: 'quente' | 'morno' | 'frio', value: string) {
+    setCriteria(prev => ({ ...prev, [key]: value }));
+  }
+
+  const source = useDefault ? defaults : criteria;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+          <h2 className="text-sm font-bold flex items-center gap-2"><Sparkles className="h-4 w-4 text-primary" /> Critérios da IA</h2>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+          <label className="flex items-start gap-3 rounded-lg border border-border bg-background/50 p-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={useDefault}
+              onChange={e => {
+                setUseDefault(e.target.checked);
+                if (e.target.checked) setCriteria(defaults);
+              }}
+              className="mt-0.5 h-4 w-4 accent-primary"
+            />
+            <span>
+              <span className="block text-sm font-semibold">Usar critérios globais</span>
+              <span className="block text-xs text-muted-foreground">Desmarque para definir a régua de temperatura deste cliente.</span>
+            </span>
+          </label>
+
+          {loading ? (
+            <div className="rounded-lg border border-border bg-background/50 p-6 text-center text-sm text-muted-foreground">Carregando critérios...</div>
+          ) : (
+            (['quente', 'morno', 'frio'] as const).map(temp => (
+              <label key={temp} className="block space-y-1.5">
+                <span className={cn('inline-flex rounded-full border px-2 py-1 text-[10px] font-bold', temperatureBadgeClass(temp))}>
+                  {TEMPERATURE_LABEL[temp]}
+                </span>
+                <textarea
+                  value={source[temp] ?? ''}
+                  onChange={e => setCriterion(temp, e.target.value)}
+                  disabled={useDefault}
+                  rows={4}
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary disabled:opacity-70"
+                />
+              </label>
+            ))
+          )}
+        </div>
+        <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border shrink-0">
+          <button onClick={onClose}
+            className="rounded-lg border border-border px-4 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors">
+            Cancelar
+          </button>
+          <button onClick={handleSave} disabled={saving || loading}
+            className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors">
+            {saving ? 'Salvando...' : 'Salvar critérios'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function ClientLogoBg({ clientId }: { clientId: string }) {
@@ -422,16 +1184,28 @@ export default function CrmPage() {
   const { clients } = useClients();
   const activeClients = useMemo(() => clients.filter(c => c.status === 'Ativo'), [clients]);
 
-  const [clientId, setClientId]     = useState('');
+  const [clientId, setClientId] = useState<string>(() => {
+    if (typeof window === 'undefined') return '';
+    return localStorage.getItem('crm:last-client') ?? '';
+  });
   const [clientSearch, setClientSearch] = useState('');
   const [segmentChoice, setSegmentChoice] = useState('');
   const [clientSort, setClientSort] = useState<'az' | 'za'>('az');
   const [clientView, setClientView] = useState<'grid' | 'list'>('grid');
   const [recentClientIds, setRecentClientIds] = useState<string[]>([]);
+
+  // ── Funnels & Stages ──────────────────────────────────────────────────
+  const [funnels, setFunnels] = useState<CrmFunnel[]>([]);
+  const [selectedFunnelId, setSelectedFunnelId] = useState('');
+  const [stages, setStages] = useState<CrmStage[]>([]);
+  const [showFunnelEditor, setShowFunnelEditor] = useState(false);
+  const [showAiCriteria, setShowAiCriteria] = useState(false);
+
   const [leads, setLeads]           = useState<CrmLead[]>([]);
   const [loading, setLoading]       = useState(false);
   const [search, setSearch]         = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [temperatureFilter, setTemperatureFilter] = useState('');
   const [columnFilters, setColumnFilters] = useState<Partial<Record<ColumnKey, string>>>({});
   const [colWidths, setColWidths] = useState<Record<ColumnKey, number>>(DEFAULT_COL_WIDTHS);
   const [saving, setSaving]         = useState(false);
@@ -440,9 +1214,16 @@ export default function CrmPage() {
   const [pageSize, setPageSize]     = useState(10);
   const [menuId, setMenuId]         = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const [kanbanMode, setKanbanMode] = useState(false);
-  const [lastPoll, setLastPoll]     = useState<Date | null>(null);
-  const pollSinceRef = useRef(new Date().toISOString());
+  const [viewMode, setViewMode] = useState<'list' | 'kanban'>(() => {
+    if (typeof window === 'undefined') return 'kanban';
+    return (localStorage.getItem('crm:view-mode') as 'list' | 'kanban' | null) ?? 'kanban';
+  });
+  const [crmView, setCrmView] = useState<'leads' | 'chat' | 'followup'>(() => {
+    if (typeof window === 'undefined') return 'leads';
+    const v = localStorage.getItem('crm:tab');
+    return (v === 'leads' || v === 'chat' || v === 'followup') ? v : 'leads';
+  });
+  const [kanbanEditLead, setKanbanEditLead] = useState<CrmLead | null>(null);
 
   // ── NEW ROW ──────────────────────────────────────────────────────────
   const [newDraft, setNewDraft] = useState<Draft>(freshDraft());
@@ -504,13 +1285,41 @@ export default function CrmPage() {
     }
   }, [colWidths]);
 
+  useEffect(() => {
+    try { localStorage.setItem('crm:view-mode', viewMode); } catch { /* ignore */ }
+  }, [viewMode]);
+
+  useEffect(() => {
+    try { if (clientId) localStorage.setItem('crm:last-client', clientId); } catch { /* ignore */ }
+  }, [clientId]);
+
+  useEffect(() => {
+    try { localStorage.setItem('crm:tab', crmView); } catch { /* ignore */ }
+  }, [crmView]);
+
   function openClientCrm(id: string) {
     setClientId(id);
+    try { localStorage.setItem('crm:last-client', id); } catch { /* ignore */ }
     setRecentClientIds(prev => {
       const next = [id, ...prev.filter(item => item !== id)].slice(0, 8);
       localStorage.setItem('crm:recent-clients', JSON.stringify(next));
       return next;
     });
+  }
+
+  function refreshLeads(options?: { silent?: boolean }) {
+    if (!clientId || !selectedFunnelId) {
+      setLeads([]);
+      return;
+    }
+    if (!options?.silent) setLoading(true);
+    fetch(`/api/crm?clientId=${clientId}&funnelId=${selectedFunnelId}`)
+      .then(r => r.ok ? r.json() as Promise<CrmLead[]> : [])
+      .then(data => setLeads(data))
+      .catch(() => setLeads([]))
+      .finally(() => {
+        if (!options?.silent) setLoading(false);
+      });
   }
 
   useEffect(() => {
@@ -521,44 +1330,52 @@ export default function CrmPage() {
     return () => document.removeEventListener('mousedown', onDown);
   }, []);
 
-  useEffect(() => { setPage(1); }, [statusFilter, search, clientId, columnFilters]);
+  useEffect(() => { setPage(1); }, [statusFilter, temperatureFilter, search, clientId, columnFilters]);
 
   useEffect(() => {
-    if (!clientId) { setLeads([]); return; }
-    setLoading(true);
-    pollSinceRef.current = new Date().toISOString();
-    fetch(`/api/crm?clientId=${clientId}`)
-      .then(r => r.ok ? r.json() as Promise<CrmLead[]> : [])
-      .then(data => { setLeads(data); pollSinceRef.current = new Date().toISOString(); })
-      .catch(() => setLeads([]))
-      .finally(() => setLoading(false));
+    if (!clientId) { setFunnels([]); setSelectedFunnelId(''); setStages([]); return; }
+    fetch(`/api/crm/funnels?clientId=${clientId}`)
+      .then(r => r.ok ? r.json() as Promise<CrmFunnel[]> : [])
+      .then(data => { setFunnels(data); if (data[0]) setSelectedFunnelId(data[0].id); })
+      .catch(() => setFunnels([]));
   }, [clientId]);
 
   useEffect(() => {
-    if (!clientId) return;
-    const iv = setInterval(() => {
-      if (document.hidden) return;
-      const since = pollSinceRef.current;
-      fetch(`/api/crm?clientId=${clientId}&since=${encodeURIComponent(since)}`)
-        .then(r => r.ok ? r.json() as Promise<CrmLead[]> : [])
-        .then(updated => {
-          if (updated.length > 0) {
-            pollSinceRef.current = new Date().toISOString();
-            setLeads(prev => {
-              const map = new Map(prev.map(l => [l.id, l]));
-              updated.forEach(l => map.set(l.id, l));
-              return [...map.values()];
-            });
-            setLastPoll(new Date());
-          }
-        })
-        .catch(() => {});
-    }, 15_000);
-    return () => clearInterval(iv);
-  }, [clientId]);
+    if (!selectedFunnelId) { setStages([]); return; }
+    fetch(`/api/crm/funnels/${selectedFunnelId}/stages`)
+      .then(r => r.ok ? r.json() as Promise<CrmStage[]> : [])
+      .then(setStages)
+      .catch(() => setStages([]));
+  }, [selectedFunnelId]);
+
+  useEffect(() => {
+    refreshLeads();
+  }, [clientId, selectedFunnelId]);
+
+  useEffect(() => {
+    if (crmView !== 'leads') return;
+    refreshLeads({ silent: true });
+  }, [crmView]);
+
+  useEffect(() => {
+    if (!clientId || !selectedFunnelId) return;
+    const timer = window.setInterval(() => refreshLeads({ silent: true }), 8_000);
+    function onFocus() { refreshLeads({ silent: true }); }
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onFocus);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onFocus);
+    };
+  }, [clientId, selectedFunnelId]);
 
   const filtered = useMemo(() => leads.filter(l => {
     if (statusFilter && l.status !== statusFilter) return false;
+    if (temperatureFilter) {
+      if (temperatureFilter === 'sem' && l.temperatura) return false;
+      if (temperatureFilter !== 'sem' && l.temperatura !== temperatureFilter) return false;
+    }
     if (search) {
       const q = search.toLowerCase();
       const found = l.nome?.toLowerCase().includes(q) || l.numero?.includes(q) ||
@@ -570,7 +1387,14 @@ export default function CrmPage() {
       if (!passesColumnFilter(l, key, value)) return false;
     }
     return true;
-  }), [leads, search, statusFilter, columnFilters]);
+  }).sort((a, b) => {
+    if (a.time_interno !== b.time_interno) return a.time_interno ? 1 : -1;
+    const order: Record<string, number> = { quente: 0, morno: 1, frio: 2 };
+    const ta = a.temperatura ? order[a.temperatura] ?? 3 : 3;
+    const tb = b.temperatura ? order[b.temperatura] ?? 3 : 3;
+    if (ta !== tb) return ta - tb;
+    return new Date(b.created_at ?? b.data ?? 0).getTime() - new Date(a.created_at ?? a.data ?? 0).getTime();
+  }), [leads, search, statusFilter, temperatureFilter, columnFilters]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const paginated  = filtered.slice((page - 1) * pageSize, page * pageSize);
@@ -585,7 +1409,55 @@ export default function CrmPage() {
     agendados:   leads.filter(l => l.status === 'Agendado' || l.status === 'Reagendado').length,
     fechamentos: leads.filter(l => l.fechou).length,
     faturamento: leads.filter(l => l.fechou).reduce((s, l) => s + toMoneyNumber(l.valor_rs), 0),
+    quentes: leads.filter(l => l.temperatura === 'quente').length,
+    mornos: leads.filter(l => l.temperatura === 'morno').length,
+    frios: leads.filter(l => l.temperatura === 'frio').length,
+    semClassificacao: leads.filter(l => !l.temperatura).length,
   }), [leads]);
+
+  const statusOptions = useMemo(
+    () => stages.length > 0 ? stages.map(s => s.label) : STATUS_OPTIONS,
+    [stages],
+  );
+
+  const selectedFunnel = funnels.find(f => f.id === selectedFunnelId) ?? null;
+  const activeFollowupLeadIds = useActiveFollowups(clientId, crmView === 'leads');
+
+  async function handleFunnelSaved(updatedFunnel: CrmFunnel, updatedStages: CrmStage[]) {
+    setFunnels(prev => prev.map(f => f.id === updatedFunnel.id ? updatedFunnel : f));
+    setStages(updatedStages);
+    setShowFunnelEditor(false);
+  }
+
+  async function handleNewFunnel() {
+    const name = window.prompt('Nome do novo funil:')?.trim();
+    if (!name) return;
+    const res = await fetch('/api/crm/funnels', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clientId, name }),
+    });
+    if (res.ok) {
+      const newFunnel = await res.json() as CrmFunnel;
+      setFunnels(prev => [...prev, newFunnel]);
+      setSelectedFunnelId(newFunnel.id);
+      setShowFunnelEditor(false);
+    }
+  }
+
+  async function handleDeleteFunnel() {
+    if (!selectedFunnelId || !window.confirm('Excluir este funil? Os leads serão movidos para o próximo funil.')) return;
+    const res = await fetch(`/api/crm/funnels/${selectedFunnelId}`, { method: 'DELETE' });
+    if (res.ok) {
+      const remaining = funnels.filter(f => f.id !== selectedFunnelId);
+      setFunnels(remaining);
+      setSelectedFunnelId(remaining[0]?.id ?? '');
+      setShowFunnelEditor(false);
+    } else {
+      const body = await res.json().catch(() => ({})) as { error?: string };
+      alert(body.error ?? 'Erro ao excluir funil');
+    }
+  }
 
   async function saveNew() {
     if (newSavingRef.current) return;
@@ -596,7 +1468,7 @@ export default function CrmPage() {
     try {
       const res = await fetch('/api/crm', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientId, ...data }),
+        body: JSON.stringify({ clientId, funnel_id: selectedFunnelId || null, ...data }),
       });
       if (res.ok) {
         const saved = await res.json() as CrmLead;
@@ -658,6 +1530,24 @@ export default function CrmPage() {
     if (res.ok) { setLeads(prev => prev.filter(l => l.id !== id)); if (editId === id) setEditId(null); }
   }
 
+  async function changeLeadStatus(id: string, status: string) {
+    setLeads(prev => prev.map(l => l.id === id ? { ...l, status } : l));
+    await fetch(`/api/crm/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
+  }
+
+  async function saveKanbanEdit(data: Draft) {
+    if (!kanbanEditLead) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/crm/${kanbanEditLead.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+      if (res.ok) {
+        const saved = await res.json() as CrmLead;
+        setLeads(prev => prev.map(l => l.id === kanbanEditLead.id ? saved : l));
+        setKanbanEditLead(null);
+      }
+    } finally { setSaving(false); }
+  }
+
   function onNewBairroKey(e: React.KeyboardEvent) {
     if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey)) { e.preventDefault(); void saveNew(); }
   }
@@ -694,7 +1584,7 @@ export default function CrmPage() {
   }
 
   return (
-    <div className="flex flex-col gap-5 h-full">
+    <div className="flex flex-col gap-5 h-full overflow-hidden">
 
       {/* ── PAGE HEADER ─────────────────────────────────────────────── */}
       <div className="flex items-center gap-3">
@@ -702,7 +1592,7 @@ export default function CrmPage() {
           {clientId ? <Users className="h-5 w-5 text-violet-400" /> : <Sparkles className="h-5 w-5 text-violet-400" />}
         </div>
         <div>
-          <h1 className="font-heading font-normal text-4xl uppercase leading-none tracking-wide text-foreground">
+          <h1 className="font-heading font-normal text-xl uppercase leading-none tracking-wide text-foreground">
             {clientId ? 'CRM' : 'Escolha um cliente'}
           </h1>
           <p className="text-xs text-muted-foreground">
@@ -722,7 +1612,7 @@ export default function CrmPage() {
                 value={clientSearch}
                 onChange={e => setClientSearch(e.target.value)}
                 placeholder="Buscar cliente ou segmento..."
-                className="h-12 w-full rounded-xl border border-border bg-card pl-11 pr-4 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-primary"
+                className="h-12 w-full rounded-[var(--radius)] border border-border bg-card pl-11 pr-4 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-primary"
               />
             </div>
             <div className="relative">
@@ -731,7 +1621,7 @@ export default function CrmPage() {
               <select
                 value={segmentChoice}
                 onChange={e => setSegmentChoice(e.target.value)}
-                className="h-12 min-w-56 appearance-none rounded-xl border border-border bg-card pl-10 pr-10 text-sm font-semibold outline-none transition-colors focus:border-primary"
+                className="h-12 min-w-56 appearance-none rounded-[var(--radius)] border border-border bg-card pl-10 pr-10 text-sm font-semibold outline-none transition-colors focus:border-primary"
               >
                 <option value="">Todos os segmentos</option>
                 {clientSegments.map(segment => <option key={segment} value={segment}>{segment}</option>)}
@@ -740,12 +1630,12 @@ export default function CrmPage() {
             <button
               type="button"
               onClick={() => setClientSort(value => value === 'az' ? 'za' : 'az')}
-              className="flex h-12 items-center gap-2 rounded-xl border border-border bg-card px-4 text-sm font-semibold text-muted-foreground transition-colors hover:text-foreground"
+              className="flex h-12 items-center gap-2 rounded-[var(--radius)] border border-border bg-card px-4 text-sm font-semibold text-muted-foreground transition-colors hover:text-foreground"
             >
               <ArrowUpDown className="h-4 w-4" />
               Ordenar: {clientSort === 'az' ? 'A-Z' : 'Z-A'}
             </button>
-            <div className="flex h-12 overflow-hidden rounded-xl border border-border bg-card p-1">
+            <div className="flex h-12 overflow-hidden rounded-[var(--radius)] border border-border bg-card p-1">
               <button
                 type="button"
                 onClick={() => setClientView('grid')}
@@ -791,7 +1681,7 @@ export default function CrmPage() {
               Todos os clientes
             </h2>
             {filteredClients.length === 0 ? (
-              <div className="rounded-xl border border-border bg-card p-12 text-center text-sm text-muted-foreground">
+              <div className="rounded-[var(--radius)] border border-border bg-card p-12 text-center text-sm text-muted-foreground">
                 Nenhum cliente encontrado com os filtros atuais.
               </div>
             ) : clientView === 'grid' ? (
@@ -801,7 +1691,7 @@ export default function CrmPage() {
                 ))}
               </div>
             ) : (
-              <div className="overflow-hidden rounded-xl border border-border bg-card">
+              <div className="overflow-hidden rounded-[var(--radius)] border border-border bg-card">
                 {filteredClients.map(client => (
                   <button
                     key={client.id}
@@ -835,11 +1725,63 @@ export default function CrmPage() {
           {activeClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
         </IconSelect>
 
-        {clientId && (
+        {/* Funnel selector */}
+        {funnels.length > 0 && (
+          <div className="flex items-center gap-1">
+            <div className="relative flex items-center">
+              <Layers className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none z-10" />
+              <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none z-10" />
+              <select
+                value={selectedFunnelId}
+                onChange={e => setSelectedFunnelId(e.target.value)}
+                className="appearance-none pl-8 pr-8 py-2 rounded-lg border border-border bg-card text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                {funnels.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+              </select>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowFunnelEditor(true)}
+              title="Configurar etapas"
+              className="flex h-9 w-9 items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            >
+              <Settings2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+
+        {/* Leads / Chat / Follow up toggle */}
+        <div className="flex overflow-hidden rounded-lg border border-border bg-card p-0.5">
+          <button type="button" onClick={() => setCrmView('leads')}
+            className={cn('flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold transition-colors',
+              crmView === 'leads' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
+            <Users className="h-3.5 w-3.5" /> Leads
+          </button>
+          <button type="button" onClick={() => setCrmView('chat')}
+            className={cn('flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold transition-colors',
+              crmView === 'chat' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
+            <MessageCircle className="h-3.5 w-3.5" /> Chat
+          </button>
+          <button type="button" onClick={() => setCrmView('followup')}
+            className={cn('flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold transition-colors',
+              crmView === 'followup' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
+            <Send className="h-3.5 w-3.5" /> Follow up
+          </button>
+        </div>
+
+        {clientId && crmView === 'leads' && (
           <>
             <IconSelect icon={SlidersHorizontal} value={statusFilter} onChange={setStatusFilter}
               placeholder="Todos status" className="min-w-[160px]">
-              {STATUS_OPTIONS.map(s => <option key={s}>{s}</option>)}
+              {statusOptions.map(s => <option key={s}>{s}</option>)}
+            </IconSelect>
+
+            <IconSelect icon={Sparkles} value={temperatureFilter} onChange={setTemperatureFilter}
+              placeholder="Temperatura" className="min-w-[150px]">
+              <option value="quente">Quente</option>
+              <option value="morno">Morno</option>
+              <option value="frio">Frio</option>
+              <option value="sem">Sem classificação</option>
             </IconSelect>
 
             <div className="relative">
@@ -847,6 +1789,14 @@ export default function CrmPage() {
               <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar leads..."
                 className="pl-8 pr-3 py-2 rounded-lg border border-border bg-card text-sm focus:outline-none focus:ring-1 focus:ring-primary w-48" />
             </div>
+
+            <button
+              type="button"
+              onClick={() => setShowAiCriteria(true)}
+              className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            >
+              <Sparkles className="h-4 w-4" /> Critérios IA
+            </button>
 
             <button onClick={() => void saveNew()}
               className="ml-auto flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
@@ -859,13 +1809,17 @@ export default function CrmPage() {
       )}
 
       {/* ── STATS ───────────────────────────────────────────────────── */}
-      {clientId && !loading && leads.length > 0 && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 shrink-0">
+      {clientId && !loading && leads.length > 0 && crmView === 'leads' && (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8 shrink-0">
           {([
             { label: 'TOTAL',       sub: 'leads cadastrados',   value: stats.total,       fmt: 'n', Icon: Users,             iconCls: 'text-purple-400',  bgCls: 'bg-purple-500/10',  borderCls: 'border-purple-500/25' },
             { label: 'AGENDADOS',   sub: 'leads agendados',     value: stats.agendados,   fmt: 'n', Icon: CalendarDays,       iconCls: 'text-green-400',   bgCls: 'bg-green-500/10',   borderCls: 'border-green-500/25'  },
             { label: 'FECHAMENTOS', sub: 'negócios fechados',   value: stats.fechamentos, fmt: 'n', Icon: HeartHandshake,     iconCls: 'text-blue-400',    bgCls: 'bg-blue-500/10',    borderCls: 'border-blue-500/25'   },
             { label: 'FATURAMENTO', sub: 'valor total faturado',value: stats.faturamento, fmt: 'c', Icon: CircleDollarSign,   iconCls: 'text-violet-400',  bgCls: 'bg-violet-500/10',  borderCls: 'border-violet-500/25' },
+            { label: 'QUENTES',     sub: 'alta intenção',       value: stats.quentes,     fmt: 'n', Icon: Sparkles,          iconCls: 'text-red-300',     bgCls: 'bg-red-500/10',     borderCls: 'border-red-500/25'    },
+            { label: 'MORNOS',      sub: 'interesse ativo',     value: stats.mornos,      fmt: 'n', Icon: Sparkles,          iconCls: 'text-orange-300',  bgCls: 'bg-orange-500/10',  borderCls: 'border-orange-500/25' },
+            { label: 'FRIOS',       sub: 'baixa resposta',      value: stats.frios,       fmt: 'n', Icon: Sparkles,          iconCls: 'text-blue-300',    bgCls: 'bg-blue-500/10',    borderCls: 'border-blue-500/25'   },
+            { label: 'SEM IA',      sub: 'sem classificação',   value: stats.semClassificacao, fmt: 'n', Icon: Sparkles,     iconCls: 'text-zinc-300',    bgCls: 'bg-zinc-500/10',    borderCls: 'border-zinc-500/25'   },
           ] as const).map(({ label, sub, value, fmt, Icon, iconCls, bgCls, borderCls }) => (
             <div key={label} className={cn('rounded-xl border bg-card px-4 py-3 flex items-center gap-3', borderCls)}>
               <div className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-lg', bgCls)}>
@@ -873,7 +1827,7 @@ export default function CrmPage() {
               </div>
               <div className="min-w-0">
                 <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
-                <p className="font-heading font-normal text-3xl leading-none">{fmt === 'c' ? formatCurrencyBRL(value) : value.toLocaleString('pt-BR')}</p>
+                <p className="font-heading font-normal text-xl leading-none">{fmt === 'c' ? formatCurrencyBRL(value) : value.toLocaleString('pt-BR')}</p>
                 <p className="text-[10px] text-muted-foreground">{sub}</p>
               </div>
             </div>
@@ -881,103 +1835,81 @@ export default function CrmPage() {
         </div>
       )}
 
-      {clientId && loading && (
-        <div className="rounded-xl border border-border bg-card p-12 text-center text-sm text-muted-foreground">Carregando...</div>
+      {clientId && loading && crmView === 'leads' && (
+        <div className="rounded-[var(--radius)] border border-border bg-card p-12 text-center text-sm text-muted-foreground">Carregando...</div>
       )}
 
-      {/* ── TABLE ───────────────────────────────────────────────────── */}
-      {clientId && !loading && (
-        <div className="flex flex-col flex-1 min-h-0 rounded-xl border border-border bg-card overflow-hidden">
+      {/* ── CHAT VIEW ───────────────────────────────────────────────── */}
+      {clientId && crmView === 'chat' && (
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <ChatView clientId={clientId} statusOptions={statusOptions} />
+        </div>
+      )}
+
+      {/* ── FOLLOW UP ───────────────────────────────────────────────── */}
+      {clientId && crmView === 'followup' && (
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <FollowupTab clientId={clientId} statusOptions={statusOptions} />
+        </div>
+      )}
+
+      {/* ── TABLE / KANBAN ──────────────────────────────────────────── */}
+      {clientId && !loading && crmView === 'leads' && (
+        <div className="flex flex-col flex-1 min-h-0 rounded-[var(--radius)] border border-border bg-card overflow-hidden">
 
           {/* Table toolbar */}
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-border shrink-0">
             <div className="flex items-center gap-2">
-              {kanbanMode
-                ? <LayoutGrid className="h-4 w-4 text-primary" />
-                : <AlignJustify className="h-4 w-4 text-primary" />}
+              {viewMode === 'list' ? <AlignJustify className="h-4 w-4 text-primary" /> : <LayoutGrid className="h-4 w-4 text-primary" />}
               <span className="text-sm font-semibold">Leads</span>
-              {lastPoll && (
-                <span className="flex items-center gap-1 text-[10px] text-muted-foreground/60">
-                  <RefreshCw className="h-2.5 w-2.5" />
-                  {lastPoll.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                </span>
-              )}
             </div>
             <div className="flex items-center gap-2">
-              {!kanbanMode && Object.keys(columnFilters).length > 0 && (
-                <button
-                  type="button"
-                  onClick={clearColumnFilters}
-                  className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  Limpar filtros
-                </button>
-              )}
-              <div className="flex overflow-hidden rounded-lg border border-border bg-card">
-                <button
-                  type="button"
-                  onClick={() => setKanbanMode(false)}
-                  className={cn('flex h-7 w-7 items-center justify-center transition-colors', !kanbanMode ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}
-                  title="Visão tabela"
-                >
-                  <AlignJustify className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setKanbanMode(true)}
-                  className={cn('flex h-7 w-7 items-center justify-center transition-colors', kanbanMode ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}
-                  title="Visão Kanban"
-                >
+              {/* View toggle */}
+              <div className="flex overflow-hidden rounded-lg border border-border bg-background/60 p-0.5">
+                <button type="button" onClick={() => setViewMode('kanban')} title="Kanban"
+                  className={cn('flex h-6 w-6 items-center justify-center rounded-md transition-colors', viewMode === 'kanban' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
                   <LayoutGrid className="h-3.5 w-3.5" />
                 </button>
+                <button type="button" onClick={() => setViewMode('list')} title="Lista"
+                  className={cn('flex h-6 w-6 items-center justify-center rounded-md transition-colors', viewMode === 'list' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
+                  <List className="h-3.5 w-3.5" />
+                </button>
               </div>
-              <button className="flex h-7 w-7 items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-foreground transition-colors">
-                <Settings2 className="h-3.5 w-3.5" />
-              </button>
+              {viewMode === 'list' && (
+                <>
+                  {Object.keys(columnFilters).length > 0 && (
+                    <button type="button" onClick={clearColumnFilters}
+                      className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
+                      Limpar filtros
+                    </button>
+                  )}
+                  <button className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
+                    <Download className="h-3.5 w-3.5" /> Exportar <ChevronDown className="h-3 w-3" />
+                  </button>
+                  <button className="flex h-7 w-7 items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-foreground transition-colors">
+                    <Settings2 className="h-3.5 w-3.5" />
+                  </button>
+                </>
+              )}
             </div>
           </div>
 
-          {/* ── KANBAN VIEW ─────────────────────────────────────────── */}
-          {kanbanMode && (
-            <div className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden p-3">
-              <DndContext
-                onDragEnd={(e: DragEndEvent) => {
-                  const leadId  = e.active.id as string;
-                  const newStatus = e.over?.id as string | undefined;
-                  if (!newStatus) return;
-                  const lead = leads.find(l => l.id === leadId);
-                  if (!lead || lead.status === newStatus) return;
-                  setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: newStatus } : l));
-                  fetch(`/api/crm/${leadId}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ status: newStatus }),
-                  }).catch(() => {
-                    setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: lead.status } : l));
-                  });
-                }}
-              >
-                <div className="flex gap-3 h-full">
-                  {KANBAN_COLS.filter(col => {
-                    const count = leads.filter(l => (l.status ?? 'Em Atendimento') === col.key).length;
-                    return count > 0 || ['Em Atendimento', 'Agendado', 'Fechado'].includes(col.key);
-                  }).map(col => (
-                    <KanbanColumn
-                      key={col.key}
-                      col={col}
-                      leads={leads.filter(l => (l.status ?? 'Em Atendimento') === col.key)}
-                    />
-                  ))}
-                </div>
-                <DragOverlay>
-                  {null}
-                </DragOverlay>
-              </DndContext>
+          {/* Kanban view */}
+          {viewMode === 'kanban' && (
+            <div className="overflow-auto flex-1 min-h-0 p-3">
+              <KanbanView
+                leads={filtered}
+                stages={stages}
+                onEdit={setKanbanEditLead}
+                onDelete={id => void deleteRow(id)}
+                onStatusChange={(id, status) => void changeLeadStatus(id, status)}
+                activeFollowupIds={activeFollowupLeadIds}
+              />
             </div>
           )}
 
           {/* Scrollable table */}
-          {!kanbanMode && <div className="overflow-auto flex-1 min-h-0">
+          {viewMode === 'list' && <div className="overflow-auto flex-1 min-h-0">
             <table className="w-full table-fixed border-collapse text-xs" style={{ minWidth: tableMinWidth }}>
               <colgroup>
                 {COLS.map(col => (
@@ -1012,6 +1944,7 @@ export default function CrmPage() {
                         columnKey={col.key}
                         value={columnFilters[col.key] ?? ''}
                         onChange={setColumnFilter}
+                        statusOptions={statusOptions}
                       />
                     </th>
                   ))}
@@ -1038,7 +1971,15 @@ export default function CrmPage() {
                   </Td>
                   <Td>
                     <select value={newDraft.status ?? ''} onChange={e => setN('status', e.target.value || null)} className={cn(cellNew, 'cursor-pointer appearance-none', STATUS_COLOR[newDraft.status ?? ''] ?? '')}>
-                      {STATUS_OPTIONS.map(o => <option key={o}>{o}</option>)}
+                      {statusOptions.map(o => <option key={o}>{o}</option>)}
+                    </select>
+                  </Td>
+                  <Td>
+                    <select value={newDraft.temperatura ?? ''} onChange={e => setN('temperatura', (e.target.value || null) as Draft['temperatura'])} className={cn(cellNew, 'cursor-pointer appearance-none')}>
+                      <option value=""></option>
+                      <option value="quente">Quente</option>
+                      <option value="morno">Morno</option>
+                      <option value="frio">Frio</option>
                     </select>
                   </Td>
                   {(['dia1','dia2','dia3','dia4'] as const).map(k => (
@@ -1136,7 +2077,7 @@ export default function CrmPage() {
                       <Td>
                         {isEditing
                           ? <select value={d.status ?? ''} onChange={e => setE('status', e.target.value || null)} className={cn(cellSel, STATUS_COLOR[d.status ?? ''] ?? '')}>
-                              {STATUS_OPTIONS.map(o => <option key={o}>{o}</option>)}
+                              {statusOptions.map(o => <option key={o}>{o}</option>)}
                             </select>
                           : statusBadge
                             ? <div className="px-1">
@@ -1145,6 +2086,30 @@ export default function CrmPage() {
                                 </span>
                               </div>
                             : null}
+                      </Td>
+                      {/* Temperatura */}
+                      <Td>
+                        {isEditing
+                          ? <select value={d.temperatura ?? ''} onChange={e => setE('temperatura', (e.target.value || null) as Draft['temperatura'])} className={cellSel}>
+                              <option value=""></option>
+                              <option value="quente">Quente</option>
+                              <option value="morno">Morno</option>
+                              <option value="frio">Frio</option>
+                            </select>
+                          : <div className="flex items-center gap-1 px-1">
+                              {lead.temperatura ? (
+                                <span className={cn('inline-flex rounded-lg border px-2 py-1 text-[10px] font-bold leading-none whitespace-nowrap', temperatureBadgeClass(lead.temperatura))}>
+                                  {TEMPERATURE_LABEL[lead.temperatura]}
+                                </span>
+                              ) : (
+                                <span className="px-1 text-[11px] text-muted-foreground">–</span>
+                              )}
+                              {lead.time_interno && (
+                                <span className="inline-flex rounded-lg border border-zinc-500/25 bg-zinc-500/10 px-1.5 py-1 text-[9px] font-bold leading-none text-zinc-300">
+                                  Interno
+                                </span>
+                              )}
+                            </div>}
                       </Td>
                       {/* 1D–4D */}
                       {(['dia1','dia2','dia3','dia4'] as const).map(k => (
@@ -1244,8 +2209,7 @@ export default function CrmPage() {
           </div>}
 
           {/* ── PAGINATION ── */}
-          {!kanbanMode && (
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-card px-4 py-2.5 shrink-0">
+          {viewMode === 'list' && <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-card px-4 py-2.5 shrink-0">
             <div className="flex flex-wrap items-center gap-3">
               <span className="text-xs text-muted-foreground">
                 {filtered.length === 0
@@ -1279,9 +2243,38 @@ export default function CrmPage() {
                 <ChevronDown className="absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground pointer-events-none" />
               </div>
             </div>
-          </div>
-          )}
+          </div>}
         </div>
+      )}
+
+      {kanbanEditLead && (
+        <QuickEditModal
+          lead={kanbanEditLead}
+          onSave={saveKanbanEdit}
+          onClose={() => setKanbanEditLead(null)}
+          onDelete={() => { void deleteRow(kanbanEditLead.id); setKanbanEditLead(null); }}
+          statusOptions={statusOptions}
+        />
+      )}
+
+      {showFunnelEditor && selectedFunnel && (
+        <FunnelEditorModal
+          funnel={selectedFunnel}
+          stages={stages}
+          clientId={clientId}
+          funnelCount={funnels.length}
+          onSaved={handleFunnelSaved}
+          onClose={() => setShowFunnelEditor(false)}
+          onDeleteFunnel={handleDeleteFunnel}
+          onNewFunnel={handleNewFunnel}
+        />
+      )}
+
+      {showAiCriteria && clientId && (
+        <AiCriteriaModal
+          clientId={clientId}
+          onClose={() => setShowAiCriteria(false)}
+        />
       )}
     </div>
   );
@@ -1300,11 +2293,13 @@ function ColumnFilter({
   columnKey,
   value,
   onChange,
+  statusOptions,
 }: {
   kind: ColumnFilterKind;
   columnKey: ColumnKey;
   value: string;
   onChange: (key: ColumnKey, value: string) => void;
+  statusOptions: string[];
 }) {
   const baseClass = 'h-7 w-full rounded-md border border-border/70 bg-background/70 px-2 text-[10px] font-medium normal-case tracking-normal text-foreground outline-none transition-colors placeholder:text-muted-foreground/40 focus:border-primary';
 
@@ -1322,7 +2317,18 @@ function ColumnFilter({
     return (
       <select value={value} onChange={e => onChange(columnKey, e.target.value)} className={cn(baseClass, 'appearance-none')}>
         <option value="">Todos</option>
-        {STATUS_OPTIONS.map(option => <option key={option}>{option}</option>)}
+        {statusOptions.map(option => <option key={option}>{option}</option>)}
+      </select>
+    );
+  }
+  if (columnKey === 'temperatura') {
+    return (
+      <select value={value} onChange={e => onChange(columnKey, e.target.value)} className={cn(baseClass, 'appearance-none')}>
+        <option value="">Todos</option>
+        <option value="quente">Quente</option>
+        <option value="morno">Morno</option>
+        <option value="frio">Frio</option>
+        <option value="sem">Sem IA</option>
       </select>
     );
   }

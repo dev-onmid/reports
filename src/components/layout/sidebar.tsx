@@ -29,6 +29,7 @@ import { cn } from '@/lib/utils';
 import { APP_VERSION } from '@/lib/app-version';
 
 type Role = 'Administrador' | 'Usuário' | 'Visualizador';
+type SidebarMode = 'desktop' | 'mobile';
 
 const navItems: { name: string; href: string; icon: React.ElementType; roles: Role[] }[] = [
   { name: 'Dashboard',   href: '/dashboard',   icon: LayoutDashboard, roles: ['Administrador', 'Usuário', 'Visualizador'] },
@@ -48,11 +49,20 @@ const navItems: { name: string; href: string; icon: React.ElementType; roles: Ro
   { name: 'Logs',        href: '/logs',        icon: ClipboardList,   roles: ['Administrador'] },
 ];
 
-export function Sidebar() {
+export function Sidebar({
+  className,
+  mode = 'desktop',
+  onNavigate,
+}: {
+  className?: string;
+  mode?: SidebarMode;
+  onNavigate?: () => void;
+}) {
   const pathname = usePathname();
   const session = getAuthSession();
   const role = (session?.role ?? 'Visualizador') as Role;
   const [collapsed, setCollapsed] = useState(false);
+  const isMobile = mode === 'mobile';
 
   useEffect(() => {
     const stored = localStorage.getItem('sidebar-collapsed');
@@ -68,90 +78,97 @@ export function Sidebar() {
 
   const visibleItems = navItems.filter(item => item.roles.includes(role));
   const showConfiguracoes = role === 'Administrador';
+  const isCollapsed = !isMobile && collapsed;
 
   return (
     <aside className={cn(
       'bg-background border-r border-border h-screen flex flex-col sticky top-0 z-20 transition-all duration-200 shrink-0',
-      collapsed ? 'w-16' : 'w-64'
+      isCollapsed ? 'w-16' : 'w-64',
+      className
     )}>
       {/* Header */}
-      <div className={cn('h-20 flex items-center border-b border-border relative', collapsed ? 'justify-center' : 'px-5')}>
-        {collapsed ? (
-          <Link href="/dashboard">
+      <div className={cn('h-14 flex items-center border-b border-border relative', isCollapsed ? 'justify-center' : 'px-5')}>
+        {isCollapsed ? (
+          <Link href="/dashboard" onClick={onNavigate}>
             <img src="/brand/onmid-logo-white.png" alt="Onmid" className="h-6 w-auto object-contain" />
           </Link>
         ) : (
-          <Link href="/dashboard" className="flex items-center gap-3 overflow-hidden">
+          <Link href="/dashboard" onClick={onNavigate} className="flex items-center gap-3 overflow-hidden">
             <img src="/brand/onmid-logo-white.png" alt="Onmid" className="h-8 w-auto max-w-[120px] object-contain" />
             <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary whitespace-nowrap">
               v{APP_VERSION}
             </span>
           </Link>
         )}
-        <button
-          onClick={toggle}
-          className="absolute -right-3 top-1/2 -translate-y-1/2 z-30 flex h-6 w-6 items-center justify-center rounded-full border border-border bg-background text-muted-foreground hover:text-foreground hover:bg-card transition-all shadow-sm"
-        >
-          {collapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronLeft className="w-3 h-3" />}
-        </button>
+        {!isMobile && (
+          <button
+            onClick={toggle}
+            aria-label={collapsed ? 'Expandir menu' : 'Recolher menu'}
+            className="absolute -right-3 top-1/2 -translate-y-1/2 z-30 flex h-6 w-6 items-center justify-center rounded-full border border-border bg-background text-muted-foreground hover:text-foreground hover:bg-card transition-all shadow-sm"
+          >
+            {collapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronLeft className="w-3 h-3" />}
+          </button>
+        )}
       </div>
 
       {/* Nav */}
-      <nav className={cn('flex-1 py-6 space-y-1 overflow-y-auto', collapsed ? 'px-2' : 'px-3')}>
+      <nav className={cn('flex-1 py-6 space-y-1 overflow-y-auto', isCollapsed ? 'px-2' : 'px-3')}>
         {visibleItems.map((item) => {
           const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
           return (
             <Link
               key={item.name}
               href={item.href}
-              title={collapsed ? item.name : undefined}
+              title={isCollapsed ? item.name : undefined}
+              onClick={onNavigate}
               className={cn(
                 'flex items-center rounded-md text-sm font-semibold transition-all relative overflow-hidden',
-                collapsed ? 'justify-center h-10 w-10 mx-auto' : 'gap-3 px-3 py-2.5',
+                isCollapsed ? 'justify-center h-10 w-10 mx-auto' : 'gap-3 px-3 py-2.5',
                 isActive
                   ? 'text-primary bg-primary/10'
                   : 'text-muted-foreground hover:bg-card hover:text-foreground'
               )}
             >
-              {isActive && !collapsed && (
+              {isActive && !isCollapsed && (
                 <div className="absolute left-0 top-0 bottom-0 w-1 bg-primary shadow-[0_0_10px_rgba(85,245,47,0.8)]" />
               )}
-              {isActive && collapsed && (
+              {isActive && isCollapsed && (
                 <div className="absolute inset-0 rounded-md ring-1 ring-inset ring-primary/40 bg-primary/10" />
               )}
               <item.icon className={cn('w-5 h-5 shrink-0 relative z-10', isActive ? 'text-primary drop-shadow-[0_0_5px_rgba(85,245,47,0.5)]' : '')} />
-              {!collapsed && item.name}
+              {!isCollapsed && item.name}
             </Link>
           );
         })}
       </nav>
 
       {/* Footer */}
-      <div className={cn('border-t border-border space-y-1 bg-background', collapsed ? 'px-2 py-3' : 'p-3')}>
+      <div className={cn('border-t border-border space-y-1 bg-background', isCollapsed ? 'px-2 py-3' : 'p-3')}>
         {showConfiguracoes && (
           <Link
             href="/configuracoes"
-            title={collapsed ? 'Configurações' : undefined}
+            title={isCollapsed ? 'Configurações' : undefined}
+            onClick={onNavigate}
             className={cn(
               'flex items-center rounded-md text-sm font-medium text-muted-foreground hover:bg-card hover:text-foreground transition-all',
-              collapsed ? 'justify-center h-10 w-10 mx-auto' : 'gap-3 px-3 py-2.5'
+              isCollapsed ? 'justify-center h-10 w-10 mx-auto' : 'gap-3 px-3 py-2.5'
             )}
           >
             <Settings className="w-5 h-5 shrink-0" />
-            {!collapsed && 'Configurações'}
+            {!isCollapsed && 'Configurações'}
           </Link>
         )}
         <Link
           href="/"
           onClick={() => clearAuthSession()}
-          title={collapsed ? 'Sair' : undefined}
+          title={isCollapsed ? 'Sair' : undefined}
           className={cn(
             'flex items-center rounded-md text-sm font-medium text-destructive/80 hover:text-destructive hover:bg-destructive/10 transition-all',
-            collapsed ? 'justify-center h-10 w-10 mx-auto' : 'gap-3 px-3 py-2.5'
+            isCollapsed ? 'justify-center h-10 w-10 mx-auto' : 'gap-3 px-3 py-2.5'
           )}
         >
           <LogOut className="w-5 h-5 shrink-0" />
-          {!collapsed && 'Sair'}
+          {!isCollapsed && 'Sair'}
         </Link>
       </div>
     </aside>

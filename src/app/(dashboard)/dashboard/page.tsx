@@ -3,16 +3,17 @@
 import RGL, { WidthProvider } from 'react-grid-layout';
 import type { Layout as RglLayout } from 'react-grid-layout';
 const RglGrid = WidthProvider(RGL);
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Fragment, createContext, useContext, useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import {
   AlertTriangle, ChevronDown, ChevronUp, ChevronRight, GripVertical, ImageIcon,
-  LayoutDashboard, Play, RefreshCw, Search, Sparkles, Check, X,
+  LayoutDashboard, LayoutTemplate, Play, RefreshCw, Search, Sparkles, Check, X,
   Pause, CircleDot, Pencil, Settings2, Users, Copy,
   Bell, DollarSign, Tag, TrendingUp, Calendar, BarChart3, Zap, Target, Briefcase,
-  Wallet, MousePointerClick, CreditCard, PiggyBank, Clock,
+  Wallet, MousePointerClick, CreditCard, PiggyBank, Clock, Info, Lightbulb, UserPlus, CheckCircle2,
+  Eye, Heart, Monitor, ExternalLink, Bookmark,
 } from 'lucide-react';
 import { getAuthSession } from '@/lib/auth-store';
 import type { AiInsight } from '@/app/api/ai/insights/route';
@@ -369,7 +370,7 @@ function autoPartial(target: number, period: Period): number {
 }
 
 // ── KPI Card ────────────────────────────────────────────────────────────────
-function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: Icon, iconColor, iconBg, loading = false, inverseGoal = false, inverseChange = false, footer, logo, chart = 'sparkline', series }: {
+function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: Icon, iconColor, iconBg, loading = false, inverseGoal = false, inverseChange = false, footer, logo, chart = 'sparkline', series, hideGoal = false }: {
   title: string; value: number; prevValue?: number; goalValue?: number;
   format?: 'currency' | 'number' | 'percent' | 'times';
   icon: React.ElementType; iconColor: string; iconBg: string; loading?: boolean; inverseGoal?: boolean; inverseChange?: boolean;
@@ -377,6 +378,7 @@ function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: 
   logo?: React.ReactNode;
   chart?: 'sparkline' | 'none';
   series?: number[];
+  hideGoal?: boolean;
 }) {
   const fmt = (v: number) =>
     format === 'currency' ? formatCurrencyBRL(v)
@@ -393,48 +395,47 @@ function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: 
     : null;
   const goalGood = goalProgress !== null && goalProgress >= 100;
   return (
-    <div
-      className="relative h-full overflow-hidden rounded-2xl border bg-[#070B14] p-5 shadow-[0_22px_70px_rgba(0,0,0,0.38)]"
-      style={{ borderColor: `${iconBg}66`, boxShadow: `0 0 34px ${iconBg}24, 0 22px 70px rgba(0,0,0,0.38)` }}
-    >
-      <div className="pointer-events-none absolute inset-0" style={{ background: `linear-gradient(135deg, ${iconBg}24, transparent 42%), radial-gradient(circle at 86% 14%, ${iconBg}44, transparent 42%)` }} />
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-px" style={{ background: `linear-gradient(90deg, transparent, ${iconBg}, transparent)` }} />
-      <div className="flex items-start justify-between gap-2">
-        <p className="text-[11px] font-bold uppercase tracking-widest text-foreground/90">{title}</p>
+    <div className="relative flex flex-col h-full overflow-hidden rounded-[var(--radius)] border border-border bg-card p-5">
+      {/* Accent bar — 2px top stripe in platform color */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5" style={{ backgroundColor: iconColor }} />
+      {/* Corner square — NVIDIA-inspired decorative motif */}
+      <div className="pointer-events-none absolute top-0 left-0 h-3 w-3" style={{ backgroundColor: iconColor }} />
+      <div className="flex items-start justify-between gap-2 mt-1">
+        <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">{title}</p>
         {logo ? (
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/15" style={{ background: `${iconBg}2B`, boxShadow: `0 0 22px ${iconBg}55` }}>
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius)] border border-border bg-card">
             {logo}
           </span>
         ) : (
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/15" style={{ background: `${iconBg}30`, boxShadow: `0 0 22px ${iconBg}55` }}>
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius)] border border-border bg-card">
             <Icon className="h-[18px] w-[18px]" style={{ color: iconColor }} />
           </span>
         )}
       </div>
       {loading ? (
-        <div className="mt-3 h-8 w-32 animate-pulse rounded bg-muted/30" />
+        <div className="mt-3 h-8 w-32 animate-pulse rounded-[var(--radius)] bg-muted/30" />
       ) : (
         <>
-          <p className="mt-3 font-heading font-normal text-3xl leading-none text-foreground">{fmt(value)}</p>
+          <p className="mt-3 font-heading font-normal text-xl leading-none text-foreground">{fmt(value)}</p>
           {change !== null ? (
-            <p className={cn('mt-1.5 flex items-center gap-0.5 text-xs font-semibold', isPositive ? 'text-emerald-400' : 'text-red-400')}>
+            <p className={cn('mt-1.5 flex items-center gap-0.5 text-xs font-semibold', isPositive ? 'text-emerald-500' : 'text-red-500')}>
               {change >= 0 ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
               {change >= 0 ? '+' : ''}{change.toFixed(1)}% vs mês passado
             </p>
           ) : (
             <p className="mt-1.5 text-[11px] text-muted-foreground">— vs mês passado</p>
           )}
-          {goalProgress !== null ? (
-            <p className={cn('mt-1 flex items-center gap-1 text-[11px] font-semibold', goalGood ? 'text-emerald-400' : 'text-amber-400')}>
+          {!hideGoal && (goalProgress !== null ? (
+            <p className={cn('mt-1 flex items-center gap-1 text-[11px] font-semibold', goalGood ? 'text-emerald-500' : 'text-amber-500')}>
               <CircleDot className="h-2.5 w-2.5" />
               {goalProgress.toFixed(0)}% vs meta
               <span className="text-muted-foreground/70">({fmt(goalValue!)})</span>
             </p>
           ) : (
             <p className="mt-1 text-[11px] text-muted-foreground/70">— vs meta</p>
-          )}
+          ))}
           {chart === 'sparkline' && (
-            <div className="mt-3 -mx-1">
+            <div className="mt-3 -mx-1 flex-1 min-h-0">
               <MiniTrendLine
                 color={change === null ? iconColor : isPositive ? '#34d399' : '#f87171'}
                 trend={change === null ? 'up' : change > 0 ? 'up' : change < 0 ? 'down' : 'flat'}
@@ -443,18 +444,17 @@ function KpiCard({ title, value, prevValue, goalValue, format = 'number', icon: 
             </div>
           )}
           {goalProgress !== null && (
-            <div className="mt-3 h-1 overflow-hidden rounded-full bg-white/10">
+            <div className="mt-3 h-[3px] overflow-hidden rounded-none bg-border">
               <div
-                className="h-full rounded-full transition-all"
+                className="h-full transition-all"
                 style={{
                   width: `${Math.min(100, goalProgress)}%`,
                   backgroundColor: goalGood ? '#22c55e' : goalProgress >= 50 ? '#facc15' : '#ef4444',
-                  boxShadow: `0 0 6px ${goalGood ? '#22c55e' : goalProgress >= 50 ? '#facc15' : '#ef4444'}88`,
                 }}
               />
             </div>
           )}
-          {footer && <div className="mt-2 border-t border-white/10 pt-2">{footer}</div>}
+          {footer && <div className="mt-2 border-t border-border pt-2">{footer}</div>}
         </>
       )}
     </div>
@@ -583,7 +583,7 @@ function CrmResultCard({
   ];
 
   return (
-    <div className="relative overflow-hidden rounded-xl border bg-[#06100D] p-5" style={{ borderColor: `${accent}80`, boxShadow: `0 0 42px ${accent}22, inset 0 0 36px ${accent}0a` }}>
+    <div className="relative h-full overflow-hidden rounded-xl border bg-[#06100D] p-5" style={{ borderColor: `${accent}80`, boxShadow: `0 0 42px ${accent}22, inset 0 0 36px ${accent}0a` }}>
       <div className="pointer-events-none absolute inset-0" style={{ background: `linear-gradient(135deg, ${accent}18, transparent 46%)` }} />
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px" style={{ background: `linear-gradient(90deg, transparent, ${accent}, transparent)` }} />
       <div className="relative mb-4 flex items-center gap-2">
@@ -633,18 +633,21 @@ function CompactInfoCard({
   helper?: string;
 }) {
   return (
-    <div className="relative overflow-hidden rounded-xl border bg-[#070B14] p-4" style={{ borderColor: `${color}66`, boxShadow: `0 0 28px ${color}1F` }}>
-      <div className="pointer-events-none absolute inset-0" style={{ background: `radial-gradient(circle at 86% 12%, ${color}40, transparent 44%)` }} />
-      <div className="flex items-start justify-between gap-3">
-        <div className="relative">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-foreground/75">{title}</p>
-          <p className="mt-2 font-heading text-2xl leading-none text-foreground">{typeof value === 'number' ? value.toLocaleString('pt-BR') : value}</p>
+    <div className="relative overflow-hidden rounded-[var(--radius)] border border-border bg-card p-4">
+      {/* Accent bar */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5" style={{ backgroundColor: color }} />
+      {/* Corner square */}
+      <div className="pointer-events-none absolute top-0 left-0 h-3 w-3" style={{ backgroundColor: color }} />
+      <div className="flex items-start justify-between gap-3 mt-1">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{title}</p>
+          <p className="mt-2 font-heading text-xl leading-none text-foreground">{typeof value === 'number' ? value.toLocaleString('pt-BR') : value}</p>
         </div>
-        <span className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/15" style={{ background: `${color}35`, color, boxShadow: `0 0 22px ${color}66` }}>
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius)] border border-border" style={{ color }}>
           <Icon className="h-[18px] w-[18px]" />
         </span>
       </div>
-      {helper && <p className="relative mt-2 text-[10px] text-foreground/55">{helper}</p>}
+      {helper && <p className="mt-2 text-[10px] text-muted-foreground">{helper}</p>}
     </div>
   );
 }
@@ -674,7 +677,7 @@ function MiniTrendLine({ color, trend = 'up', values }: { color: string; trend?:
   const path = realPath ?? (trend === 'down' ? TREND_DOWN : trend === 'flat' ? TREND_FLAT : TREND_UP);
   const closedPath = `${path} L320 92 L0 92 Z`;
   return (
-    <svg viewBox="0 0 320 92" className="h-20 w-full overflow-visible" aria-hidden="true">
+    <svg viewBox="0 0 320 92" preserveAspectRatio="none" className="h-full min-h-[48px] w-full block overflow-visible" aria-hidden="true">
       <defs>
         <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
           <stop offset="0%" stopColor={color} stopOpacity="0.35" />
@@ -702,7 +705,7 @@ function ChannelMetricBox({
   return (
     <div className="h-full rounded-xl border border-border bg-background/70 p-9">
       <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
-      <p className="mt-6 font-heading font-normal text-4xl leading-none" style={{ color }}>
+      <p className="mt-4 font-heading font-normal text-2xl leading-none" style={{ color }}>
         {formatted}
       </p>
     </div>
@@ -734,7 +737,7 @@ function RealizedOnlyCard({
     <div className="relative h-full overflow-hidden rounded-xl border border-border bg-card/95 p-10 shadow-[0_22px_80px_rgba(0,0,0,0.18)]">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_75%_30%,rgba(139,53,255,0.14),transparent_42%)]" />
       <div className="relative">
-      <p className="font-bold text-lg text-foreground">{title}</p>
+      <p className="font-bold text-sm text-foreground">{title}</p>
       <p className="mt-1 text-[11px] text-muted-foreground">{description}</p>
       <div className="mt-10 rounded-lg border border-border bg-background/70 p-10">
         {loading ? (
@@ -745,7 +748,7 @@ function RealizedOnlyCard({
         ) : (
           <>
             <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Realizado</p>
-            <p className="mt-2 font-heading font-normal text-4xl leading-none text-foreground">{formatted}</p>
+            <p className="mt-2 font-heading font-normal text-xl leading-none text-foreground">{formatted}</p>
           </>
         )}
       </div>
@@ -783,7 +786,7 @@ function ChannelCard({
       <div className="relative flex items-start gap-8">
         {mark}
         <div>
-          <h3 className="flex items-center gap-3 font-heading font-normal text-3xl uppercase tracking-wide text-foreground">
+          <h3 className="flex items-center gap-3 font-heading font-normal text-xl uppercase tracking-wide text-foreground">
             <PlatformMarkForText text={title} />
             <span>{title}</span>
           </h3>
@@ -813,9 +816,9 @@ function MetricSection({
   children: ReactNode;
 }) {
   return (
-    <section className="relative overflow-hidden rounded-2xl border bg-[#050914] p-5" style={{ borderColor: `${accent}66`, boxShadow: `0 0 48px ${accent}22` }}>
-      <div className="pointer-events-none absolute inset-0" style={{ background: `linear-gradient(135deg, ${accent}20, transparent 44%), radial-gradient(circle at 92% 0%, ${accent}4D, transparent 36%)` }} />
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-px" style={{ background: `linear-gradient(90deg, transparent, ${accent}, transparent)` }} />
+    <section className="relative overflow-hidden rounded-[var(--radius)] border border-border bg-card p-5">
+      {/* Platform accent bar */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5" style={{ backgroundColor: accent }} />
       <div className="relative mb-5 flex items-end justify-between gap-4">
         {title && (
         <div>
@@ -823,7 +826,7 @@ function MetricSection({
             <PlatformMarkForText text={title} />
             <span>{title}</span>
           </h2>
-          {description && <p className="mt-0.5 text-[11px] text-foreground/60">{description}</p>}
+          {description && <p className="mt-0.5 text-[11px] text-muted-foreground">{description}</p>}
         </div>
         )}
       </div>
@@ -878,7 +881,7 @@ function MetricTile({
       <div className="absolute inset-x-0 top-0 h-1" style={{ backgroundColor: hasProgressPanel ? progressColor : accent, boxShadow: `0 0 24px ${hasProgressPanel ? progressColor : accent}` }} />
       <div className="pointer-events-none absolute inset-0" style={{ background: `linear-gradient(135deg, ${accent}22, transparent 42%), radial-gradient(circle at 85% 18%, ${accent}44, transparent 40%)` }} />
       <div className="relative flex h-full flex-col">
-        <p className="flex items-center gap-2 text-lg font-bold text-foreground">
+        <p className="flex items-center gap-2 text-sm font-bold text-foreground">
           <PlatformMarkForText text={title} />
           <span>{title}</span>
         </p>
@@ -895,18 +898,18 @@ function MetricTile({
             <div className={cn('grid gap-8 text-center', partial !== undefined ? 'sm:grid-cols-3' : 'sm:grid-cols-2')}>
               {meta !== undefined && (
                 <div>
-                  <p className="font-heading font-normal text-2xl leading-none text-foreground">{meta > 0 ? fmt(meta) : 'Sem meta'}</p>
+                  <p className="font-heading font-normal text-[22px] leading-none text-foreground">{meta > 0 ? fmt(meta) : 'Sem meta'}</p>
                   <p className="mt-2 text-sm font-bold text-foreground/60">Meta</p>
                 </div>
               )}
               {partial !== undefined && (
                 <div>
-                  <p className="font-heading font-normal text-2xl leading-none text-foreground">{partial > 0 ? fmt(partial) : '—'}</p>
+                  <p className="font-heading font-normal text-[22px] leading-none text-foreground">{partial > 0 ? fmt(partial) : '—'}</p>
                   <p className="mt-2 text-sm font-bold text-foreground/60">Meta Parcial</p>
                 </div>
               )}
               <div>
-                <p className="font-heading font-normal text-2xl leading-none text-foreground">{fmt(value)}</p>
+                <p className="font-heading font-normal text-[22px] leading-none text-foreground">{fmt(value)}</p>
                 <p className="mt-2 text-sm font-bold text-foreground/60">Realizado</p>
               </div>
             </div>
@@ -929,7 +932,7 @@ function MetricTile({
                     }}
                   />
                   <div className="absolute inset-0 flex items-center justify-center">
-                    <span className="rounded bg-black/70 px-3 py-0.5 text-base font-bold text-white shadow-[0_0_16px_rgba(255,255,255,0.14)]">{progressLabel}</span>
+                    <span className="rounded-[var(--radius)] bg-black/70 px-2 py-0.5 text-xs font-bold text-white">{progressLabel}</span>
                   </div>
                 </div>
               </div>
@@ -939,7 +942,7 @@ function MetricTile({
           <div className="mt-8 flex flex-1 items-center rounded-lg border border-white/15 bg-black/35 p-7">
             <div>
               <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Realizado</p>
-              <p className="mt-3 font-heading font-normal text-4xl leading-none" style={{ color: accent }}>
+              <p className="mt-3 font-heading font-normal text-[22px] leading-none" style={{ color: accent }}>
                 {fmt(value)}
               </p>
             </div>
@@ -961,7 +964,9 @@ function ClientSelector({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<'az' | 'za'>('az');
-  const ref = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
   const hasMultipleClients = clients.length > 1;
   const allClientsSelected = clients.length > 0 && selected.size === clients.length;
   const showingAllClients = hasMultipleClients && allClientsSelected;
@@ -974,11 +979,23 @@ function ClientSelector({
 
   useEffect(() => {
     function onOutside(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (
+        buttonRef.current && !buttonRef.current.contains(target) &&
+        dropdownRef.current && !dropdownRef.current.contains(target)
+      ) setOpen(false);
     }
     document.addEventListener('mousedown', onOutside);
     return () => document.removeEventListener('mousedown', onOutside);
   }, []);
+
+  function handleToggleOpen() {
+    if (!open && buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      setDropdownStyle({ position: 'fixed', top: rect.bottom + 6, left: rect.left, zIndex: 9999 });
+    }
+    setOpen(v => !v);
+  }
 
   function toggle(id: string) {
     if (showingAllClients) {
@@ -1002,67 +1019,70 @@ function ClientSelector({
     ? clients.find(c => selected.has(c.id))?.name ?? '1 cliente'
     : `${selected.size} clientes`;
 
+  const dropdown = (
+    <div ref={dropdownRef} style={dropdownStyle} className="w-64 rounded-xl border border-border bg-card shadow-xl p-1">
+      <div className="grid gap-1 p-1">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Buscar cliente..."
+            className="h-8 w-full rounded-lg border border-border bg-background pl-8 pr-2 text-xs outline-none focus:border-primary"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => setSort(sort === 'az' ? 'za' : 'az')}
+          className="h-7 rounded-lg border border-border bg-background px-2 text-[10px] font-bold text-muted-foreground hover:text-foreground"
+        >
+          Ordem {sort === 'az' ? 'A-Z' : 'Z-A'}
+        </button>
+      </div>
+      {hasMultipleClients && (
+        <>
+          <button
+            onClick={toggleAll}
+            className="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-muted/50 transition-colors"
+          >
+            <span className={cn('w-4 h-4 rounded border flex items-center justify-center text-[10px] shrink-0',
+              allClientsSelected ? 'bg-primary border-primary text-black' : 'border-border'
+            )}>{allClientsSelected && '✓'}</span>
+            <span className="font-semibold">Todos</span>
+          </button>
+          <div className="my-1 border-t border-border" />
+        </>
+      )}
+      <div className="max-h-48 overflow-y-auto space-y-0.5">
+        {visibleClients.map(c => (
+          <button
+            key={c.id}
+            onClick={() => toggle(c.id)}
+            className="w-full flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm hover:bg-muted/50 transition-colors"
+          >
+            <span className={cn('w-4 h-4 rounded border flex items-center justify-center text-[10px] shrink-0',
+              selected.has(c.id) ? 'bg-primary border-primary text-black' : 'border-border'
+            )}>{selected.has(c.id) && '✓'}</span>
+            <ClientAvatar clientId={c.id} name={c.name} size="sm" />
+            <span className="truncate">{c.name}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
   return (
-    <div ref={ref} className="relative">
+    <div className="relative">
       <button
-        onClick={() => setOpen(v => !v)}
+        ref={buttonRef}
+        onClick={handleToggleOpen}
         className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm font-semibold hover:bg-muted/50 transition-colors"
       >
         {selected.size === 1 && (() => { const c = clients.find(cl => selected.has(cl.id)); return c ? <ClientAvatar clientId={c.id} name={c.name} size="sm" /> : null; })()}
         {label}
         <ChevronDown className={cn('w-3.5 h-3.5 text-muted-foreground transition-transform', open && 'rotate-180')} />
       </button>
-      {open && (
-        <div className="absolute left-0 top-full mt-1.5 z-50 w-64 rounded-xl border border-border bg-card shadow-xl p-1">
-          <div className="grid gap-1 p-1">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-              <input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Buscar cliente..."
-                className="h-8 w-full rounded-lg border border-border bg-background pl-8 pr-2 text-xs outline-none focus:border-primary"
-              />
-            </div>
-            <button
-              type="button"
-              onClick={() => setSort(sort === 'az' ? 'za' : 'az')}
-              className="h-7 rounded-lg border border-border bg-background px-2 text-[10px] font-bold text-muted-foreground hover:text-foreground"
-            >
-              Ordem {sort === 'az' ? 'A-Z' : 'Z-A'}
-            </button>
-          </div>
-          {hasMultipleClients && (
-            <>
-              <button
-                onClick={toggleAll}
-                className="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-muted/50 transition-colors"
-              >
-                <span className={cn('w-4 h-4 rounded border flex items-center justify-center text-[10px] shrink-0',
-                  allClientsSelected ? 'bg-primary border-primary text-black' : 'border-border'
-                )}>{allClientsSelected && '✓'}</span>
-                <span className="font-semibold">Todos</span>
-              </button>
-              <div className="my-1 border-t border-border" />
-            </>
-          )}
-          <div className="max-h-48 overflow-y-auto space-y-0.5">
-            {visibleClients.map(c => (
-              <button
-                key={c.id}
-                onClick={() => toggle(c.id)}
-                className="w-full flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm hover:bg-muted/50 transition-colors"
-              >
-                <span className={cn('w-4 h-4 rounded border flex items-center justify-center text-[10px] shrink-0',
-                  selected.has(c.id) ? 'bg-primary border-primary text-black' : 'border-border'
-                )}>{selected.has(c.id) && '✓'}</span>
-                <ClientAvatar clientId={c.id} name={c.name} size="sm" />
-                <span className="truncate">{c.name}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+      {open && createPortal(dropdown, document.body)}
     </div>
   );
 }
@@ -1173,8 +1193,10 @@ function CreativePreviewOverlay({
   creative: TopCreative | null;
   onClose: () => void;
 }) {
+  const [videoFailed, setVideoFailed] = useState(false);
   if (!creative) return null;
   const imgUrl = creative.imageUrl ?? creative.thumbnailUrl;
+  const showVideo = !!creative.videoUrl && !videoFailed;
 
   return (
     <div className="fixed inset-0 z-[100] bg-black/90 p-4 backdrop-blur-sm" onClick={onClose}>
@@ -1190,20 +1212,21 @@ function CreativePreviewOverlay({
           className="flex h-[min(78vh,760px)] w-[min(82vw,560px)] items-center justify-center overflow-hidden rounded-2xl border border-white/15 bg-black shadow-[0_0_60px_rgba(11,132,255,0.18)]"
           onClick={(event) => event.stopPropagation()}
         >
-          {creative.videoUrl ? (
+          {showVideo ? (
             <video
               src={creative.videoUrl}
               poster={imgUrl}
               controls
               autoPlay
               className="h-full w-full bg-black object-contain"
+              onError={() => setVideoFailed(true)}
             />
           ) : imgUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={imgUrl}
               alt={creative.adName}
-              className="h-full w-full bg-black object-contain"
+              className="h-full w-full bg-black object-cover"
               style={{ imageRendering: 'auto' }}
               loading="eager"
             />
@@ -1228,7 +1251,19 @@ function CreativePreviewOverlay({
               <p className="mt-1 font-bold">{creative.leads > 0 ? creative.leads : '—'}</p>
             </div>
           </div>
-          <p className="mt-4 text-xs text-white/40">{creative.accountName}</p>
+          {creative.permalink && (
+            <a
+              href={creative.permalink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-4 flex items-center gap-2 rounded-lg border border-white/20 bg-white/10 px-3 py-2.5 text-xs font-semibold text-white hover:bg-white/20 transition-colors"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+              Ver publicação original
+            </a>
+          )}
+          <p className="mt-3 text-xs text-white/40">{creative.accountName}</p>
         </div>
       </div>
     </div>
@@ -1686,14 +1721,14 @@ function TopKeywordsTable({ keywords, loading }: { keywords: GoogleKeyword[]; lo
     { key: 'impressions', label: 'Impressões' },
     { key: 'clicks', label: 'Cliques' },
     { key: 'ctr', label: 'CTR' },
-    { key: 'spend', label: 'Gasto' },
+    { key: 'spend', label: 'Investido' },
     { key: 'conversions', label: 'Conv.' },
     { key: 'cpl', label: 'CPL' },
   ];
 
   return (
-    <div className="overflow-hidden rounded-xl border border-[#EA4335]/40 bg-black/35 shadow-[0_0_30px_rgba(234,67,53,0.18)]">
-      <div className="flex items-center justify-between border-b border-[#EA4335]/25 bg-[#EA4335]/10 px-4 py-3">
+    <div className="overflow-hidden rounded-xl border border-[#EA4335]/40 bg-black/35 shadow-[0_0_30px_rgba(234,67,53,0.18)] h-full flex flex-col">
+      <div className="shrink-0 flex items-center justify-between border-b border-[#EA4335]/25 bg-[#EA4335]/10 px-4 py-3">
         <div className="flex items-center gap-2">
           <GoogleMark />
           <p className="text-sm font-bold uppercase tracking-wider">Top Palavras-chave</p>
@@ -1707,9 +1742,9 @@ function TopKeywordsTable({ keywords, loading }: { keywords: GoogleKeyword[]; lo
       ) : sorted.length === 0 ? (
         <p className="p-6 text-sm text-muted-foreground">Nenhuma palavra-chave encontrada no período.</p>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="overflow-auto flex-1 min-h-0">
           <table className="w-full min-w-[780px] text-left">
-            <thead className="border-b border-[#EA4335]/25 bg-black/35">
+            <thead className="border-b border-[#EA4335]/25 bg-black/35 sticky top-0 z-10">
               <tr className="text-[10px] font-bold uppercase tracking-widest text-foreground/60">
                 <th className="px-4 py-2.5">Palavra-chave</th>
                 {cols.map(c => (
@@ -1784,7 +1819,7 @@ function AdCreativePreview({ ad, x, y }: { ad: MetaAdWithMetrics; x: number; y: 
           <p className="text-[11px] font-semibold">{ad.name}</p>
         )}
         <div className="flex gap-3 pt-0.5 text-[10px] border-t border-border">
-          <span className="text-muted-foreground">Gasto <strong className="text-foreground">{formatCurrencyBRL(ad.spend)}</strong></span>
+          <span className="text-muted-foreground">Investido <strong className="text-foreground">{formatCurrencyBRL(ad.spend)}</strong></span>
           {ad.leads > 0 && <span className="text-muted-foreground">CPL <strong className="text-foreground">{formatCurrencyBRL(ad.cpl)}</strong></span>}
           {ad.impressions > 0 && <span className="text-muted-foreground">CTR <strong className="text-foreground">{ad.ctr.toFixed(1)}%</strong></span>}
         </div>
@@ -1974,7 +2009,7 @@ function CampaignPerformanceTable({
     return (
       <div className="rounded-xl border border-white/15 bg-black/35 px-5 py-7">
         <p className="text-sm font-semibold text-foreground">Nenhuma campanha ativa no período.</p>
-        <p className="mt-1 text-xs text-muted-foreground">Quando houver gasto nas contas vinculadas, as campanhas aparecem aqui com métricas e ações rápidas.</p>
+        <p className="mt-1 text-xs text-muted-foreground">Quando houver investido nas contas vinculadas, as campanhas aparecem aqui com métricas e ações rápidas.</p>
       </div>
     );
   }
@@ -2254,15 +2289,15 @@ function CampaignPerformanceTable({
     <>
       {optimizeCampaign && <CampaignOptimizeDrawer campaign={optimizeCampaign} onClose={() => setOptimizeCampaign(null)} />}
       {adPreview && <AdCreativePreview ad={adPreview.ad} x={adPreview.x} y={adPreview.y} />}
-      <div className="overflow-hidden rounded-xl border border-white/15 bg-black/35 shadow-[0_0_28px_rgba(255,255,255,0.08)]">
-        <div className="overflow-x-auto">
+      <div className="overflow-hidden rounded-xl border border-white/15 bg-black/35 shadow-[0_0_28px_rgba(255,255,255,0.08)] h-full">
+        <div className="overflow-auto h-full">
           <table className="w-full min-w-[1080px] text-left">
-            <thead className="border-b border-white/15 bg-white/[0.06]">
+            <thead className="border-b border-white/15 bg-white/[0.06] sticky top-0 z-10">
               <tr className="text-[10px] font-bold uppercase tracking-widest text-foreground/62">
                 <th className="px-4 py-3">Nome</th>
                 <th className="px-4 py-3 text-center">Plataforma</th>
                 <th className="px-4 py-3 text-right">Verba/dia</th>
-                <th className="px-4 py-3 text-right">Gasto</th>
+                <th className="px-4 py-3 text-right">Investido</th>
                 <th className="px-4 py-3 text-right">Resultados</th>
                 <th className="px-4 py-3 text-right">CPL</th>
                 <th className="px-4 py-3 text-right">Impressões</th>
@@ -2309,15 +2344,15 @@ function AudiencePieCard({
   });
 
   return (
-    <div className="flex min-h-[360px] flex-col rounded-xl border border-white/15 bg-black/35 p-4 shadow-[inset_0_0_24px_rgba(255,255,255,0.05)]">
+    <div className="flex min-h-[240px] flex-col rounded-[var(--radius)] border border-border bg-card p-4">
       <div>
         <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground">{title}</h4>
-        <p className="mt-0.5 text-[11px] text-foreground/55">{total.toLocaleString('pt-BR')} pessoas/imp.</p>
+        <p className="mt-0.5 text-[11px] text-muted-foreground">{total.toLocaleString('pt-BR')} pessoas/imp.</p>
       </div>
       {variant === 'donut' && (
-        <div className="mt-3 flex justify-center">
+        <div className="mt-3 flex flex-1 min-h-0 justify-center items-center overflow-hidden">
           {slices.length > 0 ? (
-          <svg viewBox="0 0 240 240" className="h-44 w-44 overflow-visible" role="img" aria-label={`Gráfico de ${title}`}>
+          <svg viewBox="0 0 240 240" className="h-full w-auto max-w-full overflow-visible" role="img" aria-label={`Gráfico de ${title}`}>
             {slices.map((slice) => (
               <path
                 key={slice.label}
@@ -2342,13 +2377,13 @@ function AudiencePieCard({
             <text x="120" y="134" textAnchor="middle" className="fill-foreground text-[18px] font-bold">{total.toLocaleString('pt-BR')}</text>
           </svg>
           ) : (
-            <div className="relative h-44 w-44 rounded-full bg-muted/20">
+            <div className="relative h-full w-auto max-w-full aspect-square rounded-full bg-muted/20">
               <div className="absolute inset-8 rounded-full bg-card" />
             </div>
           )}
         </div>
       )}
-      <div className="mt-4 grid flex-1 content-start gap-1.5 sm:grid-cols-2">
+      <div className="mt-4 grid content-start gap-1.5 sm:grid-cols-2">
         {slices.length > 0 ? slices.slice(0, 7).map((item) => (
           <button
             key={item.label}
@@ -2401,9 +2436,10 @@ function AudiencePlatformBlock({
     ? 'md:grid-cols-2 xl:grid-cols-3'
     : 'md:grid-cols-2 xl:grid-cols-4';
   return (
-    <div className="relative flex h-full flex-col overflow-hidden rounded-xl border bg-black/35 p-4" style={{ borderColor: `${color}66`, boxShadow: `0 0 34px ${color}1F, inset 0 0 28px ${color}10` }}>
-      <div className="pointer-events-none absolute inset-0" style={{ background: `linear-gradient(135deg, ${color}18, transparent 44%), radial-gradient(circle at 8% 0%, ${color}3D, transparent 34%)` }} />
-      <div className="relative flex items-start gap-2">
+    <div className="relative flex h-full flex-col overflow-hidden rounded-[var(--radius)] border border-border bg-card p-4">
+      {/* Platform accent bar */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5" style={{ backgroundColor: color }} />
+      <div className="relative flex items-start gap-2 mt-1">
         <span className="mt-0.5">{title === 'Meta Ads' ? <MetaMark /> : <GoogleMark />}</span>
         <div>
           <h3 className="text-sm font-bold uppercase tracking-wider text-foreground">{title}</h3>
@@ -2424,9 +2460,14 @@ type DashboardWidgetSize = 'sm' | 'md' | 'lg';
 type DashboardCardChart = 'sparkline' | 'none';
 type AudienceChartVariant = 'donut' | 'list';
 type DashboardCardId =
-  | 'general-revenue' | 'general-leads' | 'general-roi' | 'general-cpl' | 'general-spend' | 'general-ctr' | 'general-funnel'
+  | 'general-revenue' | 'general-leads' | 'general-roi' | 'general-cpl' | 'general-spend' | 'general-ctr' | 'general-funnel' | 'general-crm'
   | 'meta-reach' | 'meta-impressions' | 'meta-leads' | 'meta-cpl' | 'meta-spend' | 'meta-ctr' | 'meta-total-spend' | 'meta-balance' | 'meta-active-campaigns' | 'meta-adsets' | 'meta-creatives' | 'meta-clicks' | 'meta-campaigns' | 'meta-audience' | 'meta-creative-preview'
-  | 'google-impressions' | 'google-conversions' | 'google-cpa' | 'google-spend' | 'google-ctr' | 'google-total-spend' | 'google-balance' | 'google-active-campaigns' | 'google-keyword-count' | 'google-campaigns' | 'google-keywords' | 'google-audience';
+  | 'google-impressions' | 'google-conversions' | 'google-cpa' | 'google-spend' | 'google-ctr' | 'google-total-spend' | 'google-balance' | 'google-active-campaigns' | 'google-keyword-count' | 'google-clicks' | 'google-cpc' | 'google-campaigns' | 'google-keywords' | 'google-audience'
+  | 'social-fb-fans' | 'social-fb-fan-adds' | 'social-fb-reach' | 'social-fb-impressions' | 'social-fb-engagements' | 'social-fb-views'
+  | 'social-ig-followers' | 'social-ig-reach' | 'social-ig-views' | 'social-ig-profile-views' | 'social-ig-website-clicks'
+  | 'social-ig-engaged' | 'social-ig-interactions' | 'social-ig-likes' | 'social-ig-saves'
+  | 'social-ig-top-posts'
+  | 'crm-total' | 'crm-ativos' | 'crm-ganhos' | 'crm-perdidos' | 'crm-funnel';
 
 type DashboardCardConfig = {
   visible: boolean;
@@ -2440,23 +2481,28 @@ type DashboardPrefs = {
   cards: Record<DashboardCardId, DashboardCardConfig>;
   metaAudienceChart: AudienceChartVariant;
   googleAudienceChart: AudienceChartVariant;
+  showCrmPanel: boolean;
+  sectionOrder: string[];
 };
+
+const DEFAULT_SECTION_ORDER = ['geral', 'meta', 'google', 'social', 'crm'];
 
 const CARD_LABELS: Record<DashboardCardId, string> = {
   'general-revenue': 'Faturamento / Resultado',
   'general-leads': 'Leads total / parcial / meta',
   'general-roi': 'ROI',
   'general-cpl': 'CPL geral',
-  'general-spend': 'Valor gasto',
+  'general-spend': 'Valor investido',
   'general-ctr': 'CTR geral',
   'general-funnel': 'Funil de vendas',
+  'general-crm': 'Resultado CRM',
   'meta-reach': 'Meta: Alcance',
   'meta-impressions': 'Meta: Impressões',
   'meta-leads': 'Meta: Leads',
   'meta-cpl': 'Meta: CPL',
-  'meta-spend': 'Meta: Valor gasto',
+  'meta-spend': 'Meta: Valor investido',
   'meta-ctr': 'Meta: CTR',
-  'meta-total-spend': 'Meta: Total gasto',
+  'meta-total-spend': 'Meta: Total investido',
   'meta-balance': 'Meta: Saldo da conta',
   'meta-active-campaigns': 'Meta: Campanhas ativas',
   'meta-adsets': 'Meta: Conjuntos',
@@ -2468,21 +2514,46 @@ const CARD_LABELS: Record<DashboardCardId, string> = {
   'google-impressions': 'Google: Impressões',
   'google-conversions': 'Google: Conversões',
   'google-cpa': 'Google: Custo por conversão',
-  'google-spend': 'Google: Valor gasto',
+  'google-spend': 'Google: Valor investido',
   'google-ctr': 'Google: CTR',
-  'google-total-spend': 'Google: Total gasto',
+  'google-total-spend': 'Google: Total investido',
   'google-balance': 'Google: Saldo da conta',
   'google-active-campaigns': 'Google: Campanhas ativas',
   'google-keyword-count': 'Google: Contador top palavras-chave',
+  'google-clicks': 'Google: Cliques',
+  'google-cpc': 'Google: Custo por Clique (CPC)',
   'google-campaigns': 'Google: Tabela de campanhas',
   'google-keywords': 'Google: Top palavras-chave',
   'google-audience': 'Google: Recortes por gênero/dispositivo',
+  'social-fb-fans': 'FB: Curtidas/Seguidores',
+  'social-fb-fan-adds': 'FB: Novas curtidas',
+  'social-fb-reach': 'FB: Alcance',
+  'social-fb-impressions': 'FB: Impressões',
+  'social-fb-engagements': 'FB: Engajamentos',
+  'social-fb-views': 'FB: Visitas à página',
+  'social-ig-followers': 'IG: Seguidores',
+  'social-ig-reach': 'IG: Alcance',
+  'social-ig-views': 'IG: Visualizações',
+  'social-ig-profile-views': 'IG: Visitas ao perfil',
+  'social-ig-website-clicks': 'IG: Cliques no site',
+  'social-ig-engaged': 'IG: Contas engajadas',
+  'social-ig-interactions': 'IG: Interações',
+  'social-ig-likes': 'IG: Curtidas',
+  'social-ig-saves': 'IG: Salvamentos',
+  'social-ig-top-posts': 'IG: Top Postagens',
+  'crm-total':    'CRM: Total de Leads',
+  'crm-ativos':   'CRM: Leads Ativos',
+  'crm-ganhos':   'CRM: Leads Ganhos',
+  'crm-perdidos': 'CRM: Leads Perdidos',
+  'crm-funnel':   'CRM: Funil por Status',
 };
 
 const CARD_GROUPS: Array<{ title: string; ids: DashboardCardId[] }> = [
-  { title: 'Métricas Gerais', ids: ['general-revenue', 'general-leads', 'general-roi', 'general-cpl', 'general-spend', 'general-ctr', 'general-funnel'] },
+  { title: 'Métricas Gerais', ids: ['general-revenue', 'general-leads', 'general-roi', 'general-cpl', 'general-spend', 'general-ctr', 'general-funnel', 'general-crm'] },
   { title: 'Meta Ads', ids: ['meta-reach', 'meta-impressions', 'meta-leads', 'meta-cpl', 'meta-spend', 'meta-ctr', 'meta-total-spend', 'meta-balance', 'meta-active-campaigns', 'meta-adsets', 'meta-creatives', 'meta-clicks', 'meta-campaigns', 'meta-audience', 'meta-creative-preview'] },
-  { title: 'Google Ads', ids: ['google-impressions', 'google-conversions', 'google-cpa', 'google-spend', 'google-ctr', 'google-total-spend', 'google-balance', 'google-active-campaigns', 'google-keyword-count', 'google-campaigns', 'google-keywords', 'google-audience'] },
+  { title: 'Google Ads', ids: ['google-impressions', 'google-conversions', 'google-cpa', 'google-spend', 'google-ctr', 'google-total-spend', 'google-balance', 'google-active-campaigns', 'google-keyword-count', 'google-clicks', 'google-cpc', 'google-campaigns', 'google-keywords', 'google-audience'] },
+  { title: 'Páginas & Perfis Sociais', ids: ['social-fb-fans', 'social-fb-fan-adds', 'social-fb-reach', 'social-fb-impressions', 'social-fb-engagements', 'social-fb-views', 'social-ig-followers', 'social-ig-reach', 'social-ig-views', 'social-ig-profile-views', 'social-ig-website-clicks', 'social-ig-engaged', 'social-ig-interactions', 'social-ig-likes', 'social-ig-saves', 'social-ig-top-posts'] },
+  { title: 'CRM Leads', ids: ['crm-total', 'crm-ativos', 'crm-ganhos', 'crm-perdidos', 'crm-funnel'] },
 ];
 
 const META_KPI_IDS: DashboardCardId[] = [
@@ -2493,46 +2564,75 @@ const META_KPI_IDS: DashboardCardId[] = [
 const GOOGLE_KPI_IDS: DashboardCardId[] = [
   'google-impressions', 'google-conversions', 'google-cpa', 'google-spend',
   'google-ctr', 'google-total-spend', 'google-balance',
-  'google-active-campaigns', 'google-keyword-count',
+  'google-active-campaigns', 'google-keyword-count', 'google-clicks', 'google-cpc',
 ];
 
 const CHANNEL_GROUPS: Array<{ id: string; label: string; color: string; ids: DashboardCardId[] }> = [
-  { id: 'geral',  label: 'Métricas Gerais', color: '#55F52F', ids: CARD_GROUPS[0].ids },
-  { id: 'meta',   label: 'Meta Ads',         color: '#0668E1', ids: CARD_GROUPS[1].ids },
-  { id: 'google', label: 'Google Ads',        color: '#7B2CFF', ids: CARD_GROUPS[2].ids },
+  { id: 'geral',   label: 'Métricas Gerais',          color: '#55F52F', ids: CARD_GROUPS[0].ids },
+  { id: 'meta',    label: 'Meta Ads',                  color: '#0668E1', ids: CARD_GROUPS[1].ids },
+  { id: 'google',  label: 'Google Ads',                color: '#7B2CFF', ids: CARD_GROUPS[2].ids },
+  { id: 'social',  label: 'Páginas & Perfis Sociais',  color: '#F59E0B', ids: CARD_GROUPS[3].ids },
+  { id: 'crm',     label: 'CRM Leads',                 color: '#8B5CF6', ids: CARD_GROUPS[4].ids },
 ];
 
 // ── React Grid Layout ────────────────────────────────────────────────────────
-const LS_RGL_LAYOUT = 'dashboard_rgl_layout_v1';
+const LS_RGL_LAYOUT = 'dashboard_rgl_layout_v7';
+function lsClientSuffix(ids: Set<string>): string {
+  if (ids.size === 1) return `__${[...ids][0]}`;
+  return '';
+}
 const RGL_COLS = 12;
 const RGL_ROW_H = 100; // px per row unit
 const RGL_MARGIN: [number, number] = [16, 16];
 
+// Natural-height helpers — compute the grid row count that fits content with no empty space.
+// chrome = card header/padding, rows capped at 15 to avoid infinite-scroll cards.
+function tableAutoH(rowCount: number, minH: number): number {
+  const total = 72 + (rowCount > 0 ? 34 + rowCount * 36 : 60) + 20;
+  return Math.max(minH, Math.min(15, Math.ceil(total / RGL_ROW_H)));
+}
+function kwAutoH(rowCount: number, minH: number): number {
+  const total = 74 + (rowCount > 0 ? rowCount * 50 : 60) + 20;
+  return Math.max(minH, Math.min(15, Math.ceil(total / RGL_ROW_H)));
+}
+function creativesGridAutoH(count: number, minH: number): number {
+  // 5 cols assumed (~1350px card); each row ≈ 467px (228px col × 16/9 + text + gap)
+  const total = 80 + (count > 0 ? Math.ceil(count / 5) * 467 : 80) + 20;
+  return Math.max(minH, Math.min(15, Math.ceil(total / RGL_ROW_H)));
+}
+function igPostsGridAutoH(count: number, minH: number): number {
+  // 8 cols assumed; each row ≈ 236px (160px sq + info + gap)
+  const total = 60 + (count > 0 ? Math.ceil(count / 8) * 236 : 60) + 20;
+  return Math.max(minH, Math.min(15, Math.ceil(total / RGL_ROW_H)));
+}
+
 const DEFAULT_META_KPI_LAYOUT: RglLayout[] = [
-  { i: 'meta-reach',            x: 0, y: 0, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'meta-impressions',      x: 3, y: 0, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'meta-leads',            x: 6, y: 0, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'meta-cpl',              x: 9, y: 0, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'meta-spend',            x: 0, y: 2, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'meta-ctr',              x: 3, y: 2, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'meta-total-spend',      x: 6, y: 2, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'meta-balance',          x: 9, y: 2, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'meta-active-campaigns', x: 0, y: 4, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'meta-adsets',           x: 3, y: 4, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'meta-creatives',        x: 6, y: 4, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'meta-clicks',           x: 9, y: 4, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'meta-reach',            x: 0, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'meta-impressions',      x: 3, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'meta-leads',            x: 6, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'meta-cpl',              x: 9, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'meta-spend',            x: 0, y: 2, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'meta-ctr',              x: 3, y: 2, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'meta-total-spend',      x: 6, y: 2, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'meta-balance',          x: 9, y: 2, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'meta-active-campaigns', x: 0, y: 4, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'meta-adsets',           x: 3, y: 4, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'meta-creatives',        x: 6, y: 4, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'meta-clicks',           x: 9, y: 4, w: 3, h: 2, minW: 2, minH: 2 },
 ];
 
 const DEFAULT_GOOGLE_KPI_LAYOUT: RglLayout[] = [
-  { i: 'google-impressions',      x: 0, y: 0, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'google-conversions',      x: 3, y: 0, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'google-cpa',              x: 6, y: 0, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'google-spend',            x: 9, y: 0, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'google-ctr',              x: 0, y: 2, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'google-total-spend',      x: 3, y: 2, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'google-balance',          x: 6, y: 2, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'google-active-campaigns', x: 9, y: 2, w: 3, h: 2, minW: 2, minH: 1 },
-  { i: 'google-keyword-count',    x: 0, y: 4, w: 3, h: 2, minW: 2, minH: 1 },
+  { i: 'google-impressions',      x: 0, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'google-conversions',      x: 3, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'google-cpa',              x: 6, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'google-spend',            x: 9, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'google-ctr',              x: 0, y: 2, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'google-total-spend',      x: 3, y: 2, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'google-balance',          x: 6, y: 2, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'google-active-campaigns', x: 9, y: 2, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'google-keyword-count',    x: 0, y: 4, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'google-clicks',           x: 3, y: 4, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'google-cpc',              x: 6, y: 4, w: 3, h: 2, minW: 2, minH: 2 },
 ];
 
 const DEFAULT_GENERAL_LAYOUT: RglLayout[] = [
@@ -2542,7 +2642,27 @@ const DEFAULT_GENERAL_LAYOUT: RglLayout[] = [
   { i: 'general-cpl',     x: 4, y: 4, w: 4, h: 2, minW: 2, minH: 1 },
   { i: 'general-ctr',     x: 0, y: 6, w: 4, h: 2, minW: 2, minH: 1 },
   { i: 'general-spend',   x: 4, y: 6, w: 4, h: 2, minW: 2, minH: 1 },
-  { i: 'general-funnel',  x: 8, y: 0, w: 4, h: 8, minW: 3, minH: 4 },
+  { i: 'general-funnel',  x: 0, y: 8, w: 8,  h: 5,  minW: 3, minH: 4  },
+  { i: 'general-crm',    x: 0, y: 13, w: 12, h: 2, minW: 4, minH: 2  },
+];
+
+const DEFAULT_SOCIAL_KPI_LAYOUT: RglLayout[] = [
+  { i: 'social-fb-fans',           x: 0, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'social-fb-fan-adds',       x: 3, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'social-fb-reach',          x: 6, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'social-fb-impressions',    x: 9, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'social-fb-engagements',    x: 0, y: 2, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'social-fb-views',          x: 3, y: 2, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'social-ig-followers',     x: 0, y: 4, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'social-ig-reach',         x: 3, y: 4, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'social-ig-views',         x: 6, y: 4, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'social-ig-profile-views', x: 9, y: 4, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'social-ig-website-clicks',x: 0, y: 6, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'social-ig-engaged',       x: 3, y: 6, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'social-ig-interactions',  x: 6, y: 6, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'social-ig-likes',         x: 9, y: 6, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'social-ig-saves',         x: 0, y: 8, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'social-ig-top-posts',    x: 0, y: 10, w: 12, h: 5, minW: 4, minH: 3 },
 ];
 
 const DEFAULT_META_PANELS_LAYOUT: RglLayout[] = [
@@ -2561,12 +2681,16 @@ const DEFAULT_CARD_OVERRIDES: Partial<Record<DashboardCardId, Partial<DashboardC
   'general-revenue': { size: 'lg', chart: 'none' },
   'general-leads': { size: 'lg', chart: 'none' },
   'general-funnel': { size: 'lg', chart: 'none' },
+  'general-crm': { size: 'lg', chart: 'none' },
   'meta-campaigns': { size: 'lg', chart: 'none' },
   'meta-audience': { size: 'lg', chart: 'none' },
   'meta-creative-preview': { size: 'lg', chart: 'none' },
   'google-campaigns': { size: 'lg', chart: 'none' },
   'google-keywords': { size: 'md', chart: 'none' },
   'google-audience': { size: 'md', chart: 'none' },
+  'social-ig-top-posts': { size: 'lg', chart: 'none' },
+  'crm-funnel': { size: 'lg', chart: 'none' },
+  'crm-total': { chart: 'none' }, 'crm-ativos': { chart: 'none' }, 'crm-ganhos': { chart: 'none' }, 'crm-perdidos': { chart: 'none' },
   'meta-adsets': { chart: 'none' },
   'meta-creatives': { chart: 'none' },
   'meta-active-campaigns': { chart: 'none' },
@@ -2582,6 +2706,8 @@ const DEFAULT_DASHBOARD_PREFS: DashboardPrefs = {
   }, {} as Record<DashboardCardId, DashboardCardConfig>),
   metaAudienceChart: 'donut',
   googleAudienceChart: 'donut',
+  showCrmPanel: false,
+  sectionOrder: DEFAULT_SECTION_ORDER,
 };
 
 const LS_DASHBOARD_PREFS = 'dashboard_global_preferences_v2';
@@ -2598,6 +2724,14 @@ function mergeDashboardPrefs(input: unknown): DashboardPrefs {
     cards,
     metaAudienceChart: raw?.metaAudienceChart ?? DEFAULT_DASHBOARD_PREFS.metaAudienceChart,
     googleAudienceChart: raw?.googleAudienceChart ?? DEFAULT_DASHBOARD_PREFS.googleAudienceChart,
+    showCrmPanel: raw?.showCrmPanel ?? false,
+    sectionOrder: (() => {
+      const stored = raw?.sectionOrder ?? [];
+      const all = DEFAULT_SECTION_ORDER;
+      const valid = stored.filter((s): s is string => all.includes(s));
+      const missing = all.filter(s => !valid.includes(s));
+      return [...valid, ...missing];
+    })(),
   };
 }
 
@@ -2627,7 +2761,7 @@ function DashboardGridItem({
   const { editMode, hideCard, toggleChart } = useContext(DashboardEditCtx);
   const [hiding, setHiding] = useState(false);
   const cfg = prefs.cards[id] ?? DEFAULT_DASHBOARD_PREFS.cards[id];
-  const isPanel = id.includes('campaigns') || id.includes('audience') || id.includes('preview') || id.includes('keywords') || id === 'general-funnel';
+  const isPanel = id.includes('campaigns') || id.includes('audience') || id.includes('preview') || id.includes('keywords') || id === 'general-funnel' || id === 'general-crm';
   if (!cfg.visible) return null;
 
   function handleHide() {
@@ -2681,7 +2815,7 @@ function SortableGridItem({
   const [hiding, setHiding] = useState(false);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
   const cfg = prefs.cards[id] ?? DEFAULT_DASHBOARD_PREFS.cards[id];
-  const isPanel = id.includes('campaigns') || id.includes('audience') || id.includes('preview') || id.includes('keywords');
+  const isPanel = id.includes('campaigns') || id.includes('audience') || id.includes('preview') || id.includes('keywords') || id === 'general-funnel' || id === 'general-crm';
   if (!cfg.visible) return null;
 
   function handleHide() {
@@ -2748,7 +2882,7 @@ function RglCardShell({
   const { editMode, hideCard, toggleChart } = useContext(DashboardEditCtx);
   const [hiding, setHiding] = useState(false);
   const cfg = prefs.cards[id] ?? DEFAULT_DASHBOARD_PREFS.cards[id];
-  const isPanel = id.includes('campaigns') || id.includes('audience') || id.includes('preview') || id.includes('keywords');
+  const isPanel = id.includes('campaigns') || id.includes('audience') || id.includes('preview') || id.includes('keywords') || id === 'general-funnel' || id === 'general-crm';
 
   function handleHide() {
     setHiding(true);
@@ -2933,7 +3067,7 @@ function MetricConfigPanel({
                   <div className="divide-y divide-border border-t border-border">
                     {orderedIds.map(id => {
                       const cfg = prefs.cards[id];
-                      const isPanel = id.includes('campaigns') || id.includes('audience') || id.includes('preview') || id.includes('keywords') || id === 'general-funnel';
+                      const isPanel = id.includes('campaigns') || id.includes('audience') || id.includes('preview') || id.includes('keywords') || id === 'general-funnel' || id === 'general-crm';
                       return (
                         <div key={id} className={cn('flex items-center gap-2 px-3 py-2 transition-colors', !cfg.visible && 'opacity-40')}>
                           <input
@@ -2975,6 +3109,23 @@ function MetricConfigPanel({
           })}
         </div>
 
+        {/* Seções opcionais */}
+        <div className="shrink-0 border-t border-border px-4 py-3 space-y-2">
+          <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground px-1">Seções extras</p>
+          <label className="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-muted/20 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={prefs.showCrmPanel}
+              onChange={e => onPrefsChange({ ...prefs, showCrmPanel: e.target.checked })}
+              className="h-3.5 w-3.5 accent-primary shrink-0"
+            />
+            <div>
+              <p className="text-xs font-semibold">Painel de Leads CRM</p>
+              <p className="text-[10px] text-muted-foreground">Cards de Ativos/Ganhos/Perdidos + funil de conversão</p>
+            </div>
+          </label>
+        </div>
+
         {/* Footer */}
         <div className="shrink-0 flex items-center justify-between border-t border-border px-5 py-4">
           <button type="button" onClick={() => onPrefsChange(DEFAULT_DASHBOARD_PREFS)}
@@ -2991,32 +3142,380 @@ function MetricConfigPanel({
   );
 }
 
-// ── Dashboard Edit Mode ──────────────────────────────────────────────────────
-type WidgetId = 'general' | 'funnel' | 'meta' | 'google';
-
-const WIDGET_INFO: Record<WidgetId, { label: string }> = {
-  general: { label: 'Métricas Gerais' },
-  funnel: { label: 'Funil de Vendas' },
-  meta: { label: 'Meta Ads' },
-  google: { label: 'Google Ads' },
+type PerformanceFunnelRow = {
+  label: string;
+  value: number;
+  color: string;
+  Icon: ComponentType<{ className?: string; style?: CSSProperties }>;
 };
 
-const DEFAULT_WIDGET_ORDER: WidgetId[] = ['general', 'funnel', 'meta', 'google'];
-const LS_ORDER = 'dashboard_widget_order';
-const LS_COLLAPSED = 'dashboard_widget_collapsed';
+function funnelNumber(value: number) {
+  return Math.round(value).toLocaleString('pt-BR');
+}
 
-function SortableWidget({
-  id, editMode, collapsed, onToggleCollapse, children,
+function funnelPercent(value: number, digits = 2) {
+  return `${value.toLocaleString('pt-BR', { minimumFractionDigits: digits, maximumFractionDigits: digits })}%`;
+}
+
+function stageConversion(current: number, previous: number) {
+  return previous > 0 ? (current / previous) * 100 : 0;
+}
+
+function displayStageName(label: string) {
+  const lower = label.toLowerCase();
+  return `${lower.charAt(0).toUpperCase()}${lower.slice(1)}`;
+}
+
+function DashboardPerformanceFunnel({ periodLabel, rows }: { periodLabel: string; rows: PerformanceFunnelRow[] }) {
+  const stages = rows.slice(0, 5);
+  const conversions = stages.map((stage, index) => (
+    index === 0 ? 100 : stageConversion(stage.value, stages[index - 1].value)
+  ));
+  const transitionConversions = conversions.slice(1);
+  const bottleneckIndex = transitionConversions.reduce((lowest, value, index) => (
+    value < transitionConversions[lowest] ? index : lowest
+  ), 0);
+  const bottleneck = `${displayStageName(stages[bottleneckIndex]?.label ?? '')} → ${displayStageName(stages[bottleneckIndex + 1]?.label ?? '')}`;
+  const generalConversion = stageConversion(stages[4]?.value ?? 0, stages[0]?.value ?? 0);
+
+  const sectionRef = useRef<HTMLElement>(null);
+  const [scale, setScale] = useState(1);
+  useEffect(() => {
+    const el = sectionRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => {
+      // 500px = scale 1.0 (default h=5 grid rows); clamp 0.65–1.0 (never bigger than KPI cards)
+      const s = Math.min(Math.max(entry.contentRect.height / 500, 0.65), 1.0);
+      setScale(s);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const iconSz = Math.round(13 * scale);
+  const badgeSz = Math.round(16 * scale);
+  const connH = Math.round(22 * scale);
+  const labelFs = Math.round(11 * scale);
+  const valueFs = Math.round(13 * scale);
+  const subFs = Math.round(10 * scale);
+  const convFs = Math.round(10 * scale);
+  const footerFs = Math.round(10 * scale);
+  const footerValueFs = Math.round(11 * scale);
+
+  return (
+    <section ref={sectionRef} className="relative h-full flex flex-col overflow-hidden rounded-[var(--radius)] border border-border bg-card p-4 sm:p-5">
+      {/* Accent bar */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5 bg-primary" />
+
+      {/* Header */}
+      <div className="relative flex-none flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <h3 className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Funil de Performance</h3>
+            <Info className="h-3 w-3 text-muted-foreground/60" />
+          </div>
+          <p className="mt-1 text-[11px] text-muted-foreground">Período: <span className="text-foreground font-semibold">{periodLabel}</span></p>
+        </div>
+        <button
+          type="button"
+          className="flex h-8 items-center gap-2 rounded-[var(--radius)] border border-border bg-muted px-3 text-xs font-bold text-muted-foreground"
+        >
+          <span className="text-muted-foreground/60">Exibir</span>
+          Conversão %
+          <ChevronDown className="h-3 w-3" />
+        </button>
+      </div>
+
+      {/* Stages — fills remaining height */}
+      <div className="relative flex-1 flex flex-col mt-3 min-h-0">
+        {stages.map((stage, index) => {
+          const Icon = stage.Icon;
+          const nextConversion = conversions[index + 1] ?? 0;
+          const isLast = index === stages.length - 1;
+
+          return (
+            <Fragment key={stage.label}>
+              {/* Stage row — grows proportionally */}
+              <div
+                className="relative flex-1 grid grid-cols-[40px_28px_1fr_auto] items-center overflow-hidden rounded-[var(--radius)] border pr-3"
+                style={{ borderColor: `${stage.color}80`, minHeight: Math.round(32 * scale) }}
+              >
+                <div
+                  className="absolute inset-0"
+                  style={{ background: `linear-gradient(90deg, ${stage.color}22 0%, ${stage.color}10 40%, transparent 100%)` }}
+                />
+                <div
+                  className="relative flex h-full items-center justify-center border-r"
+                  style={{ borderColor: `${stage.color}55` }}
+                >
+                  <Icon style={{ color: stage.color, width: iconSz, height: iconSz }} />
+                </div>
+                <div className="relative flex justify-center">
+                  <span
+                    className="flex items-center justify-center rounded-full font-black text-white"
+                    style={{ backgroundColor: `${stage.color}cc`, width: badgeSz, height: badgeSz, fontSize: Math.round(8 * scale) }}
+                  >
+                    {index + 1}
+                  </span>
+                </div>
+                <p className="relative font-bold uppercase text-foreground" style={{ fontSize: labelFs, letterSpacing: '0.08em' }}>{stage.label}</p>
+                <div className="relative text-right">
+                  <p className="font-heading font-normal leading-none text-foreground" style={{ fontSize: valueFs }}>{funnelNumber(stage.value)}</p>
+                  <p className="mt-0.5 font-semibold text-muted-foreground" style={{ fontSize: subFs }}>{funnelPercent(conversions[index], index === 0 ? 1 : 2)}</p>
+                </div>
+              </div>
+
+              {/* Connector — fixed proportional height */}
+              {!isLast && (
+                <div className="relative flex-none flex justify-center" style={{ height: connH }}>
+                  <div className="absolute left-1/2 top-0 h-full border-l border-dashed" style={{ borderColor: `${stage.color}88` }} />
+                  <span className="absolute rounded-full" style={{ backgroundColor: stage.color, width: Math.round(7 * scale), height: Math.round(7 * scale), top: -Math.round(3 * scale) }} />
+                  <div className="relative z-10 flex items-center gap-1.5 rounded-[var(--radius)] border border-border bg-card px-2 self-center">
+                    <span className="font-bold text-muted-foreground" style={{ fontSize: convFs }}>Taxa de conversão</span>
+                    <span className="font-bold" style={{ color: stage.color, fontSize: convFs }}>{funnelPercent(nextConversion)}</span>
+                  </div>
+                </div>
+              )}
+            </Fragment>
+          );
+        })}
+      </div>
+
+      {/* Footer */}
+      <div className="relative flex-none mt-3 grid gap-0 overflow-hidden rounded-[var(--radius)] border border-border bg-muted/30 md:grid-cols-3">
+        <div className="flex gap-2 p-2.5 md:border-r md:border-border">
+          <div className="flex shrink-0 items-center justify-center rounded-[var(--radius)] border border-border text-destructive" style={{ width: Math.round(26 * scale), height: Math.round(26 * scale) }}>
+            <AlertTriangle style={{ width: Math.round(12 * scale), height: Math.round(12 * scale) }} />
+          </div>
+          <div>
+            <p className="font-bold uppercase tracking-widest text-muted-foreground" style={{ fontSize: footerFs }}>Maior Gargalo</p>
+            <p className="mt-0.5 font-bold text-foreground" style={{ fontSize: footerValueFs }}>{bottleneck}</p>
+            <p className="mt-0.5 text-muted-foreground" style={{ fontSize: footerFs }}>Conversão de {funnelPercent(transitionConversions[bottleneckIndex] ?? 0)}</p>
+          </div>
+        </div>
+        <div className="flex gap-2 p-2.5 md:border-r md:border-border">
+          <div className="flex shrink-0 items-center justify-center rounded-[var(--radius)] border border-border" style={{ color: '#55f52f', width: Math.round(26 * scale), height: Math.round(26 * scale) }}>
+            <TrendingUp style={{ width: Math.round(12 * scale), height: Math.round(12 * scale) }} />
+          </div>
+          <div>
+            <p className="font-bold uppercase tracking-widest text-muted-foreground" style={{ fontSize: footerFs }}>Conversão Geral</p>
+            <p className="mt-0.5 font-heading font-normal leading-none text-foreground" style={{ fontSize: Math.round(16 * scale) }}>{funnelPercent(generalConversion)}</p>
+            <p className="mt-0.5 text-muted-foreground" style={{ fontSize: footerFs }}>{funnelNumber(stages[4]?.value ?? 0)} de {funnelNumber(stages[0]?.value ?? 0)} visitantes</p>
+          </div>
+        </div>
+        <div className="flex gap-2 p-2.5">
+          <div className="flex shrink-0 items-center justify-center rounded-[var(--radius)] border border-border" style={{ color: '#55f52f', width: Math.round(26 * scale), height: Math.round(26 * scale) }}>
+            <Lightbulb style={{ width: Math.round(12 * scale), height: Math.round(12 * scale) }} />
+          </div>
+          <div>
+            <p className="font-bold uppercase tracking-widest text-muted-foreground" style={{ fontSize: footerFs }}>Oportunidade</p>
+            <p className="mt-0.5 font-bold text-foreground" style={{ fontSize: footerValueFs }}>Melhore a qualificação</p>
+            <p className="mt-0.5 text-muted-foreground" style={{ fontSize: footerFs }}>Ative automações e nutrições</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ── CRM Dashboard Panel ──────────────────────────────────────────────────────
+type CrmStats = {
+  total: number;
+  ativos: number;
+  ganhos: number;
+  perdidos: number;
+  faturamento: number;
+  byStatus: Array<{ status: string; count: number; valor: number; pct: number }>;
+};
+
+const STATUS_FUNNEL_ORDER = [
+  'Em Atendimento', 'Agendado', 'Reagendado', 'Fechado', 'Comprou',
+  'Paciente', 'Não Retorna', 'Distante', 'Sem Interesse', 'Desqualificado',
+];
+
+const STATUS_FUNNEL_COLOR: Record<string, string> = {
+  'Em Atendimento': '#0ea5e9',
+  'Agendado':       '#3b82f6',
+  'Reagendado':     '#7dd3fc',
+  'Fechado':        '#10b981',
+  'Comprou':        '#34d399',
+  'Paciente':       '#a1a1aa',
+  'Não Retorna':    '#71717a',
+  'Distante':       '#f97316',
+  'Sem Interesse':  '#ef4444',
+  'Desqualificado': '#dc2626',
+};
+
+function CrmDashboardPanel({ clientIds, prefs }: { clientIds: Set<string>; prefs: DashboardPrefs }) {
+  const [stats, setStats] = React.useState<CrmStats | null>(null);
+  const [loading, setLoading] = React.useState(false);
+  const [sortBy, setSortBy] = React.useState<'count' | 'valor'>('count');
+  const cardVisible = (id: DashboardCardId) => prefs.cards[id]?.visible !== false;
+
+  React.useEffect(() => {
+    if (clientIds.size === 0) return;
+    setLoading(true);
+    const ids = [...clientIds];
+
+    Promise.all(ids.map(id =>
+      fetch(`/api/dashboard/crm-stats?clientId=${id}`).then(r => r.json()) as Promise<CrmStats>
+    )).then(results => {
+      const merged: CrmStats = {
+        total: 0, ativos: 0, ganhos: 0, perdidos: 0, faturamento: 0,
+        byStatus: [],
+      };
+      const statusMap = new Map<string, { count: number; valor: number }>();
+
+      for (const r of results) {
+        if (!r || typeof r !== 'object' || !('total' in r)) continue;
+        merged.total += r.total ?? 0;
+        merged.ativos += r.ativos ?? 0;
+        merged.ganhos += r.ganhos ?? 0;
+        merged.perdidos += r.perdidos ?? 0;
+        merged.faturamento += r.faturamento ?? 0;
+        for (const s of r.byStatus ?? []) {
+          const cur = statusMap.get(s.status) ?? { count: 0, valor: 0 };
+          statusMap.set(s.status, { count: cur.count + s.count, valor: cur.valor + s.valor });
+        }
+      }
+
+      merged.byStatus = [...statusMap.entries()].map(([status, d]) => ({
+        status,
+        count: d.count,
+        valor: d.valor,
+        pct: merged.total > 0 ? Math.round((d.count / merged.total) * 100) : 0,
+      }));
+
+      setStats(merged);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, [[...clientIds].sort().join(',')]);
+
+  if (loading) {
+    return (
+      <div className="rounded-xl border border-border bg-card p-8 text-center text-sm text-muted-foreground">
+        Carregando dados de leads…
+      </div>
+    );
+  }
+
+  if (!stats || stats.total === 0) {
+    return (
+      <div className="rounded-xl border border-border bg-card p-8 text-center">
+        <p className="text-sm text-muted-foreground">Nenhum lead registrado ainda.</p>
+        <p className="text-xs text-muted-foreground/60 mt-1">Conecte o WhatsApp para capturar leads automaticamente.</p>
+      </div>
+    );
+  }
+
+  const sortedStatuses = STATUS_FUNNEL_ORDER
+    .map(s => stats.byStatus.find(b => b.status === s) ?? { status: s, count: 0, valor: 0, pct: 0 })
+    .filter(s => s.count > 0);
+
+  const maxVal = Math.max(...sortedStatuses.map(s => sortBy === 'count' ? s.count : s.valor), 1);
+
+  const summaryCards = [
+    { id: 'crm-total' as DashboardCardId,    label: 'Total de Leads',  value: stats.total,    cls: 'text-foreground',  sub: 'no período' },
+    { id: 'crm-ativos' as DashboardCardId,   label: 'Leads Ativos',    value: stats.ativos,   cls: 'text-sky-400',     sub: 'em andamento' },
+    { id: 'crm-ganhos' as DashboardCardId,   label: 'Leads Ganhos',    value: stats.ganhos,   cls: 'text-emerald-400', sub: 'negócios fechados' },
+    { id: 'crm-perdidos' as DashboardCardId, label: 'Leads Perdidos',  value: stats.perdidos, cls: 'text-red-400',     sub: 'sem interesse / desqualif.' },
+  ].filter(c => cardVisible(c.id));
+
+  return (
+    <div className="space-y-4">
+      {/* Summary cards */}
+      {summaryCards.length > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {summaryCards.map(({ label, value, cls, sub }) => (
+            <div key={label} className="bg-card border border-border rounded-xl p-4">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
+              <p className={cn('font-heading font-normal text-2xl leading-none mt-2', cls)}>{value.toLocaleString('pt-BR')}</p>
+              <p className="text-[10px] text-muted-foreground mt-1">{sub}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Funnel chart */}
+      {cardVisible('crm-funnel') && <div className="bg-card border border-border rounded-xl p-5">
+        <div className="flex items-center justify-between mb-4">
+          <p className="text-sm font-bold">Funil de Leads por Status</p>
+          <div className="flex gap-1 rounded-lg border border-border p-0.5">
+            <button onClick={() => setSortBy('count')}
+              className={cn('px-2.5 py-1 rounded-md text-[10px] font-bold transition-colors',
+                sortBy === 'count' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
+              Por Qtd.
+            </button>
+            <button onClick={() => setSortBy('valor')}
+              className={cn('px-2.5 py-1 rounded-md text-[10px] font-bold transition-colors',
+                sortBy === 'valor' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
+              Por Valor
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-2.5">
+          {sortedStatuses.map(s => {
+            const barVal = sortBy === 'count' ? s.count : s.valor;
+            const barPct = Math.round((barVal / maxVal) * 100);
+            const color = STATUS_FUNNEL_COLOR[s.status] ?? '#71717a';
+            return (
+              <div key={s.status} className="flex items-center gap-3">
+                <span className="w-32 shrink-0 text-[11px] text-right text-muted-foreground">{s.pct}%</span>
+                <div className="flex-1 h-6 bg-muted/30 rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all duration-500"
+                    style={{ width: `${barPct}%`, background: color, opacity: 0.85 }}
+                  />
+                </div>
+                <div className="w-48 shrink-0">
+                  <p className="text-xs font-semibold text-foreground">{s.status}</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    {s.count} leads · {s.valor > 0 ? formatCurrencyBRL(s.valor) : 'R$ 0'}
+                  </p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {stats.faturamento > 0 && (
+          <div className="mt-4 pt-4 border-t border-border flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">Faturamento total CRM:</span>
+            <span className="text-sm font-bold text-primary">{formatCurrencyBRL(stats.faturamento)}</span>
+          </div>
+        )}
+      </div>}
+    </div>
+  );
+}
+
+// ── Dashboard Section Drag Ordering ─────────────────────────────────────────
+const SECTION_INFO: Record<string, { label: string }> = {
+  geral:   { label: 'Métricas Gerais' },
+  meta:    { label: 'Meta Ads' },
+  google:  { label: 'Google Ads' },
+  social:  { label: 'Páginas & Perfis Sociais' },
+  crm:     { label: 'CRM Leads' },
+};
+
+function SortableSection({
+  id, editMode, orderIndex, children,
 }: {
-  id: WidgetId; editMode: boolean; collapsed: boolean; onToggleCollapse: () => void; children: ReactNode;
+  id: string; editMode: boolean; orderIndex: number; children: ReactNode;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
-  const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 };
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+    order: orderIndex,
+  };
 
   return (
     <div ref={setNodeRef} style={style}>
       {editMode && (
-        <div className="mb-2 flex items-center gap-2 rounded-lg border border-dashed border-primary/40 bg-primary/5 px-3 py-2">
+        <div className="mb-1 flex items-center gap-2 rounded-lg border border-dashed border-primary/40 bg-primary/5 px-3 py-1.5">
           <button
             type="button"
             {...attributes}
@@ -3026,18 +3525,10 @@ function SortableWidget({
           >
             <GripVertical className="h-4 w-4" />
           </button>
-          <span className="flex-1 text-xs font-semibold text-muted-foreground">{WIDGET_INFO[id].label}</span>
-          <button
-            type="button"
-            onClick={onToggleCollapse}
-            className="p-0.5 text-muted-foreground hover:text-foreground"
-            aria-label={collapsed ? 'Expandir seção' : 'Recolher seção'}
-          >
-            {collapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
-          </button>
+          <span className="flex-1 text-xs font-semibold text-muted-foreground">{SECTION_INFO[id]?.label ?? id}</span>
         </div>
       )}
-      {!collapsed && children}
+      {children}
     </div>
   );
 }
@@ -3197,21 +3688,45 @@ function CircularQuality({ pct, color, size = 120 }: { pct: number; color: strin
 function CreativeCarouselCard({ creative, idx, sortBy, onPreview }: {
   creative: TopCreative; idx: number; sortBy: SortKey; onPreview: (c: TopCreative) => void;
 }) {
-  const [imgErr, setImgErr] = useState(false);
-  const imgUrl = creative.imageUrl ?? creative.thumbnailUrl;
+  const [imgStage, setImgStage] = useState<'primary' | 'thumb' | 'error'>('primary');
+  const primaryUrl = creative.imageUrl;
+  const thumbUrl = creative.thumbnailUrl;
+  const imgUrl = imgStage === 'primary' ? (primaryUrl ?? thumbUrl) : imgStage === 'thumb' ? thumbUrl : undefined;
   const metricValue = sortBy === 'leads' ? creative.leads.toLocaleString('pt-BR')
     : sortBy === 'cpl' ? (creative.cpl > 0 ? formatCurrencyBRL(creative.cpl) : '—')
     : sortBy === 'ctr' ? `${creative.ctr.toFixed(2)}%`
     : formatCurrencyBRL(creative.spend);
+
+  function handleImgError() {
+    // Only fall back to thumbnail if imageUrl was actually tried and is distinct from thumbnail
+    if (imgStage === 'primary' && primaryUrl && thumbUrl && thumbUrl !== primaryUrl) {
+      setImgStage('thumb');
+    } else {
+      setImgStage('error');
+    }
+  }
+
   return (
-    <div className="w-[175px] shrink-0 overflow-hidden rounded-xl border border-[#0B84FF]/35 bg-black/45 shadow-[0_0_24px_rgba(11,132,255,0.16)] transition-colors hover:border-[#55F52F]/65 hover:shadow-[0_0_30px_rgba(85,245,47,0.26)]">
+    <div className="w-[228px] shrink-0 overflow-hidden rounded-xl border border-[#0B84FF]/35 bg-black/45 shadow-[0_0_24px_rgba(11,132,255,0.16)] transition-colors hover:border-[#55F52F]/65 hover:shadow-[0_0_30px_rgba(85,245,47,0.26)]">
       <div className="relative overflow-hidden bg-[#07101F]" style={{ aspectRatio: '9/16' }}>
-        {imgUrl && !imgErr ? (
+        {imgUrl && imgStage !== 'error' ? (
           <button type="button" onClick={() => onPreview(creative)} className="block h-full w-full">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={imgUrl} alt={creative.adName} className="h-full w-full object-cover" onError={() => setImgErr(true)} />
+            <img src={imgUrl} alt={creative.adName} className="h-full w-full object-cover" onError={handleImgError} />
             {creative.videoUrl && <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/20 pointer-events-none" />}
           </button>
+        ) : creative.permalink ? (
+          <a
+            href={creative.permalink}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/40 hover:bg-black/60 transition-colors"
+            title="Ver publicação original"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <ExternalLink className="h-7 w-7 text-white/60" />
+            <span className="text-[10px] font-semibold text-white/50">Ver publicação</span>
+          </a>
         ) : <ImageIcon className="absolute inset-0 m-auto h-8 w-8 text-muted-foreground/30" />}
         {creative.videoUrl && (
           <span className="absolute left-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-black/70">
@@ -3223,6 +3738,20 @@ function CreativeCarouselCard({ creative, idx, sortBy, onPreview }: {
       </div>
       <div className="p-2.5 space-y-2">
         <p className="text-[11px] font-bold truncate">{creative.adName}</p>
+        {(creative.campaignName ?? creative.adSetName) && (
+          <div className="space-y-0.5">
+            {creative.campaignName && (
+              <p className="text-[9px] text-foreground/45 truncate" title={creative.campaignName}>
+                <span className="font-semibold text-foreground/60">Camp:</span> {creative.campaignName}
+              </p>
+            )}
+            {creative.adSetName && (
+              <p className="text-[9px] text-foreground/45 truncate" title={creative.adSetName}>
+                <span className="font-semibold text-foreground/60">Conj:</span> {creative.adSetName}
+              </p>
+            )}
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-1">
           {([
             { label: 'INVEST.', val: formatCurrencyBRL(creative.spend) },
@@ -3274,7 +3803,7 @@ function FbCard({ data }: { data: FacebookPageData }) {
       </div>
       <div className="relative">
         <p className="text-[10px] font-bold uppercase tracking-widest text-foreground/50 mb-0.5">Curtidas / Seguidores</p>
-        <p className="font-heading text-3xl leading-none font-normal mb-3" style={{ color: FB }}>{numK(data.fans)}</p>
+        <p className="font-heading text-xl leading-none font-normal mb-3" style={{ color: FB }}>{numK(data.fans)}</p>
         <div className="space-y-1.5 border-t border-white/10 pt-2">
           {data.fanAdds > 0 && <SocialMetricRow label="Novas curtidas no período" value={data.fanAdds} />}
           <SocialMetricRow label="Alcance" value={data.reach} />
@@ -3304,12 +3833,14 @@ function IgCard({ data }: { data: InstagramPageData }) {
       </div>
       <div className="relative">
         <p className="text-[10px] font-bold uppercase tracking-widest text-foreground/50 mb-0.5">Seguidores</p>
-        <p className="font-heading text-3xl leading-none font-normal mb-3" style={{ color: IG }}>{numK(data.followers)}</p>
+        <p className="font-heading text-xl leading-none font-normal mb-3" style={{ color: IG }}>{numK(data.followers)}</p>
         <div className="space-y-1.5 border-t border-white/10 pt-2">
           <SocialMetricRow label="Alcance" value={data.reach} />
-          <SocialMetricRow label="Impressões" value={data.impressions} />
+          <SocialMetricRow label="Visualizações" value={data.views} />
           <SocialMetricRow label="Visitas ao perfil" value={data.profileViews} />
           {data.websiteClicks > 0 && <SocialMetricRow label="Cliques no site" value={data.websiteClicks} />}
+          {data.accountsEngaged > 0 && <SocialMetricRow label="Contas engajadas" value={data.accountsEngaged} />}
+          {data.totalInteractions > 0 && <SocialMetricRow label="Interações" value={data.totalInteractions} />}
         </div>
       </div>
     </div>
@@ -3332,6 +3863,150 @@ function SocialPageCards({
       )}
       {facebook && <FbCard data={facebook} />}
       {instagram && <IgCard data={instagram} />}
+    </div>
+  );
+}
+
+// ── IgTopPostsCard ────────────────────────────────────────────────────────────
+import type { IgPost } from '@/app/api/meta/ig-posts/route';
+
+type IgSortKey = 'reach' | 'views' | 'likes' | 'saves' | 'comments';
+
+const IG_SORT_OPTIONS: { value: IgSortKey; label: string }[] = [
+  { value: 'reach',    label: 'Alcance' },
+  { value: 'views',   label: 'Visualizações' },
+  { value: 'likes',   label: 'Curtidas' },
+  { value: 'saves',   label: 'Salvamentos' },
+  { value: 'comments',label: 'Comentários' },
+];
+
+function IgTopPostsCard({ posts, loading, sortBy, onSortChange }: {
+  posts: IgPost[];
+  loading: boolean;
+  sortBy: IgSortKey;
+  onSortChange: (s: IgSortKey) => void;
+}) {
+  function fmt(n: number) { return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n); }
+  function relDate(ts: string) {
+    const d = new Date(ts);
+    const diffDays = Math.floor((Date.now() - d.getTime()) / 86400000);
+    if (diffDays === 0) return 'hoje';
+    if (diffDays === 1) return '1d atrás';
+    if (diffDays < 7) return `${diffDays}d atrás`;
+    if (diffDays < 30) return `${Math.floor(diffDays / 7)}sem atrás`;
+    return `${Math.floor(diffDays / 30)}m atrás`;
+  }
+
+  const MEDIA_BADGE: Record<string, { label: string; color: string }> = {
+    REELS:          { label: 'REELS',     color: '#E1306C' },
+    VIDEO:          { label: 'VÍDEO',     color: '#833AB4' },
+    CAROUSEL_ALBUM: { label: 'CARROSSEL', color: '#F77737' },
+    IMAGE:          { label: 'FOTO',      color: '#405DE6' },
+  };
+
+  return (
+    <div className="rounded-xl border border-[#E1306C]/35 bg-black/35 p-4 shadow-[inset_0_0_30px_rgba(225,48,108,0.06),0_0_28px_rgba(225,48,108,0.14)] h-full flex flex-col">
+      <div className="shrink-0 flex flex-wrap items-center justify-between gap-3 mb-3">
+        <div className="flex items-center gap-2">
+          <svg viewBox="0 0 24 24" className="h-4 w-4 fill-[#E1306C]"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z" /></svg>
+          <p className="text-[11px] font-bold uppercase tracking-widest text-foreground/75">Top Postagens Instagram</p>
+          {loading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-foreground/55 mr-1">Ordenar por</span>
+          {IG_SORT_OPTIONS.map(opt => (
+            <button
+              key={opt.value}
+              onClick={() => onSortChange(opt.value)}
+              className={cn(
+                'px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors border',
+                sortBy === opt.value
+                  ? 'bg-[#E1306C] text-white border-[#E1306C] shadow-[0_0_10px_rgba(225,48,108,0.4)]'
+                  : 'text-muted-foreground border-border hover:text-foreground'
+              )}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center gap-2 flex-1 text-sm text-muted-foreground">
+          <RefreshCw className="h-4 w-4 animate-spin" /> Carregando postagens...
+        </div>
+      ) : posts.length === 0 ? (
+        <p className="flex-1 flex items-center justify-center text-sm text-muted-foreground">Nenhuma postagem encontrada no período.</p>
+      ) : (
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <div
+            className="grid gap-3"
+            style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }}
+          >
+            {posts.map((post, idx) => {
+              const badge = MEDIA_BADGE[post.mediaType] ?? MEDIA_BADGE.IMAGE;
+              const thumb = post.thumbnailUrl ?? post.mediaUrl;
+              const mainMetric = sortBy === 'views' ? Math.max(post.videoViews, post.reach)
+                : sortBy === 'likes' ? post.likes
+                : sortBy === 'saves' ? post.saves
+                : sortBy === 'comments' ? post.comments
+                : post.reach;
+              return (
+                <a
+                  key={post.id}
+                  href={post.permalink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="relative flex flex-col overflow-hidden rounded-xl border border-border bg-card/50 hover:border-[#E1306C]/50 transition-colors group"
+                >
+                  {/* Thumbnail */}
+                  <div className="relative bg-muted aspect-square overflow-hidden">
+                    {thumb ? (
+                      <img
+                        src={thumb}
+                        alt={post.caption?.slice(0, 60)}
+                        className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
+                      />
+                    ) : (
+                      <div className="h-full w-full flex items-center justify-center bg-muted/50">
+                        <ImageIcon className="h-8 w-8 text-muted-foreground/30" />
+                      </div>
+                    )}
+                    {/* Rank badge */}
+                    <div className="absolute top-1.5 left-1.5 h-5 w-5 rounded-full bg-black/70 flex items-center justify-center text-[9px] font-black text-white">
+                      {idx + 1}
+                    </div>
+                    {/* Media type badge */}
+                    <span
+                      className="absolute top-1.5 right-1.5 rounded px-1 py-0.5 text-[8px] font-black text-white"
+                      style={{ backgroundColor: `${badge.color}cc` }}
+                    >
+                      {badge.label}
+                    </span>
+                    {/* Main metric overlay */}
+                    <div className="absolute bottom-1.5 right-1.5 rounded-full px-1.5 py-0.5 text-[9px] font-black text-black bg-[#E1306C] shadow">
+                      {fmt(mainMetric)}
+                    </div>
+                  </div>
+                  {/* Info */}
+                  <div className="p-2 flex flex-col gap-1.5">
+                    {post.caption && (
+                      <p className="text-[10px] text-foreground/70 line-clamp-2 leading-tight">{post.caption}</p>
+                    )}
+                    <p className="text-[9px] text-muted-foreground">@{post.username} · {relDate(post.timestamp)}</p>
+                    <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
+                      <span className="text-[9px] text-muted-foreground">Alcance <span className="font-semibold text-foreground">{fmt(post.reach)}</span></span>
+                      <span className="text-[9px] text-muted-foreground">Curtidas <span className="font-semibold text-foreground">{fmt(post.likes)}</span></span>
+                      {post.videoViews > 0 && <span className="text-[9px] text-muted-foreground">Views <span className="font-semibold text-foreground">{fmt(post.videoViews)}</span></span>}
+                      <span className="text-[9px] text-muted-foreground">Salv. <span className="font-semibold text-foreground">{fmt(post.saves)}</span></span>
+                    </div>
+                  </div>
+                </a>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -3368,8 +4043,6 @@ export default function GeneralDashboard() {
   const [balancesLoading, setBalancesLoading] = useState(false);
   const [dataCacheAge, setDataCacheAge] = useState<number | null>(null);
   const editMode = true;
-  const [widgetOrder, setWidgetOrder] = useState<WidgetId[]>(DEFAULT_WIDGET_ORDER);
-  const [collapsedWidgets, setCollapsedWidgets] = useState<Set<WidgetId>>(new Set());
   const [aiInsights, setAiInsights] = useState<AiInsight[]>([]);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
@@ -3380,8 +4053,26 @@ export default function GeneralDashboard() {
   const [generalLayout, setGeneralLayout] = useState<RglLayout[]>(DEFAULT_GENERAL_LAYOUT);
   const [metaPanelsLayout, setMetaPanelsLayout] = useState<RglLayout[]>(DEFAULT_META_PANELS_LAYOUT);
   const [googlePanelsLayout, setGooglePanelsLayout] = useState<RglLayout[]>(DEFAULT_GOOGLE_PANELS_LAYOUT);
+  const [socialKpiLayout, setSocialKpiLayout] = useState<RglLayout[]>(DEFAULT_SOCIAL_KPI_LAYOUT);
   const [pageInsights, setPageInsights] = useState<PageInsightsResult[]>([]);
+  const [prevPageInsights, setPrevPageInsights] = useState<PageInsightsResult[]>([]);
   const [pageInsightsLoading, setPageInsightsLoading] = useState(false);
+  const [igPosts, setIgPosts] = useState<IgPost[]>([]);
+  const [igPostsLoading, setIgPostsLoading] = useState(false);
+  const [igSortBy, setIgSortBy] = useState<IgSortKey>('reach');
+  // Stable string key derived from selectedIds — used as useEffect dependency
+  const selectedKey = [...selectedIds].sort().join(',');
+  // Ref always points to the suffix currently in use (updated synchronously in load effect)
+  const currentLsSuffixRef = useRef('');
+  // Track last auto-resize key per panel group to avoid fighting user manual resizes within a session
+  const metaPanelsResizeKeyRef = useRef('');
+  const googlePanelsResizeKeyRef = useRef('');
+  const socialResizeKeyRef = useRef('');
+  // Track when each fetch has actually started (to ignore the initial mount where loading=false)
+  const campaignsFetchStartedRef = useRef('');
+  const creativesFetchStartedRef = useRef('');
+  const keywordsFetchStartedRef = useRef('');
+  const igPostsFetchStartedRef = useRef('');
   const [alertsCollapsed, setAlertsCollapsed] = useState(() => {
     if (typeof window === 'undefined') return false;
     return localStorage.getItem('dashboard:alerts:collapsed') === '1';
@@ -3395,6 +4086,23 @@ export default function GeneralDashboard() {
     });
   }
 
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set();
+    try {
+      const raw = localStorage.getItem('dashboard:sections:collapsed');
+      return raw ? new Set(JSON.parse(raw) as string[]) : new Set();
+    } catch { return new Set(); }
+  });
+
+  function toggleSection(id: string) {
+    setCollapsedSections(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      localStorage.setItem('dashboard:sections:collapsed', JSON.stringify([...next]));
+      return next;
+    });
+  }
+
   const sensors = useSensors(
     useSensor(PointerSensor),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -3403,10 +4111,12 @@ export default function GeneralDashboard() {
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
     if (over && active.id !== over.id) {
-      setWidgetOrder(order => {
-        const oldIndex = order.indexOf(active.id as WidgetId);
-        const newIndex = order.indexOf(over.id as WidgetId);
-        return arrayMove(order, oldIndex, newIndex);
+      setDashboardPrefs(prev => {
+        const order = prev.sectionOrder;
+        const oldIndex = order.indexOf(String(active.id));
+        const newIndex = order.indexOf(String(over.id));
+        if (oldIndex === -1 || newIndex === -1) return prev;
+        return { ...prev, sectionOrder: arrayMove(order, oldIndex, newIndex) };
       });
     }
   }
@@ -3432,14 +4142,6 @@ export default function GeneralDashboard() {
     };
   }
 
-  function toggleCollapse(id: WidgetId) {
-    setCollapsedWidgets(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  }
-
   function hideCard(id: DashboardCardId) {
     setDashboardPrefs(prev => ({
       ...prev,
@@ -3457,61 +4159,85 @@ export default function GeneralDashboard() {
     });
   }
 
-  // Load layout from localStorage
-  useEffect(() => {
-    try {
-      const order = localStorage.getItem(LS_ORDER);
-      if (order) {
-        const parsed = JSON.parse(order) as WidgetId[];
-        if (
-          Array.isArray(parsed) &&
-          parsed.every(id => DEFAULT_WIDGET_ORDER.includes(id)) &&
-          DEFAULT_WIDGET_ORDER.every(id => parsed.includes(id))
-        ) {
-          setWidgetOrder(parsed);
-        } else {
-          setWidgetOrder(DEFAULT_WIDGET_ORDER);
-        }
-      }
-      const collapsed = localStorage.getItem(LS_COLLAPSED);
-      if (collapsed) setCollapsedWidgets(new Set(JSON.parse(collapsed) as WidgetId[]));
-    } catch {}
-  }, []);
+  // ── Copy layout modal ──────────────────────────────────────────────────────
+  const [copyLayoutOpen, setCopyLayoutOpen] = useState(false);
+  const [copyLayoutDest, setCopyLayoutDest] = useState<Set<string>>(new Set());
 
-  useEffect(() => { localStorage.setItem(LS_ORDER, JSON.stringify(widgetOrder)); }, [widgetOrder]);
-  useEffect(() => { localStorage.setItem(LS_COLLAPSED, JSON.stringify([...collapsedWidgets])); }, [collapsedWidgets]);
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem(LS_DASHBOARD_PREFS);
-      setDashboardPrefs(stored ? mergeDashboardPrefs(JSON.parse(stored)) : DEFAULT_DASHBOARD_PREFS);
-    } catch {
-      setDashboardPrefs(DEFAULT_DASHBOARD_PREFS);
+  function openCopyLayout() {
+    setCopyLayoutDest(new Set());
+    setCopyLayoutOpen(true);
+  }
+
+  function copyLayoutToClients() {
+    const srcId = [...selectedIds][0];
+    const srcSuffix = `__${srcId}`;
+    const keysToClone = [
+      LS_RGL_LAYOUT,
+      LS_DASHBOARD_PREFS,
+    ];
+    for (const destId of copyLayoutDest) {
+      const destSuffix = `__${destId}`;
+      for (const key of keysToClone) {
+        const val = localStorage.getItem(key + srcSuffix);
+        if (val !== null) localStorage.setItem(key + destSuffix, val);
+      }
     }
-  }, []);
+    setCopyLayoutOpen(false);
+  }
+
+  // Load preferences from localStorage — re-runs whenever the selected client changes
   useEffect(() => {
-    localStorage.setItem(LS_DASHBOARD_PREFS, JSON.stringify(dashboardPrefs));
-  }, [dashboardPrefs]);
-  useEffect(() => {
+    if (selectedIds.size === 0) return;
+    const suffix = lsClientSuffix(selectedIds);
+    currentLsSuffixRef.current = suffix;
+
+    // Reset to defaults first so switching clients never leaks one client's state into another
+    setDashboardPrefs(DEFAULT_DASHBOARD_PREFS);
+    setMetaKpiLayout(DEFAULT_META_KPI_LAYOUT);
+    setGoogleKpiLayout(DEFAULT_GOOGLE_KPI_LAYOUT);
+    setGeneralLayout(DEFAULT_GENERAL_LAYOUT);
+    setMetaPanelsLayout(DEFAULT_META_PANELS_LAYOUT);
+    setGooglePanelsLayout(DEFAULT_GOOGLE_PANELS_LAYOUT);
+    setSocialKpiLayout(DEFAULT_SOCIAL_KPI_LAYOUT);
+
+
     try {
-      const stored = localStorage.getItem(LS_RGL_LAYOUT);
+      const stored = localStorage.getItem(LS_DASHBOARD_PREFS + suffix);
+      if (stored) setDashboardPrefs(mergeDashboardPrefs(JSON.parse(stored)));
+    } catch {}
+
+    try {
+      const stored = localStorage.getItem(LS_RGL_LAYOUT + suffix);
       if (stored) {
-        const parsed = JSON.parse(stored) as { meta?: RglLayout[]; google?: RglLayout[]; general?: RglLayout[]; metaPanels?: RglLayout[]; googlePanels?: RglLayout[] };
+        const parsed = JSON.parse(stored) as { meta?: RglLayout[]; google?: RglLayout[]; general?: RglLayout[]; metaPanels?: RglLayout[]; googlePanels?: RglLayout[]; social?: RglLayout[] };
         const merge = (setter: React.Dispatch<React.SetStateAction<RglLayout[]>>, saved?: RglLayout[]) => {
-          if (saved) setter(prev => prev.map(item => { const s = saved.find(l => l.i === item.i); return s ? { ...item, x: s.x, y: s.y, w: s.w, h: s.h } : item; }));
+          if (saved) setter(prev => prev.map(item => {
+            const s = saved.find(l => l.i === item.i);
+            return s ? { ...item, x: s.x, y: s.y, w: s.w, h: s.h } : item;
+          }));
         };
         merge(setMetaKpiLayout, parsed.meta);
         merge(setGoogleKpiLayout, parsed.google);
         merge(setGeneralLayout, parsed.general);
         merge(setMetaPanelsLayout, parsed.metaPanels);
         merge(setGooglePanelsLayout, parsed.googlePanels);
+        merge(setSocialKpiLayout, parsed.social);
       }
     } catch {}
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedKey]);
+
+  // Save — always write to the key that was active when this client was loaded
   useEffect(() => {
+    if (!currentLsSuffixRef.current && selectedIds.size === 0) return;
+    localStorage.setItem(LS_DASHBOARD_PREFS + currentLsSuffixRef.current, JSON.stringify(dashboardPrefs));
+  }, [dashboardPrefs]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!currentLsSuffixRef.current && selectedIds.size === 0) return;
     try {
-      localStorage.setItem(LS_RGL_LAYOUT, JSON.stringify({ meta: metaKpiLayout, google: googleKpiLayout, general: generalLayout, metaPanels: metaPanelsLayout, googlePanels: googlePanelsLayout }));
+      localStorage.setItem(LS_RGL_LAYOUT + currentLsSuffixRef.current, JSON.stringify({ meta: metaKpiLayout, google: googleKpiLayout, general: generalLayout, metaPanels: metaPanelsLayout, googlePanels: googlePanelsLayout, social: socialKpiLayout }));
     } catch {}
-  }, [metaKpiLayout, googleKpiLayout, generalLayout, metaPanelsLayout, googlePanelsLayout]);
+  }, [metaKpiLayout, googleKpiLayout, generalLayout, metaPanelsLayout, googlePanelsLayout, socialKpiLayout]); // eslint-disable-line react-hooks/exhaustive-deps
   // customizerOpen available to all users
 
   // Initialize: pre-select from ?client=ID param, otherwise start empty (force client picker)
@@ -3758,23 +4484,104 @@ export default function GeneralDashboard() {
     let cancelled = false;
     setPageInsightsLoading(true);
     setPageInsights([]);
+    setPrevPageInsights([]);
     if (selectedIds.size === 0 || !customReady) {
       setPageInsightsLoading(false);
       return () => { cancelled = true; };
     }
     const { from, to } = periodToDateRange(period, customDateFrom, customDateTo);
+    const durationMs = to.getTime() - from.getTime() + 86400000;
+    const prevTo = new Date(from.getTime() - 86400000);
+    const prevFrom = new Date(prevTo.getTime() - durationMs + 86400000);
     const params = new URLSearchParams({
       clientIds: [...selectedIds].join(','),
       from: from.toISOString().split('T')[0],
       to: to.toISOString().split('T')[0],
     });
-    fetch(`/api/meta/page-insights?${params}`)
-      .then(r => r.ok ? r.json() as Promise<PageInsightsResult[]> : [])
-      .then(data => { if (!cancelled) setPageInsights(data); })
-      .catch(() => { if (!cancelled) setPageInsights([]); })
-      .finally(() => { if (!cancelled) setPageInsightsLoading(false); });
+    const prevParams = new URLSearchParams({
+      clientIds: [...selectedIds].join(','),
+      from: prevFrom.toISOString().split('T')[0],
+      to: prevTo.toISOString().split('T')[0],
+    });
+    Promise.all([
+      fetch(`/api/meta/page-insights?${params}`).then(r => r.ok ? r.json() as Promise<PageInsightsResult[]> : []),
+      fetch(`/api/meta/page-insights?${prevParams}`).then(r => r.ok ? r.json() as Promise<PageInsightsResult[]> : []),
+    ]).then(([cur, prev]) => {
+      console.log('[page-insights] current', cur);
+      console.log('[page-insights] prev', prev);
+      if (!cancelled) { setPageInsights(cur); setPrevPageInsights(prev); }
+    }).catch(() => {
+      if (!cancelled) { setPageInsights([]); setPrevPageInsights([]); }
+    }).finally(() => { if (!cancelled) setPageInsightsLoading(false); });
     return () => { cancelled = true; };
   }, [selectedIds, period, customDateFrom, customDateTo, customReady]);
+
+  // Fetch Instagram top posts
+  useEffect(() => {
+    if (selectedIds.size === 0 || !customReady) { setIgPosts([]); return; }
+    setIgPostsLoading(true);
+    const params = buildPeriodParams({ clientIds: [...selectedIds].join(','), limit: '24', sortBy: igSortBy });
+    fetch(`/api/meta/ig-posts?${params}`)
+      .then(r => r.ok ? r.json() as Promise<IgPost[]> : [])
+      .then(data => setIgPosts(data))
+      .catch(() => setIgPosts([]))
+      .finally(() => setIgPostsLoading(false));
+  }, [selectedIds, period, customDateFrom, customDateTo, customReady, igSortBy]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Auto-fit panel heights to content ────────────────────────────────────
+  // Each effect fires once per (client × period) context. User can expand manually within that session;
+  // switching client or period resets to content-snug height.
+  // The "FetchStarted" refs guard against the initial-mount false-positive where loading=false
+  // but data hasn't been fetched yet — we only auto-resize after a real fetch cycle completes.
+  useEffect(() => {
+    const key = `${selectedKey}:${period}:${customDateFrom}:${customDateTo}`;
+    if (campaignsLoading) campaignsFetchStartedRef.current = key;
+    if (creativesLoading) creativesFetchStartedRef.current = key;
+    if (campaignsLoading || creativesLoading || selectedIds.size === 0) return;
+    if (campaignsFetchStartedRef.current !== key || creativesFetchStartedRef.current !== key) return;
+    if (metaPanelsResizeKeyRef.current === key) return;
+    metaPanelsResizeKeyRef.current = key;
+    const mCount = campaigns.filter(c => c.platform === 'meta').length;
+    const cCount = creatives.length;
+    setMetaPanelsLayout(prev => prev.map(item => {
+      const minH = item.minH ?? 2;
+      if (item.i === 'meta-campaigns')        return { ...item, h: tableAutoH(mCount, minH) };
+      if (item.i === 'meta-creative-preview') return { ...item, h: creativesGridAutoH(cCount, minH) };
+      return item;
+    }));
+  }, [campaignsLoading, creativesLoading]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const key = `${selectedKey}:${period}:${customDateFrom}:${customDateTo}`;
+    if (campaignsLoading) campaignsFetchStartedRef.current = key;
+    if (keywordsLoading) keywordsFetchStartedRef.current = key;
+    if (campaignsLoading || keywordsLoading || selectedIds.size === 0) return;
+    if (campaignsFetchStartedRef.current !== key || keywordsFetchStartedRef.current !== key) return;
+    if (googlePanelsResizeKeyRef.current === key) return;
+    googlePanelsResizeKeyRef.current = key;
+    const gCount = campaigns.filter(c => c.platform === 'google').length;
+    const kCount = keywords.length;
+    setGooglePanelsLayout(prev => prev.map(item => {
+      const minH = item.minH ?? 2;
+      if (item.i === 'google-campaigns') return { ...item, h: tableAutoH(gCount, minH) };
+      if (item.i === 'google-keywords')  return { ...item, h: kwAutoH(kCount, minH) };
+      return item;
+    }));
+  }, [campaignsLoading, keywordsLoading]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const key = `${selectedKey}:${period}:${customDateFrom}:${customDateTo}`;
+    if (igPostsLoading) igPostsFetchStartedRef.current = key;
+    if (igPostsLoading || selectedIds.size === 0) return;
+    if (igPostsFetchStartedRef.current !== key) return;
+    if (socialResizeKeyRef.current === key) return;
+    socialResizeKeyRef.current = key;
+    setSocialKpiLayout(prev => prev.map(item => {
+      const minH = item.minH ?? 3;
+      if (item.i === 'social-ig-top-posts') return { ...item, h: igPostsGridAutoH(igPosts.length, minH) };
+      return item;
+    }));
+  }, [igPostsLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Aggregate metrics ────────────────────────────────────────────────────
   let metaLeads = 0, metaFormLeads = 0, metaSiteLeads = 0, metaConversations = 0, metaSpend = 0, metaReach = 0, metaImpressions = 0, metaClicks = 0;
@@ -3844,6 +4651,10 @@ export default function GeneralDashboard() {
     dailySeries.map((row) => row.google?.impressions ?? 0),
     100,
   );
+  const googleCpcSeries = ratioSeries(
+    dailySeries.map((row) => row.google?.cost ?? 0),
+    dailySeries.map((row) => row.google?.clicks ?? 0),
+  );
   const revenueSeries = cumulative(dailySeries.map((row) => row.crm?.revenue ?? 0));
   const totalLeadsSeries = dailySeries.map((_, index) => (metaLeadsSeries[index] ?? 0) + (googleConversionsSeries[index] ?? 0));
   const totalSpendSeries = dailySeries.map((_, index) => (metaSpendSeries[index] ?? 0) + (googleCostSeries[index] ?? 0));
@@ -3895,7 +4706,6 @@ export default function GeneralDashboard() {
   const avgCrmTicket = crmSales > 0 ? revenue / crmSales : 0;
   const plannedSalesPartial = autoPartial(plannedSalesTotal, period);
   const effectiveSalesGoal = plannedSalesPartial > 0 ? plannedSalesPartial : plannedSalesTotal;
-  const hasCrmData = metricsRevenue > 0 || crmSales > 0 || crmLeads > 0;
 
   const revenuePartial = autoPartial(plannedRevenue, period);
   const leadsPartial = autoPartial(leadsGoal, period);
@@ -4065,9 +4875,87 @@ export default function GeneralDashboard() {
         />
       )}
 
+      {/* Copy layout modal */}
+      {copyLayoutOpen && selectedIds.size === 1 && (() => {
+        const srcClient = clients.find(c => selectedIds.has(c.id));
+        const otherClients = clients.filter(c => !selectedIds.has(c.id));
+        const allSelected = copyLayoutDest.size === otherClients.length;
+        return createPortal(
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+            <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md flex flex-col max-h-[80vh]">
+              <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-border shrink-0">
+                <div>
+                  <h2 className="text-sm font-bold">Copiar layout</h2>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    De <span className="font-semibold text-foreground">{srcClient?.name}</span> para:
+                  </p>
+                </div>
+                <button onClick={() => setCopyLayoutOpen(false)} className="text-muted-foreground hover:text-foreground p-1">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="px-5 pt-3 pb-2 border-b border-border shrink-0 flex items-center justify-between gap-2">
+                <span className="text-[11px] text-muted-foreground">{copyLayoutDest.size} de {otherClients.length} selecionado{copyLayoutDest.size !== 1 ? 's' : ''}</span>
+                <button
+                  onClick={() => setCopyLayoutDest(allSelected ? new Set() : new Set(otherClients.map(c => c.id)))}
+                  className="text-[11px] font-semibold text-primary hover:underline"
+                >
+                  {allSelected ? 'Desmarcar todos' : 'Selecionar todos'}
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto px-5 py-3 space-y-1 min-h-0">
+                {otherClients.map(c => {
+                  const checked = copyLayoutDest.has(c.id);
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => setCopyLayoutDest(prev => {
+                        const next = new Set(prev);
+                        if (next.has(c.id)) next.delete(c.id); else next.add(c.id);
+                        return next;
+                      })}
+                      className={cn(
+                        'w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition-colors',
+                        checked ? 'bg-primary/10 border border-primary/30' : 'hover:bg-muted/40 border border-transparent'
+                      )}
+                    >
+                      <div className={cn('h-4 w-4 rounded border flex items-center justify-center shrink-0', checked ? 'bg-primary border-primary' : 'border-border')}>
+                        {checked && <Check className="h-3 w-3 text-black" />}
+                      </div>
+                      <ClientAvatar clientId={c.id} name={c.name} size="sm" />
+                      <span className="font-medium truncate">{c.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="px-5 pb-5 pt-3 border-t border-border shrink-0 flex gap-2 justify-end">
+                <button
+                  onClick={() => setCopyLayoutOpen(false)}
+                  className="px-4 py-2 rounded-xl border border-border text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={copyLayoutToClients}
+                  disabled={copyLayoutDest.size === 0}
+                  className="px-4 py-2 rounded-xl bg-primary text-black text-sm font-bold hover:bg-primary/90 transition-colors disabled:opacity-40"
+                >
+                  Copiar para {copyLayoutDest.size > 0 ? `${copyLayoutDest.size} cliente${copyLayoutDest.size !== 1 ? 's' : ''}` : 'clientes'}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        );
+      })()}
+
       {/* UNIFIED TOP BAR */}
-      <div className="sticky top-0 z-20 -mx-6 -mt-6 bg-background/95 backdrop-blur-sm border-b border-border">
-        <div className="flex items-center gap-2 px-6 h-20">
+      <div className="sticky top-0 z-20 -mx-6 bg-background/95 backdrop-blur-sm border-b border-border">
+        <div className="flex items-center gap-1.5 px-4 h-14 overflow-x-auto">
           <BackButton />
           {/* Client selector */}
           <ClientSelector clients={clients} selected={selectedIds} onChange={setSelectedIds} />
@@ -4105,7 +4993,7 @@ export default function GeneralDashboard() {
           <div className="flex-1" />
 
           {/* Search */}
-          <div className="relative w-52">
+          <div className="relative hidden lg:block w-44 xl:w-52">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
             <Input
               type="search"
@@ -4122,9 +5010,33 @@ export default function GeneralDashboard() {
             className="flex items-center gap-1.5 rounded-xl border border-violet-500/40 bg-violet-500/15 px-3 py-2 text-xs font-semibold text-violet-400 hover:bg-violet-500/25 transition-colors disabled:opacity-50 whitespace-nowrap"
           >
             {aiLoading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-            {aiLoading ? 'Analisando...' : 'Analisar com IA'}
+            <span className="hidden sm:inline">{aiLoading ? 'Analisando...' : 'Analisar com IA'}</span>
           </button>
 
+
+          {/* Copy layout */}
+          {selectedIds.size === 1 && (
+            <button
+              type="button"
+              onClick={openCopyLayout}
+              className="flex items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors whitespace-nowrap"
+              title="Copiar layout para outros clientes"
+            >
+              <LayoutTemplate className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Copiar layout</span>
+            </button>
+          )}
+
+          {/* Metric customizer */}
+          <button
+            type="button"
+            onClick={() => setCustomizerOpen(true)}
+            className="flex items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors whitespace-nowrap"
+            title="Configurar métricas visíveis"
+          >
+            <Settings2 className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Métricas</span>
+          </button>
 
           {/* Theme + bell + user */}
           <ThemeToggle />
@@ -4133,7 +5045,7 @@ export default function GeneralDashboard() {
             <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-primary" />
           </button>
           <div className="flex items-center gap-2.5 border-l border-border pl-3">
-            <div className="flex flex-col items-end leading-none gap-0.5">
+            <div className="hidden md:flex flex-col items-end leading-none gap-0.5">
               <span className="text-sm font-medium">{session?.name ?? 'Usuário'}</span>
               <span className="text-[11px] text-muted-foreground">{session?.role ?? ''}</span>
             </div>
@@ -4161,7 +5073,7 @@ export default function GeneralDashboard() {
       {selectedIds.size === 0 && clients.length > 0 && (
         <div className="flex flex-col items-center justify-center py-16 gap-8">
           <div className="text-center">
-            <h2 className="font-heading font-normal text-3xl uppercase tracking-wide text-foreground">Escolha um cliente</h2>
+            <h2 className="font-heading font-normal text-xl uppercase tracking-wide text-foreground">Escolha um cliente</h2>
             <p className="mt-2 text-sm text-muted-foreground">Selecione para abrir o dashboard</p>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-w-3xl w-full">
@@ -4232,112 +5144,78 @@ export default function GeneralDashboard() {
         </div>
       )}
 
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+      <SortableContext items={dashboardPrefs.sectionOrder} strategy={verticalListSortingStrategy}>
+      <div className="flex flex-col gap-6">
+
       {/* 1. MÉTRICAS GERAIS */}
-      <section className="relative overflow-hidden rounded-2xl border border-[#55F52F]/55 bg-[#050C0A] p-5 shadow-[0_0_56px_rgba(85,245,47,0.22)]">
+      <SortableSection id="geral" editMode={editMode} orderIndex={dashboardPrefs.sectionOrder.indexOf('geral')}>
+      {CARD_GROUPS[0].ids.some(id => dashboardPrefs.cards[id]?.visible !== false) && <section className="relative overflow-hidden rounded-2xl border border-[#55F52F]/55 bg-[#050C0A] p-5 shadow-[0_0_56px_rgba(85,245,47,0.22)]">
         <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(85,245,47,0.16),transparent_38%),radial-gradient(circle_at_92%_8%,rgba(85,245,47,0.28),transparent_34%)]" />
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,#55F52F,transparent)]" />
-        <div className="relative mb-4 flex items-center gap-3">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#55F52F]/70 bg-[#55F52F]/25 text-primary shadow-[0_0_24px_rgba(85,245,47,0.65)]">
-            <LayoutDashboard className="h-[18px] w-[18px]" />
-          </span>
-          <div>
-            <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">Métricas Gerais</h2>
-            <p className="text-[11px] text-foreground/60">Consolidado do período antes da leitura por canal.</p>
+        <div className="relative mb-4 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#55F52F]/70 bg-[#55F52F]/25 text-primary shadow-[0_0_24px_rgba(85,245,47,0.65)]">
+              <LayoutDashboard className="h-[18px] w-[18px]" />
+            </span>
+            <div>
+              <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">Métricas Gerais</h2>
+              <p className="text-[11px] text-foreground/60">Consolidado do período antes da leitura por canal.</p>
+            </div>
           </div>
+          <button type="button" onClick={() => toggleSection('geral')} className="flex items-center gap-1 rounded-lg border border-[#55F52F]/30 bg-[#55F52F]/10 px-2.5 py-1.5 text-[11px] font-semibold text-[#55F52F]/80 hover:bg-[#55F52F]/20 transition-colors">
+            <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', collapsedSections.has('geral') && '-rotate-90')} />
+            {collapsedSections.has('geral') ? 'Expandir' : 'Recolher'}
+          </button>
         </div>
-        {(() => {
+        {!collapsedSections.has('geral') && (() => {
           const generalCards: Record<string, ReactNode> = {
             'general-revenue': <TargetSummaryCard title="Faturamento" value={revenue} partial={effectiveRevenueGoal} target={plannedRevenue} format="currency" accent="#22c55e" icon={DollarSign} />,
             'general-leads':   <TargetSummaryCard title="Leads" value={totalLeads} partial={effectiveLeadsGoal} target={leadsGoal} format="number" accent="#22c55e" icon={Users} />,
             'general-roi':     <KpiCard title="ROI" value={roi} prevValue={prevRoi > 0 ? prevRoi : undefined} goalValue={roiGoal > 0 ? roiGoal : undefined} format="times" icon={TrendingUp} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} chart={dashboardPrefs.cards['general-roi'].chart} series={seriesOrPacing(roiSeries, roi)} />,
             'general-cpl':     <KpiCard title="CPL Geral" value={totalCostPerLead} prevValue={prevCpl > 0 ? prevCpl : undefined} goalValue={cplGoal > 0 ? cplGoal : undefined} format="currency" icon={Tag} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} inverseGoal inverseChange chart={dashboardPrefs.cards['general-cpl'].chart} series={seriesOrPacing(cplSeries, totalCostPerLead)} />,
             'general-ctr':     <KpiCard title="CTR Geral" value={avgCtr} format="percent" icon={MousePointerClick} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} chart={dashboardPrefs.cards['general-ctr'].chart} series={seriesOrPacing(avgCtrSeries, avgCtr)} />,
-            'general-spend':   <KpiCard title="Valor Gasto" value={totalSpend} format="currency" icon={CreditCard} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} chart={dashboardPrefs.cards['general-spend'].chart} series={seriesOrPacing(totalSpendSeries, totalSpend)} />,
+            'general-spend':   <KpiCard title="Valor Investido" value={totalSpend} format="currency" icon={CreditCard} iconColor="#e2e8f0" iconBg="#e2e8f0" loading={metricsLoading} chart={dashboardPrefs.cards['general-spend'].chart} series={seriesOrPacing(totalSpendSeries, totalSpend)} />,
+            'general-crm': <CrmResultCard
+              revenue={revenue}
+              revenueGoal={plannedRevenue}
+              revenuePartial={effectiveRevenueGoal}
+              sales={crmSales}
+              salesGoal={plannedSalesTotal}
+              salesPartial={effectiveSalesGoal}
+              ticket={avgCrmTicket}
+            />,
             'general-funnel':
-            <div className="flex h-full min-h-[680px] flex-col rounded-xl border border-[#55F52F]/35 bg-black/35 p-4 shadow-[inset_0_0_30px_rgba(85,245,47,0.08),0_0_28px_rgba(85,245,47,0.14)] xl:min-h-[820px]">
-              <p className="text-sm font-bold uppercase tracking-wider text-foreground">Funil de Performance</p>
-              <p className="mt-0.5 text-[11px] text-foreground/60">Período: {PERIODS.find(p => p.value === period)?.label ?? period}</p>
-              {(() => {
-                const firstId = [...selectedIds][0];
-                const clientPlanning = firstId ? (planningsByClient[firstId] ?? readPlanningFromStorage(firstId)) : DEFAULT_PLANNING;
-                const stages = clientPlanning.stages.length >= 2 ? clientPlanning.stages : DEFAULT_PLANNING.stages;
-                const crmValues = [
-                  totalLeads,
-                  funnelCounts[FUNNEL_ORDER[0]] ?? 0,
-                  funnelCounts[FUNNEL_ORDER[1]] ?? 0,
-                  funnelCounts[FUNNEL_ORDER[2]] ?? 0,
-                  funnelCounts[FUNNEL_ORDER[3]] ?? 0,
-                ];
-                const funnelRows: { label: string; value: number }[] = [
-                  { label: 'Visitantes', value: (metaReach || metaImpressions) + googleImpressions },
-                  { label: 'Leads', value: totalLeads },
-                  ...stages.slice(1).map((s, i) => ({ label: s.name.replace(/^\d+º\s*—\s*/, '').replace(/\s*\(.+\)/, ''), value: crmValues[i + 1] ?? 0 })),
-                ];
-                const maxVal = funnelRows[0]?.value || 1;
-                const FUNNEL_COLORS = ['#0EA5E9', '#7C3AED', '#EC4899', '#F97316', '#22C55E'];
-                const funnelHeight = 62;
-                const funnelGap = 10;
-                const funnelTop = 26;
-                const funnelWidth = 320;
-                const funnelCenter = funnelWidth / 2;
-                return (
-                  <div className="mt-4 grid flex-1 items-stretch gap-5">
-                    <div className="relative min-h-[620px] rounded-xl border border-white/15 bg-black/45 p-4 shadow-[inset_0_0_32px_rgba(14,165,233,0.12)]">
-                      <svg viewBox="0 0 320 410" className="h-full w-full overflow-visible" role="img" aria-label="Funil de vendas">
-                        <defs>
-                          <filter id="dashboard-funnel-glow" x="-30%" y="-30%" width="160%" height="160%">
-                            <feGaussianBlur stdDeviation="3" result="blur" />
-                            <feMerge>
-                              <feMergeNode in="blur" />
-                              <feMergeNode in="SourceGraphic" />
-                            </feMerge>
-                          </filter>
-                        </defs>
-                        {funnelRows.slice(0, 5).map((row, i) => {
-                          const pct = maxVal > 0 ? (row.value / maxVal) * 100 : 0;
-                          const topRatio = Math.max(0.28, 1 - i * 0.14);
-                          const bottomRatio = Math.max(0.22, 1 - (i + 1) * 0.14);
-                          const topWidth = funnelWidth * topRatio;
-                          const bottomWidth = funnelWidth * bottomRatio;
-                          const y = funnelTop + i * (funnelHeight + funnelGap);
-                          const color = FUNNEL_COLORS[i % FUNNEL_COLORS.length];
-                          const d = [
-                            `M ${funnelCenter - topWidth / 2} ${y}`,
-                            `L ${funnelCenter + topWidth / 2} ${y}`,
-                            `L ${funnelCenter + bottomWidth / 2} ${y + funnelHeight}`,
-                            `L ${funnelCenter - bottomWidth / 2} ${y + funnelHeight}`,
-                            'Z',
-                          ].join(' ');
-                          return (
-                            <g key={row.label} filter="url(#dashboard-funnel-glow)">
-                              <path d={d} fill={color} opacity={0.92} />
-                              <text
-                                x={funnelCenter}
-                                y={y + 25}
-                                textAnchor="middle"
-                                className="fill-white text-[13px] font-black uppercase tracking-wide"
-                                style={{ paintOrder: 'stroke', stroke: 'rgba(0,0,0,0.7)', strokeWidth: 4 }}
-                              >
-                                {row.label}
-                              </text>
-                              <text
-                                x={funnelCenter}
-                                y={y + 46}
-                                textAnchor="middle"
-                                className="fill-white text-[12px] font-bold"
-                                style={{ paintOrder: 'stroke', stroke: 'rgba(0,0,0,0.72)', strokeWidth: 4 }}
-                              >
-                                {row.value.toLocaleString('pt-BR')} • {pct.toFixed(2)}%
-                              </text>
-                            </g>
-                          );
-                        })}
-                      </svg>
-                    </div>
-                  </div>
-                );
-              })()}
-            </div>,
+            (() => {
+              const crmValues = [
+                totalLeads,
+                funnelCounts[FUNNEL_ORDER[0]] ?? 0,
+                funnelCounts[FUNNEL_ORDER[1]] ?? 0,
+                funnelCounts[FUNNEL_ORDER[2]] ?? 0,
+                funnelCounts[FUNNEL_ORDER[3]] ?? 0,
+              ];
+              const labels = ['VISITANTES', 'LEADS', 'QUALIFICADOS', 'AGENDAMENTOS', 'COMPARECIMENTOS'];
+              const values = [
+                Math.max((metaReach || metaImpressions) + googleImpressions, totalLeads),
+                totalLeads,
+                ...crmValues.slice(1),
+              ];
+              const colors = ['#14B8FF', '#9B5CFF', '#F03A9C', '#FF7A00', '#35E84B'];
+              const icons = [Users, UserPlus, CheckCircle2, Calendar, Users];
+              const rows = labels.slice(0, 5).map((label, index) => ({
+                label,
+                value: values[index] ?? 0,
+                color: colors[index],
+                Icon: icons[index],
+              }));
+
+              return (
+                <DashboardPerformanceFunnel
+                  periodLabel={PERIODS.find(p => p.value === period)?.label ?? period}
+                  rows={rows}
+                />
+              );
+            })(),
           };
           const visibleLayout = generalLayout.filter(l => dashboardPrefs.cards[l.i as DashboardCardId]?.visible !== false);
           return (
@@ -4364,23 +5242,12 @@ export default function GeneralDashboard() {
           );
         })()}
 
-        {hasCrmData && (
-          <div className="relative mt-4">
-            <CrmResultCard
-              revenue={revenue}
-              revenueGoal={plannedRevenue}
-              revenuePartial={effectiveRevenueGoal}
-              sales={crmSales}
-              salesGoal={plannedSalesTotal}
-              salesPartial={effectiveSalesGoal}
-              ticket={avgCrmTicket}
-            />
-          </div>
-        )}
-      </section>
+      </section>}
+      </SortableSection>
 
       {/* 2. META ADS */}
-      <section className="relative overflow-hidden rounded-2xl border border-[#0B84FF]/70 bg-[#050A16] p-5 shadow-[0_0_64px_rgba(11,132,255,0.28)]">
+      <SortableSection id="meta" editMode={editMode} orderIndex={dashboardPrefs.sectionOrder.indexOf('meta')}>
+      {CARD_GROUPS[1].ids.some(id => dashboardPrefs.cards[id]?.visible !== false) && <section className="relative overflow-hidden rounded-2xl border border-[#0B84FF]/70 bg-[#050A16] p-5 shadow-[0_0_64px_rgba(11,132,255,0.28)]">
         <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(11,132,255,0.20),transparent_42%),radial-gradient(circle_at_92%_0%,rgba(0,194,255,0.30),transparent_36%)]" />
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,#00C2FF,#0B84FF,transparent)]" />
         <div className="relative mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -4392,19 +5259,25 @@ export default function GeneralDashboard() {
               Meta Ads
             </h2>
           </div>
-          <p className="text-[11px] text-foreground/60">{metaFormLeads.toLocaleString('pt-BR')} formulários + {metaConversations.toLocaleString('pt-BR')} conversas no período</p>
+          <div className="flex items-center gap-3">
+            <p className="text-[11px] text-foreground/60">{metaFormLeads.toLocaleString('pt-BR')} formulários + {metaConversations.toLocaleString('pt-BR')} conversas no período</p>
+            <button type="button" onClick={() => toggleSection('meta')} className="flex items-center gap-1 rounded-lg border border-[#0B84FF]/30 bg-[#0B84FF]/10 px-2.5 py-1.5 text-[11px] font-semibold text-[#0B84FF]/80 hover:bg-[#0B84FF]/20 transition-colors whitespace-nowrap">
+              <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', collapsedSections.has('meta') && '-rotate-90')} />
+              {collapsedSections.has('meta') ? 'Expandir' : 'Recolher'}
+            </button>
+          </div>
         </div>
 
-        {(() => {
+        {!collapsedSections.has('meta') && (() => {
           const metaCards: Record<string, ReactNode> = {
             'meta-reach':            <KpiCard title="Alcance Meta" value={metaReach} format="number" icon={Users} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} chart={dashboardPrefs.cards['meta-reach'].chart} series={seriesOrPacing(metaReachSeries, metaReach)} />,
             'meta-impressions':      <KpiCard title="Impressões Meta" value={metaImpressions} format="number" icon={BarChart3} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} chart={dashboardPrefs.cards['meta-impressions'].chart} series={seriesOrPacing(metaImpressionsSeries, metaImpressions)} />,
             'meta-leads':            <KpiCard title="Leads Meta Ads" value={metaLeads} prevValue={prevMetaLeads > 0 ? prevMetaLeads : undefined} format="number" icon={Target} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['meta-leads'].chart} series={seriesOrPacing(metaLeadsSeries, metaLeads)} />,
             'meta-cpl':              <KpiCard title="CPL Meta Ads" value={avgCpl} format="currency" icon={Zap} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} inverseGoal inverseChange logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['meta-cpl'].chart} series={seriesOrPacing(metaCplSeries, avgCpl)} />,
-            'meta-spend':            <KpiCard title="Valor Gasto Meta" value={metaSpend} format="currency" icon={Wallet} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['meta-spend'].chart} series={seriesOrPacing(metaSpendSeries, metaSpend)} />,
+            'meta-spend':            <KpiCard title="Valor Investido Meta" value={metaSpend} format="currency" icon={Wallet} iconColor="#e2e8f0" iconBg="#e2e8f0" loading={metricsLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['meta-spend'].chart} series={seriesOrPacing(metaSpendSeries, metaSpend)} />,
             'meta-ctr':              <KpiCard title="CTR Meta Ads" value={metaCtr} format="percent" icon={MousePointerClick} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} chart={dashboardPrefs.cards['meta-ctr'].chart} series={seriesOrPacing(metaCtrSeries, metaCtr)} />,
-            'meta-total-spend':      <KpiCard title="Total Gasto Meta" value={metaCampaignSpend || metaSpend} format="currency" icon={CreditCard} iconColor="#0668E1" iconBg="#0668E1" loading={campaignsLoading || metricsLoading} chart={dashboardPrefs.cards['meta-total-spend'].chart} series={seriesOrPacing(metaSpendSeries, metaCampaignSpend || metaSpend)} />,
-            'meta-balance':          <KpiCard title="Saldo da Conta Meta" value={metaBalance} format="currency" icon={PiggyBank} iconColor="#0668E1" iconBg="#0668E1" loading={balancesLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['meta-balance'].chart} series={pacingSeries(metaBalance, Math.max(2, selectedDateKeys.length || 2))} />,
+            'meta-total-spend':      <KpiCard title="Total Investido Meta" value={metaCampaignSpend || metaSpend} format="currency" icon={CreditCard} iconColor="#e2e8f0" iconBg="#e2e8f0" loading={campaignsLoading || metricsLoading} chart={dashboardPrefs.cards['meta-total-spend'].chart} series={seriesOrPacing(metaSpendSeries, metaCampaignSpend || metaSpend)} />,
+            'meta-balance':          <KpiCard title="Saldo da Conta Meta" value={metaBalance} format="currency" icon={PiggyBank} iconColor="#e2e8f0" iconBg="#e2e8f0" loading={balancesLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['meta-balance'].chart} series={pacingSeries(metaBalance, Math.max(2, selectedDateKeys.length || 2))} />,
             'meta-active-campaigns': <CompactInfoCard title="Campanhas Ativas" value={activeMetaCampaigns} icon={Briefcase} color="#0668E1" />,
             'meta-adsets':           <CompactInfoCard title="Conjuntos" value="Ver na tabela" icon={LayoutDashboard} color="#0668E1" helper="Expanda uma campanha para visualizar conjuntos e anúncios." />,
             'meta-creatives':        <CompactInfoCard title="Criativos" value={metaCreativeCount} icon={ImageIcon} color="#0668E1" helper="Com preview no carrossel abaixo." />,
@@ -4438,11 +5311,13 @@ export default function GeneralDashboard() {
           );
         })()}
 
-        {(() => {
+        {!collapsedSections.has('meta') && <div className="mt-5" />}
+
+        {!collapsedSections.has('meta') && (() => {
           const metaPanelCards: Record<string, ReactNode> = {
             'meta-campaigns': (
-              <div className="rounded-xl border border-[#0B84FF]/35 bg-black/35 p-4 shadow-[inset_0_0_30px_rgba(11,132,255,0.10),0_0_28px_rgba(11,132,255,0.16)] h-full overflow-auto">
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <div className="rounded-xl border border-[#0B84FF]/35 bg-black/35 p-4 shadow-[inset_0_0_30px_rgba(11,132,255,0.10),0_0_28px_rgba(11,132,255,0.16)] h-full flex flex-col">
+                <div className="mb-3 shrink-0 flex flex-wrap items-center justify-between gap-3">
                   <p className="text-[11px] font-bold uppercase tracking-widest text-foreground/75">Campanhas Meta Ads</p>
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] font-bold uppercase tracking-widest text-foreground/55">Ordenar por</span>
@@ -4457,13 +5332,15 @@ export default function GeneralDashboard() {
                     {campaignsLoading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
                   </div>
                 </div>
-                <CampaignPerformanceTable campaigns={metaCampaigns} loading={campaignsLoading} period={period} dateFrom={customDateFrom} dateTo={customDateTo} />
+                <div className="flex-1 min-h-0">
+                  <CampaignPerformanceTable campaigns={metaCampaigns} loading={campaignsLoading} period={period} dateFrom={customDateFrom} dateTo={customDateTo} />
+                </div>
               </div>
             ),
             'meta-audience': <AudiencePlatformBlock title="Meta Ads" description="Recortes por idade, gênero, plataforma e dispositivo." color="#0B84FF" colors={META_AUDIENCE_COLORS} data={audience.meta} chartVariant={dashboardPrefs.metaAudienceChart} />,
             'meta-creative-preview': (
-              <div className="rounded-xl border border-[#0B84FF]/35 bg-black/35 p-4 shadow-[inset_0_0_30px_rgba(11,132,255,0.10),0_0_28px_rgba(11,132,255,0.16)] h-full overflow-hidden">
-                <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="rounded-xl border border-[#0B84FF]/35 bg-black/35 p-4 shadow-[inset_0_0_30px_rgba(11,132,255,0.10),0_0_28px_rgba(11,132,255,0.16)] h-full flex flex-col overflow-hidden">
+                <div className="flex-none flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <p className="text-[11px] font-bold uppercase tracking-widest text-foreground/75">Criativos Meta Ads</p>
                     <p className="mt-0.5 text-[11px] text-foreground/55">Anúncios e previews com melhor desempenho no período selecionado.</p>
@@ -4481,11 +5358,11 @@ export default function GeneralDashboard() {
                     {creativesLoading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
                   </div>
                 </div>
-                <div className="mt-4">
+                <div className="mt-4 flex-1 min-h-0 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
                   {creativesLoading ? (
-                    <div className="flex gap-3 overflow-hidden">
+                    <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(228px, 1fr))' }}>
                       {Array.from({ length: 5 }).map((_, i) => (
-                        <div key={i} className="w-[175px] shrink-0 animate-pulse rounded-xl border border-border bg-muted/10">
+                        <div key={i} className="animate-pulse rounded-xl border border-border bg-muted/10">
                           <div className="bg-muted/30 rounded-t-xl" style={{ aspectRatio: '9/16' }} />
                           <div className="p-2.5 space-y-2"><div className="h-3 bg-muted/40 rounded w-3/4" /></div>
                         </div>
@@ -4498,7 +5375,7 @@ export default function GeneralDashboard() {
                       <p className="mt-1 text-xs text-muted-foreground/60">Conecte uma conta Meta Ads em Integrações.</p>
                     </div>
                   ) : (
-                    <div className="flex gap-3 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
+                    <div className="grid gap-3 pb-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(228px, 1fr))' }}>
                       {creatives.map((c, idx) => (
                         <CreativeCarouselCard key={c.adId} creative={c} idx={idx} sortBy={sortBy} onPreview={setPreviewCreative} />
                       ))}
@@ -4532,32 +5409,42 @@ export default function GeneralDashboard() {
             </RglGrid>
           );
         })()}
-      </section>
+      </section>}
+      </SortableSection>
 
       {/* 3. GOOGLE ADS */}
-      <section className="relative overflow-hidden rounded-2xl border border-[#EA4335]/75 bg-[#120607] p-5 shadow-[0_0_64px_rgba(234,67,53,0.30)]">
+      <SortableSection id="google" editMode={editMode} orderIndex={dashboardPrefs.sectionOrder.indexOf('google')}>
+      {CARD_GROUPS[2].ids.some(id => dashboardPrefs.cards[id]?.visible !== false) && <section className="relative overflow-hidden rounded-2xl border border-[#EA4335]/75 bg-[#120607] p-5 shadow-[0_0_64px_rgba(234,67,53,0.30)]">
         <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(234,67,53,0.22),transparent_42%),radial-gradient(circle_at_92%_0%,rgba(251,188,5,0.24),transparent_34%)]" />
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,#EA4335,#FBBC05,transparent)]" />
-        <div className="relative mb-4 flex items-center gap-3">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#EA4335]/75 bg-[#EA4335]/25 shadow-[0_0_26px_rgba(234,67,53,0.70)]">
-            <GoogleAdsMark className="h-5 w-5" />
-          </span>
-          <h2 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-foreground">
-            Google Ads
-          </h2>
+        <div className="relative mb-4 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#EA4335]/75 bg-[#EA4335]/25 shadow-[0_0_26px_rgba(234,67,53,0.70)]">
+              <GoogleAdsMark className="h-5 w-5" />
+            </span>
+            <h2 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-foreground">
+              Google Ads
+            </h2>
+          </div>
+          <button type="button" onClick={() => toggleSection('google')} className="flex items-center gap-1 rounded-lg border border-[#EA4335]/30 bg-[#EA4335]/10 px-2.5 py-1.5 text-[11px] font-semibold text-[#EA4335]/80 hover:bg-[#EA4335]/20 transition-colors whitespace-nowrap">
+            <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', collapsedSections.has('google') && '-rotate-90')} />
+            {collapsedSections.has('google') ? 'Expandir' : 'Recolher'}
+          </button>
         </div>
 
-        {(() => {
+        {!collapsedSections.has('google') && (() => {
           const googleCards: Record<string, ReactNode> = {
             'google-impressions':      <KpiCard title="Impressões Google" value={googleImpressions} format="number" icon={BarChart3} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} chart={dashboardPrefs.cards['google-impressions'].chart} series={seriesOrPacing(googleImpressionsSeries, googleImpressions)} />,
             'google-conversions':      <KpiCard title="Conversões Google" value={googleConv} prevValue={prevGoogleConv > 0 ? prevGoogleConv : undefined} format="number" icon={BarChart3} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-conversions'].chart} series={seriesOrPacing(googleConversionsSeries, googleConv)} />,
             'google-cpa':              <KpiCard title="Custo por Conversão" value={avgCpa} format="currency" icon={Briefcase} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} inverseGoal inverseChange logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-cpa'].chart} series={seriesOrPacing(googleCpaSeries, avgCpa)} />,
-            'google-spend':            <KpiCard title="Valor Gasto Google" value={googleCost} format="currency" icon={CreditCard} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-spend'].chart} series={seriesOrPacing(googleCostSeries, googleCost)} />,
+            'google-spend':            <KpiCard title="Valor Investido Google" value={googleCost} format="currency" icon={CreditCard} iconColor="#e2e8f0" iconBg="#e2e8f0" loading={metricsLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-spend'].chart} series={seriesOrPacing(googleCostSeries, googleCost)} />,
             'google-ctr':              <KpiCard title="CTR Google Ads" value={googleCtrValue} format="percent" icon={MousePointerClick} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} chart={dashboardPrefs.cards['google-ctr'].chart} series={seriesOrPacing(googleCtrSeries, googleCtrValue)} />,
-            'google-total-spend':      <KpiCard title="Total Gasto Google" value={googleCampaignSpend || googleCost} format="currency" icon={Wallet} iconColor="#EA4335" iconBg="#EA4335" loading={campaignsLoading || metricsLoading} chart={dashboardPrefs.cards['google-total-spend'].chart} series={seriesOrPacing(googleCostSeries, googleCampaignSpend || googleCost)} />,
-            'google-balance':          <KpiCard title="Saldo da Conta Google" value={googleBalance} format="currency" icon={Wallet} iconColor="#EA4335" iconBg="#EA4335" loading={balancesLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-balance'].chart} series={pacingSeries(googleBalance, Math.max(2, selectedDateKeys.length || 2))} />,
+            'google-total-spend':      <KpiCard title="Total Investido Google" value={googleCampaignSpend || googleCost} format="currency" icon={Wallet} iconColor="#e2e8f0" iconBg="#e2e8f0" loading={campaignsLoading || metricsLoading} chart={dashboardPrefs.cards['google-total-spend'].chart} series={seriesOrPacing(googleCostSeries, googleCampaignSpend || googleCost)} />,
+            'google-balance':          <KpiCard title="Saldo da Conta Google" value={googleBalance} format="currency" icon={Wallet} iconColor="#e2e8f0" iconBg="#e2e8f0" loading={balancesLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-balance'].chart} series={pacingSeries(googleBalance, Math.max(2, selectedDateKeys.length || 2))} />,
             'google-active-campaigns': <CompactInfoCard title="Campanhas Ativas" value={activeGoogleCampaigns} icon={Briefcase} color="#EA4335" />,
             'google-keyword-count':    <CompactInfoCard title="Top Palavras-chave" value={keywords.length} icon={Search} color="#EA4335" helper="Lista ordenada abaixo." />,
+            'google-clicks':           <KpiCard title="Cliques Google" value={googleClicks} format="number" icon={MousePointerClick} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} chart={dashboardPrefs.cards['google-clicks'].chart} series={seriesOrPacing(googleClicksSeries, googleClicks)} />,
+            'google-cpc':              <KpiCard title="CPC Google" value={googleCpc} format="currency" icon={CreditCard} iconColor="#e2e8f0" iconBg="#e2e8f0" loading={metricsLoading} inverseGoal inverseChange logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-cpc'].chart} series={seriesOrPacing(googleCpcSeries, googleCpc)} />,
           };
           const visibleLayout = googleKpiLayout.filter(l => dashboardPrefs.cards[l.i as DashboardCardId]?.visible !== false);
           return (
@@ -4587,11 +5474,13 @@ export default function GeneralDashboard() {
           );
         })()}
 
-        {(() => {
+        {!collapsedSections.has('google') && <div className="mt-5" />}
+
+        {!collapsedSections.has('google') && (() => {
           const googlePanelCards: Record<string, ReactNode> = {
             'google-campaigns': (
-              <div className="rounded-xl border border-[#EA4335]/40 bg-black/35 p-4 shadow-[inset_0_0_30px_rgba(234,67,53,0.10),0_0_28px_rgba(234,67,53,0.18)] h-full overflow-auto">
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <div className="rounded-xl border border-[#EA4335]/40 bg-black/35 p-4 shadow-[inset_0_0_30px_rgba(234,67,53,0.10),0_0_28px_rgba(234,67,53,0.18)] h-full flex flex-col">
+                <div className="mb-3 shrink-0 flex flex-wrap items-center justify-between gap-3">
                   <p className="text-[11px] font-bold uppercase tracking-widest text-foreground/75">Campanhas Google Ads</p>
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] font-bold uppercase tracking-widest text-foreground/55">Ordenar por</span>
@@ -4606,11 +5495,13 @@ export default function GeneralDashboard() {
                     {campaignsLoading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
                   </div>
                 </div>
-                <CampaignPerformanceTable campaigns={googleCampaigns} loading={campaignsLoading} period={period} dateFrom={customDateFrom} dateTo={customDateTo} />
+                <div className="flex-1 min-h-0">
+                  <CampaignPerformanceTable campaigns={googleCampaigns} loading={campaignsLoading} period={period} dateFrom={customDateFrom} dateTo={customDateTo} />
+                </div>
               </div>
             ),
             'google-keywords': (
-              <div className="space-y-4 h-full overflow-auto">
+              <div className="h-full">
                 <TopKeywordsTable keywords={keywords} loading={keywordsLoading} />
               </div>
             ),
@@ -4640,42 +5531,135 @@ export default function GeneralDashboard() {
             </RglGrid>
           );
         })()}
-      </section>
+      </section>}
+      </SortableSection>
 
       {/* 4. PÁGINAS SOCIAIS */}
-      {(pageInsightsLoading || pageInsights.some(p => p.facebook ?? p.instagram)) && (
-        <section className="relative overflow-hidden rounded-2xl border border-[#E1306C]/50 bg-[#0D060C] p-5 shadow-[0_0_56px_rgba(225,48,108,0.18)]">
-          <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(225,48,108,0.14),transparent_42%),radial-gradient(circle_at_92%_0%,rgba(131,58,180,0.22),transparent_36%)]" />
-          <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,#E1306C,#833AB4,transparent)]" />
-          <div className="relative mb-5 flex items-center gap-3">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#E1306C]/60 bg-[#E1306C]/20 shadow-[0_0_24px_rgba(225,48,108,0.50)]">
-              <svg viewBox="0 0 24 24" className="h-[18px] w-[18px] fill-[#E1306C]"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z" /></svg>
-            </span>
-            <div>
-              <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">Páginas &amp; Perfis Sociais</h2>
-              <p className="text-[11px] text-foreground/60">Métricas orgânicas — Facebook Page + Instagram Business</p>
-            </div>
-            {pageInsightsLoading && <RefreshCw className="ml-2 h-4 w-4 animate-spin text-muted-foreground" />}
-          </div>
+      <SortableSection id="social" editMode={editMode} orderIndex={dashboardPrefs.sectionOrder.indexOf('social')}>
+      {(pageInsightsLoading || pageInsights.some(p => p.facebook ?? p.instagram)) && CARD_GROUPS[3].ids.some(id => dashboardPrefs.cards[id]?.visible !== false) && (() => {
+        const allFbData = pageInsights.filter(p => p.facebook).map(p => p.facebook!);
+        const allIgData = pageInsights.filter(p => p.instagram).map(p => p.instagram!);
+        const prevFbData = prevPageInsights.filter(p => p.facebook).map(p => p.facebook!);
+        const prevIgData = prevPageInsights.filter(p => p.instagram).map(p => p.instagram!);
+        const hasFb = allFbData.length > 0;
+        const hasIg = allIgData.length > 0;
+        const fbFans    = allFbData.reduce((s, d) => s + d.fans, 0);
+        const fbAdds    = allFbData.reduce((s, d) => s + d.fanAdds, 0);
+        const fbReach   = allFbData.reduce((s, d) => s + d.reach, 0);
+        const fbImpr    = allFbData.reduce((s, d) => s + d.impressions, 0);
+        const fbEngage  = allFbData.reduce((s, d) => s + d.engagements, 0);
+        const fbViews   = allFbData.reduce((s, d) => s + d.pageViews, 0);
+        const igFollow   = allIgData.reduce((s, d) => s + d.followers, 0);
+        const igReach    = allIgData.reduce((s, d) => s + d.reach, 0);
+        const igViews    = allIgData.reduce((s, d) => s + d.views, 0);
+        const igPViews   = allIgData.reduce((s, d) => s + d.profileViews, 0);
+        const igClicks   = allIgData.reduce((s, d) => s + d.websiteClicks, 0);
+        const igEngaged  = allIgData.reduce((s, d) => s + d.accountsEngaged, 0);
+        const igInteract = allIgData.reduce((s, d) => s + d.totalInteractions, 0);
+        const igLikes    = allIgData.reduce((s, d) => s + d.likes, 0);
+        const igSaves    = allIgData.reduce((s, d) => s + d.saves, 0);
+        // Previous period aggregates
+        const prevFbFans    = prevFbData.reduce((s, d) => s + d.fans, 0);
+        const prevFbAdds    = prevFbData.reduce((s, d) => s + d.fanAdds, 0);
+        const prevFbReach   = prevFbData.reduce((s, d) => s + d.reach, 0);
+        const prevFbImpr    = prevFbData.reduce((s, d) => s + d.impressions, 0);
+        const prevFbEngage  = prevFbData.reduce((s, d) => s + d.engagements, 0);
+        const prevFbViews   = prevFbData.reduce((s, d) => s + d.pageViews, 0);
+        const prevIgFollow  = prevIgData.reduce((s, d) => s + d.followers, 0);
+        const prevIgReach   = prevIgData.reduce((s, d) => s + d.reach, 0);
+        const prevIgViews   = prevIgData.reduce((s, d) => s + d.views, 0);
+        const prevIgPViews  = prevIgData.reduce((s, d) => s + d.profileViews, 0);
+        const prevIgClicks  = prevIgData.reduce((s, d) => s + d.websiteClicks, 0);
+        const prevIgEngaged = prevIgData.reduce((s, d) => s + d.accountsEngaged, 0);
+        const prevIgInteract= prevIgData.reduce((s, d) => s + d.totalInteractions, 0);
+        const prevIgLikes   = prevIgData.reduce((s, d) => s + d.likes, 0);
+        const prevIgSaves   = prevIgData.reduce((s, d) => s + d.saves, 0);
 
-          <div className="relative grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {pageInsightsLoading
-              ? Array.from({ length: 2 }).map((_, i) => (
-                  <div key={i} className="h-52 animate-pulse rounded-xl border border-white/10 bg-white/5" />
-                ))
-              : pageInsights.map(({ clientId, clientName, facebook, instagram }) => (
-                  <SocialPageCards
-                    key={clientId}
-                    clientName={clientName}
-                    showClientName={pageInsights.length > 1}
-                    facebook={facebook}
-                    instagram={instagram}
-                  />
-                ))
-            }
-          </div>
-        </section>
-      )}
+        const socialCards: Record<string, ReactNode> = {
+          'social-fb-fans':            <KpiCard title="Curtidas / Seg."   value={fbFans}    prevValue={prevFbFans}    format="number" icon={Users}         iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} hideGoal />,
+          'social-fb-fan-adds':        <KpiCard title="Novas curtidas"    value={fbAdds}    prevValue={prevFbAdds}    format="number" icon={UserPlus}      iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} hideGoal />,
+          'social-fb-reach':           <KpiCard title="Alcance FB"        value={fbReach}   prevValue={prevFbReach}   format="number" icon={Eye}           iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} hideGoal />,
+          'social-fb-impressions':     <KpiCard title="Impressões FB"     value={fbImpr}    prevValue={prevFbImpr}    format="number" icon={BarChart3}     iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} hideGoal />,
+          'social-fb-engagements':     <KpiCard title="Engajamentos FB"   value={fbEngage}  prevValue={prevFbEngage}  format="number" icon={Heart}         iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} hideGoal />,
+          'social-fb-views':           <KpiCard title="Visitas à página"  value={fbViews}   prevValue={prevFbViews}   format="number" icon={Monitor}       iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} hideGoal />,
+          'social-ig-followers':       <KpiCard title="Seguidores IG"     value={igFollow}  prevValue={prevIgFollow}  format="number" icon={Users}         iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal />,
+          'social-ig-reach':           <KpiCard title="Alcance IG"        value={igReach}   prevValue={prevIgReach}   format="number" icon={Eye}           iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal />,
+          'social-ig-views':           <KpiCard title="Visualizações IG"  value={igViews}   prevValue={prevIgViews}   format="number" icon={BarChart3}     iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal />,
+          'social-ig-profile-views':   <KpiCard title="Visitas ao perfil" value={igPViews}  prevValue={prevIgPViews}  format="number" icon={Monitor}       iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal />,
+          'social-ig-website-clicks':  <KpiCard title="Cliques no site"   value={igClicks}  prevValue={prevIgClicks}  format="number" icon={ExternalLink}  iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal />,
+          'social-ig-engaged':         <KpiCard title="Contas engajadas"  value={igEngaged} prevValue={prevIgEngaged} format="number" icon={Heart}         iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal />,
+          'social-ig-interactions':    <KpiCard title="Interações IG"     value={igInteract}prevValue={prevIgInteract}format="number" icon={Zap}           iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal />,
+          'social-ig-likes':           <KpiCard title="Curtidas IG"       value={igLikes}   prevValue={prevIgLikes}   format="number" icon={Heart}         iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal />,
+          'social-ig-saves':           <KpiCard title="Salvamentos IG"    value={igSaves}   prevValue={prevIgSaves}   format="number" icon={Bookmark}      iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal />,
+          'social-ig-top-posts':       <IgTopPostsCard posts={igPosts} loading={igPostsLoading} sortBy={igSortBy} onSortChange={setIgSortBy} />,
+        };
+
+        const visibleSocialLayout = socialKpiLayout.filter(l => {
+          if (l.i.startsWith('social-fb-') && !hasFb && !pageInsightsLoading) return false;
+          if (l.i.startsWith('social-ig-') && !hasIg && !pageInsightsLoading) return false;
+          return dashboardPrefs.cards[l.i as DashboardCardId]?.visible !== false;
+        });
+
+        return (
+          <section className="relative overflow-hidden rounded-[var(--radius)] border border-border bg-card p-5">
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5" style={{ background: 'linear-gradient(90deg,#1877F2,#E1306C)' }} />
+            <div className="pointer-events-none absolute top-0 left-0 h-3 w-3 bg-[#1877F2]" />
+            <div className="relative mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <svg viewBox="0 0 24 24" className="h-4 w-4 fill-[#E1306C]"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z" /></svg>
+                  <h2 className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Páginas &amp; Perfis Sociais</h2>
+                  {pageInsightsLoading && <RefreshCw className="h-3 w-3 animate-spin text-muted-foreground" />}
+                </div>
+                {/* Account chips */}
+                <div className="flex flex-wrap gap-2">
+                {pageInsights.map(({ clientId, facebook, instagram }) => (
+                  <span key={clientId} className="flex items-center gap-2">
+                    {facebook && (
+                      <span className="flex items-center gap-1 rounded-[var(--radius)] border border-[#1877F2]/30 bg-[#1877F2]/10 px-2 py-0.5 text-[10px] font-semibold text-[#1877F2]">
+                        {facebook.picture && <img src={facebook.picture} alt="" className="h-4 w-4 rounded-full" />}
+                        {facebook.pageName}
+                      </span>
+                    )}
+                    {instagram && (
+                      <span className="flex items-center gap-1 rounded-[var(--radius)] border border-[#E1306C]/30 bg-[#E1306C]/10 px-2 py-0.5 text-[10px] font-semibold text-[#E1306C]">
+                        {instagram.picture && <img src={instagram.picture} alt="" className="h-4 w-4 rounded-full" />}
+                        @{instagram.username}
+                      </span>
+                    )}
+                  </span>
+                ))}
+                </div>
+              </div>
+              <button type="button" onClick={() => toggleSection('social')} className="flex items-center gap-1 rounded-lg border border-[#E1306C]/30 bg-[#E1306C]/10 px-2.5 py-1.5 text-[11px] font-semibold text-[#E1306C]/80 hover:bg-[#E1306C]/20 transition-colors whitespace-nowrap">
+                <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', collapsedSections.has('social') && '-rotate-90')} />
+                {collapsedSections.has('social') ? 'Expandir' : 'Recolher'}
+              </button>
+            </div>
+
+            {!collapsedSections.has('social') && <RglGrid
+              layout={visibleSocialLayout}
+              cols={RGL_COLS}
+              rowHeight={RGL_ROW_H}
+              margin={RGL_MARGIN}
+              containerPadding={[0, 0]}
+              isDraggable
+              isResizable
+              draggableHandle=".drag-handle"
+              compactType="vertical"
+              onLayoutChange={nl => setSocialKpiLayout(prev => prev.map(item => { const u = nl.find(l => l.i === item.i); return u ? { ...item, x: u.x, y: u.y, w: u.w, h: u.h } : item; }))}
+            >
+              {visibleSocialLayout.map(l => (
+                <div key={l.i} className="h-full">
+                  <RglCardShell id={l.i as DashboardCardId} prefs={dashboardPrefs}>
+                    {socialCards[l.i]}
+                  </RglCardShell>
+                </div>
+              ))}
+            </RglGrid>}
+          </section>
+        );
+      })()}
 
       {/* Resumo por cliente */}
       {selectedClients.length > 1 && (
@@ -4706,6 +5690,38 @@ export default function GeneralDashboard() {
           </div>
         </div>
       )}
+      </SortableSection>
+
+      {/* ── 5. CRM LEADS PANEL (opt-in) ── */}
+      <SortableSection id="crm" editMode={editMode} orderIndex={dashboardPrefs.sectionOrder.indexOf('crm')}>
+      {dashboardPrefs.showCrmPanel && selectedIds.size > 0 && (
+        <section className="relative overflow-hidden rounded-2xl border border-violet-500/40 bg-violet-950/20 p-5 space-y-1">
+          <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(139,92,246,0.12),transparent_50%)]" />
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(139,92,246,0.6),transparent)]" />
+          <div className="relative mb-4 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-violet-500/40 bg-violet-500/15 shadow-[0_0_20px_rgba(139,92,246,0.4)]">
+                <UserPlus className="h-4 w-4 text-violet-400" />
+              </span>
+              <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">Leads CRM</h2>
+            </div>
+            <button type="button" onClick={() => toggleSection('crm-leads')} className="flex items-center gap-1 rounded-lg border border-violet-500/30 bg-violet-500/10 px-2.5 py-1.5 text-[11px] font-semibold text-violet-400/80 hover:bg-violet-500/20 transition-colors whitespace-nowrap">
+              <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', collapsedSections.has('crm-leads') && '-rotate-90')} />
+              {collapsedSections.has('crm-leads') ? 'Expandir' : 'Recolher'}
+            </button>
+          </div>
+          {!collapsedSections.has('crm-leads') && (
+            <div className="relative">
+              <CrmDashboardPanel clientIds={selectedIds} prefs={dashboardPrefs} />
+            </div>
+          )}
+        </section>
+      )}
+      </SortableSection>
+
+      </div>
+      </SortableContext>
+      </DndContext>
 
       <CreativePreviewOverlay creative={previewCreative} onClose={() => setPreviewCreative(null)} />
 

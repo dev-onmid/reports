@@ -36,7 +36,7 @@ function sleep(ms: number) {
   return new Promise<void>(r => setTimeout(r, ms));
 }
 
-export async function POST(req: NextRequest) {
+async function runWorker(req: NextRequest) {
   const secret = process.env.CRON_SECRET;
   if (secret) {
     const authHeader = req.headers.get('authorization');
@@ -56,11 +56,22 @@ export async function POST(req: NextRequest) {
       ALTER TABLE public.zapi_campaigns
       ADD COLUMN IF NOT EXISTS next_tick_at TIMESTAMPTZ
     `);
+    await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS message_index INT NOT NULL DEFAULT 0`);
+
+    // Transition pending campaigns whose start time has arrived
+    await pool.query(`
+      UPDATE public.zapi_campaigns
+         SET status = 'running', next_tick_at = NULL
+       WHERE status = 'pending'
+         AND starts_at <= NOW()
+    `);
 
     const { rows: campaigns } = await pool.query<{
       id: string;
       status: string;
       message: string;
+      messages: string | null;
+      message_index: number;
       image_url: string | null;
       ends_at: string | null;
       active_from: string | null;
@@ -71,7 +82,7 @@ export async function POST(req: NextRequest) {
       token: string;
       security_token: string | null;
     }>(`
-      SELECT c.id, c.status, c.message, c.image_url, c.ends_at,
+      SELECT c.id, c.status, c.message, c.messages, c.message_index, c.image_url, c.ends_at,
              c.active_from, c.active_until, c.interval_min, c.interval_max,
              cl.instance_id, cl.token, cl.security_token
         FROM public.zapi_campaigns c
@@ -114,6 +125,17 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      // Build message pool once per campaign; track local index so within-invocation
+      // rotation stays in sync before the DB is updated
+      let messagePool: string[] = [campaign.message];
+      if (campaign.messages) {
+        try {
+          const parsed: string[] = typeof campaign.messages === 'string' ? JSON.parse(campaign.messages) : campaign.messages;
+          if (Array.isArray(parsed) && parsed.length > 0) messagePool = parsed;
+        } catch { /* keep single message */ }
+      }
+      let localIndex = campaign.message_index ?? 0;
+
       // Process messages for this campaign until time budget runs out
       while (Date.now() - startTime < BUDGET_MS) {
         const intervalSec = campaign.interval_min + Math.random() * (campaign.interval_max - campaign.interval_min);
@@ -144,7 +166,8 @@ export async function POST(req: NextRequest) {
           break;
         }
 
-        const message = interpolate(campaign.message, number.phone, number.name ?? '');
+        const rawMessage = messagePool[localIndex % messagePool.length];
+        const message = interpolate(rawMessage, number.phone, number.name ?? '');
 
         let result;
         if (imageUrls.length > 0) {
@@ -165,7 +188,8 @@ export async function POST(req: NextRequest) {
         );
 
         const field = result.ok ? 'sent = sent + 1' : 'failed = failed + 1';
-        await pool.query(`UPDATE public.zapi_campaigns SET ${field} WHERE id = $1`, [campaign.id]);
+        await pool.query(`UPDATE public.zapi_campaigns SET ${field}, message_index = message_index + 1 WHERE id = $1`, [campaign.id]);
+        localIndex++;
         processed++;
 
         // Re-check status in case it was paused/cancelled externally
@@ -188,3 +212,7 @@ export async function POST(req: NextRequest) {
     await pool.end();
   }
 }
+
+// Vercel Cron sends GET; external cron-job.org can POST with ?secret=
+export async function GET(req: NextRequest) { return runWorker(req); }
+export async function POST(req: NextRequest) { return runWorker(req); }

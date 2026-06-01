@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useState, type ComponentType } from 'react';
+import { use, useEffect, useState, type ComponentType, type CSSProperties } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { mockDashboardData, mockClients, type ClientStatus, type DashboardType } from '@/lib/mock-data';
 import { useClients } from '@/lib/client-store';
@@ -17,7 +17,7 @@ import {
   WalletCards, Send, CheckCircle2, Clock3, AlertTriangle, Filter, Trash2,
   UserRound, Phone, Mail, Briefcase, SlidersHorizontal, Check, Hash, BarChart2, Layers,
   Power, PowerOff, Search, BookMarked, ExternalLink, RefreshCw, ChevronRight,
-  PiggyBank, Wallet,
+  PiggyBank, Wallet, Info, Lightbulb, UserPlus,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -44,16 +44,19 @@ import { LinkAccountsDialog } from '@/components/link-accounts-dialog';
 import { ClientAvatar } from '@/components/client-avatar';
 import { HistoricoTab } from '@/components/historico-tab';
 import { VaultTab } from '@/components/vault-tab';
+import { ClientTrackingTab } from './tracking-tab';
+import { ClientCrmTab } from './crm-tab';
+import { ChatView } from '@/app/(dashboard)/crm/chat-view';
 
 // ── Funnel types & logic ───────────────────────────────────────────────────────
 type FunnelStage = { id: string; name: string; conversion: number };
 
 const DEFAULT_STAGES: FunnelStage[] = [
-  { id: 's5', name: '5º — Contatos (Leads)',     conversion: 50  },
-  { id: 's4', name: '4º — Qualificados',          conversion: 100 },
-  { id: 's3', name: '3º — Agendamentos',          conversion: 50  },
-  { id: 's2', name: '2º — Comparecimentos',       conversion: 47  },
-  { id: 's1', name: '1º — Fechamentos (Vendas)',  conversion: 0   },
+  { id: 's5', name: '5º — Leads',                  conversion: 50 },
+  { id: 's4', name: '4º — Contatos',               conversion: 50 },
+  { id: 's3', name: '3º — Agendamentos / Proposta',        conversion: 50 },
+  { id: 's2', name: '2º — Comparecimento / Negociação',   conversion: 50 },
+  { id: 's1', name: '1º — Fechamentos (Vendas)',   conversion: 0  },
 ];
 
 const STAGE_COLORS = ['#55F52F', '#7B2CFF', '#3B82F6', '#F59E0B', '#EC4899', '#10B981', '#EF4444'];
@@ -308,12 +311,16 @@ type ClientPlanningConfig = {
   tkm: number;
   cplMeta: number;
   stages: FunnelStage[];
+  simpleMode: boolean;
+  invPlaSimple: number;
 };
 
 const DEFAULT_CLIENT_PLANNING: ClientPlanningConfig = {
   tkm: 9000,
   cplMeta: 30,
   stages: DEFAULT_STAGES,
+  simpleMode: false,
+  invPlaSimple: 0,
 };
 
 function sanitizePlanningStages(stages: unknown): FunnelStage[] {
@@ -341,10 +348,13 @@ function readSavedClientPlanning(clientId: string): ClientPlanningConfig {
     const parsed = JSON.parse(raw) as Partial<ClientPlanningConfig>;
     const tkm = Number(parsed.tkm ?? DEFAULT_CLIENT_PLANNING.tkm);
     const cplMeta = Number(parsed.cplMeta ?? DEFAULT_CLIENT_PLANNING.cplMeta);
+    const invPlaSimple = Number(parsed.invPlaSimple ?? 0);
     return {
       tkm: Number.isFinite(tkm) ? tkm : DEFAULT_CLIENT_PLANNING.tkm,
       cplMeta: Number.isFinite(cplMeta) ? cplMeta : DEFAULT_CLIENT_PLANNING.cplMeta,
       stages: sanitizePlanningStages(parsed.stages),
+      simpleMode: Boolean(parsed.simpleMode ?? false),
+      invPlaSimple: Number.isFinite(invPlaSimple) ? invPlaSimple : 0,
     };
   } catch {
     return DEFAULT_CLIENT_PLANNING;
@@ -357,7 +367,7 @@ function saveClientPlanning(clientId: string, planning: ClientPlanningConfig) {
   fetch(`/api/clients/${clientId}/planning`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tkm: planning.tkm, cplMeta: planning.cplMeta, stages: planning.stages }),
+    body: JSON.stringify({ tkm: planning.tkm, cplMeta: planning.cplMeta, stages: planning.stages, simpleMode: planning.simpleMode, invPlaSimple: planning.invPlaSimple }),
   }).catch(() => {});
 }
 
@@ -367,6 +377,8 @@ function FunnelTab({ clientId, clientName, goalConfig }: { clientId: string; cli
   const [tkm, setTkm] = useState(() => readSavedClientPlanning(clientId).tkm);
   const [cplMeta, setCplMeta] = useState(() => readSavedClientPlanning(clientId).cplMeta);
   const [stages, setStages] = useState<FunnelStage[]>(() => readSavedClientPlanning(clientId).stages);
+  const [simpleMode, setSimpleMode] = useState(() => readSavedClientPlanning(clientId).simpleMode);
+  const [invPlaSimple, setInvPlaSimple] = useState(() => readSavedClientPlanning(clientId).invPlaSimple);
 
   useEffect(() => {
     let cancelled = false;
@@ -374,19 +386,25 @@ function FunnelTab({ clientId, clientName, goalConfig }: { clientId: string; cli
     setTkm(saved.tkm);
     setCplMeta(saved.cplMeta);
     setStages(saved.stages);
+    setSimpleMode(saved.simpleMode);
+    setInvPlaSimple(saved.invPlaSimple);
     setPlanningLoadedFor(clientId);
     fetch(`/api/clients/${clientId}/planning`)
       .then(r => r.json())
-      .then((dbData: { tkm: number; cplMeta: number; stages: FunnelStage[] } | null) => {
+      .then((dbData: { tkm: number; cplMeta: number; stages: FunnelStage[]; simpleMode?: boolean; invPlaSimple?: number } | null) => {
         if (cancelled || !dbData) return;
         const planning: ClientPlanningConfig = {
           tkm: dbData.tkm || saved.tkm,
           cplMeta: dbData.cplMeta || saved.cplMeta,
           stages: sanitizePlanningStages(dbData.stages),
+          simpleMode: dbData.simpleMode ?? saved.simpleMode,
+          invPlaSimple: dbData.invPlaSimple ?? saved.invPlaSimple,
         };
         setTkm(planning.tkm);
         setCplMeta(planning.cplMeta);
         setStages(planning.stages);
+        setSimpleMode(planning.simpleMode);
+        setInvPlaSimple(planning.invPlaSimple);
         window.localStorage.setItem(`clientPlanning_${clientId}`, JSON.stringify(planning));
       })
       .catch(() => {});
@@ -395,8 +413,8 @@ function FunnelTab({ clientId, clientName, goalConfig }: { clientId: string; cli
 
   useEffect(() => {
     if (planningLoadedFor !== clientId) return;
-    saveClientPlanning(clientId, { tkm, cplMeta, stages });
-  }, [clientId, planningLoadedFor, tkm, cplMeta, stages]);
+    saveClientPlanning(clientId, { tkm, cplMeta, stages, simpleMode, invPlaSimple });
+  }, [clientId, planningLoadedFor, tkm, cplMeta, stages, simpleMode, invPlaSimple]);
 
   const cplPlanejado = cplMeta;
   const vols     = plannedFunnelFromGoal(goalConfig, stages, tkm);
@@ -428,17 +446,132 @@ function FunnelTab({ clientId, clientName, goalConfig }: { clientId: string; cli
 
   return (
     <div className="space-y-5 pt-2">
-      {/* Client context */}
-      <p className="text-sm text-muted-foreground">
-        Configuração do funil de planejamento para <strong className="text-foreground">{clientName}</strong>.
-        A meta principal é <strong className="text-foreground">{goalConfig.label}</strong>; ajuste as taxas de conversão para recalcular o plano.
-      </p>
+      {/* Header row: context + simple mode toggle */}
+      <div className="flex items-start justify-between gap-4">
+        <p className="text-sm text-muted-foreground">
+          {simpleMode
+            ? <>Modo simples ativo para <strong className="text-foreground">{clientName}</strong>. Digite diretamente os valores de planejamento.</>
+            : <>Configuração do funil de planejamento para <strong className="text-foreground">{clientName}</strong>. A meta principal é <strong className="text-foreground">{goalConfig.label}</strong>; ajuste as taxas de conversão para recalcular o plano.</>
+          }
+        </p>
+        <button
+          onClick={() => setSimpleMode(v => !v)}
+          className={cn(
+            'shrink-0 flex items-center gap-2 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors',
+            simpleMode
+              ? 'bg-primary/20 border-primary/40 text-primary hover:bg-primary/30'
+              : 'bg-muted/40 border-border text-muted-foreground hover:bg-muted hover:text-foreground',
+          )}
+        >
+          <Layers className="w-3.5 h-3.5" />
+          {simpleMode ? 'Modo simples' : 'Modo funil'}
+        </button>
+      </div>
 
+      {/* ── SIMPLE MODE ─────────────────────────────────────────────────── */}
+      {simpleMode && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {/* Meta goal (readonly) */}
+            <div className="bg-card border border-border rounded-xl p-4">
+              <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">META ({goalConfig.label})</p>
+              <p className="font-heading font-normal text-xl leading-none text-foreground">{goalValue}</p>
+              <p className="text-[11px] text-muted-foreground mt-1">Configurada na meta do cliente</p>
+            </div>
+            {/* TKM */}
+            <div className="bg-card border border-border rounded-xl p-4">
+              <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">TKM (Ticket Médio)</p>
+              <div className="flex items-baseline gap-1">
+                <span className="text-lg font-bold text-muted-foreground">R$</span>
+                <CurrencyInput value={tkm} onChange={setTkm} className={cn('font-heading font-normal text-xl leading-none flex-1 min-w-0 text-foreground', inputCls)} />
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-1">Valor médio por venda</p>
+            </div>
+            {/* Inv. Planejado — directly editable */}
+            <div className="bg-primary/10 border border-primary/30 rounded-xl p-4">
+              <p className="text-[9px] font-bold uppercase tracking-widest text-primary mb-2">INV. PLANEJADO</p>
+              <div className="flex items-baseline gap-1">
+                <span className="text-lg font-bold text-primary/60">R$</span>
+                <CurrencyInput value={invPlaSimple} onChange={setInvPlaSimple} className={cn('font-heading font-normal text-xl leading-none flex-1 min-w-0 text-primary', inputCls)} />
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-1">Investimento planejado direto</p>
+            </div>
+          </div>
+
+          {/* Simple summary */}
+          {invPlaSimple > 0 && tkm > 0 && goalConfig.target > 0 && (
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              {goalConfig.type === 'revenue' ? (
+                <>
+                  <div className="bg-card border border-border rounded-xl p-4">
+                    <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">VENDAS NECESSÁRIAS</p>
+                    <p className="font-heading font-normal text-xl leading-none">
+                      {Math.ceil(goalConfig.target / tkm).toLocaleString('pt-BR')}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground mt-1">{fmtBRL(goalConfig.target)} meta ÷ {fmtBRL(tkm)} TKM</p>
+                  </div>
+                  <div className="bg-card border border-border rounded-xl p-4">
+                    <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">FATURAMENTO META</p>
+                    <p className="font-heading font-normal text-xl leading-none text-primary">{fmtBRL(goalConfig.target)}</p>
+                    <p className="text-[11px] text-muted-foreground mt-1">Meta principal do cliente</p>
+                  </div>
+                  <div className="bg-card border border-border rounded-xl p-4 col-span-2 md:col-span-1">
+                    <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">ROI ESPERADO</p>
+                    {(() => {
+                      const roi = goalConfig.target / invPlaSimple;
+                      return (
+                        <>
+                          <p className={cn('font-heading font-normal text-xl leading-none', roi >= 3 ? 'text-primary' : roi >= 1.5 ? 'text-yellow-400' : 'text-red-400')}>
+                            {roi.toFixed(1)}x
+                          </p>
+                          <p className="text-[11px] text-muted-foreground mt-1">{fmtBRL(goalConfig.target)} ÷ {fmtBRL(invPlaSimple)}</p>
+                        </>
+                      );
+                    })()}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="bg-card border border-border rounded-xl p-4">
+                    <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">{goalConfig.label.toUpperCase()} NECESSÁRIAS</p>
+                    <p className="font-heading font-normal text-xl leading-none">{goalConfig.target.toLocaleString('pt-BR')}</p>
+                    <p className="text-[11px] text-muted-foreground mt-1">Meta principal do cliente</p>
+                  </div>
+                  <div className="bg-card border border-border rounded-xl p-4">
+                    <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">FATURAMENTO ESTIMADO</p>
+                    <p className="font-heading font-normal text-xl leading-none text-primary">{fmtBRL(goalConfig.target * tkm)}</p>
+                    <p className="text-[11px] text-muted-foreground mt-1">{goalConfig.target} × {fmtBRL(tkm)} TKM</p>
+                  </div>
+                  <div className="bg-card border border-border rounded-xl p-4 col-span-2 md:col-span-1">
+                    <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">ROI ESPERADO</p>
+                    {(() => {
+                      const fat = goalConfig.target * tkm;
+                      const roi = invPlaSimple > 0 ? fat / invPlaSimple : 0;
+                      return (
+                        <>
+                          <p className={cn('font-heading font-normal text-xl leading-none', roi >= 3 ? 'text-primary' : roi >= 1.5 ? 'text-yellow-400' : 'text-red-400')}>
+                            {roi.toFixed(1)}x
+                          </p>
+                          <p className="text-[11px] text-muted-foreground mt-1">{fmtBRL(fat)} ÷ {fmtBRL(invPlaSimple)}</p>
+                        </>
+                      );
+                    })()}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── FULL FUNNEL MODE ─────────────────────────────────────────────── */}
+      {!simpleMode && (
+        <>
       {/* Config row */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="bg-card border border-border rounded-xl p-4">
           <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">META ({goalConfig.label})</p>
-          <p className="font-heading font-normal text-3xl leading-none text-foreground">{goalValue}</p>
+          <p className="font-heading font-normal text-xl leading-none text-foreground">{goalValue}</p>
           <p className="text-[11px] text-muted-foreground mt-1">Configurada na meta principal do cliente</p>
         </div>
         {[
@@ -452,7 +585,7 @@ function FunnelTab({ clientId, clientName, goalConfig }: { clientId: string; cli
               <CurrencyInput
                 value={value}
                 onChange={set}
-                className={cn('font-heading font-normal text-3xl leading-none flex-1 min-w-0', color, inputCls)}
+                className={cn('font-heading font-normal text-xl leading-none flex-1 min-w-0', color, inputCls)}
               />
             </div>
             <p className="text-[11px] text-muted-foreground mt-1">{desc}</p>
@@ -569,21 +702,21 @@ function FunnelTab({ clientId, clientName, goalConfig }: { clientId: string; cli
         <div className="flex flex-col gap-4">
           <div className="bg-primary/10 border border-primary/30 rounded-xl p-5">
             <p className="text-[9px] font-bold uppercase tracking-widest text-primary mb-2">INV. PLANEJADO</p>
-            <p className="text-4xl font-heading font-normal text-primary">{fmtBRL(invPla)}</p>
+            <p className="text-xl font-heading font-normal text-primary">{fmtBRL(invPla)}</p>
             <p className="text-xs text-muted-foreground mt-2">{topVol} leads × {fmtBRL(cplPlanejado)} CPL planejado</p>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-card border border-border rounded-xl p-5">
               <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">{lastStageLabel.toUpperCase()} NECESSÁRIAS</p>
-              <p className="text-3xl font-heading font-normal">{botVol}</p>
+              <p className="text-xl font-heading font-normal">{botVol}</p>
               <p className="text-xs text-muted-foreground mt-2">
                 {goalConfig.type === 'revenue' ? `${goalValue} ÷ ${fmtBRL(tkm)}` : `Meta principal: ${goalValue}`}
               </p>
             </div>
             <div className="bg-card border border-border rounded-xl p-5">
               <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">CAC</p>
-              <p className="text-3xl font-heading font-normal">{fmtBRL(cac)}</p>
+              <p className="text-xl font-heading font-normal">{fmtBRL(cac)}</p>
               <p className="text-xs text-muted-foreground mt-2">Custo por aquisição</p>
             </div>
           </div>
@@ -592,7 +725,7 @@ function FunnelTab({ clientId, clientName, goalConfig }: { clientId: string; cli
             <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">
               {goalConfig.type === 'revenue' ? 'ROI ESPERADO' : `CUSTO POR ${goalConfig.label.toUpperCase()}`}
             </p>
-            <p className={cn('text-4xl font-heading font-normal', goalConfig.type === 'revenue' ? (roi >= 3 ? 'text-primary' : roi >= 1.5 ? 'text-yellow-400' : 'text-red-400') : 'text-primary')}>
+            <p className={cn('text-xl font-heading font-normal', goalConfig.type === 'revenue' ? (roi >= 3 ? 'text-primary' : roi >= 1.5 ? 'text-yellow-400' : 'text-red-400') : 'text-primary')}>
               {goalConfig.type === 'revenue' ? `${roi.toFixed(1)}x` : fmtBRL(goalConfig.target > 0 ? invPla / goalConfig.target : 0)}
             </p>
             <p className="text-xs text-muted-foreground mt-2">
@@ -635,6 +768,8 @@ function FunnelTab({ clientId, clientName, goalConfig }: { clientId: string; cli
         </div>
 
       </div>
+        </>
+      )}
     </div>
   );
 }
@@ -695,7 +830,7 @@ function InvestmentPaymentsTab({ clientId, clientName }: { clientId: string; cli
               <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
               <Icon className={cn('w-4 h-4 shrink-0', tone)} />
             </div>
-            <p className={cn('font-heading font-normal text-3xl leading-none mt-3', tone)}>{fmtBRL(value)}</p>
+            <p className={cn('font-heading font-normal text-xl leading-none mt-3', tone)}>{fmtBRL(value)}</p>
           </div>
         ))}
       </div>
@@ -1254,12 +1389,12 @@ function GoalProgressCard({ goal }: { goal: GoalProgress }) {
           <div className="relative flex min-h-28 items-center justify-between gap-4 p-4">
             <div className="rounded-lg bg-background/80 px-4 py-3 shadow-[0_12px_30px_rgba(0,0,0,0.35)] backdrop-blur">
               <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Realizado</p>
-              <p className="mt-1 font-heading font-normal text-4xl leading-none tracking-wide text-foreground">
+              <p className="mt-1 font-heading font-normal text-xl leading-none tracking-wide text-foreground">
                 {formatGoalValue(goal.realized, goal.format)}
               </p>
             </div>
             <div className="rounded-lg bg-background/80 px-3 py-2 text-right shadow-[0_12px_30px_rgba(0,0,0,0.35)] backdrop-blur">
-              <p className="font-heading font-normal text-3xl leading-none" style={{ color }}>{progress}%</p>
+              <p className="font-heading font-normal text-xl leading-none" style={{ color }}>{progress}%</p>
               <p className="mt-1 text-[10px] font-bold uppercase tracking-widest" style={{ color }}>{goalToneLabel(progress)}</p>
             </div>
           </div>
@@ -1302,7 +1437,7 @@ function FunnelStageCard({ stage, target, partial, current, progress }: {
           </div>
           <div>
             <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Realizado</p>
-            <p className="mt-1 font-heading font-normal text-4xl leading-none" style={{ color }}>
+            <p className="mt-1 font-heading font-normal text-xl leading-none" style={{ color }}>
               {current.toLocaleString('pt-BR')}
             </p>
           </div>
@@ -1345,7 +1480,7 @@ function TargetSummaryCard({ label, value, max }: {
       <CardContent>
         <div className="rounded-lg bg-background/60 p-4">
           <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Valor atual</p>
-          <span className="mt-1 block font-heading font-normal text-4xl leading-none tracking-wide" style={{ color }}>
+          <span className="mt-1 block font-heading font-normal text-xl leading-none tracking-wide" style={{ color }}>
             {fmtBRL(value)}
           </span>
         </div>
@@ -1373,7 +1508,7 @@ function DataHighlightCard({ label, value, detail, color }: {
       <div className="h-1.5" style={{ backgroundColor: color }} />
       <div className="p-4">
         <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
-        <p className="mt-2 font-heading font-normal text-4xl leading-none tracking-wide" style={{ color }}>
+        <p className="mt-2 font-heading font-normal text-xl leading-none tracking-wide" style={{ color }}>
           {value}
         </p>
         <p className="mt-2 text-xs text-muted-foreground">{detail}</p>
@@ -1482,6 +1617,183 @@ function PlanningGoalsDashboard({ goalConfig, todayProgress }: { goalConfig: Cli
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+type SalesFunnelStageView = {
+  label: string;
+  value: number;
+  color: string;
+  Icon: ComponentType<{ className?: string; style?: CSSProperties }>;
+};
+
+function formatFunnelNumber(value: number): string {
+  return Math.round(value).toLocaleString('pt-BR');
+}
+
+function formatFunnelPercent(value: number): string {
+  return `${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+}
+
+function conversionPercent(current: number, previous: number): number {
+  if (previous <= 0) return 0;
+  return (current / previous) * 100;
+}
+
+function SalesFunnelPerformance({
+  dashboardData,
+  todayProgress,
+}: {
+  dashboardData: typeof mockDashboardData;
+  todayProgress: TodayProgress;
+}) {
+  const leads = dashboardData.newLeadsData.reduce((sum, item) => sum + item.facebook + item.instagram, 0);
+  const visitors = Math.max(dashboardData.salesTargets.marketing.value, leads);
+  const stages: SalesFunnelStageView[] = [
+    { label: 'VISITANTES', value: visitors, color: '#14B8FF', Icon: Users },
+    { label: 'LEADS', value: leads, color: '#9B5CFF', Icon: UserPlus },
+    { label: 'QUALIFICADOS', value: todayProgress.funnel[1] ?? 0, color: '#F03A9C', Icon: CheckCircle2 },
+    { label: 'AGENDAMENTOS', value: todayProgress.funnel[2] ?? 0, color: '#FF7A00', Icon: Calendar },
+    { label: 'COMPARECIMENTOS', value: todayProgress.funnel[3] ?? 0, color: '#35E84B', Icon: Users },
+  ];
+  const conversions = stages.map((stage, index) => (
+    index === 0 ? 100 : conversionPercent(stage.value, stages[index - 1].value)
+  ));
+  const transitionConversions = conversions.slice(1);
+  const bottleneckIndex = transitionConversions.reduce((lowest, value, index) => (
+    value < transitionConversions[lowest] ? index : lowest
+  ), 0);
+  const bottleneck = `${stages[bottleneckIndex].label[0]}${stages[bottleneckIndex].label.slice(1).toLowerCase()} → ${stages[bottleneckIndex + 1].label[0]}${stages[bottleneckIndex + 1].label.slice(1).toLowerCase()}`;
+  const generalConversion = conversionPercent(stages[4].value, stages[0].value);
+
+  return (
+    <section className="relative overflow-hidden rounded-[20px] border border-[#55F52F]/45 bg-[#06120f] p-4 shadow-[0_0_0_1px_rgba(85,245,47,0.16),0_0_42px_rgba(85,245,47,0.18)] sm:p-6">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(85,245,47,0.12),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.035),transparent_22%)]" />
+      <div className="pointer-events-none absolute inset-0 opacity-[0.12] [background-image:radial-gradient(circle,rgba(255,255,255,0.38)_1px,transparent_1px)] [background-size:16px_16px]" />
+
+      <div className="relative flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-3">
+            <h3 className="text-xl font-black uppercase tracking-[0.16em] text-white">Funil de Performance</h3>
+            <Info className="h-4 w-4 text-white/55" />
+          </div>
+          <p className="mt-2 text-sm font-semibold text-white/55">Período: <span className="text-white/72">Este mês</span></p>
+        </div>
+        <button
+          type="button"
+          className="flex h-12 items-center gap-3 rounded-xl border border-white/10 bg-[#171925] px-4 text-sm font-bold text-white/80 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]"
+        >
+          <span className="text-white/45">Exibir</span>
+          Conversão %
+          <ChevronDown className="h-4 w-4 text-white/55" />
+        </button>
+      </div>
+
+      <div className="relative mt-9">
+        {stages.map((stage, index) => {
+          const Icon = stage.Icon;
+          const conversion = conversions[index];
+          const nextConversion = conversions[index + 1] ?? 0;
+
+          return (
+            <div key={stage.label}>
+              <div
+                className="relative grid min-h-[118px] grid-cols-[96px_52px_1fr_auto] items-center overflow-hidden rounded-xl border bg-[#0A1218]/82 pr-8 shadow-[inset_0_0_44px_rgba(255,255,255,0.025)] max-sm:grid-cols-[74px_38px_1fr] max-sm:pr-4"
+                style={{
+                  borderColor: `${stage.color}cc`,
+                  boxShadow: `inset 0 0 46px ${stage.color}22, 0 0 18px ${stage.color}26`,
+                }}
+              >
+                <div
+                  className="absolute inset-0"
+                  style={{
+                    background: `linear-gradient(90deg, ${stage.color}33 0%, ${stage.color}24 14%, ${stage.color}10 48%, ${stage.color}08 100%)`,
+                  }}
+                />
+                <div
+                  className="relative flex h-full min-h-[118px] items-center justify-center border-r bg-black/10"
+                  style={{
+                    borderColor: `${stage.color}aa`,
+                    boxShadow: `inset 0 0 32px ${stage.color}44`,
+                  }}
+                >
+                  <Icon className="h-11 w-11" style={{ color: stage.color }} />
+                </div>
+                <div className="relative flex justify-center">
+                  <span
+                    className="flex h-9 w-9 items-center justify-center rounded-full text-sm font-black text-white shadow-[0_0_24px_rgba(255,255,255,0.16)]"
+                    style={{ backgroundColor: `${stage.color}aa` }}
+                  >
+                    {index + 1}
+                  </span>
+                </div>
+                <p className="relative text-xs font-black uppercase tracking-[0.1em] text-white max-sm:text-[10px]">
+                  {stage.label}
+                </p>
+                <div className="relative text-right max-sm:col-span-3 max-sm:pb-4 max-sm:pr-1">
+                  <p className="text-4xl font-black leading-none text-white max-sm:text-3xl">{formatFunnelNumber(stage.value)}</p>
+                  <p className="mt-3 text-xl font-semibold text-white/65 max-sm:text-base">{formatFunnelPercent(conversion)}</p>
+                </div>
+              </div>
+
+              {index < stages.length - 1 && (
+                <div className="relative flex h-[74px] justify-center">
+                  <div
+                    className="absolute left-1/2 top-0 h-full border-l-2 border-dotted"
+                    style={{ borderColor: `${stage.color}cc` }}
+                  />
+                  <span
+                    className="absolute top-[-6px] h-3 w-3 rounded-full"
+                    style={{ backgroundColor: stage.color, boxShadow: `0 0 18px ${stage.color}` }}
+                  />
+                  <div className="relative z-10 mt-7 flex h-10 items-center gap-5 rounded-lg border border-white/10 bg-[#171B25] px-4 shadow-[0_12px_30px_rgba(0,0,0,0.34)]">
+                    <span className="text-xs font-black text-white/58">Taxa de conversão</span>
+                    <span className="text-lg font-black" style={{ color: stage.color }}>{formatFunnelPercent(nextConversion)}</span>
+                  </div>
+                  <ChevronDown
+                    className="absolute bottom-2 h-5 w-5"
+                    style={{ color: stage.color, filter: `drop-shadow(0 0 8px ${stage.color})` }}
+                  />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="relative mt-8 grid gap-0 overflow-hidden rounded-2xl border border-white/10 bg-[#131923]/86 shadow-[inset_0_0_36px_rgba(255,255,255,0.025)] md:grid-cols-3">
+        <div className="flex gap-4 p-6 md:border-r md:border-white/10">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#ff4d61]/25 text-[#ff8a95] shadow-[0_0_22px_rgba(255,77,97,0.25)]">
+            <AlertTriangle className="h-5 w-5" />
+          </div>
+          <div>
+            <p className="text-sm font-black uppercase tracking-[0.12em] text-white/78">Maior Gargalo</p>
+            <p className="mt-4 text-lg font-black text-white">{bottleneck}</p>
+            <p className="mt-3 text-sm font-semibold text-white/45">Conversão de {formatFunnelPercent(transitionConversions[bottleneckIndex] ?? 0)}</p>
+          </div>
+        </div>
+        <div className="flex gap-4 p-6 md:border-r md:border-white/10">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#35E84B]/18 text-[#67ff76] shadow-[0_0_22px_rgba(53,232,75,0.25)]">
+            <TrendingUp className="h-5 w-5" />
+          </div>
+          <div>
+            <p className="text-sm font-black uppercase tracking-[0.12em] text-white/78">Conversão Geral</p>
+            <p className="mt-4 text-xl font-black text-white">{formatFunnelPercent(generalConversion)}</p>
+            <p className="mt-2 text-sm font-semibold text-white/45">{formatFunnelNumber(stages[4].value)} de {formatFunnelNumber(stages[0].value)} visitantes</p>
+          </div>
+        </div>
+        <div className="flex gap-4 p-6">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#35E84B]/18 text-[#B7FF7A] shadow-[0_0_22px_rgba(53,232,75,0.25)]">
+            <Lightbulb className="h-5 w-5" />
+          </div>
+          <div>
+            <p className="text-sm font-black uppercase tracking-[0.12em] text-white/78">Oportunidade</p>
+            <p className="mt-4 text-lg font-black text-white">Melhore a qualificação</p>
+            <p className="mt-3 text-sm font-semibold text-white/45">Ative automações e nutrições</p>
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -1778,7 +2090,7 @@ function ClientWidgetCard({ widget, editable, onRemove }: {
                 <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{metric.short}</p>
                 <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: metric.color }} />
               </div>
-              <p className="mt-2 font-heading font-normal text-4xl leading-none tracking-wide" style={{ color: metric.color }}>
+              <p className="mt-2 font-heading font-normal text-xl leading-none tracking-wide" style={{ color: metric.color }}>
                 {formatClientMetricValue(metric.value, metric.format)}
               </p>
               <p className="mt-2 text-xs text-muted-foreground">{metric.label}</p>
@@ -2064,7 +2376,7 @@ function ClientDashboardTab({
         onAdd={onAddCustomBlock}
       />
 
-      <PlanningGoalsDashboard goalConfig={goalConfig} todayProgress={todayProgress} />
+      <SalesFunnelPerformance dashboardData={dashboardData} todayProgress={todayProgress} />
 
       <div className="grid gap-5 md:grid-cols-3">
         {Object.entries(dashboardData.salesTargets).map(([key, target]) => (
@@ -2200,7 +2512,7 @@ function MetaAdsConnectionDialog({
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
       <DialogContent className="max-w-lg border-border bg-card">
         <DialogHeader>
-          <DialogTitle className="font-heading font-normal text-2xl uppercase tracking-wider">Configurar Meta Ads</DialogTitle>
+          <DialogTitle className="font-heading font-normal text-xl uppercase tracking-wider">Configurar Meta Ads</DialogTitle>
           <p className="text-sm text-muted-foreground">
             Selecione a(s) conta(s) de anúncio de <strong>{clientName}</strong>.
           </p>
@@ -2378,7 +2690,7 @@ function GoogleAdsConnectionDialog({
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
       <DialogContent className="max-w-lg border-border bg-card">
         <DialogHeader>
-          <DialogTitle className="font-heading font-normal text-2xl uppercase tracking-wider">Configurar Google Ads</DialogTitle>
+          <DialogTitle className="font-heading font-normal text-xl uppercase tracking-wider">Configurar Google Ads</DialogTitle>
           <p className="text-sm text-muted-foreground">
             Selecione as contas Google Ads de <strong>{clientName}</strong>.
           </p>
@@ -2823,7 +3135,7 @@ function SheetsResultsTab({ clientId }: { clientId: string }) {
           <div className="rounded-xl border border-primary/20 bg-primary/5 p-5 flex items-center justify-between">
             <div>
               <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Total de Vendas</p>
-              <p className="text-3xl font-bold text-primary mt-1">{fmtBRL(result.total)}</p>
+              <p className="text-xl font-bold text-primary mt-1">{fmtBRL(result.total)}</p>
               {result.note && <p className="text-xs text-muted-foreground mt-2 max-w-md">{result.note}</p>}
             </div>
           </div>
@@ -2903,7 +3215,7 @@ function SheetsResultsTab({ clientId }: { clientId: string }) {
 }
 
 // ── Page ───────────────────────────────────────────────────────────────────────
-const TABS = ['planejamento', 'historico', 'links', 'pagamentos', 'resultados', 'dna', 'importar'] as const;
+const TABS = ['planejamento', 'historico', 'links', 'pagamentos', 'resultados', 'dna', 'rastreio', 'crm', 'chat', 'importar'] as const;
 type Tab = typeof TABS[number];
 
 export default function ClientPage({ params }: { params: Promise<{ id: string }> }) {
@@ -3063,6 +3375,9 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
     pagamentos:   'Pagamentos',
     resultados:   'Resultados',
     dna:          'DNA do Cliente',
+    rastreio:     'Rastreio WA',
+    crm:          'CRM',
+    chat:         'Chat WhatsApp',
     importar:     'Importar Dados',
   };
 
@@ -3078,7 +3393,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
             <div className="px-2 py-0.5 rounded text-[10px] font-bold tracking-widest bg-primary/20 text-primary border border-primary/30 uppercase w-fit mb-2">
               {client.status}
             </div>
-            <h1 className="font-heading font-normal text-4xl uppercase leading-none tracking-wide text-foreground">{client.name}</h1>
+            <h1 className="font-heading font-normal text-xl uppercase leading-none tracking-wide text-foreground">{client.name}</h1>
             <div className="flex items-center gap-2 mt-1 flex-wrap">
               <p className="text-sm text-muted-foreground uppercase tracking-wide">
                 {storedClient?.category_name ?? storedClient?.segment ?? client.segment}
@@ -3219,7 +3534,10 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
 
       {tab === 'resultados' && <SheetsResultsTab clientId={id} />}
 
+      {tab === 'rastreio' && <ClientTrackingTab clientId={id} />}
 
+      {tab === 'crm' && <ClientCrmTab clientId={id} />}
+      {tab === 'chat' && <ChatView clientId={id} />}
 
       {tab === 'importar' && (
         <div className="grid gap-5 md:grid-cols-2 pt-1">

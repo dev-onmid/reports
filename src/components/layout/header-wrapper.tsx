@@ -3,8 +3,8 @@
 import { usePathname } from 'next/navigation';
 import { Header } from './header';
 
-export function HeaderWrapper() {
+export function HeaderWrapper({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
   const pathname = usePathname();
   if (pathname === '/dashboard') return null;
-  return <Header />;
+  return <Header onOpenSidebar={onOpenSidebar} />;
 }

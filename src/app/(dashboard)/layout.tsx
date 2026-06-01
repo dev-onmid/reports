@@ -1,28 +1,9 @@
-import { Sidebar } from '@/components/layout/sidebar';
-import { HeaderWrapper } from '@/components/layout/header-wrapper';
-import { PaymentProviderWrapper } from '@/components/layout/payment-provider-wrapper';
-import { HolidayPaymentAlert } from '@/components/layout/holiday-payment-alert';
-import { AuthGuard } from '@/components/layout/auth-guard';
+import { DashboardShell } from '@/components/layout/dashboard-shell';
 
 export default function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  return (
-    <PaymentProviderWrapper>
-      <AuthGuard>
-        <div className="flex h-screen overflow-hidden bg-background">
-          <Sidebar />
-          <div className="flex flex-col flex-1 overflow-hidden">
-            <HeaderWrapper />
-            <main className="flex-1 overflow-y-auto p-6">
-              {children}
-            </main>
-          </div>
-          <HolidayPaymentAlert />
-        </div>
-      </AuthGuard>
-    </PaymentProviderWrapper>
-  );
+  return <DashboardShell>{children}</DashboardShell>;
 }
