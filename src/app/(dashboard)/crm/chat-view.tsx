@@ -40,6 +40,8 @@ type CrmMessage = {
 
 type MediaType = 'imagem' | 'audio' | 'video' | 'documento' | 'localizacao';
 
+const DEFAULT_STATUS_OPTIONS = ['Em Atendimento', 'Agendado', 'Reagendado', 'Fechado', 'Comprou', 'Paciente', 'Não Retorna', 'Distante', 'Sem Interesse', 'Desqualificado'];
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const CANAL_COLORS: Record<string, string> = {
@@ -335,7 +337,7 @@ function MediaModal({
 
 // ── Main ChatView ─────────────────────────────────────────────────────────────
 
-export function ChatView({ clientId }: { clientId: string }) {
+export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: { clientId: string; statusOptions?: string[] }) {
   const [leads,      setLeads]      = useState<InboxLead[]>([]);
   const [loading,    setLoading]    = useState(true);
   const [search,     setSearch]     = useState('');
@@ -549,6 +551,32 @@ export function ChatView({ clientId }: { clientId: string }) {
     await doSend(payload);
   }
 
+  async function changeSelectedStatus(status: string) {
+    if (!selectedId || !selectedLead) return;
+    const previousStatus = selectedLead.status;
+    setLeads(prev => prev.map(lead => (
+      lead.id === selectedId || (lead.numero && selectedLead.numero && normalizeNumber(lead.numero) === normalizeNumber(selectedLead.numero))
+        ? { ...lead, status }
+        : lead
+    )));
+    try {
+      const res = await fetch(`/api/crm/${selectedId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+      if (!res.ok) throw new Error(`Erro ${res.status}`);
+      loadInbox();
+    } catch (err) {
+      setLeads(prev => prev.map(lead => (
+        lead.id === selectedId ? { ...lead, status: previousStatus } : lead
+      )));
+      setSendStatus('err');
+      setSendError(err instanceof Error ? err.message : 'Erro ao alterar status');
+      setTimeout(() => { setSendStatus(null); setSendError(null); }, 5000);
+    }
+  }
+
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -740,9 +768,22 @@ export function ChatView({ clientId }: { clientId: string }) {
                   <p className="text-xs text-muted-foreground">Online agora</p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  {selectedLead.status && (
-                    <span className="hidden text-xs text-muted-foreground sm:inline">{selectedLead.status}</span>
-                  )}
+                  <div className="relative">
+                    <select
+                      value={selectedLead.status ?? ''}
+                      onChange={event => void changeSelectedStatus(event.target.value)}
+                      className="h-8 appearance-none rounded-lg border border-border bg-background px-3 pr-8 text-xs font-semibold text-foreground outline-none transition-colors hover:border-primary/50 focus:border-primary"
+                    >
+                      {!selectedLead.status && <option value="">Sem status</option>}
+                      {selectedLead.status && !statusOptions.includes(selectedLead.status) && (
+                        <option value={selectedLead.status}>{selectedLead.status}</option>
+                      )}
+                      {statusOptions.map(status => (
+                        <option key={status} value={status}>{status}</option>
+                      ))}
+                    </select>
+                    <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">▾</span>
+                  </div>
                   {selectedLead.fechou && (
                     <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-primary/15 text-primary">Fechou</span>
                   )}

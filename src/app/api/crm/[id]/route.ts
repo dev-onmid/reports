@@ -18,6 +18,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
     const next = { ...current, ...f };
 
+    const identityParams = [current.client_id, id, current.numero ?? null];
     const { rows: [lead] } = await pool.query(
       `UPDATE public.crm_leads SET
         mes=$1, data=$2, link_criativo=$3, nome=$4, numero=$5, canal=$6, emoji=$7,
@@ -27,7 +28,16 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         data_nasc=$22, bairro=$23, motivacoes=$24, dores=$25,
         temperatura=$26, time_interno=$27,
         updated_at=NOW()
-       WHERE id=$28 RETURNING *`,
+       WHERE client_id=$28
+         AND (
+           id=$29::uuid
+           OR (
+             NULLIF(regexp_replace(COALESCE(numero, ''), '\\D', '', 'g'), '') =
+             NULLIF(regexp_replace(COALESCE($30::text, ''), '\\D', '', 'g'), '')
+             AND NULLIF(regexp_replace(COALESCE($30::text, ''), '\\D', '', 'g'), '') IS NOT NULL
+           )
+         )
+       RETURNING *`,
       [
         next.mes??null, next.data||null, next.link_criativo??null,
         next.nome??null, next.numero??null, next.canal??null, next.emoji??null,
@@ -38,7 +48,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         next.pagamento??null, next.analise_credito??false,
         next.data_nasc||null, next.bairro??null, next.motivacoes??null, next.dores??null,
         next.temperatura ?? null, next.time_interno === true,
-        id,
+        ...identityParams,
       ]
     );
     if (!lead) return Response.json({ error: 'Not found' }, { status: 404 });

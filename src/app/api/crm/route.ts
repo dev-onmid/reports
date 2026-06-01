@@ -85,6 +85,8 @@ export async function GET(req: NextRequest) {
         FROM public.crm_leads
         WHERE client_id = $1
           AND ($2::uuid IS NULL OR funnel_id = $2::uuid)
+          AND numero ~ '^[0-9]{10,15}$'
+          AND numero NOT LIKE '%--%'
       )
       SELECT *
       FROM ranked

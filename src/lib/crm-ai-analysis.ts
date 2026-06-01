@@ -371,6 +371,7 @@ ${statusOptions.map(status => `- ${status}`).join('\n')}
 
 Regras importantes de status:
 - Seja objetivo e conclusivo. Não mude status por intenção vaga, especulação ou frase ambígua.
+- Dê mais peso às mensagens recentes. Uma nova confirmação de agendamento depois de uma compra deve mover para "Agendado" se houver data/horário ou confirmação objetiva.
 - "Quero agendar", "tenho interesse em agendar" ou "pode marcar" ainda NÃO é agendamento confirmado se não houver data/horário combinado ou confirmação objetiva.
 - Use "Agendado" somente quando houver data e/ou horário definido e o cliente confirmar ou aceitar explicitamente aquele agendamento.
 - Se cliente pediu novo horário após um agendamento, use "Reagendado" quando existir.
