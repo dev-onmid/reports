@@ -6,8 +6,10 @@ import {
   Users, CalendarDays, HeartHandshake, CircleDollarSign,
   ChevronLeft, ChevronRight, ChevronDown, SlidersHorizontal,
   AlignJustify, Trash2, Pencil, Sparkles, Clock3, LayoutGrid, List, ArrowUpDown,
-  BarChart3, Plug, UserRound,
+  BarChart3, Plug, UserRound, RefreshCw,
 } from 'lucide-react';
+import { DndContext, DragOverlay, useDroppable, useDraggable, type DragEndEvent } from '@dnd-kit/core';
+import { CSS } from '@dnd-kit/utilities';
 import { useClients } from '@/lib/client-store';
 import { ClientAvatar, fetchClientPicture } from '@/components/client-avatar';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
@@ -58,6 +60,69 @@ const STATUS_COLOR: Record<string, string> = {
   'Sem Interesse':  'text-red-400',
   'Desqualificado': 'text-red-400',
 };
+
+const KANBAN_COLS: { key: string; color: string; border: string; bg: string }[] = [
+  { key: 'Em Atendimento', color: '#38bdf8', border: 'border-sky-500/30',      bg: 'bg-sky-500/5'      },
+  { key: 'Agendado',       color: '#60a5fa', border: 'border-blue-500/30',     bg: 'bg-blue-500/5'     },
+  { key: 'Reagendado',     color: '#93c5fd', border: 'border-blue-300/30',     bg: 'bg-blue-300/5'     },
+  { key: 'Fechado',        color: '#34d399', border: 'border-emerald-500/30',  bg: 'bg-emerald-500/5'  },
+  { key: 'Comprou',        color: '#4ade80', border: 'border-green-500/30',    bg: 'bg-green-500/5'    },
+  { key: 'Paciente',       color: '#94a3b8', border: 'border-slate-500/30',    bg: 'bg-slate-500/5'    },
+  { key: 'Não Retorna',    color: '#a1a1aa', border: 'border-zinc-500/30',     bg: 'bg-zinc-500/5'     },
+  { key: 'Distante',       color: '#fb923c', border: 'border-orange-500/30',   bg: 'bg-orange-500/5'   },
+  { key: 'Sem Interesse',  color: '#f87171', border: 'border-red-500/30',      bg: 'bg-red-500/5'      },
+  { key: 'Desqualificado', color: '#f87171', border: 'border-red-500/30',      bg: 'bg-red-500/5'      },
+];
+
+function KanbanCard({ lead, overlay }: { lead: CrmLead; overlay?: boolean }) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: lead.id });
+  const style = { transform: CSS.Translate.toString(transform) };
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...listeners}
+      {...attributes}
+      className={cn(
+        'rounded-lg border border-border bg-card p-2.5 cursor-grab active:cursor-grabbing select-none shadow-sm transition-shadow',
+        isDragging && !overlay && 'opacity-30',
+        overlay && 'shadow-xl rotate-1 opacity-95',
+      )}
+    >
+      <p className="text-xs font-semibold truncate">{lead.nome || 'Lead sem nome'}</p>
+      {lead.numero && <p className="mt-0.5 text-[10px] text-muted-foreground truncate">{lead.numero}</p>}
+      {lead.canal && <p className="mt-0.5 text-[9px] text-muted-foreground/60 uppercase tracking-wider">{lead.canal}</p>}
+      {(lead.data ?? lead.created_at) && (
+        <p className="mt-1 text-[9px] text-muted-foreground/50">{fmtD(lead.data ?? lead.created_at)}</p>
+      )}
+    </div>
+  );
+}
+
+function KanbanColumn({ col, leads }: { col: typeof KANBAN_COLS[number]; leads: CrmLead[] }) {
+  const { setNodeRef, isOver } = useDroppable({ id: col.key });
+  return (
+    <div
+      ref={setNodeRef}
+      className={cn(
+        'flex w-[200px] shrink-0 flex-col rounded-xl border transition-all',
+        col.border, col.bg,
+        isOver && 'ring-2 ring-primary/60 border-primary/40',
+      )}
+    >
+      <div className="flex items-center justify-between px-3 py-2 border-b border-border/40">
+        <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: col.color }}>{col.key}</span>
+        <span className="text-[10px] font-bold text-muted-foreground">{leads.length}</span>
+      </div>
+      <div className="flex flex-col gap-2 overflow-y-auto p-2 min-h-[120px] flex-1">
+        {leads.map(lead => <KanbanCard key={lead.id} lead={lead} />)}
+        {leads.length === 0 && (
+          <div className="flex flex-1 items-center justify-center text-[10px] text-muted-foreground/40 py-4">Vazio</div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 type ChannelMatch = {
   id: string;
@@ -375,6 +440,9 @@ export default function CrmPage() {
   const [pageSize, setPageSize]     = useState(10);
   const [menuId, setMenuId]         = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const [kanbanMode, setKanbanMode] = useState(false);
+  const [lastPoll, setLastPoll]     = useState<Date | null>(null);
+  const pollSinceRef = useRef(new Date().toISOString());
 
   // ── NEW ROW ──────────────────────────────────────────────────────────
   const [newDraft, setNewDraft] = useState<Draft>(freshDraft());
@@ -458,11 +526,35 @@ export default function CrmPage() {
   useEffect(() => {
     if (!clientId) { setLeads([]); return; }
     setLoading(true);
+    pollSinceRef.current = new Date().toISOString();
     fetch(`/api/crm?clientId=${clientId}`)
       .then(r => r.ok ? r.json() as Promise<CrmLead[]> : [])
-      .then(data => setLeads(data))
+      .then(data => { setLeads(data); pollSinceRef.current = new Date().toISOString(); })
       .catch(() => setLeads([]))
       .finally(() => setLoading(false));
+  }, [clientId]);
+
+  useEffect(() => {
+    if (!clientId) return;
+    const iv = setInterval(() => {
+      if (document.hidden) return;
+      const since = pollSinceRef.current;
+      fetch(`/api/crm?clientId=${clientId}&since=${encodeURIComponent(since)}`)
+        .then(r => r.ok ? r.json() as Promise<CrmLead[]> : [])
+        .then(updated => {
+          if (updated.length > 0) {
+            pollSinceRef.current = new Date().toISOString();
+            setLeads(prev => {
+              const map = new Map(prev.map(l => [l.id, l]));
+              updated.forEach(l => map.set(l.id, l));
+              return [...map.values()];
+            });
+            setLastPoll(new Date());
+          }
+        })
+        .catch(() => {});
+    }, 15_000);
+    return () => clearInterval(iv);
   }, [clientId]);
 
   const filtered = useMemo(() => leads.filter(l => {
@@ -800,11 +892,19 @@ export default function CrmPage() {
           {/* Table toolbar */}
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-border shrink-0">
             <div className="flex items-center gap-2">
-              <AlignJustify className="h-4 w-4 text-primary" />
+              {kanbanMode
+                ? <LayoutGrid className="h-4 w-4 text-primary" />
+                : <AlignJustify className="h-4 w-4 text-primary" />}
               <span className="text-sm font-semibold">Leads</span>
+              {lastPoll && (
+                <span className="flex items-center gap-1 text-[10px] text-muted-foreground/60">
+                  <RefreshCw className="h-2.5 w-2.5" />
+                  {lastPoll.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-2">
-              {Object.keys(columnFilters).length > 0 && (
+              {!kanbanMode && Object.keys(columnFilters).length > 0 && (
                 <button
                   type="button"
                   onClick={clearColumnFilters}
@@ -813,19 +913,71 @@ export default function CrmPage() {
                   Limpar filtros
                 </button>
               )}
-              <button className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
-                <Download className="h-3.5 w-3.5" />
-                Exportar
-                <ChevronDown className="h-3 w-3" />
-              </button>
+              <div className="flex overflow-hidden rounded-lg border border-border bg-card">
+                <button
+                  type="button"
+                  onClick={() => setKanbanMode(false)}
+                  className={cn('flex h-7 w-7 items-center justify-center transition-colors', !kanbanMode ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}
+                  title="Visão tabela"
+                >
+                  <AlignJustify className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setKanbanMode(true)}
+                  className={cn('flex h-7 w-7 items-center justify-center transition-colors', kanbanMode ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}
+                  title="Visão Kanban"
+                >
+                  <LayoutGrid className="h-3.5 w-3.5" />
+                </button>
+              </div>
               <button className="flex h-7 w-7 items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-foreground transition-colors">
                 <Settings2 className="h-3.5 w-3.5" />
               </button>
             </div>
           </div>
 
+          {/* ── KANBAN VIEW ─────────────────────────────────────────── */}
+          {kanbanMode && (
+            <div className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden p-3">
+              <DndContext
+                onDragEnd={(e: DragEndEvent) => {
+                  const leadId  = e.active.id as string;
+                  const newStatus = e.over?.id as string | undefined;
+                  if (!newStatus) return;
+                  const lead = leads.find(l => l.id === leadId);
+                  if (!lead || lead.status === newStatus) return;
+                  setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: newStatus } : l));
+                  fetch(`/api/crm/${leadId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ status: newStatus }),
+                  }).catch(() => {
+                    setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: lead.status } : l));
+                  });
+                }}
+              >
+                <div className="flex gap-3 h-full">
+                  {KANBAN_COLS.filter(col => {
+                    const count = leads.filter(l => (l.status ?? 'Em Atendimento') === col.key).length;
+                    return count > 0 || ['Em Atendimento', 'Agendado', 'Fechado'].includes(col.key);
+                  }).map(col => (
+                    <KanbanColumn
+                      key={col.key}
+                      col={col}
+                      leads={leads.filter(l => (l.status ?? 'Em Atendimento') === col.key)}
+                    />
+                  ))}
+                </div>
+                <DragOverlay>
+                  {null}
+                </DragOverlay>
+              </DndContext>
+            </div>
+          )}
+
           {/* Scrollable table */}
-          <div className="overflow-auto flex-1 min-h-0">
+          {!kanbanMode && <div className="overflow-auto flex-1 min-h-0">
             <table className="w-full table-fixed border-collapse text-xs" style={{ minWidth: tableMinWidth }}>
               <colgroup>
                 {COLS.map(col => (
@@ -1089,9 +1241,10 @@ export default function CrmPage() {
                 })}
               </tbody>
             </table>
-          </div>
+          </div>}
 
           {/* ── PAGINATION ── */}
+          {!kanbanMode && (
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-card px-4 py-2.5 shrink-0">
             <div className="flex flex-wrap items-center gap-3">
               <span className="text-xs text-muted-foreground">
@@ -1127,6 +1280,7 @@ export default function CrmPage() {
               </div>
             </div>
           </div>
+          )}
         </div>
       )}
     </div>

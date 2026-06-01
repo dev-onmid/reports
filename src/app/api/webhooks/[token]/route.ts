@@ -115,6 +115,49 @@ async function handleLeadCreate(pool: ReturnType<typeof makeServerPool>, data: a
   return { action: 'lead.create', id: rows[0].id, client_id: clientId, nome, numero };
 }
 
+const STATUS_OPTIONS = ['Em Atendimento','Agendado','Reagendado','Fechado','Comprou','Paciente','Não Retorna','Distante','Sem Interesse','Desqualificado'];
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function handleMessageReceived(pool: ReturnType<typeof makeServerPool>, data: any, direction: 'received' | 'sent') {
+  const numero  = String(data.numero ?? data.phone ?? data.from ?? data.to ?? '').replace(/\D/g, '');
+  const mensagem = data.mensagem ?? data.message ?? data.text ?? data.body ?? '';
+  const clientId = data.client_id ?? data.clientId ?? null;
+
+  if (!numero || !mensagem) throw new Error('Campos "numero" e "mensagem" são obrigatórios');
+
+  const query = clientId
+    ? `SELECT * FROM public.crm_leads WHERE REGEXP_REPLACE(numero,'\\D','','g') = $1 AND client_id = $2 ORDER BY created_at DESC LIMIT 1`
+    : `SELECT * FROM public.crm_leads WHERE REGEXP_REPLACE(numero,'\\D','','g') = $1 ORDER BY created_at DESC LIMIT 1`;
+  const { rows: [lead] } = await pool.query(query, clientId ? [numero, clientId] : [numero]);
+
+  if (!lead) return { action: `message.${direction}`, warning: 'Lead não encontrado para este número' };
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return { action: `message.${direction}`, warning: 'ANTHROPIC_API_KEY não configurada — status não atualizado', lead_id: lead.id };
+
+  const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 50,
+      system: `Você é classificador de estágio de lead de CRM. Analise o contexto e retorne APENAS o nome exato de um dos estágios abaixo, sem qualquer outra palavra:\n${STATUS_OPTIONS.join(', ')}`,
+      messages: [{ role: 'user', content: `Lead: ${lead.nome ?? 'Desconhecido'}\nStatus atual: ${lead.status ?? 'Em Atendimento'}\nObservações: ${lead.observacao ?? ''}\nMensagem ${direction === 'sent' ? 'ENVIADA pelo atendente' : 'RECEBIDA do lead'}: "${mensagem}"\n\nQual estágio agora?` }],
+    }),
+  });
+
+  const claudeData = await claudeRes.json() as { content?: { text: string }[] };
+  const raw = claudeData.content?.[0]?.text?.trim() ?? '';
+  const newStatus = STATUS_OPTIONS.find(s => raw.toLowerCase().includes(s.toLowerCase())) ?? null;
+
+  if (newStatus && newStatus !== lead.status) {
+    await pool.query(`UPDATE public.crm_leads SET status = $1, updated_at = NOW() WHERE id = $2`, [newStatus, lead.id]);
+    return { action: `message.${direction}`, lead_id: lead.id, old_status: lead.status, new_status: newStatus, changed: true };
+  }
+
+  return { action: `message.${direction}`, lead_id: lead.id, status: lead.status, changed: false };
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function handleLeadUpdate(pool: ReturnType<typeof makeServerPool>, data: any) {
   const leadId = data.lead_id ?? data.id;
@@ -194,6 +237,12 @@ export async function POST(
           break;
         case 'lead.update':
           result = await handleLeadUpdate(pool, data);
+          break;
+        case 'message.received':
+          result = await handleMessageReceived(pool, data, 'received');
+          break;
+        case 'message.sent':
+          result = await handleMessageReceived(pool, data, 'sent');
           break;
         default:
           await log(pool, token, config.name, event, body, 'ignored', { reason: 'unknown_event' });

@@ -55,21 +55,28 @@ async function ensureTable(pool: ReturnType<typeof makeServerPool>) {
 }
 
 export async function GET(req: NextRequest) {
-  const clientId = new URL(req.url).searchParams.get('clientId');
+  const url = new URL(req.url);
+  const clientId = url.searchParams.get('clientId');
+  const since    = url.searchParams.get('since');
   if (!clientId) return Response.json({ error: 'clientId required' }, { status: 400 });
   const pool = makeServerPool();
   try {
     await ensureTable(pool);
-    const { rows } = await pool.query(
-      `SELECT *,
-          COALESCE(lead_date, data) AS normalized_date,
-          COALESCE(lead_name, nome) AS normalized_name,
-          COALESCE(NULLIF(revenue, 0), valor_rs, 0)::float AS normalized_revenue
-         FROM public.crm_leads
-        WHERE client_id = $1
-        ORDER BY COALESCE(lead_date, data) DESC NULLS LAST, created_at DESC`,
-      [clientId]
-    );
+    const { rows } = since
+      ? await pool.query(
+          `SELECT * FROM public.crm_leads WHERE client_id = $1 AND updated_at > $2 ORDER BY updated_at DESC`,
+          [clientId, since],
+        )
+      : await pool.query(
+          `SELECT *,
+              COALESCE(lead_date, data) AS normalized_date,
+              COALESCE(lead_name, nome) AS normalized_name,
+              COALESCE(NULLIF(revenue, 0), valor_rs, 0)::float AS normalized_revenue
+             FROM public.crm_leads
+            WHERE client_id = $1
+            ORDER BY COALESCE(lead_date, data) DESC NULLS LAST, created_at DESC`,
+          [clientId],
+        );
     return Response.json(rows);
   } finally {
     await pool.end();
