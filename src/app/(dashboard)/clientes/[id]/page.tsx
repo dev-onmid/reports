@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useState, type ComponentType, type CSSProperties } from 'react';
+import { use, useEffect, useState, type ComponentType, type CSSProperties, type PointerEvent } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { mockDashboardData, mockClients, type ClientStatus, type DashboardType } from '@/lib/mock-data';
 import { useClients } from '@/lib/client-store';
@@ -17,7 +17,7 @@ import {
   WalletCards, Send, CheckCircle2, Clock3, AlertTriangle, Filter, Trash2,
   UserRound, Phone, Mail, Briefcase, SlidersHorizontal, Check, Hash, BarChart2, Layers,
   Power, PowerOff, Search, BookMarked, ExternalLink, RefreshCw, ChevronRight,
-  PiggyBank, Wallet, Info, Lightbulb, UserPlus,
+  PiggyBank, Wallet, Info, Lightbulb, UserPlus, Brain, Save, MousePointer2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -338,6 +338,77 @@ function sanitizePlanningStages(stages: unknown): FunnelStage[] {
     })
     .filter(Boolean) as FunnelStage[];
   return valid.length >= 2 ? valid.slice(0, 7) : DEFAULT_STAGES;
+}
+
+type MindMapNode = {
+  id: string;
+  title: string;
+  note: string;
+  color: string;
+  x: number;
+  y: number;
+  parentId: string | null;
+};
+
+type MindMapData = {
+  nodes: MindMapNode[];
+};
+
+const MIND_MAP_COLORS = ['#55F52F', '#38BDF8', '#A78BFA', '#F59E0B', '#FB7185', '#22C55E', '#F472B6', '#94A3B8'];
+const MIND_MAP_CANVAS = { width: 980, height: 600 };
+const MIND_MAP_STORAGE_KEY = (clientId: string) => `clientMindMap_${clientId}`;
+
+function defaultMindMap(clientName: string): MindMapData {
+  const root = 'mind-root';
+  return {
+    nodes: [
+      { id: root, title: clientName || 'Cliente', note: 'Perfil central', color: '#55F52F', x: 430, y: 265, parentId: null },
+      { id: 'mind-objective', title: 'Objetivos', note: 'Metas, KPIs e prioridades', color: '#38BDF8', x: 650, y: 110, parentId: root },
+      { id: 'mind-audience', title: 'Público', note: 'Segmentos, dores e objeções', color: '#A78BFA', x: 170, y: 110, parentId: root },
+      { id: 'mind-offer', title: 'Oferta', note: 'Produtos, diferenciais e ticket', color: '#F59E0B', x: 150, y: 405, parentId: root },
+      { id: 'mind-channels', title: 'Canais', note: 'Meta, Google, WhatsApp e CRM', color: '#FB7185', x: 665, y: 405, parentId: root },
+      { id: 'mind-actions', title: 'Próximas ações', note: 'Tarefas e responsáveis', color: '#22C55E', x: 430, y: 485, parentId: root },
+    ],
+  };
+}
+
+function sanitizeMindMap(data: unknown, clientName: string): MindMapData {
+  if (!data || typeof data !== 'object') return defaultMindMap(clientName);
+  const nodes = (data as Partial<MindMapData>).nodes;
+  if (!Array.isArray(nodes)) return defaultMindMap(clientName);
+
+  const valid = nodes
+    .map((node, index) => {
+      if (!node || typeof node !== 'object') return null;
+      const item = node as Partial<MindMapNode>;
+      const x = Number(item.x);
+      const y = Number(item.y);
+      return {
+        id: item.id || `mind-${index + 1}`,
+        title: String(item.title || 'Novo tópico').slice(0, 80),
+        note: String(item.note || '').slice(0, 220),
+        color: MIND_MAP_COLORS.includes(String(item.color)) ? String(item.color) : MIND_MAP_COLORS[index % MIND_MAP_COLORS.length],
+        x: Number.isFinite(x) ? Math.min(MIND_MAP_CANVAS.width - 180, Math.max(20, x)) : 120 + index * 30,
+        y: Number.isFinite(y) ? Math.min(MIND_MAP_CANVAS.height - 80, Math.max(20, y)) : 120 + index * 30,
+        parentId: item.parentId ? String(item.parentId) : null,
+      };
+    })
+    .filter(Boolean) as MindMapNode[];
+
+  if (valid.length === 0) return defaultMindMap(clientName);
+  if (!valid.some((node) => node.parentId === null)) valid[0] = { ...valid[0], parentId: null };
+  const ids = new Set(valid.map((node) => node.id));
+  return { nodes: valid.slice(0, 48).map((node) => ({ ...node, parentId: node.parentId && ids.has(node.parentId) ? node.parentId : null })) };
+}
+
+function readSavedMindMap(clientId: string, clientName: string): MindMapData {
+  if (typeof window === 'undefined') return defaultMindMap(clientName);
+  try {
+    const raw = window.localStorage.getItem(MIND_MAP_STORAGE_KEY(clientId));
+    return raw ? sanitizeMindMap(JSON.parse(raw), clientName) : defaultMindMap(clientName);
+  } catch {
+    return defaultMindMap(clientName);
+  }
 }
 
 function readSavedClientPlanning(clientId: string): ClientPlanningConfig {
@@ -770,6 +841,287 @@ function FunnelTab({ clientId, clientName, goalConfig }: { clientId: string; cli
       </div>
         </>
       )}
+    </div>
+  );
+}
+
+// ── Mind map tab ──────────────────────────────────────────────────────────────
+function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientName: string }) {
+  const [map, setMap] = useState<MindMapData>(() => readSavedMindMap(clientId, clientName));
+  const [selectedId, setSelectedId] = useState(() => readSavedMindMap(clientId, clientName).nodes[0]?.id ?? '');
+  const [saved, setSaved] = useState(false);
+  const [dragging, setDragging] = useState<{ id: string; offsetX: number; offsetY: number } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const savedMap = readSavedMindMap(clientId, clientName);
+    setMap(savedMap);
+    setSelectedId(savedMap.nodes[0]?.id ?? '');
+
+    fetch(`/api/clients/${clientId}/mind-map`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((dbMap: MindMapData | null) => {
+        if (cancelled || !dbMap) return;
+        const clean = sanitizeMindMap(dbMap, clientName);
+        setMap(clean);
+        setSelectedId((current) => clean.nodes.some((node) => node.id === current) ? current : clean.nodes[0]?.id ?? '');
+        window.localStorage.setItem(MIND_MAP_STORAGE_KEY(clientId), JSON.stringify(clean));
+      })
+      .catch(() => {});
+
+    return () => { cancelled = true; };
+  }, [clientId, clientName]);
+
+  const selectedNode = map.nodes.find((node) => node.id === selectedId) ?? map.nodes[0];
+  const rootId = map.nodes.find((node) => node.parentId === null)?.id ?? map.nodes[0]?.id;
+
+  function persist(nextMap = map) {
+    const clean = sanitizeMindMap(nextMap, clientName);
+    window.localStorage.setItem(MIND_MAP_STORAGE_KEY(clientId), JSON.stringify(clean));
+    fetch(`/api/clients/${clientId}/mind-map`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(clean),
+    }).catch(() => {});
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1800);
+  }
+
+  function updateNode(id: string, patch: Partial<MindMapNode>) {
+    setSaved(false);
+    setMap((prev) => ({
+      nodes: prev.nodes.map((node) => node.id === id ? { ...node, ...patch } : node),
+    }));
+  }
+
+  function addNode(parentId: string | null) {
+    if (map.nodes.length >= 48) return;
+    const parent = map.nodes.find((node) => node.id === parentId) ?? selectedNode ?? map.nodes[0];
+    const siblings = map.nodes.filter((node) => node.parentId === parent?.id).length;
+    const angle = ((siblings % 8) / 8) * Math.PI * 2;
+    const next: MindMapNode = {
+      id: `mind-${Date.now()}`,
+      title: 'Novo tópico',
+      note: '',
+      color: MIND_MAP_COLORS[map.nodes.length % MIND_MAP_COLORS.length],
+      x: Math.min(MIND_MAP_CANVAS.width - 190, Math.max(30, (parent?.x ?? 420) + Math.cos(angle) * 230)),
+      y: Math.min(MIND_MAP_CANVAS.height - 90, Math.max(30, (parent?.y ?? 260) + Math.sin(angle) * 170)),
+      parentId: parent?.id ?? null,
+    };
+    const nextMap = { nodes: [...map.nodes, next] };
+    setMap(nextMap);
+    setSelectedId(next.id);
+    setSaved(false);
+  }
+
+  function removeNode(id: string) {
+    if (id === rootId || map.nodes.length <= 1) return;
+    const removeIds = new Set<string>([id]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const node of map.nodes) {
+        if (node.parentId && removeIds.has(node.parentId) && !removeIds.has(node.id)) {
+          removeIds.add(node.id);
+          changed = true;
+        }
+      }
+    }
+    const nextNodes = map.nodes.filter((node) => !removeIds.has(node.id));
+    setMap({ nodes: nextNodes });
+    setSelectedId(nextNodes[0]?.id ?? '');
+    setSaved(false);
+  }
+
+  function handlePointerDown(e: PointerEvent<HTMLButtonElement>, node: MindMapNode) {
+    const rect = e.currentTarget.offsetParent?.getBoundingClientRect();
+    if (!rect) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setSelectedId(node.id);
+    setDragging({ id: node.id, offsetX: e.clientX - rect.left - node.x, offsetY: e.clientY - rect.top - node.y });
+  }
+
+  function handlePointerMove(e: PointerEvent<HTMLDivElement>) {
+    if (!dragging) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = Math.min(MIND_MAP_CANVAS.width - 185, Math.max(16, e.clientX - rect.left - dragging.offsetX));
+    const y = Math.min(MIND_MAP_CANVAS.height - 76, Math.max(16, e.clientY - rect.top - dragging.offsetY));
+    updateNode(dragging.id, { x, y });
+  }
+
+  function handlePointerUp() {
+    setDragging(null);
+  }
+
+  return (
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="overflow-hidden rounded-xl border border-border bg-card">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+          <div className="flex items-center gap-3">
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-primary/30 bg-primary/10 text-primary">
+              <Brain className="h-4 w-4" />
+            </span>
+            <div>
+              <h3 className="text-sm font-bold uppercase tracking-wider">Mapa Mental</h3>
+              <p className="text-xs text-muted-foreground">Organize estratégia, público, oferta, canais e ações do cliente.</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => addNode(selectedNode?.id ?? rootId ?? null)} className="h-9 gap-2 text-xs font-bold uppercase tracking-wider">
+              <Plus className="h-3.5 w-3.5" />
+              Tópico
+            </Button>
+            <Button onClick={() => persist()} className="h-9 gap-2 bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-bold uppercase tracking-wider">
+              {saved ? <Check className="h-3.5 w-3.5" /> : <Save className="h-3.5 w-3.5" />}
+              {saved ? 'Salvo' : 'Salvar'}
+            </Button>
+          </div>
+        </div>
+
+        <div className="overflow-auto p-3">
+          <div
+            className="relative min-w-[980px] rounded-lg border border-border/60 bg-background"
+            style={{ width: MIND_MAP_CANVAS.width, height: MIND_MAP_CANVAS.height }}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerLeave={handlePointerUp}
+          >
+            <svg className="absolute inset-0 h-full w-full pointer-events-none">
+              {map.nodes.map((node) => {
+                const parent = node.parentId ? map.nodes.find((candidate) => candidate.id === node.parentId) : null;
+                if (!parent) return null;
+                return (
+                  <path
+                    key={`${parent.id}-${node.id}`}
+                    d={`M ${parent.x + 88} ${parent.y + 34} C ${(parent.x + node.x) / 2 + 88} ${parent.y + 34}, ${(parent.x + node.x) / 2 + 88} ${node.y + 34}, ${node.x + 88} ${node.y + 34}`}
+                    fill="none"
+                    stroke={node.color}
+                    strokeOpacity="0.5"
+                    strokeWidth="2"
+                  />
+                );
+              })}
+            </svg>
+
+            {map.nodes.map((node) => {
+              const isSelected = node.id === selectedNode?.id;
+              const childCount = map.nodes.filter((item) => item.parentId === node.id).length;
+              return (
+                <button
+                  key={node.id}
+                  type="button"
+                  onPointerDown={(e) => handlePointerDown(e, node)}
+                  className={cn(
+                    'absolute w-44 rounded-lg border bg-card px-3 py-2 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md',
+                    isSelected ? 'ring-2 ring-primary border-primary/50' : 'border-border',
+                    node.parentId === null ? 'w-48' : '',
+                  )}
+                  style={{ left: node.x, top: node.y, borderColor: isSelected ? node.color : undefined }}
+                >
+                  <span className="mb-1 flex items-center gap-2">
+                    <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: node.color }} />
+                    <span className="truncate text-sm font-bold">{node.title}</span>
+                  </span>
+                  <span className="line-clamp-2 block min-h-8 text-[11px] leading-snug text-muted-foreground">
+                    {node.note || 'Clique para editar'}
+                  </span>
+                  {childCount > 0 && (
+                    <span className="mt-2 inline-flex rounded-full border border-border px-2 py-0.5 text-[10px] font-bold text-muted-foreground">
+                      {childCount} ligados
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+
+            <div className="absolute bottom-3 left-3 flex items-center gap-2 rounded-lg border border-border bg-card/90 px-3 py-2 text-[11px] font-semibold text-muted-foreground">
+              <MousePointer2 className="h-3.5 w-3.5" />
+              Arraste os tópicos para reorganizar
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <aside className="rounded-xl border border-border bg-card p-4">
+        {selectedNode ? (
+          <div className="space-y-4">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Tópico selecionado</p>
+              <p className="mt-1 truncate text-sm font-bold">{selectedNode.title}</p>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Título</Label>
+              <Input
+                value={selectedNode.title}
+                onChange={(e) => updateNode(selectedNode.id, { title: e.target.value })}
+                className="bg-background"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Notas</Label>
+              <textarea
+                value={selectedNode.note}
+                onChange={(e) => updateNode(selectedNode.id, { note: e.target.value })}
+                className="min-h-28 w-full resize-none rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                placeholder="Detalhes, hipóteses, tarefas ou aprendizados."
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Cor</Label>
+              <div className="grid grid-cols-8 gap-2">
+                {MIND_MAP_COLORS.map((color) => (
+                  <button
+                    key={color}
+                    type="button"
+                    onClick={() => updateNode(selectedNode.id, { color })}
+                    className={cn('h-7 rounded-md border transition-transform hover:scale-105', selectedNode.color === color ? 'border-foreground ring-2 ring-foreground/20' : 'border-border')}
+                    style={{ backgroundColor: color }}
+                    aria-label={`Cor ${color}`}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Button variant="outline" onClick={() => addNode(selectedNode.id)} className="h-9 w-full justify-start gap-2 text-xs font-bold uppercase tracking-wider">
+                <Plus className="h-3.5 w-3.5" />
+                Adicionar filho
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => removeNode(selectedNode.id)}
+                disabled={selectedNode.id === rootId}
+                className="h-9 w-full justify-start gap-2 border-red-400/30 text-xs font-bold uppercase tracking-wider text-red-300 hover:bg-red-500/10 disabled:opacity-40"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Remover tópico
+              </Button>
+            </div>
+
+            <div className="rounded-lg border border-border bg-background/60 p-3">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Estrutura</p>
+              <div className="mt-2 max-h-48 space-y-1 overflow-auto pr-1">
+                {map.nodes.map((node) => (
+                  <button
+                    key={node.id}
+                    type="button"
+                    onClick={() => setSelectedId(node.id)}
+                    className={cn('flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors', selectedNode.id === node.id ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground')}
+                  >
+                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: node.color }} />
+                    <span className="truncate">{node.parentId ? 'Filho: ' : ''}{node.title}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">Adicione um tópico para começar.</p>
+        )}
+      </aside>
     </div>
   );
 }
@@ -3215,7 +3567,7 @@ function SheetsResultsTab({ clientId }: { clientId: string }) {
 }
 
 // ── Page ───────────────────────────────────────────────────────────────────────
-const TABS = ['planejamento', 'historico', 'links', 'pagamentos', 'resultados', 'dna', 'rastreio', 'crm', 'chat', 'importar'] as const;
+const TABS = ['planejamento', 'mapa', 'historico', 'links', 'pagamentos', 'resultados', 'dna', 'rastreio', 'crm', 'chat', 'importar'] as const;
 type Tab = typeof TABS[number];
 
 export default function ClientPage({ params }: { params: Promise<{ id: string }> }) {
@@ -3370,6 +3722,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
 
   const tabLabel: Record<Tab, string> = {
     planejamento: 'Planejamento',
+    mapa:         'Mapa Mental',
     historico:    'Histórico',
     links:        'Links & Senhas',
     pagamentos:   'Pagamentos',
@@ -3522,6 +3875,8 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
           <FunnelTab clientId={id} clientName={client.name} goalConfig={clientGoal} />
         </div>
       )}
+
+      {tab === 'mapa' && <ClientMindMapTab clientId={id} clientName={client.name} />}
 
       {tab === 'historico' && <HistoricoTab clientId={id} />}
 
