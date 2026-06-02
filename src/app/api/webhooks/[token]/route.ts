@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
+import { analisarConversa } from '@/lib/crm-ai-analysis';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -115,47 +116,48 @@ async function handleLeadCreate(pool: ReturnType<typeof makeServerPool>, data: a
   return { action: 'lead.create', id: rows[0].id, client_id: clientId, nome, numero };
 }
 
-const STATUS_OPTIONS = ['Em Atendimento','Agendado','Reagendado','Fechado','Comprou','Paciente','Não Retorna','Distante','Sem Interesse','Desqualificado'];
-
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function handleMessageReceived(pool: ReturnType<typeof makeServerPool>, data: any, direction: 'received' | 'sent') {
-  const numero  = String(data.numero ?? data.phone ?? data.from ?? data.to ?? '').replace(/\D/g, '');
-  const mensagem = data.mensagem ?? data.message ?? data.text ?? data.body ?? '';
-  const clientId = data.client_id ?? data.clientId ?? null;
+  const numero   = String(data.numero ?? data.phone ?? data.from ?? data.to ?? '').replace(/\D/g, '');
+  const mensagem = String(data.mensagem ?? data.message ?? data.text ?? data.body ?? '').trim();
+  const clientId = String(data.client_id ?? data.clientId ?? '');
 
   if (!numero || !mensagem) throw new Error('Campos "numero" e "mensagem" são obrigatórios');
+  if (!clientId) throw new Error('Campo "client_id" é obrigatório para identificar o funil correto');
 
-  const query = clientId
-    ? `SELECT * FROM public.crm_leads WHERE REGEXP_REPLACE(numero,'\\D','','g') = $1 AND client_id = $2 ORDER BY created_at DESC LIMIT 1`
-    : `SELECT * FROM public.crm_leads WHERE REGEXP_REPLACE(numero,'\\D','','g') = $1 ORDER BY created_at DESC LIMIT 1`;
-  const { rows: [lead] } = await pool.query(query, clientId ? [numero, clientId] : [numero]);
-
+  // Find lead by phone (digits only match)
+  const { rows: [lead] } = await pool.query(
+    `SELECT id, status FROM public.crm_leads
+      WHERE client_id = $1
+        AND REGEXP_REPLACE(COALESCE(numero,''), '\\D', '', 'g') = $2
+      ORDER BY created_at DESC LIMIT 1`,
+    [clientId, numero],
+  );
   if (!lead) return { action: `message.${direction}`, warning: 'Lead não encontrado para este número' };
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return { action: `message.${direction}`, warning: 'ANTHROPIC_API_KEY não configurada — status não atualizado', lead_id: lead.id };
+  // Persist message in crm_messages so analisarConversa has full context
+  await pool.query(
+    `INSERT INTO public.crm_messages (lead_id, client_id, direction, text)
+     VALUES ($1, $2, $3, $4)`,
+    [lead.id, clientId, direction === 'received' ? 'in' : 'out', mensagem],
+  ).catch(() => null);
 
-  const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-    body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 50,
-      system: `Você é classificador de estágio de lead de CRM. Analise o contexto e retorne APENAS o nome exato de um dos estágios abaixo, sem qualquer outra palavra:\n${STATUS_OPTIONS.join(', ')}`,
-      messages: [{ role: 'user', content: `Lead: ${lead.nome ?? 'Desconhecido'}\nStatus atual: ${lead.status ?? 'Em Atendimento'}\nObservações: ${lead.observacao ?? ''}\nMensagem ${direction === 'sent' ? 'ENVIADA pelo atendente' : 'RECEBIDA do lead'}: "${mensagem}"\n\nQual estágio agora?` }],
-    }),
-  });
+  const statusBefore = lead.status;
 
-  const claudeData = await claudeRes.json() as { content?: { text: string }[] };
-  const raw = claudeData.content?.[0]?.text?.trim() ?? '';
-  const newStatus = STATUS_OPTIONS.find(s => raw.toLowerCase().includes(s.toLowerCase())) ?? null;
+  // Delegate to the full AI analysis: loads funnel stages, applies rules, updates status
+  await analisarConversa(pool as Parameters<typeof analisarConversa>[0], lead.id);
 
-  if (newStatus && newStatus !== lead.status) {
-    await pool.query(`UPDATE public.crm_leads SET status = $1, updated_at = NOW() WHERE id = $2`, [newStatus, lead.id]);
-    return { action: `message.${direction}`, lead_id: lead.id, old_status: lead.status, new_status: newStatus, changed: true };
-  }
-
-  return { action: `message.${direction}`, lead_id: lead.id, status: lead.status, changed: false };
+  // Read updated status to report back
+  const { rows: [updated] } = await pool.query(
+    `SELECT status FROM public.crm_leads WHERE id = $1`, [lead.id],
+  );
+  return {
+    action: `message.${direction}`,
+    lead_id: lead.id,
+    old_status: statusBefore,
+    new_status: updated?.status ?? statusBefore,
+    changed: updated?.status !== statusBefore,
+  };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
