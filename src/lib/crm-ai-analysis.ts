@@ -234,9 +234,9 @@ async function loadStatusOptions(pool: Pool, lead: { client_id: string; funnel_i
   ).catch(() => ({ rows: [] as Array<{ label: string }> }));
 
   const labels = rows.map(row => row.label).filter(Boolean);
-  const fallback = ['Em Atendimento', 'Agendado', 'Reagendado', 'Fechado', 'Comprou', 'Paciente', 'Não Retorna', 'Distante', 'Sem Interesse', 'Desqualificado'];
+  const extras = ['Novo', 'Proposta', 'Negociação', 'Perdido'];
   const current = lead.status ? [lead.status] : [];
-  return Array.from(new Set([...labels, ...current, ...fallback]));
+  return Array.from(new Set([...labels, ...current, ...extras]));
 }
 
 async function loadConversationSignals(pool: Pool, leadId: string): Promise<ConversationSignals> {
