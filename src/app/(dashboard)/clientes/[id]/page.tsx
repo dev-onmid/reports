@@ -3567,7 +3567,7 @@ function SheetsResultsTab({ clientId }: { clientId: string }) {
 }
 
 // ── Page ───────────────────────────────────────────────────────────────────────
-const TABS = ['planejamento', 'mapa', 'historico', 'links', 'pagamentos', 'resultados', 'dna', 'rastreio', 'crm', 'chat', 'importar'] as const;
+const TABS = ['planejamento', 'mapa', 'historico', 'links', 'pagamentos', 'dna', 'rastreio', 'crm', 'chat'] as const;
 type Tab = typeof TABS[number];
 
 export default function ClientPage({ params }: { params: Promise<{ id: string }> }) {
@@ -3726,12 +3726,10 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
     historico:    'Histórico',
     links:        'Links & Senhas',
     pagamentos:   'Pagamentos',
-    resultados:   'Resultados',
     dna:          'DNA do Cliente',
     rastreio:     'Rastreio WA',
     crm:          'CRM',
     chat:         'Chat WhatsApp',
-    importar:     'Importar Dados',
   };
 
   return (
@@ -3887,53 +3885,11 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
       {tab === 'pagamentos' && <InvestmentPaymentsTab clientId={id} clientName={client.name} />}
 
 
-      {tab === 'resultados' && <SheetsResultsTab clientId={id} />}
-
       {tab === 'rastreio' && <ClientTrackingTab clientId={id} />}
 
       {tab === 'crm' && <ClientCrmTab clientId={id} />}
       {tab === 'chat' && <ChatView clientId={id} />}
 
-      {tab === 'importar' && (
-        <div className="grid gap-5 md:grid-cols-2 pt-1">
-          <Card className="bg-card border-border border-dashed">
-            <CardHeader>
-              <CardTitle>Upload de Planilha</CardTitle>
-              <CardDescription>CSV, XLSX ou XML com dados de leads/CRM</CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col items-center py-10 text-center">
-              <div className="w-14 h-14 rounded-full bg-muted flex items-center justify-center mb-4">
-                <UploadCloud className="w-7 h-7 text-muted-foreground" />
-              </div>
-              <p className="text-sm text-muted-foreground mb-4">Arraste ou selecione o arquivo de {client.name}</p>
-              <Button variant="outline">Selecionar Arquivo</Button>
-            </CardContent>
-          </Card>
-          <Card className="bg-card border-border">
-            <CardHeader>
-              <CardTitle>Google Sheets</CardTitle>
-              <CardDescription>Sincronizar planilha CRM online</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label>URL da Planilha</Label>
-                <div className="flex gap-2">
-                  <div className="relative flex-1">
-                    <LinkIcon className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                    <Input placeholder="https://docs.google.com/spreadsheets/d/..." className="pl-9 bg-muted/50" />
-                  </div>
-                  <Button>Conectar</Button>
-                </div>
-              </div>
-              <div className="pt-3 border-t border-border">
-                <Button variant="link" className="h-auto p-0 text-primary text-sm">
-                  Baixar modelo ONMID e mapear colunas
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
 
       <Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>
         <DialogContent className="sm:max-w-md">
