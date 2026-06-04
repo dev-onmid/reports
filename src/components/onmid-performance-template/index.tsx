@@ -328,7 +328,7 @@ function RenderCover({ page }: { page: CoverPage }) {
           </div>
         </div>
       </div>
-      {/* Right side decorative chart sketches */}
+      {/* Right side: real summary metrics or decorative chart */}
       <div style={{ position: 'absolute', right: '5%', top: '15%', width: '34%', display: 'flex', flexDirection: 'column', gap: 10 }}>
         <Card style={{ padding: '5%' }}>
           <div style={{ height: 60, display: 'flex', alignItems: 'flex-end', gap: 5 }}>
@@ -337,14 +337,19 @@ function RenderCover({ page }: { page: CoverPage }) {
             ))}
           </div>
         </Card>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-          {[{ l: 'Cadastros', v: '86', c: G }, { l: 'Conversão', v: '+115%', c: B }, { l: 'Investimento', v: 'R$1.810', c: TM }, { l: 'CAC', v: 'R$58', c: G }].map(({ l, v, c }) => (
-            <Card key={l} style={{ padding: '8%' }}>
-              <div style={{ fontSize: 9, color: TG, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{l}</div>
-              <div style={{ fontSize: 15, fontWeight: 800, color: c, marginTop: 2 }}>{v}</div>
-            </Card>
-          ))}
-        </div>
+        {page.summaryMetrics && page.summaryMetrics.length > 0 && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            {page.summaryMetrics.map(({ label, value, accent }) => {
+              const color = accent === 'green' ? G : accent === 'blue' ? B : TM;
+              return (
+                <Card key={label} style={{ padding: '8%' }}>
+                  <div style={{ fontSize: 9, color: TG, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</div>
+                  <div style={{ fontSize: 15, fontWeight: 800, color, marginTop: 2 }}>{value}</div>
+                </Card>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -782,14 +787,57 @@ function RenderPage({ page }: { page: ReportPage }) {
 
 export default function OmniPerformanceTemplate({ data }: { data: OmniReportData }) {
   return (
-    <div style={{ background: '#f4f4f5', minHeight: '100vh', padding: '32px 24px' }}>
+    <div className="report-outer" style={{ background: '#f4f4f5', minHeight: '100vh', padding: '32px 24px' }}>
       <style>{`
-        @media print {
-          body { margin: 0; background: white; }
-          .report-page-wrapper { page-break-after: always; margin: 0 !important; padding: 0 !important; box-shadow: none !important; }
-          .no-print { display: none !important; }
-        }
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+
+        @page {
+          size: A4 landscape;
+          margin: 0;
+        }
+
+        @media print {
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            background: white !important;
+          }
+
+          /* Hide everything outside the report */
+          .no-print { display: none !important; }
+
+          /* Each slide = one A4 landscape page */
+          .report-page-wrapper {
+            page-break-after: always;
+            break-after: page;
+            margin: 0 !important;
+            padding: 0 !important;
+            border-radius: 0 !important;
+            box-shadow: none !important;
+            /* A4 landscape: 297mm × 210mm — fit 16:9 within height */
+            width: 297mm !important;
+            height: 167.0625mm !important; /* 297 * 9/16 */
+            overflow: hidden !important;
+          }
+
+          /* No blank page after the last slide */
+          .report-page-wrapper:last-child {
+            page-break-after: avoid !important;
+            break-after: avoid !important;
+          }
+
+          /* Outer container resets */
+          .report-outer {
+            background: white !important;
+            padding: 0 !important;
+            min-height: unset !important;
+          }
+          .report-pages {
+            max-width: unset !important;
+            margin: 0 !important;
+            gap: 0 !important;
+          }
+        }
       `}</style>
 
       {/* Print button */}
@@ -804,7 +852,7 @@ export default function OmniPerformanceTemplate({ data }: { data: OmniReportData
       </div>
 
       {/* Pages */}
-      <div style={{ maxWidth: 1200, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 28 }}>
+      <div className="report-pages" style={{ maxWidth: 1200, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 28 }}>
         {data.pages.map((page, i) => (
           <div key={i} className="report-page-wrapper" style={{ borderRadius: 16, overflow: 'hidden', boxShadow: '0 4px 32px rgba(0,0,0,0.12)' }}>
             <RenderPage page={page} />

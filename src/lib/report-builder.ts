@@ -441,6 +441,23 @@ export async function buildOmniReport(input: {
   const pages: ReportPage[] = [];
 
   if (pageSet.has('cover')) {
+    // Build real summary metrics for the cover — only include what has data
+    const coverMetrics: { label: string; value: string; accent: 'green' | 'blue' | 'dark' }[] = [];
+    const totalCadastros = monthlyCrm.reduce((s, m) => s + m.registros, 0);
+    if (totalCadastros > 0) {
+      coverMetrics.push({ label: 'Cadastros', value: String(totalCadastros), accent: 'green' });
+      if (growthPct !== '—') {
+        coverMetrics.push({ label: 'Crescimento', value: growthPct, accent: 'blue' });
+      }
+    }
+    if (hasMeta) {
+      const totalSpend = monthlyMeta.reduce((s, m) => s + m.spend, 0);
+      const totalNc = monthlyCrm.reduce((s, m) => s + m.novosClientes, 0);
+      const avgCac = totalNc > 0 ? Math.round(totalSpend / totalNc) : 0;
+      coverMetrics.push({ label: 'Investimento', value: brl(totalSpend), accent: 'dark' });
+      if (avgCac > 0) coverMetrics.push({ label: 'CAC médio', value: brl(avgCac), accent: 'green' });
+    }
+
     pages.push({
       type: 'cover',
       title: 'Relatório de\nPerformance',
@@ -450,6 +467,7 @@ export async function buildOmniReport(input: {
       period: `${fmtMonth(periodFrom)} a ${fmtMonth(periodTo)}`,
       sources: ['Base de Clientes', ...(hasMeta ? ['Relatórios Meta Ads'] : [])].join(' + '),
       objective: 'Analisar a evolução da base de clientes, aquisição de novos compradores' + (hasMeta ? ', eficiência do tráfego pago e desempenho das campanhas de mídia.' : '.'),
+      summaryMetrics: coverMetrics.length > 0 ? coverMetrics : undefined,
     });
   }
 

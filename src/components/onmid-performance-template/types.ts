@@ -16,6 +16,7 @@ export type CoverPage = {
   period: string;          // "Junho/2025 a Abril/2026"
   sources: string;         // "Base de Clientes + Relatórios Meta Ads"
   objective: string;       // 1-2 sentences
+  summaryMetrics?: { label: string; value: string; accent: 'green' | 'blue' | 'dark' }[];
 };
 
 export type ExecutiveSummaryPage = {
