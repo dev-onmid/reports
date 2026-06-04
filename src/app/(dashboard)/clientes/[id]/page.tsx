@@ -1280,7 +1280,7 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
       >
         {/* Transformed layer */}
         <div style={{ position: 'absolute', transformOrigin: '0 0', transform: `translate(${pan.x}px,${pan.y}px) scale(${scale})`, willChange: 'transform' }}>
-          <svg style={{ position: 'absolute', top: 0, left: 0, width: 0, height: 0, overflow: 'visible', pointerEvents: 'none' }}>
+          <svg style={{ position: 'absolute', top: -500, left: -500, width: 8000, height: 5000, pointerEvents: 'none', zIndex: 0 }}>
             <defs>
               {/* Arrow marker for each node color */}
               {map.nodes.map(node => (
@@ -1293,17 +1293,17 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
               </marker>
             </defs>
 
-            {/* Connection lines — center-to-center bezier (works for any direction) */}
+            {/* Connection lines — center-to-center bezier, offset +500 to match SVG origin */}
             {map.nodes.map(node => {
               const parent = node.parentId ? map.nodes.find(n => n.id === node.parentId) : null;
               if (!parent) return null;
+              const O = 500; // SVG origin offset
               const parentW = parent.parentId === null ? 192 : 176;
               const nodeW = node.parentId === null ? 192 : 176;
-              const x1 = parent.x + parentW / 2;
-              const y1 = parent.y + 34;
-              const x2 = node.x + nodeW / 2;
-              const y2 = node.y + 34;
-              // Midpoint control — horizontal S-curve
+              const x1 = parent.x + parentW / 2 + O;
+              const y1 = parent.y + 34 + O;
+              const x2 = node.x + nodeW / 2 + O;
+              const y2 = node.y + 34 + O;
               const mx = (x1 + x2) / 2;
               return (
                 <path
@@ -1318,17 +1318,20 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
               );
             })}
 
-            {/* Live preview line while connecting */}
+            {/* Live preview line while dragging to connect */}
             {connecting && (() => {
               const fromNode = map.nodes.find(n => n.id === connecting.fromId);
               if (!fromNode) return null;
+              const O = 500;
               const fw = fromNode.parentId === null ? 192 : 176;
-              const x1 = fromNode.x + fw / 2;
-              const y1 = fromNode.y + 34;
-              const mx = (x1 + connecting.toX) / 2;
+              const x1 = fromNode.x + fw / 2 + O;
+              const y1 = fromNode.y + 34 + O;
+              const tx = connecting.toX + O;
+              const ty = connecting.toY + O;
+              const mx = (x1 + tx) / 2;
               return (
                 <path
-                  d={`M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${connecting.toY}, ${connecting.toX} ${connecting.toY}`}
+                  d={`M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${ty}, ${tx} ${ty}`}
                   fill="none"
                   stroke="#55F52F"
                   strokeWidth="2.5"
