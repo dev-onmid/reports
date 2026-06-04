@@ -18,7 +18,7 @@ import {
   UserRound, Phone, Mail, Briefcase, SlidersHorizontal, Check, Hash, BarChart2, Layers,
   Power, PowerOff, Search, BookMarked, ExternalLink, RefreshCw, ChevronRight,
   PiggyBank, Wallet, Info, Lightbulb, UserPlus, Brain, Save, MousePointer2,
-  Maximize2, Minimize2, ZoomIn, ZoomOut, ImageIcon, Unlink, History, Copy,
+  Maximize2, Minimize2, ZoomIn, ZoomOut, ImageIcon, Unlink, History, Copy, Sparkles,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -897,6 +897,249 @@ function FunnelTab({ clientId, clientName, goalConfig }: { clientId: string; cli
 }
 
 // ── Mind map tab ──────────────────────────────────────────────────────────────
+// ── AI Map Builder Modal ───────────────────────────────────────────────────────
+
+function AIMapBuilderModal({ clientName, onApply, onClose }: {
+  clientName: string;
+  onApply: (data: MindMapData, merge: boolean) => void;
+  onClose: () => void;
+}) {
+  const [tab, setTab] = useState<'text' | 'audio' | 'photo'>('text');
+  const [text, setText] = useState('');
+  const [transcript, setTranscript] = useState('');
+  const [recording, setRecording] = useState(false);
+  const [image, setImage] = useState<{ base64: string; type: string; preview: string } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<MindMapData | null>(null);
+  const [error, setError] = useState('');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const recognitionRef = useRef<any>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function generate(inputText: string, img?: { base64: string; type: string }) {
+    if (!inputText.trim() && !img) return;
+    setLoading(true); setError(''); setResult(null);
+    try {
+      const res = await fetch('/api/ai/mind-map-builder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: inputText || undefined, imageBase64: img?.base64, imageType: img?.type, clientName }),
+      });
+      const data = await res.json() as MindMapData & { error?: string };
+      if (!res.ok) throw new Error(data.error ?? 'Erro desconhecido');
+      setResult(data);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function startRecording() {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const SR = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
+    if (!SR) { setError('Reconhecimento de voz não disponível neste browser. Use Chrome ou Edge.'); return; }
+    const rec = new SR() as {
+      lang: string; continuous: boolean; interimResults: boolean;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      onresult: (e: any) => void; onerror: (e: any) => void; onend: () => void;
+      start(): void; stop(): void;
+    };
+    recognitionRef.current = rec;
+    rec.lang = 'pt-BR'; rec.continuous = true; rec.interimResults = true;
+    let finalText = '';
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    rec.onresult = (e: any) => {
+      let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) finalText += e.results[i][0].transcript + ' ';
+        else interim += e.results[i][0].transcript;
+      }
+      setTranscript(finalText + interim);
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    rec.onerror = (e: any) => { setError(`Erro: ${e.error}`); setRecording(false); };
+    rec.onend = () => setRecording(false);
+    rec.start();
+    setRecording(true);
+  }
+
+  function stopRecording() { recognitionRef.current?.stop(); setRecording(false); }
+
+  function handleImageFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      const base64 = dataUrl.split(',')[1];
+      const type = dataUrl.match(/:(.*?);/)?.[1] ?? 'image/jpeg';
+      setImage({ base64, type, preview: dataUrl });
+    };
+    reader.readAsDataURL(file);
+  }
+
+  const tabs = [
+    { key: 'text' as const, label: 'Texto', icon: '✏️' },
+    { key: 'audio' as const, label: 'Áudio', icon: '🎙️' },
+    { key: 'photo' as const, label: 'Foto / Câmera', icon: '📷' },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onPointerDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-lg mx-4 flex flex-col max-h-[90vh]" onPointerDown={e => e.stopPropagation()}>
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-primary/15 border border-primary/30 flex items-center justify-center text-sm">🧠</div>
+            <div>
+              <h2 className="text-sm font-bold text-foreground">Criar mapa com IA</h2>
+              <p className="text-[11px] text-muted-foreground">Descreva, grave ou envie uma foto — a IA monta o mapa</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors"><X className="h-4 w-4" /></button>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex border-b border-border shrink-0">
+          {tabs.map(t => (
+            <button key={t.key} onClick={() => { setTab(t.key); setError(''); setResult(null); }}
+              className={cn('flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-semibold transition-colors border-b-2',
+                tab === t.key ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground')}>
+              <span>{t.icon}</span>{t.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+
+          {/* TEXT TAB */}
+          {tab === 'text' && (
+            <div className="space-y-3">
+              <p className="text-[11px] text-muted-foreground">Descreva o cliente, o negócio, contexto estratégico ou qualquer conteúdo que deve virar mapa mental.</p>
+              <textarea
+                value={text}
+                onChange={e => setText(e.target.value)}
+                placeholder={`Ex: Restaurante italiano em SP, foco em delivery e salão VIP, público 30-50 anos, forte presença no Instagram, quer aumentar recompra e lançar programa de fidelidade...`}
+                className="w-full h-36 rounded-xl border border-input bg-background px-3 py-2.5 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-primary text-foreground placeholder:text-muted-foreground"
+              />
+              <button onClick={() => generate(text)} disabled={!text.trim() || loading}
+                className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary text-primary-foreground py-2.5 text-sm font-bold disabled:opacity-50 hover:bg-primary/90 transition-colors">
+                {loading ? <><RefreshCw className="h-4 w-4 animate-spin" /> Gerando mapa...</> : <><Sparkles className="h-4 w-4" /> Gerar mapa mental</>}
+              </button>
+            </div>
+          )}
+
+          {/* AUDIO TAB */}
+          {tab === 'audio' && (
+            <div className="space-y-3">
+              <p className="text-[11px] text-muted-foreground">Grave sua voz descrevendo o cliente ou estratégia. A transcrição acontece em tempo real no browser (Chrome/Edge).</p>
+              <div className={cn('flex items-center justify-center rounded-xl border-2 border-dashed py-8 transition-colors', recording ? 'border-red-400/60 bg-red-500/5' : 'border-border')}>
+                {recording ? (
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="flex gap-1 items-end h-8">
+                      {[1,2,3,4,5].map(i => (
+                        <div key={i} className="w-1.5 bg-red-400 rounded-full animate-pulse" style={{ height: `${20 + Math.random() * 12}px`, animationDelay: `${i * 0.1}s` }} />
+                      ))}
+                    </div>
+                    <p className="text-xs text-red-400 font-semibold">Gravando... fale agora</p>
+                    <button onClick={stopRecording} className="flex items-center gap-2 rounded-lg bg-red-500/15 border border-red-400/30 px-4 py-2 text-xs font-bold text-red-400 hover:bg-red-500/25 transition-colors">
+                      <span className="w-2 h-2 rounded-sm bg-red-400" /> Parar gravação
+                    </button>
+                  </div>
+                ) : (
+                  <button onClick={startRecording} className="flex flex-col items-center gap-2 text-muted-foreground hover:text-foreground transition-colors">
+                    <div className="w-12 h-12 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-xl">🎙️</div>
+                    <span className="text-xs font-semibold">Clique para gravar</span>
+                    <span className="text-[10px] text-muted-foreground">Requer Chrome ou Edge</span>
+                  </button>
+                )}
+              </div>
+              {transcript && (
+                <div className="space-y-2">
+                  <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Transcrição (editável)</label>
+                  <textarea value={transcript} onChange={e => setTranscript(e.target.value)}
+                    className="w-full h-28 rounded-xl border border-input bg-background px-3 py-2.5 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-primary text-foreground" />
+                  <button onClick={() => generate(transcript)} disabled={!transcript.trim() || loading}
+                    className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary text-primary-foreground py-2.5 text-sm font-bold disabled:opacity-50 hover:bg-primary/90 transition-colors">
+                    {loading ? <><RefreshCw className="h-4 w-4 animate-spin" /> Gerando mapa...</> : <><Sparkles className="h-4 w-4" /> Gerar mapa com transcrição</>}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* PHOTO TAB */}
+          {tab === 'photo' && (
+            <div className="space-y-3">
+              <p className="text-[11px] text-muted-foreground">Tire uma foto ou selecione uma imagem (briefing, anotações, lousa, post-it, site do cliente). A IA analisa e cria o mapa.</p>
+              <input ref={fileInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleImageFile} />
+              {!image ? (
+                <button onClick={() => fileInputRef.current?.click()}
+                  className="w-full flex flex-col items-center gap-3 rounded-xl border-2 border-dashed border-border py-10 text-muted-foreground hover:border-primary/40 hover:text-foreground hover:bg-muted/30 transition-colors">
+                  <span className="text-3xl">📷</span>
+                  <span className="text-sm font-semibold">Abrir câmera ou selecionar imagem</span>
+                  <span className="text-[10px]">Camera no celular · Arquivo no desktop</span>
+                </button>
+              ) : (
+                <div className="space-y-3">
+                  <div className="relative rounded-xl overflow-hidden border border-border">
+                    <img src={image.preview} alt="preview" className="w-full max-h-48 object-contain bg-black/20" />
+                    <button onClick={() => setImage(null)}
+                      className="absolute top-2 right-2 w-6 h-6 rounded-full bg-black/60 flex items-center justify-center hover:bg-black/80 transition-colors">
+                      <X className="h-3 w-3 text-white" />
+                    </button>
+                  </div>
+                  <button onClick={() => fileInputRef.current?.click()} className="text-xs text-muted-foreground hover:text-foreground underline transition-colors">
+                    Trocar imagem
+                  </button>
+                  <button onClick={() => generate('', image)} disabled={loading}
+                    className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary text-primary-foreground py-2.5 text-sm font-bold disabled:opacity-50 hover:bg-primary/90 transition-colors">
+                    {loading ? <><RefreshCw className="h-4 w-4 animate-spin" /> Analisando imagem...</> : <><Sparkles className="h-4 w-4" /> Analisar e gerar mapa</>}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Error */}
+          {error && (
+            <div className="flex items-start gap-2 rounded-xl bg-red-500/10 border border-red-400/20 px-3 py-2.5">
+              <span className="text-red-400 text-sm mt-0.5">⚠️</span>
+              <p className="text-xs text-red-300">{error}</p>
+            </div>
+          )}
+
+          {/* Result preview */}
+          {result && (
+            <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="text-primary text-lg">✅</span>
+                <div>
+                  <p className="text-sm font-bold text-foreground">{result.nodes.length} nós gerados</p>
+                  <p className="text-[11px] text-muted-foreground">Escolha como aplicar ao mapa atual</p>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => onApply(result, false)}
+                  className="flex-1 rounded-xl bg-primary text-primary-foreground py-2 text-xs font-bold hover:bg-primary/90 transition-colors">
+                  Substituir mapa
+                </button>
+                <button onClick={() => onApply(result, true)}
+                  className="flex-1 rounded-xl border border-primary/40 text-primary py-2 text-xs font-bold hover:bg-primary/10 transition-colors">
+                  Mesclar ao existente
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientName: string }) {
   const [map, setMap] = useState<MindMapData>(() => readSavedMindMap(clientId, clientName));
   const [saved, setSaved] = useState(false);
@@ -925,6 +1168,7 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
   const scaleRef = useRef(scale);
   const mapRef = useRef(map);
   const [showHistory, setShowHistory] = useState(false);
+  const [showAIBuilder, setShowAIBuilder] = useState(false);
   const [history, setHistory] = useState<MindMapSnapshot[]>(() => loadMindMapHistory(clientId));
 
   useEffect(() => {
@@ -1113,6 +1357,24 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
   function removeEdge(edgeId: string) {
     setMap(prev => ({ ...prev, edges: prev.edges.filter(e => e.id !== edgeId) }));
     setSaved(false);
+  }
+
+  function applyAIMap(aiData: MindMapData, merge: boolean) {
+    let nextMap: MindMapData;
+    if (merge) {
+      // Offset new nodes to avoid overlapping existing nodes
+      const offset = 60;
+      const shifted = aiData.nodes.map(n => ({ ...n, id: `ai-${n.id}-${Date.now()}`, x: n.x + offset, y: n.y + offset, parentId: n.parentId ? `ai-${n.parentId}-${Date.now()}` : null }));
+      // Re-ID edges
+      nextMap = { nodes: [...map.nodes, ...shifted], edges: [...map.edges, ...aiData.edges] };
+    } else {
+      nextMap = aiData;
+    }
+    setMap(nextMap);
+    setEditingId(null);
+    setSelectedIds(new Set());
+    persist(nextMap);
+    setShowAIBuilder(false);
   }
 
   function zoomBy(factor: number) {
@@ -1333,6 +1595,16 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
           </div>
         </div>
         <div className="flex items-center gap-1.5">
+          {/* AI Builder button */}
+          <button
+            onClick={() => setShowAIBuilder(true)}
+            className="flex h-8 items-center gap-1.5 rounded-lg border border-violet-500/40 bg-violet-500/10 px-2.5 text-xs font-semibold text-violet-400 hover:bg-violet-500/20 transition-colors"
+            title="Criar mapa com IA (texto, áudio ou foto)"
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            Criar com IA
+          </button>
+          <div className="mx-1 h-5 w-px bg-border" />
           <button onClick={() => zoomBy(0.8)} className="flex h-8 w-8 items-center justify-center rounded-lg border border-border text-muted-foreground hover:bg-muted hover:text-foreground transition-colors" title="Diminuir zoom">
             <ZoomOut className="h-3.5 w-3.5" />
           </button>
@@ -1639,6 +1911,15 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
         reader.readAsDataURL(file);
         e.target.value = '';
       }} />
+
+      {/* AI Map Builder Modal */}
+      {showAIBuilder && (
+        <AIMapBuilderModal
+          clientName={clientName}
+          onApply={applyAIMap}
+          onClose={() => setShowAIBuilder(false)}
+        />
+      )}
     </div>
   );
 }
