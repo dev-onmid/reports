@@ -1062,12 +1062,12 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
   function handleConnectPointerDown(e: PointerEvent<HTMLDivElement>, node: MindMapNode) {
     e.stopPropagation();
     e.preventDefault();
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    const canvasEl = canvasRef.current;
+    if (!canvasEl) return;
 
     const fromId = node.id;
     dragRef.current = { type: 'connect', id: fromId, startClientX: e.clientX, startClientY: e.clientY, moved: false };
-    const rect0 = canvas.getBoundingClientRect();
+    const rect0 = canvasEl.getBoundingClientRect();
     setConnecting({
       fromId,
       toX: (e.clientX - rect0.left - panRef.current.x) / scaleRef.current,
@@ -1076,7 +1076,7 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
 
     function onMove(ev: globalThis.PointerEvent) {
       if (dragRef.current?.type !== 'connect') return;
-      const r = canvas.getBoundingClientRect();
+      const r = canvasEl.getBoundingClientRect();
       setConnecting(prev => prev ? {
         ...prev,
         toX: (ev.clientX - r.left - panRef.current.x) / scaleRef.current,
@@ -1090,7 +1090,7 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
       dragRef.current = null;
       setConnecting(null);
 
-      const r = canvas.getBoundingClientRect();
+      const r = canvasEl.getBoundingClientRect();
       const toX = (ev.clientX - r.left - panRef.current.x) / scaleRef.current;
       const toY = (ev.clientY - r.top - panRef.current.y) / scaleRef.current;
       const current = mapRef.current;
