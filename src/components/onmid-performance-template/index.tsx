@@ -5,6 +5,7 @@ import type {
   CoverPage, ExecutiveSummaryPage, GrowthChartPage,
   NewCustomersPage, ExplanationCardsPage, ComparisonTablePage,
   CostPerCustomerPage, ReachImpressionsPage, MetricHighlightPage,
+  DiagnosisPage, InsightsPage, RecommendationsPage, ActionPlanPage, ConclusionPage,
 } from './types';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
@@ -766,6 +767,219 @@ function RenderMetricHighlight({ page }: { page: MetricHighlightPage }) {
   );
 }
 
+// ── Diagnosis ─────────────────────────────────────────────────────────────────
+
+const ACCENT_COLORS: Record<string, { bg: string; border: string; text: string; icon: string }> = {
+  positive:    { bg: '#f0fdf4', border: '#bbf7d0', text: '#16a34a', icon: '#22c55e' },
+  negative:    { bg: '#fef2f2', border: '#fca5a5', text: '#dc2626', icon: '#ef4444' },
+  opportunity: { bg: '#eff6ff', border: '#bfdbfe', text: '#2563eb', icon: '#3b82f6' },
+  neutral:     { bg: '#f8fafc', border: '#e2e8f0', text: '#475569', icon: '#64748b' },
+};
+
+function RenderDiagnosis({ page }: { page: DiagnosisPage }) {
+  return (
+    <div style={PAGE}>
+      <div style={DECO_RING} /><div style={GLOW} />
+      <OnmidLogo />
+      <div style={{ marginTop: '3%' }}>
+        <PageTitle title={'Diagnóstico\nGeral'} highlight="Geral" subtitle="O que os dados revelam sobre o negócio?" />
+      </div>
+      <Card style={{ marginTop: '3%', padding: '3% 4%', display: 'flex', alignItems: 'flex-start', gap: 16 }}>
+        <ICircle icon="target" size={38} />
+        <p style={{ fontSize: 14, fontWeight: 700, color: TX, lineHeight: 1.5, margin: 0 }}>{page.mainStatement}</p>
+      </Card>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginTop: 12 }}>
+        {page.items.slice(0, 6).map((item, i) => {
+          const a = ACCENT_COLORS[item.accent] ?? ACCENT_COLORS.neutral;
+          return (
+            <div key={i} style={{ background: a.bg, border: `1.5px solid ${a.border}`, borderRadius: 12, padding: '4%', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <ICircle icon={item.icon} size={28} green={item.accent !== 'opportunity'} />
+                <span style={{ fontSize: 11, fontWeight: 700, color: a.text }}>{item.title}</span>
+              </div>
+              <p style={{ fontSize: 10, color: TM, margin: 0, lineHeight: 1.5 }}>{item.description}</p>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Insights ──────────────────────────────────────────────────────────────────
+
+function RenderInsights({ page }: { page: InsightsPage }) {
+  const list = page.insights.slice(0, 5);
+  return (
+    <div style={PAGE}>
+      <div style={DECO_RING} /><div style={GLOW} />
+      <OnmidLogo />
+      <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: '4%', marginTop: '3%', height: '84%' }}>
+        <div>
+          <PageTitle title={'Principais\nInsights'} highlight="Insights" />
+          <p style={{ fontSize: 11, color: TG, marginTop: 8, lineHeight: 1.55 }}>
+            Os dados deste período revelam pontos estratégicos que merecem atenção imediata.
+          </p>
+          <GreenCard style={{ marginTop: 16, padding: '5%' }}>
+            <ICircle icon="idea" size={32} />
+            <p style={{ fontSize: 11, color: TX, fontWeight: 600, marginTop: 8, lineHeight: 1.5 }}>
+              Cada insight está conectado a uma evidência real dos dados.
+            </p>
+          </GreenCard>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {list.map((ins, i) => (
+            <Card key={i} style={{ padding: '3% 4%', display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+              <div style={{ width: 28, height: 28, borderRadius: '50%', background: G, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <span style={{ fontSize: 12, fontWeight: 800, color: 'white' }}>{ins.number}</span>
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: TX, marginBottom: 3 }}>{ins.title}</div>
+                <p style={{ fontSize: 10, color: TM, margin: 0, lineHeight: 1.5 }}>{ins.body}</p>
+                {ins.evidence && (
+                  <div style={{ marginTop: 5, display: 'inline-flex', alignItems: 'center', gap: 4, background: GL, border: `1px solid ${GB}`, borderRadius: 4, padding: '2px 7px' }}>
+                    <span style={{ fontSize: 9, color: G, fontWeight: 600 }}>{ins.evidence}</span>
+                  </div>
+                )}
+              </div>
+            </Card>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Recommendations ───────────────────────────────────────────────────────────
+
+function RenderRecommendations({ page }: { page: RecommendationsPage }) {
+  const groups = page.groups.slice(0, 4);
+  return (
+    <div style={PAGE}>
+      <div style={DECO_RING} /><div style={GLOW} />
+      <OnmidLogo />
+      <div style={{ marginTop: '3%' }}>
+        <PageTitle title={'Recomendações'} highlight="Recomendações" subtitle="O que fazer a partir deste relatório" />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${groups.length}, 1fr)`, gap: 12, marginTop: '3%' }}>
+        {groups.map((group, i) => (
+          <Card key={i} style={{ padding: '4%', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <ICircle icon={group.icon} size={30} />
+              <span style={{ fontSize: 12, fontWeight: 800, color: TX }}>{group.category}</span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {group.items.slice(0, 4).map((item, j) => (
+                <div key={j} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                  <div style={{ width: 16, height: 16, borderRadius: '50%', background: GL, border: `1.5px solid ${GB}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1 }}>
+                    <svg viewBox="0 0 24 24" width="8" height="8" fill="none" stroke={G} strokeWidth="3"><polyline points="20 6 9 17 4 12" /></svg>
+                  </div>
+                  <p style={{ fontSize: 10, color: TM, margin: 0, lineHeight: 1.5 }}>{item}</p>
+                </div>
+              ))}
+            </div>
+          </Card>
+        ))}
+      </div>
+      <GreenCard style={{ marginTop: 14, padding: '2.5% 4%', display: 'flex', alignItems: 'center', gap: 16 }}>
+        <ICircle icon="arrow" size={30} />
+        <p style={{ fontSize: 12, fontWeight: 700, color: G, margin: 0 }}>{page.highlight}</p>
+      </GreenCard>
+    </div>
+  );
+}
+
+// ── Action Plan ───────────────────────────────────────────────────────────────
+
+const URGENCY_STYLE: Record<string, { bg: string; text: string; label: string }> = {
+  alta:  { bg: '#fef2f2', text: '#dc2626', label: 'Alta' },
+  média: { bg: '#fffbeb', text: '#d97706', label: 'Média' },
+  baixa: { bg: '#f0fdf4', text: '#16a34a', label: 'Baixa' },
+};
+
+function RenderActionPlan({ page }: { page: ActionPlanPage }) {
+  return (
+    <div style={PAGE}>
+      <div style={DECO_RING} /><div style={GLOW} />
+      <OnmidLogo />
+      <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: '4%', marginTop: '3%', height: '84%' }}>
+        <div>
+          <PageTitle title={'Plano de\nAção'} highlight="Ação" />
+          <p style={{ fontSize: 11, color: TG, marginTop: 8 }}>Foco: <strong style={{ color: TX }}>{page.month}</strong></p>
+          <Card style={{ marginTop: 14, padding: '5%' }}>
+            <ICircle icon="target" size={32} />
+            <p style={{ fontSize: 12, fontWeight: 700, color: TX, marginTop: 8, lineHeight: 1.45 }}>{page.mainFocus}</p>
+          </Card>
+          <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {Object.entries(URGENCY_STYLE).map(([key, s]) => (
+              <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ width: 10, height: 10, borderRadius: 2, background: s.bg, border: `1.5px solid ${s.text}` }} />
+                <span style={{ fontSize: 9, color: TG, fontWeight: 600 }}>Prioridade {s.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {page.actions.slice(0, 5).map((action, i) => {
+            const s = URGENCY_STYLE[action.urgency] ?? URGENCY_STYLE.média;
+            return (
+              <Card key={i} style={{ padding: '3% 4%', display: 'flex', gap: 14, alignItems: 'flex-start', borderLeft: `3px solid ${s.text}` }}>
+                <div style={{ width: 28, height: 28, borderRadius: '50%', background: s.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <span style={{ fontSize: 12, fontWeight: 800, color: s.text }}>{action.priority}</span>
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ fontSize: 11, fontWeight: 700, color: TX, margin: '0 0 3px' }}>{action.what}</p>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: GL, borderRadius: 4, padding: '2px 8px' }}>
+                    <svg viewBox="0 0 24 24" width="9" height="9" fill="none" stroke={G} strokeWidth="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                    <span style={{ fontSize: 9, color: G, fontWeight: 600 }}>Métrica: {action.metric}</span>
+                  </div>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Conclusion ────────────────────────────────────────────────────────────────
+
+function RenderConclusion({ page }: { page: ConclusionPage }) {
+  const blocks = [
+    { icon: 'chart',  label: 'Resumo do período', text: page.summary },
+    { icon: 'idea',   label: 'Principal aprendizado', text: page.mainLearning },
+    { icon: 'star',   label: 'Maior oportunidade', text: page.biggestOpportunity },
+    { icon: 'target', label: 'Próximo foco estratégico', text: page.nextFocus },
+  ];
+  return (
+    <div style={PAGE}>
+      <div style={DECO_RING} /><div style={DECO_RING2} /><div style={GLOW} />
+      <OnmidLogo />
+      <div style={{ marginTop: '3%' }}>
+        <PageTitle title={'Conclusão'} highlight="Conclusão" subtitle="Visão ampla do período e próximos passos" />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: '4%', height: '68%' }}>
+        {blocks.map((b, i) => (
+          <Card key={i} style={{ padding: '5%', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <ICircle icon={b.icon} size={32} green={i !== 1} />
+              <span style={{ fontSize: 11, fontWeight: 700, color: TG, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{b.label}</span>
+            </div>
+            <p style={{ fontSize: 12, color: TX, margin: 0, lineHeight: 1.6, fontWeight: i === 0 ? 600 : 400 }}>{b.text}</p>
+          </Card>
+        ))}
+      </div>
+      <GreenCard style={{ marginTop: 14, padding: '2.5% 4%', display: 'flex', alignItems: 'center', gap: 14 }}>
+        <ICircle icon="arrow" size={28} />
+        <p style={{ fontSize: 12, fontWeight: 700, color: TX, margin: 0 }}>
+          Relatório gerado pela <span style={{ color: G }}>ONMID</span> · {new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
+        </p>
+      </GreenCard>
+    </div>
+  );
+}
+
 // ── Router ────────────────────────────────────────────────────────────────────
 
 function RenderPage({ page }: { page: ReportPage }) {
@@ -779,6 +993,11 @@ function RenderPage({ page }: { page: ReportPage }) {
     case 'cost_per_customer':    return <RenderCostPerCustomer page={page} />;
     case 'reach_impressions':    return <RenderReachImpressions page={page} />;
     case 'metric_highlight':     return <RenderMetricHighlight page={page} />;
+    case 'diagnosis':            return <RenderDiagnosis page={page} />;
+    case 'insights_page':        return <RenderInsights page={page} />;
+    case 'recommendations':      return <RenderRecommendations page={page} />;
+    case 'action_plan':          return <RenderActionPlan page={page} />;
+    case 'conclusion':           return <RenderConclusion page={page} />;
     default:                     return null;
   }
 }

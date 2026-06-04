@@ -221,42 +221,82 @@ ${manualNotes ? `Contexto do analista: ${manualNotes}` : ''}
 DADOS DO PERÍODO:
 ${JSON.stringify(data, null, 2)}
 
-Analise os dados acima e gere o conteúdo estratégico do relatório ONMID para ${clientName}.
+Analise os dados e gere o conteúdo completo do relatório ONMID para ${clientName}.
+Interprete os números — nunca os repita sem significado. Máximo 2-3 frases por bloco. Tom direto, consultivo, linguagem do dono do negócio.
 
-Lembre-se:
-- Interprete os números, não apenas os repita.
-- Se o volume for baixo, contextualize sem alarme.
-- Use linguagem do dono do negócio, não de analista técnico.
-- Máximo 2-3 frases por campo. Direto e preciso.
+Retorne APENAS o JSON abaixo. Não inclua markdown nem texto fora do JSON.
 
-Retorne JSON com exatamente esta estrutura:
 {
   "executiveSummary": {
-    "mainStatement": "Uma frase forte que define o período para ${clientName}. O que a fase representa para o negócio.",
+    "mainStatement": "Frase forte que define o que o período representou para ${clientName}.",
     "cards": [
-      { "number": "01", "title": "Aquisição", "description": "O que aconteceu com a entrada de novos clientes. Interprete, não apenas cite o número." },
-      { "number": "02", "title": "Conversão", "description": "Como os cadastros se transformaram em clientes reais. Qual o padrão identificado." },
-      { "number": "03", "title": "Performance de Mídia", "description": "O que as campanhas entregaram em visibilidade e resultado. Inclua apenas se hasMeta=true, senão fale de crescimento orgânico." }
+      { "number": "01", "title": "Aquisição", "description": "O que aconteceu com a entrada de clientes. Interprete." },
+      { "number": "02", "title": "Conversão", "description": "Como cadastros viraram clientes. Qual padrão identificado." },
+      { "number": "03", "title": "Performance de Mídia", "description": "O que as campanhas entregaram. Se hasMeta=false, fale do crescimento orgânico." }
     ],
-    "readout": "Frase de conclusão que amarra os três pontos acima. O que esse período representa para o negócio."
+    "readout": "Frase de conclusão que amarra os três pontos. O que o período representa."
   },
-  "growthInsight": "Uma frase sobre o crescimento da base no último mês. O que ele representa para o cliente.",
+  "growthInsight": "Uma frase sobre o crescimento da base no último mês.",
   "explanationCards": [
-    { "title": "Novo cliente", "description": "Como identificamos um novo cliente neste relatório. Explicação simples e direta.", "highlight": "Critério principal em verde (ex: Qtd. de pedidos = 1)" },
-    { "title": "Valor da base", "description": "Como medimos o valor gerado pela base de clientes. O que esse número representa.", "highlight": "Métrica principal usada (ex: Valor acumulado por cliente)" },
-    { "title": "Leitura correta", "description": "O que estamos analisando de fato: além da venda imediata, o que mais importa neste contexto.", "highlight": null }
+    { "title": "Novo cliente", "description": "Como identificamos um novo cliente neste relatório.", "highlight": "Critério em verde" },
+    { "title": "Valor da base", "description": "Como medimos o valor da base de clientes.", "highlight": "Métrica principal" },
+    { "title": "Leitura correta", "description": "O que estamos analisando além da venda imediata.", "highlight": null }
   ],
-  "comparisonReadout": "Leitura do comparativo entre os dois últimos meses. O que evoluiu, o que regrediu e qual a leitura estratégica.",
-  "comparisonInsight": "Frase de destaque final. Máximo 1 linha. Resumo do que o comparativo revela.",
-  "reachContext": "2-3 frases explicando o papel das impressões e do alcance para ${clientName}. Por que visibilidade importa para este tipo de negócio.",
-  "reachHighlightDesc": "Continuação após o número de pico de alcance. Ex: 'pessoas alcançadas, o melhor resultado do período, mostrando que a marca ganhou mais presença.'",
-  "includePages": ["cover", "executive_summary", "growth_chart", "new_customers", "explanation_cards", "comparison_table", "cost_per_customer", "reach_impressions"]
+  "comparisonReadout": "Leitura do comparativo entre os dois últimos meses.",
+  "comparisonInsight": "Frase de destaque final do comparativo. Máximo 1 linha.",
+  "reachContext": "2-3 frases sobre o papel das impressões e alcance para este negócio.",
+  "reachHighlightDesc": "Continuação após o número do pico de alcance.",
+  "diagnosis": {
+    "mainStatement": "Diagnóstico central do período para ${clientName}. O que os dados revelam sobre o negócio.",
+    "items": [
+      { "icon": "chart", "title": "O que está funcionando", "description": "...", "accent": "positive" },
+      { "icon": "filter", "title": "Principal gargalo", "description": "...", "accent": "negative" },
+      { "icon": "arrow", "title": "Maior oportunidade", "description": "...", "accent": "opportunity" },
+      { "icon": "refresh", "title": "O que ajustar", "description": "...", "accent": "neutral" },
+      { "icon": "megaphone", "title": "Canal ou frente prioritária", "description": "...", "accent": "opportunity" },
+      { "icon": "target", "title": "Próxima prioridade", "description": "...", "accent": "positive" }
+    ]
+  },
+  "insights": [
+    { "number": 1, "title": "Título do insight 1", "body": "Descrição com interpretação estratégica.", "evidence": "Base: dado concreto" },
+    { "number": 2, "title": "Título do insight 2", "body": "...", "evidence": "..." },
+    { "number": 3, "title": "Título do insight 3", "body": "...", "evidence": "..." },
+    { "number": 4, "title": "Título do insight 4", "body": "...", "evidence": null },
+    { "number": 5, "title": "Título do insight 5", "body": "...", "evidence": null }
+  ],
+  "recommendations": {
+    "groups": [
+      { "category": "Aquisição", "icon": "person", "items": ["Ação 1", "Ação 2", "Ação 3"] },
+      { "category": "Conversão", "icon": "filter", "items": ["Ação 1", "Ação 2", "Ação 3"] },
+      { "category": "Recompra", "icon": "refresh", "items": ["Ação 1", "Ação 2", "Ação 3"] },
+      { "category": "Mídia Paga", "icon": "megaphone", "items": ["Ação 1", "Ação 2", "Ação 3"] }
+    ],
+    "highlight": "Recomendação principal. Uma frase clara sobre o que fazer primeiro."
+  },
+  "actionPlan": {
+    "mainFocus": "Foco estratégico principal para o próximo mês.",
+    "actions": [
+      { "priority": 1, "what": "O que fazer", "metric": "Métrica para acompanhar", "urgency": "alta" },
+      { "priority": 2, "what": "...", "metric": "...", "urgency": "alta" },
+      { "priority": 3, "what": "...", "metric": "...", "urgency": "média" },
+      { "priority": 4, "what": "...", "metric": "...", "urgency": "média" },
+      { "priority": 5, "what": "...", "metric": "...", "urgency": "baixa" }
+    ]
+  },
+  "conclusion": {
+    "summary": "Resumo do desempenho geral do período.",
+    "mainLearning": "Principal aprendizado estratégico deste relatório.",
+    "biggestOpportunity": "Maior oportunidade identificada para ${clientName}.",
+    "nextFocus": "Próximo foco estratégico recomendado."
+  },
+  "includePages": ["cover", "executive_summary", "growth_chart", "new_customers", "explanation_cards", "comparison_table", "cost_per_customer", "reach_impressions", "diagnosis", "insights_page", "recommendations", "action_plan", "conclusion"]
 }
 
-REGRA FINAL DE PÁGINAS: inclua apenas páginas que fazem sentido com os dados disponíveis.
-- Se hasMeta=false: remova "reach_impressions" e "cost_per_customer"
-- Se totalRegistros < 3: mantenha apenas "cover", "executive_summary", "explanation_cards"
-- Nunca inclua uma página com dados zerados sem contexto estratégico`;
+REGRAS DE SELEÇÃO DE PÁGINAS:
+- Se hasMeta=false: remova "reach_impressions", "cost_per_customer"
+- Se totalRegistros < 3: use apenas "cover", "executive_summary", "explanation_cards", "diagnosis", "insights_page", "recommendations", "action_plan", "conclusion"
+- "diagnosis", "insights_page", "recommendations", "action_plan", "conclusion" SEMPRE devem estar incluídos
+- Nunca inclua página de gráfico sem dados reais`;
 
 // ── Build ─────────────────────────────────────────────────────────────────────
 
@@ -330,46 +370,114 @@ export async function buildOmniReport(input: {
   };
 
   // 3. Call Claude
+  type DiagnosisItem = { icon: string; title: string; description: string; accent: 'positive' | 'negative' | 'opportunity' | 'neutral' };
   type AiOutput = {
-    executiveSummary: {
-      mainStatement: string;
-      cards: { number: string; title: string; description: string }[];
-      readout: string;
-    };
+    executiveSummary: { mainStatement: string; cards: { number: string; title: string; description: string }[]; readout: string };
     growthInsight: string;
     explanationCards: { title: string; description: string; highlight?: string | null }[];
     comparisonReadout: string;
     comparisonInsight: string;
     reachContext: string;
     reachHighlightDesc: string;
+    diagnosis: { mainStatement: string; items: DiagnosisItem[] };
+    insights: { number: number; title: string; body: string; evidence?: string | null }[];
+    recommendations: { groups: { category: string; icon: string; items: string[] }[]; highlight: string };
+    actionPlan: { mainFocus: string; actions: { priority: number; what: string; metric: string; urgency: 'alta' | 'média' | 'baixa' }[] };
+    conclusion: { summary: string; mainLearning: string; biggestOpportunity: string; nextFocus: string };
     includePages: string[];
   };
 
-  let ai: AiOutput = {
+  const totalRegistros = monthlyCrm.reduce((s, m) => s + m.registros, 0);
+  const nextMonthLabel = (() => {
+    if (!last?.label) return 'próximo mês';
+    const [m, y] = last.label.split('/');
+    const months = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+    const idx = months.indexOf(m);
+    const nextIdx = (idx + 1) % 12;
+    const nextYear = nextIdx === 0 ? String(parseInt(y) + 1) : y;
+    return `${months[nextIdx]}/${nextYear}`;
+  })();
+
+  const AI_DEFAULTS: AiOutput = {
     executiveSummary: {
-      mainStatement: `${clientName} manteve crescimento consistente no período, com destaque para ${last?.label ?? 'o último mês'} que registrou ${currRegistros} cadastros.`,
+      mainStatement: `${clientName} encerrou o período com ${totalRegistros} registros na base. Os dados apontam o estágio atual e as oportunidades de crescimento.`,
       cards: [
-        { number: '01', title: 'Aquisição', description: `${monthlyCrm.reduce((s, m) => s + m.registros, 0)} cadastros no período com tendência de crescimento.` },
+        { number: '01', title: 'Aquisição', description: `${totalRegistros} registros no período. A análise mensal revela o ritmo de entrada na base.` },
         { number: '02', title: 'Conversão', description: `${monthlyCrm.reduce((s, m) => s + m.novosClientes, 0)} novos clientes realizaram o primeiro pedido.` },
-        { number: '03', title: 'Performance de Mídia', description: hasMeta ? 'Campanhas gerando alcance, impressões e compras atribuídas.' : 'Dados de mídia não disponíveis neste período.' },
+        { number: '03', title: 'Performance de Mídia', description: hasMeta ? 'As campanhas geraram visibilidade e compras atribuídas ao longo do período.' : 'Crescimento baseado em canais orgânicos e relacionamento.' },
       ],
-      readout: 'evolução consistente nos três principais frentes: aquisição, conversão e performance de mídia.',
+      readout: 'Os dados revelam o comportamento da base, padrões de aquisição e os pontos de atenção para os próximos meses.',
     },
-    growthInsight: `${last?.label} teve forte evolução na entrada de pessoas na base.`,
+    growthInsight: `${last?.label ?? 'O último mês'} registrou ${currRegistros} entradas — ${growthPct !== '—' ? `variação de ${growthPct} em relação ao mês anterior` : 'base de referência inicial'}.`,
     explanationCards: [
-      { title: 'Novo cliente', description: 'Consideramos como novo cliente todo cadastro com Qtd. de pedidos = 1. Isso indica o primeiro pedido registrado.', highlight: 'Qtd. de pedidos = 1.' },
-      { title: 'Valor da base', description: 'Como não temos faturamento mensal por pedido, usamos o valor acumulado gerado por cliente.', highlight: 'Valor acumulado gerado por cliente.' },
-      { title: 'Leitura correta', description: 'Não estamos analisando apenas venda imediata. Estamos analisando quantos clientes entraram, compraram, voltaram e quanto valor geraram.', highlight: null },
+      { title: 'Novo cliente', description: 'Identificamos como novo cliente todo cadastro que gerou o primeiro pedido registrado.', highlight: 'Primeiro pedido = novo cliente' },
+      { title: 'Valor da base', description: 'Usamos o valor acumulado gerado por cliente para medir o potencial financeiro da base.', highlight: 'Valor acumulado por cliente' },
+      { title: 'Leitura correta', description: 'Analisamos além da venda imediata: quantos entraram, compraram, voltaram e quanto valor essa base já gerou.', highlight: null },
     ],
-    comparisonReadout: `${last?.label} teve mais cadastros, mais novos clientes e menor custo por novo cliente que ${prev?.label}.`,
-    comparisonInsight: 'O investimento cresceu pouco, mas os resultados cresceram mais.',
-    reachContext: hasMeta
-      ? 'O tráfego pago manteve o cliente presente para o público. As campanhas geraram volume constante de exposição da marca ao longo dos meses.'
-      : '',
-    reachHighlightDesc: `pessoas alcançadas, foi o melhor resultado do período.`,
-    includePages: ['cover', 'executive_summary', 'growth_chart', 'new_customers', 'explanation_cards', 'comparison_table',
-      ...(hasMeta ? ['cost_per_customer', 'reach_impressions'] : [])],
+    comparisonReadout: prev && last
+      ? `${last.label} registrou ${last.registros} cadastros e ${last.novosClientes} novos clientes frente a ${prev.registros} e ${prev.novosClientes} em ${prev.label}.`
+      : 'Dados insuficientes para comparativo entre meses.',
+    comparisonInsight: growthPct !== '—' ? `A base variou ${growthPct} — tendência que define o ritmo do próximo mês.` : 'Período inicial: referência para meses seguintes.',
+    reachContext: hasMeta ? 'O tráfego pago garantiu presença constante da marca. Impressões e alcance representam o volume de exposição ao longo dos meses.' : '',
+    reachHighlightDesc: 'pessoas alcançadas no período — o melhor resultado em visibilidade de marca.',
+    diagnosis: {
+      mainStatement: `${clientName} apresenta dados que indicam o estágio atual do negócio. A análise revela oportunidades claras de aquisição e conversão.`,
+      items: [
+        { icon: 'chart', title: 'O que está funcionando', description: totalRegistros > 0 ? 'A base tem crescimento identificável. Há entrada de novos clientes no período.' : 'Estrutura de rastreamento operacional e pronta para escalar.', accent: 'positive' },
+        { icon: 'filter', title: 'Principal gargalo', description: totalRegistros < 5 ? 'Volume de dados ainda baixo para padrões definitivos. Meses seguintes são determinantes.' : 'Converter mais cadastros em clientes recorrentes é o desafio central.', accent: 'negative' },
+        { icon: 'arrow', title: 'Maior oportunidade', description: hasMeta ? 'Escalar o investimento nos meses com melhor CAC pode multiplicar o resultado sem proporcionalmente aumentar custo.' : 'Ativar mídia paga com base no histórico de cadastros pode acelerar a aquisição.', accent: 'opportunity' },
+        { icon: 'refresh', title: 'O que ajustar', description: 'Acompanhar a taxa de recompra e identificar clientes de uma única compra para campanhas de reativação.', accent: 'neutral' },
+        { icon: 'megaphone', title: 'Canal prioritário', description: hasMeta ? 'Meta Ads segue como principal canal de aquisição — foco em criativo e segmentação.' : 'Estruturar a primeira campanha paga com base no perfil dos clientes já adquiridos.', accent: 'opportunity' },
+        { icon: 'target', title: 'Próxima prioridade', description: `Em ${nextMonthLabel}: manter ou superar o volume do último mês e monitorar a taxa de conversão de cadastro para pedido.`, accent: 'positive' },
+      ],
+    },
+    insights: [
+      { number: 1, title: 'Ritmo de aquisição', body: totalRegistros > 0 ? `${totalRegistros} cadastros no período mostram o ritmo de entrada. O objetivo é manter crescimento mês a mês.` : 'Período inicial de coleta de dados. Os próximos meses definirão o padrão de crescimento.', evidence: `Base: ${totalRegistros} registros no período` },
+      { number: 2, title: 'Conversão da base', body: `${monthlyCrm.reduce((s, m) => s + m.novosClientes, 0)} clientes realizaram o primeiro pedido — essa taxa define o potencial da base.`, evidence: null },
+      { number: 3, title: 'Tendência recente', body: growthPct !== '—' ? `Variação de ${growthPct} no último mês indica ${growthPct.startsWith('+') ? 'aceleração' : 'queda'} que merece atenção.` : 'Com um único mês disponível, os próximos meses definirão a tendência.', evidence: last ? `${last.label}: ${last.registros} cadastros` : null },
+      ...(hasMeta ? [
+        { number: 4, title: 'Eficiência de mídia', body: 'O investimento em Meta Ads gerou visibilidade consistente. A relação entre spend e novos clientes define o CAC do período.', evidence: null },
+        { number: 5, title: 'Oportunidade de escala', body: 'Meses com menor CAC mostram o momento ideal para aumentar investimento. Replicar essas condições é o caminho.', evidence: null },
+      ] : [
+        { number: 4, title: 'Potencial orgânico', body: 'Sem mídia paga ativa, o crescimento reflete o potencial orgânico da marca. Ativar tráfego pago pode multiplicar esse resultado.', evidence: null },
+      ]),
+    ],
+    recommendations: {
+      groups: [
+        { category: 'Aquisição', icon: 'person', items: ['Manter ou aumentar investimento nos meses com melhor CAC', 'Testar novos públicos com base no perfil dos clientes atuais', 'Criar campanha específica para o produto ou serviço âncora'] },
+        { category: 'Conversão', icon: 'filter', items: ['Reduzir o tempo entre cadastro e primeira compra', 'Ativar sequência de nutrição para novos cadastros', 'Testar oferta de entrada para converter leads mais rápido'] },
+        { category: 'Recompra', icon: 'refresh', items: ['Identificar clientes com apenas uma compra e criar campanha de reativação', 'Monitorar intervalo médio entre compras para antecipar recompra', 'Criar programa de fidelidade ou benefício para cliente recorrente'] },
+        { category: 'Mídia Paga', icon: 'megaphone', items: hasMeta ? ['Pausar criativos com CPC elevado e CTR baixo', 'Aumentar orçamento nos grupos de anúncio com melhor CAC', 'Testar formato de vídeo curto para produtos de maior conversão'] : ['Criar primeira campanha com orçamento de teste (R$500–1000/mês)', 'Segmentar para lookalike da base atual de clientes', 'Medir CPL e CAC desde a primeira semana para calibrar o investimento'] },
+      ],
+      highlight: `A maior oportunidade de ${clientName} nos próximos 30 dias está na conversão de quem já está na base mas ainda não recomprou.`,
+    },
+    actionPlan: {
+      mainFocus: `Consolidar o crescimento em ${nextMonthLabel} e aumentar a taxa de conversão da base existente.`,
+      actions: [
+        { priority: 1, what: 'Revisar e pausar campanhas com CAC acima da média', metric: 'CAC médio do período', urgency: 'alta' },
+        { priority: 2, what: 'Criar lista de clientes sem recompra nos últimos 60 dias e acionar via WhatsApp', metric: 'Taxa de reativação', urgency: 'alta' },
+        { priority: 3, what: 'Produzir 2 novos criativos baseados nos produtos mais vendidos', metric: 'CTR e CPC dos novos criativos', urgency: 'média' },
+        { priority: 4, what: 'Configurar automação de pós-compra para incentivar avaliação e indicação', metric: 'NPS e novos cadastros por indicação', urgency: 'média' },
+        { priority: 5, what: 'Revisar o funil de cadastro e identificar onde há maior abandono', metric: 'Taxa de conversão cadastro → pedido', urgency: 'baixa' },
+      ],
+    },
+    conclusion: {
+      summary: `${clientName} encerrou o período com ${totalRegistros} cadastros registrados${hasMeta ? ' e presença ativa de mídia' : ''}. Os dados revelam o estágio atual e os caminhos de crescimento.`,
+      mainLearning: 'O volume de dados disponível define o padrão base. Os próximos meses serão determinantes para consolidar tendências e ajustar estratégias.',
+      biggestOpportunity: hasMeta ? 'Escalar o investimento nos meses com melhor relação entre spend e novos clientes pode reduzir o CAC e acelerar a base.' : 'Ativar tráfego pago com base no perfil dos clientes já adquiridos é o próximo passo de maior impacto.',
+      nextFocus: `Em ${nextMonthLabel}: manter a entrada de novos cadastros, reativar quem não recomprou e monitorar a eficiência de cada canal.`,
+    },
+    includePages: [
+      'cover', 'executive_summary',
+      ...(totalRegistros >= 3 ? ['growth_chart', 'new_customers'] : []),
+      'explanation_cards',
+      ...(prev && last ? ['comparison_table'] : []),
+      ...(hasMeta ? ['cost_per_customer', 'reach_impressions'] : []),
+      'diagnosis', 'insights_page', 'recommendations', 'action_plan', 'conclusion',
+    ],
   };
+
+  let ai: AiOutput = AI_DEFAULTS;
 
   if (apiKey) {
     try {
@@ -377,8 +485,8 @@ export async function buildOmniReport(input: {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
         body: JSON.stringify({
-          model: 'claude-haiku-4-5-20251001',
-          max_tokens: 2000,
+          model: 'claude-sonnet-4-6',
+          max_tokens: 4096,
           system: SYSTEM_PROMPT,
           messages: [{ role: 'user', content: USER_PROMPT_TPL(clientName, summary, manualNotes ?? '') }],
         }),
@@ -387,9 +495,12 @@ export async function buildOmniReport(input: {
         const data = await res.json() as { content?: { type: string; text: string }[] };
         const text = data.content?.find(c => c.type === 'text')?.text ?? '';
         const match = text.match(/\{[\s\S]*\}/);
-        if (match) ai = { ...ai, ...JSON.parse(match[0]) as AiOutput };
+        if (match) {
+          const parsed = JSON.parse(match[0]) as Partial<AiOutput>;
+          ai = { ...AI_DEFAULTS, ...parsed };
+        }
       }
-    } catch { /* use fallback */ }
+    } catch { /* use defaults */ }
   }
 
   // 4. Build ranking
@@ -540,6 +651,33 @@ export async function buildOmniReport(input: {
       highlightValue: peakReach.value,
       highlightDesc: ai.reachHighlightDesc,
     });
+  }
+
+  // ── New pages (always present) ──────────────────────────────────────────────
+
+  if (pageSet.has('diagnosis')) {
+    pages.push({ type: 'diagnosis', ...ai.diagnosis });
+  }
+
+  if (pageSet.has('insights_page') && ai.insights.length > 0) {
+    pages.push({ type: 'insights_page', insights: ai.insights.map(ins => ({ ...ins, evidence: ins.evidence ?? undefined })) });
+  }
+
+  if (pageSet.has('recommendations')) {
+    pages.push({ type: 'recommendations', ...ai.recommendations });
+  }
+
+  if (pageSet.has('action_plan')) {
+    pages.push({
+      type: 'action_plan',
+      month: nextMonthLabel,
+      mainFocus: ai.actionPlan.mainFocus,
+      actions: ai.actionPlan.actions,
+    });
+  }
+
+  if (pageSet.has('conclusion')) {
+    pages.push({ type: 'conclusion', ...ai.conclusion });
   }
 
   return {
