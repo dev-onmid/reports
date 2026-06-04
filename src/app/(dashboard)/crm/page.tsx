@@ -1742,10 +1742,10 @@ export default function CrmPage() {
             <button
               type="button"
               onClick={() => setShowFunnelEditor(true)}
-              title="Configurar etapas"
-              className="flex h-9 w-9 items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              className="flex h-9 items-center gap-1.5 rounded-lg border border-border px-3 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
             >
-              <Settings2 className="h-3.5 w-3.5" />
+              <Pencil className="h-3.5 w-3.5" />
+              Editar funil
             </button>
           </div>
         )}
