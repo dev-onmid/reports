@@ -1293,28 +1293,26 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
               </marker>
             </defs>
 
-            {/* Connection lines */}
+            {/* Connection lines — center-to-center bezier (works for any direction) */}
             {map.nodes.map(node => {
               const parent = node.parentId ? map.nodes.find(n => n.id === node.parentId) : null;
               if (!parent) return null;
               const parentW = parent.parentId === null ? 192 : 176;
-              const nodeW = 176;
-              // From right edge of parent to left edge of node (horizontal flow)
-              const x1 = parent.x + parentW;
-              const y1 = parent.y + 32;
-              const x2 = node.x;
-              const y2 = node.y + 32;
-              const dx = Math.abs(x2 - x1);
-              const cx1 = x1 + Math.max(60, dx * 0.4);
-              const cx2 = x2 - Math.max(60, dx * 0.4);
+              const nodeW = node.parentId === null ? 192 : 176;
+              const x1 = parent.x + parentW / 2;
+              const y1 = parent.y + 34;
+              const x2 = node.x + nodeW / 2;
+              const y2 = node.y + 34;
+              // Midpoint control — horizontal S-curve
+              const mx = (x1 + x2) / 2;
               return (
                 <path
                   key={`${parent.id}-${node.id}`}
-                  d={`M ${x1} ${y1} C ${cx1} ${y1}, ${cx2} ${y2}, ${x2} ${y2}`}
+                  d={`M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`}
                   fill="none"
                   stroke={node.color}
-                  strokeOpacity="0.75"
-                  strokeWidth="2"
+                  strokeOpacity="0.9"
+                  strokeWidth="2.5"
                   markerEnd={`url(#arr-${node.id})`}
                 />
               );
@@ -1325,18 +1323,17 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
               const fromNode = map.nodes.find(n => n.id === connecting.fromId);
               if (!fromNode) return null;
               const fw = fromNode.parentId === null ? 192 : 176;
-              const x1 = fromNode.x + fw;
-              const y1 = fromNode.y + 32;
-              const dx = Math.abs(connecting.toX - x1);
-              const cx = x1 + Math.max(40, dx * 0.4);
+              const x1 = fromNode.x + fw / 2;
+              const y1 = fromNode.y + 34;
+              const mx = (x1 + connecting.toX) / 2;
               return (
                 <path
-                  d={`M ${x1} ${y1} C ${cx} ${y1}, ${connecting.toX - 40} ${connecting.toY}, ${connecting.toX} ${connecting.toY}`}
+                  d={`M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${connecting.toY}, ${connecting.toX} ${connecting.toY}`}
                   fill="none"
                   stroke="#55F52F"
-                  strokeWidth="2"
+                  strokeWidth="2.5"
                   strokeDasharray="8 4"
-                  strokeOpacity="0.9"
+                  strokeOpacity="0.95"
                   markerEnd="url(#arr-preview)"
                 />
               );
