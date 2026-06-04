@@ -495,17 +495,20 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
         ok?: boolean;
         imported?: number;
         matched?: number;
+        fetched?: number;
         error?: string;
       };
       if (!res.ok || !data.ok) {
         setImportResult(data.error ?? 'Não foi possível puxar conversas.');
         return;
       }
-      setImportResult(
-        searchTerm.trim()
-          ? `${data.matched ?? 0} conversa(s) encontrada(s) para a busca.`
-          : `${data.imported ?? 0} conversa(s) sincronizada(s).`,
-      );
+      if (searchTerm.trim()) {
+        setImportResult(`${data.matched ?? 0} encontrada(s) de ${data.fetched ?? 0} na API.`);
+      } else if ((data.fetched ?? 0) === 0) {
+        setImportResult('API retornou 0 conversas. Verifique a instância nas configurações.');
+      } else {
+        setImportResult(`${data.imported ?? 0} sincronizada(s) (${data.fetched ?? 0} recebidas da API).`);
+      }
       loadInbox();
     } catch {
       setImportResult('Erro ao puxar conversas.');

@@ -104,19 +104,38 @@ async function fetchProviderChats(instance: {
     const base = (process.env.EVOLUTION_API_URL ?? '').replace(/\/$/, '');
     const apikey = process.env.EVOLUTION_API_KEY ?? '';
     if (!base || !apikey) throw new Error('EVOLUTION_API_URL ou EVOLUTION_API_KEY não configurados.');
-    const headers = { 'Content-Type': 'application/json', apikey };
-    const body = JSON.stringify({ page: 1, offset: limit });
-    const endpoints = [
-      `${base}/chat/findChats/${instance.instance_id}`,
-      `${base}/chat/findContacts/${instance.instance_id}`,
-      `${base}/contact/findContacts/${instance.instance_id}`,
+    const h = { 'Content-Type': 'application/json', apikey };
+
+    // Try multiple endpoint + body combinations across Evolution API versions
+    type Attempt = { url: string; method: string; body?: string };
+    const attempts: Attempt[] = [
+      // GET without body (Evolution v1 / some builds)
+      { url: `${base}/chat/findChats/${instance.instance_id}`,       method: 'GET' },
+      { url: `${base}/chat/findContacts/${instance.instance_id}`,    method: 'GET' },
+      // POST with where clause (Evolution v2)
+      { url: `${base}/chat/findChats/${instance.instance_id}`,       method: 'POST', body: JSON.stringify({ where: {}, skip: 0, take: limit }) },
+      { url: `${base}/chat/findChats/${instance.instance_id}`,       method: 'POST', body: JSON.stringify({ where: {} }) },
+      // POST with page/offset (legacy)
+      { url: `${base}/chat/findChats/${instance.instance_id}`,       method: 'POST', body: JSON.stringify({ page: 1, offset: limit }) },
+      // Contacts variants
+      { url: `${base}/chat/findContacts/${instance.instance_id}`,    method: 'POST', body: JSON.stringify({ where: {} }) },
+      { url: `${base}/contact/findContacts/${instance.instance_id}`, method: 'POST', body: JSON.stringify({ where: {} }) },
+      { url: `${base}/contact/findContacts/${instance.instance_id}`, method: 'GET' },
     ];
-    for (const url of endpoints) {
-      const res = await fetch(url, { method: 'POST', headers, body }).catch(() => null);
+
+    for (const { url, method, body } of attempts) {
+      const opts: RequestInit = { method, headers: h };
+      if (body) opts.body = body;
+      const res = await fetch(url, opts).catch(() => null);
       if (!res?.ok) continue;
-      const records = extractRecords(await res.json().catch(() => null));
-      if (records.length > 0) return records;
+      const json = await res.json().catch(() => null);
+      const records = extractRecords(json);
+      if (records.length > 0) {
+        console.log(`[inbox] Evolution: ${records.length} chats via ${method} ${url}`);
+        return records;
+      }
     }
+    console.warn('[inbox] Evolution: all endpoints returned 0 records');
     return [];
   }
 
@@ -271,12 +290,19 @@ export async function POST(req: NextRequest) {
         ADD COLUMN IF NOT EXISTS whatsapp_last_direction TEXT;
     `);
 
-    const contacts = chats
+    const mapped = chats
       .filter(chat => chat.isGroup !== true)
       .map(chat => {
-        const remoteJid = String(chat.remoteJid ?? chat.id ?? (chat.key as Record<string, unknown> | undefined)?.remoteJid ?? '');
-        const phone = normalizePhone(chat.phone ?? remoteJid);
-        const name = String(chat.name ?? chat.pushName ?? chat.pushname ?? chat.phone ?? phone);
+        const remoteJid = String(
+          chat.remoteJid
+          ?? chat.id
+          ?? (chat.key as Record<string, unknown> | undefined)?.remoteJid
+          ?? '',
+        );
+        // Extract phone: prefer explicit field, fallback to remoteJid (strip @s.whatsapp.net etc.)
+        const rawPhone = chat.phone ?? chat.phoneNumber ?? remoteJid.split('@')[0] ?? remoteJid;
+        const phone = normalizePhone(rawPhone);
+        const name = String(chat.name ?? chat.pushName ?? chat.pushname ?? chat.verifiedName ?? chat.phone ?? phone);
         const profilePictureUrl = typeof chat.profilePicUrl === 'string'
           ? chat.profilePicUrl
           : typeof chat.profilePictureUrl === 'string'
@@ -295,14 +321,19 @@ export async function POST(req: NextRequest) {
           lastMessageText: extractLastMessageText(chat),
           lastDirection: extractLastDirection(chat),
         };
-      })
-      .filter(contact => {
-        if (String(contact.remoteJid).endsWith('@g.us') || String(contact.remoteJid).endsWith('@broadcast')) return false;
-        if (!/^[0-9]{10,15}$/.test(contact.phone)) return false;
-        if (!search) return true;
-        return (searchDigits.length > 0 && contact.phone.includes(searchDigits))
-          || contact.name.toLowerCase().includes(search);
       });
+
+    // Relaxed phone filter: 8–15 digits (covers short local numbers & international)
+    const contacts = mapped.filter(contact => {
+      const jid = String(contact.remoteJid);
+      if (jid.endsWith('@g.us') || jid.endsWith('@broadcast') || jid.includes('newsletter')) return false;
+      if (!/^[0-9]{8,15}$/.test(contact.phone)) return false;
+      if (!search) return true;
+      return (searchDigits.length > 0 && contact.phone.includes(searchDigits))
+        || contact.name.toLowerCase().includes(search);
+    });
+
+    console.log(`[inbox] fetched=${chats.length} mapped=${mapped.length} contacts=${contacts.length}`);
 
     let imported = 0;
     for (const contact of contacts) {
