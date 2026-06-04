@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useState, type ComponentType, type CSSProperties, type PointerEvent } from 'react';
+import { use, useEffect, useRef, useState, type ComponentType, type CSSProperties, type PointerEvent } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { mockDashboardData, mockClients, type ClientStatus, type DashboardType } from '@/lib/mock-data';
 import { useClients } from '@/lib/client-store';
@@ -18,6 +18,7 @@ import {
   UserRound, Phone, Mail, Briefcase, SlidersHorizontal, Check, Hash, BarChart2, Layers,
   Power, PowerOff, Search, BookMarked, ExternalLink, RefreshCw, ChevronRight,
   PiggyBank, Wallet, Info, Lightbulb, UserPlus, Brain, Save, MousePointer2,
+  Maximize2, Minimize2, ZoomIn, ZoomOut, ImageIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -348,6 +349,7 @@ type MindMapNode = {
   x: number;
   y: number;
   parentId: string | null;
+  image?: string | null;
 };
 
 type MindMapData = {
@@ -355,7 +357,6 @@ type MindMapData = {
 };
 
 const MIND_MAP_COLORS = ['#55F52F', '#38BDF8', '#A78BFA', '#F59E0B', '#FB7185', '#22C55E', '#F472B6', '#94A3B8'];
-const MIND_MAP_CANVAS = { width: 980, height: 600 };
 const MIND_MAP_STORAGE_KEY = (clientId: string) => `clientMindMap_${clientId}`;
 
 function defaultMindMap(clientName: string): MindMapData {
@@ -388,9 +389,10 @@ function sanitizeMindMap(data: unknown, clientName: string): MindMapData {
         title: String(item.title || 'Novo tópico').slice(0, 80),
         note: String(item.note || '').slice(0, 220),
         color: MIND_MAP_COLORS.includes(String(item.color)) ? String(item.color) : MIND_MAP_COLORS[index % MIND_MAP_COLORS.length],
-        x: Number.isFinite(x) ? Math.min(MIND_MAP_CANVAS.width - 180, Math.max(20, x)) : 120 + index * 30,
-        y: Number.isFinite(y) ? Math.min(MIND_MAP_CANVAS.height - 80, Math.max(20, y)) : 120 + index * 30,
+        x: Number.isFinite(x) ? x : 120 + index * 30,
+        y: Number.isFinite(y) ? y : 120 + index * 30,
         parentId: item.parentId ? String(item.parentId) : null,
+        image: typeof item.image === 'string' ? item.image : null,
       };
     })
     .filter(Boolean) as MindMapNode[];
@@ -848,15 +850,31 @@ function FunnelTab({ clientId, clientName, goalConfig }: { clientId: string; cli
 // ── Mind map tab ──────────────────────────────────────────────────────────────
 function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientName: string }) {
   const [map, setMap] = useState<MindMapData>(() => readSavedMindMap(clientId, clientName));
-  const [selectedId, setSelectedId] = useState(() => readSavedMindMap(clientId, clientName).nodes[0]?.id ?? '');
   const [saved, setSaved] = useState(false);
-  const [dragging, setDragging] = useState<{ id: string; offsetX: number; offsetY: number } | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [pan, setPan] = useState({ x: 60, y: 60 });
+  const [scale, setScale] = useState(1);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const dragRef = useRef<{
+    type: 'node' | 'pan';
+    id?: string;
+    startClientX: number;
+    startClientY: number;
+    startNodeX?: number;
+    startNodeY?: number;
+    startPanX?: number;
+    startPanY?: number;
+    moved: boolean;
+  } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     const savedMap = readSavedMindMap(clientId, clientName);
     setMap(savedMap);
-    setSelectedId(savedMap.nodes[0]?.id ?? '');
+    setEditingId(null);
 
     fetch(`/api/clients/${clientId}/mind-map`)
       .then((r) => r.ok ? r.json() : null)
@@ -864,7 +882,6 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
         if (cancelled || !dbMap) return;
         const clean = sanitizeMindMap(dbMap, clientName);
         setMap(clean);
-        setSelectedId((current) => clean.nodes.some((node) => node.id === current) ? current : clean.nodes[0]?.id ?? '');
         window.localStorage.setItem(MIND_MAP_STORAGE_KEY(clientId), JSON.stringify(clean));
       })
       .catch(() => {});
@@ -872,8 +889,57 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
     return () => { cancelled = true; };
   }, [clientId, clientName]);
 
-  const selectedNode = map.nodes.find((node) => node.id === selectedId) ?? map.nodes[0];
-  const rootId = map.nodes.find((node) => node.parentId === null)?.id ?? map.nodes[0]?.id;
+  // Paste image into the editing node
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      if (!editingId) return;
+      const imageItem = Array.from(e.clipboardData?.items ?? []).find(i => i.type.startsWith('image/'));
+      if (!imageItem) return;
+      const blob = imageItem.getAsFile();
+      if (!blob) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          setMap(prev => ({ nodes: prev.nodes.map(n => n.id === editingId ? { ...n, image: reader.result as string } : n) }));
+          setSaved(false);
+        }
+      };
+      reader.readAsDataURL(blob);
+    };
+    document.addEventListener('paste', handlePaste);
+    return () => document.removeEventListener('paste', handlePaste);
+  }, [editingId]);
+
+  // Wheel zoom (needs passive:false to call preventDefault)
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      setPan(prevPan => {
+        setScale(prevScale => {
+          const worldX = (e.clientX - rect.left - prevPan.x) / prevScale;
+          const worldY = (e.clientY - rect.top - prevPan.y) / prevScale;
+          const factor = e.deltaY > 0 ? 0.9 : 1.1;
+          const newScale = Math.min(3, Math.max(0.15, prevScale * factor));
+          const newPan = {
+            x: e.clientX - rect.left - worldX * newScale,
+            y: e.clientY - rect.top - worldY * newScale,
+          };
+          // Schedule pan update outside this setter
+          requestAnimationFrame(() => setPan(newPan));
+          return newScale;
+        });
+        return prevPan;
+      });
+    };
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    return () => canvas.removeEventListener('wheel', onWheel);
+  }, []);
+
+  const editingNode = editingId ? (map.nodes.find(n => n.id === editingId) ?? null) : null;
+  const rootId = map.nodes.find(n => n.parentId === null)?.id ?? map.nodes[0]?.id;
 
   function persist(nextMap = map) {
     const clean = sanitizeMindMap(nextMap, clientName);
@@ -889,239 +955,286 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
 
   function updateNode(id: string, patch: Partial<MindMapNode>) {
     setSaved(false);
-    setMap((prev) => ({
-      nodes: prev.nodes.map((node) => node.id === id ? { ...node, ...patch } : node),
-    }));
+    setMap(prev => ({ nodes: prev.nodes.map(n => n.id === id ? { ...n, ...patch } : n) }));
   }
 
-  function addNode(parentId: string | null) {
+  function addNodeAt(x: number, y: number, parentId: string | null) {
     if (map.nodes.length >= 48) return;
-    const parent = map.nodes.find((node) => node.id === parentId) ?? selectedNode ?? map.nodes[0];
-    const siblings = map.nodes.filter((node) => node.parentId === parent?.id).length;
-    const angle = ((siblings % 8) / 8) * Math.PI * 2;
     const next: MindMapNode = {
       id: `mind-${Date.now()}`,
       title: 'Novo tópico',
       note: '',
       color: MIND_MAP_COLORS[map.nodes.length % MIND_MAP_COLORS.length],
-      x: Math.min(MIND_MAP_CANVAS.width - 190, Math.max(30, (parent?.x ?? 420) + Math.cos(angle) * 230)),
-      y: Math.min(MIND_MAP_CANVAS.height - 90, Math.max(30, (parent?.y ?? 260) + Math.sin(angle) * 170)),
-      parentId: parent?.id ?? null,
+      x,
+      y,
+      parentId,
+      image: null,
     };
     const nextMap = { nodes: [...map.nodes, next] };
     setMap(nextMap);
-    setSelectedId(next.id);
+    setEditingId(next.id);
     setSaved(false);
+  }
+
+  function addChildOf(parentId: string) {
+    const parent = map.nodes.find(n => n.id === parentId);
+    if (!parent) return;
+    const siblings = map.nodes.filter(n => n.parentId === parentId).length;
+    const angle = ((siblings % 8) / 8) * Math.PI * 2;
+    addNodeAt(parent.x + Math.cos(angle) * 250, parent.y + Math.sin(angle) * 180, parentId);
   }
 
   function removeNode(id: string) {
     if (id === rootId || map.nodes.length <= 1) return;
-    const removeIds = new Set<string>([id]);
+    const toRemove = new Set<string>([id]);
     let changed = true;
     while (changed) {
       changed = false;
-      for (const node of map.nodes) {
-        if (node.parentId && removeIds.has(node.parentId) && !removeIds.has(node.id)) {
-          removeIds.add(node.id);
-          changed = true;
-        }
+      for (const n of map.nodes) {
+        if (n.parentId && toRemove.has(n.parentId) && !toRemove.has(n.id)) { toRemove.add(n.id); changed = true; }
       }
     }
-    const nextNodes = map.nodes.filter((node) => !removeIds.has(node.id));
-    setMap({ nodes: nextNodes });
-    setSelectedId(nextNodes[0]?.id ?? '');
+    setMap({ nodes: map.nodes.filter(n => !toRemove.has(n.id)) });
+    setEditingId(null);
     setSaved(false);
   }
 
-  function handlePointerDown(e: PointerEvent<HTMLButtonElement>, node: MindMapNode) {
-    const rect = e.currentTarget.offsetParent?.getBoundingClientRect();
+  function zoomBy(factor: number) {
+    const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
+    const cx = rect.width / 2;
+    const cy = rect.height / 2;
+    setScale(prev => {
+      const newScale = Math.min(3, Math.max(0.15, prev * factor));
+      setPan(p => ({
+        x: cx - (cx - p.x) / prev * newScale,
+        y: cy - (cy - p.y) / prev * newScale,
+      }));
+      return newScale;
+    });
+  }
+
+  // Canvas background: pan on drag, add node on click
+  function handleCanvasPointerDown(e: PointerEvent<HTMLDivElement>) {
+    if (e.target !== e.currentTarget) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    setSelectedId(node.id);
-    setDragging({ id: node.id, offsetX: e.clientX - rect.left - node.x, offsetY: e.clientY - rect.top - node.y });
+    setEditingId(null);
+    dragRef.current = { type: 'pan', startClientX: e.clientX, startClientY: e.clientY, startPanX: pan.x, startPanY: pan.y, moved: false };
+    if (canvasRef.current) canvasRef.current.style.cursor = 'grabbing';
   }
 
-  function handlePointerMove(e: PointerEvent<HTMLDivElement>) {
-    if (!dragging) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = Math.min(MIND_MAP_CANVAS.width - 185, Math.max(16, e.clientX - rect.left - dragging.offsetX));
-    const y = Math.min(MIND_MAP_CANVAS.height - 76, Math.max(16, e.clientY - rect.top - dragging.offsetY));
-    updateNode(dragging.id, { x, y });
+  function handleCanvasPointerMove(e: PointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.type !== 'pan') return;
+    const dx = e.clientX - drag.startClientX;
+    const dy = e.clientY - drag.startClientY;
+    if (Math.abs(dx) > 4 || Math.abs(dy) > 4) drag.moved = true;
+    setPan({ x: drag.startPanX! + dx, y: drag.startPanY! + dy });
   }
 
-  function handlePointerUp() {
-    setDragging(null);
+  function handleCanvasPointerUp(e: PointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current;
+    dragRef.current = null;
+    if (canvasRef.current) canvasRef.current.style.cursor = '';
+    if (!drag || drag.type !== 'pan') return;
+    if (!drag.moved) {
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      addNodeAt((e.clientX - rect.left - pan.x) / scale - 88, (e.clientY - rect.top - pan.y) / scale - 34, null);
+    }
   }
+
+  // Node: drag to move, click to edit
+  function handleNodePointerDown(e: PointerEvent<HTMLButtonElement>, node: MindMapNode) {
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragRef.current = { type: 'node', id: node.id, startClientX: e.clientX, startClientY: e.clientY, startNodeX: node.x, startNodeY: node.y, moved: false };
+  }
+
+  function handleNodePointerMove(e: PointerEvent<HTMLButtonElement>, node: MindMapNode) {
+    const drag = dragRef.current;
+    if (!drag || drag.type !== 'node' || drag.id !== node.id) return;
+    const dx = e.clientX - drag.startClientX;
+    const dy = e.clientY - drag.startClientY;
+    if (Math.abs(dx) > 4 || Math.abs(dy) > 4) drag.moved = true;
+    updateNode(node.id, { x: drag.startNodeX! + dx / scale, y: drag.startNodeY! + dy / scale });
+  }
+
+  function handleNodePointerUp(e: PointerEvent<HTMLButtonElement>, node: MindMapNode) {
+    const drag = dragRef.current;
+    dragRef.current = null;
+    if (!drag || drag.type !== 'node') return;
+    if (!drag.moved) {
+      setEditingId(prev => prev === node.id ? null : node.id);
+    } else {
+      persist();
+    }
+  }
+
+  // Position floating panel near node, clamped to canvas bounds
+  function getPanelPos(node: MindMapNode) {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return { top: 80, left: 80 };
+    const nodeScreenX = node.x * scale + pan.x;
+    const nodeScreenY = node.y * scale + pan.y;
+    const nodeW = 176 * scale;
+    const panelW = 272;
+    const panelH = 440;
+    let left = nodeScreenX + nodeW + 12;
+    let top = nodeScreenY;
+    if (left + panelW > rect.width - 8) left = Math.max(8, nodeScreenX - panelW - 12);
+    if (top + panelH > rect.height - 8) top = Math.max(8, rect.height - panelH - 8);
+    return { top, left };
+  }
+
+  const panelPos = editingNode ? getPanelPos(editingNode) : null;
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-      <div className="overflow-hidden rounded-xl border border-border bg-card">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
-          <div className="flex items-center gap-3">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-primary/30 bg-primary/10 text-primary">
-              <Brain className="h-4 w-4" />
-            </span>
-            <div>
-              <h3 className="text-sm font-bold uppercase tracking-wider">Mapa Mental</h3>
-              <p className="text-xs text-muted-foreground">Organize estratégia, público, oferta, canais e ações do cliente.</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={() => addNode(selectedNode?.id ?? rootId ?? null)} className="h-9 gap-2 text-xs font-bold uppercase tracking-wider">
-              <Plus className="h-3.5 w-3.5" />
-              Tópico
-            </Button>
-            <Button onClick={() => persist()} className="h-9 gap-2 bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-bold uppercase tracking-wider">
-              {saved ? <Check className="h-3.5 w-3.5" /> : <Save className="h-3.5 w-3.5" />}
-              {saved ? 'Salvo' : 'Salvar'}
-            </Button>
+    <div className={cn('flex flex-col rounded-xl border border-border bg-card overflow-hidden', isFullscreen && 'fixed inset-0 z-50 rounded-none border-0')} style={isFullscreen ? undefined : { height: '76vh' }}>
+      {/* Toolbar */}
+      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-2.5">
+        <div className="flex items-center gap-3">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-primary/30 bg-primary/10 text-primary">
+            <Brain className="h-4 w-4" />
+          </span>
+          <div>
+            <h3 className="text-sm font-bold uppercase tracking-wider">Mapa Mental</h3>
+            <p className="text-[11px] text-muted-foreground">Clique no canvas para adicionar · Scroll para zoom · Arraste para mover</p>
           </div>
         </div>
-
-        <div className="overflow-auto p-3">
-          <div
-            className="relative min-w-[980px] rounded-lg border border-border/60 bg-background"
-            style={{ width: MIND_MAP_CANVAS.width, height: MIND_MAP_CANVAS.height }}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerUp}
-            onPointerLeave={handlePointerUp}
-          >
-            <svg className="absolute inset-0 h-full w-full pointer-events-none">
-              {map.nodes.map((node) => {
-                const parent = node.parentId ? map.nodes.find((candidate) => candidate.id === node.parentId) : null;
-                if (!parent) return null;
-                return (
-                  <path
-                    key={`${parent.id}-${node.id}`}
-                    d={`M ${parent.x + 88} ${parent.y + 34} C ${(parent.x + node.x) / 2 + 88} ${parent.y + 34}, ${(parent.x + node.x) / 2 + 88} ${node.y + 34}, ${node.x + 88} ${node.y + 34}`}
-                    fill="none"
-                    stroke={node.color}
-                    strokeOpacity="0.5"
-                    strokeWidth="2"
-                  />
-                );
-              })}
-            </svg>
-
-            {map.nodes.map((node) => {
-              const isSelected = node.id === selectedNode?.id;
-              const childCount = map.nodes.filter((item) => item.parentId === node.id).length;
-              return (
-                <button
-                  key={node.id}
-                  type="button"
-                  onPointerDown={(e) => handlePointerDown(e, node)}
-                  className={cn(
-                    'absolute w-44 rounded-lg border bg-card px-3 py-2 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md',
-                    isSelected ? 'ring-2 ring-primary border-primary/50' : 'border-border',
-                    node.parentId === null ? 'w-48' : '',
-                  )}
-                  style={{ left: node.x, top: node.y, borderColor: isSelected ? node.color : undefined }}
-                >
-                  <span className="mb-1 flex items-center gap-2">
-                    <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: node.color }} />
-                    <span className="truncate text-sm font-bold">{node.title}</span>
-                  </span>
-                  <span className="line-clamp-2 block min-h-8 text-[11px] leading-snug text-muted-foreground">
-                    {node.note || 'Clique para editar'}
-                  </span>
-                  {childCount > 0 && (
-                    <span className="mt-2 inline-flex rounded-full border border-border px-2 py-0.5 text-[10px] font-bold text-muted-foreground">
-                      {childCount} ligados
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-
-            <div className="absolute bottom-3 left-3 flex items-center gap-2 rounded-lg border border-border bg-card/90 px-3 py-2 text-[11px] font-semibold text-muted-foreground">
-              <MousePointer2 className="h-3.5 w-3.5" />
-              Arraste os tópicos para reorganizar
-            </div>
-          </div>
+        <div className="flex items-center gap-1.5">
+          <button onClick={() => zoomBy(0.8)} className="flex h-8 w-8 items-center justify-center rounded-lg border border-border text-muted-foreground hover:bg-muted hover:text-foreground transition-colors" title="Diminuir zoom">
+            <ZoomOut className="h-3.5 w-3.5" />
+          </button>
+          <button onClick={() => { setScale(1); setPan({ x: 60, y: 60 }); }} className="h-8 min-w-[52px] rounded-lg border border-border px-2 font-mono text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors">
+            {Math.round(scale * 100)}%
+          </button>
+          <button onClick={() => zoomBy(1.25)} className="flex h-8 w-8 items-center justify-center rounded-lg border border-border text-muted-foreground hover:bg-muted hover:text-foreground transition-colors" title="Aumentar zoom">
+            <ZoomIn className="h-3.5 w-3.5" />
+          </button>
+          <div className="mx-1 h-5 w-px bg-border" />
+          <Button onClick={() => persist()} className="h-8 gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 px-3 text-xs font-bold uppercase tracking-wider">
+            {saved ? <Check className="h-3.5 w-3.5" /> : <Save className="h-3.5 w-3.5" />}
+            {saved ? 'Salvo' : 'Salvar'}
+          </Button>
+          <button onClick={() => setIsFullscreen(v => !v)} className="flex h-8 w-8 items-center justify-center rounded-lg border border-border text-muted-foreground hover:bg-muted hover:text-foreground transition-colors" title={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}>
+            {isFullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+          </button>
         </div>
       </div>
 
-      <aside className="rounded-xl border border-border bg-card p-4">
-        {selectedNode ? (
-          <div className="space-y-4">
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Tópico selecionado</p>
-              <p className="mt-1 truncate text-sm font-bold">{selectedNode.title}</p>
-            </div>
+      {/* Infinite canvas */}
+      <div
+        ref={canvasRef}
+        className="relative flex-1 overflow-hidden cursor-crosshair bg-[radial-gradient(circle,_#ffffff08_1px,_transparent_1px)] bg-[length:24px_24px]"
+        onPointerDown={handleCanvasPointerDown}
+        onPointerMove={handleCanvasPointerMove}
+        onPointerUp={handleCanvasPointerUp}
+        onPointerLeave={() => { dragRef.current = null; if (canvasRef.current) canvasRef.current.style.cursor = ''; }}
+      >
+        {/* Transformed layer */}
+        <div style={{ position: 'absolute', transformOrigin: '0 0', transform: `translate(${pan.x}px,${pan.y}px) scale(${scale})`, willChange: 'transform' }}>
+          <svg style={{ position: 'absolute', inset: '-9999px', overflow: 'visible', pointerEvents: 'none' }}>
+            {map.nodes.map(node => {
+              const parent = node.parentId ? map.nodes.find(n => n.id === node.parentId) : null;
+              if (!parent) return null;
+              const x1 = parent.x + 88; const y1 = parent.y + 36;
+              const x2 = node.x + 88; const y2 = node.y + 36;
+              const cx = (x1 + x2) / 2;
+              return (
+                <path key={`${parent.id}-${node.id}`} d={`M ${x1} ${y1} C ${cx} ${y1}, ${cx} ${y2}, ${x2} ${y2}`} fill="none" stroke={node.color} strokeOpacity="0.5" strokeWidth="2" />
+              );
+            })}
+          </svg>
 
-            <div className="space-y-1.5">
-              <Label>Título</Label>
-              <Input
-                value={selectedNode.title}
-                onChange={(e) => updateNode(selectedNode.id, { title: e.target.value })}
-                className="bg-background"
-              />
-            </div>
+          {map.nodes.map(node => {
+            const isEditing = node.id === editingId;
+            const childCount = map.nodes.filter(n => n.parentId === node.id).length;
+            return (
+              <button
+                key={node.id}
+                type="button"
+                onPointerDown={e => handleNodePointerDown(e, node)}
+                onPointerMove={e => handleNodePointerMove(e, node)}
+                onPointerUp={e => handleNodePointerUp(e, node)}
+                className={cn('absolute w-44 rounded-lg border bg-card px-3 py-2 text-left shadow-sm cursor-grab active:cursor-grabbing select-none transition-shadow hover:shadow-md', node.parentId === null && 'w-48')}
+                style={{ left: node.x, top: node.y, borderColor: isEditing ? node.color : undefined, boxShadow: isEditing ? `0 0 0 2px ${node.color}` : undefined }}
+              >
+                <span className="mb-1 flex items-center gap-2">
+                  <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: node.color }} />
+                  <span className="truncate text-sm font-bold">{node.title}</span>
+                </span>
+                {node.image && <img src={node.image} alt="" className="mb-1.5 w-full rounded-md object-cover" style={{ maxHeight: 80 }} />}
+                <span className="line-clamp-2 block text-[11px] leading-snug text-muted-foreground">{node.note || 'Clique para editar'}</span>
+                {childCount > 0 && <span className="mt-1.5 inline-flex rounded-full border border-border px-2 py-0.5 text-[10px] font-bold text-muted-foreground">{childCount} ligados</span>}
+              </button>
+            );
+          })}
+        </div>
 
-            <div className="space-y-1.5">
-              <Label>Notas</Label>
-              <textarea
-                value={selectedNode.note}
-                onChange={(e) => updateNode(selectedNode.id, { note: e.target.value })}
-                className="min-h-28 w-full resize-none rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-                placeholder="Detalhes, hipóteses, tarefas ou aprendizados."
-              />
+        {/* Floating edit panel */}
+        {editingNode && panelPos && (
+          <div className="absolute z-20 w-68 rounded-xl border border-border bg-card shadow-2xl" style={{ top: panelPos.top, left: panelPos.left, width: 272 }} onPointerDown={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-border px-3 py-2">
+              <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider">
+                <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: editingNode.color }} />
+                Editar tópico
+              </span>
+              <button onClick={() => setEditingId(null)} className="text-muted-foreground hover:text-foreground transition-colors"><X className="h-3.5 w-3.5" /></button>
             </div>
-
-            <div className="space-y-2">
-              <Label>Cor</Label>
-              <div className="grid grid-cols-8 gap-2">
-                {MIND_MAP_COLORS.map((color) => (
-                  <button
-                    key={color}
-                    type="button"
-                    onClick={() => updateNode(selectedNode.id, { color })}
-                    className={cn('h-7 rounded-md border transition-transform hover:scale-105', selectedNode.color === color ? 'border-foreground ring-2 ring-foreground/20' : 'border-border')}
-                    style={{ backgroundColor: color }}
-                    aria-label={`Cor ${color}`}
-                  />
+            <div className="space-y-3 p-3">
+              <div>
+                <Label className="text-[10px] uppercase tracking-wider">Título</Label>
+                <Input value={editingNode.title} onChange={e => updateNode(editingNode.id, { title: e.target.value })} className="mt-1 h-7 bg-background text-xs" autoFocus />
+              </div>
+              <div>
+                <Label className="text-[10px] uppercase tracking-wider">Notas</Label>
+                <textarea value={editingNode.note} onChange={e => updateNode(editingNode.id, { note: e.target.value })} className="mt-1 min-h-16 w-full resize-none rounded-lg border border-input bg-background px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary" placeholder="Detalhes, hipóteses, tarefas..." />
+              </div>
+              <div>
+                {editingNode.image ? (
+                  <div className="relative">
+                    <img src={editingNode.image} alt="" className="w-full rounded-lg object-cover" style={{ maxHeight: 110 }} />
+                    <button onClick={() => updateNode(editingNode.id, { image: null })} className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80"><X className="h-3 w-3" /></button>
+                  </div>
+                ) : (
+                  <button onClick={() => imageInputRef.current?.click()} className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-border py-2 text-xs text-muted-foreground hover:bg-muted transition-colors">
+                    <ImageIcon className="h-3.5 w-3.5" />
+                    Imagem (upload ou Ctrl+V)
+                  </button>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {MIND_MAP_COLORS.map(color => (
+                  <button key={color} type="button" onClick={() => updateNode(editingNode.id, { color })} className={cn('h-5 w-5 rounded border transition-transform hover:scale-110', editingNode.color === color ? 'ring-2 ring-foreground/30 border-foreground' : 'border-border')} style={{ backgroundColor: color }} />
                 ))}
               </div>
-            </div>
-
-            <div className="space-y-2">
-              <Button variant="outline" onClick={() => addNode(selectedNode.id)} className="h-9 w-full justify-start gap-2 text-xs font-bold uppercase tracking-wider">
-                <Plus className="h-3.5 w-3.5" />
-                Adicionar filho
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => removeNode(selectedNode.id)}
-                disabled={selectedNode.id === rootId}
-                className="h-9 w-full justify-start gap-2 border-red-400/30 text-xs font-bold uppercase tracking-wider text-red-300 hover:bg-red-500/10 disabled:opacity-40"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                Remover tópico
-              </Button>
-            </div>
-
-            <div className="rounded-lg border border-border bg-background/60 p-3">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Estrutura</p>
-              <div className="mt-2 max-h-48 space-y-1 overflow-auto pr-1">
-                {map.nodes.map((node) => (
-                  <button
-                    key={node.id}
-                    type="button"
-                    onClick={() => setSelectedId(node.id)}
-                    className={cn('flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors', selectedNode.id === node.id ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground')}
-                  >
-                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: node.color }} />
-                    <span className="truncate">{node.parentId ? 'Filho: ' : ''}{node.title}</span>
-                  </button>
-                ))}
+              <div className="flex gap-2">
+                <button onClick={() => addChildOf(editingNode.id)} className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-border py-1.5 text-xs font-semibold hover:bg-muted transition-colors">
+                  <Plus className="h-3 w-3" /> Filho
+                </button>
+                <button onClick={() => removeNode(editingNode.id)} disabled={editingNode.id === rootId} className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-red-400/30 py-1.5 text-xs font-semibold text-red-300 hover:bg-red-500/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                  <Trash2 className="h-3 w-3" /> Remover
+                </button>
               </div>
             </div>
           </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">Adicione um tópico para começar.</p>
         )}
-      </aside>
+
+        <div className="pointer-events-none absolute bottom-3 left-3 flex items-center gap-1.5 rounded-lg border border-border bg-card/80 px-3 py-1.5 text-[10px] font-semibold text-muted-foreground backdrop-blur-sm">
+          <MousePointer2 className="h-3 w-3" />
+          Clique no fundo para novo tópico · Scroll = zoom · Arraste para mover
+        </div>
+      </div>
+
+      <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={e => {
+        const file = e.target.files?.[0];
+        if (!file || !editingId) return;
+        const reader = new FileReader();
+        reader.onload = () => { if (typeof reader.result === 'string') { updateNode(editingId, { image: reader.result }); } };
+        reader.readAsDataURL(file);
+        e.target.value = '';
+      }} />
     </div>
   );
 }
