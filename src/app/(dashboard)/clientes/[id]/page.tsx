@@ -1062,8 +1062,8 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
   function handleConnectPointerDown(e: PointerEvent<HTMLDivElement>, node: MindMapNode) {
     e.stopPropagation();
     e.preventDefault();
-    const canvasEl = canvasRef.current;
-    if (!canvasEl) return;
+    if (!canvasRef.current) return;
+    const canvasEl: HTMLDivElement = canvasRef.current;
 
     const fromId = node.id;
     dragRef.current = { type: 'connect', id: fromId, startClientX: e.clientX, startClientY: e.clientY, moved: false };
