@@ -888,7 +888,7 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
                     <div className="flex items-center gap-1.5 min-w-0">
                       <span className="text-sm font-semibold truncate">{leadName(lead)}</span>
                       {lead.status === 'Bloqueado' && (
-                        <Ban className="h-3 w-3 shrink-0 text-red-400" title="Bloqueado" />
+                        <Ban className="h-3 w-3 shrink-0 text-red-400" />
                       )}
                       {lead.last_message_at !== null && (Date.now() - new Date(lead.last_message_at).getTime()) < 3 * 86_400_000 && lead.status !== 'Bloqueado' && (
                         <span className="shrink-0 h-1.5 w-1.5 rounded-full bg-primary animate-pulse" title="Tempo real ativo" />
