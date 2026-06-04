@@ -1201,7 +1201,7 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
       const reader = new FileReader();
       reader.onload = () => {
         if (typeof reader.result === 'string') {
-          setMap(prev => ({ nodes: prev.nodes.map(n => n.id === editingId ? { ...n, image: reader.result as string } : n) }));
+          setMap(prev => ({ nodes: prev.nodes.map(n => n.id === editingId ? { ...n, image: reader.result as string } : n), edges: prev.edges }));
           setSaved(false);
         }
       };
@@ -1275,7 +1275,7 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
 
   function updateNode(id: string, patch: Partial<MindMapNode>) {
     setSaved(false);
-    setMap(prev => ({ nodes: prev.nodes.map(n => n.id === id ? { ...n, ...patch } : n) }));
+    setMap(prev => ({ nodes: prev.nodes.map(n => n.id === id ? { ...n, ...patch } : n), edges: prev.edges }));
   }
 
   function addNodeAt(x: number, y: number, parentId: string | null) {
@@ -1518,8 +1518,8 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
         while (cur) { ancestors.add(cur); cur = map.nodes.find(n => n.id === cur)?.parentId ?? null; }
         if (!ancestors.has(target.id)) {
           const newNodes = map.nodes.map(n => n.id === target.id ? { ...n, parentId: drag.id! } : n);
-          setMap({ nodes: newNodes });
-          persist({ nodes: newNodes });
+          setMap({ nodes: newNodes, edges: map.edges });
+          persist({ nodes: newNodes, edges: map.edges });
         }
       }
     }
