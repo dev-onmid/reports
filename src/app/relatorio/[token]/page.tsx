@@ -1,6 +1,8 @@
 import { makeServerPool } from '@/lib/server-db';
 import DiagnosticoTemplate from '@/components/diagnostico-template';
+import OmniPerformanceTemplate from '@/components/onmid-performance-template';
 import type { DiagnosticoData } from '@/components/diagnostico-template/types';
+import type { OmniReportData } from '@/components/onmid-performance-template/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,7 +10,14 @@ export default async function RelatorioPublicoPage({ params }: { params: Promise
   const { token } = await params;
 
   const pool = makeServerPool();
-  let report: { client_name: string; period_from: string; period_to: string; report_data: DiagnosticoData; template_slug: string } | null = null;
+  let report: {
+    client_name: string;
+    period_from: string;
+    period_to: string;
+    report_data: unknown;
+    template_slug: string;
+  } | null = null;
+
   try {
     const { rows } = await pool.query(
       `SELECT client_name, period_from, period_to, report_data, template_slug
@@ -38,12 +47,19 @@ export default async function RelatorioPublicoPage({ params }: { params: Promise
     );
   }
 
-  const data = report.report_data as DiagnosticoData;
+  if (report.template_slug === 'onmid-clean-performance') {
+    return (
+      <>
+        <title>{`Relatório — ${report.client_name}`}</title>
+        <OmniPerformanceTemplate data={report.report_data as OmniReportData} />
+      </>
+    );
+  }
 
   return (
     <>
       <title>{`Relatório — ${report.client_name}`}</title>
-      <DiagnosticoTemplate data={data} />
+      <DiagnosticoTemplate data={report.report_data as DiagnosticoData} />
     </>
   );
 }

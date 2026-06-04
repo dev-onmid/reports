@@ -38,9 +38,9 @@ function fmtDateTime(iso: string) {
   return { date: d.toLocaleDateString('pt-BR'), time: d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) };
 }
 
-function prevMonthRange() {
+function defaultDateRange() {
   const now = new Date();
-  const first = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const first = new Date(now.getFullYear(), now.getMonth() - 12, 1);
   const last = new Date(now.getFullYear(), now.getMonth(), 0);
   const fmt = (d: Date) => d.toISOString().split('T')[0];
   return { from: fmt(first), to: fmt(last) };
@@ -96,7 +96,7 @@ export default function RelatoriosPage() {
 
   // Default dates when modal opens
   function openGenModal() {
-    const { from, to } = prevMonthRange();
+    const { from, to } = defaultDateRange();
     setGenForm({ clientId: '', from, to });
     setShowGenModal(true);
   }
@@ -741,7 +741,7 @@ export default function RelatoriosPage() {
                 </div>
               </div>
               <p className="text-[11px] text-muted-foreground/60">
-                Padrão: mês anterior completo. Dados buscados ao vivo de Meta Ads + CRM.
+                Padrão: últimos 12 meses. O template ONMID exibe o histórico mensal completo do período.
               </p>
             </div>
 
