@@ -3,6 +3,7 @@ import { makeServerPool } from '@/lib/server-db';
 import { normalizeWebhookPayload, type WhatsAppProvider } from '@/lib/whatsapp-provider';
 import { markLeadResponded } from '@/lib/followup-send';
 import { analisarConversa } from '@/lib/crm-ai-analysis';
+import { enviarEventoMeta, enviarEventoGoogle } from '@/lib/conversions';
 import type { NextRequest } from 'next/server';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -219,14 +220,21 @@ export async function POST(
        origin, ctwaClid ?? null, utmData.utm_source ?? null, instanceId, profilePictureUrl ?? null],
     );
 
+    let isFirstInbound = false;
     if (crmLead && messageText) {
       await pool.query(
         `INSERT INTO public.crm_messages (lead_id, client_id, direction, text, created_at)
          VALUES ($1, $2, $3, $4, $5::timestamptz)`,
         [crmLead.id, clientId, fromMe ? 'out' : 'in', messageText, messageCreatedAt],
       );
-      // Cancel pending follow-ups when lead sends a message (not fromMe)
       if (!fromMe) {
+        // Detect first inbound message (now count = 1 after insert above)
+        const { rows: [{ cnt }] } = await pool.query(
+          `SELECT COUNT(*)::int AS cnt FROM public.crm_messages
+            WHERE lead_id = $1 AND direction = 'in'`,
+          [crmLead.id],
+        ).catch(() => ({ rows: [{ cnt: 0 }] }));
+        isFirstInbound = Number(cnt) === 1;
         await markLeadResponded(pool, crmLead.id).catch(() => null);
       }
     }
@@ -235,6 +243,36 @@ export async function POST(
     }
     if (crmLead && messageText) {
       await analisarConversa(pool, crmLead.id).catch(err => console.error('[webhook analisarConversa]', err));
+    }
+
+    // ── CAPI / Enhanced Conversions (new system, client_conversion_config) ────
+    if (crmLead && !fromMe) {
+      const leadData = { id: crmLead.id as string, phone, ctwaClid: ctwaClid ?? null };
+      if (isFirstInbound) {
+        // First message = new lead contact
+        await enviarEventoMeta(pool, clientId, 'Lead', leadData).catch(() => null);
+        const { rows: [convCfg] } = await pool.query(
+          `SELECT google_conversion_label_lead FROM public.client_conversion_config WHERE client_id = $1`,
+          [clientId],
+        ).catch(() => ({ rows: [] as Array<{ google_conversion_label_lead: string | null }> }));
+        await enviarEventoGoogle(pool, clientId, convCfg?.google_conversion_label_lead, leadData).catch(() => null);
+      } else {
+        // First response after being created
+        const { rows: [{ total_in }] } = await pool.query(
+          `SELECT COUNT(*)::int AS total_in FROM public.crm_messages
+            WHERE lead_id = $1 AND direction = 'in'`,
+          [crmLead.id],
+        ).catch(() => ({ rows: [{ total_in: 0 }] }));
+        if (Number(total_in) === 2) {
+          // Second inbound = first reply after initial contact
+          await enviarEventoMeta(pool, clientId, 'Contact', leadData).catch(() => null);
+          const { rows: [convCfg] } = await pool.query(
+            `SELECT google_conversion_label_contact FROM public.client_conversion_config WHERE client_id = $1`,
+            [clientId],
+          ).catch(() => ({ rows: [] as Array<{ google_conversion_label_contact: string | null }> }));
+          await enviarEventoGoogle(pool, clientId, convCfg?.google_conversion_label_contact, leadData).catch(() => null);
+        }
+      }
     }
 
     // 3. Load client tracking config (optional — only needed for pixel events)
@@ -332,6 +370,15 @@ export async function POST(
          WHERE id = $3`,
         [metaResult.success, valor, lead.id],
       );
+
+      // Also fire through new CAPI system (logs separately, non-blocking)
+      const leadDataForCapi = { id: crmLead?.id as string | undefined, phone, ctwaClid: lead.ctwa_clid };
+      await enviarEventoMeta(pool, clientId, 'Purchase', leadDataForCapi, valor).catch(() => null);
+      const { rows: [convCfgP] } = await pool.query(
+        `SELECT google_conversion_label_purchase FROM public.client_conversion_config WHERE client_id = $1`,
+        [clientId],
+      ).catch(() => ({ rows: [] as Array<{ google_conversion_label_purchase: string | null }> }));
+      await enviarEventoGoogle(pool, clientId, convCfgP?.google_conversion_label_purchase, leadDataForCapi, valor).catch(() => null);
 
       return Response.json({
         ok: true, action: 'purchase_sent', valor,

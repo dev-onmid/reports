@@ -4,6 +4,8 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   Copy, Check, Trash2, Plus, RefreshCw, Eye, EyeOff,
   Settings2, MessageCircle, ShoppingCart, X, TrendingUp, Wifi, WifiOff, QrCode,
+  HelpCircle, Zap, AlertCircle, ExternalLink, ChevronDown, ChevronUp,
+  Globe, BarChart3,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -45,6 +47,42 @@ type WaLead = {
 type ConnState = 'open' | 'close' | 'connecting' | 'unknown' | 'n/a';
 
 type LeadPeriod = '7d' | '30d' | '90d';
+
+type ConversionConfig = {
+  meta_pixel_id: string;
+  meta_access_token: string;
+  meta_test_event_code: string;
+  meta_ativo: boolean;
+  google_customer_id: string;
+  google_conversion_label_lead: string;
+  google_conversion_label_contact: string;
+  google_conversion_label_purchase: string;
+  google_api_secret: string;
+  google_measurement_id: string;
+  google_ativo: boolean;
+};
+
+type EventoCustom = {
+  id: string;
+  status_gatilho: string;
+  meta_event_name: string;
+  google_conversion_label: string;
+  ativo: boolean;
+};
+
+type ConversionLog = {
+  id: string;
+  lead_id: string | null;
+  plataforma: 'meta' | 'google';
+  event_name: string;
+  event_id: string;
+  telefone_hash: string | null;
+  valor: number | null;
+  status_resposta: number | null;
+  resposta_body: string | null;
+  enviado_em: string;
+  sucesso: boolean;
+};
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -99,6 +137,57 @@ function StateBadge({ state }: { state: ConnState }) {
   );
 }
 
+function Tooltip({ text, children }: { text: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="relative inline-flex items-center" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+      {children}
+      {open && (
+        <span className="absolute bottom-full left-1/2 z-50 mb-2 w-72 -translate-x-1/2 rounded-lg border border-border bg-card px-3 py-2 text-[11px] leading-relaxed text-muted-foreground shadow-xl whitespace-pre-line">
+          {text}
+        </span>
+      )}
+    </span>
+  );
+}
+
+function HelpBtn({ text }: { text: string }) {
+  return (
+    <Tooltip text={text}>
+      <HelpCircle className="ml-1 h-3.5 w-3.5 cursor-help text-muted-foreground/60 hover:text-muted-foreground transition-colors" />
+    </Tooltip>
+  );
+}
+
+function SecretInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="relative">
+      <input
+        type={show ? 'text' : 'password'}
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full rounded-lg border border-border bg-background px-3 py-2 pr-9 text-sm font-mono outline-none focus:border-primary"
+      />
+      <button type="button" onClick={() => setShow(v => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+        {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+      </button>
+    </div>
+  );
+}
+
+function Toggle({ value, onChange, label }: { value: boolean; onChange: (v: boolean) => void; label: string }) {
+  return (
+    <label className="flex cursor-pointer items-center gap-3">
+      <div onClick={() => onChange(!value)} className={cn('relative h-5 w-9 rounded-full transition-colors cursor-pointer', value ? 'bg-primary' : 'bg-muted')}>
+        <div className={cn('absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform', value ? 'translate-x-4' : 'translate-x-0.5')} />
+      </div>
+      <span className="text-xs font-medium">{label}</span>
+    </label>
+  );
+}
+
 // ── Main component ───────────────────────────────────────────────────────────
 
 export function ClientTrackingTab({ clientId }: { clientId: string }) {
@@ -133,6 +222,23 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
   // Leads
   const [period, setPeriod]   = useState<LeadPeriod>('30d');
   const periodDays = { '7d': 7, '30d': 30, '90d': 90 } as const;
+
+  // Conversions API
+  const [convConfig, setConvConfig] = useState<ConversionConfig>({
+    meta_pixel_id: '', meta_access_token: '', meta_test_event_code: '', meta_ativo: false,
+    google_customer_id: '', google_conversion_label_lead: '', google_conversion_label_contact: '',
+    google_conversion_label_purchase: '', google_api_secret: '', google_measurement_id: '', google_ativo: false,
+  });
+  const [eventosCustom, setEventosCustom] = useState<EventoCustom[]>([]);
+  const [convLog, setConvLog]             = useState<ConversionLog[]>([]);
+  const [convLogFilter, setConvLogFilter] = useState<'all' | 'meta' | 'google'>('all');
+  const [savingConv, setSavingConv]       = useState(false);
+  const [testingMeta, setTestingMeta]     = useState(false);
+  const [testingGoogle, setTestingGoogle] = useState(false);
+  const [testResult, setTestResult]       = useState<{ platform: string; sucesso: boolean; body: string } | null>(null);
+  const [logModal, setLogModal]           = useState<ConversionLog | null>(null);
+  const [newEvento, setNewEvento]         = useState({ status_gatilho: '', meta_event_name: '', google_conversion_label: '' });
+  const [addingEvento, setAddingEvento]   = useState(false);
 
   // ── Status polling ───────────────────────────────────────────────────────
 
@@ -174,16 +280,104 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
       fetch(`/api/clients/${clientId}/tracking`).then(r => r.ok ? r.json() as Promise<TrackingConfig> : null),
       fetch(`/api/clients/${clientId}/tracking/instances`).then(r => r.ok ? r.json() as Promise<Instance[]> : []),
       fetch(`/api/clients/${clientId}/tracking/leads?days=30`).then(r => r.ok ? r.json() as Promise<WaLead[]> : []),
-    ]).then(([cfg, insts, ls]) => {
+      fetch(`/api/clients/${clientId}/conversions`).then(r => r.ok ? r.json() as Promise<Partial<ConversionConfig>> : null),
+      fetch(`/api/clients/${clientId}/conversions/eventos-custom`).then(r => r.ok ? r.json() as Promise<EventoCustom[]> : []),
+      fetch(`/api/clients/${clientId}/conversions/log?days=30&limit=50`).then(r => r.ok ? r.json() as Promise<ConversionLog[]> : []),
+    ]).then(([cfg, insts, ls, convCfg, eventos, log]) => {
       if (cfg) setConfig(cfg);
       setInstances(insts ?? []);
       setLeads(ls ?? []);
+      if (convCfg) setConvConfig(prev => ({ ...prev, ...convCfg }));
+      setEventosCustom(eventos ?? []);
+      setConvLog(log ?? []);
     }).catch(() => {}).finally(() => setLoading(false));
   }, [clientId]);
 
   useEffect(() => {
     if (!loading) loadLeads(period);
   }, [period]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Conversion config ────────────────────────────────────────────────────
+
+  async function saveConvConfig() {
+    setSavingConv(true);
+    try {
+      const res = await fetch(`/api/clients/${clientId}/conversions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(convConfig),
+      });
+      if (res.ok) setConvConfig(await res.json() as ConversionConfig);
+    } finally {
+      setSavingConv(false);
+    }
+  }
+
+  async function testConversion(platform: 'meta' | 'google') {
+    if (platform === 'meta') setTestingMeta(true); else setTestingGoogle(true);
+    setTestResult(null);
+    try {
+      const res = await fetch(`/api/clients/${clientId}/conversions/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ platform }),
+      });
+      const data = await res.json() as { ok: boolean; resultado?: { sucesso: boolean; resposta_body: string } };
+      setTestResult({
+        platform,
+        sucesso: data.resultado?.sucesso ?? false,
+        body: data.resultado?.resposta_body ?? (res.ok ? 'Enviado' : 'Erro'),
+      });
+    } finally {
+      if (platform === 'meta') setTestingMeta(false); else setTestingGoogle(false);
+    }
+  }
+
+  async function addEvento() {
+    if (!newEvento.status_gatilho) return;
+    setAddingEvento(true);
+    try {
+      const res = await fetch(`/api/clients/${clientId}/conversions/eventos-custom`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...newEvento, ativo: true }),
+      });
+      if (res.ok) {
+        const row = await res.json() as EventoCustom;
+        setEventosCustom(prev => {
+          const idx = prev.findIndex(e => e.id === row.id);
+          return idx >= 0 ? prev.map((e, i) => i === idx ? row : e) : [...prev, row];
+        });
+        setNewEvento({ status_gatilho: '', meta_event_name: '', google_conversion_label: '' });
+      }
+    } finally {
+      setAddingEvento(false);
+    }
+  }
+
+  async function removeEvento(eventoId: string) {
+    await fetch(`/api/clients/${clientId}/conversions/eventos-custom?eventoId=${eventoId}`, { method: 'DELETE' });
+    setEventosCustom(prev => prev.filter(e => e.id !== eventoId));
+  }
+
+  async function toggleEvento(evento: EventoCustom) {
+    const res = await fetch(`/api/clients/${clientId}/conversions/eventos-custom`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...evento, ativo: !evento.ativo }),
+    });
+    if (res.ok) {
+      const row = await res.json() as EventoCustom;
+      setEventosCustom(prev => prev.map(e => e.id === row.id ? row : e));
+    }
+  }
+
+  async function refreshConvLog() {
+    const filter = convLogFilter !== 'all' ? `&plataforma=${convLogFilter}` : '';
+    const rows = await fetch(`/api/clients/${clientId}/conversions/log?days=30&limit=50${filter}`)
+      .then(r => r.ok ? r.json() as Promise<ConversionLog[]> : []);
+    setConvLog(rows);
+  }
 
   // ── Config save ──────────────────────────────────────────────────────────
 
@@ -386,6 +580,242 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
           {saving && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
           Salvar configurações
         </button>
+      </div>
+
+      {/* ── Conversões API ─────────────────────────────────────────────── */}
+      <div className="rounded-xl border border-border bg-card p-5 space-y-5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Zap className="h-4 w-4 text-primary" />
+            <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Conversões API</p>
+          </div>
+          <a href="/ajuda/conversoes" target="_blank" className="flex items-center gap-1 text-[10px] text-primary hover:underline">
+            Ver guia completo <ExternalLink className="h-3 w-3" />
+          </a>
+        </div>
+
+        {/* Meta CAPI */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 border-b border-border pb-2">
+            <BarChart3 className="h-3.5 w-3.5 text-blue-400" />
+            <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Meta Conversions API</p>
+          </div>
+          <Toggle value={convConfig.meta_ativo} onChange={v => setConvConfig(p => ({ ...p, meta_ativo: v }))} label="Ativar Meta CAPI" />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 flex items-center text-xs font-semibold text-muted-foreground">
+                Pixel ID <HelpBtn text={'1. Acesse business.facebook.com\n2. Vá em "Gerenciador de Eventos"\n3. Selecione seu Pixel na lista\n4. O Pixel ID aparece abaixo do nome (ex: 1234567890123456)'} />
+              </label>
+              <input value={convConfig.meta_pixel_id} onChange={e => setConvConfig(p => ({ ...p, meta_pixel_id: e.target.value }))} placeholder="Ex: 1234567890123456" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
+            </div>
+            <div>
+              <label className="mb-1 flex items-center text-xs font-semibold text-muted-foreground">
+                Token da API de Conversões <HelpBtn text={'1. No Gerenciador de Eventos, clique no Pixel\n2. Vá na aba "Configurações"\n3. Role até "API de Conversões"\n4. Clique em "Gerar token de acesso"\n⚠️ Nunca compartilhe este token.'} />
+              </label>
+              <SecretInput value={convConfig.meta_access_token} onChange={v => setConvConfig(p => ({ ...p, meta_access_token: v }))} placeholder="EAAxxxxxxx..." />
+            </div>
+            <div>
+              <label className="mb-1 flex items-center text-xs font-semibold text-muted-foreground">
+                Código de Teste (opcional) <HelpBtn text={'Opcional. Só use para testes.\n1. No Gerenciador de Eventos → "Testar eventos"\n2. Copie o código (ex: TEST12345)\n3. Remova após confirmar funcionamento.'} />
+              </label>
+              <input value={convConfig.meta_test_event_code} onChange={e => setConvConfig(p => ({ ...p, meta_test_event_code: e.target.value }))} placeholder="TEST12345" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
+            </div>
+            <div className="flex items-end">
+              <button onClick={() => testConversion('meta')} disabled={testingMeta} className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-4 py-2 text-xs font-bold text-primary hover:bg-primary/20 disabled:opacity-50 transition-colors">
+                {testingMeta ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
+                Testar conexão Meta
+              </button>
+            </div>
+          </div>
+          {testResult?.platform === 'meta' && (
+            <div className={cn('flex items-start gap-2 rounded-lg border px-3 py-2 text-xs', testResult.sucesso ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-400' : 'border-red-400/30 bg-red-500/10 text-red-400')}>
+              {testResult.sucesso ? <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" /> : <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />}
+              <span className="font-mono break-all">{testResult.body.slice(0, 200)}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Google Enhanced Conversions */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 border-b border-border pb-2">
+            <Globe className="h-3.5 w-3.5 text-yellow-400" />
+            <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Google Enhanced Conversions</p>
+          </div>
+          <Toggle value={convConfig.google_ativo} onChange={v => setConvConfig(p => ({ ...p, google_ativo: v }))} label="Ativar Google Enhanced Conversions" />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 flex items-center text-xs font-semibold text-muted-foreground">
+                Measurement ID <HelpBtn text={'1. Acesse analytics.google.com\n2. Administrador → Fluxos de dados\n3. Clique no fluxo web\n4. O ID começa com G- (ex: G-XXXXXXXXXX)'} />
+              </label>
+              <input value={convConfig.google_measurement_id} onChange={e => setConvConfig(p => ({ ...p, google_measurement_id: e.target.value }))} placeholder="G-XXXXXXXXXX" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
+            </div>
+            <div>
+              <label className="mb-1 flex items-center text-xs font-semibold text-muted-foreground">
+                API Secret <HelpBtn text={'1. No Analytics: Administrador → Fluxos de dados\n2. Clique no fluxo\n3. Role até "Measurement Protocol API secrets"\n4. Clique em "Criar" e copie o valor'} />
+              </label>
+              <SecretInput value={convConfig.google_api_secret} onChange={v => setConvConfig(p => ({ ...p, google_api_secret: v }))} placeholder="API Secret" />
+            </div>
+            <div>
+              <label className="mb-1 flex items-center text-xs font-semibold text-muted-foreground">
+                Label Lead <HelpBtn text={'1. Em ads.google.com → Metas → Conversões\n2. Clique na conversão desejada → Configurações\n3. Copie o Conversion Label (ex: XXXXXXXXXXXXXX)'} />
+              </label>
+              <input value={convConfig.google_conversion_label_lead} onChange={e => setConvConfig(p => ({ ...p, google_conversion_label_lead: e.target.value }))} placeholder="Conversion Label" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
+            </div>
+            <div>
+              <label className="mb-1 flex items-center text-xs font-semibold text-muted-foreground">
+                Label Engajamento (Contact) <HelpBtn text={'Conversion Label da meta de engajamento/contato no Google Ads.'} />
+              </label>
+              <input value={convConfig.google_conversion_label_contact} onChange={e => setConvConfig(p => ({ ...p, google_conversion_label_contact: e.target.value }))} placeholder="Conversion Label" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
+            </div>
+            <div>
+              <label className="mb-1 flex items-center text-xs font-semibold text-muted-foreground">
+                Label Purchase <HelpBtn text={'Conversion Label da meta de compra/purchase no Google Ads.'} />
+              </label>
+              <input value={convConfig.google_conversion_label_purchase} onChange={e => setConvConfig(p => ({ ...p, google_conversion_label_purchase: e.target.value }))} placeholder="Conversion Label" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
+            </div>
+            <div className="flex items-end">
+              <button onClick={() => testConversion('google')} disabled={testingGoogle} className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-yellow-400/30 bg-yellow-500/10 px-4 py-2 text-xs font-bold text-yellow-400 hover:bg-yellow-500/20 disabled:opacity-50 transition-colors">
+                {testingGoogle ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
+                Testar conexão Google
+              </button>
+            </div>
+          </div>
+          {testResult?.platform === 'google' && (
+            <div className={cn('flex items-start gap-2 rounded-lg border px-3 py-2 text-xs', testResult.sucesso ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-400' : 'border-red-400/30 bg-red-500/10 text-red-400')}>
+              {testResult.sucesso ? <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" /> : <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />}
+              <span className="font-mono break-all">{testResult.body.slice(0, 200)}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Eventos customizados por status */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 border-b border-border pb-2">
+            <Settings2 className="h-3.5 w-3.5 text-muted-foreground" />
+            <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Eventos por Status</p>
+          </div>
+          <p className="text-[11px] text-muted-foreground">Configure qual evento Meta e/ou label Google disparar quando o lead mudar para um determinado status.</p>
+
+          {eventosCustom.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border">
+                    {['Status gatilho', 'Evento Meta', 'Label Google', 'Ativo', ''].map(h => (
+                      <th key={h} className="px-3 py-2 text-left font-semibold text-muted-foreground uppercase tracking-wider text-[10px]">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {eventosCustom.map(ev => (
+                    <tr key={ev.id} className="border-b border-border/40 last:border-0">
+                      <td className="px-3 py-2 font-mono font-medium">{ev.status_gatilho}</td>
+                      <td className="px-3 py-2 text-muted-foreground">{ev.meta_event_name || '—'}</td>
+                      <td className="px-3 py-2 text-muted-foreground">{ev.google_conversion_label || '—'}</td>
+                      <td className="px-3 py-2">
+                        <div onClick={() => toggleEvento(ev)} className={cn('relative h-4 w-7 rounded-full cursor-pointer transition-colors', ev.ativo ? 'bg-primary' : 'bg-muted')}>
+                          <div className={cn('absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-transform', ev.ativo ? 'translate-x-3.5' : 'translate-x-0.5')} />
+                        </div>
+                      </td>
+                      <td className="px-3 py-2">
+                        <button onClick={() => removeEvento(ev.id)} className="rounded p-1 text-muted-foreground/40 hover:text-red-400 hover:bg-red-500/10 transition-colors">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_1fr_auto] items-end">
+            <div>
+              <label className="mb-1 block text-[10px] font-semibold text-muted-foreground uppercase">Status gatilho</label>
+              <input value={newEvento.status_gatilho} onChange={e => setNewEvento(p => ({ ...p, status_gatilho: e.target.value }))} placeholder="Ex: Proposta" className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-xs outline-none focus:border-primary" />
+            </div>
+            <div>
+              <label className="mb-1 block text-[10px] font-semibold text-muted-foreground uppercase">Evento Meta</label>
+              <input value={newEvento.meta_event_name} onChange={e => setNewEvento(p => ({ ...p, meta_event_name: e.target.value }))} placeholder="Ex: InitiateCheckout" className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-mono outline-none focus:border-primary" />
+            </div>
+            <div>
+              <label className="mb-1 block text-[10px] font-semibold text-muted-foreground uppercase">Label Google</label>
+              <input value={newEvento.google_conversion_label} onChange={e => setNewEvento(p => ({ ...p, google_conversion_label: e.target.value }))} placeholder="Ex: XXXXXXXXXXXXXX" className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-mono outline-none focus:border-primary" />
+            </div>
+            <button onClick={addEvento} disabled={addingEvento || !newEvento.status_gatilho} className="flex items-center gap-1 rounded-lg bg-primary/10 border border-primary/30 px-3 py-1.5 text-xs font-bold text-primary hover:bg-primary/20 disabled:opacity-40 transition-colors">
+              {addingEvento ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
+              Adicionar
+            </button>
+          </div>
+        </div>
+
+        <button onClick={saveConvConfig} disabled={savingConv} className="flex items-center justify-center gap-1.5 rounded-lg bg-primary px-5 py-2 text-sm font-bold text-black hover:bg-primary/90 disabled:opacity-50 transition-colors">
+          {savingConv && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
+          Salvar configurações de conversão
+        </button>
+      </div>
+
+      {/* ── Log de Conversões ───────────────────────────────────────────── */}
+      <div className="rounded-xl border border-border bg-card p-5 space-y-4">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-2">
+            <BarChart3 className="h-4 w-4 text-muted-foreground" />
+            <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Log de Conversões</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-0.5 rounded-lg border border-border bg-background p-0.5">
+              {(['all', 'meta', 'google'] as const).map(f => (
+                <button key={f} onClick={() => { setConvLogFilter(f); setTimeout(refreshConvLog, 0); }}
+                  className={cn('rounded-md px-3 py-1 text-xs font-semibold transition-all', convLogFilter === f ? 'bg-primary text-black' : 'text-muted-foreground hover:text-foreground')}>
+                  {f === 'all' ? 'Todos' : f === 'meta' ? 'Meta' : 'Google'}
+                </button>
+              ))}
+            </div>
+            <button onClick={refreshConvLog} className="rounded-lg border border-border p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+              <RefreshCw className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+
+        {convLog.length === 0 ? (
+          <div className="flex h-20 items-center justify-center rounded-lg border border-dashed border-border">
+            <p className="text-xs text-muted-foreground">Nenhuma conversão registrada no período.</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border">
+                  {['Data', 'Plataforma', 'Evento', 'Valor', 'Status HTTP', 'Resultado'].map(h => (
+                    <th key={h} className="px-3 py-2 text-left font-semibold text-muted-foreground uppercase tracking-wider text-[10px]">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {convLog.map(entry => (
+                  <tr key={entry.id} onClick={() => setLogModal(entry)} className="cursor-pointer border-b border-border/40 last:border-0 hover:bg-muted/20 transition-colors">
+                    <td className="px-3 py-2 tabular-nums text-muted-foreground">{new Date(entry.enviado_em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
+                    <td className="px-3 py-2">
+                      <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-bold', entry.plataforma === 'meta' ? 'bg-blue-500/15 text-blue-400' : 'bg-yellow-500/15 text-yellow-400')}>
+                        {entry.plataforma === 'meta' ? 'Meta' : 'Google'}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 font-mono">{entry.event_name}</td>
+                    <td className="px-3 py-2 tabular-nums font-bold">
+                      {entry.valor != null ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(entry.valor) : '—'}
+                    </td>
+                    <td className="px-3 py-2 font-mono">{entry.status_resposta ?? '—'}</td>
+                    <td className="px-3 py-2">
+                      {entry.sucesso
+                        ? <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-400">✓ Sucesso</span>
+                        : <span className="rounded-full bg-red-500/15 px-2 py-0.5 text-[10px] font-bold text-red-400">✗ Erro</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* ── Instâncias ─────────────────────────────────────────────────── */}
@@ -665,6 +1095,40 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
                 {adding && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
                 {instProvider === 'evolution' ? 'Criar na Evolution API' : 'Adicionar'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Log detail modal ─────────────────────────────────────────────── */}
+      {logModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setLogModal(null)}>
+          <div className="w-full max-w-lg rounded-xl border border-border bg-card p-5 shadow-2xl space-y-3" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-bold text-sm">{logModal.event_name}</h3>
+                <p className="text-xs text-muted-foreground">{logModal.plataforma === 'meta' ? 'Meta CAPI' : 'Google Enhanced'} · {new Date(logModal.enviado_em).toLocaleString('pt-BR')}</p>
+              </div>
+              <button onClick={() => setLogModal(null)} className="text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>
+            </div>
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              {[
+                { label: 'Status HTTP', value: String(logModal.status_resposta ?? '—') },
+                { label: 'Resultado', value: logModal.sucesso ? '✓ Sucesso' : '✗ Erro' },
+                { label: 'Valor', value: logModal.valor != null ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(logModal.valor) : '—' },
+                { label: 'Event ID', value: logModal.event_id.slice(0, 8) + '...' },
+              ].map(({ label, value }) => (
+                <div key={label} className="rounded-lg border border-border bg-background/60 p-2">
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
+                  <p className="mt-0.5 font-mono font-bold">{value}</p>
+                </div>
+              ))}
+            </div>
+            <div>
+              <p className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">Resposta completa</p>
+              <pre className="max-h-48 overflow-auto rounded-lg border border-border bg-background p-3 text-[10px] leading-relaxed text-muted-foreground whitespace-pre-wrap break-all">
+                {logModal.resposta_body || '(sem corpo)'}
+              </pre>
             </div>
           </div>
         </div>

@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { queueFollowupIfExists } from '@/lib/followup-send';
 import { ensureCrmAiSchema } from '@/lib/crm-ai-analysis';
+import { dispararEventosPorStatus } from '@/lib/conversions';
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -53,10 +54,19 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     );
     if (!lead) return Response.json({ error: 'Not found' }, { status: 404 });
 
-    // Queue follow-up if status changed
+    // Queue follow-up and fire conversion events if status changed
     const newStatus = (next.status ?? 'Em Atendimento') as string;
     if (current && lead.client_id && current.status !== newStatus) {
       await queueFollowupIfExists(pool, id, lead.client_id, newStatus).catch(() => null);
+      const leadPhone = lead.numero ?? current.numero ?? null;
+      if (leadPhone) {
+        await dispararEventosPorStatus(
+          pool,
+          lead.client_id,
+          newStatus,
+          { id, phone: leadPhone },
+        ).catch(() => null);
+      }
     }
 
     return Response.json(lead);
