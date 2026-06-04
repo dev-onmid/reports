@@ -7,6 +7,7 @@ import {
   Image, Mic, Video, FileText, MapPin, X, CheckCircle2,
   AlertCircle, History, Filter, MoreHorizontal, Smile,
   CheckSquare2, Square, Trash2, Ban, UserX,
+  Wifi, WifiOff, AlertTriangle,
 } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -42,6 +43,12 @@ type CrmMessage = {
 type MediaType = 'imagem' | 'audio' | 'video' | 'documento' | 'localizacao';
 
 const DEFAULT_STATUS_OPTIONS = ['Em Atendimento', 'Agendado', 'Reagendado', 'Fechado', 'Comprou', 'Paciente', 'Não Retorna', 'Distante', 'Sem Interesse', 'Desqualificado'];
+
+type InstanceStatus = 'checking' | 'connected' | 'disconnected' | 'no_instance' | 'unknown';
+type InstanceInfo = { id: string; nome: string; provider: string; status: string };
+
+const INSTANCE_ALERT_KEY = 'crm-instance-alert-shown';
+const INSTANCE_ALERT_COOLDOWN = 10 * 60 * 1000; // 10 min
 
 const COMMON_EMOJIS = [
   '😊','😂','❤️','👍','🙏','😍','🎉','✅','🔥','💪',
@@ -410,6 +417,11 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
   // Emoji picker
   const [emojiPicker, setEmojiPicker] = useState(false);
 
+  // Instance status
+  const [instanceStatus,  setInstanceStatus]  = useState<InstanceStatus>('checking');
+  const [instanceInfos,   setInstanceInfos]   = useState<InstanceInfo[]>([]);
+  const [instanceAlertOpen, setInstanceAlertOpen] = useState(false);
+
   // Confirm dialog
   const [confirmDialog, setConfirmDialog] = useState<{
     title: string;
@@ -436,6 +448,31 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
     if (!el) return;
     el.scrollTo({ top: el.scrollHeight, behavior });
   }
+
+  // ── Instance status ─────────────────────────────────────────────────────────
+  const loadInstanceStatus = useCallback(() => {
+    fetch(`/api/crm/instance-status?clientId=${clientId}`)
+      .then(r => r.json())
+      .then((data: { status: string; instances?: InstanceInfo[] }) => {
+        const status = data.status as InstanceStatus;
+        setInstanceStatus(status);
+        setInstanceInfos(data.instances ?? []);
+        if (status === 'disconnected' || status === 'no_instance') {
+          const lastShown = Number(sessionStorage.getItem(INSTANCE_ALERT_KEY) ?? 0);
+          if (!lastShown || Date.now() - lastShown > INSTANCE_ALERT_COOLDOWN) {
+            setInstanceAlertOpen(true);
+            sessionStorage.setItem(INSTANCE_ALERT_KEY, String(Date.now()));
+          }
+        }
+      })
+      .catch(() => setInstanceStatus('unknown'));
+  }, [clientId]);
+
+  useEffect(() => {
+    loadInstanceStatus();
+    const id = setInterval(loadInstanceStatus, 30_000);
+    return () => clearInterval(id);
+  }, [loadInstanceStatus]);
 
   // ── Data loading ────────────────────────────────────────────────────────────
   const loadInbox = useCallback(() => {
@@ -771,6 +808,25 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
                   {leads.length > 0 && (
                     <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-bold text-primary">{leads.length}</span>
                   )}
+                  {/* Instance status badge */}
+                  <button
+                    onClick={() => setInstanceAlertOpen(true)}
+                    className="flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-bold transition-colors"
+                    title={instanceStatus === 'connected' ? 'WhatsApp conectado' : instanceStatus === 'checking' ? 'Verificando...' : 'WhatsApp desconectado — clique para detalhes'}
+                  >
+                    {instanceStatus === 'connected' && (
+                      <><Wifi className="h-3 w-3 text-emerald-400" /><span className="text-emerald-400">ON</span></>
+                    )}
+                    {(instanceStatus === 'disconnected' || instanceStatus === 'no_instance') && (
+                      <><WifiOff className="h-3 w-3 text-red-400 animate-pulse" /><span className="text-red-400">OFF</span></>
+                    )}
+                    {instanceStatus === 'checking' && (
+                      <><Wifi className="h-3 w-3 text-muted-foreground animate-pulse" /></>
+                    )}
+                    {instanceStatus === 'unknown' && (
+                      <><Wifi className="h-3 w-3 text-amber-400" /><span className="text-amber-400">?</span></>
+                    )}
+                  </button>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <button onClick={loadInbox} className="flex h-8 w-8 items-center justify-center rounded-[var(--radius)] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors" title="Atualizar">
@@ -1089,6 +1145,20 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
                 </div>
               </div>
 
+              {/* Instance disconnected banner */}
+              {(instanceStatus === 'disconnected' || instanceStatus === 'no_instance') && (
+                <button
+                  type="button"
+                  onClick={() => setInstanceAlertOpen(true)}
+                  className="flex w-full items-center gap-2 px-4 py-2 text-xs font-semibold bg-red-500/10 border-b border-red-500/20 text-red-400 hover:bg-red-500/15 transition-colors text-left"
+                >
+                  <WifiOff className="h-3.5 w-3.5 shrink-0 animate-pulse" />
+                  {instanceStatus === 'no_instance'
+                    ? 'Nenhuma instância WhatsApp configurada. Clique para saber mais.'
+                    : 'WhatsApp desconectado — mensagens podem não ser enviadas. Clique para detalhes.'}
+                </button>
+              )}
+
               {/* Sync result toast */}
               {syncResult && (
                 <div className="px-4 py-2 text-xs font-semibold bg-primary/10 border-b border-border text-primary">
@@ -1244,6 +1314,108 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
           onConfirm={confirmDialog.onConfirm}
           onClose={() => setConfirmDialog(null)}
         />
+      )}
+
+      {/* Instance alert modal */}
+      {instanceAlertOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setInstanceAlertOpen(false)}>
+          <div className="w-full max-w-md bg-card rounded-2xl border border-border shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center gap-3 px-5 py-4 border-b border-border">
+              <div className={cn(
+                'flex h-9 w-9 shrink-0 items-center justify-center rounded-full',
+                instanceStatus === 'connected' ? 'bg-emerald-500/15' : 'bg-red-500/15',
+              )}>
+                {instanceStatus === 'connected'
+                  ? <Wifi className="h-5 w-5 text-emerald-400" />
+                  : <WifiOff className="h-5 w-5 text-red-400" />}
+              </div>
+              <div>
+                <p className="text-sm font-bold">Status do WhatsApp</p>
+                <p className={cn('text-xs font-semibold', instanceStatus === 'connected' ? 'text-emerald-400' : 'text-red-400')}>
+                  {instanceStatus === 'connected' ? 'Conectado' : instanceStatus === 'no_instance' ? 'Sem instância configurada' : 'Desconectado'}
+                </p>
+              </div>
+            </div>
+
+            <div className="px-5 py-4 space-y-3">
+              {instanceStatus === 'no_instance' ? (
+                <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      Nenhuma instância WhatsApp está configurada para este cliente. Configure em{' '}
+                      <span className="font-semibold text-foreground">Clientes → Rastreamento</span>{' '}
+                      para enviar e receber mensagens.
+                    </p>
+                  </div>
+                </div>
+              ) : instanceStatus !== 'connected' ? (
+                <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      A instância está desconectada. Mensagens <span className="font-semibold text-foreground">não serão enviadas</span> até que o WhatsApp seja reconectado.
+                      Acesse <span className="font-semibold text-foreground">Clientes → Rastreamento</span> para escanear o QR Code e reconectar.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4">
+                  <div className="flex items-start gap-3">
+                    <Wifi className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      WhatsApp conectado e funcionando normalmente.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {instanceInfos.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Instâncias</p>
+                  {instanceInfos.map(inst => (
+                    <div key={inst.id} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background/60 px-3 py-2.5">
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold truncate">{inst.nome}</p>
+                        <p className="text-[10px] text-muted-foreground">{inst.provider === 'evolution' ? 'Evolution API' : 'Z-API'}</p>
+                      </div>
+                      <span className={cn(
+                        'flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold shrink-0',
+                        inst.status === 'connected'
+                          ? 'bg-emerald-500/15 text-emerald-400'
+                          : inst.status === 'unknown'
+                            ? 'bg-amber-500/15 text-amber-400'
+                            : 'bg-red-500/15 text-red-400',
+                      )}>
+                        {inst.status === 'connected'
+                          ? <><Wifi className="h-2.5 w-2.5" /> Conectado</>
+                          : inst.status === 'unknown'
+                            ? <><Wifi className="h-2.5 w-2.5" /> Desconhecido</>
+                            : <><WifiOff className="h-2.5 w-2.5" /> Desconectado</>}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between gap-3 px-5 pb-5">
+              <button
+                onClick={loadInstanceStatus}
+                className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                Verificar novamente
+              </button>
+              <button
+                onClick={() => setInstanceAlertOpen(false)}
+                className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
+              >
+                Entendi
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );

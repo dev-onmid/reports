@@ -13,7 +13,7 @@ import {
   Users, CalendarDays, HeartHandshake, CircleDollarSign,
   ChevronLeft, ChevronRight, ChevronDown, SlidersHorizontal,
   AlignJustify, Trash2, Pencil, Sparkles, Clock3, LayoutGrid, List, ArrowUpDown,
-  BarChart3, Plug, UserRound, MessageCircle, X, Send, GripVertical, Layers,
+  BarChart3, Plug, UserRound, MessageCircle, X, Send, GripVertical, Layers, WifiOff,
 } from 'lucide-react';
 import { ChatView } from './chat-view';
 import { FollowupTab, useActiveFollowups, FollowupBadge } from './followup-tab';
@@ -1193,6 +1193,7 @@ export default function CrmPage() {
   const [clientSort, setClientSort] = useState<'az' | 'za'>('az');
   const [clientView, setClientView] = useState<'grid' | 'list'>('grid');
   const [recentClientIds, setRecentClientIds] = useState<string[]>([]);
+  const [chatInstanceStatus, setChatInstanceStatus] = useState<'connected' | 'disconnected' | 'unknown' | 'no_instance' | null>(null);
 
   // ── Funnels & Stages ──────────────────────────────────────────────────
   const [funnels, setFunnels] = useState<CrmFunnel[]>([]);
@@ -1267,6 +1268,22 @@ export default function CrmPage() {
       setRecentClientIds([]);
     }
   }, []);
+
+  // Poll instance status for the Chat tab dot indicator
+  useEffect(() => {
+    if (!clientId) { setChatInstanceStatus(null); return; }
+    function check() {
+      fetch(`/api/crm/instance-status?clientId=${clientId}`)
+        .then(r => r.json())
+        .then((data: { status: string }) => {
+          setChatInstanceStatus(data.status as 'connected' | 'disconnected' | 'unknown' | 'no_instance');
+        })
+        .catch(() => setChatInstanceStatus('unknown'));
+    }
+    check();
+    const id = setInterval(check, 30_000);
+    return () => clearInterval(id);
+  }, [clientId]);
 
   useEffect(() => {
     try {
@@ -1758,9 +1775,24 @@ export default function CrmPage() {
             <Users className="h-3.5 w-3.5" /> Leads
           </button>
           <button type="button" onClick={() => setCrmView('chat')}
-            className={cn('flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold transition-colors',
+            className={cn('relative flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold transition-colors',
               crmView === 'chat' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
             <MessageCircle className="h-3.5 w-3.5" /> Chat
+            {/* Instance status dot */}
+            {clientId && chatInstanceStatus && chatInstanceStatus !== 'connected' && (
+              <span
+                className={cn(
+                  'absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full border border-card',
+                  chatInstanceStatus === 'disconnected' || chatInstanceStatus === 'no_instance'
+                    ? 'bg-red-500 animate-pulse'
+                    : 'bg-amber-400',
+                )}
+                title={chatInstanceStatus === 'no_instance' ? 'Sem instância configurada' : 'WhatsApp desconectado'}
+              />
+            )}
+            {clientId && chatInstanceStatus === 'connected' && (
+              <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-emerald-500 border border-card" />
+            )}
           </button>
           <button type="button" onClick={() => setCrmView('followup')}
             className={cn('flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold transition-colors',
