@@ -168,6 +168,36 @@ export async function POST(
   }
 }
 
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
+  const pool = makeServerPool();
+  try {
+    const { rows: [lead] } = await pool.query(
+      `SELECT client_id, numero FROM public.crm_leads WHERE id = $1`,
+      [id],
+    );
+    if (!lead) return Response.json({ error: 'lead not found' }, { status: 404 });
+
+    const { rowCount } = await pool.query(
+      `DELETE FROM public.crm_messages
+       WHERE lead_id = $1
+          OR lead_id IN (
+            SELECT l2.id FROM public.crm_leads l2
+            WHERE l2.client_id = $2
+              AND l2.numero IS NOT NULL
+              AND l2.numero = $3
+          )`,
+      [id, lead.client_id, lead.numero ?? null],
+    );
+    return Response.json({ deleted: rowCount ?? 0 });
+  } finally {
+    await pool.end();
+  }
+}
+
 async function sendLocation(
   instance: { instanceId: string; token: string; provider: 'zapi' | 'evolution' },
   phone: string,

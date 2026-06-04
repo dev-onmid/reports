@@ -6,6 +6,7 @@ import {
   Search, MessageCircle, RefreshCw, Send, Paperclip,
   Image, Mic, Video, FileText, MapPin, X, CheckCircle2,
   AlertCircle, History, Filter, MoreHorizontal, Smile,
+  CheckSquare2, Square, Trash2, Ban, UserX,
 } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -41,6 +42,12 @@ type CrmMessage = {
 type MediaType = 'imagem' | 'audio' | 'video' | 'documento' | 'localizacao';
 
 const DEFAULT_STATUS_OPTIONS = ['Em Atendimento', 'Agendado', 'Reagendado', 'Fechado', 'Comprou', 'Paciente', 'Não Retorna', 'Distante', 'Sem Interesse', 'Desqualificado'];
+
+const COMMON_EMOJIS = [
+  '😊','😂','❤️','👍','🙏','😍','🎉','✅','🔥','💪',
+  '👋','🤝','😎','🚀','💯','⭐','🤔','😅','👀','💰',
+  '😁','🤩','🥳','😢','😭','🤣','😘','💬','📅','✨',
+];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -335,6 +342,41 @@ function MediaModal({
   );
 }
 
+// ── Confirm dialog ────────────────────────────────────────────────────────────
+
+function ConfirmDialog({
+  title,
+  description,
+  confirmLabel = 'Confirmar',
+  confirmClass = 'bg-red-500 hover:bg-red-600 text-white',
+  onConfirm,
+  onClose,
+}: {
+  title: string;
+  description: string;
+  confirmLabel?: string;
+  confirmClass?: string;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="w-full max-w-sm bg-card rounded-2xl border border-border shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="px-5 py-5 space-y-2">
+          <p className="text-sm font-bold">{title}</p>
+          <p className="text-xs text-muted-foreground leading-relaxed">{description}</p>
+        </div>
+        <div className="flex justify-end gap-2 px-5 pb-5">
+          <button onClick={onClose} className="rounded-lg border border-border px-4 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground">Cancelar</button>
+          <button onClick={() => { onConfirm(); onClose(); }} className={cn('rounded-lg px-4 py-2 text-sm font-semibold', confirmClass)}>
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main ChatView ─────────────────────────────────────────────────────────────
 
 export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: { clientId: string; statusOptions?: string[] }) {
@@ -355,6 +397,27 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
   const [chatAvatars, setChatAvatars] = useState<Record<string, string>>({});
   const [importingChats, setImportingChats] = useState(false);
   const [importResult, setImportResult] = useState<string | null>(null);
+
+  // Select mode
+  const [selectMode,      setSelectMode]      = useState(false);
+  const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
+  const [bulkAction,      setBulkAction]      = useState<'deleting' | 'clearing' | null>(null);
+
+  // More menu (per-conversation)
+  const [moreMenu,     setMoreMenu]     = useState(false);
+  const [clearingChat, setClearingChat] = useState(false);
+
+  // Emoji picker
+  const [emojiPicker, setEmojiPicker] = useState(false);
+
+  // Confirm dialog
+  const [confirmDialog, setConfirmDialog] = useState<{
+    title: string;
+    description: string;
+    confirmLabel?: string;
+    confirmClass?: string;
+    onConfirm: () => void;
+  } | null>(null);
 
   const messagesAreaRef = useRef<HTMLDivElement>(null);
   const pollRef         = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -423,7 +486,6 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
       .then((d: { messages: CrmMessage[] }) => {
         setMessages(d.messages ?? []);
         setMsgLoading(false);
-        // Only auto-scroll if user was near bottom (or initial load)
         if (atBottom || initial) {
           requestAnimationFrame(() => scrollToBottom(initial ? 'instant' : 'smooth'));
         }
@@ -432,8 +494,7 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Inbox auto-refresh (real-time) ─────────────────────────────────────────
-  // Polls every 8s so new WA messages appear automatically in the sidebar.
+  // ── Inbox auto-refresh ─────────────────────────────────────────────────────
   useEffect(() => {
     loadInbox();
     const id = setInterval(loadInbox, 8_000);
@@ -455,8 +516,6 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
   }, [clientId]);
 
   // ── Messages auto-refresh ───────────────────────────────────────────────────
-  // Only keeps the 5s poll alive for conversations with activity in the last 3 days.
-  // Older conversations load once and stop — use the manual "Histórico" button instead.
   const isRecentLead = selectedLead
     ? selectedLead.last_message_at !== null
       && (Date.now() - new Date(selectedLead.last_message_at).getTime()) < 3 * 86_400_000
@@ -465,11 +524,88 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
   useEffect(() => {
     if (!selectedId) { setMessages([]); return; }
     loadMessages(selectedId, true);
-    if (!isRecentLead) return; // older conversation: load once, no polling
+    if (!isRecentLead) return;
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(() => loadMessages(selectedId), 5_000);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [selectedId, loadMessages, isRecentLead]);
+
+  // ── Select mode helpers ─────────────────────────────────────────────────────
+  function toggleSelectLead(id: string) {
+    setSelectedLeadIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  function exitSelectMode() {
+    setSelectMode(false);
+    setSelectedLeadIds(new Set());
+  }
+
+  // ── Bulk actions ────────────────────────────────────────────────────────────
+  async function bulkDelete() {
+    setBulkAction('deleting');
+    try {
+      await Promise.all([...selectedLeadIds].map(id => fetch(`/api/crm/${id}`, { method: 'DELETE' })));
+      setLeads(prev => prev.filter(l => !selectedLeadIds.has(l.id)));
+      if (selectedId && selectedLeadIds.has(selectedId)) {
+        setSelectedId(null);
+        setMessages([]);
+      }
+      exitSelectMode();
+    } finally {
+      setBulkAction(null);
+    }
+  }
+
+  async function bulkClearChats() {
+    setBulkAction('clearing');
+    try {
+      await Promise.all([...selectedLeadIds].map(id =>
+        fetch(`/api/crm/${id}/messages`, { method: 'DELETE' }),
+      ));
+      if (selectedId && selectedLeadIds.has(selectedId)) setMessages([]);
+      exitSelectMode();
+    } finally {
+      setBulkAction(null);
+    }
+  }
+
+  // ── Per-conversation actions ────────────────────────────────────────────────
+  async function clearCurrentChat() {
+    if (!selectedId) return;
+    setClearingChat(true);
+    setMoreMenu(false);
+    try {
+      await fetch(`/api/crm/${selectedId}/messages`, { method: 'DELETE' });
+      setMessages([]);
+    } finally {
+      setClearingChat(false);
+    }
+  }
+
+  async function blockContact() {
+    if (!selectedId) return;
+    setMoreMenu(false);
+    await changeSelectedStatus('Bloqueado');
+  }
+
+  async function deleteCurrentLead() {
+    if (!selectedId) return;
+    setMoreMenu(false);
+    try {
+      await fetch(`/api/crm/${selectedId}`, { method: 'DELETE' });
+      setLeads(prev => prev.filter(l => l.id !== selectedId));
+      setSelectedId(null);
+      setMessages([]);
+    } catch {
+      setSendStatus('err');
+      setSendError('Erro ao excluir lead');
+      setTimeout(() => { setSendStatus(null); setSendError(null); }, 5000);
+    }
+  }
 
   // ── Send helpers ────────────────────────────────────────────────────────────
   async function syncHistory() {
@@ -507,13 +643,11 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ direction: 'out', ...payload }),
       });
-      // Handle non-JSON responses (e.g. Vercel 500 HTML pages)
       const rawText = await res.text();
       let data: { wa_sent?: boolean; error?: string; wa_error?: string } = {};
       try { data = JSON.parse(rawText) as typeof data; } catch { /* non-JSON */ }
 
       if (!res.ok) {
-        console.error('[doSend error]', res.status, rawText);
         setSendStatus('err');
         setSendError(data.error ?? `Erro ${res.status}`);
       } else {
@@ -525,7 +659,6 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
       }
       setTimeout(() => { setSendStatus(null); setSendError(null); }, 6000);
     } catch (err) {
-      console.error('[doSend fetch error]', err);
       setSendStatus('err');
       setSendError(String(err));
       setTimeout(() => { setSendStatus(null); setSendError(null); }, 6000);
@@ -538,7 +671,6 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
     if (!replyText.trim()) return;
     const text = replyText.trim();
     setReplyText('');
-    // Reset textarea height
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
       textareaRef.current.focus();
@@ -584,7 +716,6 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
     }
   }
 
-  // Auto-resize textarea
   function handleTextareaChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     setReplyText(e.target.value);
     const el = e.target;
@@ -609,50 +740,78 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
 
   return (
     <>
-      {/* ── Main layout: fills available space, no external scroll ── */}
+      {/* ── Main layout ── */}
       <div className="flex h-full min-h-0 overflow-hidden rounded-[var(--radius)] border border-border bg-card">
 
         {/* ── Left: Inbox list ── */}
         <div className="flex w-[340px] shrink-0 flex-col border-r border-border bg-card min-h-0">
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
-            <div className="flex items-center gap-2">
-              <MessageCircle className="h-4 w-4 text-primary" />
-              <span className="text-sm font-bold">Inbox</span>
-              {leads.length > 0 && (
-                <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-bold text-primary">{leads.length}</span>
-              )}
-            </div>
-            <div className="flex items-center gap-1.5">
-              <button onClick={loadInbox} className="flex h-8 w-8 items-center justify-center rounded-[var(--radius)] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors" title="Atualizar">
-                <RefreshCw className="h-3.5 w-3.5" />
-              </button>
-              <button
-                onClick={() => {
-                  const wrongName = window.prompt(
-                    'Nome errado a remover (ex: "Matheus Campos").\nDeixe em branco para limpar só leads sem resposta e grupos:',
-                    '',
-                  );
-                  if (wrongName === null) return; // cancelled
-                  fetch('/api/crm/cleanup', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ clientId, wrongName: wrongName.trim() || undefined }),
-                  })
-                    .then(r => r.json())
-                    .then((d: { groupsDeleted?: number; namesCleared?: number }) => {
-                      alert(`✓ ${d.groupsDeleted ?? 0} grupos removidos\n✓ ${d.namesCleared ?? 0} nomes corrigidos`);
-                      loadInbox();
-                    })
-                    .catch(() => alert('Erro na limpeza'));
-                }}
-                className="flex h-8 w-8 items-center justify-center rounded-[var(--radius)] text-muted-foreground hover:bg-muted hover:text-amber-400 transition-colors"
-                title="Limpar grupos e nomes incorretos"
-              >
-                <Filter className="h-3.5 w-3.5" />
-              </button>
-            </div>
+            {selectMode ? (
+              <>
+                <div className="flex items-center gap-2">
+                  <CheckSquare2 className="h-4 w-4 text-primary" />
+                  <span className="text-sm font-bold text-primary">
+                    {selectedLeadIds.size > 0 ? `${selectedLeadIds.size} selecionado(s)` : 'Selecionar'}
+                  </span>
+                </div>
+                <button
+                  onClick={exitSelectMode}
+                  className="flex h-8 w-8 items-center justify-center rounded-[var(--radius)] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                  title="Cancelar seleção"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-2">
+                  <MessageCircle className="h-4 w-4 text-primary" />
+                  <span className="text-sm font-bold">Inbox</span>
+                  {leads.length > 0 && (
+                    <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-bold text-primary">{leads.length}</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button onClick={loadInbox} className="flex h-8 w-8 items-center justify-center rounded-[var(--radius)] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors" title="Atualizar">
+                    <RefreshCw className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={() => setSelectMode(true)}
+                    className="flex h-8 w-8 items-center justify-center rounded-[var(--radius)] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                    title="Selecionar conversas"
+                  >
+                    <CheckSquare2 className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={() => {
+                      const wrongName = window.prompt(
+                        'Nome errado a remover (ex: "Matheus Campos").\nDeixe em branco para limpar só leads sem resposta e grupos:',
+                        '',
+                      );
+                      if (wrongName === null) return;
+                      fetch('/api/crm/cleanup', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ clientId, wrongName: wrongName.trim() || undefined }),
+                      })
+                        .then(r => r.json())
+                        .then((d: { groupsDeleted?: number; namesCleared?: number }) => {
+                          alert(`✓ ${d.groupsDeleted ?? 0} grupos removidos\n✓ ${d.namesCleared ?? 0} nomes corrigidos`);
+                          loadInbox();
+                        })
+                        .catch(() => alert('Erro na limpeza'));
+                    }}
+                    className="flex h-8 w-8 items-center justify-center rounded-[var(--radius)] text-muted-foreground hover:bg-muted hover:text-amber-400 transition-colors"
+                    title="Limpar grupos e nomes incorretos"
+                  >
+                    <Filter className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </>
+            )}
           </div>
+
           {/* Search */}
           <div className="px-3 py-3 border-b border-border shrink-0">
             <div className="relative">
@@ -677,7 +836,8 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
               <p className="mt-2 text-[11px] text-muted-foreground">{importResult}</p>
             )}
           </div>
-          {/* Lead list — ONLY this section scrolls on the left */}
+
+          {/* Lead list */}
           <div className="flex-1 overflow-y-auto min-h-0">
             {loading ? (
               <div className="p-4 text-xs text-muted-foreground text-center">Carregando…</div>
@@ -694,23 +854,43 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
                 </button>
               </div>
             ) : filtered.map(lead => (
-              <button key={lead.id} onClick={() => setSelectedId(lead.id)}
+              <button
+                key={lead.id}
+                onClick={() => {
+                  if (selectMode) {
+                    toggleSelectLead(lead.id);
+                  } else {
+                    setSelectedId(lead.id);
+                  }
+                }}
                 className={cn(
                   'w-full flex items-start gap-3 border-b border-border/40 px-4 py-3 text-left transition-colors hover:bg-muted/30',
-                  selectedId === lead.id && 'border-l-2 border-l-primary bg-primary/10',
-                )}>
-                <ContactAvatar
-                  lead={lead}
-                  size="sm"
-                  showChannel
-                  avatarOverride={chatAvatars[normalizeNumber(lead.numero)]}
-                />
+                  !selectMode && selectedId === lead.id && 'border-l-2 border-l-primary bg-primary/10',
+                  selectMode && selectedLeadIds.has(lead.id) && 'bg-primary/10',
+                )}
+              >
+                {selectMode ? (
+                  <div className="flex items-center justify-center h-9 w-9 shrink-0">
+                    {selectedLeadIds.has(lead.id)
+                      ? <CheckSquare2 className="h-5 w-5 text-primary" />
+                      : <Square className="h-5 w-5 text-muted-foreground" />}
+                  </div>
+                ) : (
+                  <ContactAvatar
+                    lead={lead}
+                    size="sm"
+                    showChannel
+                    avatarOverride={chatAvatars[normalizeNumber(lead.numero)]}
+                  />
+                )}
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-1">
                     <div className="flex items-center gap-1.5 min-w-0">
                       <span className="text-sm font-semibold truncate">{leadName(lead)}</span>
-                      {/* Live indicator — auto-updates enabled */}
-                      {lead.last_message_at !== null && (Date.now() - new Date(lead.last_message_at).getTime()) < 3 * 86_400_000 && (
+                      {lead.status === 'Bloqueado' && (
+                        <Ban className="h-3 w-3 shrink-0 text-red-400" title="Bloqueado" />
+                      )}
+                      {lead.last_message_at !== null && (Date.now() - new Date(lead.last_message_at).getTime()) < 3 * 86_400_000 && lead.status !== 'Bloqueado' && (
                         <span className="shrink-0 h-1.5 w-1.5 rounded-full bg-primary animate-pulse" title="Tempo real ativo" />
                       )}
                     </div>
@@ -744,6 +924,44 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
               </div>
             )}
           </div>
+
+          {/* Bulk action bar */}
+          {selectMode && selectedLeadIds.size > 0 && (
+            <div className="shrink-0 border-t border-border bg-card p-3 space-y-2">
+              <p className="text-[11px] font-semibold text-muted-foreground">
+                {selectedLeadIds.size} conversa(s) selecionada(s)
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setConfirmDialog({
+                    title: 'Limpar conversas',
+                    description: `Apagar todas as mensagens de ${selectedLeadIds.size} conversa(s) selecionada(s)? Esta ação não pode ser desfeita.`,
+                    confirmLabel: 'Limpar',
+                    confirmClass: 'bg-amber-500 hover:bg-amber-600 text-white',
+                    onConfirm: () => void bulkClearChats(),
+                  })}
+                  disabled={!!bulkAction}
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-amber-500/30 px-2 py-2 text-xs font-semibold text-amber-400 hover:bg-amber-500/10 disabled:opacity-50 transition-colors"
+                >
+                  <Trash2 className="h-3 w-3" />
+                  {bulkAction === 'clearing' ? 'Limpando...' : 'Limpar chats'}
+                </button>
+                <button
+                  onClick={() => setConfirmDialog({
+                    title: 'Excluir leads',
+                    description: `Excluir permanentemente ${selectedLeadIds.size} lead(s) selecionado(s)? Esta ação não pode ser desfeita.`,
+                    confirmLabel: 'Excluir',
+                    onConfirm: () => void bulkDelete(),
+                  })}
+                  disabled={!!bulkAction}
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-red-500/30 px-2 py-2 text-xs font-semibold text-red-400 hover:bg-red-500/10 disabled:opacity-50 transition-colors"
+                >
+                  <UserX className="h-3 w-3" />
+                  {bulkAction === 'deleting' ? 'Excluindo...' : 'Excluir leads'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* ── Right: Conversation ── */}
@@ -764,8 +982,11 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
                   <div className="flex items-center gap-2">
                     <p className="text-sm font-semibold truncate">{leadName(selectedLead)}</p>
                     <StatusDot status={selectedLead.status} />
+                    {selectedLead.status === 'Bloqueado' && (
+                      <Ban className="h-3.5 w-3.5 text-red-400 shrink-0" />
+                    )}
                   </div>
-                  <p className="text-xs text-muted-foreground">Online agora</p>
+                  <p className="text-xs text-muted-foreground">{selectedLead.numero ?? 'Sem número'}</p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <div className="relative">
@@ -781,13 +1002,13 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
                       {statusOptions.map(status => (
                         <option key={status} value={status}>{status}</option>
                       ))}
+                      <option value="Bloqueado">Bloqueado</option>
                     </select>
                     <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">▾</span>
                   </div>
                   {selectedLead.fechou && (
                     <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-primary/15 text-primary">Fechou</span>
                   )}
-                  {/* Live / static indicator + sync button */}
                   {isRecentLead ? (
                     <span className="flex items-center gap-1 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
                       <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
@@ -807,14 +1028,67 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
                     <History className="h-3 w-3" />
                     {syncing ? 'Buscando…' : 'Histórico'}
                   </button>
-                  <button
-                    className="flex h-9 w-9 items-center justify-center rounded-[var(--radius)] border border-border text-muted-foreground hover:bg-muted hover:text-foreground"
-                    title="Mais opções"
-                  >
-                    <MoreHorizontal className="h-4 w-4" />
-                  </button>
+
+                  {/* More options dropdown */}
+                  <div className="relative">
+                    <button
+                      onClick={() => setMoreMenu(v => !v)}
+                      className={cn(
+                        'flex h-9 w-9 items-center justify-center rounded-[var(--radius)] border border-border text-muted-foreground hover:bg-muted hover:text-foreground transition-colors',
+                        moreMenu && 'bg-muted text-foreground',
+                      )}
+                      title="Mais opções"
+                    >
+                      <MoreHorizontal className="h-4 w-4" />
+                    </button>
+                    {moreMenu && (
+                      <div className="absolute right-0 top-10 z-40 w-52 rounded-xl border border-border bg-popover shadow-xl overflow-hidden">
+                        <button
+                          onClick={() => setConfirmDialog({
+                            title: 'Limpar conversa',
+                            description: 'Apagar todas as mensagens desta conversa? Esta ação não pode ser desfeita.',
+                            confirmLabel: 'Limpar',
+                            confirmClass: 'bg-amber-500 hover:bg-amber-600 text-white',
+                            onConfirm: () => void clearCurrentChat(),
+                          })}
+                          disabled={clearingChat}
+                          className="flex w-full items-center gap-2.5 px-4 py-3 text-sm hover:bg-muted/50 transition-colors text-left disabled:opacity-50"
+                        >
+                          <Trash2 className="h-4 w-4 text-amber-400 shrink-0" />
+                          {clearingChat ? 'Limpando...' : 'Limpar conversa'}
+                        </button>
+                        <button
+                          onClick={() => setConfirmDialog({
+                            title: 'Bloquear contato',
+                            description: `Bloquear "${leadName(selectedLead)}"? O status será alterado para "Bloqueado".`,
+                            confirmLabel: 'Bloquear',
+                            confirmClass: 'bg-orange-500 hover:bg-orange-600 text-white',
+                            onConfirm: () => void blockContact(),
+                          })}
+                          className="flex w-full items-center gap-2.5 px-4 py-3 text-sm hover:bg-muted/50 transition-colors text-left"
+                        >
+                          <Ban className="h-4 w-4 text-orange-400 shrink-0" />
+                          Bloquear contato
+                        </button>
+                        <div className="h-px bg-border" />
+                        <button
+                          onClick={() => setConfirmDialog({
+                            title: 'Excluir lead',
+                            description: `Excluir permanentemente "${leadName(selectedLead)}"? Esta ação não pode ser desfeita.`,
+                            confirmLabel: 'Excluir',
+                            onConfirm: () => void deleteCurrentLead(),
+                          })}
+                          className="flex w-full items-center gap-2.5 px-4 py-3 text-sm hover:bg-muted/50 transition-colors text-left text-red-400"
+                        >
+                          <UserX className="h-4 w-4 shrink-0" />
+                          Excluir lead
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
+
               {/* Sync result toast */}
               {syncResult && (
                 <div className="px-4 py-2 text-xs font-semibold bg-primary/10 border-b border-border text-primary">
@@ -822,7 +1096,7 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
                 </div>
               )}
 
-              {/* Messages — ONLY this scrolls */}
+              {/* Messages */}
               <div
                 ref={messagesAreaRef}
                 className="min-h-0 flex-1 overflow-y-auto px-4 py-4 space-y-2 [background-image:linear-gradient(rgba(14,15,20,0.84),rgba(14,15,20,0.84)),radial-gradient(circle_at_1px_1px,rgba(255,255,255,0.08)_1px,transparent_0)] [background-size:auto,18px_18px]"
@@ -848,7 +1122,6 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
 
               {/* Input area */}
               <div className="border-t border-border bg-card shrink-0">
-                {/* Send status indicator */}
                 {sendStatus && (
                   <div className={cn(
                     'flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold border-b border-border',
@@ -864,7 +1137,7 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
                   {/* Attachment button */}
                   <div className="relative shrink-0">
                     <button
-                      onClick={() => setAttachMenu(v => !v)}
+                      onClick={() => { setAttachMenu(v => !v); setEmojiPicker(false); }}
                       className="flex h-11 w-11 items-center justify-center rounded-[var(--radius)] border border-border text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
                       title="Anexar mídia"
                     >
@@ -895,13 +1168,39 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
                     className="flex-1 resize-none rounded-[var(--radius)] border border-border bg-background px-3 py-3 pr-11 text-sm focus:outline-none focus:ring-1 focus:ring-primary overflow-hidden"
                     style={{ minHeight: 44, maxHeight: 140 }}
                   />
-                  <button
-                    type="button"
-                    className="-ml-14 mb-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius)] text-muted-foreground hover:text-foreground"
-                    title="Emoji"
-                  >
-                    <Smile className="h-4 w-4" />
-                  </button>
+
+                  {/* Emoji button */}
+                  <div className="relative -ml-14 mb-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => { setEmojiPicker(v => !v); setAttachMenu(false); }}
+                      className={cn(
+                        'flex h-8 w-8 items-center justify-center rounded-[var(--radius)] transition-colors',
+                        emojiPicker ? 'text-primary' : 'text-muted-foreground hover:text-foreground',
+                      )}
+                      title="Emoji"
+                    >
+                      <Smile className="h-4 w-4" />
+                    </button>
+                    {emojiPicker && (
+                      <div className="absolute bottom-10 right-0 z-30 rounded-xl border border-border bg-popover shadow-xl p-2 grid grid-cols-5 gap-0.5">
+                        {COMMON_EMOJIS.map(e => (
+                          <button
+                            key={e}
+                            type="button"
+                            onClick={() => {
+                              setReplyText(t => t + e);
+                              setEmojiPicker(false);
+                              textareaRef.current?.focus();
+                            }}
+                            className="flex h-9 w-9 items-center justify-center text-lg hover:bg-muted/50 rounded transition-colors"
+                          >
+                            {e}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
 
                   {/* Send button */}
                   <button
@@ -919,14 +1218,32 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
         </div>
       </div>
 
-      {/* Attach menu backdrop */}
+      {/* Backdrops */}
       {attachMenu && (
         <div className="fixed inset-0 z-20" onClick={() => setAttachMenu(false)} />
+      )}
+      {moreMenu && (
+        <div className="fixed inset-0 z-30" onClick={() => setMoreMenu(false)} />
+      )}
+      {emojiPicker && (
+        <div className="fixed inset-0 z-20" onClick={() => setEmojiPicker(false)} />
       )}
 
       {/* Media modal */}
       {mediaModal && (
         <MediaModal tipo={mediaModal} onSend={sendMedia} onClose={() => setMediaModal(null)} />
+      )}
+
+      {/* Confirm dialog */}
+      {confirmDialog && (
+        <ConfirmDialog
+          title={confirmDialog.title}
+          description={confirmDialog.description}
+          confirmLabel={confirmDialog.confirmLabel}
+          confirmClass={confirmDialog.confirmClass}
+          onConfirm={confirmDialog.onConfirm}
+          onClose={() => setConfirmDialog(null)}
+        />
       )}
     </>
   );
