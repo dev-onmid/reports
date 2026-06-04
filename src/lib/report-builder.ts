@@ -84,16 +84,16 @@ type MonthlyMeta = {
 
 async function fetchMonthlyMeta(connectionId: string, accountIds: string[], from: string, to: string): Promise<MonthlyMeta[]> {
   const pool = makeServerPool();
-  let conn: { access_token: string; token_expiry: string | null } | null = null;
+  let conn: { id: string; app_id: string; access_token: string; token_expiry: string | null } | null = null;
   try {
     const { rows } = await pool.query(
-      `SELECT access_token, token_expiry FROM public.meta_connections WHERE id = $1`,
+      `SELECT id, app_id, access_token, token_expiry FROM public.meta_connections WHERE id = $1`,
       [connectionId],
     );
     conn = rows[0] ?? null;
     if (!conn) {
       const { rows: leg } = await pool.query(
-        `SELECT access_token, NULL AS token_expiry FROM public.meta_integration WHERE id='global' AND status='connected' LIMIT 1`,
+        `SELECT 'legacy' AS id, '' AS app_id, access_token, NULL AS token_expiry FROM public.meta_integration WHERE id='global' AND status='connected' LIMIT 1`,
       );
       conn = leg[0] ?? null;
     }
