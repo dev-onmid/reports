@@ -356,7 +356,7 @@ function RenderExecutiveSummary({ page }: { page: ExecutiveSummaryPage }) {
       <div style={DECO_RING} /><div style={GLOW} />
       <OnmidLogo />
       <div style={{ marginTop: '4%' }}>
-        <PageTitle title="Resumo\nExecutivo" highlight="Executivo" subtitle="O que os dados mostram?" />
+        <PageTitle title={'Resumo\nExecutivo'} highlight="Executivo" subtitle="O que os dados mostram?" />
       </div>
       <div style={{ marginTop: '3%' }}>
         <Card style={{ padding: '3% 4%', display: 'flex', alignItems: 'center', gap: 20 }}>
@@ -518,10 +518,10 @@ function RenderExplanationCards({ page }: { page: ExplanationCardsPage }) {
       <div style={{ marginTop: '4%' }}>
         <PageTitle title={page.title} highlight={page.titleHighlight} />
       </div>
-      <div style={{ display: 'flex', alignItems: 'stretch', gap: 0, marginTop: '5%', height: '62%' }}>
+      <div style={{ display: 'flex', alignItems: 'stretch', gap: 0, marginTop: '5%', height: '62%', minWidth: 0 }}>
         {page.cards.map((card, i) => (
-          <div key={card.number} style={{ display: 'flex', alignItems: 'center' }}>
-            <Card style={{ flex: 1, padding: '5%', display: 'flex', flexDirection: 'column', gap: 12, width: '28vw', height: '100%', boxSizing: 'border-box' }}>
+          <div key={card.number} style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0 }}>
+            <Card style={{ flex: 1, padding: '5%', display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0, height: '100%', boxSizing: 'border-box' }}>
               <ICircle icon={['person', 'dollar', 'book'][i] as string} size={52} />
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>

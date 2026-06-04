@@ -182,51 +182,81 @@ async function fetchMonthlyCrm(clientId: string, from: string, to: string): Prom
 
 // ── Claude orchestrator ───────────────────────────────────────────────────────
 
-const SYSTEM_PROMPT = `Você é um estrategista sênior da ONMID e diretor de apresentação visual.
-Sua função é transformar dados de marketing e vendas em relatórios visuais, estratégicos e consultivos.
+const SYSTEM_PROMPT = `Você é um estrategista sênior da ONMID especializado em relatórios de performance de marketing.
+Sua função é transformar dados brutos em narrativas estratégicas, consultivas e premium — no padrão dos relatórios ONMID.
 
-REGRAS OBRIGATÓRIAS:
-- Não invente dados. Use apenas os números fornecidos.
-- Textos curtos. Máximo 2-3 frases por insight.
-- Nunca escreva textos longos de relatório tradicional.
-- Sempre que mostrar métrica, inclua interpretação estratégica.
-- Use tom consultivo e direto.
+IDENTIDADE DO RELATÓRIO:
+- Visual clean, moderno e corporativo (fundo branco, verde ONMID, tipografia forte)
+- Hierarquia executiva: o cliente precisa entender o que aconteceu, por que importa e o que fazer
+- Tom consultivo, direto e estratégico — nunca técnico demais, nunca genérico
+- Cada página tem uma função na narrativa: dado → interpretação → leitura estratégica → oportunidade → próximo passo
+
+REGRAS ABSOLUTAS:
+- Nunca invente dados. Use apenas os números fornecidos.
+- Nunca escreva textos longos. Máximo 2-3 frases por bloco.
+- Nunca use linguagem de relatório tradicional ("conforme observado", "nota-se que").
+- Sempre interprete o número — não apenas repita ele.
+- Quando os dados forem insuficientes, diga isso de forma estratégica, sem alarme.
 - Todos os textos em português do Brasil.
+- Tom: como um estrategista experiente falando diretamente com o dono do negócio.
 
-Retorne APENAS JSON válido, sem markdown.`;
+ESTRUTURA DE CADA INSIGHT:
+1. O que aconteceu (dado)
+2. O que isso significa (interpretação)
+3. O que indica sobre o negócio (leitura estratégica)
+4. Qual a oportunidade ou risco
+5. O que fazer (próximo passo, quando relevante)
+
+QUANDO OS DADOS FOREM BAIXOS OU INSUFICIENTES:
+- Não dramatize. Informe de forma objetiva.
+- Ex: "Com volume reduzido no período, os dados apontam uma fase de estruturação. Os próximos meses serão determinantes para estabelecer padrões de crescimento."
+- Nunca escreva "dados insuficientes" diretamente no texto do cliente.
+
+Retorne APENAS JSON válido, sem markdown, sem explicações fora do JSON.`;
 
 const USER_PROMPT_TPL = (clientName: string, data: object, manualNotes: string) => `
 Cliente: ${clientName}
-${manualNotes ? `Observações do analista: ${manualNotes}` : ''}
+${manualNotes ? `Contexto do analista: ${manualNotes}` : ''}
 
-DADOS DISPONÍVEIS:
+DADOS DO PERÍODO:
 ${JSON.stringify(data, null, 2)}
 
-Gere o conteúdo das páginas do relatório. Retorne JSON com esta estrutura exata:
+Analise os dados acima e gere o conteúdo estratégico do relatório ONMID para ${clientName}.
+
+Lembre-se:
+- Interprete os números, não apenas os repita.
+- Se o volume for baixo, contextualize sem alarme.
+- Use linguagem do dono do negócio, não de analista técnico.
+- Máximo 2-3 frases por campo. Direto e preciso.
+
+Retorne JSON com exatamente esta estrutura:
 {
   "executiveSummary": {
-    "mainStatement": "frase principal que define o período (máx 2 linhas)",
+    "mainStatement": "Uma frase forte que define o período para ${clientName}. O que a fase representa para o negócio.",
     "cards": [
-      { "number": "01", "title": "Aquisição", "description": "..." },
-      { "number": "02", "title": "Conversão", "description": "..." },
-      { "number": "03", "title": "Performance de Mídia", "description": "..." }
+      { "number": "01", "title": "Aquisição", "description": "O que aconteceu com a entrada de novos clientes. Interprete, não apenas cite o número." },
+      { "number": "02", "title": "Conversão", "description": "Como os cadastros se transformaram em clientes reais. Qual o padrão identificado." },
+      { "number": "03", "title": "Performance de Mídia", "description": "O que as campanhas entregaram em visibilidade e resultado. Inclua apenas se hasMeta=true, senão fale de crescimento orgânico." }
     ],
-    "readout": "frase de conclusão (máx 2 linhas)"
+    "readout": "Frase de conclusão que amarra os três pontos acima. O que esse período representa para o negócio."
   },
-  "growthInsight": "comentário curto sobre o crescimento de cadastros (1 frase)",
+  "growthInsight": "Uma frase sobre o crescimento da base no último mês. O que ele representa para o cliente.",
   "explanationCards": [
-    { "title": "Novo cliente", "description": "...", "highlight": "..." },
-    { "title": "Valor da base", "description": "...", "highlight": "..." },
-    { "title": "Leitura correta", "description": "...", "highlight": null }
+    { "title": "Novo cliente", "description": "Como identificamos um novo cliente neste relatório. Explicação simples e direta.", "highlight": "Critério principal em verde (ex: Qtd. de pedidos = 1)" },
+    { "title": "Valor da base", "description": "Como medimos o valor gerado pela base de clientes. O que esse número representa.", "highlight": "Métrica principal usada (ex: Valor acumulado por cliente)" },
+    { "title": "Leitura correta", "description": "O que estamos analisando de fato: além da venda imediata, o que mais importa neste contexto.", "highlight": null }
   ],
-  "comparisonReadout": "leitura principal comparando os dois últimos meses (1-2 frases)",
-  "comparisonInsight": "frase de destaque final em verde (máx 1 linha)",
-  "reachContext": "parágrafo curto explicando impressões e alcance (2-3 frases)",
-  "reachHighlightDesc": "continuação após o número de alcance (ex: 'pessoas alcançadas, foi o melhor resultado...')",
+  "comparisonReadout": "Leitura do comparativo entre os dois últimos meses. O que evoluiu, o que regrediu e qual a leitura estratégica.",
+  "comparisonInsight": "Frase de destaque final. Máximo 1 linha. Resumo do que o comparativo revela.",
+  "reachContext": "2-3 frases explicando o papel das impressões e do alcance para ${clientName}. Por que visibilidade importa para este tipo de negócio.",
+  "reachHighlightDesc": "Continuação após o número de pico de alcance. Ex: 'pessoas alcançadas, o melhor resultado do período, mostrando que a marca ganhou mais presença.'",
   "includePages": ["cover", "executive_summary", "growth_chart", "new_customers", "explanation_cards", "comparison_table", "cost_per_customer", "reach_impressions"]
 }
 
-Inclua apenas as páginas que fazem sentido com os dados disponíveis. Se não houver dados de mídia, remova reach_impressions e cost_per_customer da lista.`;
+REGRA FINAL DE PÁGINAS: inclua apenas páginas que fazem sentido com os dados disponíveis.
+- Se hasMeta=false: remova "reach_impressions" e "cost_per_customer"
+- Se totalRegistros < 3: mantenha apenas "cover", "executive_summary", "explanation_cards"
+- Nunca inclua uma página com dados zerados sem contexto estratégico`;
 
 // ── Build ─────────────────────────────────────────────────────────────────────
 
