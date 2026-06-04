@@ -18,7 +18,7 @@ import {
   UserRound, Phone, Mail, Briefcase, SlidersHorizontal, Check, Hash, BarChart2, Layers,
   Power, PowerOff, Search, BookMarked, ExternalLink, RefreshCw, ChevronRight,
   PiggyBank, Wallet, Info, Lightbulb, UserPlus, Brain, Save, MousePointer2,
-  Maximize2, Minimize2, ZoomIn, ZoomOut, ImageIcon, Unlink, History,
+  Maximize2, Minimize2, ZoomIn, ZoomOut, ImageIcon, Unlink, History, Copy,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -352,8 +352,15 @@ type MindMapNode = {
   image?: string | null;
 };
 
+type MindMapEdge = {
+  id: string;
+  from: string;
+  to: string;
+};
+
 type MindMapData = {
   nodes: MindMapNode[];
+  edges: MindMapEdge[];
 };
 
 type MindMapSnapshot = {
@@ -400,6 +407,7 @@ function defaultMindMap(clientName: string): MindMapData {
       { id: 'mind-channels', title: 'Canais', note: 'Meta, Google, WhatsApp e CRM', color: '#FB7185', x: 665, y: 405, parentId: root },
       { id: 'mind-actions', title: 'Próximas ações', note: 'Tarefas e responsáveis', color: '#22C55E', x: 430, y: 485, parentId: root },
     ],
+    edges: [],
   };
 }
 
@@ -430,7 +438,18 @@ function sanitizeMindMap(data: unknown, clientName: string): MindMapData {
   if (valid.length === 0) return defaultMindMap(clientName);
   if (!valid.some((node) => node.parentId === null)) valid[0] = { ...valid[0], parentId: null };
   const ids = new Set(valid.map((node) => node.id));
-  return { nodes: valid.slice(0, 48).map((node) => ({ ...node, parentId: node.parentId && ids.has(node.parentId) ? node.parentId : null })) };
+  const cleanNodes = valid.slice(0, 48).map((node) => ({ ...node, parentId: node.parentId && ids.has(node.parentId) ? node.parentId : null }));
+
+  // Sanitize extra edges
+  const rawEdges = (data as Partial<MindMapData>).edges;
+  const cleanEdges: MindMapEdge[] = Array.isArray(rawEdges)
+    ? rawEdges
+        .filter((e): e is MindMapEdge => !!e && typeof e === 'object' && typeof (e as MindMapEdge).from === 'string' && typeof (e as MindMapEdge).to === 'string')
+        .filter(e => ids.has(e.from) && ids.has(e.to))
+        .slice(0, 200)
+    : [];
+
+  return { nodes: cleanNodes, edges: cleanEdges };
 }
 
 function readSavedMindMap(clientId: string, clientName: string): MindMapData {
@@ -900,6 +919,7 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
     startPanY?: number;
     moved: boolean;
   } | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   // Refs that always hold the latest value — safe to use in window event handlers
   const panRef = useRef(pan);
   const scaleRef = useRef(scale);
@@ -947,6 +967,15 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
     return () => document.removeEventListener('paste', handlePaste);
   }, [editingId]);
 
+  // Keyboard: Esc = clear selection, Delete = remove selected nodes
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setSelectedIds(new Set()); setEditingId(null); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   // Wheel zoom (needs passive:false to call preventDefault)
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -958,8 +987,11 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
         setScale(prevScale => {
           const worldX = (e.clientX - rect.left - prevPan.x) / prevScale;
           const worldY = (e.clientY - rect.top - prevPan.y) / prevScale;
-          const factor = e.deltaY > 0 ? 0.9 : 1.1;
-          const newScale = Math.min(3, Math.max(0.15, prevScale * factor));
+          // Gentle zoom: ~5% per wheel notch; trackpad produces small deltaY values
+          const delta = Math.abs(e.deltaY);
+          const step = Math.min(delta / 400, 0.12); // cap at 12% even for fast swipes
+          const factor = e.deltaY > 0 ? 1 - step : 1 + step;
+          const newScale = Math.min(4, Math.max(0.1, prevScale * factor));
           const newPan = {
             x: e.clientX - rect.left - worldX * newScale,
             y: e.clientY - rect.top - worldY * newScale,
@@ -1038,8 +1070,48 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
         if (n.parentId && toRemove.has(n.parentId) && !toRemove.has(n.id)) { toRemove.add(n.id); changed = true; }
       }
     }
-    setMap({ nodes: map.nodes.filter(n => !toRemove.has(n.id)) });
+    setMap({
+      nodes: map.nodes.filter(n => !toRemove.has(n.id)),
+      edges: map.edges.filter(e => !toRemove.has(e.from) && !toRemove.has(e.to)),
+    });
     setEditingId(null);
+    setSelectedIds(prev => { const s = new Set(prev); toRemove.forEach(i => s.delete(i)); return s; });
+    setSaved(false);
+  }
+
+  function duplicateNode(id: string) {
+    const src = map.nodes.find(n => n.id === id);
+    if (!src) return;
+    const newNode: MindMapNode = { ...src, id: `mind-${Date.now()}`, x: src.x + 40, y: src.y + 40, parentId: src.parentId };
+    const nextMap = { nodes: [...map.nodes, newNode], edges: map.edges };
+    setMap(nextMap);
+    setEditingId(newNode.id);
+    setSaved(false);
+  }
+
+  function duplicateSelected() {
+    if (selectedIds.size === 0) return;
+    const idMap = new Map<string, string>();
+    const newNodes: MindMapNode[] = [];
+    for (const id of selectedIds) {
+      const src = map.nodes.find(n => n.id === id);
+      if (!src) continue;
+      const newId = `mind-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      idMap.set(id, newId);
+      newNodes.push({ ...src, id: newId, x: src.x + 50, y: src.y + 50 });
+    }
+    // Preserve connections between duplicated nodes
+    const newEdges: MindMapEdge[] = newNodes
+      .filter(n => n.parentId && idMap.has(n.parentId))
+      .map(n => ({ id: `e-${Date.now()}-${Math.random().toString(36).slice(2)}`, from: idMap.get(n.parentId!)!, to: n.id }));
+    const nextMap = { nodes: [...map.nodes, ...newNodes], edges: [...map.edges, ...newEdges] };
+    setMap(nextMap);
+    setSelectedIds(new Set(newNodes.map(n => n.id)));
+    setSaved(false);
+  }
+
+  function removeEdge(edgeId: string) {
+    setMap(prev => ({ ...prev, edges: prev.edges.filter(e => e.id !== edgeId) }));
     setSaved(false);
   }
 
@@ -1102,14 +1174,27 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
       );
       if (!target) return;
 
-      // cycle check
+      // Prevent duplicate connection
+      const alreadyConnected =
+        target.parentId === fromId ||
+        current.edges.some(e => e.from === fromId && e.to === target.id);
+      if (alreadyConnected) return;
+
+      // Prevent cycles: walk up from fromId
       const ancestors = new Set<string>();
       let cur: string | null = fromId;
       while (cur) { ancestors.add(cur); cur = current.nodes.find(n => n.id === cur)?.parentId ?? null; }
       if (ancestors.has(target.id)) return;
 
-      const newNodes = current.nodes.map(n => n.id === target.id ? { ...n, parentId: fromId } : n);
-      const newMap = { nodes: newNodes };
+      let newMap: MindMapData;
+      if (!target.parentId) {
+        // First connection → set as parent (tree edge)
+        newMap = { nodes: current.nodes.map(n => n.id === target.id ? { ...n, parentId: fromId } : n), edges: current.edges };
+      } else {
+        // Already has a parent → add as extra edge
+        const newEdge: MindMapEdge = { id: `e-${Date.now()}`, from: fromId, to: target.id };
+        newMap = { nodes: current.nodes, edges: [...current.edges, newEdge] };
+      }
       setMap(newMap);
       persist(newMap);
     }
@@ -1199,7 +1284,18 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
     dragRef.current = null;
     if (!drag || drag.type !== 'node') return;
     if (!drag.moved) {
-      setEditingId(prev => prev === node.id ? null : node.id);
+      if (e.ctrlKey || e.metaKey) {
+        // Multi-select: toggle node in selection
+        setSelectedIds(prev => {
+          const s = new Set(prev);
+          s.has(node.id) ? s.delete(node.id) : s.add(node.id);
+          return s;
+        });
+        setEditingId(null);
+      } else {
+        setSelectedIds(new Set()); // clear selection on normal click
+        setEditingId(prev => prev === node.id ? null : node.id);
+      }
     } else {
       persist();
     }
@@ -1246,6 +1342,23 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
           <button onClick={() => zoomBy(1.25)} className="flex h-8 w-8 items-center justify-center rounded-lg border border-border text-muted-foreground hover:bg-muted hover:text-foreground transition-colors" title="Aumentar zoom">
             <ZoomIn className="h-3.5 w-3.5" />
           </button>
+          {/* Multi-select copy button */}
+          {selectedIds.size > 0 && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-muted-foreground font-semibold">{selectedIds.size} selecionado{selectedIds.size > 1 ? 's' : ''}</span>
+              <button
+                onClick={duplicateSelected}
+                className="flex h-8 items-center gap-1.5 rounded-lg border border-primary/40 bg-primary/10 px-2.5 text-xs font-semibold text-primary hover:bg-primary/20 transition-colors"
+                title="Duplicar selecionados"
+              >
+                <Copy className="h-3.5 w-3.5" />
+                Copiar
+              </button>
+              <button onClick={() => setSelectedIds(new Set())} className="flex h-8 w-8 items-center justify-center rounded-lg border border-border text-muted-foreground hover:bg-muted transition-colors" title="Limpar seleção (Esc)">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
           <div className="mx-1 h-5 w-px bg-border" />
           {/* History button */}
           <div className="relative">
@@ -1318,6 +1431,33 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
               );
             })}
 
+            {/* Extra edges (multiple connections from/to same node) */}
+            {map.edges.map(edge => {
+              const from = map.nodes.find(n => n.id === edge.from);
+              const to = map.nodes.find(n => n.id === edge.to);
+              if (!from || !to) return null;
+              const O = 500;
+              const fromW = from.parentId === null ? 192 : 176;
+              const toW = to.parentId === null ? 192 : 176;
+              const x1 = from.x + fromW / 2 + O;
+              const y1 = from.y + 34 + O;
+              const x2 = to.x + toW / 2 + O;
+              const y2 = to.y + 34 + O;
+              const mx = (x1 + x2) / 2;
+              return (
+                <path
+                  key={edge.id}
+                  d={`M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`}
+                  fill="none"
+                  stroke={from.color}
+                  strokeOpacity="0.7"
+                  strokeWidth="2"
+                  strokeDasharray="6 3"
+                  markerEnd={`url(#arr-${from.id})`}
+                />
+              );
+            })}
+
             {/* Live preview line while dragging to connect */}
             {connecting && (() => {
               const fromNode = map.nodes.find(n => n.id === connecting.fromId);
@@ -1345,8 +1485,9 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
 
           {map.nodes.map(node => {
             const isEditing = node.id === editingId;
+            const isSelected = selectedIds.has(node.id);
             const isConnectTarget = connecting && connecting.fromId !== node.id;
-            const childCount = map.nodes.filter(n => n.parentId === node.id).length;
+            const childCount = map.nodes.filter(n => n.parentId === node.id).length + map.edges.filter(e => e.from === node.id).length;
             const nodeW = node.parentId === null ? 'w-48' : 'w-44';
             return (
               <div key={node.id} className="absolute group/node" style={{ left: node.x, top: node.y }}>
@@ -1356,7 +1497,14 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
                   onPointerMove={e => handleNodePointerMove(e, node)}
                   onPointerUp={e => handleNodePointerUp(e, node)}
                   className={cn('rounded-lg border bg-card px-3 py-2 text-left shadow-sm cursor-grab active:cursor-grabbing select-none transition-shadow hover:shadow-md', nodeW, isConnectTarget && 'ring-2 ring-primary/50')}
-                  style={{ borderColor: isEditing ? node.color : undefined, boxShadow: isEditing ? `0 0 0 2px ${node.color}` : undefined }}
+                  style={{
+                    borderColor: isEditing ? node.color : isSelected ? node.color : undefined,
+                    boxShadow: isEditing
+                      ? `0 0 0 2px ${node.color}`
+                      : isSelected
+                        ? `0 0 0 2px ${node.color}, 0 0 12px ${node.color}60`
+                        : undefined,
+                  }}
                 >
                   <span className="mb-1 flex items-center gap-2">
                     <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: node.color }} />
@@ -1421,6 +1569,9 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
                 <button onClick={() => addChildOf(editingNode.id)} className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-border py-1.5 text-xs font-semibold hover:bg-muted transition-colors">
                   <Plus className="h-3 w-3" /> Filho
                 </button>
+                <button onClick={() => duplicateNode(editingNode.id)} className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-border py-1.5 text-xs font-semibold hover:bg-muted transition-colors" title="Duplicar nó">
+                  <Copy className="h-3 w-3" /> Duplicar
+                </button>
                 {editingNode.parentId && (
                   <button onClick={() => { updateNode(editingNode.id, { parentId: null }); setSaved(false); }} className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-border py-1.5 text-xs font-semibold text-muted-foreground hover:bg-muted transition-colors">
                     <Unlink className="h-3 w-3" /> Desconectar
@@ -1476,7 +1627,7 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
 
         <div className="pointer-events-none absolute bottom-3 left-3 flex items-center gap-1.5 rounded-lg border border-border bg-card/80 px-3 py-1.5 text-[10px] font-semibold text-muted-foreground backdrop-blur-sm">
           <MousePointer2 className="h-3 w-3" />
-          Clique no fundo = novo tópico · Scroll = zoom · Arraste ponto verde = conectar
+          Clique = editar · Ctrl+clique = selecionar · Scroll = zoom · Arraste ponto verde = conectar
         </div>
       </div>
 
