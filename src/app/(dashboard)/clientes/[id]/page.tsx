@@ -1015,53 +1015,19 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
     });
   }
 
-  // Connect handle: drag from dot to another node to create parent-child link
+  // Connect handle: capture on canvas so canvas move/up handlers control everything
   function handleConnectPointerDown(e: PointerEvent<HTMLDivElement>, node: MindMapNode) {
     e.stopPropagation();
-    e.currentTarget.setPointerCapture(e.pointerId);
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const toX = (e.clientX - rect.left - pan.x) / scale;
-    const toY = (e.clientY - rect.top - pan.y) / scale;
+    const canvas = canvasRef.current;
+    const rect = canvas?.getBoundingClientRect();
+    if (!canvas || !rect) return;
+    canvas.setPointerCapture(e.pointerId);
     dragRef.current = { type: 'connect', id: node.id, startClientX: e.clientX, startClientY: e.clientY, moved: false };
-    setConnecting({ fromId: node.id, toX, toY });
-  }
-
-  function handleConnectPointerMove(e: PointerEvent<HTMLDivElement>) {
-    if (dragRef.current?.type !== 'connect') return;
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    setConnecting(prev => prev ? {
-      ...prev,
+    setConnecting({
+      fromId: node.id,
       toX: (e.clientX - rect.left - pan.x) / scale,
       toY: (e.clientY - rect.top - pan.y) / scale,
-    } : null);
-  }
-
-  function handleConnectPointerUp(e: PointerEvent<HTMLDivElement>) {
-    const drag = dragRef.current;
-    dragRef.current = null;
-    setConnecting(null);
-    if (!drag || drag.type !== 'connect' || !drag.id) return;
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const toX = (e.clientX - rect.left - pan.x) / scale;
-    const toY = (e.clientY - rect.top - pan.y) / scale;
-    const NODE_W = 192; const NODE_H = 100;
-    const target = map.nodes.find(n =>
-      n.id !== drag.id &&
-      toX >= n.x && toX <= n.x + NODE_W &&
-      toY >= n.y && toY <= n.y + NODE_H
-    );
-    if (!target) return;
-    // Prevent circular: target must not be an ancestor of fromId
-    const ancestors = new Set<string>();
-    let cur: string | null = drag.id;
-    while (cur) { ancestors.add(cur); cur = map.nodes.find(n => n.id === cur)?.parentId ?? null; }
-    if (ancestors.has(target.id)) return;
-    const newNodes = map.nodes.map(n => n.id === target.id ? { ...n, parentId: drag.id! } : n);
-    setMap({ nodes: newNodes });
-    persist({ nodes: newNodes });
+    });
   }
 
   // Canvas background: pan on drag, add node on click
@@ -1075,22 +1041,52 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
 
   function handleCanvasPointerMove(e: PointerEvent<HTMLDivElement>) {
     const drag = dragRef.current;
-    if (!drag || drag.type !== 'pan') return;
-    const dx = e.clientX - drag.startClientX;
-    const dy = e.clientY - drag.startClientY;
-    if (Math.abs(dx) > 4 || Math.abs(dy) > 4) drag.moved = true;
-    setPan({ x: drag.startPanX! + dx, y: drag.startPanY! + dy });
+    if (!drag) return;
+    const rect = canvasRef.current?.getBoundingClientRect();
+
+    if (drag.type === 'pan') {
+      const dx = e.clientX - drag.startClientX;
+      const dy = e.clientY - drag.startClientY;
+      if (Math.abs(dx) > 4 || Math.abs(dy) > 4) drag.moved = true;
+      setPan({ x: drag.startPanX! + dx, y: drag.startPanY! + dy });
+    } else if (drag.type === 'connect' && rect) {
+      setConnecting(prev => prev ? {
+        ...prev,
+        toX: (e.clientX - rect.left - pan.x) / scale,
+        toY: (e.clientY - rect.top - pan.y) / scale,
+      } : null);
+    }
   }
 
   function handleCanvasPointerUp(e: PointerEvent<HTMLDivElement>) {
     const drag = dragRef.current;
     dragRef.current = null;
     if (canvasRef.current) canvasRef.current.style.cursor = '';
-    if (!drag || drag.type !== 'pan') return;
-    if (!drag.moved) {
-      const rect = canvasRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      addNodeAt((e.clientX - rect.left - pan.x) / scale - 88, (e.clientY - rect.top - pan.y) / scale - 34, null);
+    const rect = canvasRef.current?.getBoundingClientRect();
+
+    if (drag?.type === 'pan') {
+      if (!drag.moved && rect) {
+        addNodeAt((e.clientX - rect.left - pan.x) / scale - 88, (e.clientY - rect.top - pan.y) / scale - 34, null);
+      }
+    } else if (drag?.type === 'connect' && rect && drag.id) {
+      setConnecting(null);
+      const toX = (e.clientX - rect.left - pan.x) / scale;
+      const toY = (e.clientY - rect.top - pan.y) / scale;
+      const target = map.nodes.find(n =>
+        n.id !== drag.id &&
+        toX >= n.x - 10 && toX <= n.x + 220 &&
+        toY >= n.y - 10 && toY <= n.y + 130
+      );
+      if (target) {
+        const ancestors = new Set<string>();
+        let cur: string | null = drag.id;
+        while (cur) { ancestors.add(cur); cur = map.nodes.find(n => n.id === cur)?.parentId ?? null; }
+        if (!ancestors.has(target.id)) {
+          const newNodes = map.nodes.map(n => n.id === target.id ? { ...n, parentId: drag.id! } : n);
+          setMap({ nodes: newNodes });
+          persist({ nodes: newNodes });
+        }
+      }
     }
   }
 
@@ -1180,7 +1176,7 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
         onPointerDown={handleCanvasPointerDown}
         onPointerMove={handleCanvasPointerMove}
         onPointerUp={handleCanvasPointerUp}
-        onPointerLeave={() => { dragRef.current = null; if (canvasRef.current) canvasRef.current.style.cursor = ''; }}
+        onPointerLeave={() => { if (dragRef.current?.type === 'connect') setConnecting(null); dragRef.current = null; if (canvasRef.current) canvasRef.current.style.cursor = ''; }}
       >
         {/* Transformed layer */}
         <div style={{ position: 'absolute', transformOrigin: '0 0', transform: `translate(${pan.x}px,${pan.y}px) scale(${scale})`, willChange: 'transform' }}>
@@ -1235,8 +1231,6 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
                   style={{ boxShadow: `0 0 0 3px ${node.color}40` }}
                   title="Arraste para conectar"
                   onPointerDown={e => handleConnectPointerDown(e, node)}
-                  onPointerMove={handleConnectPointerMove}
-                  onPointerUp={handleConnectPointerUp}
                 >
                   <Plus className="h-2.5 w-2.5 text-primary group-hover/node:[.bg-primary_&]:text-primary-foreground" />
                 </div>
