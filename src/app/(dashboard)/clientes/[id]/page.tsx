@@ -18,7 +18,7 @@ import {
   UserRound, Phone, Mail, Briefcase, SlidersHorizontal, Check, Hash, BarChart2, Layers,
   Power, PowerOff, Search, BookMarked, ExternalLink, RefreshCw, ChevronRight,
   PiggyBank, Wallet, Info, Lightbulb, UserPlus, Brain, Save, MousePointer2,
-  Maximize2, Minimize2, ZoomIn, ZoomOut, ImageIcon,
+  Maximize2, Minimize2, ZoomIn, ZoomOut, ImageIcon, Unlink,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -855,11 +855,12 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
   const [pan, setPan] = useState({ x: 60, y: 60 });
   const [scale, setScale] = useState(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [connecting, setConnecting] = useState<{ fromId: string; toX: number; toY: number } | null>(null);
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const dragRef = useRef<{
-    type: 'node' | 'pan';
+    type: 'node' | 'pan' | 'connect';
     id?: string;
     startClientX: number;
     startClientY: number;
@@ -1014,6 +1015,55 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
     });
   }
 
+  // Connect handle: drag from dot to another node to create parent-child link
+  function handleConnectPointerDown(e: PointerEvent<HTMLDivElement>, node: MindMapNode) {
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const toX = (e.clientX - rect.left - pan.x) / scale;
+    const toY = (e.clientY - rect.top - pan.y) / scale;
+    dragRef.current = { type: 'connect', id: node.id, startClientX: e.clientX, startClientY: e.clientY, moved: false };
+    setConnecting({ fromId: node.id, toX, toY });
+  }
+
+  function handleConnectPointerMove(e: PointerEvent<HTMLDivElement>) {
+    if (dragRef.current?.type !== 'connect') return;
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setConnecting(prev => prev ? {
+      ...prev,
+      toX: (e.clientX - rect.left - pan.x) / scale,
+      toY: (e.clientY - rect.top - pan.y) / scale,
+    } : null);
+  }
+
+  function handleConnectPointerUp(e: PointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current;
+    dragRef.current = null;
+    setConnecting(null);
+    if (!drag || drag.type !== 'connect' || !drag.id) return;
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const toX = (e.clientX - rect.left - pan.x) / scale;
+    const toY = (e.clientY - rect.top - pan.y) / scale;
+    const NODE_W = 192; const NODE_H = 100;
+    const target = map.nodes.find(n =>
+      n.id !== drag.id &&
+      toX >= n.x && toX <= n.x + NODE_W &&
+      toY >= n.y && toY <= n.y + NODE_H
+    );
+    if (!target) return;
+    // Prevent circular: target must not be an ancestor of fromId
+    const ancestors = new Set<string>();
+    let cur: string | null = drag.id;
+    while (cur) { ancestors.add(cur); cur = map.nodes.find(n => n.id === cur)?.parentId ?? null; }
+    if (ancestors.has(target.id)) return;
+    const newNodes = map.nodes.map(n => n.id === target.id ? { ...n, parentId: drag.id! } : n);
+    setMap({ nodes: newNodes });
+    persist({ nodes: newNodes });
+  }
+
   // Canvas background: pan on drag, add node on click
   function handleCanvasPointerDown(e: PointerEvent<HTMLDivElement>) {
     if (e.target !== e.currentTarget) return;
@@ -1134,40 +1184,63 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
       >
         {/* Transformed layer */}
         <div style={{ position: 'absolute', transformOrigin: '0 0', transform: `translate(${pan.x}px,${pan.y}px) scale(${scale})`, willChange: 'transform' }}>
-          <svg style={{ position: 'absolute', inset: '-9999px', overflow: 'visible', pointerEvents: 'none' }}>
+          <svg style={{ position: 'absolute', top: 0, left: 0, width: 0, height: 0, overflow: 'visible', pointerEvents: 'none' }}>
             {map.nodes.map(node => {
               const parent = node.parentId ? map.nodes.find(n => n.id === node.parentId) : null;
               if (!parent) return null;
-              const x1 = parent.x + 88; const y1 = parent.y + 36;
-              const x2 = node.x + 88; const y2 = node.y + 36;
+              const nodeW = node.parentId === null ? 192 : 176;
+              const parentW = parent.parentId === null ? 192 : 176;
+              const x1 = parent.x + parentW / 2; const y1 = parent.y + 36;
+              const x2 = node.x + nodeW / 2; const y2 = node.y + 36;
               const cx = (x1 + x2) / 2;
               return (
                 <path key={`${parent.id}-${node.id}`} d={`M ${x1} ${y1} C ${cx} ${y1}, ${cx} ${y2}, ${x2} ${y2}`} fill="none" stroke={node.color} strokeOpacity="0.5" strokeWidth="2" />
               );
             })}
+            {connecting && (() => {
+              const fromNode = map.nodes.find(n => n.id === connecting.fromId);
+              if (!fromNode) return null;
+              const fw = fromNode.parentId === null ? 192 : 176;
+              const x1 = fromNode.x + fw; const y1 = fromNode.y + 36;
+              return <path d={`M ${x1} ${y1} L ${connecting.toX} ${connecting.toY}`} fill="none" stroke="#55F52F" strokeWidth="2" strokeDasharray="6 3" strokeOpacity="0.8" />;
+            })()}
           </svg>
 
           {map.nodes.map(node => {
             const isEditing = node.id === editingId;
+            const isConnectTarget = connecting && connecting.fromId !== node.id;
             const childCount = map.nodes.filter(n => n.parentId === node.id).length;
+            const nodeW = node.parentId === null ? 'w-48' : 'w-44';
             return (
-              <button
-                key={node.id}
-                type="button"
-                onPointerDown={e => handleNodePointerDown(e, node)}
-                onPointerMove={e => handleNodePointerMove(e, node)}
-                onPointerUp={e => handleNodePointerUp(e, node)}
-                className={cn('absolute w-44 rounded-lg border bg-card px-3 py-2 text-left shadow-sm cursor-grab active:cursor-grabbing select-none transition-shadow hover:shadow-md', node.parentId === null && 'w-48')}
-                style={{ left: node.x, top: node.y, borderColor: isEditing ? node.color : undefined, boxShadow: isEditing ? `0 0 0 2px ${node.color}` : undefined }}
-              >
-                <span className="mb-1 flex items-center gap-2">
-                  <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: node.color }} />
-                  <span className="truncate text-sm font-bold">{node.title}</span>
-                </span>
-                {node.image && <img src={node.image} alt="" className="mb-1.5 w-full rounded-md object-cover" style={{ maxHeight: 80 }} />}
-                <span className="line-clamp-2 block text-[11px] leading-snug text-muted-foreground">{node.note || 'Clique para editar'}</span>
-                {childCount > 0 && <span className="mt-1.5 inline-flex rounded-full border border-border px-2 py-0.5 text-[10px] font-bold text-muted-foreground">{childCount} ligados</span>}
-              </button>
+              <div key={node.id} className="absolute group/node" style={{ left: node.x, top: node.y }}>
+                <button
+                  type="button"
+                  onPointerDown={e => handleNodePointerDown(e, node)}
+                  onPointerMove={e => handleNodePointerMove(e, node)}
+                  onPointerUp={e => handleNodePointerUp(e, node)}
+                  className={cn('rounded-lg border bg-card px-3 py-2 text-left shadow-sm cursor-grab active:cursor-grabbing select-none transition-shadow hover:shadow-md', nodeW, isConnectTarget && 'ring-2 ring-primary/50')}
+                  style={{ borderColor: isEditing ? node.color : undefined, boxShadow: isEditing ? `0 0 0 2px ${node.color}` : undefined }}
+                >
+                  <span className="mb-1 flex items-center gap-2">
+                    <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: node.color }} />
+                    <span className="truncate text-sm font-bold">{node.title}</span>
+                  </span>
+                  {node.image && <img src={node.image} alt="" className="mb-1.5 w-full rounded-md object-cover" style={{ maxHeight: 80 }} />}
+                  <span className="line-clamp-2 block text-[11px] leading-snug text-muted-foreground">{node.note || 'Clique para editar'}</span>
+                  {childCount > 0 && <span className="mt-1.5 inline-flex rounded-full border border-border px-2 py-0.5 text-[10px] font-bold text-muted-foreground">{childCount} ligados</span>}
+                </button>
+                {/* Connect handle — drag to link to another node */}
+                <div
+                  className="absolute top-1/2 -translate-y-1/2 -right-3 z-10 h-5 w-5 rounded-full border-2 border-primary bg-card flex items-center justify-center cursor-crosshair opacity-0 group-hover/node:opacity-100 hover:bg-primary transition-all"
+                  style={{ boxShadow: `0 0 0 3px ${node.color}40` }}
+                  title="Arraste para conectar"
+                  onPointerDown={e => handleConnectPointerDown(e, node)}
+                  onPointerMove={handleConnectPointerMove}
+                  onPointerUp={handleConnectPointerUp}
+                >
+                  <Plus className="h-2.5 w-2.5 text-primary group-hover/node:[.bg-primary_&]:text-primary-foreground" />
+                </div>
+              </div>
             );
           })}
         </div>
@@ -1213,8 +1286,13 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
                 <button onClick={() => addChildOf(editingNode.id)} className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-border py-1.5 text-xs font-semibold hover:bg-muted transition-colors">
                   <Plus className="h-3 w-3" /> Filho
                 </button>
-                <button onClick={() => removeNode(editingNode.id)} disabled={editingNode.id === rootId} className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-red-400/30 py-1.5 text-xs font-semibold text-red-300 hover:bg-red-500/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-                  <Trash2 className="h-3 w-3" /> Remover
+                {editingNode.parentId && (
+                  <button onClick={() => { updateNode(editingNode.id, { parentId: null }); setSaved(false); }} className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-border py-1.5 text-xs font-semibold text-muted-foreground hover:bg-muted transition-colors">
+                    <Unlink className="h-3 w-3" /> Desconectar
+                  </button>
+                )}
+                <button onClick={() => removeNode(editingNode.id)} disabled={editingNode.id === rootId} className="flex items-center justify-center gap-1 rounded-lg border border-red-400/30 px-2.5 py-1.5 text-xs font-semibold text-red-300 hover:bg-red-500/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                  <Trash2 className="h-3 w-3" />
                 </button>
               </div>
             </div>
@@ -1223,7 +1301,7 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
 
         <div className="pointer-events-none absolute bottom-3 left-3 flex items-center gap-1.5 rounded-lg border border-border bg-card/80 px-3 py-1.5 text-[10px] font-semibold text-muted-foreground backdrop-blur-sm">
           <MousePointer2 className="h-3 w-3" />
-          Clique no fundo para novo tópico · Scroll = zoom · Arraste para mover
+          Clique no fundo = novo tópico · Scroll = zoom · Arraste ponto verde = conectar
         </div>
       </div>
 
