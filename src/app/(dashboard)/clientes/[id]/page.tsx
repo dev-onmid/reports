@@ -18,7 +18,7 @@ import {
   UserRound, Phone, Mail, Briefcase, SlidersHorizontal, Check, Hash, BarChart2, Layers,
   Power, PowerOff, Search, BookMarked, ExternalLink, RefreshCw, ChevronRight,
   PiggyBank, Wallet, Info, Lightbulb, UserPlus, Brain, Save, MousePointer2,
-  Maximize2, Minimize2, ZoomIn, ZoomOut, ImageIcon, Unlink,
+  Maximize2, Minimize2, ZoomIn, ZoomOut, ImageIcon, Unlink, History,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -356,8 +356,38 @@ type MindMapData = {
   nodes: MindMapNode[];
 };
 
+type MindMapSnapshot = {
+  ts: number;
+  label: string;
+  map: MindMapData;
+};
+
 const MIND_MAP_COLORS = ['#55F52F', '#38BDF8', '#A78BFA', '#F59E0B', '#FB7185', '#22C55E', '#F472B6', '#94A3B8'];
 const MIND_MAP_STORAGE_KEY = (clientId: string) => `clientMindMap_${clientId}`;
+const MIND_MAP_HISTORY_KEY = (clientId: string) => `clientMindMapHistory_${clientId}`;
+const MAX_SNAPSHOTS = 10;
+
+function loadMindMapHistory(clientId: string): MindMapSnapshot[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(MIND_MAP_HISTORY_KEY(clientId));
+    return raw ? (JSON.parse(raw) as MindMapSnapshot[]) : [];
+  } catch { return []; }
+}
+
+function pushMindMapSnapshot(clientId: string, map: MindMapData): MindMapSnapshot[] {
+  const history = loadMindMapHistory(clientId);
+  const now = Date.now();
+  const label = new Date(now).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+  if (history[0] && now - history[0].ts < 30_000) {
+    history[0] = { ts: now, label, map };
+  } else {
+    history.unshift({ ts: now, label, map });
+  }
+  const updated = history.slice(0, MAX_SNAPSHOTS);
+  window.localStorage.setItem(MIND_MAP_HISTORY_KEY(clientId), JSON.stringify(updated));
+  return updated;
+}
 
 function defaultMindMap(clientName: string): MindMapData {
   const root = 'mind-root';
@@ -870,6 +900,12 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
     startPanY?: number;
     moved: boolean;
   } | null>(null);
+  // Refs that always hold the latest value — safe to use in window event handlers
+  const panRef = useRef(pan);
+  const scaleRef = useRef(scale);
+  const mapRef = useRef(map);
+  const [showHistory, setShowHistory] = useState(false);
+  const [history, setHistory] = useState<MindMapSnapshot[]>(() => loadMindMapHistory(clientId));
 
   useEffect(() => {
     let cancelled = false;
@@ -939,6 +975,11 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
     return () => canvas.removeEventListener('wheel', onWheel);
   }, []);
 
+  // Keep refs in sync so window event handlers always see current values
+  useEffect(() => { panRef.current = pan; }, [pan]);
+  useEffect(() => { scaleRef.current = scale; }, [scale]);
+  useEffect(() => { mapRef.current = map; }, [map]);
+
   const editingNode = editingId ? (map.nodes.find(n => n.id === editingId) ?? null) : null;
   const rootId = map.nodes.find(n => n.parentId === null)?.id ?? map.nodes[0]?.id;
 
@@ -950,6 +991,8 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(clean),
     }).catch(() => {});
+    const updated = pushMindMapSnapshot(clientId, clean);
+    setHistory(updated);
     setSaved(true);
     setTimeout(() => setSaved(false), 1800);
   }
@@ -1015,19 +1058,64 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
     });
   }
 
-  // Connect handle: capture on canvas so canvas move/up handlers control everything
+  // Connect handle: use native window listeners to avoid React pointer capture routing issues
   function handleConnectPointerDown(e: PointerEvent<HTMLDivElement>, node: MindMapNode) {
     e.stopPropagation();
+    e.preventDefault();
     const canvas = canvasRef.current;
-    const rect = canvas?.getBoundingClientRect();
-    if (!canvas || !rect) return;
-    canvas.setPointerCapture(e.pointerId);
-    dragRef.current = { type: 'connect', id: node.id, startClientX: e.clientX, startClientY: e.clientY, moved: false };
+    if (!canvas) return;
+
+    const fromId = node.id;
+    dragRef.current = { type: 'connect', id: fromId, startClientX: e.clientX, startClientY: e.clientY, moved: false };
+    const rect0 = canvas.getBoundingClientRect();
     setConnecting({
-      fromId: node.id,
-      toX: (e.clientX - rect.left - pan.x) / scale,
-      toY: (e.clientY - rect.top - pan.y) / scale,
+      fromId,
+      toX: (e.clientX - rect0.left - panRef.current.x) / scaleRef.current,
+      toY: (e.clientY - rect0.top - panRef.current.y) / scaleRef.current,
     });
+
+    function onMove(ev: globalThis.PointerEvent) {
+      if (dragRef.current?.type !== 'connect') return;
+      const r = canvas.getBoundingClientRect();
+      setConnecting(prev => prev ? {
+        ...prev,
+        toX: (ev.clientX - r.left - panRef.current.x) / scaleRef.current,
+        toY: (ev.clientY - r.top - panRef.current.y) / scaleRef.current,
+      } : null);
+    }
+
+    function onUp(ev: globalThis.PointerEvent) {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      dragRef.current = null;
+      setConnecting(null);
+
+      const r = canvas.getBoundingClientRect();
+      const toX = (ev.clientX - r.left - panRef.current.x) / scaleRef.current;
+      const toY = (ev.clientY - r.top - panRef.current.y) / scaleRef.current;
+      const current = mapRef.current;
+
+      const target = current.nodes.find(n =>
+        n.id !== fromId &&
+        toX >= n.x - 10 && toX <= n.x + 220 &&
+        toY >= n.y - 10 && toY <= n.y + 130,
+      );
+      if (!target) return;
+
+      // cycle check
+      const ancestors = new Set<string>();
+      let cur: string | null = fromId;
+      while (cur) { ancestors.add(cur); cur = current.nodes.find(n => n.id === cur)?.parentId ?? null; }
+      if (ancestors.has(target.id)) return;
+
+      const newNodes = current.nodes.map(n => n.id === target.id ? { ...n, parentId: fromId } : n);
+      const newMap = { nodes: newNodes };
+      setMap(newMap);
+      persist(newMap);
+    }
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
   }
 
   // Canvas background: pan on drag, add node on click
@@ -1159,6 +1247,18 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
             <ZoomIn className="h-3.5 w-3.5" />
           </button>
           <div className="mx-1 h-5 w-px bg-border" />
+          {/* History button */}
+          <div className="relative">
+            <button
+              onClick={() => setShowHistory(v => !v)}
+              className={cn('flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold transition-colors', showHistory ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:bg-muted hover:text-foreground')}
+              title="Histórico de sessões"
+            >
+              <History className="h-3.5 w-3.5" />
+              Histórico
+              {history.length > 0 && <span className="ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary/20 px-1 text-[9px] font-bold text-primary">{history.length}</span>}
+            </button>
+          </div>
           <Button onClick={() => persist()} className="h-8 gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 px-3 text-xs font-bold uppercase tracking-wider">
             {saved ? <Check className="h-3.5 w-3.5" /> : <Save className="h-3.5 w-3.5" />}
             {saved ? 'Salvo' : 'Salvar'}
@@ -1181,24 +1281,65 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
         {/* Transformed layer */}
         <div style={{ position: 'absolute', transformOrigin: '0 0', transform: `translate(${pan.x}px,${pan.y}px) scale(${scale})`, willChange: 'transform' }}>
           <svg style={{ position: 'absolute', top: 0, left: 0, width: 0, height: 0, overflow: 'visible', pointerEvents: 'none' }}>
+            <defs>
+              {/* Arrow marker for each node color */}
+              {map.nodes.map(node => (
+                <marker key={`arr-${node.id}`} id={`arr-${node.id}`} markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                  <path d="M0,0 L0,6 L8,3 z" fill={node.color} opacity="0.8" />
+                </marker>
+              ))}
+              <marker id="arr-preview" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <path d="M0,0 L0,6 L8,3 z" fill="#55F52F" />
+              </marker>
+            </defs>
+
+            {/* Connection lines */}
             {map.nodes.map(node => {
               const parent = node.parentId ? map.nodes.find(n => n.id === node.parentId) : null;
               if (!parent) return null;
-              const nodeW = node.parentId === null ? 192 : 176;
               const parentW = parent.parentId === null ? 192 : 176;
-              const x1 = parent.x + parentW / 2; const y1 = parent.y + 36;
-              const x2 = node.x + nodeW / 2; const y2 = node.y + 36;
-              const cx = (x1 + x2) / 2;
+              const nodeW = 176;
+              // From right edge of parent to left edge of node (horizontal flow)
+              const x1 = parent.x + parentW;
+              const y1 = parent.y + 32;
+              const x2 = node.x;
+              const y2 = node.y + 32;
+              const dx = Math.abs(x2 - x1);
+              const cx1 = x1 + Math.max(60, dx * 0.4);
+              const cx2 = x2 - Math.max(60, dx * 0.4);
               return (
-                <path key={`${parent.id}-${node.id}`} d={`M ${x1} ${y1} C ${cx} ${y1}, ${cx} ${y2}, ${x2} ${y2}`} fill="none" stroke={node.color} strokeOpacity="0.5" strokeWidth="2" />
+                <path
+                  key={`${parent.id}-${node.id}`}
+                  d={`M ${x1} ${y1} C ${cx1} ${y1}, ${cx2} ${y2}, ${x2} ${y2}`}
+                  fill="none"
+                  stroke={node.color}
+                  strokeOpacity="0.75"
+                  strokeWidth="2"
+                  markerEnd={`url(#arr-${node.id})`}
+                />
               );
             })}
+
+            {/* Live preview line while connecting */}
             {connecting && (() => {
               const fromNode = map.nodes.find(n => n.id === connecting.fromId);
               if (!fromNode) return null;
               const fw = fromNode.parentId === null ? 192 : 176;
-              const x1 = fromNode.x + fw; const y1 = fromNode.y + 36;
-              return <path d={`M ${x1} ${y1} L ${connecting.toX} ${connecting.toY}`} fill="none" stroke="#55F52F" strokeWidth="2" strokeDasharray="6 3" strokeOpacity="0.8" />;
+              const x1 = fromNode.x + fw;
+              const y1 = fromNode.y + 32;
+              const dx = Math.abs(connecting.toX - x1);
+              const cx = x1 + Math.max(40, dx * 0.4);
+              return (
+                <path
+                  d={`M ${x1} ${y1} C ${cx} ${y1}, ${connecting.toX - 40} ${connecting.toY}, ${connecting.toX} ${connecting.toY}`}
+                  fill="none"
+                  stroke="#55F52F"
+                  strokeWidth="2"
+                  strokeDasharray="8 4"
+                  strokeOpacity="0.9"
+                  markerEnd="url(#arr-preview)"
+                />
+              );
             })()}
           </svg>
 
@@ -1289,6 +1430,46 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
                   <Trash2 className="h-3 w-3" />
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* History panel */}
+        {showHistory && (
+          <div className="absolute right-3 top-3 z-30 w-64 rounded-xl border border-border bg-card shadow-2xl" onPointerDown={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-border px-3 py-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-foreground">Histórico de sessões</span>
+              <button onClick={() => setShowHistory(false)} className="text-muted-foreground hover:text-foreground transition-colors"><X className="h-3.5 w-3.5" /></button>
+            </div>
+            <div className="max-h-72 overflow-y-auto">
+              {history.length === 0 && (
+                <p className="px-3 py-4 text-center text-[11px] text-muted-foreground">Nenhuma sessão salva ainda.</p>
+              )}
+              {history.map((snap, i) => (
+                <div key={snap.ts} className="flex items-center justify-between border-b border-border/50 px-3 py-2.5 hover:bg-muted/40 transition-colors">
+                  <div>
+                    <p className="text-[11px] font-semibold text-foreground">{snap.label}</p>
+                    <p className="text-[10px] text-muted-foreground">{snap.map.nodes.length} nós</p>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {i === 0 && <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-bold text-primary">Atual</span>}
+                    {i > 0 && (
+                      <button
+                        onClick={() => {
+                          const restored = sanitizeMindMap(snap.map, clientName);
+                          setMap(restored);
+                          window.localStorage.setItem(MIND_MAP_STORAGE_KEY(clientId), JSON.stringify(restored));
+                          setShowHistory(false);
+                          setSaved(false);
+                        }}
+                        className="rounded-lg border border-border px-2 py-1 text-[10px] font-semibold text-muted-foreground hover:border-primary/40 hover:text-primary transition-colors"
+                      >
+                        Restaurar
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         )}
