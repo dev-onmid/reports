@@ -158,6 +158,7 @@ export async function GET(req: NextRequest) {
 
   const pool = makeServerPool();
   try {
+    // Ensure columns exist — swallow errors (already created in POST or on first run)
     await pool.query(`
       ALTER TABLE public.crm_leads
         ADD COLUMN IF NOT EXISTS profile_picture_url TEXT,
@@ -166,16 +167,32 @@ export async function GET(req: NextRequest) {
         ADD COLUMN IF NOT EXISTS whatsapp_last_direction TEXT;
     `).catch(() => null);
 
+    // Detect avatar column available in this install
     const { rows: columnRows } = await pool.query(
       `SELECT column_name
        FROM information_schema.columns
        WHERE table_schema = 'public'
          AND table_name = 'crm_leads'
          AND column_name IN ('profile_picture_url', 'picture_url', 'avatar_url')`,
-    );
+    ).catch(() => ({ rows: [] as Array<{ column_name: string }> }));
+
     const avatarColumn = ['profile_picture_url', 'picture_url', 'avatar_url']
-      .find(column => columnRows.some(row => row.column_name === column));
+      .find(column => columnRows.some((row: { column_name: string }) => row.column_name === column));
     const avatarSelect = avatarColumn ? `l.${avatarColumn}` : `NULL::text`;
+
+    // Check which optional columns exist to avoid query errors on older schemas
+    const { rows: optCols } = await pool.query(
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = 'crm_leads'
+         AND column_name IN ('whatsapp_last_message_at','whatsapp_last_message_text','whatsapp_last_direction')`,
+    ).catch(() => ({ rows: [] as Array<{ column_name: string }> }));
+    const hasWaAt   = optCols.some((r: { column_name: string }) => r.column_name === 'whatsapp_last_message_at');
+    const hasWaText = optCols.some((r: { column_name: string }) => r.column_name === 'whatsapp_last_message_text');
+    const hasWaDir  = optCols.some((r: { column_name: string }) => r.column_name === 'whatsapp_last_direction');
+
+    const waAtExpr   = hasWaAt   ? 'l.whatsapp_last_message_at'   : 'NULL::timestamptz';
+    const waTextExpr = hasWaText ? 'l.whatsapp_last_message_text'  : 'NULL::text';
+    const waDirExpr  = hasWaDir  ? 'l.whatsapp_last_direction'     : 'NULL::text';
 
     const { rows } = await pool.query(
        `WITH canonical_leads AS (
@@ -195,7 +212,7 @@ export async function GET(req: NextRequest) {
              AND (
                l.numero IS NULL
                OR (
-                 l.numero ~ '^[0-9]{10,15}$'
+                 l.numero ~ '^[0-9]{8,15}$'
                  AND l.numero NOT LIKE '%--%'
                )
              )
@@ -214,13 +231,12 @@ export async function GET(req: NextRequest) {
          ${avatarSelect} AS avatar_url,
          l.created_at,
          l.updated_at,
-         COALESCE(m.text, l.whatsapp_last_message_text) AS last_message,
-         COALESCE(m.direction, l.whatsapp_last_direction) AS last_direction,
-         COALESCE(m.created_at, l.whatsapp_last_message_at) AS last_message_at,
+         COALESCE(m.text, ${waTextExpr}) AS last_message,
+         COALESCE(m.direction, ${waDirExpr}) AS last_direction,
+         COALESCE(m.created_at, ${waAtExpr}) AS last_message_at,
          COALESCE(unread.total, 0) AS unread_count
        FROM canonical_leads l
        LEFT JOIN LATERAL (
-         -- Busca última mensagem de qualquer lead com o mesmo número do cliente
          SELECT text, direction, created_at
          FROM public.crm_messages
          WHERE lead_id IN (
@@ -244,11 +260,14 @@ export async function GET(req: NextRequest) {
            AND m2.direction = 'in'
            AND m2.created_at > COALESCE(l.updated_at, l.created_at - interval '1 day')
        ) unread ON true
-       ORDER BY COALESCE(m.created_at, l.whatsapp_last_message_at, l.created_at) DESC
+       ORDER BY COALESCE(m.created_at, ${waAtExpr}, l.created_at) DESC
        LIMIT 200`,
       [clientId],
     );
     return Response.json(rows);
+  } catch (err) {
+    console.error('[inbox GET]', err);
+    return Response.json([], { status: 200 });
   } finally {
     await pool.end();
   }

@@ -477,9 +477,20 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
   // ── Data loading ────────────────────────────────────────────────────────────
   const loadInbox = useCallback(() => {
     fetch(`/api/crm/inbox?clientId=${clientId}`)
-      .then(r => r.json())
-      .then((rows: InboxLead[]) => { setLeads(Array.isArray(rows) ? rows : []); setLoading(false); })
-      .catch(() => setLoading(false));
+      .then(async r => {
+        const json = await r.json().catch(() => null);
+        if (Array.isArray(json)) {
+          setLeads(json as InboxLead[]);
+        } else {
+          console.warn('[inbox GET] resposta inesperada:', json);
+          setLeads([]);
+        }
+        setLoading(false);
+      })
+      .catch(err => {
+        console.error('[inbox GET] fetch error:', err);
+        setLoading(false);
+      });
   }, [clientId]);
 
   async function importConversations(searchTerm = '') {
@@ -510,6 +521,7 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
         setImportResult(`${data.imported ?? 0} sincronizada(s) (${data.fetched ?? 0} recebidas da API).`);
       }
       loadInbox();
+      setTimeout(loadInbox, 800);
     } catch {
       setImportResult('Erro ao puxar conversas.');
     } finally {
