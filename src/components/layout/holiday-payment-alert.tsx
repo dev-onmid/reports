@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { usePathname } from 'next/navigation';
 import { AlertTriangle, CalendarDays, Send } from 'lucide-react';
 import {
   Dialog,
@@ -13,25 +14,56 @@ import { Button } from '@/components/ui/button';
 import { formatDateBR, getHolidayPaymentImpacts, getTodayISO, getUpcomingHolidays, previousBusinessDay } from '@/lib/holidays';
 import { useInvestmentPayments } from '@/lib/payment-store';
 
-const STORAGE_KEY = 'onmid-holiday-payment-alert';
+const SHOWN_AT_KEY = 'onmid-holiday-shown-at';
+const HIDDEN_AT_KEY = 'onmid-tab-hidden-at';
+const AWAY_MS = 20 * 60 * 1000;        // 20 min ausente = reseta
+const PAYMENTS_COOLDOWN_MS = 15 * 60 * 1000; // cooldown entre exibições na aba pagamentos
 
 export function HolidayPaymentAlert() {
   const { payments } = useInvestmentPayments();
   const [open, setOpen] = useState(false);
+  const pathname = usePathname();
   const today = getTodayISO();
+  const lastPathShownRef = useRef<string | null>(null);
 
   const upcomingHolidays = useMemo(() => getUpcomingHolidays(today, 2), [today]);
   const impacts = useMemo(() => getHolidayPaymentImpacts(payments, today, 2), [payments, today]);
 
+  // Track tab visibility to detect when user was away
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        sessionStorage.setItem(HIDDEN_AT_KEY, String(Date.now()));
+      } else {
+        const hiddenAt = Number(sessionStorage.getItem(HIDDEN_AT_KEY) ?? 0);
+        if (hiddenAt && Date.now() - hiddenAt > AWAY_MS) {
+          sessionStorage.removeItem(SHOWN_AT_KEY);
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, []);
+
+  // Decide when to show
   useEffect(() => {
     if (upcomingHolidays.length === 0 && impacts.length === 0) return;
 
-    const storageValue = `${today}:${upcomingHolidays.map((holiday) => holiday.date).join(',')}:${impacts.length}`;
-    if (window.localStorage.getItem(STORAGE_KEY) === storageValue) return;
+    const now = Date.now();
+    const shownAt = Number(sessionStorage.getItem(SHOWN_AT_KEY) ?? 0);
+    const isPayments = pathname?.includes('/pagamentos');
+    const neverShown = !shownAt;
+    const paymentsCooldownPassed = isPayments && now - shownAt > PAYMENTS_COOLDOWN_MS;
+    const isNewPaymentsVisit = isPayments && lastPathShownRef.current !== pathname;
 
-    setOpen(true);
-    window.localStorage.setItem(STORAGE_KEY, storageValue);
-  }, [impacts.length, today, upcomingHolidays]);
+    const shouldShow = neverShown || (isPayments && isNewPaymentsVisit && paymentsCooldownPassed);
+
+    if (shouldShow) {
+      setOpen(true);
+      sessionStorage.setItem(SHOWN_AT_KEY, String(now));
+      lastPathShownRef.current = pathname ?? null;
+    }
+  }, [impacts.length, upcomingHolidays.length, pathname]);
 
   if (upcomingHolidays.length === 0 && impacts.length === 0) return null;
 
