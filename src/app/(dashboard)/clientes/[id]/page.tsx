@@ -1290,7 +1290,7 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
       parentId,
       image: null,
     };
-    const nextMap = { nodes: [...map.nodes, next] };
+    const nextMap = { nodes: [...map.nodes, next], edges: map.edges };
     setMap(nextMap);
     setEditingId(next.id);
     setSaved(false);

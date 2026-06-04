@@ -52,10 +52,7 @@ export function PaymentProvider({ children }: { children: React.ReactNode }) {
         const res = await fetch('/api/payments');
         if (!res.ok) { setPayments([]); return; }
         const data: InvestmentPayment[] = await res.json();
-        const today = new Date().toISOString().split('T')[0];
-        setPayments(data.map((p) =>
-          p.status === 'Enviado' && p.date < today ? { ...p, status: 'Em atraso' as PaymentStatus } : p
-        ));
+        setPayments(data);
       } catch (error) {
         console.error('Erro ao carregar pagamentos:', error);
         setPayments([]);
