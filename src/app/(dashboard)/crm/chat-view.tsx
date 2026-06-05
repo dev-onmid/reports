@@ -431,9 +431,10 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
     onConfirm: () => void;
   } | null>(null);
 
-  const messagesAreaRef = useRef<HTMLDivElement>(null);
-  const pollRef         = useRef<ReturnType<typeof setInterval> | null>(null);
-  const textareaRef     = useRef<HTMLTextAreaElement>(null);
+  const messagesAreaRef  = useRef<HTMLDivElement>(null);
+  const pollRef          = useRef<ReturnType<typeof setInterval> | null>(null);
+  const textareaRef      = useRef<HTMLTextAreaElement>(null);
+  const autoSyncedRef    = useRef<Set<string>>(new Set());
 
   const selectedLead = leads.find(l => l.id === selectedId) ?? null;
 
@@ -582,6 +583,15 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [selectedId, loadMessages, isRecentLead]);
 
+  // ── Auto-sync history when conversation has no messages ────────────────────
+  useEffect(() => {
+    if (!selectedId || msgLoading || messages.length > 0) return;
+    if (autoSyncedRef.current.has(selectedId)) return;
+    autoSyncedRef.current.add(selectedId);
+    void syncHistory();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, msgLoading, messages.length]);
+
   // ── Select mode helpers ─────────────────────────────────────────────────────
   function toggleSelectLead(id: string) {
     setSelectedLeadIds(prev => {
@@ -660,20 +670,25 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
   }
 
   // ── Send helpers ────────────────────────────────────────────────────────────
-  async function syncHistory() {
-    if (!selectedId || !selectedLead) return;
+  async function syncHistory(leadId?: string) {
+    const id = leadId ?? selectedId;
+    if (!id) return;
     setSyncing(true);
     setSyncResult(null);
     try {
       const res = await fetch('/api/crm/sync-history', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ leadId: selectedId, clientId }),
+        body: JSON.stringify({ leadId: id, clientId }),
       });
       const data = await res.json() as { ok?: boolean; imported?: number; error?: string };
       if (data.ok) {
-        setSyncResult(data.imported === 0 ? 'Nenhuma mensagem nova encontrada.' : `${data.imported} mensagem(ns) importada(s)!`);
-        if ((data.imported ?? 0) > 0) loadMessages(selectedId, true);
+        if ((data.imported ?? 0) > 0) {
+          setSyncResult(`${data.imported} mensagem(ns) importada(s)!`);
+          loadMessages(id, true);
+        } else {
+          setSyncResult(null); // silencia "0 mensagens" no auto-sync
+        }
       } else {
         setSyncResult(data.error ?? 'Erro ao sincronizar');
       }
