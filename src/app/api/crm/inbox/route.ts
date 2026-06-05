@@ -314,7 +314,8 @@ export async function POST(req: NextRequest) {
         ADD COLUMN IF NOT EXISTS profile_picture_url TEXT,
         ADD COLUMN IF NOT EXISTS whatsapp_last_message_at TIMESTAMPTZ,
         ADD COLUMN IF NOT EXISTS whatsapp_last_message_text TEXT,
-        ADD COLUMN IF NOT EXISTS whatsapp_last_direction TEXT;
+        ADD COLUMN IF NOT EXISTS whatsapp_last_direction TEXT,
+        ADD COLUMN IF NOT EXISTS whatsapp_lid TEXT;
     `);
 
     const mapped = chats
@@ -385,6 +386,7 @@ export async function POST(req: NextRequest) {
         `UPDATE public.crm_leads
          SET nome = COALESCE(NULLIF($3, ''), nome),
              numero = $2,
+             whatsapp_lid = COALESCE($8, whatsapp_lid),
              profile_picture_url = COALESCE($4, profile_picture_url),
              whatsapp_last_message_at = COALESCE($5::timestamptz, whatsapp_last_message_at),
              whatsapp_last_message_text = COALESCE($6, whatsapp_last_message_text),
@@ -400,15 +402,15 @@ export async function POST(req: NextRequest) {
           contact.lastMessageAt,
           contact.lastMessageText,
           contact.lastDirection,
-          contact.lid ?? null,   // $8 — LID to also match old leads stored with LID as numero
+          contact.lid ?? null,   // $8 — LID (also used to match leads stored with LID as numero)
         ],
       );
       if ((updated.rowCount ?? 0) === 0) {
         await pool.query(
           `INSERT INTO public.crm_leads
             (client_id, nome, numero, canal, origin, data, status, profile_picture_url,
-             whatsapp_last_message_at, whatsapp_last_message_text, whatsapp_last_direction)
-           VALUES ($1, $2, $3, 'Whatsapp', 'organic', CURRENT_DATE, 'Em Atendimento', $4, $5::timestamptz, $6, $7)`,
+             whatsapp_last_message_at, whatsapp_last_message_text, whatsapp_last_direction, whatsapp_lid)
+           VALUES ($1, $2, $3, 'Whatsapp', 'organic', CURRENT_DATE, 'Em Atendimento', $4, $5::timestamptz, $6, $7, $8)`,
           [
             clientId,
             contact.name,
@@ -417,6 +419,7 @@ export async function POST(req: NextRequest) {
             contact.lastMessageAt,
             contact.lastMessageText,
             contact.lastDirection,
+            contact.lid ?? null,
           ],
         );
       }

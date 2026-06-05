@@ -61,10 +61,13 @@ async function fetchEvolutionMessages(
     `${base}/messages/findMessages/${instanceName}`,
   ];
 
-  // Only use the nested key format — flat where.remoteJid ignores the filter and returns wrong data
+  // Use nested key format only — flat where.remoteJid is broken in this Evolution version
+  // Also try remoteJidAlt for LID-mode instances where real phone is stored there
   const bodies = [
-    { where: { key: { remoteJid } }, page: 1, offset: limit },
-    { where: { key: { remoteJid } }, skip: 0, take: limit },
+    { where: { key: { remoteJid } },          page: 1, offset: limit },
+    { where: { key: { remoteJidAlt: remoteJid } }, page: 1, offset: limit },
+    { where: { key: { remoteJid } },          skip: 0, take: limit },
+    { where: { key: { remoteJidAlt: remoteJid } }, skip: 0, take: limit },
     { where: { key: { remoteJid } } },
   ];
 
@@ -161,9 +164,12 @@ export async function POST(req: NextRequest) {
     await ensureSchema(pool);
 
     const { rows: [lead] } = await pool.query(
-      `SELECT numero FROM public.crm_leads WHERE id = $1 AND client_id = $2`,
+      `SELECT numero, whatsapp_lid FROM public.crm_leads WHERE id = $1 AND client_id = $2`,
       [leadId, clientId],
-    );
+    ).catch(async () => {
+      // whatsapp_lid column may not exist yet
+      return pool.query(`SELECT numero, NULL::text AS whatsapp_lid FROM public.crm_leads WHERE id = $1 AND client_id = $2`, [leadId, clientId]);
+    });
     if (!lead?.numero) {
       return Response.json({ error: 'Lead não encontrado ou sem número' }, { status: 404 });
     }
@@ -190,10 +196,12 @@ export async function POST(req: NextRequest) {
       if (!base || !apikey) {
         return Response.json({ error: 'EVOLUTION_API_URL ou EVOLUTION_API_KEY não configurados.' }, { status: 500 });
       }
-      // Try @s.whatsapp.net first, then @lid (Evolution API LID mode)
+      // Build list of JIDs to try (phone in both @s.whatsapp.net and @lid, plus stored LID)
+      const lid = (lead.whatsapp_lid as string | null)?.replace(/\D/g, '') ?? null;
       const jidFormats = [
         `${phone}@s.whatsapp.net`,
         `${phone}@lid`,
+        ...(lid && lid !== phone ? [`${lid}@lid`, `${lid}@s.whatsapp.net`] : []),
         `${phone}@c.us`,
       ];
       for (const remoteJid of jidFormats) {
