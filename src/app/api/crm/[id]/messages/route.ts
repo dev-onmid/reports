@@ -3,6 +3,23 @@ import { makeServerPool } from '@/lib/server-db';
 import { getClientInstance, sendFollowupMessage } from '@/lib/followup-send';
 import { analisarConversa } from '@/lib/crm-ai-analysis';
 
+// Ensures crm_messages has all columns the code expects.
+// The original migration only had: id, contact_id, client_id(?), direction, text, created_at.
+// We add the columns used by all chat routes.
+async function migrateCrmMessages(pool: ReturnType<typeof makeServerPool>) {
+  const stmts = [
+    `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS lead_id UUID`,
+    `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS client_id TEXT`,
+    `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS tipo TEXT NOT NULL DEFAULT 'texto'`,
+    `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS external_id TEXT`,
+    `ALTER TABLE public.crm_messages ALTER COLUMN contact_id DROP NOT NULL`,
+    `CREATE INDEX IF NOT EXISTS idx_crm_messages_lead ON public.crm_messages (lead_id, created_at DESC) WHERE lead_id IS NOT NULL`,
+  ];
+  for (const sql of stmts) {
+    await pool.query(sql).catch(() => null);
+  }
+}
+
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -10,12 +27,7 @@ export async function GET(
   const { id } = await params;
   const pool = makeServerPool();
   try {
-    // Migrate crm_messages schema: add lead_id + make contact_id nullable + add tipo/external_id
-    await pool.query(`ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS lead_id UUID`).catch(() => null);
-    await pool.query(`ALTER TABLE public.crm_messages ALTER COLUMN contact_id DROP NOT NULL`).catch(() => null);
-    await pool.query(`ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS tipo TEXT NOT NULL DEFAULT 'texto'`).catch(() => null);
-    await pool.query(`ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS external_id TEXT`).catch(() => null);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_crm_messages_lead ON public.crm_messages (lead_id, created_at DESC)`).catch(() => null);
+    await migrateCrmMessages(pool);
 
     const BASE_WHERE = `
       WHERE m.lead_id = $1
@@ -114,11 +126,7 @@ export async function POST(
     );
     const targetLeadId = canonical?.id ?? id;
 
-    // Ensure crm_messages has lead_id + all required columns
-    await pool.query(`ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS lead_id UUID`).catch(() => null);
-    await pool.query(`ALTER TABLE public.crm_messages ALTER COLUMN contact_id DROP NOT NULL`).catch(() => null);
-    await pool.query(`ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS tipo TEXT NOT NULL DEFAULT 'texto'`).catch(() => null);
-    await pool.query(`ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS external_id TEXT`).catch(() => null);
+    await migrateCrmMessages(pool);
 
     // Send via WhatsApp when outbound and lead has a phone number
     let waSent = false;

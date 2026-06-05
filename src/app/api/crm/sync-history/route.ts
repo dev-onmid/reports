@@ -2,15 +2,19 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 
 async function ensureSchema(pool: ReturnType<typeof makeServerPool>) {
-  await pool.query(`ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS lead_id UUID`).catch(() => null);
-  await pool.query(`ALTER TABLE public.crm_messages ALTER COLUMN contact_id DROP NOT NULL`).catch(() => null);
-  await pool.query(`ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS external_id TEXT`).catch(() => null);
-  await pool.query(`ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS tipo TEXT NOT NULL DEFAULT 'texto'`).catch(() => null);
-  await pool.query(`
-    CREATE UNIQUE INDEX IF NOT EXISTS crm_messages_lead_external_idx
-      ON public.crm_messages (lead_id, external_id)
-      WHERE external_id IS NOT NULL AND lead_id IS NOT NULL;
-  `).catch(() => null);
+  const stmts = [
+    `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS lead_id UUID`,
+    `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS client_id TEXT`,
+    `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS tipo TEXT NOT NULL DEFAULT 'texto'`,
+    `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS external_id TEXT`,
+    `ALTER TABLE public.crm_messages ALTER COLUMN contact_id DROP NOT NULL`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS crm_messages_lead_external_idx
+       ON public.crm_messages (lead_id, external_id)
+       WHERE external_id IS NOT NULL AND lead_id IS NOT NULL`,
+  ];
+  for (const sql of stmts) {
+    await pool.query(sql).catch(() => null);
+  }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
