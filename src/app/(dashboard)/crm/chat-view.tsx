@@ -423,6 +423,9 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
   const [instanceAlertOpen, setInstanceAlertOpen] = useState(false);
 
   // Confirm dialog
+  const [debugModal, setDebugModal] = useState<{ loading: boolean; data: unknown } | null>(null);
+
+  // Confirm dialog
   const [confirmDialog, setConfirmDialog] = useState<{
     title: string;
     description: string;
@@ -1108,11 +1111,33 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
                   <button
                     onClick={() => void syncHistory()}
                     disabled={syncing}
-                    title="Importar histórico de mensagens da Evolution API"
+                    title="Importar histórico de mensagens"
                     className="flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-[11px] font-semibold text-muted-foreground hover:text-foreground hover:border-primary/40 disabled:opacity-50 transition-colors"
                   >
                     <History className="h-3 w-3" />
                     {syncing ? 'Buscando…' : 'Histórico'}
+                  </button>
+                  <button
+                    onClick={async () => {
+                      if (!selectedId) return;
+                      setDebugModal({ loading: true, data: null });
+                      try {
+                        const res = await fetch('/api/crm/sync-history/debug', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ leadId: selectedId, clientId }),
+                        });
+                        const data = await res.json();
+                        setDebugModal({ loading: false, data });
+                      } catch (err) {
+                        setDebugModal({ loading: false, data: { error: String(err) } });
+                      }
+                    }}
+                    title="Debug: ver resposta bruta da API"
+                    className="flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-[11px] font-semibold text-muted-foreground hover:text-foreground hover:border-amber-400/40 transition-colors"
+                  >
+                    <AlertCircle className="h-3 w-3" />
+                    Debug
                   </button>
 
                   {/* More options dropdown */}
@@ -1344,6 +1369,30 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
           onConfirm={confirmDialog.onConfirm}
           onClose={() => setConfirmDialog(null)}
         />
+      )}
+
+      {/* Debug modal */}
+      {debugModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setDebugModal(null)}>
+          <div className="w-full max-w-2xl bg-card rounded-2xl border border-border shadow-2xl overflow-hidden flex flex-col max-h-[80vh]" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-border shrink-0">
+              <p className="text-sm font-bold text-amber-400">Debug — Resposta da API WhatsApp</p>
+              <button onClick={() => setDebugModal(null)} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4">
+              {debugModal.loading ? (
+                <p className="text-xs text-muted-foreground">Consultando API…</p>
+              ) : (
+                <pre className="text-[10px] text-foreground whitespace-pre-wrap break-all leading-relaxed">
+                  {JSON.stringify(debugModal.data, null, 2)}
+                </pre>
+              )}
+            </div>
+            <div className="px-5 py-3 border-t border-border shrink-0">
+              <p className="text-[10px] text-muted-foreground">Cole esta resposta no chat para diagnóstico.</p>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Instance alert modal */}
