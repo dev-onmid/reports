@@ -158,113 +158,121 @@ export async function GET(req: NextRequest) {
 
   const pool = makeServerPool();
   try {
-    // Ensure columns exist — swallow errors (already created in POST or on first run)
-    await pool.query(`
-      ALTER TABLE public.crm_leads
-        ADD COLUMN IF NOT EXISTS profile_picture_url TEXT,
-        ADD COLUMN IF NOT EXISTS whatsapp_last_message_at TIMESTAMPTZ,
-        ADD COLUMN IF NOT EXISTS whatsapp_last_message_text TEXT,
-        ADD COLUMN IF NOT EXISTS whatsapp_last_direction TEXT;
-    `).catch(() => null);
-
-    // Detect avatar column available in this install
-    const { rows: columnRows } = await pool.query(
-      `SELECT column_name
-       FROM information_schema.columns
-       WHERE table_schema = 'public'
-         AND table_name = 'crm_leads'
-         AND column_name IN ('profile_picture_url', 'picture_url', 'avatar_url')`,
-    ).catch(() => ({ rows: [] as Array<{ column_name: string }> }));
-
-    const avatarColumn = ['profile_picture_url', 'picture_url', 'avatar_url']
-      .find(column => columnRows.some((row: { column_name: string }) => row.column_name === column));
-    const avatarSelect = avatarColumn ? `l.${avatarColumn}` : `NULL::text`;
-
-    // Check which optional columns exist to avoid query errors on older schemas
-    const { rows: optCols } = await pool.query(
-      `SELECT column_name FROM information_schema.columns
-       WHERE table_schema = 'public' AND table_name = 'crm_leads'
-         AND column_name IN ('whatsapp_last_message_at','whatsapp_last_message_text','whatsapp_last_direction')`,
-    ).catch(() => ({ rows: [] as Array<{ column_name: string }> }));
-    const hasWaAt   = optCols.some((r: { column_name: string }) => r.column_name === 'whatsapp_last_message_at');
-    const hasWaText = optCols.some((r: { column_name: string }) => r.column_name === 'whatsapp_last_message_text');
-    const hasWaDir  = optCols.some((r: { column_name: string }) => r.column_name === 'whatsapp_last_direction');
-
-    const waAtExpr   = hasWaAt   ? 'l.whatsapp_last_message_at'   : 'NULL::timestamptz';
-    const waTextExpr = hasWaText ? 'l.whatsapp_last_message_text'  : 'NULL::text';
-    const waDirExpr  = hasWaDir  ? 'l.whatsapp_last_direction'     : 'NULL::text';
-
-    const { rows } = await pool.query(
-       `WITH canonical_leads AS (
-         SELECT *
-         FROM (
-           SELECT
-             l.*,
-             ROW_NUMBER() OVER (
-               PARTITION BY COALESCE(NULLIF(regexp_replace(COALESCE(l.numero, ''), '\\D', '', 'g'), ''), l.id::text)
-               ORDER BY
-                 CASE WHEN l.funnel_id IS NOT NULL THEN 0 ELSE 1 END,
-                 COALESCE(l.updated_at, l.created_at) DESC,
-                 l.created_at DESC
-             ) AS rn
-           FROM public.crm_leads l
-           WHERE l.client_id = $1
-             AND (
-               l.numero IS NULL
-               OR (
-                 l.numero ~ '^[0-9]{8,15}$'
-                 AND l.numero NOT LIKE '%--%'
-               )
-             )
-         ) ranked
-         WHERE rn = 1
-       )
-       SELECT
-         l.id,
-         l.nome,
-         l.numero,
-         l.canal,
-         l.origin,
-         l.status,
-         l.fechou,
-         l.valor_rs,
-         ${avatarSelect} AS avatar_url,
-         l.created_at,
-         l.updated_at,
-         COALESCE(m.text, ${waTextExpr}) AS last_message,
-         COALESCE(m.direction, ${waDirExpr}) AS last_direction,
-         COALESCE(m.created_at, ${waAtExpr}) AS last_message_at,
-         COALESCE(unread.total, 0) AS unread_count
-       FROM canonical_leads l
-       LEFT JOIN LATERAL (
-         SELECT text, direction, created_at
-         FROM public.crm_messages
-         WHERE lead_id IN (
-           SELECT id FROM public.crm_leads l2
-           WHERE l2.client_id = l.client_id
-             AND l2.numero    = l.numero
-             AND l2.numero IS NOT NULL
-           UNION SELECT l.id
-         )
-         ORDER BY created_at DESC
-         LIMIT 1
-       ) m ON true
-       LEFT JOIN LATERAL (
-         SELECT COUNT(*)::int AS total
-         FROM public.crm_messages m2
-         WHERE m2.lead_id IN (
-           SELECT id FROM public.crm_leads l3
-           WHERE l3.client_id = l.client_id AND l3.numero = l.numero AND l3.numero IS NOT NULL
-           UNION SELECT l.id
-         )
-           AND m2.direction = 'in'
-           AND m2.created_at > COALESCE(l.updated_at, l.created_at - interval '1 day')
-       ) unread ON true
-       ORDER BY COALESCE(m.created_at, ${waAtExpr}, l.created_at) DESC
+    // Step 1: fetch leads (simple, no optional columns)
+    const { rows: leads } = await pool.query<{
+      id: string; nome: string | null; numero: string | null; canal: string | null;
+      origin: string | null; status: string | null; fechou: boolean;
+      valor_rs: string | null; created_at: string; updated_at: string | null;
+    }>(
+      `SELECT id, nome, numero, canal, origin, status, fechou, valor_rs, created_at, updated_at
+       FROM public.crm_leads
+       WHERE client_id = $1
+         AND (numero IS NULL OR (numero ~ '^[0-9]{8,15}$' AND numero NOT LIKE '%--%'))
+       ORDER BY COALESCE(updated_at, created_at) DESC
        LIMIT 200`,
       [clientId],
     );
-    return Response.json(rows);
+
+    if (leads.length === 0) return Response.json([]);
+
+    // Step 2: deduplicate by normalized phone (keep most-recently-updated)
+    const seen = new Set<string>();
+    const unique = leads.filter(l => {
+      const key = l.numero ? l.numero.replace(/\D/g, '') || l.id : l.id;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    // Step 3: enrich with last message (best-effort, skip on error)
+    const ids = unique.map(l => l.id);
+    let lastMsgs: Record<string, { text: string; direction: string; created_at: string }> = {};
+    let unreadCounts: Record<string, number> = {};
+    let avatarMap: Record<string, string | null> = {};
+
+    try {
+      // Last message per lead
+      const { rows: msgs } = await pool.query<{
+        lead_id: string; text: string; direction: string; created_at: string;
+      }>(
+        `SELECT DISTINCT ON (lead_id) lead_id, text, direction, created_at
+         FROM public.crm_messages
+         WHERE lead_id = ANY($1::uuid[])
+         ORDER BY lead_id, created_at DESC`,
+        [ids],
+      );
+      lastMsgs = Object.fromEntries(msgs.map(m => [m.lead_id, m]));
+    } catch { /* not critical */ }
+
+    try {
+      // Unread count per lead
+      const { rows: unreads } = await pool.query<{ lead_id: string; total: number }>(
+        `SELECT lead_id, COUNT(*)::int AS total
+         FROM public.crm_messages
+         WHERE lead_id = ANY($1::uuid[]) AND direction = 'in'
+         GROUP BY lead_id`,
+        [ids],
+      );
+      unreadCounts = Object.fromEntries(unreads.map(u => [u.lead_id, u.total]));
+    } catch { /* not critical */ }
+
+    try {
+      // Avatar URLs (profile_picture_url column may not exist on every install)
+      const { rows: avs } = await pool.query<{ id: string; avatar_url: string | null }>(
+        `SELECT id,
+           COALESCE(profile_picture_url, picture_url, avatar_url) AS avatar_url
+         FROM public.crm_leads
+         WHERE id = ANY($1::uuid[])`,
+        [ids],
+      );
+      avatarMap = Object.fromEntries(avs.map(a => [a.id, a.avatar_url]));
+    } catch { /* not critical */ }
+
+    // Step 4: also enrich with whatsapp_last_* fields if columns exist
+    let waMap: Record<string, { text: string | null; dir: string | null; at: string | null }> = {};
+    try {
+      const { rows: wa } = await pool.query<{
+        id: string; t: string | null; d: string | null; a: string | null;
+      }>(
+        `SELECT id,
+           whatsapp_last_message_text  AS t,
+           whatsapp_last_direction     AS d,
+           whatsapp_last_message_at    AS a
+         FROM public.crm_leads
+         WHERE id = ANY($1::uuid[])`,
+        [ids],
+      );
+      waMap = Object.fromEntries(wa.map(w => [w.id, { text: w.t, dir: w.d, at: w.a }]));
+    } catch { /* columns may not exist */ }
+
+    // Step 5: assemble result
+    const result = unique.map(l => {
+      const msg  = lastMsgs[l.id];
+      const wa   = waMap[l.id];
+      return {
+        id:              l.id,
+        nome:            l.nome,
+        numero:          l.numero,
+        canal:           l.canal,
+        origin:          l.origin,
+        status:          l.status,
+        fechou:          l.fechou,
+        avatar_url:      avatarMap[l.id] ?? null,
+        created_at:      l.created_at,
+        last_message:    msg?.text    ?? wa?.text ?? null,
+        last_direction:  msg?.direction ?? wa?.dir ?? null,
+        last_message_at: msg?.created_at ?? wa?.at ?? l.updated_at ?? l.created_at,
+        unread_count:    unreadCounts[l.id] ?? 0,
+      };
+    });
+
+    // Sort by last_message_at desc
+    result.sort((a, b) =>
+      new Date(b.last_message_at ?? b.created_at).getTime() -
+      new Date(a.last_message_at ?? a.created_at).getTime(),
+    );
+
+    return Response.json(result);
   } catch (err) {
     console.error('[inbox GET]', err);
     return Response.json([], { status: 200 });
