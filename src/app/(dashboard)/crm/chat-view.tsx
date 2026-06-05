@@ -687,7 +687,7 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
           setSyncResult(`${data.imported} mensagem(ns) importada(s)!`);
           loadMessages(id, true);
         } else {
-          setSyncResult(null); // silencia "0 mensagens" no auto-sync
+          setSyncResult('Histórico sem mensagens novas.');
         }
       } else {
         setSyncResult(data.error ?? 'Erro ao sincronizar');
