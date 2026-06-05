@@ -326,9 +326,24 @@ export async function POST(req: NextRequest) {
           ?? (chat.key as Record<string, unknown> | undefined)?.remoteJid
           ?? '',
         );
-        // Extract phone: prefer explicit field, fallback to remoteJid (strip @s.whatsapp.net etc.)
-        const rawPhone = chat.phone ?? chat.phoneNumber ?? remoteJid.split('@')[0] ?? remoteJid;
+        const isLid = remoteJid.endsWith('@lid');
+
+        // In LID mode (Evolution API new addressing), the real phone is in remoteJidAlt
+        // Fall back to extracting from remoteJid itself for @s.whatsapp.net chats
+        const remoteJidAlt = String(
+          chat.remoteJidAlt
+          ?? (chat.key as Record<string, unknown> | undefined)?.remoteJidAlt
+          ?? '',
+        );
+        let rawPhone: string;
+        if (isLid && remoteJidAlt) {
+          rawPhone = remoteJidAlt.split('@')[0];
+        } else {
+          rawPhone = String(chat.phone ?? chat.phoneNumber ?? remoteJid.split('@')[0] ?? '');
+        }
         const phone = normalizePhone(rawPhone);
+        // Keep LID for use in message history queries
+        const lid = isLid ? remoteJid.split('@')[0] : null;
         const name = String(chat.name ?? chat.pushName ?? chat.pushname ?? chat.verifiedName ?? chat.phone ?? phone);
         const profilePictureUrl = typeof chat.profilePicUrl === 'string'
           ? chat.profilePicUrl
@@ -341,6 +356,7 @@ export async function POST(req: NextRequest) {
                 : null;
         return {
           phone,
+          lid,
           name,
           profilePictureUrl,
           remoteJid,
@@ -364,15 +380,17 @@ export async function POST(req: NextRequest) {
 
     let imported = 0;
     for (const contact of contacts) {
+      // Match by real phone OR by LID (for leads imported before this fix that stored LIDs as numero)
       const updated = await pool.query(
         `UPDATE public.crm_leads
          SET nome = COALESCE(NULLIF($3, ''), nome),
+             numero = $2,
              profile_picture_url = COALESCE($4, profile_picture_url),
              whatsapp_last_message_at = COALESCE($5::timestamptz, whatsapp_last_message_at),
              whatsapp_last_message_text = COALESCE($6, whatsapp_last_message_text),
              whatsapp_last_direction = COALESCE($7, whatsapp_last_direction),
              updated_at = NOW()
-         WHERE client_id = $1 AND numero = $2
+         WHERE client_id = $1 AND (numero = $2 OR ($8::text IS NOT NULL AND numero = $8))
          RETURNING id`,
         [
           clientId,
@@ -382,6 +400,7 @@ export async function POST(req: NextRequest) {
           contact.lastMessageAt,
           contact.lastMessageText,
           contact.lastDirection,
+          contact.lid ?? null,   // $8 — LID to also match old leads stored with LID as numero
         ],
       );
       if ((updated.rowCount ?? 0) === 0) {

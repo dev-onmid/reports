@@ -61,13 +61,10 @@ async function fetchEvolutionMessages(
     `${base}/messages/findMessages/${instanceName}`,
   ];
 
-  // Try different body formats across Evolution API versions
+  // Only use the nested key format — flat where.remoteJid ignores the filter and returns wrong data
   const bodies = [
-    { where: { key: { remoteJid } },         page: 1, offset: limit },
-    { where: { key: { remoteJid } },         skip: 0, take: limit },
-    { where: { remoteJid },                   page: 1, offset: limit },
-    { where: { remoteJid },                   skip: 0, take: limit },
-    { remoteJid,                              page: 1, limit },
+    { where: { key: { remoteJid } }, page: 1, offset: limit },
+    { where: { key: { remoteJid } }, skip: 0, take: limit },
     { where: { key: { remoteJid } } },
   ];
 
@@ -193,8 +190,16 @@ export async function POST(req: NextRequest) {
       if (!base || !apikey) {
         return Response.json({ error: 'EVOLUTION_API_URL ou EVOLUTION_API_KEY não configurados.' }, { status: 500 });
       }
-      const remoteJid = `${phone}@s.whatsapp.net`;
-      rawRecords = await fetchEvolutionMessages(base, apikey, inst.instance_id, remoteJid, LIMIT);
+      // Try @s.whatsapp.net first, then @lid (Evolution API LID mode)
+      const jidFormats = [
+        `${phone}@s.whatsapp.net`,
+        `${phone}@lid`,
+        `${phone}@c.us`,
+      ];
+      for (const remoteJid of jidFormats) {
+        rawRecords = await fetchEvolutionMessages(base, apikey, inst.instance_id, remoteJid, LIMIT);
+        if (rawRecords.length > 0) break;
+      }
     } else {
       // Z-API
       rawRecords = await fetchZapiMessages(inst.instance_id, inst.token, phone, LIMIT);
