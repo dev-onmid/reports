@@ -10,29 +10,40 @@ export async function GET(
   const { id } = await params;
   const pool = makeServerPool();
   try {
-    // Garante que a coluna tipo existe (pode não existir em instalações antigas)
+    // Ensure tipo column exists — but don't let this block the query
     await pool.query(
       `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS tipo TEXT NOT NULL DEFAULT 'texto'`
     ).catch(() => null);
 
-    // Busca por lead_id direto E por qualquer outro lead do mesmo cliente
-    // com o mesmo número — resolve o mismatch entre lead do webhook e lead do CRM.
-    const { rows } = await pool.query(
-      `SELECT m.id, m.direction, m.text,
-              COALESCE(m.tipo, 'texto') AS tipo,
-              m.created_at
-       FROM public.crm_messages m
-       WHERE m.lead_id = $1
-          OR m.lead_id IN (
-            SELECT l2.id FROM public.crm_leads l2
-            WHERE l2.client_id = (SELECT client_id FROM public.crm_leads WHERE id = $1 LIMIT 1)
-              AND l2.numero    = (SELECT numero    FROM public.crm_leads WHERE id = $1 LIMIT 1)
-              AND l2.numero IS NOT NULL
-          )
-       ORDER BY m.created_at ASC, m.id ASC
-       LIMIT 500`,
-      [id],
-    );
+    const BASE_WHERE = `
+      WHERE m.lead_id = $1
+         OR m.lead_id IN (
+           SELECT l2.id FROM public.crm_leads l2
+           WHERE l2.client_id = (SELECT client_id FROM public.crm_leads WHERE id = $1 LIMIT 1)
+             AND l2.numero    = (SELECT numero    FROM public.crm_leads WHERE id = $1 LIMIT 1)
+             AND l2.numero IS NOT NULL
+         )
+      ORDER BY m.created_at ASC, m.id ASC
+      LIMIT 500`;
+
+    // Try with tipo column first; fall back to 'texto' literal if column missing
+    let rows: unknown[] = [];
+    try {
+      const result = await pool.query(
+        `SELECT m.id, m.direction, m.text, COALESCE(m.tipo, 'texto') AS tipo, m.created_at
+         FROM public.crm_messages m ${BASE_WHERE}`,
+        [id],
+      );
+      rows = result.rows;
+    } catch {
+      const result = await pool.query(
+        `SELECT m.id, m.direction, m.text, 'texto' AS tipo, m.created_at
+         FROM public.crm_messages m ${BASE_WHERE}`,
+        [id],
+      );
+      rows = result.rows;
+    }
+
     return Response.json({ messages: rows });
   } catch (err) {
     console.error('[messages GET]', err);
