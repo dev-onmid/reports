@@ -2,13 +2,14 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 
 async function ensureSchema(pool: ReturnType<typeof makeServerPool>) {
-  await pool.query(`
-    ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS external_id TEXT;
-  `).catch(() => null);
+  await pool.query(`ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS lead_id UUID`).catch(() => null);
+  await pool.query(`ALTER TABLE public.crm_messages ALTER COLUMN contact_id DROP NOT NULL`).catch(() => null);
+  await pool.query(`ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS external_id TEXT`).catch(() => null);
+  await pool.query(`ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS tipo TEXT NOT NULL DEFAULT 'texto'`).catch(() => null);
   await pool.query(`
     CREATE UNIQUE INDEX IF NOT EXISTS crm_messages_lead_external_idx
       ON public.crm_messages (lead_id, external_id)
-      WHERE external_id IS NOT NULL;
+      WHERE external_id IS NOT NULL AND lead_id IS NOT NULL;
   `).catch(() => null);
 }
 

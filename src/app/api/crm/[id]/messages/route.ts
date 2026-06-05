@@ -10,10 +10,12 @@ export async function GET(
   const { id } = await params;
   const pool = makeServerPool();
   try {
-    // Ensure tipo column exists — but don't let this block the query
-    await pool.query(
-      `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS tipo TEXT NOT NULL DEFAULT 'texto'`
-    ).catch(() => null);
+    // Migrate crm_messages schema: add lead_id + make contact_id nullable + add tipo/external_id
+    await pool.query(`ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS lead_id UUID`).catch(() => null);
+    await pool.query(`ALTER TABLE public.crm_messages ALTER COLUMN contact_id DROP NOT NULL`).catch(() => null);
+    await pool.query(`ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS tipo TEXT NOT NULL DEFAULT 'texto'`).catch(() => null);
+    await pool.query(`ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS external_id TEXT`).catch(() => null);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_crm_messages_lead ON public.crm_messages (lead_id, created_at DESC)`).catch(() => null);
 
     const BASE_WHERE = `
       WHERE m.lead_id = $1
@@ -112,10 +114,11 @@ export async function POST(
     );
     const targetLeadId = canonical?.id ?? id;
 
-    // Ensure crm_messages has `tipo` column
-    await pool.query(`
-      ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS tipo TEXT NOT NULL DEFAULT 'texto'
-    `).catch(() => null);
+    // Ensure crm_messages has lead_id + all required columns
+    await pool.query(`ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS lead_id UUID`).catch(() => null);
+    await pool.query(`ALTER TABLE public.crm_messages ALTER COLUMN contact_id DROP NOT NULL`).catch(() => null);
+    await pool.query(`ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS tipo TEXT NOT NULL DEFAULT 'texto'`).catch(() => null);
+    await pool.query(`ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS external_id TEXT`).catch(() => null);
 
     // Send via WhatsApp when outbound and lead has a phone number
     let waSent = false;
