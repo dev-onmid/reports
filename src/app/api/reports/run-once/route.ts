@@ -1,19 +1,22 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { buildOmniReport, saveOmniReport } from '@/lib/report-builder';
+import { buildDeliveryReport, saveDeliveryReport } from '@/lib/delivery-report-builder';
 
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => ({})) as {
     clientId?: string; from?: string; to?: string; manualNotes?: string;
+    template?: string; csvContent?: string;
   };
 
-  const { clientId, from, to, manualNotes } = body;
+  const { clientId, from, to, manualNotes, template, csvContent } = body;
   if (!clientId || !from || !to) {
     return Response.json({ error: 'clientId, from e to são obrigatórios' }, { status: 400 });
   }
 
+  // Resolve client name
   const pool = makeServerPool();
   let clientName = '';
   let metaConnectionId: string | null = null;
@@ -37,6 +40,18 @@ export async function POST(request: NextRequest) {
     await pool.end();
   }
 
+  // ── Delivery template ──────────────────────────────────────────────────────
+  if (template === 'delivery') {
+    if (!csvContent) {
+      return Response.json({ error: 'csvContent é obrigatório para o template Delivery' }, { status: 400 });
+    }
+
+    const reportData = await buildDeliveryReport({ clientId, clientName, from, to, csvContent });
+    const { token, reportId } = await saveDeliveryReport({ clientId, clientName, from, to, data: reportData });
+    return Response.json({ ok: true, id: reportId, public_token: token });
+  }
+
+  // ── Performance template (default) ────────────────────────────────────────
   const apiKey = process.env.ANTHROPIC_API_KEY ?? '';
 
   const reportData = await buildOmniReport({

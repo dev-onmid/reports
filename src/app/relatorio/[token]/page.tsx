@@ -1,8 +1,10 @@
 import { makeServerPool } from '@/lib/server-db';
 import DiagnosticoTemplate from '@/components/diagnostico-template';
 import OmniPerformanceTemplate from '@/components/onmid-performance-template';
+import DeliveryViewer from '@/components/delivery-template/viewer';
 import type { DiagnosticoData } from '@/components/diagnostico-template/types';
 import type { OmniReportData } from '@/components/onmid-performance-template/types';
+import type { DeliveryReportData } from '@/components/delivery-template/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -44,6 +46,15 @@ export default async function RelatorioPublicoPage({ params }: { params: Promise
           <p style={{ fontSize: 14, color: '#888' }}>O link pode ter expirado ou ser inválido.</p>
         </div>
       </div>
+    );
+  }
+
+  if (report.template_slug === 'onmid-delivery') {
+    return (
+      <>
+        <title>{`Relatório Delivery — ${report.client_name}`}</title>
+        <DeliveryViewer data={report.report_data as DeliveryReportData} />
+      </>
     );
   }
 

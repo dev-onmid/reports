@@ -58,6 +58,9 @@ export default function RelatoriosPage() {
   // Geração avulsa
   const [showGenModal, setShowGenModal] = useState(false);
   const [genForm, setGenForm] = useState({ clientId: '', from: '', to: '' });
+  const [genTemplate, setGenTemplate] = useState<'performance' | 'delivery'>('performance');
+  const [genCsvContent, setGenCsvContent] = useState('');
+  const [genCsvFileName, setGenCsvFileName] = useState('');
   const [generating, setGenerating] = useState(false);
 
   // Automações (configs)
@@ -98,26 +101,42 @@ export default function RelatoriosPage() {
   function openGenModal() {
     const { from, to } = defaultDateRange();
     setGenForm({ clientId: '', from, to });
+    setGenTemplate('performance');
+    setGenCsvContent('');
+    setGenCsvFileName('');
     setShowGenModal(true);
+  }
+
+  function handleCsvFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setGenCsvFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (ev) => setGenCsvContent((ev.target?.result as string) ?? '');
+    reader.readAsText(file, 'utf-8');
   }
 
   async function generateReport() {
     if (!genForm.clientId || !genForm.from || !genForm.to) return;
+    if (genTemplate === 'delivery' && !genCsvContent) return;
     setGenerating(true);
     try {
+      const payload: Record<string, string> = {
+        clientId: genForm.clientId,
+        from: genForm.from,
+        to: genForm.to,
+        template: genTemplate,
+      };
+      if (genTemplate === 'delivery') payload.csvContent = genCsvContent;
+
       const res = await fetch('/api/reports/run-once', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          clientId: genForm.clientId,
-          from: genForm.from,
-          to: genForm.to,
-        }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json() as { public_token?: string; id?: string };
       if (data.public_token) {
         setShowGenModal(false);
-        // Refresh list
         const rows = await fetch('/api/reports').then(r => r.ok ? r.json() : []) as DiagnosticReport[];
         setDiagnostics(rows);
         window.open(`/relatorio/${data.public_token}`, '_blank');
@@ -692,7 +711,7 @@ export default function RelatoriosPage() {
       {/* ── GENERATE MODAL ── */}
       {showGenModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-md space-y-5 shadow-2xl">
+          <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-lg space-y-5 shadow-2xl">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-xl bg-violet-500/20 border border-violet-500/30 flex items-center justify-center">
@@ -700,12 +719,64 @@ export default function RelatoriosPage() {
                 </div>
                 <div>
                   <h2 className="font-semibold text-foreground text-sm">Gerar Relatório</h2>
-                  <p className="text-xs text-muted-foreground">Diagnóstico de performance com template completo</p>
+                  <p className="text-xs text-muted-foreground">Escolha o template e preencha os dados</p>
                 </div>
               </div>
               <button onClick={() => setShowGenModal(false)} className="text-muted-foreground hover:text-foreground">
                 <X className="w-4 h-4" />
               </button>
+            </div>
+
+            {/* Template selector */}
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground font-medium">Template</label>
+              <div className="grid grid-cols-2 gap-3">
+                {([
+                  {
+                    key: 'performance' as const,
+                    title: 'Performance',
+                    desc: 'Meta Ads + CRM — diagnóstico de tráfego pago',
+                    color: 'violet',
+                    icon: <BarChart2 className="w-5 h-5" />,
+                  },
+                  {
+                    key: 'delivery' as const,
+                    title: 'Delivery',
+                    desc: 'Cardápio digital + Meta Ads — relatório de restaurantes',
+                    color: 'emerald',
+                    icon: <FileText className="w-5 h-5" />,
+                  },
+                ]).map(tpl => {
+                  const active = genTemplate === tpl.key;
+                  return (
+                    <button
+                      key={tpl.key}
+                      onClick={() => setGenTemplate(tpl.key)}
+                      className={cn(
+                        'flex flex-col gap-2 p-4 rounded-xl border-2 text-left transition-all',
+                        active
+                          ? tpl.color === 'violet'
+                            ? 'border-violet-500 bg-violet-500/10'
+                            : 'border-emerald-500 bg-emerald-500/10'
+                          : 'border-border bg-background hover:border-border/80',
+                      )}
+                    >
+                      <div className={cn(
+                        'w-9 h-9 rounded-lg flex items-center justify-center',
+                        active
+                          ? tpl.color === 'violet' ? 'bg-violet-500/20 text-violet-400' : 'bg-emerald-500/20 text-emerald-400'
+                          : 'bg-muted text-muted-foreground',
+                      )}>
+                        {tpl.icon}
+                      </div>
+                      <div>
+                        <p className={cn('text-sm font-semibold', active ? 'text-foreground' : 'text-muted-foreground')}>{tpl.title}</p>
+                        <p className="text-[11px] text-muted-foreground leading-tight">{tpl.desc}</p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             <div className="space-y-3">
@@ -740,9 +811,36 @@ export default function RelatoriosPage() {
                   />
                 </div>
               </div>
-              <p className="text-[11px] text-muted-foreground/60">
-                Padrão: últimos 12 meses. O template ONMID exibe o histórico mensal completo do período.
-              </p>
+
+              {/* CSV upload — only for Delivery */}
+              {genTemplate === 'delivery' && (
+                <div className="space-y-1.5">
+                  <label className="text-xs text-muted-foreground font-medium">Exportação do cardápio digital (CSV / XML / TXT)</label>
+                  <label className={cn(
+                    'flex items-center gap-3 px-4 py-3 rounded-lg border-2 border-dashed cursor-pointer transition-colors',
+                    genCsvContent ? 'border-emerald-500/50 bg-emerald-500/5' : 'border-border hover:border-emerald-500/40',
+                  )}>
+                    <input type="file" accept=".csv,.xml,.txt,.xlsx" onChange={handleCsvFile} className="hidden" />
+                    {genCsvContent ? (
+                      <>
+                        <FileCheck2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span className="text-xs text-emerald-400 truncate">{genCsvFileName}</span>
+                      </>
+                    ) : (
+                      <>
+                        <FileText className="w-4 h-4 text-muted-foreground shrink-0" />
+                        <span className="text-xs text-muted-foreground">Clique para anexar o relatório exportado do Goomer, Anota Aí, etc.</span>
+                      </>
+                    )}
+                  </label>
+                </div>
+              )}
+
+              {genTemplate === 'performance' && (
+                <p className="text-[11px] text-muted-foreground/60">
+                  Padrão: últimos 12 meses. O template ONMID exibe o histórico mensal completo do período.
+                </p>
+              )}
             </div>
 
             <div className="flex justify-end gap-2 pt-1">
@@ -751,8 +849,19 @@ export default function RelatoriosPage() {
               </button>
               <Button
                 onClick={generateReport}
-                disabled={generating || !genForm.clientId || !genForm.from || !genForm.to}
-                className="bg-violet-600 hover:bg-violet-700 text-white gap-2 text-sm min-w-[120px]"
+                disabled={
+                  generating ||
+                  !genForm.clientId ||
+                  !genForm.from ||
+                  !genForm.to ||
+                  (genTemplate === 'delivery' && !genCsvContent)
+                }
+                className={cn(
+                  'text-white gap-2 text-sm min-w-[120px]',
+                  genTemplate === 'delivery'
+                    ? 'bg-emerald-600 hover:bg-emerald-700'
+                    : 'bg-violet-600 hover:bg-violet-700',
+                )}
               >
                 {generating ? (
                   <>
