@@ -1226,40 +1226,256 @@ export function Slide09bActionPlan({ data, current, total }: { data: DeliveryRep
   );
 }
 
+// ── Slide 10 — Destaques das campanhas ───────────────────────────────────────
+export function Slide10CampaignHighlights({ data, current, total }: { data: DeliveryReportData; current: number; total: number }) {
+  const pt = data.paidTraffic!;
+  const month = data.monthlyOverview.current.monthLabel.toLowerCase();
+
+  return (
+    <Shell current={current} total={total}>
+      <SlideHeading title="Destaques das campanhas" subtitle={`Desempenho das campanhas em ${month}`} />
+
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(pt.topCampaigns.length, 2)}, 1fr)`, gap: 16, height: 'calc(100% - 72px)' }}>
+        {pt.topCampaigns.slice(0, 2).map((camp, ci) => (
+          <div key={ci} style={{ background: 'white', border: `1px solid ${C.border}`, borderRadius: 14, padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 14, borderBottom: `1px solid ${C.border}` }}>
+              <GreenCircle size={44}>{ci === 0 ? Icon.whatsapp : Icon.rocket}</GreenCircle>
+              <div>
+                <div style={{ fontWeight: 900, fontSize: 15, color: C.text, lineHeight: 1.2 }}>{camp.name}</div>
+                <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>{camp.description}</div>
+              </div>
+            </div>
+            {/* Metrics grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+              {camp.metrics.slice(0, 6).map((m, mi) => (
+                <div key={mi} style={{ background: C.cardBg, borderRadius: 8, padding: '10px 12px' }}>
+                  <div style={{ fontSize: 10, color: C.muted, marginBottom: 4, lineHeight: 1.3 }}>{m.label}</div>
+                  <div style={{ fontSize: 18, fontWeight: 900, color: C.text }}>{m.value}</div>
+                </div>
+              ))}
+            </div>
+            {/* Insight */}
+            <div style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 10, background: C.greenLight, borderRadius: 10, padding: '12px 14px' }}>
+              <GreenCircle size={30}>{Icon.bulb}</GreenCircle>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: C.greenDark, marginBottom: 4 }}>Insight estratégico</div>
+                <p style={{ margin: 0, fontSize: 12, color: C.muted, lineHeight: 1.55 }}>{camp.insight}</p>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </Shell>
+  );
+}
+
+// ── Slide 11 — Diagnóstico do que compõe o faturamento ───────────────────────
+export function Slide11RevenueComposition({ data, current, total }: { data: DeliveryReportData; current: number; total: number }) {
+  const { revenueForces, revenueForceDetails, assetsForNextMonth, conclusion, nextMonth } = data.actionSummary;
+  const forceIcons = [Icon.refresh, Icon.trophy, Icon.calendar, Icon.pin];
+
+  return (
+    <Shell current={current} total={total}>
+      <SlideHeading title="O que sustentou o faturamento" subtitle={`Forças que compõem a receita e ativos para ${nextMonth}`} />
+
+      <div style={{ display: 'flex', gap: 16, height: 'calc(100% - 72px)' }}>
+        {/* Left: 4 force cards */}
+        <div style={{ flex: 2.2, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, flex: 1 }}>
+            {revenueForces.slice(0, 4).map((force, i) => (
+              <div key={i} style={{ background: 'white', border: `1px solid ${C.border}`, borderRadius: 12, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <GreenCircle size={36}>{forceIcons[i]}</GreenCircle>
+                  <span style={{ fontWeight: 700, fontSize: 13, color: C.text, lineHeight: 1.3 }}>{force}</span>
+                </div>
+                <p style={{ margin: 0, fontSize: 11, color: C.muted, lineHeight: 1.55, flex: 1 }}>
+                  {(revenueForceDetails || [])[i] || ''}
+                </p>
+              </div>
+            ))}
+          </div>
+          {/* Conclusion */}
+          <div style={{ background: 'linear-gradient(135deg, #F0FFF4, #EFF6FF)', border: `1px solid ${C.border}`, borderRadius: 10, padding: '12px 18px', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+            <GreenCircle size={32}>{Icon.target}</GreenCircle>
+            <p style={{ margin: 0, fontSize: 12, fontWeight: 600, color: C.text, lineHeight: 1.5 }}>{conclusion}</p>
+          </div>
+        </div>
+
+        {/* Right: assets for next month */}
+        <div style={{ flex: 1.2, background: 'white', border: `1px solid ${C.border}`, borderRadius: 12, padding: '18px 20px', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+            <GreenCircle size={34}>{Icon.rocket}</GreenCircle>
+            <div>
+              <div style={{ fontWeight: 800, fontSize: 13, color: C.text }}>O que ainda temos</div>
+              <div style={{ fontSize: 11, color: C.muted }}>para aproveitar em {nextMonth}</div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>
+            {(assetsForNextMonth || []).slice(0, 8).map((asset, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 10px', background: i % 2 === 0 ? C.cardBg : 'white', borderRadius: 8, border: `1px solid ${C.border}` }}>
+                <div style={{ width: 6, height: 6, borderRadius: '50%', background: C.green, flexShrink: 0, marginTop: 5 }} />
+                <span style={{ fontSize: 12, color: C.text, lineHeight: 1.4 }}>{asset}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </Shell>
+  );
+}
+
+// ── Slide 12 — Plano de ação detalhado ────────────────────────────────────────
+export function Slide12DetailedPlan({ data, current, total }: { data: DeliveryReportData; current: number; total: number }) {
+  const plan = data.campaignActionPlan!;
+  const { nextMonth } = data.actionSummary;
+
+  return (
+    <Shell current={current} total={total}>
+      <SlideHeading title={`Plano de ação detalhado — ${nextMonth}`} subtitle="Campanhas recomendadas por etapa do relacionamento com o cliente" />
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, height: 'calc(100% - 72px)' }}>
+        {/* Campaign cards */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8, flex: 1 }}>
+          {plan.campaigns.slice(0, 5).map((camp, i) => (
+            <div key={i} style={{ background: 'white', border: `1px solid ${C.border}`, borderRadius: 10, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ width: 22, height: 22, borderRadius: '50%', background: C.green, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <span style={{ fontSize: 10, fontWeight: 900, color: 'white' }}>{i + 1}</span>
+                </div>
+                <span style={{ fontWeight: 700, fontSize: 11, color: C.text, lineHeight: 1.3 }}>{camp.name}</span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                <div style={{ fontSize: 10, color: C.muted }}><strong style={{ color: C.text }}>Objetivo:</strong> {camp.objective}</div>
+                <div style={{ fontSize: 10, color: C.muted }}><strong style={{ color: C.text }}>Público:</strong> {camp.audience}</div>
+                <div style={{ background: C.greenLight, borderRadius: 6, padding: '6px 8px', fontSize: 10, color: C.greenDark, fontStyle: 'italic', lineHeight: 1.45 }}>
+                  "{camp.message}"
+                </div>
+                {camp.product && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 2 }}>
+                    <GreenCircle size={20}>{Icon.cart}</GreenCircle>
+                    <span style={{ fontSize: 10, color: C.muted }}>{camp.product}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Customer journey */}
+        {plan.customerJourney.length > 0 && (
+          <div style={{ background: 'white', border: `1px solid ${C.border}`, borderRadius: 10, padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 0, flexShrink: 0 }}>
+            {plan.customerJourney.map((step, i) => (
+              <React.Fragment key={i}>
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: C.green, flexShrink: 0 }} />
+                  <span style={{ fontSize: 11, fontWeight: 600, color: C.text, whiteSpace: 'nowrap' }}>{step}</span>
+                </div>
+                {i < plan.customerJourney.length - 1 && (
+                  <div style={{ color: C.greenMid, fontSize: 16, fontWeight: 900, padding: '0 4px' }}>→</div>
+                )}
+              </React.Fragment>
+            ))}
+          </div>
+        )}
+
+        {/* Guidelines */}
+        {plan.guidelines.length > 0 && (
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(plan.guidelines.length, 4)}, 1fr)`, gap: 8, flexShrink: 0 }}>
+            {plan.guidelines.slice(0, 4).map((g, i) => (
+              <div key={i} style={{ background: C.cardBg, border: `1px solid ${C.border}`, borderRadius: 8, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ width: 6, height: 6, borderRadius: '50%', background: C.green, flexShrink: 0 }} />
+                <span style={{ fontSize: 11, color: C.text }}>{g}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </Shell>
+  );
+}
+
+// ── Slide list builder (auto-omission logic) ──────────────────────────────────
+type SlideKey =
+  | 'cover' | 'monthly' | 'weekly' | 'regions'
+  | 'customerBase' | 'inactives' | 'products' | 'traffic'
+  | 'creatives' | 'actionPlan'
+  | 'campaignHighlights' | 'revenueComposition' | 'detailedPlan';
+
+export function buildDeliverySlideList(data: DeliveryReportData): SlideKey[] {
+  const list: SlideKey[] = ['cover', 'monthly'];
+
+  // Slide 03 — só se houver dados de dias
+  if (data.weeklyBehavior.ordersByDay.some(d => d.value > 0)) {
+    list.push('weekly');
+  }
+  // Slide 04 — só se houver bairros com pedidos
+  if (data.geoRegions.regions.length > 0 && data.geoRegions.regions.some(r => r.orders > 0)) {
+    list.push('regions');
+  }
+  // Slide 05 — só se houver base de clientes
+  if (data.customerBase.active > 0 || data.customerBase.inactive > 0 || data.customerBase.potential > 0) {
+    list.push('customerBase');
+  }
+  // Slide 06 — só se houver inativos ou potenciais
+  if (data.inactives.ranges.some(r => r.count > 0) || data.inactives.potentialCount > 0) {
+    list.push('inactives');
+  }
+  // Slide 07 — só se houver produtos com pedidos
+  if (data.topProducts.ranking.length > 0 && data.topProducts.ranking.some(p => p.orders > 0)) {
+    list.push('products');
+  }
+  // Slide 08 — só se houver tráfego pago
+  if (data.paidTraffic) {
+    list.push('traffic');
+  }
+
+  // Slides 09a/09b — sempre presentes (síntese e plano)
+  list.push('creatives');
+  list.push('actionPlan');
+
+  // Complementares
+  if (data.paidTraffic?.topCampaigns.length) {
+    list.push('campaignHighlights');
+  }
+  if (data.actionSummary.revenueForces.length >= 3) {
+    list.push('revenueComposition');
+  }
+  if (data.campaignActionPlan?.campaigns.length) {
+    list.push('detailedPlan');
+  }
+
+  return list;
+}
+
 // ── Public render function ─────────────────────────────────────────────────────
 export function renderDeliverySlide(
   data: DeliveryReportData,
   slideIndex: number,
   totalSlides: number,
 ): React.ReactNode {
+  const list = buildDeliverySlideList(data);
+  const key = list[slideIndex];
   const current = slideIndex + 1;
-  const hasTraffic = !!data.paidTraffic;
 
-  // Index map:
-  //  0-6  → slides 01-07 (always)
-  //  7    → slide 08 Traffic (if traffic) OR slide 09a (no traffic)
-  //  8    → slide 09a (if traffic)  OR slide 09b (no traffic)
-  //  9    → slide 09b (if traffic only)
-  switch (slideIndex) {
-    case 0: return <Slide01Cover data={data} current={current} total={totalSlides} />;
-    case 1: return <Slide02Monthly data={data} current={current} total={totalSlides} />;
-    case 2: return <Slide03Weekly data={data} current={current} total={totalSlides} />;
-    case 3: return <Slide04Regions data={data} current={current} total={totalSlides} />;
-    case 4: return <Slide05CustomerBase data={data} current={current} total={totalSlides} />;
-    case 5: return <Slide06Inactives data={data} current={current} total={totalSlides} />;
-    case 6: return <Slide07Products data={data} current={current} total={totalSlides} />;
-    case 7: return hasTraffic
-      ? <Slide08Traffic data={data} current={current} total={totalSlides} />
-      : <Slide09aCreatives data={data} current={current} total={totalSlides} />;
-    case 8: return hasTraffic
-      ? <Slide09aCreatives data={data} current={current} total={totalSlides} />
-      : <Slide09bActionPlan data={data} current={current} total={totalSlides} />;
-    case 9: return <Slide09bActionPlan data={data} current={current} total={totalSlides} />;
-    default: return null;
+  switch (key) {
+    case 'cover':               return <Slide01Cover data={data} current={current} total={totalSlides} />;
+    case 'monthly':             return <Slide02Monthly data={data} current={current} total={totalSlides} />;
+    case 'weekly':              return <Slide03Weekly data={data} current={current} total={totalSlides} />;
+    case 'regions':             return <Slide04Regions data={data} current={current} total={totalSlides} />;
+    case 'customerBase':        return <Slide05CustomerBase data={data} current={current} total={totalSlides} />;
+    case 'inactives':           return <Slide06Inactives data={data} current={current} total={totalSlides} />;
+    case 'products':            return <Slide07Products data={data} current={current} total={totalSlides} />;
+    case 'traffic':             return <Slide08Traffic data={data} current={current} total={totalSlides} />;
+    case 'creatives':           return <Slide09aCreatives data={data} current={current} total={totalSlides} />;
+    case 'actionPlan':          return <Slide09bActionPlan data={data} current={current} total={totalSlides} />;
+    case 'campaignHighlights':  return <Slide10CampaignHighlights data={data} current={current} total={totalSlides} />;
+    case 'revenueComposition':  return <Slide11RevenueComposition data={data} current={current} total={totalSlides} />;
+    case 'detailedPlan':        return <Slide12DetailedPlan data={data} current={current} total={totalSlides} />;
+    default:                    return null;
   }
 }
 
 export function getDeliverySlideCount(data: DeliveryReportData): number {
-  // 7 base slides + slide 08 traffic (if available) + slide 09a + slide 09b
-  return data.paidTraffic ? 10 : 9;
+  return buildDeliverySlideList(data).length;
 }

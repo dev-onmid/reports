@@ -25,6 +25,14 @@ export type CampaignData = {
   insight: string;
 };
 
+export type CampaignAction = {
+  name: string;
+  objective: string;
+  audience: string;
+  message: string;
+  product: string;
+};
+
 export type CreativeData = {
   name: string;
   roas: number;
@@ -99,9 +107,17 @@ export type DeliveryReportData = {
   actionSummary: {
     creatives: CreativeData[];
     revenueForces: string[];
+    revenueForceDetails: string[];  // 4 parágrafos explicando cada força (para slide 11)
+    assetsForNextMonth: string[];   // lista "O que ainda temos para aproveitar"
     actionPlan: string[];
     priorities: string[];
     conclusion: string;
     nextMonth: string;
   };
+
+  campaignActionPlan: {
+    campaigns: CampaignAction[];
+    customerJourney: string[];
+    guidelines: string[];
+  } | null;
 };

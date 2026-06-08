@@ -90,30 +90,55 @@ ${csvContent.slice(0, 30000)}
 === DADOS META ADS ===
 ${metaJson}
 
+=== REGRAS DE INSIGHT AUTOMÁTICO ===
+Aplique as regras abaixo ao gerar os textos de insight:
+- Faturamento caiu mas ticket médio subiu → queda vem de volume/pedidos, não de valor médio
+- Pedidos E ticket médio caíram → revisar oferta, campanha de volume urgente
+- Ticket médio subiu → sugerir combos e produtos complementares
+- Inativos = maioria da base → priorizar reativação acima de tudo
+- Clientes com 1 pedido relevantes → priorizar segunda compra antes que virem inativos
+- Sexta e sábado fortes → reforçar campanhas de fim de semana
+- Terça e quarta fracos → criar campanhas específicas de meio de semana
+- Poucos bairros concentram pedidos → remarketing geográfico segmentado
+- ROAS positivo → sugerir escala controlada
+- Frequência alta → renovação de criativos urgente
+- Custo por compra baixo → aumentar orçamento gradualmente
+- Custo por conversa alto → testar nova oferta ou público
+
+=== REGRAS DE OMISSÃO ===
+Use arrays VAZIOS [] quando não houver dados (não zeros, não placeholders).
+- weeklyBehavior.ordersByDay: [] se não houver dados por dia da semana
+- geoRegions.regions: [] se não houver dados por bairro/região
+- customerBase: use 0 para todos os números se não houver segmentação de clientes
+- inactives.ranges: [] se não houver dados de inatividade; potentialCount: 0 se não houver potenciais
+- topProducts.ranking: [] se não houver dados de produtos
+- paidTraffic: null se não houver dados de Meta Ads
+- campaignActionPlan: null se não houver base de clientes ou produtos para montar as campanhas
+
 Retorne o JSON com exatamente esta estrutura TypeScript:
 
 {
   clientName: string,
   templateSlug: "onmid-delivery",
   cover: {
-    subtitle: string,           // ex: "Análise de resultado e oportunidades de crescimento"
-    periodLabel: string,        // ex: "Abril 2025"
-    prevPeriodLabel: string,    // ex: "Março 2025"
-    objective: string           // 1-2 frases sobre o objetivo do relatório
+    subtitle: string,
+    periodLabel: string,
+    prevPeriodLabel: string,     // "" se não houver mês anterior
+    objective: string
   },
   monthlyOverview: {
     current: { monthLabel: string, year: string, revenue: number, orders: number, avgTicket: number },
     previous: { monthLabel: string, year: string, revenue: number, orders: number, avgTicket: number },
-    mainInsight: string         // leitura principal comparando os dois meses (2-3 frases)
+    mainInsight: string
   },
   weeklyBehavior: {
-    ordersByDay: Array<{ day: string, value: number, highlight: boolean }>,   // 7 dias da semana
+    ordersByDay: Array<{ day: string, value: number, highlight: boolean }>,
     deliveriesByDay: Array<{ day: string, value: number, highlight: boolean }>,
-    strategicReading: string,   // análise dos picos e vales (2 frases)
-    opportunities: string[]     // 3 ações para potencializar dias fracos
+    strategicReading: string,
+    opportunities: string[]
   },
   geoRegions: {
-    regions: Array<{ rank: number, name: string, orders: number, revenue: number }>,  // top 8
+    regions: Array<{ rank: number, name: string, orders: number, revenue: number }>,
     strengthenInsight: string,
     growInsight: string,
     remarketingInsight: string
@@ -125,19 +150,19 @@ Retorne o JSON com exatamente esta estrutura TypeScript:
     ordersInBase: number,
     singleOrderCount: number,
     multiOrderCount: number,
-    baseInsight: string,        // 1-2 frases
-    segmentInsight: string      // 1-2 frases
+    baseInsight: string,
+    segmentInsight: string
   },
   inactives: {
-    ranges: Array<{ label: string, count: number, priority: boolean }>,  // ex: "30-60 dias", "61-90 dias", "91-120 dias", "+120 dias"
+    ranges: Array<{ label: string, count: number, priority: boolean }>,
     potentialCount: number,
-    approachSuggestions: string[],  // 3 abordagens de reativação
-    entryProducts: string[],        // 2-4 produtos para porta de entrada
-    cta: string                     // chamada para ação no WhatsApp
+    approachSuggestions: string[],
+    entryProducts: string[],
+    cta: string
   },
   topProducts: {
-    ranking: Array<{ rank: number, name: string, orders: number }>,  // top 6
-    combos: Array<{ title: string, description: string }>,           // 4-5 combos/upsell sugeridos
+    ranking: Array<{ rank: number, name: string, orders: number }>,
+    combos: Array<{ title: string, description: string }>,
     insight: string
   },
   paidTraffic: {
@@ -155,13 +180,26 @@ Retorne o JSON com exatamente esta estrutura TypeScript:
     recommendation: string
   } | null,
   actionSummary: {
-    creatives: Array<{ name: string, roas: number }>,  // 3-4 criativos se Meta disponível
-    revenueForces: string[],  // 4 forças que compõem o faturamento (frases curtas)
-    actionPlan: string[],     // 5-6 ações táticas para o próximo mês
-    priorities: string[],     // 5-6 prioridades ordenadas por impacto
-    conclusion: string,       // 1-2 frases de síntese executiva
-    nextMonth: string         // nome do próximo mês (ex: "Maio")
-  }
+    creatives: Array<{ name: string, roas: number }>,
+    revenueForces: string[],          // 4 frases curtas: ex "Clientes recorrentes", "Produtos campeões"
+    revenueForceDetails: string[],    // 4 parágrafos explicando cada força (1-2 frases cada)
+    assetsForNextMonth: string[],     // 6-8 itens: "X clientes ativos", "Y clientes inativos", "Produtos campeões", etc.
+    actionPlan: string[],             // 6-8 ações em ordem de prioridade
+    priorities: string[],             // 6-8 prioridades objetivas
+    conclusion: string,
+    nextMonth: string
+  },
+  campaignActionPlan: {
+    campaigns: Array<{
+      name: string,        // ex: "Campanha 1 — Recompra para ativos"
+      objective: string,
+      audience: string,
+      message: string,     // mensagem sugerida para WhatsApp (1-2 frases)
+      product: string      // produto ou oferta recomendada
+    }>,
+    customerJourney: string[],   // 5 etapas: ["Descoberta", "Primeira compra", "Recompra", "Reativação leve", "Reativação forte"]
+    guidelines: string[]          // 4 diretrizes estratégicas (frases curtas)
+  } | null
 }
 `.trim();
 }
@@ -192,7 +230,7 @@ export async function buildDeliveryReport(opts: {
   // Claude call
   const message = await anthropic.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 8192,
+    max_tokens: 16000,
     messages: [
       {
         role: 'user',
