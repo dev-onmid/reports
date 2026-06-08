@@ -38,14 +38,36 @@ Receberá:
 3. Período e nome do cliente
 
 Sua tarefa: extrair, interpretar e estruturar TODOS os dados em um JSON TypeScript exato.
+
 REGRAS CRÍTICAS:
 - Retorne APENAS JSON válido. Sem markdown, sem blocos de código, sem explicações.
 - Todos os valores numéricos devem ser números (não strings).
-- Textos de insight devem ser objetivos, data-driven e diretivos (tom de consultoria).
-- Se um dado não existir no CSV, use 0 para números e "" para strings.
-- paidTraffic deve ser null se não houver dados de Meta Ads.
-- Se o CSV for fornecido em outro formato (XML, JSON, etc.), extraia da mesma forma.
-- Gere no mínimo 5 itens em actionPlan e priorities.
+- Textos de insight: objetivos, data-driven, tom de consultoria sênior, 2-4 frases.
+- paidTraffic: null se não houver dados de Meta Ads.
+- Se o CSV estiver em outro formato (XML, JSON, etc.), extraia da mesma forma.
+- Gere no mínimo 6 itens em actionPlan e 6 itens em priorities.
+
+REGRAS DE EXTRAÇÃO DE PRODUTOS:
+- Procure colunas como: "produto", "item", "name", "description", "quantidade", "qtd", "qty",
+  "pedidos", "orders", "vendas", "sales", "total_vendido", "count" em qualquer case.
+- O campo "orders" de cada produto = quantidade de vezes que aquele produto foi pedido/vendido.
+- Se o CSV tiver linhas de pedido (1 linha = 1 item de pedido), agrupe por produto e some.
+- Se o CSV tiver totais por produto, use diretamente.
+- NUNCA deixe orders = 0 se o produto aparecer no CSV. Se não encontrar a quantidade, estime
+  pela proporção em relação ao total de pedidos do mês.
+
+REGRAS DE EXTRAÇÃO DE BASE DE CLIENTES:
+- Procure colunas: "cliente", "customer", "telefone", "phone", "status", "ativo", "inativo",
+  "última compra", "last_order", "recency", "frequência", "frequency".
+- active = clientes com pedido nos últimos 30 dias (ou marcados como "ativo").
+- inactive = clientes sem pedido entre 31-120 dias (ou marcados como "inativo").
+- potential = contatos sem nenhum pedido registrado (ou marcados como "potencial").
+- Se o CSV não tiver dados de clientes, use 0 e explique no baseInsight.
+
+REGRAS ROAS (META ADS):
+- ROAS de um criativo = receita atribuída / investimento.
+- Se não houver coluna de receita, calcule pelo número de conversões estimadas × ticket médio.
+- Se não houver dados de ROAS no CSV/Meta, use 0.00 para criativos.
 `.trim();
 
 function buildUserPrompt(

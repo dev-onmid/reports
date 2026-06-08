@@ -119,7 +119,7 @@ function Shell({ current, total, children, noBlob }: ShellProps) {
         <ReportsFooter />
       </div>
       {/* Content area */}
-      <div style={{ position: 'absolute', top: 68, left: 44, right: 44, bottom: 48 }}>
+      <div style={{ position: 'absolute', top: 68, left: 44, right: 44, bottom: 48, overflow: 'hidden' }}>
         {children}
       </div>
     </div>
@@ -1092,94 +1092,65 @@ export function Slide08Traffic({ data, current, total }: { data: DeliveryReportD
   );
 }
 
-// ── Slide 09 — Diagnóstico e plano de ação ────────────────────────────────────
-export function Slide09Summary({ data, current, total }: { data: DeliveryReportData; current: number; total: number }) {
-  const { creatives, revenueForces, actionPlan, priorities, conclusion, nextMonth } = data.actionSummary;
+// ── Slide 09a — Criativos + Forças do faturamento ────────────────────────────
+export function Slide09aCreatives({ data, current, total }: { data: DeliveryReportData; current: number; total: number }) {
+  const { creatives, revenueForces, conclusion, nextMonth } = data.actionSummary;
 
   return (
     <Shell current={current} total={total}>
-      <SlideHeading title={`Diagnóstico e plano de ação para ${nextMonth}`} subtitle="Transformar dados em recorrência, campanhas e faturamento" />
+      <SlideHeading
+        title={`Diagnóstico — ${nextMonth}`}
+        subtitle="Criativos com melhor sinal e forças que compõem o faturamento"
+      />
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, height: 'calc(100% - 72px)' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 0.9fr 1fr 1fr', gap: 12, flex: 1 }}>
-          {/* Column 1: Criativos */}
-          <div style={{ background: 'white', border: `1px solid ${C.border}`, borderRadius: 12, padding: '14px 16px', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-              <div style={{ width: 20, height: 20, borderRadius: '50%', background: C.green, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <span style={{ fontSize: 9, fontWeight: 900, color: 'white' }}>1</span>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14, height: 'calc(100% - 72px)' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, flex: 1 }}>
+          {/* Criativos */}
+          <div style={{ background: 'white', border: `1px solid ${C.border}`, borderRadius: 12, padding: '18px 20px', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+              <div style={{ width: 24, height: 24, borderRadius: '50%', background: C.green, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <span style={{ fontSize: 11, fontWeight: 900, color: 'white' }}>1</span>
               </div>
-              <span style={{ fontWeight: 700, fontSize: 12, color: C.text }}>Criativos com melhor sinal</span>
+              <span style={{ fontWeight: 700, fontSize: 14, color: C.text }}>Criativos com melhor sinal</span>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-              <span style={{ fontSize: 9, fontWeight: 700, color: C.muted, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Criativo</span>
-              <span style={{ fontSize: 9, fontWeight: 700, color: C.green, letterSpacing: '0.08em', textTransform: 'uppercase' }}>ROAS</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10, paddingBottom: 8, borderBottom: `1px solid ${C.border}` }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: C.muted, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Criativo</span>
+              <span style={{ fontSize: 10, fontWeight: 700, color: C.green, letterSpacing: '0.08em', textTransform: 'uppercase' }}>ROAS</span>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {creatives.slice(0, 4).map((c, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'space-between' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }}>
-                    <div style={{ width: 32, height: 32, borderRadius: 6, background: ['#1a1a1a', C.greenLight, C.blueLight, C.purpleLight][i], flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <span style={{ fontSize: 10, color: i === 0 ? 'white' : C.muted, fontWeight: 700 }}>{c.name.slice(0, 2).toUpperCase()}</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
+              {creatives.slice(0, 5).map((c, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
+                    <div style={{
+                      width: 36, height: 36, borderRadius: 8, flexShrink: 0,
+                      background: ['#1a1a1a', C.greenLight, C.blueLight, C.purpleLight, C.cardBg][i],
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      <span style={{ fontSize: 11, color: i === 0 ? 'white' : C.muted, fontWeight: 700 }}>
+                        {c.name.replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || `C${i + 1}`}
+                      </span>
                     </div>
-                    <span style={{ fontSize: 11, color: C.text, lineHeight: 1.3, overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name}</span>
+                    <span style={{ fontSize: 12, color: C.text, lineHeight: 1.35, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{c.name}</span>
                   </div>
-                  <span style={{ fontSize: 14, fontWeight: 900, color: C.green, flexShrink: 0 }}>{c.roas.toFixed(2)}</span>
+                  <span style={{ fontSize: 18, fontWeight: 900, color: C.green, flexShrink: 0 }}>{c.roas.toFixed(2)}</span>
                 </div>
               ))}
             </div>
           </div>
 
-          {/* Column 2: Revenue composition */}
-          <div style={{ background: 'white', border: `1px solid ${C.border}`, borderRadius: 12, padding: '14px 16px', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-              <div style={{ width: 20, height: 20, borderRadius: '50%', background: C.green, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <span style={{ fontSize: 9, fontWeight: 900, color: 'white' }}>2</span>
+          {/* Revenue forces */}
+          <div style={{ background: 'white', border: `1px solid ${C.border}`, borderRadius: 12, padding: '18px 20px', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+              <div style={{ width: 24, height: 24, borderRadius: '50%', background: C.green, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <span style={{ fontSize: 11, fontWeight: 900, color: 'white' }}>2</span>
               </div>
-              <span style={{ fontWeight: 700, fontSize: 12, color: C.text }}>O que compõe o faturamento</span>
+              <span style={{ fontWeight: 700, fontSize: 14, color: C.text }}>O que compõe o faturamento</span>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, flex: 1, alignContent: 'center' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, flex: 1, alignContent: 'center' }}>
               {revenueForces.slice(0, 4).map((force, i) => (
-                <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-                  <GreenCircle size={40}>{[Icon.refresh, Icon.trophy, Icon.calendar, Icon.pin][i]}</GreenCircle>
-                  <span style={{ fontSize: 11, fontWeight: 600, color: C.text, textAlign: 'center', lineHeight: 1.3 }}>{force}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Column 3: Action plan */}
-          <div style={{ background: 'white', border: `1px solid ${C.border}`, borderRadius: 12, padding: '14px 16px', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-              <div style={{ width: 20, height: 20, borderRadius: '50%', background: C.green, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <span style={{ fontSize: 9, fontWeight: 900, color: 'white' }}>3</span>
-              </div>
-              <span style={{ fontWeight: 700, fontSize: 12, color: C.text }}>Plano de ação para {nextMonth}</span>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-              {actionPlan.slice(0, 6).map((item, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                  <div style={{ width: 18, height: 18, borderRadius: '50%', background: C.greenLight, border: `1px solid ${C.greenMid}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1 }}>
-                    <span style={{ fontSize: 9, fontWeight: 800, color: C.greenDark }}>{i + 1}</span>
-                  </div>
-                  <span style={{ fontSize: 11, color: C.text, lineHeight: 1.4 }}>{item}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Column 4: Priorities */}
-          <div style={{ background: 'white', border: `1px solid ${C.border}`, borderRadius: 12, padding: '14px 16px', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-              <div style={{ width: 20, height: 20, borderRadius: '50%', background: C.green, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <span style={{ fontSize: 9, fontWeight: 900, color: 'white' }}>4</span>
-              </div>
-              <span style={{ fontWeight: 700, fontSize: 12, color: C.text }}>Prioridades recomendadas</span>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-              {priorities.slice(0, 6).map((item, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                  <div style={{ width: 6, height: 6, borderRadius: '50%', background: C.green, flexShrink: 0, marginTop: 5 }} />
-                  <span style={{ fontSize: 11, color: C.text, lineHeight: 1.4 }}>{item}</span>
+                <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, padding: '14px 10px', background: C.cardBg, borderRadius: 10, border: `1px solid ${C.border}` }}>
+                  <GreenCircle size={44}>{[Icon.refresh, Icon.trophy, Icon.calendar, Icon.pin][i]}</GreenCircle>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: C.text, textAlign: 'center', lineHeight: 1.4 }}>{force}</span>
                 </div>
               ))}
             </div>
@@ -1187,9 +1158,68 @@ export function Slide09Summary({ data, current, total }: { data: DeliveryReportD
         </div>
 
         {/* Conclusion */}
-        <div style={{ background: 'linear-gradient(135deg, #F0FFF4, #EFF6FF)', border: `1px solid ${C.border}`, borderRadius: 10, padding: '12px 18px', display: 'flex', alignItems: 'center', gap: 14 }}>
-          <GreenCircle size={34}>{Icon.target}</GreenCircle>
+        <div style={{ background: 'linear-gradient(135deg, #F0FFF4, #EFF6FF)', border: `1px solid ${C.border}`, borderRadius: 10, padding: '14px 20px', display: 'flex', alignItems: 'center', gap: 14, flexShrink: 0 }}>
+          <GreenCircle size={36}>{Icon.target}</GreenCircle>
           <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: C.text, lineHeight: 1.5 }}>{conclusion}</p>
+        </div>
+      </div>
+    </Shell>
+  );
+}
+
+// ── Slide 09b — Plano de ação + Prioridades ───────────────────────────────────
+export function Slide09bActionPlan({ data, current, total }: { data: DeliveryReportData; current: number; total: number }) {
+  const { actionPlan, priorities, nextMonth } = data.actionSummary;
+
+  return (
+    <Shell current={current} total={total}>
+      <SlideHeading
+        title={`Plano de ação para ${nextMonth}`}
+        subtitle="Transformar diagnóstico em ações táticas de alto impacto"
+      />
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, height: 'calc(100% - 72px)' }}>
+        {/* Plano de ação */}
+        <div style={{ background: 'white', border: `1px solid ${C.border}`, borderRadius: 12, padding: '18px 20px', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+            <div style={{ width: 24, height: 24, borderRadius: '50%', background: C.green, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <span style={{ fontSize: 11, fontWeight: 900, color: 'white' }}>3</span>
+            </div>
+            <span style={{ fontWeight: 700, fontSize: 14, color: C.text }}>Plano de ação para {nextMonth}</span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+            {actionPlan.slice(0, 8).map((item, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                <div style={{
+                  width: 22, height: 22, borderRadius: '50%',
+                  background: C.greenLight, border: `1px solid ${C.greenMid}`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  flexShrink: 0, marginTop: 1,
+                }}>
+                  <span style={{ fontSize: 10, fontWeight: 800, color: C.greenDark }}>{i + 1}</span>
+                </div>
+                <span style={{ fontSize: 12, color: C.text, lineHeight: 1.5 }}>{item}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Prioridades */}
+        <div style={{ background: 'white', border: `1px solid ${C.border}`, borderRadius: 12, padding: '18px 20px', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+            <div style={{ width: 24, height: 24, borderRadius: '50%', background: C.green, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <span style={{ fontSize: 11, fontWeight: 900, color: 'white' }}>4</span>
+            </div>
+            <span style={{ fontWeight: 700, fontSize: 14, color: C.text }}>Prioridades recomendadas</span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+            {priorities.slice(0, 8).map((item, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                <div style={{ width: 8, height: 8, borderRadius: '50%', background: C.green, flexShrink: 0, marginTop: 6 }} />
+                <span style={{ fontSize: 12, color: C.text, lineHeight: 1.5 }}>{item}</span>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </Shell>
@@ -1203,6 +1233,13 @@ export function renderDeliverySlide(
   totalSlides: number,
 ): React.ReactNode {
   const current = slideIndex + 1;
+  const hasTraffic = !!data.paidTraffic;
+
+  // Index map:
+  //  0-6  → slides 01-07 (always)
+  //  7    → slide 08 Traffic (if traffic) OR slide 09a (no traffic)
+  //  8    → slide 09a (if traffic)  OR slide 09b (no traffic)
+  //  9    → slide 09b (if traffic only)
   switch (slideIndex) {
     case 0: return <Slide01Cover data={data} current={current} total={totalSlides} />;
     case 1: return <Slide02Monthly data={data} current={current} total={totalSlides} />;
@@ -1211,14 +1248,18 @@ export function renderDeliverySlide(
     case 4: return <Slide05CustomerBase data={data} current={current} total={totalSlides} />;
     case 5: return <Slide06Inactives data={data} current={current} total={totalSlides} />;
     case 6: return <Slide07Products data={data} current={current} total={totalSlides} />;
-    case 7: return data.paidTraffic
+    case 7: return hasTraffic
       ? <Slide08Traffic data={data} current={current} total={totalSlides} />
-      : <Slide09Summary data={data} current={current} total={totalSlides} />;
-    case 8: return <Slide09Summary data={data} current={current} total={totalSlides} />;
+      : <Slide09aCreatives data={data} current={current} total={totalSlides} />;
+    case 8: return hasTraffic
+      ? <Slide09aCreatives data={data} current={current} total={totalSlides} />
+      : <Slide09bActionPlan data={data} current={current} total={totalSlides} />;
+    case 9: return <Slide09bActionPlan data={data} current={current} total={totalSlides} />;
     default: return null;
   }
 }
 
 export function getDeliverySlideCount(data: DeliveryReportData): number {
-  return data.paidTraffic ? 9 : 8;
+  // 7 base slides + slide 08 traffic (if available) + slide 09a + slide 09b
+  return data.paidTraffic ? 10 : 9;
 }
