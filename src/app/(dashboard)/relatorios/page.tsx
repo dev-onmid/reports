@@ -134,12 +134,15 @@ export default function RelatoriosPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const data = await res.json() as { public_token?: string; id?: string };
+      const data = await res.json() as { public_token?: string; id?: string; error?: string };
       if (data.public_token) {
         setShowGenModal(false);
+        // window.open must be called before any await to avoid popup blocker
+        window.open(`/relatorio/${data.public_token}`, '_blank');
         const rows = await fetch('/api/reports').then(r => r.ok ? r.json() : []) as DiagnosticReport[];
         setDiagnostics(rows);
-        window.open(`/relatorio/${data.public_token}`, '_blank');
+      } else {
+        alert(data.error ?? 'Erro ao gerar relatório. Tente novamente.');
       }
     } finally {
       setGenerating(false);
