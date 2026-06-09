@@ -8,10 +8,10 @@ export const maxDuration = 120;
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => ({})) as {
     clientId?: string; from?: string; to?: string; manualNotes?: string;
-    template?: string; csvContent?: string;
+    agencyContext?: string; template?: string; csvContent?: string;
   };
 
-  const { clientId, from, to, manualNotes, template, csvContent } = body;
+  const { clientId, from, to, manualNotes, agencyContext, template, csvContent } = body;
   if (!clientId || !from || !to) {
     return Response.json({ error: 'clientId, from e to são obrigatórios' }, { status: 400 });
   }
@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: 'csvContent é obrigatório para o template Delivery' }, { status: 400 });
     }
 
-    const reportData = await buildDeliveryReport({ clientId, clientName, from, to, csvContent });
+    const reportData = await buildDeliveryReport({ clientId, clientName, from, to, csvContent, agencyContext });
     const { token, reportId } = await saveDeliveryReport({ clientId, clientName, from, to, data: reportData });
     return Response.json({ ok: true, id: reportId, public_token: token });
   }
@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
     accountIds: metaAccountIds,
     periodFrom: from,
     periodTo: to,
-    manualNotes,
+    agencyContext: agencyContext ?? manualNotes,
     apiKey,
   });
 

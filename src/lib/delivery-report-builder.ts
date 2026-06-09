@@ -1,11 +1,11 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { DeliveryReportData } from '@/components/delivery-template/types';
 import { makeServerPool } from '@/lib/server-db';
 import { randomUUID } from 'crypto';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-// ── Meta Ads fetcher (reuses the same connection pattern as report-builder.ts) ─
+// ── Meta Ads fetcher ──────────────────────────────────────────────────────────
+
 async function fetchMetaData(clientId: string, from: string, to: string) {
   const pool = makeServerPool();
   try {
@@ -29,67 +29,164 @@ async function fetchMetaData(clientId: string, from: string, to: string) {
   }
 }
 
-// ── Claude prompt ─────────────────────────────────────────────────────────────
-const SYSTEM_PROMPT = `
-Você é um consultor sênior de marketing especializado em negócios de delivery e alimentação no Brasil.
-Sua função é transformar dados brutos em diagnósticos precisos e planos táticos de alto impacto.
+// ── Prompts ───────────────────────────────────────────────────────────────────
 
-━━ BENCHMARKS DO SETOR (delivery Brasil) ━━
-Use estes valores como referência para qualificar o desempenho do cliente:
-• Ticket médio saudável: R$ 40–70 (abaixo → oportunidade de upsell/combo)
-• Taxa de recompra mensal: 35–50 % dos ativos (abaixo → retenção é prioridade)
-• Frequência ideal: 2–3 pedidos/mês por cliente ativo (abaixo → programa de fidelidade)
-• Base inativa costuma ser 5–15× maior que a ativa — isso É uma oportunidade, não um fracasso
-• Distribuição de pedidos por dia: Sex/Sáb/Dom = 55–70 % do volume; Seg/Ter = menor tráfego
-• Top 3 bairros normalmente concentram 40–65 % dos pedidos
-• ROAS Meta Ads: < 3× = ineficiente; 4–6× = saudável; > 7× = escalar
-• Custo por pedido (Meta): R$ 8–20 dependendo do ticket e região
-• Frequência de exposição (Meta): > 3,5 por semana = cansaço criativo, renovar
+const SYSTEM_PROMPT = `Você é um analista sênior de marketing digital especializado em delivery e alimentação no Brasil. Você escreve para donos de restaurante — não para marqueteiros.
 
-━━ FONTES DE DADOS QUE VOCÊ RECEBE ━━
-1. CARDÁPIO DIGITAL / SISTEMA DE PEDIDOS (CSV/exportação)
-   Plataformas comuns: Goomer, Anota Aí, iFood, Delivery Direto, Aiqfome, Garçom Web
-   O CSV pode variar muito em estrutura. Adapte-se ao formato recebido.
+MISSÃO: transformar dados de pedidos, clientes e campanhas em um diagnóstico claro e um plano de ação que o dono do restaurante consiga executar.
 
-2. META ADS (JSON estruturado pela plataforma)
-   Campos disponíveis: campaign_name, spend, impressions, reach, clicks, actions (conversões)
+BENCHMARKS DO SETOR (use como referência para qualificar o desempenho):
+• Ticket médio saudável: R$40–70 (abaixo → oportunidade de upsell/combo)
+• Taxa de recompra mensal: 35–50% dos ativos (abaixo → retenção é prioridade)
+• Frequência ideal: 2–3 pedidos/mês por cliente ativo
+• Base inativa costuma ser 5–15× maior que a ativa — isso É uma oportunidade, não fracasso
+• Sex/Sáb/Dom = 55–70% do volume de pedidos
+• ROAS Meta Ads: <3× = ineficiente; 4–6× = saudável; >7× = escalar
+• Custo por pedido (Meta): R$8–20 dependendo do ticket e região
+• Top 3 bairros concentram 40–65% dos pedidos em geral
 
-━━ REGRAS DE EXTRAÇÃO ━━
+REGRAS DE COMUNICAÇÃO (sem exceção):
+- Toda métrica técnica DEVE ter tradução em linguagem de negócio entre parênteses
+  ✓ "ROAS de 4,2× (para cada R$1 investido, R$4,20 vieram em pedidos atribuídos)"
+  ✓ "Ticket médio de R$58 — acima do benchmark de R$40–70 para delivery"
+- Seções sem dados são OMITIDAS. Nunca: "N/A", "sem dados", seção vazia.
+- Toda queda: 1 frase de contexto + 1 ação concreta. Nunca esconda quedas.
+- Variações com % E valor absoluto: "+23% (de 254 para 312)"
+- Tom direto, português BR. Proibido: "excelente resultado", "ótimo desempenho", "é importante destacar"
+- O relatório conta uma história: fizemos → aconteceu → aprendemos → vamos fazer
 
-PRODUTOS:
-• Identifique a coluna de nome do produto e de quantidade vendida (pode ser: produto, item,
-  descrição, name, quantidade, qtd, qty, pedidos, orders, vendas, count, total_vendido)
-• Se o CSV tiver 1 linha por item de pedido → agrupe por produto e some as quantidades
-• Se já tiver totais consolidados → use diretamente
-• NUNCA retorne orders = 0 para um produto que aparece no CSV
-• Se não encontrar quantidade, estime pela proporção sobre o total de pedidos
+SEÇÕES (ordem fixa — pule se não houver dados):
+1. RESUMO EXECUTIVO — 3 a 5 destaques em 1 frase cada, mais importante para o negócio primeiro
+2. RESULTADOS DO MÊS — faturamento, volume de pedidos, ticket médio. Compare com benchmark setorial.
+3. BASE DE CLIENTES — ativos, inativos por faixa, potenciais. Saúde e oportunidade de reativação.
+4. FUNIL DE MÍDIA PAGA — investimento → alcance → cliques → pedidos. Melhor e pior campanha com plano para a pior.
+5. ANÁLISE DE PRODUTOS — top produtos, dependências de poucos itens, oportunidades de combo/upsell
+6. COMPORTAMENTO SEMANAL — dias fortes vs fracos, oportunidade de equalizar volume
+7. COMPARATIVO COM PERÍODO ANTERIOR — métricas lado a lado, variação %, contexto para cada queda
+8. CAMPANHAS SUGERIDAS — 2 a 3 campanhas específicas com audiência, mensagem pronta e produto
+9. RECOMENDAÇÕES — mín. 3, máx. 5. Formato OBRIGATÓRIO: O que fazer → Por que (dado) → Resultado esperado
+10. PRÓXIMOS PASSOS — 3 a 4 ações concretas que a agência vai executar
 
-CLIENTES / RFM:
-• Classifique usando a data do último pedido (last_order, última compra, data):
-  - active   = último pedido há 0–30 dias
-  - inactive = último pedido há 31–120 dias (subdivida em faixas de 30 dias)
-  - potential = nunca fez pedido (contato cadastrado sem histórico)
-• Se o CSV não tiver dados de clientes: use 0 e explique em baseInsight
+QUALIDADE:
+- Cada insight DEVE citar um número concreto do relatório
+- Compare com benchmarks quando relevante
+- Mensagem de campanha WhatsApp: informal, "Oi [nome]," na abertura, 2–3 frases com produto e oferta específicos
+- Relatório com poucos dados parece enxuto e completo, não incompleto
 
-META ADS / ROAS:
-• ROAS = receita atribuída / spend. Se não tiver receita explícita: conversões × ticket médio
-• Se não tiver dados de Meta Ads: paidTraffic = null
-• Para criativos: use o nome da campanha ou ad_name como identificador; roas = 0 se não calculável
+DESIGN SYSTEM — use inline styles com estes valores exatos:
+verde: #55f52f | fundo: #ffffff | texto: #0e0e0e | hero: #000000
+superfície: #f7f7f7 | borda: #cccccc | roxo: #7b2cff | erro: #e52020
+verde texto: #1a6600 | cinza texto: #757575
+fonte título: font-family:var(--font-bebas),sans-serif
+fonte corpo: font-family:var(--font-inter),sans-serif
+border-radius: 2px (SEMPRE, nunca maior)
 
-━━ QUALIDADE DOS INSIGHTS ━━
-• Cada insight deve citar números concretos do relatório
-• Compare com os benchmarks acima quando relevante
-• Tom de consultoria sênior: direto, objetivo, sem elogios vazios
-• Evite frases genéricas como "é importante" ou "deve ser considerado"
-• Exemplos de bom insight:
-  ✓ "Com 87 clientes entre 30–60 dias sem compra e ticket médio de R$ 52, uma campanha de
-     reativação pode recuperar R$ 4.500 em receita se converter 10 % desse grupo."
-  ✗ "A base de inativos é grande e representa uma oportunidade para a empresa."
+COMPONENTES — use estes padrões exatamente:
 
-━━ REGRA ABSOLUTA ━━
-Retorne APENAS JSON válido. Zero markdown, zero blocos de código, zero texto fora do JSON.
-Todos os números devem ser do tipo number (não string). Arrays vazios [] quando não houver dados.
-`.trim();
+Wrapper externo (abre e fecha o documento):
+<div style="background:#fff;font-family:var(--font-inter),sans-serif;padding-bottom:80px">
+  ...
+</div>
+
+Capa:
+<div style="background:#000;padding:56px 48px 48px">
+  <div style="color:#55f52f;font-family:var(--font-bebas),sans-serif;font-size:12px;letter-spacing:0.15em">ONMID · RELATÓRIO DE DELIVERY</div>
+  <h1 style="color:#fff;font-family:var(--font-bebas),sans-serif;font-size:80px;line-height:0.9;margin:12px 0 0">NOME DO<br>RESTAURANTE</h1>
+  <div style="color:#999;font-family:var(--font-inter),sans-serif;font-size:14px;margin-top:24px;text-transform:uppercase;letter-spacing:0.05em">Período · Mês/Ano</div>
+  <div style="display:flex;gap:12px;margin-top:32px;flex-wrap:wrap">
+    <div style="background:#ffffff15;border:1px solid #ffffff25;padding:12px 20px;border-radius:2px">
+      <div style="color:#999;font-family:var(--font-inter),sans-serif;font-size:11px;text-transform:uppercase;letter-spacing:0.08em">Label</div>
+      <div style="color:#fff;font-family:var(--font-bebas),sans-serif;font-size:28px;line-height:1;margin-top:4px">Valor</div>
+    </div>
+  </div>
+</div>
+
+Cabeçalho de seção:
+<div style="padding:48px 48px 0">
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:28px">
+    <div style="width:4px;height:36px;background:#55f52f;flex-shrink:0"></div>
+    <h2 style="font-family:var(--font-bebas),sans-serif;font-size:36px;color:#0e0e0e;margin:0;line-height:1">TÍTULO DA SEÇÃO</h2>
+  </div>
+</div>
+
+Cards de métricas:
+<div style="display:flex;gap:16px;flex-wrap:wrap;padding:0 48px;margin-top:24px">
+  <div style="background:#f7f7f7;border:1px solid #cccccc;border-radius:2px;padding:24px;flex:1;min-width:150px">
+    <div style="font-family:var(--font-inter),sans-serif;font-size:11px;color:#757575;text-transform:uppercase;letter-spacing:0.08em">LABEL</div>
+    <div style="font-family:var(--font-bebas),sans-serif;font-size:44px;color:#0e0e0e;line-height:1;margin-top:8px">VALOR</div>
+    <div style="font-family:var(--font-inter),sans-serif;font-size:12px;color:#757575;margin-top:8px">tradução em linguagem de negócio</div>
+  </div>
+</div>
+
+Texto de análise:
+<div style="padding:16px 48px 0">
+  <p style="font-family:var(--font-inter),sans-serif;font-size:14px;color:#0e0e0e;line-height:1.7;margin:0">Texto aqui.</p>
+</div>
+
+Variação positiva: <span style="background:#e8fde0;color:#1a6600;font-size:12px;font-weight:600;padding:2px 8px;border-radius:2px;font-family:var(--font-inter),sans-serif;display:inline-block">+23% (de 254 para 312)</span>
+Variação negativa: <span style="background:#fde8e8;color:#e52020;font-size:12px;font-weight:600;padding:2px 8px;border-radius:2px;font-family:var(--font-inter),sans-serif;display:inline-block">-12% (de 312 para 275)</span>
+
+Tabela comparativa ou de produtos:
+<div style="padding:0 48px;margin-top:24px;overflow-x:auto">
+  <table style="width:100%;border-collapse:collapse;font-family:var(--font-inter),sans-serif;font-size:13px">
+    <thead>
+      <tr style="background:#000;color:#fff">
+        <th style="padding:12px 16px;text-align:left;font-weight:600">Coluna</th>
+        <th style="padding:12px 16px;text-align:right;font-weight:600">Valor</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr style="border-bottom:1px solid #cccccc">
+        <td style="padding:12px 16px;color:#0e0e0e;font-weight:500">Item</td>
+        <td style="padding:12px 16px;text-align:right;color:#0e0e0e;font-weight:600">Valor</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+Highlight box:
+<div style="background:#000;color:#fff;padding:28px 32px;border-radius:2px;margin:24px 48px 0">
+  <div style="font-family:var(--font-bebas),sans-serif;font-size:22px;color:#55f52f;margin-bottom:8px">DESTAQUE</div>
+  <div style="font-family:var(--font-inter),sans-serif;font-size:15px;line-height:1.6">insight importante aqui</div>
+</div>
+
+Card de campanha sugerida:
+<div style="border:1px solid #cccccc;border-radius:2px;padding:24px;margin-bottom:16px">
+  <div style="font-family:var(--font-bebas),sans-serif;font-size:20px;color:#0e0e0e;margin-bottom:4px">NOME DA CAMPANHA</div>
+  <div style="font-family:var(--font-inter),sans-serif;font-size:12px;color:#757575;margin-bottom:16px">Audiência: descrição do público</div>
+  <div style="background:#f7f7f7;border-radius:2px;padding:16px;border-left:3px solid #55f52f">
+    <div style="font-family:var(--font-inter),sans-serif;font-size:11px;color:#757575;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px">Mensagem WhatsApp</div>
+    <div style="font-family:var(--font-inter),sans-serif;font-size:14px;color:#0e0e0e;line-height:1.6">Oi [nome], mensagem aqui...</div>
+  </div>
+</div>
+
+Item de recomendação:
+<div style="border:1px solid #cccccc;border-radius:2px;padding:20px;border-left:4px solid #55f52f;margin-bottom:12px">
+  <div style="font-family:var(--font-inter),sans-serif;font-size:11px;font-weight:700;color:#757575;text-transform:uppercase;letter-spacing:0.08em">O QUE FAZER</div>
+  <div style="font-family:var(--font-inter),sans-serif;font-size:14px;color:#0e0e0e;margin-top:6px;font-weight:600">ação específica aqui</div>
+  <div style="font-family:var(--font-inter),sans-serif;font-size:13px;color:#757575;margin-top:8px"><span style="font-weight:600;color:#0e0e0e">Por que:</span> dado concreto</div>
+  <div style="font-family:var(--font-inter),sans-serif;font-size:13px;color:#1a6600;margin-top:4px"><span style="font-weight:600">Resultado esperado:</span> métrica esperada</div>
+</div>
+
+Próximo passo numerado:
+<div style="display:flex;gap:16px;align-items:flex-start;padding:16px 0;border-bottom:1px solid #f7f7f7">
+  <div style="background:#55f52f;color:#000;font-family:var(--font-bebas),sans-serif;font-size:18px;min-width:36px;height:36px;display:flex;align-items:center;justify-content:center;flex-shrink:0;border-radius:2px">1</div>
+  <div>
+    <div style="font-family:var(--font-inter),sans-serif;font-size:14px;font-weight:700;color:#0e0e0e">AÇÃO ESPECÍFICA</div>
+    <div style="font-family:var(--font-inter),sans-serif;font-size:13px;color:#757575;margin-top:4px">detalhes concretos</div>
+  </div>
+</div>
+
+Divisor entre seções: <div style="height:1px;background:#f7f7f7;margin:0 48px"></div>
+
+Rodapé:
+<div style="background:#000;padding:32px 48px;margin-top:64px;display:flex;align-items:center;justify-content:space-between">
+  <div style="color:#55f52f;font-family:var(--font-bebas),sans-serif;font-size:20px;letter-spacing:0.1em">ONMID</div>
+  <div style="color:#757575;font-family:var(--font-inter),sans-serif;font-size:12px">Relatório gerado por ONMID Reports</div>
+</div>
+
+SAÍDA: retorne APENAS o HTML. Sem markdown, sem blocos de código, sem texto antes ou depois.
+O HTML começa em <div style="background:#fff e termina em </div>`;
 
 function buildUserPrompt(
   clientName: string,
@@ -99,201 +196,39 @@ function buildUserPrompt(
   to: string,
   csvContent: string,
   metaJson: string,
+  agencyContext: string,
 ): string {
   const hasMeta = metaJson !== 'Sem dados de Meta Ads disponíveis.';
-  return `
-━━ CONTEXTO DO RELATÓRIO ━━
-Cliente: ${clientName}
-Segmento: Delivery / Restaurante
-Período analisado: ${periodLabel} (${from} a ${to})
-Período comparativo: ${prevPeriodLabel || 'não disponível'}
-
-━━ FASE 1 — DADOS DO SISTEMA DE PEDIDOS (cardápio digital / delivery) ━━
-${csvContent.slice(0, 28000)}
-
-━━ FASE 2 — DADOS DE TRÁFEGO PAGO (Meta Ads) ━━
-${hasMeta ? metaJson : 'Sem dados de tráfego pago neste período. Defina paidTraffic como null.'}
-
-━━ FASE 3 — DIAGNÓSTICO: aplique este raciocínio antes de gerar os textos ━━
-
-SOBRE RECEITA E VOLUME:
-• Faturamento subiu mas pedidos caíram → ticket médio mais alto compensou; foco em manter volume
-• Faturamento caiu mas ticket subiu → queda é de volume, não de valor; priorizar aquisição/reativação
-• Ambos caíram → situação crítica; revisar oferta, preço e canais urgentemente
-• Ticket abaixo de R$ 40 → oportunidade clara de combos, upsell no checkout
-
-SOBRE BASE DE CLIENTES:
-• Se singleOrderCount > 30 % da base ativa → campanha urgente de segunda compra (janela de 15 dias)
-• Se inactive > 3× active → reativação é a maior alavanca de receita disponível
-• Clientes 30–60 dias inativos = alta probabilidade de resposta; começar sempre por eles
-• Potenciais (sem compra) = lista de remarketing; usar produto de entrada de baixo valor
-
-SOBRE PRODUTOS E DIAS:
-• Top 3 produtos concentrando > 60 % do volume → dependência de poucos itens; diversificar via combos
-• Sexta/Sáb/Dom fortes → campanhas de antecipação (quinta à noite)
-• Seg/Ter fracos → promoções exclusivas de meio de semana para equalizar volume
-
-SOBRE TRÁFEGO PAGO:
-• ROAS < 3× → pausa para revisar creative e público antes de escalar
-• Frequência > 3,5 → criativo com fadiga; trocar antes de perder performance
-• CPC alto + CTR baixo → problema no criativo (imagem/copy), não no público
-• Custo por conversa/compra baixo → aumentar orçamento 20 % por semana até atingir ROAS-alvo
-
-━━ FASE 4 — PLANO DE AÇÃO: critérios de qualidade ━━
-• actionPlan: cada item deve ser uma ação específica com público, canal e prazo implícitos
-  ✓ "Enviar oferta de recompra via WhatsApp para os 87 clientes com 30–59 dias de inatividade
-     nos primeiros 3 dias do mês, usando o produto X com desconto de 15 %"
-  ✗ "Criar campanha de reativação para clientes inativos"
-
-• campaigns[].message: escreva uma mensagem WhatsApp pronta para envio (2–3 frases), informal,
-  com o produto e a oferta específicos. Use "Oi [nome]" como abertura.
-
-━━ OMISSÕES OBRIGATÓRIAS ━━
-Use [] (array vazio) quando a fonte de dados não tiver a informação:
-• weeklyBehavior.ordersByDay e deliveriesByDay → [] se não houver breakdown por dia
-• geoRegions.regions → [] se não houver dados por bairro/região
-• inactives.ranges → [] se não houver dados de recência
-• topProducts.ranking → [] se não houver dados de produtos
-• paidTraffic → null se sem Meta Ads
-• campaignActionPlan → null se não houver dados suficientes de clientes E produtos
-
-━━ ESTRUTURA JSON DE SAÍDA ━━
-{
-  clientName: string,
-  templateSlug: "onmid-delivery",
-
-  cover: {
-    subtitle: string,          // 1 frase descrevendo o que o relatório abrange
-    periodLabel: string,       // ex: "Maio/2025"
-    prevPeriodLabel: string,   // ex: "Abril/2025" ou "" se não houver comparativo
-    objective: string          // 1 frase: o principal objetivo estratégico para o próximo mês
-  },
-
-  monthlyOverview: {
-    current:  { monthLabel: string, year: string, revenue: number, orders: number, avgTicket: number },
-    previous: { monthLabel: string, year: string, revenue: number, orders: number, avgTicket: number },
-    mainInsight: string  // 2–3 frases com números concretos e comparação com benchmark
-  },
-
-  weeklyBehavior: {
-    ordersByDay:    Array<{ day: string, value: number, highlight: boolean }>,
-    // highlight = true para os 2 dias de maior volume
-    deliveriesByDay: Array<{ day: string, value: number, highlight: boolean }>,
-    // mesmo array com valor de pedidos por dia (use os mesmos dados se não houver distinção)
-    strategicReading: string,  // qual padrão semanal existe e o que ele revela
-    opportunities: string[]    // 2–3 ações específicas baseadas nos padrões encontrados
-  },
-
-  geoRegions: {
-    regions: Array<{ rank: number, name: string, orders: number, revenue: number }>,
-    strengthenInsight: string,   // o que fazer nos bairros que já performam bem
-    growInsight: string,         // quais bairros têm potencial e como ativar
-    remarketingInsight: string   // como usar os dados geográficos em campanhas pagas
-  },
-
-  customerBase: {
-    active: number,             // pedido nos últimos 30 dias
-    inactive: number,           // sem pedido entre 31–120 dias
-    potential: number,          // cadastrados sem nenhum pedido
-    ordersInBase: number,       // total de pedidos na base
-    singleOrderCount: number,   // clientes com exatamente 1 pedido
-    multiOrderCount: number,    // clientes com 2+ pedidos
-    baseInsight: string,        // saúde geral da base com números e benchmark
-    segmentInsight: string      // o que fazer com cada segmento (ativo/inativo/potencial)
-  },
-
-  inactives: {
-    ranges: Array<{
-      label: string,    // ex: "30–59 dias", "60–89 dias", "90–119 dias", "120+ dias"
-      count: number,
-      priority: boolean // true para faixas 30–59 e 60–89 (maior probabilidade de reativação)
-    }>,
-    potentialCount: number,
-    approachSuggestions: string[],  // 3–4 abordagens específicas por faixa, com canal e oferta
-    entryProducts: string[],        // 3–5 produtos de entrada para primeira oferta de reativação
-    cta: string                     // frase de chamada para ação resumindo a estratégia
-  },
-
-  topProducts: {
-    ranking: Array<{ rank: number, name: string, orders: number }>,
-    combos: Array<{
-      title: string,        // nome sugerido para o combo
-      description: string   // quais produtos combinar e por quê (baseado nos dados)
-    }>,
-    insight: string  // o que os produtos revelam sobre o comportamento de compra
-  },
-
-  paidTraffic: {
-    investment: number,
-    impressions: number,
-    reach: number,
-    clicks: number,
-    campaignNames: string[],
-    topCampaigns: Array<{
-      name: string,
-      description: string,
-      metrics: Array<{ label: string, value: string }>,
-      // métricas obrigatórias: Investimento, Alcance, Cliques, ROAS (ou CPA)
-      insight: string  // 1–2 frases com diagnóstico e próximo passo
-    }>,
-    recommendation: string  // ação prioritária para o próximo mês no Meta Ads
-  } | null,
-
-  actionSummary: {
-    creatives: Array<{ name: string, roas: number }>,
-    // lista de criativos/campanhas com melhor performance (vazio [] se sem Meta Ads)
-
-    revenueForces: string[],
-    // EXATAMENTE 4 títulos curtos (máx. 4 palavras cada): as 4 forças que sustentaram a receita
-    // ex: ["Clientes recorrentes", "Fim de semana forte", "Produtos campeões", "Reativações"]
-
-    revenueForceDetails: string[],
-    // EXATAMENTE 4 parágrafos de 1–2 frases explicando cada força acima com dados do relatório
-
-    assetsForNextMonth: string[],
-    // 6–8 ativos disponíveis para o próximo mês com números
-    // ex: "389 clientes ativos para campanhas de frequência", "87 inativos 30–59 dias para reativação"
-
-    actionPlan: string[],   // 6–8 ações específicas em ordem de prioridade (ver critério de qualidade acima)
-    priorities: string[],   // 6–8 prioridades com urgência: "URGENTE:", "ALTA:", "MÉDIA:", "BAIXA:"
-
-    conclusion: string,
-    // 2–3 frases resumindo o diagnóstico do mês e a estratégia principal para o próximo
-
-    nextMonth: string
-    // FORMATO OBRIGATÓRIO: apenas "Mês/AAAA" — ex: "Junho/2025"
-    // NÃO coloque texto estratégico aqui. APENAS o nome do mês seguinte.
-  },
-
-  campaignActionPlan: {
-    campaigns: Array<{
-      name: string,       // ex: "Campanha 1 — Reativação 30–59 dias"
-      objective: string,  // 1 frase: o que essa campanha vai conseguir
-      audience: string,   // quem recebe (tamanho + critério de segmentação)
-      message: string,    // mensagem WhatsApp pronta para envio, começando com "Oi [nome],"
-      product: string     // produto ou oferta específica desta campanha
-    }>,
-    customerJourney: string[],
-    // EXATAMENTE 5 etapas: ["Descoberta", "Primeira compra", "Recompra", "Reativação leve", "Reativação forte"]
-
-    guidelines: string[]
-    // EXATAMENTE 4 diretrizes estratégicas curtas (1 frase cada)
-  } | null
-}
-`.trim();
+  return [
+    `Cliente: ${clientName}`,
+    `Segmento: Delivery / Restaurante`,
+    `Período: ${periodLabel} (${from} a ${to})`,
+    `Período anterior para comparação: ${prevPeriodLabel || 'não disponível — apresente como linha de base'}`,
+    agencyContext ? `Contexto da agência: ${agencyContext}` : null,
+    '',
+    'DADOS DO SISTEMA DE PEDIDOS (cardápio digital / delivery):',
+    csvContent.slice(0, 28000),
+    '',
+    'DADOS META ADS:',
+    hasMeta ? metaJson : 'Sem dados de tráfego pago neste período.',
+    '',
+    'DADOS INSTAGRAM INSIGHTS:',
+    'Sem dados de Instagram Orgânico disponíveis para este período.',
+  ].filter(l => l !== null).join('\n');
 }
 
 // ── Public builder ─────────────────────────────────────────────────────────────
+
 export async function buildDeliveryReport(opts: {
   clientId: string;
   clientName: string;
   from: string;
   to: string;
   csvContent: string;
-}): Promise<DeliveryReportData> {
-  const { clientId, clientName, from, to, csvContent } = opts;
+  agencyContext?: string;
+}): Promise<{ html: string }> {
+  const { clientId, clientName, from, to, csvContent, agencyContext = '' } = opts;
 
-  // Month labels
   const fromDate = new Date(from + 'T12:00:00');
   const prevDate = new Date(fromDate);
   prevDate.setMonth(prevDate.getMonth() - 1);
@@ -302,42 +237,35 @@ export async function buildDeliveryReport(opts: {
   const periodLabel = `${MONTHS[fromDate.getMonth()]} ${fromDate.getFullYear()}`;
   const prevPeriodLabel = `${MONTHS[prevDate.getMonth()]} ${prevDate.getFullYear()}`;
 
-  // Meta data
   const metaRows = await fetchMetaData(clientId, from, to);
   const metaJson = metaRows ? JSON.stringify(metaRows, null, 2) : 'Sem dados de Meta Ads disponíveis.';
 
-  // Claude call
   const message = await anthropic.messages.create({
     model: 'claude-sonnet-4-6',
     max_tokens: 16000,
+    system: SYSTEM_PROMPT,
     messages: [
       {
         role: 'user',
-        content: buildUserPrompt(clientName, periodLabel, prevPeriodLabel, from, to, csvContent, metaJson),
+        content: buildUserPrompt(clientName, periodLabel, prevPeriodLabel, from, to, csvContent, metaJson, agencyContext),
       },
     ],
-    system: SYSTEM_PROMPT,
   });
 
   const raw = message.content[0].type === 'text' ? message.content[0].text : '';
+  const html = raw.replace(/^```(?:html)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
 
-  // Strip any accidental markdown fences
-  const jsonText = raw
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/\s*```\s*$/i, '')
-    .trim();
-
-  const reportData: DeliveryReportData = JSON.parse(jsonText);
-  return reportData;
+  return { html };
 }
 
 // ── Save to DB ─────────────────────────────────────────────────────────────────
+
 export async function saveDeliveryReport(opts: {
   clientId: string;
   clientName: string;
   from: string;
   to: string;
-  data: DeliveryReportData;
+  data: { html: string };
 }): Promise<{ token: string; reportId: string }> {
   const { clientId, clientName, from, to, data } = opts;
   const token = randomUUID();
@@ -349,7 +277,7 @@ export async function saveDeliveryReport(opts: {
          (client_id, client_name, period_from, period_to, template_slug, report_data, public_token)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING id`,
-      [clientId, clientName, from, to, 'onmid-delivery', JSON.stringify(data), token],
+      [clientId, clientName, from, to, 'onmid-narrative-delivery', JSON.stringify(data), token],
     );
     return { token, reportId: rows[0].id };
   } finally {

@@ -49,6 +49,24 @@ export default async function RelatorioPublicoPage({ params }: { params: Promise
     );
   }
 
+  // ── New narrative templates (HTML output from Claude) ──────────────────────
+  if (
+    report.template_slug === 'onmid-narrative-performance' ||
+    report.template_slug === 'onmid-narrative-delivery'
+  ) {
+    const data = report.report_data as { html: string };
+    const isDelivery = report.template_slug === 'onmid-narrative-delivery';
+    return (
+      <>
+        <title>{`Relatório ${isDelivery ? 'Delivery' : 'de Performance'} — ${report.client_name}`}</title>
+        <div style={{ background: '#ffffff', minHeight: '100vh' }}>
+          <div dangerouslySetInnerHTML={{ __html: data.html ?? '' }} />
+        </div>
+      </>
+    );
+  }
+
+  // ── Legacy templates ───────────────────────────────────────────────────────
   if (report.template_slug === 'onmid-delivery') {
     return (
       <>

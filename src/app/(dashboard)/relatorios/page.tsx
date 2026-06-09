@@ -57,7 +57,7 @@ export default function RelatoriosPage() {
 
   // Geração avulsa
   const [showGenModal, setShowGenModal] = useState(false);
-  const [genForm, setGenForm] = useState({ clientId: '', from: '', to: '' });
+  const [genForm, setGenForm] = useState({ clientId: '', from: '', to: '', agencyContext: '' });
   const [genTemplate, setGenTemplate] = useState<'performance' | 'delivery'>('performance');
   const [genCsvContent, setGenCsvContent] = useState('');
   const [genCsvFileName, setGenCsvFileName] = useState('');
@@ -100,7 +100,7 @@ export default function RelatoriosPage() {
   // Default dates when modal opens
   function openGenModal() {
     const { from, to } = defaultDateRange();
-    setGenForm({ clientId: '', from, to });
+    setGenForm({ clientId: '', from, to, agencyContext: '' });
     setGenTemplate('performance');
     setGenCsvContent('');
     setGenCsvFileName('');
@@ -127,6 +127,7 @@ export default function RelatoriosPage() {
         to: genForm.to,
         template: genTemplate,
       };
+      if (genForm.agencyContext) payload.agencyContext = genForm.agencyContext;
       if (genTemplate === 'delivery') payload.csvContent = genCsvContent;
 
       const res = await fetch('/api/reports/run-once', {
@@ -813,6 +814,20 @@ export default function RelatoriosPage() {
                     className="w-full px-3 py-2.5 text-sm bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50"
                   />
                 </div>
+              </div>
+
+              {/* Agency context — optional for both templates */}
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground font-medium">
+                  Contexto da agência <span className="text-muted-foreground/50">(opcional)</span>
+                </label>
+                <textarea
+                  value={genForm.agencyContext}
+                  onChange={e => setGenForm(f => ({ ...f, agencyContext: e.target.value }))}
+                  placeholder="Ex: trocamos criativo dia 15, cliente ficou fechado 1 semana em fevereiro..."
+                  rows={2}
+                  className="w-full px-3 py-2.5 text-sm bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50 resize-none placeholder:text-muted-foreground/40"
+                />
               </div>
 
               {/* CSV upload — only for Delivery */}
