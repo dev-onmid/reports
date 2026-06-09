@@ -187,7 +187,7 @@ Retorne o JSON com exatamente esta estrutura TypeScript:
     actionPlan: string[],             // 6-8 ações em ordem de prioridade
     priorities: string[],             // 6-8 prioridades objetivas
     conclusion: string,
-    nextMonth: string
+    nextMonth: string    // APENAS o nome do mês seguinte, ex: "Junho/2025" — NÃO coloque texto estratégico aqui
   },
   campaignActionPlan: {
     campaigns: Array<{

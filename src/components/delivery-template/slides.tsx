@@ -36,6 +36,14 @@ function brl(n: number): string {
 function num(n: number): string {
   return n.toLocaleString('pt-BR');
 }
+// Garante que nextMonth seja apenas "Mês/YYYY", nunca texto longo de estratégia
+function safeMonth(raw: string): string {
+  if (!raw) return '';
+  // Se tiver vírgula ou ponto-e-vírgula, pega só até o primeiro delimitador
+  const trimmed = raw.split(/[,;]/)[0].trim();
+  // Se ainda for longo (>20 chars), trunca
+  return trimmed.length > 20 ? trimmed.slice(0, 20).trim() : trimmed;
+}
 function pctDelta(a: number, b: number): { text: string; up: boolean } {
   if (b === 0) return { text: '—', up: true };
   const v = ((a - b) / b) * 100;
@@ -666,7 +674,7 @@ export function Slide03Weekly({ data, current, total }: { data: DeliveryReportDa
           <div style={{ background: 'white', border: `1px solid ${C.border}`, borderRadius: 14, padding: '16px 18px', flex: 1, borderLeft: `4px solid ${C.green}` }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
               <GreenCircle size={36}>{Icon.bulb()}</GreenCircle>
-              <span style={{ fontSize: 14, fontWeight: 700, color: C.text }}>Oportunidade para {data.actionSummary.nextMonth}</span>
+              <span style={{ fontSize: 14, fontWeight: 700, color: C.text }}>Oportunidade para {safeMonth(data.actionSummary.nextMonth)}</span>
             </div>
             <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 7 }}>
               {data.weeklyBehavior.opportunities.slice(0, 4).map((o, i) => (
@@ -955,7 +963,7 @@ export function Slide06Inactives({ data, current, total }: { data: DeliveryRepor
         {/* Left 55% */}
         <div style={{ flex: 2.7, display: 'flex', flexDirection: 'column', gap: 0 }}>
           <h1 style={{ margin: '0 0 4px', fontSize: 52, fontWeight: 900, color: C.text, letterSpacing: '-0.03em', lineHeight: 1.05 }}>Inativos e potenciais</h1>
-          <p style={{ margin: '0 0 14px', fontSize: 15, color: C.sub }}>A maior reserva de crescimento para {data.actionSummary.nextMonth}</p>
+          <p style={{ margin: '0 0 14px', fontSize: 15, color: C.sub }}>A maior reserva de crescimento para {safeMonth(data.actionSummary.nextMonth)}</p>
 
           <Card style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
@@ -1251,6 +1259,12 @@ export function Slide09aCreatives({ data, current, total }: { data: DeliveryRepo
               <span style={{ fontSize: 10, fontWeight: 700, color: C.green, letterSpacing: '0.08em', textTransform: 'uppercase' }}>ROAS</span>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1 }}>
+              {creatives.length === 0 && (
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, color: C.muted }}>
+                  <GreenCircle size={44} color={C.row}>{Icon.chart(C.muted)}</GreenCircle>
+                  <span style={{ fontSize: 12, textAlign: 'center', lineHeight: 1.6 }}>Sem dados de tráfego pago neste período</span>
+                </div>
+              )}
               {creatives.slice(0, 5).map((c, i) => (
                 <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'space-between' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
@@ -1346,7 +1360,7 @@ export function Slide09bActionPlan({ data, current, total }: { data: DeliveryRep
     <Shell current={current} total={total}>
       <div style={{ marginBottom: 16 }}>
         <h1 style={{ margin: 0, fontSize: 58, fontWeight: 900, color: C.text, letterSpacing: '-0.03em', lineHeight: 1.05 }}>
-          Plano de ação<br />para {nextMonth}
+          Plano de ação<br />para {safeMonth(nextMonth)}
         </h1>
         <p style={{ margin: '6px 0 0', fontSize: 17, color: C.sub }}>Transformar diagnóstico em ações táticas de alto impacto</p>
       </div>
@@ -1356,7 +1370,7 @@ export function Slide09bActionPlan({ data, current, total }: { data: DeliveryRep
         <Card style={{ display: 'flex', flexDirection: 'column' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
             <NumBadge n={1} />
-            <span style={{ fontSize: 16, fontWeight: 700, color: C.text }}>Plano de ação para {nextMonth}</span>
+            <span style={{ fontSize: 16, fontWeight: 700, color: C.text }}>Plano de ação para {safeMonth(nextMonth)}</span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {actionPlan.slice(0, 8).map((item, i) => (
@@ -1460,7 +1474,7 @@ export function Slide11RevenueComposition({ data, current, total }: { data: Deli
     <Shell current={current} total={total}>
       <div style={{ marginBottom: 14 }}>
         <h1 style={{ margin: 0, fontSize: 42, fontWeight: 900, color: C.text, letterSpacing: '-0.025em', lineHeight: 1.1 }}>O que sustentou o faturamento</h1>
-        <p style={{ margin: '4px 0 0', fontSize: 15, color: C.sub }}>Forças que compõem a receita e ativos para {nextMonth}</p>
+        <p style={{ margin: '4px 0 0', fontSize: 15, color: C.sub }}>Forças que compõem a receita e ativos para {safeMonth(nextMonth)}</p>
       </div>
 
       <div style={{ display: 'flex', gap: 18, height: 'calc(100% - 74px)' }}>
@@ -1492,7 +1506,7 @@ export function Slide11RevenueComposition({ data, current, total }: { data: Deli
             <GreenCircle size={40}>{Icon.rocket()}</GreenCircle>
             <div>
               <div style={{ fontWeight: 800, fontSize: 14, color: C.text }}>O que ainda temos</div>
-              <div style={{ fontSize: 12, color: C.muted }}>para aproveitar em {nextMonth}</div>
+              <div style={{ fontSize: 12, color: C.muted }}>para aproveitar em {safeMonth(nextMonth)}</div>
             </div>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>
@@ -1518,7 +1532,7 @@ export function Slide12DetailedPlan({ data, current, total }: { data: DeliveryRe
     <Shell current={current} total={total}>
       <div style={{ marginBottom: 14 }}>
         <h1 style={{ margin: 0, fontSize: 42, fontWeight: 900, color: C.text, letterSpacing: '-0.025em', lineHeight: 1.1 }}>
-          Plano de ação detalhado — {nextMonth}
+          Plano de ação detalhado — {safeMonth(nextMonth)}
         </h1>
         <p style={{ margin: '4px 0 0', fontSize: 15, color: C.sub }}>Campanhas recomendadas por etapa do relacionamento com o cliente</p>
       </div>
