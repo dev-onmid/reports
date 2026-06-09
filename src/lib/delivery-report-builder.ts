@@ -31,43 +31,64 @@ async function fetchMetaData(clientId: string, from: string, to: string) {
 
 // ── Claude prompt ─────────────────────────────────────────────────────────────
 const SYSTEM_PROMPT = `
-Você é um especialista em análise de dados de restaurantes/delivery e marketing digital.
-Receberá:
-1. Dados exportados do cardápio digital (CSV/texto — pedidos, produtos, clientes, regiões, etc.)
-2. Dados de campanhas de Meta Ads (JSON — gastos, impressões, cliques, ROAS, etc.)
-3. Período e nome do cliente
+Você é um consultor sênior de marketing especializado em negócios de delivery e alimentação no Brasil.
+Sua função é transformar dados brutos em diagnósticos precisos e planos táticos de alto impacto.
 
-Sua tarefa: extrair, interpretar e estruturar TODOS os dados em um JSON TypeScript exato.
+━━ BENCHMARKS DO SETOR (delivery Brasil) ━━
+Use estes valores como referência para qualificar o desempenho do cliente:
+• Ticket médio saudável: R$ 40–70 (abaixo → oportunidade de upsell/combo)
+• Taxa de recompra mensal: 35–50 % dos ativos (abaixo → retenção é prioridade)
+• Frequência ideal: 2–3 pedidos/mês por cliente ativo (abaixo → programa de fidelidade)
+• Base inativa costuma ser 5–15× maior que a ativa — isso É uma oportunidade, não um fracasso
+• Distribuição de pedidos por dia: Sex/Sáb/Dom = 55–70 % do volume; Seg/Ter = menor tráfego
+• Top 3 bairros normalmente concentram 40–65 % dos pedidos
+• ROAS Meta Ads: < 3× = ineficiente; 4–6× = saudável; > 7× = escalar
+• Custo por pedido (Meta): R$ 8–20 dependendo do ticket e região
+• Frequência de exposição (Meta): > 3,5 por semana = cansaço criativo, renovar
 
-REGRAS CRÍTICAS:
-- Retorne APENAS JSON válido. Sem markdown, sem blocos de código, sem explicações.
-- Todos os valores numéricos devem ser números (não strings).
-- Textos de insight: objetivos, data-driven, tom de consultoria sênior, 2-4 frases.
-- paidTraffic: null se não houver dados de Meta Ads.
-- Se o CSV estiver em outro formato (XML, JSON, etc.), extraia da mesma forma.
-- Gere no mínimo 6 itens em actionPlan e 6 itens em priorities.
+━━ FONTES DE DADOS QUE VOCÊ RECEBE ━━
+1. CARDÁPIO DIGITAL / SISTEMA DE PEDIDOS (CSV/exportação)
+   Plataformas comuns: Goomer, Anota Aí, iFood, Delivery Direto, Aiqfome, Garçom Web
+   O CSV pode variar muito em estrutura. Adapte-se ao formato recebido.
 
-REGRAS DE EXTRAÇÃO DE PRODUTOS:
-- Procure colunas como: "produto", "item", "name", "description", "quantidade", "qtd", "qty",
-  "pedidos", "orders", "vendas", "sales", "total_vendido", "count" em qualquer case.
-- O campo "orders" de cada produto = quantidade de vezes que aquele produto foi pedido/vendido.
-- Se o CSV tiver linhas de pedido (1 linha = 1 item de pedido), agrupe por produto e some.
-- Se o CSV tiver totais por produto, use diretamente.
-- NUNCA deixe orders = 0 se o produto aparecer no CSV. Se não encontrar a quantidade, estime
-  pela proporção em relação ao total de pedidos do mês.
+2. META ADS (JSON estruturado pela plataforma)
+   Campos disponíveis: campaign_name, spend, impressions, reach, clicks, actions (conversões)
 
-REGRAS DE EXTRAÇÃO DE BASE DE CLIENTES:
-- Procure colunas: "cliente", "customer", "telefone", "phone", "status", "ativo", "inativo",
-  "última compra", "last_order", "recency", "frequência", "frequency".
-- active = clientes com pedido nos últimos 30 dias (ou marcados como "ativo").
-- inactive = clientes sem pedido entre 31-120 dias (ou marcados como "inativo").
-- potential = contatos sem nenhum pedido registrado (ou marcados como "potencial").
-- Se o CSV não tiver dados de clientes, use 0 e explique no baseInsight.
+━━ REGRAS DE EXTRAÇÃO ━━
 
-REGRAS ROAS (META ADS):
-- ROAS de um criativo = receita atribuída / investimento.
-- Se não houver coluna de receita, calcule pelo número de conversões estimadas × ticket médio.
-- Se não houver dados de ROAS no CSV/Meta, use 0.00 para criativos.
+PRODUTOS:
+• Identifique a coluna de nome do produto e de quantidade vendida (pode ser: produto, item,
+  descrição, name, quantidade, qtd, qty, pedidos, orders, vendas, count, total_vendido)
+• Se o CSV tiver 1 linha por item de pedido → agrupe por produto e some as quantidades
+• Se já tiver totais consolidados → use diretamente
+• NUNCA retorne orders = 0 para um produto que aparece no CSV
+• Se não encontrar quantidade, estime pela proporção sobre o total de pedidos
+
+CLIENTES / RFM:
+• Classifique usando a data do último pedido (last_order, última compra, data):
+  - active   = último pedido há 0–30 dias
+  - inactive = último pedido há 31–120 dias (subdivida em faixas de 30 dias)
+  - potential = nunca fez pedido (contato cadastrado sem histórico)
+• Se o CSV não tiver dados de clientes: use 0 e explique em baseInsight
+
+META ADS / ROAS:
+• ROAS = receita atribuída / spend. Se não tiver receita explícita: conversões × ticket médio
+• Se não tiver dados de Meta Ads: paidTraffic = null
+• Para criativos: use o nome da campanha ou ad_name como identificador; roas = 0 se não calculável
+
+━━ QUALIDADE DOS INSIGHTS ━━
+• Cada insight deve citar números concretos do relatório
+• Compare com os benchmarks acima quando relevante
+• Tom de consultoria sênior: direto, objetivo, sem elogios vazios
+• Evite frases genéricas como "é importante" ou "deve ser considerado"
+• Exemplos de bom insight:
+  ✓ "Com 87 clientes entre 30–60 dias sem compra e ticket médio de R$ 52, uma campanha de
+     reativação pode recuperar R$ 4.500 em receita se converter 10 % desse grupo."
+  ✗ "A base de inativos é grande e representa uma oportunidade para a empresa."
+
+━━ REGRA ABSOLUTA ━━
+Retorne APENAS JSON válido. Zero markdown, zero blocos de código, zero texto fora do JSON.
+Todos os números devem ser do tipo number (não string). Arrays vazios [] quando não houver dados.
 `.trim();
 
 function buildUserPrompt(
@@ -79,92 +100,129 @@ function buildUserPrompt(
   csvContent: string,
   metaJson: string,
 ): string {
+  const hasMeta = metaJson !== 'Sem dados de Meta Ads disponíveis.';
   return `
-CLIENTE: ${clientName}
-PERÍODO ATUAL: ${periodLabel} (${from} a ${to})
-PERÍODO COMPARATIVO: ${prevPeriodLabel}
+━━ CONTEXTO DO RELATÓRIO ━━
+Cliente: ${clientName}
+Segmento: Delivery / Restaurante
+Período analisado: ${periodLabel} (${from} a ${to})
+Período comparativo: ${prevPeriodLabel || 'não disponível'}
 
-=== DADOS DO CARDÁPIO DIGITAL (CSV/Exportação) ===
-${csvContent.slice(0, 30000)}
+━━ FASE 1 — DADOS DO SISTEMA DE PEDIDOS (cardápio digital / delivery) ━━
+${csvContent.slice(0, 28000)}
 
-=== DADOS META ADS ===
-${metaJson}
+━━ FASE 2 — DADOS DE TRÁFEGO PAGO (Meta Ads) ━━
+${hasMeta ? metaJson : 'Sem dados de tráfego pago neste período. Defina paidTraffic como null.'}
 
-=== REGRAS DE INSIGHT AUTOMÁTICO ===
-Aplique as regras abaixo ao gerar os textos de insight:
-- Faturamento caiu mas ticket médio subiu → queda vem de volume/pedidos, não de valor médio
-- Pedidos E ticket médio caíram → revisar oferta, campanha de volume urgente
-- Ticket médio subiu → sugerir combos e produtos complementares
-- Inativos = maioria da base → priorizar reativação acima de tudo
-- Clientes com 1 pedido relevantes → priorizar segunda compra antes que virem inativos
-- Sexta e sábado fortes → reforçar campanhas de fim de semana
-- Terça e quarta fracos → criar campanhas específicas de meio de semana
-- Poucos bairros concentram pedidos → remarketing geográfico segmentado
-- ROAS positivo → sugerir escala controlada
-- Frequência alta → renovação de criativos urgente
-- Custo por compra baixo → aumentar orçamento gradualmente
-- Custo por conversa alto → testar nova oferta ou público
+━━ FASE 3 — DIAGNÓSTICO: aplique este raciocínio antes de gerar os textos ━━
 
-=== REGRAS DE OMISSÃO ===
-Use arrays VAZIOS [] quando não houver dados (não zeros, não placeholders).
-- weeklyBehavior.ordersByDay: [] se não houver dados por dia da semana
-- geoRegions.regions: [] se não houver dados por bairro/região
-- customerBase: use 0 para todos os números se não houver segmentação de clientes
-- inactives.ranges: [] se não houver dados de inatividade; potentialCount: 0 se não houver potenciais
-- topProducts.ranking: [] se não houver dados de produtos
-- paidTraffic: null se não houver dados de Meta Ads
-- campaignActionPlan: null se não houver base de clientes ou produtos para montar as campanhas
+SOBRE RECEITA E VOLUME:
+• Faturamento subiu mas pedidos caíram → ticket médio mais alto compensou; foco em manter volume
+• Faturamento caiu mas ticket subiu → queda é de volume, não de valor; priorizar aquisição/reativação
+• Ambos caíram → situação crítica; revisar oferta, preço e canais urgentemente
+• Ticket abaixo de R$ 40 → oportunidade clara de combos, upsell no checkout
 
-Retorne o JSON com exatamente esta estrutura TypeScript:
+SOBRE BASE DE CLIENTES:
+• Se singleOrderCount > 30 % da base ativa → campanha urgente de segunda compra (janela de 15 dias)
+• Se inactive > 3× active → reativação é a maior alavanca de receita disponível
+• Clientes 30–60 dias inativos = alta probabilidade de resposta; começar sempre por eles
+• Potenciais (sem compra) = lista de remarketing; usar produto de entrada de baixo valor
 
+SOBRE PRODUTOS E DIAS:
+• Top 3 produtos concentrando > 60 % do volume → dependência de poucos itens; diversificar via combos
+• Sexta/Sáb/Dom fortes → campanhas de antecipação (quinta à noite)
+• Seg/Ter fracos → promoções exclusivas de meio de semana para equalizar volume
+
+SOBRE TRÁFEGO PAGO:
+• ROAS < 3× → pausa para revisar creative e público antes de escalar
+• Frequência > 3,5 → criativo com fadiga; trocar antes de perder performance
+• CPC alto + CTR baixo → problema no criativo (imagem/copy), não no público
+• Custo por conversa/compra baixo → aumentar orçamento 20 % por semana até atingir ROAS-alvo
+
+━━ FASE 4 — PLANO DE AÇÃO: critérios de qualidade ━━
+• actionPlan: cada item deve ser uma ação específica com público, canal e prazo implícitos
+  ✓ "Enviar oferta de recompra via WhatsApp para os 87 clientes com 30–59 dias de inatividade
+     nos primeiros 3 dias do mês, usando o produto X com desconto de 15 %"
+  ✗ "Criar campanha de reativação para clientes inativos"
+
+• campaigns[].message: escreva uma mensagem WhatsApp pronta para envio (2–3 frases), informal,
+  com o produto e a oferta específicos. Use "Oi [nome]" como abertura.
+
+━━ OMISSÕES OBRIGATÓRIAS ━━
+Use [] (array vazio) quando a fonte de dados não tiver a informação:
+• weeklyBehavior.ordersByDay e deliveriesByDay → [] se não houver breakdown por dia
+• geoRegions.regions → [] se não houver dados por bairro/região
+• inactives.ranges → [] se não houver dados de recência
+• topProducts.ranking → [] se não houver dados de produtos
+• paidTraffic → null se sem Meta Ads
+• campaignActionPlan → null se não houver dados suficientes de clientes E produtos
+
+━━ ESTRUTURA JSON DE SAÍDA ━━
 {
   clientName: string,
   templateSlug: "onmid-delivery",
+
   cover: {
-    subtitle: string,
-    periodLabel: string,
-    prevPeriodLabel: string,     // "" se não houver mês anterior
-    objective: string
+    subtitle: string,          // 1 frase descrevendo o que o relatório abrange
+    periodLabel: string,       // ex: "Maio/2025"
+    prevPeriodLabel: string,   // ex: "Abril/2025" ou "" se não houver comparativo
+    objective: string          // 1 frase: o principal objetivo estratégico para o próximo mês
   },
+
   monthlyOverview: {
-    current: { monthLabel: string, year: string, revenue: number, orders: number, avgTicket: number },
+    current:  { monthLabel: string, year: string, revenue: number, orders: number, avgTicket: number },
     previous: { monthLabel: string, year: string, revenue: number, orders: number, avgTicket: number },
-    mainInsight: string
+    mainInsight: string  // 2–3 frases com números concretos e comparação com benchmark
   },
+
   weeklyBehavior: {
-    ordersByDay: Array<{ day: string, value: number, highlight: boolean }>,
+    ordersByDay:    Array<{ day: string, value: number, highlight: boolean }>,
+    // highlight = true para os 2 dias de maior volume
     deliveriesByDay: Array<{ day: string, value: number, highlight: boolean }>,
-    strategicReading: string,
-    opportunities: string[]
+    // mesmo array com valor de pedidos por dia (use os mesmos dados se não houver distinção)
+    strategicReading: string,  // qual padrão semanal existe e o que ele revela
+    opportunities: string[]    // 2–3 ações específicas baseadas nos padrões encontrados
   },
+
   geoRegions: {
     regions: Array<{ rank: number, name: string, orders: number, revenue: number }>,
-    strengthenInsight: string,
-    growInsight: string,
-    remarketingInsight: string
+    strengthenInsight: string,   // o que fazer nos bairros que já performam bem
+    growInsight: string,         // quais bairros têm potencial e como ativar
+    remarketingInsight: string   // como usar os dados geográficos em campanhas pagas
   },
+
   customerBase: {
-    active: number,
-    inactive: number,
-    potential: number,
-    ordersInBase: number,
-    singleOrderCount: number,
-    multiOrderCount: number,
-    baseInsight: string,
-    segmentInsight: string
+    active: number,             // pedido nos últimos 30 dias
+    inactive: number,           // sem pedido entre 31–120 dias
+    potential: number,          // cadastrados sem nenhum pedido
+    ordersInBase: number,       // total de pedidos na base
+    singleOrderCount: number,   // clientes com exatamente 1 pedido
+    multiOrderCount: number,    // clientes com 2+ pedidos
+    baseInsight: string,        // saúde geral da base com números e benchmark
+    segmentInsight: string      // o que fazer com cada segmento (ativo/inativo/potencial)
   },
+
   inactives: {
-    ranges: Array<{ label: string, count: number, priority: boolean }>,
+    ranges: Array<{
+      label: string,    // ex: "30–59 dias", "60–89 dias", "90–119 dias", "120+ dias"
+      count: number,
+      priority: boolean // true para faixas 30–59 e 60–89 (maior probabilidade de reativação)
+    }>,
     potentialCount: number,
-    approachSuggestions: string[],
-    entryProducts: string[],
-    cta: string
+    approachSuggestions: string[],  // 3–4 abordagens específicas por faixa, com canal e oferta
+    entryProducts: string[],        // 3–5 produtos de entrada para primeira oferta de reativação
+    cta: string                     // frase de chamada para ação resumindo a estratégia
   },
+
   topProducts: {
     ranking: Array<{ rank: number, name: string, orders: number }>,
-    combos: Array<{ title: string, description: string }>,
-    insight: string
+    combos: Array<{
+      title: string,        // nome sugerido para o combo
+      description: string   // quais produtos combinar e por quê (baseado nos dados)
+    }>,
+    insight: string  // o que os produtos revelam sobre o comportamento de compra
   },
+
   paidTraffic: {
     investment: number,
     impressions: number,
@@ -175,30 +233,51 @@ Retorne o JSON com exatamente esta estrutura TypeScript:
       name: string,
       description: string,
       metrics: Array<{ label: string, value: string }>,
-      insight: string
+      // métricas obrigatórias: Investimento, Alcance, Cliques, ROAS (ou CPA)
+      insight: string  // 1–2 frases com diagnóstico e próximo passo
     }>,
-    recommendation: string
+    recommendation: string  // ação prioritária para o próximo mês no Meta Ads
   } | null,
+
   actionSummary: {
     creatives: Array<{ name: string, roas: number }>,
-    revenueForces: string[],          // 4 frases curtas: ex "Clientes recorrentes", "Produtos campeões"
-    revenueForceDetails: string[],    // 4 parágrafos explicando cada força (1-2 frases cada)
-    assetsForNextMonth: string[],     // 6-8 itens: "X clientes ativos", "Y clientes inativos", "Produtos campeões", etc.
-    actionPlan: string[],             // 6-8 ações em ordem de prioridade
-    priorities: string[],             // 6-8 prioridades objetivas
+    // lista de criativos/campanhas com melhor performance (vazio [] se sem Meta Ads)
+
+    revenueForces: string[],
+    // EXATAMENTE 4 títulos curtos (máx. 4 palavras cada): as 4 forças que sustentaram a receita
+    // ex: ["Clientes recorrentes", "Fim de semana forte", "Produtos campeões", "Reativações"]
+
+    revenueForceDetails: string[],
+    // EXATAMENTE 4 parágrafos de 1–2 frases explicando cada força acima com dados do relatório
+
+    assetsForNextMonth: string[],
+    // 6–8 ativos disponíveis para o próximo mês com números
+    // ex: "389 clientes ativos para campanhas de frequência", "87 inativos 30–59 dias para reativação"
+
+    actionPlan: string[],   // 6–8 ações específicas em ordem de prioridade (ver critério de qualidade acima)
+    priorities: string[],   // 6–8 prioridades com urgência: "URGENTE:", "ALTA:", "MÉDIA:", "BAIXA:"
+
     conclusion: string,
-    nextMonth: string    // APENAS o nome do mês seguinte, ex: "Junho/2025" — NÃO coloque texto estratégico aqui
+    // 2–3 frases resumindo o diagnóstico do mês e a estratégia principal para o próximo
+
+    nextMonth: string
+    // FORMATO OBRIGATÓRIO: apenas "Mês/AAAA" — ex: "Junho/2025"
+    // NÃO coloque texto estratégico aqui. APENAS o nome do mês seguinte.
   },
+
   campaignActionPlan: {
     campaigns: Array<{
-      name: string,        // ex: "Campanha 1 — Recompra para ativos"
-      objective: string,
-      audience: string,
-      message: string,     // mensagem sugerida para WhatsApp (1-2 frases)
-      product: string      // produto ou oferta recomendada
+      name: string,       // ex: "Campanha 1 — Reativação 30–59 dias"
+      objective: string,  // 1 frase: o que essa campanha vai conseguir
+      audience: string,   // quem recebe (tamanho + critério de segmentação)
+      message: string,    // mensagem WhatsApp pronta para envio, começando com "Oi [nome],"
+      product: string     // produto ou oferta específica desta campanha
     }>,
-    customerJourney: string[],   // 5 etapas: ["Descoberta", "Primeira compra", "Recompra", "Reativação leve", "Reativação forte"]
-    guidelines: string[]          // 4 diretrizes estratégicas (frases curtas)
+    customerJourney: string[],
+    // EXATAMENTE 5 etapas: ["Descoberta", "Primeira compra", "Recompra", "Reativação leve", "Reativação forte"]
+
+    guidelines: string[]
+    // EXATAMENTE 4 diretrizes estratégicas curtas (1 frase cada)
   } | null
 }
 `.trim();
