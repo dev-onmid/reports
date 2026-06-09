@@ -135,7 +135,7 @@ export default function RelatoriosPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const data = await res.json() as { public_token?: string; id?: string; error?: string };
+      const data = await res.json().catch(() => ({ error: `Erro ${res.status} — tente novamente.` })) as { public_token?: string; id?: string; error?: string };
       if (data.public_token) {
         setShowGenModal(false);
         // window.open must be called before any await to avoid popup blocker

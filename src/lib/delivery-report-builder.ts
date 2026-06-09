@@ -242,7 +242,7 @@ export async function buildDeliveryReport(opts: {
 
   const message = await anthropic.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 16000,
+    max_tokens: 8192,
     system: SYSTEM_PROMPT,
     messages: [
       {
