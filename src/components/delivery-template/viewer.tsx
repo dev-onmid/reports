@@ -51,9 +51,11 @@ export default function DeliveryViewer({ data }: Props) {
     if (!win) return;
     win.document.write(`<!DOCTYPE html><html><head>
       <meta charset="utf-8" />
+      <link rel="preconnect" href="https://fonts.googleapis.com" />
+      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
       <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { background: white; }
+        body { background: white; font-family: "Inter", -apple-system, sans-serif; }
         .page { width: ${SLIDE_W}px; height: ${SLIDE_H}px; page-break-after: always; overflow: hidden; }
         @page { size: ${SLIDE_W}px ${SLIDE_H}px; margin: 0; }
         @media print { body { -webkit-print-color-adjust: exact; color-adjust: exact; } }
