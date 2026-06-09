@@ -13,7 +13,7 @@ export type AuthSession = {
 
 async function loadAuthUsers(): Promise<User[]> {
   try {
-    const res = await fetch('/api/users');
+    const res = await fetch('/api/users?login=1');
     if (res.ok) {
       const data = await res.json() as User[];
       if (data && data.length > 0) return data;

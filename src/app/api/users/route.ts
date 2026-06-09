@@ -2,15 +2,20 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function rowToJson(r: any) {
-  return { id: r.id, name: r.name, email: r.email, password: r.password, role: r.role, status: r.status };
+function rowToJson(r: any, includePassword = false) {
+  return {
+    id: r.id, name: r.name, email: r.email, role: r.role, status: r.status,
+    ...(includePassword ? { password: r.password } : {}),
+  };
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const pool = makeServerPool();
+  // Include password only for the dedicated login auth check (login=1)
+  const forLogin = req.nextUrl.searchParams.get('login') === '1';
   try {
     const { rows } = await pool.query('SELECT * FROM public.users ORDER BY name ASC');
-    return Response.json(rows.map(rowToJson));
+    return Response.json(rows.map(r => rowToJson(r, forLogin)));
   } catch {
     return Response.json([], { status: 200 });
   } finally {

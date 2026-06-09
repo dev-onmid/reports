@@ -2,11 +2,10 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { logActivity } from '@/lib/activity-log-store';
+import { getAuthSession } from '@/lib/auth-store';
 import { type Client, type ClientStatus, type DashboardType } from '@/lib/mock-data';
 
 const CLIENTS_UPDATED_EVENT = 'clients-updated';
-
-export const CURRENT_USER_ROLE = 'Administrador';
 
 export type NewClientInput = {
   name: string;
@@ -17,8 +16,9 @@ export type NewClientInput = {
   dashboard_type?: DashboardType;
 };
 
-export function canManageClients(role = CURRENT_USER_ROLE): boolean {
-  return role === 'Administrador';
+export function canManageClients(role?: string): boolean {
+  const effectiveRole = role ?? getAuthSession()?.role ?? '';
+  return effectiveRole === 'Administrador';
 }
 
 async function apiClients(method: string, body?: unknown, id?: string): Promise<Response> {
@@ -40,7 +40,10 @@ export function useClients() {
       const res = await fetch('/api/clients');
       if (!res.ok) return;
       const data: Client[] = await res.json();
-      setClients(data);
+      const session = getAuthSession();
+      const isAdmin = session?.role === 'Administrador';
+      // Non-admins only see clients they are gestor of
+      setClients(isAdmin ? data : data.filter(c => c.gestor_id === session?.userId));
     } catch (error) {
       console.error('Erro ao carregar clientes:', error);
     }
