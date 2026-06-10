@@ -1342,8 +1342,7 @@ export default function PagamentosPage() {
   const { clients } = useClients();
   const { payments, addPayment, updatePayment, updatePaymentStatus, deletePayment, movePaymentDate, togglePaymentExtra } = useInvestmentPayments();
   const [editingPayment, setEditingPayment] = useState<InvestmentPayment | null>(null);
-  const visibleClientIds = new Set(clients.map((client) => client.id));
-  const visiblePayments = payments.filter((payment) => visibleClientIds.has(payment.clientId));
+  const visiblePayments = payments;
 
   // ── Lifted balance state ──────────────────────────────────────────────────
   const [balances, setBalances] = useState<AdAccountBalance[]>([]);
