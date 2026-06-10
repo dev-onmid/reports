@@ -59,8 +59,7 @@ export default function RelatoriosPage() {
   const [showGenModal, setShowGenModal] = useState(false);
   const [genForm, setGenForm] = useState({ clientId: '', from: '', to: '', agencyContext: '' });
   const [genTemplate, setGenTemplate] = useState<'performance' | 'delivery'>('performance');
-  const [genCsvContent, setGenCsvContent] = useState('');
-  const [genCsvFileName, setGenCsvFileName] = useState('');
+  const [genCsvFiles, setGenCsvFiles] = useState<{ name: string; content: string }[]>([]);
   const [generating, setGenerating] = useState(false);
 
   // Automações (configs)
@@ -102,33 +101,41 @@ export default function RelatoriosPage() {
     const { from, to } = defaultDateRange();
     setGenForm({ clientId: '', from, to, agencyContext: '' });
     setGenTemplate('performance');
-    setGenCsvContent('');
-    setGenCsvFileName('');
+    setGenCsvFiles([]);
     setShowGenModal(true);
   }
 
-  function handleCsvFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setGenCsvFileName(file.name);
-    const reader = new FileReader();
-    reader.onload = (ev) => setGenCsvContent((ev.target?.result as string) ?? '');
-    reader.readAsText(file, 'utf-8');
+  function handleCsvFiles(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    if (!files.length) return;
+    files.forEach(file => {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const content = (ev.target?.result as string) ?? '';
+        setGenCsvFiles(prev => [...prev, { name: file.name, content }]);
+      };
+      reader.readAsText(file, 'utf-8');
+    });
+    e.target.value = '';
+  }
+
+  function removeCsvFile(index: number) {
+    setGenCsvFiles(prev => prev.filter((_, i) => i !== index));
   }
 
   async function generateReport() {
     if (!genForm.clientId || !genForm.from || !genForm.to) return;
-    if (genTemplate === 'delivery' && !genCsvContent) return;
+    if (genTemplate === 'delivery' && !genCsvFiles.length) return;
     setGenerating(true);
     try {
-      const payload: Record<string, string> = {
+      const payload: Record<string, unknown> = {
         clientId: genForm.clientId,
         from: genForm.from,
         to: genForm.to,
         template: genTemplate,
       };
       if (genForm.agencyContext) payload.agencyContext = genForm.agencyContext;
-      if (genTemplate === 'delivery') payload.csvContent = genCsvContent;
+      if (genTemplate === 'delivery') payload.csvFiles = genCsvFiles;
 
       const res = await fetch('/api/reports/run-once', {
         method: 'POST',
@@ -833,23 +840,33 @@ export default function RelatoriosPage() {
               {/* CSV upload — only for Delivery */}
               {genTemplate === 'delivery' && (
                 <div className="space-y-1.5">
-                  <label className="text-xs text-muted-foreground font-medium">Exportação do cardápio digital (CSV / XML / TXT)</label>
-                  <label className={cn(
-                    'flex items-center gap-3 px-4 py-3 rounded-lg border-2 border-dashed cursor-pointer transition-colors',
-                    genCsvContent ? 'border-emerald-500/50 bg-emerald-500/5' : 'border-border hover:border-emerald-500/40',
-                  )}>
-                    <input type="file" accept=".csv,.xml,.txt,.xlsx" onChange={handleCsvFile} className="hidden" />
-                    {genCsvContent ? (
-                      <>
-                        <FileCheck2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                        <span className="text-xs text-emerald-400 truncate">{genCsvFileName}</span>
-                      </>
-                    ) : (
-                      <>
-                        <FileText className="w-4 h-4 text-muted-foreground shrink-0" />
-                        <span className="text-xs text-muted-foreground">Clique para anexar o relatório exportado do Goomer, Anota Aí, etc.</span>
-                      </>
-                    )}
+                  <label className="text-xs text-muted-foreground font-medium">
+                    Planilhas do cardápio digital <span className="text-muted-foreground/50">(CSV / XML / TXT — pode anexar várias)</span>
+                  </label>
+                  {/* File list */}
+                  {genCsvFiles.length > 0 && (
+                    <div className="space-y-1">
+                      {genCsvFiles.map((f, i) => (
+                        <div key={i} className="flex items-center gap-2 px-3 py-2 rounded-md bg-emerald-500/8 border border-emerald-500/20">
+                          <FileCheck2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          <span className="text-xs text-emerald-400 truncate flex-1">{f.name}</span>
+                          <button
+                            onClick={() => removeCsvFile(i)}
+                            className="text-muted-foreground hover:text-destructive transition-colors shrink-0"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {/* Add file button */}
+                  <label className="flex items-center gap-3 px-4 py-3 rounded-lg border-2 border-dashed border-border hover:border-emerald-500/40 cursor-pointer transition-colors">
+                    <input type="file" multiple accept=".csv,.xml,.txt,.xlsx" onChange={handleCsvFiles} className="hidden" />
+                    <FileText className="w-4 h-4 text-muted-foreground shrink-0" />
+                    <span className="text-xs text-muted-foreground">
+                      {genCsvFiles.length > 0 ? 'Adicionar mais planilhas...' : 'Clique para anexar planilhas do Goomer, Anota Aí, etc.'}
+                    </span>
                   </label>
                 </div>
               )}
@@ -872,7 +889,7 @@ export default function RelatoriosPage() {
                   !genForm.clientId ||
                   !genForm.from ||
                   !genForm.to ||
-                  (genTemplate === 'delivery' && !genCsvContent)
+                  (genTemplate === 'delivery' && !genCsvFiles.length)
                 }
                 className={cn(
                   'text-white gap-2 text-sm min-w-[120px]',

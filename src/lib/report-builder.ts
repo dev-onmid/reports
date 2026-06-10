@@ -248,129 +248,141 @@ REGRAS DE COMUNICAÇÃO (sem exceção):
 - O relatório conta uma história: fizemos → aconteceu → aprendemos → vamos fazer
 
 SEÇÕES (ordem fixa — pule se não houver dados):
-1. RESUMO EXECUTIVO — 3 a 5 destaques em 1 frase cada, mais importante para o negócio primeiro
-2. RESULTADOS DO NEGÓCIO — só se houver dados de CRM (registros, clientes, faturamento). Conecte com o investimento.
-3. FUNIL DE MÍDIA PAGA — investimento → alcance → cliques → resultado. Melhor e pior campanha com plano para a pior.
-4. INSTAGRAM ORGÂNICO — crescimento de seguidores, alcance orgânico, top 3 conteúdos e o que indicam
-5. ANÁLISE DE PRODUTOS/VENDAS — só se houver dados de planilha. Mais vendidos, variações, oportunidades.
-6. COMPARATIVO COM PERÍODO ANTERIOR — métricas lado a lado, variação %, contexto para cada queda
-7. RECOMENDAÇÕES — mín. 3, máx. 5. Formato OBRIGATÓRIO: O que fazer → Por que (dado concreto) → Resultado esperado
-8. PRÓXIMOS PASSOS — 3 a 4 ações concretas que a agência vai executar no próximo período
+1. CAPA — nome do cliente, período, principais KPIs
+2. RESUMO EXECUTIVO — 3 a 5 destaques em 1 frase cada, mais importante primeiro
+3. RESULTADOS DO NEGÓCIO — só se houver CRM (registros, clientes, faturamento). Conecte ao investimento.
+4. FUNIL DE MÍDIA PAGA — investimento → alcance → cliques → resultado. Melhor e pior campanha com plano.
+5. INSTAGRAM ORGÂNICO — crescimento, alcance, top 3 conteúdos
+6. ANÁLISE DE PRODUTOS/VENDAS — só com planilha. Mais vendidos, variações, oportunidades.
+7. COMPARATIVO COM PERÍODO ANTERIOR — métricas lado a lado, variação %, contexto para quedas
+8. RECOMENDAÇÕES — mín. 3, máx. 5. Formato: O que fazer → Por que (dado) → Resultado esperado
+9. PRÓXIMOS PASSOS — 3 a 4 ações concretas
 
 QUALIDADE:
-- Se não há dados do período anterior: apresente como linha de base e declare isso
-- Máximo 8 cards de destaque no Resumo — o resto vai em tabela
+- Máximo 6 cards de KPI por slide — o restante vai em tabela
+- Se não há período anterior: apresente como linha de base e declare isso
 - Relatório com poucos dados parece enxuto e completo, não incompleto
 
-DESIGN SYSTEM — use inline styles com estes valores exatos:
-verde: #55f52f | fundo: #ffffff | texto: #0e0e0e | hero: #000000
-superfície: #f7f7f7 | borda: #cccccc | roxo: #7b2cff | erro: #e52020
-verde texto: #1a6600 | cinza texto: #757575
-fonte título: font-family:var(--font-bebas),sans-serif
-fonte corpo: font-family:var(--font-inter),sans-serif
-border-radius: 2px (SEMPRE, nunca maior)
+━━ FORMATO: SLIDES HORIZONTAIS 16:9 ━━
 
-COMPONENTES — use estes padrões exatamente:
+O relatório é uma apresentação. Cada seção = 1 slide de 1280×720px.
+Use exatamente estes padrões — não invente estruturas novas.
 
-Wrapper externo (abre e fecha o documento):
-<div style="background:#fff;font-family:var(--font-inter),sans-serif;padding-bottom:80px">
-  ...
+CORES: verde #55f52f | preto #000000 | fundo slide #ffffff | texto #0e0e0e
+       superfície #f7f7f7 | borda #cccccc | verde texto #1a6600 | cinza #757575
+       erro #e52020 | fundo container #111111
+FONTES: títulos → font-family:var(--font-bebas),sans-serif
+        corpo   → font-family:var(--font-inter),sans-serif
+RADIUS: 2px em tudo — NUNCA maior
+
+── WRAPPER DO DOCUMENTO (obrigatório, abre e fecha tudo) ──
+<div style="background:#111;padding:32px;font-family:var(--font-inter),sans-serif">
+  [slides aqui]
 </div>
 
-Capa:
-<div style="background:#000;padding:56px 48px 48px">
-  <div style="color:#55f52f;font-family:var(--font-bebas),sans-serif;font-size:12px;letter-spacing:0.15em">ONMID · RELATÓRIO DE MARKETING DIGITAL</div>
-  <h1 style="color:#fff;font-family:var(--font-bebas),sans-serif;font-size:80px;line-height:0.9;margin:12px 0 0">NOME DO<br>CLIENTE</h1>
-  <div style="color:#999;font-family:var(--font-inter),sans-serif;font-size:14px;margin-top:24px;text-transform:uppercase;letter-spacing:0.05em">Período · Jan/25 a Mar/25</div>
-  <div style="display:flex;gap:12px;margin-top:32px;flex-wrap:wrap">
-    <!-- KPI pills: use apenas se houver dados concretos -->
-    <div style="background:#ffffff15;border:1px solid #ffffff25;padding:12px 20px;border-radius:2px">
-      <div style="color:#999;font-family:var(--font-inter),sans-serif;font-size:11px;text-transform:uppercase;letter-spacing:0.08em">Label</div>
-      <div style="color:#fff;font-family:var(--font-bebas),sans-serif;font-size:28px;line-height:1;margin-top:4px">Valor</div>
+── SLIDE DE CAPA (fundo preto, layout flex coluna) ──
+<div style="width:1280px;min-height:720px;background:#000;margin:0 auto 16px;padding:72px 80px;box-sizing:border-box;display:flex;flex-direction:column;justify-content:space-between;page-break-after:always">
+  <div style="color:#55f52f;font-family:var(--font-bebas),sans-serif;font-size:13px;letter-spacing:0.2em">ONMID · RELATÓRIO DE MARKETING DIGITAL</div>
+  <div>
+    <h1 style="color:#fff;font-family:var(--font-bebas),sans-serif;font-size:100px;line-height:0.88;margin:0">NOME DO<br>CLIENTE</h1>
+    <div style="color:#555;font-family:var(--font-inter),sans-serif;font-size:14px;margin-top:20px;text-transform:uppercase;letter-spacing:0.08em">Período · Jan/25 a Mar/25</div>
+    <div style="display:flex;gap:16px;margin-top:28px;flex-wrap:wrap">
+      <div style="background:#ffffff12;border:1px solid #ffffff20;padding:14px 24px;border-radius:2px">
+        <div style="color:#666;font-family:var(--font-inter),sans-serif;font-size:11px;text-transform:uppercase;letter-spacing:0.08em">Label</div>
+        <div style="color:#fff;font-family:var(--font-bebas),sans-serif;font-size:32px;line-height:1;margin-top:4px">Valor</div>
+      </div>
     </div>
   </div>
 </div>
 
-Cabeçalho de seção:
-<div style="padding:48px 48px 0">
-  <div style="display:flex;align-items:center;gap:12px;margin-bottom:28px">
-    <div style="width:4px;height:36px;background:#55f52f;flex-shrink:0"></div>
-    <h2 style="font-family:var(--font-bebas),sans-serif;font-size:36px;color:#0e0e0e;margin:0;line-height:1">TÍTULO DA SEÇÃO</h2>
+── SLIDE PADRÃO (fundo branco, header + conteúdo em 1 coluna) ──
+<div style="width:1280px;min-height:720px;background:#fff;margin:0 auto 16px;padding:56px 72px;box-sizing:border-box;page-break-after:always">
+  <div style="display:flex;align-items:center;gap:14px;margin-bottom:36px">
+    <div style="width:5px;height:40px;background:#55f52f;flex-shrink:0;border-radius:2px"></div>
+    <h2 style="font-family:var(--font-bebas),sans-serif;font-size:44px;color:#0e0e0e;margin:0;line-height:1">TÍTULO DA SEÇÃO</h2>
+  </div>
+  [conteúdo do slide]
+</div>
+
+── SLIDE COM 2 COLUNAS (esquerda: dados/cards | direita: análise/texto) ──
+<div style="width:1280px;min-height:720px;background:#fff;margin:0 auto 16px;padding:56px 72px;box-sizing:border-box;page-break-after:always">
+  <div style="display:flex;align-items:center;gap:14px;margin-bottom:36px">
+    <div style="width:5px;height:40px;background:#55f52f;flex-shrink:0;border-radius:2px"></div>
+    <h2 style="font-family:var(--font-bebas),sans-serif;font-size:44px;color:#0e0e0e;margin:0;line-height:1">TÍTULO</h2>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:48px;align-items:start">
+    <div>[coluna esquerda]</div>
+    <div>[coluna direita]</div>
   </div>
 </div>
 
-Cards de métricas (dentro de uma seção, agrupe em flex row):
-<div style="display:flex;gap:16px;flex-wrap:wrap;padding:0 48px;margin-top:24px">
-  <div style="background:#f7f7f7;border:1px solid #cccccc;border-radius:2px;padding:24px;flex:1;min-width:150px">
-    <div style="font-family:var(--font-inter),sans-serif;font-size:11px;color:#757575;text-transform:uppercase;letter-spacing:0.08em">LABEL</div>
-    <div style="font-family:var(--font-bebas),sans-serif;font-size:44px;color:#0e0e0e;line-height:1;margin-top:8px">VALOR</div>
-    <div style="font-family:var(--font-inter),sans-serif;font-size:12px;color:#757575;margin-top:8px">tradução em linguagem de negócio</div>
-  </div>
+── SLIDE COM 3 COLUNAS (para comparativos ou 3 blocos de insight) ──
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px">
+  [3 blocos]
 </div>
 
-Texto de análise (parágrafos dentro de seção):
-<div style="padding:16px 48px 0">
-  <p style="font-family:var(--font-inter),sans-serif;font-size:14px;color:#0e0e0e;line-height:1.7;margin:0">Texto aqui.</p>
+── CARD DE KPI (use dentro de grids de métricas) ──
+<div style="background:#f7f7f7;border:1px solid #cccccc;border-radius:2px;padding:24px">
+  <div style="font-family:var(--font-inter),sans-serif;font-size:11px;color:#757575;text-transform:uppercase;letter-spacing:0.08em">LABEL</div>
+  <div style="font-family:var(--font-bebas),sans-serif;font-size:52px;color:#0e0e0e;line-height:1;margin-top:8px">VALOR</div>
+  <div style="font-family:var(--font-inter),sans-serif;font-size:12px;color:#757575;margin-top:8px">tradução em linguagem de negócio</div>
 </div>
 
-Variação positiva: <span style="background:#e8fde0;color:#1a6600;font-size:12px;font-weight:600;padding:2px 8px;border-radius:2px;font-family:var(--font-inter),sans-serif;display:inline-block">+23% (de 254 para 312)</span>
-Variação negativa: <span style="background:#fde8e8;color:#e52020;font-size:12px;font-weight:600;padding:2px 8px;border-radius:2px;font-family:var(--font-inter),sans-serif;display:inline-block">-12% (de 312 para 275)</span>
+── VARIAÇÃO ──
+Positiva: <span style="background:#e8fde0;color:#1a6600;font-size:12px;font-weight:600;padding:3px 10px;border-radius:2px;font-family:var(--font-inter),sans-serif">+23% (de 254 para 312)</span>
+Negativa: <span style="background:#fde8e8;color:#e52020;font-size:12px;font-weight:600;padding:3px 10px;border-radius:2px;font-family:var(--font-inter),sans-serif">-12% (de 312 para 275)</span>
 
-Tabela comparativa:
-<div style="padding:0 48px;margin-top:24px;overflow-x:auto">
-  <table style="width:100%;border-collapse:collapse;font-family:var(--font-inter),sans-serif;font-size:13px">
-    <thead>
-      <tr style="background:#000;color:#fff">
-        <th style="padding:12px 16px;text-align:left;font-weight:600">Métrica</th>
-        <th style="padding:12px 16px;text-align:right;font-weight:600">Período Anterior</th>
-        <th style="padding:12px 16px;text-align:right;font-weight:600">Período Atual</th>
-        <th style="padding:12px 16px;text-align:right;font-weight:600">Variação</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr style="border-bottom:1px solid #cccccc">
-        <td style="padding:12px 16px;color:#0e0e0e;font-weight:500">Nome da Métrica</td>
-        <td style="padding:12px 16px;text-align:right;color:#757575">Valor anterior</td>
-        <td style="padding:12px 16px;text-align:right;color:#0e0e0e;font-weight:600">Valor atual</td>
-        <td style="padding:12px 16px;text-align:right">[badge de variação]</td>
-      </tr>
-    </tbody>
-  </table>
+── TABELA (ocupa largura total do slide) ──
+<table style="width:100%;border-collapse:collapse;font-family:var(--font-inter),sans-serif;font-size:13px">
+  <thead>
+    <tr style="background:#000;color:#fff">
+      <th style="padding:13px 18px;text-align:left;font-weight:600">Métrica</th>
+      <th style="padding:13px 18px;text-align:right;font-weight:600">Período Anterior</th>
+      <th style="padding:13px 18px;text-align:right;font-weight:600">Período Atual</th>
+      <th style="padding:13px 18px;text-align:right;font-weight:600">Variação</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr style="border-bottom:1px solid #e8e8e8">
+      <td style="padding:13px 18px;color:#0e0e0e;font-weight:500">Métrica</td>
+      <td style="padding:13px 18px;text-align:right;color:#757575">Valor ant.</td>
+      <td style="padding:13px 18px;text-align:right;color:#0e0e0e;font-weight:700">Valor atual</td>
+      <td style="padding:13px 18px;text-align:right">[badge]</td>
+    </tr>
+  </tbody>
+</table>
+
+── HIGHLIGHT BOX (insight central de um slide) ──
+<div style="background:#000;padding:28px 36px;border-radius:2px;margin-top:20px">
+  <div style="font-family:var(--font-bebas),sans-serif;font-size:20px;color:#55f52f;margin-bottom:8px">DESTAQUE</div>
+  <div style="font-family:var(--font-inter),sans-serif;font-size:15px;color:#fff;line-height:1.6">insight aqui</div>
 </div>
 
-Highlight box (para insight central de uma seção):
-<div style="background:#000;color:#fff;padding:28px 32px;border-radius:2px;margin:24px 48px 0">
-  <div style="font-family:var(--font-bebas),sans-serif;font-size:22px;color:#55f52f;margin-bottom:8px">DESTAQUE</div>
-  <div style="font-family:var(--font-inter),sans-serif;font-size:15px;line-height:1.6">insight importante aqui</div>
-</div>
-
-Item de recomendação:
-<div style="border:1px solid #cccccc;border-radius:2px;padding:20px;border-left:4px solid #55f52f;margin-bottom:12px">
+── ITEM DE RECOMENDAÇÃO ──
+<div style="border:1px solid #e8e8e8;border-radius:2px;padding:20px;border-left:4px solid #55f52f;margin-bottom:12px">
   <div style="font-family:var(--font-inter),sans-serif;font-size:11px;font-weight:700;color:#757575;text-transform:uppercase;letter-spacing:0.08em">O QUE FAZER</div>
-  <div style="font-family:var(--font-inter),sans-serif;font-size:14px;color:#0e0e0e;margin-top:6px;font-weight:600">ação específica aqui</div>
-  <div style="font-family:var(--font-inter),sans-serif;font-size:13px;color:#757575;margin-top:8px"><span style="font-weight:600;color:#0e0e0e">Por que:</span> dado concreto que sustenta a recomendação</div>
-  <div style="font-family:var(--font-inter),sans-serif;font-size:13px;color:#1a6600;margin-top:4px"><span style="font-weight:600">Resultado esperado:</span> métrica ou efeito esperado</div>
+  <div style="font-family:var(--font-inter),sans-serif;font-size:14px;color:#0e0e0e;margin-top:6px;font-weight:600">ação específica</div>
+  <div style="font-family:var(--font-inter),sans-serif;font-size:13px;color:#757575;margin-top:8px"><span style="font-weight:600;color:#0e0e0e">Por que:</span> dado concreto</div>
+  <div style="font-family:var(--font-inter),sans-serif;font-size:13px;color:#1a6600;margin-top:4px"><span style="font-weight:600">Resultado:</span> efeito esperado</div>
 </div>
 
-Próximo passo numerado:
-<div style="display:flex;gap:16px;align-items:flex-start;padding:16px 0;border-bottom:1px solid #f7f7f7">
-  <div style="background:#55f52f;color:#000;font-family:var(--font-bebas),sans-serif;font-size:18px;min-width:36px;height:36px;display:flex;align-items:center;justify-content:center;flex-shrink:0;border-radius:2px">1</div>
+── PRÓXIMO PASSO NUMERADO ──
+<div style="display:flex;gap:16px;align-items:flex-start;padding:14px 0;border-bottom:1px solid #f0f0f0">
+  <div style="background:#55f52f;color:#000;font-family:var(--font-bebas),sans-serif;font-size:18px;min-width:36px;height:36px;display:flex;align-items:center;justify-content:center;border-radius:2px;flex-shrink:0">1</div>
   <div>
-    <div style="font-family:var(--font-inter),sans-serif;font-size:14px;font-weight:700;color:#0e0e0e">AÇÃO ESPECÍFICA</div>
-    <div style="font-family:var(--font-inter),sans-serif;font-size:13px;color:#757575;margin-top:4px">detalhes concretos do que será feito</div>
+    <div style="font-family:var(--font-inter),sans-serif;font-size:14px;font-weight:700;color:#0e0e0e">AÇÃO</div>
+    <div style="font-family:var(--font-inter),sans-serif;font-size:13px;color:#757575;margin-top:3px">detalhes concretos</div>
   </div>
 </div>
 
-Divisor entre seções: <div style="height:1px;background:#f7f7f7;margin:0 48px"></div>
-
-Rodapé:
-<div style="background:#000;padding:32px 48px;margin-top:64px;display:flex;align-items:center;justify-content:space-between">
-  <div style="color:#55f52f;font-family:var(--font-bebas),sans-serif;font-size:20px;letter-spacing:0.1em">ONMID</div>
-  <div style="color:#757575;font-family:var(--font-inter),sans-serif;font-size:12px">Relatório gerado por ONMID Reports</div>
+── SLIDE DE RODAPÉ (último slide, fundo preto) ──
+<div style="width:1280px;height:120px;background:#000;margin:0 auto 16px;padding:0 72px;box-sizing:border-box;display:flex;align-items:center;justify-content:space-between">
+  <div style="color:#55f52f;font-family:var(--font-bebas),sans-serif;font-size:22px;letter-spacing:0.12em">ONMID</div>
+  <div style="color:#555;font-family:var(--font-inter),sans-serif;font-size:12px">Relatório gerado por ONMID Reports</div>
 </div>
 
 SAÍDA: retorne APENAS o HTML. Sem markdown, sem blocos de código, sem texto antes ou depois.
-O HTML começa em <div style="background:#fff e termina em </div>`;
+O HTML começa em <div style="background:#111 e termina em </div>`;
 
 function buildUserPrompt(
   clientName: string,

@@ -56,10 +56,20 @@ export default async function RelatorioPublicoPage({ params }: { params: Promise
   ) {
     const data = report.report_data as { html: string };
     const isDelivery = report.template_slug === 'onmid-narrative-delivery';
+    const printCss = `
+      @media print {
+        @page { size: landscape; margin: 0; }
+        body { background: #111 !important; }
+        [style*="page-break-after"] { break-after: page; }
+      }
+      * { box-sizing: border-box; }
+    `;
     return (
       <>
         <title>{`Relatório ${isDelivery ? 'Delivery' : 'de Performance'} — ${report.client_name}`}</title>
-        <div style={{ background: '#ffffff', minHeight: '100vh' }}>
+        {/* eslint-disable-next-line react/no-danger */}
+        <style dangerouslySetInnerHTML={{ __html: printCss }} />
+        <div style={{ background: '#111111', minHeight: '100vh', overflowX: 'auto' }}>
           <div dangerouslySetInnerHTML={{ __html: data.html ?? '' }} />
         </div>
       </>

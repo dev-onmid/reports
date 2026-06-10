@@ -1,29 +1,86 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { makeServerPool } from '@/lib/server-db';
+import { getFreshMetaToken } from '@/lib/meta-token';
 import { randomUUID } from 'crypto';
+import { brl } from './report-runner';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-// ── Meta Ads fetcher ──────────────────────────────────────────────────────────
+// ── Meta Ads fetcher (campaign-level, same auth pattern as report-builder) ────
 
-async function fetchMetaData(clientId: string, from: string, to: string) {
+async function fetchCampaignMeta(
+  connectionId: string | null | undefined,
+  accountIds: string[],
+  from: string,
+  to: string,
+): Promise<string> {
+  if (!connectionId || !accountIds.length) return 'Sem dados de Meta Ads disponíveis.';
+
+  const pool = makeServerPool();
+  let conn: { id: string; app_id: string; access_token: string; token_expiry: string | null } | null = null;
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, app_id, access_token, token_expiry FROM public.meta_connections WHERE id = $1`,
+      [connectionId],
+    );
+    conn = rows[0] ?? null;
+  } finally {
+    await pool.end();
+  }
+  if (!conn) return 'Sem dados de Meta Ads disponíveis.';
+
+  const token = await getFreshMetaToken(conn);
+  const timeRange = JSON.stringify({ since: from, until: to });
+  const campaigns: Record<string, unknown>[] = [];
+
+  await Promise.allSettled(accountIds.map(async (accountId) => {
+    const acct = accountId.startsWith('act_') ? accountId : `act_${accountId}`;
+    const url = new URL(`https://graph.facebook.com/v21.0/${acct}/insights`);
+    url.searchParams.set('fields', 'campaign_name,spend,impressions,reach,clicks,actions');
+    url.searchParams.set('time_range', timeRange);
+    url.searchParams.set('level', 'campaign');
+    url.searchParams.set('limit', '50');
+    url.searchParams.set('access_token', token);
+
+    const res = await fetch(url.toString()).catch(() => null);
+    if (!res?.ok) return;
+    const json = await res.json() as { data?: Record<string, unknown>[] };
+    campaigns.push(...(json.data ?? []));
+  }));
+
+  if (!campaigns.length) return 'Sem dados de Meta Ads disponíveis.';
+  return JSON.stringify(campaigns, null, 2);
+}
+
+// ── CRM fetcher ───────────────────────────────────────────────────────────────
+
+async function fetchCrmData(clientId: string, from: string, to: string): Promise<string> {
   const pool = makeServerPool();
   try {
     const { rows } = await pool.query(
-      `SELECT access_token, ad_account_id FROM meta_connections WHERE client_id = $1 LIMIT 1`,
-      [clientId],
-    );
-    if (!rows[0]) return null;
+      `SELECT
+         TO_CHAR(DATE_TRUNC('month', COALESCE(data::date, lead_date, created_at::date)), 'YYYY-MM') AS month,
+         COUNT(*) AS registros,
+         COUNT(*) FILTER (WHERE fechou = true OR COALESCE(NULLIF(valor_rs,0), 0) > 0) AS fechados,
+         COALESCE(SUM(COALESCE(NULLIF(valor_rs,0), 0)), 0) AS faturamento
+       FROM public.crm_leads
+       WHERE client_id = $1
+         AND COALESCE(data::date, lead_date, created_at::date) BETWEEN $2 AND $3
+       GROUP BY 1
+       ORDER BY 1`,
+      [clientId, from, to],
+    ).catch(() => ({ rows: [] as { month: string; registros: string; fechados: string; faturamento: string }[] }));
 
-    const { access_token, ad_account_id } = rows[0];
-    const fields = 'campaign_name,spend,impressions,reach,clicks,actions';
-    const url = `https://graph.facebook.com/v19.0/act_${ad_account_id}/insights?fields=${fields}&time_range={"since":"${from}","until":"${to}"}&level=campaign&limit=50&access_token=${access_token}`;
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const json = await res.json();
-    return (json.data ?? []) as Record<string, string>[];
-  } catch {
-    return null;
+    if (!rows.length) return 'Sem dados de CRM para este período.';
+
+    const lines = ['Dados de CRM / base de clientes por mês:'];
+    for (const r of rows) {
+      const fat = parseFloat(r.faturamento) || 0;
+      lines.push(
+        `${r.month}: ${r.registros} leads | ${r.fechados} conversões${fat > 0 ? ` | ${brl(fat)} faturamento` : ''}`,
+      );
+    }
+    return lines.join('\n');
   } finally {
     await pool.end();
   }
@@ -73,132 +130,139 @@ QUALIDADE:
 - Mensagem de campanha WhatsApp: informal, "Oi [nome]," na abertura, 2–3 frases com produto e oferta específicos
 - Relatório com poucos dados parece enxuto e completo, não incompleto
 
-DESIGN SYSTEM — use inline styles com estes valores exatos:
-verde: #55f52f | fundo: #ffffff | texto: #0e0e0e | hero: #000000
-superfície: #f7f7f7 | borda: #cccccc | roxo: #7b2cff | erro: #e52020
-verde texto: #1a6600 | cinza texto: #757575
-fonte título: font-family:var(--font-bebas),sans-serif
-fonte corpo: font-family:var(--font-inter),sans-serif
-border-radius: 2px (SEMPRE, nunca maior)
+━━ FORMATO: SLIDES HORIZONTAIS 16:9 ━━
 
-COMPONENTES — use estes padrões exatamente:
+O relatório é uma apresentação. Cada seção = 1 slide de 1280×720px.
+Use exatamente estes padrões — não invente estruturas novas.
 
-Wrapper externo (abre e fecha o documento):
-<div style="background:#fff;font-family:var(--font-inter),sans-serif;padding-bottom:80px">
-  ...
+CORES: verde #55f52f | preto #000000 | fundo slide #ffffff | texto #0e0e0e
+       superfície #f7f7f7 | borda #cccccc | verde texto #1a6600 | cinza #757575
+       erro #e52020 | fundo container #111111
+FONTES: títulos → font-family:var(--font-bebas),sans-serif
+        corpo   → font-family:var(--font-inter),sans-serif
+RADIUS: 2px em tudo — NUNCA maior
+
+── WRAPPER DO DOCUMENTO ──
+<div style="background:#111;padding:32px;font-family:var(--font-inter),sans-serif">
+  [slides aqui]
 </div>
 
-Capa:
-<div style="background:#000;padding:56px 48px 48px">
-  <div style="color:#55f52f;font-family:var(--font-bebas),sans-serif;font-size:12px;letter-spacing:0.15em">ONMID · RELATÓRIO DE DELIVERY</div>
-  <h1 style="color:#fff;font-family:var(--font-bebas),sans-serif;font-size:80px;line-height:0.9;margin:12px 0 0">NOME DO<br>RESTAURANTE</h1>
-  <div style="color:#999;font-family:var(--font-inter),sans-serif;font-size:14px;margin-top:24px;text-transform:uppercase;letter-spacing:0.05em">Período · Mês/Ano</div>
-  <div style="display:flex;gap:12px;margin-top:32px;flex-wrap:wrap">
-    <div style="background:#ffffff15;border:1px solid #ffffff25;padding:12px 20px;border-radius:2px">
-      <div style="color:#999;font-family:var(--font-inter),sans-serif;font-size:11px;text-transform:uppercase;letter-spacing:0.08em">Label</div>
-      <div style="color:#fff;font-family:var(--font-bebas),sans-serif;font-size:28px;line-height:1;margin-top:4px">Valor</div>
+── SLIDE DE CAPA ──
+<div style="width:1280px;min-height:720px;background:#000;margin:0 auto 16px;padding:72px 80px;box-sizing:border-box;display:flex;flex-direction:column;justify-content:space-between;page-break-after:always">
+  <div style="color:#55f52f;font-family:var(--font-bebas),sans-serif;font-size:13px;letter-spacing:0.2em">ONMID · RELATÓRIO DE DELIVERY</div>
+  <div>
+    <h1 style="color:#fff;font-family:var(--font-bebas),sans-serif;font-size:100px;line-height:0.88;margin:0">NOME DO<br>RESTAURANTE</h1>
+    <div style="color:#555;font-family:var(--font-inter),sans-serif;font-size:14px;margin-top:20px;text-transform:uppercase;letter-spacing:0.08em">Período · Mês/Ano</div>
+    <div style="display:flex;gap:16px;margin-top:28px;flex-wrap:wrap">
+      <div style="background:#ffffff12;border:1px solid #ffffff20;padding:14px 24px;border-radius:2px">
+        <div style="color:#666;font-family:var(--font-inter),sans-serif;font-size:11px;text-transform:uppercase;letter-spacing:0.08em">Label</div>
+        <div style="color:#fff;font-family:var(--font-bebas),sans-serif;font-size:32px;line-height:1;margin-top:4px">Valor</div>
+      </div>
     </div>
   </div>
 </div>
 
-Cabeçalho de seção:
-<div style="padding:48px 48px 0">
-  <div style="display:flex;align-items:center;gap:12px;margin-bottom:28px">
-    <div style="width:4px;height:36px;background:#55f52f;flex-shrink:0"></div>
-    <h2 style="font-family:var(--font-bebas),sans-serif;font-size:36px;color:#0e0e0e;margin:0;line-height:1">TÍTULO DA SEÇÃO</h2>
+── SLIDE PADRÃO (1 coluna) ──
+<div style="width:1280px;min-height:720px;background:#fff;margin:0 auto 16px;padding:56px 72px;box-sizing:border-box;page-break-after:always">
+  <div style="display:flex;align-items:center;gap:14px;margin-bottom:36px">
+    <div style="width:5px;height:40px;background:#55f52f;flex-shrink:0;border-radius:2px"></div>
+    <h2 style="font-family:var(--font-bebas),sans-serif;font-size:44px;color:#0e0e0e;margin:0;line-height:1">TÍTULO</h2>
+  </div>
+  [conteúdo]
+</div>
+
+── SLIDE COM 2 COLUNAS ──
+<div style="width:1280px;min-height:720px;background:#fff;margin:0 auto 16px;padding:56px 72px;box-sizing:border-box;page-break-after:always">
+  <div style="display:flex;align-items:center;gap:14px;margin-bottom:36px">
+    <div style="width:5px;height:40px;background:#55f52f;flex-shrink:0;border-radius:2px"></div>
+    <h2 style="font-family:var(--font-bebas),sans-serif;font-size:44px;color:#0e0e0e;margin:0;line-height:1">TÍTULO</h2>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:48px;align-items:start">
+    <div>[esquerda]</div>
+    <div>[direita]</div>
   </div>
 </div>
 
-Cards de métricas:
-<div style="display:flex;gap:16px;flex-wrap:wrap;padding:0 48px;margin-top:24px">
-  <div style="background:#f7f7f7;border:1px solid #cccccc;border-radius:2px;padding:24px;flex:1;min-width:150px">
-    <div style="font-family:var(--font-inter),sans-serif;font-size:11px;color:#757575;text-transform:uppercase;letter-spacing:0.08em">LABEL</div>
-    <div style="font-family:var(--font-bebas),sans-serif;font-size:44px;color:#0e0e0e;line-height:1;margin-top:8px">VALOR</div>
-    <div style="font-family:var(--font-inter),sans-serif;font-size:12px;color:#757575;margin-top:8px">tradução em linguagem de negócio</div>
-  </div>
+── CARD DE KPI ──
+<div style="background:#f7f7f7;border:1px solid #cccccc;border-radius:2px;padding:24px">
+  <div style="font-family:var(--font-inter),sans-serif;font-size:11px;color:#757575;text-transform:uppercase;letter-spacing:0.08em">LABEL</div>
+  <div style="font-family:var(--font-bebas),sans-serif;font-size:52px;color:#0e0e0e;line-height:1;margin-top:8px">VALOR</div>
+  <div style="font-family:var(--font-inter),sans-serif;font-size:12px;color:#757575;margin-top:8px">tradução business</div>
 </div>
 
-Texto de análise:
-<div style="padding:16px 48px 0">
-  <p style="font-family:var(--font-inter),sans-serif;font-size:14px;color:#0e0e0e;line-height:1.7;margin:0">Texto aqui.</p>
+── VARIAÇÃO ──
+Positiva: <span style="background:#e8fde0;color:#1a6600;font-size:12px;font-weight:600;padding:3px 10px;border-radius:2px;font-family:var(--font-inter),sans-serif">+23% (de 254 para 312)</span>
+Negativa: <span style="background:#fde8e8;color:#e52020;font-size:12px;font-weight:600;padding:3px 10px;border-radius:2px;font-family:var(--font-inter),sans-serif">-12% (de 312 para 275)</span>
+
+── TABELA ──
+<table style="width:100%;border-collapse:collapse;font-family:var(--font-inter),sans-serif;font-size:13px">
+  <thead><tr style="background:#000;color:#fff">
+    <th style="padding:13px 18px;text-align:left;font-weight:600">Coluna</th>
+    <th style="padding:13px 18px;text-align:right;font-weight:600">Valor</th>
+  </tr></thead>
+  <tbody>
+    <tr style="border-bottom:1px solid #e8e8e8">
+      <td style="padding:13px 18px;color:#0e0e0e;font-weight:500">Item</td>
+      <td style="padding:13px 18px;text-align:right;font-weight:700">Valor</td>
+    </tr>
+  </tbody>
+</table>
+
+── HIGHLIGHT BOX ──
+<div style="background:#000;padding:28px 36px;border-radius:2px;margin-top:20px">
+  <div style="font-family:var(--font-bebas),sans-serif;font-size:20px;color:#55f52f;margin-bottom:8px">DESTAQUE</div>
+  <div style="font-family:var(--font-inter),sans-serif;font-size:15px;color:#fff;line-height:1.6">insight aqui</div>
 </div>
 
-Variação positiva: <span style="background:#e8fde0;color:#1a6600;font-size:12px;font-weight:600;padding:2px 8px;border-radius:2px;font-family:var(--font-inter),sans-serif;display:inline-block">+23% (de 254 para 312)</span>
-Variação negativa: <span style="background:#fde8e8;color:#e52020;font-size:12px;font-weight:600;padding:2px 8px;border-radius:2px;font-family:var(--font-inter),sans-serif;display:inline-block">-12% (de 312 para 275)</span>
-
-Tabela comparativa ou de produtos:
-<div style="padding:0 48px;margin-top:24px;overflow-x:auto">
-  <table style="width:100%;border-collapse:collapse;font-family:var(--font-inter),sans-serif;font-size:13px">
-    <thead>
-      <tr style="background:#000;color:#fff">
-        <th style="padding:12px 16px;text-align:left;font-weight:600">Coluna</th>
-        <th style="padding:12px 16px;text-align:right;font-weight:600">Valor</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr style="border-bottom:1px solid #cccccc">
-        <td style="padding:12px 16px;color:#0e0e0e;font-weight:500">Item</td>
-        <td style="padding:12px 16px;text-align:right;color:#0e0e0e;font-weight:600">Valor</td>
-      </tr>
-    </tbody>
-  </table>
-</div>
-
-Highlight box:
-<div style="background:#000;color:#fff;padding:28px 32px;border-radius:2px;margin:24px 48px 0">
-  <div style="font-family:var(--font-bebas),sans-serif;font-size:22px;color:#55f52f;margin-bottom:8px">DESTAQUE</div>
-  <div style="font-family:var(--font-inter),sans-serif;font-size:15px;line-height:1.6">insight importante aqui</div>
-</div>
-
-Card de campanha sugerida:
-<div style="border:1px solid #cccccc;border-radius:2px;padding:24px;margin-bottom:16px">
+── CARD DE CAMPANHA SUGERIDA ──
+<div style="border:1px solid #e8e8e8;border-radius:2px;padding:20px;border-left:4px solid #55f52f;margin-bottom:12px">
   <div style="font-family:var(--font-bebas),sans-serif;font-size:20px;color:#0e0e0e;margin-bottom:4px">NOME DA CAMPANHA</div>
-  <div style="font-family:var(--font-inter),sans-serif;font-size:12px;color:#757575;margin-bottom:16px">Audiência: descrição do público</div>
-  <div style="background:#f7f7f7;border-radius:2px;padding:16px;border-left:3px solid #55f52f">
-    <div style="font-family:var(--font-inter),sans-serif;font-size:11px;color:#757575;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px">Mensagem WhatsApp</div>
-    <div style="font-family:var(--font-inter),sans-serif;font-size:14px;color:#0e0e0e;line-height:1.6">Oi [nome], mensagem aqui...</div>
+  <div style="font-family:var(--font-inter),sans-serif;font-size:12px;color:#757575;margin-bottom:12px">Audiência: descrição do público</div>
+  <div style="background:#f7f7f7;border-radius:2px;padding:14px;border-left:3px solid #55f52f">
+    <div style="font-family:var(--font-inter),sans-serif;font-size:11px;color:#757575;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px">Mensagem WhatsApp</div>
+    <div style="font-family:var(--font-inter),sans-serif;font-size:13px;color:#0e0e0e;line-height:1.6">Oi [nome], mensagem aqui...</div>
   </div>
 </div>
 
-Item de recomendação:
-<div style="border:1px solid #cccccc;border-radius:2px;padding:20px;border-left:4px solid #55f52f;margin-bottom:12px">
+── ITEM DE RECOMENDAÇÃO ──
+<div style="border:1px solid #e8e8e8;border-radius:2px;padding:20px;border-left:4px solid #55f52f;margin-bottom:12px">
   <div style="font-family:var(--font-inter),sans-serif;font-size:11px;font-weight:700;color:#757575;text-transform:uppercase;letter-spacing:0.08em">O QUE FAZER</div>
-  <div style="font-family:var(--font-inter),sans-serif;font-size:14px;color:#0e0e0e;margin-top:6px;font-weight:600">ação específica aqui</div>
+  <div style="font-family:var(--font-inter),sans-serif;font-size:14px;color:#0e0e0e;margin-top:6px;font-weight:600">ação específica</div>
   <div style="font-family:var(--font-inter),sans-serif;font-size:13px;color:#757575;margin-top:8px"><span style="font-weight:600;color:#0e0e0e">Por que:</span> dado concreto</div>
-  <div style="font-family:var(--font-inter),sans-serif;font-size:13px;color:#1a6600;margin-top:4px"><span style="font-weight:600">Resultado esperado:</span> métrica esperada</div>
+  <div style="font-family:var(--font-inter),sans-serif;font-size:13px;color:#1a6600;margin-top:4px"><span style="font-weight:600">Resultado:</span> efeito esperado</div>
 </div>
 
-Próximo passo numerado:
-<div style="display:flex;gap:16px;align-items:flex-start;padding:16px 0;border-bottom:1px solid #f7f7f7">
-  <div style="background:#55f52f;color:#000;font-family:var(--font-bebas),sans-serif;font-size:18px;min-width:36px;height:36px;display:flex;align-items:center;justify-content:center;flex-shrink:0;border-radius:2px">1</div>
+── PRÓXIMO PASSO ──
+<div style="display:flex;gap:16px;align-items:flex-start;padding:14px 0;border-bottom:1px solid #f0f0f0">
+  <div style="background:#55f52f;color:#000;font-family:var(--font-bebas),sans-serif;font-size:18px;min-width:36px;height:36px;display:flex;align-items:center;justify-content:center;border-radius:2px;flex-shrink:0">1</div>
   <div>
-    <div style="font-family:var(--font-inter),sans-serif;font-size:14px;font-weight:700;color:#0e0e0e">AÇÃO ESPECÍFICA</div>
-    <div style="font-family:var(--font-inter),sans-serif;font-size:13px;color:#757575;margin-top:4px">detalhes concretos</div>
+    <div style="font-family:var(--font-inter),sans-serif;font-size:14px;font-weight:700;color:#0e0e0e">AÇÃO</div>
+    <div style="font-family:var(--font-inter),sans-serif;font-size:13px;color:#757575;margin-top:3px">detalhes</div>
   </div>
 </div>
 
-Divisor entre seções: <div style="height:1px;background:#f7f7f7;margin:0 48px"></div>
-
-Rodapé:
-<div style="background:#000;padding:32px 48px;margin-top:64px;display:flex;align-items:center;justify-content:space-between">
-  <div style="color:#55f52f;font-family:var(--font-bebas),sans-serif;font-size:20px;letter-spacing:0.1em">ONMID</div>
-  <div style="color:#757575;font-family:var(--font-inter),sans-serif;font-size:12px">Relatório gerado por ONMID Reports</div>
+── RODAPÉ ──
+<div style="width:1280px;height:100px;background:#000;margin:0 auto 16px;padding:0 72px;box-sizing:border-box;display:flex;align-items:center;justify-content:space-between">
+  <div style="color:#55f52f;font-family:var(--font-bebas),sans-serif;font-size:22px;letter-spacing:0.12em">ONMID</div>
+  <div style="color:#555;font-family:var(--font-inter),sans-serif;font-size:12px">Relatório gerado por ONMID Reports</div>
 </div>
 
 SAÍDA: retorne APENAS o HTML. Sem markdown, sem blocos de código, sem texto antes ou depois.
-O HTML começa em <div style="background:#fff e termina em </div>`;
+O HTML começa em <div style="background:#111 e termina em </div>`;
 
-function buildUserPrompt(
-  clientName: string,
-  periodLabel: string,
-  prevPeriodLabel: string,
-  from: string,
-  to: string,
-  csvContent: string,
-  metaJson: string,
-  agencyContext: string,
-): string {
-  const hasMeta = metaJson !== 'Sem dados de Meta Ads disponíveis.';
+function buildUserPrompt(opts: {
+  clientName: string;
+  periodLabel: string;
+  prevPeriodLabel: string;
+  from: string;
+  to: string;
+  csvContent: string;
+  metaJson: string;
+  crmData: string;
+  agencyContext: string;
+}): string {
+  const { clientName, periodLabel, prevPeriodLabel, from, to, csvContent, metaJson, crmData, agencyContext } = opts;
+  const hasMeta = !metaJson.startsWith('Sem dados');
   return [
     `Cliente: ${clientName}`,
     `Segmento: Delivery / Restaurante`,
@@ -207,13 +271,16 @@ function buildUserPrompt(
     agencyContext ? `Contexto da agência: ${agencyContext}` : null,
     '',
     'DADOS DO SISTEMA DE PEDIDOS (cardápio digital / delivery):',
-    csvContent.slice(0, 28000),
+    csvContent.slice(0, 20000),
     '',
     'DADOS META ADS:',
     hasMeta ? metaJson : 'Sem dados de tráfego pago neste período.',
     '',
     'DADOS INSTAGRAM INSIGHTS:',
     'Sem dados de Instagram Orgânico disponíveis para este período.',
+    '',
+    'DADOS CRM / BASE DE CLIENTES (dashboard interno):',
+    crmData,
   ].filter(l => l !== null).join('\n');
 }
 
@@ -226,8 +293,10 @@ export async function buildDeliveryReport(opts: {
   to: string;
   csvContent: string;
   agencyContext?: string;
+  connectionId?: string | null;
+  accountIds?: string[];
 }): Promise<{ html: string }> {
-  const { clientId, clientName, from, to, csvContent, agencyContext = '' } = opts;
+  const { clientId, clientName, from, to, csvContent, agencyContext = '', connectionId, accountIds = [] } = opts;
 
   const fromDate = new Date(from + 'T12:00:00');
   const prevDate = new Date(fromDate);
@@ -237,8 +306,10 @@ export async function buildDeliveryReport(opts: {
   const periodLabel = `${MONTHS[fromDate.getMonth()]} ${fromDate.getFullYear()}`;
   const prevPeriodLabel = `${MONTHS[prevDate.getMonth()]} ${prevDate.getFullYear()}`;
 
-  const metaRows = await fetchMetaData(clientId, from, to);
-  const metaJson = metaRows ? JSON.stringify(metaRows, null, 2) : 'Sem dados de Meta Ads disponíveis.';
+  const [metaJson, crmData] = await Promise.all([
+    fetchCampaignMeta(connectionId, accountIds, from, to),
+    fetchCrmData(clientId, from, to),
+  ]);
 
   const message = await anthropic.messages.create({
     model: 'claude-sonnet-4-6',
@@ -247,7 +318,7 @@ export async function buildDeliveryReport(opts: {
     messages: [
       {
         role: 'user',
-        content: buildUserPrompt(clientName, periodLabel, prevPeriodLabel, from, to, csvContent, metaJson, agencyContext),
+        content: buildUserPrompt({ clientName, periodLabel, prevPeriodLabel, from, to, csvContent, metaJson, crmData, agencyContext }),
       },
     ],
   });
