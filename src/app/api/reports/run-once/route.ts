@@ -3,7 +3,7 @@ import { makeServerPool } from '@/lib/server-db';
 import { buildOmniReport, saveOmniReport } from '@/lib/report-builder';
 import { buildDeliveryReport, saveDeliveryReport } from '@/lib/delivery-report-builder';
 
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
   try {

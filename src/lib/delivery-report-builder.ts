@@ -99,7 +99,8 @@ async function fetchMetaAds(
     urlAcc.searchParams.set('time_range', timeRange);
     urlAcc.searchParams.set('level', 'account');
     urlAcc.searchParams.set('access_token', token);
-    const resAcc = await fetch(urlAcc.toString()).catch(() => null);
+    const metaSignal = AbortSignal.timeout(12000);
+    const resAcc = await fetch(urlAcc.toString(), { signal: metaSignal }).catch(() => null);
     if (resAcc?.ok) {
       const j = await resAcc.json() as { data?: Record<string, string>[] };
       for (const row of j.data ?? []) {
@@ -117,7 +118,7 @@ async function fetchMetaAds(
     urlCamp.searchParams.set('level', 'campaign');
     urlCamp.searchParams.set('limit', '5');
     urlCamp.searchParams.set('access_token', token);
-    const resCamp = await fetch(urlCamp.toString()).catch(() => null);
+    const resCamp = await fetch(urlCamp.toString(), { signal: AbortSignal.timeout(12000) }).catch(() => null);
     if (!resCamp?.ok) return;
     const j = await resCamp.json() as { data?: Record<string, string>[] };
     for (const row of j.data ?? []) {
@@ -276,7 +277,7 @@ export async function buildDeliveryReport(opts: {
 
   const message = await anthropic.messages.create({
     model:      'claude-sonnet-4-6',
-    max_tokens: 16000,
+    max_tokens: 12000,
     system:     SYSTEM_PROMPT,
     messages:   [{ role: 'user', content: buildUserPrompt(structuredData, csvContent) }],
   });
