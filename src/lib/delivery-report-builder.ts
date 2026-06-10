@@ -271,7 +271,7 @@ function buildUserPrompt(opts: {
     agencyContext ? `Contexto da agência: ${agencyContext}` : null,
     '',
     'DADOS DO SISTEMA DE PEDIDOS (cardápio digital / delivery):',
-    csvContent.slice(0, 20000),
+    csvContent.slice(0, 50000),
     '',
     'DADOS META ADS:',
     hasMeta ? metaJson : 'Sem dados de tráfego pago neste período.',

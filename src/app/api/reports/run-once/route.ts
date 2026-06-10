@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
         `SELECT platform, connection_id, account_id FROM public.client_account_links WHERE client_id = $1`,
         [clientId],
       );
-      const metaLinks = links.filter((l: { platform: string }) => l.platform === 'meta');
+      const metaLinks = links.filter((l: { platform: string }) => l.platform === 'meta_ads' || l.platform === 'meta');
       metaConnectionId = (metaLinks[0] as { connection_id: string } | undefined)?.connection_id ?? null;
       metaAccountIds = metaLinks.map((l: { account_id: string }) => l.account_id);
     } finally {
