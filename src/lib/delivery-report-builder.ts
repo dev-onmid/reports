@@ -8,16 +8,6 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type ClientBase = {
-  ativos: number;
-  inativos: number;
-  potenciais: number;
-  com_1_pedido: number;
-  com_mais_de_1: number;
-  total_pedidos_base: number;
-};
-
-type InativoFaixa = { faixa: string; quantidade: number };
 type Bairro = { bairro: string; pedidos: number; faturamento: number };
 
 type MetaAds = {
@@ -36,94 +26,11 @@ type StructuredData = {
   cliente: { nome: string; segmento: string };
   periodo: { atual: string; anterior: string };
   contexto_agencia: string;
-  base_clientes: ClientBase;
-  inativos_por_faixa: InativoFaixa[];
-  por_regiao: Bairro[];
-  meta_ads: MetaAds | null;
+  por_regiao: Bairro[];   // do banco (crm_leads.bairro) — pode estar vazio
+  meta_ads: MetaAds | null; // da API do Meta
 };
 
 // ── DB Fetchers ───────────────────────────────────────────────────────────────
-
-async function fetchClientBase(clientId: string, from: string, to: string): Promise<ClientBase> {
-  const pool = makeServerPool();
-  try {
-    const { rows } = await pool.query(
-      `WITH per_numero AS (
-         SELECT
-           numero,
-           SUM(CASE WHEN fechou = true OR COALESCE(NULLIF(valor_rs,0),0) > 0 THEN 1 ELSE 0 END) AS total_pedidos,
-           MAX(COALESCE(data, lead_date, created_at::date)) AS ultima_data
-         FROM public.crm_leads
-         WHERE client_id = $1
-           AND numero IS NOT NULL AND numero != '' AND numero NOT LIKE '%-%'
-         GROUP BY numero
-       )
-       SELECT
-         COUNT(*) FILTER (WHERE total_pedidos > 0 AND ultima_data BETWEEN $2 AND $3)          AS ativos,
-         COUNT(*) FILTER (WHERE total_pedidos > 0 AND NOT (ultima_data BETWEEN $2 AND $3))    AS inativos,
-         COUNT(*) FILTER (WHERE total_pedidos = 0)                                             AS potenciais,
-         COUNT(*) FILTER (WHERE total_pedidos = 1)                                             AS com_1_pedido,
-         COUNT(*) FILTER (WHERE total_pedidos > 1)                                             AS com_mais_de_1,
-         COALESCE(SUM(total_pedidos), 0)                                                       AS total_pedidos_base
-       FROM per_numero`,
-      [clientId, from, to],
-    ).catch(() => ({ rows: [] }));
-
-    const r = rows[0] ?? {};
-    return {
-      ativos:            parseInt(String(r.ativos            ?? 0), 10),
-      inativos:          parseInt(String(r.inativos          ?? 0), 10),
-      potenciais:        parseInt(String(r.potenciais        ?? 0), 10),
-      com_1_pedido:      parseInt(String(r.com_1_pedido      ?? 0), 10),
-      com_mais_de_1:     parseInt(String(r.com_mais_de_1     ?? 0), 10),
-      total_pedidos_base:parseInt(String(r.total_pedidos_base?? 0), 10),
-    };
-  } finally {
-    await pool.end();
-  }
-}
-
-async function fetchInativosFaixas(clientId: string, referenceDate: string): Promise<InativoFaixa[]> {
-  const pool = makeServerPool();
-  try {
-    const { rows } = await pool.query(
-      `WITH ultima_compra AS (
-         SELECT numero, MAX(COALESCE(data, lead_date, created_at::date)) AS ult
-         FROM public.crm_leads
-         WHERE client_id = $1
-           AND (fechou = true OR COALESCE(NULLIF(valor_rs,0),0) > 0)
-           AND numero IS NOT NULL AND numero != ''
-         GROUP BY numero
-       )
-       SELECT
-         CASE
-           WHEN dias BETWEEN 30  AND 59  THEN '30-59'
-           WHEN dias BETWEEN 60  AND 89  THEN '60-89'
-           WHEN dias BETWEEN 90  AND 179 THEN '90-179'
-           WHEN dias BETWEEN 180 AND 364 THEN '180-364'
-           WHEN dias >= 365              THEN '365+'
-         END AS faixa,
-         COUNT(*) AS quantidade
-       FROM (
-         SELECT ($2::date - ult)::int AS dias FROM ultima_compra WHERE ult < $2::date
-       ) t
-       WHERE dias >= 30
-       GROUP BY 1
-       ORDER BY MIN(dias)`,
-      [clientId, referenceDate],
-    ).catch(() => ({ rows: [] }));
-
-    const ORDER = ['30-59', '60-89', '90-179', '180-364', '365+'];
-    return ORDER
-      .map(faixa => {
-        const row = rows.find((r: { faixa: string }) => r.faixa === faixa);
-        return row ? { faixa, quantidade: parseInt(String(row.quantidade), 10) } : null;
-      })
-      .filter((x): x is InativoFaixa => x !== null && x.quantidade > 0);
-  } finally {
-    await pool.end();
-  }
-}
 
 async function fetchBairros(clientId: string, from: string, to: string): Promise<Bairro[]> {
   const pool = makeServerPool();
@@ -240,223 +147,95 @@ async function fetchMetaAds(
 
 // ── System Prompt ─────────────────────────────────────────────────────────────
 
-const SYSTEM_PROMPT = `Você é um analista sênior de marketing especializado em delivery e alimentação no Brasil. Você escreve para o dono do restaurante — não para marqueteiros.
+const SYSTEM_PROMPT = `Você é um analista sênior de marketing especializado em delivery. Escreve para o dono do restaurante.
 
-MISSÃO: transformar dados de pedidos, clientes e campanhas em um diagnóstico claro e um plano de ação que o dono consiga executar amanhã.
+BENCHMARKS: ticket médio R$40–70 | recompra mensal 35–50% dos ativos | Sex/Sáb/Dom = 55–70% do volume | ROAS <3× ruim, 4–6× bom, >7× escalar
 
-BENCHMARKS (use para qualificar o desempenho):
-• Ticket médio saudável: R$40–70 • Taxa de recompra mensal: 35–50% dos ativos • Frequência ideal: 2–3 pedidos/mês por ativo
-• Base inativa costuma ser 5–15× maior que a ativa — é oportunidade, não fracasso • Sex/Sáb/Dom = 55–70% do volume
-• ROAS Meta Ads: <3× ineficiente | 4–6× saudável | >7× escalar • Custo por pedido: R$8–20 dependendo do ticket
+REGRAS:
+1. Dados ausentes na planilha = slide omitido. Nunca invente.
+2. Todo slide termina com insight em linguagem de negócio (não de marqueteiro).
+3. Quedas: 1 contexto + 1 ação. Variações sempre: "+23% (de 254 para 312)".
+4. Proibido: "excelente resultado", "N/A", seções vazias.
 
-REGRAS SEM EXCEÇÃO:
-1. Nunca invente dados. Campo ausente = slide omitido.
-2. Todo slide termina com insight ou recomendação em linguagem de dono de negócio.
-3. Quedas não são escondidas: 1 frase de contexto + 1 ação concreta.
-4. Variações sempre com % e valor absoluto: "-1,8% (de R$134.535 para R$132.143)"
-5. Proibido: "excelente resultado", "é importante destacar", "N/A", seção vazia.
-6. Tom direto, português BR. "Clientes que pararam de comprar", não "churn".
+FONTES DE DADOS:
+- JSON (meta_ads, por_regiao): dados do sistema — use direto.
+- PLANILHA CSV: extraia daqui tudo mais: faturamento, pedidos, ticket, por_dia, base_clientes (ativos/inativos/potenciais), produtos. A planilha Goomer/Anota Aí inclui esses resumos.
 
-━━ ESTRUTURA DOS 9 SLIDES (ordem fixa — pule slides sem dados) ━━
+SLIDES (pule sem dados):
+1-CAPA: sempre. Título, período, 3–4 KPIs mais importantes do negócio.
+2-VISÃO GERAL: faturamento|pedidos|ticket atual vs anterior. Card leitura.
+3-DIAS DA SEMANA: barras CSS (verde=top 2, cinza=demais). Card estratégia + oportunidade.
+4-REGIÕES: só se por_regiao tiver dados. Tabela bairros + 3 cards insight.
+5-BASE DE CLIENTES: só se houver ativos/inativos/potenciais na planilha. 3 KPIs + barra dividida + insight.
+6-INATIVOS: só se houver faixas (30-59/60-89/90-179/180-364/365+). Barras + 3 mensagens WhatsApp exemplo.
+7-PRODUTOS: só se houver ranking. Barras top produtos + 3 combos sugeridos.
+8-META ADS: só se meta_ads no JSON. 4 KPIs + cards por campanha.
+9-DIAGNÓSTICO: sempre, sempre último. 4 colunas: feito|resultados|plano próximo mês|prioridades. Card conclusão 1 frase.
 
-SLIDE 1 — CAPA (sempre presente)
-• Título: "Relatório de Performance — [nome do cliente]"
-• Subtítulo: o que o relatório cobre (adapte ao que tem dado)
-• Período analisado e período de comparação
-• 3–4 KPIs chave em cards: o que mais importa pro negócio desse cliente
+DESIGN (1440×810px por slide):
+Cores: verde #00C853 | verde-bg #E8F5E9 | texto #111111 | secundário #555555 | fundo slide #FFFFFF | card #FAFAFA | borda #F0F0F0 | positivo bg #E8F5E9 txt #00C853 | negativo bg #FFEBEE txt #FF5252 | anterior bg #E3F2FD txt #1565C0
+Fontes: KPI grandes e "ONMID" → var(--font-bebas),sans-serif | resto → var(--font-inter),sans-serif
+Radius: cards 12px | badges 6px | barras 4px. Sombra cards: 0 2px 8px rgba(0,0,0,0.05)
 
-SLIDE 2 — VISÃO GERAL DO MÊS (só se houver dados de faturamento/pedidos na planilha)
-• Linha atual: Faturamento | Pedidos | Ticket médio
-• Linha anterior: mesmos campos (com badge azul para período anterior)
-• Linha comparativo: variação % com seta verde/vermelha
-• Card "Leitura principal": 2 frases sobre o que os números significam e o foco do próximo mês
-
-SLIDE 3 — COMPORTAMENTO POR DIA DA SEMANA (só se houver dados por dia na planilha)
-• Barras CSS horizontais para os 7 dias: barras verdes para os 2 mais fortes, cinza para os demais
-• Card "Leitura estratégica": quais dias concentram força
-• Card "Oportunidade": bullets com ações para os dias fracos
-
-SLIDE 4 — REGIÕES COM MAIOR VOLUME (só se por_regiao tiver dados)
-• Tabela com ranking de bairros (pedidos + faturamento)
-• Card "Fortalecer onde existe demanda": top 3 com estratégia
-• Card "Estimular onde há potencial": bairros fracos + oportunidade
-• Card "Insight para remarketing": como usar segmentação geográfica
-
-SLIDE 5 — BASE DE CLIENTES (só se base_clientes tiver dados)
-• 3 KPIs: Clientes ativos | Clientes inativos | Clientes em potencial
-• Barra dividida mostrando proporção dos 3 grupos
-• Cards "Dentro da ativa": com 1 pedido | com mais de 1 (com badge de oportunidade)
-• Insight: qual grupo representa maior alavancagem
-
-SLIDE 6 — INATIVOS E POTENCIAIS (só se inativos_por_faixa tiver dados)
-• KPI destaque: clientes em potencial (nunca compraram)
-• Barras CSS por faixa de dias (30-59 / 60-89 / 90-179 / 180-364 / 365+), destacar faixa prioritária
-• 3 cards de abordagem sugerida com mensagem WhatsApp de exemplo
-• Conclusão: por qual faixa começar e por quê
-
-SLIDE 7 — PRODUTOS CAMPEÕES (só se houver dados de produtos na planilha)
-• Ranking horizontal de top produtos (barras CSS verdes)
-• 3 cards de combos sugeridos para aumentar ticket
-• Insight: produto protagonista vs. produto que eleva ticket
-
-SLIDE 8 — TRÁFEGO PAGO (só se meta_ads tiver dados)
-• 4 KPIs: Investimento | Impressões | Alcance | Cliques
-• Para cada campanha (máx 3): card com métricas + insight estratégico em 2–3 linhas
-• Recomendação geral de estrutura
-
-SLIDE 9 — DIAGNÓSTICO E PLANO DE AÇÃO (sempre presente, sempre o último)
-• Coluna 1 "O que foi feito": resumo dos criativos / iniciativas do mês
-• Coluna 2 "O que compõe o resultado": ícones das 3–4 forças identificadas
-• Coluna 3 "Plano para o próximo mês": lista numerada de 4–7 ações concretas
-• Coluna 4 "Prioridades": bullets específicos de execução
-• Card de conclusão estratégica: 1 frase forte que resume o que o próximo mês deve ser
-
-━━ DESIGN SYSTEM — SIGA EXATAMENTE ━━
-
-DIMENSÃO: 1440×810px por slide
-CORES:
-  Verde primário:     #00C853
-  Verde claro (bg):   #E8F5E9
-  Texto principal:    #111111 (peso 700-800 em títulos)
-  Texto secundário:   #555555
-  Fundo slide:        #FFFFFF
-  Fundo card:         #FAFAFA
-  Borda card:         #F0F0F0
-  Positivo bg:        #E8F5E9  | texto: #00C853
-  Negativo bg:        #FFEBEE  | texto: #FF5252
-  Período anterior:   bg #E3F2FD | texto: #1565C0
-  Container externo:  #F4F4F4
-FONTES:
-  Números KPI grandes e nome ONMID: font-family:var(--font-bebas),sans-serif
-  Todo o resto: font-family:var(--font-inter),sans-serif
-RADIUS: cards 12px | badges 6px | barras 4px | ícones-círculo 50%
-SOMBRA: 0 2px 8px rgba(0,0,0,0.05) em cards
-
-━━ PADRÕES HTML OBRIGATÓRIOS ━━
-
-WRAPPER DO DOCUMENTO:
-<div style="background:#F4F4F4;padding:28px;font-family:var(--font-inter),sans-serif">[slides]</div>
-
-SLIDE GENÉRICO (adapte conteúdo; mude fundo da capa para #111111):
-<div style="width:1440px;min-height:810px;background:#FFFFFF;margin:0 auto 20px;border-radius:0;box-shadow:0 4px 20px rgba(0,0,0,0.08);overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column">
-  <!-- HEADER BAR (obrigatório em todo slide) -->
+ESTRUTURA OBRIGATÓRIA DE CADA SLIDE:
+<div style="width:1440px;min-height:810px;background:#FFFFFF;margin:0 auto 20px;box-shadow:0 4px 20px rgba(0,0,0,0.08);overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column">
   <div style="height:52px;padding:0 48px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #F0F0F0;flex-shrink:0">
-    <span style="font-family:var(--font-bebas),sans-serif;font-size:22px;color:#00C853;letter-spacing:0.06em">ONMID</span>
-    <span style="font-size:12px;color:#AAAAAA;font-family:var(--font-inter),sans-serif;font-weight:500">NN/09</span>
+    <span style="font-family:var(--font-bebas),sans-serif;font-size:22px;color:#00C853">ONMID</span>
+    <span style="font-size:12px;color:#AAAAAA">NN/09</span>
   </div>
-  <!-- CONTEÚDO -->
-  <div style="flex:1;padding:36px 48px 40px">[conteúdo]</div>
+  <div style="flex:1;padding:32px 48px 36px">[conteúdo]</div>
 </div>
 
-TÍTULO DE SEÇÃO (dentro do conteúdo):
-<div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:24px">
-  <div style="width:4px;min-height:38px;background:#00C853;border-radius:2px;flex-shrink:0;margin-top:2px"></div>
-  <div>
-    <h2 style="font-family:var(--font-inter),sans-serif;font-size:28px;font-weight:800;color:#111111;margin:0;line-height:1.1">TÍTULO</h2>
-    <p style="font-size:14px;color:#555555;margin:4px 0 0;font-family:var(--font-inter),sans-serif">subtítulo</p>
-  </div>
-</div>
+TÍTULO DE SEÇÃO: <div style="display:flex;gap:12px;margin-bottom:20px"><div style="width:4px;background:#00C853;border-radius:2px;flex-shrink:0"></div><div><h2 style="font-family:var(--font-inter),sans-serif;font-size:26px;font-weight:800;color:#111111;margin:0">TÍTULO</h2><p style="font-size:13px;color:#555555;margin:3px 0 0">subtítulo</p></div></div>
 
-CARD DE KPI (use em grid de 3–4 colunas):
-<div style="background:#FAFAFA;border:1px solid #F0F0F0;border-radius:12px;padding:22px;box-shadow:0 2px 8px rgba(0,0,0,0.04)">
-  <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
-    <div style="width:34px;height:34px;background:#E8F5E9;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#00C853" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">[path]</svg>
-    </div>
-    <span style="font-size:11px;font-weight:700;color:#777777;text-transform:uppercase;letter-spacing:0.08em;font-family:var(--font-inter),sans-serif">LABEL</span>
-  </div>
-  <div style="font-family:var(--font-bebas),sans-serif;font-size:42px;color:#111111;line-height:1;margin-bottom:6px">VALOR</div>
-  <div style="font-size:12px;color:#555555;line-height:1.5;font-family:var(--font-inter),sans-serif">contexto business</div>
-</div>
+KPI CARD (grid 3-4 col): <div style="background:#FAFAFA;border:1px solid #F0F0F0;border-radius:12px;padding:20px"><div style="width:32px;height:32px;background:#E8F5E9;border-radius:50%;margin-bottom:10px"></div><div style="font-size:10px;font-weight:700;color:#777;text-transform:uppercase;letter-spacing:0.08em">LABEL</div><div style="font-family:var(--font-bebas),sans-serif;font-size:40px;color:#111111;line-height:1;margin:6px 0">VALOR</div><div style="font-size:12px;color:#555555">contexto</div></div>
 
-BADGE POSITIVO: <span style="background:#E8F5E9;color:#00C853;font-size:12px;font-weight:700;padding:3px 10px;border-radius:6px;font-family:var(--font-inter),sans-serif">↑ +23% (de 254 para 312)</span>
-BADGE NEGATIVO: <span style="background:#FFEBEE;color:#FF5252;font-size:12px;font-weight:700;padding:3px 10px;border-radius:6px;font-family:var(--font-inter),sans-serif">↓ -12% (de 312 para 275)</span>
-BADGE ANTERIOR: <span style="background:#E3F2FD;color:#1565C0;font-size:12px;font-weight:600;padding:3px 10px;border-radius:6px;font-family:var(--font-inter),sans-serif">mai/25: R$134.535</span>
+BADGE+: <span style="background:#E8F5E9;color:#00C853;font-size:12px;font-weight:700;padding:3px 10px;border-radius:6px">↑ +23% (de 254 para 312)</span>
+BADGE-: <span style="background:#FFEBEE;color:#FF5252;font-size:12px;font-weight:700;padding:3px 10px;border-radius:6px">↓ -12% (de 312 para 275)</span>
+BADGE ANT: <span style="background:#E3F2FD;color:#1565C0;font-size:12px;font-weight:600;padding:3px 10px;border-radius:6px">mai/25: R$134.535</span>
 
-BARRA CSS HORIZONTAL (charts de dias / produtos / inativos):
-<div style="margin-bottom:10px">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-    <span style="font-size:13px;font-weight:600;color:#111111;font-family:var(--font-inter),sans-serif">Label</span>
-    <span style="font-size:13px;font-weight:700;color:#111111;font-family:var(--font-inter),sans-serif">150</span>
-  </div>
-  <div style="height:8px;background:#F0F0F0;border-radius:4px;overflow:hidden">
-    <div style="height:100%;background:#00C853;border-radius:4px;width:75%"></div>
-  </div>
-</div>
-<!-- Barra cinza (dias fracos): troque background:#00C853 por background:#D0D0D0 -->
+BARRA CSS: <div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:13px;font-weight:600;color:#111111;margin-bottom:3px"><span>Label</span><span>150</span></div><div style="height:8px;background:#F0F0F0;border-radius:4px"><div style="height:100%;background:#00C853;border-radius:4px;width:75%"></div></div></div>
+(dias fracos: background:#D0D0D0 na barra interna)
 
-BARRA DIVIDIDA (proporção 3 grupos da base):
-<div style="height:14px;border-radius:7px;overflow:hidden;display:flex;margin:16px 0">
-  <div style="background:#00C853;width:X%"></div>
-  <div style="background:#FF5252;width:Y%"></div>
-  <div style="background:#1565C0;width:Z%"></div>
-</div>
-<!-- X = ativos/total*100, Y = inativos/total*100, Z = potenciais/total*100 -->
+BARRA DIVIDIDA BASE: <div style="height:12px;border-radius:6px;overflow:hidden;display:flex;margin:12px 0"><div style="background:#00C853;width:X%"></div><div style="background:#FF5252;width:Y%"></div><div style="background:#1565C0;width:Z%"></div></div>
 
-TABELA DE BAIRROS:
-<table style="width:100%;border-collapse:collapse;font-family:var(--font-inter),sans-serif;font-size:13px">
-  <thead><tr style="background:#111111;color:#FFFFFF">
-    <th style="padding:10px 16px;text-align:left;font-weight:600;border-radius:6px 0 0 0">Bairro</th>
-    <th style="padding:10px 16px;text-align:right;font-weight:600">Pedidos</th>
-    <th style="padding:10px 16px;text-align:right;font-weight:600;border-radius:0 6px 0 0">Faturamento</th>
-  </tr></thead>
-  <tbody>[linhas com border-bottom:1px solid #F5F5F5]</tbody>
-</table>
+TABELA BAIRROS: <table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="background:#111111;color:#FFF"><th style="padding:9px 14px;text-align:left">Bairro</th><th style="padding:9px 14px;text-align:right">Pedidos</th><th style="padding:9px 14px;text-align:right">Faturamento</th></tr></thead><tbody>[tr com border-bottom:1px solid #F5F5F5]</tbody></table>
 
-CARD DE INSIGHT (leitura estratégica / oportunidade):
-<div style="background:#F0FAF3;border:1px solid #C8E6C9;border-radius:12px;padding:18px 20px">
-  <div style="font-size:11px;font-weight:700;color:#00C853;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;font-family:var(--font-inter),sans-serif">LEITURA ESTRATÉGICA</div>
-  <p style="font-size:14px;color:#111111;line-height:1.6;margin:0;font-family:var(--font-inter),sans-serif">texto do insight</p>
-</div>
+INSIGHT BOX: <div style="background:#F0FAF3;border:1px solid #C8E6C9;border-radius:12px;padding:16px 18px"><div style="font-size:10px;font-weight:700;color:#00C853;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px">LEITURA</div><p style="font-size:14px;color:#111111;line-height:1.6;margin:0">insight</p></div>
 
-CARD DE RECOMENDAÇÃO (slide 9):
-<div style="background:#FFFFFF;border:1px solid #F0F0F0;border-radius:12px;padding:18px 20px;border-left:4px solid #00C853;margin-bottom:10px;box-shadow:0 2px 8px rgba(0,0,0,0.04)">
-  <div style="font-size:11px;font-weight:700;color:#AAAAAA;text-transform:uppercase;letter-spacing:0.08em;font-family:var(--font-inter),sans-serif">O QUE FAZER</div>
-  <div style="font-size:14px;font-weight:600;color:#111111;margin-top:5px;font-family:var(--font-inter),sans-serif">ação específica</div>
-  <div style="font-size:13px;color:#555555;margin-top:6px;font-family:var(--font-inter),sans-serif"><span style="font-weight:600;color:#111111">Por que:</span> dado concreto do relatório</div>
-  <div style="font-size:13px;color:#00C853;font-weight:600;margin-top:4px;font-family:var(--font-inter),sans-serif">Resultado esperado: efeito mensurável</div>
-</div>
+REC CARD: <div style="border:1px solid #F0F0F0;border-radius:12px;padding:16px 18px;border-left:4px solid #00C853;margin-bottom:8px"><div style="font-size:10px;font-weight:700;color:#AAAAAA;text-transform:uppercase">O QUE FAZER</div><div style="font-size:14px;font-weight:600;color:#111111;margin-top:4px">ação</div><div style="font-size:12px;color:#555555;margin-top:4px"><strong style="color:#111111">Por que:</strong> dado</div><div style="font-size:12px;color:#00C853;font-weight:600;margin-top:3px">Resultado: efeito</div></div>
 
-PRÓXIMO PASSO NUMERADO:
-<div style="display:flex;gap:14px;align-items:flex-start;padding:12px 0;border-bottom:1px solid #F5F5F5">
-  <div style="width:30px;height:30px;background:#00C853;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
-    <span style="font-size:15px;font-weight:800;color:#FFFFFF;font-family:var(--font-inter),sans-serif">1</span>
-  </div>
-  <div>
-    <div style="font-size:14px;font-weight:700;color:#111111;font-family:var(--font-inter),sans-serif">AÇÃO</div>
-    <div style="font-size:12px;color:#555555;margin-top:2px;font-family:var(--font-inter),sans-serif">detalhe concreto</div>
-  </div>
-</div>
+PRÓX PASSO: <div style="display:flex;gap:12px;padding:10px 0;border-bottom:1px solid #F5F5F5"><div style="width:28px;height:28px;background:#00C853;border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0"><span style="font-size:14px;font-weight:800;color:#FFF">1</span></div><div><div style="font-size:13px;font-weight:700;color:#111111">AÇÃO</div><div style="font-size:12px;color:#555555;margin-top:1px">detalhe</div></div></div>
 
-CARD DE CAMPANHA META:
-<div style="background:#FAFAFA;border:1px solid #F0F0F0;border-radius:12px;padding:18px 20px;margin-bottom:12px">
-  <div style="font-size:14px;font-weight:700;color:#111111;margin-bottom:8px;font-family:var(--font-inter),sans-serif">Nome da campanha</div>
-  <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:10px">
-    <span style="font-size:12px;color:#555555;font-family:var(--font-inter),sans-serif"><strong style="color:#111111">R$XXX</strong> investido</span>
-    <span style="font-size:12px;color:#555555;font-family:var(--font-inter),sans-serif"><strong style="color:#111111">XX.XXX</strong> alcance</span>
-    <span style="font-size:12px;color:#555555;font-family:var(--font-inter),sans-serif"><strong style="color:#111111">XXX</strong> cliques</span>
-  </div>
-  <p style="font-size:13px;color:#555555;line-height:1.5;margin:0;font-family:var(--font-inter),sans-serif">insight estratégico em 2–3 linhas</p>
-</div>
+CAPA (fundo escuro): use background:#111111 no slide e background:rgba(255,255,255,0.08) nos cards de KPI, cor #FFF nos textos, #00C853 no subtítulo de agência.
 
-SAÍDA: retorne APENAS o HTML. Sem markdown, sem blocos de código, sem texto antes ou depois.
-O HTML começa com <div style="background:#F4F4F4 e termina com </div>`;
+WRAPPER: <div style="background:#F4F4F4;padding:28px">[slides]</div>
+
+SAÍDA: APENAS HTML. Sem markdown, sem texto extra. Começa com <div style="background:#F4F4F4 e termina com </div>.`;
 
 // ── User Prompt ───────────────────────────────────────────────────────────────
 
 function buildUserPrompt(data: StructuredData, csvContent: string): string {
+  const metaSection = data.meta_ads
+    ? `meta_ads: ${JSON.stringify(data.meta_ads)}`
+    : 'meta_ads: null (sem dados de tráfego pago)';
+
+  const regiaoSection = data.por_regiao.length
+    ? `por_regiao: ${JSON.stringify(data.por_regiao)}`
+    : 'por_regiao: [] (sem dados de bairro no sistema — procure na planilha)';
+
   return [
-    '## DADOS ESTRUTURADOS DO SISTEMA (já calculados — use diretamente)',
-    '```json',
-    JSON.stringify(data, null, 2),
-    '```',
+    `CLIENTE: ${data.cliente.nome} | SEGMENTO: ${data.cliente.segmento}`,
+    `PERÍODO ATUAL: ${data.periodo.atual} | PERÍODO ANTERIOR: ${data.periodo.anterior}`,
+    data.contexto_agencia ? `CONTEXTO DA AGÊNCIA: ${data.contexto_agencia}` : '',
     '',
-    '## PLANILHA DE PEDIDOS',
-    'Extraia daqui: visao_geral (faturamento, pedidos, ticket), por_dia (dia → pedidos/vendas), produtos (ranking de vendas).',
-    'Compare faturamento/pedidos do período atual com período anterior SE houver dois meses de dados.',
+    '=== DADOS DO SISTEMA (use diretamente) ===',
+    metaSection,
+    regiaoSection,
     '',
+    '=== PLANILHA DE PEDIDOS (extraia: faturamento, pedidos, ticket, por_dia, base_clientes, inativos, produtos) ===',
     csvContent.slice(0, 50000),
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 }
 
 // ── Public Builder ────────────────────────────────────────────────────────────
@@ -477,35 +256,35 @@ export async function buildDeliveryReport(opts: {
   const prevDate = new Date(fromDate);
   prevDate.setMonth(prevDate.getMonth() - 1);
   const MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
-  const periodLabel    = `${MONTHS[fromDate.getMonth()]}/${fromDate.getFullYear()}`;
-  const prevPeriodLabel= `${MONTHS[prevDate.getMonth()]}/${prevDate.getFullYear()}`;
+  const periodLabel     = `${MONTHS[fromDate.getMonth()]}/${fromDate.getFullYear()}`;
+  const prevPeriodLabel = `${MONTHS[prevDate.getMonth()]}/${prevDate.getFullYear()}`;
 
-  const [base_clientes, inativos_por_faixa, por_regiao, meta_ads] = await Promise.all([
-    fetchClientBase(clientId, from, to),
-    fetchInativosFaixas(clientId, to),
+  const [por_regiao, meta_ads] = await Promise.all([
     fetchBairros(clientId, from, to),
     fetchMetaAds(connectionId, accountIds, from, to),
   ]);
+
+  console.log(`[delivery] ${clientName} | Meta: ${meta_ads ? `R$${meta_ads.investimento}` : 'null'} | Bairros: ${por_regiao.length} | CSV: ${csvContent.length} chars`);
 
   const structuredData: StructuredData = {
     cliente:          { nome: clientName, segmento: 'Delivery / Restaurante' },
     periodo:          { atual: periodLabel, anterior: prevPeriodLabel },
     contexto_agencia: agencyContext,
-    base_clientes,
-    inativos_por_faixa,
     por_regiao,
     meta_ads,
   };
 
   const message = await anthropic.messages.create({
     model:      'claude-sonnet-4-6',
-    max_tokens: 8192,
+    max_tokens: 16000,
     system:     SYSTEM_PROMPT,
     messages:   [{ role: 'user', content: buildUserPrompt(structuredData, csvContent) }],
   });
 
   const raw  = message.content[0].type === 'text' ? message.content[0].text : '';
   const html = raw.replace(/^```(?:html)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+
+  console.log(`[delivery] HTML gerado: ${html.length} chars | stop_reason: ${message.stop_reason}`);
 
   return { html };
 }
