@@ -1,117 +1,254 @@
 import Anthropic from '@anthropic-ai/sdk';
+import * as XLSX from 'xlsx';
 import { makeServerPool } from '@/lib/server-db';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import { randomUUID } from 'crypto';
-import { brl } from './report-runner';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// ── Format helpers ─────────────────────────────────────────────────────────────
 
-type Bairro = { bairro: string; pedidos: number; faturamento: number };
+function brl(n: number) {
+  return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 0, maximumFractionDigits: 0 });
+}
+function num(n: number) { return n.toLocaleString('pt-BR'); }
 
-type MetaAds = {
-  investimento: number;
-  impressoes: number;
-  alcance: number;
-  cliques: number;
-  campanhas: Array<{
-    nome: string;
-    tipo: string;
-    metricas: { investimento: number; impressoes: number; alcance: number; cliques: number };
-  }>;
+// ── Design tokens ──────────────────────────────────────────────────────────────
+
+const D = {
+  green:   '#00C853',
+  greenBg: '#E8F5E9',
+  text:    '#111111',
+  muted:   '#555555',
+  white:   '#FFFFFF',
+  card:    '#FAFAFA',
+  border:  '#F0F0F0',
+  red:     '#FF5252',
+  redBg:   '#FFEBEE',
+  blue:    '#1565C0',
+  blueBg:  '#E3F2FD',
+  dark:    '#111111',
+  inter:   'var(--font-inter),sans-serif',
+  bebas:   'var(--font-bebas),sans-serif',
 };
 
-type StructuredData = {
-  cliente: { nome: string; segmento: string };
-  periodo: { atual: string; anterior: string };
-  contexto_agencia: string;
-  por_regiao: Bairro[];   // do banco (crm_leads.bairro) — pode estar vazio
-  meta_ads: MetaAds | null; // da API do Meta
+// ── Types ──────────────────────────────────────────────────────────────────────
+
+type Bairro    = { bairro: string; pedidos: number; faturamento: number };
+type MetaAds   = { investimento: number; impressoes: number; alcance: number; cliques: number; campanhas: Array<{ nome: string; tipo: string; metricas: { investimento: number; impressoes: number; alcance: number; cliques: number } }> };
+type Product   = { nome: string; qtd: number; total: number };
+type Faixa     = { label: string; count: number };
+type DiaDaSemana = { dia: string; pedidos: number; pct: number };
+
+type ParsedData = {
+  ativos:          number;
+  inativos:        number;
+  potenciais:      number;
+  faturamento:     number;
+  pedidos_ativos:  number;
+  ticket:          number;
+  produtos:        Product[];
+  inativos_faixas: Faixa[];
+  por_dia:         DiaDaSemana[];
 };
 
-// ── DB Fetchers ───────────────────────────────────────────────────────────────
+// ── CSV helpers ────────────────────────────────────────────────────────────────
+
+function detectType(filename: string): 'ativos' | 'inativos' | 'potenciais' | 'produtos' | 'pedidos' | 'outros' {
+  const n = filename.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  if (n.includes('inativ'))                                           return 'inativos';
+  if (n.includes('ativo'))                                            return 'ativos';
+  if (n.includes('potencial'))                                        return 'potenciais';
+  if (n.includes('produto'))                                          return 'produtos';
+  if (n.includes('pedido') || n.includes('order') || n.includes('venda')) return 'pedidos';
+  return 'outros';
+}
+
+function splitCsv(content: string): { headers: string[]; rows: string[][] } {
+  const lines = content.split('\n').filter(l => l.trim() && l.trim() !== '""');
+  if (lines.length < 2) return { headers: [], rows: [] };
+  const sep = (lines[0].match(/;/g)?.length ?? 0) > (lines[0].match(/,/g)?.length ?? 0) ? ';' : ',';
+  const parse = (line: string) => line.split(sep).map(c => c.replace(/^"|"$/g, '').trim());
+  return { headers: parse(lines[0]).map(h => h.toLowerCase()), rows: lines.slice(1).map(parse) };
+}
+
+function parseFloat2(s: string): number {
+  return parseFloat(s.replace(/[R$\s.]/g, '').replace(',', '.')) || 0;
+}
+
+// ── File Parsers ───────────────────────────────────────────────────────────────
+
+function parseClientesCsv(content: string): { count: number; faturamento: number; pedidos: number } {
+  const { headers, rows } = splitCsv(content);
+  if (!headers.length) return { count: 0, faturamento: 0, pedidos: 0 };
+
+  const vIdx = headers.findIndex(h => (h.includes('valor') || h.includes('gasto') || h.includes('faturamento')) && !h.includes('pedido'));
+  const pIdx = headers.findIndex(h => (h.includes('pedido') || h.includes('qtd') || h.includes('quantidade')) && !h.includes('ultimo') && !h.includes('data') && !h.includes('valor'));
+
+  let fat = 0, ped = 0;
+  for (const row of rows) {
+    if (vIdx >= 0) fat += parseFloat2(row[vIdx] ?? '');
+    if (pIdx >= 0) ped += parseInt(row[pIdx] ?? '0') || 0;
+  }
+  return { count: rows.length, faturamento: fat, pedidos: ped };
+}
+
+function parseInativosFaixas(content: string, refDate: Date): Faixa[] {
+  const { headers, rows } = splitCsv(content);
+  const dIdx = headers.findIndex(h => h.includes('ultimo') || (h.includes('data') && h.includes('pedido')));
+  if (dIdx === -1) return [];
+
+  const FAIXAS = [
+    { label: '30–59 dias',  min: 30,  max: 59,        count: 0 },
+    { label: '60–89 dias',  min: 60,  max: 89,        count: 0 },
+    { label: '90–179 dias', min: 90,  max: 179,       count: 0 },
+    { label: '180–364 dias',min: 180, max: 364,       count: 0 },
+    { label: '365+ dias',   min: 365, max: Infinity,  count: 0 },
+  ];
+
+  for (const row of rows) {
+    const ds = row[dIdx] ?? '';
+    if (!ds) continue;
+    let d: Date | null = null;
+    if (/\d{2}\/\d{2}\/\d{4}/.test(ds)) { const [dd, mm, yyyy] = ds.split('/'); d = new Date(`${yyyy}-${mm}-${dd}`); }
+    else if (/\d{4}-\d{2}-\d{2}/.test(ds)) { d = new Date(ds); }
+    if (!d || isNaN(d.getTime())) continue;
+    const dias = Math.floor((refDate.getTime() - d.getTime()) / 86_400_000);
+    const f = FAIXAS.find(x => dias >= x.min && dias <= x.max);
+    if (f) f.count++;
+  }
+  return FAIXAS.filter(f => f.count > 0).map(({ label, count }) => ({ label, count }));
+}
+
+function parseProducts(content: string): Product[] {
+  const isBase64 = content.startsWith('data:');
+  let rows: Record<string, unknown>[];
+
+  if (isBase64) {
+    const b64 = content.includes(';base64,') ? content.split(';base64,')[1] : content;
+    try {
+      const wb = XLSX.read(b64, { type: 'base64' });
+      rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]) as Record<string, unknown>[];
+    } catch { return []; }
+  } else {
+    const { headers, rows: r } = splitCsv(content);
+    rows = r.map(cols => Object.fromEntries(headers.map((h, i) => [h, cols[i]])));
+  }
+
+  if (!rows.length) return [];
+  const keys = Object.keys(rows[0]).map(k => k.toLowerCase());
+  const get  = (kw: string[]) => Object.keys(rows[0])[keys.findIndex(k => kw.some(w => k.includes(w))) ?? -1];
+  const nKey = get(['produto', 'nome', 'item', 'descri']);
+  const qKey = get(['qtd', 'quantidade', 'vendid']);
+  const tKey = get(['total', 'faturamento', 'valor']);
+  if (!nKey) return [];
+
+  return rows
+    .map(r => ({
+      nome:  String(r[nKey] ?? '').trim(),
+      qtd:   qKey ? parseInt(String(r[qKey] ?? '0').replace(/\D/g, '')) || 0 : 0,
+      total: tKey ? parseFloat2(String(r[tKey] ?? '0')) : 0,
+    }))
+    .filter(p => p.nome && p.nome.length > 1)
+    .sort((a, b) => b.qtd - a.qtd || b.total - a.total)
+    .slice(0, 10);
+}
+
+function parsePedidosDia(content: string): DiaDaSemana[] {
+  const { headers, rows } = splitCsv(content);
+  const dIdx = headers.findIndex(h => h.includes('data') || h.includes('date'));
+  if (dIdx === -1) return [];
+
+  const DIAS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+  const counts = [0, 0, 0, 0, 0, 0, 0];
+  for (const row of rows) {
+    const ds = row[dIdx] ?? '';
+    let d: Date | null = null;
+    if (/\d{2}\/\d{2}\/\d{4}/.test(ds)) { const [dd, mm, yyyy] = ds.split('/'); d = new Date(`${yyyy}-${mm}-${dd}`); }
+    else if (/\d{4}-\d{2}-\d{2}/.test(ds)) { d = new Date(ds); }
+    if (d && !isNaN(d.getTime())) counts[d.getDay()]++;
+  }
+  const max = Math.max(...counts);
+  if (!max) return [];
+  return DIAS.map((dia, i) => ({ dia, pedidos: counts[i], pct: (counts[i] / max) * 100 }));
+}
+
+function parseAllFiles(files: { name: string; content: string }[], refDate: Date): ParsedData {
+  const out: ParsedData = { ativos: 0, inativos: 0, potenciais: 0, faturamento: 0, pedidos_ativos: 0, ticket: 0, produtos: [], inativos_faixas: [], por_dia: [] };
+  for (const f of files) {
+    const type = detectType(f.name);
+    if (type === 'ativos') {
+      const { count, faturamento, pedidos } = parseClientesCsv(f.content);
+      out.ativos = count; out.faturamento = faturamento; out.pedidos_ativos = pedidos;
+    } else if (type === 'inativos') {
+      out.inativos = parseClientesCsv(f.content).count;
+      out.inativos_faixas = parseInativosFaixas(f.content, refDate);
+    } else if (type === 'potenciais') {
+      out.potenciais = parseClientesCsv(f.content).count;
+    } else if (type === 'produtos') {
+      out.produtos = parseProducts(f.content);
+    } else if (type === 'pedidos') {
+      out.por_dia = parsePedidosDia(f.content);
+    }
+  }
+  if (out.pedidos_ativos > 0 && out.faturamento > 0) out.ticket = out.faturamento / out.pedidos_ativos;
+  return out;
+}
+
+// ── DB / API fetchers ──────────────────────────────────────────────────────────
 
 async function fetchBairros(clientId: string, from: string, to: string): Promise<Bairro[]> {
   const pool = makeServerPool();
   try {
     const { rows } = await pool.query(
-      `SELECT
-         bairro,
-         COUNT(*)                                         AS pedidos,
-         COALESCE(SUM(COALESCE(NULLIF(valor_rs,0),0)), 0) AS faturamento
+      `SELECT bairro, COUNT(*) AS pedidos, COALESCE(SUM(COALESCE(NULLIF(valor_rs,0),0)),0) AS faturamento
        FROM public.crm_leads
-       WHERE client_id = $1
-         AND bairro IS NOT NULL AND bairro != ''
-         AND COALESCE(data, lead_date, created_at::date) BETWEEN $2 AND $3
-       GROUP BY bairro
-       ORDER BY pedidos DESC
-       LIMIT 10`,
+       WHERE client_id=$1 AND bairro IS NOT NULL AND bairro!=''
+         AND COALESCE(data,lead_date,created_at::date) BETWEEN $2 AND $3
+       GROUP BY bairro ORDER BY pedidos DESC LIMIT 10`,
       [clientId, from, to],
     ).catch(() => ({ rows: [] }));
-
     return rows.map((r: { bairro: string; pedidos: string; faturamento: string }) => ({
-      bairro:      r.bairro,
-      pedidos:     parseInt(r.pedidos, 10),
-      faturamento: parseFloat(r.faturamento),
+      bairro: r.bairro, pedidos: parseInt(r.pedidos, 10), faturamento: parseFloat(r.faturamento),
     }));
-  } finally {
-    await pool.end();
-  }
+  } finally { await pool.end(); }
 }
 
-async function fetchMetaAds(
-  connectionId: string | null | undefined,
-  accountIds: string[],
-  from: string,
-  to: string,
-): Promise<MetaAds | null> {
+async function fetchMetaAds(connectionId: string | null | undefined, accountIds: string[], from: string, to: string): Promise<MetaAds | null> {
   if (!connectionId || !accountIds.length) return null;
-
   const pool = makeServerPool();
   let conn: { id: string; app_id: string; access_token: string; token_expiry: string | null } | null = null;
   try {
-    const { rows } = await pool.query(
-      `SELECT id, app_id, access_token, token_expiry FROM public.meta_connections WHERE id = $1`,
-      [connectionId],
-    );
+    const { rows } = await pool.query(`SELECT id,app_id,access_token,token_expiry FROM public.meta_connections WHERE id=$1`, [connectionId]);
     conn = rows[0] ?? null;
-  } finally {
-    await pool.end();
-  }
+  } finally { await pool.end(); }
   if (!conn) return null;
 
-  const token = await getFreshMetaToken(conn);
+  const token     = await getFreshMetaToken(conn);
   const timeRange = JSON.stringify({ since: from, until: to });
-
   let totalSpend = 0, totalImpressions = 0, totalReach = 0, totalCliques = 0;
-  const campaigns: Array<{
-    nome: string; tipo: string;
-    metricas: { investimento: number; impressoes: number; alcance: number; cliques: number };
-  }> = [];
+  const campaigns: MetaAds['campanhas'] = [];
 
   await Promise.allSettled(accountIds.map(async (accountId) => {
     const acct = accountId.startsWith('act_') ? accountId : `act_${accountId}`;
+    const sig  = AbortSignal.timeout(12000);
 
-    // Account totals
     const urlAcc = new URL(`https://graph.facebook.com/v21.0/${acct}/insights`);
     urlAcc.searchParams.set('fields', 'spend,impressions,reach,clicks');
     urlAcc.searchParams.set('time_range', timeRange);
     urlAcc.searchParams.set('level', 'account');
     urlAcc.searchParams.set('access_token', token);
-    const metaSignal = AbortSignal.timeout(12000);
-    const resAcc = await fetch(urlAcc.toString(), { signal: metaSignal }).catch(() => null);
+    const resAcc = await fetch(urlAcc.toString(), { signal: sig }).catch(() => null);
     if (resAcc?.ok) {
       const j = await resAcc.json() as { data?: Record<string, string>[] };
       for (const row of j.data ?? []) {
-        totalSpend       += parseFloat(row.spend       ?? '0');
-        totalImpressions += parseInt(row.impressions   ?? '0', 10);
-        totalReach       += parseInt(row.reach         ?? '0', 10);
-        totalCliques     += parseInt(row.clicks        ?? '0', 10);
+        totalSpend       += parseFloat(row.spend ?? '0');
+        totalImpressions += parseInt(row.impressions ?? '0', 10);
+        totalReach       += parseInt(row.reach ?? '0', 10);
+        totalCliques     += parseInt(row.clicks ?? '0', 10);
       }
     }
 
-    // Campaign level
     const urlCamp = new URL(`https://graph.facebook.com/v21.0/${acct}/insights`);
     urlCamp.searchParams.set('fields', 'campaign_name,objective,spend,impressions,reach,clicks');
     urlCamp.searchParams.set('time_range', timeRange);
@@ -123,199 +260,328 @@ async function fetchMetaAds(
     const j = await resCamp.json() as { data?: Record<string, string>[] };
     for (const row of j.data ?? []) {
       campaigns.push({
-        nome: String(row.campaign_name ?? 'Sem nome'),
-        tipo: String(row.objective     ?? ''),
-        metricas: {
-          investimento: parseFloat(row.spend       ?? '0'),
-          impressoes:   parseInt(row.impressions   ?? '0', 10),
-          alcance:      parseInt(row.reach         ?? '0', 10),
-          cliques:      parseInt(row.clicks        ?? '0', 10),
-        },
+        nome: String(row.campaign_name ?? 'Sem nome'), tipo: String(row.objective ?? ''),
+        metricas: { investimento: parseFloat(row.spend ?? '0'), impressoes: parseInt(row.impressions ?? '0', 10), alcance: parseInt(row.reach ?? '0', 10), cliques: parseInt(row.clicks ?? '0', 10) },
       });
     }
   }));
 
   if (totalSpend === 0 && campaigns.length === 0) return null;
-
-  return {
-    investimento: totalSpend,
-    impressoes:   totalImpressions,
-    alcance:      totalReach,
-    cliques:      totalCliques,
-    campanhas:    campaigns.slice(0, 3),
-  };
+  return { investimento: totalSpend, impressoes: totalImpressions, alcance: totalReach, cliques: totalCliques, campanhas: campaigns.slice(0, 3) };
 }
 
-// ── System Prompt ─────────────────────────────────────────────────────────────
+// ── HTML components ────────────────────────────────────────────────────────────
 
-const SYSTEM_PROMPT = `Você é um analista sênior de marketing especializado em delivery. Escreve para o dono do restaurante.
+function wrapSlide(body: string, idx: number, total: number, dark = false): string {
+  const bg = dark ? D.dark : D.white;
+  const hb = dark ? 'rgba(255,255,255,0.1)' : D.border;
+  const cc = dark ? '#666' : '#AAAAAA';
+  return `<div style="width:1440px;min-height:810px;background:${bg};margin:0 auto 20px;box-shadow:0 4px 20px rgba(0,0,0,0.08);overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column"><div style="height:52px;padding:0 48px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid ${hb};flex-shrink:0"><span style="font-family:${D.bebas};font-size:22px;color:${D.green}">ONMID</span><span style="font-size:12px;color:${cc};font-family:${D.inter}">${idx}/${total}</span></div><div style="flex:1;padding:32px 48px 36px">${body}</div></div>`;
+}
 
-BENCHMARKS: ticket médio R$40–70 | recompra mensal 35–50% dos ativos | Sex/Sáb/Dom = 55–70% do volume | ROAS <3× ruim, 4–6× bom, >7× escalar
+function secTitle(title: string, sub: string): string {
+  return `<div style="display:flex;gap:12px;margin-bottom:20px;align-items:flex-start"><div style="width:4px;min-height:34px;background:${D.green};border-radius:2px;flex-shrink:0;margin-top:3px"></div><div><h2 style="font-family:${D.inter};font-size:24px;font-weight:800;color:${D.text};margin:0;line-height:1.1">${title}</h2><p style="font-size:13px;color:${D.muted};margin:3px 0 0;font-family:${D.inter}">${sub}</p></div></div>`;
+}
 
-REGRAS:
-1. Dados ausentes na planilha = slide omitido. Nunca invente.
-2. Todo slide termina com insight em linguagem de negócio (não de marqueteiro).
-3. Quedas: 1 contexto + 1 ação. Variações sempre: "+23% (de 254 para 312)".
-4. Proibido: "excelente resultado", "N/A", seções vazias.
+function kpi(label: string, value: string, context: string, dark = false): string {
+  const bg  = dark ? 'rgba(255,255,255,0.08)' : D.card;
+  const bc  = dark ? 'rgba(255,255,255,0.1)'  : D.border;
+  const lc  = dark ? '#888' : '#777';
+  const vc  = dark ? D.white : D.text;
+  const cc  = dark ? '#AAA' : D.muted;
+  return `<div style="background:${bg};border:1px solid ${bc};border-radius:12px;padding:20px 22px"><div style="font-size:10px;font-weight:700;color:${lc};text-transform:uppercase;letter-spacing:0.08em;font-family:${D.inter};margin-bottom:6px">${label}</div><div style="font-family:${D.bebas};font-size:36px;color:${vc};line-height:1;margin-bottom:6px">${value}</div><div style="font-size:12px;color:${cc};font-family:${D.inter};line-height:1.4">${context}</div></div>`;
+}
 
-FONTES DE DADOS:
-- JSON (meta_ads, por_regiao): dados do sistema — use direto.
-- PLANILHA CSV: extraia daqui tudo mais: faturamento, pedidos, ticket, por_dia, base_clientes (ativos/inativos/potenciais), produtos. A planilha Goomer/Anota Aí inclui esses resumos.
+function hbar(label: string, value: string, pct: number, hi: boolean): string {
+  const bar = hi ? D.green : '#D0D0D0';
+  return `<div style="margin-bottom:9px"><div style="display:flex;justify-content:space-between;font-size:13px;font-weight:600;color:${D.text};font-family:${D.inter};margin-bottom:3px"><span>${label}</span><span>${value}</span></div><div style="height:8px;background:${D.border};border-radius:4px"><div style="height:100%;background:${bar};border-radius:4px;width:${Math.min(pct, 100).toFixed(1)}%"></div></div></div>`;
+}
 
-SLIDES (pule sem dados):
-1-CAPA: sempre. Título, período, 3–4 KPIs mais importantes do negócio.
-2-VISÃO GERAL: faturamento|pedidos|ticket atual vs anterior. Card leitura.
-3-DIAS DA SEMANA: barras CSS (verde=top 2, cinza=demais). Card estratégia + oportunidade.
-4-REGIÕES: só se por_regiao tiver dados. Tabela bairros + 3 cards insight.
-5-BASE DE CLIENTES: só se houver ativos/inativos/potenciais na planilha. 3 KPIs + barra dividida + insight.
-6-INATIVOS: só se houver faixas (30-59/60-89/90-179/180-364/365+). Barras + 3 mensagens WhatsApp exemplo.
-7-PRODUTOS: só se houver ranking. Barras top produtos + 3 combos sugeridos.
-8-META ADS: só se meta_ads no JSON. 4 KPIs + cards por campanha.
-9-DIAGNÓSTICO: sempre, sempre último. 4 colunas: feito|resultados|plano próximo mês|prioridades. Card conclusão 1 frase.
+function insight(title: string, text: string): string {
+  return `<div style="background:#F0FAF3;border:1px solid #C8E6C9;border-radius:12px;padding:14px 16px;margin-top:12px"><div style="font-size:10px;font-weight:700;color:${D.green};text-transform:uppercase;letter-spacing:0.08em;margin-bottom:5px;font-family:${D.inter}">${title}</div><p style="font-size:13px;color:${D.text};line-height:1.6;margin:0;font-family:${D.inter}">${text}</p></div>`;
+}
 
-DESIGN (1440×810px por slide):
-Cores: verde #00C853 | verde-bg #E8F5E9 | texto #111111 | secundário #555555 | fundo slide #FFFFFF | card #FAFAFA | borda #F0F0F0 | positivo bg #E8F5E9 txt #00C853 | negativo bg #FFEBEE txt #FF5252 | anterior bg #E3F2FD txt #1565C0
-Fontes: KPI grandes e "ONMID" → var(--font-bebas),sans-serif | resto → var(--font-inter),sans-serif
-Radius: cards 12px | badges 6px | barras 4px. Sombra cards: 0 2px 8px rgba(0,0,0,0.05)
+// ── Slide builders (TypeScript — zero AI tokens) ───────────────────────────────
 
-ESTRUTURA OBRIGATÓRIA DE CADA SLIDE:
-<div style="width:1440px;min-height:810px;background:#FFFFFF;margin:0 auto 20px;box-shadow:0 4px 20px rgba(0,0,0,0.08);overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column">
-  <div style="height:52px;padding:0 48px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #F0F0F0;flex-shrink:0">
-    <span style="font-family:var(--font-bebas),sans-serif;font-size:22px;color:#00C853">ONMID</span>
-    <span style="font-size:12px;color:#AAAAAA">NN/09</span>
-  </div>
-  <div style="flex:1;padding:32px 48px 36px">[conteúdo]</div>
+function sCapa(d: ParsedData, meta: MetaAds | null, clientName: string, periodo: string, total: number): string {
+  const cards: string[] = [];
+  if (d.faturamento > 0)  cards.push(kpi('Faturamento', brl(d.faturamento), `${num(d.pedidos_ativos)} pedidos`, true));
+  if (d.ticket > 0)       cards.push(kpi('Ticket Médio', brl(d.ticket), 'por pedido (ativos)', true));
+  if (d.ativos > 0)       cards.push(kpi('Clientes Ativos', num(d.ativos), `${num(d.inativos)} inativos · ${num(d.potenciais)} em potencial`, true));
+  if (meta)               cards.push(kpi('Investimento Meta', brl(meta.investimento), `${num(meta.cliques)} cliques · ${num(meta.alcance)} alcance`, true));
+
+  const body = `<div style="display:flex;flex-direction:column;justify-content:center;height:100%;gap:24px">
+<div>
+  <div style="font-size:11px;font-weight:700;color:${D.green};text-transform:uppercase;letter-spacing:0.12em;font-family:${D.inter};margin-bottom:10px">Relatório de Performance — Delivery</div>
+  <h1 style="font-family:${D.bebas};font-size:68px;color:${D.white};margin:0;line-height:0.95;letter-spacing:0.02em">${clientName}</h1>
+  <p style="font-size:15px;color:#AAAAAA;margin:12px 0 0;font-family:${D.inter}">${periodo}</p>
 </div>
-
-TÍTULO DE SEÇÃO: <div style="display:flex;gap:12px;margin-bottom:20px"><div style="width:4px;background:#00C853;border-radius:2px;flex-shrink:0"></div><div><h2 style="font-family:var(--font-inter),sans-serif;font-size:26px;font-weight:800;color:#111111;margin:0">TÍTULO</h2><p style="font-size:13px;color:#555555;margin:3px 0 0">subtítulo</p></div></div>
-
-KPI CARD (grid 3-4 col): <div style="background:#FAFAFA;border:1px solid #F0F0F0;border-radius:12px;padding:20px"><div style="width:32px;height:32px;background:#E8F5E9;border-radius:50%;margin-bottom:10px"></div><div style="font-size:10px;font-weight:700;color:#777;text-transform:uppercase;letter-spacing:0.08em">LABEL</div><div style="font-family:var(--font-bebas),sans-serif;font-size:40px;color:#111111;line-height:1;margin:6px 0">VALOR</div><div style="font-size:12px;color:#555555">contexto</div></div>
-
-BADGE+: <span style="background:#E8F5E9;color:#00C853;font-size:12px;font-weight:700;padding:3px 10px;border-radius:6px">↑ +23% (de 254 para 312)</span>
-BADGE-: <span style="background:#FFEBEE;color:#FF5252;font-size:12px;font-weight:700;padding:3px 10px;border-radius:6px">↓ -12% (de 312 para 275)</span>
-BADGE ANT: <span style="background:#E3F2FD;color:#1565C0;font-size:12px;font-weight:600;padding:3px 10px;border-radius:6px">mai/25: R$134.535</span>
-
-BARRA CSS: <div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:13px;font-weight:600;color:#111111;margin-bottom:3px"><span>Label</span><span>150</span></div><div style="height:8px;background:#F0F0F0;border-radius:4px"><div style="height:100%;background:#00C853;border-radius:4px;width:75%"></div></div></div>
-(dias fracos: background:#D0D0D0 na barra interna)
-
-BARRA DIVIDIDA BASE: <div style="height:12px;border-radius:6px;overflow:hidden;display:flex;margin:12px 0"><div style="background:#00C853;width:X%"></div><div style="background:#FF5252;width:Y%"></div><div style="background:#1565C0;width:Z%"></div></div>
-
-TABELA BAIRROS: <table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="background:#111111;color:#FFF"><th style="padding:9px 14px;text-align:left">Bairro</th><th style="padding:9px 14px;text-align:right">Pedidos</th><th style="padding:9px 14px;text-align:right">Faturamento</th></tr></thead><tbody>[tr com border-bottom:1px solid #F5F5F5]</tbody></table>
-
-INSIGHT BOX: <div style="background:#F0FAF3;border:1px solid #C8E6C9;border-radius:12px;padding:16px 18px"><div style="font-size:10px;font-weight:700;color:#00C853;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px">LEITURA</div><p style="font-size:14px;color:#111111;line-height:1.6;margin:0">insight</p></div>
-
-REC CARD: <div style="border:1px solid #F0F0F0;border-radius:12px;padding:16px 18px;border-left:4px solid #00C853;margin-bottom:8px"><div style="font-size:10px;font-weight:700;color:#AAAAAA;text-transform:uppercase">O QUE FAZER</div><div style="font-size:14px;font-weight:600;color:#111111;margin-top:4px">ação</div><div style="font-size:12px;color:#555555;margin-top:4px"><strong style="color:#111111">Por que:</strong> dado</div><div style="font-size:12px;color:#00C853;font-weight:600;margin-top:3px">Resultado: efeito</div></div>
-
-PRÓX PASSO: <div style="display:flex;gap:12px;padding:10px 0;border-bottom:1px solid #F5F5F5"><div style="width:28px;height:28px;background:#00C853;border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0"><span style="font-size:14px;font-weight:800;color:#FFF">1</span></div><div><div style="font-size:13px;font-weight:700;color:#111111">AÇÃO</div><div style="font-size:12px;color:#555555;margin-top:1px">detalhe</div></div></div>
-
-CAPA (fundo escuro): use background:#111111 no slide e background:rgba(255,255,255,0.08) nos cards de KPI, cor #FFF nos textos, #00C853 no subtítulo de agência.
-
-WRAPPER: <div style="background:#F4F4F4;padding:28px">[slides]</div>
-
-SAÍDA: APENAS HTML. Sem markdown, sem texto extra. Começa com <div style="background:#F4F4F4 e termina com </div>.`;
-
-// ── User Prompt ───────────────────────────────────────────────────────────────
-
-function buildUserPrompt(data: StructuredData, csvContent: string): string {
-  const metaSection = data.meta_ads
-    ? `meta_ads: ${JSON.stringify(data.meta_ads)}`
-    : 'meta_ads: null (sem dados de tráfego pago)';
-
-  const regiaoSection = data.por_regiao.length
-    ? `por_regiao: ${JSON.stringify(data.por_regiao)}`
-    : 'por_regiao: [] (sem dados de bairro no sistema — procure na planilha)';
-
-  return [
-    `CLIENTE: ${data.cliente.nome} | SEGMENTO: ${data.cliente.segmento}`,
-    `PERÍODO ATUAL: ${data.periodo.atual} | PERÍODO ANTERIOR: ${data.periodo.anterior}`,
-    data.contexto_agencia ? `CONTEXTO DA AGÊNCIA: ${data.contexto_agencia}` : '',
-    '',
-    '=== DADOS DO SISTEMA (use diretamente) ===',
-    metaSection,
-    regiaoSection,
-    '',
-    '=== PLANILHA DE PEDIDOS (extraia: faturamento, pedidos, ticket, por_dia, base_clientes, inativos, produtos) ===',
-    csvContent.slice(0, 50000),
-  ].filter(Boolean).join('\n');
+${cards.length ? `<div style="display:grid;grid-template-columns:repeat(${Math.min(cards.length, 4)},1fr);gap:14px">${cards.join('')}</div>` : ''}
+</div>`;
+  return wrapSlide(body, 1, total, true);
 }
 
-// ── Public Builder ────────────────────────────────────────────────────────────
+function sVisaoGeral(d: ParsedData, idx: number, total: number): string {
+  const body = `
+${secTitle('Visão Geral do Período', 'Faturamento, pedidos e ticket médio dos clientes ativos')}
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">
+  ${kpi('Faturamento', brl(d.faturamento), 'soma do valor gasto pelos clientes ativos')}
+  ${kpi('Pedidos', num(d.pedidos_ativos), 'total de pedidos no período')}
+  ${kpi('Ticket Médio', brl(d.ticket), 'faturamento ÷ pedidos')}
+</div>`;
+  return wrapSlide(body, idx, total);
+}
+
+function sPorDia(d: ParsedData, idx: number, total: number): string {
+  const sorted = [...d.por_dia].sort((a, b) => b.pedidos - a.pedidos);
+  const top2   = new Set(sorted.slice(0, 2).map(x => x.dia));
+  const bars   = d.por_dia.map(x => hbar(x.dia, num(x.pedidos), x.pct, top2.has(x.dia))).join('');
+  const body = `
+${secTitle('Pedidos por Dia da Semana', 'Distribuição de pedidos ao longo da semana')}
+<div style="display:grid;grid-template-columns:2fr 1fr;gap:28px">
+  <div>${bars}</div>
+  <div>
+    ${insight('Dias Fortes', `${sorted[0]?.dia} e ${sorted[1]?.dia} concentram os maiores volumes. Priorize campanhas na quarta/quinta para alimentar os picos.`)}
+    ${insight('Oportunidade', `${sorted[sorted.length-1]?.dia} e ${sorted[sorted.length-2]?.dia} estão mais fracos — uma promoção específica nesses dias equilibra o volume semanal.`)}
+  </div>
+</div>`;
+  return wrapSlide(body, idx, total);
+}
+
+function sBase(d: ParsedData, idx: number, total: number): string {
+  const tot = d.ativos + d.inativos + d.potenciais;
+  const pA  = tot ? (d.ativos      / tot * 100).toFixed(1) : '0';
+  const pI  = tot ? (d.inativos    / tot * 100).toFixed(1) : '0';
+  const pP  = tot ? (d.potenciais  / tot * 100).toFixed(1) : '0';
+  const body = `
+${secTitle('Base de Clientes', `Total de ${num(tot)} clientes cadastrados`)}
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px">
+  ${kpi('Ativos', num(d.ativos), `${pA}% da base — compraram no período`)}
+  ${kpi('Inativos', num(d.inativos), `${pI}% — pararam de comprar`)}
+  ${kpi('Em Potencial', num(d.potenciais), `${pP}% — nunca compraram`)}
+</div>
+<div style="height:14px;border-radius:7px;overflow:hidden;display:flex;margin-bottom:12px">
+  <div style="background:${D.green};width:${pA}%"></div>
+  <div style="background:${D.red};width:${pI}%"></div>
+  <div style="background:${D.blue};width:${pP}%"></div>
+</div>
+<div style="display:flex;gap:20px;font-size:12px;font-family:${D.inter};color:${D.muted}">
+  <span><span style="display:inline-block;width:10px;height:10px;background:${D.green};border-radius:2px;margin-right:5px;vertical-align:middle"></span>Ativos</span>
+  <span><span style="display:inline-block;width:10px;height:10px;background:${D.red};border-radius:2px;margin-right:5px;vertical-align:middle"></span>Inativos</span>
+  <span><span style="display:inline-block;width:10px;height:10px;background:${D.blue};border-radius:2px;margin-right:5px;vertical-align:middle"></span>Em potencial</span>
+</div>`;
+  return wrapSlide(body, idx, total);
+}
+
+function sInativos(d: ParsedData, idx: number, total: number): string {
+  const max  = Math.max(...d.inativos_faixas.map(f => f.count));
+  const bars = d.inativos_faixas.map(f => hbar(f.label, num(f.count), max ? f.count / max * 100 : 0, f.count === max)).join('');
+  const maior = d.inativos_faixas.reduce((a, b) => a.count > b.count ? a : b);
+  const body = `
+${secTitle('Clientes Inativos por Faixa', `${num(d.inativos)} clientes sem comprar — distribuídos por tempo`)}
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:28px">
+  <div>${bars}</div>
+  <div>
+    ${insight('Prioridade de Reativação', `A maior concentração está em ${maior.label} com ${num(maior.count)} clientes. Comece por eles — são os mais receptivos a uma oferta de retorno.`)}
+    <div style="margin-top:12px;background:${D.card};border:1px solid ${D.border};border-radius:12px;padding:14px 16px">
+      <div style="font-size:10px;font-weight:700;color:#777;text-transform:uppercase;letter-spacing:0.08em;font-family:${D.inter};margin-bottom:8px">Sugestão de Mensagem</div>
+      <p style="font-size:13px;color:${D.text};font-family:${D.inter};line-height:1.6;margin:0">"Faz tempo que você não aparece! 😊 Preparamos um mimo especial pra você voltar. Use o cupom <strong>VOLTEI</strong> e ganhe desconto no próximo pedido. Válido por 7 dias!"</p>
+    </div>
+  </div>
+</div>`;
+  return wrapSlide(body, idx, total);
+}
+
+function sProdutos(d: ParsedData, idx: number, total: number): string {
+  const max  = Math.max(...d.produtos.map(p => p.qtd));
+  const bars = d.produtos.slice(0, 8).map((p, i) =>
+    hbar(p.nome, `${num(p.qtd)} ped${p.total ? ` · ${brl(p.total)}` : ''}`, max ? p.qtd / max * 100 : 0, i < 3)
+  ).join('');
+  const body = `
+${secTitle('Produtos Mais Vendidos', 'Ranking por quantidade de pedidos')}
+<div style="display:grid;grid-template-columns:3fr 2fr;gap:28px">
+  <div>${bars}</div>
+  <div>
+    ${d.produtos[0] ? insight('Produto Estrela', `"${d.produtos[0].nome}" lidera com ${num(d.produtos[0].qtd)} pedidos. Use-o como âncora em combos para elevar o ticket médio.`) : ''}
+    ${d.produtos[1] ? insight('Combo Sugerido', `"${d.produtos[0]?.nome}" + "${d.produtos[1]?.nome}" — os dois mais pedidos juntos aumentam o ticket e o valor percebido.`) : ''}
+  </div>
+</div>`;
+  return wrapSlide(body, idx, total);
+}
+
+function sRegioes(bairros: Bairro[], idx: number, total: number): string {
+  const rows = bairros.map((b, i) =>
+    `<tr style="background:${i % 2 ? D.white : '#FAFAFA'}"><td style="padding:9px 14px;font-size:13px;color:${D.text};font-family:${D.inter}">${b.bairro}</td><td style="padding:9px 14px;text-align:right;font-size:13px;font-weight:600;color:${D.text};font-family:${D.inter}">${num(b.pedidos)}</td><td style="padding:9px 14px;text-align:right;font-size:13px;color:${D.muted};font-family:${D.inter}">${brl(b.faturamento)}</td></tr>`
+  ).join('');
+  const body = `
+${secTitle('Regiões com Maior Volume', 'Bairros rankeados por pedidos (via CRM)')}
+<table style="width:100%;border-collapse:collapse;border:1px solid ${D.border};border-radius:8px;overflow:hidden">
+  <thead><tr style="background:${D.text};color:white">
+    <th style="padding:10px 14px;text-align:left;font-size:12px;font-family:${D.inter}">Bairro</th>
+    <th style="padding:10px 14px;text-align:right;font-size:12px;font-family:${D.inter}">Pedidos</th>
+    <th style="padding:10px 14px;text-align:right;font-size:12px;font-family:${D.inter}">Faturamento</th>
+  </tr></thead>
+  <tbody>${rows}</tbody>
+</table>
+${bairros[0] ? insight('Fortalecer onde há demanda', `${bairros[0].bairro} lidera com ${num(bairros[0].pedidos)} pedidos. Segmente campanhas Meta para este bairro e os 2 seguintes para maximizar retorno.`) : ''}`;
+  return wrapSlide(body, idx, total);
+}
+
+function sMetaAds(meta: MetaAds, idx: number, total: number): string {
+  const cpl = meta.cliques ? brl(meta.investimento / meta.cliques) : '—';
+  const body = `
+${secTitle('Meta Ads — Tráfego Pago', 'Investimento e resultados das campanhas no período')}
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px">
+  ${kpi('Investimento', brl(meta.investimento), 'total investido em anúncios')}
+  ${kpi('Impressões', num(meta.impressoes), 'vezes que seus anúncios foram vistos')}
+  ${kpi('Alcance', num(meta.alcance), 'pessoas únicas impactadas')}
+  ${kpi('Cliques', num(meta.cliques), `${cpl}/clique (CPL)`)}
+</div>
+${meta.campanhas.length ? `<div style="font-size:10px;font-weight:700;color:#777;text-transform:uppercase;letter-spacing:0.08em;font-family:${D.inter};margin-bottom:10px">Campanhas Ativas</div>
+<div style="display:grid;grid-template-columns:repeat(${Math.min(meta.campanhas.length, 3)},1fr);gap:12px">
+  ${meta.campanhas.map(c =>
+    `<div style="background:${D.card};border:1px solid ${D.border};border-radius:12px;padding:16px"><div style="font-size:13px;font-weight:700;color:${D.text};font-family:${D.inter};margin-bottom:8px">${c.nome}</div><div style="display:flex;flex-direction:column;gap:4px"><span style="font-size:12px;color:${D.muted};font-family:${D.inter}">Investido: <strong style="color:${D.text}">${brl(c.metricas.investimento)}</strong></span><span style="font-size:12px;color:${D.muted};font-family:${D.inter}">Alcance: <strong style="color:${D.text}">${num(c.metricas.alcance)}</strong></span><span style="font-size:12px;color:${D.muted};font-family:${D.inter}">Cliques: <strong style="color:${D.text}">${num(c.metricas.cliques)}</strong></span></div></div>`
+  ).join('')}
+</div>` : ''}`;
+  return wrapSlide(body, idx, total);
+}
+
+// ── Diagnosis (Claude — JSON only, ~300 tokens) ────────────────────────────────
+
+type DiagJson = {
+  diagnostico: string;
+  pontos_fortes: string[];
+  pontos_atencao: string[];
+  plano: Array<{ acao: string; motivo: string }>;
+};
+
+async function fetchDiagnosis(d: ParsedData, meta: MetaAds | null, bairros: Bairro[], clientName: string, periodo: string, agencyContext: string): Promise<DiagJson> {
+  const summary = {
+    cliente: clientName, periodo,
+    faturamento: d.faturamento, pedidos: d.pedidos_ativos, ticket: Math.round(d.ticket),
+    ativos: d.ativos, inativos: d.inativos, potenciais: d.potenciais,
+    top_produtos: d.produtos.slice(0, 3).map(p => `${p.nome} (${p.qtd}x)`),
+    top_bairro: bairros[0]?.bairro ?? null,
+    meta_ads: meta ? { investimento: meta.investimento, alcance: meta.alcance, cliques: meta.cliques } : null,
+    contexto_agencia: agencyContext || null,
+  };
+
+  const msg = await anthropic.messages.create({
+    model:      'claude-sonnet-4-6',
+    max_tokens: 1200,
+    system:     'Analista de marketing de delivery. Responda APENAS com JSON válido. Sem markdown, sem texto extra.',
+    messages:   [{ role: 'user', content: `DADOS:\n${JSON.stringify(summary, null, 2)}\n\nRetorne:\n{"diagnostico":"2-3 frases sobre o estado do negócio","pontos_fortes":["...","...","..."],"pontos_atencao":["...","..."],"plano":[{"acao":"...","motivo":"..."},{"acao":"...","motivo":"..."},{"acao":"...","motivo":"..."},{"acao":"...","motivo":"..."},{"acao":"...","motivo":"..."}]}` }],
+  });
+
+  const raw = msg.content[0].type === 'text' ? msg.content[0].text : '{}';
+  try {
+    return JSON.parse(raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim()) as DiagJson;
+  } catch {
+    return { diagnostico: 'Análise indisponível.', pontos_fortes: [], pontos_atencao: [], plano: [] };
+  }
+}
+
+function sDiagnostico(diag: DiagJson, idx: number, total: number): string {
+  const fortes = diag.pontos_fortes.map(p =>
+    `<div style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid ${D.border}"><div style="width:20px;height:20px;background:${D.greenBg};border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;color:${D.green};margin-top:1px">✓</div><span style="font-size:13px;color:${D.text};font-family:${D.inter};line-height:1.4">${p}</span></div>`
+  ).join('');
+
+  const atencao = diag.pontos_atencao.map(p =>
+    `<div style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid ${D.border}"><div style="width:20px;height:20px;background:${D.redBg};border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;color:${D.red};margin-top:1px">!</div><span style="font-size:13px;color:${D.text};font-family:${D.inter};line-height:1.4">${p}</span></div>`
+  ).join('');
+
+  const plano = diag.plano.map((p, i) =>
+    `<div style="display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-bottom:1px solid ${D.border}"><div style="width:26px;height:26px;background:${D.green};border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0"><span style="font-size:13px;font-weight:800;color:white;font-family:${D.inter}">${i + 1}</span></div><div><div style="font-size:13px;font-weight:700;color:${D.text};font-family:${D.inter}">${p.acao}</div><div style="font-size:12px;color:${D.muted};font-family:${D.inter};margin-top:2px">${p.motivo}</div></div></div>`
+  ).join('');
+
+  const body = `
+${secTitle('Diagnóstico e Plano de Ação', 'Análise do período e próximos passos')}
+<div style="background:${D.card};border:1px solid ${D.border};border-radius:12px;padding:14px 18px;margin-bottom:20px">
+  <p style="font-size:14px;color:${D.text};font-family:${D.inter};line-height:1.7;margin:0">${diag.diagnostico}</p>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr 1.6fr;gap:22px">
+  <div><div style="font-size:10px;font-weight:700;color:#777;text-transform:uppercase;letter-spacing:0.08em;font-family:${D.inter};margin-bottom:8px">Pontos Fortes</div>${fortes}</div>
+  <div><div style="font-size:10px;font-weight:700;color:#777;text-transform:uppercase;letter-spacing:0.08em;font-family:${D.inter};margin-bottom:8px">Atenção</div>${atencao}</div>
+  <div><div style="font-size:10px;font-weight:700;color:#777;text-transform:uppercase;letter-spacing:0.08em;font-family:${D.inter};margin-bottom:8px">Plano para o Próximo Mês</div>${plano}</div>
+</div>`;
+  return wrapSlide(body, idx, total);
+}
+
+// ── Public builder ─────────────────────────────────────────────────────────────
 
 export async function buildDeliveryReport(opts: {
-  clientId: string;
-  clientName: string;
-  from: string;
-  to: string;
-  csvContent: string;
+  clientId:      string;
+  clientName:    string;
+  from:          string;
+  to:            string;
+  csvFiles:      { name: string; content: string }[];
   agencyContext?: string;
   connectionId?: string | null;
-  accountIds?: string[];
+  accountIds?:   string[];
 }): Promise<{ html: string }> {
-  const { clientId, clientName, from, to, csvContent, agencyContext = '', connectionId, accountIds = [] } = opts;
+  const { clientId, clientName, from, to, csvFiles = [], agencyContext = '', connectionId, accountIds = [] } = opts;
 
-  const fromDate = new Date(from + 'T12:00:00');
-  const prevDate = new Date(fromDate);
-  prevDate.setMonth(prevDate.getMonth() - 1);
-  const MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
-  const periodLabel     = `${MONTHS[fromDate.getMonth()]}/${fromDate.getFullYear()}`;
-  const prevPeriodLabel = `${MONTHS[prevDate.getMonth()]}/${prevDate.getFullYear()}`;
+  const fromDate  = new Date(from + 'T12:00:00');
+  const toDate    = new Date(to + 'T12:00:00');
+  const MONTHS    = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  const periodo   = `${MONTHS[fromDate.getMonth()]}/${fromDate.getFullYear()}`;
 
-  const [por_regiao, meta_ads] = await Promise.all([
+  // Parse files + fetch API/DB in parallel
+  const data = parseAllFiles(csvFiles, toDate);
+  const [bairros, meta] = await Promise.all([
     fetchBairros(clientId, from, to),
     fetchMetaAds(connectionId, accountIds, from, to),
   ]);
 
-  console.log(`[delivery] ${clientName} | Meta: ${meta_ads ? `R$${meta_ads.investimento}` : 'null'} | Bairros: ${por_regiao.length} | CSV: ${csvContent.length} chars`);
+  console.log(`[delivery] ${clientName} | ativos:${data.ativos} inativos:${data.inativos} pot:${data.potenciais} fat:${brl(data.faturamento)} prod:${data.produtos.length} bairros:${bairros.length} meta:${meta ? 'sim' : 'não'}`);
 
-  const structuredData: StructuredData = {
-    cliente:          { nome: clientName, segmento: 'Delivery / Restaurante' },
-    periodo:          { atual: periodLabel, anterior: prevPeriodLabel },
-    contexto_agencia: agencyContext,
-    por_regiao,
-    meta_ads,
-  };
+  // Claude writes ONLY the diagnosis (JSON, ~300 tokens)
+  const diag = await fetchDiagnosis(data, meta, bairros, clientName, periodo, agencyContext);
 
-  const message = await anthropic.messages.create({
-    model:      'claude-sonnet-4-6',
-    max_tokens: 12000,
-    system:     SYSTEM_PROMPT,
-    messages:   [{ role: 'user', content: buildUserPrompt(structuredData, csvContent) }],
-  });
+  // Determine active slides
+  const hasVisao   = data.faturamento > 0 || data.pedidos_ativos > 0;
+  const hasDia     = data.por_dia.length > 0;
+  const hasBase    = data.ativos > 0 || data.inativos > 0 || data.potenciais > 0;
+  const hasInat    = data.inativos_faixas.length > 0;
+  const hasProd    = data.produtos.length > 0;
+  const hasRegiao  = bairros.length > 0;
+  const hasMeta    = meta !== null;
 
-  const raw  = message.content[0].type === 'text' ? message.content[0].text : '';
-  const html = raw.replace(/^```(?:html)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+  const total = 1 + (hasVisao ? 1 : 0) + (hasDia ? 1 : 0) + (hasBase ? 1 : 0) + (hasInat ? 1 : 0) + (hasProd ? 1 : 0) + (hasRegiao ? 1 : 0) + (hasMeta ? 1 : 0) + 1;
 
-  console.log(`[delivery] HTML gerado: ${html.length} chars | stop_reason: ${message.stop_reason}`);
+  const slides: string[] = [];
+  let i = 1;
+  slides.push(sCapa(data, meta, clientName, periodo, total));
+  if (hasVisao)  slides.push(sVisaoGeral(data, ++i, total));
+  if (hasDia)    slides.push(sPorDia(data, ++i, total));
+  if (hasBase)   slides.push(sBase(data, ++i, total));
+  if (hasInat)   slides.push(sInativos(data, ++i, total));
+  if (hasProd)   slides.push(sProdutos(data, ++i, total));
+  if (hasRegiao) slides.push(sRegioes(bairros, ++i, total));
+  if (hasMeta)   slides.push(sMetaAds(meta!, ++i, total));
+  slides.push(sDiagnostico(diag, ++i, total));
 
-  return { html };
+  return { html: `<div style="background:#F4F4F4;padding:28px;font-family:${D.inter}">${slides.join('')}</div>` };
 }
 
-// ── Save to DB ────────────────────────────────────────────────────────────────
+// ── Save to DB ─────────────────────────────────────────────────────────────────
 
 export async function saveDeliveryReport(opts: {
-  clientId: string;
+  clientId:   string;
   clientName: string;
-  from: string;
-  to: string;
-  data: { html: string };
+  from:       string;
+  to:         string;
+  data:       { html: string };
 }): Promise<{ token: string; reportId: string }> {
   const { clientId, clientName, from, to, data } = opts;
   const token = randomUUID();
-
-  const pool = makeServerPool();
+  const pool  = makeServerPool();
   try {
     const { rows } = await pool.query(
-      `INSERT INTO public.diagnostic_reports
-         (client_id, client_name, period_from, period_to, template_slug, report_data, public_token)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING id`,
+      `INSERT INTO public.diagnostic_reports (client_id,client_name,period_from,period_to,template_slug,report_data,public_token)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
       [clientId, clientName, from, to, 'onmid-narrative-delivery', JSON.stringify(data), token],
     );
     return { token, reportId: rows[0].id as string };
-  } finally {
-    await pool.end();
-  }
+  } finally { await pool.end(); }
 }
-
-// keep brl in scope for possible future use
-void brl;

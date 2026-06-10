@@ -114,7 +114,12 @@ export default function RelatoriosPage() {
         const content = (ev.target?.result as string) ?? '';
         setGenCsvFiles(prev => [...prev, { name: file.name, content }]);
       };
-      reader.readAsText(file, 'utf-8');
+      // XLSX/XLS must be read as base64 data URL — readAsText corrupts binary files
+      if (/\.xlsx?$/i.test(file.name)) {
+        reader.readAsDataURL(file);
+      } else {
+        reader.readAsText(file, 'utf-8');
+      }
     });
     e.target.value = '';
   }

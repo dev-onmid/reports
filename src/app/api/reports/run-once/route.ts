@@ -15,11 +15,7 @@ export async function POST(request: NextRequest) {
     };
 
     const { clientId, from, to, manualNotes, agencyContext, template } = body;
-
-    // Combine multiple CSV files into labeled sections
-    const csvContent = body.csvFiles?.length
-      ? body.csvFiles.map((f, i) => `--- PLANILHA ${i + 1}: ${f.name} ---\n${f.content}`).join('\n\n')
-      : (body.csvContent ?? '');
+    const csvFiles = body.csvFiles ?? [];
     if (!clientId || !from || !to) {
       return Response.json({ error: 'clientId, from e to são obrigatórios' }, { status: 400 });
     }
@@ -50,12 +46,12 @@ export async function POST(request: NextRequest) {
 
     // ── Delivery template ──────────────────────────────────────────────────────
     if (template === 'delivery') {
-      if (!csvContent) {
+      if (!csvFiles.length) {
         return Response.json({ error: 'Anexe ao menos uma planilha para o template Delivery.' }, { status: 400 });
       }
 
       const reportData = await buildDeliveryReport({
-        clientId, clientName, from, to, csvContent, agencyContext,
+        clientId, clientName, from, to, csvFiles, agencyContext,
         connectionId: metaConnectionId,
         accountIds: metaAccountIds,
       });
