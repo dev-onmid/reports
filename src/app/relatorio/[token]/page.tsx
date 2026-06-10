@@ -59,17 +59,18 @@ export default async function RelatorioPublicoPage({ params }: { params: Promise
     const printCss = `
       @media print {
         @page { size: landscape; margin: 0; }
-        body { background: #111 !important; }
+        body { background: #F4F4F4 !important; }
         [style*="page-break-after"] { break-after: page; }
       }
       * { box-sizing: border-box; }
+      body { background: #F4F4F4; }
     `;
     return (
       <>
         <title>{`Relatório ${isDelivery ? 'Delivery' : 'de Performance'} — ${report.client_name}`}</title>
         {/* eslint-disable-next-line react/no-danger */}
         <style dangerouslySetInnerHTML={{ __html: printCss }} />
-        <div style={{ background: '#111111', minHeight: '100vh', overflowX: 'auto' }}>
+        <div style={{ background: '#F4F4F4', minHeight: '100vh', overflowX: 'auto' }}>
           <div dangerouslySetInnerHTML={{ __html: data.html ?? '' }} />
         </div>
       </>

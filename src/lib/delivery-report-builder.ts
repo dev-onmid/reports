@@ -6,15 +6,160 @@ import { brl } from './report-runner';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-// ── Meta Ads fetcher (campaign-level, same auth pattern as report-builder) ────
+// ── Types ─────────────────────────────────────────────────────────────────────
 
-async function fetchCampaignMeta(
+type ClientBase = {
+  ativos: number;
+  inativos: number;
+  potenciais: number;
+  com_1_pedido: number;
+  com_mais_de_1: number;
+  total_pedidos_base: number;
+};
+
+type InativoFaixa = { faixa: string; quantidade: number };
+type Bairro = { bairro: string; pedidos: number; faturamento: number };
+
+type MetaAds = {
+  investimento: number;
+  impressoes: number;
+  alcance: number;
+  cliques: number;
+  campanhas: Array<{
+    nome: string;
+    tipo: string;
+    metricas: { investimento: number; impressoes: number; alcance: number; cliques: number };
+  }>;
+};
+
+type StructuredData = {
+  cliente: { nome: string; segmento: string };
+  periodo: { atual: string; anterior: string };
+  contexto_agencia: string;
+  base_clientes: ClientBase;
+  inativos_por_faixa: InativoFaixa[];
+  por_regiao: Bairro[];
+  meta_ads: MetaAds | null;
+};
+
+// ── DB Fetchers ───────────────────────────────────────────────────────────────
+
+async function fetchClientBase(clientId: string, from: string, to: string): Promise<ClientBase> {
+  const pool = makeServerPool();
+  try {
+    const { rows } = await pool.query(
+      `WITH per_numero AS (
+         SELECT
+           numero,
+           SUM(CASE WHEN fechou = true OR COALESCE(NULLIF(valor_rs,0),0) > 0 THEN 1 ELSE 0 END) AS total_pedidos,
+           MAX(COALESCE(data, lead_date, created_at::date)) AS ultima_data
+         FROM public.crm_leads
+         WHERE client_id = $1
+           AND numero IS NOT NULL AND numero != '' AND numero NOT LIKE '%-%'
+         GROUP BY numero
+       )
+       SELECT
+         COUNT(*) FILTER (WHERE total_pedidos > 0 AND ultima_data BETWEEN $2 AND $3)          AS ativos,
+         COUNT(*) FILTER (WHERE total_pedidos > 0 AND NOT (ultima_data BETWEEN $2 AND $3))    AS inativos,
+         COUNT(*) FILTER (WHERE total_pedidos = 0)                                             AS potenciais,
+         COUNT(*) FILTER (WHERE total_pedidos = 1)                                             AS com_1_pedido,
+         COUNT(*) FILTER (WHERE total_pedidos > 1)                                             AS com_mais_de_1,
+         COALESCE(SUM(total_pedidos), 0)                                                       AS total_pedidos_base
+       FROM per_numero`,
+      [clientId, from, to],
+    ).catch(() => ({ rows: [] }));
+
+    const r = rows[0] ?? {};
+    return {
+      ativos:            parseInt(String(r.ativos            ?? 0), 10),
+      inativos:          parseInt(String(r.inativos          ?? 0), 10),
+      potenciais:        parseInt(String(r.potenciais        ?? 0), 10),
+      com_1_pedido:      parseInt(String(r.com_1_pedido      ?? 0), 10),
+      com_mais_de_1:     parseInt(String(r.com_mais_de_1     ?? 0), 10),
+      total_pedidos_base:parseInt(String(r.total_pedidos_base?? 0), 10),
+    };
+  } finally {
+    await pool.end();
+  }
+}
+
+async function fetchInativosFaixas(clientId: string, referenceDate: string): Promise<InativoFaixa[]> {
+  const pool = makeServerPool();
+  try {
+    const { rows } = await pool.query(
+      `WITH ultima_compra AS (
+         SELECT numero, MAX(COALESCE(data, lead_date, created_at::date)) AS ult
+         FROM public.crm_leads
+         WHERE client_id = $1
+           AND (fechou = true OR COALESCE(NULLIF(valor_rs,0),0) > 0)
+           AND numero IS NOT NULL AND numero != ''
+         GROUP BY numero
+       )
+       SELECT
+         CASE
+           WHEN dias BETWEEN 30  AND 59  THEN '30-59'
+           WHEN dias BETWEEN 60  AND 89  THEN '60-89'
+           WHEN dias BETWEEN 90  AND 179 THEN '90-179'
+           WHEN dias BETWEEN 180 AND 364 THEN '180-364'
+           WHEN dias >= 365              THEN '365+'
+         END AS faixa,
+         COUNT(*) AS quantidade
+       FROM (
+         SELECT ($2::date - ult)::int AS dias FROM ultima_compra WHERE ult < $2::date
+       ) t
+       WHERE dias >= 30
+       GROUP BY 1
+       ORDER BY MIN(dias)`,
+      [clientId, referenceDate],
+    ).catch(() => ({ rows: [] }));
+
+    const ORDER = ['30-59', '60-89', '90-179', '180-364', '365+'];
+    return ORDER
+      .map(faixa => {
+        const row = rows.find((r: { faixa: string }) => r.faixa === faixa);
+        return row ? { faixa, quantidade: parseInt(String(row.quantidade), 10) } : null;
+      })
+      .filter((x): x is InativoFaixa => x !== null && x.quantidade > 0);
+  } finally {
+    await pool.end();
+  }
+}
+
+async function fetchBairros(clientId: string, from: string, to: string): Promise<Bairro[]> {
+  const pool = makeServerPool();
+  try {
+    const { rows } = await pool.query(
+      `SELECT
+         bairro,
+         COUNT(*)                                         AS pedidos,
+         COALESCE(SUM(COALESCE(NULLIF(valor_rs,0),0)), 0) AS faturamento
+       FROM public.crm_leads
+       WHERE client_id = $1
+         AND bairro IS NOT NULL AND bairro != ''
+         AND COALESCE(data, lead_date, created_at::date) BETWEEN $2 AND $3
+       GROUP BY bairro
+       ORDER BY pedidos DESC
+       LIMIT 10`,
+      [clientId, from, to],
+    ).catch(() => ({ rows: [] }));
+
+    return rows.map((r: { bairro: string; pedidos: string; faturamento: string }) => ({
+      bairro:      r.bairro,
+      pedidos:     parseInt(r.pedidos, 10),
+      faturamento: parseFloat(r.faturamento),
+    }));
+  } finally {
+    await pool.end();
+  }
+}
+
+async function fetchMetaAds(
   connectionId: string | null | undefined,
   accountIds: string[],
   from: string,
   to: string,
-): Promise<string> {
-  if (!connectionId || !accountIds.length) return 'Sem dados de Meta Ads disponíveis.';
+): Promise<MetaAds | null> {
+  if (!connectionId || !accountIds.length) return null;
 
   const pool = makeServerPool();
   let conn: { id: string; app_id: string; access_token: string; token_expiry: string | null } | null = null;
@@ -27,264 +172,294 @@ async function fetchCampaignMeta(
   } finally {
     await pool.end();
   }
-  if (!conn) return 'Sem dados de Meta Ads disponíveis.';
+  if (!conn) return null;
 
   const token = await getFreshMetaToken(conn);
   const timeRange = JSON.stringify({ since: from, until: to });
-  const campaigns: Record<string, unknown>[] = [];
+
+  let totalSpend = 0, totalImpressions = 0, totalReach = 0, totalCliques = 0;
+  const campaigns: Array<{
+    nome: string; tipo: string;
+    metricas: { investimento: number; impressoes: number; alcance: number; cliques: number };
+  }> = [];
 
   await Promise.allSettled(accountIds.map(async (accountId) => {
     const acct = accountId.startsWith('act_') ? accountId : `act_${accountId}`;
-    const url = new URL(`https://graph.facebook.com/v21.0/${acct}/insights`);
-    url.searchParams.set('fields', 'campaign_name,spend,impressions,reach,clicks,actions');
-    url.searchParams.set('time_range', timeRange);
-    url.searchParams.set('level', 'campaign');
-    url.searchParams.set('limit', '50');
-    url.searchParams.set('access_token', token);
 
-    const res = await fetch(url.toString()).catch(() => null);
-    if (!res?.ok) return;
-    const json = await res.json() as { data?: Record<string, unknown>[] };
-    campaigns.push(...(json.data ?? []));
+    // Account totals
+    const urlAcc = new URL(`https://graph.facebook.com/v21.0/${acct}/insights`);
+    urlAcc.searchParams.set('fields', 'spend,impressions,reach,clicks');
+    urlAcc.searchParams.set('time_range', timeRange);
+    urlAcc.searchParams.set('level', 'account');
+    urlAcc.searchParams.set('access_token', token);
+    const resAcc = await fetch(urlAcc.toString()).catch(() => null);
+    if (resAcc?.ok) {
+      const j = await resAcc.json() as { data?: Record<string, string>[] };
+      for (const row of j.data ?? []) {
+        totalSpend       += parseFloat(row.spend       ?? '0');
+        totalImpressions += parseInt(row.impressions   ?? '0', 10);
+        totalReach       += parseInt(row.reach         ?? '0', 10);
+        totalCliques     += parseInt(row.clicks        ?? '0', 10);
+      }
+    }
+
+    // Campaign level
+    const urlCamp = new URL(`https://graph.facebook.com/v21.0/${acct}/insights`);
+    urlCamp.searchParams.set('fields', 'campaign_name,objective,spend,impressions,reach,clicks');
+    urlCamp.searchParams.set('time_range', timeRange);
+    urlCamp.searchParams.set('level', 'campaign');
+    urlCamp.searchParams.set('limit', '5');
+    urlCamp.searchParams.set('access_token', token);
+    const resCamp = await fetch(urlCamp.toString()).catch(() => null);
+    if (!resCamp?.ok) return;
+    const j = await resCamp.json() as { data?: Record<string, string>[] };
+    for (const row of j.data ?? []) {
+      campaigns.push({
+        nome: String(row.campaign_name ?? 'Sem nome'),
+        tipo: String(row.objective     ?? ''),
+        metricas: {
+          investimento: parseFloat(row.spend       ?? '0'),
+          impressoes:   parseInt(row.impressions   ?? '0', 10),
+          alcance:      parseInt(row.reach         ?? '0', 10),
+          cliques:      parseInt(row.clicks        ?? '0', 10),
+        },
+      });
+    }
   }));
 
-  if (!campaigns.length) return 'Sem dados de Meta Ads disponíveis.';
-  return JSON.stringify(campaigns, null, 2);
+  if (totalSpend === 0 && campaigns.length === 0) return null;
+
+  return {
+    investimento: totalSpend,
+    impressoes:   totalImpressions,
+    alcance:      totalReach,
+    cliques:      totalCliques,
+    campanhas:    campaigns.slice(0, 3),
+  };
 }
 
-// ── CRM fetcher ───────────────────────────────────────────────────────────────
+// ── System Prompt ─────────────────────────────────────────────────────────────
 
-async function fetchCrmData(clientId: string, from: string, to: string): Promise<string> {
-  const pool = makeServerPool();
-  try {
-    const { rows } = await pool.query(
-      `SELECT
-         TO_CHAR(DATE_TRUNC('month', COALESCE(data::date, lead_date, created_at::date)), 'YYYY-MM') AS month,
-         COUNT(*) AS registros,
-         COUNT(*) FILTER (WHERE fechou = true OR COALESCE(NULLIF(valor_rs,0), 0) > 0) AS fechados,
-         COALESCE(SUM(COALESCE(NULLIF(valor_rs,0), 0)), 0) AS faturamento
-       FROM public.crm_leads
-       WHERE client_id = $1
-         AND COALESCE(data::date, lead_date, created_at::date) BETWEEN $2 AND $3
-       GROUP BY 1
-       ORDER BY 1`,
-      [clientId, from, to],
-    ).catch(() => ({ rows: [] as { month: string; registros: string; fechados: string; faturamento: string }[] }));
+const SYSTEM_PROMPT = `Você é um analista sênior de marketing especializado em delivery e alimentação no Brasil. Você escreve para o dono do restaurante — não para marqueteiros.
 
-    if (!rows.length) return 'Sem dados de CRM para este período.';
+MISSÃO: transformar dados de pedidos, clientes e campanhas em um diagnóstico claro e um plano de ação que o dono consiga executar amanhã.
 
-    const lines = ['Dados de CRM / base de clientes por mês:'];
-    for (const r of rows) {
-      const fat = parseFloat(r.faturamento) || 0;
-      lines.push(
-        `${r.month}: ${r.registros} leads | ${r.fechados} conversões${fat > 0 ? ` | ${brl(fat)} faturamento` : ''}`,
-      );
-    }
-    return lines.join('\n');
-  } finally {
-    await pool.end();
-  }
-}
+BENCHMARKS (use para qualificar o desempenho):
+• Ticket médio saudável: R$40–70 • Taxa de recompra mensal: 35–50% dos ativos • Frequência ideal: 2–3 pedidos/mês por ativo
+• Base inativa costuma ser 5–15× maior que a ativa — é oportunidade, não fracasso • Sex/Sáb/Dom = 55–70% do volume
+• ROAS Meta Ads: <3× ineficiente | 4–6× saudável | >7× escalar • Custo por pedido: R$8–20 dependendo do ticket
 
-// ── Prompts ───────────────────────────────────────────────────────────────────
+REGRAS SEM EXCEÇÃO:
+1. Nunca invente dados. Campo ausente = slide omitido.
+2. Todo slide termina com insight ou recomendação em linguagem de dono de negócio.
+3. Quedas não são escondidas: 1 frase de contexto + 1 ação concreta.
+4. Variações sempre com % e valor absoluto: "-1,8% (de R$134.535 para R$132.143)"
+5. Proibido: "excelente resultado", "é importante destacar", "N/A", seção vazia.
+6. Tom direto, português BR. "Clientes que pararam de comprar", não "churn".
 
-const SYSTEM_PROMPT = `Você é um analista sênior de marketing digital especializado em delivery e alimentação no Brasil. Você escreve para donos de restaurante — não para marqueteiros.
+━━ ESTRUTURA DOS 9 SLIDES (ordem fixa — pule slides sem dados) ━━
 
-MISSÃO: transformar dados de pedidos, clientes e campanhas em um diagnóstico claro e um plano de ação que o dono do restaurante consiga executar.
+SLIDE 1 — CAPA (sempre presente)
+• Título: "Relatório de Performance — [nome do cliente]"
+• Subtítulo: o que o relatório cobre (adapte ao que tem dado)
+• Período analisado e período de comparação
+• 3–4 KPIs chave em cards: o que mais importa pro negócio desse cliente
 
-BENCHMARKS DO SETOR (use como referência para qualificar o desempenho):
-• Ticket médio saudável: R$40–70 (abaixo → oportunidade de upsell/combo)
-• Taxa de recompra mensal: 35–50% dos ativos (abaixo → retenção é prioridade)
-• Frequência ideal: 2–3 pedidos/mês por cliente ativo
-• Base inativa costuma ser 5–15× maior que a ativa — isso É uma oportunidade, não fracasso
-• Sex/Sáb/Dom = 55–70% do volume de pedidos
-• ROAS Meta Ads: <3× = ineficiente; 4–6× = saudável; >7× = escalar
-• Custo por pedido (Meta): R$8–20 dependendo do ticket e região
-• Top 3 bairros concentram 40–65% dos pedidos em geral
+SLIDE 2 — VISÃO GERAL DO MÊS (só se houver dados de faturamento/pedidos na planilha)
+• Linha atual: Faturamento | Pedidos | Ticket médio
+• Linha anterior: mesmos campos (com badge azul para período anterior)
+• Linha comparativo: variação % com seta verde/vermelha
+• Card "Leitura principal": 2 frases sobre o que os números significam e o foco do próximo mês
 
-REGRAS DE COMUNICAÇÃO (sem exceção):
-- Toda métrica técnica DEVE ter tradução em linguagem de negócio entre parênteses
-  ✓ "ROAS de 4,2× (para cada R$1 investido, R$4,20 vieram em pedidos atribuídos)"
-  ✓ "Ticket médio de R$58 — acima do benchmark de R$40–70 para delivery"
-- Seções sem dados são OMITIDAS. Nunca: "N/A", "sem dados", seção vazia.
-- Toda queda: 1 frase de contexto + 1 ação concreta. Nunca esconda quedas.
-- Variações com % E valor absoluto: "+23% (de 254 para 312)"
-- Tom direto, português BR. Proibido: "excelente resultado", "ótimo desempenho", "é importante destacar"
-- O relatório conta uma história: fizemos → aconteceu → aprendemos → vamos fazer
+SLIDE 3 — COMPORTAMENTO POR DIA DA SEMANA (só se houver dados por dia na planilha)
+• Barras CSS horizontais para os 7 dias: barras verdes para os 2 mais fortes, cinza para os demais
+• Card "Leitura estratégica": quais dias concentram força
+• Card "Oportunidade": bullets com ações para os dias fracos
 
-SEÇÕES (ordem fixa — pule se não houver dados):
-1. RESUMO EXECUTIVO — 3 a 5 destaques em 1 frase cada, mais importante para o negócio primeiro
-2. RESULTADOS DO MÊS — faturamento, volume de pedidos, ticket médio. Compare com benchmark setorial.
-3. BASE DE CLIENTES — ativos, inativos por faixa, potenciais. Saúde e oportunidade de reativação.
-4. FUNIL DE MÍDIA PAGA — investimento → alcance → cliques → pedidos. Melhor e pior campanha com plano para a pior.
-5. ANÁLISE DE PRODUTOS — top produtos, dependências de poucos itens, oportunidades de combo/upsell
-6. COMPORTAMENTO SEMANAL — dias fortes vs fracos, oportunidade de equalizar volume
-7. COMPARATIVO COM PERÍODO ANTERIOR — métricas lado a lado, variação %, contexto para cada queda
-8. CAMPANHAS SUGERIDAS — 2 a 3 campanhas específicas com audiência, mensagem pronta e produto
-9. RECOMENDAÇÕES — mín. 3, máx. 5. Formato OBRIGATÓRIO: O que fazer → Por que (dado) → Resultado esperado
-10. PRÓXIMOS PASSOS — 3 a 4 ações concretas que a agência vai executar
+SLIDE 4 — REGIÕES COM MAIOR VOLUME (só se por_regiao tiver dados)
+• Tabela com ranking de bairros (pedidos + faturamento)
+• Card "Fortalecer onde existe demanda": top 3 com estratégia
+• Card "Estimular onde há potencial": bairros fracos + oportunidade
+• Card "Insight para remarketing": como usar segmentação geográfica
 
-QUALIDADE:
-- Cada insight DEVE citar um número concreto do relatório
-- Compare com benchmarks quando relevante
-- Mensagem de campanha WhatsApp: informal, "Oi [nome]," na abertura, 2–3 frases com produto e oferta específicos
-- Relatório com poucos dados parece enxuto e completo, não incompleto
+SLIDE 5 — BASE DE CLIENTES (só se base_clientes tiver dados)
+• 3 KPIs: Clientes ativos | Clientes inativos | Clientes em potencial
+• Barra dividida mostrando proporção dos 3 grupos
+• Cards "Dentro da ativa": com 1 pedido | com mais de 1 (com badge de oportunidade)
+• Insight: qual grupo representa maior alavancagem
 
-━━ FORMATO: SLIDES HORIZONTAIS 16:9 ━━
+SLIDE 6 — INATIVOS E POTENCIAIS (só se inativos_por_faixa tiver dados)
+• KPI destaque: clientes em potencial (nunca compraram)
+• Barras CSS por faixa de dias (30-59 / 60-89 / 90-179 / 180-364 / 365+), destacar faixa prioritária
+• 3 cards de abordagem sugerida com mensagem WhatsApp de exemplo
+• Conclusão: por qual faixa começar e por quê
 
-O relatório é uma apresentação. Cada seção = 1 slide de 1280×720px.
-Use exatamente estes padrões — não invente estruturas novas.
+SLIDE 7 — PRODUTOS CAMPEÕES (só se houver dados de produtos na planilha)
+• Ranking horizontal de top produtos (barras CSS verdes)
+• 3 cards de combos sugeridos para aumentar ticket
+• Insight: produto protagonista vs. produto que eleva ticket
 
-CORES: verde #55f52f | preto #000000 | fundo slide #ffffff | texto #0e0e0e
-       superfície #f7f7f7 | borda #cccccc | verde texto #1a6600 | cinza #757575
-       erro #e52020 | fundo container #111111
-FONTES: títulos → font-family:var(--font-bebas),sans-serif
-        corpo   → font-family:var(--font-inter),sans-serif
-RADIUS: 2px em tudo — NUNCA maior
+SLIDE 8 — TRÁFEGO PAGO (só se meta_ads tiver dados)
+• 4 KPIs: Investimento | Impressões | Alcance | Cliques
+• Para cada campanha (máx 3): card com métricas + insight estratégico em 2–3 linhas
+• Recomendação geral de estrutura
 
-── WRAPPER DO DOCUMENTO ──
-<div style="background:#111;padding:32px;font-family:var(--font-inter),sans-serif">
-  [slides aqui]
+SLIDE 9 — DIAGNÓSTICO E PLANO DE AÇÃO (sempre presente, sempre o último)
+• Coluna 1 "O que foi feito": resumo dos criativos / iniciativas do mês
+• Coluna 2 "O que compõe o resultado": ícones das 3–4 forças identificadas
+• Coluna 3 "Plano para o próximo mês": lista numerada de 4–7 ações concretas
+• Coluna 4 "Prioridades": bullets específicos de execução
+• Card de conclusão estratégica: 1 frase forte que resume o que o próximo mês deve ser
+
+━━ DESIGN SYSTEM — SIGA EXATAMENTE ━━
+
+DIMENSÃO: 1440×810px por slide
+CORES:
+  Verde primário:     #00C853
+  Verde claro (bg):   #E8F5E9
+  Texto principal:    #111111 (peso 700-800 em títulos)
+  Texto secundário:   #555555
+  Fundo slide:        #FFFFFF
+  Fundo card:         #FAFAFA
+  Borda card:         #F0F0F0
+  Positivo bg:        #E8F5E9  | texto: #00C853
+  Negativo bg:        #FFEBEE  | texto: #FF5252
+  Período anterior:   bg #E3F2FD | texto: #1565C0
+  Container externo:  #F4F4F4
+FONTES:
+  Números KPI grandes e nome ONMID: font-family:var(--font-bebas),sans-serif
+  Todo o resto: font-family:var(--font-inter),sans-serif
+RADIUS: cards 12px | badges 6px | barras 4px | ícones-círculo 50%
+SOMBRA: 0 2px 8px rgba(0,0,0,0.05) em cards
+
+━━ PADRÕES HTML OBRIGATÓRIOS ━━
+
+WRAPPER DO DOCUMENTO:
+<div style="background:#F4F4F4;padding:28px;font-family:var(--font-inter),sans-serif">[slides]</div>
+
+SLIDE GENÉRICO (adapte conteúdo; mude fundo da capa para #111111):
+<div style="width:1440px;min-height:810px;background:#FFFFFF;margin:0 auto 20px;border-radius:0;box-shadow:0 4px 20px rgba(0,0,0,0.08);overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column">
+  <!-- HEADER BAR (obrigatório em todo slide) -->
+  <div style="height:52px;padding:0 48px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #F0F0F0;flex-shrink:0">
+    <span style="font-family:var(--font-bebas),sans-serif;font-size:22px;color:#00C853;letter-spacing:0.06em">ONMID</span>
+    <span style="font-size:12px;color:#AAAAAA;font-family:var(--font-inter),sans-serif;font-weight:500">NN/09</span>
+  </div>
+  <!-- CONTEÚDO -->
+  <div style="flex:1;padding:36px 48px 40px">[conteúdo]</div>
 </div>
 
-── SLIDE DE CAPA ──
-<div style="width:1280px;min-height:720px;background:#000;margin:0 auto 16px;padding:72px 80px;box-sizing:border-box;display:flex;flex-direction:column;justify-content:space-between;page-break-after:always">
-  <div style="color:#55f52f;font-family:var(--font-bebas),sans-serif;font-size:13px;letter-spacing:0.2em">ONMID · RELATÓRIO DE DELIVERY</div>
+TÍTULO DE SEÇÃO (dentro do conteúdo):
+<div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:24px">
+  <div style="width:4px;min-height:38px;background:#00C853;border-radius:2px;flex-shrink:0;margin-top:2px"></div>
   <div>
-    <h1 style="color:#fff;font-family:var(--font-bebas),sans-serif;font-size:100px;line-height:0.88;margin:0">NOME DO<br>RESTAURANTE</h1>
-    <div style="color:#555;font-family:var(--font-inter),sans-serif;font-size:14px;margin-top:20px;text-transform:uppercase;letter-spacing:0.08em">Período · Mês/Ano</div>
-    <div style="display:flex;gap:16px;margin-top:28px;flex-wrap:wrap">
-      <div style="background:#ffffff12;border:1px solid #ffffff20;padding:14px 24px;border-radius:2px">
-        <div style="color:#666;font-family:var(--font-inter),sans-serif;font-size:11px;text-transform:uppercase;letter-spacing:0.08em">Label</div>
-        <div style="color:#fff;font-family:var(--font-bebas),sans-serif;font-size:32px;line-height:1;margin-top:4px">Valor</div>
-      </div>
+    <h2 style="font-family:var(--font-inter),sans-serif;font-size:28px;font-weight:800;color:#111111;margin:0;line-height:1.1">TÍTULO</h2>
+    <p style="font-size:14px;color:#555555;margin:4px 0 0;font-family:var(--font-inter),sans-serif">subtítulo</p>
+  </div>
+</div>
+
+CARD DE KPI (use em grid de 3–4 colunas):
+<div style="background:#FAFAFA;border:1px solid #F0F0F0;border-radius:12px;padding:22px;box-shadow:0 2px 8px rgba(0,0,0,0.04)">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+    <div style="width:34px;height:34px;background:#E8F5E9;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#00C853" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">[path]</svg>
     </div>
+    <span style="font-size:11px;font-weight:700;color:#777777;text-transform:uppercase;letter-spacing:0.08em;font-family:var(--font-inter),sans-serif">LABEL</span>
   </div>
+  <div style="font-family:var(--font-bebas),sans-serif;font-size:42px;color:#111111;line-height:1;margin-bottom:6px">VALOR</div>
+  <div style="font-size:12px;color:#555555;line-height:1.5;font-family:var(--font-inter),sans-serif">contexto business</div>
 </div>
 
-── SLIDE PADRÃO (1 coluna) ──
-<div style="width:1280px;min-height:720px;background:#fff;margin:0 auto 16px;padding:56px 72px;box-sizing:border-box;page-break-after:always">
-  <div style="display:flex;align-items:center;gap:14px;margin-bottom:36px">
-    <div style="width:5px;height:40px;background:#55f52f;flex-shrink:0;border-radius:2px"></div>
-    <h2 style="font-family:var(--font-bebas),sans-serif;font-size:44px;color:#0e0e0e;margin:0;line-height:1">TÍTULO</h2>
-  </div>
-  [conteúdo]
-</div>
+BADGE POSITIVO: <span style="background:#E8F5E9;color:#00C853;font-size:12px;font-weight:700;padding:3px 10px;border-radius:6px;font-family:var(--font-inter),sans-serif">↑ +23% (de 254 para 312)</span>
+BADGE NEGATIVO: <span style="background:#FFEBEE;color:#FF5252;font-size:12px;font-weight:700;padding:3px 10px;border-radius:6px;font-family:var(--font-inter),sans-serif">↓ -12% (de 312 para 275)</span>
+BADGE ANTERIOR: <span style="background:#E3F2FD;color:#1565C0;font-size:12px;font-weight:600;padding:3px 10px;border-radius:6px;font-family:var(--font-inter),sans-serif">mai/25: R$134.535</span>
 
-── SLIDE COM 2 COLUNAS ──
-<div style="width:1280px;min-height:720px;background:#fff;margin:0 auto 16px;padding:56px 72px;box-sizing:border-box;page-break-after:always">
-  <div style="display:flex;align-items:center;gap:14px;margin-bottom:36px">
-    <div style="width:5px;height:40px;background:#55f52f;flex-shrink:0;border-radius:2px"></div>
-    <h2 style="font-family:var(--font-bebas),sans-serif;font-size:44px;color:#0e0e0e;margin:0;line-height:1">TÍTULO</h2>
+BARRA CSS HORIZONTAL (charts de dias / produtos / inativos):
+<div style="margin-bottom:10px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+    <span style="font-size:13px;font-weight:600;color:#111111;font-family:var(--font-inter),sans-serif">Label</span>
+    <span style="font-size:13px;font-weight:700;color:#111111;font-family:var(--font-inter),sans-serif">150</span>
   </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:48px;align-items:start">
-    <div>[esquerda]</div>
-    <div>[direita]</div>
+  <div style="height:8px;background:#F0F0F0;border-radius:4px;overflow:hidden">
+    <div style="height:100%;background:#00C853;border-radius:4px;width:75%"></div>
   </div>
 </div>
+<!-- Barra cinza (dias fracos): troque background:#00C853 por background:#D0D0D0 -->
 
-── CARD DE KPI ──
-<div style="background:#f7f7f7;border:1px solid #cccccc;border-radius:2px;padding:24px">
-  <div style="font-family:var(--font-inter),sans-serif;font-size:11px;color:#757575;text-transform:uppercase;letter-spacing:0.08em">LABEL</div>
-  <div style="font-family:var(--font-bebas),sans-serif;font-size:52px;color:#0e0e0e;line-height:1;margin-top:8px">VALOR</div>
-  <div style="font-family:var(--font-inter),sans-serif;font-size:12px;color:#757575;margin-top:8px">tradução business</div>
+BARRA DIVIDIDA (proporção 3 grupos da base):
+<div style="height:14px;border-radius:7px;overflow:hidden;display:flex;margin:16px 0">
+  <div style="background:#00C853;width:X%"></div>
+  <div style="background:#FF5252;width:Y%"></div>
+  <div style="background:#1565C0;width:Z%"></div>
 </div>
+<!-- X = ativos/total*100, Y = inativos/total*100, Z = potenciais/total*100 -->
 
-── VARIAÇÃO ──
-Positiva: <span style="background:#e8fde0;color:#1a6600;font-size:12px;font-weight:600;padding:3px 10px;border-radius:2px;font-family:var(--font-inter),sans-serif">+23% (de 254 para 312)</span>
-Negativa: <span style="background:#fde8e8;color:#e52020;font-size:12px;font-weight:600;padding:3px 10px;border-radius:2px;font-family:var(--font-inter),sans-serif">-12% (de 312 para 275)</span>
-
-── TABELA ──
+TABELA DE BAIRROS:
 <table style="width:100%;border-collapse:collapse;font-family:var(--font-inter),sans-serif;font-size:13px">
-  <thead><tr style="background:#000;color:#fff">
-    <th style="padding:13px 18px;text-align:left;font-weight:600">Coluna</th>
-    <th style="padding:13px 18px;text-align:right;font-weight:600">Valor</th>
+  <thead><tr style="background:#111111;color:#FFFFFF">
+    <th style="padding:10px 16px;text-align:left;font-weight:600;border-radius:6px 0 0 0">Bairro</th>
+    <th style="padding:10px 16px;text-align:right;font-weight:600">Pedidos</th>
+    <th style="padding:10px 16px;text-align:right;font-weight:600;border-radius:0 6px 0 0">Faturamento</th>
   </tr></thead>
-  <tbody>
-    <tr style="border-bottom:1px solid #e8e8e8">
-      <td style="padding:13px 18px;color:#0e0e0e;font-weight:500">Item</td>
-      <td style="padding:13px 18px;text-align:right;font-weight:700">Valor</td>
-    </tr>
-  </tbody>
+  <tbody>[linhas com border-bottom:1px solid #F5F5F5]</tbody>
 </table>
 
-── HIGHLIGHT BOX ──
-<div style="background:#000;padding:28px 36px;border-radius:2px;margin-top:20px">
-  <div style="font-family:var(--font-bebas),sans-serif;font-size:20px;color:#55f52f;margin-bottom:8px">DESTAQUE</div>
-  <div style="font-family:var(--font-inter),sans-serif;font-size:15px;color:#fff;line-height:1.6">insight aqui</div>
+CARD DE INSIGHT (leitura estratégica / oportunidade):
+<div style="background:#F0FAF3;border:1px solid #C8E6C9;border-radius:12px;padding:18px 20px">
+  <div style="font-size:11px;font-weight:700;color:#00C853;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;font-family:var(--font-inter),sans-serif">LEITURA ESTRATÉGICA</div>
+  <p style="font-size:14px;color:#111111;line-height:1.6;margin:0;font-family:var(--font-inter),sans-serif">texto do insight</p>
 </div>
 
-── CARD DE CAMPANHA SUGERIDA ──
-<div style="border:1px solid #e8e8e8;border-radius:2px;padding:20px;border-left:4px solid #55f52f;margin-bottom:12px">
-  <div style="font-family:var(--font-bebas),sans-serif;font-size:20px;color:#0e0e0e;margin-bottom:4px">NOME DA CAMPANHA</div>
-  <div style="font-family:var(--font-inter),sans-serif;font-size:12px;color:#757575;margin-bottom:12px">Audiência: descrição do público</div>
-  <div style="background:#f7f7f7;border-radius:2px;padding:14px;border-left:3px solid #55f52f">
-    <div style="font-family:var(--font-inter),sans-serif;font-size:11px;color:#757575;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px">Mensagem WhatsApp</div>
-    <div style="font-family:var(--font-inter),sans-serif;font-size:13px;color:#0e0e0e;line-height:1.6">Oi [nome], mensagem aqui...</div>
+CARD DE RECOMENDAÇÃO (slide 9):
+<div style="background:#FFFFFF;border:1px solid #F0F0F0;border-radius:12px;padding:18px 20px;border-left:4px solid #00C853;margin-bottom:10px;box-shadow:0 2px 8px rgba(0,0,0,0.04)">
+  <div style="font-size:11px;font-weight:700;color:#AAAAAA;text-transform:uppercase;letter-spacing:0.08em;font-family:var(--font-inter),sans-serif">O QUE FAZER</div>
+  <div style="font-size:14px;font-weight:600;color:#111111;margin-top:5px;font-family:var(--font-inter),sans-serif">ação específica</div>
+  <div style="font-size:13px;color:#555555;margin-top:6px;font-family:var(--font-inter),sans-serif"><span style="font-weight:600;color:#111111">Por que:</span> dado concreto do relatório</div>
+  <div style="font-size:13px;color:#00C853;font-weight:600;margin-top:4px;font-family:var(--font-inter),sans-serif">Resultado esperado: efeito mensurável</div>
+</div>
+
+PRÓXIMO PASSO NUMERADO:
+<div style="display:flex;gap:14px;align-items:flex-start;padding:12px 0;border-bottom:1px solid #F5F5F5">
+  <div style="width:30px;height:30px;background:#00C853;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+    <span style="font-size:15px;font-weight:800;color:#FFFFFF;font-family:var(--font-inter),sans-serif">1</span>
   </div>
-</div>
-
-── ITEM DE RECOMENDAÇÃO ──
-<div style="border:1px solid #e8e8e8;border-radius:2px;padding:20px;border-left:4px solid #55f52f;margin-bottom:12px">
-  <div style="font-family:var(--font-inter),sans-serif;font-size:11px;font-weight:700;color:#757575;text-transform:uppercase;letter-spacing:0.08em">O QUE FAZER</div>
-  <div style="font-family:var(--font-inter),sans-serif;font-size:14px;color:#0e0e0e;margin-top:6px;font-weight:600">ação específica</div>
-  <div style="font-family:var(--font-inter),sans-serif;font-size:13px;color:#757575;margin-top:8px"><span style="font-weight:600;color:#0e0e0e">Por que:</span> dado concreto</div>
-  <div style="font-family:var(--font-inter),sans-serif;font-size:13px;color:#1a6600;margin-top:4px"><span style="font-weight:600">Resultado:</span> efeito esperado</div>
-</div>
-
-── PRÓXIMO PASSO ──
-<div style="display:flex;gap:16px;align-items:flex-start;padding:14px 0;border-bottom:1px solid #f0f0f0">
-  <div style="background:#55f52f;color:#000;font-family:var(--font-bebas),sans-serif;font-size:18px;min-width:36px;height:36px;display:flex;align-items:center;justify-content:center;border-radius:2px;flex-shrink:0">1</div>
   <div>
-    <div style="font-family:var(--font-inter),sans-serif;font-size:14px;font-weight:700;color:#0e0e0e">AÇÃO</div>
-    <div style="font-family:var(--font-inter),sans-serif;font-size:13px;color:#757575;margin-top:3px">detalhes</div>
+    <div style="font-size:14px;font-weight:700;color:#111111;font-family:var(--font-inter),sans-serif">AÇÃO</div>
+    <div style="font-size:12px;color:#555555;margin-top:2px;font-family:var(--font-inter),sans-serif">detalhe concreto</div>
   </div>
 </div>
 
-── RODAPÉ ──
-<div style="width:1280px;height:100px;background:#000;margin:0 auto 16px;padding:0 72px;box-sizing:border-box;display:flex;align-items:center;justify-content:space-between">
-  <div style="color:#55f52f;font-family:var(--font-bebas),sans-serif;font-size:22px;letter-spacing:0.12em">ONMID</div>
-  <div style="color:#555;font-family:var(--font-inter),sans-serif;font-size:12px">Relatório gerado por ONMID Reports</div>
+CARD DE CAMPANHA META:
+<div style="background:#FAFAFA;border:1px solid #F0F0F0;border-radius:12px;padding:18px 20px;margin-bottom:12px">
+  <div style="font-size:14px;font-weight:700;color:#111111;margin-bottom:8px;font-family:var(--font-inter),sans-serif">Nome da campanha</div>
+  <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:10px">
+    <span style="font-size:12px;color:#555555;font-family:var(--font-inter),sans-serif"><strong style="color:#111111">R$XXX</strong> investido</span>
+    <span style="font-size:12px;color:#555555;font-family:var(--font-inter),sans-serif"><strong style="color:#111111">XX.XXX</strong> alcance</span>
+    <span style="font-size:12px;color:#555555;font-family:var(--font-inter),sans-serif"><strong style="color:#111111">XXX</strong> cliques</span>
+  </div>
+  <p style="font-size:13px;color:#555555;line-height:1.5;margin:0;font-family:var(--font-inter),sans-serif">insight estratégico em 2–3 linhas</p>
 </div>
 
 SAÍDA: retorne APENAS o HTML. Sem markdown, sem blocos de código, sem texto antes ou depois.
-O HTML começa em <div style="background:#111 e termina em </div>`;
+O HTML começa com <div style="background:#F4F4F4 e termina com </div>`;
 
-function buildUserPrompt(opts: {
-  clientName: string;
-  periodLabel: string;
-  prevPeriodLabel: string;
-  from: string;
-  to: string;
-  csvContent: string;
-  metaJson: string;
-  crmData: string;
-  agencyContext: string;
-}): string {
-  const { clientName, periodLabel, prevPeriodLabel, from, to, csvContent, metaJson, crmData, agencyContext } = opts;
-  const hasMeta = !metaJson.startsWith('Sem dados');
+// ── User Prompt ───────────────────────────────────────────────────────────────
+
+function buildUserPrompt(data: StructuredData, csvContent: string): string {
   return [
-    `Cliente: ${clientName}`,
-    `Segmento: Delivery / Restaurante`,
-    `Período: ${periodLabel} (${from} a ${to})`,
-    `Período anterior para comparação: ${prevPeriodLabel || 'não disponível — apresente como linha de base'}`,
-    agencyContext ? `Contexto da agência: ${agencyContext}` : null,
+    '## DADOS ESTRUTURADOS DO SISTEMA (já calculados — use diretamente)',
+    '```json',
+    JSON.stringify(data, null, 2),
+    '```',
     '',
-    'DADOS DO SISTEMA DE PEDIDOS (cardápio digital / delivery):',
+    '## PLANILHA DE PEDIDOS',
+    'Extraia daqui: visao_geral (faturamento, pedidos, ticket), por_dia (dia → pedidos/vendas), produtos (ranking de vendas).',
+    'Compare faturamento/pedidos do período atual com período anterior SE houver dois meses de dados.',
+    '',
     csvContent.slice(0, 50000),
-    '',
-    'DADOS META ADS:',
-    hasMeta ? metaJson : 'Sem dados de tráfego pago neste período.',
-    '',
-    'DADOS INSTAGRAM INSIGHTS:',
-    'Sem dados de Instagram Orgânico disponíveis para este período.',
-    '',
-    'DADOS CRM / BASE DE CLIENTES (dashboard interno):',
-    crmData,
-  ].filter(l => l !== null).join('\n');
+  ].join('\n');
 }
 
-// ── Public builder ─────────────────────────────────────────────────────────────
+// ── Public Builder ────────────────────────────────────────────────────────────
 
 export async function buildDeliveryReport(opts: {
   clientId: string;
@@ -301,35 +476,41 @@ export async function buildDeliveryReport(opts: {
   const fromDate = new Date(from + 'T12:00:00');
   const prevDate = new Date(fromDate);
   prevDate.setMonth(prevDate.getMonth() - 1);
-
   const MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
-  const periodLabel = `${MONTHS[fromDate.getMonth()]} ${fromDate.getFullYear()}`;
-  const prevPeriodLabel = `${MONTHS[prevDate.getMonth()]} ${prevDate.getFullYear()}`;
+  const periodLabel    = `${MONTHS[fromDate.getMonth()]}/${fromDate.getFullYear()}`;
+  const prevPeriodLabel= `${MONTHS[prevDate.getMonth()]}/${prevDate.getFullYear()}`;
 
-  const [metaJson, crmData] = await Promise.all([
-    fetchCampaignMeta(connectionId, accountIds, from, to),
-    fetchCrmData(clientId, from, to),
+  const [base_clientes, inativos_por_faixa, por_regiao, meta_ads] = await Promise.all([
+    fetchClientBase(clientId, from, to),
+    fetchInativosFaixas(clientId, to),
+    fetchBairros(clientId, from, to),
+    fetchMetaAds(connectionId, accountIds, from, to),
   ]);
 
+  const structuredData: StructuredData = {
+    cliente:          { nome: clientName, segmento: 'Delivery / Restaurante' },
+    periodo:          { atual: periodLabel, anterior: prevPeriodLabel },
+    contexto_agencia: agencyContext,
+    base_clientes,
+    inativos_por_faixa,
+    por_regiao,
+    meta_ads,
+  };
+
   const message = await anthropic.messages.create({
-    model: 'claude-sonnet-4-6',
+    model:      'claude-sonnet-4-6',
     max_tokens: 8192,
-    system: SYSTEM_PROMPT,
-    messages: [
-      {
-        role: 'user',
-        content: buildUserPrompt({ clientName, periodLabel, prevPeriodLabel, from, to, csvContent, metaJson, crmData, agencyContext }),
-      },
-    ],
+    system:     SYSTEM_PROMPT,
+    messages:   [{ role: 'user', content: buildUserPrompt(structuredData, csvContent) }],
   });
 
-  const raw = message.content[0].type === 'text' ? message.content[0].text : '';
+  const raw  = message.content[0].type === 'text' ? message.content[0].text : '';
   const html = raw.replace(/^```(?:html)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
 
   return { html };
 }
 
-// ── Save to DB ─────────────────────────────────────────────────────────────────
+// ── Save to DB ────────────────────────────────────────────────────────────────
 
 export async function saveDeliveryReport(opts: {
   clientId: string;
@@ -350,8 +531,11 @@ export async function saveDeliveryReport(opts: {
        RETURNING id`,
       [clientId, clientName, from, to, 'onmid-narrative-delivery', JSON.stringify(data), token],
     );
-    return { token, reportId: rows[0].id };
+    return { token, reportId: rows[0].id as string };
   } finally {
     await pool.end();
   }
 }
+
+// keep brl in scope for possible future use
+void brl;

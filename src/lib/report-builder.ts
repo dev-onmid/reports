@@ -28,14 +28,11 @@ export async function saveOmniReport(opts: {
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING id, public_token`,
       [
-        opts.clientId,
-        opts.clientName,
+        opts.clientId, opts.clientName,
         `Relatório de Performance — ${opts.clientName}`,
-        opts.periodFrom,
-        opts.periodTo,
+        opts.periodFrom, opts.periodTo,
         JSON.stringify(opts.reportData),
-        opts.generatedBy,
-        opts.configId ?? null,
+        opts.generatedBy, opts.configId ?? null,
         'onmid-narrative-performance',
       ],
     );
@@ -47,13 +44,13 @@ export async function saveOmniReport(opts: {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function pct(a: number, b: number): string {
+export function pct(a: number, b: number): string {
   if (b === 0) return '—';
   const v = ((a - b) / b) * 100;
   return (v >= 0 ? '+' : '') + v.toFixed(1) + '%';
 }
 
-function fmtMonth(isoDate: string): string {
+export function fmtMonth(isoDate: string): string {
   const d = new Date(isoDate + 'T12:00:00Z');
   const months = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
   return `${months[d.getUTCMonth()]}/${String(d.getUTCFullYear()).slice(2)}`;
@@ -62,14 +59,9 @@ function fmtMonth(isoDate: string): string {
 // ── Monthly Meta Ads fetch ────────────────────────────────────────────────────
 
 type MonthlyMeta = {
-  month: string;
-  label: string;
-  spend: number;
-  impressions: number;
-  reach: number;
-  results: number;
-  newContacts: number;
-  purchases: number;
+  month: string; label: string;
+  spend: number; impressions: number; reach: number;
+  results: number; newContacts: number; purchases: number;
 };
 
 async function fetchMonthlyMeta(connectionId: string, accountIds: string[], from: string, to: string): Promise<MonthlyMeta[]> {
@@ -83,7 +75,8 @@ async function fetchMonthlyMeta(connectionId: string, accountIds: string[], from
     conn = rows[0] ?? null;
     if (!conn) {
       const { rows: leg } = await pool.query(
-        `SELECT 'legacy' AS id, '' AS app_id, access_token, NULL AS token_expiry FROM public.meta_integration WHERE id='global' AND status='connected' LIMIT 1`,
+        `SELECT 'legacy' AS id, '' AS app_id, access_token, NULL AS token_expiry
+         FROM public.meta_integration WHERE id='global' AND status='connected' LIMIT 1`,
       );
       conn = leg[0] ?? null;
     }
@@ -92,36 +85,36 @@ async function fetchMonthlyMeta(connectionId: string, accountIds: string[], from
   }
   if (!conn) return [];
 
-  const token = await getFreshMetaToken(conn);
+  const token     = await getFreshMetaToken(conn);
   const timeRange = JSON.stringify({ since: from, until: to });
-  const monthly = new Map<string, MonthlyMeta>();
+  const monthly   = new Map<string, MonthlyMeta>();
 
   await Promise.allSettled(accountIds.map(async (accountId) => {
     const acct = accountId.startsWith('act_') ? accountId : `act_${accountId}`;
-    const url = new URL(`https://graph.facebook.com/v21.0/${acct}/insights`);
-    url.searchParams.set('level', 'account');
-    url.searchParams.set('fields', 'spend,impressions,reach,actions');
-    url.searchParams.set('time_range', timeRange);
+    const url  = new URL(`https://graph.facebook.com/v21.0/${acct}/insights`);
+    url.searchParams.set('level',          'account');
+    url.searchParams.set('fields',         'spend,impressions,reach,actions');
+    url.searchParams.set('time_range',     timeRange);
     url.searchParams.set('time_increment', 'monthly');
-    url.searchParams.set('access_token', token);
+    url.searchParams.set('access_token',   token);
 
     const res = await fetch(url.toString()).catch(() => null);
     if (!res?.ok) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data = [] } = await res.json() as { data?: any[] };
     for (const row of data) {
-      const key = String(row.date_start ?? '').slice(0, 7);
+      const key  = String(row.date_start ?? '').slice(0, 7);
       if (!key) continue;
       const prev = monthly.get(key) ?? { month: key, label: fmtMonth(row.date_start), spend: 0, impressions: 0, reach: 0, results: 0, newContacts: 0, purchases: 0 };
       const acts = (row.actions ?? []) as { action_type: string; value: string }[];
       monthly.set(key, {
         ...prev,
-        spend: prev.spend + parseFloat(row.spend || '0'),
-        impressions: prev.impressions + parseInt(row.impressions || '0', 10),
-        reach: prev.reach + parseInt(row.reach || '0', 10),
-        results: prev.results + sumActions(acts, RESULT_ACTIONS),
+        spend:       prev.spend       + parseFloat(row.spend       || '0'),
+        impressions: prev.impressions + parseInt(row.impressions   || '0', 10),
+        reach:       prev.reach       + parseInt(row.reach         || '0', 10),
+        results:     prev.results     + sumActions(acts, RESULT_ACTIONS),
         newContacts: prev.newContacts + sumActions(acts, NEW_CONTACT_ACTIONS),
-        purchases: prev.purchases + sumActions(acts, PURCHASE_ACTIONS),
+        purchases:   prev.purchases   + sumActions(acts, PURCHASE_ACTIONS),
       });
     }
   }));
@@ -132,12 +125,8 @@ async function fetchMonthlyMeta(connectionId: string, accountIds: string[], from
 // ── Monthly CRM fetch ─────────────────────────────────────────────────────────
 
 type MonthlyCrm = {
-  month: string;
-  label: string;
-  registros: number;
-  novosClientes: number;
-  fechados: number;
-  faturamento: number;
+  month: string; label: string;
+  registros: number; novosClientes: number; fechados: number; faturamento: number;
 };
 
 async function fetchMonthlyCrm(clientId: string, from: string, to: string): Promise<MonthlyCrm[]> {
@@ -152,237 +141,225 @@ async function fetchMonthlyCrm(clientId: string, from: string, to: string): Prom
        FROM public.crm_leads
        WHERE client_id = $1
          AND COALESCE(data::date, lead_date, created_at::date) BETWEEN $2 AND $3
-       GROUP BY 1
-       ORDER BY 1`,
+       GROUP BY 1 ORDER BY 1`,
       [clientId, from, to],
     ).catch(() => ({ rows: [] as Array<{ month: string; registros: string; fechados: string; faturamento: string }> }));
 
     return rows.map(r => ({
-      month: r.month,
-      label: fmtMonth(r.month + '-01'),
-      registros: parseInt(r.registros, 10) || 0,
-      novosClientes: parseInt(r.fechados, 10) || 0,
-      fechados: parseInt(r.fechados, 10) || 0,
-      faturamento: parseFloat(r.faturamento) || 0,
+      month:         r.month,
+      label:         fmtMonth(r.month + '-01'),
+      registros:     parseInt(r.registros,  10) || 0,
+      novosClientes: parseInt(r.fechados,   10) || 0,
+      fechados:      parseInt(r.fechados,   10) || 0,
+      faturamento:   parseFloat(r.faturamento)  || 0,
     }));
   } finally {
     await pool.end();
   }
 }
 
-// ── Data formatters ───────────────────────────────────────────────────────────
+// ── Data text formatters ──────────────────────────────────────────────────────
 
 function formatMetaData(monthlyMeta: MonthlyMeta[]): string {
   if (!monthlyMeta.length) return 'Sem dados de Meta Ads para este período.';
 
-  const totals = monthlyMeta.reduce(
-    (acc, m) => ({
-      spend: acc.spend + m.spend,
-      impressions: acc.impressions + m.impressions,
-      reach: acc.reach + m.reach,
-      results: acc.results + m.results,
-      purchases: acc.purchases + m.purchases,
-    }),
+  const t = monthlyMeta.reduce(
+    (acc, m) => ({ spend: acc.spend + m.spend, impressions: acc.impressions + m.impressions, reach: acc.reach + m.reach, results: acc.results + m.results, purchases: acc.purchases + m.purchases }),
     { spend: 0, impressions: 0, reach: 0, results: 0, purchases: 0 },
   );
 
-  const cpr = totals.results > 0 ? brl(totals.spend / totals.results) : null;
-  const cpp = totals.purchases > 0 ? brl(totals.spend / totals.purchases) : null;
+  const cpr = t.results   > 0 ? brl(t.spend / t.results)   : null;
+  const cpp = t.purchases > 0 ? brl(t.spend / t.purchases) : null;
 
-  const lines = [
-    `Total investido: ${brl(totals.spend)}`,
-    `Total de impressões: ${totals.impressions.toLocaleString('pt-BR')}`,
-    `Alcance total: ${totals.reach.toLocaleString('pt-BR')} pessoas`,
-    `Resultados (leads/mensagens/contatos): ${totals.results}`,
+  return [
+    `Total investido: ${brl(t.spend)}`,
+    `Impressões totais: ${t.impressions.toLocaleString('pt-BR')}`,
+    `Alcance total: ${t.reach.toLocaleString('pt-BR')} pessoas`,
+    `Resultados (leads/mensagens/contatos): ${t.results}`,
     cpr ? `Custo por resultado: ${cpr}` : null,
-    totals.purchases > 0 ? `Compras atribuídas: ${totals.purchases}` : null,
+    t.purchases > 0 ? `Compras atribuídas: ${t.purchases}` : null,
     cpp ? `Custo por compra: ${cpp}` : null,
     '',
     'Detalhamento mensal:',
     ...monthlyMeta.map(m => {
-      const parts = [`${m.label}: ${brl(m.spend)} investido | ${m.impressions.toLocaleString('pt-BR')} impressões | ${m.reach.toLocaleString('pt-BR')} alcance | ${m.results} resultados`];
-      if (m.purchases > 0) parts.push(`${m.purchases} compras`);
-      return parts.join(' | ');
+      const p = [`${m.label}: ${brl(m.spend)} | ${m.impressions.toLocaleString('pt-BR')} impressões | ${m.reach.toLocaleString('pt-BR')} alcance | ${m.results} resultados`];
+      if (m.purchases > 0) p.push(`${m.purchases} compras`);
+      return p.join(' | ');
     }),
-  ].filter(l => l !== null);
-
-  return lines.join('\n');
+  ].filter(l => l !== null).join('\n');
 }
 
 function formatCrmData(monthlyCrm: MonthlyCrm[]): string {
   if (!monthlyCrm.length) return 'Sem dados de CRM para este período.';
 
-  const totals = monthlyCrm.reduce(
+  const t = monthlyCrm.reduce(
     (acc, m) => ({ registros: acc.registros + m.registros, novosClientes: acc.novosClientes + m.novosClientes, faturamento: acc.faturamento + m.faturamento }),
     { registros: 0, novosClientes: 0, faturamento: 0 },
   );
 
-  const lines = [
-    `Total de registros/leads: ${totals.registros}`,
-    `Total de novos clientes (conversões): ${totals.novosClientes}`,
-    totals.faturamento > 0 ? `Faturamento total registrado: ${brl(totals.faturamento)}` : null,
+  return [
+    `Total de registros/leads: ${t.registros}`,
+    `Total de conversões (novos clientes): ${t.novosClientes}`,
+    t.faturamento > 0 ? `Faturamento total: ${brl(t.faturamento)}` : null,
     '',
     'Detalhamento mensal:',
     ...monthlyCrm.map(m => {
-      const parts = [`${m.label}: ${m.registros} registros | ${m.novosClientes} novos clientes`];
-      if (m.faturamento > 0) parts.push(`${brl(m.faturamento)} faturamento`);
-      return parts.join(' | ');
+      const p = [`${m.label}: ${m.registros} registros | ${m.novosClientes} novos clientes`];
+      if (m.faturamento > 0) p.push(`${brl(m.faturamento)} faturamento`);
+      return p.join(' | ');
     }),
-  ].filter(l => l !== null);
-
-  return lines.join('\n');
+  ].filter(l => l !== null).join('\n');
 }
 
-// ── Prompts ───────────────────────────────────────────────────────────────────
+// ── System Prompt ─────────────────────────────────────────────────────────────
 
 const SYSTEM_PROMPT = `Você é um analista sênior de marketing digital. Você escreve para donos de negócio — não para marqueteiros.
 
-REGRAS DE COMUNICAÇÃO (sem exceção):
-- Toda métrica técnica DEVE ter tradução em linguagem de negócio entre parênteses
-  ✓ "Alcance de 12.400 pessoas (cada R$1 investido chegou a 8 pessoas)"
-  ✓ "CTR de 2,3% — 23 em cada 1.000 que viram o anúncio clicaram"
-- Seções sem dados são OMITIDAS. Nunca: "N/A", "sem dados", seção vazia.
-- Toda queda: 1 frase de contexto + 1 ação concreta. Nunca esconda quedas.
-- Variações com % E valor absoluto: "+23% (de 254 para 312)"
-- Tom direto, português BR. Proibido: "excelente resultado", "ótimo desempenho", "é importante destacar"
-- O relatório conta uma história: fizemos → aconteceu → aprendemos → vamos fazer
+MISSÃO: transformar dados de tráfego pago e base de clientes em um diagnóstico claro e um plano de ação concreto.
 
-SEÇÕES (ordem fixa — pule se não houver dados):
-1. CAPA — nome do cliente, período, principais KPIs
-2. RESUMO EXECUTIVO — 3 a 5 destaques em 1 frase cada, mais importante primeiro
-3. RESULTADOS DO NEGÓCIO — só se houver CRM (registros, clientes, faturamento). Conecte ao investimento.
-4. FUNIL DE MÍDIA PAGA — investimento → alcance → cliques → resultado. Melhor e pior campanha com plano.
-5. INSTAGRAM ORGÂNICO — crescimento, alcance, top 3 conteúdos
-6. ANÁLISE DE PRODUTOS/VENDAS — só com planilha. Mais vendidos, variações, oportunidades.
-7. COMPARATIVO COM PERÍODO ANTERIOR — métricas lado a lado, variação %, contexto para quedas
-8. RECOMENDAÇÕES — mín. 3, máx. 5. Formato: O que fazer → Por que (dado) → Resultado esperado
-9. PRÓXIMOS PASSOS — 3 a 4 ações concretas
+REGRAS SEM EXCEÇÃO:
+1. Nunca invente dados. Campo ausente = slide omitido.
+2. Todo slide termina com insight ou recomendação em linguagem de dono de negócio.
+3. Quedas não são escondidas: 1 frase de contexto + 1 ação concreta.
+4. Variações sempre com % e valor absoluto: "+23% (de 254 para 312)"
+5. Proibido: "excelente resultado", "é importante destacar", "N/A", seção vazia.
+6. Tom direto, português BR. Métricas técnicas sempre com tradução entre parênteses.
+   ✓ "ROAS de 4,2× (para cada R$1 investido, R$4,20 vieram em resultados atribuídos)"
+   ✓ "CTR de 2,3% — 23 em cada 1.000 que viram o anúncio clicaram"
 
-QUALIDADE:
-- Máximo 6 cards de KPI por slide — o restante vai em tabela
-- Se não há período anterior: apresente como linha de base e declare isso
-- Relatório com poucos dados parece enxuto e completo, não incompleto
+━━ ESTRUTURA DOS SLIDES (ordem fixa — pule slides sem dados) ━━
 
-━━ FORMATO: SLIDES HORIZONTAIS 16:9 ━━
+SLIDE 1 — CAPA (sempre)
+• Título, período, período anterior, objetivo do relatório
+• 3–4 KPI cards com os números mais importantes do período
 
-O relatório é uma apresentação. Cada seção = 1 slide de 1280×720px.
-Use exatamente estes padrões — não invente estruturas novas.
+SLIDE 2 — RESULTADOS DO MÊS (só com dados de CRM ou Meta Ads)
+• Faturamento | Leads/Conversões | Ticket médio
+• Linha atual vs anterior com badges de variação
+• Card "Leitura principal": o que os números significam para o negócio
 
-CORES: verde #55f52f | preto #000000 | fundo slide #ffffff | texto #0e0e0e
-       superfície #f7f7f7 | borda #cccccc | verde texto #1a6600 | cinza #757575
-       erro #e52020 | fundo container #111111
-FONTES: títulos → font-family:var(--font-bebas),sans-serif
-        corpo   → font-family:var(--font-inter),sans-serif
-RADIUS: 2px em tudo — NUNCA maior
+SLIDE 3 — FUNIL DE MÍDIA PAGA (só com Meta Ads)
+• KPIs: Investimento | Impressões | Alcance | Cliques | Resultados | Custo por resultado
+• Top campanhas com métricas individuais + insight por campanha
+• Recomendação: melhor campanha para escalar, pior campanha e o que mudar
 
-── WRAPPER DO DOCUMENTO (obrigatório, abre e fecha tudo) ──
-<div style="background:#111;padding:32px;font-family:var(--font-inter),sans-serif">
-  [slides aqui]
+SLIDE 4 — BASE DE CLIENTES (só com dados de CRM)
+• KPIs: Total de leads | Novos clientes (conversões) | Taxa de conversão
+• Evolução mensal em tabela
+• Insight: tendência e oportunidade
+
+SLIDE 5 — COMPARATIVO COM PERÍODO ANTERIOR (só com 2+ meses de dados)
+• Tabela lado a lado: mês atual vs anterior
+• Variação em % com seta e cor para cada métrica
+• Contexto: por que subiu ou caiu, o que vai mudar
+
+SLIDE 6 — RECOMENDAÇÕES (sempre)
+• Mínimo 3, máximo 5 recomendações
+• Formato obrigatório: O que fazer → Por que (dado) → Resultado esperado
+
+SLIDE 7 — PRÓXIMOS PASSOS (sempre o último)
+• 3–5 ações concretas numeradas que a agência vai executar
+
+━━ DESIGN SYSTEM — SIGA EXATAMENTE ━━
+
+DIMENSÃO: 1440×810px por slide
+CORES:
+  Verde primário:     #00C853
+  Verde claro (bg):   #E8F5E9
+  Texto principal:    #111111
+  Texto secundário:   #555555
+  Fundo slide:        #FFFFFF
+  Fundo card:         #FAFAFA
+  Borda card:         #F0F0F0
+  Positivo bg:        #E8F5E9  | texto: #00C853
+  Negativo bg:        #FFEBEE  | texto: #FF5252
+  Período anterior:   bg #E3F2FD | texto: #1565C0
+  Container externo:  #F4F4F4
+FONTES:
+  Números KPI grandes e nome ONMID: font-family:var(--font-bebas),sans-serif
+  Todo o resto: font-family:var(--font-inter),sans-serif
+RADIUS: cards 12px | badges 6px | barras 4px
+SOMBRA: 0 2px 8px rgba(0,0,0,0.05) em cards
+
+━━ PADRÕES HTML OBRIGATÓRIOS ━━
+
+WRAPPER DO DOCUMENTO:
+<div style="background:#F4F4F4;padding:28px;font-family:var(--font-inter),sans-serif">[slides]</div>
+
+SLIDE GENÉRICO:
+<div style="width:1440px;min-height:810px;background:#FFFFFF;margin:0 auto 20px;box-shadow:0 4px 20px rgba(0,0,0,0.08);overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column">
+  <div style="height:52px;padding:0 48px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #F0F0F0;flex-shrink:0">
+    <span style="font-family:var(--font-bebas),sans-serif;font-size:22px;color:#00C853;letter-spacing:0.06em">ONMID</span>
+    <span style="font-size:12px;color:#AAAAAA;font-family:var(--font-inter),sans-serif">NN/NN</span>
+  </div>
+  <div style="flex:1;padding:36px 48px 40px">[conteúdo]</div>
 </div>
 
-── SLIDE DE CAPA (fundo preto, layout flex coluna) ──
-<div style="width:1280px;min-height:720px;background:#000;margin:0 auto 16px;padding:72px 80px;box-sizing:border-box;display:flex;flex-direction:column;justify-content:space-between;page-break-after:always">
-  <div style="color:#55f52f;font-family:var(--font-bebas),sans-serif;font-size:13px;letter-spacing:0.2em">ONMID · RELATÓRIO DE MARKETING DIGITAL</div>
+TÍTULO DE SEÇÃO:
+<div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:24px">
+  <div style="width:4px;min-height:38px;background:#00C853;border-radius:2px;flex-shrink:0;margin-top:2px"></div>
   <div>
-    <h1 style="color:#fff;font-family:var(--font-bebas),sans-serif;font-size:100px;line-height:0.88;margin:0">NOME DO<br>CLIENTE</h1>
-    <div style="color:#555;font-family:var(--font-inter),sans-serif;font-size:14px;margin-top:20px;text-transform:uppercase;letter-spacing:0.08em">Período · Jan/25 a Mar/25</div>
-    <div style="display:flex;gap:16px;margin-top:28px;flex-wrap:wrap">
-      <div style="background:#ffffff12;border:1px solid #ffffff20;padding:14px 24px;border-radius:2px">
-        <div style="color:#666;font-family:var(--font-inter),sans-serif;font-size:11px;text-transform:uppercase;letter-spacing:0.08em">Label</div>
-        <div style="color:#fff;font-family:var(--font-bebas),sans-serif;font-size:32px;line-height:1;margin-top:4px">Valor</div>
-      </div>
+    <h2 style="font-family:var(--font-inter),sans-serif;font-size:28px;font-weight:800;color:#111111;margin:0;line-height:1.1">TÍTULO</h2>
+    <p style="font-size:14px;color:#555555;margin:4px 0 0">subtítulo</p>
+  </div>
+</div>
+
+CARD DE KPI:
+<div style="background:#FAFAFA;border:1px solid #F0F0F0;border-radius:12px;padding:22px;box-shadow:0 2px 8px rgba(0,0,0,0.04)">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+    <div style="width:34px;height:34px;background:#E8F5E9;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#00C853" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">[path]</svg>
     </div>
+    <span style="font-size:11px;font-weight:700;color:#777777;text-transform:uppercase;letter-spacing:0.08em">LABEL</span>
   </div>
+  <div style="font-family:var(--font-bebas),sans-serif;font-size:42px;color:#111111;line-height:1;margin-bottom:6px">VALOR</div>
+  <div style="font-size:12px;color:#555555;line-height:1.5">contexto business</div>
 </div>
 
-── SLIDE PADRÃO (fundo branco, header + conteúdo em 1 coluna) ──
-<div style="width:1280px;min-height:720px;background:#fff;margin:0 auto 16px;padding:56px 72px;box-sizing:border-box;page-break-after:always">
-  <div style="display:flex;align-items:center;gap:14px;margin-bottom:36px">
-    <div style="width:5px;height:40px;background:#55f52f;flex-shrink:0;border-radius:2px"></div>
-    <h2 style="font-family:var(--font-bebas),sans-serif;font-size:44px;color:#0e0e0e;margin:0;line-height:1">TÍTULO DA SEÇÃO</h2>
-  </div>
-  [conteúdo do slide]
-</div>
+BADGE POSITIVO: <span style="background:#E8F5E9;color:#00C853;font-size:12px;font-weight:700;padding:3px 10px;border-radius:6px">↑ +23% (de 254 para 312)</span>
+BADGE NEGATIVO: <span style="background:#FFEBEE;color:#FF5252;font-size:12px;font-weight:700;padding:3px 10px;border-radius:6px">↓ -12% (de 312 para 275)</span>
+BADGE ANTERIOR: <span style="background:#E3F2FD;color:#1565C0;font-size:12px;font-weight:600;padding:3px 10px;border-radius:6px">mai/25: R$134.535</span>
 
-── SLIDE COM 2 COLUNAS (esquerda: dados/cards | direita: análise/texto) ──
-<div style="width:1280px;min-height:720px;background:#fff;margin:0 auto 16px;padding:56px 72px;box-sizing:border-box;page-break-after:always">
-  <div style="display:flex;align-items:center;gap:14px;margin-bottom:36px">
-    <div style="width:5px;height:40px;background:#55f52f;flex-shrink:0;border-radius:2px"></div>
-    <h2 style="font-family:var(--font-bebas),sans-serif;font-size:44px;color:#0e0e0e;margin:0;line-height:1">TÍTULO</h2>
-  </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:48px;align-items:start">
-    <div>[coluna esquerda]</div>
-    <div>[coluna direita]</div>
-  </div>
-</div>
-
-── SLIDE COM 3 COLUNAS (para comparativos ou 3 blocos de insight) ──
-<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px">
-  [3 blocos]
-</div>
-
-── CARD DE KPI (use dentro de grids de métricas) ──
-<div style="background:#f7f7f7;border:1px solid #cccccc;border-radius:2px;padding:24px">
-  <div style="font-family:var(--font-inter),sans-serif;font-size:11px;color:#757575;text-transform:uppercase;letter-spacing:0.08em">LABEL</div>
-  <div style="font-family:var(--font-bebas),sans-serif;font-size:52px;color:#0e0e0e;line-height:1;margin-top:8px">VALOR</div>
-  <div style="font-family:var(--font-inter),sans-serif;font-size:12px;color:#757575;margin-top:8px">tradução em linguagem de negócio</div>
-</div>
-
-── VARIAÇÃO ──
-Positiva: <span style="background:#e8fde0;color:#1a6600;font-size:12px;font-weight:600;padding:3px 10px;border-radius:2px;font-family:var(--font-inter),sans-serif">+23% (de 254 para 312)</span>
-Negativa: <span style="background:#fde8e8;color:#e52020;font-size:12px;font-weight:600;padding:3px 10px;border-radius:2px;font-family:var(--font-inter),sans-serif">-12% (de 312 para 275)</span>
-
-── TABELA (ocupa largura total do slide) ──
+TABELA DE COMPARATIVO:
 <table style="width:100%;border-collapse:collapse;font-family:var(--font-inter),sans-serif;font-size:13px">
-  <thead>
-    <tr style="background:#000;color:#fff">
-      <th style="padding:13px 18px;text-align:left;font-weight:600">Métrica</th>
-      <th style="padding:13px 18px;text-align:right;font-weight:600">Período Anterior</th>
-      <th style="padding:13px 18px;text-align:right;font-weight:600">Período Atual</th>
-      <th style="padding:13px 18px;text-align:right;font-weight:600">Variação</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr style="border-bottom:1px solid #e8e8e8">
-      <td style="padding:13px 18px;color:#0e0e0e;font-weight:500">Métrica</td>
-      <td style="padding:13px 18px;text-align:right;color:#757575">Valor ant.</td>
-      <td style="padding:13px 18px;text-align:right;color:#0e0e0e;font-weight:700">Valor atual</td>
-      <td style="padding:13px 18px;text-align:right">[badge]</td>
-    </tr>
-  </tbody>
+  <thead><tr style="background:#111111;color:#FFFFFF">
+    <th style="padding:11px 16px;text-align:left;font-weight:600">Métrica</th>
+    <th style="padding:11px 16px;text-align:right;font-weight:600">Período Anterior</th>
+    <th style="padding:11px 16px;text-align:right;font-weight:600">Período Atual</th>
+    <th style="padding:11px 16px;text-align:right;font-weight:600">Variação</th>
+  </tr></thead>
+  <tbody>[linhas com border-bottom:1px solid #F5F5F5]</tbody>
 </table>
 
-── HIGHLIGHT BOX (insight central de um slide) ──
-<div style="background:#000;padding:28px 36px;border-radius:2px;margin-top:20px">
-  <div style="font-family:var(--font-bebas),sans-serif;font-size:20px;color:#55f52f;margin-bottom:8px">DESTAQUE</div>
-  <div style="font-family:var(--font-inter),sans-serif;font-size:15px;color:#fff;line-height:1.6">insight aqui</div>
+CARD DE INSIGHT:
+<div style="background:#F0FAF3;border:1px solid #C8E6C9;border-radius:12px;padding:18px 20px">
+  <div style="font-size:11px;font-weight:700;color:#00C853;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px">LEITURA PRINCIPAL</div>
+  <p style="font-size:14px;color:#111111;line-height:1.6;margin:0">insight aqui</p>
 </div>
 
-── ITEM DE RECOMENDAÇÃO ──
-<div style="border:1px solid #e8e8e8;border-radius:2px;padding:20px;border-left:4px solid #55f52f;margin-bottom:12px">
-  <div style="font-family:var(--font-inter),sans-serif;font-size:11px;font-weight:700;color:#757575;text-transform:uppercase;letter-spacing:0.08em">O QUE FAZER</div>
-  <div style="font-family:var(--font-inter),sans-serif;font-size:14px;color:#0e0e0e;margin-top:6px;font-weight:600">ação específica</div>
-  <div style="font-family:var(--font-inter),sans-serif;font-size:13px;color:#757575;margin-top:8px"><span style="font-weight:600;color:#0e0e0e">Por que:</span> dado concreto</div>
-  <div style="font-family:var(--font-inter),sans-serif;font-size:13px;color:#1a6600;margin-top:4px"><span style="font-weight:600">Resultado:</span> efeito esperado</div>
+CARD DE RECOMENDAÇÃO:
+<div style="background:#FFFFFF;border:1px solid #F0F0F0;border-radius:12px;padding:18px 20px;border-left:4px solid #00C853;margin-bottom:10px;box-shadow:0 2px 8px rgba(0,0,0,0.04)">
+  <div style="font-size:11px;font-weight:700;color:#AAAAAA;text-transform:uppercase;letter-spacing:0.08em">O QUE FAZER</div>
+  <div style="font-size:14px;font-weight:600;color:#111111;margin-top:5px">ação específica</div>
+  <div style="font-size:13px;color:#555555;margin-top:6px"><span style="font-weight:600;color:#111111">Por que:</span> dado concreto</div>
+  <div style="font-size:13px;color:#00C853;font-weight:600;margin-top:4px">Resultado esperado: efeito mensurável</div>
 </div>
 
-── PRÓXIMO PASSO NUMERADO ──
-<div style="display:flex;gap:16px;align-items:flex-start;padding:14px 0;border-bottom:1px solid #f0f0f0">
-  <div style="background:#55f52f;color:#000;font-family:var(--font-bebas),sans-serif;font-size:18px;min-width:36px;height:36px;display:flex;align-items:center;justify-content:center;border-radius:2px;flex-shrink:0">1</div>
-  <div>
-    <div style="font-family:var(--font-inter),sans-serif;font-size:14px;font-weight:700;color:#0e0e0e">AÇÃO</div>
-    <div style="font-family:var(--font-inter),sans-serif;font-size:13px;color:#757575;margin-top:3px">detalhes concretos</div>
+PRÓXIMO PASSO:
+<div style="display:flex;gap:14px;align-items:flex-start;padding:12px 0;border-bottom:1px solid #F5F5F5">
+  <div style="width:30px;height:30px;background:#00C853;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+    <span style="font-size:15px;font-weight:800;color:#FFFFFF">1</span>
   </div>
-</div>
-
-── SLIDE DE RODAPÉ (último slide, fundo preto) ──
-<div style="width:1280px;height:120px;background:#000;margin:0 auto 16px;padding:0 72px;box-sizing:border-box;display:flex;align-items:center;justify-content:space-between">
-  <div style="color:#55f52f;font-family:var(--font-bebas),sans-serif;font-size:22px;letter-spacing:0.12em">ONMID</div>
-  <div style="color:#555;font-family:var(--font-inter),sans-serif;font-size:12px">Relatório gerado por ONMID Reports</div>
+  <div>
+    <div style="font-size:14px;font-weight:700;color:#111111">AÇÃO</div>
+    <div style="font-size:12px;color:#555555;margin-top:2px">detalhe concreto</div>
+  </div>
 </div>
 
 SAÍDA: retorne APENAS o HTML. Sem markdown, sem blocos de código, sem texto antes ou depois.
-O HTML começa em <div style="background:#111 e termina em </div>`;
+O HTML começa com <div style="background:#F4F4F4 e termina com </div>`;
+
+// ── User Prompt ───────────────────────────────────────────────────────────────
 
 function buildUserPrompt(
   clientName: string,
@@ -403,9 +380,6 @@ function buildUserPrompt(
     'DADOS META ADS:',
     metaData,
     '',
-    'DADOS INSTAGRAM INSIGHTS:',
-    'Sem dados de Instagram Orgânico disponíveis para este período.',
-    '',
     'DADOS CRM / RESULTADOS DO NEGÓCIO:',
     crmData,
   ].filter(l => l !== null).join('\n');
@@ -422,7 +396,6 @@ export async function buildOmniReport(input: {
   periodTo: string;
   agencyContext?: string;
   apiKey: string;
-  // legacy compat
   manualNotes?: string;
 }): Promise<{ html: string }> {
   const { clientId, clientName, connectionId, accountIds, periodFrom, periodTo, apiKey } = input;
@@ -435,17 +408,13 @@ export async function buildOmniReport(input: {
     fetchMonthlyCrm(clientId, periodFrom, periodTo),
   ]);
 
-  const period = `${fmtMonth(periodFrom)} a ${fmtMonth(periodTo)}`;
-
-  // Infer segment from data (best effort)
-  const segment = 'Marketing Digital';
-
-  // Previous period: month before the first month in the data
+  const period     = `${fmtMonth(periodFrom)} a ${fmtMonth(periodTo)}`;
   const firstMonth = monthlyCrm[0]?.label ?? monthlyMeta[0]?.label ?? '';
   const prevPeriod = firstMonth ? `mês anterior a ${firstMonth}` : 'não disponível';
 
   const metaData = formatMetaData(monthlyMeta);
-  const crmData = formatCrmData(monthlyCrm);
+  const crmData  = formatCrmData(monthlyCrm);
+  const segment  = 'Marketing Digital';
 
   const userPrompt = buildUserPrompt(clientName, segment, period, prevPeriod, agencyContext, metaData, crmData);
 
@@ -454,37 +423,29 @@ export async function buildOmniReport(input: {
   if (apiKey) {
     try {
       const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-6',
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+        body:    JSON.stringify({
+          model:      'claude-sonnet-4-6',
           max_tokens: 8192,
-          system: SYSTEM_PROMPT,
-          messages: [{ role: 'user', content: userPrompt }],
+          system:     SYSTEM_PROMPT,
+          messages:   [{ role: 'user', content: userPrompt }],
         }),
       });
-
       if (res.ok) {
         const data = await res.json() as { content?: { type: string; text: string }[] };
         const text = data.content?.find(c => c.type === 'text')?.text ?? '';
-        // Strip accidental markdown fences
         html = text.replace(/^```(?:html)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
       }
     } catch { /* fall through to fallback */ }
   }
 
-  if (!html) {
-    html = buildFallbackHtml(clientName, period, monthlyCrm, monthlyMeta);
-  }
+  if (!html) html = buildFallbackHtml(clientName, period, monthlyCrm, monthlyMeta);
 
   return { html };
 }
 
-// ── Fallback HTML (when Claude is unavailable) ────────────────────────────────
+// ── Fallback HTML ─────────────────────────────────────────────────────────────
 
 function buildFallbackHtml(
   clientName: string,
@@ -492,38 +453,29 @@ function buildFallbackHtml(
   monthlyCrm: MonthlyCrm[],
   monthlyMeta: MonthlyMeta[],
 ): string {
-  const totalRegistros = monthlyCrm.reduce((s, m) => s + m.registros, 0);
-  const totalNovosClientes = monthlyCrm.reduce((s, m) => s + m.novosClientes, 0);
-  const totalSpend = monthlyMeta.reduce((s, m) => s + m.spend, 0);
-  const hasMeta = monthlyMeta.length > 0;
+  const totalRegistros    = monthlyCrm.reduce((s, m) => s + m.registros, 0);
+  const totalNovosClientes= monthlyCrm.reduce((s, m) => s + m.novosClientes, 0);
+  const totalSpend        = monthlyMeta.reduce((s, m) => s + m.spend, 0);
+  const hasMeta           = monthlyMeta.length > 0;
 
-  return `<div style="background:#fff;font-family:var(--font-inter),sans-serif;padding-bottom:80px">
-  <div style="background:#000;padding:56px 48px 48px">
-    <div style="color:#55f52f;font-family:var(--font-bebas),sans-serif;font-size:12px;letter-spacing:0.15em">ONMID · RELATÓRIO DE MARKETING DIGITAL</div>
-    <h1 style="color:#fff;font-family:var(--font-bebas),sans-serif;font-size:80px;line-height:0.9;margin:12px 0 0">${clientName.toUpperCase()}</h1>
-    <div style="color:#999;font-family:var(--font-inter),sans-serif;font-size:14px;margin-top:24px;text-transform:uppercase;letter-spacing:0.05em">Período · ${period}</div>
-    <div style="display:flex;gap:12px;margin-top:32px;flex-wrap:wrap">
-      ${totalRegistros > 0 ? `<div style="background:#ffffff15;border:1px solid #ffffff25;padding:12px 20px;border-radius:2px"><div style="color:#999;font-family:var(--font-inter),sans-serif;font-size:11px;text-transform:uppercase;letter-spacing:0.08em">Registros</div><div style="color:#fff;font-family:var(--font-bebas),sans-serif;font-size:28px;line-height:1;margin-top:4px">${totalRegistros}</div></div>` : ''}
-      ${hasMeta ? `<div style="background:#ffffff15;border:1px solid #ffffff25;padding:12px 20px;border-radius:2px"><div style="color:#999;font-family:var(--font-inter),sans-serif;font-size:11px;text-transform:uppercase;letter-spacing:0.08em">Investimento</div><div style="color:#fff;font-family:var(--font-bebas),sans-serif;font-size:28px;line-height:1;margin-top:4px">${brl(totalSpend)}</div></div>` : ''}
+  return `<div style="background:#F4F4F4;padding:28px;font-family:var(--font-inter),sans-serif">
+  <div style="width:1440px;min-height:810px;background:#111111;margin:0 auto 20px;box-shadow:0 4px 20px rgba(0,0,0,0.08);overflow:hidden;box-sizing:border-box;display:flex;flex-direction:column">
+    <div style="height:52px;padding:0 48px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #222222;flex-shrink:0">
+      <span style="font-family:var(--font-bebas),sans-serif;font-size:22px;color:#00C853;letter-spacing:0.06em">ONMID</span>
+      <span style="font-size:12px;color:#777777">01/01</span>
     </div>
-  </div>
-  <div style="padding:48px 48px 0">
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:28px">
-      <div style="width:4px;height:36px;background:#55f52f;flex-shrink:0"></div>
-      <h2 style="font-family:var(--font-bebas),sans-serif;font-size:36px;color:#0e0e0e;margin:0;line-height:1">RESUMO DO PERÍODO</h2>
+    <div style="flex:1;padding:56px 48px 48px;display:flex;flex-direction:column;justify-content:space-between">
+      <div>
+        <div style="font-size:11px;font-weight:700;color:#00C853;text-transform:uppercase;letter-spacing:0.15em;margin-bottom:16px">ONMID · RELATÓRIO DE PERFORMANCE</div>
+        <h1 style="font-family:var(--font-bebas),sans-serif;font-size:80px;color:#FFFFFF;line-height:0.9;margin:0">${clientName.toUpperCase()}</h1>
+        <div style="font-size:13px;color:#777777;margin-top:20px;text-transform:uppercase;letter-spacing:0.08em">Período · ${period}</div>
+      </div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap">
+        ${totalRegistros > 0 ? `<div style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:18px 24px"><div style="font-size:11px;color:#777777;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px">LEADS</div><div style="font-family:var(--font-bebas),sans-serif;font-size:36px;color:#FFFFFF;line-height:1">${totalRegistros}</div></div>` : ''}
+        ${totalNovosClientes > 0 ? `<div style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:18px 24px"><div style="font-size:11px;color:#777777;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px">NOVOS CLIENTES</div><div style="font-family:var(--font-bebas),sans-serif;font-size:36px;color:#FFFFFF;line-height:1">${totalNovosClientes}</div></div>` : ''}
+        ${hasMeta ? `<div style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:18px 24px"><div style="font-size:11px;color:#777777;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px">INVESTIMENTO META</div><div style="font-family:var(--font-bebas),sans-serif;font-size:36px;color:#FFFFFF;line-height:1">${brl(totalSpend)}</div></div>` : ''}
+      </div>
     </div>
-  </div>
-  <div style="display:flex;gap:16px;flex-wrap:wrap;padding:0 48px;margin-top:24px">
-    ${totalRegistros > 0 ? `<div style="background:#f7f7f7;border:1px solid #cccccc;border-radius:2px;padding:24px;flex:1;min-width:150px"><div style="font-family:var(--font-inter),sans-serif;font-size:11px;color:#757575;text-transform:uppercase;letter-spacing:0.08em">REGISTROS</div><div style="font-family:var(--font-bebas),sans-serif;font-size:44px;color:#0e0e0e;line-height:1;margin-top:8px">${totalRegistros}</div><div style="font-family:var(--font-inter),sans-serif;font-size:12px;color:#757575;margin-top:8px">leads e cadastros no período</div></div>` : ''}
-    ${totalNovosClientes > 0 ? `<div style="background:#f7f7f7;border:1px solid #cccccc;border-radius:2px;padding:24px;flex:1;min-width:150px"><div style="font-family:var(--font-inter),sans-serif;font-size:11px;color:#757575;text-transform:uppercase;letter-spacing:0.08em">NOVOS CLIENTES</div><div style="font-family:var(--font-bebas),sans-serif;font-size:44px;color:#0e0e0e;line-height:1;margin-top:8px">${totalNovosClientes}</div><div style="font-family:var(--font-inter),sans-serif;font-size:12px;color:#757575;margin-top:8px">conversões no período</div></div>` : ''}
-    ${hasMeta ? `<div style="background:#f7f7f7;border:1px solid #cccccc;border-radius:2px;padding:24px;flex:1;min-width:150px"><div style="font-family:var(--font-inter),sans-serif;font-size:11px;color:#757575;text-transform:uppercase;letter-spacing:0.08em">INVESTIMENTO META</div><div style="font-family:var(--font-bebas),sans-serif;font-size:44px;color:#0e0e0e;line-height:1;margin-top:8px">${brl(totalSpend)}</div><div style="font-family:var(--font-inter),sans-serif;font-size:12px;color:#757575;margin-top:8px">em tráfego pago</div></div>` : ''}
-  </div>
-  <div style="background:#000;padding:32px 48px;margin-top:64px;display:flex;align-items:center;justify-content:space-between">
-    <div style="color:#55f52f;font-family:var(--font-bebas),sans-serif;font-size:20px;letter-spacing:0.1em">ONMID</div>
-    <div style="color:#757575;font-family:var(--font-inter),sans-serif;font-size:12px">Relatório gerado por ONMID Reports</div>
   </div>
 </div>`;
 }
-
-// ── Unused but kept for type compatibility with older code ────────────────────
-export { pct, fmtMonth };
