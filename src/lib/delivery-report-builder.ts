@@ -13,24 +13,21 @@ function brl(n: number) {
 }
 function num(n: number) { return n.toLocaleString('pt-BR'); }
 
-// ── Design tokens ──────────────────────────────────────────────────────────────
+// ── Design tokens ─────────────────────────────────────────────────────────────
+// Report viewer always runs in dark mode (class="dark" on root html in layout.tsx).
+// CSS variables resolve via globals.css; hex constants are used only for SVG fill/stroke.
 
-const D = {
-  green:   '#00C853',
-  greenBg: '#E8F5E9',
-  text:    '#111111',
-  muted:   '#555555',
-  white:   '#FFFFFF',
-  card:    '#FAFAFA',
-  border:  '#F0F0F0',
-  red:     '#FF5252',
-  redBg:   '#FFEBEE',
-  blue:    '#1565C0',
-  blueBg:  '#E3F2FD',
-  dark:    '#111111',
-  inter:   'var(--font-inter),sans-serif',
-  bebas:   'var(--font-bebas),sans-serif',
-};
+const PRIMARY = '#55f52f';
+const CARD    = '#1a1a1a';
+const BG      = '#0e0f14';
+const BORDER  = '#2a2d3a';
+const FG      = '#f5f5f5';
+const MUTED   = '#a0aec0';
+const RED     = '#e52020';
+const BLUE    = '#0B84FF';
+
+const INTER = 'var(--font-inter), Inter, sans-serif';
+const BEBAS = 'var(--font-bebas), "Bebas Neue", sans-serif';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -270,63 +267,125 @@ async function fetchMetaAds(connectionId: string | null | undefined, accountIds:
   return { investimento: totalSpend, impressoes: totalImpressions, alcance: totalReach, cliques: totalCliques, campanhas: campaigns.slice(0, 3) };
 }
 
-// ── HTML components ────────────────────────────────────────────────────────────
+// ── SVG chart helpers ─────────────────────────────────────────────────────────
 
-function wrapSlide(body: string, idx: number, total: number, dark = false): string {
-  const bg = dark ? D.dark : D.white;
-  const hb = dark ? 'rgba(255,255,255,0.1)' : D.border;
-  const cc = dark ? '#666' : '#AAAAAA';
-  return `<div style="width:1440px;min-height:810px;background:${bg};margin:0 auto 20px;box-shadow:0 4px 20px rgba(0,0,0,0.08);overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column"><div style="height:52px;padding:0 48px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid ${hb};flex-shrink:0"><span style="font-family:${D.bebas};font-size:22px;color:${D.green}">ONMID</span><span style="font-size:12px;color:${cc};font-family:${D.inter}">${idx}/${total}</span></div><div style="flex:1;padding:32px 48px 36px">${body}</div></div>`;
+function ptCart(cx: number, cy: number, r: number, deg: number) {
+  const a = (deg - 90) * Math.PI / 180;
+  return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
+}
+
+function donutPath(cx: number, cy: number, outer: number, inner: number, a1: number, a2: number): string {
+  const safe = a2 - a1 >= 360 ? a1 + 359.99 : a2;
+  const os = ptCart(cx, cy, outer, safe), oe = ptCart(cx, cy, outer, a1);
+  const is = ptCart(cx, cy, inner, a1), ie = ptCart(cx, cy, inner, safe);
+  const arc = safe - a1 <= 180 ? '0' : '1';
+  return `M ${os.x.toFixed(1)} ${os.y.toFixed(1)} A ${outer} ${outer} 0 ${arc} 0 ${oe.x.toFixed(1)} ${oe.y.toFixed(1)} L ${is.x.toFixed(1)} ${is.y.toFixed(1)} A ${inner} ${inner} 0 ${arc} 1 ${ie.x.toFixed(1)} ${ie.y.toFixed(1)} Z`;
+}
+
+function donutSvg(slices: { label: string; value: number; color: string }[], s = 220): string {
+  const total = slices.reduce((a, b) => a + b.value, 0);
+  if (!total) return '';
+  let c = 0;
+  const paths = slices.map(sl => {
+    const angle = (sl.value / total) * 360;
+    const p = donutPath(s / 2, s / 2, s / 2 - 6, s / 3, c, c + angle);
+    c += angle;
+    return `<path d="${p}" fill="${sl.color}" stroke="${BG}" stroke-width="2" style="filter:drop-shadow(0 0 6px ${sl.color}80)"/>`;
+  });
+  return `<svg viewBox="0 0 ${s} ${s}" width="${s}" height="${s}" style="flex-shrink:0">
+    ${paths.join('')}
+    <circle cx="${s / 2}" cy="${s / 2}" r="${Math.round(s / 3 - 8)}" fill="${CARD}"/>
+  </svg>`;
+}
+
+// ── HTML component helpers ─────────────────────────────────────────────────────
+
+function wrapSlide(body: string, idx: number, total: number): string {
+  return `<div style="width:1440px;min-height:810px;background:${BG};border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column">
+  <div style="height:52px;padding:0 48px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid ${BORDER};flex-shrink:0">
+    <span style="font-family:${BEBAS};font-size:22px;color:${PRIMARY};letter-spacing:0.06em">ONMID</span>
+    <span style="font-size:11px;color:${MUTED};font-family:${INTER};font-weight:600">${idx} / ${total}</span>
+  </div>
+  <div style="flex:1;padding:36px 48px 40px">${body}</div>
+</div>`;
 }
 
 function secTitle(title: string, sub: string): string {
-  return `<div style="display:flex;gap:12px;margin-bottom:20px;align-items:flex-start"><div style="width:4px;min-height:34px;background:${D.green};border-radius:2px;flex-shrink:0;margin-top:3px"></div><div><h2 style="font-family:${D.inter};font-size:24px;font-weight:800;color:${D.text};margin:0;line-height:1.1">${title}</h2><p style="font-size:13px;color:${D.muted};margin:3px 0 0;font-family:${D.inter}">${sub}</p></div></div>`;
+  return `<div style="display:flex;gap:14px;margin-bottom:24px;align-items:flex-start">
+  <div style="width:4px;flex-shrink:0;background:${PRIMARY};margin-top:2px;align-self:stretch;min-height:36px"></div>
+  <div>
+    <h2 style="font-family:${BEBAS};font-size:32px;color:${FG};margin:0;line-height:1;letter-spacing:0.02em">${title}</h2>
+    <p style="font-size:11px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.08em;margin:4px 0 0;font-family:${INTER}">${sub}</p>
+  </div>
+</div>`;
 }
 
-function kpi(label: string, value: string, context: string, dark = false): string {
-  const bg  = dark ? 'rgba(255,255,255,0.08)' : D.card;
-  const bc  = dark ? 'rgba(255,255,255,0.1)'  : D.border;
-  const lc  = dark ? '#888' : '#777';
-  const vc  = dark ? D.white : D.text;
-  const cc  = dark ? '#AAA' : D.muted;
-  return `<div style="background:${bg};border:1px solid ${bc};border-radius:12px;padding:20px 22px"><div style="font-size:10px;font-weight:700;color:${lc};text-transform:uppercase;letter-spacing:0.08em;font-family:${D.inter};margin-bottom:6px">${label}</div><div style="font-family:${D.bebas};font-size:36px;color:${vc};line-height:1;margin-bottom:6px">${value}</div><div style="font-size:12px;color:${cc};font-family:${D.inter};line-height:1.4">${context}</div></div>`;
+function kpi(label: string, value: string, context: string, accentColor = PRIMARY): string {
+  return `<div style="position:relative;overflow:hidden;border:1px solid ${BORDER};border-radius:2px;background:${CARD};padding:20px 22px;box-sizing:border-box">
+  <div style="position:absolute;top:0;left:0;right:0;height:2px;background:${accentColor}"></div>
+  <div style="position:absolute;top:0;left:0;width:12px;height:12px;background:${accentColor}"></div>
+  <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:4px 0 8px">${label}</p>
+  <p style="font-family:${BEBAS};font-size:38px;color:${FG};line-height:1;margin:0 0 4px">${value}</p>
+  <p style="font-size:12px;color:${MUTED};font-family:${INTER};line-height:1.4;margin:0">${context}</p>
+</div>`;
 }
 
 function hbar(label: string, value: string, pct: number, hi: boolean): string {
-  const bar = hi ? D.green : '#D0D0D0';
-  return `<div style="margin-bottom:9px"><div style="display:flex;justify-content:space-between;font-size:13px;font-weight:600;color:${D.text};font-family:${D.inter};margin-bottom:3px"><span>${label}</span><span>${value}</span></div><div style="height:8px;background:${D.border};border-radius:4px"><div style="height:100%;background:${bar};border-radius:4px;width:${Math.min(pct, 100).toFixed(1)}%"></div></div></div>`;
+  const barColor = hi ? PRIMARY : `${PRIMARY}40`;
+  const glow = hi ? `box-shadow:0 0 8px ${PRIMARY}80` : '';
+  return `<div style="margin-bottom:10px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+    <span style="font-size:12px;font-weight:600;color:${FG};font-family:${INTER}">${label}</span>
+    <span style="font-size:12px;font-weight:700;color:${hi ? PRIMARY : MUTED};font-family:${INTER}">${value}</span>
+  </div>
+  <div style="height:6px;background:${BORDER};overflow:hidden">
+    <div style="height:100%;background:${barColor};width:${Math.min(pct, 100).toFixed(1)}%;${glow}"></div>
+  </div>
+</div>`;
 }
 
 function insight(title: string, text: string): string {
-  return `<div style="background:#F0FAF3;border:1px solid #C8E6C9;border-radius:12px;padding:14px 16px;margin-top:12px"><div style="font-size:10px;font-weight:700;color:${D.green};text-transform:uppercase;letter-spacing:0.08em;margin-bottom:5px;font-family:${D.inter}">${title}</div><p style="font-size:13px;color:${D.text};line-height:1.6;margin:0;font-family:${D.inter}">${text}</p></div>`;
+  return `<div style="border:1px solid ${PRIMARY}4D;background:${PRIMARY}14;border-radius:2px;padding:14px 16px;margin-top:10px">
+  <p style="font-size:10px;font-weight:700;color:${PRIMARY};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 5px">${title}</p>
+  <p style="font-size:13px;color:${FG};line-height:1.6;margin:0;font-family:${INTER}">${text}</p>
+</div>`;
+}
+
+function tableRow(cells: { text: string; right?: boolean; bold?: boolean; color?: string }[], stripe: boolean): string {
+  const bg = stripe ? `${CARD}` : BG;
+  const tds = cells.map(c =>
+    `<td style="padding:10px 16px;font-size:13px;font-family:${INTER};text-align:${c.right ? 'right' : 'left'};font-weight:${c.bold ? '700' : '400'};color:${c.color ?? FG}">${c.text}</td>`
+  ).join('');
+  return `<tr style="background:${bg};border-bottom:1px solid ${BORDER}">${tds}</tr>`;
 }
 
 // ── Slide builders (TypeScript — zero AI tokens) ───────────────────────────────
 
 function sCapa(d: ParsedData, meta: MetaAds | null, clientName: string, periodo: string, total: number): string {
   const cards: string[] = [];
-  if (d.faturamento > 0)  cards.push(kpi('Faturamento', brl(d.faturamento), `${num(d.pedidos_ativos)} pedidos`, true));
-  if (d.ticket > 0)       cards.push(kpi('Ticket Médio', brl(d.ticket), 'por pedido (ativos)', true));
-  if (d.ativos > 0)       cards.push(kpi('Clientes Ativos', num(d.ativos), `${num(d.inativos)} inativos · ${num(d.potenciais)} em potencial`, true));
-  if (meta)               cards.push(kpi('Investimento Meta', brl(meta.investimento), `${num(meta.cliques)} cliques · ${num(meta.alcance)} alcance`, true));
+  if (d.faturamento > 0) cards.push(kpi('Faturamento', brl(d.faturamento), `${num(d.pedidos_ativos)} pedidos`));
+  if (d.ticket > 0)      cards.push(kpi('Ticket Médio', brl(d.ticket), 'por pedido (clientes ativos)'));
+  if (d.ativos > 0)      cards.push(kpi('Clientes Ativos', num(d.ativos), `${num(d.inativos)} inativos · ${num(d.potenciais)} potenciais`));
+  if (meta)              cards.push(kpi('Investimento Meta', brl(meta.investimento), `${num(meta.cliques)} cliques · ${num(meta.alcance)} alcance`, BLUE));
 
-  const body = `<div style="display:flex;flex-direction:column;justify-content:center;height:100%;gap:24px">
-<div>
-  <div style="font-size:11px;font-weight:700;color:${D.green};text-transform:uppercase;letter-spacing:0.12em;font-family:${D.inter};margin-bottom:10px">Relatório de Performance — Delivery</div>
-  <h1 style="font-family:${D.bebas};font-size:68px;color:${D.white};margin:0;line-height:0.95;letter-spacing:0.02em">${clientName}</h1>
-  <p style="font-size:15px;color:#AAAAAA;margin:12px 0 0;font-family:${D.inter}">${periodo}</p>
-</div>
-${cards.length ? `<div style="display:grid;grid-template-columns:repeat(${Math.min(cards.length, 4)},1fr);gap:14px">${cards.join('')}</div>` : ''}
+  const body = `<div style="display:flex;flex-direction:column;justify-content:center;height:100%;gap:28px;position:relative">
+  <div style="position:absolute;top:-100px;right:-100px;width:500px;height:500px;border-radius:50%;background:radial-gradient(circle,${PRIMARY}1A,transparent 70%);pointer-events:none"></div>
+  <div>
+    <p style="font-size:11px;font-weight:700;color:${PRIMARY};text-transform:uppercase;letter-spacing:0.14em;font-family:${INTER};margin:0 0 10px">Relatório de Performance — Delivery</p>
+    <h1 style="font-family:${BEBAS};font-size:72px;color:${FG};margin:0;line-height:0.92;letter-spacing:0.02em">${clientName}</h1>
+    <p style="font-size:15px;color:${MUTED};margin:14px 0 0;font-family:${INTER}">${periodo}</p>
+  </div>
+  ${cards.length ? `<div style="display:grid;grid-template-columns:repeat(${Math.min(cards.length, 4)},1fr);gap:14px">${cards.join('')}</div>` : ''}
 </div>`;
-  return wrapSlide(body, 1, total, true);
+  return wrapSlide(body, 1, total);
 }
 
 function sVisaoGeral(d: ParsedData, idx: number, total: number): string {
   const body = `
-${secTitle('Visão Geral do Período', 'Faturamento, pedidos e ticket médio dos clientes ativos')}
+${secTitle('Visão Geral do Período', 'Faturamento, pedidos e ticket médio — clientes ativos')}
 <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">
   ${kpi('Faturamento', brl(d.faturamento), 'soma do valor gasto pelos clientes ativos')}
-  ${kpi('Pedidos', num(d.pedidos_ativos), 'total de pedidos no período')}
+  ${kpi('Pedidos', num(d.pedidos_ativos), 'total de pedidos realizados no período')}
   ${kpi('Ticket Médio', brl(d.ticket), 'faturamento ÷ pedidos')}
 </div>`;
   return wrapSlide(body, idx, total);
@@ -350,42 +409,54 @@ ${secTitle('Pedidos por Dia da Semana', 'Distribuição de pedidos ao longo da s
 
 function sBase(d: ParsedData, idx: number, total: number): string {
   const tot = d.ativos + d.inativos + d.potenciais;
-  const pA  = tot ? (d.ativos      / tot * 100).toFixed(1) : '0';
-  const pI  = tot ? (d.inativos    / tot * 100).toFixed(1) : '0';
-  const pP  = tot ? (d.potenciais  / tot * 100).toFixed(1) : '0';
+  const pA  = tot ? (d.ativos     / tot * 100).toFixed(1) : '0';
+  const pI  = tot ? (d.inativos   / tot * 100).toFixed(1) : '0';
+  const pP  = tot ? (d.potenciais / tot * 100).toFixed(1) : '0';
+
+  const donut = donutSvg([
+    { label: 'Ativos',       value: d.ativos,     color: PRIMARY },
+    { label: 'Inativos',     value: d.inativos,   color: RED },
+    { label: 'Em Potencial', value: d.potenciais, color: BLUE },
+  ]);
+
+  const legend = [
+    { label: 'Ativos',       pct: pA, count: d.ativos,     color: PRIMARY },
+    { label: 'Inativos',     pct: pI, count: d.inativos,   color: RED },
+    { label: 'Em Potencial', pct: pP, count: d.potenciais, color: BLUE },
+  ].map(l => `<div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid ${BORDER}">
+    <div style="width:10px;height:10px;border-radius:2px;background:${l.color};flex-shrink:0"></div>
+    <span style="flex:1;font-size:13px;font-weight:600;color:${FG};font-family:${INTER}">${l.label}</span>
+    <span style="font-size:20px;font-family:${BEBAS};color:${FG};line-height:1">${num(l.count)}</span>
+    <span style="font-size:12px;font-weight:700;color:${l.color};font-family:${INTER};min-width:40px;text-align:right">${l.pct}%</span>
+  </div>`).join('');
+
   const body = `
 ${secTitle('Base de Clientes', `Total de ${num(tot)} clientes cadastrados`)}
-<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px">
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px">
   ${kpi('Ativos', num(d.ativos), `${pA}% da base — compraram no período`)}
-  ${kpi('Inativos', num(d.inativos), `${pI}% — pararam de comprar`)}
-  ${kpi('Em Potencial', num(d.potenciais), `${pP}% — nunca compraram`)}
+  ${kpi('Inativos', num(d.inativos), `${pI}% — pararam de comprar`, RED)}
+  ${kpi('Em Potencial', num(d.potenciais), `${pP}% — nunca compraram`, BLUE)}
 </div>
-<div style="height:14px;border-radius:7px;overflow:hidden;display:flex;margin-bottom:12px">
-  <div style="background:${D.green};width:${pA}%"></div>
-  <div style="background:${D.red};width:${pI}%"></div>
-  <div style="background:${D.blue};width:${pP}%"></div>
-</div>
-<div style="display:flex;gap:20px;font-size:12px;font-family:${D.inter};color:${D.muted}">
-  <span><span style="display:inline-block;width:10px;height:10px;background:${D.green};border-radius:2px;margin-right:5px;vertical-align:middle"></span>Ativos</span>
-  <span><span style="display:inline-block;width:10px;height:10px;background:${D.red};border-radius:2px;margin-right:5px;vertical-align:middle"></span>Inativos</span>
-  <span><span style="display:inline-block;width:10px;height:10px;background:${D.blue};border-radius:2px;margin-right:5px;vertical-align:middle"></span>Em potencial</span>
+<div style="display:flex;gap:40px;align-items:center">
+  ${donut}
+  <div style="flex:1">${legend}</div>
 </div>`;
   return wrapSlide(body, idx, total);
 }
 
 function sInativos(d: ParsedData, idx: number, total: number): string {
-  const max  = Math.max(...d.inativos_faixas.map(f => f.count));
-  const bars = d.inativos_faixas.map(f => hbar(f.label, num(f.count), max ? f.count / max * 100 : 0, f.count === max)).join('');
+  const max   = Math.max(...d.inativos_faixas.map(f => f.count));
+  const bars  = d.inativos_faixas.map(f => hbar(f.label, num(f.count), max ? f.count / max * 100 : 0, f.count === max)).join('');
   const maior = d.inativos_faixas.reduce((a, b) => a.count > b.count ? a : b);
   const body = `
-${secTitle('Clientes Inativos por Faixa', `${num(d.inativos)} clientes sem comprar — distribuídos por tempo`)}
+${secTitle('Clientes Inativos por Faixa', `${num(d.inativos)} clientes sem comprar — distribuídos por tempo de ausência`)}
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:28px">
   <div>${bars}</div>
   <div>
     ${insight('Prioridade de Reativação', `A maior concentração está em ${maior.label} com ${num(maior.count)} clientes. Comece por eles — são os mais receptivos a uma oferta de retorno.`)}
-    <div style="margin-top:12px;background:${D.card};border:1px solid ${D.border};border-radius:12px;padding:14px 16px">
-      <div style="font-size:10px;font-weight:700;color:#777;text-transform:uppercase;letter-spacing:0.08em;font-family:${D.inter};margin-bottom:8px">Sugestão de Mensagem</div>
-      <p style="font-size:13px;color:${D.text};font-family:${D.inter};line-height:1.6;margin:0">"Faz tempo que você não aparece! 😊 Preparamos um mimo especial pra você voltar. Use o cupom <strong>VOLTEI</strong> e ganhe desconto no próximo pedido. Válido por 7 dias!"</p>
+    <div style="margin-top:12px;border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:16px">
+      <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 8px">Sugestão de Mensagem</p>
+      <p style="font-size:13px;color:${FG};font-family:${INTER};line-height:1.6;margin:0">"Faz tempo que você não aparece! Preparamos um mimo especial pra você voltar. Use o cupom <strong style="color:${PRIMARY}">VOLTEI</strong> e ganhe desconto no próximo pedido. Válido por 7 dias!"</p>
     </div>
   </div>
 </div>`;
@@ -410,17 +481,22 @@ ${secTitle('Produtos Mais Vendidos', 'Ranking por quantidade de pedidos')}
 }
 
 function sRegioes(bairros: Bairro[], idx: number, total: number): string {
-  const rows = bairros.map((b, i) =>
-    `<tr style="background:${i % 2 ? D.white : '#FAFAFA'}"><td style="padding:9px 14px;font-size:13px;color:${D.text};font-family:${D.inter}">${b.bairro}</td><td style="padding:9px 14px;text-align:right;font-size:13px;font-weight:600;color:${D.text};font-family:${D.inter}">${num(b.pedidos)}</td><td style="padding:9px 14px;text-align:right;font-size:13px;color:${D.muted};font-family:${D.inter}">${brl(b.faturamento)}</td></tr>`
-  ).join('');
+  const rows = bairros.map((b, i) => tableRow([
+    { text: b.bairro },
+    { text: num(b.pedidos), right: true, bold: true, color: PRIMARY },
+    { text: brl(b.faturamento), right: true, color: MUTED },
+  ], i % 2 === 0)).join('');
+
   const body = `
-${secTitle('Regiões com Maior Volume', 'Bairros rankeados por pedidos (via CRM)')}
-<table style="width:100%;border-collapse:collapse;border:1px solid ${D.border};border-radius:8px;overflow:hidden">
-  <thead><tr style="background:${D.text};color:white">
-    <th style="padding:10px 14px;text-align:left;font-size:12px;font-family:${D.inter}">Bairro</th>
-    <th style="padding:10px 14px;text-align:right;font-size:12px;font-family:${D.inter}">Pedidos</th>
-    <th style="padding:10px 14px;text-align:right;font-size:12px;font-family:${D.inter}">Faturamento</th>
-  </tr></thead>
+${secTitle('Regiões com Maior Volume', 'Bairros rankeados por pedidos — dados do CRM')}
+<table style="width:100%;border-collapse:collapse;border:1px solid ${BORDER};overflow:hidden">
+  <thead>
+    <tr style="background:${CARD};border-bottom:1px solid ${BORDER}">
+      <th style="padding:10px 16px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:${MUTED};font-family:${INTER}">Bairro</th>
+      <th style="padding:10px 16px;text-align:right;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:${MUTED};font-family:${INTER}">Pedidos</th>
+      <th style="padding:10px 16px;text-align:right;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:${MUTED};font-family:${INTER}">Faturamento</th>
+    </tr>
+  </thead>
   <tbody>${rows}</tbody>
 </table>
 ${bairros[0] ? insight('Fortalecer onde há demanda', `${bairros[0].bairro} lidera com ${num(bairros[0].pedidos)} pedidos. Segmente campanhas Meta para este bairro e os 2 seguintes para maximizar retorno.`) : ''}`;
@@ -429,20 +505,31 @@ ${bairros[0] ? insight('Fortalecer onde há demanda', `${bairros[0].bairro} lide
 
 function sMetaAds(meta: MetaAds, idx: number, total: number): string {
   const cpl = meta.cliques ? brl(meta.investimento / meta.cliques) : '—';
+  const campCards = meta.campanhas.map(c =>
+    `<div style="border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:16px;position:relative;overflow:hidden">
+      <div style="position:absolute;top:0;left:0;right:0;height:2px;background:${BLUE}"></div>
+      <div style="position:absolute;top:0;left:0;width:12px;height:12px;background:${BLUE}"></div>
+      <p style="font-size:12px;font-weight:700;color:${FG};font-family:${INTER};margin:4px 0 10px;line-height:1.3">${c.nome}</p>
+      <div style="display:flex;flex-direction:column;gap:5px">
+        <div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER}"><span style="color:${MUTED}">Investido</span><span style="font-weight:700;color:${FG}">${brl(c.metricas.investimento)}</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER}"><span style="color:${MUTED}">Alcance</span><span style="font-weight:700;color:${FG}">${num(c.metricas.alcance)}</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER}"><span style="color:${MUTED}">Cliques</span><span style="font-weight:700;color:${FG}">${num(c.metricas.cliques)}</span></div>
+      </div>
+    </div>`
+  ).join('');
+
   const body = `
 ${secTitle('Meta Ads — Tráfego Pago', 'Investimento e resultados das campanhas no período')}
 <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px">
-  ${kpi('Investimento', brl(meta.investimento), 'total investido em anúncios')}
-  ${kpi('Impressões', num(meta.impressoes), 'vezes que seus anúncios foram vistos')}
-  ${kpi('Alcance', num(meta.alcance), 'pessoas únicas impactadas')}
-  ${kpi('Cliques', num(meta.cliques), `${cpl}/clique (CPL)`)}
+  ${kpi('Investimento', brl(meta.investimento), 'total investido em anúncios', BLUE)}
+  ${kpi('Impressões', num(meta.impressoes), 'vezes que os anúncios foram vistos', BLUE)}
+  ${kpi('Alcance', num(meta.alcance), 'pessoas únicas impactadas', BLUE)}
+  ${kpi('Cliques', num(meta.cliques), `${cpl} por clique (CPL)`, BLUE)}
 </div>
-${meta.campanhas.length ? `<div style="font-size:10px;font-weight:700;color:#777;text-transform:uppercase;letter-spacing:0.08em;font-family:${D.inter};margin-bottom:10px">Campanhas Ativas</div>
-<div style="display:grid;grid-template-columns:repeat(${Math.min(meta.campanhas.length, 3)},1fr);gap:12px">
-  ${meta.campanhas.map(c =>
-    `<div style="background:${D.card};border:1px solid ${D.border};border-radius:12px;padding:16px"><div style="font-size:13px;font-weight:700;color:${D.text};font-family:${D.inter};margin-bottom:8px">${c.nome}</div><div style="display:flex;flex-direction:column;gap:4px"><span style="font-size:12px;color:${D.muted};font-family:${D.inter}">Investido: <strong style="color:${D.text}">${brl(c.metricas.investimento)}</strong></span><span style="font-size:12px;color:${D.muted};font-family:${D.inter}">Alcance: <strong style="color:${D.text}">${num(c.metricas.alcance)}</strong></span><span style="font-size:12px;color:${D.muted};font-family:${D.inter}">Cliques: <strong style="color:${D.text}">${num(c.metricas.cliques)}</strong></span></div></div>`
-  ).join('')}
-</div>` : ''}`;
+${meta.campanhas.length ? `
+  <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 10px">Campanhas Ativas</p>
+  <div style="display:grid;grid-template-columns:repeat(${Math.min(meta.campanhas.length, 3)},1fr);gap:12px">${campCards}</div>
+` : ''}`;
   return wrapSlide(body, idx, total);
 }
 
@@ -482,27 +569,44 @@ async function fetchDiagnosis(d: ParsedData, meta: MetaAds | null, bairros: Bair
 }
 
 function sDiagnostico(diag: DiagJson, idx: number, total: number): string {
+  const colLabel = (text: string) =>
+    `<p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 10px">${text}</p>`;
+
   const fortes = diag.pontos_fortes.map(p =>
-    `<div style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid ${D.border}"><div style="width:20px;height:20px;background:${D.greenBg};border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;color:${D.green};margin-top:1px">✓</div><span style="font-size:13px;color:${D.text};font-family:${D.inter};line-height:1.4">${p}</span></div>`
+    `<div style="display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-bottom:1px solid ${BORDER}">
+      <div style="width:20px;height:20px;background:${PRIMARY}20;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;color:${PRIMARY}">✓</div>
+      <span style="font-size:13px;color:${FG};font-family:${INTER};line-height:1.4">${p}</span>
+    </div>`
   ).join('');
 
   const atencao = diag.pontos_atencao.map(p =>
-    `<div style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid ${D.border}"><div style="width:20px;height:20px;background:${D.redBg};border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;color:${D.red};margin-top:1px">!</div><span style="font-size:13px;color:${D.text};font-family:${D.inter};line-height:1.4">${p}</span></div>`
+    `<div style="display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-bottom:1px solid ${BORDER}">
+      <div style="width:20px;height:20px;background:${RED}20;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;color:${RED}">!</div>
+      <span style="font-size:13px;color:${FG};font-family:${INTER};line-height:1.4">${p}</span>
+    </div>`
   ).join('');
 
   const plano = diag.plano.map((p, i) =>
-    `<div style="display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-bottom:1px solid ${D.border}"><div style="width:26px;height:26px;background:${D.green};border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0"><span style="font-size:13px;font-weight:800;color:white;font-family:${D.inter}">${i + 1}</span></div><div><div style="font-size:13px;font-weight:700;color:${D.text};font-family:${D.inter}">${p.acao}</div><div style="font-size:12px;color:${D.muted};font-family:${D.inter};margin-top:2px">${p.motivo}</div></div></div>`
+    `<div style="display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-bottom:1px solid ${BORDER}">
+      <div style="width:26px;height:26px;background:${PRIMARY};border-radius:2px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+        <span style="font-size:13px;font-weight:800;color:#0e0f14;font-family:${INTER}">${i + 1}</span>
+      </div>
+      <div>
+        <div style="font-size:13px;font-weight:700;color:${FG};font-family:${INTER}">${p.acao}</div>
+        <div style="font-size:12px;color:${MUTED};font-family:${INTER};margin-top:3px">${p.motivo}</div>
+      </div>
+    </div>`
   ).join('');
 
   const body = `
 ${secTitle('Diagnóstico e Plano de Ação', 'Análise do período e próximos passos')}
-<div style="background:${D.card};border:1px solid ${D.border};border-radius:12px;padding:14px 18px;margin-bottom:20px">
-  <p style="font-size:14px;color:${D.text};font-family:${D.inter};line-height:1.7;margin:0">${diag.diagnostico}</p>
+<div style="border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:16px 20px;margin-bottom:22px">
+  <p style="font-size:14px;color:${FG};font-family:${INTER};line-height:1.7;margin:0">${diag.diagnostico}</p>
 </div>
-<div style="display:grid;grid-template-columns:1fr 1fr 1.6fr;gap:22px">
-  <div><div style="font-size:10px;font-weight:700;color:#777;text-transform:uppercase;letter-spacing:0.08em;font-family:${D.inter};margin-bottom:8px">Pontos Fortes</div>${fortes}</div>
-  <div><div style="font-size:10px;font-weight:700;color:#777;text-transform:uppercase;letter-spacing:0.08em;font-family:${D.inter};margin-bottom:8px">Atenção</div>${atencao}</div>
-  <div><div style="font-size:10px;font-weight:700;color:#777;text-transform:uppercase;letter-spacing:0.08em;font-family:${D.inter};margin-bottom:8px">Plano para o Próximo Mês</div>${plano}</div>
+<div style="display:grid;grid-template-columns:1fr 1fr 1.6fr;gap:24px">
+  <div>${colLabel('Pontos Fortes')}${fortes}</div>
+  <div>${colLabel('Atenção')}${atencao}</div>
+  <div>${colLabel('Plano para o Próximo Mês')}${plano}</div>
 </div>`;
   return wrapSlide(body, idx, total);
 }
@@ -561,7 +665,7 @@ export async function buildDeliveryReport(opts: {
   if (hasMeta)   slides.push(sMetaAds(meta!, ++i, total));
   slides.push(sDiagnostico(diag, ++i, total));
 
-  return { html: `<div style="background:#F4F4F4;padding:28px;font-family:${D.inter}">${slides.join('')}</div>` };
+  return { html: `<div style="background:${BG};padding:28px;font-family:${INTER}">${slides.join('')}</div>` };
 }
 
 // ── Save to DB ─────────────────────────────────────────────────────────────────
