@@ -24,6 +24,7 @@ import {
   ShieldCheck,
   Mail,
   Link2,
+  Palette,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { APP_VERSION } from '@/lib/app-version';
@@ -47,6 +48,7 @@ const navItems: { name: string; href: string; icon: React.ElementType; roles: Ro
   { name: 'Automações',  href: '/automacoes',  icon: Zap,             roles: ['Administrador'] },
   { name: 'Integrações', href: '/integracoes', icon: Plug,            roles: ['Administrador'] },
   { name: 'Logs',        href: '/logs',        icon: ClipboardList,   roles: ['Administrador'] },
+  { name: 'Design',     href: '/design-system', icon: Palette,        roles: ['Administrador'] },
 ];
 
 export function Sidebar({
