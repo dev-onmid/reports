@@ -13,9 +13,13 @@ function brl(n: number) {
 }
 function num(n: number) { return n.toLocaleString('pt-BR'); }
 
+function deltaInfo(current: number, prev: number): { label: string; up: boolean; hasData: boolean } {
+  if (!prev) return { label: '—', up: true, hasData: false };
+  const diff = ((current - prev) / prev) * 100;
+  return { label: `${diff >= 0 ? '+' : ''}${diff.toFixed(1)}%`, up: diff >= 0, hasData: true };
+}
+
 // ── Design tokens ─────────────────────────────────────────────────────────────
-// Report viewer always runs in dark mode (class="dark" on root html in layout.tsx).
-// CSS variables resolve via globals.css; hex constants are used only for SVG fill/stroke.
 
 const PRIMARY = '#55f52f';
 const CARD    = '#1a1a1a';
@@ -25,17 +29,48 @@ const FG      = '#f5f5f5';
 const MUTED   = '#a0aec0';
 const RED     = '#e52020';
 const BLUE    = '#0B84FF';
+const ORANGE  = '#FF6B35';
 
 const INTER = 'var(--font-inter), Inter, sans-serif';
 const BEBAS = 'var(--font-bebas), "Bebas Neue", sans-serif';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-type Bairro    = { bairro: string; pedidos: number; faturamento: number };
-type MetaAds   = { investimento: number; impressoes: number; alcance: number; cliques: number; campanhas: Array<{ nome: string; tipo: string; metricas: { investimento: number; impressoes: number; alcance: number; cliques: number } }> };
-type Product   = { nome: string; qtd: number; total: number };
-type Faixa     = { label: string; count: number };
+type Bairro      = { bairro: string; pedidos: number; faturamento: number };
+type Product     = { nome: string; qtd: number; total: number };
+type Faixa       = { label: string; count: number };
 type DiaDaSemana = { dia: string; pedidos: number; pct: number };
+
+type CampanhaDetalhada = {
+  nome: string;
+  tipo: string;
+  metricas: {
+    investimento: number;
+    impressoes: number;
+    alcance: number;
+    cliques: number;
+    frequencia: number;
+    conversas: number;
+    compras: number;
+    valor_compras: number;
+    purchase_roas: number;
+  };
+};
+
+type MetaAdsFull = {
+  investimento: number;
+  impressoes: number;
+  alcance: number;
+  cliques: number;
+  campanhas: CampanhaDetalhada[];
+};
+
+type Creative = {
+  nome: string;
+  spend: number;
+  resultado: number;
+  thumbnail_url: string | null;
+};
 
 type ParsedData = {
   ativos:          number;
@@ -44,19 +79,33 @@ type ParsedData = {
   faturamento:     number;
   pedidos_ativos:  number;
   ticket:          number;
+  uma_compra:      number;
+  recorrentes:     number;
   produtos:        Product[];
   inativos_faixas: Faixa[];
   por_dia:         DiaDaSemana[];
+};
+
+type DiagJson = {
+  diagnostico:                string;
+  forcas:                     Array<{ titulo: string; descricao: string }>;
+  pontos_fortes:              string[];
+  pontos_atencao:             string[];
+  plano:                      Array<{ acao: string; objetivo: string; publico: string; mensagem: string }>;
+  insight_campanha_conversa:  string;
+  insight_campanha_conversao: string;
+  frase_fechamento:           string;
+  jornada:                    string[];
 };
 
 // ── CSV helpers ────────────────────────────────────────────────────────────────
 
 function detectType(filename: string): 'ativos' | 'inativos' | 'potenciais' | 'produtos' | 'pedidos' | 'outros' {
   const n = filename.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
-  if (n.includes('inativ'))                                           return 'inativos';
-  if (n.includes('ativo'))                                            return 'ativos';
-  if (n.includes('potencial'))                                        return 'potenciais';
-  if (n.includes('produto'))                                          return 'produtos';
+  if (n.includes('inativ'))                                               return 'inativos';
+  if (n.includes('ativo'))                                                return 'ativos';
+  if (n.includes('potencial'))                                            return 'potenciais';
+  if (n.includes('produto'))                                              return 'produtos';
   if (n.includes('pedido') || n.includes('order') || n.includes('venda')) return 'pedidos';
   return 'outros';
 }
@@ -73,21 +122,50 @@ function parseFloat2(s: string): number {
   return parseFloat(s.replace(/[R$\s.]/g, '').replace(',', '.')) || 0;
 }
 
+// Files prefixed with "ant-" (or containing "anterior") belong to the previous period.
+function separateFiles(files: { name: string; content: string }[]): {
+  current: typeof files;
+  previous: typeof files;
+} {
+  const current: typeof files = [];
+  const previous: typeof files = [];
+  for (const f of files) {
+    const base = f.name.toLowerCase();
+    if (base.startsWith('ant-') || base.includes('anterior')) {
+      const strippedName = base.startsWith('ant-') ? f.name.slice(4) : f.name;
+      previous.push({ name: strippedName, content: f.content });
+    } else {
+      current.push(f);
+    }
+  }
+  return { current, previous };
+}
+
 // ── File Parsers ───────────────────────────────────────────────────────────────
 
-function parseClientesCsv(content: string): { count: number; faturamento: number; pedidos: number } {
+function parseClientesCsvExtended(content: string): {
+  count: number; faturamento: number; pedidos: number; uma_compra: number; recorrentes: number;
+} {
   const { headers, rows } = splitCsv(content);
-  if (!headers.length) return { count: 0, faturamento: 0, pedidos: 0 };
+  if (!headers.length) return { count: 0, faturamento: 0, pedidos: 0, uma_compra: 0, recorrentes: 0 };
 
   const vIdx = headers.findIndex(h => (h.includes('valor') || h.includes('gasto') || h.includes('faturamento')) && !h.includes('pedido'));
-  const pIdx = headers.findIndex(h => (h.includes('pedido') || h.includes('qtd') || h.includes('quantidade')) && !h.includes('ultimo') && !h.includes('data') && !h.includes('valor'));
+  const pIdx = headers.findIndex(h =>
+    (h.includes('pedido') || h.includes('qtd') || h.includes('quantidade')) &&
+    !h.includes('ultimo') && !h.includes('data') && !h.includes('valor'),
+  );
 
-  let fat = 0, ped = 0;
+  let fat = 0, ped = 0, uma_compra = 0, recorrentes = 0;
   for (const row of rows) {
     if (vIdx >= 0) fat += parseFloat2(row[vIdx] ?? '');
-    if (pIdx >= 0) ped += parseInt(row[pIdx] ?? '0') || 0;
+    const pedCount = pIdx >= 0 ? (parseInt(row[pIdx] ?? '0') || 0) : 0;
+    if (pIdx >= 0) {
+      ped += pedCount;
+      if (pedCount === 1) uma_compra++;
+      else if (pedCount >= 2) recorrentes++;
+    }
   }
-  return { count: rows.length, faturamento: fat, pedidos: ped };
+  return { count: rows.length, faturamento: fat, pedidos: ped, uma_compra, recorrentes };
 }
 
 function parseInativosFaixas(content: string, refDate: Date): Faixa[] {
@@ -96,11 +174,11 @@ function parseInativosFaixas(content: string, refDate: Date): Faixa[] {
   if (dIdx === -1) return [];
 
   const FAIXAS = [
-    { label: '30–59 dias',  min: 30,  max: 59,        count: 0 },
-    { label: '60–89 dias',  min: 60,  max: 89,        count: 0 },
-    { label: '90–179 dias', min: 90,  max: 179,       count: 0 },
-    { label: '180–364 dias',min: 180, max: 364,       count: 0 },
-    { label: '365+ dias',   min: 365, max: Infinity,  count: 0 },
+    { label: '30–59 dias',   min: 30,  max: 59,       count: 0 },
+    { label: '60–89 dias',   min: 60,  max: 89,       count: 0 },
+    { label: '90–179 dias',  min: 90,  max: 179,      count: 0 },
+    { label: '180–364 dias', min: 180, max: 364,      count: 0 },
+    { label: '365+ dias',    min: 365, max: Infinity,  count: 0 },
   ];
 
   for (const row of rows) {
@@ -171,17 +249,22 @@ function parsePedidosDia(content: string): DiaDaSemana[] {
 }
 
 function parseAllFiles(files: { name: string; content: string }[], refDate: Date): ParsedData {
-  const out: ParsedData = { ativos: 0, inativos: 0, potenciais: 0, faturamento: 0, pedidos_ativos: 0, ticket: 0, produtos: [], inativos_faixas: [], por_dia: [] };
+  const out: ParsedData = {
+    ativos: 0, inativos: 0, potenciais: 0, faturamento: 0, pedidos_ativos: 0, ticket: 0,
+    uma_compra: 0, recorrentes: 0,
+    produtos: [], inativos_faixas: [], por_dia: [],
+  };
   for (const f of files) {
     const type = detectType(f.name);
     if (type === 'ativos') {
-      const { count, faturamento, pedidos } = parseClientesCsv(f.content);
+      const { count, faturamento, pedidos, uma_compra, recorrentes } = parseClientesCsvExtended(f.content);
       out.ativos = count; out.faturamento = faturamento; out.pedidos_ativos = pedidos;
+      out.uma_compra = uma_compra; out.recorrentes = recorrentes;
     } else if (type === 'inativos') {
-      out.inativos = parseClientesCsv(f.content).count;
+      out.inativos = parseClientesCsvExtended(f.content).count;
       out.inativos_faixas = parseInativosFaixas(f.content, refDate);
     } else if (type === 'potenciais') {
-      out.potenciais = parseClientesCsv(f.content).count;
+      out.potenciais = parseClientesCsvExtended(f.content).count;
     } else if (type === 'produtos') {
       out.produtos = parseProducts(f.content);
     } else if (type === 'pedidos') {
@@ -211,31 +294,42 @@ async function fetchBairros(clientId: string, from: string, to: string): Promise
   } finally { await pool.end(); }
 }
 
-async function fetchMetaAds(connectionId: string | null | undefined, accountIds: string[], from: string, to: string): Promise<MetaAds | null> {
-  if (!connectionId || !accountIds.length) return null;
+// Combined Meta fetch: account totals + campaign details (actions/frequency) + creative thumbnails.
+async function fetchMetaData(
+  connectionId: string | null | undefined,
+  accountIds: string[],
+  from: string, to: string,
+): Promise<{ meta: MetaAdsFull | null; creatives: Creative[] }> {
+  if (!connectionId || !accountIds.length) return { meta: null, creatives: [] };
+
   const pool = makeServerPool();
   let conn: { id: string; app_id: string; access_token: string; token_expiry: string | null } | null = null;
   try {
-    const { rows } = await pool.query(`SELECT id,app_id,access_token,token_expiry FROM public.meta_connections WHERE id=$1`, [connectionId]);
+    const { rows } = await pool.query(
+      `SELECT id,app_id,access_token,token_expiry FROM public.meta_connections WHERE id=$1`,
+      [connectionId],
+    );
     conn = rows[0] ?? null;
   } finally { await pool.end(); }
-  if (!conn) return null;
+  if (!conn) return { meta: null, creatives: [] };
 
   const token     = await getFreshMetaToken(conn);
   const timeRange = JSON.stringify({ since: from, until: to });
+
   let totalSpend = 0, totalImpressions = 0, totalReach = 0, totalCliques = 0;
-  const campaigns: MetaAds['campanhas'] = [];
+  const campanhas: CampanhaDetalhada[] = [];
+  const adInsights: Array<{ ad_id: string; ad_name: string; spend: number; resultado: number }> = [];
 
   await Promise.allSettled(accountIds.map(async (accountId) => {
     const acct = accountId.startsWith('act_') ? accountId : `act_${accountId}`;
-    const sig  = AbortSignal.timeout(12000);
 
+    // Account-level totals
     const urlAcc = new URL(`https://graph.facebook.com/v21.0/${acct}/insights`);
     urlAcc.searchParams.set('fields', 'spend,impressions,reach,clicks');
     urlAcc.searchParams.set('time_range', timeRange);
     urlAcc.searchParams.set('level', 'account');
     urlAcc.searchParams.set('access_token', token);
-    const resAcc = await fetch(urlAcc.toString(), { signal: sig }).catch(() => null);
+    const resAcc = await fetch(urlAcc.toString(), { signal: AbortSignal.timeout(12000) }).catch(() => null);
     if (resAcc?.ok) {
       const j = await resAcc.json() as { data?: Record<string, string>[] };
       for (const row of j.data ?? []) {
@@ -246,25 +340,97 @@ async function fetchMetaAds(connectionId: string | null | undefined, accountIds:
       }
     }
 
+    // Campaign-level with actions + frequency
     const urlCamp = new URL(`https://graph.facebook.com/v21.0/${acct}/insights`);
-    urlCamp.searchParams.set('fields', 'campaign_name,objective,spend,impressions,reach,clicks');
+    urlCamp.searchParams.set('fields', 'campaign_name,objective,spend,impressions,reach,clicks,frequency,actions,purchase_roas');
     urlCamp.searchParams.set('time_range', timeRange);
     urlCamp.searchParams.set('level', 'campaign');
-    urlCamp.searchParams.set('limit', '5');
+    urlCamp.searchParams.set('limit', '8');
     urlCamp.searchParams.set('access_token', token);
     const resCamp = await fetch(urlCamp.toString(), { signal: AbortSignal.timeout(12000) }).catch(() => null);
-    if (!resCamp?.ok) return;
-    const j = await resCamp.json() as { data?: Record<string, string>[] };
-    for (const row of j.data ?? []) {
-      campaigns.push({
-        nome: String(row.campaign_name ?? 'Sem nome'), tipo: String(row.objective ?? ''),
-        metricas: { investimento: parseFloat(row.spend ?? '0'), impressoes: parseInt(row.impressions ?? '0', 10), alcance: parseInt(row.reach ?? '0', 10), cliques: parseInt(row.clicks ?? '0', 10) },
-      });
+    if (resCamp?.ok) {
+      const j = await resCamp.json() as { data?: Record<string, unknown>[] };
+      for (const row of j.data ?? []) {
+        const actMap: Record<string, number> = {};
+        for (const a of (row.actions as Array<{ action_type: string; value: string }> ?? [])) {
+          actMap[a.action_type] = (actMap[a.action_type] || 0) + parseFloat(a.value || '0');
+        }
+        const purchaseRoasArr = row.purchase_roas as Array<{ action_type: string; value: string }> | undefined;
+        const purchase_roas   = parseFloat(purchaseRoasArr?.[0]?.value ?? '0') || 0;
+        campanhas.push({
+          nome: String(row.campaign_name ?? 'Sem nome'),
+          tipo: String(row.objective ?? ''),
+          metricas: {
+            investimento:  parseFloat(String(row.spend ?? '0')),
+            impressoes:    parseInt(String(row.impressions ?? '0'), 10),
+            alcance:       parseInt(String(row.reach ?? '0'), 10),
+            cliques:       parseInt(String(row.clicks ?? '0'), 10),
+            frequencia:    parseFloat(String(row.frequency ?? '0')),
+            conversas:     actMap['messaging_conversation_started_7d'] || 0,
+            compras:       actMap['offsite_conversion.fb_pixel_purchase'] || 0,
+            valor_compras: actMap['offsite_conversion.fb_pixel_purchase_value'] || actMap['purchase'] || 0,
+            purchase_roas,
+          },
+        });
+      }
+    }
+
+    // Ad-level for creative ranking
+    const urlAd = new URL(`https://graph.facebook.com/v21.0/${acct}/insights`);
+    urlAd.searchParams.set('fields', 'ad_id,ad_name,spend,actions');
+    urlAd.searchParams.set('time_range', timeRange);
+    urlAd.searchParams.set('level', 'ad');
+    urlAd.searchParams.set('limit', '20');
+    urlAd.searchParams.set('access_token', token);
+    const resAd = await fetch(urlAd.toString(), { signal: AbortSignal.timeout(15000) }).catch(() => null);
+    if (resAd?.ok) {
+      const j = await resAd.json() as { data?: Record<string, unknown>[] };
+      for (const row of j.data ?? []) {
+        const actMap: Record<string, number> = {};
+        for (const a of (row.actions as Array<{ action_type: string; value: string }> ?? [])) {
+          actMap[a.action_type] = (actMap[a.action_type] || 0) + parseFloat(a.value || '0');
+        }
+        const resultado = (actMap['messaging_conversation_started_7d'] || 0) +
+          (actMap['offsite_conversion.fb_pixel_purchase'] || 0) +
+          (actMap['lead'] || 0);
+        adInsights.push({
+          ad_id:   String(row.ad_id || ''),
+          ad_name: String(row.ad_name || 'Sem nome'),
+          spend:   parseFloat(String(row.spend || '0')),
+          resultado,
+        });
+      }
     }
   }));
 
-  if (totalSpend === 0 && campaigns.length === 0) return null;
-  return { investimento: totalSpend, impressoes: totalImpressions, alcance: totalReach, cliques: totalCliques, campanhas: campaigns.slice(0, 3) };
+  if (totalSpend === 0 && campanhas.length === 0) return { meta: null, creatives: [] };
+
+  const meta: MetaAdsFull = {
+    investimento: totalSpend,
+    impressoes:   totalImpressions,
+    alcance:      totalReach,
+    cliques:      totalCliques,
+    campanhas:    campanhas.sort((a, b) => b.metricas.investimento - a.metricas.investimento).slice(0, 5),
+  };
+
+  // Fetch thumbnails for top-5 ads by resultado then spend
+  const top5 = adInsights
+    .sort((a, b) => b.resultado - a.resultado || b.spend - a.spend)
+    .slice(0, 5);
+
+  const creatives: Creative[] = await Promise.all(top5.map(async (ad) => {
+    if (!ad.ad_id) return { nome: ad.ad_name, spend: ad.spend, resultado: ad.resultado, thumbnail_url: null };
+    const url = `https://graph.facebook.com/v21.0/${ad.ad_id}?fields=creative{thumbnail_url}&access_token=${token}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000) }).catch(() => null);
+    let thumbnail_url: string | null = null;
+    if (res?.ok) {
+      const j = await res.json() as { creative?: { thumbnail_url?: string } };
+      thumbnail_url = j.creative?.thumbnail_url ?? null;
+    }
+    return { nome: ad.ad_name, spend: ad.spend, resultado: ad.resultado, thumbnail_url };
+  }));
+
+  return { meta, creatives };
 }
 
 // ── SVG chart helpers ─────────────────────────────────────────────────────────
@@ -282,7 +448,7 @@ function donutPath(cx: number, cy: number, outer: number, inner: number, a1: num
   return `M ${os.x.toFixed(1)} ${os.y.toFixed(1)} A ${outer} ${outer} 0 ${arc} 0 ${oe.x.toFixed(1)} ${oe.y.toFixed(1)} L ${is.x.toFixed(1)} ${is.y.toFixed(1)} A ${inner} ${inner} 0 ${arc} 1 ${ie.x.toFixed(1)} ${ie.y.toFixed(1)} Z`;
 }
 
-function donutSvg(slices: { label: string; value: number; color: string }[], s = 220): string {
+function donutSvg(slices: { label: string; value: number; color: string }[], s = 200): string {
   const total = slices.reduce((a, b) => a + b.value, 0);
   if (!total) return '';
   let c = 0;
@@ -300,11 +466,14 @@ function donutSvg(slices: { label: string; value: number; color: string }[], s =
 
 // ── HTML component helpers ─────────────────────────────────────────────────────
 
-function wrapSlide(body: string, idx: number, total: number): string {
+function wrapSlide(body: string, idx: number, total: number, tag?: string): string {
+  const tagHtml = tag
+    ? `<span style="font-size:9px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};border:1px solid ${BORDER};padding:2px 8px">${tag}</span>`
+    : '';
   return `<div style="width:1440px;min-height:810px;background:${BG};border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column">
   <div style="height:52px;padding:0 48px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid ${BORDER};flex-shrink:0">
     <span style="font-family:${BEBAS};font-size:22px;color:${PRIMARY};letter-spacing:0.06em">ONMID</span>
-    <span style="font-size:11px;color:${MUTED};font-family:${INTER};font-weight:600">${idx} / ${total}</span>
+    <div style="display:flex;align-items:center;gap:12px">${tagHtml}<span style="font-size:11px;color:${MUTED};font-family:${INTER};font-weight:600">${idx} / ${total}</span></div>
   </div>
   <div style="flex:1;padding:36px 48px 40px">${body}</div>
 </div>`;
@@ -330,6 +499,22 @@ function kpi(label: string, value: string, context: string, accentColor = PRIMAR
 </div>`;
 }
 
+function kpiWithDelta(label: string, value: string, prevValue: string, delta: { label: string; up: boolean; hasData: boolean }, accentColor = PRIMARY): string {
+  const deltaHtml = delta.hasData
+    ? `<span style="font-size:11px;font-weight:700;color:${delta.up ? PRIMARY : RED};font-family:${INTER};margin-left:6px">${delta.up ? '↑' : '↓'} ${delta.label}</span>`
+    : '';
+  const prevHtml = prevValue
+    ? `<span style="font-size:11px;color:${MUTED};font-family:${INTER}">ant: ${prevValue}</span>`
+    : '';
+  return `<div style="position:relative;overflow:hidden;border:1px solid ${BORDER};border-radius:2px;background:${CARD};padding:20px 22px;box-sizing:border-box">
+  <div style="position:absolute;top:0;left:0;right:0;height:2px;background:${accentColor}"></div>
+  <div style="position:absolute;top:0;left:0;width:12px;height:12px;background:${accentColor}"></div>
+  <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:4px 0 8px">${label}</p>
+  <p style="font-family:${BEBAS};font-size:38px;color:${FG};line-height:1;margin:0 0 6px">${value}${deltaHtml}</p>
+  <p style="font-size:12px;color:${MUTED};font-family:${INTER};line-height:1.4;margin:0">${prevHtml}</p>
+</div>`;
+}
+
 function hbar(label: string, value: string, pct: number, hi: boolean): string {
   const barColor = hi ? PRIMARY : `${PRIMARY}40`;
   const glow = hi ? `box-shadow:0 0 8px ${PRIMARY}80` : '';
@@ -352,42 +537,58 @@ function insight(title: string, text: string): string {
 }
 
 function tableRow(cells: { text: string; right?: boolean; bold?: boolean; color?: string }[], stripe: boolean): string {
-  const bg = stripe ? `${CARD}` : BG;
+  const bg = stripe ? CARD : BG;
   const tds = cells.map(c =>
-    `<td style="padding:10px 16px;font-size:13px;font-family:${INTER};text-align:${c.right ? 'right' : 'left'};font-weight:${c.bold ? '700' : '400'};color:${c.color ?? FG}">${c.text}</td>`
+    `<td style="padding:10px 16px;font-size:13px;font-family:${INTER};text-align:${c.right ? 'right' : 'left'};font-weight:${c.bold ? '700' : '400'};color:${c.color ?? FG}">${c.text}</td>`,
   ).join('');
   return `<tr style="background:${bg};border-bottom:1px solid ${BORDER}">${tds}</tr>`;
 }
 
-// ── Slide builders (TypeScript — zero AI tokens) ───────────────────────────────
+// ── Slide builders ────────────────────────────────────────────────────────────
 
-function sCapa(d: ParsedData, meta: MetaAds | null, clientName: string, periodo: string, total: number): string {
+function sCapa(
+  d: ParsedData, meta: MetaAdsFull | null, clientName: string,
+  periodo: string, prevPeriodo: string, diag: DiagJson, total: number,
+): string {
   const cards: string[] = [];
-  if (d.faturamento > 0) cards.push(kpi('Faturamento', brl(d.faturamento), `${num(d.pedidos_ativos)} pedidos`));
+  if (d.faturamento > 0) cards.push(kpi('Faturamento', brl(d.faturamento), `${num(d.pedidos_ativos)} pedidos no período`));
   if (d.ticket > 0)      cards.push(kpi('Ticket Médio', brl(d.ticket), 'por pedido (clientes ativos)'));
   if (d.ativos > 0)      cards.push(kpi('Clientes Ativos', num(d.ativos), `${num(d.inativos)} inativos · ${num(d.potenciais)} potenciais`));
-  if (meta)              cards.push(kpi('Investimento Meta', brl(meta.investimento), `${num(meta.cliques)} cliques · ${num(meta.alcance)} alcance`, BLUE));
+  if (meta)              cards.push(kpi('Investimento Meta', brl(meta.investimento), `${num(meta.cliques)} cliques · alcance ${num(meta.alcance)}`, BLUE));
+
+  const prevLine = prevPeriodo ? `<span style="font-size:12px;color:${MUTED};font-family:${INTER}"> — comparado com ${prevPeriodo}</span>` : '';
+  const fechamento = diag.frase_fechamento
+    ? `<div style="margin-top:20px;border-left:3px solid ${PRIMARY};padding:10px 16px;background:${PRIMARY}0D">
+        <p style="font-size:14px;color:${FG};font-family:${INTER};line-height:1.6;margin:0;font-style:italic">"${diag.frase_fechamento}"</p>
+      </div>`
+    : '';
 
   const body = `<div style="display:flex;flex-direction:column;justify-content:center;height:100%;gap:28px;position:relative">
   <div style="position:absolute;top:-100px;right:-100px;width:500px;height:500px;border-radius:50%;background:radial-gradient(circle,${PRIMARY}1A,transparent 70%);pointer-events:none"></div>
   <div>
     <p style="font-size:11px;font-weight:700;color:${PRIMARY};text-transform:uppercase;letter-spacing:0.14em;font-family:${INTER};margin:0 0 10px">Relatório de Performance — Delivery</p>
     <h1 style="font-family:${BEBAS};font-size:72px;color:${FG};margin:0;line-height:0.92;letter-spacing:0.02em">${clientName}</h1>
-    <p style="font-size:15px;color:${MUTED};margin:14px 0 0;font-family:${INTER}">${periodo}</p>
+    <p style="font-size:15px;color:${MUTED};margin:14px 0 0;font-family:${INTER}">${periodo}${prevLine}</p>
+    ${fechamento}
   </div>
   ${cards.length ? `<div style="display:grid;grid-template-columns:repeat(${Math.min(cards.length, 4)},1fr);gap:14px">${cards.join('')}</div>` : ''}
 </div>`;
   return wrapSlide(body, 1, total);
 }
 
-function sVisaoGeral(d: ParsedData, idx: number, total: number): string {
+function sVisaoGeral(d: ParsedData, prevD: ParsedData | null, idx: number, total: number): string {
+  const dFat    = deltaInfo(d.faturamento,    prevD?.faturamento    ?? 0);
+  const dPed    = deltaInfo(d.pedidos_ativos, prevD?.pedidos_ativos ?? 0);
+  const dTicket = deltaInfo(d.ticket,         prevD?.ticket         ?? 0);
+
   const body = `
 ${secTitle('Visão Geral do Período', 'Faturamento, pedidos e ticket médio — clientes ativos')}
 <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">
-  ${kpi('Faturamento', brl(d.faturamento), 'soma do valor gasto pelos clientes ativos')}
-  ${kpi('Pedidos', num(d.pedidos_ativos), 'total de pedidos realizados no período')}
-  ${kpi('Ticket Médio', brl(d.ticket), 'faturamento ÷ pedidos')}
-</div>`;
+  ${kpiWithDelta('Faturamento', brl(d.faturamento), prevD ? brl(prevD.faturamento) : '', dFat)}
+  ${kpiWithDelta('Pedidos', num(d.pedidos_ativos), prevD ? num(prevD.pedidos_ativos) : '', dPed)}
+  ${kpiWithDelta('Ticket Médio', brl(d.ticket), prevD ? brl(prevD.ticket) : '', dTicket)}
+</div>
+${prevD ? `<p style="font-size:11px;color:${MUTED};font-family:${INTER};margin-top:16px">Período anterior incluído via arquivos <code style="background:${CARD};padding:1px 5px;font-size:10px">ant-*.csv</code></p>` : `<p style="font-size:11px;color:${MUTED};font-family:${INTER};margin-top:16px">Para exibir comparativos envie os arquivos do mês anterior com prefixo <code style="background:${CARD};padding:1px 5px;font-size:10px">ant-</code></p>`}`;
   return wrapSlide(body, idx, total);
 }
 
@@ -395,13 +596,51 @@ function sPorDia(d: ParsedData, idx: number, total: number): string {
   const sorted = [...d.por_dia].sort((a, b) => b.pedidos - a.pedidos);
   const top2   = new Set(sorted.slice(0, 2).map(x => x.dia));
   const bars   = d.por_dia.map(x => hbar(x.dia, num(x.pedidos), x.pct, top2.has(x.dia))).join('');
+
   const body = `
-${secTitle('Pedidos por Dia da Semana', 'Distribuição de pedidos ao longo da semana')}
+${secTitle('Comportamento por Dia da Semana', 'Distribuição de pedidos — identifica padrões de demanda')}
 <div style="display:grid;grid-template-columns:2fr 1fr;gap:28px">
   <div>${bars}</div>
   <div>
-    ${insight('Dias Fortes', `${sorted[0]?.dia} e ${sorted[1]?.dia} concentram os maiores volumes. Priorize campanhas na quarta/quinta para alimentar os picos.`)}
-    ${insight('Oportunidade', `${sorted[sorted.length-1]?.dia} e ${sorted[sorted.length-2]?.dia} estão mais fracos — uma promoção específica nesses dias equilibra o volume semanal.`)}
+    ${insight('Dias Fortes', `${sorted[0]?.dia ?? '—'} e ${sorted[1]?.dia ?? '—'} concentram os maiores volumes. Lance campanhas na quarta/quinta para alimentar os picos do fim de semana.`)}
+    ${insight('Oportunidade', `${sorted[sorted.length - 1]?.dia ?? '—'} está mais fraco — uma promoção específica para esse dia equilibra o volume semanal e diluí custos fixos.`)}
+  </div>
+</div>`;
+  return wrapSlide(body, idx, total);
+}
+
+function sRegioes(bairros: Bairro[], idx: number, total: number): string {
+  const rows = bairros.map((b, i) => tableRow([
+    { text: b.bairro },
+    { text: num(b.pedidos), right: true, bold: true, color: PRIMARY },
+    { text: brl(b.faturamento), right: true, color: MUTED },
+  ], i % 2 === 0)).join('');
+
+  const top2     = bairros.slice(0, 2);
+  const mid      = bairros.slice(2, 5);
+
+  const body = `
+${secTitle('Regiões com Maior Volume', 'Bairros rankeados por pedidos — dados do CRM')}
+<div style="display:grid;grid-template-columns:3fr 2fr;gap:28px">
+  <table style="width:100%;border-collapse:collapse;border:1px solid ${BORDER};overflow:hidden">
+    <thead>
+      <tr style="background:${CARD};border-bottom:1px solid ${BORDER}">
+        <th style="padding:10px 16px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:${MUTED};font-family:${INTER}">Bairro</th>
+        <th style="padding:10px 16px;text-align:right;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:${MUTED};font-family:${INTER}">Pedidos</th>
+        <th style="padding:10px 16px;text-align:right;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:${MUTED};font-family:${INTER}">Faturamento</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <div style="display:flex;flex-direction:column;gap:10px">
+    ${top2.length ? `<div style="border:1px solid ${PRIMARY}4D;background:${PRIMARY}14;border-radius:2px;padding:14px 16px">
+      <p style="font-size:10px;font-weight:700;color:${PRIMARY};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 5px">Fortalecer</p>
+      <p style="font-size:13px;color:${FG};line-height:1.5;margin:0;font-family:${INTER}">${top2.map(b => b.bairro).join(', ')} — já têm demanda consolidada. Segmente anúncios Meta para esses bairros e aumente o ticket com combo exclusivo.</p>
+    </div>` : ''}
+    ${mid.length ? `<div style="border:1px solid ${BLUE}4D;background:${BLUE}0F;border-radius:2px;padding:14px 16px">
+      <p style="font-size:10px;font-weight:700;color:${BLUE};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 5px">Estimular</p>
+      <p style="font-size:13px;color:${FG};line-height:1.5;margin:0;font-family:${INTER}">${mid.map(b => b.bairro).join(', ')} — potencial subutilizado. Lance campanha de reconhecimento de marca nesses bairros para construir base.</p>
+    </div>` : ''}
   </div>
 </div>`;
   return wrapSlide(body, idx, total);
@@ -430,16 +669,43 @@ function sBase(d: ParsedData, idx: number, total: number): string {
     <span style="font-size:12px;font-weight:700;color:${l.color};font-family:${INTER};min-width:40px;text-align:right">${l.pct}%</span>
   </div>`).join('');
 
+  const hasDistrib = d.uma_compra > 0 || d.recorrentes > 0;
+  const distribHtml = hasDistrib ? (() => {
+    const totalAtivos = d.uma_compra + d.recorrentes;
+    const pUma = totalAtivos ? (d.uma_compra / totalAtivos * 100).toFixed(1) : '0';
+    const pRec = totalAtivos ? (d.recorrentes / totalAtivos * 100).toFixed(1) : '0';
+    return `<div style="margin-top:16px;border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:14px 16px">
+      <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 10px">Frequência de Compra — Ativos</p>
+      <div style="display:flex;gap:24px">
+        <div style="text-align:center">
+          <p style="font-family:${BEBAS};font-size:32px;color:${FG};margin:0;line-height:1">${num(d.uma_compra)}</p>
+          <p style="font-size:11px;color:${ORANGE};font-family:${INTER};margin:4px 0 0;font-weight:700">1× — ${pUma}%</p>
+        </div>
+        <div style="width:1px;background:${BORDER}"></div>
+        <div style="text-align:center">
+          <p style="font-family:${BEBAS};font-size:32px;color:${FG};margin:0;line-height:1">${num(d.recorrentes)}</p>
+          <p style="font-size:11px;color:${PRIMARY};font-family:${INTER};margin:4px 0 0;font-weight:700">2×+ — ${pRec}%</p>
+        </div>
+        <div style="flex:1;align-self:center;font-size:12px;color:${MUTED};font-family:${INTER};line-height:1.5">
+          ${parseFloat(pRec) > 50 ? `Alta recorrência: mais da metade dos ativos já recomprou. Foco em programas de fidelidade.` : `${num(d.uma_compra)} clientes compraram só uma vez — oportunidade clara de retenção na segunda compra.`}
+        </div>
+      </div>
+    </div>`;
+  })() : '';
+
   const body = `
 ${secTitle('Base de Clientes', `Total de ${num(tot)} clientes cadastrados`)}
-<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px">
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px">
   ${kpi('Ativos', num(d.ativos), `${pA}% da base — compraram no período`)}
   ${kpi('Inativos', num(d.inativos), `${pI}% — pararam de comprar`, RED)}
   ${kpi('Em Potencial', num(d.potenciais), `${pP}% — nunca compraram`, BLUE)}
 </div>
-<div style="display:flex;gap:40px;align-items:center">
+<div style="display:flex;gap:32px;align-items:flex-start">
   ${donut}
-  <div style="flex:1">${legend}</div>
+  <div style="flex:1">
+    ${legend}
+    ${distribHtml}
+  </div>
 </div>`;
   return wrapSlide(body, idx, total);
 }
@@ -448,12 +714,25 @@ function sInativos(d: ParsedData, idx: number, total: number): string {
   const max   = Math.max(...d.inativos_faixas.map(f => f.count));
   const bars  = d.inativos_faixas.map(f => hbar(f.label, num(f.count), max ? f.count / max * 100 : 0, f.count === max)).join('');
   const maior = d.inativos_faixas.reduce((a, b) => a.count > b.count ? a : b);
+  const portaEntrada = d.produtos[0];
+
   const body = `
-${secTitle('Clientes Inativos por Faixa', `${num(d.inativos)} clientes sem comprar — distribuídos por tempo de ausência`)}
+${secTitle('Inativos e Potenciais', `${num(d.inativos)} inativos · ${num(d.potenciais)} potenciais — distribuídos por tempo de ausência`)}
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:28px">
-  <div>${bars}</div>
   <div>
-    ${insight('Prioridade de Reativação', `A maior concentração está em ${maior.label} com ${num(maior.count)} clientes. Comece por eles — são os mais receptivos a uma oferta de retorno.`)}
+    ${bars}
+    ${d.potenciais > 0 ? `<div style="margin-top:14px;padding:12px 16px;background:${BLUE}0F;border:1px solid ${BLUE}30;border-radius:2px">
+      <p style="font-size:10px;font-weight:700;color:${BLUE};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 4px">Em Potencial (nunca compraram)</p>
+      <p style="font-size:20px;font-family:${BEBAS};color:${FG};margin:0;line-height:1">${num(d.potenciais)} <span style="font-size:13px;color:${MUTED};font-family:${INTER};font-weight:400">clientes sem pedido</span></p>
+    </div>` : ''}
+  </div>
+  <div>
+    ${insight('Prioridade de Reativação', `A maior concentração está em ${maior.label} com ${num(maior.count)} clientes. Eles têm memória do produto — uma oferta personalizada tem alta chance de retorno.`)}
+    ${portaEntrada ? `<div style="margin-top:12px;border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:16px">
+      <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 8px">Porta de Entrada Sugerida</p>
+      <p style="font-family:${BEBAS};font-size:22px;color:${PRIMARY};margin:0 0 4px;line-height:1">${portaEntrada.nome}</p>
+      <p style="font-size:12px;color:${MUTED};font-family:${INTER};margin:0">${num(portaEntrada.qtd)} pedidos no período · ${portaEntrada.total ? brl(portaEntrada.total) : 'sem valor'} — produto mais reconhecido para reativação.</p>
+    </div>` : ''}
     <div style="margin-top:12px;border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:16px">
       <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 8px">Sugestão de Mensagem</p>
       <p style="font-size:13px;color:${FG};font-family:${INTER};line-height:1.6;margin:0">"Faz tempo que você não aparece! Preparamos um mimo especial pra você voltar. Use o cupom <strong style="color:${PRIMARY}">VOLTEI</strong> e ganhe desconto no próximo pedido. Válido por 7 dias!"</p>
@@ -466,65 +745,80 @@ ${secTitle('Clientes Inativos por Faixa', `${num(d.inativos)} clientes sem compr
 function sProdutos(d: ParsedData, idx: number, total: number): string {
   const max  = Math.max(...d.produtos.map(p => p.qtd));
   const bars = d.produtos.slice(0, 8).map((p, i) =>
-    hbar(p.nome, `${num(p.qtd)} ped${p.total ? ` · ${brl(p.total)}` : ''}`, max ? p.qtd / max * 100 : 0, i < 3)
+    hbar(p.nome, `${num(p.qtd)} ped${p.total ? ` · ${brl(p.total)}` : ''}`, max ? p.qtd / max * 100 : 0, i < 3),
   ).join('');
+
+  // Static combo suggestions from top-4 products
+  const top4 = d.produtos.slice(0, 4);
+  const combos: Array<{ a: string; b: string }> = [];
+  if (top4[0] && top4[1]) combos.push({ a: top4[0].nome, b: top4[1].nome });
+  if (top4[2] && top4[3]) combos.push({ a: top4[2].nome, b: top4[3].nome });
+  if (top4[0] && top4[2]) combos.push({ a: top4[0].nome, b: top4[2].nome });
+  if (top4[1] && top4[3]) combos.push({ a: top4[1].nome, b: top4[3].nome });
+
+  const comboGrid = combos.slice(0, 4).map(c =>
+    `<div style="border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:12px 14px">
+      <p style="font-size:10px;font-weight:700;color:${ORANGE};text-transform:uppercase;letter-spacing:0.08em;font-family:${INTER};margin:0 0 6px">Combo</p>
+      <p style="font-size:13px;font-weight:600;color:${FG};font-family:${INTER};margin:0;line-height:1.4">${c.a} <span style="color:${MUTED}">+</span> ${c.b}</p>
+    </div>`,
+  ).join('');
+
   const body = `
 ${secTitle('Produtos Mais Vendidos', 'Ranking por quantidade de pedidos')}
 <div style="display:grid;grid-template-columns:3fr 2fr;gap:28px">
   <div>${bars}</div>
   <div>
     ${d.produtos[0] ? insight('Produto Estrela', `"${d.produtos[0].nome}" lidera com ${num(d.produtos[0].qtd)} pedidos. Use-o como âncora em combos para elevar o ticket médio.`) : ''}
-    ${d.produtos[1] ? insight('Combo Sugerido', `"${d.produtos[0]?.nome}" + "${d.produtos[1]?.nome}" — os dois mais pedidos juntos aumentam o ticket e o valor percebido.`) : ''}
+    ${combos.length ? `
+    <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:14px 0 8px">Combos Sugeridos</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">${comboGrid}</div>` : ''}
   </div>
 </div>`;
   return wrapSlide(body, idx, total);
 }
 
-function sRegioes(bairros: Bairro[], idx: number, total: number): string {
-  const rows = bairros.map((b, i) => tableRow([
-    { text: b.bairro },
-    { text: num(b.pedidos), right: true, bold: true, color: PRIMARY },
-    { text: brl(b.faturamento), right: true, color: MUTED },
-  ], i % 2 === 0)).join('');
-
-  const body = `
-${secTitle('Regiões com Maior Volume', 'Bairros rankeados por pedidos — dados do CRM')}
-<table style="width:100%;border-collapse:collapse;border:1px solid ${BORDER};overflow:hidden">
-  <thead>
-    <tr style="background:${CARD};border-bottom:1px solid ${BORDER}">
-      <th style="padding:10px 16px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:${MUTED};font-family:${INTER}">Bairro</th>
-      <th style="padding:10px 16px;text-align:right;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:${MUTED};font-family:${INTER}">Pedidos</th>
-      <th style="padding:10px 16px;text-align:right;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:${MUTED};font-family:${INTER}">Faturamento</th>
-    </tr>
-  </thead>
-  <tbody>${rows}</tbody>
-</table>
-${bairros[0] ? insight('Fortalecer onde há demanda', `${bairros[0].bairro} lidera com ${num(bairros[0].pedidos)} pedidos. Segmente campanhas Meta para este bairro e os 2 seguintes para maximizar retorno.`) : ''}`;
-  return wrapSlide(body, idx, total);
-}
-
-function sMetaAds(meta: MetaAds, idx: number, total: number): string {
+function sMetaAds(meta: MetaAdsFull, idx: number, total: number): string {
   const cpl = meta.cliques ? brl(meta.investimento / meta.cliques) : '—';
-  const campCards = meta.campanhas.map(c =>
-    `<div style="border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:16px;position:relative;overflow:hidden">
-      <div style="position:absolute;top:0;left:0;right:0;height:2px;background:${BLUE}"></div>
-      <div style="position:absolute;top:0;left:0;width:12px;height:12px;background:${BLUE}"></div>
-      <p style="font-size:12px;font-weight:700;color:${FG};font-family:${INTER};margin:4px 0 10px;line-height:1.3">${c.nome}</p>
-      <div style="display:flex;flex-direction:column;gap:5px">
-        <div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER}"><span style="color:${MUTED}">Investido</span><span style="font-weight:700;color:${FG}">${brl(c.metricas.investimento)}</span></div>
-        <div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER}"><span style="color:${MUTED}">Alcance</span><span style="font-weight:700;color:${FG}">${num(c.metricas.alcance)}</span></div>
-        <div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER}"><span style="color:${MUTED}">Cliques</span><span style="font-weight:700;color:${FG}">${num(c.metricas.cliques)}</span></div>
+
+  const campCards = meta.campanhas.map(c => {
+    const m = c.metricas;
+    const isConversa  = m.conversas > 0 || c.tipo.toLowerCase().includes('messages');
+    const isConversao = m.compras > 0 || c.tipo.toLowerCase().includes('conversions');
+    const accentColor = isConversa ? PRIMARY : isConversao ? ORANGE : BLUE;
+
+    const metricsRows: string[] = [
+      `<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER}"><span style="color:${MUTED}">Investido</span><span style="font-weight:700;color:${FG}">${brl(m.investimento)}</span></div>`,
+      `<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER}"><span style="color:${MUTED}">Alcance</span><span style="font-weight:700;color:${FG}">${num(m.alcance)}</span></div>`,
+    ];
+    if (m.frequencia > 0) metricsRows.push(`<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER}"><span style="color:${MUTED}">Frequência</span><span style="font-weight:700;color:${FG}">${m.frequencia.toFixed(1)}×</span></div>`);
+    if (isConversa && m.conversas > 0) {
+      metricsRows.push(`<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER}"><span style="color:${MUTED}">Conversas</span><span style="font-weight:700;color:${PRIMARY}">${num(Math.round(m.conversas))}</span></div>`);
+      if (m.conversas > 0) metricsRows.push(`<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER}"><span style="color:${MUTED}">Custo/conversa</span><span style="font-weight:700;color:${FG}">${brl(m.investimento / m.conversas)}</span></div>`);
+    }
+    if (isConversao && m.compras > 0) {
+      metricsRows.push(`<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER}"><span style="color:${MUTED}">Compras</span><span style="font-weight:700;color:${ORANGE}">${num(Math.round(m.compras))}</span></div>`);
+      if (m.purchase_roas > 0) metricsRows.push(`<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER}"><span style="color:${MUTED}">ROAS</span><span style="font-weight:700;color:${FG}">${m.purchase_roas.toFixed(2)}×</span></div>`);
+    }
+
+    const typeLabel = isConversa ? 'CONVERSA' : isConversao ? 'CONVERSÃO' : 'TRÁFEGO';
+    return `<div style="border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:16px;position:relative;overflow:hidden">
+      <div style="position:absolute;top:0;left:0;right:0;height:2px;background:${accentColor}"></div>
+      <div style="position:absolute;top:0;left:0;width:12px;height:12px;background:${accentColor}"></div>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin:4px 0 10px">
+        <p style="font-size:12px;font-weight:700;color:${FG};font-family:${INTER};margin:0;line-height:1.3;max-width:70%">${c.nome}</p>
+        <span style="font-size:9px;font-weight:700;color:${accentColor};text-transform:uppercase;letter-spacing:0.08em;font-family:${INTER};border:1px solid ${accentColor}40;padding:2px 6px;flex-shrink:0">${typeLabel}</span>
       </div>
-    </div>`
-  ).join('');
+      <div style="display:flex;flex-direction:column;gap:5px">${metricsRows.join('')}</div>
+    </div>`;
+  }).join('');
 
   const body = `
 ${secTitle('Meta Ads — Tráfego Pago', 'Investimento e resultados das campanhas no período')}
 <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px">
-  ${kpi('Investimento', brl(meta.investimento), 'total investido em anúncios', BLUE)}
-  ${kpi('Impressões', num(meta.impressoes), 'vezes que os anúncios foram vistos', BLUE)}
+  ${kpi('Investimento', brl(meta.investimento), 'total em anúncios no período', BLUE)}
+  ${kpi('Impressões', num(meta.impressoes), 'exibições dos anúncios', BLUE)}
   ${kpi('Alcance', num(meta.alcance), 'pessoas únicas impactadas', BLUE)}
-  ${kpi('Cliques', num(meta.cliques), `${cpl} por clique (CPL)`, BLUE)}
+  ${kpi('CPL', cpl, `${num(meta.cliques)} cliques no período`, BLUE)}
 </div>
 ${meta.campanhas.length ? `
   <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 10px">Campanhas Ativas</p>
@@ -533,114 +827,336 @@ ${meta.campanhas.length ? `
   return wrapSlide(body, idx, total);
 }
 
-// ── Diagnosis (Claude — JSON only, ~300 tokens) ────────────────────────────────
+function sDiagnostico(diag: DiagJson, creatives: Creative[], idx: number, total: number): string {
+  const colLabel = (text: string) =>
+    `<p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 10px">${text}</p>`;
 
-type DiagJson = {
-  diagnostico: string;
-  pontos_fortes: string[];
-  pontos_atencao: string[];
-  plano: Array<{ acao: string; motivo: string }>;
-};
+  const fortes = diag.pontos_fortes.slice(0, 3).map(p =>
+    `<div style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid ${BORDER}">
+      <div style="width:18px;height:18px;background:${PRIMARY}20;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:10px;color:${PRIMARY}">✓</div>
+      <span style="font-size:12px;color:${FG};font-family:${INTER};line-height:1.4">${p}</span>
+    </div>`,
+  ).join('');
 
-async function fetchDiagnosis(d: ParsedData, meta: MetaAds | null, bairros: Bairro[], clientName: string, periodo: string, agencyContext: string): Promise<DiagJson> {
+  const atencao = diag.pontos_atencao.slice(0, 2).map(p =>
+    `<div style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid ${BORDER}">
+      <div style="width:18px;height:18px;background:${RED}20;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:10px;color:${RED}">!</div>
+      <span style="font-size:12px;color:${FG};font-family:${INTER};line-height:1.4">${p}</span>
+    </div>`,
+  ).join('');
+
+  const plano = diag.plano.slice(0, 5).map((p, i) =>
+    `<div style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid ${BORDER}">
+      <div style="width:22px;height:22px;background:${PRIMARY};border-radius:2px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+        <span style="font-size:11px;font-weight:800;color:#0e0f14;font-family:${INTER}">${i + 1}</span>
+      </div>
+      <div>
+        <div style="font-size:12px;font-weight:700;color:${FG};font-family:${INTER}">${p.acao}</div>
+        <div style="font-size:11px;color:${MUTED};font-family:${INTER};margin-top:2px">${p.objetivo || ''}</div>
+      </div>
+    </div>`,
+  ).join('');
+
+  const creativesHtml = creatives.length
+    ? `<div style="display:flex;flex-direction:column;gap:8px">
+        ${colLabel('Top Criativos')}
+        ${creatives.slice(0, 3).map(c => `
+          <div style="display:flex;gap:10px;align-items:center;padding:8px;background:${CARD};border:1px solid ${BORDER};border-radius:2px">
+            ${c.thumbnail_url
+              ? `<img src="${c.thumbnail_url}" style="width:44px;height:44px;object-fit:cover;border-radius:2px;flex-shrink:0" />`
+              : `<div style="width:44px;height:44px;background:${BORDER};border-radius:2px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:18px">🎨</div>`
+            }
+            <div style="flex:1;min-width:0">
+              <p style="font-size:11px;font-weight:600;color:${FG};font-family:${INTER};margin:0;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.nome}</p>
+              <p style="font-size:11px;color:${MUTED};font-family:${INTER};margin:3px 0 0">${brl(c.spend)} · ${c.resultado > 0 ? `${num(Math.round(c.resultado))} result.` : 'sem resultado'}</p>
+            </div>
+          </div>`).join('')}
+      </div>`
+    : '';
+
+  const body = `
+${secTitle('Diagnóstico e Plano de Ação', 'Análise do período e próximos passos')}
+<div style="border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:16px 20px;margin-bottom:18px">
+  <p style="font-size:14px;color:${FG};font-family:${INTER};line-height:1.7;margin:0">${diag.diagnostico}</p>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr 1.6fr ${creatives.length ? '1fr' : ''};gap:20px">
+  <div>${colLabel('Pontos Fortes')}${fortes}</div>
+  <div>${colLabel('Atenção')}${atencao}</div>
+  <div>${colLabel('Plano — Próximo Mês')}${plano}</div>
+  ${creatives.length ? `<div>${creativesHtml}</div>` : ''}
+</div>`;
+  return wrapSlide(body, idx, total);
+}
+
+// ── Expanded slides ───────────────────────────────────────────────────────────
+
+function sDestaqueCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number, total: number): string {
+  const campanhasConversa  = meta.campanhas.filter(c => c.metricas.conversas > 0 || c.tipo.toLowerCase().includes('messages'));
+  const campanhasConversao = meta.campanhas.filter(c => c.metricas.compras > 0 || c.tipo.toLowerCase().includes('conversions'));
+  const campanhasOther     = meta.campanhas.filter(c => !campanhasConversa.includes(c) && !campanhasConversao.includes(c));
+
+  function campSection(title: string, color: string, camps: CampanhaDetalhada[], insightText: string) {
+    if (!camps.length) return '';
+    const cards = camps.map(c => {
+      const m = c.metricas;
+      const rows: string[] = [
+        `<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER};padding:5px 0;border-bottom:1px solid ${BORDER}"><span style="color:${MUTED}">Investido</span><span style="font-weight:700;color:${FG}">${brl(m.investimento)}</span></div>`,
+        `<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER};padding:5px 0;border-bottom:1px solid ${BORDER}"><span style="color:${MUTED}">Alcance</span><span style="font-weight:700;color:${FG}">${num(m.alcance)}</span></div>`,
+        `<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER};padding:5px 0;border-bottom:1px solid ${BORDER}"><span style="color:${MUTED}">Freq.</span><span style="font-weight:700;color:${FG}">${m.frequencia.toFixed(1)}×</span></div>`,
+      ];
+      if (m.conversas > 0) rows.push(`<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER};padding:5px 0;border-bottom:1px solid ${BORDER}"><span style="color:${MUTED}">Conversas</span><span style="font-weight:700;color:${PRIMARY}">${num(Math.round(m.conversas))}</span></div>`);
+      if (m.conversas > 0) rows.push(`<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER};padding:5px 0;border-bottom:1px solid ${BORDER}"><span style="color:${MUTED}">Custo/conv.</span><span style="font-weight:700;color:${FG}">${brl(m.investimento / m.conversas)}</span></div>`);
+      if (m.compras > 0) rows.push(`<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER};padding:5px 0;border-bottom:1px solid ${BORDER}"><span style="color:${MUTED}">Compras</span><span style="font-weight:700;color:${ORANGE}">${num(Math.round(m.compras))}</span></div>`);
+      if (m.purchase_roas > 0) rows.push(`<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER};padding:5px 0"><span style="color:${MUTED}">ROAS</span><span style="font-weight:700;color:${ORANGE}">${m.purchase_roas.toFixed(2)}×</span></div>`);
+      return `<div style="border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:14px;position:relative;overflow:hidden">
+        <div style="position:absolute;top:0;left:0;right:0;height:2px;background:${color}"></div>
+        <p style="font-size:12px;font-weight:700;color:${FG};font-family:${INTER};margin:4px 0 10px;line-height:1.3">${c.nome}</p>
+        <div>${rows.join('')}</div>
+      </div>`;
+    }).join('');
+    return `<div style="margin-bottom:20px">
+      <p style="font-size:11px;font-weight:700;color:${color};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 10px">— ${title}</p>
+      <div style="display:grid;grid-template-columns:repeat(${Math.min(camps.length, 3)},1fr);gap:12px;margin-bottom:10px">${cards}</div>
+      ${insightText ? `<div style="border:1px solid ${color}40;background:${color}0D;border-radius:2px;padding:12px 16px">
+        <p style="font-size:13px;color:${FG};font-family:${INTER};line-height:1.6;margin:0">${insightText}</p>
+      </div>` : ''}
+    </div>`;
+  }
+
+  const body = `
+${secTitle('Destaque de Campanhas', 'Análise expandida por tipo de campanha e objetivo')}
+${campSection('Campanhas de Conversa', PRIMARY, campanhasConversa, diag.insight_campanha_conversa)}
+${campSection('Campanhas de Conversão', ORANGE, campanhasConversao, diag.insight_campanha_conversao)}
+${campSection('Demais Campanhas', BLUE, campanhasOther, '')}`;
+  return wrapSlide(body, idx, total, 'ANÁLISE EXPANDIDA');
+}
+
+function sDiagnosticoFat(diag: DiagJson, d: ParsedData, bairros: Bairro[], idx: number, total: number): string {
+  const forcas = diag.forcas.length
+    ? diag.forcas.slice(0, 4)
+    : [
+        { titulo: 'Recorrência', descricao: d.recorrentes > 0 ? `${num(d.recorrentes)} clientes já recompraram — base de recorrência ativa.` : 'Ampliar programas de fidelidade para converter compradores únicos.' },
+        { titulo: 'Produtos', descricao: d.produtos[0] ? `"${d.produtos[0].nome}" é ancora de valor com ${num(d.produtos[0].qtd)} pedidos.` : 'Diversificar o cardápio com itens complementares.' },
+        { titulo: 'Dias Fortes', descricao: d.por_dia.length ? `Pico de pedidos em ${[...d.por_dia].sort((a, b) => b.pedidos - a.pedidos)[0]?.dia ?? '—'} — concentre esforços nesse dia.` : 'Mapeie os dias de pico para otimizar campanhas.' },
+        { titulo: 'Regiões', descricao: bairros[0] ? `${bairros[0].bairro} lidera com ${num(bairros[0].pedidos)} pedidos — fortalecer presença local aqui.` : 'Concentrar entrega em zonas de maior demanda.' },
+      ];
+
+  const forcaCards = forcas.map((f, i) => {
+    const colors = [PRIMARY, BLUE, ORANGE, RED];
+    const c = colors[i % colors.length];
+    return `<div style="border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:18px;position:relative;overflow:hidden">
+      <div style="position:absolute;top:0;left:0;width:100%;height:2px;background:${c}"></div>
+      <p style="font-family:${BEBAS};font-size:20px;color:${c};margin:4px 0 8px;letter-spacing:0.04em">${f.titulo}</p>
+      <p style="font-size:13px;color:${FG};font-family:${INTER};line-height:1.6;margin:0">${f.descricao}</p>
+    </div>`;
+  }).join('');
+
+  const sidebar = `
+    <div style="border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:16px;margin-bottom:12px">
+      <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 12px">Base de Clientes</p>
+      ${[
+        { label: 'Ativos',       value: num(d.ativos),     color: PRIMARY },
+        { label: 'Inativos',     value: num(d.inativos),   color: RED },
+        { label: 'Em Potencial', value: num(d.potenciais), color: BLUE },
+      ].map(item => `<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid ${BORDER};font-family:${INTER}">
+        <span style="font-size:12px;color:${MUTED}">${item.label}</span>
+        <span style="font-size:16px;font-family:${BEBAS};color:${item.color};line-height:1">${item.value}</span>
+      </div>`).join('')}
+    </div>
+    ${bairros[0] ? `<div style="border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:16px">
+      <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 10px">Top Regiões</p>
+      ${bairros.slice(0, 4).map((b, i) => `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid ${BORDER};font-family:${INTER}">
+        <span style="font-size:12px;color:${i === 0 ? FG : MUTED}">${b.bairro}</span>
+        <span style="font-size:12px;font-weight:700;color:${i === 0 ? PRIMARY : MUTED}">${num(b.pedidos)} ped.</span>
+      </div>`).join('')}
+    </div>` : ''}`;
+
+  const body = `
+${secTitle('Diagnóstico de Faturamento', 'As 4 forças que explicam o resultado do período')}
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 280px;gap:16px;align-items:start">
+  <div style="grid-column:1/5;display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:16px">${forcaCards}</div>
+  <div>${sidebar}</div>
+</div>
+${diag.diagnostico ? `<div style="margin-top:16px;border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:16px 20px">
+  <p style="font-size:14px;color:${FG};font-family:${INTER};line-height:1.7;margin:0">${diag.diagnostico}</p>
+</div>` : ''}`;
+  return wrapSlide(body, idx, total, 'ANÁLISE EXPANDIDA');
+}
+
+function sPlanoDetalhado(diag: DiagJson, idx: number, total: number): string {
+  const JORNADA_LABELS: Record<string, string> = {
+    descoberta:          'Descoberta',
+    primeira_compra:     '1ª Compra',
+    recompra:            'Recompra',
+    reativacao_leve:     'Reativação Leve',
+    reativacao_forte:    'Reativação Forte',
+  };
+  const jornada = diag.jornada.length
+    ? diag.jornada
+    : ['descoberta', 'primeira_compra', 'recompra', 'reativacao_leve', 'reativacao_forte'];
+
+  const jornadaHtml = `<div style="display:flex;align-items:center;gap:0;margin-bottom:20px;overflow:hidden">
+    ${jornada.map((etapa, i) => `
+      <div style="flex:1;position:relative;text-align:center">
+        <div style="background:${i === 0 ? PRIMARY : CARD};border:1px solid ${i === 0 ? PRIMARY : BORDER};padding:8px 4px;clip-path:polygon(0 0,calc(100% - 10px) 0,100% 50%,calc(100% - 10px) 100%,0 100%,${i === 0 ? '0' : '10px'} 50%);margin-right:-1px">
+          <p style="font-size:10px;font-weight:700;color:${i === 0 ? BG : MUTED};text-transform:uppercase;letter-spacing:0.06em;font-family:${INTER};margin:0;line-height:1.2">${JORNADA_LABELS[etapa] ?? etapa}</p>
+        </div>
+      </div>`).join('')}
+  </div>`;
+
+  const planCards = diag.plano.slice(0, 5).map((p, i) => {
+    const etapa = jornada[i] ?? '';
+    const etapaLabel = JORNADA_LABELS[etapa] ?? '';
+    return `<div style="border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:16px;display:flex;flex-direction:column;gap:8px;position:relative;overflow:hidden">
+      <div style="position:absolute;top:0;left:0;right:0;height:2px;background:${PRIMARY}"></div>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+        <div style="width:28px;height:28px;background:${PRIMARY};border-radius:2px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+          <span style="font-size:14px;font-weight:800;color:#0e0f14;font-family:${INTER}">${i + 1}</span>
+        </div>
+        ${etapaLabel ? `<span style="font-size:9px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.08em;font-family:${INTER};border:1px solid ${BORDER};padding:2px 6px;flex-shrink:0">${etapaLabel}</span>` : ''}
+      </div>
+      <p style="font-size:13px;font-weight:700;color:${FG};font-family:${INTER};margin:0;line-height:1.3">${p.acao}</p>
+      ${p.objetivo ? `<p style="font-size:11px;color:${PRIMARY};font-family:${INTER};margin:0;line-height:1.4"><strong>Objetivo:</strong> ${p.objetivo}</p>` : ''}
+      ${p.publico ? `<p style="font-size:11px;color:${MUTED};font-family:${INTER};margin:0;line-height:1.4"><strong style="color:${FG}">Público:</strong> ${p.publico}</p>` : ''}
+      ${p.mensagem ? `<div style="margin-top:4px;padding:8px;background:${BG};border-radius:2px;border:1px solid ${BORDER}">
+        <p style="font-size:11px;color:${MUTED};font-family:${INTER};margin:0;line-height:1.5;font-style:italic">"${p.mensagem}"</p>
+      </div>` : ''}
+    </div>`;
+  }).join('');
+
+  const body = `
+${secTitle('Plano de Ação Detalhado', 'Estratégia campanha a campanha para o próximo mês')}
+${jornadaHtml}
+<div style="display:grid;grid-template-columns:repeat(${Math.min(diag.plano.length, 5)},1fr);gap:12px">${planCards}</div>`;
+  return wrapSlide(body, idx, total, 'ANÁLISE EXPANDIDA');
+}
+
+// ── Diagnosis (Claude — expanded JSON) ────────────────────────────────────────
+
+async function fetchDiagnosis(
+  d: ParsedData, prevD: ParsedData | null, meta: MetaAdsFull | null,
+  bairros: Bairro[], clientName: string, periodo: string, agencyContext: string,
+): Promise<DiagJson> {
   const summary = {
     cliente: clientName, periodo,
     faturamento: d.faturamento, pedidos: d.pedidos_ativos, ticket: Math.round(d.ticket),
     ativos: d.ativos, inativos: d.inativos, potenciais: d.potenciais,
-    top_produtos: d.produtos.slice(0, 3).map(p => `${p.nome} (${p.qtd}x)`),
-    top_bairro: bairros[0]?.bairro ?? null,
-    meta_ads: meta ? { investimento: meta.investimento, alcance: meta.alcance, cliques: meta.cliques } : null,
+    uma_compra: d.uma_compra, recorrentes: d.recorrentes,
+    top_produtos: d.produtos.slice(0, 5).map(p => `${p.nome} (${p.qtd}x)`),
+    top_bairros: bairros.slice(0, 3).map(b => `${b.bairro} (${b.pedidos} ped)`),
+    dias_semana: d.por_dia.sort((a, b) => b.pedidos - a.pedidos).slice(0, 2).map(x => x.dia),
+    meta_ads: meta ? {
+      investimento: meta.investimento, alcance: meta.alcance, cliques: meta.cliques,
+      campanhas: meta.campanhas.map(c => ({
+        nome: c.nome, tipo: c.tipo,
+        conversas: c.metricas.conversas, compras: c.metricas.compras,
+        frequencia: c.metricas.frequencia, roas: c.metricas.purchase_roas,
+      })),
+    } : null,
+    periodo_anterior: prevD ? { faturamento: prevD.faturamento, pedidos: prevD.pedidos_ativos, ticket: Math.round(prevD.ticket) } : null,
     contexto_agencia: agencyContext || null,
   };
 
+  const schema = `{
+  "diagnostico": "2-3 frases sobre o estado atual do negócio",
+  "forcas": [
+    {"titulo":"Recorrência","descricao":"..."},
+    {"titulo":"Produtos","descricao":"..."},
+    {"titulo":"Dias","descricao":"..."},
+    {"titulo":"Regiões","descricao":"..."}
+  ],
+  "pontos_fortes": ["...","...","..."],
+  "pontos_atencao": ["...","..."],
+  "plano": [
+    {"acao":"...","objetivo":"resultado esperado","publico":"quem recebe","mensagem":"texto de exemplo para disparo"},
+    {"acao":"...","objetivo":"...","publico":"...","mensagem":"..."},
+    {"acao":"...","objetivo":"...","publico":"...","mensagem":"..."},
+    {"acao":"...","objetivo":"...","publico":"...","mensagem":"..."},
+    {"acao":"...","objetivo":"...","publico":"...","mensagem":"..."}
+  ],
+  "insight_campanha_conversa": "análise das campanhas de conversa — 1-2 frases ou string vazia",
+  "insight_campanha_conversao": "análise das campanhas de conversão — 1-2 frases ou string vazia",
+  "frase_fechamento": "frase motivacional de 1 linha sobre o objetivo do próximo mês",
+  "jornada": ["descoberta","primeira_compra","recompra","reativacao_leve","reativacao_forte"]
+}`;
+
   const msg = await anthropic.messages.create({
     model:      'claude-sonnet-4-6',
-    max_tokens: 1200,
-    system:     'Analista de marketing de delivery. Responda APENAS com JSON válido. Sem markdown, sem texto extra.',
-    messages:   [{ role: 'user', content: `DADOS:\n${JSON.stringify(summary, null, 2)}\n\nRetorne:\n{"diagnostico":"2-3 frases sobre o estado do negócio","pontos_fortes":["...","...","..."],"pontos_atencao":["...","..."],"plano":[{"acao":"...","motivo":"..."},{"acao":"...","motivo":"..."},{"acao":"...","motivo":"..."},{"acao":"...","motivo":"..."},{"acao":"...","motivo":"..."}]}` }],
+    max_tokens: 2500,
+    system:     'Analista de marketing de delivery para restaurantes. Responda APENAS com JSON válido. Sem markdown, sem texto extra.',
+    messages:   [{ role: 'user', content: `DADOS:\n${JSON.stringify(summary, null, 2)}\n\nRetorne EXATAMENTE este schema:\n${schema}` }],
   });
 
   const raw = msg.content[0].type === 'text' ? msg.content[0].text : '{}';
   try {
-    return JSON.parse(raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim()) as DiagJson;
+    const parsed = JSON.parse(raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim()) as DiagJson;
+    return {
+      diagnostico:                parsed.diagnostico                ?? 'Análise indisponível.',
+      forcas:                     Array.isArray(parsed.forcas)      ? parsed.forcas : [],
+      pontos_fortes:              Array.isArray(parsed.pontos_fortes) ? parsed.pontos_fortes : [],
+      pontos_atencao:             Array.isArray(parsed.pontos_atencao) ? parsed.pontos_atencao : [],
+      plano:                      Array.isArray(parsed.plano)        ? parsed.plano : [],
+      insight_campanha_conversa:  parsed.insight_campanha_conversa  ?? '',
+      insight_campanha_conversao: parsed.insight_campanha_conversao ?? '',
+      frase_fechamento:           parsed.frase_fechamento            ?? '',
+      jornada:                    Array.isArray(parsed.jornada)      ? parsed.jornada : ['descoberta','primeira_compra','recompra','reativacao_leve','reativacao_forte'],
+    };
   } catch {
-    return { diagnostico: 'Análise indisponível.', pontos_fortes: [], pontos_atencao: [], plano: [] };
+    return {
+      diagnostico: 'Análise indisponível.',
+      forcas: [], pontos_fortes: [], pontos_atencao: [], plano: [],
+      insight_campanha_conversa: '', insight_campanha_conversao: '',
+      frase_fechamento: '', jornada: [],
+    };
   }
-}
-
-function sDiagnostico(diag: DiagJson, idx: number, total: number): string {
-  const colLabel = (text: string) =>
-    `<p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 10px">${text}</p>`;
-
-  const fortes = diag.pontos_fortes.map(p =>
-    `<div style="display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-bottom:1px solid ${BORDER}">
-      <div style="width:20px;height:20px;background:${PRIMARY}20;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;color:${PRIMARY}">✓</div>
-      <span style="font-size:13px;color:${FG};font-family:${INTER};line-height:1.4">${p}</span>
-    </div>`
-  ).join('');
-
-  const atencao = diag.pontos_atencao.map(p =>
-    `<div style="display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-bottom:1px solid ${BORDER}">
-      <div style="width:20px;height:20px;background:${RED}20;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;color:${RED}">!</div>
-      <span style="font-size:13px;color:${FG};font-family:${INTER};line-height:1.4">${p}</span>
-    </div>`
-  ).join('');
-
-  const plano = diag.plano.map((p, i) =>
-    `<div style="display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-bottom:1px solid ${BORDER}">
-      <div style="width:26px;height:26px;background:${PRIMARY};border-radius:2px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
-        <span style="font-size:13px;font-weight:800;color:#0e0f14;font-family:${INTER}">${i + 1}</span>
-      </div>
-      <div>
-        <div style="font-size:13px;font-weight:700;color:${FG};font-family:${INTER}">${p.acao}</div>
-        <div style="font-size:12px;color:${MUTED};font-family:${INTER};margin-top:3px">${p.motivo}</div>
-      </div>
-    </div>`
-  ).join('');
-
-  const body = `
-${secTitle('Diagnóstico e Plano de Ação', 'Análise do período e próximos passos')}
-<div style="border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:16px 20px;margin-bottom:22px">
-  <p style="font-size:14px;color:${FG};font-family:${INTER};line-height:1.7;margin:0">${diag.diagnostico}</p>
-</div>
-<div style="display:grid;grid-template-columns:1fr 1fr 1.6fr;gap:24px">
-  <div>${colLabel('Pontos Fortes')}${fortes}</div>
-  <div>${colLabel('Atenção')}${atencao}</div>
-  <div>${colLabel('Plano para o Próximo Mês')}${plano}</div>
-</div>`;
-  return wrapSlide(body, idx, total);
 }
 
 // ── Public builder ─────────────────────────────────────────────────────────────
 
 export async function buildDeliveryReport(opts: {
-  clientId:      string;
-  clientName:    string;
-  from:          string;
-  to:            string;
-  csvFiles:      { name: string; content: string }[];
+  clientId:       string;
+  clientName:     string;
+  from:           string;
+  to:             string;
+  csvFiles:       { name: string; content: string }[];
   agencyContext?: string;
-  connectionId?: string | null;
-  accountIds?:   string[];
+  connectionId?:  string | null;
+  accountIds?:    string[];
 }): Promise<{ html: string }> {
   const { clientId, clientName, from, to, csvFiles = [], agencyContext = '', connectionId, accountIds = [] } = opts;
 
-  const fromDate  = new Date(from + 'T12:00:00');
-  const toDate    = new Date(to + 'T12:00:00');
-  const MONTHS    = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
-  const periodo   = `${MONTHS[fromDate.getMonth()]}/${fromDate.getFullYear()}`;
+  const fromDate = new Date(from + 'T12:00:00');
+  const toDate   = new Date(to   + 'T12:00:00');
 
-  // Parse files + fetch API/DB in parallel
-  const data = parseAllFiles(csvFiles, toDate);
-  const [bairros, meta] = await Promise.all([
+  const MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  const periodo      = `${MONTHS[fromDate.getMonth()]}/${fromDate.getFullYear()}`;
+
+  // Separate current vs previous-period CSV files (prefix ant-)
+  const { current: currentFiles, previous: prevFiles } = separateFiles(csvFiles);
+  const hasPrev = prevFiles.length > 0;
+
+  // Parse CSV data
+  const data     = parseAllFiles(currentFiles, toDate);
+  const prevData  = hasPrev ? parseAllFiles(prevFiles, fromDate) : null;
+
+  // Previous period label for capa
+  const prevPeriodo = hasPrev && prevFiles.length > 0
+    ? (() => {
+        const prevMonth = new Date(fromDate.getFullYear(), fromDate.getMonth() - 1, 1);
+        return `${MONTHS[prevMonth.getMonth()]}/${prevMonth.getFullYear()}`;
+      })()
+    : '';
+
+  // Parallel: DB bairros + Meta API (campaigns + creatives)
+  const [bairros, { meta, creatives }] = await Promise.all([
     fetchBairros(clientId, from, to),
-    fetchMetaAds(connectionId, accountIds, from, to),
+    fetchMetaData(connectionId, accountIds, from, to),
   ]);
 
-  console.log(`[delivery] ${clientName} | ativos:${data.ativos} inativos:${data.inativos} pot:${data.potenciais} fat:${brl(data.faturamento)} prod:${data.produtos.length} bairros:${bairros.length} meta:${meta ? 'sim' : 'não'}`);
+  console.log(`[delivery] ${clientName} | ativos:${data.ativos} fat:${brl(data.faturamento)} prod:${data.produtos.length} bairros:${bairros.length} meta:${meta ? 'sim' : 'não'} criativos:${creatives.length} prev:${hasPrev}`);
 
-  // Claude writes ONLY the diagnosis (JSON, ~300 tokens)
-  const diag = await fetchDiagnosis(data, meta, bairros, clientName, periodo, agencyContext);
+  // Claude writes ONLY the diagnosis JSON (~2500 tokens)
+  const diag = await fetchDiagnosis(data, prevData, meta, bairros, clientName, periodo, agencyContext);
 
   // Determine active slides
   const hasVisao   = data.faturamento > 0 || data.pedidos_ativos > 0;
@@ -650,20 +1166,38 @@ export async function buildDeliveryReport(opts: {
   const hasProd    = data.produtos.length > 0;
   const hasRegiao  = bairros.length > 0;
   const hasMeta    = meta !== null;
+  const hasDestaques    = hasMeta && meta!.campanhas.length > 0;
+  const hasDiagFat      = hasBase || hasRegiao;
+  const hasPlanoDetalh  = diag.plano.length > 0;
 
-  const total = 1 + (hasVisao ? 1 : 0) + (hasDia ? 1 : 0) + (hasBase ? 1 : 0) + (hasInat ? 1 : 0) + (hasProd ? 1 : 0) + (hasRegiao ? 1 : 0) + (hasMeta ? 1 : 0) + 1;
+  const total = 1
+    + (hasVisao  ? 1 : 0)
+    + (hasDia    ? 1 : 0)
+    + (hasRegiao ? 1 : 0)
+    + (hasBase   ? 1 : 0)
+    + (hasInat   ? 1 : 0)
+    + (hasProd   ? 1 : 0)
+    + (hasMeta   ? 1 : 0)
+    + 1                           // diagnóstico
+    + (hasDestaques   ? 1 : 0)
+    + (hasDiagFat     ? 1 : 0)
+    + (hasPlanoDetalh ? 1 : 0);
 
   const slides: string[] = [];
   let i = 1;
-  slides.push(sCapa(data, meta, clientName, periodo, total));
-  if (hasVisao)  slides.push(sVisaoGeral(data, ++i, total));
-  if (hasDia)    slides.push(sPorDia(data, ++i, total));
-  if (hasBase)   slides.push(sBase(data, ++i, total));
-  if (hasInat)   slides.push(sInativos(data, ++i, total));
-  if (hasProd)   slides.push(sProdutos(data, ++i, total));
-  if (hasRegiao) slides.push(sRegioes(bairros, ++i, total));
-  if (hasMeta)   slides.push(sMetaAds(meta!, ++i, total));
-  slides.push(sDiagnostico(diag, ++i, total));
+
+  slides.push(sCapa(data, meta, clientName, periodo, prevPeriodo, diag, total));
+  if (hasVisao)       slides.push(sVisaoGeral(data, prevData, ++i, total));
+  if (hasDia)         slides.push(sPorDia(data, ++i, total));
+  if (hasRegiao)      slides.push(sRegioes(bairros, ++i, total));
+  if (hasBase)        slides.push(sBase(data, ++i, total));
+  if (hasInat)        slides.push(sInativos(data, ++i, total));
+  if (hasProd)        slides.push(sProdutos(data, ++i, total));
+  if (hasMeta)        slides.push(sMetaAds(meta!, ++i, total));
+  slides.push(sDiagnostico(diag, creatives, ++i, total));
+  if (hasDestaques)   slides.push(sDestaqueCampanhas(meta!, diag, ++i, total));
+  if (hasDiagFat)     slides.push(sDiagnosticoFat(diag, data, bairros, ++i, total));
+  if (hasPlanoDetalh) slides.push(sPlanoDetalhado(diag, ++i, total));
 
   return { html: `<div style="background:${BG};padding:28px;font-family:${INTER}">${slides.join('')}</div>` };
 }

@@ -12,9 +12,10 @@ export async function POST(request: NextRequest) {
       agencyContext?: string; template?: string;
       csvContent?: string;
       csvFiles?: { name: string; content: string }[];
+      supplementaryContent?: string;
     };
 
-    const { clientId, from, to, manualNotes, agencyContext, template } = body;
+    const { clientId, from, to, manualNotes, agencyContext, template, supplementaryContent } = body;
     const csvFiles = body.csvFiles ?? [];
     if (!clientId || !from || !to) {
       return Response.json({ error: 'clientId, from e to são obrigatórios' }, { status: 400 });
@@ -25,6 +26,8 @@ export async function POST(request: NextRequest) {
     let clientName = '';
     let metaConnectionId: string | null = null;
     let metaAccountIds: string[] = [];
+    let googleConnectionId: string | null = null;
+    let googleAccountIds: string[] = [];
 
     try {
       const { rows: clientRows } = await pool.query(
@@ -40,6 +43,9 @@ export async function POST(request: NextRequest) {
       const metaLinks = links.filter((l: { platform: string }) => l.platform === 'meta_ads' || l.platform === 'meta');
       metaConnectionId = (metaLinks[0] as { connection_id: string } | undefined)?.connection_id ?? null;
       metaAccountIds = metaLinks.map((l: { account_id: string }) => l.account_id);
+      const googleLinks = links.filter((l: { platform: string }) => l.platform === 'google_ads' || l.platform === 'google');
+      googleConnectionId = (googleLinks[0] as { connection_id: string } | undefined)?.connection_id ?? null;
+      googleAccountIds = googleLinks.map((l: { account_id: string }) => l.account_id);
     } finally {
       await pool.end();
     }
@@ -67,9 +73,12 @@ export async function POST(request: NextRequest) {
       clientName,
       connectionId: metaConnectionId,
       accountIds: metaAccountIds,
+      googleConnectionId,
+      googleAccountIds,
       periodFrom: from,
       periodTo: to,
       agencyContext: agencyContext ?? manualNotes,
+      supplementaryContent: supplementaryContent ?? undefined,
       apiKey,
     });
 

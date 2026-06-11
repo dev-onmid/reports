@@ -40,10 +40,28 @@ function fmtDateTime(iso: string) {
 
 function defaultDateRange() {
   const now = new Date();
-  const first = new Date(now.getFullYear(), now.getMonth() - 12, 1);
+  const first = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const last = new Date(now.getFullYear(), now.getMonth(), 0);
   const fmt = (d: Date) => d.toISOString().split('T')[0];
   return { from: fmt(first), to: fmt(last) };
+}
+
+type ClientLink = { platform: string; accountId: string; accountName: string | null };
+
+function platformLabel(platform: string): string {
+  const map: Record<string, string> = {
+    meta: 'Meta Ads', meta_ads: 'Meta Ads',
+    google: 'Google Ads', google_ads: 'Google Ads',
+    instagram: 'Instagram',
+  };
+  return map[platform] ?? platform;
+}
+
+function platformColor(platform: string): string {
+  if (platform === 'meta' || platform === 'meta_ads') return 'bg-blue-500/15 text-blue-300 border-blue-400/30';
+  if (platform === 'google' || platform === 'google_ads') return 'bg-orange-500/15 text-orange-300 border-orange-400/30';
+  if (platform === 'instagram') return 'bg-pink-500/15 text-pink-300 border-pink-400/30';
+  return 'bg-muted text-muted-foreground border-border';
 }
 
 const PAGE_SIZE = 8;
@@ -60,6 +78,8 @@ export default function RelatoriosPage() {
   const [genForm, setGenForm] = useState({ clientId: '', from: '', to: '', agencyContext: '' });
   const [genTemplate, setGenTemplate] = useState<'performance' | 'delivery'>('performance');
   const [genCsvFiles, setGenCsvFiles] = useState<{ name: string; content: string }[]>([]);
+  const [genSupplementaryFiles, setGenSupplementaryFiles] = useState<{ name: string; content: string }[]>([]);
+  const [clientLinks, setClientLinks] = useState<ClientLink[]>([]);
   const [generating, setGenerating] = useState(false);
 
   // Automações (configs)
@@ -96,12 +116,23 @@ export default function RelatoriosPage() {
     }).catch(() => {});
   }, []);
 
+  // Fetch connected assets when client changes
+  useEffect(() => {
+    if (!genForm.clientId) { setClientLinks([]); return; }
+    fetch(`/api/clients/${genForm.clientId}/links`)
+      .then(r => r.ok ? r.json() : [])
+      .then((rows: ClientLink[]) => setClientLinks(rows))
+      .catch(() => setClientLinks([]));
+  }, [genForm.clientId]);
+
   // Default dates when modal opens
   function openGenModal() {
     const { from, to } = defaultDateRange();
     setGenForm({ clientId: '', from, to, agencyContext: '' });
     setGenTemplate('performance');
     setGenCsvFiles([]);
+    setGenSupplementaryFiles([]);
+    setClientLinks([]);
     setShowGenModal(true);
   }
 
@@ -128,6 +159,28 @@ export default function RelatoriosPage() {
     setGenCsvFiles(prev => prev.filter((_, i) => i !== index));
   }
 
+  function handleSupplementaryFiles(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    if (!files.length) return;
+    files.forEach(file => {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const content = (ev.target?.result as string) ?? '';
+        setGenSupplementaryFiles(prev => [...prev, { name: file.name, content }]);
+      };
+      if (/\.xlsx?$/i.test(file.name)) {
+        reader.readAsDataURL(file);
+      } else {
+        reader.readAsText(file, 'utf-8');
+      }
+    });
+    e.target.value = '';
+  }
+
+  function removeSupplementaryFile(index: number) {
+    setGenSupplementaryFiles(prev => prev.filter((_, i) => i !== index));
+  }
+
   async function generateReport() {
     if (!genForm.clientId || !genForm.from || !genForm.to) return;
     if (genTemplate === 'delivery' && !genCsvFiles.length) return;
@@ -141,6 +194,9 @@ export default function RelatoriosPage() {
       };
       if (genForm.agencyContext) payload.agencyContext = genForm.agencyContext;
       if (genTemplate === 'delivery') payload.csvFiles = genCsvFiles;
+      if (genTemplate === 'performance' && genSupplementaryFiles.length) {
+        payload.supplementaryContent = genSupplementaryFiles.map(f => `[${f.name}]\n${f.content}`).join('\n\n');
+      }
 
       const res = await fetch('/api/reports/run-once', {
         method: 'POST',
@@ -738,7 +794,7 @@ export default function RelatoriosPage() {
                   <p className="text-xs text-muted-foreground">Escolha o template e preencha os dados</p>
                 </div>
               </div>
-              <button onClick={() => setShowGenModal(false)} className="text-muted-foreground hover:text-foreground">
+              <button onClick={() => { setShowGenModal(false); setGenSupplementaryFiles([]); setClientLinks([]); }} className="text-muted-foreground hover:text-foreground">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -806,6 +862,18 @@ export default function RelatoriosPage() {
                   <option value="">Selecionar cliente...</option>
                   {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
+                {clientLinks.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {Array.from(new Set(clientLinks.map(l => l.platform))).map(platform => (
+                      <span key={platform} className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border', platformColor(platform))}>
+                        {platformLabel(platform)}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {genForm.clientId && clientLinks.length === 0 && (
+                  <p className="text-[10px] text-muted-foreground/50 pt-0.5">Nenhuma integração vinculada a este cliente.</p>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
@@ -846,8 +914,13 @@ export default function RelatoriosPage() {
               {genTemplate === 'delivery' && (
                 <div className="space-y-1.5">
                   <label className="text-xs text-muted-foreground font-medium">
-                    Planilhas do cardápio digital <span className="text-muted-foreground/50">(CSV / XML / TXT — pode anexar várias)</span>
+                    Planilhas do cardápio digital <span className="text-muted-foreground/50">(CSV / XLSX — pode anexar várias)</span>
                   </label>
+                  <p className="text-xs text-muted-foreground/60 leading-relaxed">
+                    Para exibir comparativo com mês anterior, nomeie os arquivos com prefixo{' '}
+                    <code className="bg-muted px-1 py-0.5 rounded text-[10px] font-mono">ant-</code>
+                    {' '}— ex: <code className="bg-muted px-1 py-0.5 rounded text-[10px] font-mono">ant-ativos.csv</code>
+                  </p>
                   {/* File list */}
                   {genCsvFiles.length > 0 && (
                     <div className="space-y-1">
@@ -877,14 +950,36 @@ export default function RelatoriosPage() {
               )}
 
               {genTemplate === 'performance' && (
-                <p className="text-[11px] text-muted-foreground/60">
-                  Padrão: últimos 12 meses. O template ONMID exibe o histórico mensal completo do período.
-                </p>
+                <div className="space-y-1.5">
+                  <label className="text-xs text-muted-foreground font-medium">
+                    Planilha suplementar <span className="text-muted-foreground/50">(opcional — enriquece a análise da IA)</span>
+                  </label>
+                  {genSupplementaryFiles.length > 0 && (
+                    <div className="space-y-1">
+                      {genSupplementaryFiles.map((f, i) => (
+                        <div key={i} className="flex items-center gap-2 px-3 py-2 rounded-md bg-violet-500/8 border border-violet-500/20">
+                          <FileCheck2 className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+                          <span className="text-xs text-violet-400 truncate flex-1">{f.name}</span>
+                          <button onClick={() => removeSupplementaryFile(i)} className="text-muted-foreground hover:text-destructive transition-colors shrink-0">
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <label className="flex items-center gap-3 px-4 py-3 rounded-lg border-2 border-dashed border-border hover:border-violet-500/40 cursor-pointer transition-colors">
+                    <input type="file" multiple accept=".csv,.xlsx,.txt" onChange={handleSupplementaryFiles} className="hidden" />
+                    <FileText className="w-4 h-4 text-muted-foreground shrink-0" />
+                    <span className="text-xs text-muted-foreground">
+                      {genSupplementaryFiles.length > 0 ? 'Adicionar mais planilhas...' : 'CSV / XLSX com dados extras (Google Sheets, CRM, etc.)'}
+                    </span>
+                  </label>
+                </div>
               )}
             </div>
 
             <div className="flex justify-end gap-2 pt-1">
-              <button onClick={() => setShowGenModal(false)} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
+              <button onClick={() => { setShowGenModal(false); setGenSupplementaryFiles([]); setClientLinks([]); }} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
                 Cancelar
               </button>
               <Button

@@ -20,6 +20,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   let config: {
     client_id: string; client_name: string;
     meta_connection_id: string | null; meta_account_ids: string[];
+    google_connection_id: string | null; google_account_ids: string[];
   } | null = null;
 
   try {
@@ -27,9 +28,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       SELECT
         rc.client_id, c.name AS client_name,
         (SELECT cal.connection_id FROM public.client_account_links cal
-         WHERE cal.client_id = rc.client_id AND cal.platform = 'meta' LIMIT 1) AS meta_connection_id,
+         WHERE cal.client_id = rc.client_id AND cal.platform IN ('meta','meta_ads') LIMIT 1) AS meta_connection_id,
         ARRAY(SELECT cal.account_id FROM public.client_account_links cal
-              WHERE cal.client_id = rc.client_id AND cal.platform = 'meta') AS meta_account_ids
+              WHERE cal.client_id = rc.client_id AND cal.platform IN ('meta','meta_ads')) AS meta_account_ids,
+        (SELECT cal.connection_id FROM public.client_account_links cal
+         WHERE cal.client_id = rc.client_id AND cal.platform IN ('google','google_ads') LIMIT 1) AS google_connection_id,
+        ARRAY(SELECT cal.account_id FROM public.client_account_links cal
+              WHERE cal.client_id = rc.client_id AND cal.platform IN ('google','google_ads')) AS google_account_ids
       FROM public.report_configs rc
       JOIN public.clients c ON c.id = rc.client_id
       WHERE rc.id = $1
@@ -52,6 +57,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     clientName: config.client_name,
     connectionId: config.meta_connection_id,
     accountIds: config.meta_account_ids,
+    googleConnectionId: config.google_connection_id,
+    googleAccountIds: config.google_account_ids,
     periodFrom: period.from,
     periodTo: period.to,
     manualNotes: body.manualNotes,

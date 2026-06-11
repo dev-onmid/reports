@@ -56,6 +56,101 @@ export function fmtMonth(isoDate: string): string {
   return `${months[d.getUTCMonth()]}/${String(d.getUTCFullYear()).slice(2)}`;
 }
 
+// ── Previous period helper ────────────────────────────────────────────────────
+
+function calcPrevPeriod(from: string, to: string): { from: string; to: string } {
+  const d1 = new Date(from + 'T00:00:00Z');
+  const d2 = new Date(to + 'T00:00:00Z');
+  const durationMs = d2.getTime() - d1.getTime() + 86400000;
+  const prevTo = new Date(d1.getTime() - 86400000);
+  const prevFrom = new Date(prevTo.getTime() - durationMs + 86400000);
+  const fmt = (d: Date) => d.toISOString().split('T')[0];
+  return { from: fmt(prevFrom), to: fmt(prevTo) };
+}
+
+// ── Google Ads fetch ──────────────────────────────────────────────────────────
+
+type GoogleAdsTotals = { spend: number; impressions: number; clicks: number; conversions: number };
+
+async function fetchGoogleAdsTotals(connectionId: string, accountIds: string[], from: string, to: string): Promise<GoogleAdsTotals> {
+  const pool = makeServerPool();
+  let conn: { access_token: string; refresh_token: string; token_expiry: string | null } | null = null;
+  try {
+    const { rows } = await pool.query(
+      `SELECT access_token, refresh_token, token_expiry FROM public.google_connections WHERE id = $1 AND status = 'connected'`,
+      [connectionId],
+    );
+    conn = rows[0] ?? null;
+  } finally {
+    await pool.end();
+  }
+
+  const empty: GoogleAdsTotals = { spend: 0, impressions: 0, clicks: 0, conversions: 0 };
+  if (!conn) return empty;
+
+  let accessToken = conn.access_token;
+  if (!conn.token_expiry || new Date(conn.token_expiry).getTime() < Date.now() + 60_000) {
+    const res = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: process.env.GOOGLE_CLIENT_ID ?? '',
+        client_secret: process.env.GOOGLE_CLIENT_SECRET ?? '',
+        refresh_token: conn.refresh_token,
+        grant_type: 'refresh_token',
+      }).toString(),
+    }).catch(() => null);
+    if (res?.ok) {
+      const data = await res.json() as { access_token?: string };
+      accessToken = data.access_token ?? accessToken;
+    }
+  }
+
+  const devToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? '';
+  const result = { ...empty };
+
+  await Promise.allSettled(accountIds.map(async (accountId) => {
+    const customerId = accountId.replace(/\D/g, '');
+    if (!customerId) return;
+    const res = await fetch(
+      `https://googleads.googleapis.com/v20/customers/${customerId}/googleAds:search`,
+      {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${accessToken}`, 'developer-token': devToken, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: `SELECT metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM campaign WHERE segments.date BETWEEN '${from}' AND '${to}' AND campaign.status != 'REMOVED'`,
+        }),
+      },
+    ).catch(() => null);
+    if (!res?.ok) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data = await res.json() as { results?: any[] };
+    for (const row of (data.results ?? [])) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const m = ((row as any).metrics ?? {}) as Record<string, number>;
+      result.spend += (m.costMicros ?? 0) / 1_000_000;
+      result.impressions += m.impressions ?? 0;
+      result.clicks += m.clicks ?? 0;
+      result.conversions += m.conversions ?? 0;
+    }
+  }));
+
+  return result;
+}
+
+function formatGoogleData(g: GoogleAdsTotals): string {
+  if (!g.spend && !g.impressions) return '';
+  return [
+    `Total investido: ${brl(g.spend)}`,
+    `Impressões: ${g.impressions.toLocaleString('pt-BR')}`,
+    `Cliques: ${g.clicks.toLocaleString('pt-BR')}`,
+    g.impressions > 0 ? `CTR: ${((g.clicks / g.impressions) * 100).toFixed(2)}%` : null,
+    `Conversões atribuídas: ${g.conversions}`,
+    g.conversions > 0 ? `Custo por conversão: ${brl(g.spend / g.conversions)}` : null,
+    g.clicks > 0 ? `CPC médio: ${brl(g.spend / g.clicks)}` : null,
+  ].filter(Boolean).join('\n');
+}
+
 // ── Monthly Meta Ads fetch ────────────────────────────────────────────────────
 
 type MonthlyMeta = {
@@ -248,8 +343,13 @@ SLIDE 4 — BASE DE CLIENTES (só com dados de CRM)
 • Evolução mensal em tabela
 • Insight: tendência e oportunidade
 
-SLIDE 5 — COMPARATIVO COM PERÍODO ANTERIOR (só com 2+ meses de dados)
-• Tabela lado a lado: mês atual vs anterior
+SLIDE 3B — GOOGLE ADS (gere este slide apenas se houver "DADOS GOOGLE ADS" nos dados fornecidos)
+• KPIs: Investimento | Impressões | Cliques | CTR | Conversões | CPC | Custo por conversão
+• Recomendação: o que otimizar baseado nos números do Google Ads
+
+SLIDE 5 — COMPARATIVO COM PERÍODO ANTERIOR (gere sempre — os dados do período anterior são sempre fornecidos como "PERÍODO ANTERIOR")
+• Use os labels PERÍODO ATUAL e PERÍODO ANTERIOR dos dados fornecidos para preencher a tabela
+• Tabela lado a lado: período anterior vs período atual (Meta + Google + CRM)
 • Variação em % com seta e cor para cada métrica
 • Contexto: por que subiu ou caiu, o que vai mudar
 
@@ -365,23 +465,38 @@ function buildUserPrompt(
   clientName: string,
   segment: string,
   period: string,
-  prevPeriod: string,
+  prevPeriodLabel: string,
   agencyContext: string,
   metaData: string,
   crmData: string,
+  metaPrevData?: string,
+  crmPrevData?: string,
+  googleData?: string,
+  googlePrevData?: string,
+  supplementary?: string,
 ): string {
   return [
     `Cliente: ${clientName}`,
     `Segmento: ${segment}`,
-    `Período: ${period}`,
-    `Período anterior para comparação: ${prevPeriod || 'não disponível — apresente como linha de base'}`,
+    `PERÍODO ATUAL: ${period}`,
+    `PERÍODO ANTERIOR (para comparação no slide 5): ${prevPeriodLabel}`,
     agencyContext ? `Contexto da agência: ${agencyContext}` : null,
     '',
-    'DADOS META ADS:',
+    `DADOS META ADS — PERÍODO ATUAL (${period}):`,
     metaData,
+    metaPrevData ? `\nDADOS META ADS — PERÍODO ANTERIOR (${prevPeriodLabel}):` : null,
+    metaPrevData ?? null,
+    googleData ? `\nDADOS GOOGLE ADS — PERÍODO ATUAL (${period}):` : null,
+    googleData ?? null,
+    googlePrevData ? `\nDADOS GOOGLE ADS — PERÍODO ANTERIOR (${prevPeriodLabel}):` : null,
+    googlePrevData ?? null,
     '',
-    'DADOS CRM / RESULTADOS DO NEGÓCIO:',
+    `DADOS CRM / RESULTADOS DO NEGÓCIO — PERÍODO ATUAL (${period}):`,
     crmData,
+    crmPrevData ? `\nDADOS CRM — PERÍODO ANTERIOR (${prevPeriodLabel}):` : null,
+    crmPrevData ?? null,
+    supplementary ? `\nDADOS SUPLEMENTARES (planilha anexada pelo cliente):` : null,
+    supplementary ?? null,
   ].filter(l => l !== null).join('\n');
 }
 
@@ -392,31 +507,57 @@ export async function buildOmniReport(input: {
   clientName: string;
   connectionId?: string | null;
   accountIds?: string[];
+  googleConnectionId?: string | null;
+  googleAccountIds?: string[];
   periodFrom: string;
   periodTo: string;
   agencyContext?: string;
   apiKey: string;
   manualNotes?: string;
+  supplementaryContent?: string;
 }): Promise<{ html: string }> {
   const { clientId, clientName, connectionId, accountIds, periodFrom, periodTo, apiKey } = input;
+  const googleConnectionId = input.googleConnectionId ?? null;
+  const googleAccountIds = input.googleAccountIds ?? [];
   const agencyContext = input.agencyContext ?? input.manualNotes ?? '';
+  const supplementaryContent = input.supplementaryContent ?? '';
 
-  const [monthlyMeta, monthlyCrm] = await Promise.all([
+  const prev = calcPrevPeriod(periodFrom, periodTo);
+  const hasGoogle = Boolean(googleConnectionId && googleAccountIds.length);
+
+  const [monthlyMeta, monthlyCrm, prevMonthlyMeta, prevMonthlyCrm, googleTotals, googlePrevTotals] = await Promise.all([
     connectionId && accountIds?.length
       ? fetchMonthlyMeta(connectionId, accountIds, periodFrom, periodTo)
       : Promise.resolve([] as MonthlyMeta[]),
     fetchMonthlyCrm(clientId, periodFrom, periodTo),
+    connectionId && accountIds?.length
+      ? fetchMonthlyMeta(connectionId, accountIds, prev.from, prev.to)
+      : Promise.resolve([] as MonthlyMeta[]),
+    fetchMonthlyCrm(clientId, prev.from, prev.to),
+    hasGoogle
+      ? fetchGoogleAdsTotals(googleConnectionId!, googleAccountIds, periodFrom, periodTo)
+      : Promise.resolve({ spend: 0, impressions: 0, clicks: 0, conversions: 0 }),
+    hasGoogle
+      ? fetchGoogleAdsTotals(googleConnectionId!, googleAccountIds, prev.from, prev.to)
+      : Promise.resolve({ spend: 0, impressions: 0, clicks: 0, conversions: 0 }),
   ]);
 
-  const period     = `${fmtMonth(periodFrom)} a ${fmtMonth(periodTo)}`;
-  const firstMonth = monthlyCrm[0]?.label ?? monthlyMeta[0]?.label ?? '';
-  const prevPeriod = firstMonth ? `mês anterior a ${firstMonth}` : 'não disponível';
+  const period          = `${fmtMonth(periodFrom)} a ${fmtMonth(periodTo)}`;
+  const prevPeriodLabel = `${fmtMonth(prev.from)} a ${fmtMonth(prev.to)}`;
 
-  const metaData = formatMetaData(monthlyMeta);
-  const crmData  = formatCrmData(monthlyCrm);
-  const segment  = 'Marketing Digital';
+  const metaData     = formatMetaData(monthlyMeta);
+  const metaPrevData = formatMetaData(prevMonthlyMeta);
+  const crmData      = formatCrmData(monthlyCrm);
+  const crmPrevData  = formatCrmData(prevMonthlyCrm);
+  const googleData   = formatGoogleData(googleTotals) || undefined;
+  const googlePrevData = formatGoogleData(googlePrevTotals) || undefined;
+  const segment      = 'Marketing Digital';
 
-  const userPrompt = buildUserPrompt(clientName, segment, period, prevPeriod, agencyContext, metaData, crmData);
+  const userPrompt = buildUserPrompt(
+    clientName, segment, period, prevPeriodLabel, agencyContext,
+    metaData, crmData, metaPrevData, crmPrevData, googleData, googlePrevData,
+    supplementaryContent || undefined,
+  );
 
   let html = '';
 
