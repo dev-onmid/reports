@@ -123,6 +123,219 @@ const pieData = [
 
 const PIE_COLORS = ["#55f52f", "#7b2cff", "#cccccc"];
 
+// ── Sparkline (SVG) ──────────────────────────────────────────────────────────
+
+const TREND_UP   = "M0 76 C28 65 45 56 68 67 S111 79 132 61 S158 62 178 47 S204 16 229 31 S264 52 287 36 S306 26 320 16";
+const TREND_DOWN = "M0 16 C28 27 45 36 68 25 S111 13 132 31 S158 30 178 45 S204 76 229 61 S264 40 287 56 S306 66 320 76";
+const TREND_FLAT = "M0 46 C28 43 45 48 68 45 S111 42 132 46 S158 44 178 46 S204 44 229 46 S264 44 287 46 S306 44 320 46";
+
+function MiniTrendLine({ color, trend = "up" }: { color: string; trend?: "up" | "down" | "flat" }) {
+  const safeId = color.replace(/[^a-zA-Z0-9]/g, "");
+  const gradId = `ds-trend-${safeId}-${trend}`;
+  const path = trend === "down" ? TREND_DOWN : trend === "flat" ? TREND_FLAT : TREND_UP;
+  const closed = `${path} L320 92 L0 92 Z`;
+  return (
+    <svg viewBox="0 0 320 92" preserveAspectRatio="none" className="h-full min-h-[48px] w-full block overflow-visible" aria-hidden>
+      <defs>
+        <linearGradient id={gradId} x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.35" />
+          <stop offset="100%" stopColor={color} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={path} fill="none" stroke={color} strokeWidth="4" strokeLinecap="round" />
+      <path d={closed} fill={`url(#${gradId})`} />
+    </svg>
+  );
+}
+
+// ── KPI card (dashboard pattern) ─────────────────────────────────────────────
+
+function DsKpiCard({
+  title, value, delta, positive, color, goalPct,
+}: {
+  title: string; value: string; delta: string; positive: boolean; color: string; goalPct?: number;
+}) {
+  return (
+    <div className="relative flex flex-col h-full overflow-hidden rounded-[var(--radius)] border border-border bg-card p-5">
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5" style={{ backgroundColor: color }} />
+      <div className="pointer-events-none absolute top-0 left-0 h-3 w-3" style={{ backgroundColor: color }} />
+      <div className="flex items-start justify-between gap-2 mt-1">
+        <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">{title}</p>
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius)] border border-border bg-card">
+          <BarChart3 className="h-[18px] w-[18px]" style={{ color }} />
+        </span>
+      </div>
+      <p className="mt-3 font-heading font-normal text-xl leading-none text-foreground">{value}</p>
+      <p className={`mt-1.5 flex items-center gap-0.5 text-xs font-semibold ${positive ? "text-emerald-500" : "text-red-500"}`}>
+        {positive ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+        {delta}
+      </p>
+      {goalPct !== undefined && (
+        <p className={`mt-1 flex items-center gap-1 text-[11px] font-semibold ${goalPct >= 100 ? "text-emerald-500" : "text-amber-500"}`}>
+          <CircleDot className="h-2.5 w-2.5" />
+          {goalPct}% vs meta
+        </p>
+      )}
+      <div className="mt-3 -mx-1 flex-1 min-h-0">
+        <MiniTrendLine color={positive ? "#34d399" : "#f87171"} trend={positive ? "up" : "down"} />
+      </div>
+      {goalPct !== undefined && (
+        <div className="mt-3 h-[3px] overflow-hidden rounded-none bg-border">
+          <div className="h-full transition-all" style={{ width: `${Math.min(100, goalPct)}%`, backgroundColor: goalPct >= 100 ? "#22c55e" : goalPct >= 50 ? "#facc15" : "#ef4444" }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Compact info card (dashboard smaller variant) ────────────────────────────
+
+function DsCompactCard({ title, value, color }: { title: string; value: string; color: string }) {
+  return (
+    <div className="relative overflow-hidden rounded-[var(--radius)] border border-border bg-card p-4">
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5" style={{ backgroundColor: color }} />
+      <div className="pointer-events-none absolute top-0 left-0 h-3 w-3" style={{ backgroundColor: color }} />
+      <div className="flex items-start justify-between gap-3 mt-1">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{title}</p>
+          <p className="mt-2 font-heading text-xl leading-none text-foreground">{value}</p>
+        </div>
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius)] border border-border" style={{ color }}>
+          <BarChart3 className="h-[18px] w-[18px]" />
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ── Donut SVG chart ───────────────────────────────────────────────────────────
+
+function polarToCartesian(cx: number, cy: number, r: number, deg: number) {
+  const rad = (deg - 90) * Math.PI / 180;
+  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+}
+
+function donutSlicePath(cx: number, cy: number, outer: number, inner: number, start: number, end: number) {
+  const safe = end - start >= 360 ? start + 359.99 : end;
+  const os = polarToCartesian(cx, cy, outer, safe);
+  const oe = polarToCartesian(cx, cy, outer, start);
+  const is = polarToCartesian(cx, cy, inner, start);
+  const ie = polarToCartesian(cx, cy, inner, safe);
+  const arc = safe - start <= 180 ? "0" : "1";
+  return `M ${os.x} ${os.y} A ${outer} ${outer} 0 ${arc} 0 ${oe.x} ${oe.y} L ${is.x} ${is.y} A ${inner} ${inner} 0 ${arc} 1 ${ie.x} ${ie.y} Z`;
+}
+
+const DONUT_SLICES = [
+  { label: "18–24", value: 22, color: "#0B84FF" },
+  { label: "25–34", value: 38, color: "#3BA0FF" },
+  { label: "35–44", value: 25, color: "#70BCFF" },
+  { label: "45+",   value: 15, color: "#B3D9FF" },
+];
+
+function DsDonutCard() {
+  const [active, setActive] = useState<number | null>(null);
+  const total = DONUT_SLICES.reduce((s, d) => s + d.value, 0);
+  let cursor = 0;
+  const slices = DONUT_SLICES.map((d, i) => {
+    const angle = (d.value / total) * 360;
+    const s = { ...d, i, pct: Math.round((d.value / total) * 100), start: cursor, end: cursor + angle };
+    cursor += angle;
+    return s;
+  });
+
+  return (
+    <div className="flex min-h-[240px] flex-col rounded-[var(--radius)] border border-border bg-card p-4">
+      <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground">Faixa etária</h4>
+      <p className="mt-0.5 text-[11px] text-muted-foreground">{total.toLocaleString("pt-BR")} impressões</p>
+      <div className="mt-3 flex flex-1 min-h-0 justify-center items-center overflow-hidden">
+        <svg viewBox="0 0 240 240" className="h-full w-auto max-w-full overflow-visible" role="img" aria-label="Donut chart de faixas etárias">
+          {slices.map((s) => (
+            <path
+              key={s.label}
+              d={donutSlicePath(120, 120, 108, 50, s.start, s.end)}
+              fill={s.color}
+              stroke="rgba(0,0,0,0.35)"
+              strokeWidth="1"
+              className="origin-center transition-all duration-200"
+              style={{
+                opacity: active === null || active === s.i ? 1 : 0.35,
+                transform: active === s.i ? "scale(1.07)" : "scale(1)",
+                filter: `drop-shadow(0 0 ${active === s.i ? 16 : 8}px ${s.color}AA)`,
+              }}
+              onMouseEnter={() => setActive(s.i)}
+              onMouseLeave={() => setActive(null)}
+            >
+              <title>{`${s.label}: ${s.pct}%`}</title>
+            </path>
+          ))}
+          <circle cx="120" cy="120" r="42" className="fill-card" />
+          <text x="120" y="116" textAnchor="middle" className="fill-muted-foreground text-[10px] font-bold uppercase tracking-widest">Total</text>
+          <text x="120" y="134" textAnchor="middle" className="fill-foreground text-[18px] font-bold">{total}</text>
+        </svg>
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-1.5">
+        {slices.map((s) => (
+          <button
+            key={s.label}
+            type="button"
+            onMouseEnter={() => setActive(s.i)}
+            onMouseLeave={() => setActive(null)}
+            className={`grid grid-cols-[1fr_auto] items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[11px] transition-colors ${active === s.i ? "bg-white/[0.12] text-foreground" : "text-foreground/60 hover:bg-white/[0.08] hover:text-foreground"}`}
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: s.color, boxShadow: `0 0 12px ${s.color}` }} />
+              <span className="min-w-0 truncate">{s.label}</span>
+            </span>
+            <span className="font-bold text-foreground">{s.pct}%</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Target / MetricTile card ──────────────────────────────────────────────────
+
+function DsTargetCard({ accent, meta, partial, realizado, progress }: {
+  accent: string; meta: string; partial: string; realizado: string; progress: number;
+}) {
+  const progressColor = progress >= 100 ? "#22c55e" : progress >= 50 ? "#facc15" : "#ef4444";
+  return (
+    <div className="relative flex flex-col overflow-hidden rounded-xl border bg-[#070B14] p-8 shadow-[0_22px_80px_rgba(0,0,0,0.38)]" style={{ borderColor: `${accent}44` }}>
+      <div className="absolute inset-x-0 top-0 h-1" style={{ backgroundColor: progressColor, boxShadow: `0 0 24px ${progressColor}` }} />
+      <div className="pointer-events-none absolute inset-0" style={{ background: `linear-gradient(135deg, ${accent}22, transparent 42%), radial-gradient(circle at 85% 18%, ${accent}44, transparent 40%)` }} />
+      <div className="relative">
+        <p className="text-sm font-bold text-foreground">Meta Ads — Leads</p>
+        <p className="mt-1 text-[11px] text-foreground/65">Resultado acumulado do período</p>
+        <div className="mt-8 flex flex-1 flex-col justify-center rounded-lg border border-white/15 bg-black/35 p-8">
+          <div className="grid grid-cols-3 gap-8 text-center">
+            {[["Meta", meta], ["Parcial", partial], ["Realizado", realizado]].map(([lbl, val]) => (
+              <div key={lbl}>
+                <p className="font-heading font-normal text-[22px] leading-none text-foreground">{val}</p>
+                <p className="mt-2 text-sm font-bold text-foreground/60">{lbl}</p>
+              </div>
+            ))}
+          </div>
+          <div className="mt-8">
+            <div
+              className="relative h-9 overflow-hidden rounded-md bg-muted/50"
+              style={{
+                backgroundImage: `linear-gradient(135deg, ${progressColor}33 25%, transparent 25%, transparent 50%, ${progressColor}33 50%, ${progressColor}33 75%, transparent 75%, transparent)`,
+                backgroundSize: "32px 32px",
+              }}
+            >
+              <div className="absolute inset-y-0 left-0 rounded-md transition-all" style={{ width: `${Math.min(100, progress)}%`, backgroundColor: progressColor, boxShadow: `0 0 24px ${progressColor}66`, opacity: 0.82 }} />
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="rounded-[var(--radius)] bg-black/70 px-2 py-0.5 text-xs font-bold text-white">{progress}%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Metric card ───────────────────────────────────────────────────────────────
 
 function MetricCard({
@@ -580,6 +793,64 @@ export default function DesignSystemPage() {
                 <Line type="monotone" dataKey="value" stroke="#55f52f" strokeWidth={2} dot={{ r: 3, fill: "#55f52f", strokeWidth: 0 }} activeDot={{ r: 5 }} />
               </LineChart>
             </ResponsiveContainer>
+          </div>
+        </div>
+      </Section>
+
+      {/* ── Dashboard card patterns ── */}
+      <Section title="Cards da Dashboard" sub="KPI card com sparkline SVG, CompactCard, donut de audiência e card de meta com progresso.">
+        {/* KpiCard row */}
+        <div>
+          <Label>KPI Card — com sparkline e meta</Label>
+          <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-4" style={{ minHeight: 220 }}>
+            <DsKpiCard title="Faturamento" value="R$ 134.535" delta="+18,3% vs mês passado" positive color="#55f52f" goalPct={87} />
+            <DsKpiCard title="Leads Meta" value="2.847" delta="+312 leads" positive color="#0B84FF" goalPct={112} />
+            <DsKpiCard title="CPL Meta" value="R$ 47,25" delta="-3,1% vs anterior" positive={false} color="#0B84FF" />
+            <DsKpiCard title="Investimento" value="R$ 18.900" delta="+5,2% vs mês passado" positive color="#7b2cff" goalPct={63} />
+          </div>
+        </div>
+
+        {/* CompactCard row */}
+        <div>
+          <Label>Compact Info Card — variante menor</Label>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <DsCompactCard title="Campanhas ativas" value="12" color="#0B84FF" />
+            <DsCompactCard title="Conjuntos" value="47" color="#0B84FF" />
+            <DsCompactCard title="Criativos" value="139" color="#0B84FF" />
+            <DsCompactCard title="Alcance" value="284.591" color="#0B84FF" />
+          </div>
+        </div>
+
+        {/* Donut + MetricTile */}
+        <div className="grid gap-6 lg:grid-cols-2">
+          {/* Donut */}
+          <div>
+            <Label>Donut Chart — audiências (SVG nativo)</Label>
+            <div className="mt-3">
+              <DsDonutCard />
+            </div>
+          </div>
+          {/* Target card */}
+          <div>
+            <Label>Target Card — meta vs realizado com progresso</Label>
+            <div className="mt-3">
+              <DsTargetCard accent="#0B84FF" meta="500" partial="350" realizado="431" progress={87} />
+            </div>
+          </div>
+        </div>
+
+        {/* Sparkline variants */}
+        <div>
+          <Label>Sparklines — variantes up / down / flat</Label>
+          <div className="mt-3 grid gap-4 sm:grid-cols-3">
+            {(["up", "down", "flat"] as const).map((trend) => (
+              <div key={trend} className="rounded-[var(--radius)] border border-border bg-card p-4">
+                <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{trend}</p>
+                <div className="h-12">
+                  <MiniTrendLine color={trend === "up" ? "#34d399" : trend === "down" ? "#f87171" : "#a0aec0"} trend={trend} />
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </Section>
