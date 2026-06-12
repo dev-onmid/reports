@@ -13,6 +13,10 @@ function brl(n: number) {
 }
 function num(n: number) { return n.toLocaleString('pt-BR'); }
 
+// Use these when 0 means "data not available", not "actually zero"
+function brlOrDash(n: number) { return n > 0 ? brl(n) : '—'; }
+function numOrDash(n: number) { return n > 0 ? num(n) : '—'; }
+
 function deltaInfo(current: number, prev: number): { label: string; up: boolean; hasData: boolean } {
   if (!prev) return { label: '—', up: true, hasData: false };
   const diff = ((current - prev) / prev) * 100;
@@ -448,20 +452,63 @@ function donutPath(cx: number, cy: number, outer: number, inner: number, a1: num
   return `M ${os.x.toFixed(1)} ${os.y.toFixed(1)} A ${outer} ${outer} 0 ${arc} 0 ${oe.x.toFixed(1)} ${oe.y.toFixed(1)} L ${is.x.toFixed(1)} ${is.y.toFixed(1)} A ${inner} ${inner} 0 ${arc} 1 ${ie.x.toFixed(1)} ${ie.y.toFixed(1)} Z`;
 }
 
-function donutSvg(slices: { label: string; value: number; color: string }[], s = 200): string {
+// s=320 → outer=140 (s/2−20), inner=64 (s/5). Centro circle r=56 (inner−8).
+function donutSvg(slices: { label: string; value: number; color: string }[], s = 320): string {
   const total = slices.reduce((a, b) => a + b.value, 0);
   if (!total) return '';
+  const outerR = Math.round(s / 2 - 20);
+  const innerR = Math.round(s / 5);
   let c = 0;
   const paths = slices.map(sl => {
     const angle = (sl.value / total) * 360;
-    const p = donutPath(s / 2, s / 2, s / 2 - 6, s / 3, c, c + angle);
+    const p = donutPath(s / 2, s / 2, outerR, innerR, c, c + angle);
     c += angle;
-    return `<path d="${p}" fill="${sl.color}" stroke="${BG}" stroke-width="2" style="filter:drop-shadow(0 0 6px ${sl.color}80)"/>`;
+    return `<path d="${p}" fill="${sl.color}" stroke="rgba(0,0,0,0.35)" stroke-width="1" style="filter:drop-shadow(0 0 8px ${sl.color}80)"/>`;
   });
   return `<svg viewBox="0 0 ${s} ${s}" width="${s}" height="${s}" style="flex-shrink:0">
     ${paths.join('')}
-    <circle cx="${s / 2}" cy="${s / 2}" r="${Math.round(s / 3 - 8)}" fill="${CARD}"/>
+    <circle cx="${s / 2}" cy="${s / 2}" r="${innerR - 8}" fill="${CARD}"/>
   </svg>`;
+}
+
+// Comparison bar chart for sVisaoGeral — paired horizontal bars, div-based inline HTML
+function compBarsHtml(
+  metrics: Array<{ label: string; cur: number; prv: number; fmt: (n: number) => string }>,
+): string {
+  const rows = metrics.map(m => {
+    const d = deltaInfo(m.cur, m.prv);
+    const maxVal = Math.max(m.cur, m.prv, 1);
+    const curPct = (m.cur / maxVal * 100).toFixed(1);
+    const prvPct = (m.prv / maxVal * 100).toFixed(1);
+    const deltaColor = d.up ? PRIMARY : RED;
+    const deltaHtml  = d.hasData
+      ? `<span style="font-size:11px;font-weight:700;color:${deltaColor};font-family:${INTER};margin-left:8px">${d.up ? '↑' : '↓'} ${d.label}</span>`
+      : '';
+    return `
+    <div style="margin-bottom:20px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:${MUTED};font-family:${INTER}">${m.label}</span>
+        ${deltaHtml}
+      </div>
+      <!-- Período atual -->
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:5px">
+        <span style="font-size:11px;font-weight:700;color:${PRIMARY};width:50px;text-align:right;flex-shrink:0;font-family:${INTER}">ATUAL</span>
+        <div style="flex:1;height:10px;background:${BORDER};overflow:hidden">
+          <div style="height:100%;background:${PRIMARY};width:${curPct}%;box-shadow:0 0 6px ${PRIMARY}60"></div>
+        </div>
+        <span style="font-size:13px;font-weight:700;color:${FG};width:130px;font-family:${INTER};flex-shrink:0">${m.cur > 0 ? m.fmt(m.cur) : '—'}</span>
+      </div>
+      <!-- Período anterior -->
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:11px;color:${MUTED};width:50px;text-align:right;flex-shrink:0;font-family:${INTER}">ANT.</span>
+        <div style="flex:1;height:10px;background:${BORDER};overflow:hidden">
+          <div style="height:100%;background:${MUTED};opacity:0.35;width:${prvPct}%"></div>
+        </div>
+        <span style="font-size:13px;color:${MUTED};width:130px;font-family:${INTER};flex-shrink:0">${m.prv > 0 ? m.fmt(m.prv) : '—'}</span>
+      </div>
+    </div>`;
+  }).join('');
+  return rows;
 }
 
 // ── HTML component helpers ─────────────────────────────────────────────────────
@@ -490,40 +537,42 @@ function secTitle(title: string, sub: string): string {
 }
 
 function kpi(label: string, value: string, context: string, accentColor = PRIMARY): string {
-  return `<div style="position:relative;overflow:hidden;border:1px solid ${BORDER};border-radius:2px;background:${CARD};padding:20px 22px;box-sizing:border-box">
+  const isEmpty = value === '—';
+  return `<div style="position:relative;overflow:hidden;border:1px solid ${BORDER};border-radius:2px;background:${CARD};padding:24px 22px;box-sizing:border-box">
   <div style="position:absolute;top:0;left:0;right:0;height:2px;background:${accentColor}"></div>
   <div style="position:absolute;top:0;left:0;width:12px;height:12px;background:${accentColor}"></div>
-  <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:4px 0 8px">${label}</p>
-  <p style="font-family:${BEBAS};font-size:38px;color:${FG};line-height:1;margin:0 0 4px">${value}</p>
+  <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:4px 0 10px">${label}</p>
+  <p style="font-family:${BEBAS};font-size:${isEmpty ? '32' : '42'}px;color:${isEmpty ? MUTED : FG};line-height:1;margin:0 0 6px">${value}</p>
   <p style="font-size:12px;color:${MUTED};font-family:${INTER};line-height:1.4;margin:0">${context}</p>
 </div>`;
 }
 
 function kpiWithDelta(label: string, value: string, prevValue: string, delta: { label: string; up: boolean; hasData: boolean }, accentColor = PRIMARY): string {
+  const isEmpty = value === '—';
   const deltaHtml = delta.hasData
     ? `<span style="font-size:11px;font-weight:700;color:${delta.up ? PRIMARY : RED};font-family:${INTER};margin-left:6px">${delta.up ? '↑' : '↓'} ${delta.label}</span>`
     : '';
-  const prevHtml = prevValue
+  const prevHtml = prevValue && prevValue !== '—'
     ? `<span style="font-size:11px;color:${MUTED};font-family:${INTER}">ant: ${prevValue}</span>`
-    : '';
-  return `<div style="position:relative;overflow:hidden;border:1px solid ${BORDER};border-radius:2px;background:${CARD};padding:20px 22px;box-sizing:border-box">
+    : (isEmpty ? `<span style="font-size:11px;color:${MUTED};font-family:${INTER}">Dado não integrado neste período</span>` : '');
+  return `<div style="position:relative;overflow:hidden;border:1px solid ${BORDER};border-radius:2px;background:${CARD};padding:24px 22px;box-sizing:border-box">
   <div style="position:absolute;top:0;left:0;right:0;height:2px;background:${accentColor}"></div>
   <div style="position:absolute;top:0;left:0;width:12px;height:12px;background:${accentColor}"></div>
-  <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:4px 0 8px">${label}</p>
-  <p style="font-family:${BEBAS};font-size:38px;color:${FG};line-height:1;margin:0 0 6px">${value}${deltaHtml}</p>
+  <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:4px 0 10px">${label}</p>
+  <p style="font-family:${BEBAS};font-size:${isEmpty ? '32' : '42'}px;color:${isEmpty ? MUTED : FG};line-height:1;margin:0 0 8px">${value}${deltaHtml}</p>
   <p style="font-size:12px;color:${MUTED};font-family:${INTER};line-height:1.4;margin:0">${prevHtml}</p>
 </div>`;
 }
 
-function hbar(label: string, value: string, pct: number, hi: boolean): string {
+function hbar(label: string, value: string, pct: number, hi: boolean, barH = 6): string {
   const barColor = hi ? PRIMARY : `${PRIMARY}40`;
   const glow = hi ? `box-shadow:0 0 8px ${PRIMARY}80` : '';
-  return `<div style="margin-bottom:10px">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+  return `<div style="margin-bottom:12px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
     <span style="font-size:12px;font-weight:600;color:${FG};font-family:${INTER}">${label}</span>
     <span style="font-size:12px;font-weight:700;color:${hi ? PRIMARY : MUTED};font-family:${INTER}">${value}</span>
   </div>
-  <div style="height:6px;background:${BORDER};overflow:hidden">
+  <div style="height:${barH}px;background:${BORDER};overflow:hidden">
     <div style="height:100%;background:${barColor};width:${Math.min(pct, 100).toFixed(1)}%;${glow}"></div>
   </div>
 </div>`;
@@ -551,15 +600,15 @@ function sCapa(
   periodo: string, prevPeriodo: string, diag: DiagJson, total: number,
 ): string {
   const cards: string[] = [];
-  if (d.faturamento > 0) cards.push(kpi('Faturamento', brl(d.faturamento), `${num(d.pedidos_ativos)} pedidos no período`));
-  if (d.ticket > 0)      cards.push(kpi('Ticket Médio', brl(d.ticket), 'por pedido (clientes ativos)'));
-  if (d.ativos > 0)      cards.push(kpi('Clientes Ativos', num(d.ativos), `${num(d.inativos)} inativos · ${num(d.potenciais)} potenciais`));
-  if (meta)              cards.push(kpi('Investimento Meta', brl(meta.investimento), `${num(meta.cliques)} cliques · alcance ${num(meta.alcance)}`, BLUE));
+  if (d.faturamento > 0) cards.push(kpi('Faturamento', brlOrDash(d.faturamento), `${numOrDash(d.pedidos_ativos)} pedidos no período`));
+  if (d.ticket > 0)      cards.push(kpi('Ticket Médio', brlOrDash(d.ticket), 'por pedido (clientes ativos)'));
+  if (d.ativos > 0)      cards.push(kpi('Clientes Ativos', numOrDash(d.ativos), `${numOrDash(d.inativos)} inativos · ${numOrDash(d.potenciais)} potenciais`));
+  if (meta)              cards.push(kpi('Investimento Meta', brlOrDash(meta.investimento), `${numOrDash(meta.cliques)} cliques · alcance ${numOrDash(meta.alcance)}`, BLUE));
 
-  const prevLine = prevPeriodo ? `<span style="font-size:12px;color:${MUTED};font-family:${INTER}"> — comparado com ${prevPeriodo}</span>` : '';
+  const prevLine = prevPeriodo ? `<span style="font-size:12px;color:${MUTED};font-family:${INTER}"> · comparado com ${prevPeriodo}</span>` : '';
   const fechamento = diag.frase_fechamento
-    ? `<div style="margin-top:20px;border-left:3px solid ${PRIMARY};padding:10px 16px;background:${PRIMARY}0D">
-        <p style="font-size:14px;color:${FG};font-family:${INTER};line-height:1.6;margin:0;font-style:italic">"${diag.frase_fechamento}"</p>
+    ? `<div style="margin-top:22px;border-left:3px solid ${PRIMARY};padding:12px 18px;background:${PRIMARY}0D">
+        <p style="font-size:15px;color:${FG};font-family:${INTER};line-height:1.6;margin:0;font-style:italic">"${diag.frase_fechamento}"</p>
       </div>`
     : '';
 
@@ -567,7 +616,7 @@ function sCapa(
   <div style="position:absolute;top:-100px;right:-100px;width:500px;height:500px;border-radius:50%;background:radial-gradient(circle,${PRIMARY}1A,transparent 70%);pointer-events:none"></div>
   <div>
     <p style="font-size:11px;font-weight:700;color:${PRIMARY};text-transform:uppercase;letter-spacing:0.14em;font-family:${INTER};margin:0 0 10px">Relatório de Performance — Delivery</p>
-    <h1 style="font-family:${BEBAS};font-size:72px;color:${FG};margin:0;line-height:0.92;letter-spacing:0.02em">${clientName}</h1>
+    <h1 style="font-family:${BEBAS};font-size:76px;color:${FG};margin:0;line-height:0.92;letter-spacing:0.02em">${clientName}</h1>
     <p style="font-size:15px;color:${MUTED};margin:14px 0 0;font-family:${INTER}">${periodo}${prevLine}</p>
     ${fechamento}
   </div>
@@ -576,19 +625,56 @@ function sCapa(
   return wrapSlide(body, 1, total);
 }
 
+// ── Visão Geral — KPIs com comparativo + paired bar chart (≥75% da área útil) ──
+
 function sVisaoGeral(d: ParsedData, prevD: ParsedData | null, idx: number, total: number): string {
   const dFat    = deltaInfo(d.faturamento,    prevD?.faturamento    ?? 0);
   const dPed    = deltaInfo(d.pedidos_ativos, prevD?.pedidos_ativos ?? 0);
   const dTicket = deltaInfo(d.ticket,         prevD?.ticket         ?? 0);
 
+  const kpiRow = `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:28px">
+    ${kpiWithDelta('Faturamento', brlOrDash(d.faturamento), prevD ? brlOrDash(prevD.faturamento) : '', dFat)}
+    ${kpiWithDelta('Pedidos', numOrDash(d.pedidos_ativos), prevD ? numOrDash(prevD.pedidos_ativos) : '', dPed)}
+    ${kpiWithDelta('Ticket Médio', brlOrDash(d.ticket), prevD ? brlOrDash(prevD.ticket) : '', dTicket)}
+  </div>`;
+
+  let bottomSection: string;
+  if (prevD) {
+    const bars = compBarsHtml([
+      { label: 'Faturamento', cur: d.faturamento, prv: prevD.faturamento, fmt: brl },
+      { label: 'Total de Pedidos', cur: d.pedidos_ativos, prv: prevD.pedidos_ativos, fmt: num },
+      { label: 'Ticket Médio', cur: d.ticket, prv: prevD.ticket, fmt: brl },
+    ]);
+    bottomSection = `
+      <div style="border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:20px 24px">
+        <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:${MUTED};font-family:${INTER};margin:0 0 18px">
+          Comparativo — Período Atual vs Anterior
+        </p>
+        ${bars}
+      </div>
+      <p style="font-size:11px;color:${MUTED};font-family:${INTER};margin-top:12px">
+        Dados anteriores via arquivos <code style="background:${CARD};padding:1px 5px;font-size:10px">ant-*.csv</code>
+      </p>`;
+  } else {
+    // Sem período anterior — preenche com métricas secundárias e insight
+    const tot = d.ativos + d.inativos + d.potenciais;
+    const pA  = tot ? (d.ativos / tot * 100).toFixed(1) : '—';
+    const mediaPerAtivo = d.ativos > 0 && d.pedidos_ativos > 0
+      ? `${(d.pedidos_ativos / d.ativos).toFixed(1)} ped/cliente`
+      : 'Aguardando integração';
+    bottomSection = `
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px">
+        ${kpi('Ativos na Base', numOrDash(d.ativos), `${pA}% do total cadastrado`)}
+        ${kpi('Pedidos por Ativo', d.pedidos_ativos > 0 && d.ativos > 0 ? (d.pedidos_ativos / d.ativos).toFixed(1) : '—', mediaPerAtivo)}
+        ${kpi('Inativos', numOrDash(d.inativos), 'clientes sem compra no período', RED)}
+      </div>
+      ${insight('Como ler estes dados', 'Esses números refletem apenas os clientes do arquivo enviado. Para exibir comparativo com período anterior, envie os arquivos com o prefixo ant- (ex: ant-ativos.csv).')}`;
+  }
+
   const body = `
 ${secTitle('Visão Geral do Período', 'Faturamento, pedidos e ticket médio — clientes ativos')}
-<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">
-  ${kpiWithDelta('Faturamento', brl(d.faturamento), prevD ? brl(prevD.faturamento) : '', dFat)}
-  ${kpiWithDelta('Pedidos', num(d.pedidos_ativos), prevD ? num(prevD.pedidos_ativos) : '', dPed)}
-  ${kpiWithDelta('Ticket Médio', brl(d.ticket), prevD ? brl(prevD.ticket) : '', dTicket)}
-</div>
-${prevD ? `<p style="font-size:11px;color:${MUTED};font-family:${INTER};margin-top:16px">Período anterior incluído via arquivos <code style="background:${CARD};padding:1px 5px;font-size:10px">ant-*.csv</code></p>` : `<p style="font-size:11px;color:${MUTED};font-family:${INTER};margin-top:16px">Para exibir comparativos envie os arquivos do mês anterior com prefixo <code style="background:${CARD};padding:1px 5px;font-size:10px">ant-</code></p>`}`;
+${kpiRow}
+${bottomSection}`;
   return wrapSlide(body, idx, total);
 }
 
@@ -603,7 +689,7 @@ ${secTitle('Comportamento por Dia da Semana', 'Distribuição de pedidos — ide
   <div>${bars}</div>
   <div>
     ${insight('Dias Fortes', `${sorted[0]?.dia ?? '—'} e ${sorted[1]?.dia ?? '—'} concentram os maiores volumes. Lance campanhas na quarta/quinta para alimentar os picos do fim de semana.`)}
-    ${insight('Oportunidade', `${sorted[sorted.length - 1]?.dia ?? '—'} está mais fraco — uma promoção específica para esse dia equilibra o volume semanal e diluí custos fixos.`)}
+    ${insight('Oportunidade', `${sorted[sorted.length - 1]?.dia ?? '—'} está mais fraco — uma promoção específica para esse dia equilibra o volume semanal e dilui custos fixos.`)}
   </div>
 </div>`;
   return wrapSlide(body, idx, total);
@@ -616,8 +702,8 @@ function sRegioes(bairros: Bairro[], idx: number, total: number): string {
     { text: brl(b.faturamento), right: true, color: MUTED },
   ], i % 2 === 0)).join('');
 
-  const top2     = bairros.slice(0, 2);
-  const mid      = bairros.slice(2, 5);
+  const top2 = bairros.slice(0, 2);
+  const mid  = bairros.slice(2, 5);
 
   const body = `
 ${secTitle('Regiões com Maior Volume', 'Bairros rankeados por pedidos — dados do CRM')}
@@ -646,12 +732,15 @@ ${secTitle('Regiões com Maior Volume', 'Bairros rankeados por pedidos — dados
   return wrapSlide(body, idx, total);
 }
 
+// ── Base — donut 320px + legenda grande + distribuição 1x/2x+ ─────────────────
+
 function sBase(d: ParsedData, idx: number, total: number): string {
   const tot = d.ativos + d.inativos + d.potenciais;
   const pA  = tot ? (d.ativos     / tot * 100).toFixed(1) : '0';
   const pI  = tot ? (d.inativos   / tot * 100).toFixed(1) : '0';
   const pP  = tot ? (d.potenciais / tot * 100).toFixed(1) : '0';
 
+  // Default s=320 → outer=140, inner=64
   const donut = donutSvg([
     { label: 'Ativos',       value: d.ativos,     color: PRIMARY },
     { label: 'Inativos',     value: d.inativos,   color: RED },
@@ -662,11 +751,11 @@ function sBase(d: ParsedData, idx: number, total: number): string {
     { label: 'Ativos',       pct: pA, count: d.ativos,     color: PRIMARY },
     { label: 'Inativos',     pct: pI, count: d.inativos,   color: RED },
     { label: 'Em Potencial', pct: pP, count: d.potenciais, color: BLUE },
-  ].map(l => `<div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid ${BORDER}">
+  ].map(l => `<div style="display:flex;align-items:center;gap:14px;padding:14px 0;border-bottom:1px solid ${BORDER}">
     <div style="width:10px;height:10px;border-radius:2px;background:${l.color};flex-shrink:0"></div>
-    <span style="flex:1;font-size:13px;font-weight:600;color:${FG};font-family:${INTER}">${l.label}</span>
-    <span style="font-size:20px;font-family:${BEBAS};color:${FG};line-height:1">${num(l.count)}</span>
-    <span style="font-size:12px;font-weight:700;color:${l.color};font-family:${INTER};min-width:40px;text-align:right">${l.pct}%</span>
+    <span style="flex:1;font-size:14px;font-weight:600;color:${FG};font-family:${INTER}">${l.label}</span>
+    <span style="font-size:24px;font-family:${BEBAS};color:${FG};line-height:1">${numOrDash(l.count)}</span>
+    <span style="font-size:13px;font-weight:700;color:${l.color};font-family:${INTER};min-width:44px;text-align:right">${l.pct}%</span>
   </div>`).join('');
 
   const hasDistrib = d.uma_compra > 0 || d.recorrentes > 0;
@@ -674,33 +763,32 @@ function sBase(d: ParsedData, idx: number, total: number): string {
     const totalAtivos = d.uma_compra + d.recorrentes;
     const pUma = totalAtivos ? (d.uma_compra / totalAtivos * 100).toFixed(1) : '0';
     const pRec = totalAtivos ? (d.recorrentes / totalAtivos * 100).toFixed(1) : '0';
-    return `<div style="margin-top:16px;border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:14px 16px">
-      <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 10px">Frequência de Compra — Ativos</p>
-      <div style="display:flex;gap:24px">
+    const pUmaNum = parseFloat(pUma);
+    return `<div style="margin-top:20px;border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:16px 18px">
+      <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 14px">Frequência de Compra — Clientes Ativos</p>
+      <div style="display:flex;gap:32px;align-items:center">
         <div style="text-align:center">
-          <p style="font-family:${BEBAS};font-size:32px;color:${FG};margin:0;line-height:1">${num(d.uma_compra)}</p>
-          <p style="font-size:11px;color:${ORANGE};font-family:${INTER};margin:4px 0 0;font-weight:700">1× — ${pUma}%</p>
+          <p style="font-family:${BEBAS};font-size:36px;color:${FG};margin:0;line-height:1">${num(d.uma_compra)}</p>
+          <p style="font-size:12px;font-weight:700;color:${ORANGE};font-family:${INTER};margin:4px 0 0">1× — ${pUma}%</p>
         </div>
-        <div style="width:1px;background:${BORDER}"></div>
+        <div style="width:1px;height:48px;background:${BORDER}"></div>
         <div style="text-align:center">
-          <p style="font-family:${BEBAS};font-size:32px;color:${FG};margin:0;line-height:1">${num(d.recorrentes)}</p>
-          <p style="font-size:11px;color:${PRIMARY};font-family:${INTER};margin:4px 0 0;font-weight:700">2×+ — ${pRec}%</p>
+          <p style="font-family:${BEBAS};font-size:36px;color:${FG};margin:0;line-height:1">${num(d.recorrentes)}</p>
+          <p style="font-size:12px;font-weight:700;color:${PRIMARY};font-family:${INTER};margin:4px 0 0">2×+ — ${pRec}%</p>
         </div>
-        <div style="flex:1;align-self:center;font-size:12px;color:${MUTED};font-family:${INTER};line-height:1.5">
-          ${parseFloat(pRec) > 50 ? `Alta recorrência: mais da metade dos ativos já recomprou. Foco em programas de fidelidade.` : `${num(d.uma_compra)} clientes compraram só uma vez — oportunidade clara de retenção na segunda compra.`}
+        <div style="flex:1;height:10px;background:${BORDER};overflow:hidden;align-self:center">
+          <div style="height:100%;background:${PRIMARY};width:${pRec}%;box-shadow:0 0 6px ${PRIMARY}60"></div>
+        </div>
+        <div style="font-size:12px;color:${MUTED};font-family:${INTER};line-height:1.5;max-width:220px">
+          ${pUmaNum > 50 ? `${num(d.uma_compra)} clientes compraram só 1×. Foco em converter a 2ª compra.` : `Alta recorrência: ${pRec}% dos ativos já recompraram.`}
         </div>
       </div>
     </div>`;
   })() : '';
 
   const body = `
-${secTitle('Base de Clientes', `Total de ${num(tot)} clientes cadastrados`)}
-<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px">
-  ${kpi('Ativos', num(d.ativos), `${pA}% da base — compraram no período`)}
-  ${kpi('Inativos', num(d.inativos), `${pI}% — pararam de comprar`, RED)}
-  ${kpi('Em Potencial', num(d.potenciais), `${pP}% — nunca compraram`, BLUE)}
-</div>
-<div style="display:flex;gap:32px;align-items:flex-start">
+${secTitle('Base de Clientes', `Total de ${numOrDash(tot)} clientes cadastrados`)}
+<div style="display:flex;gap:40px;align-items:flex-start">
   ${donut}
   <div style="flex:1">
     ${legend}
@@ -717,21 +805,21 @@ function sInativos(d: ParsedData, idx: number, total: number): string {
   const portaEntrada = d.produtos[0];
 
   const body = `
-${secTitle('Inativos e Potenciais', `${num(d.inativos)} inativos · ${num(d.potenciais)} potenciais — distribuídos por tempo de ausência`)}
+${secTitle('Inativos e Potenciais', `${numOrDash(d.inativos)} inativos · ${numOrDash(d.potenciais)} potenciais — distribuídos por tempo de ausência`)}
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:28px">
   <div>
     ${bars}
-    ${d.potenciais > 0 ? `<div style="margin-top:14px;padding:12px 16px;background:${BLUE}0F;border:1px solid ${BLUE}30;border-radius:2px">
-      <p style="font-size:10px;font-weight:700;color:${BLUE};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 4px">Em Potencial (nunca compraram)</p>
-      <p style="font-size:20px;font-family:${BEBAS};color:${FG};margin:0;line-height:1">${num(d.potenciais)} <span style="font-size:13px;color:${MUTED};font-family:${INTER};font-weight:400">clientes sem pedido</span></p>
+    ${d.potenciais > 0 ? `<div style="margin-top:14px;padding:14px 16px;background:${BLUE}0F;border:1px solid ${BLUE}30;border-radius:2px">
+      <p style="font-size:10px;font-weight:700;color:${BLUE};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 6px">Em Potencial (nunca compraram)</p>
+      <p style="font-size:24px;font-family:${BEBAS};color:${FG};margin:0;line-height:1">${num(d.potenciais)} <span style="font-size:13px;color:${MUTED};font-family:${INTER};font-weight:400">clientes sem pedido</span></p>
     </div>` : ''}
   </div>
   <div>
     ${insight('Prioridade de Reativação', `A maior concentração está em ${maior.label} com ${num(maior.count)} clientes. Eles têm memória do produto — uma oferta personalizada tem alta chance de retorno.`)}
-    ${portaEntrada ? `<div style="margin-top:12px;border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:16px">
+    ${portaEntrada && portaEntrada.qtd > 0 ? `<div style="margin-top:12px;border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:16px">
       <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 8px">Porta de Entrada Sugerida</p>
-      <p style="font-family:${BEBAS};font-size:22px;color:${PRIMARY};margin:0 0 4px;line-height:1">${portaEntrada.nome}</p>
-      <p style="font-size:12px;color:${MUTED};font-family:${INTER};margin:0">${num(portaEntrada.qtd)} pedidos no período · ${portaEntrada.total ? brl(portaEntrada.total) : 'sem valor'} — produto mais reconhecido para reativação.</p>
+      <p style="font-family:${BEBAS};font-size:24px;color:${PRIMARY};margin:0 0 4px;line-height:1">${portaEntrada.nome}</p>
+      <p style="font-size:12px;color:${MUTED};font-family:${INTER};margin:0">${num(portaEntrada.qtd)} pedidos no período${portaEntrada.total ? ` · ${brl(portaEntrada.total)}` : ''} — produto mais reconhecido para reativação.</p>
     </div>` : ''}
     <div style="margin-top:12px;border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:16px">
       <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 8px">Sugestão de Mensagem</p>
@@ -742,13 +830,34 @@ ${secTitle('Inativos e Potenciais', `${num(d.inativos)} inativos · ${num(d.pote
   return wrapSlide(body, idx, total);
 }
 
+// ── Produtos — barras 12px, estado vazio explícito se todos qtd=0 ─────────────
+
 function sProdutos(d: ParsedData, idx: number, total: number): string {
+  const allZeroQty = d.produtos.every(p => p.qtd === 0);
+
+  if (allZeroQty) {
+    // Modo catálogo — sem ranking falso de 0 pedidos
+    const catalogCards = d.produtos.slice(0, 8).map(p =>
+      `<div style="border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:14px 16px">
+        <p style="font-size:13px;font-weight:600;color:${FG};font-family:${INTER};margin:0 0 6px">${p.nome}</p>
+        ${p.total > 0 ? `<p style="font-size:12px;color:${MUTED};font-family:${INTER};margin:0">${brl(p.total)}</p>` : ''}
+      </div>`,
+    ).join('');
+    const body = `
+${secTitle('Produtos Cadastrados', 'Catálogo identificado — volume de vendas não capturado neste arquivo')}
+<div style="border:1px solid ${ORANGE}30;background:${ORANGE}0A;border-radius:2px;padding:14px 16px;margin-bottom:20px">
+  <p style="font-size:13px;color:${ORANGE};font-family:${INTER};margin:0">Volume de pedidos não disponível neste arquivo. Para exibir o ranking de vendas, envie uma planilha com coluna de quantidade vendida.</p>
+</div>
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">${catalogCards}</div>`;
+    return wrapSlide(body, idx, total);
+  }
+
   const max  = Math.max(...d.produtos.map(p => p.qtd));
+  // barH=12 para ranking de produtos (mais denso e visível)
   const bars = d.produtos.slice(0, 8).map((p, i) =>
-    hbar(p.nome, `${num(p.qtd)} ped${p.total ? ` · ${brl(p.total)}` : ''}`, max ? p.qtd / max * 100 : 0, i < 3),
+    hbar(p.nome, `${num(p.qtd)} ped${p.total > 0 ? ` · ${brl(p.total)}` : ''}`, max ? p.qtd / max * 100 : 0, i < 3, 12),
   ).join('');
 
-  // Static combo suggestions from top-4 products
   const top4 = d.produtos.slice(0, 4);
   const combos: Array<{ a: string; b: string }> = [];
   if (top4[0] && top4[1]) combos.push({ a: top4[0].nome, b: top4[1].nome });
@@ -787,103 +896,138 @@ function sMetaAds(meta: MetaAdsFull, idx: number, total: number): string {
     const accentColor = isConversa ? PRIMARY : isConversao ? ORANGE : BLUE;
 
     const metricsRows: string[] = [
-      `<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER}"><span style="color:${MUTED}">Investido</span><span style="font-weight:700;color:${FG}">${brl(m.investimento)}</span></div>`,
-      `<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER}"><span style="color:${MUTED}">Alcance</span><span style="font-weight:700;color:${FG}">${num(m.alcance)}</span></div>`,
+      `<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER};padding:5px 0;border-bottom:1px solid ${BORDER}"><span style="color:${MUTED}">Investido</span><span style="font-weight:700;color:${FG}">${brlOrDash(m.investimento)}</span></div>`,
+      `<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER};padding:5px 0;border-bottom:1px solid ${BORDER}"><span style="color:${MUTED}">Alcance</span><span style="font-weight:700;color:${FG}">${numOrDash(m.alcance)}</span></div>`,
     ];
-    if (m.frequencia > 0) metricsRows.push(`<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER}"><span style="color:${MUTED}">Frequência</span><span style="font-weight:700;color:${FG}">${m.frequencia.toFixed(1)}×</span></div>`);
+    if (m.frequencia > 0) metricsRows.push(`<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER};padding:5px 0;border-bottom:1px solid ${BORDER}"><span style="color:${MUTED}">Frequência</span><span style="font-weight:700;color:${FG}">${m.frequencia.toFixed(1)}×</span></div>`);
     if (isConversa && m.conversas > 0) {
-      metricsRows.push(`<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER}"><span style="color:${MUTED}">Conversas</span><span style="font-weight:700;color:${PRIMARY}">${num(Math.round(m.conversas))}</span></div>`);
-      if (m.conversas > 0) metricsRows.push(`<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER}"><span style="color:${MUTED}">Custo/conversa</span><span style="font-weight:700;color:${FG}">${brl(m.investimento / m.conversas)}</span></div>`);
+      metricsRows.push(`<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER};padding:5px 0;border-bottom:1px solid ${BORDER}"><span style="color:${MUTED}">Conversas</span><span style="font-weight:700;color:${PRIMARY}">${num(Math.round(m.conversas))}</span></div>`);
+      metricsRows.push(`<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER};padding:5px 0"><span style="color:${MUTED}">Custo/conversa</span><span style="font-weight:700;color:${FG}">${brl(m.investimento / m.conversas)}</span></div>`);
     }
     if (isConversao && m.compras > 0) {
-      metricsRows.push(`<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER}"><span style="color:${MUTED}">Compras</span><span style="font-weight:700;color:${ORANGE}">${num(Math.round(m.compras))}</span></div>`);
-      if (m.purchase_roas > 0) metricsRows.push(`<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER}"><span style="color:${MUTED}">ROAS</span><span style="font-weight:700;color:${FG}">${m.purchase_roas.toFixed(2)}×</span></div>`);
+      metricsRows.push(`<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER};padding:5px 0;border-bottom:1px solid ${BORDER}"><span style="color:${MUTED}">Compras</span><span style="font-weight:700;color:${ORANGE}">${num(Math.round(m.compras))}</span></div>`);
+      if (m.purchase_roas > 0) metricsRows.push(`<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER};padding:5px 0"><span style="color:${MUTED}">ROAS</span><span style="font-weight:700;color:${ORANGE}">${m.purchase_roas.toFixed(2)}×</span></div>`);
     }
 
     const typeLabel = isConversa ? 'CONVERSA' : isConversao ? 'CONVERSÃO' : 'TRÁFEGO';
-    return `<div style="border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:16px;position:relative;overflow:hidden">
+    return `<div style="border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:18px;position:relative;overflow:hidden">
       <div style="position:absolute;top:0;left:0;right:0;height:2px;background:${accentColor}"></div>
       <div style="position:absolute;top:0;left:0;width:12px;height:12px;background:${accentColor}"></div>
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin:4px 0 10px">
-        <p style="font-size:12px;font-weight:700;color:${FG};font-family:${INTER};margin:0;line-height:1.3;max-width:70%">${c.nome}</p>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin:4px 0 12px">
+        <p style="font-size:13px;font-weight:700;color:${FG};font-family:${INTER};margin:0;line-height:1.3;max-width:70%">${c.nome}</p>
         <span style="font-size:9px;font-weight:700;color:${accentColor};text-transform:uppercase;letter-spacing:0.08em;font-family:${INTER};border:1px solid ${accentColor}40;padding:2px 6px;flex-shrink:0">${typeLabel}</span>
       </div>
-      <div style="display:flex;flex-direction:column;gap:5px">${metricsRows.join('')}</div>
+      <div style="display:flex;flex-direction:column">${metricsRows.join('')}</div>
     </div>`;
   }).join('');
 
   const body = `
 ${secTitle('Meta Ads — Tráfego Pago', 'Investimento e resultados das campanhas no período')}
-<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px">
-  ${kpi('Investimento', brl(meta.investimento), 'total em anúncios no período', BLUE)}
-  ${kpi('Impressões', num(meta.impressoes), 'exibições dos anúncios', BLUE)}
-  ${kpi('Alcance', num(meta.alcance), 'pessoas únicas impactadas', BLUE)}
-  ${kpi('CPL', cpl, `${num(meta.cliques)} cliques no período`, BLUE)}
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:24px">
+  ${kpi('Investimento', brlOrDash(meta.investimento), 'total em anúncios no período', BLUE)}
+  ${kpi('Impressões', numOrDash(meta.impressoes), 'exibições dos anúncios', BLUE)}
+  ${kpi('Alcance', numOrDash(meta.alcance), 'pessoas únicas impactadas', BLUE)}
+  ${kpi('CPL', cpl, `${numOrDash(meta.cliques)} cliques no período`, BLUE)}
 </div>
 ${meta.campanhas.length ? `
-  <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 10px">Campanhas Ativas</p>
-  <div style="display:grid;grid-template-columns:repeat(${Math.min(meta.campanhas.length, 3)},1fr);gap:12px">${campCards}</div>
+  <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 12px">Campanhas Ativas</p>
+  <div style="display:grid;grid-template-columns:repeat(${Math.min(meta.campanhas.length, 3)},1fr);gap:14px">${campCards}</div>
 ` : ''}`;
   return wrapSlide(body, idx, total);
 }
 
-function sDiagnostico(diag: DiagJson, creatives: Creative[], idx: number, total: number): string {
+// ── Diagnóstico A — texto + pontos fortes/atenção (slide 1 de 2) ──────────────
+
+function sDiagnosticoA(diag: DiagJson, idx: number, total: number): string {
   const colLabel = (text: string) =>
-    `<p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 10px">${text}</p>`;
+    `<p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 12px">${text}</p>`;
 
-  const fortes = diag.pontos_fortes.slice(0, 3).map(p =>
-    `<div style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid ${BORDER}">
-      <div style="width:18px;height:18px;background:${PRIMARY}20;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:10px;color:${PRIMARY}">✓</div>
-      <span style="font-size:12px;color:${FG};font-family:${INTER};line-height:1.4">${p}</span>
+  const fortes = diag.pontos_fortes.slice(0, 4).map(p =>
+    `<div style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid ${BORDER}">
+      <div style="width:20px;height:20px;background:${PRIMARY}20;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;color:${PRIMARY}">✓</div>
+      <span style="font-size:13px;color:${FG};font-family:${INTER};line-height:1.5">${p}</span>
     </div>`,
   ).join('');
 
-  const atencao = diag.pontos_atencao.slice(0, 2).map(p =>
-    `<div style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid ${BORDER}">
-      <div style="width:18px;height:18px;background:${RED}20;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:10px;color:${RED}">!</div>
-      <span style="font-size:12px;color:${FG};font-family:${INTER};line-height:1.4">${p}</span>
+  const atencao = diag.pontos_atencao.slice(0, 3).map(p =>
+    `<div style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid ${BORDER}">
+      <div style="width:20px;height:20px;background:${RED}20;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;color:${RED}">!</div>
+      <span style="font-size:13px;color:${FG};font-family:${INTER};line-height:1.5">${p}</span>
     </div>`,
   ).join('');
 
-  const plano = diag.plano.slice(0, 5).map((p, i) =>
-    `<div style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid ${BORDER}">
-      <div style="width:22px;height:22px;background:${PRIMARY};border-radius:2px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
-        <span style="font-size:11px;font-weight:800;color:#0e0f14;font-family:${INTER}">${i + 1}</span>
+  const fechamento = diag.frase_fechamento
+    ? `<div style="margin-top:20px;border:1px solid ${PRIMARY}4D;background:${PRIMARY}0D;border-radius:2px;padding:16px 20px">
+        <p style="font-size:10px;font-weight:700;color:${PRIMARY};text-transform:uppercase;letter-spacing:.1em;font-family:${INTER};margin:0 0 6px">Objetivo do Próximo Mês</p>
+        <p style="font-size:15px;color:${FG};font-family:${INTER};line-height:1.6;margin:0;font-style:italic">"${diag.frase_fechamento}"</p>
+      </div>`
+    : '';
+
+  const body = `
+${secTitle('Diagnóstico do Período', 'Análise dos dados e pontos de atenção')}
+<div style="border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:20px 24px;margin-bottom:24px">
+  <p style="font-size:15px;color:${FG};font-family:${INTER};line-height:1.75;margin:0">${diag.diagnostico}</p>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:32px">
+  <div>
+    ${colLabel('Pontos Fortes')}
+    ${fortes}
+  </div>
+  <div>
+    ${colLabel('Pontos de Atenção')}
+    ${atencao}
+    ${fechamento}
+  </div>
+</div>`;
+  return wrapSlide(body, idx, total);
+}
+
+// ── Diagnóstico B — plano 5 passos + criativos (slide 2 de 2) ────────────────
+
+function sDiagnosticoPlan(diag: DiagJson, creatives: Creative[], idx: number, total: number): string {
+  const planoItems = diag.plano.slice(0, 5);
+
+  const cardHtml = (p: typeof planoItems[0], i: number) =>
+    `<div style="border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:16px;position:relative;overflow:hidden;display:flex;flex-direction:column;gap:8px">
+      <div style="position:absolute;top:0;left:0;right:0;height:2px;background:${PRIMARY}"></div>
+      <div style="width:26px;height:26px;background:${PRIMARY};border-radius:2px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+        <span style="font-size:13px;font-weight:800;color:#0e0f14;font-family:${INTER}">${i + 1}</span>
       </div>
-      <div>
-        <div style="font-size:12px;font-weight:700;color:${FG};font-family:${INTER}">${p.acao}</div>
-        <div style="font-size:11px;color:${MUTED};font-family:${INTER};margin-top:2px">${p.objetivo || ''}</div>
-      </div>
-    </div>`,
-  ).join('');
+      <p style="font-size:13px;font-weight:700;color:${FG};font-family:${INTER};margin:0;line-height:1.3">${p.acao}</p>
+      ${p.objetivo ? `<p style="font-size:11px;color:${PRIMARY};font-family:${INTER};margin:0;line-height:1.4"><strong>Objetivo:</strong> ${p.objetivo}</p>` : ''}
+      ${p.publico ? `<p style="font-size:11px;color:${MUTED};font-family:${INTER};margin:0;line-height:1.4"><strong style="color:${FG}">Público:</strong> ${p.publico}</p>` : ''}
+    </div>`;
 
-  const creativesHtml = creatives.length
+  // 3+2 grid layout
+  const row1 = planoItems.slice(0, 3).map((p, i) => cardHtml(p, i)).join('');
+  const row2 = planoItems.slice(3, 5).map((p, i) => cardHtml(p, i + 3)).join('');
+
+  const planoHtml = `
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px">${row1}</div>
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;max-width:68%">${row2}</div>`;
+
+  const creativesHtml = creatives.length > 0
     ? `<div style="display:flex;flex-direction:column;gap:8px">
-        ${colLabel('Top Criativos')}
+        <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 4px">Top Criativos</p>
         ${creatives.slice(0, 3).map(c => `
-          <div style="display:flex;gap:10px;align-items:center;padding:8px;background:${CARD};border:1px solid ${BORDER};border-radius:2px">
+          <div style="display:flex;gap:10px;align-items:center;padding:10px;background:${CARD};border:1px solid ${BORDER};border-radius:2px">
             ${c.thumbnail_url
-              ? `<img src="${c.thumbnail_url}" style="width:44px;height:44px;object-fit:cover;border-radius:2px;flex-shrink:0" />`
-              : `<div style="width:44px;height:44px;background:${BORDER};border-radius:2px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:18px">🎨</div>`
+              ? `<img src="${c.thumbnail_url}" style="width:48px;height:48px;object-fit:cover;border-radius:2px;flex-shrink:0" />`
+              : `<div style="width:48px;height:48px;background:${BORDER};border-radius:2px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:${MUTED};font-size:20px">🎨</div>`
             }
             <div style="flex:1;min-width:0">
               <p style="font-size:11px;font-weight:600;color:${FG};font-family:${INTER};margin:0;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.nome}</p>
-              <p style="font-size:11px;color:${MUTED};font-family:${INTER};margin:3px 0 0">${brl(c.spend)} · ${c.resultado > 0 ? `${num(Math.round(c.resultado))} result.` : 'sem resultado'}</p>
+              <p style="font-size:11px;color:${MUTED};font-family:${INTER};margin:3px 0 0">${brlOrDash(c.spend)}${c.resultado > 0 ? ` · ${num(Math.round(c.resultado))} result.` : ''}</p>
             </div>
           </div>`).join('')}
       </div>`
     : '';
 
   const body = `
-${secTitle('Diagnóstico e Plano de Ação', 'Análise do período e próximos passos')}
-<div style="border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:16px 20px;margin-bottom:18px">
-  <p style="font-size:14px;color:${FG};font-family:${INTER};line-height:1.7;margin:0">${diag.diagnostico}</p>
-</div>
-<div style="display:grid;grid-template-columns:1fr 1fr 1.6fr ${creatives.length ? '1fr' : ''};gap:20px">
-  <div>${colLabel('Pontos Fortes')}${fortes}</div>
-  <div>${colLabel('Atenção')}${atencao}</div>
-  <div>${colLabel('Plano — Próximo Mês')}${plano}</div>
-  ${creatives.length ? `<div>${creativesHtml}</div>` : ''}
+${secTitle('Plano de Ação — Próximo Mês', '5 ações estratégicas baseadas nos dados do período')}
+<div style="display:grid;grid-template-columns:${creatives.length > 0 ? '1fr 220px' : '1fr'};gap:24px;align-items:start">
+  <div>${planoHtml}</div>
+  ${creatives.length > 0 ? `<div>${creativesHtml}</div>` : ''}
 </div>`;
   return wrapSlide(body, idx, total);
 }
@@ -900,21 +1044,21 @@ function sDestaqueCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number, tota
     const cards = camps.map(c => {
       const m = c.metricas;
       const rows: string[] = [
-        `<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER};padding:5px 0;border-bottom:1px solid ${BORDER}"><span style="color:${MUTED}">Investido</span><span style="font-weight:700;color:${FG}">${brl(m.investimento)}</span></div>`,
-        `<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER};padding:5px 0;border-bottom:1px solid ${BORDER}"><span style="color:${MUTED}">Alcance</span><span style="font-weight:700;color:${FG}">${num(m.alcance)}</span></div>`,
+        `<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER};padding:5px 0;border-bottom:1px solid ${BORDER}"><span style="color:${MUTED}">Investido</span><span style="font-weight:700;color:${FG}">${brlOrDash(m.investimento)}</span></div>`,
+        `<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER};padding:5px 0;border-bottom:1px solid ${BORDER}"><span style="color:${MUTED}">Alcance</span><span style="font-weight:700;color:${FG}">${numOrDash(m.alcance)}</span></div>`,
         `<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER};padding:5px 0;border-bottom:1px solid ${BORDER}"><span style="color:${MUTED}">Freq.</span><span style="font-weight:700;color:${FG}">${m.frequencia.toFixed(1)}×</span></div>`,
       ];
       if (m.conversas > 0) rows.push(`<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER};padding:5px 0;border-bottom:1px solid ${BORDER}"><span style="color:${MUTED}">Conversas</span><span style="font-weight:700;color:${PRIMARY}">${num(Math.round(m.conversas))}</span></div>`);
       if (m.conversas > 0) rows.push(`<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER};padding:5px 0;border-bottom:1px solid ${BORDER}"><span style="color:${MUTED}">Custo/conv.</span><span style="font-weight:700;color:${FG}">${brl(m.investimento / m.conversas)}</span></div>`);
       if (m.compras > 0) rows.push(`<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER};padding:5px 0;border-bottom:1px solid ${BORDER}"><span style="color:${MUTED}">Compras</span><span style="font-weight:700;color:${ORANGE}">${num(Math.round(m.compras))}</span></div>`);
       if (m.purchase_roas > 0) rows.push(`<div style="display:flex;justify-content:space-between;font-size:12px;font-family:${INTER};padding:5px 0"><span style="color:${MUTED}">ROAS</span><span style="font-weight:700;color:${ORANGE}">${m.purchase_roas.toFixed(2)}×</span></div>`);
-      return `<div style="border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:14px;position:relative;overflow:hidden">
+      return `<div style="border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:16px;position:relative;overflow:hidden">
         <div style="position:absolute;top:0;left:0;right:0;height:2px;background:${color}"></div>
-        <p style="font-size:12px;font-weight:700;color:${FG};font-family:${INTER};margin:4px 0 10px;line-height:1.3">${c.nome}</p>
+        <p style="font-size:12px;font-weight:700;color:${FG};font-family:${INTER};margin:4px 0 12px;line-height:1.3">${c.nome}</p>
         <div>${rows.join('')}</div>
       </div>`;
     }).join('');
-    return `<div style="margin-bottom:20px">
+    return `<div style="margin-bottom:22px">
       <p style="font-size:11px;font-weight:700;color:${color};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 10px">— ${title}</p>
       <div style="display:grid;grid-template-columns:repeat(${Math.min(camps.length, 3)},1fr);gap:12px;margin-bottom:10px">${cards}</div>
       ${insightText ? `<div style="border:1px solid ${color}40;background:${color}0D;border-radius:2px;padding:12px 16px">
@@ -936,17 +1080,17 @@ function sDiagnosticoFat(diag: DiagJson, d: ParsedData, bairros: Bairro[], idx: 
     ? diag.forcas.slice(0, 4)
     : [
         { titulo: 'Recorrência', descricao: d.recorrentes > 0 ? `${num(d.recorrentes)} clientes já recompraram — base de recorrência ativa.` : 'Ampliar programas de fidelidade para converter compradores únicos.' },
-        { titulo: 'Produtos', descricao: d.produtos[0] ? `"${d.produtos[0].nome}" é ancora de valor com ${num(d.produtos[0].qtd)} pedidos.` : 'Diversificar o cardápio com itens complementares.' },
-        { titulo: 'Dias Fortes', descricao: d.por_dia.length ? `Pico de pedidos em ${[...d.por_dia].sort((a, b) => b.pedidos - a.pedidos)[0]?.dia ?? '—'} — concentre esforços nesse dia.` : 'Mapeie os dias de pico para otimizar campanhas.' },
-        { titulo: 'Regiões', descricao: bairros[0] ? `${bairros[0].bairro} lidera com ${num(bairros[0].pedidos)} pedidos — fortalecer presença local aqui.` : 'Concentrar entrega em zonas de maior demanda.' },
+        { titulo: 'Produtos', descricao: d.produtos[0] && d.produtos[0].qtd > 0 ? `"${d.produtos[0].nome}" é âncora com ${num(d.produtos[0].qtd)} pedidos.` : 'Identificar produto âncora para campanhas de entrada.' },
+        { titulo: 'Dias Fortes', descricao: d.por_dia.length ? `Pico em ${[...d.por_dia].sort((a, b) => b.pedidos - a.pedidos)[0]?.dia ?? '—'} — concentrar esforços nesse dia.` : 'Mapear os dias de pico para otimizar campanhas.' },
+        { titulo: 'Regiões', descricao: bairros[0] ? `${bairros[0].bairro} lidera com ${num(bairros[0].pedidos)} pedidos.` : 'Concentrar entrega em zonas de maior demanda.' },
       ];
 
   const forcaCards = forcas.map((f, i) => {
     const colors = [PRIMARY, BLUE, ORANGE, RED];
     const c = colors[i % colors.length];
-    return `<div style="border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:18px;position:relative;overflow:hidden">
+    return `<div style="border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:20px;position:relative;overflow:hidden">
       <div style="position:absolute;top:0;left:0;width:100%;height:2px;background:${c}"></div>
-      <p style="font-family:${BEBAS};font-size:20px;color:${c};margin:4px 0 8px;letter-spacing:0.04em">${f.titulo}</p>
+      <p style="font-family:${BEBAS};font-size:22px;color:${c};margin:4px 0 10px;letter-spacing:0.04em">${f.titulo}</p>
       <p style="font-size:13px;color:${FG};font-family:${INTER};line-height:1.6;margin:0">${f.descricao}</p>
     </div>`;
   }).join('');
@@ -955,17 +1099,17 @@ function sDiagnosticoFat(diag: DiagJson, d: ParsedData, bairros: Bairro[], idx: 
     <div style="border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:16px;margin-bottom:12px">
       <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 12px">Base de Clientes</p>
       ${[
-        { label: 'Ativos',       value: num(d.ativos),     color: PRIMARY },
-        { label: 'Inativos',     value: num(d.inativos),   color: RED },
-        { label: 'Em Potencial', value: num(d.potenciais), color: BLUE },
-      ].map(item => `<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid ${BORDER};font-family:${INTER}">
+        { label: 'Ativos',       value: numOrDash(d.ativos),     color: PRIMARY },
+        { label: 'Inativos',     value: numOrDash(d.inativos),   color: RED },
+        { label: 'Em Potencial', value: numOrDash(d.potenciais), color: BLUE },
+      ].map(item => `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid ${BORDER};font-family:${INTER}">
         <span style="font-size:12px;color:${MUTED}">${item.label}</span>
-        <span style="font-size:16px;font-family:${BEBAS};color:${item.color};line-height:1">${item.value}</span>
+        <span style="font-size:18px;font-family:${BEBAS};color:${item.color};line-height:1">${item.value}</span>
       </div>`).join('')}
     </div>
     ${bairros[0] ? `<div style="border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:16px">
       <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 10px">Top Regiões</p>
-      ${bairros.slice(0, 4).map((b, i) => `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid ${BORDER};font-family:${INTER}">
+      ${bairros.slice(0, 4).map((b, i) => `<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid ${BORDER};font-family:${INTER}">
         <span style="font-size:12px;color:${i === 0 ? FG : MUTED}">${b.bairro}</span>
         <span style="font-size:12px;font-weight:700;color:${i === 0 ? PRIMARY : MUTED}">${num(b.pedidos)} ped.</span>
       </div>`).join('')}
@@ -973,43 +1117,41 @@ function sDiagnosticoFat(diag: DiagJson, d: ParsedData, bairros: Bairro[], idx: 
 
   const body = `
 ${secTitle('Diagnóstico de Faturamento', 'As 4 forças que explicam o resultado do período')}
-<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 280px;gap:16px;align-items:start">
-  <div style="grid-column:1/5;display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:16px">${forcaCards}</div>
+<div style="display:grid;grid-template-columns:1fr 280px;gap:20px;align-items:start">
+  <div>
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-bottom:20px">${forcaCards}</div>
+    ${diag.diagnostico ? `<div style="border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:16px 20px">
+      <p style="font-size:14px;color:${FG};font-family:${INTER};line-height:1.7;margin:0">${diag.diagnostico}</p>
+    </div>` : ''}
+  </div>
   <div>${sidebar}</div>
-</div>
-${diag.diagnostico ? `<div style="margin-top:16px;border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:16px 20px">
-  <p style="font-size:14px;color:${FG};font-family:${INTER};line-height:1.7;margin:0">${diag.diagnostico}</p>
-</div>` : ''}`;
+</div>`;
   return wrapSlide(body, idx, total, 'ANÁLISE EXPANDIDA');
 }
 
+// ── Plano Detalhado — 3+2 grid com objetivo/público/mensagem + jornada ────────
+
 function sPlanoDetalhado(diag: DiagJson, idx: number, total: number): string {
   const JORNADA_LABELS: Record<string, string> = {
-    descoberta:          'Descoberta',
-    primeira_compra:     '1ª Compra',
-    recompra:            'Recompra',
-    reativacao_leve:     'Reativação Leve',
-    reativacao_forte:    'Reativação Forte',
+    descoberta: 'Descoberta', primeira_compra: '1ª Compra',
+    recompra: 'Recompra', reativacao_leve: 'Reativação Leve', reativacao_forte: 'Reativação Forte',
   };
   const jornada = diag.jornada.length
     ? diag.jornada
     : ['descoberta', 'primeira_compra', 'recompra', 'reativacao_leve', 'reativacao_forte'];
 
-  const jornadaHtml = `<div style="display:flex;align-items:center;gap:0;margin-bottom:20px;overflow:hidden">
+  const jornadaHtml = `<div style="display:flex;align-items:stretch;margin-bottom:22px;overflow:hidden">
     ${jornada.map((etapa, i) => `
-      <div style="flex:1;position:relative;text-align:center">
-        <div style="background:${i === 0 ? PRIMARY : CARD};border:1px solid ${i === 0 ? PRIMARY : BORDER};padding:8px 4px;clip-path:polygon(0 0,calc(100% - 10px) 0,100% 50%,calc(100% - 10px) 100%,0 100%,${i === 0 ? '0' : '10px'} 50%);margin-right:-1px">
-          <p style="font-size:10px;font-weight:700;color:${i === 0 ? BG : MUTED};text-transform:uppercase;letter-spacing:0.06em;font-family:${INTER};margin:0;line-height:1.2">${JORNADA_LABELS[etapa] ?? etapa}</p>
-        </div>
+      <div style="flex:1;text-align:center;background:${i === 0 ? PRIMARY : CARD};border:1px solid ${i === 0 ? PRIMARY : BORDER};padding:9px 4px;margin-right:-1px;position:relative">
+        <p style="font-size:10px;font-weight:700;color:${i === 0 ? BG : MUTED};text-transform:uppercase;letter-spacing:0.06em;font-family:${INTER};margin:0;line-height:1.3">${JORNADA_LABELS[etapa] ?? etapa}</p>
       </div>`).join('')}
   </div>`;
 
   const planCards = diag.plano.slice(0, 5).map((p, i) => {
-    const etapa = jornada[i] ?? '';
-    const etapaLabel = JORNADA_LABELS[etapa] ?? '';
-    return `<div style="border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:16px;display:flex;flex-direction:column;gap:8px;position:relative;overflow:hidden">
+    const etapaLabel = JORNADA_LABELS[jornada[i] ?? ''] ?? '';
+    return `<div style="border:1px solid ${BORDER};background:${CARD};border-radius:2px;padding:16px;display:flex;flex-direction:column;gap:9px;position:relative;overflow:hidden">
       <div style="position:absolute;top:0;left:0;right:0;height:2px;background:${PRIMARY}"></div>
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px">
         <div style="width:28px;height:28px;background:${PRIMARY};border-radius:2px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
           <span style="font-size:14px;font-weight:800;color:#0e0f14;font-family:${INTER}">${i + 1}</span>
         </div>
@@ -1018,16 +1160,21 @@ function sPlanoDetalhado(diag: DiagJson, idx: number, total: number): string {
       <p style="font-size:13px;font-weight:700;color:${FG};font-family:${INTER};margin:0;line-height:1.3">${p.acao}</p>
       ${p.objetivo ? `<p style="font-size:11px;color:${PRIMARY};font-family:${INTER};margin:0;line-height:1.4"><strong>Objetivo:</strong> ${p.objetivo}</p>` : ''}
       ${p.publico ? `<p style="font-size:11px;color:${MUTED};font-family:${INTER};margin:0;line-height:1.4"><strong style="color:${FG}">Público:</strong> ${p.publico}</p>` : ''}
-      ${p.mensagem ? `<div style="margin-top:4px;padding:8px;background:${BG};border-radius:2px;border:1px solid ${BORDER}">
+      ${p.mensagem ? `<div style="margin-top:2px;padding:8px 10px;background:${BG};border-radius:2px;border:1px solid ${BORDER}">
         <p style="font-size:11px;color:${MUTED};font-family:${INTER};margin:0;line-height:1.5;font-style:italic">"${p.mensagem}"</p>
       </div>` : ''}
     </div>`;
-  }).join('');
+  });
+
+  // 3+2 rows for 5 cards
+  const row1Html = `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px">${planCards.slice(0,3).join('')}</div>`;
+  const row2Html = `<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;max-width:67%">${planCards.slice(3).join('')}</div>`;
 
   const body = `
 ${secTitle('Plano de Ação Detalhado', 'Estratégia campanha a campanha para o próximo mês')}
 ${jornadaHtml}
-<div style="display:grid;grid-template-columns:repeat(${Math.min(diag.plano.length, 5)},1fr);gap:12px">${planCards}</div>`;
+${row1Html}
+${row2Html}`;
   return wrapSlide(body, idx, total, 'ANÁLISE EXPANDIDA');
 }
 
@@ -1042,7 +1189,7 @@ async function fetchDiagnosis(
     faturamento: d.faturamento, pedidos: d.pedidos_ativos, ticket: Math.round(d.ticket),
     ativos: d.ativos, inativos: d.inativos, potenciais: d.potenciais,
     uma_compra: d.uma_compra, recorrentes: d.recorrentes,
-    top_produtos: d.produtos.slice(0, 5).map(p => `${p.nome} (${p.qtd}x)`),
+    top_produtos: d.produtos.filter(p => p.qtd > 0).slice(0, 5).map(p => `${p.nome} (${p.qtd}x)`),
     top_bairros: bairros.slice(0, 3).map(b => `${b.bairro} (${b.pedidos} ped)`),
     dias_semana: d.por_dia.sort((a, b) => b.pedidos - a.pedidos).slice(0, 2).map(x => x.dia),
     meta_ads: meta ? {
@@ -1092,14 +1239,14 @@ async function fetchDiagnosis(
     const parsed = JSON.parse(raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim()) as DiagJson;
     return {
       diagnostico:                parsed.diagnostico                ?? 'Análise indisponível.',
-      forcas:                     Array.isArray(parsed.forcas)      ? parsed.forcas : [],
+      forcas:                     Array.isArray(parsed.forcas)        ? parsed.forcas : [],
       pontos_fortes:              Array.isArray(parsed.pontos_fortes) ? parsed.pontos_fortes : [],
       pontos_atencao:             Array.isArray(parsed.pontos_atencao) ? parsed.pontos_atencao : [],
-      plano:                      Array.isArray(parsed.plano)        ? parsed.plano : [],
+      plano:                      Array.isArray(parsed.plano)         ? parsed.plano : [],
       insight_campanha_conversa:  parsed.insight_campanha_conversa  ?? '',
       insight_campanha_conversao: parsed.insight_campanha_conversao ?? '',
       frase_fechamento:           parsed.frase_fechamento            ?? '',
-      jornada:                    Array.isArray(parsed.jornada)      ? parsed.jornada : ['descoberta','primeira_compra','recompra','reativacao_leve','reativacao_forte'],
+      jornada:                    Array.isArray(parsed.jornada)       ? parsed.jornada : ['descoberta','primeira_compra','recompra','reativacao_leve','reativacao_forte'],
     };
   } catch {
     return {
@@ -1127,38 +1274,31 @@ export async function buildDeliveryReport(opts: {
 
   const fromDate = new Date(from + 'T12:00:00');
   const toDate   = new Date(to   + 'T12:00:00');
+  const MONTHS   = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  const periodo  = `${MONTHS[fromDate.getMonth()]}/${fromDate.getFullYear()}`;
 
-  const MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
-  const periodo      = `${MONTHS[fromDate.getMonth()]}/${fromDate.getFullYear()}`;
-
-  // Separate current vs previous-period CSV files (prefix ant-)
   const { current: currentFiles, previous: prevFiles } = separateFiles(csvFiles);
   const hasPrev = prevFiles.length > 0;
 
-  // Parse CSV data
-  const data     = parseAllFiles(currentFiles, toDate);
-  const prevData  = hasPrev ? parseAllFiles(prevFiles, fromDate) : null;
+  const data    = parseAllFiles(currentFiles, toDate);
+  const prevData = hasPrev ? parseAllFiles(prevFiles, fromDate) : null;
 
-  // Previous period label for capa
-  const prevPeriodo = hasPrev && prevFiles.length > 0
+  const prevPeriodo = hasPrev
     ? (() => {
-        const prevMonth = new Date(fromDate.getFullYear(), fromDate.getMonth() - 1, 1);
-        return `${MONTHS[prevMonth.getMonth()]}/${prevMonth.getFullYear()}`;
+        const pm = new Date(fromDate.getFullYear(), fromDate.getMonth() - 1, 1);
+        return `${MONTHS[pm.getMonth()]}/${pm.getFullYear()}`;
       })()
     : '';
 
-  // Parallel: DB bairros + Meta API (campaigns + creatives)
   const [bairros, { meta, creatives }] = await Promise.all([
     fetchBairros(clientId, from, to),
     fetchMetaData(connectionId, accountIds, from, to),
   ]);
 
-  console.log(`[delivery] ${clientName} | ativos:${data.ativos} fat:${brl(data.faturamento)} prod:${data.produtos.length} bairros:${bairros.length} meta:${meta ? 'sim' : 'não'} criativos:${creatives.length} prev:${hasPrev}`);
+  console.log(`[delivery] ${clientName} | fat:${brlOrDash(data.faturamento)} ativos:${data.ativos} prod:${data.produtos.length} bairros:${bairros.length} meta:${meta ? 'sim' : 'não'} criativos:${creatives.length} prev:${hasPrev}`);
 
-  // Claude writes ONLY the diagnosis JSON (~2500 tokens)
   const diag = await fetchDiagnosis(data, prevData, meta, bairros, clientName, periodo, agencyContext);
 
-  // Determine active slides
   const hasVisao   = data.faturamento > 0 || data.pedidos_ativos > 0;
   const hasDia     = data.por_dia.length > 0;
   const hasBase    = data.ativos > 0 || data.inativos > 0 || data.potenciais > 0;
@@ -1166,10 +1306,11 @@ export async function buildDeliveryReport(opts: {
   const hasProd    = data.produtos.length > 0;
   const hasRegiao  = bairros.length > 0;
   const hasMeta    = meta !== null;
-  const hasDestaques    = hasMeta && meta!.campanhas.length > 0;
-  const hasDiagFat      = hasBase || hasRegiao;
-  const hasPlanoDetalh  = diag.plano.length > 0;
+  const hasDestaques   = hasMeta && meta!.campanhas.length > 0;
+  const hasDiagFat     = hasBase || hasRegiao;
+  const hasPlanoDetalh = diag.plano.length > 0;
 
+  // Diagnóstico sempre gera 2 slides (A + Plan)
   const total = 1
     + (hasVisao  ? 1 : 0)
     + (hasDia    ? 1 : 0)
@@ -1178,7 +1319,7 @@ export async function buildDeliveryReport(opts: {
     + (hasInat   ? 1 : 0)
     + (hasProd   ? 1 : 0)
     + (hasMeta   ? 1 : 0)
-    + 1                           // diagnóstico
+    + 2                           // sDiagnosticoA + sDiagnosticoPlan
     + (hasDestaques   ? 1 : 0)
     + (hasDiagFat     ? 1 : 0)
     + (hasPlanoDetalh ? 1 : 0);
@@ -1187,14 +1328,15 @@ export async function buildDeliveryReport(opts: {
   let i = 1;
 
   slides.push(sCapa(data, meta, clientName, periodo, prevPeriodo, diag, total));
-  if (hasVisao)       slides.push(sVisaoGeral(data, prevData, ++i, total));
-  if (hasDia)         slides.push(sPorDia(data, ++i, total));
-  if (hasRegiao)      slides.push(sRegioes(bairros, ++i, total));
-  if (hasBase)        slides.push(sBase(data, ++i, total));
-  if (hasInat)        slides.push(sInativos(data, ++i, total));
-  if (hasProd)        slides.push(sProdutos(data, ++i, total));
-  if (hasMeta)        slides.push(sMetaAds(meta!, ++i, total));
-  slides.push(sDiagnostico(diag, creatives, ++i, total));
+  if (hasVisao)     slides.push(sVisaoGeral(data, prevData, ++i, total));
+  if (hasDia)       slides.push(sPorDia(data, ++i, total));
+  if (hasRegiao)    slides.push(sRegioes(bairros, ++i, total));
+  if (hasBase)      slides.push(sBase(data, ++i, total));
+  if (hasInat)      slides.push(sInativos(data, ++i, total));
+  if (hasProd)      slides.push(sProdutos(data, ++i, total));
+  if (hasMeta)      slides.push(sMetaAds(meta!, ++i, total));
+  slides.push(sDiagnosticoA(diag, ++i, total));
+  slides.push(sDiagnosticoPlan(diag, creatives, ++i, total));
   if (hasDestaques)   slides.push(sDestaqueCampanhas(meta!, diag, ++i, total));
   if (hasDiagFat)     slides.push(sDiagnosticoFat(diag, data, bairros, ++i, total));
   if (hasPlanoDetalh) slides.push(sPlanoDetalhado(diag, ++i, total));
