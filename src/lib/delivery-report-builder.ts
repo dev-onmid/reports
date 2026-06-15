@@ -33,7 +33,7 @@ const BG           = '#FFFFFF';
 const BORDER       = '#E2E8F0';
 const FG           = '#111827';   // near-black — titles, values
 const MUTED        = '#374151';   // cinza chumbo — body text, labels, secondary
-const RED          = '#DC2626';
+const RED          = '#e52020';
 const BLUE         = '#0B84FF';
 const ORANGE       = '#FF6B35';
 
@@ -626,7 +626,7 @@ function sectionHeader(thesis: string, context: string): string {
   <div style="display:flex;gap:14px;align-items:flex-start">
     <div style="width:4px;flex-shrink:0;background:${PRIMARY};align-self:stretch;min-height:42px;margin-top:2px"></div>
     <div>
-      <h2 style="font-family:${BEBAS};font-size:34px;color:${FG};margin:0;line-height:1;letter-spacing:0.02em">${thesis}</h2>
+      <h2 style="font-family:${BEBAS};font-size:36px;color:${FG};margin:0;line-height:1;letter-spacing:0.02em">${thesis}</h2>
       <p style="font-size:11px;font-weight:600;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;margin:5px 0 0;font-family:${INTER}">${context}</p>
     </div>
   </div>
@@ -644,7 +644,7 @@ function kpiHero(label: string, value: string, sub: string, color = PRIMARY): st
   <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,${color},${color}00)"></div>
   <div style="position:absolute;top:0;left:0;width:14px;height:14px;background:${color}"></div>
   <p style="font-size:10px;font-weight:700;color:${textColor};text-transform:uppercase;letter-spacing:0.12em;font-family:${INTER};margin:4px 0 10px">${label}</p>
-  <p style="font-family:${BEBAS};font-size:${isEmpty ? '40' : '76'}px;color:${isEmpty ? MUTED : FG};line-height:0.9;margin:0 0 10px;letter-spacing:0.01em">${value}</p>
+  <p style="font-family:${BEBAS};font-size:${isEmpty ? '36' : '60'}px;color:${isEmpty ? MUTED : FG};line-height:0.9;margin:0 0 10px;letter-spacing:0.01em">${value}</p>
   <p style="font-size:13px;color:${MUTED};font-family:${INTER};line-height:1.5;margin:0">${sub}</p>
 </div>`;
 }
@@ -656,7 +656,7 @@ function kpi(label: string, value: string, context: string, accentColor = PRIMAR
   <div style="position:absolute;top:0;left:0;right:0;height:2px;background:${accentColor}"></div>
   <div style="position:absolute;top:0;left:0;width:12px;height:12px;background:${accentColor}"></div>
   <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:4px 0 8px">${label}</p>
-  <p style="font-family:${BEBAS};font-size:${isEmpty ? '28' : '38'}px;color:${isEmpty ? MUTED : FG};line-height:1;margin:0 0 5px">${value}</p>
+  <p style="font-family:${BEBAS};font-size:${isEmpty ? '24' : '36'}px;color:${isEmpty ? MUTED : FG};line-height:1;margin:0 0 5px">${value}</p>
   <p style="font-size:11px;color:${MUTED};font-family:${INTER};line-height:1.4;margin:0">${context}</p>
 </div>`;
 }
@@ -673,7 +673,7 @@ function kpiWithDelta(label: string, value: string, prevValue: string, delta: { 
   <div style="position:absolute;top:0;left:0;right:0;height:2px;background:${accentColor}"></div>
   <div style="position:absolute;top:0;left:0;width:12px;height:12px;background:${accentColor}"></div>
   <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:4px 0 8px">${label}</p>
-  <p style="font-family:${BEBAS};font-size:${isEmpty ? '28' : '38'}px;color:${isEmpty ? MUTED : FG};line-height:1;margin:0 0 7px">${value}${deltaHtml}</p>
+  <p style="font-family:${BEBAS};font-size:${isEmpty ? '24' : '36'}px;color:${isEmpty ? MUTED : FG};line-height:1;margin:0 0 7px">${value}${deltaHtml}</p>
   <p style="font-size:11px;color:${MUTED};font-family:${INTER};line-height:1.4;margin:0">${prevHtml}</p>
 </div>`;
 }
@@ -820,7 +820,7 @@ function sCapa(
   <div style="flex:1;display:flex;flex-direction:column;justify-content:center;padding-right:48px;border-right:1px solid ${BORDER};position:relative;overflow:hidden">
     <div style="position:absolute;bottom:-80px;left:-80px;width:320px;height:320px;border-radius:50%;background:radial-gradient(circle,${PRIMARY}0F,transparent 70%)"></div>
     <p style="font-size:10px;font-weight:700;color:${PRIMARY};text-transform:uppercase;letter-spacing:0.16em;font-family:${INTER};margin:0 0 14px">Relatório de Performance — Delivery</p>
-    <h1 style="font-family:${BEBAS};font-size:72px;color:${FG};margin:0;line-height:0.9;letter-spacing:0.02em">${clientName}</h1>
+    <h1 style="font-family:${BEBAS};font-size:60px;color:${FG};margin:0;line-height:0.9;letter-spacing:0.02em">${clientName}</h1>
     <p style="font-size:14px;color:${MUTED};margin:14px 0 0;font-family:${INTER}">${periodo}${prevLine}</p>
     ${fechamento}
   </div>
@@ -994,7 +994,7 @@ function sBase(d: ParsedData, idx: number, total: number): string {
   const card = (label: string, value: string, ctx: string, barColor: string, icoPath: string) => {
     const isEmpty  = value === '—';
     const numColor = isEmpty ? MUTED : FG;
-    const numSize  = isEmpty ? '38' : '56';
+    const numSize  = isEmpty ? '30' : '48';
     return `<div style="background:${CARD};border:1px solid ${BORDER};overflow:hidden;box-sizing:border-box;display:flex;flex-direction:column">
       <div style="height:4px;background:${barColor};flex-shrink:0"></div>
       <div style="padding:18px 20px 20px;display:flex;flex-direction:column;gap:10px">
@@ -1038,12 +1038,12 @@ function sBase(d: ParsedData, idx: number, total: number): string {
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:1px;background:${BORDER}">
         <div style="background:${ORANGE}0D;padding:16px;text-align:center">
           <p style="font-size:10px;font-weight:700;color:${ORANGE};text-transform:uppercase;letter-spacing:0.08em;font-family:${INTER};margin:0 0 8px">1ª compra apenas</p>
-          <p style="font-family:${BEBAS};font-size:44px;color:${FG};line-height:0.9;margin:0 0 6px">${num(d.uma_compra)}</p>
+          <p style="font-family:${BEBAS};font-size:36px;color:${FG};line-height:0.9;margin:0 0 6px">${num(d.uma_compra)}</p>
           <p style="font-size:12px;font-weight:700;color:${ORANGE};font-family:${INTER};margin:0">${pUma}% dos ativos</p>
         </div>
         <div style="background:${PRIMARY}0D;padding:16px;text-align:center">
           <p style="font-size:10px;font-weight:700;color:${PRIMARY_TEXT};text-transform:uppercase;letter-spacing:0.08em;font-family:${INTER};margin:0 0 8px">Recompra (2× ou mais)</p>
-          <p style="font-family:${BEBAS};font-size:44px;color:${FG};line-height:0.9;margin:0 0 6px">${num(d.recorrentes)}</p>
+          <p style="font-family:${BEBAS};font-size:36px;color:${FG};line-height:0.9;margin:0 0 6px">${num(d.recorrentes)}</p>
           <p style="font-size:12px;font-weight:700;color:${PRIMARY_TEXT};font-family:${INTER};margin:0">${pRec}% dos ativos</p>
         </div>
       </div>
@@ -1817,7 +1817,8 @@ export async function buildDeliveryReport(opts: {
   if (hasDiagFat)     slides.push(sDiagnosticoFat(diag, data, bairros, ++i, total));
   if (hasPlanoDetalh) slides.push(sPlanoDetalhado(diag, ++i, total));
 
-  return { html: `<div style="background:${BG};padding:28px;font-family:${INTER}">${slides.join('')}</div>` };
+  const fontLink = `<style>@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&display=swap');</style>`;
+  return { html: `${fontLink}<div style="background:${BG};padding:28px;font-family:${INTER}">${slides.join('')}</div>` };
 }
 
 // ── Save to DB ─────────────────────────────────────────────────────────────────
