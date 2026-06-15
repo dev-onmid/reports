@@ -964,75 +964,118 @@ ${thesisBanner(`Os 3 bairros mais fortes concentram ${top3pct}% dos pedidos — 
 
 function sBase(d: ParsedData, idx: number, total: number): string {
   const tot = d.ativos + d.inativos + d.potenciais;
-  const pA  = tot ? (d.ativos  / tot * 100).toFixed(0) : '0';
-  const pI  = tot ? (d.inativos / tot * 100).toFixed(0) : '0';
-  const pP  = tot ? (d.potenciais / tot * 100).toFixed(0) : '0';
+  const pA  = tot ? Math.round(d.ativos     / tot * 100) : 0;
+  const pI  = tot ? Math.round(d.inativos   / tot * 100) : 0;
+  const pP  = tot ? Math.round(d.potenciais / tot * 100) : 0;
 
   const totalAtivos = d.uma_compra + d.recorrentes;
-  const pRec = totalAtivos ? (d.recorrentes / totalAtivos * 100).toFixed(0) : '0';
-  const pUma = totalAtivos ? (d.uma_compra / totalAtivos * 100).toFixed(0) : '0';
+  const pRec = totalAtivos ? Math.round(d.recorrentes / totalAtivos * 100) : 0;
+  const pUma = totalAtivos ? Math.round(d.uma_compra  / totalAtivos * 100) : 0;
   const hasDistrib = d.uma_compra > 0 || d.recorrentes > 0;
 
-  // Thesis: frequency-driven if data available
   const thesis = hasDistrib
-    ? (parseInt(pUma) > 50
-        ? `${pUma}% comprou só uma vez — converter a 2ª compra é o maior ganho do mês`
-        : `${pRec}% da base ativa já recompra — a recorrência sustenta o resultado`)
+    ? (pUma > 50
+        ? `${pUma}% comprou só 1 vez — converter a 2ª compra é o maior ganho do mês`
+        : `${pRec}% da base ativa já recompra — recorrência sustenta o resultado`)
     : `Base total de ${numOrDash(tot)} clientes — ${pA}% ativos, ${pI}% inativos`;
 
-  const donut = donutSvg([
+  // ── Icon circle (inline SVG) ───────────────────────────────────────────────
+  const ico = (path: string, color: string) => {
+    const stroke = color === PRIMARY ? PRIMARY_TEXT : color;
+    return `<div style="width:44px;height:44px;border-radius:50%;background:${color}15;border:1.5px solid ${color}28;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="${stroke}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${path}</svg>
+    </div>`;
+  };
+  const ICO_USERS  = '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>';
+  const ICO_CLOCK  = '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>';
+  const ICO_STAR   = '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>';
+
+  // ── KPI card — briefing spec: 4px bar | icon+LABEL | BIG NUMBER | context ──
+  const card = (label: string, value: string, ctx: string, barColor: string, icoPath: string) => {
+    const isEmpty  = value === '—';
+    const numColor = isEmpty ? MUTED : FG;
+    const numSize  = isEmpty ? '38' : '56';
+    return `<div style="background:${CARD};border:1px solid ${BORDER};overflow:hidden;box-sizing:border-box;display:flex;flex-direction:column">
+      <div style="height:4px;background:${barColor};flex-shrink:0"></div>
+      <div style="padding:18px 20px 20px;display:flex;flex-direction:column;gap:10px">
+        <div style="display:flex;align-items:center;gap:10px">
+          ${ico(icoPath, barColor)}
+          <span style="font-size:11px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};line-height:1.3">${label}</span>
+        </div>
+        <p style="font-family:${BEBAS};font-size:${numSize}px;color:${numColor};line-height:0.9;margin:0;letter-spacing:0.01em">${value}</p>
+        <p style="font-size:12px;color:${MUTED};font-family:${INTER};line-height:1.4;margin:0">${ctx}</p>
+      </div>
+    </div>`;
+  };
+
+  // ── Donut + legend — FIX: percent labels use PRIMARY_TEXT not PRIMARY ───────
+  const donut = tot > 0 ? donutSvg([
     { label: 'Ativos',       value: d.ativos,     color: PRIMARY },
     { label: 'Inativos',     value: d.inativos,   color: RED },
     { label: 'Em Potencial', value: d.potenciais, color: BLUE },
-  ]);
+  ], 180) : '';
 
-  const legend = [
-    { label: 'Ativos',       pct: pA, count: d.ativos,     color: PRIMARY },
-    { label: 'Inativos',     pct: pI, count: d.inativos,   color: RED },
-    { label: 'Em Potencial', pct: pP, count: d.potenciais, color: BLUE },
-  ].map(l => `<div style="display:flex;align-items:center;gap:14px;padding:11px 0;border-bottom:1px solid ${BORDER}">
-    <div style="width:8px;height:8px;background:${l.color};flex-shrink:0"></div>
-    <span style="flex:1;font-size:13px;font-weight:600;color:${FG};font-family:${INTER}">${l.label}</span>
-    <span style="font-size:28px;font-family:${BEBAS};color:${FG};line-height:1">${numOrDash(l.count)}</span>
-    <span style="font-size:12px;font-weight:700;color:${l.color};font-family:${INTER};width:40px;text-align:right">${l.pct}%</span>
-  </div>`).join('');
+  const legendRows = [
+    { label: 'Ativos',        count: d.ativos,     pct: pA, color: PRIMARY },
+    { label: 'Inativos',      count: d.inativos,   pct: pI, color: RED },
+    { label: 'Em Potencial',  count: d.potenciais, pct: pP, color: BLUE },
+  ].map(l => {
+    // FIX: PRIMARY chartreuse (#55f52f) is ~1.7:1 contrast on white → invisible.
+    // Use PRIMARY_TEXT (#1a8a00) for all green text labels instead.
+    const pctColor = l.color === PRIMARY ? PRIMARY_TEXT : l.color;
+    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid ${BORDER}">
+      <div style="width:8px;height:8px;border-radius:50%;background:${l.color};flex-shrink:0"></div>
+      <span style="flex:1;font-size:12px;font-weight:600;color:${FG};font-family:${INTER}">${l.label}</span>
+      <span style="font-family:${BEBAS};font-size:20px;color:${FG};line-height:1">${numOrDash(l.count)}</span>
+      <span style="font-size:11px;font-weight:700;color:${pctColor};font-family:${INTER};min-width:32px;text-align:right">${l.pct}%</span>
+    </div>`;
+  }).join('');
 
-  // Right side: hero stats for 1x vs 2x+
-  const rightContent = hasDistrib ? `
-    <div style="margin-bottom:14px">
-      <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 14px">Frequência de Compra</p>
-      <div style="display:flex;gap:0">
-        <div style="flex:1;border:1px solid ${ORANGE}40;background:${ORANGE}0A;padding:16px;text-align:center">
-          <p style="font-family:${BEBAS};font-size:52px;color:${FG};margin:0;line-height:1">${num(d.uma_compra)}</p>
-          <p style="font-size:11px;font-weight:700;color:${ORANGE};font-family:${INTER};margin:5px 0 0">1× — ${pUma}%</p>
+  // ── Frequency section — FIX: omit silently if no data (no client-facing error) ─
+  const freqHtml = hasDistrib ? `
+    <div style="margin-top:20px">
+      <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 10px">Frequência de Compra</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1px;background:${BORDER}">
+        <div style="background:${ORANGE}0D;padding:16px;text-align:center">
+          <p style="font-size:10px;font-weight:700;color:${ORANGE};text-transform:uppercase;letter-spacing:0.08em;font-family:${INTER};margin:0 0 8px">1ª compra apenas</p>
+          <p style="font-family:${BEBAS};font-size:44px;color:${FG};line-height:0.9;margin:0 0 6px">${num(d.uma_compra)}</p>
+          <p style="font-size:12px;font-weight:700;color:${ORANGE};font-family:${INTER};margin:0">${pUma}% dos ativos</p>
         </div>
-        <div style="flex:1;border:1px solid ${PRIMARY}40;background:${PRIMARY}0A;padding:16px;text-align:center;border-left:none">
-          <p style="font-family:${BEBAS};font-size:52px;color:${FG};margin:0;line-height:1">${num(d.recorrentes)}</p>
-          <p style="font-size:11px;font-weight:700;color:${PRIMARY};font-family:${INTER};margin:5px 0 0">2×+ — ${pRec}%</p>
+        <div style="background:${PRIMARY}0D;padding:16px;text-align:center">
+          <p style="font-size:10px;font-weight:700;color:${PRIMARY_TEXT};text-transform:uppercase;letter-spacing:0.08em;font-family:${INTER};margin:0 0 8px">Recompra (2× ou mais)</p>
+          <p style="font-family:${BEBAS};font-size:44px;color:${FG};line-height:0.9;margin:0 0 6px">${num(d.recorrentes)}</p>
+          <p style="font-size:12px;font-weight:700;color:${PRIMARY_TEXT};font-family:${INTER};margin:0">${pRec}% dos ativos</p>
         </div>
       </div>
-    </div>
-    ${parseInt(pUma) > 50
-      ? insight('Oportunidade clara', `${num(d.uma_compra)} clientes compraram só 1 vez. Uma campanha de 2ª compra com cupom pode converter 20–30% deles.`, ORANGE)
-      : insight('Recorrência saudável', `${pRec}% dos ativos já recompraram. Foco em aumentar a frequência e elevar o ticket médio por pedido.`, PRIMARY)}`
-    : insight('Frequência não mapeada', 'A coluna de quantidade de pedidos não foi encontrada nos CSVs. Para ver distribuição 1× vs 2×+, inclua uma coluna "qtd_pedidos" no arquivo de ativos.');
+      ${pUma > 50
+        ? insight('Oportunidade clara', `${num(d.uma_compra)} clientes compraram só 1 vez. Uma campanha de 2ª compra com cupom pode converter 20–30% deles.`, ORANGE)
+        : insight('Recorrência saudável', `${pRec}% dos ativos já recompraram. Foco em aumentar frequência e ticket médio por pedido.`)}
+    </div>` : '';
 
   const conclusion = hasDistrib
-    ? (parseInt(pUma) > 50
-      ? `Prioridade: campanha de 2ª compra para ${num(d.uma_compra)} clientes que compraram só 1× — é a maior oportunidade de crescimento disponível.`
-      : `Base de recorrência sólida (${pRec}%). Estratégia: aumentar frequência e ticket dos ${num(d.recorrentes)} clientes fiéis.`)
-    : `Base total: ${numOrDash(tot)} cadastros. ${pA}% ativos, ${pI}% inativos — os inativos recentes são o maior ativo escondido.`;
+    ? (pUma > 50
+        ? `Prioridade: converter ${num(d.uma_compra)} clientes que compraram só 1 vez — é a maior oportunidade de crescimento disponível.`
+        : `Base de recorrência sólida (${pRec}%). Estratégia: aumentar frequência e ticket dos ${num(d.recorrentes)} clientes fiéis.`)
+    : `Base total: ${numOrDash(tot)} cadastros. ${pA}% ativos, ${pI}% inativos — os inativos recentes são o maior ativo oculto.`;
 
   const body = `
 ${sectionHeader(thesis, `Total: ${numOrDash(tot)} clientes cadastrados`)}
-<div style="display:grid;grid-template-columns:360px 1fr;gap:32px;flex:1;align-items:start">
+<div style="display:grid;grid-template-columns:1fr 252px;gap:28px;align-items:start">
   <div>
-    ${donut}
-    ${legend}
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px">
+      ${card('Clientes Ativos', numOrDash(d.ativos),     `${pA}% da base total`,    PRIMARY, ICO_USERS)}
+      ${card('Inativos',        numOrDash(d.inativos),   'sem pedido no período',   RED,     ICO_CLOCK)}
+      ${card('Em Potencial',    numOrDash(d.potenciais), 'nunca compraram',          BLUE,    ICO_STAR)}
+    </div>
+    ${freqHtml}
   </div>
-  <div>${rightContent}</div>
+  <div>
+    ${tot > 0 ? `<div style="display:flex;justify-content:center;margin-bottom:10px">${donut}</div>` : ''}
+    ${legendRows}
+  </div>
 </div>
 ${thesisBanner(conclusion)}`;
+
   return auditSlide(wrapSlide(body, idx, total), 'sBase');
 }
 
