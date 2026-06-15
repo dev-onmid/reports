@@ -1,6 +1,7 @@
 import { makeServerPool } from '@/lib/server-db';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import { RESULT_ACTIONS, NEW_CONTACT_ACTIONS, PURCHASE_ACTIONS, sumActions, brl } from './report-runner';
+import { logAiUsage } from '@/lib/ai-usage-logger';
 
 // ── Persist ───────────────────────────────────────────────────────────────────
 
@@ -614,7 +615,8 @@ export async function buildOmniReport(input: {
         }),
       });
       if (res.ok) {
-        const data = await res.json() as { content?: { type: string; text: string }[] };
+        const data = await res.json() as { content?: { type: string; text: string }[]; usage?: { input_tokens: number; output_tokens: number } };
+        void logAiUsage({ source: 'report_performance', model: 'claude-sonnet-4-6', inputTokens: data.usage?.input_tokens ?? 0, outputTokens: data.usage?.output_tokens ?? 0 });
         const text = data.content?.find(c => c.type === 'text')?.text ?? '';
         html = text.replace(/^```(?:html)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
       }

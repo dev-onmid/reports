@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { google as googleapis } from 'googleapis';
+import { logAiUsage } from '@/lib/ai-usage-logger';
 import { deflateSync } from 'zlib';
 import { makeServerPool } from '@/lib/server-db';
 import { sendText, sendDocument } from '@/lib/zapi';
@@ -1442,6 +1443,7 @@ export async function POST(req: NextRequest) {
         }
 
         const totalCostUsd = totalInputTokens * INPUT_COST_PER_TOKEN + totalOutputTokens * OUTPUT_COST_PER_TOKEN;
+        void logAiUsage({ source: 'luna_chat', model: 'claude-sonnet-4-6', inputTokens: totalInputTokens, outputTokens: totalOutputTokens });
         send(controller, {
           type: 'done', role,
           usage: {

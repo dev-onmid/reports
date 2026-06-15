@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
+import { logAiUsage } from '@/lib/ai-usage-logger';
 
 export type AiInsight = {
   id: string;
@@ -149,7 +150,8 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: `Erro na API Claude: ${err}` }, { status: 502 });
   }
 
-  const claudeData = await claudeRes.json() as { content: Array<{ type: string; text: string }> };
+  const claudeData = await claudeRes.json() as { content: Array<{ type: string; text: string }>; usage?: { input_tokens: number; output_tokens: number } };
+  void logAiUsage({ source: 'insights', model: 'claude-haiku-4-5-20251001', inputTokens: claudeData.usage?.input_tokens ?? 0, outputTokens: claudeData.usage?.output_tokens ?? 0 });
   const rawText = claudeData.content?.[0]?.text ?? '[]';
 
   let insights: Array<{

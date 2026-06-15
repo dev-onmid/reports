@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { Pool } from 'pg';
 import { queueFollowupIfExists } from '@/lib/followup-send';
+import { logAiUsage } from '@/lib/ai-usage-logger';
 
 const MODEL = 'claude-haiku-4-5-20251001';
 
@@ -519,6 +520,7 @@ Retorne exatamente este JSON:
       ],
     );
 
+    void logAiUsage({ source: 'crm_analysis', model: MODEL, inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens });
     const tokens = Number(response.usage.input_tokens ?? 0) + Number(response.usage.output_tokens ?? 0);
     await pool.query(
       `INSERT INTO public.ia_uso_mensal (client_id, mes_ano, chamadas_ia, tokens_usados, custo_estimado_usd)

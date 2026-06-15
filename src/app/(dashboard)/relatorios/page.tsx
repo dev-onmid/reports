@@ -978,38 +978,44 @@ export default function RelatoriosPage() {
               )}
             </div>
 
-            <div className="flex justify-end gap-2 pt-1">
-              <button onClick={() => { setShowGenModal(false); setGenSupplementaryFiles([]); setClientLinks([]); }} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
-                Cancelar
-              </button>
-              <Button
-                onClick={generateReport}
-                disabled={
-                  generating ||
-                  !genForm.clientId ||
-                  !genForm.from ||
-                  !genForm.to ||
-                  (genTemplate === 'delivery' && !genCsvFiles.length)
-                }
-                className={cn(
-                  'text-white gap-2 text-sm min-w-[120px]',
-                  genTemplate === 'delivery'
-                    ? 'bg-emerald-600 hover:bg-emerald-700'
-                    : 'bg-violet-600 hover:bg-violet-700',
-                )}
-              >
-                {generating ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Gerando...
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-4 h-4" />
-                    Gerar
-                  </>
-                )}
-              </Button>
+            <div className="flex items-center justify-between gap-2 pt-1">
+              <span className="text-[11px] text-muted-foreground/60 flex items-center gap-1">
+                <Zap className="w-3 h-3" />
+                {genTemplate === 'delivery' ? '~R$ 0,21 estimado' : '~R$ 0,59 estimado'}
+              </span>
+              <div className="flex gap-2">
+                <button onClick={() => { setShowGenModal(false); setGenSupplementaryFiles([]); setClientLinks([]); }} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
+                  Cancelar
+                </button>
+                <Button
+                  onClick={generateReport}
+                  disabled={
+                    generating ||
+                    !genForm.clientId ||
+                    !genForm.from ||
+                    !genForm.to ||
+                    (genTemplate === 'delivery' && !genCsvFiles.length)
+                  }
+                  className={cn(
+                    'text-white gap-2 text-sm min-w-[120px]',
+                    genTemplate === 'delivery'
+                      ? 'bg-emerald-600 hover:bg-emerald-700'
+                      : 'bg-violet-600 hover:bg-violet-700',
+                  )}
+                >
+                  {generating ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Gerando...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-4 h-4" />
+                      Gerar
+                    </>
+                  )}
+                </Button>
+              </div>
             </div>
           </div>
         </div>

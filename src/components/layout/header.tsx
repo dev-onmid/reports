@@ -8,6 +8,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { getAuthSession, type AuthSession } from '@/lib/auth-store';
 import { BackButton } from './back-button';
 import { ThemeToggle } from '@/components/theme-toggle';
+import { AIUsagePill } from './ai-usage-pill';
 
 export function Header({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
   const [session, setSession] = useState<AuthSession | null>(null);
@@ -48,6 +49,7 @@ export function Header({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
         />
       </div>
 
+      <AIUsagePill />
       <ThemeToggle />
 
       <button className="relative p-2 text-muted-foreground hover:text-foreground transition-colors">

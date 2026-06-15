@@ -1,4 +1,5 @@
 import type { NextRequest } from 'next/server';
+import { logAiUsage } from '@/lib/ai-usage-logger';
 
 const COLORS = ['#55F52F', '#38BDF8', '#A78BFA', '#F59E0B', '#FB7185', '#22C55E', '#F472B6', '#94A3B8'];
 const COLOR_SET = new Set(COLORS);
@@ -106,7 +107,8 @@ Regras obrigatórias:
       return Response.json({ error: `Erro na API: ${err.slice(0, 200)}` }, { status: 500 });
     }
 
-    const data = await res.json() as { content?: { type: string; text: string }[] };
+    const data = await res.json() as { content?: { type: string; text: string }[]; usage?: { input_tokens: number; output_tokens: number } };
+    void logAiUsage({ source: 'mindmap', model: 'claude-sonnet-4-6', inputTokens: data.usage?.input_tokens ?? 0, outputTokens: data.usage?.output_tokens ?? 0 });
     const text = data.content?.find(c => c.type === 'text')?.text ?? '';
     const match = text.match(/\{[\s\S]*\}/);
     if (!match) return Response.json({ error: 'Resposta inválida — tente novamente' }, { status: 500 });

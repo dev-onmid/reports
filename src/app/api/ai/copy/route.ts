@@ -1,4 +1,5 @@
 import type { NextRequest } from 'next/server';
+import { logAiUsage } from '@/lib/ai-usage-logger';
 
 export type CopyVariation = {
   body: string;
@@ -89,7 +90,8 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: `Erro na API Claude: ${err}` }, { status: 502 });
   }
 
-  const claudeData = await claudeRes.json() as { content: Array<{ type: string; text: string }> };
+  const claudeData = await claudeRes.json() as { content: Array<{ type: string; text: string }>; usage?: { input_tokens: number; output_tokens: number } };
+  void logAiUsage({ source: 'copy', model: 'claude-haiku-4-5-20251001', inputTokens: claudeData.usage?.input_tokens ?? 0, outputTokens: claudeData.usage?.output_tokens ?? 0 });
   const rawText = claudeData.content?.[0]?.text ?? '[]';
 
   let variations: CopyVariation[];

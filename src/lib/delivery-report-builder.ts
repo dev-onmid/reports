@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx';
 import { makeServerPool } from '@/lib/server-db';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import { randomUUID } from 'crypto';
+import { logAiUsage } from '@/lib/ai-usage-logger';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -1638,6 +1639,7 @@ async function fetchDiagnosis(
     system:     'Analista de marketing de delivery para restaurantes. Responda APENAS com JSON válido. Sem markdown, sem texto extra.',
     messages:   [{ role: 'user', content: `DADOS:\n${JSON.stringify(summary, null, 2)}\n\nRetorne EXATAMENTE este schema:\n${schema}` }],
   });
+  void logAiUsage({ source: 'report_delivery', model: 'claude-sonnet-4-6', inputTokens: msg.usage.input_tokens, outputTokens: msg.usage.output_tokens });
 
   const raw = msg.content[0].type === 'text' ? msg.content[0].text : '{}';
   try {
