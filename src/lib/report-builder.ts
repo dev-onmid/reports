@@ -387,9 +387,10 @@ CORES:
   Fundo slide:        #FFFFFF
   Fundo card:         #F7F8FA
   Borda:              #E2E8F0
-  Texto principal:    #0F172A
-  Texto secundário:   #64748B
-  Verde primário:     #55f52f  (oportunidade, ação, positivo)
+  Texto principal:    #111827   (títulos, valores — quase preto)
+  Texto secundário:   #374151   (cinza chumbo — labels, body)
+  Verde gráfico:      #55f52f   (fills de barra, bordas, corner squares — NÃO usar em texto pequeno)
+  Verde texto:        #1a8a00   (verde legível — labels, "Conclusão", nomes de seção)
   Vermelho:           #DC2626  (risco, queda, atenção)
   Azul Meta:          #0B84FF  (Meta Ads, tráfego pago)
   Azul Google:        #4285F4  (Google Ads)
@@ -418,8 +419,8 @@ TÍTULO DE SLIDE (tese, não descrição):
 <div style="display:flex;gap:14px;align-items:flex-start;margin-bottom:22px">
   <div style="width:4px;flex-shrink:0;background:#55f52f;align-self:stretch;min-height:42px;margin-top:2px"></div>
   <div>
-    <h2 style="font-family:var(--font-bebas),'Bebas Neue',sans-serif;font-size:34px;color:#0F172A;margin:0;line-height:1;letter-spacing:0.02em">TESE DO SLIDE</h2>
-    <p style="font-size:11px;font-weight:600;color:#64748B;text-transform:uppercase;letter-spacing:0.1em;margin:5px 0 0;font-family:var(--font-inter)">contexto técnico</p>
+    <h2 style="font-family:var(--font-bebas),'Bebas Neue',sans-serif;font-size:34px;color:#111827;margin:0;line-height:1;letter-spacing:0.02em">TESE DO SLIDE</h2>
+    <p style="font-size:11px;font-weight:600;color:#374151;text-transform:uppercase;letter-spacing:0.1em;margin:5px 0 0;font-family:var(--font-inter)">contexto técnico</p>
   </div>
 </div>
 
@@ -427,18 +428,18 @@ KPI HERO (1 por slide — o maior número):
 <div style="position:relative;overflow:hidden;border:1px solid #55f52f40;background:#F7F8FA;padding:24px 24px 20px">
   <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#55f52f,#55f52f00)"></div>
   <div style="position:absolute;top:0;left:0;width:14px;height:14px;background:#55f52f"></div>
-  <p style="font-size:10px;font-weight:700;color:#55f52f;text-transform:uppercase;letter-spacing:0.12em;font-family:var(--font-inter);margin:4px 0 10px">LABEL</p>
-  <p style="font-family:var(--font-bebas),'Bebas Neue',sans-serif;font-size:72px;color:#0F172A;line-height:0.9;margin:0 0 10px">VALOR</p>
-  <p style="font-size:13px;color:#64748B;font-family:var(--font-inter);line-height:1.5;margin:0">sub-contexto</p>
+  <p style="font-size:10px;font-weight:700;color:#1a8a00;text-transform:uppercase;letter-spacing:0.12em;font-family:var(--font-inter);margin:4px 0 10px">LABEL</p>
+  <p style="font-family:var(--font-bebas),'Bebas Neue',sans-serif;font-size:72px;color:#111827;line-height:0.9;margin:0 0 10px">VALOR</p>
+  <p style="font-size:13px;color:#374151;font-family:var(--font-inter);line-height:1.5;margin:0">sub-contexto</p>
 </div>
 
 KPI SECUNDÁRIO (até 3 por slide):
 <div style="position:relative;overflow:hidden;border:1px solid #E2E8F0;background:#F7F8FA;padding:18px 16px">
   <div style="position:absolute;top:0;left:0;right:0;height:2px;background:#55f52f"></div>
   <div style="position:absolute;top:0;left:0;width:12px;height:12px;background:#55f52f"></div>
-  <p style="font-size:10px;font-weight:700;color:#64748B;text-transform:uppercase;letter-spacing:0.1em;font-family:var(--font-inter);margin:4px 0 8px">LABEL</p>
-  <p style="font-family:var(--font-bebas),'Bebas Neue',sans-serif;font-size:36px;color:#0F172A;line-height:1;margin:0 0 5px">VALOR</p>
-  <p style="font-size:11px;color:#64748B;font-family:var(--font-inter);margin:0">contexto</p>
+  <p style="font-size:10px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:0.1em;font-family:var(--font-inter);margin:4px 0 8px">LABEL</p>
+  <p style="font-family:var(--font-bebas),'Bebas Neue',sans-serif;font-size:36px;color:#111827;line-height:1;margin:0 0 5px">VALOR</p>
+  <p style="font-size:11px;color:#374151;font-family:var(--font-inter);margin:0">contexto</p>
 </div>
 
 BADGE POSITIVO: <span style="font-size:11px;font-weight:700;color:#55f52f;font-family:var(--font-inter)">↑ +23%</span>
@@ -474,8 +475,8 @@ CARD DE CAMPANHA (scoreboard):
 CARD DE INSIGHT / CONCLUSÃO (obrigatório em todo slide):
 <div style="margin-top:auto;padding-top:16px;padding-bottom:24px">
   <div style="border-left:3px solid #55f52f;background:#55f52f0D;padding:12px 20px;display:flex;align-items:center;gap:14px">
-    <span style="font-size:10px;font-weight:800;color:#55f52f;text-transform:uppercase;letter-spacing:0.12em;font-family:var(--font-inter);flex-shrink:0">Conclusão</span>
-    <span style="font-size:13px;color:#0F172A;font-family:var(--font-inter);line-height:1.6">conclusão executiva aqui — dado → decisão → resultado esperado</span>
+    <span style="font-size:10px;font-weight:800;color:#1a8a00;text-transform:uppercase;letter-spacing:0.12em;font-family:var(--font-inter);flex-shrink:0">Conclusão</span>
+    <span style="font-size:13px;color:#111827;font-family:var(--font-inter);line-height:1.6">conclusão executiva aqui — dado → decisão → resultado esperado</span>
   </div>
 </div>
 

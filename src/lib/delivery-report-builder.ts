@@ -25,15 +25,16 @@ function deltaInfo(current: number, prev: number): { label: string; up: boolean;
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 
-const PRIMARY = '#55f52f';
-const CARD    = '#F7F8FA';
-const BG      = '#FFFFFF';
-const BORDER  = '#E2E8F0';
-const FG      = '#0F172A';
-const MUTED   = '#64748B';
-const RED     = '#DC2626';
-const BLUE    = '#0B84FF';
-const ORANGE  = '#FF6B35';
+const PRIMARY      = '#55f52f';   // graphic fills only (bars, borders, squares)
+const PRIMARY_TEXT = '#1a8a00';   // green as readable text on white (5.4:1 contrast)
+const CARD         = '#F7F8FA';
+const BG           = '#FFFFFF';
+const BORDER       = '#E2E8F0';
+const FG           = '#111827';   // near-black — titles, values
+const MUTED        = '#374151';   // cinza chumbo — body text, labels, secondary
+const RED          = '#DC2626';
+const BLUE         = '#0B84FF';
+const ORANGE       = '#FF6B35';
 
 const INTER = 'var(--font-inter), Inter, sans-serif';
 const BEBAS = 'var(--font-bebas), "Bebas Neue", sans-serif';
@@ -582,7 +583,7 @@ function compBarsHtml(
       </div>
       <!-- Período atual -->
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:5px">
-        <span style="font-size:11px;font-weight:700;color:${PRIMARY};width:50px;text-align:right;flex-shrink:0;font-family:${INTER}">ATUAL</span>
+        <span style="font-size:11px;font-weight:700;color:${PRIMARY_TEXT};width:50px;text-align:right;flex-shrink:0;font-family:${INTER}">ATUAL</span>
         <div style="flex:1;height:10px;background:${BORDER};overflow:hidden">
           <div style="height:100%;background:${PRIMARY};width:${curPct}%;box-shadow:0 0 6px ${PRIMARY}60"></div>
         </div>
@@ -637,10 +638,11 @@ function secTitle(title: string, sub: string): string { return sectionHeader(tit
 /** Hero KPI — ONE per slide, the anchor metric */
 function kpiHero(label: string, value: string, sub: string, color = PRIMARY): string {
   const isEmpty = value === '—';
+  const textColor = color === PRIMARY ? PRIMARY_TEXT : color;
   return `<div style="position:relative;overflow:hidden;border:1px solid ${color}40;background:${CARD};padding:28px 28px 24px;box-sizing:border-box">
   <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,${color},${color}00)"></div>
   <div style="position:absolute;top:0;left:0;width:14px;height:14px;background:${color}"></div>
-  <p style="font-size:10px;font-weight:700;color:${color};text-transform:uppercase;letter-spacing:0.12em;font-family:${INTER};margin:4px 0 10px">${label}</p>
+  <p style="font-size:10px;font-weight:700;color:${textColor};text-transform:uppercase;letter-spacing:0.12em;font-family:${INTER};margin:4px 0 10px">${label}</p>
   <p style="font-family:${BEBAS};font-size:${isEmpty ? '40' : '76'}px;color:${isEmpty ? MUTED : FG};line-height:0.9;margin:0 0 10px;letter-spacing:0.01em">${value}</p>
   <p style="font-size:13px;color:${MUTED};font-family:${INTER};line-height:1.5;margin:0">${sub}</p>
 </div>`;
@@ -680,7 +682,7 @@ function hbar(label: string, value: string, pct: number, hi: boolean, barH = 6):
   return `<div style="margin-bottom:11px">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
     <span style="font-size:12px;font-weight:${hi ? '700' : '500'};color:${hi ? FG : MUTED};font-family:${INTER}">${label}</span>
-    <span style="font-size:12px;font-weight:700;color:${hi ? PRIMARY : MUTED};font-family:${INTER}">${value}</span>
+    <span style="font-size:12px;font-weight:700;color:${hi ? FG : MUTED};font-family:${INTER}">${value}</span>
   </div>
   <div style="height:${barH}px;background:${BORDER};overflow:hidden">
     <div style="height:100%;background:${barColor};width:${Math.min(pct,100).toFixed(1)}%"></div>
@@ -690,28 +692,31 @@ function hbar(label: string, value: string, pct: number, hi: boolean, barH = 6):
 
 /** Full-width bottom conclusion banner — every content slide should end with one */
 function thesisBanner(text: string, type: 'insight'|'warning'|'neutral' = 'insight'): string {
-  const color = type === 'warning' ? RED : type === 'neutral' ? MUTED : PRIMARY;
+  const color     = type === 'warning' ? RED : type === 'neutral' ? MUTED : PRIMARY;
+  const textColor = type === 'insight' ? PRIMARY_TEXT : color;
   return `<div data-conclusion="1" style="margin-top:auto;padding-top:16px;padding-bottom:28px">
   <div style="border-left:3px solid ${color};background:${color}0D;padding:12px 20px;display:flex;align-items:center;gap:14px">
-    <span style="font-size:10px;font-weight:800;color:${color};text-transform:uppercase;letter-spacing:0.12em;font-family:${INTER};flex-shrink:0">Conclusão</span>
+    <span style="font-size:10px;font-weight:800;color:${textColor};text-transform:uppercase;letter-spacing:0.12em;font-family:${INTER};flex-shrink:0">Conclusão</span>
     <span style="font-size:13px;color:${FG};font-family:${INTER};line-height:1.6">${text}</span>
   </div>
 </div>`;
 }
 
 function insight(title: string, text: string, color = PRIMARY): string {
+  const textColor = color === PRIMARY ? PRIMARY_TEXT : color;
   return `<div style="border:1px solid ${color}40;background:${color}0D;padding:13px 15px;margin-top:10px">
-  <p style="font-size:10px;font-weight:700;color:${color};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 5px">${title}</p>
+  <p style="font-size:10px;font-weight:700;color:${textColor};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 5px">${title}</p>
   <p style="font-size:12px;color:${FG};line-height:1.6;margin:0;font-family:${INTER}">${text}</p>
 </div>`;
 }
 
 /** Campaign/product rank card — winner gets full weight, others get reduced weight */
 function rankCard(rank: number, title: string, metrics: Array<{label:string;value:string}>, status: 'winner'|'loser'|'normal'): string {
-  const accent = status === 'winner' ? PRIMARY : status === 'loser' ? RED : BORDER;
-  const badge  = status === 'winner' ? `<span style="font-size:9px;font-weight:800;color:${BG};background:${PRIMARY};padding:2px 7px;letter-spacing:0.08em;font-family:${INTER}">CAMPEÃ</span>`
-               : status === 'loser'  ? `<span style="font-size:9px;font-weight:800;color:${FG};background:${RED};padding:2px 7px;letter-spacing:0.08em;font-family:${INTER}">ATENÇÃO</span>`
-               : '';
+  const accent     = status === 'winner' ? PRIMARY : status === 'loser' ? RED : BORDER;
+  const accentText = status === 'winner' ? PRIMARY_TEXT : status === 'loser' ? RED : MUTED;
+  const badge      = status === 'winner' ? `<span style="font-size:9px;font-weight:800;color:${BG};background:${PRIMARY};padding:2px 7px;letter-spacing:0.08em;font-family:${INTER}">CAMPEÃ</span>`
+                   : status === 'loser'  ? `<span style="font-size:9px;font-weight:800;color:#FFFFFF;background:${RED};padding:2px 7px;letter-spacing:0.08em;font-family:${INTER}">ATENÇÃO</span>`
+                   : '';
   const opacity = status === 'normal' ? 'opacity:0.72' : '';
   const rows = metrics.map(m =>
     `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid ${BORDER};font-family:${INTER}">
@@ -724,7 +729,7 @@ function rankCard(rank: number, title: string, metrics: Array<{label:string;valu
   <div style="position:absolute;top:0;left:0;width:12px;height:12px;background:${accent}"></div>
   <div style="display:flex;justify-content:space-between;align-items:flex-start;margin:4px 0 12px;gap:8px">
     <div style="display:flex;align-items:center;gap:8px">
-      <span style="font-family:${BEBAS};font-size:26px;color:${accent};line-height:1">#${rank}</span>
+      <span style="font-family:${BEBAS};font-size:26px;color:${accentText};line-height:1">#${rank}</span>
       <span style="font-size:12px;font-weight:700;color:${FG};font-family:${INTER};line-height:1.3">${title}</span>
     </div>
     ${badge}
@@ -1413,7 +1418,7 @@ function sDestaqueCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number, tota
     return `<div style="margin-bottom:20px">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
         <div style="width:3px;height:14px;background:${PRIMARY}"></div>
-        <p style="font-size:10px;font-weight:700;color:${PRIMARY};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0">Campanhas de Conversa — métrica: mensagens iniciadas</p>
+        <p style="font-size:10px;font-weight:700;color:${PRIMARY_TEXT};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0">Campanhas de Conversa — métrica: mensagens iniciadas</p>
       </div>
       <div style="display:grid;grid-template-columns:repeat(${Math.min(sorted.length,3)},1fr);gap:10px;margin-bottom:8px">${cards}</div>
       ${diag.insight_campanha_conversa ? insight('Análise', diag.insight_campanha_conversa, PRIMARY) : ''}
