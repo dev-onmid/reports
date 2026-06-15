@@ -40,10 +40,7 @@ export function useClients() {
       const res = await fetch('/api/clients');
       if (!res.ok) return;
       const data: Client[] = await res.json();
-      const session = getAuthSession();
-      const isAdmin = session?.role === 'Administrador';
-      // Non-admins only see clients they are gestor of
-      setClients(isAdmin ? data : data.filter(c => c.gestor_id === session?.userId));
+      setClients(data);
     } catch (error) {
       console.error('Erro ao carregar clientes:', error);
     }
