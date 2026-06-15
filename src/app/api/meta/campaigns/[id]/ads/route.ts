@@ -43,7 +43,7 @@ export async function GET(
 
   const token = await getFreshMetaToken(conn);
   const url = new URL(`https://graph.facebook.com/v21.0/${campaignId}/ads`);
-  url.searchParams.set('fields', 'id,name,status,effective_status,creative{id,body,title,thumbnail_url,effective_object_story_spec}');
+  url.searchParams.set('fields', 'id,name,status,effective_status,creative{id,body,title,image_url,thumbnail_url,effective_object_story_spec}');
   url.searchParams.set('limit', '20');
   url.searchParams.set('access_token', token);
 
@@ -66,7 +66,7 @@ export async function GET(
       status: ad.effective_status ?? ad.status ?? 'ACTIVE',
       body: cr.body ?? linkData.message ?? '',
       title: cr.title ?? linkData.name ?? '',
-      imageUrl: cr.thumbnail_url ?? linkData.picture ?? '',
+      imageUrl: cr.image_url ?? cr.thumbnail_url ?? linkData.picture ?? '',
       creativeId: cr.id,
     };
   });

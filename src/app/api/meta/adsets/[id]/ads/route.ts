@@ -73,7 +73,7 @@ export async function GET(
   const insightField = `insights.time_range(${JSON.stringify({ since, until })}){spend,impressions,clicks,actions}`;
 
   const url = new URL(`https://graph.facebook.com/v21.0/${adsetId}/ads`);
-  url.searchParams.set('fields', `id,name,status,effective_status,creative{id,body,title,thumbnail_url},${insightField}`);
+  url.searchParams.set('fields', `id,name,status,effective_status,creative{id,body,title,image_url,thumbnail_url},${insightField}`);
   url.searchParams.set('limit', '50');
   url.searchParams.set('access_token', token);
 
@@ -103,7 +103,7 @@ export async function GET(
       status: ad.effective_status ?? ad.status ?? 'ACTIVE',
       body: cr.body ?? '',
       title: cr.title ?? '',
-      imageUrl: cr.thumbnail_url ?? '',
+      imageUrl: cr.image_url ?? cr.thumbnail_url ?? '',
       creativeId: cr.id,
       spend,
       impressions,

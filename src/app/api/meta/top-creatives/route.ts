@@ -249,7 +249,7 @@ export async function GET(request: NextRequest) {
               campaignName: insight.campaign_name ?? undefined,
               adSetId: insight.adset_id ?? undefined,
               adSetName: insight.adset_name ?? undefined,
-              imageUrl: assetFeedImageUrl ?? storyImageUrl ?? creative.thumbnail_url ?? creative.image_url ?? undefined,
+              imageUrl: assetFeedImageUrl ?? storyImageUrl ?? creative.image_url ?? creative.thumbnail_url ?? undefined,
               thumbnailUrl: creative.thumbnail_url ?? undefined,
               videoUrl: videoInfo.source ?? undefined,
               permalink,
