@@ -38,7 +38,7 @@ const BLUE         = '#0B84FF';
 const ORANGE       = '#FF6B35';
 
 const INTER = 'var(--font-inter), Inter, sans-serif';
-const BEBAS = 'var(--font-bebas), "Bebas Neue", sans-serif';
+const BEBAS = "var(--font-bebas), 'Bebas Neue', sans-serif";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -1633,6 +1633,25 @@ async function fetchDiagnosis(
   d: ParsedData, prevD: ParsedData | null, meta: MetaAdsFull | null,
   bairros: Bairro[], clientName: string, periodo: string, agencyContext: string,
 ): Promise<DiagJson> {
+  if (process.env.SKIP_AI === 'true') {
+    return {
+      diagnostico: '[Modo de teste — IA desativada]',
+      forcas: [
+        { titulo: 'Recorrência', descricao: 'Dado simulado para teste' },
+        { titulo: 'Produtos',    descricao: 'Dado simulado para teste' },
+        { titulo: 'Dias',        descricao: 'Dado simulado para teste' },
+        { titulo: 'Regiões',     descricao: 'Dado simulado para teste' },
+      ],
+      pontos_fortes:  ['Dado simulado para teste'],
+      pontos_atencao: ['Dado simulado para teste'],
+      plano: [{ acao: 'Campanha de teste', objetivo: '—', publico: '—', mensagem: '—' }],
+      insight_campanha_conversa:  '',
+      insight_campanha_conversao: '',
+      frase_fechamento: 'Modo de teste ativo — IA desativada.',
+      jornada: ['descoberta', 'primeira_compra', 'recompra', 'reativacao_leve', 'reativacao_forte'],
+    };
+  }
+
   const summary = {
     cliente: clientName, periodo,
     faturamento: d.faturamento, pedidos: d.pedidos_ativos, ticket: Math.round(d.ticket),

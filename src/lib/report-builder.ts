@@ -602,7 +602,7 @@ export async function buildOmniReport(input: {
 
   let html = '';
 
-  if (apiKey) {
+  if (apiKey && process.env.SKIP_AI !== 'true') {
     try {
       const res = await fetch('https://api.anthropic.com/v1/messages', {
         method:  'POST',
