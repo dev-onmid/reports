@@ -384,13 +384,13 @@ SLIDE 7 — PRÓXIMOS PASSOS (sempre) [Layout D: 3+2 grid]
 
 DIMENSÃO: 1440×810px por slide. ZERO sombras. ZERO border-radius > 2px.
 CORES:
-  Fundo slide:        #0e0f14
-  Fundo card:         #1a1a1a
-  Borda:              #2a2d3a
-  Texto principal:    #f5f5f5
-  Texto secundário:   #a0aec0
+  Fundo slide:        #FFFFFF
+  Fundo card:         #F7F8FA
+  Borda:              #E2E8F0
+  Texto principal:    #0F172A
+  Texto secundário:   #64748B
   Verde primário:     #55f52f  (oportunidade, ação, positivo)
-  Vermelho:           #e52020  (risco, queda, atenção)
+  Vermelho:           #DC2626  (risco, queda, atenção)
   Azul Meta:          #0B84FF  (Meta Ads, tráfego pago)
   Azul Google:        #4285F4  (Google Ads)
   Laranja conversão:  #FF6B35  (compras, conversão)
@@ -403,13 +403,13 @@ SOMBRAS: proibidas
 ━━ PADRÕES HTML OBRIGATÓRIOS ━━
 
 WRAPPER:
-<div style="background:#0e0f14;padding:28px;font-family:var(--font-inter),Inter,sans-serif">[slides]</div>
+<div style="background:#FFFFFF;padding:28px;font-family:var(--font-inter),Inter,sans-serif">[slides]</div>
 
 SLIDE GENÉRICO:
-<div style="width:1440px;min-height:810px;background:#0e0f14;border:1px solid #2a2d3a;margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column">
-  <div style="height:52px;padding:0 48px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #2a2d3a;flex-shrink:0">
+<div style="width:1440px;min-height:810px;background:#FFFFFF;border:1px solid #E2E8F0;margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column">
+  <div style="height:52px;padding:0 48px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #E2E8F0;flex-shrink:0">
     <span style="font-family:var(--font-bebas),'Bebas Neue',sans-serif;font-size:22px;color:#55f52f;letter-spacing:0.06em">ONMID</span>
-    <span style="font-size:11px;color:#a0aec0;font-family:var(--font-inter),Inter,sans-serif;font-weight:600">N / TOTAL</span>
+    <span style="font-size:11px;color:#64748B;font-family:var(--font-inter),Inter,sans-serif;font-weight:600">N / TOTAL</span>
   </div>
   <div style="flex:1;padding:32px 48px;display:flex;flex-direction:column">[conteúdo]</div>
 </div>
@@ -418,85 +418,85 @@ TÍTULO DE SLIDE (tese, não descrição):
 <div style="display:flex;gap:14px;align-items:flex-start;margin-bottom:22px">
   <div style="width:4px;flex-shrink:0;background:#55f52f;align-self:stretch;min-height:42px;margin-top:2px"></div>
   <div>
-    <h2 style="font-family:var(--font-bebas),'Bebas Neue',sans-serif;font-size:34px;color:#f5f5f5;margin:0;line-height:1;letter-spacing:0.02em">TESE DO SLIDE</h2>
-    <p style="font-size:11px;font-weight:600;color:#a0aec0;text-transform:uppercase;letter-spacing:0.1em;margin:5px 0 0;font-family:var(--font-inter)">contexto técnico</p>
+    <h2 style="font-family:var(--font-bebas),'Bebas Neue',sans-serif;font-size:34px;color:#0F172A;margin:0;line-height:1;letter-spacing:0.02em">TESE DO SLIDE</h2>
+    <p style="font-size:11px;font-weight:600;color:#64748B;text-transform:uppercase;letter-spacing:0.1em;margin:5px 0 0;font-family:var(--font-inter)">contexto técnico</p>
   </div>
 </div>
 
 KPI HERO (1 por slide — o maior número):
-<div style="position:relative;overflow:hidden;border:1px solid #55f52f40;background:#1a1a1a;padding:24px 24px 20px">
+<div style="position:relative;overflow:hidden;border:1px solid #55f52f40;background:#F7F8FA;padding:24px 24px 20px">
   <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#55f52f,#55f52f00)"></div>
   <div style="position:absolute;top:0;left:0;width:14px;height:14px;background:#55f52f"></div>
   <p style="font-size:10px;font-weight:700;color:#55f52f;text-transform:uppercase;letter-spacing:0.12em;font-family:var(--font-inter);margin:4px 0 10px">LABEL</p>
-  <p style="font-family:var(--font-bebas),'Bebas Neue',sans-serif;font-size:72px;color:#f5f5f5;line-height:0.9;margin:0 0 10px">VALOR</p>
-  <p style="font-size:13px;color:#a0aec0;font-family:var(--font-inter);line-height:1.5;margin:0">sub-contexto</p>
+  <p style="font-family:var(--font-bebas),'Bebas Neue',sans-serif;font-size:72px;color:#0F172A;line-height:0.9;margin:0 0 10px">VALOR</p>
+  <p style="font-size:13px;color:#64748B;font-family:var(--font-inter);line-height:1.5;margin:0">sub-contexto</p>
 </div>
 
 KPI SECUNDÁRIO (até 3 por slide):
-<div style="position:relative;overflow:hidden;border:1px solid #2a2d3a;background:#1a1a1a;padding:18px 16px">
+<div style="position:relative;overflow:hidden;border:1px solid #E2E8F0;background:#F7F8FA;padding:18px 16px">
   <div style="position:absolute;top:0;left:0;right:0;height:2px;background:#55f52f"></div>
   <div style="position:absolute;top:0;left:0;width:12px;height:12px;background:#55f52f"></div>
-  <p style="font-size:10px;font-weight:700;color:#a0aec0;text-transform:uppercase;letter-spacing:0.1em;font-family:var(--font-inter);margin:4px 0 8px">LABEL</p>
-  <p style="font-family:var(--font-bebas),'Bebas Neue',sans-serif;font-size:36px;color:#f5f5f5;line-height:1;margin:0 0 5px">VALOR</p>
-  <p style="font-size:11px;color:#a0aec0;font-family:var(--font-inter);margin:0">contexto</p>
+  <p style="font-size:10px;font-weight:700;color:#64748B;text-transform:uppercase;letter-spacing:0.1em;font-family:var(--font-inter);margin:4px 0 8px">LABEL</p>
+  <p style="font-family:var(--font-bebas),'Bebas Neue',sans-serif;font-size:36px;color:#0F172A;line-height:1;margin:0 0 5px">VALOR</p>
+  <p style="font-size:11px;color:#64748B;font-family:var(--font-inter);margin:0">contexto</p>
 </div>
 
 BADGE POSITIVO: <span style="font-size:11px;font-weight:700;color:#55f52f;font-family:var(--font-inter)">↑ +23%</span>
-BADGE NEGATIVO: <span style="font-size:11px;font-weight:700;color:#e52020;font-family:var(--font-inter)">↓ -12%</span>
-BADGE CAMPEÃ: <span style="font-size:9px;font-weight:800;color:#0e0f14;background:#55f52f;padding:2px 7px;letter-spacing:0.08em;font-family:var(--font-inter)">CAMPEÃ</span>
-BADGE ATENÇÃO: <span style="font-size:9px;font-weight:800;color:#f5f5f5;background:#e52020;padding:2px 7px;letter-spacing:0.08em;font-family:var(--font-inter)">ATENÇÃO</span>
+BADGE NEGATIVO: <span style="font-size:11px;font-weight:700;color:#DC2626;font-family:var(--font-inter)">↓ -12%</span>
+BADGE CAMPEÃ: <span style="font-size:9px;font-weight:800;color:#FFFFFF;background:#55f52f;padding:2px 7px;letter-spacing:0.08em;font-family:var(--font-inter)">CAMPEÃ</span>
+BADGE ATENÇÃO: <span style="font-size:9px;font-weight:800;color:#FFFFFF;background:#FF6B35;padding:2px 7px;letter-spacing:0.08em;font-family:var(--font-inter)">ATENÇÃO</span>
 
 TABELA DE COMPARATIVO:
 <table style="width:100%;border-collapse:collapse;font-family:var(--font-inter),Inter,sans-serif">
-  <thead><tr style="background:#1a1a1a;border-bottom:1px solid #2a2d3a">
-    <th style="padding:9px 14px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#a0aec0">Métrica</th>
-    <th style="padding:9px 14px;text-align:right;font-size:10px;font-weight:700;text-transform:uppercase;color:#a0aec0">Anterior</th>
-    <th style="padding:9px 14px;text-align:right;font-size:10px;font-weight:700;text-transform:uppercase;color:#a0aec0">Atual</th>
-    <th style="padding:9px 14px;text-align:right;font-size:10px;font-weight:700;text-transform:uppercase;color:#a0aec0">Var.</th>
+  <thead><tr style="background:#F7F8FA;border-bottom:1px solid #E2E8F0">
+    <th style="padding:9px 14px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#64748B">Métrica</th>
+    <th style="padding:9px 14px;text-align:right;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748B">Anterior</th>
+    <th style="padding:9px 14px;text-align:right;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748B">Atual</th>
+    <th style="padding:9px 14px;text-align:right;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748B">Var.</th>
   </tr></thead>
-  <tbody>[linhas alternadas #1a1a1a / #0e0f14, border-bottom:1px solid #2a2d3a]</tbody>
+  <tbody>[linhas alternadas #F7F8FA / #FFFFFF, border-bottom:1px solid #E2E8F0]</tbody>
 </table>
 
 CARD DE CAMPANHA (scoreboard):
-<div style="position:relative;overflow:hidden;border:1px solid #55f52f60;background:#1a1a1a;padding:16px">
+<div style="position:relative;overflow:hidden;border:1px solid #55f52f60;background:#F7F8FA;padding:16px">
   <div style="position:absolute;top:0;left:0;right:0;height:2px;background:#55f52f"></div>
   <div style="position:absolute;top:0;left:0;width:12px;height:12px;background:#55f52f"></div>
   <div style="display:flex;justify-content:space-between;align-items:flex-start;margin:4px 0 12px">
     <div style="display:flex;align-items:center;gap:8px">
       <span style="font-family:var(--font-bebas),'Bebas Neue',sans-serif;font-size:24px;color:#55f52f;line-height:1">#1</span>
-      <span style="font-size:12px;font-weight:700;color:#f5f5f5;font-family:var(--font-inter);line-height:1.3">NOME CAMPANHA</span>
+      <span style="font-size:12px;font-weight:700;color:#0F172A;font-family:var(--font-inter);line-height:1.3">NOME CAMPANHA</span>
     </div>
     [badge CAMPEÃ ou ATENÇÃO]
   </div>
-  [métricas: display:flex;justify-content:space-between; padding:5px 0;border-bottom:1px solid #2a2d3a]
+  [métricas: display:flex;justify-content:space-between; padding:5px 0;border-bottom:1px solid #E2E8F0]
 </div>
 
 CARD DE INSIGHT / CONCLUSÃO (obrigatório em todo slide):
 <div style="margin-top:auto;padding-top:16px;padding-bottom:24px">
   <div style="border-left:3px solid #55f52f;background:#55f52f0D;padding:12px 20px;display:flex;align-items:center;gap:14px">
     <span style="font-size:10px;font-weight:800;color:#55f52f;text-transform:uppercase;letter-spacing:0.12em;font-family:var(--font-inter);flex-shrink:0">Conclusão</span>
-    <span style="font-size:13px;color:#f5f5f5;font-family:var(--font-inter);line-height:1.6">conclusão executiva aqui — dado → decisão → resultado esperado</span>
+    <span style="font-size:13px;color:#0F172A;font-family:var(--font-inter);line-height:1.6">conclusão executiva aqui — dado → decisão → resultado esperado</span>
   </div>
 </div>
 
 BARRA HORIZONTAL (gráficos):
 <div style="margin-bottom:11px">
   <div style="display:flex;justify-content:space-between;margin-bottom:5px">
-    <span style="font-size:12px;font-weight:600;color:#f5f5f5;font-family:var(--font-inter)">label</span>
+    <span style="font-size:12px;font-weight:600;color:#0F172A;font-family:var(--font-inter)">label</span>
     <span style="font-size:12px;font-weight:700;color:#55f52f;font-family:var(--font-inter)">valor</span>
   </div>
-  <div style="height:8px;background:#2a2d3a;overflow:hidden">
+  <div style="height:8px;background:#E2E8F0;overflow:hidden">
     <div style="height:100%;background:#55f52f;width:XX%"></div>
   </div>
 </div>
 
 DADO AUSENTE (não criar card grande — usar faixa discreta):
-<div style="border-left:2px solid #a0aec0;padding:8px 14px;background:#1a1a1a;margin:8px 0">
-  <p style="font-size:11px;color:#a0aec0;font-family:var(--font-inter);margin:0">Dado não integrado neste período — [nome do dado] não foi encontrado nos dados fornecidos.</p>
+<div style="border-left:2px solid #64748B;padding:8px 14px;background:#F7F8FA;margin:8px 0">
+  <p style="font-size:11px;color:#64748B;font-family:var(--font-inter);margin:0">Dado não integrado neste período — [nome do dado] não foi encontrado nos dados fornecidos.</p>
 </div>
 
 SAÍDA: retorne APENAS o HTML. Sem markdown, sem blocos de código, sem texto antes ou depois.
-O HTML começa com <div style="background:#0e0f14 e termina com </div>`;
+O HTML começa com <div style="background:#FFFFFF e termina com </div>`;
 
 // ── User Prompt ───────────────────────────────────────────────────────────────
 

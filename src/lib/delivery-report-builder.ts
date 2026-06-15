@@ -26,12 +26,12 @@ function deltaInfo(current: number, prev: number): { label: string; up: boolean;
 // ── Design tokens ─────────────────────────────────────────────────────────────
 
 const PRIMARY = '#55f52f';
-const CARD    = '#1a1a1a';
-const BG      = '#0e0f14';
-const BORDER  = '#2a2d3a';
-const FG      = '#f5f5f5';
-const MUTED   = '#a0aec0';
-const RED     = '#e52020';
+const CARD    = '#F7F8FA';
+const BG      = '#FFFFFF';
+const BORDER  = '#E2E8F0';
+const FG      = '#0F172A';
+const MUTED   = '#64748B';
+const RED     = '#DC2626';
 const BLUE    = '#0B84FF';
 const ORANGE  = '#FF6B35';
 
@@ -74,6 +74,16 @@ type Creative = {
   spend: number;
   resultado: number;
   thumbnail_url: string | null;
+};
+
+type InstagramData = {
+  username: string;
+  followers: number;
+  reach: number;
+  impressions: number;
+  profile_views: number;
+  website_clicks: number;
+  accounts_engaged: number;
 };
 
 type ParsedData = {
@@ -437,12 +447,77 @@ async function fetchMetaData(
   return { meta, creatives };
 }
 
+async function fetchInstagramInsights(
+  connectionId: string | null | undefined,
+  from: string, to: string,
+): Promise<InstagramData | null> {
+  if (!connectionId) return null;
+
+  const pool = makeServerPool();
+  let conn: { id: string; app_id: string; access_token: string; token_expiry: string | null } | null = null;
+  try {
+    const { rows } = await pool.query(
+      `SELECT id,app_id,access_token,token_expiry FROM public.meta_connections WHERE id=$1`,
+      [connectionId],
+    );
+    conn = rows[0] ?? null;
+  } finally { await pool.end(); }
+  if (!conn) return null;
+
+  const token = await getFreshMetaToken(conn);
+
+  // Discover Instagram Business accounts via Facebook Pages
+  const pagesUrl = new URL('https://graph.facebook.com/v21.0/me/accounts');
+  pagesUrl.searchParams.set('fields', 'id,name,instagram_business_account{id,username,followers_count}');
+  pagesUrl.searchParams.set('access_token', token);
+  const pagesRes = await fetch(pagesUrl.toString(), { signal: AbortSignal.timeout(12000) }).catch(() => null);
+  if (!pagesRes?.ok) return null;
+
+  const pagesData = await pagesRes.json() as {
+    data?: Array<{ instagram_business_account?: { id: string; username: string; followers_count: number } }>;
+  };
+  const igAccounts = (pagesData.data ?? [])
+    .map(p => p.instagram_business_account)
+    .filter((a): a is { id: string; username: string; followers_count: number } => !!a);
+  if (!igAccounts.length) return null;
+
+  const ig = igAccounts[0];
+
+  // Fetch profile-level insights for the period
+  const insUrl = new URL(`https://graph.facebook.com/v21.0/${ig.id}/insights`);
+  insUrl.searchParams.set('metric', 'reach,impressions,profile_views,website_clicks,accounts_engaged');
+  insUrl.searchParams.set('period', 'total_over_range');
+  insUrl.searchParams.set('since', from);
+  insUrl.searchParams.set('until', to);
+  insUrl.searchParams.set('access_token', token);
+  const insRes = await fetch(insUrl.toString(), { signal: AbortSignal.timeout(12000) }).catch(() => null);
+
+  let reach = 0, impressions = 0, profile_views = 0, website_clicks = 0, accounts_engaged = 0;
+  if (insRes?.ok) {
+    const insData = await insRes.json() as {
+      data?: Array<{ name: string; values: Array<{ value: number }> }>;
+    };
+    for (const m of insData.data ?? []) {
+      const val = typeof m.values?.[0]?.value === 'number' ? m.values[0].value : 0;
+      if (m.name === 'reach')             reach = val;
+      else if (m.name === 'impressions')  impressions = val;
+      else if (m.name === 'profile_views') profile_views = val;
+      else if (m.name === 'website_clicks') website_clicks = val;
+      else if (m.name === 'accounts_engaged') accounts_engaged = val;
+    }
+  }
+
+  if (reach === 0 && impressions === 0 && ig.followers_count === 0) return null;
+
+  return { username: ig.username, followers: ig.followers_count, reach, impressions, profile_views, website_clicks, accounts_engaged };
+}
+
 // ── Slide audit (dev-only warnings) ───────────────────────────────────────────
 
 function auditSlide(html: string, id: string): string {
   if (process.env.NODE_ENV === 'production') return html;
   const warns: string[] = [];
-  const cards = (html.match(/background:#1a1a1a/g) ?? []).length;
+  const cards = (html.match(new RegExp(`background:${CARD}`, 'g')) ?? []).length;
   if (cards > 8) warns.push(`${id}: ${cards} cards (>8)`);
   if (!(html.includes('data-conclusion') || html.includes('CONCLUSÃO') || html.includes('LEITURA')))
     warns.push(`${id}: sem conclusão`);
@@ -1120,6 +1195,53 @@ ${thesisBanner(conclusion, 'insight')}`;
   return auditSlide(wrapSlide(body, idx, total), 'sMetaAds');
 }
 
+// ── Instagram Insights ────────────────────────────────────────────────────────
+
+function sInstagram(ig: InstagramData, idx: number, total: number): string {
+  const engRate = ig.reach > 0 ? (ig.accounts_engaged / ig.reach) * 100 : 0;
+
+  const IG_COLOR = '#E1306C';
+
+  const metricRow = (label: string, value: string, sub: string) =>
+    `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid ${BORDER}">
+      <div>
+        <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0">${label}</p>
+        <p style="font-size:10px;color:${MUTED};font-family:${INTER};margin:2px 0 0">${sub}</p>
+      </div>
+      <span style="font-family:${BEBAS};font-size:28px;color:${FG};letter-spacing:0.04em">${value}</span>
+    </div>`;
+
+  const body = `
+${sectionHeader(
+  ig.reach > 0
+    ? `@${ig.username} alcançou ${numOrDash(ig.reach)} pessoas — o orgânico aquece antes do anúncio`
+    : `@${ig.username} · visibilidade orgânica no período`,
+  'Instagram Business Insights · alcance, engajamento e conversão para o perfil'
+)}
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;flex:1;align-items:start">
+  <div>
+    ${kpiHero('Alcance', numOrDash(ig.reach), 'contas únicas atingidas no período', IG_COLOR)}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px">
+      ${kpi('Seguidores', numOrDash(ig.followers), 'total acumulado', IG_COLOR)}
+      ${kpi('Impressões', numOrDash(ig.impressions), 'exibições totais', MUTED)}
+    </div>
+  </div>
+  <div style="border:1px solid ${BORDER};background:${CARD};padding:0 16px">
+    <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:14px 0 2px">Métricas de Conversão Orgânica</p>
+    ${metricRow('Contas Engajadas', numOrDash(ig.accounts_engaged), `${engRate.toFixed(1)}% taxa de engajamento`)}
+    ${metricRow('Visitas ao Perfil', numOrDash(ig.profile_views), 'acessos ao perfil no período')}
+    ${metricRow('Cliques no link da bio', numOrDash(ig.website_clicks), 'acesso ao site / cardápio')}
+  </div>
+</div>
+${thesisBanner(
+  ig.accounts_engaged > 0
+    ? `${numOrDash(ig.accounts_engaged)} contas engajaram com o perfil (${engRate.toFixed(1)}% do alcance). Audiência orgânica aquecida converte melhor em campanhas pagas.`
+    : `Perfil @${ig.username} alcançou ${numOrDash(ig.reach)} pessoas de forma orgânica no período — base pronta para ser convertida via anúncio.`
+)}`;
+
+  return auditSlide(wrapSlide(body, idx, total), 'sInstagram');
+}
+
 // ── Diagnóstico A — Decision Matrix + análise (slide 1 de 2) ─────────────────
 
 function sDiagnosticoA(diag: DiagJson, idx: number, total: number): string {
@@ -1193,7 +1315,7 @@ ${diag.frase_fechamento ? thesisBanner(`"${diag.frase_fechamento}"`) : ''}`;
 
 // ── Diagnóstico B — plano 5 passos + criativos (slide 2 de 2) ────────────────
 
-function sDiagnosticoPlan(diag: DiagJson, creatives: Creative[], idx: number, total: number): string {
+function sDiagnosticoPlan(diag: DiagJson, idx: number, total: number): string {
   const plano = diag.plano.slice(0, 5);
 
   const card = (p: typeof plano[0], i: number) =>
@@ -1215,32 +1337,56 @@ function sDiagnosticoPlan(diag: DiagJson, creatives: Creative[], idx: number, to
   const row1 = plano.slice(0, 3).map((p, i) => card(p, i)).join('');
   const row2 = plano.slice(3, 5).map((p, i) => card(p, i + 3)).join('');
 
-  const creativesHtml = creatives.length > 0
-    ? `<div>
-        <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 8px">Top Criativos</p>
-        ${creatives.slice(0, 4).map(c => `
-          <div style="display:flex;gap:10px;align-items:center;padding:8px;background:${CARD};border:1px solid ${BORDER};margin-bottom:6px">
-            ${c.thumbnail_url
-              ? `<img src="${c.thumbnail_url}" style="width:44px;height:44px;object-fit:cover;flex-shrink:0" />`
-              : `<div style="width:44px;height:44px;background:${BORDER};flex-shrink:0"></div>`}
-            <div style="flex:1;min-width:0">
-              <p style="font-size:11px;font-weight:600;color:${FG};font-family:${INTER};margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.nome}</p>
-              <p style="font-size:10px;color:${MUTED};font-family:${INTER};margin:3px 0 0">${brlOrDash(c.spend)}${c.resultado>0?` · ${num(Math.round(c.resultado))} res.`:''}</p>
-            </div>
-          </div>`).join('')}
-      </div>` : '';
-
   const body = `
 ${sectionHeader('5 ações para o próximo mês — priorizadas por impacto nos dados', 'Plano de ação baseado no diagnóstico do período')}
-<div style="display:grid;grid-template-columns:${creatives.length>0?'1fr 200px':'1fr'};gap:20px;flex:1;align-items:start">
-  <div>
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px">${row1}</div>
-    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;max-width:67%">${row2}</div>
-  </div>
-  ${creatives.length>0?`<div>${creativesHtml}</div>`:''}
+<div style="flex:1;display:flex;flex-direction:column;gap:10px">
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">${row1}</div>
+  <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;max-width:67%">${row2}</div>
 </div>
 ${thesisBanner('Executar estas 5 ações em sequência, da mais fácil para a mais complexa, garante resultado consistente no próximo mês.')}`;
   return auditSlide(wrapSlide(body, idx, total), 'sDiagnosticoPlan');
+}
+
+function sCriativos(creatives: Creative[], idx: number, total: number): string {
+  const top = creatives.slice(0, 6);
+  const best = top[0];
+
+  const creativeCard = (c: Creative, i: number) => {
+    const isFirst = i === 0;
+    const accent = isFirst ? PRIMARY : BORDER;
+    return `<div style="position:relative;overflow:hidden;border:1px solid ${accent};background:${CARD};display:flex;flex-direction:column">
+      ${isFirst ? `<div style="position:absolute;top:0;left:0;right:0;height:2px;background:${PRIMARY}"></div>` : ''}
+      ${c.thumbnail_url
+        ? `<img src="${c.thumbnail_url}" style="width:100%;aspect-ratio:16/9;object-fit:cover;display:block" />`
+        : `<div style="width:100%;aspect-ratio:16/9;background:${BG};display:flex;align-items:center;justify-content:center">
+            <span style="font-size:10px;color:${MUTED};font-family:${INTER}">Sem thumbnail</span>
+           </div>`}
+      <div style="padding:10px 12px;display:flex;flex-direction:column;gap:5px">
+        ${isFirst ? `<span style="font-size:9px;font-weight:800;color:${PRIMARY};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER}">MELHOR CRIATIVO</span>` : ''}
+        <p style="font-size:11px;font-weight:700;color:${FG};font-family:${INTER};margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.nome}</p>
+        <div style="display:flex;gap:12px">
+          <span style="font-size:10px;color:${MUTED};font-family:${INTER}">${brlOrDash(c.spend)}</span>
+          ${c.resultado > 0 ? `<span style="font-size:10px;color:${isFirst?PRIMARY:MUTED};font-family:${INTER};font-weight:${isFirst?'700':'400'}">${num(Math.round(c.resultado))} resultados</span>` : ''}
+        </div>
+      </div>
+    </div>`;
+  };
+
+  const body = `
+${sectionHeader(
+  best ? `"${best.nome.slice(0,48)}${best.nome.length>48?'…':''}" lidera o desempenho — referência para os próximos criativos` : 'Análise de criativos — identifique o padrão vencedor',
+  'Top criativos Meta Ads por resultado no período'
+)}
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;flex:1;align-items:start">
+  ${top.map((c, i) => creativeCard(c, i)).join('')}
+</div>
+${thesisBanner(
+  best
+    ? `O criativo "${best.nome.slice(0,40)}${best.nome.length>40?'…':''}" deve ser referência para novas peças — replicar o formato e testar variações de copy.`
+    : 'Analise o padrão visual dos criativos com maior resultado e replique o formato nos próximos anúncios.'
+)}`;
+
+  return auditSlide(wrapSlide(body, idx, total), 'sCriativos');
 }
 
 // ── Expanded slides ───────────────────────────────────────────────────────────
@@ -1250,34 +1396,83 @@ function sDestaqueCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number, tota
   const conversao = meta.campanhas.filter(c => c.metricas.compras > 0 || c.tipo.toLowerCase().includes('conversions'));
   const others    = meta.campanhas.filter(c => !conversa.includes(c) && !conversao.includes(c));
 
-  function section(title: string, color: string, camps: CampanhaDetalhada[], insightTxt: string) {
+  function sectionConversa(camps: CampanhaDetalhada[]) {
+    if (!camps.length) return '';
+    const sorted = [...camps].sort((a, b) => b.metricas.conversas - a.metricas.conversas);
+    const cards = sorted.map((c, i) => {
+      const m = c.metricas;
+      const metrics: Array<{label:string;value:string}> = [
+        { label: 'Investido',     value: brlOrDash(m.investimento) },
+        { label: 'Alcance',       value: numOrDash(m.alcance) },
+        { label: 'Freq.',         value: `${m.frequencia.toFixed(1)}×` },
+        { label: 'Mensagens',     value: m.conversas > 0 ? num(Math.round(m.conversas)) : '—' },
+        { label: 'Custo/msg',     value: m.conversas > 0 && m.investimento > 0 ? brl(m.investimento / m.conversas) : '—' },
+      ];
+      return rankCard(i + 1, c.nome, metrics, i === 0 ? 'winner' : 'normal');
+    }).join('');
+    return `<div style="margin-bottom:20px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <div style="width:3px;height:14px;background:${PRIMARY}"></div>
+        <p style="font-size:10px;font-weight:700;color:${PRIMARY};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0">Campanhas de Conversa — métrica: mensagens iniciadas</p>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(${Math.min(sorted.length,3)},1fr);gap:10px;margin-bottom:8px">${cards}</div>
+      ${diag.insight_campanha_conversa ? insight('Análise', diag.insight_campanha_conversa, PRIMARY) : ''}
+    </div>`;
+  }
+
+  function sectionVendas(camps: CampanhaDetalhada[]) {
+    if (!camps.length) return '';
+    const sorted = [...camps].sort((a, b) => b.metricas.purchase_roas - a.metricas.purchase_roas);
+    const cards = sorted.map((c, i) => {
+      const m = c.metricas;
+      const metrics: Array<{label:string;value:string}> = [
+        { label: 'Investido',     value: brlOrDash(m.investimento) },
+        { label: 'Valor vendas',  value: m.valor_compras > 0 ? brl(m.valor_compras) : '—' },
+        { label: 'Vendas',        value: m.compras > 0 ? num(Math.round(m.compras)) : '—' },
+        { label: 'ROAS',          value: m.purchase_roas > 0 ? `${m.purchase_roas.toFixed(2)}×` : '—' },
+        { label: 'Custo/venda',   value: m.compras > 0 && m.investimento > 0 ? brl(m.investimento / m.compras) : '—' },
+      ];
+      return rankCard(i + 1, c.nome, metrics, i === 0 ? 'winner' : 'normal');
+    }).join('');
+    return `<div style="margin-bottom:20px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <div style="width:3px;height:14px;background:${ORANGE}"></div>
+        <p style="font-size:10px;font-weight:700;color:${ORANGE};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0">Campanhas de Vendas — métrica: valor e quantidade de vendas</p>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(${Math.min(sorted.length,3)},1fr);gap:10px;margin-bottom:8px">${cards}</div>
+      ${diag.insight_campanha_conversao ? insight('Análise', diag.insight_campanha_conversao, ORANGE) : ''}
+    </div>`;
+  }
+
+  function sectionOthers(camps: CampanhaDetalhada[]) {
     if (!camps.length) return '';
     const cards = camps.map((c, i) => {
       const m = c.metricas;
       const metrics: Array<{label:string;value:string}> = [
         { label: 'Investido', value: brlOrDash(m.investimento) },
-        { label: 'Alcance', value: numOrDash(m.alcance) },
-        { label: 'Freq.', value: `${m.frequencia.toFixed(1)}×` },
+        { label: 'Alcance',   value: numOrDash(m.alcance) },
+        { label: 'Cliques',   value: numOrDash(m.cliques) },
+        { label: 'Freq.',     value: `${m.frequencia.toFixed(1)}×` },
       ];
-      if (m.conversas > 0) metrics.push({ label: 'Conversas', value: num(Math.round(m.conversas)) });
-      if (m.conversas > 0 && m.investimento > 0) metrics.push({ label: 'Custo/conv.', value: brl(m.investimento / m.conversas) });
-      if (m.compras > 0) metrics.push({ label: 'Compras', value: num(Math.round(m.compras)) });
-      if (m.purchase_roas > 0) metrics.push({ label: 'ROAS', value: `${m.purchase_roas.toFixed(2)}×` });
       return rankCard(i + 1, c.nome, metrics, i === 0 ? 'winner' : 'normal');
     }).join('');
-    return `<div style="margin-bottom:18px">
-      <p style="font-size:10px;font-weight:700;color:${color};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 8px">— ${title}</p>
-      <div style="display:grid;grid-template-columns:repeat(${Math.min(camps.length,3)},1fr);gap:10px;margin-bottom:8px">${cards}</div>
-      ${insightTxt ? insight('Análise', insightTxt, color) : ''}
+    return `<div style="margin-bottom:20px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <div style="width:3px;height:14px;background:${BLUE}"></div>
+        <p style="font-size:10px;font-weight:700;color:${BLUE};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0">Demais Campanhas — alcance e engajamento</p>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(${Math.min(camps.length,3)},1fr);gap:10px">${cards}</div>
     </div>`;
   }
 
   const body = `
-${sectionHeader('Campanhas abertas por objetivo — cada tipo exige uma leitura diferente', 'Análise expandida Meta Ads por tipo de campanha')}
-${section('Campanhas de Conversa', PRIMARY, conversa, diag.insight_campanha_conversa)}
-${section('Campanhas de Conversão', ORANGE, conversao, diag.insight_campanha_conversao)}
-${section('Demais Campanhas', BLUE, others, '')}
-${thesisBanner('Campanhas de conversa e conversão têm métricas de sucesso distintas — compare pelo custo por resultado, não pelo investimento total.', 'neutral')}`;
+${sectionHeader('Cada campanha tem um objetivo — compare pelo custo por resultado, não pelo investimento', 'Análise expandida Meta Ads por tipo de campanha')}
+<div style="flex:1;overflow:hidden">
+  ${sectionConversa(conversa)}
+  ${sectionVendas(conversao)}
+  ${sectionOthers(others)}
+</div>
+${thesisBanner('Conversa = custo por mensagem. Venda = ROAS e valor gerado. Nunca misture as métricas de sucesso entre tipos de campanha.', 'neutral')}`;
   return auditSlide(wrapSlide(body, idx, total, 'ANÁLISE EXPANDIDA'), 'sDestaqueCampanhas');
 }
 
@@ -1495,37 +1690,42 @@ export async function buildDeliveryReport(opts: {
       })()
     : '';
 
-  const [bairros, { meta, creatives }] = await Promise.all([
+  const [bairros, { meta, creatives }, instagram] = await Promise.all([
     fetchBairros(clientId, from, to),
     fetchMetaData(connectionId, accountIds, from, to),
+    fetchInstagramInsights(connectionId, from, to),
   ]);
 
-  console.log(`[delivery] ${clientName} | fat:${brlOrDash(data.faturamento)} ativos:${data.ativos} prod:${data.produtos.length} bairros:${bairros.length} meta:${meta ? 'sim' : 'não'} criativos:${creatives.length} prev:${hasPrev}`);
+  console.log(`[delivery] ${clientName} | fat:${brlOrDash(data.faturamento)} ativos:${data.ativos} prod:${data.produtos.length} bairros:${bairros.length} meta:${meta ? 'sim' : 'não'} ig:${instagram ? `@${instagram.username}` : 'não'} criativos:${creatives.length} prev:${hasPrev}`);
 
   const diag = await fetchDiagnosis(data, prevData, meta, bairros, clientName, periodo, agencyContext);
 
-  const hasVisao   = data.faturamento > 0 || data.pedidos_ativos > 0;
-  const hasDia     = data.por_dia.length > 0;
-  const hasBase    = data.ativos > 0 || data.inativos > 0 || data.potenciais > 0;
-  const hasInat    = data.inativos_faixas.length > 0;
-  const hasProd    = data.produtos.length > 0;
-  const hasRegiao  = bairros.length > 0;
-  const hasMeta    = meta !== null;
+  const hasVisao       = data.faturamento > 0 || data.pedidos_ativos > 0;
+  const hasDia         = data.por_dia.length > 0;
+  const hasBase        = data.ativos > 0 || data.inativos > 0 || data.potenciais > 0;
+  const hasInat        = data.inativos_faixas.length > 0;
+  const hasProd        = data.produtos.length > 0;
+  const hasRegiao      = bairros.length > 0;
+  const hasMeta        = meta !== null;
+  const hasInstagram   = instagram !== null;
   const hasDestaques   = hasMeta && meta!.campanhas.length > 0;
   const hasDiagFat     = hasBase || hasRegiao;
   const hasPlanoDetalh = diag.plano.length > 0;
+  const hasCriativos   = creatives.length > 0;
 
   // Diagnóstico sempre gera 2 slides (A + Plan)
   const total = 1
-    + (hasVisao  ? 1 : 0)
-    + (hasDia    ? 1 : 0)
-    + (hasRegiao ? 1 : 0)
-    + (hasBase   ? 1 : 0)
-    + (hasInat   ? 1 : 0)
-    + (hasProd   ? 1 : 0)
-    + (hasMeta   ? 1 : 0)
+    + (hasVisao      ? 1 : 0)
+    + (hasDia        ? 1 : 0)
+    + (hasRegiao     ? 1 : 0)
+    + (hasBase       ? 1 : 0)
+    + (hasInat       ? 1 : 0)
+    + (hasProd       ? 1 : 0)
+    + (hasMeta       ? 1 : 0)
+    + (hasInstagram  ? 1 : 0)
     + 2                           // sDiagnosticoA + sDiagnosticoPlan
     + (hasDestaques   ? 1 : 0)
+    + (hasCriativos   ? 1 : 0)
     + (hasDiagFat     ? 1 : 0)
     + (hasPlanoDetalh ? 1 : 0);
 
@@ -1533,16 +1733,18 @@ export async function buildDeliveryReport(opts: {
   let i = 1;
 
   slides.push(sCapa(data, meta, clientName, periodo, prevPeriodo, diag, total));
-  if (hasVisao)     slides.push(sVisaoGeral(data, prevData, ++i, total));
-  if (hasDia)       slides.push(sPorDia(data, ++i, total));
-  if (hasRegiao)    slides.push(sRegioes(bairros, ++i, total));
-  if (hasBase)      slides.push(sBase(data, ++i, total));
-  if (hasInat)      slides.push(sInativos(data, ++i, total));
-  if (hasProd)      slides.push(sProdutos(data, ++i, total));
-  if (hasMeta)      slides.push(sMetaAds(meta!, ++i, total));
+  if (hasVisao)       slides.push(sVisaoGeral(data, prevData, ++i, total));
+  if (hasDia)         slides.push(sPorDia(data, ++i, total));
+  if (hasRegiao)      slides.push(sRegioes(bairros, ++i, total));
+  if (hasBase)        slides.push(sBase(data, ++i, total));
+  if (hasInat)        slides.push(sInativos(data, ++i, total));
+  if (hasProd)        slides.push(sProdutos(data, ++i, total));
+  if (hasMeta)        slides.push(sMetaAds(meta!, ++i, total));
+  if (hasInstagram)   slides.push(sInstagram(instagram!, ++i, total));
   slides.push(sDiagnosticoA(diag, ++i, total));
-  slides.push(sDiagnosticoPlan(diag, creatives, ++i, total));
+  slides.push(sDiagnosticoPlan(diag, ++i, total));
   if (hasDestaques)   slides.push(sDestaqueCampanhas(meta!, diag, ++i, total));
+  if (hasCriativos)   slides.push(sCriativos(creatives, ++i, total));
   if (hasDiagFat)     slides.push(sDiagnosticoFat(diag, data, bairros, ++i, total));
   if (hasPlanoDetalh) slides.push(sPlanoDetalhado(diag, ++i, total));
 
