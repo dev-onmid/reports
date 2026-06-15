@@ -52,17 +52,23 @@ async function gadsSearch(customerId: string, query: string, accessToken: string
 }
 
 async function fetchGadsAccountMetrics(customerId: string, accessToken: string, loginCustomerId: string | undefined, gaqlPeriod: string) {
-  const data = await gadsSearch(
-    customerId,
-    `SELECT metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.average_cpc, metrics.conversions, metrics.cost_per_conversion
-     FROM customer WHERE ${gaqlPeriod}`,
-    accessToken,
-    loginCustomerId,
-  );
+  const query = `SELECT metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.average_cpc, metrics.conversions, metrics.cost_per_conversion
+     FROM customer WHERE ${gaqlPeriod}`;
+  let data = await gadsSearch(customerId, query, accessToken, loginCustomerId);
+  // If the primary attempt failed and we had a loginCustomerId, retry without it (direct account fallback).
+  // If there was no loginCustomerId, retry with the account itself as login (MCC self-access fallback).
+  if (!data) {
+    const fallbackLogin = loginCustomerId ? undefined : customerId;
+    console.log(`[metrics/gads] retrying customer=${customerId} fallbackLogin=${fallbackLogin ?? 'none'}`);
+    data = await gadsSearch(customerId, query, accessToken, fallbackLogin);
+  }
   if (!data) return null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const m = (data.results?.[0] as any)?.metrics;
-  if (!m) return null;
+  if (!m) {
+    console.log(`[metrics/gads] empty results customer=${customerId} period=${gaqlPeriod} loginCustomer=${loginCustomerId}`);
+    return null;
+  }
   const spend = (m.costMicros ?? 0) / 1_000_000;
   const conversions = Number(m.conversions ?? 0);
   return {
@@ -84,14 +90,14 @@ type DailyMetrics = {
 type CrmDailyRow = { date: string; revenue: number; sales: number; leads: number };
 
 async function fetchGadsAccountDailyMetrics(customerId: string, accessToken: string, loginCustomerId: string | undefined, gaqlPeriod: string) {
-  const data = await gadsSearch(
-    customerId,
-    `SELECT segments.date, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions
+  const query = `SELECT segments.date, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions
      FROM customer WHERE ${gaqlPeriod}
-     ORDER BY segments.date`,
-    accessToken,
-    loginCustomerId,
-  );
+     ORDER BY segments.date`;
+  let data = await gadsSearch(customerId, query, accessToken, loginCustomerId);
+  if (!data) {
+    const fallbackLogin = loginCustomerId ? undefined : customerId;
+    data = await gadsSearch(customerId, query, accessToken, fallbackLogin);
+  }
   if (!data) return [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return ((data.results ?? []) as any[]).map((row) => {
@@ -126,10 +132,10 @@ async function buildMccMap(accessToken: string): Promise<Record<string, string>>
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const c = (data?.results?.[0] as any)?.customer;
       if (!c?.manager) return;
-      // This is an MCC — list its sub-accounts
+      // This is an MCC — list all sub-accounts at any depth (not just level=1)
       const subData = await gadsSearch(
         custId,
-        'SELECT customer_client.id, customer_client.manager, customer_client.level FROM customer_client WHERE customer_client.level = 1',
+        'SELECT customer_client.id, customer_client.level FROM customer_client WHERE customer_client.level >= 1',
         accessToken,
         custId,
       );
@@ -137,7 +143,8 @@ async function buildMccMap(accessToken: string): Promise<Record<string, string>>
       for (const r of subData?.results ?? [] as any[]) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const sub = (r as any).customerClient;
-        if (sub?.id && !sub.manager) mccMap[normalizeGoogleCustomerId(String(sub.id))] = custId;
+        // Map every sub-account (including nested MCCs) to this top-level MCC as login-customer-id
+        if (sub?.id) mccMap[normalizeGoogleCustomerId(String(sub.id))] = custId;
       }
     })
   );
@@ -392,26 +399,37 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const connDaily: Awaited<ReturnType<typeof fetchGadsAccountDailyMetrics>> = [];
     const seenAccounts = new Set<string>();
 
-    await Promise.allSettled(
-      googleConns.map(async (conn) => {
-        const accessToken = await getFreshGoogleToken(conn);
-        const mccMap = await buildMccMap(accessToken);
+    // Process connections sequentially so each gets a chance to resolve accounts
+    // that a previous connection failed to fetch (e.g. different MCC hierarchies).
+    for (const conn of googleConns) {
+      const pendingIds = uniqueAccountIds.filter(id => !seenAccounts.has(id));
+      if (pendingIds.length === 0) break;
 
-        await Promise.allSettled(
-          uniqueAccountIds.map(async (accountId) => {
-            if (seenAccounts.has(accountId)) return;
-            const loginCustomerId = mccMap[accountId];
-            const m = await fetchGadsAccountMetrics(accountId, accessToken, loginCustomerId, gaqlPeriod);
-            if (m) {
-              seenAccounts.add(accountId);
-              connMetrics.push(m);
-              const daily = await fetchGadsAccountDailyMetrics(accountId, accessToken, loginCustomerId, gaqlPeriod);
-              connDaily.push(...daily);
-            }
-          })
-        );
-      })
-    );
+      let accessToken: string;
+      let mccMap: Record<string, string>;
+      try {
+        accessToken = await getFreshGoogleToken(conn);
+        mccMap = await buildMccMap(accessToken);
+      } catch (e) {
+        console.error('[metrics] google token/mcc error', e);
+        continue;
+      }
+
+      // Accounts within a single connection can still be fetched in parallel —
+      // each accountId maps to exactly one entry, so there's no race here.
+      await Promise.allSettled(
+        pendingIds.map(async (accountId) => {
+          const loginCustomerId = mccMap[accountId];
+          const m = await fetchGadsAccountMetrics(accountId, accessToken, loginCustomerId, gaqlPeriod);
+          if (m) {
+            seenAccounts.add(accountId);
+            connMetrics.push(m);
+            const daily = await fetchGadsAccountDailyMetrics(accountId, accessToken, loginCustomerId, gaqlPeriod);
+            connDaily.push(...daily);
+          }
+        })
+      );
+    }
 
     if (connMetrics.length > 0) {
       const agg = connMetrics.reduce((a, m) => ({

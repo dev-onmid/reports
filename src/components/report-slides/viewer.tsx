@@ -49,7 +49,7 @@ export function ReportViewer({ data, onClose }: { data: ReportData; onClose?: ()
     if (!win) return;
 
     const isLight = isLightColor(manifest.theme);
-    const bg = isLight ? '#f4f4f5' : '#0d0d0f';
+    const bg = isLight ? '#EEF1F5' : '#0d0d0f';
 
     const slideDivs = manifest.slides
       .map((spec, i) => {
@@ -108,16 +108,17 @@ export function ReportViewer({ data, onClose }: { data: ReportData; onClose?: ()
   const thumbScale = 104 / SLIDE_W;
 
   return (
-    <div className="flex flex-col h-full" style={{ background: '#09090B' }}>
+    <div className="flex flex-col h-full" style={{ background: '#EEF1F5' }}>
       {/* Controls */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '0 24px', height: 52, borderBottom: '1px solid #1F1F23', flexShrink: 0,
+        padding: '0 24px', height: 52, borderBottom: '1px solid #D6DEE8', flexShrink: 0,
+        background: 'rgba(255,255,255,0.88)',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: '#fff' }}>{data.clientName}</span>
-          <span style={{ fontSize: 12, color: '#555' }}>—</span>
-          <span style={{ fontSize: 12, color: '#777' }}>{data.periodLabel}</span>
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#0F172A' }}>{data.clientName}</span>
+          <span style={{ fontSize: 12, color: '#94A3B8' }}>—</span>
+          <span style={{ fontSize: 12, color: '#475569' }}>{data.periodLabel}</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <button onClick={prev} disabled={current === 0} style={navBtn}>
@@ -129,7 +130,7 @@ export function ReportViewer({ data, onClose }: { data: ReportData; onClose?: ()
           <button onClick={next} disabled={current === slides.length - 1} style={navBtn}>
             <ChevronRight size={16} />
           </button>
-          <div style={{ width: 1, height: 20, background: '#333', margin: '0 6px' }} />
+          <div style={{ width: 1, height: 20, background: '#D6DEE8', margin: '0 6px' }} />
           <button onClick={handlePrint} style={actionBtn}>
             <Printer size={13} />
             <span>Exportar PDF</span>
@@ -149,7 +150,7 @@ export function ReportViewer({ data, onClose }: { data: ReportData; onClose?: ()
           height: SLIDE_H * scale,
           overflow: 'hidden',
           borderRadius: 6,
-          boxShadow: '0 24px 80px rgba(0,0,0,0.6)',
+          boxShadow: '0 18px 50px rgba(15,23,42,0.16)',
           flexShrink: 0,
         }}>
           <div style={{ width: SLIDE_W, height: SLIDE_H, transformOrigin: 'top left', transform: `scale(${scale})` }}>
@@ -161,8 +162,8 @@ export function ReportViewer({ data, onClose }: { data: ReportData; onClose?: ()
       {/* Thumbnail strip */}
       <div style={{
         display: 'flex', gap: 8, padding: '8px 16px',
-        borderTop: '1px solid #1F1F23', flexShrink: 0,
-        overflowX: 'auto', background: '#09090B',
+        borderTop: '1px solid #D6DEE8', flexShrink: 0,
+        overflowX: 'auto', background: 'rgba(255,255,255,0.88)',
       }}>
         {slides.map((_, i) => (
           <button
@@ -210,11 +211,11 @@ export function ReportViewer({ data, onClose }: { data: ReportData; onClose?: ()
 const navBtn: React.CSSProperties = {
   display: 'flex', alignItems: 'center', justifyContent: 'center',
   width: 30, height: 30, borderRadius: 6, border: 'none', cursor: 'pointer',
-  background: 'transparent', color: '#888',
+  background: 'transparent', color: '#475569',
 };
 
 const actionBtn: React.CSSProperties = {
   display: 'flex', alignItems: 'center', gap: 6,
   padding: '0 12px', height: 30, borderRadius: 6, border: 'none', cursor: 'pointer',
-  background: 'transparent', color: '#ccc', fontSize: 12, fontWeight: 600,
+  background: 'transparent', color: '#334155', fontSize: 12, fontWeight: 600,
 };

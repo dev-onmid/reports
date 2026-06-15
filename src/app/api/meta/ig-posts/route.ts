@@ -18,6 +18,7 @@ export type IgPost = {
   reach: number;
   saves: number;
   videoViews: number;
+  publishedInPeriod: boolean;
 };
 
 type ConnRow = { id: string; app_id: string; access_token: string; token_expiry: string | null };
@@ -25,6 +26,29 @@ type PageEntry = {
   id: string; name: string; access_token: string;
   instagram_business_account?: { id: string; username?: string; profile_picture_url?: string };
 };
+
+// Resolves any period key to explicit { since, until } YYYY-MM-DD strings.
+function resolveDateRange(period: string, dateFrom: string, dateTo: string): { since: string; until: string } {
+  const isValidDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(Date.parse(s));
+  if (period === 'custom' && isValidDate(dateFrom) && isValidDate(dateTo)) {
+    return { since: dateFrom, until: dateTo };
+  }
+  const now = new Date();
+  const fmt = (d: Date) => d.toISOString().split('T')[0];
+  const daysAgo = (n: number) => { const d = new Date(now); d.setDate(d.getDate() - n); return fmt(d); };
+  switch (period) {
+    case 'yesterday':   return { since: daysAgo(1), until: daysAgo(1) };
+    case 'last_7d':     return { since: daysAgo(7), until: daysAgo(1) };
+    case 'last_14d':    return { since: daysAgo(14), until: daysAgo(1) };
+    case 'last_30d':    return { since: daysAgo(30), until: daysAgo(1) };
+    case 'this_month':  return { since: fmt(new Date(now.getFullYear(), now.getMonth(), 1)), until: fmt(now) };
+    case 'last_month':  return {
+      since: fmt(new Date(now.getFullYear(), now.getMonth() - 1, 1)),
+      until: fmt(new Date(now.getFullYear(), now.getMonth(), 0)),
+    };
+    default:            return { since: daysAgo(30), until: daysAgo(1) };
+  }
+}
 
 async function getIgAccount(accountId: string, token: string): Promise<{ igId: string; username: string; picture?: string; pageToken: string } | null> {
   // Try promote_pages first (per ad account), then /me/accounts fallback
@@ -123,16 +147,19 @@ export async function GET(req: NextRequest) {
   const clientIds = (req.nextUrl.searchParams.get('clientIds') ?? '').split(',').filter(Boolean);
   const limit = Math.min(parseInt(req.nextUrl.searchParams.get('limit') ?? '24'), 50);
   const sortBy = req.nextUrl.searchParams.get('sortBy') ?? 'reach';
+  const period = req.nextUrl.searchParams.get('period') ?? 'last_30d';
   const dateFrom = req.nextUrl.searchParams.get('dateFrom') ?? '';
   const dateTo = req.nextUrl.searchParams.get('dateTo') ?? '';
 
   if (!clientIds.length) return Response.json([]);
 
-  const since = dateFrom ? Math.floor(new Date(dateFrom + 'T00:00:00Z').getTime() / 1000) : undefined;
-  const until = dateTo ? Math.min(
-    Math.floor(new Date(dateTo + 'T23:59:59Z').getTime() / 1000),
+  // Always resolve to explicit dates so that every period key filters posts correctly.
+  const { since: sinceDate, until: untilDate } = resolveDateRange(period, dateFrom, dateTo);
+  const since = Math.floor(new Date(sinceDate + 'T00:00:00Z').getTime() / 1000);
+  const until = Math.min(
+    Math.floor(new Date(untilDate + 'T23:59:59Z').getTime() / 1000),
     Math.floor(Date.now() / 1000),
-  ) : undefined;
+  );
 
   const pool = makeServerPool();
   try {
@@ -182,8 +209,8 @@ export async function GET(req: NextRequest) {
         const mediaUrl = new URL(`https://graph.facebook.com/v21.0/${ig.igId}/media`);
         mediaUrl.searchParams.set('fields', mediaFields);
         mediaUrl.searchParams.set('limit', '30');
-        if (since) mediaUrl.searchParams.set('since', String(since));
-        if (until) mediaUrl.searchParams.set('until', String(until));
+        mediaUrl.searchParams.set('since', String(since));
+        mediaUrl.searchParams.set('until', String(until));
         mediaUrl.searchParams.set('access_token', ig.pageToken);
 
         const mediaRes = await fetch(mediaUrl.toString());
@@ -205,6 +232,7 @@ export async function GET(req: NextRequest) {
         for (const m of media) {
           const ins = insights.get(m.id) ?? { reach: 0, saves: 0, videoViews: 0 };
           const isVideo = m.media_product_type === 'REELS' || m.media_type === 'VIDEO';
+          const postTs = m.timestamp ? new Date(m.timestamp).getTime() : 0;
           allPosts.push({
             id: m.id,
             clientId,
@@ -221,6 +249,7 @@ export async function GET(req: NextRequest) {
             reach: ins.reach,
             saves: ins.saves,
             videoViews: ins.videoViews,
+            publishedInPeriod: postTs >= since * 1000 && postTs <= until * 1000,
           });
         }
       } catch {}

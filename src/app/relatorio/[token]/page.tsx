@@ -57,20 +57,44 @@ export default async function RelatorioPublicoPage({ params }: { params: Promise
     const data = report.report_data as { html: string };
     const isDelivery = report.template_slug === 'onmid-narrative-delivery';
     const printCss = `
+      :root {
+        --report-canvas: #EEF1F5;
+        --report-page: #F7F8FA;
+        --report-surface: #FFFFFF;
+        --report-surface-alt: #F1F5F9;
+        --report-border: #D6DEE8;
+        --report-text: #0F172A;
+        --report-muted: #334155;
+      }
       @media print {
         @page { size: landscape; margin: 0; }
-        body { background: #F4F4F4 !important; }
+        body { background: var(--report-canvas) !important; }
         [style*="page-break-after"] { break-after: page; }
       }
       * { box-sizing: border-box; }
-      body { background: #F4F4F4; }
+      body { background: var(--report-canvas); }
+      [style*="background:#F4F4F4"],
+      [style*="background: #F4F4F4"] { background: var(--report-canvas) !important; }
+      [style*="background:#FFFFFF"],
+      [style*="background: #FFFFFF"] { background: var(--report-page) !important; }
+      [style*="background:#F7F8FA"],
+      [style*="background: #F7F8FA"] { background: var(--report-surface) !important; }
+      [style*="border:1px solid #E2E8F0"],
+      [style*="border: 1px solid #E2E8F0"] { border-color: var(--report-border) !important; }
+      [style*="border-bottom:1px solid #E2E8F0"],
+      [style*="border-bottom: 1px solid #E2E8F0"] { border-bottom-color: var(--report-border) !important; }
+      [style*="color:#111827"],
+      [style*="color: #111827"] { color: var(--report-text) !important; }
+      [style*="color:#374151"],
+      [style*="color: #374151"],
+      [style*="color:#64748B"],
+      [style*="color: #64748B"] { color: var(--report-muted) !important; }
     `;
     return (
       <>
         <title>{`Relatório ${isDelivery ? 'Delivery' : 'de Performance'} — ${report.client_name}`}</title>
-        {/* eslint-disable-next-line react/no-danger */}
         <style dangerouslySetInnerHTML={{ __html: printCss }} />
-        <div style={{ background: '#F4F4F4', minHeight: '100vh', overflowX: 'auto' }}>
+        <div style={{ background: '#EEF1F5', minHeight: '100vh', overflowX: 'auto' }}>
           <div dangerouslySetInnerHTML={{ __html: data.html ?? '' }} />
         </div>
       </>

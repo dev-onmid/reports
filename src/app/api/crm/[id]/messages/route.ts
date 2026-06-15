@@ -2,22 +2,13 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { getClientInstance, sendFollowupMessage } from '@/lib/followup-send';
 import { analisarConversa } from '@/lib/crm-ai-analysis';
+import { ensureCrmMessagesSchema, ensureDefaultFunnel } from '@/lib/crm-conversation-sync';
 
 // Ensures crm_messages has all columns the code expects.
 // The original migration only had: id, contact_id, client_id(?), direction, text, created_at.
 // We add the columns used by all chat routes.
 async function migrateCrmMessages(pool: ReturnType<typeof makeServerPool>) {
-  const stmts = [
-    `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS lead_id UUID`,
-    `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS client_id TEXT`,
-    `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS tipo TEXT NOT NULL DEFAULT 'texto'`,
-    `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS external_id TEXT`,
-    `ALTER TABLE public.crm_messages ALTER COLUMN contact_id DROP NOT NULL`,
-    `CREATE INDEX IF NOT EXISTS idx_crm_messages_lead ON public.crm_messages (lead_id, created_at DESC) WHERE lead_id IS NOT NULL`,
-  ];
-  for (const sql of stmts) {
-    await pool.query(sql).catch(() => null);
-  }
+  await ensureCrmMessagesSchema(pool);
 }
 
 export async function GET(
@@ -29,14 +20,57 @@ export async function GET(
   try {
     await migrateCrmMessages(pool);
 
-    const BASE_WHERE = `
-      WHERE m.lead_id = $1
-         OR m.lead_id IN (
-           SELECT l2.id FROM public.crm_leads l2
-           WHERE l2.client_id = (SELECT client_id FROM public.crm_leads WHERE id = $1 LIMIT 1)
-             AND l2.numero    = (SELECT numero    FROM public.crm_leads WHERE id = $1 LIMIT 1)
-             AND l2.numero IS NOT NULL
-         )
+    const BASE_WITH_CONTACTS = `
+      WITH target AS (
+        SELECT id, client_id, numero
+          FROM public.crm_leads
+         WHERE id = $1
+         LIMIT 1
+      ),
+      lead_matches AS (
+        SELECT l2.id
+          FROM public.crm_leads l2
+          JOIN target t ON t.client_id = l2.client_id
+         WHERE l2.id = t.id
+            OR (
+              NULLIF(regexp_replace(COALESCE(l2.numero, ''), '\\D', '', 'g'), '') =
+              NULLIF(regexp_replace(COALESCE(t.numero, ''), '\\D', '', 'g'), '')
+              AND NULLIF(regexp_replace(COALESCE(t.numero, ''), '\\D', '', 'g'), '') IS NOT NULL
+            )
+      ),
+      contact_matches AS (
+        SELECT c.id
+          FROM public.crm_contacts c
+          JOIN target t ON t.client_id = c.client_id
+         WHERE NULLIF(regexp_replace(COALESCE(c.phone, ''), '\\D', '', 'g'), '') =
+               NULLIF(regexp_replace(COALESCE(t.numero, ''), '\\D', '', 'g'), '')
+           AND NULLIF(regexp_replace(COALESCE(t.numero, ''), '\\D', '', 'g'), '') IS NOT NULL
+      )`;
+    const BASE_WITHOUT_CONTACTS = `
+      WITH target AS (
+        SELECT id, client_id, numero
+          FROM public.crm_leads
+         WHERE id = $1
+         LIMIT 1
+      ),
+      lead_matches AS (
+        SELECT l2.id
+          FROM public.crm_leads l2
+          JOIN target t ON t.client_id = l2.client_id
+         WHERE l2.id = t.id
+            OR (
+              NULLIF(regexp_replace(COALESCE(l2.numero, ''), '\\D', '', 'g'), '') =
+              NULLIF(regexp_replace(COALESCE(t.numero, ''), '\\D', '', 'g'), '')
+              AND NULLIF(regexp_replace(COALESCE(t.numero, ''), '\\D', '', 'g'), '') IS NOT NULL
+            )
+      )`;
+    const WHERE_WITH_CONTACTS = `
+      WHERE m.lead_id IN (SELECT id FROM lead_matches)
+         OR m.contact_id IN (SELECT id FROM contact_matches)
+      ORDER BY m.created_at ASC, m.id ASC
+      LIMIT 500`;
+    const WHERE_WITHOUT_CONTACTS = `
+      WHERE m.lead_id IN (SELECT id FROM lead_matches)
       ORDER BY m.created_at ASC, m.id ASC
       LIMIT 500`;
 
@@ -44,17 +78,22 @@ export async function GET(
     let rows: unknown[] = [];
     try {
       const result = await pool.query(
-        `SELECT m.id, m.direction, m.text, COALESCE(m.tipo, 'texto') AS tipo, m.created_at
-         FROM public.crm_messages m ${BASE_WHERE}`,
+        `${BASE_WITH_CONTACTS}
+         SELECT m.id, m.direction, m.text, COALESCE(m.tipo, 'texto') AS tipo, m.created_at
+         FROM public.crm_messages m ${WHERE_WITH_CONTACTS}`,
         [id],
       );
       rows = result.rows;
-    } catch {
+    } catch (withContactsErr) {
       const result = await pool.query(
-        `SELECT m.id, m.direction, m.text, 'texto' AS tipo, m.created_at
-         FROM public.crm_messages m ${BASE_WHERE}`,
+        `${BASE_WITHOUT_CONTACTS}
+         SELECT m.id, m.direction, m.text, 'texto' AS tipo, m.created_at
+         FROM public.crm_messages m ${WHERE_WITHOUT_CONTACTS}`,
         [id],
-      );
+      ).catch(async () => {
+        if (withContactsErr) throw withContactsErr;
+        throw new Error('Falha ao carregar mensagens');
+      });
       rows = result.rows;
     }
 
@@ -105,6 +144,7 @@ export async function POST(
       [id],
     );
     if (!lead) return Response.json({ error: 'lead not found' }, { status: 404 });
+    await ensureDefaultFunnel(pool, lead.client_id);
     const { rows: [canonical] } = await pool.query<{ id: string }>(
       `SELECT id
          FROM public.crm_leads
@@ -164,7 +204,10 @@ export async function POST(
     );
     await pool.query(
       `UPDATE public.crm_leads
-          SET updated_at = NOW()
+          SET updated_at = NOW(),
+              whatsapp_last_message_text = $4,
+              whatsapp_last_direction = $5,
+              whatsapp_last_message_at = NOW()
         WHERE client_id = $1
           AND (
             id = $2::uuid
@@ -174,7 +217,7 @@ export async function POST(
               AND NULLIF(regexp_replace(COALESCE($3::text, ''), '\\D', '', 'g'), '') IS NOT NULL
             )
           )`,
-      [lead.client_id, id, lead.numero ?? null],
+      [lead.client_id, id, lead.numero ?? null, dbText, direction],
     );
     if (lead.time_interno !== true) {
       await analisarConversa(pool, targetLeadId).catch(err => console.error('[messages analisarConversa]', err));

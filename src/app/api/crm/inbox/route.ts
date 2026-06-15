@@ -1,5 +1,9 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
+import {
+  ensureDefaultFunnel,
+  upsertLeadFromConversation,
+} from '@/lib/crm-conversation-sync';
 
 const ZAPI_BASE = 'https://api.z-api.io/instances';
 
@@ -158,6 +162,8 @@ export async function GET(req: NextRequest) {
 
   const pool = makeServerPool();
   try {
+    await ensureDefaultFunnel(pool, clientId);
+
     // Step 1: fetch leads (simple, no optional columns)
     const { rows: leads } = await pool.query<{
       id: string; nome: string | null; numero: string | null; canal: string | null;
@@ -296,6 +302,8 @@ export async function POST(req: NextRequest) {
 
   const pool = makeServerPool();
   try {
+    await ensureDefaultFunnel(pool, clientId);
+
     const { rows: [instance] } = await pool.query(
       `SELECT instance_id, token, provider
        FROM public.client_zapi_instances
@@ -308,15 +316,6 @@ export async function POST(req: NextRequest) {
       return Response.json({ error: 'Nenhuma instância ativa encontrada para este cliente.' }, { status: 404 });
     }
     const chats = await fetchProviderChats(instance, limit);
-
-    await pool.query(`
-      ALTER TABLE public.crm_leads
-        ADD COLUMN IF NOT EXISTS profile_picture_url TEXT,
-        ADD COLUMN IF NOT EXISTS whatsapp_last_message_at TIMESTAMPTZ,
-        ADD COLUMN IF NOT EXISTS whatsapp_last_message_text TEXT,
-        ADD COLUMN IF NOT EXISTS whatsapp_last_direction TEXT,
-        ADD COLUMN IF NOT EXISTS whatsapp_lid TEXT;
-    `);
 
     const mapped = chats
       .filter(chat => chat.isGroup !== true)
@@ -381,48 +380,16 @@ export async function POST(req: NextRequest) {
 
     let imported = 0;
     for (const contact of contacts) {
-      // Match by real phone OR by LID (for leads imported before this fix that stored LIDs as numero)
-      const updated = await pool.query(
-        `UPDATE public.crm_leads
-         SET nome = COALESCE(NULLIF($3, ''), nome),
-             numero = $2,
-             whatsapp_lid = COALESCE($8, whatsapp_lid),
-             profile_picture_url = COALESCE($4, profile_picture_url),
-             whatsapp_last_message_at = COALESCE($5::timestamptz, whatsapp_last_message_at),
-             whatsapp_last_message_text = COALESCE($6, whatsapp_last_message_text),
-             whatsapp_last_direction = COALESCE($7, whatsapp_last_direction),
-             updated_at = NOW()
-         WHERE client_id = $1 AND (numero = $2 OR ($8::text IS NOT NULL AND numero = $8))
-         RETURNING id`,
-        [
-          clientId,
-          contact.phone,
-          contact.name,
-          contact.profilePictureUrl,
-          contact.lastMessageAt,
-          contact.lastMessageText,
-          contact.lastDirection,
-          contact.lid ?? null,   // $8 — LID (also used to match leads stored with LID as numero)
-        ],
-      );
-      if ((updated.rowCount ?? 0) === 0) {
-        await pool.query(
-          `INSERT INTO public.crm_leads
-            (client_id, nome, numero, canal, origin, data, status, profile_picture_url,
-             whatsapp_last_message_at, whatsapp_last_message_text, whatsapp_last_direction, whatsapp_lid)
-           VALUES ($1, $2, $3, 'Whatsapp', 'organic', CURRENT_DATE, 'Em Atendimento', $4, $5::timestamptz, $6, $7, $8)`,
-          [
-            clientId,
-            contact.name,
-            contact.phone,
-            contact.profilePictureUrl,
-            contact.lastMessageAt,
-            contact.lastMessageText,
-            contact.lastDirection,
-            contact.lid ?? null,
-          ],
-        );
-      }
+      await upsertLeadFromConversation(pool, {
+        clientId,
+        phone: contact.phone,
+        lid: contact.lid,
+        name: contact.name,
+        profilePictureUrl: contact.profilePictureUrl,
+        lastMessageAt: contact.lastMessageAt,
+        lastMessageText: contact.lastMessageText,
+        lastDirection: contact.lastDirection,
+      });
       imported += 1;
     }
 

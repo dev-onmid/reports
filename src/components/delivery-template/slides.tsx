@@ -11,11 +11,12 @@ const C = {
   greenMid:    '#86EFAC',
   greenDark:   '#16A34A',
   text:        '#0F172A',
-  sub:         '#475569',
+  sub:         '#334155',
   muted:       '#94A3B8',
-  border:      '#E2E8F0',
-  bg:          '#FFFFFF',
-  row:         '#F8FAFC',
+  border:      '#D6DEE8',
+  bg:          '#F7F8FA',
+  surface:     '#FFFFFF',
+  row:         '#F1F5F9',
   red:         '#F87171',
   redLight:    '#FEF2F2',
   salmon:      '#FB7185',
@@ -165,7 +166,7 @@ function InsightBorder({ icon, title, body, style }: { icon: React.ReactNode; ti
 // Generic card
 function Card({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
   return (
-    <div style={{ background: 'white', border: `1px solid ${C.border}`, borderRadius: 14, padding: '16px 18px', ...style }}>
+    <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 14, padding: '16px 18px', boxShadow: '0 10px 26px rgba(15,23,42,0.06)', ...style }}>
       {children}
     </div>
   );
@@ -475,23 +476,22 @@ export function Slide01Cover({ data, current, total }: { data: DeliveryReportDat
 // ── Slide 02 — Visão geral do mês ─────────────────────────────────────────────
 export function Slide02Monthly({ data, current, total }: { data: DeliveryReportData; current: number; total: number }) {
   const { current: cur, previous: prev } = data.monthlyOverview;
+  const hasCompare = prev.revenue > 0 || prev.orders > 0 || prev.avgTicket > 0;
   const rDelta = pctDelta(cur.revenue, prev.revenue);
   const oDelta = pctDelta(cur.orders, prev.orders);
   const tDelta = pctDelta(cur.avgTicket, prev.avgTicket);
 
-  function MetricCell({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
-    return (
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 14, padding: '0 18px' }}>
-        {icon}
-        <div>
-          <div style={{ fontSize: 12, color: C.muted, marginBottom: 2 }}>{label}</div>
-          <div style={{ fontSize: 26, fontWeight: 800, color: C.text, letterSpacing: '-0.02em', lineHeight: 1 }}>{value}</div>
-        </div>
+  const metricCell = (icon: React.ReactNode, label: string, value: string) => (
+    <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 14, padding: '0 18px' }}>
+      {icon}
+      <div>
+        <div style={{ fontSize: 12, color: C.muted, marginBottom: 2 }}>{label}</div>
+        <div style={{ fontSize: 26, fontWeight: 800, color: C.text, letterSpacing: '-0.02em', lineHeight: 1 }}>{value}</div>
       </div>
-    );
-  }
+    </div>
+  );
 
-  function DeltaCell({ icon, label, delta }: { icon: React.ReactNode; label: string; delta: { text: string; up: boolean } }) {
+  const deltaCell = (icon: React.ReactNode, label: string, delta: { text: string; up: boolean }) => {
     const col = delta.up ? C.greenDark : C.red;
     return (
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 14, padding: '0 18px' }}>
@@ -507,17 +507,16 @@ export function Slide02Monthly({ data, current, total }: { data: DeliveryReportD
         </div>
       </div>
     );
-  }
+  };
 
-  function Divider() {
-    return <div style={{ width: 1, background: C.border, alignSelf: 'stretch', margin: '12px 0' }} />;
-  }
+  const divider = <div style={{ width: 1, background: C.border, alignSelf: 'stretch', margin: '12px 0' }} />;
 
   const rowBase: React.CSSProperties = {
     display: 'flex', alignItems: 'stretch',
-    borderRadius: 14, overflow: 'hidden',
+    borderRadius: 18, overflow: 'hidden',
     border: `1px solid ${C.border}`,
-    background: 'white',
+    background: C.surface,
+    boxShadow: '0 14px 34px rgba(15,23,42,0.07)',
   };
 
   return (
@@ -525,7 +524,9 @@ export function Slide02Monthly({ data, current, total }: { data: DeliveryReportD
       {/* Title */}
       <div style={{ marginBottom: 16 }}>
         <h1 style={{ margin: 0, fontSize: 52, fontWeight: 900, color: C.text, letterSpacing: '-0.03em', lineHeight: 1.05 }}>Visão geral do mês</h1>
-        <p style={{ margin: '4px 0 0', fontSize: 15, color: C.sub }}>Comparativo de {cur.monthLabel} com {prev.monthLabel} de {cur.year}</p>
+        <p style={{ margin: '4px 0 0', fontSize: 15, color: C.sub }}>
+          {hasCompare ? `Comparativo de ${cur.monthLabel} com ${prev.monthLabel} de ${cur.year}` : `Resultado de ${cur.monthLabel} de ${cur.year}`}
+        </p>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -539,48 +540,52 @@ export function Slide02Monthly({ data, current, total }: { data: DeliveryReportD
             </div>
           </div>
           <div style={{ display: 'flex', flex: 1 }}>
-            <MetricCell icon={<GreenCircle size={40}>{Icon.dollar()}</GreenCircle>} label="Faturamento" value={`R$ ${brl(cur.revenue)}`} />
-            <Divider />
-            <MetricCell icon={<GreenCircle size={40}>{Icon.cart()}</GreenCircle>} label="Pedidos" value={num(cur.orders)} />
-            <Divider />
-            <MetricCell icon={<GreenCircle size={40}>{Icon.tag()}</GreenCircle>} label="Ticket médio" value={`R$ ${brl(cur.avgTicket)}`} />
+            {metricCell(<GreenCircle size={40}>{Icon.dollar()}</GreenCircle>, 'Faturamento', `R$ ${brl(cur.revenue)}`)}
+            {divider}
+            {metricCell(<GreenCircle size={40}>{Icon.cart()}</GreenCircle>, 'Pedidos', num(cur.orders))}
+            {divider}
+            {metricCell(<GreenCircle size={40}>{Icon.tag()}</GreenCircle>, 'Ticket médio', `R$ ${brl(cur.avgTicket)}`)}
           </div>
         </div>
 
         {/* Row: Mês anterior */}
-        <div style={{ ...rowBase, borderLeft: `4px solid ${C.blue}` }}>
-          <div style={{ width: 148, display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', background: C.blueLight, flexShrink: 0 }}>
-            <GreenCircle size={44} color={C.blueLight}>{Icon.calendar(C.blue)}</GreenCircle>
-            <div>
-              <div style={{ fontWeight: 800, fontSize: 15, color: C.text }}>{prev.monthLabel}</div>
-              <div style={{ fontSize: 12, color: C.muted }}>{prev.year}</div>
+        {hasCompare && (
+          <div style={{ ...rowBase, borderLeft: `4px solid ${C.blue}` }}>
+            <div style={{ width: 148, display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', background: C.blueLight, flexShrink: 0 }}>
+              <GreenCircle size={44} color={C.blueLight}>{Icon.calendar(C.blue)}</GreenCircle>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 15, color: C.text }}>{prev.monthLabel}</div>
+                <div style={{ fontSize: 12, color: C.muted }}>{prev.year}</div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', flex: 1 }}>
+              {metricCell(<GreenCircle size={40} color={C.blueLight}>{Icon.dollar(C.blue)}</GreenCircle>, 'Faturamento', `R$ ${brl(prev.revenue)}`)}
+              {divider}
+              {metricCell(<GreenCircle size={40} color={C.blueLight}>{Icon.cart(C.blue)}</GreenCircle>, 'Pedidos', num(prev.orders))}
+              {divider}
+              {metricCell(<GreenCircle size={40} color={C.blueLight}>{Icon.tag(C.blue)}</GreenCircle>, 'Ticket médio', `R$ ${brl(prev.avgTicket)}`)}
             </div>
           </div>
-          <div style={{ display: 'flex', flex: 1 }}>
-            <MetricCell icon={<GreenCircle size={40} color={C.blueLight}>{Icon.dollar(C.blue)}</GreenCircle>} label="Faturamento" value={`R$ ${brl(prev.revenue)}`} />
-            <Divider />
-            <MetricCell icon={<GreenCircle size={40} color={C.blueLight}>{Icon.cart(C.blue)}</GreenCircle>} label="Pedidos" value={num(prev.orders)} />
-            <Divider />
-            <MetricCell icon={<GreenCircle size={40} color={C.blueLight}>{Icon.tag(C.blue)}</GreenCircle>} label="Ticket médio" value={`R$ ${brl(prev.avgTicket)}`} />
-          </div>
-        </div>
+        )}
 
         {/* Row: Comparativo */}
-        <div style={{ ...rowBase, background: C.row }}>
-          <div style={{ width: 148, display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', flexShrink: 0 }}>
-            <GreenCircle size={40}>{Icon.chart()}</GreenCircle>
-            <div style={{ fontSize: 12, fontWeight: 700, color: C.sub, lineHeight: 1.4 }}>
-              Comparativo<br />{cur.monthLabel} vs. {prev.monthLabel}
+        {hasCompare && (
+          <div style={{ ...rowBase, background: C.surface }}>
+            <div style={{ width: 148, display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', flexShrink: 0 }}>
+              <GreenCircle size={40}>{Icon.chart()}</GreenCircle>
+              <div style={{ fontSize: 12, fontWeight: 700, color: C.sub, lineHeight: 1.4 }}>
+                Comparativo<br />{cur.monthLabel} vs. {prev.monthLabel}
+              </div>
+            </div>
+            <div style={{ display: 'flex', flex: 1 }}>
+              {deltaCell(<GreenCircle size={40}>{Icon.dollar()}</GreenCircle>, 'Faturamento', rDelta)}
+              {divider}
+              {deltaCell(<GreenCircle size={40}>{Icon.cart()}</GreenCircle>, 'Pedidos', oDelta)}
+              {divider}
+              {deltaCell(<GreenCircle size={40}>{Icon.tag()}</GreenCircle>, 'Ticket médio', tDelta)}
             </div>
           </div>
-          <div style={{ display: 'flex', flex: 1 }}>
-            <DeltaCell icon={<GreenCircle size={40}>{Icon.dollar()}</GreenCircle>} label="Faturamento" delta={rDelta} />
-            <Divider />
-            <DeltaCell icon={<GreenCircle size={40}>{Icon.cart()}</GreenCircle>} label="Pedidos" delta={oDelta} />
-            <Divider />
-            <DeltaCell icon={<GreenCircle size={40}>{Icon.tag()}</GreenCircle>} label="Ticket médio" delta={tDelta} />
-          </div>
-        </div>
+        )}
       </div>
 
       {/* Insight */}
@@ -955,7 +960,6 @@ export function Slide06Inactives({ data, current, total }: { data: DeliveryRepor
   const priorityRanges = ranges.filter(r => r.priority);
   const priorityStart = ranges.findIndex(r => r.priority);
   const priorityCount = priorityRanges.length;
-  const rowH = ranges.length > 0 ? Math.floor(160 / ranges.length) : 30;
 
   return (
     <Shell current={current} total={total}>
@@ -1240,7 +1244,7 @@ export function Slide08Traffic({ data, current, total }: { data: DeliveryReportD
 
 // ── Slide 09a — Diagnóstico: Criativos + Forças ───────────────────────────────
 export function Slide09aCreatives({ data, current, total }: { data: DeliveryReportData; current: number; total: number }) {
-  const { creatives, revenueForces, conclusion, nextMonth } = data.actionSummary;
+  const { creatives, revenueForces, conclusion } = data.actionSummary;
   const forceIcons = [Icon.refresh(), Icon.trophy(), Icon.calendar(), Icon.pin()];
   const thumbnailBgs = ['#1a1a2e', C.greenLight, C.blueLight, C.purpleLight, C.row];
 
@@ -1550,7 +1554,7 @@ export function Slide12DetailedPlan({ data, current, total }: { data: DeliveryRe
                 <div style={{ fontSize: 11, color: C.sub }}><strong style={{ color: C.text }}>Objetivo:</strong> {camp.objective}</div>
                 <div style={{ fontSize: 11, color: C.sub }}><strong style={{ color: C.text }}>Público:</strong> {camp.audience}</div>
                 <div style={{ background: C.greenLight, borderRadius: 8, padding: '7px 10px', fontSize: 11, color: C.greenDark, fontStyle: 'italic', lineHeight: 1.5 }}>
-                  "{camp.message}"
+                  &quot;{camp.message}&quot;
                 </div>
                 {camp.product && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>

@@ -14,16 +14,19 @@ const GL  = '#f0fdf4';  // green light bg
 const GB  = '#bbf7d0';  // green border
 const B   = '#3b82f6';  // blue (secondary)
 const BL  = '#eff6ff';  // blue light bg
-const TX  = '#111827';  // primary text
-const TG  = '#6b7280';  // muted text
-const TM  = '#374151';  // medium text
+const RP  = '#F7F8FA';  // report page background
+const SF  = '#FFFFFF';  // card surface
+const BD  = '#D6DEE8';  // subtle report border
+const TX  = '#0F172A';  // primary text
+const TG  = '#475569';  // muted text
+const TM  = '#334155';  // medium text
 const R   = '#ef4444';  // red (negative)
 
 const PAGE: React.CSSProperties = {
   position: 'relative',
   width: '100%',
   aspectRatio: '16/9',
-  background: '#ffffff',
+  background: RP,
   fontFamily: '"Inter", "Segoe UI", sans-serif',
   overflow: 'hidden',
   boxSizing: 'border-box',
@@ -246,7 +249,7 @@ function MovingAvgChart({ barData, avgData, h = 200 }: { barData: MonthPoint[]; 
 
 function Card({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
   return (
-    <div style={{ background: 'white', borderRadius: 14, boxShadow: '0 2px 16px rgba(0,0,0,0.07)', padding: '4%', ...style }}>
+    <div style={{ background: SF, border: `1px solid ${BD}`, borderRadius: 14, boxShadow: '0 10px 28px rgba(15,23,42,0.07)', padding: '4%', ...style }}>
       {children}
     </div>
   );
@@ -263,7 +266,7 @@ function GreenCard({ children, style }: { children: React.ReactNode; style?: Rea
 function ClientCard({ name, size = 1 }: { name: string; size?: number }) {
   const fs = 16 * size;
   return (
-    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10 * size, background: 'white', borderRadius: 12 * size, boxShadow: '0 2px 12px rgba(0,0,0,0.07)', padding: `${8 * size}px ${16 * size}px` }}>
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10 * size, background: SF, border: `1px solid ${BD}`, borderRadius: 12 * size, boxShadow: '0 10px 24px rgba(15,23,42,0.07)', padding: `${8 * size}px ${16 * size}px` }}>
       <ICircle icon="person" size={32 * size} />
       <span style={{ fontSize: fs, fontWeight: 800, color: TX }}>{name}</span>
     </div>
@@ -295,63 +298,97 @@ function PageTitle({ title, highlight, subtitle, size = 1 }: { title: string; hi
 // ──────────────────────────────────────────────────────────────────────────────
 
 function RenderCover({ page }: { page: CoverPage }) {
+  const supportText = page.subtitle || 'Análise de faturamento, pedidos, tráfego, base de clientes, produtos e oportunidades para o próximo ciclo.';
   return (
     <div style={PAGE}>
-      <div style={DECO_RING} /><div style={DECO_RING2} /><div style={GLOW} />
-      <OnmidLogo />
-      <div style={{ marginTop: '6%', width: '55%' }}>
-        <PageTitle title={page.title} highlight={page.titleHighlight} size={1.15} />
-        <p style={{ fontSize: 13, color: TG, marginTop: 8, fontWeight: 500 }}>{page.subtitle}</p>
-        <div style={{ marginTop: '5%' }}>
-          <ClientCard name={page.clientName} />
-        </div>
-        <div style={{ marginTop: '5%', display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {[
-            { icon: '📅', label: 'Período analisado:', value: page.period },
-            { icon: '🗄', label: 'Fontes:', value: page.sources },
-          ].map(({ icon, label, value }) => (
-            <div key={label} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-              <div style={{ width: 26, height: 26, borderRadius: 8, background: GL, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, flexShrink: 0 }}>{icon}</div>
-              <div>
-                <span style={{ fontSize: 11, fontWeight: 700, color: TM }}>{label} </span>
-                <span style={{ fontSize: 11, color: TG }}>{value}</span>
+      <div style={{ position: 'absolute', left: '-8%', bottom: '-22%', width: '28%', height: '48%', borderRadius: '50%', background: 'radial-gradient(circle, rgba(34,197,94,.20), transparent 72%)' }} />
+      <div style={{ position: 'absolute', right: '6%', top: '11%', width: '38%', height: '70%', borderRadius: '50%', background: 'linear-gradient(135deg, rgba(219,234,254,.70), rgba(255,255,255,.24))', opacity: .78 }} />
+
+      <div style={{ position: 'absolute', top: 28, left: 44, zIndex: 2 }}><OnmidLogo size={1.25} /></div>
+      <div style={{ position: 'absolute', top: 30, right: 48, zIndex: 2, fontSize: 24, fontWeight: 900, color: TX, lineHeight: 1, textAlign: 'right' }}>
+        01/09
+        <div style={{ width: 58, height: 2, background: G, marginTop: 9, marginLeft: 'auto' }} />
+      </div>
+
+      <div style={{ position: 'relative', zIndex: 1, height: '100%', display: 'grid', gridTemplateColumns: '47% 1fr', gap: '3%', paddingTop: '13%' }}>
+        <div>
+          <h1 style={{ fontSize: 54, fontWeight: 900, lineHeight: 1.04, color: TX, letterSpacing: '-0.045em', margin: '0 0 18px' }}>
+            Relatório de Performance —<br />{page.clientName}
+          </h1>
+          <p style={{ fontSize: 18, color: '#163461', lineHeight: 1.48, margin: '0 0 28px', fontWeight: 500 }}>{supportText}</p>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+              <div style={{ width: 44, height: 44, borderRadius: 14, background: `${G}18`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={G} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="17" rx="2" /><path d="M16 2v5M8 2v5M3 10h18" /></svg>
               </div>
+              <p style={{ fontSize: 17, color: '#14305B', margin: 0 }}><strong style={{ color: TX }}>Período analisado:</strong> {page.period}</p>
             </div>
-          ))}
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-            <div style={{ width: 26, height: 26, borderRadius: 8, background: GL, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <ICircle icon="target" size={20} />
-            </div>
-            <div>
-              <span style={{ fontSize: 11, fontWeight: 700, color: TM }}>Objetivo do relatório: </span>
-              <span style={{ fontSize: 11, color: TG }}>{page.objective}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+              <div style={{ width: 44, height: 44, borderRadius: 14, background: `${B}14`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={B} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" /></svg>
+              </div>
+              <p style={{ fontSize: 17, color: '#14305B', margin: 0 }}><strong style={{ color: TX }}>Comparativo:</strong> período anterior equivalente</p>
             </div>
           </div>
         </div>
+
+        <div style={{ position: 'relative' }}>
+          <Card style={{ position: 'absolute', right: '9%', top: 8, width: '58%', padding: 18, borderRadius: 18 }}>
+            <div style={{ display: 'flex', gap: 7, marginBottom: 10 }}><span style={{ width: 9, height: 9, borderRadius: '50%', background: G }} /><span style={{ width: 9, height: 9, borderRadius: '50%', background: `${G}55` }} /><span style={{ width: 9, height: 9, borderRadius: '50%', background: '#D7DEE8' }} /></div>
+            <svg viewBox="0 0 360 90" width="100%" height="78"><rect x="0" y="4" width="360" height="84" fill="#F8FAFD" stroke="#E6EDF6" /><path d="M0 70 C38 58 44 30 78 38 C108 46 116 14 150 22 C184 30 178 62 216 54 C254 46 256 18 290 26 C320 34 318 60 354 18" fill="none" stroke={B} strokeWidth="3" strokeLinecap="round" /><path d="M0 70 C38 58 44 30 78 38 C108 46 116 14 150 22 C184 30 178 62 216 54 C254 46 256 18 290 26 C320 34 318 60 354 18 L354 88 L0 88 Z" fill={B} opacity=".1" /></svg>
+          </Card>
+
+          <Card style={{ position: 'absolute', left: '5%', top: '28%', width: '34%', height: 96, padding: 16, borderRadius: 17, display: 'flex', alignItems: 'center', gap: 16 }}>
+            <div style={{ width: 64, height: 64, borderRadius: '50%', background: `conic-gradient(${G} 0 68%, ${G}55 68% 82%, #DBEAFE 82% 100%)`, position: 'relative' }}><span style={{ position: 'absolute', inset: 19, borderRadius: '50%', background: SF }} /></div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}><span style={{ height: 8, borderRadius: 8, background: G, width: 18 }} /><span style={{ height: 8, borderRadius: 8, background: '#D9E2EE', width: 78 }} /><span style={{ height: 8, borderRadius: 8, background: '#D9E2EE', width: 58 }} /></div>
+          </Card>
+
+          <Card style={{ position: 'absolute', right: 0, top: '48%', width: '30%', height: 98, padding: '18px 22px', borderRadius: 15, display: 'flex', alignItems: 'flex-end', gap: 13 }}>
+            {[30, 44, 58, 74, 92].map((h, i) => <span key={h} style={{ width: 14, height: h, borderRadius: 5, background: G, opacity: 0.38 + i * 0.14 }} />)}
+          </Card>
+
+          <Card style={{ position: 'absolute', right: '32%', top: '44%', width: '36%', height: 104, padding: 14, borderRadius: 15, display: 'grid', gridTemplateColumns: '92px 1fr', gap: 14 }}>
+            <div style={{ borderRadius: 13, background: 'linear-gradient(135deg,#FDE68A,#F97316)', position: 'relative', overflow: 'hidden' }}>
+              <span style={{ position: 'absolute', left: 15, top: 18, width: 24, height: 24, borderRadius: '50%', background: G }} />
+              <span style={{ position: 'absolute', right: 14, top: 28, width: 32, height: 22, borderRadius: 14, background: '#FEF3C7' }} />
+              <span style={{ position: 'absolute', left: 24, bottom: 18, width: 44, height: 24, borderRadius: 16, background: '#B45309' }} />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 9, justifyContent: 'center' }}><span style={{ height: 8, borderRadius: 8, background: '#D9E2EE', width: 86 }} /><span style={{ height: 8, borderRadius: 8, background: '#D9E2EE', width: 64 }} /><span style={{ height: 8, borderRadius: 8, background: '#D9E2EE', width: 50 }} /><span style={{ height: 16, borderRadius: 9, background: G, width: 54, marginTop: 3 }} /></div>
+          </Card>
+
+          <Card style={{ position: 'absolute', left: '12%', bottom: '18%', width: '34%', height: 94, padding: 12, borderRadius: 15 }}>
+            <div style={{ height: 70, borderRadius: 12, background: '#EFF6FF', position: 'relative', overflow: 'hidden' }}>
+              <svg viewBox="0 0 210 70" width="100%" height="70"><path d="M0 54 L48 26 L96 40 L144 15 L210 50" fill="none" stroke="#BFDBFE" strokeWidth="12" /><path d="M30 62 L86 25 L138 45 L190 12" fill="none" stroke="#93C5FD" strokeWidth="2" /></svg>
+              <span style={{ position: 'absolute', left: 58, top: 32, width: 20, height: 20, borderRadius: '50% 50% 50% 0', transform: 'rotate(-45deg)', background: G }}><span style={{ position: 'absolute', inset: 6, borderRadius: '50%', background: SF }} /></span>
+            </div>
+          </Card>
+
+          <Card style={{ position: 'absolute', right: '5%', bottom: '18%', width: '34%', height: 86, padding: 16, borderRadius: 14 }}>
+            <svg viewBox="0 0 196 54" width="100%" height="54"><path d="M0 38 C22 18 34 50 54 25 C76 4 92 50 112 30 C132 10 144 32 160 17 C178 0 186 22 196 8" fill="none" stroke={B} strokeWidth="2.4" /><path d="M0 38 C22 18 34 50 54 25 C76 4 92 50 112 30 C132 10 144 32 160 17 C178 0 186 22 196 8 L196 54 L0 54 Z" fill={B} opacity=".1" /></svg>
+          </Card>
+        </div>
       </div>
-      {/* Right side: real summary metrics or decorative chart */}
-      <div style={{ position: 'absolute', right: '5%', top: '15%', width: '34%', display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <Card style={{ padding: '5%' }}>
-          <div style={{ height: 60, display: 'flex', alignItems: 'flex-end', gap: 5 }}>
-            {[30, 45, 35, 60, 80, 70, 90].map((v, i) => (
-              <div key={i} style={{ flex: 1, height: v + '%', background: i === 6 ? '#93c5fd' : G, borderRadius: '3px 3px 0 0', opacity: 0.8 }} />
-            ))}
-          </div>
-        </Card>
-        {page.summaryMetrics && page.summaryMetrics.length > 0 && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            {page.summaryMetrics.map(({ label, value, accent }) => {
-              const color = accent === 'green' ? G : accent === 'blue' ? B : TM;
-              return (
-                <Card key={label} style={{ padding: '8%' }}>
-                  <div style={{ fontSize: 9, color: TG, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</div>
-                  <div style={{ fontSize: 15, fontWeight: 800, color, marginTop: 2 }}>{value}</div>
-                </Card>
-              );
-            })}
-          </div>
-        )}
+
+      <Card style={{ position: 'absolute', right: 52, bottom: 64, width: '58%', minHeight: 104, borderRadius: 18, display: 'grid', gridTemplateColumns: '96px 1fr', alignItems: 'center', padding: '22px 30px' }}>
+        <div style={{ width: 72, height: 72, borderRadius: '50%', background: `${G}16`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke={G} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="4" /><path d="M12 12l7-7" /><path d="M16 5h3v3" /></svg>
+        </div>
+        <div style={{ borderLeft: `2px solid ${G}`, paddingLeft: 22 }}>
+          <p style={{ fontSize: 21, fontWeight: 900, color: TX, margin: '0 0 6px' }}>Objetivo do relatório</p>
+          <p style={{ fontSize: 14, color: '#163461', lineHeight: 1.52, margin: 0 }}>{page.objective}</p>
+          <p style={{ fontSize: 10, color: TG, margin: '6px 0 0', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.08em' }}>Fontes: {page.sources}</p>
+        </div>
+      </Card>
+
+      <div style={{ position: 'absolute', left: 44, right: 44, bottom: 18, height: 1, background: BD }} />
+      <div style={{ position: 'absolute', left: 44, bottom: 8, display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{ width: 34, height: 18, borderRadius: 999, background: G, display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 3, boxSizing: 'border-box' }}><span style={{ width: 11, height: 11, borderRadius: '50%', background: SF }} /></span>
+        <span style={{ fontSize: 12, fontWeight: 900, color: TX, letterSpacing: '.03em' }}>ONMID</span>
+        <span style={{ fontSize: 12, color: '#163461' }}>Reports</span>
       </div>
+      {/* Keep legacy fields consumed without visual clutter. */}
+      <div style={{ display: 'none' }}>{page.title}{page.titleHighlight}</div>
     </div>
   );
 }
@@ -393,7 +430,7 @@ function RenderExecutiveSummary({ page }: { page: ExecutiveSummaryPage }) {
         <p style={{ fontSize: 12, margin: 0, color: TX, lineHeight: 1.5 }}>
           A análise dos dados mostra <strong>{page.readout}</strong>
         </p>
-        <div style={{ marginLeft: 'auto', width: 28, height: 28, borderRadius: '50%', background: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <div style={{ marginLeft: 'auto', width: 28, height: 28, borderRadius: '50%', background: SF, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke={G} strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
         </div>
       </GreenCard>
@@ -496,7 +533,7 @@ function RenderNewCustomers({ page }: { page: NewCustomersPage }) {
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {page.ranking.slice(0, 3).map((r, i) => (
-                <div key={r.label} style={{ background: 'white', border: '1px solid #f1f5f9', borderRadius: 12, padding: '10px 14px', boxShadow: '0 1px 6px rgba(0,0,0,0.05)' }}>
+                <div key={r.label} style={{ background: SF, border: `1px solid ${BD}`, borderRadius: 12, padding: '10px 14px', boxShadow: '0 6px 16px rgba(15,23,42,0.06)' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <div style={{ width: 30, height: 30, borderRadius: '50%', background: `${medalColors[i]}22`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, flexShrink: 0 }}>
                       {medals[i]}
@@ -584,7 +621,7 @@ function RenderComparisonTable({ page }: { page: ComparisonTablePage }) {
           </thead>
           <tbody>
             {page.rows.map((row, i) => (
-              <tr key={row.label} style={{ borderBottom: '1px solid #f8fafc', background: i % 2 === 0 ? 'white' : '#fafafa' }}>
+              <tr key={row.label} style={{ borderBottom: `1px solid ${BD}`, background: i % 2 === 0 ? SF : '#F1F5F9' }}>
                 <td style={{ padding: '9px 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
                   <div style={{ width: 24, height: 24, borderRadius: 6, background: GL, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, flexShrink: 0 }}>{row.icon}</div>
                   <span style={{ fontWeight: 500, color: TM }}>{row.label}</span>
@@ -1006,7 +1043,7 @@ function RenderPage({ page }: { page: ReportPage }) {
 
 export default function OmniPerformanceTemplate({ data }: { data: OmniReportData }) {
   return (
-    <div className="report-outer" style={{ background: '#f4f4f5', minHeight: '100vh', padding: '32px 24px' }}>
+    <div className="report-outer" style={{ background: '#EEF1F5', minHeight: '100vh', padding: '32px 24px' }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
 
@@ -1019,7 +1056,7 @@ export default function OmniPerformanceTemplate({ data }: { data: OmniReportData
           html, body {
             margin: 0 !important;
             padding: 0 !important;
-            background: white !important;
+            background: #EEF1F5 !important;
           }
 
           /* Hide everything outside the report */
@@ -1047,7 +1084,7 @@ export default function OmniPerformanceTemplate({ data }: { data: OmniReportData
 
           /* Outer container resets */
           .report-outer {
-            background: white !important;
+            background: #EEF1F5 !important;
             padding: 0 !important;
             min-height: unset !important;
           }
@@ -1073,7 +1110,7 @@ export default function OmniPerformanceTemplate({ data }: { data: OmniReportData
       {/* Pages */}
       <div className="report-pages" style={{ maxWidth: 1200, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 28 }}>
         {data.pages.map((page, i) => (
-          <div key={i} className="report-page-wrapper" style={{ borderRadius: 16, overflow: 'hidden', boxShadow: '0 4px 32px rgba(0,0,0,0.12)' }}>
+          <div key={i} className="report-page-wrapper" style={{ borderRadius: 16, overflow: 'hidden', boxShadow: '0 16px 42px rgba(15,23,42,0.14)' }}>
             <RenderPage page={page} />
           </div>
         ))}

@@ -305,8 +305,17 @@ export default function RelatoriosPage() {
     setDiagnostics(prev => prev.filter(r => r.id !== id));
   }
 
+  const activeClientIds = new Set(clients.map(c => c.id));
+  const activeClientNames = new Set(clients.map(c => c.name));
+  const visibleDiagnostics = diagnostics.filter(r =>
+    activeClientIds.has(r.client_id) || activeClientNames.has(r.client_name)
+  );
+  const visibleConfigs = configs.filter(c =>
+    activeClientIds.has(c.client_id) || activeClientNames.has(c.client_name)
+  );
+
   // Filters & pagination
-  const filtered = diagnostics.filter(r => {
+  const filtered = visibleDiagnostics.filter(r => {
     if (search && !r.title.toLowerCase().includes(search.toLowerCase()) && !r.client_name.toLowerCase().includes(search.toLowerCase())) return false;
     if (filterClient && r.client_name !== filterClient) return false;
     if (filterOrigin && r.generated_by !== filterOrigin) return false;
@@ -317,15 +326,15 @@ export default function RelatoriosPage() {
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const clientsById = new Map(clients.map(c => [c.id, c]));
   const clientsByName = new Map(clients.map(c => [c.name, c]));
-  const allClientNames = Array.from(new Set(diagnostics.map(d => d.client_name))).sort();
+  const allClientNames = Array.from(new Set(visibleDiagnostics.map(d => d.client_name))).sort();
 
   // KPIs
   const now = new Date();
-  const thisMonth = diagnostics.filter(d => {
+  const thisMonth = visibleDiagnostics.filter(d => {
     const dt = new Date(d.created_at);
     return dt.getMonth() === now.getMonth() && dt.getFullYear() === now.getFullYear();
   }).length;
-  const uniqueClients = new Set(diagnostics.map(d => d.client_name)).size;
+  const uniqueClients = new Set(visibleDiagnostics.map(d => d.client_name)).size;
 
   function renderClient(clientName: string, clientId?: string) {
     const client = (clientId ? clientsById.get(clientId) : undefined) ?? clientsByName.get(clientName);
@@ -394,7 +403,7 @@ export default function RelatoriosPage() {
               <div>
                 <p className="text-xs text-muted-foreground">Total de relatórios</p>
                 <p className="font-heading font-normal text-xl leading-none text-foreground mt-0.5">
-                  {diagnostics.length}<span className="text-violet-400 text-sm ml-1">✦</span>
+                  {visibleDiagnostics.length}<span className="text-violet-400 text-sm ml-1">✦</span>
                 </p>
               </div>
             </div>
@@ -422,7 +431,7 @@ export default function RelatoriosPage() {
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Automações ativas</p>
-                <p className="font-heading font-normal text-xl leading-none text-foreground mt-0.5">{configs.filter(c => c.active).length}</p>
+                <p className="font-heading font-normal text-xl leading-none text-foreground mt-0.5">{visibleConfigs.filter(c => c.active).length}</p>
               </div>
             </div>
           </div>
@@ -702,7 +711,7 @@ export default function RelatoriosPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {configs.length === 0 && (
+                {visibleConfigs.length === 0 && (
                   <tr>
                     <td colSpan={7} className="py-14 text-center">
                       <div className="flex flex-col items-center gap-3">
@@ -715,7 +724,7 @@ export default function RelatoriosPage() {
                     </td>
                   </tr>
                 )}
-                {configs.map(cfg => (
+                {visibleConfigs.map(cfg => (
                   <tr key={cfg.id} className="hover:bg-muted/40 transition-colors group">
                     <td className="px-5 py-3.5">
                       <p className="font-medium text-foreground text-sm">{cfg.client_name}</p>

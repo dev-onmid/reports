@@ -28,11 +28,14 @@ function deltaInfo(current: number, prev: number): { label: string; up: boolean;
 
 const PRIMARY      = '#55f52f';   // graphic fills only (bars, borders, squares)
 const PRIMARY_TEXT = '#1a8a00';   // green as readable text on white (5.4:1 contrast)
-const CARD         = '#F7F8FA';
-const BG           = '#FFFFFF';
-const BORDER       = '#E2E8F0';
-const FG           = '#111827';   // near-black — titles, values
-const MUTED        = '#374151';   // cinza chumbo — body text, labels, secondary
+const CANVAS       = '#EEF1F5';
+const CARD         = '#FFFFFF';
+const BG           = '#F7F8FA';
+const ROW          = '#F1F5F9';
+const BORDER       = '#D6DEE8';
+const INVERSE      = '#FFFFFF';
+const FG           = '#0F172A';   // near-black — titles, values
+const MUTED        = '#334155';   // cinza chumbo — body text, labels, secondary
 const RED          = '#e52020';
 const BLUE         = '#0B84FF';
 const ORANGE       = '#FF6B35';
@@ -563,46 +566,6 @@ function donutSvg(slices: { label: string; value: number; color: string }[], s =
   </svg>`;
 }
 
-// Comparison bar chart for sVisaoGeral — paired horizontal bars, div-based inline HTML
-function compBarsHtml(
-  metrics: Array<{ label: string; cur: number; prv: number; fmt: (n: number) => string }>,
-): string {
-  const rows = metrics.map(m => {
-    const d = deltaInfo(m.cur, m.prv);
-    const maxVal = Math.max(m.cur, m.prv, 1);
-    const curPct = (m.cur / maxVal * 100).toFixed(1);
-    const prvPct = (m.prv / maxVal * 100).toFixed(1);
-    const deltaColor = d.up ? PRIMARY : RED;
-    const deltaHtml  = d.hasData
-      ? `<span style="font-size:11px;font-weight:700;color:${deltaColor};font-family:${INTER};margin-left:8px">${d.up ? '↑' : '↓'} ${d.label}</span>`
-      : '';
-    return `
-    <div style="margin-bottom:20px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:${MUTED};font-family:${INTER}">${m.label}</span>
-        ${deltaHtml}
-      </div>
-      <!-- Período atual -->
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:5px">
-        <span style="font-size:11px;font-weight:700;color:${PRIMARY_TEXT};width:50px;text-align:right;flex-shrink:0;font-family:${INTER}">ATUAL</span>
-        <div style="flex:1;height:10px;background:${BORDER};overflow:hidden">
-          <div style="height:100%;background:${PRIMARY};width:${curPct}%;box-shadow:0 0 6px ${PRIMARY}60"></div>
-        </div>
-        <span style="font-size:13px;font-weight:700;color:${FG};width:130px;font-family:${INTER};flex-shrink:0">${m.cur > 0 ? m.fmt(m.cur) : '—'}</span>
-      </div>
-      <!-- Período anterior -->
-      <div style="display:flex;align-items:center;gap:10px">
-        <span style="font-size:11px;color:${MUTED};width:50px;text-align:right;flex-shrink:0;font-family:${INTER}">ANT.</span>
-        <div style="flex:1;height:10px;background:${BORDER};overflow:hidden">
-          <div style="height:100%;background:${MUTED};opacity:0.35;width:${prvPct}%"></div>
-        </div>
-        <span style="font-size:13px;color:${MUTED};width:130px;font-family:${INTER};flex-shrink:0">${m.prv > 0 ? m.fmt(m.prv) : '—'}</span>
-      </div>
-    </div>`;
-  }).join('');
-  return rows;
-}
-
 // ── HTML component helpers ─────────────────────────────────────────────────────
 
 // ── Core layout primitives ────────────────────────────────────────────────────
@@ -633,9 +596,6 @@ function sectionHeader(thesis: string, context: string): string {
 </div>`;
 }
 
-/** Legacy alias so old call-sites keep compiling — thesis + sub */
-function secTitle(title: string, sub: string): string { return sectionHeader(title, sub); }
-
 /** Hero KPI — ONE per slide, the anchor metric */
 function kpiHero(label: string, value: string, sub: string, color = PRIMARY): string {
   const isEmpty = value === '—';
@@ -658,23 +618,6 @@ function kpi(label: string, value: string, context: string, accentColor = PRIMAR
   <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:4px 0 8px">${label}</p>
   <p style="font-family:${BEBAS};font-size:${isEmpty ? '24' : '36'}px;color:${isEmpty ? MUTED : FG};line-height:1;margin:0 0 5px">${value}</p>
   <p style="font-size:11px;color:${MUTED};font-family:${INTER};line-height:1.4;margin:0">${context}</p>
-</div>`;
-}
-
-function kpiWithDelta(label: string, value: string, prevValue: string, delta: { label: string; up: boolean; hasData: boolean }, accentColor = PRIMARY): string {
-  const isEmpty = value === '—';
-  const deltaHtml = delta.hasData
-    ? `<span style="font-size:11px;font-weight:700;color:${delta.up ? PRIMARY : RED};font-family:${INTER};margin-left:6px">${delta.up ? '↑' : '↓'} ${delta.label}</span>`
-    : '';
-  const prevHtml = prevValue && prevValue !== '—'
-    ? `<span style="font-size:11px;color:${MUTED};font-family:${INTER}">ant: ${prevValue}</span>`
-    : (isEmpty ? `<span style="font-size:11px;color:${MUTED};font-family:${INTER}">Dado não integrado</span>` : '');
-  return `<div style="position:relative;overflow:hidden;border:1px solid ${BORDER};background:${CARD};padding:20px 18px;box-sizing:border-box">
-  <div style="position:absolute;top:0;left:0;right:0;height:2px;background:${accentColor}"></div>
-  <div style="position:absolute;top:0;left:0;width:12px;height:12px;background:${accentColor}"></div>
-  <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:4px 0 8px">${label}</p>
-  <p style="font-family:${BEBAS};font-size:${isEmpty ? '24' : '36'}px;color:${isEmpty ? MUTED : FG};line-height:1;margin:0 0 7px">${value}${deltaHtml}</p>
-  <p style="font-size:11px;color:${MUTED};font-family:${INTER};line-height:1.4;margin:0">${prevHtml}</p>
 </div>`;
 }
 
@@ -715,7 +658,7 @@ function insight(title: string, text: string, color = PRIMARY): string {
 function rankCard(rank: number, title: string, metrics: Array<{label:string;value:string}>, status: 'winner'|'loser'|'normal'): string {
   const accent     = status === 'winner' ? PRIMARY : status === 'loser' ? RED : BORDER;
   const accentText = status === 'winner' ? PRIMARY_TEXT : status === 'loser' ? RED : MUTED;
-  const badge      = status === 'winner' ? `<span style="font-size:9px;font-weight:800;color:${BG};background:${PRIMARY};padding:2px 7px;letter-spacing:0.08em;font-family:${INTER}">CAMPEÃ</span>`
+  const badge      = status === 'winner' ? `<span style="font-size:9px;font-weight:800;color:${INVERSE};background:${PRIMARY};padding:2px 7px;letter-spacing:0.08em;font-family:${INTER}">CAMPEÃ</span>`
                    : status === 'loser'  ? `<span style="font-size:9px;font-weight:800;color:#FFFFFF;background:${RED};padding:2px 7px;letter-spacing:0.08em;font-family:${INTER}">ATENÇÃO</span>`
                    : '';
   const opacity = status === 'normal' ? 'opacity:0.72' : '';
@@ -771,17 +714,9 @@ function journeyBar(steps: string[]): string {
   };
   return `<div style="display:flex;align-items:stretch;margin-bottom:20px">
     ${steps.map((s, i) => `<div style="flex:1;text-align:center;padding:8px 4px;background:${i===0?PRIMARY:CARD};border:1px solid ${i===0?PRIMARY:BORDER};margin-right:-1px;position:relative">
-      <p style="font-size:10px;font-weight:700;color:${i===0?BG:MUTED};text-transform:uppercase;letter-spacing:0.06em;font-family:${INTER};margin:0">${LABELS[s]??s}</p>
+      <p style="font-size:10px;font-weight:700;color:${i===0?INVERSE:MUTED};text-transform:uppercase;letter-spacing:0.06em;font-family:${INTER};margin:0">${LABELS[s]??s}</p>
     </div>`).join('')}
   </div>`;
-}
-
-function tableRow(cells: { text: string; right?: boolean; bold?: boolean; color?: string }[], stripe: boolean): string {
-  const bg = stripe ? CARD : BG;
-  const tds = cells.map(c =>
-    `<td style="padding:9px 14px;font-size:12px;font-family:${INTER};text-align:${c.right?'right':'left'};font-weight:${c.bold?'700':'400'};color:${c.color??FG}">${c.text}</td>`,
-  ).join('');
-  return `<tr style="background:${bg};border-bottom:1px solid ${BORDER}">${tds}</tr>`;
 }
 
 // ── Slide builders ────────────────────────────────────────────────────────────
@@ -792,98 +727,234 @@ function sCapa(
   d: ParsedData, meta: MetaAdsFull | null, clientName: string,
   periodo: string, prevPeriodo: string, diag: DiagJson, total: number,
 ): string {
-  const prevLine = prevPeriodo
-    ? `<span style="font-size:12px;color:${MUTED};font-family:${INTER}"> · vs. ${prevPeriodo}</span>` : '';
+  void d;
+  void meta;
 
-  const fechamento = diag.frase_fechamento
-    ? `<div style="margin-top:24px;border-left:3px solid ${PRIMARY};padding:12px 18px;background:${PRIMARY}0D">
-        <p style="font-size:14px;color:${FG};font-family:${INTER};line-height:1.65;margin:0;font-style:italic">"${diag.frase_fechamento}"</p>
-      </div>` : '';
+  const apoio = `Análise de faturamento, pedidos, tráfego, base de clientes, produtos e oportunidades para o próximo ciclo.`;
+  const objetivo = diag.diagnostico || diag.frase_fechamento || `Apresentar uma leitura clara dos resultados do período, entender o que compôs o faturamento, quais públicos e produtos tiveram maior força e quais oportunidades podem ser aproveitadas para aumentar recorrência, reativar clientes e otimizar campanhas.`;
 
-  // Right side: hero metric + 3 secondary KPIs
-  const heroHtml = d.faturamento > 0
-    ? kpiHero('Faturamento do Período', brlOrDash(d.faturamento), `${numOrDash(d.pedidos_ativos)} pedidos · ticket médio ${brlOrDash(d.ticket)}`)
-    : d.ativos > 0
-    ? kpiHero('Clientes Ativos', numOrDash(d.ativos), `${numOrDash(d.inativos)} inativos · ${numOrDash(d.potenciais)} potenciais`)
-    : meta
-    ? kpiHero('Investimento Meta Ads', brlOrDash(meta.investimento), `${numOrDash(meta.alcance)} pessoas alcançadas`, BLUE)
-    : '';
+  const chartPath = 'M0 86 C46 72 42 34 86 44 C120 52 130 12 164 20 C198 28 190 70 232 62 C270 54 270 18 308 28 C342 38 330 72 378 46 C410 30 414 8 446 12';
+  const body = `<div style="width:1440px;min-height:810px;background:${BG};border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
+  <div style="position:absolute;left:-110px;bottom:-130px;width:360px;height:360px;border-radius:50%;background:radial-gradient(circle,${PRIMARY}33 0%,${PRIMARY}16 38%,transparent 72%);pointer-events:none"></div>
+  <div style="position:absolute;right:96px;top:88px;width:520px;height:520px;border-radius:50%;background:linear-gradient(135deg,rgba(219,234,254,.68),rgba(255,255,255,.2));opacity:.72;pointer-events:none"></div>
 
-  const secondary = [
-    d.ticket > 0    && kpi('Ticket Médio', brlOrDash(d.ticket), 'por pedido — clientes ativos'),
-    d.ativos > 0    && kpi('Clientes Ativos', numOrDash(d.ativos), `${numOrDash(d.inativos)} inativos`),
-    meta            && kpi('Meta Ads', brlOrDash(meta.investimento), `${numOrDash(meta.cliques)} cliques`, BLUE),
-  ].filter(Boolean) as string[];
-
-  const body = `<div style="flex:1;display:flex;gap:0;align-items:stretch">
-  <!-- Identity side -->
-  <div style="flex:1;display:flex;flex-direction:column;justify-content:center;padding-right:48px;border-right:1px solid ${BORDER};position:relative;overflow:hidden">
-    <div style="position:absolute;bottom:-80px;left:-80px;width:320px;height:320px;border-radius:50%;background:radial-gradient(circle,${PRIMARY}0F,transparent 70%)"></div>
-    <p style="font-size:10px;font-weight:700;color:${PRIMARY};text-transform:uppercase;letter-spacing:0.16em;font-family:${INTER};margin:0 0 14px">Relatório de Performance — Delivery</p>
-    <h1 style="font-family:${BEBAS};font-size:60px;color:${FG};margin:0;line-height:0.9;letter-spacing:0.02em">${clientName}</h1>
-    <p style="font-size:14px;color:${MUTED};margin:14px 0 0;font-family:${INTER}">${periodo}${prevLine}</p>
-    ${fechamento}
+  <div style="height:92px;padding:34px 48px 0;display:flex;align-items:flex-start;justify-content:space-between;flex-shrink:0">
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-family:${INTER};font-size:34px;font-weight:900;letter-spacing:-0.06em;color:${FG};line-height:1">onmid</span>
+      <span style="width:44px;height:22px;border-radius:999px;background:${PRIMARY};display:inline-flex;align-items:center;justify-content:flex-end;padding-right:4px;box-sizing:border-box;box-shadow:0 8px 20px ${PRIMARY}55">
+        <span style="width:14px;height:14px;border-radius:50%;background:#FFFFFF;display:block"></span>
+      </span>
+      <span style="font-size:9px;font-weight:700;color:${MUTED};align-self:flex-start;margin-top:1px">®</span>
+    </div>
+    <div style="font-family:${INTER};font-size:22px;font-weight:900;color:${FG};line-height:1;text-align:right">
+      01/${String(total).padStart(2, '0')}
+      <div style="height:2px;background:${PRIMARY};margin-top:9px;width:58px;margin-left:auto"></div>
+    </div>
   </div>
-  <!-- Metrics side -->
-  <div style="width:560px;flex-shrink:0;display:flex;flex-direction:column;justify-content:center;padding-left:48px;gap:14px">
-    ${heroHtml}
-    ${secondary.length ? `<div style="display:grid;grid-template-columns:repeat(${Math.min(secondary.length,3)},1fr);gap:10px">${secondary.join('')}</div>` : ''}
+
+  <div style="position:relative;z-index:1;flex:1;padding:82px 48px 68px;display:grid;grid-template-columns:650px 1fr;column-gap:40px">
+    <div style="display:flex;flex-direction:column;min-width:0">
+      <h1 style="font-family:${INTER};font-size:58px;font-weight:900;letter-spacing:-0.045em;color:${FG};line-height:1.04;margin:0 0 20px">
+        Relatório de Performance —<br>${clientName}
+      </h1>
+      <p style="font-family:${INTER};font-size:20px;font-weight:500;color:#163461;line-height:1.48;margin:0 0 34px;max-width:590px">${apoio}</p>
+
+      <div style="display:flex;flex-direction:column;gap:18px;margin-top:4px">
+        <div style="display:flex;align-items:center;gap:20px">
+          <div style="width:48px;height:48px;border-radius:15px;background:${PRIMARY}16;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="${PRIMARY}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="4" width="18" height="17" rx="2"></rect><path d="M16 2v5M8 2v5M3 10h18"></path>
+            </svg>
+          </div>
+          <p style="font-family:${INTER};font-size:18px;color:#14305B;margin:0"><strong style="color:${FG}">Período analisado:</strong> ${periodo}</p>
+        </div>
+        <div style="display:flex;align-items:center;gap:20px">
+          <div style="width:48px;height:48px;border-radius:15px;background:${BLUE}12;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="${BLUE}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4M12 8h.01"></path>
+            </svg>
+          </div>
+          <p style="font-family:${INTER};font-size:18px;color:#14305B;margin:0"><strong style="color:${FG}">Comparativo:</strong> ${prevPeriodo || 'Período anterior não informado'}</p>
+        </div>
+      </div>
+    </div>
+
+    <div style="position:relative;min-height:440px">
+      <div style="position:absolute;right:70px;top:10px;width:360px;height:150px;border-radius:18px;background:#FFFFFF;border:1px solid #E7ECF3;box-shadow:0 18px 42px rgba(15,23,42,.09);padding:22px">
+        <div style="display:flex;gap:8px;margin-bottom:16px"><span style="width:10px;height:10px;border-radius:50%;background:${PRIMARY}"></span><span style="width:10px;height:10px;border-radius:50%;background:${PRIMARY}55"></span><span style="width:10px;height:10px;border-radius:50%;background:#D7DEE8"></span></div>
+        <svg viewBox="0 0 460 110" width="100%" height="86">
+          <rect x="0" y="4" width="460" height="104" fill="#F8FAFD" stroke="#E6EDF6"/>
+          <path d="${chartPath}" fill="none" stroke="${BLUE}" stroke-width="3" stroke-linecap="round"/>
+          <path d="${chartPath} L446 108 L0 108 Z" fill="${BLUE}" opacity=".10"/>
+        </svg>
+      </div>
+
+      <div style="position:absolute;left:56px;top:144px;width:230px;height:112px;border-radius:17px;background:#FFFFFF;border:1px solid #E7ECF3;box-shadow:0 18px 38px rgba(15,23,42,.10);display:flex;align-items:center;gap:18px;padding:18px">
+        <div style="width:72px;height:72px;border-radius:50%;background:conic-gradient(${PRIMARY} 0 68%,${PRIMARY}55 68% 82%,#DBEAFE 82% 100%);position:relative;flex-shrink:0"><span style="position:absolute;inset:21px;border-radius:50%;background:#FFFFFF"></span></div>
+        <div style="flex:1;display:flex;flex-direction:column;gap:12px"><span style="height:8px;border-radius:8px;background:${PRIMARY};width:18px"></span><span style="height:8px;border-radius:8px;background:#D9E2EE;width:86px"></span><span style="height:8px;border-radius:8px;background:#D9E2EE;width:64px"></span></div>
+      </div>
+
+      <div style="position:absolute;right:0;top:250px;width:196px;height:112px;border-radius:15px;background:#FFFFFF;border:1px solid #E7ECF3;box-shadow:0 18px 38px rgba(15,23,42,.09);display:flex;align-items:flex-end;gap:14px;padding:22px 24px">
+        ${[34, 50, 66, 84, 104].map((h, i) => `<span style="width:15px;height:${h}px;border-radius:5px;background:${PRIMARY};opacity:${0.38 + i * 0.14}"></span>`).join('')}
+      </div>
+
+      <div style="position:absolute;right:212px;top:220px;width:230px;height:112px;border-radius:15px;background:#FFFFFF;border:1px solid #E7ECF3;box-shadow:0 18px 38px rgba(15,23,42,.09);display:grid;grid-template-columns:96px 1fr;gap:15px;padding:14px">
+        <div style="border-radius:13px;background:linear-gradient(135deg,#FDE68A,#F97316);position:relative;overflow:hidden">
+          <span style="position:absolute;left:15px;top:18px;width:26px;height:26px;border-radius:50%;background:#22C55E"></span>
+          <span style="position:absolute;right:14px;top:26px;width:34px;height:24px;border-radius:14px;background:#FEF3C7"></span>
+          <span style="position:absolute;left:24px;bottom:18px;width:48px;height:28px;border-radius:16px;background:#B45309"></span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px;justify-content:center"><span style="height:9px;border-radius:9px;background:#D9E2EE;width:92px"></span><span style="height:9px;border-radius:9px;background:#D9E2EE;width:70px"></span><span style="height:9px;border-radius:9px;background:#D9E2EE;width:52px"></span><span style="height:17px;border-radius:9px;background:${PRIMARY};width:54px;margin-top:4px"></span></div>
+      </div>
+
+      <div style="position:absolute;left:104px;bottom:38px;width:210px;height:112px;border-radius:15px;background:#FFFFFF;border:1px solid #E7ECF3;box-shadow:0 18px 38px rgba(15,23,42,.08);padding:12px">
+        <div style="height:88px;border-radius:12px;background:#EFF6FF;position:relative;overflow:hidden">
+          <svg viewBox="0 0 210 88" width="100%" height="88"><path d="M0 62 L48 28 L96 46 L144 18 L210 56" fill="none" stroke="#BFDBFE" stroke-width="12"/><path d="M30 78 L86 28 L138 52 L190 10" fill="none" stroke="#93C5FD" stroke-width="2"/></svg>
+          <span style="position:absolute;left:58px;top:38px;width:22px;height:22px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:${PRIMARY}"><span style="position:absolute;inset:7px;border-radius:50%;background:#FFFFFF"></span></span>
+          <span style="position:absolute;right:52px;top:22px;width:22px;height:22px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:${PRIMARY}"><span style="position:absolute;inset:7px;border-radius:50%;background:#FFFFFF"></span></span>
+        </div>
+      </div>
+
+      <div style="position:absolute;right:34px;bottom:30px;width:220px;height:96px;border-radius:14px;background:#FFFFFF;border:1px solid #E7ECF3;box-shadow:0 18px 38px rgba(15,23,42,.08);padding:18px">
+        <svg viewBox="0 0 196 58" width="100%" height="58"><path d="M0 42 C22 20 34 54 54 28 C76 4 92 54 112 32 C132 10 144 34 160 18 C178 0 186 24 196 8" fill="none" stroke="${BLUE}" stroke-width="2.4"/><path d="M0 42 C22 20 34 54 54 28 C76 4 92 54 112 32 C132 10 144 34 160 18 C178 0 186 24 196 8 L196 58 L0 58 Z" fill="${BLUE}" opacity=".10"/></svg>
+      </div>
+
+      <div style="position:absolute;right:24px;top:104px;width:96px;height:96px;border-radius:50%;background:${PRIMARY}18;box-shadow:0 14px 36px ${PRIMARY}22;display:flex;align-items:center;justify-content:center">
+        <svg width="50" height="50" viewBox="0 0 24 24" fill="none" stroke="${PRIMARY_TEXT}" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13c0-4 3-7 8-7s8 3 8 7"></path><path d="M5 13h14l-1 5H6z"></path><path d="M8 7l1-3M16 7l-1-3M10 5h4"></path></svg>
+      </div>
+    </div>
+  </div>
+
+  <div data-conclusion="1" style="position:absolute;right:70px;bottom:78px;width:850px;min-height:116px;border-radius:18px;background:#FFFFFF;border:1px solid #E7ECF3;box-shadow:0 18px 42px rgba(15,23,42,.08);display:grid;grid-template-columns:112px 1fr;align-items:center;padding:26px 34px">
+    <div style="width:78px;height:78px;border-radius:50%;background:${PRIMARY}16;display:flex;align-items:center;justify-content:center">
+      <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="${PRIMARY}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"></circle><circle cx="12" cy="12" r="4"></circle><path d="M12 12l7-7"></path><path d="M16 5h3v3"></path></svg>
+    </div>
+    <div style="border-left:2px solid ${PRIMARY};padding-left:24px">
+      <p style="font-family:${INTER};font-size:22px;font-weight:900;color:${FG};margin:0 0 8px">Objetivo do relatório</p>
+      <p style="font-family:${INTER};font-size:16px;font-weight:500;color:#163461;line-height:1.55;margin:0">${objetivo}</p>
+    </div>
+  </div>
+
+  <div style="height:56px;border-top:1px solid ${BORDER};display:flex;align-items:center;padding:0 48px;gap:12px">
+    <span style="width:34px;height:18px;border-radius:999px;background:${PRIMARY};display:inline-flex;align-items:center;justify-content:flex-end;padding-right:3px;box-sizing:border-box"><span style="width:11px;height:11px;border-radius:50%;background:#FFFFFF"></span></span>
+    <span style="font-family:${INTER};font-size:13px;font-weight:900;color:${FG};letter-spacing:.03em">ONMID</span>
+    <span style="font-family:${INTER};font-size:13px;color:#163461">Reports</span>
   </div>
 </div>`;
-  return auditSlide(wrapSlide(body, 1, total), 'sCapa');
+  return auditSlide(body, 'sCapa');
 }
 
-function sVisaoGeral(d: ParsedData, prevD: ParsedData | null, idx: number, total: number): string {
+function sVisaoGeral(
+  d: ParsedData, prevD: ParsedData | null, idx: number, total: number,
+  periodo: string, prevPeriodo: string,
+): string {
   const dFat    = deltaInfo(d.faturamento,    prevD?.faturamento    ?? 0);
   const dPed    = deltaInfo(d.pedidos_ativos, prevD?.pedidos_ativos ?? 0);
   const dTicket = deltaInfo(d.ticket,         prevD?.ticket         ?? 0);
+  const hasCompare = !!prevD && (prevD.faturamento > 0 || prevD.pedidos_ativos > 0 || prevD.ticket > 0);
 
-  // Dynamic thesis title
-  let thesis = 'Resultado do período em faturamento, pedidos e ticket';
-  if (dFat.hasData) {
-    const dir = dFat.up ? 'cresceu' : 'caiu';
-    thesis = `Faturamento ${dir} ${dFat.label} — ${dTicket.up ? 'ticket sustenta a margem' : 'ticket caiu junto com o volume'}`;
-  }
+  const periodParts = (label: string, fallback: string) => {
+    const [month, year] = (label || fallback).split('/');
+    return { month: month || fallback, year: year || '' };
+  };
+  const curPeriod = periodParts(periodo, 'Atual');
+  const cmpPeriod = periodParts(prevPeriodo, 'Comparativo');
+  const brl2 = (n: number) => n > 0
+    ? n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : '—';
 
-  // LEFT: comparison bars or secondary KPIs
-  let leftContent: string;
-  if (prevD) {
-    leftContent = compBarsHtml([
-      { label: 'Faturamento', cur: d.faturamento, prv: prevD.faturamento, fmt: brl },
-      { label: 'Total de Pedidos', cur: d.pedidos_ativos, prv: prevD.pedidos_ativos, fmt: num },
-      { label: 'Ticket Médio', cur: d.ticket, prv: prevD.ticket, fmt: brl },
-    ]);
-  } else {
-    const freq = d.ativos > 0 && d.pedidos_ativos > 0 ? (d.pedidos_ativos / d.ativos).toFixed(1) : '—';
-    leftContent = `
-      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-bottom:16px">
-        ${kpi('Clientes Ativos', numOrDash(d.ativos), 'compraram no período')}
-        ${kpi('Inativos', numOrDash(d.inativos), 'sem pedido no período', RED)}
-        ${kpi('Potenciais', numOrDash(d.potenciais), 'nunca compraram', BLUE)}
-        ${kpi('Freq. Média', freq === '—' ? '—' : `${freq}×`, 'pedidos por cliente ativo')}
+  const icon = (name: 'calendar'|'money'|'cart'|'tag'|'chart'|'bulb', color: string) => {
+    const paths: Record<string, string> = {
+      calendar: '<rect x="3" y="4" width="18" height="17" rx="2"></rect><path d="M16 2v5M8 2v5M3 10h18"></path>',
+      money:    '<circle cx="12" cy="12" r="8"></circle><path d="M12 7v10M9 9.5c0-1.2 1.2-2 3-2s3 .8 3 2-1.2 2-3 2-3 .8-3 2 1.2 2 3 2 3-.8 3-2"></path>',
+      cart:     '<path d="M4 5h2l2 11h9l2-8H7"></path><circle cx="10" cy="20" r="1.5"></circle><circle cx="17" cy="20" r="1.5"></circle>',
+      tag:      '<path d="M20 10l-8 8-8-8V4h6l10 10z"></path><circle cx="8" cy="8" r="1.4"></circle>',
+      chart:    '<path d="M4 19V9"></path><path d="M10 19V5"></path><path d="M16 19v-8"></path><path d="M22 19H2"></path>',
+      bulb:     '<path d="M9 18h6"></path><path d="M10 22h4"></path><path d="M12 2a7 7 0 0 0-4 12.74V17h8v-2.26A7 7 0 0 0 12 2z"></path><path d="M4 10H2M22 10h-2M5 4l1.5 1.5M19 4l-1.5 1.5"></path>',
+    };
+    return `<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">${paths[name]}</svg>`;
+  };
+
+  const circle = (name: 'calendar'|'money'|'cart'|'tag'|'chart'|'bulb', color: string, bg: string, size = 76) =>
+    `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${bg};display:flex;align-items:center;justify-content:center;flex-shrink:0">${icon(name, color)}</div>`;
+
+  const metricCard = (label: string, value: string, name: 'money'|'cart'|'tag', color: string, bg: string) =>
+    `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 14px 34px rgba(15,23,42,.07);padding:22px 24px;display:flex;align-items:center;gap:22px;min-width:0">
+      ${circle(name, color, bg, 80)}
+      <div style="min-width:0">
+        <p style="font-family:${INTER};font-size:18px;font-weight:500;color:#163461;margin:0 0 10px">${label}</p>
+        <p style="font-family:${INTER};font-size:34px;font-weight:900;letter-spacing:-0.035em;color:${FG};line-height:1;margin:0;white-space:nowrap">${value}</p>
       </div>
-      ${insight('Sem comparativo', 'Para exibir variação vs mês anterior, envie os CSVs com prefixo ant- (ex: ant-ativos.csv).')}`;
-  }
-
-  // RIGHT: hero faturamento + 3 KPI chips
-  const rightContent = `
-    ${kpiHero('Faturamento', brlOrDash(d.faturamento), `${numOrDash(d.pedidos_ativos)} pedidos no período`)}
-    <div style="display:grid;grid-template-columns:1fr;gap:10px;margin-top:12px">
-      ${kpiWithDelta('Pedidos', numOrDash(d.pedidos_ativos), prevD ? numOrDash(prevD.pedidos_ativos) : '', dPed)}
-      ${kpiWithDelta('Ticket Médio', brlOrDash(d.ticket), prevD ? brlOrDash(prevD.ticket) : '', dTicket)}
     </div>`;
 
-  const conclusion = dFat.hasData
-    ? `${dFat.up ? 'Crescimento confirmado' : 'Queda identificada'}: ${dFat.label} vs período anterior. ${dTicket.up ? 'O ticket médio subiu — sinal de upgrade no mix de produtos.' : 'O ticket médio caiu — revisar o mix e promoções.'}`
+  const periodLabel = (label: { month: string; year: string }, color: string, bg: string, borderColor: string) =>
+    `<div style="width:185px;display:flex;align-items:center;gap:16px;padding-left:22px;border-left:3px solid ${borderColor};box-sizing:border-box;flex-shrink:0">
+      ${circle('calendar', color, bg, 72)}
+      <div>
+        <p style="font-family:${INTER};font-size:25px;font-weight:900;color:${FG};line-height:1;margin:0 0 8px">${label.month}</p>
+        ${label.year ? `<p style="font-family:${INTER};font-size:20px;font-weight:500;color:#163461;line-height:1;margin:0">${label.year}</p>` : ''}
+      </div>
+    </div>`;
+
+  const metricRow = (label: { month: string; year: string }, source: ParsedData, color: string, bg: string, borderColor: string) =>
+    `<div style="display:grid;grid-template-columns:185px repeat(3,1fr);gap:18px;align-items:stretch">
+      ${periodLabel(label, color, bg, borderColor)}
+      ${metricCard('Faturamento', brl2(source.faturamento), 'money', color, bg)}
+      ${metricCard('Pedidos', numOrDash(source.pedidos_ativos), 'cart', color, bg)}
+      ${metricCard('Ticket médio', brl2(source.ticket), 'tag', color, bg)}
+    </div>`;
+
+  const deltaCell = (label: string, dlt: { label: string; up: boolean; hasData: boolean }, name: 'money'|'cart'|'tag'|'chart') => {
+    const color = dlt.up ? PRIMARY_TEXT : BLUE;
+    const bg = dlt.up ? `${PRIMARY}16` : `${BLUE}12`;
+    return `<div style="flex:1;display:flex;align-items:center;gap:20px;padding:0 30px;min-width:0">
+      ${circle(name, color, bg, 74)}
+      <div>
+        <p style="font-family:${INTER};font-size:16px;font-weight:500;color:#163461;margin:0 0 7px">${label}</p>
+        <p style="font-family:${INTER};font-size:37px;font-weight:900;letter-spacing:-0.035em;color:${color};line-height:1;margin:0">
+          ${dlt.hasData ? dlt.label : '—'} ${dlt.hasData ? (dlt.up ? '↑' : '↓') : ''}
+        </p>
+      </div>
+    </div>`;
+  };
+
+  const insightText = hasCompare && dFat.hasData
+    ? `${curPeriod.month} ficou ${dFat.up ? 'acima' : 'abaixo'} de ${cmpPeriod.month} em faturamento (${dFat.label}). Pedidos ${dPed.up ? 'subiram' : 'caíram'} ${dPed.hasData ? dPed.label : '—'} e o ticket médio ${dTicket.up ? 'avançou' : 'recuou'} ${dTicket.hasData ? dTicket.label : '—'}, indicando ${dTicket.up ? 'melhora no valor por pedido' : 'pressão no valor por pedido'}.`
     : `Base ativa de ${numOrDash(d.ativos)} clientes gerou ${brlOrDash(d.faturamento)} com ticket médio de ${brlOrDash(d.ticket)}.`;
 
   const body = `
-${sectionHeader(thesis, 'Faturamento · Pedidos · Ticket — clientes ativos no período')}
-<div style="display:grid;grid-template-columns:1fr 380px;gap:28px;flex:1">
-  <div>${leftContent}</div>
-  <div>${rightContent}</div>
+<div style="margin-bottom:26px">
+  <h1 style="font-family:${INTER};font-size:58px;font-weight:900;letter-spacing:-0.045em;color:${FG};line-height:1.04;margin:0 0 10px">Visão geral do mês</h1>
+  <p style="font-family:${INTER};font-size:22px;font-weight:500;color:#163461;line-height:1.35;margin:0">
+    ${hasCompare ? `Comparativo de ${curPeriod.month} com ${cmpPeriod.month}${curPeriod.year ? ` de ${curPeriod.year}` : ''}` : `Resultado de ${periodo}`}
+  </p>
 </div>
-${thesisBanner(conclusion)}`;
+
+<div style="display:flex;flex-direction:column;gap:18px;flex:1">
+  ${metricRow(curPeriod, d, PRIMARY_TEXT, `${PRIMARY}16`, PRIMARY)}
+  ${hasCompare && prevD ? metricRow(cmpPeriod, prevD, BLUE, `${BLUE}12`, BLUE) : ''}
+
+  ${hasCompare ? `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 14px 34px rgba(15,23,42,.06);min-height:118px;display:flex;align-items:center;overflow:hidden">
+    <div style="width:210px;padding:0 34px;box-sizing:border-box">
+      <p style="font-family:${INTER};font-size:22px;font-weight:900;color:${FG};line-height:1.1;margin:0 0 10px">Comparativo</p>
+      <p style="font-family:${INTER};font-size:18px;font-weight:500;color:#163461;line-height:1;margin:0">${curPeriod.month} vs. ${cmpPeriod.month}</p>
+    </div>
+    ${deltaCell('Faturamento', dFat, 'chart')}
+    <div style="width:1px;height:78px;background:${BORDER}"></div>
+    ${deltaCell('Pedidos', dPed, 'cart')}
+    <div style="width:1px;height:78px;background:${BORDER}"></div>
+    ${deltaCell('Ticket médio', dTicket, 'tag')}
+  </div>` : ''}
+
+  <div data-conclusion="1" style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 14px 34px rgba(15,23,42,.06);display:grid;grid-template-columns:120px 1fr;align-items:center;padding:24px 34px;margin-top:${hasCompare ? '2' : '18'}px">
+    ${circle('bulb', PRIMARY_TEXT, `${PRIMARY}16`, 78)}
+    <div style="border-left:2px solid ${PRIMARY};padding-left:30px">
+      <p style="font-family:${INTER};font-size:23px;font-weight:900;color:${FG};line-height:1;margin:0 0 12px">Leitura principal</p>
+      <p style="font-family:${INTER};font-size:17px;font-weight:500;color:#163461;line-height:1.55;margin:0">${insightText}</p>
+    </div>
+  </div>
+</div>
+`;
   return auditSlide(wrapSlide(body, idx, total), 'sVisaoGeral');
 }
 
@@ -925,7 +996,7 @@ function sRegioes(bairros: Bairro[], idx: number, total: number): string {
   const maxPed = bairros[0]?.pedidos ?? 1;
   const tableRows = bairros.map((b, i) => {
     const barW = Math.round(b.pedidos / maxPed * 100);
-    return `<tr style="background:${i%2===0?CARD:BG};border-bottom:1px solid ${BORDER}">
+    return `<tr style="background:${i%2===0?CARD:ROW};border-bottom:1px solid ${BORDER}">
       <td style="padding:9px 14px;font-size:13px;font-family:${INTER};color:${i<2?FG:MUTED};font-weight:${i<2?'600':'400'}">${b.bairro}</td>
       <td style="padding:9px 14px;width:180px">
         <div style="display:flex;align-items:center;gap:8px">
@@ -1372,13 +1443,13 @@ function sDiagnosticoPlan(diag: DiagJson, idx: number, total: number): string {
       <div style="position:absolute;top:0;left:0;right:0;height:2px;background:${PRIMARY}"></div>
       <div style="display:flex;align-items:center;gap:8px">
         <div style="width:24px;height:24px;background:${PRIMARY};display:flex;align-items:center;justify-content:center;flex-shrink:0">
-          <span style="font-size:12px;font-weight:800;color:${BG};font-family:${INTER}">${i+1}</span>
+          <span style="font-size:12px;font-weight:800;color:${INVERSE};font-family:${INTER}">${i+1}</span>
         </div>
         <p style="font-size:12px;font-weight:700;color:${FG};font-family:${INTER};margin:0;line-height:1.3">${p.acao}</p>
       </div>
       ${p.objetivo ? `<p style="font-size:11px;color:${PRIMARY};font-family:${INTER};margin:0;line-height:1.4">Obj: ${p.objetivo}</p>` : ''}
       ${p.publico  ? `<p style="font-size:11px;color:${MUTED};font-family:${INTER};margin:0;line-height:1.4">Para: ${p.publico}</p>` : ''}
-      ${p.mensagem ? `<div style="padding:6px 8px;background:${BG};border:1px solid ${BORDER}">
+      ${p.mensagem ? `<div style="padding:6px 8px;background:${CARD};border:1px solid ${BORDER}">
         <p style="font-size:10px;color:${MUTED};font-family:${INTER};margin:0;line-height:1.5;font-style:italic">"${p.mensagem.slice(0,90)}${p.mensagem.length>90?'…':''}"</p>
       </div>` : ''}
     </div>`;
@@ -1407,7 +1478,7 @@ function sCriativos(creatives: Creative[], idx: number, total: number): string {
       ${isFirst ? `<div style="position:absolute;top:0;left:0;right:0;height:2px;background:${PRIMARY}"></div>` : ''}
       ${c.thumbnail_url
         ? `<img src="${c.thumbnail_url}" style="width:100%;aspect-ratio:16/9;object-fit:cover;display:block" />`
-        : `<div style="width:100%;aspect-ratio:16/9;background:${BG};display:flex;align-items:center;justify-content:center">
+        : `<div style="width:100%;aspect-ratio:16/9;background:${CARD};display:flex;align-items:center;justify-content:center">
             <span style="font-size:10px;color:${MUTED};font-family:${INTER}">Sem thumbnail</span>
            </div>`}
       <div style="padding:10px 12px;display:flex;flex-direction:column;gap:5px">
@@ -1602,7 +1673,7 @@ function sPlanoDetalhado(diag: DiagJson, idx: number, total: number): string {
       <div style="display:flex;justify-content:space-between;align-items:center;gap:6px">
         <div style="display:flex;align-items:center;gap:6px">
           <div style="width:24px;height:24px;background:${accent};display:flex;align-items:center;justify-content:center;flex-shrink:0">
-            <span style="font-size:12px;font-weight:800;color:${BG};font-family:${INTER}">${i+1}</span>
+            <span style="font-size:12px;font-weight:800;color:${INVERSE};font-family:${INTER}">${i+1}</span>
           </div>
           ${etapa ? `<span style="font-size:9px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.08em;font-family:${INTER};border:1px solid ${BORDER};padding:2px 5px">${etapa}</span>` : ''}
         </div>
@@ -1610,7 +1681,7 @@ function sPlanoDetalhado(diag: DiagJson, idx: number, total: number): string {
       <p style="font-size:12px;font-weight:700;color:${FG};font-family:${INTER};margin:0;line-height:1.3">${p.acao}</p>
       ${p.objetivo ? `<p style="font-size:11px;color:${accent};font-family:${INTER};margin:0;line-height:1.4">Obj: ${p.objetivo}</p>` : ''}
       ${p.publico  ? `<p style="font-size:11px;color:${MUTED};font-family:${INTER};margin:0;line-height:1.4">Para: ${p.publico}</p>` : ''}
-      ${p.mensagem ? `<div style="padding:5px 8px;background:${BG};border:1px solid ${BORDER}">
+      ${p.mensagem ? `<div style="padding:5px 8px;background:${CARD};border:1px solid ${BORDER}">
         <p style="font-size:10px;color:${MUTED};font-family:${INTER};margin:0;line-height:1.5;font-style:italic">"${p.mensagem.slice(0,80)}${p.mensagem.length>80?'…':''}"</p>
       </div>` : ''}
     </div>`;
@@ -1802,7 +1873,7 @@ export async function buildDeliveryReport(opts: {
   let i = 1;
 
   slides.push(sCapa(data, meta, clientName, periodo, prevPeriodo, diag, total));
-  if (hasVisao)       slides.push(sVisaoGeral(data, prevData, ++i, total));
+  if (hasVisao)       slides.push(sVisaoGeral(data, prevData, ++i, total, periodo, prevPeriodo));
   if (hasDia)         slides.push(sPorDia(data, ++i, total));
   if (hasRegiao)      slides.push(sRegioes(bairros, ++i, total));
   if (hasBase)        slides.push(sBase(data, ++i, total));
@@ -1818,7 +1889,7 @@ export async function buildDeliveryReport(opts: {
   if (hasPlanoDetalh) slides.push(sPlanoDetalhado(diag, ++i, total));
 
   const fontLink = `<style>@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&display=swap');</style>`;
-  return { html: `${fontLink}<div style="background:${BG};padding:28px;font-family:${INTER}">${slides.join('')}</div>` };
+  return { html: `${fontLink}<div style="background:${CANVAS};padding:28px;font-family:${INTER}">${slides.join('')}</div>` };
 }
 
 // ── Save to DB ─────────────────────────────────────────────────────────────────

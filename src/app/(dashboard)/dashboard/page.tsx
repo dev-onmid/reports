@@ -289,6 +289,26 @@ function aggregateDailySeries(
   return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
 }
 
+// Sums same-position values across multiple social page datasets for sparklines.
+function aggPageSeries<T extends Record<string, number[]>>(
+  pages: (T | undefined)[],
+  key: keyof T,
+): number[] {
+  const out: number[] = [];
+  for (const d of pages) {
+    (d?.[key] ?? [] as number[]).forEach((v: number, i: number) => { out[i] = (out[i] ?? 0) + v; });
+  }
+  return out;
+}
+
+// If the daily series has real data, return it; otherwise return a 2-point slope from prev→current.
+// This ensures each card has a unique sparkline shape even when daily data is unavailable.
+function socialSeriesOrSlope(daily: number[], prev: number, current: number): number[] | undefined {
+  if (daily.some(v => v > 0)) return daily;
+  const pts = [prev, current].filter(v => v > 0);
+  return pts.length >= 2 ? pts : undefined;
+}
+
 function computeFunnel(stages: FunnelStage[], revenueTarget: number, ticket: number): number[] {
   const volumes = new Array<number>(stages.length).fill(0);
   if (stages.length === 0 || revenueTarget <= 0 || ticket <= 0) return volumes;
@@ -3880,21 +3900,29 @@ const IG_SORT_OPTIONS: { value: IgSortKey; label: string }[] = [
   { value: 'comments',label: 'Comentários' },
 ];
 
-function IgTopPostsCard({ posts, loading, sortBy, onSortChange }: {
+function IgTopPostsCard({ posts, loading, sortBy, onSortChange, periodFrom, periodTo }: {
   posts: IgPost[];
   loading: boolean;
   sortBy: IgSortKey;
   onSortChange: (s: IgSortKey) => void;
+  periodFrom?: string;
+  periodTo?: string;
 }) {
-  function fmt(n: number) { return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n); }
-  function relDate(ts: string) {
-    const d = new Date(ts);
-    const diffDays = Math.floor((Date.now() - d.getTime()) / 86400000);
-    if (diffDays === 0) return 'hoje';
-    if (diffDays === 1) return '1d atrás';
-    if (diffDays < 7) return `${diffDays}d atrás`;
-    if (diffDays < 30) return `${Math.floor(diffDays / 7)}sem atrás`;
-    return `${Math.floor(diffDays / 30)}m atrás`;
+  const [typeFilter, setTypeFilter] = useState<'all' | string>('all');
+
+  function fmt(n: number) {
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+    return String(n);
+  }
+
+  function fmtDate(ts: string) {
+    if (!ts) return '—';
+    return new Date(ts).toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' }).replace('.', '');
+  }
+
+  function fmtPeriodDate(iso: string) {
+    return new Date(iso + 'T12:00:00Z').toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' }).replace('.', '');
   }
 
   const MEDIA_BADGE: Record<string, { label: string; color: string }> = {
@@ -3904,104 +3932,181 @@ function IgTopPostsCard({ posts, loading, sortBy, onSortChange }: {
     IMAGE:          { label: 'FOTO',      color: '#405DE6' },
   };
 
+  const TYPE_FILTERS = [
+    { value: 'all',            label: 'Todos' },
+    { value: 'REELS',          label: 'Reels' },
+    { value: 'IMAGE',          label: 'Foto' },
+    { value: 'CAROUSEL_ALBUM', label: 'Carrossel' },
+  ];
+
+  const METRIC_COLS: Array<{ key: IgSortKey; label: string; getValue: (p: IgPost) => number }> = [
+    { key: 'reach',    label: 'Alcance',  getValue: p => p.reach },
+    { key: 'views',    label: 'Views',    getValue: p => p.videoViews },
+    { key: 'likes',    label: 'Curtidas', getValue: p => p.likes },
+    { key: 'comments', label: 'Coment.',  getValue: p => p.comments },
+    { key: 'saves',    label: 'Salv.',    getValue: p => p.saves },
+  ];
+
+  const filtered = typeFilter === 'all' ? posts : posts.filter(p => p.mediaType === typeFilter);
+  const periodLabel = periodFrom && periodTo
+    ? `${fmtPeriodDate(periodFrom)} – ${fmtPeriodDate(periodTo)} · métricas vitalícias`
+    : 'métricas vitalícias';
+
   return (
     <div className="rounded-xl border border-[#E1306C]/35 bg-black/35 p-4 shadow-[inset_0_0_30px_rgba(225,48,108,0.06),0_0_28px_rgba(225,48,108,0.14)] h-full flex flex-col">
-      <div className="shrink-0 flex flex-wrap items-center justify-between gap-3 mb-3">
+      {/* Header */}
+      <div className="shrink-0 flex flex-wrap items-center justify-between gap-2 mb-3">
         <div className="flex items-center gap-2">
-          <svg viewBox="0 0 24 24" className="h-4 w-4 fill-[#E1306C]"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z" /></svg>
-          <p className="text-[11px] font-bold uppercase tracking-widest text-foreground/75">Top Postagens Instagram</p>
-          {loading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+          <svg viewBox="0 0 24 24" className="h-4 w-4 fill-[#E1306C] shrink-0"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z" /></svg>
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-widest text-foreground/75 leading-none">Top Postagens Instagram</p>
+            <p className="text-[9px] text-muted-foreground mt-0.5">{periodLabel}</p>
+          </div>
+          {loading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground ml-1" />}
         </div>
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] font-bold uppercase tracking-widest text-foreground/55 mr-1">Ordenar por</span>
-          {IG_SORT_OPTIONS.map(opt => (
-            <button
-              key={opt.value}
-              onClick={() => onSortChange(opt.value)}
-              className={cn(
-                'px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors border',
-                sortBy === opt.value
-                  ? 'bg-[#E1306C] text-white border-[#E1306C] shadow-[0_0_10px_rgba(225,48,108,0.4)]'
-                  : 'text-muted-foreground border-border hover:text-foreground'
-              )}
-            >
-              {opt.label}
-            </button>
-          ))}
+
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Type filter chips */}
+          <div className="flex items-center gap-1">
+            {TYPE_FILTERS.map(f => {
+              const count = f.value === 'all' ? posts.length : posts.filter(p => p.mediaType === f.value).length;
+              if (f.value !== 'all' && count === 0) return null;
+              return (
+                <button
+                  key={f.value}
+                  onClick={() => setTypeFilter(f.value)}
+                  className={cn(
+                    'px-2 py-0.5 rounded-md text-[10px] font-semibold transition-colors border',
+                    typeFilter === f.value
+                      ? 'bg-[#E1306C]/20 text-[#E1306C] border-[#E1306C]/50'
+                      : 'text-muted-foreground border-border hover:text-foreground'
+                  )}
+                >
+                  {f.label}{f.value !== 'all' && <span className="ml-1 opacity-50">{count}</span>}
+                </button>
+              );
+            })}
+          </div>
+          <div className="w-px h-3.5 bg-border" />
+          {/* Sort buttons */}
+          <div className="flex items-center gap-1">
+            <span className="text-[9px] font-bold uppercase tracking-widest text-foreground/40 mr-0.5">Ordenar</span>
+            {IG_SORT_OPTIONS.map(opt => (
+              <button
+                key={opt.value}
+                onClick={() => onSortChange(opt.value)}
+                className={cn(
+                  'px-2 py-0.5 rounded-md text-[10px] font-semibold transition-colors border',
+                  sortBy === opt.value
+                    ? 'bg-[#E1306C] text-white border-[#E1306C] shadow-[0_0_8px_rgba(225,48,108,0.35)]'
+                    : 'text-muted-foreground border-border hover:text-foreground'
+                )}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
+      {/* Body */}
       {loading ? (
         <div className="flex items-center justify-center gap-2 flex-1 text-sm text-muted-foreground">
           <RefreshCw className="h-4 w-4 animate-spin" /> Carregando postagens...
         </div>
-      ) : posts.length === 0 ? (
-        <p className="flex-1 flex items-center justify-center text-sm text-muted-foreground">Nenhuma postagem encontrada no período.</p>
+      ) : filtered.length === 0 ? (
+        <p className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
+          {posts.length === 0 ? 'Nenhuma postagem encontrada no período.' : 'Nenhuma postagem desse tipo no período.'}
+        </p>
       ) : (
         <div className="flex-1 min-h-0 overflow-y-auto">
-          <div
-            className="grid gap-3"
-            style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }}
-          >
-            {posts.map((post, idx) => {
+          {/* Column header row */}
+          <div className="flex items-center gap-3 pb-1.5 mb-1 border-b border-border/40 sticky top-0 bg-black/60 backdrop-blur-sm z-10">
+            <div className="w-5 shrink-0" />
+            <div className="w-14 shrink-0" />
+            <div className="flex-1 text-[9px] font-bold uppercase tracking-widest text-muted-foreground/50">Post</div>
+            {METRIC_COLS.map(col => (
+              <button
+                key={col.key}
+                onClick={() => onSortChange(col.key)}
+                className={cn(
+                  'text-right min-w-[2.75rem] shrink-0 text-[9px] font-bold uppercase tracking-widest transition-colors',
+                  sortBy === col.key ? 'text-[#E1306C]' : 'text-muted-foreground/50 hover:text-foreground'
+                )}
+              >
+                {col.label}
+              </button>
+            ))}
+            <div className="w-5 shrink-0" />
+          </div>
+
+          {/* Post rows */}
+          <div className="space-y-0.5">
+            {filtered.map((post, idx) => {
               const badge = MEDIA_BADGE[post.mediaType] ?? MEDIA_BADGE.IMAGE;
               const thumb = post.thumbnailUrl ?? post.mediaUrl;
-              const mainMetric = sortBy === 'views' ? Math.max(post.videoViews, post.reach)
-                : sortBy === 'likes' ? post.likes
-                : sortBy === 'saves' ? post.saves
-                : sortBy === 'comments' ? post.comments
-                : post.reach;
               return (
-                <a
+                <div
                   key={post.id}
-                  href={post.permalink}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="relative flex flex-col overflow-hidden rounded-xl border border-border bg-card/50 hover:border-[#E1306C]/50 transition-colors group"
+                  className="flex items-center gap-3 px-1 py-2 rounded-lg hover:bg-[#E1306C]/5 transition-colors group"
                 >
+                  {/* Rank */}
+                  <span className="w-5 text-center text-[11px] font-black text-muted-foreground shrink-0">{idx + 1}</span>
+
                   {/* Thumbnail */}
-                  <div className="relative bg-muted aspect-square overflow-hidden">
+                  <div className="relative h-14 w-14 shrink-0 rounded-lg overflow-hidden bg-muted">
                     {thumb ? (
-                      <img
-                        src={thumb}
-                        alt={post.caption?.slice(0, 60)}
-                        className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
-                      />
+                      <img src={thumb} alt="" className="h-full w-full object-cover" loading="lazy" />
                     ) : (
-                      <div className="h-full w-full flex items-center justify-center bg-muted/50">
-                        <ImageIcon className="h-8 w-8 text-muted-foreground/30" />
+                      <div className="h-full w-full flex items-center justify-center">
+                        <ImageIcon className="h-4 w-4 text-muted-foreground/30" />
                       </div>
                     )}
-                    {/* Rank badge */}
-                    <div className="absolute top-1.5 left-1.5 h-5 w-5 rounded-full bg-black/70 flex items-center justify-center text-[9px] font-black text-white">
-                      {idx + 1}
-                    </div>
-                    {/* Media type badge */}
                     <span
-                      className="absolute top-1.5 right-1.5 rounded px-1 py-0.5 text-[8px] font-black text-white"
-                      style={{ backgroundColor: `${badge.color}cc` }}
+                      className="absolute bottom-0 inset-x-0 py-0.5 text-center text-[7px] font-black text-white leading-tight"
+                      style={{ backgroundColor: badge.color + 'cc' }}
                     >
                       {badge.label}
                     </span>
-                    {/* Main metric overlay */}
-                    <div className="absolute bottom-1.5 right-1.5 rounded-full px-1.5 py-0.5 text-[9px] font-black text-black bg-[#E1306C] shadow">
-                      {fmt(mainMetric)}
-                    </div>
                   </div>
-                  {/* Info */}
-                  <div className="p-2 flex flex-col gap-1.5">
-                    {post.caption && (
-                      <p className="text-[10px] text-foreground/70 line-clamp-2 leading-tight">{post.caption}</p>
-                    )}
-                    <p className="text-[9px] text-muted-foreground">@{post.username} · {relDate(post.timestamp)}</p>
-                    <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
-                      <span className="text-[9px] text-muted-foreground">Alcance <span className="font-semibold text-foreground">{fmt(post.reach)}</span></span>
-                      <span className="text-[9px] text-muted-foreground">Curtidas <span className="font-semibold text-foreground">{fmt(post.likes)}</span></span>
-                      {post.videoViews > 0 && <span className="text-[9px] text-muted-foreground">Views <span className="font-semibold text-foreground">{fmt(post.videoViews)}</span></span>}
-                      <span className="text-[9px] text-muted-foreground">Salv. <span className="font-semibold text-foreground">{fmt(post.saves)}</span></span>
-                    </div>
+
+                  {/* Caption + date */}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs leading-snug text-foreground/80 line-clamp-2">
+                      {post.caption || <em className="text-muted-foreground not-italic opacity-50">Sem legenda</em>}
+                    </p>
+                    <p className="mt-0.5 text-[10px] text-muted-foreground">
+                      @{post.username}{post.timestamp && <> · {fmtDate(post.timestamp)}</>}
+                      {!post.publishedInPeriod && <span className="text-amber-400 ml-1">· fora do período</span>}
+                    </p>
                   </div>
-                </a>
+
+                  {/* Metric values */}
+                  {METRIC_COLS.map(col => {
+                    const isActive = col.key === sortBy;
+                    const val = col.getValue(post);
+                    return (
+                      <div key={col.key} className="text-right min-w-[2.75rem] shrink-0">
+                        <p className={cn(
+                          'text-sm tabular-nums leading-none',
+                          isActive ? 'text-[#E1306C] font-black' : val > 0 ? 'text-foreground font-semibold' : 'text-muted-foreground/30 font-normal'
+                        )}>
+                          {val > 0 ? fmt(val) : '—'}
+                        </p>
+                      </div>
+                    );
+                  })}
+
+                  {/* External link */}
+                  <a
+                    href={post.permalink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-5 shrink-0 flex items-center justify-center text-muted-foreground/30 hover:text-[#E1306C] transition-colors opacity-0 group-hover:opacity-100"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+                </div>
               );
             })}
           </div>
@@ -4799,6 +4904,13 @@ export default function GeneralDashboard() {
   const activeMetaCampaigns = metaCampaigns.filter((campaign) => campaign.status === 'ACTIVE' || campaign.status === 'ENABLED').length;
   const activeGoogleCampaigns = googleCampaigns.filter((campaign) => campaign.status === 'ACTIVE' || campaign.status === 'ENABLED').length;
   const metaCreativeCount = creatives.length;
+  const hasVisibleGeneralCards = CARD_GROUPS[0].ids.some(id => dashboardPrefs.cards[id]?.visible !== false);
+  const hasVisibleMetaCards = CARD_GROUPS[1].ids.some(id => dashboardPrefs.cards[id]?.visible !== false);
+  const hasVisibleGoogleCards = CARD_GROUPS[2].ids.some(id => dashboardPrefs.cards[id]?.visible !== false);
+  const hasVisibleSocialCards = CARD_GROUPS[3].ids.some(id => dashboardPrefs.cards[id]?.visible !== false);
+  const hasVisibleCrmCards = CARD_GROUPS[4].ids.some(id => dashboardPrefs.cards[id]?.visible !== false);
+  const shouldRenderSocialSection = (pageInsightsLoading || pageInsights.some(p => p.facebook ?? p.instagram)) && hasVisibleSocialCards;
+  const shouldRenderCrmSection = dashboardPrefs.showCrmPanel && selectedIds.size > 0 && hasVisibleCrmCards;
 
   async function analyzeWithAI() {
     if (selectedIds.size === 0) return;
@@ -5149,8 +5261,8 @@ export default function GeneralDashboard() {
       <div className="flex flex-col gap-6">
 
       {/* 1. MÉTRICAS GERAIS */}
-      <SortableSection id="geral" editMode={editMode} orderIndex={dashboardPrefs.sectionOrder.indexOf('geral')}>
-      {CARD_GROUPS[0].ids.some(id => dashboardPrefs.cards[id]?.visible !== false) && <section className="relative overflow-hidden rounded-2xl border border-[#55F52F]/55 bg-[#050C0A] p-5 shadow-[0_0_56px_rgba(85,245,47,0.22)]">
+      {hasVisibleGeneralCards && <SortableSection id="geral" editMode={editMode} orderIndex={dashboardPrefs.sectionOrder.indexOf('geral')}>
+      <section className="relative overflow-hidden rounded-2xl border border-[#55F52F]/55 bg-[#050C0A] p-5 shadow-[0_0_56px_rgba(85,245,47,0.22)]">
         <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(85,245,47,0.16),transparent_38%),radial-gradient(circle_at_92%_8%,rgba(85,245,47,0.28),transparent_34%)]" />
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,#55F52F,transparent)]" />
         <div className="relative mb-4 flex items-center justify-between gap-3">
@@ -5242,12 +5354,12 @@ export default function GeneralDashboard() {
           );
         })()}
 
-      </section>}
-      </SortableSection>
+      </section>
+      </SortableSection>}
 
       {/* 2. META ADS */}
-      <SortableSection id="meta" editMode={editMode} orderIndex={dashboardPrefs.sectionOrder.indexOf('meta')}>
-      {CARD_GROUPS[1].ids.some(id => dashboardPrefs.cards[id]?.visible !== false) && <section className="relative overflow-hidden rounded-2xl border border-[#0B84FF]/70 bg-[#050A16] p-5 shadow-[0_0_64px_rgba(11,132,255,0.28)]">
+      {hasVisibleMetaCards && <SortableSection id="meta" editMode={editMode} orderIndex={dashboardPrefs.sectionOrder.indexOf('meta')}>
+      <section className="relative overflow-hidden rounded-2xl border border-[#0B84FF]/70 bg-[#050A16] p-5 shadow-[0_0_64px_rgba(11,132,255,0.28)]">
         <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(11,132,255,0.20),transparent_42%),radial-gradient(circle_at_92%_0%,rgba(0,194,255,0.30),transparent_36%)]" />
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,#00C2FF,#0B84FF,transparent)]" />
         <div className="relative mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -5409,12 +5521,12 @@ export default function GeneralDashboard() {
             </RglGrid>
           );
         })()}
-      </section>}
-      </SortableSection>
+      </section>
+      </SortableSection>}
 
       {/* 3. GOOGLE ADS */}
-      <SortableSection id="google" editMode={editMode} orderIndex={dashboardPrefs.sectionOrder.indexOf('google')}>
-      {CARD_GROUPS[2].ids.some(id => dashboardPrefs.cards[id]?.visible !== false) && <section className="relative overflow-hidden rounded-2xl border border-[#EA4335]/75 bg-[#120607] p-5 shadow-[0_0_64px_rgba(234,67,53,0.30)]">
+      {hasVisibleGoogleCards && <SortableSection id="google" editMode={editMode} orderIndex={dashboardPrefs.sectionOrder.indexOf('google')}>
+      <section className="relative overflow-hidden rounded-2xl border border-[#EA4335]/75 bg-[#120607] p-5 shadow-[0_0_64px_rgba(234,67,53,0.30)]">
         <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(234,67,53,0.22),transparent_42%),radial-gradient(circle_at_92%_0%,rgba(251,188,5,0.24),transparent_34%)]" />
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,#EA4335,#FBBC05,transparent)]" />
         <div className="relative mb-4 flex items-center justify-between gap-3">
@@ -5531,12 +5643,12 @@ export default function GeneralDashboard() {
             </RglGrid>
           );
         })()}
-      </section>}
-      </SortableSection>
+      </section>
+      </SortableSection>}
 
       {/* 4. PÁGINAS SOCIAIS */}
-      <SortableSection id="social" editMode={editMode} orderIndex={dashboardPrefs.sectionOrder.indexOf('social')}>
-      {(pageInsightsLoading || pageInsights.some(p => p.facebook ?? p.instagram)) && CARD_GROUPS[3].ids.some(id => dashboardPrefs.cards[id]?.visible !== false) && (() => {
+      {shouldRenderSocialSection && <SortableSection id="social" editMode={editMode} orderIndex={dashboardPrefs.sectionOrder.indexOf('social')}>
+      {(() => {
         const allFbData = pageInsights.filter(p => p.facebook).map(p => p.facebook!);
         const allIgData = pageInsights.filter(p => p.instagram).map(p => p.instagram!);
         const prevFbData = prevPageInsights.filter(p => p.facebook).map(p => p.facebook!);
@@ -5575,23 +5687,38 @@ export default function GeneralDashboard() {
         const prevIgLikes   = prevIgData.reduce((s, d) => s + d.likes, 0);
         const prevIgSaves   = prevIgData.reduce((s, d) => s + d.saves, 0);
 
+        // Daily sparkline series — aggregated across all linked accounts
+        const fbReachSeries   = aggPageSeries(allFbData.map(d => d.dailySeries), 'reach');
+        const fbImprSeries    = aggPageSeries(allFbData.map(d => d.dailySeries), 'impressions');
+        const fbEngageSeries  = aggPageSeries(allFbData.map(d => d.dailySeries), 'engagements');
+        const fbViewsSeries   = aggPageSeries(allFbData.map(d => d.dailySeries), 'pageViews');
+        const fbAddsSeries    = aggPageSeries(allFbData.map(d => d.dailySeries), 'fanAdds');
+        const igReachSeries        = aggPageSeries(allIgData.map(d => d.dailySeries), 'reach');
+        const igViewsSeries        = aggPageSeries(allIgData.map(d => d.dailySeries), 'views');
+        const igPViewsSeries       = aggPageSeries(allIgData.map(d => d.dailySeries), 'profileViews');
+        const igClicksSeries       = aggPageSeries(allIgData.map(d => d.dailySeries), 'websiteClicks');
+        const igEngagedSeries      = aggPageSeries(allIgData.map(d => d.dailySeries), 'accountsEngaged');
+        const igInteractSeries     = aggPageSeries(allIgData.map(d => d.dailySeries), 'totalInteractions');
+        const igLikesSeries        = aggPageSeries(allIgData.map(d => d.dailySeries), 'likes');
+        const igSavesSeries        = aggPageSeries(allIgData.map(d => d.dailySeries), 'saves');
+
         const socialCards: Record<string, ReactNode> = {
-          'social-fb-fans':            <KpiCard title="Curtidas / Seg."   value={fbFans}    prevValue={prevFbFans}    format="number" icon={Users}         iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} hideGoal />,
-          'social-fb-fan-adds':        <KpiCard title="Novas curtidas"    value={fbAdds}    prevValue={prevFbAdds}    format="number" icon={UserPlus}      iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} hideGoal />,
-          'social-fb-reach':           <KpiCard title="Alcance FB"        value={fbReach}   prevValue={prevFbReach}   format="number" icon={Eye}           iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} hideGoal />,
-          'social-fb-impressions':     <KpiCard title="Impressões FB"     value={fbImpr}    prevValue={prevFbImpr}    format="number" icon={BarChart3}     iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} hideGoal />,
-          'social-fb-engagements':     <KpiCard title="Engajamentos FB"   value={fbEngage}  prevValue={prevFbEngage}  format="number" icon={Heart}         iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} hideGoal />,
-          'social-fb-views':           <KpiCard title="Visitas à página"  value={fbViews}   prevValue={prevFbViews}   format="number" icon={Monitor}       iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} hideGoal />,
-          'social-ig-followers':       <KpiCard title="Seguidores IG"     value={igFollow}  prevValue={prevIgFollow}  format="number" icon={Users}         iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal />,
-          'social-ig-reach':           <KpiCard title="Alcance IG"        value={igReach}   prevValue={prevIgReach}   format="number" icon={Eye}           iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal />,
-          'social-ig-views':           <KpiCard title="Visualizações IG"  value={igViews}   prevValue={prevIgViews}   format="number" icon={BarChart3}     iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal />,
-          'social-ig-profile-views':   <KpiCard title="Visitas ao perfil" value={igPViews}  prevValue={prevIgPViews}  format="number" icon={Monitor}       iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal />,
-          'social-ig-website-clicks':  <KpiCard title="Cliques no site"   value={igClicks}  prevValue={prevIgClicks}  format="number" icon={ExternalLink}  iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal />,
-          'social-ig-engaged':         <KpiCard title="Contas engajadas"  value={igEngaged} prevValue={prevIgEngaged} format="number" icon={Heart}         iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal />,
-          'social-ig-interactions':    <KpiCard title="Interações IG"     value={igInteract}prevValue={prevIgInteract}format="number" icon={Zap}           iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal />,
-          'social-ig-likes':           <KpiCard title="Curtidas IG"       value={igLikes}   prevValue={prevIgLikes}   format="number" icon={Heart}         iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal />,
-          'social-ig-saves':           <KpiCard title="Salvamentos IG"    value={igSaves}   prevValue={prevIgSaves}   format="number" icon={Bookmark}      iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal />,
-          'social-ig-top-posts':       <IgTopPostsCard posts={igPosts} loading={igPostsLoading} sortBy={igSortBy} onSortChange={setIgSortBy} />,
+          'social-fb-fans':            <KpiCard title="Curtidas / Seg."   value={fbFans}    prevValue={prevFbFans}    format="number" icon={Users}         iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-fb-fans']?.chart ?? 'sparkline'}       series={socialSeriesOrSlope([], prevFbFans, fbFans)} />,
+          'social-fb-fan-adds':        <KpiCard title="Novas curtidas"    value={fbAdds}    prevValue={prevFbAdds}    format="number" icon={UserPlus}      iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-fb-fan-adds']?.chart ?? 'sparkline'}   series={socialSeriesOrSlope(fbAddsSeries, prevFbAdds, fbAdds)} />,
+          'social-fb-reach':           <KpiCard title="Alcance FB"        value={fbReach}   prevValue={prevFbReach}   format="number" icon={Eye}           iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-fb-reach']?.chart ?? 'sparkline'}      series={socialSeriesOrSlope(fbReachSeries, prevFbReach, fbReach)} />,
+          'social-fb-impressions':     <KpiCard title="Impressões FB"     value={fbImpr}    prevValue={prevFbImpr}    format="number" icon={BarChart3}     iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-fb-impressions']?.chart ?? 'sparkline'} series={socialSeriesOrSlope(fbImprSeries, prevFbImpr, fbImpr)} />,
+          'social-fb-engagements':     <KpiCard title="Engajamentos FB"   value={fbEngage}  prevValue={prevFbEngage}  format="number" icon={Heart}         iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-fb-engagements']?.chart ?? 'sparkline'} series={socialSeriesOrSlope(fbEngageSeries, prevFbEngage, fbEngage)} />,
+          'social-fb-views':           <KpiCard title="Visitas à página"  value={fbViews}   prevValue={prevFbViews}   format="number" icon={Monitor}       iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-fb-views']?.chart ?? 'sparkline'}      series={socialSeriesOrSlope(fbViewsSeries, prevFbViews, fbViews)} />,
+          'social-ig-followers':       <KpiCard title="Seguidores IG"     value={igFollow}  prevValue={prevIgFollow}  format="number" icon={Users}         iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-ig-followers']?.chart ?? 'sparkline'}   series={socialSeriesOrSlope([], prevIgFollow, igFollow)} />,
+          'social-ig-reach':           <KpiCard title="Alcance IG"        value={igReach}   prevValue={prevIgReach}   format="number" icon={Eye}           iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-ig-reach']?.chart ?? 'sparkline'}        series={socialSeriesOrSlope(igReachSeries, prevIgReach, igReach)} />,
+          'social-ig-views':           <KpiCard title="Visualizações IG"  value={igViews}   prevValue={prevIgViews}   format="number" icon={BarChart3}     iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-ig-views']?.chart ?? 'sparkline'}        series={socialSeriesOrSlope(igViewsSeries, prevIgViews, igViews)} />,
+          'social-ig-profile-views':   <KpiCard title="Visitas ao perfil" value={igPViews}  prevValue={prevIgPViews}  format="number" icon={Monitor}       iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-ig-profile-views']?.chart ?? 'sparkline'}  series={socialSeriesOrSlope(igPViewsSeries, prevIgPViews, igPViews)} />,
+          'social-ig-website-clicks':  <KpiCard title="Cliques no site"   value={igClicks}  prevValue={prevIgClicks}  format="number" icon={ExternalLink}  iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-ig-website-clicks']?.chart ?? 'sparkline'} series={socialSeriesOrSlope(igClicksSeries, prevIgClicks, igClicks)} />,
+          'social-ig-engaged':         <KpiCard title="Contas engajadas"  value={igEngaged} prevValue={prevIgEngaged} format="number" icon={Heart}         iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-ig-engaged']?.chart ?? 'sparkline'}       series={socialSeriesOrSlope(igEngagedSeries, prevIgEngaged, igEngaged)} />,
+          'social-ig-interactions':    <KpiCard title="Interações IG"     value={igInteract}prevValue={prevIgInteract}format="number" icon={Zap}           iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-ig-interactions']?.chart ?? 'sparkline'}   series={socialSeriesOrSlope(igInteractSeries, prevIgInteract, igInteract)} />,
+          'social-ig-likes':           <KpiCard title="Curtidas IG"       value={igLikes}   prevValue={prevIgLikes}   format="number" icon={Heart}         iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-ig-likes']?.chart ?? 'sparkline'}         series={socialSeriesOrSlope(igLikesSeries, prevIgLikes, igLikes)} />,
+          'social-ig-saves':           <KpiCard title="Salvamentos IG"    value={igSaves}   prevValue={prevIgSaves}   format="number" icon={Bookmark}      iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-ig-saves']?.chart ?? 'sparkline'}         series={socialSeriesOrSlope(igSavesSeries, prevIgSaves, igSaves)} />,
+          'social-ig-top-posts':       <IgTopPostsCard posts={igPosts} loading={igPostsLoading} sortBy={igSortBy} onSortChange={setIgSortBy} periodFrom={selectedRange.from.toISOString().split('T')[0]} periodTo={selectedRange.to.toISOString().split('T')[0]} />,
         };
 
         const visibleSocialLayout = socialKpiLayout.filter(l => {
@@ -5690,34 +5817,32 @@ export default function GeneralDashboard() {
           </div>
         </div>
       )}
-      </SortableSection>
+      </SortableSection>}
 
       {/* ── 5. CRM LEADS PANEL (opt-in) ── */}
-      <SortableSection id="crm" editMode={editMode} orderIndex={dashboardPrefs.sectionOrder.indexOf('crm')}>
-      {dashboardPrefs.showCrmPanel && selectedIds.size > 0 && (
-        <section className="relative overflow-hidden rounded-2xl border border-violet-500/40 bg-violet-950/20 p-5 space-y-1">
-          <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(139,92,246,0.12),transparent_50%)]" />
-          <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(139,92,246,0.6),transparent)]" />
-          <div className="relative mb-4 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-violet-500/40 bg-violet-500/15 shadow-[0_0_20px_rgba(139,92,246,0.4)]">
-                <UserPlus className="h-4 w-4 text-violet-400" />
-              </span>
-              <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">Leads CRM</h2>
-            </div>
-            <button type="button" onClick={() => toggleSection('crm-leads')} className="flex items-center gap-1 rounded-lg border border-violet-500/30 bg-violet-500/10 px-2.5 py-1.5 text-[11px] font-semibold text-violet-400/80 hover:bg-violet-500/20 transition-colors whitespace-nowrap">
-              <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', collapsedSections.has('crm-leads') && '-rotate-90')} />
-              {collapsedSections.has('crm-leads') ? 'Expandir' : 'Recolher'}
-            </button>
+      {shouldRenderCrmSection && <SortableSection id="crm" editMode={editMode} orderIndex={dashboardPrefs.sectionOrder.indexOf('crm')}>
+      <section className="relative overflow-hidden rounded-2xl border border-violet-500/40 bg-violet-950/20 p-5 space-y-1">
+        <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(139,92,246,0.12),transparent_50%)]" />
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(139,92,246,0.6),transparent)]" />
+        <div className="relative mb-4 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-violet-500/40 bg-violet-500/15 shadow-[0_0_20px_rgba(139,92,246,0.4)]">
+              <UserPlus className="h-4 w-4 text-violet-400" />
+            </span>
+            <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">Leads CRM</h2>
           </div>
-          {!collapsedSections.has('crm-leads') && (
-            <div className="relative">
-              <CrmDashboardPanel clientIds={selectedIds} prefs={dashboardPrefs} />
-            </div>
-          )}
-        </section>
-      )}
-      </SortableSection>
+          <button type="button" onClick={() => toggleSection('crm-leads')} className="flex items-center gap-1 rounded-lg border border-violet-500/30 bg-violet-500/10 px-2.5 py-1.5 text-[11px] font-semibold text-violet-400/80 hover:bg-violet-500/20 transition-colors whitespace-nowrap">
+            <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', collapsedSections.has('crm-leads') && '-rotate-90')} />
+            {collapsedSections.has('crm-leads') ? 'Expandir' : 'Recolher'}
+          </button>
+        </div>
+        {!collapsedSections.has('crm-leads') && (
+          <div className="relative">
+            <CrmDashboardPanel clientIds={selectedIds} prefs={dashboardPrefs} />
+          </div>
+        )}
+      </section>
+      </SortableSection>}
 
       </div>
       </SortableContext>

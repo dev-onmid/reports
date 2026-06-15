@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
+import { ensureDefaultFunnel, getFirstFunnelStageLabel } from '@/lib/crm-conversation-sync';
 
 async function ensureTable(pool: ReturnType<typeof makeServerPool>) {
   await pool.query(`
@@ -69,6 +70,7 @@ export async function GET(req: NextRequest) {
   const pool = makeServerPool();
   try {
     await ensureTable(pool);
+    await ensureDefaultFunnel(pool, clientId);
     if (since) {
       const { rows } = await pool.query(
         `SELECT * FROM public.crm_leads WHERE client_id = $1 AND updated_at > $2 ORDER BY updated_at DESC`,
@@ -115,6 +117,8 @@ export async function POST(req: NextRequest) {
   const pool = makeServerPool();
   try {
     await ensureTable(pool);
+    const fallbackFunnelId = await ensureDefaultFunnel(pool, clientId);
+    const fallbackStatus = await getFirstFunnelStageLabel(pool, String(f.funnel_id ?? fallbackFunnelId));
     const { rows: [lead] } = await pool.query(
       `INSERT INTO public.crm_leads
         (client_id,mes,data,link_criativo,nome,numero,canal,emoji,
@@ -128,12 +132,12 @@ export async function POST(req: NextRequest) {
         clientId, f.mes??null, f.data||null, f.link_criativo??null,
         f.nome??null, f.numero??null, f.canal??null, f.emoji??null,
         f.dia1??false, f.dia2??false, f.dia3??false, f.dia4??false,
-        f.status??'Em Atendimento', f.data_agendada||null,
+        f.status??fallbackStatus, f.data_agendada||null,
         f.video_dra??false, f.compareceu??false, f.observacao??null,
         f.orcamento||null, f.fechou??false, f.valor_rs||null,
         f.pagamento??null, f.analise_credito??false,
         f.data_nasc||null, f.bairro??null, f.motivacoes??null, f.dores??null,
-        f.funnel_id??null, f.temperatura??null, f.time_interno === true,
+        f.funnel_id??fallbackFunnelId, f.temperatura??null, f.time_interno === true,
       ]
     );
     return Response.json(lead, { status: 201 });

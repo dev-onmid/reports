@@ -1,6 +1,13 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { analisarConversa } from '@/lib/crm-ai-analysis';
+import {
+  ensureCrmMessagesSchema,
+  ensureDefaultFunnel,
+  getFirstFunnelStageLabel,
+  normalizeCrmPhone,
+  upsertLeadFromConversation,
+} from '@/lib/crm-conversation-sync';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -105,42 +112,91 @@ async function handleLeadCreate(pool: ReturnType<typeof makeServerPool>, data: a
   const mes    = data.mes ?? `${now.toLocaleString('pt-BR', { month: 'short' })}/${now.getFullYear()}`;
   const dataLead = data.data ?? data.date ?? now.toISOString().slice(0, 10);
 
+  const funnelId = await ensureDefaultFunnel(pool, clientId);
+  const fallbackStatus = await getFirstFunnelStageLabel(pool, funnelId);
+  if (normalizeCrmPhone(numero)) {
+    const lead = await upsertLeadFromConversation(pool, {
+      clientId,
+      phone: numero,
+      name: nome,
+      canal,
+      origin: canal,
+      status: data.status ?? null,
+      observacao: obs,
+    });
+    return { action: 'lead.create', id: lead.id, client_id: clientId, nome, numero };
+  }
+
   const { rows } = await pool.query(
     `INSERT INTO public.crm_leads
-       (client_id, mes, data, nome, numero, canal, observacao, status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       (client_id, mes, data, nome, numero, canal, observacao, status, funnel_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      RETURNING id`,
-    [clientId, mes, dataLead, nome, numero, canal, obs, data.status ?? 'Em Atendimento'],
+    [clientId, mes, dataLead, nome, numero, canal, obs, data.status ?? fallbackStatus, funnelId],
   );
 
   return { action: 'lead.create', id: rows[0].id, client_id: clientId, nome, numero };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+function parseWebhookTimestamp(data: any) {
+  const raw = data.timestamp ?? data.messageTimestamp ?? data.created_at ?? data.createdAt ?? data.date;
+  if (!raw) return new Date().toISOString();
+  const num = Number(raw);
+  if (Number.isFinite(num) && num > 0) {
+    return new Date(num < 10_000_000_000 ? num * 1000 : num).toISOString();
+  }
+  const parsed = new Date(String(raw));
+  return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function handleMessageReceived(pool: ReturnType<typeof makeServerPool>, data: any, direction: 'received' | 'sent') {
-  const numero   = String(data.numero ?? data.phone ?? data.from ?? data.to ?? '').replace(/\D/g, '');
+  const numero   = normalizeCrmPhone(data.numero ?? data.phone ?? data.from ?? data.to);
   const mensagem = String(data.mensagem ?? data.message ?? data.text ?? data.body ?? '').trim();
   const clientId = String(data.client_id ?? data.clientId ?? '');
+  const lid      = normalizeCrmPhone(data.lid ?? data.remoteJid ?? data.remote_jid);
+  const nome     = data.nome ?? data.name ?? data.pushName ?? data.pushname ?? data.contact_name ?? null;
+  const externalId = data.external_id ?? data.messageId ?? data.message_id ?? data.id ?? null;
+  const createdAt = parseWebhookTimestamp(data);
 
-  if (!numero || !mensagem) throw new Error('Campos "numero" e "mensagem" são obrigatórios');
+  if ((!numero && !lid) || !mensagem) throw new Error('Campos "numero" e "mensagem" são obrigatórios');
   if (!clientId) throw new Error('Campo "client_id" é obrigatório para identificar o funil correto');
 
-  // Find lead by phone (digits only match)
+  const syncedLead = await upsertLeadFromConversation(pool, {
+    clientId,
+    phone: numero,
+    lid,
+    name: nome,
+    lastMessageAt: createdAt,
+    lastMessageText: mensagem,
+    lastDirection: direction === 'received' ? 'in' : 'out',
+  });
   const { rows: [lead] } = await pool.query(
-    `SELECT id, status FROM public.crm_leads
-      WHERE client_id = $1
-        AND REGEXP_REPLACE(COALESCE(numero,''), '\\D', '', 'g') = $2
-      ORDER BY created_at DESC LIMIT 1`,
-    [clientId, numero],
+    `SELECT id, status FROM public.crm_leads WHERE id = $1`,
+    [syncedLead.id],
   );
-  if (!lead) return { action: `message.${direction}`, warning: 'Lead não encontrado para este número' };
 
   // Persist message in crm_messages so analisarConversa has full context
-  await pool.query(
-    `INSERT INTO public.crm_messages (lead_id, client_id, direction, text)
-     VALUES ($1, $2, $3, $4)`,
-    [lead.id, clientId, direction === 'received' ? 'in' : 'out', mensagem],
-  ).catch(() => null);
+  await ensureCrmMessagesSchema(pool);
+  if (externalId) {
+    await pool.query(
+      `INSERT INTO public.crm_messages (lead_id, client_id, direction, text, external_id, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (lead_id, external_id) DO NOTHING`,
+      [lead.id, clientId, direction === 'received' ? 'in' : 'out', mensagem, String(externalId), createdAt],
+    ).catch(() => null);
+  } else {
+    await pool.query(
+      `INSERT INTO public.crm_messages (lead_id, client_id, direction, text, created_at)
+       SELECT $1, $2, $3, $4, $5
+       WHERE NOT EXISTS (
+         SELECT 1 FROM public.crm_messages
+          WHERE lead_id = $1 AND direction = $3 AND text = $4 AND created_at = $5
+       )`,
+      [lead.id, clientId, direction === 'received' ? 'in' : 'out', mensagem, createdAt],
+    ).catch(() => null);
+  }
 
   const statusBefore = lead.status;
 

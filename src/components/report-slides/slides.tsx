@@ -27,13 +27,13 @@ const DARK = {
 
 const LIGHT = {
   text: '#0F172A',
-  muted: 'rgba(15,23,42,0.50)',
-  faint: 'rgba(15,23,42,0.28)',
+  muted: '#334155',
+  faint: '#64748B',
   accent: '#7B21D0',
   green: '#16A34A',
-  cardBg: 'rgba(0,0,0,0.04)',
-  cardBorder: 'rgba(0,0,0,0.10)',
-  grid: 'rgba(0,0,0,0.07)',
+  cardBg: '#FFFFFF',
+  cardBorder: '#D6DEE8',
+  grid: '#D6DEE8',
 };
 
 type Colors = typeof DARK;
@@ -56,13 +56,17 @@ interface BaseProps {
 
 function Base({ theme, colors, clientLogo, slideIndex, totalSlides, padding, children }: BaseProps) {
   const light = isLightColor(theme);
+  const normalizedTheme = theme.trim().toLowerCase();
+  const pageBg = light && ['#fff', '#ffffff', 'white', 'rgb(255,255,255)', 'rgb(255, 255, 255)'].includes(normalizedTheme)
+    ? '#F7F8FA'
+    : theme;
   return (
     <div style={{
       width: SLIDE_W,
       height: SLIDE_H,
       position: 'relative',
       overflow: 'hidden',
-      background: theme,
+      background: pageBg,
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif',
     }}>
       {/* Onmid logo — always present top right */}

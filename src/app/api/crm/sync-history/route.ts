@@ -1,20 +1,9 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
+import { ensureCrmMessagesSchema, ensureDefaultFunnel } from '@/lib/crm-conversation-sync';
 
 async function ensureSchema(pool: ReturnType<typeof makeServerPool>) {
-  const stmts = [
-    `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS lead_id UUID`,
-    `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS client_id TEXT`,
-    `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS tipo TEXT NOT NULL DEFAULT 'texto'`,
-    `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS external_id TEXT`,
-    `ALTER TABLE public.crm_messages ALTER COLUMN contact_id DROP NOT NULL`,
-    `CREATE UNIQUE INDEX IF NOT EXISTS crm_messages_lead_external_idx
-       ON public.crm_messages (lead_id, external_id)
-       WHERE external_id IS NOT NULL AND lead_id IS NOT NULL`,
-  ];
-  for (const sql of stmts) {
-    await pool.query(sql).catch(() => null);
-  }
+  await ensureCrmMessagesSchema(pool);
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -71,9 +60,14 @@ async function fetchEvolutionMessages(
   const bodies = [
     { where: { key: { remoteJid } },          page: 1, offset: limit },
     { where: { key: { remoteJidAlt: remoteJid } }, page: 1, offset: limit },
+    { where: { remoteJid },                   page: 1, offset: limit },
+    { where: { remoteJidAlt: remoteJid },     page: 1, offset: limit },
     { where: { key: { remoteJid } },          skip: 0, take: limit },
     { where: { key: { remoteJidAlt: remoteJid } }, skip: 0, take: limit },
+    { where: { remoteJid },                   skip: 0, take: limit },
+    { where: { remoteJidAlt: remoteJid },     skip: 0, take: limit },
     { where: { key: { remoteJid } } },
+    { where: { remoteJid } },
   ];
 
   for (const url of endpoints) {
@@ -166,6 +160,7 @@ export async function POST(req: NextRequest) {
 
   const pool = makeServerPool();
   try {
+    await ensureDefaultFunnel(pool, clientId);
     await ensureSchema(pool);
 
     const { rows: [lead] } = await pool.query(
@@ -257,7 +252,27 @@ export async function POST(req: NextRequest) {
     }
 
     if (imported > 0) {
-      await pool.query(`UPDATE public.crm_leads SET updated_at = NOW() WHERE id = $1`, [leadId]);
+      const { rows: [last] } = await pool.query<{
+        text: string;
+        direction: string;
+        created_at: string;
+      }>(
+        `SELECT text, direction, created_at
+           FROM public.crm_messages
+          WHERE lead_id = $1
+          ORDER BY created_at DESC
+          LIMIT 1`,
+        [leadId],
+      );
+      await pool.query(
+        `UPDATE public.crm_leads
+            SET updated_at = NOW(),
+                whatsapp_last_message_text = COALESCE($2, whatsapp_last_message_text),
+                whatsapp_last_direction = COALESCE($3, whatsapp_last_direction),
+                whatsapp_last_message_at = COALESCE($4::timestamptz, whatsapp_last_message_at)
+          WHERE id = $1`,
+        [leadId, last?.text ?? null, last?.direction ?? null, last?.created_at ?? null],
+      );
     }
 
     return Response.json({ ok: true, imported, skipped, provider: inst.provider });

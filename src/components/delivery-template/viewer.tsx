@@ -55,7 +55,7 @@ export default function DeliveryViewer({ data }: Props) {
       <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
       <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { background: white; font-family: "Inter", -apple-system, sans-serif; }
+        body { background: #EEF1F5; font-family: "Inter", -apple-system, sans-serif; }
         .page { width: ${SLIDE_W}px; height: ${SLIDE_H}px; page-break-after: always; overflow: hidden; }
         @page { size: ${SLIDE_W}px ${SLIDE_H}px; margin: 0; }
         @media print { body { -webkit-print-color-adjust: exact; color-adjust: exact; } }
@@ -73,7 +73,7 @@ export default function DeliveryViewer({ data }: Props) {
       ref={containerRef}
       style={{
         width: '100vw', height: '100vh',
-        background: '#1a1a1a',
+        background: '#EEF1F5',
         display: 'flex', flexDirection: 'column',
         alignItems: 'center', justifyContent: 'flex-start',
         overflow: 'hidden',
@@ -100,7 +100,7 @@ export default function DeliveryViewer({ data }: Props) {
               opacity: i === current ? 1 : 0,
               pointerEvents: i === current ? 'auto' : 'none',
               top: 0,
-              boxShadow: '0 8px 40px rgba(0,0,0,0.5)',
+        boxShadow: '0 16px 42px rgba(15,23,42,0.16)',
               borderRadius: 8,
               overflow: 'hidden',
             }}
@@ -113,9 +113,9 @@ export default function DeliveryViewer({ data }: Props) {
       {/* Controls bar */}
       <div style={{
         width: '100%',
-        background: 'rgba(0,0,0,0.7)',
+        background: 'rgba(255,255,255,0.86)',
         backdropFilter: 'blur(10px)',
-        borderTop: '1px solid rgba(255,255,255,0.1)',
+        borderTop: '1px solid rgba(148,163,184,0.32)',
         padding: '10px 20px',
         display: 'flex',
         alignItems: 'center',
@@ -165,7 +165,7 @@ export default function DeliveryViewer({ data }: Props) {
               fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}
           >‹</button>
-          <span style={{ color: 'white', fontSize: 13, fontWeight: 600, minWidth: 60, textAlign: 'center' }}>
+          <span style={{ color: '#0F172A', fontSize: 13, fontWeight: 600, minWidth: 60, textAlign: 'center' }}>
             {String(current + 1).padStart(2, '0')} / {String(totalSlides).padStart(2, '0')}
           </span>
           <button

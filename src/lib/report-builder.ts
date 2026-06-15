@@ -326,12 +326,17 @@ MISSÃO: transformar dados de tráfego pago e base de clientes em diagnóstico c
 ━━ HIERARQUIA VISUAL OBRIGATÓRIA POR TIPO DE SLIDE ━━
 
 A) CAPA / RESUMO EXECUTIVO (slide 1):
-- Layout: lado esquerdo = identidade (nome cliente, período, objetivo), lado direito = 1 KPI hero Bebas 76px + 3 KPIs secundários
-- Nenhum bloco de texto corrido na capa
+- Layout igual à referência: lado esquerdo com título grande "Relatório de Performance — [Cliente]", texto de apoio, período analisado e comparativo; lado direito com composição visual de relatório (cards flutuantes, gráfico de linha, donut, barras, mapa/ícones); card largo de "Objetivo do relatório" no rodapé direito.
+- A capa NÃO é dashboard de KPI. Ela é abertura editorial/premium com elementos gráficos laterais.
+- O nome do cliente deve ser tão evidente quanto o título.
 
 B) RESULTADOS / VISÃO GERAL (slide 2):
-- Layout: área principal (65%) = gráfico de comparativo ou tabela principal; coluna lateral (35%) = KPI hero + insight + próxima ação
-- Sempre mostrar variação vs período anterior com badge colorido
+- Layout igual à referência: título "Visão geral do mês", subtítulo "Comparativo de [mês atual] com [mês anterior]".
+- Mostrar primeiro o mês atual com 3 cards grandes, nesta ordem: Faturamento, Pedidos, Ticket médio.
+- Logo abaixo, se houver comparativo, mostrar o mês comparativo com os mesmos 3 cards e a mesma ordem.
+- Abaixo disso, criar uma faixa de comparativo entre períodos com variação percentual de Faturamento, Pedidos e Ticket médio.
+- Finalizar com card "Leitura principal" resumindo o que aconteceu no mês.
+- Reduzir dados secundários como clientes ativos, inativos, potenciais e frequência média; não deixar esses dados competirem com os 3 indicadores principais.
 
 C) MÍDIA PAGA / META ADS / GOOGLE ADS:
 - Layout: 4 KPIs compactos no topo + scoreboard de campanhas abaixo
@@ -346,14 +351,21 @@ D) RECOMENDAÇÕES / PRÓXIMOS PASSOS:
 ━━ ESTRUTURA DOS SLIDES (ordem fixa — pule slides sem dados) ━━
 
 SLIDE 1 — CAPA (sempre) [Layout A]
-• Lado esquerdo: nome cliente, período atual, período anterior, objetivo executivo
-• Lado direito: KPI hero = faturamento ou investimento (Bebas 76px) + 3 secundários
-• Conclusão: frase do objetivo do próximo mês
+• Título obrigatório: "Relatório de Performance —" em uma linha e o nome do cliente na linha seguinte.
+• Texto de apoio obrigatório: "Análise de faturamento, pedidos, tráfego, base de clientes, produtos e oportunidades para [mês/próximo ciclo]".
+• Mostrar claramente: "Período analisado: [atual]" e "Comparativo: [anterior]".
+• Lado direito: composição visual com janela de gráfico de linha, card de donut/legenda, card com miniatura abstrata + linhas, card de barras, card de mapa e card de linha menor. Use SVG/CSS, sem imagens externas.
+• Rodapé/lateral inferior: card largo "Objetivo do relatório" com ícone de alvo e texto executivo do objetivo.
+• Manter logo ONMID no topo esquerdo, contador 01/TOTAL no topo direito e assinatura ONMID Reports no rodapé.
 
 SLIDE 2 — RESULTADOS DO MÊS (com CRM ou Meta) [Layout B]
-• Tese no título: ex. "Faturamento cresceu X% — o ticket médio sustenta a margem"
-• Área principal: tabela de comparativo ou barras atual×anterior
-• Lateral: KPI hero faturamento/leads + variação + leitura principal
+• Título obrigatório: "Visão geral do mês".
+• Subtítulo: "Comparativo de [mês atual] com [mês anterior]" quando houver comparativo; caso contrário "Resultado de [mês atual]".
+• Primeira linha: mês atual + cards de Faturamento, Pedidos e Ticket médio, nessa ordem, com ícones.
+• Segunda linha: mês comparativo + cards de Faturamento, Pedidos e Ticket médio, nessa ordem, somente quando houver dados anteriores.
+• Terceira linha: faixa/bloco de comparativo com variação percentual dos 3 indicadores, somente quando houver dados anteriores.
+• Rodapé: card "Leitura principal" com 1-2 frases executivas sobre o que aconteceu.
+• Não inserir clientes ativos/inativos/potenciais/frequência como cards principais neste slide.
 
 SLIDE 3 — META ADS [Layout C]
 • Tese: "Uma campanha concentra o ROAS — priorizar sua verba aumenta o retorno"
@@ -383,13 +395,15 @@ SLIDE 7 — PRÓXIMOS PASSOS (sempre) [Layout D: 3+2 grid]
 
 ━━ DESIGN SYSTEM ON_REPORTS — SIGA EXATAMENTE ━━
 
-DIMENSÃO: 1440×810px por slide. ZERO sombras. ZERO border-radius > 2px.
+DIMENSÃO: 1440×810px por slide.
 CORES:
-  Fundo slide:        #FFFFFF
-  Fundo card:         #F7F8FA
-  Borda:              #E2E8F0
-  Texto principal:    #111827   (títulos, valores — quase preto)
-  Texto secundário:   #374151   (cinza chumbo — labels, body)
+  Fundo externo:       #EEF1F5   (canvas do relatório)
+  Fundo slide:         #F7F8FA   (off-white premium, nunca branco puro)
+  Fundo card:          #FFFFFF   (superfície dos blocos)
+  Fundo linha/faixa:   #F1F5F9   (tabelas e faixas discretas)
+  Borda:               #D6DEE8
+  Texto principal:     #0F172A   (títulos, valores — quase preto)
+  Texto secundário:    #334155   (cinza chumbo — labels, body)
   Verde gráfico:      #55f52f   (fills de barra, bordas, corner squares — NÃO usar em texto pequeno)
   Verde texto:        #1a8a00   (verde legível — labels, "Conclusão", nomes de seção)
   Vermelho:           #DC2626  (risco, queda, atenção)
@@ -399,17 +413,35 @@ CORES:
 FONTES:
   KPIs/títulos fortes: font-family:var(--font-bebas),"Bebas Neue",sans-serif
   Todo resto:          font-family:var(--font-inter),Inter,sans-serif
-RADIUS: 2px em todos os elementos (border-radius:2px)
-SOMBRAS: proibidas
+RADIUS: capa pode usar 14–18px em cards flutuantes para seguir a referência; demais slides podem manter radius pequeno.
+SOMBRAS: capa deve usar sombras suaves em cards flutuantes; demais slides usam sombras discretas apenas quando ajudam a separar blocos.
 
 ━━ PADRÕES HTML OBRIGATÓRIOS ━━
 
 WRAPPER:
-<div style="background:#FFFFFF;padding:28px;font-family:var(--font-inter),Inter,sans-serif">[slides]</div>
+<div style="background:#EEF1F5;padding:28px;font-family:var(--font-inter),Inter,sans-serif">[slides]</div>
+
+CAPA PADRÃO OBRIGATÓRIA:
+<div style="width:1440px;min-height:810px;background:#F7F8FA;border:1px solid #D6DEE8;margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
+  <div style="height:92px;padding:34px 48px 0;display:flex;align-items:flex-start;justify-content:space-between">
+    [logo ONMID à esquerda]
+    <div style="font-size:22px;font-weight:900;color:#0F172A">01/TOTAL<div style="height:2px;background:#55f52f;margin-top:9px;width:58px;margin-left:auto"></div></div>
+  </div>
+  <div style="position:relative;z-index:1;flex:1;padding:82px 48px 68px;display:grid;grid-template-columns:650px 1fr;column-gap:40px">
+    <div>
+      <h1 style="font-size:58px;font-weight:900;color:#0F172A;line-height:1.04;margin:0 0 20px">Relatório de Performance —<br>[CLIENTE]</h1>
+      <p style="font-size:20px;font-weight:500;color:#163461;line-height:1.48;margin:0 0 34px">Análise de faturamento, pedidos, tráfego, base de clientes, produtos e oportunidades para [MÊS/PRÓXIMO CICLO]</p>
+      [duas linhas com ícones: Período analisado e Comparativo]
+    </div>
+    <div style="position:relative">[composição visual lateral com cards flutuantes: gráfico linha, donut, barras, mapa, mini-card de campanha]</div>
+  </div>
+  <div data-conclusion="1" style="position:absolute;right:70px;bottom:78px;width:850px;border-radius:18px;background:#FFFFFF;border:1px solid #E7ECF3;box-shadow:0 18px 42px rgba(15,23,42,.08);display:grid;grid-template-columns:112px 1fr;align-items:center;padding:26px 34px">[Objetivo do relatório]</div>
+  <div style="height:56px;border-top:1px solid #D6DEE8;display:flex;align-items:center;padding:0 48px">ONMID Reports</div>
+</div>
 
 SLIDE GENÉRICO:
-<div style="width:1440px;min-height:810px;background:#FFFFFF;border:1px solid #E2E8F0;margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column">
-  <div style="height:52px;padding:0 48px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #E2E8F0;flex-shrink:0">
+<div style="width:1440px;min-height:810px;background:#F7F8FA;border:1px solid #D6DEE8;margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column">
+  <div style="height:52px;padding:0 48px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #D6DEE8;flex-shrink:0">
     <span style="font-family:var(--font-bebas),'Bebas Neue',sans-serif;font-size:22px;color:#55f52f;letter-spacing:0.06em">ONMID</span>
     <span style="font-size:11px;color:#64748B;font-family:var(--font-inter),Inter,sans-serif;font-weight:600">N / TOTAL</span>
   </div>
@@ -420,27 +452,27 @@ TÍTULO DE SLIDE (tese, não descrição):
 <div style="display:flex;gap:14px;align-items:flex-start;margin-bottom:22px">
   <div style="width:4px;flex-shrink:0;background:#55f52f;align-self:stretch;min-height:42px;margin-top:2px"></div>
   <div>
-    <h2 style="font-family:var(--font-bebas),'Bebas Neue',sans-serif;font-size:34px;color:#111827;margin:0;line-height:1;letter-spacing:0.02em">TESE DO SLIDE</h2>
-    <p style="font-size:11px;font-weight:600;color:#374151;text-transform:uppercase;letter-spacing:0.1em;margin:5px 0 0;font-family:var(--font-inter)">contexto técnico</p>
+    <h2 style="font-family:var(--font-bebas),'Bebas Neue',sans-serif;font-size:34px;color:#0F172A;margin:0;line-height:1;letter-spacing:0.02em">TESE DO SLIDE</h2>
+    <p style="font-size:11px;font-weight:600;color:#334155;text-transform:uppercase;letter-spacing:0.1em;margin:5px 0 0;font-family:var(--font-inter)">contexto técnico</p>
   </div>
 </div>
 
 KPI HERO (1 por slide — o maior número):
-<div style="position:relative;overflow:hidden;border:1px solid #55f52f40;background:#F7F8FA;padding:24px 24px 20px">
+<div style="position:relative;overflow:hidden;border:1px solid #55f52f40;background:#FFFFFF;padding:24px 24px 20px">
   <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#55f52f,#55f52f00)"></div>
   <div style="position:absolute;top:0;left:0;width:14px;height:14px;background:#55f52f"></div>
   <p style="font-size:10px;font-weight:700;color:#1a8a00;text-transform:uppercase;letter-spacing:0.12em;font-family:var(--font-inter);margin:4px 0 10px">LABEL</p>
-  <p style="font-family:var(--font-bebas),'Bebas Neue',sans-serif;font-size:72px;color:#111827;line-height:0.9;margin:0 0 10px">VALOR</p>
-  <p style="font-size:13px;color:#374151;font-family:var(--font-inter);line-height:1.5;margin:0">sub-contexto</p>
+  <p style="font-family:var(--font-bebas),'Bebas Neue',sans-serif;font-size:72px;color:#0F172A;line-height:0.9;margin:0 0 10px">VALOR</p>
+  <p style="font-size:13px;color:#334155;font-family:var(--font-inter);line-height:1.5;margin:0">sub-contexto</p>
 </div>
 
 KPI SECUNDÁRIO (até 3 por slide):
-<div style="position:relative;overflow:hidden;border:1px solid #E2E8F0;background:#F7F8FA;padding:18px 16px">
+<div style="position:relative;overflow:hidden;border:1px solid #D6DEE8;background:#FFFFFF;padding:18px 16px">
   <div style="position:absolute;top:0;left:0;right:0;height:2px;background:#55f52f"></div>
   <div style="position:absolute;top:0;left:0;width:12px;height:12px;background:#55f52f"></div>
-  <p style="font-size:10px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:0.1em;font-family:var(--font-inter);margin:4px 0 8px">LABEL</p>
-  <p style="font-family:var(--font-bebas),'Bebas Neue',sans-serif;font-size:36px;color:#111827;line-height:1;margin:0 0 5px">VALOR</p>
-  <p style="font-size:11px;color:#374151;font-family:var(--font-inter);margin:0">contexto</p>
+  <p style="font-size:10px;font-weight:700;color:#334155;text-transform:uppercase;letter-spacing:0.1em;font-family:var(--font-inter);margin:4px 0 8px">LABEL</p>
+  <p style="font-family:var(--font-bebas),'Bebas Neue',sans-serif;font-size:36px;color:#0F172A;line-height:1;margin:0 0 5px">VALOR</p>
+  <p style="font-size:11px;color:#334155;font-family:var(--font-inter);margin:0">contexto</p>
 </div>
 
 BADGE POSITIVO: <span style="font-size:11px;font-weight:700;color:#55f52f;font-family:var(--font-inter)">↑ +23%</span>
@@ -450,17 +482,17 @@ BADGE ATENÇÃO: <span style="font-size:9px;font-weight:800;color:#FFFFFF;backgr
 
 TABELA DE COMPARATIVO:
 <table style="width:100%;border-collapse:collapse;font-family:var(--font-inter),Inter,sans-serif">
-  <thead><tr style="background:#F7F8FA;border-bottom:1px solid #E2E8F0">
+  <thead><tr style="background:#F1F5F9;border-bottom:1px solid #D6DEE8">
     <th style="padding:9px 14px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#64748B">Métrica</th>
     <th style="padding:9px 14px;text-align:right;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748B">Anterior</th>
     <th style="padding:9px 14px;text-align:right;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748B">Atual</th>
     <th style="padding:9px 14px;text-align:right;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748B">Var.</th>
   </tr></thead>
-  <tbody>[linhas alternadas #F7F8FA / #FFFFFF, border-bottom:1px solid #E2E8F0]</tbody>
+  <tbody>[linhas alternadas #FFFFFF / #F1F5F9, border-bottom:1px solid #D6DEE8]</tbody>
 </table>
 
 CARD DE CAMPANHA (scoreboard):
-<div style="position:relative;overflow:hidden;border:1px solid #55f52f60;background:#F7F8FA;padding:16px">
+<div style="position:relative;overflow:hidden;border:1px solid #55f52f60;background:#FFFFFF;padding:16px">
   <div style="position:absolute;top:0;left:0;right:0;height:2px;background:#55f52f"></div>
   <div style="position:absolute;top:0;left:0;width:12px;height:12px;background:#55f52f"></div>
   <div style="display:flex;justify-content:space-between;align-items:flex-start;margin:4px 0 12px">
@@ -470,14 +502,14 @@ CARD DE CAMPANHA (scoreboard):
     </div>
     [badge CAMPEÃ ou ATENÇÃO]
   </div>
-  [métricas: display:flex;justify-content:space-between; padding:5px 0;border-bottom:1px solid #E2E8F0]
+  [métricas: display:flex;justify-content:space-between; padding:5px 0;border-bottom:1px solid #D6DEE8]
 </div>
 
 CARD DE INSIGHT / CONCLUSÃO (obrigatório em todo slide):
 <div style="margin-top:auto;padding-top:16px;padding-bottom:24px">
   <div style="border-left:3px solid #55f52f;background:#55f52f0D;padding:12px 20px;display:flex;align-items:center;gap:14px">
     <span style="font-size:10px;font-weight:800;color:#1a8a00;text-transform:uppercase;letter-spacing:0.12em;font-family:var(--font-inter);flex-shrink:0">Conclusão</span>
-    <span style="font-size:13px;color:#111827;font-family:var(--font-inter);line-height:1.6">conclusão executiva aqui — dado → decisão → resultado esperado</span>
+    <span style="font-size:13px;color:#0F172A;font-family:var(--font-inter);line-height:1.6">conclusão executiva aqui — dado → decisão → resultado esperado</span>
   </div>
 </div>
 
@@ -487,18 +519,18 @@ BARRA HORIZONTAL (gráficos):
     <span style="font-size:12px;font-weight:600;color:#0F172A;font-family:var(--font-inter)">label</span>
     <span style="font-size:12px;font-weight:700;color:#55f52f;font-family:var(--font-inter)">valor</span>
   </div>
-  <div style="height:8px;background:#E2E8F0;overflow:hidden">
+  <div style="height:8px;background:#D6DEE8;overflow:hidden">
     <div style="height:100%;background:#55f52f;width:XX%"></div>
   </div>
 </div>
 
 DADO AUSENTE (não criar card grande — usar faixa discreta):
-<div style="border-left:2px solid #64748B;padding:8px 14px;background:#F7F8FA;margin:8px 0">
+<div style="border-left:2px solid #64748B;padding:8px 14px;background:#FFFFFF;margin:8px 0">
   <p style="font-size:11px;color:#64748B;font-family:var(--font-inter);margin:0">Dado não integrado neste período — [nome do dado] não foi encontrado nos dados fornecidos.</p>
 </div>
 
 SAÍDA: retorne APENAS o HTML. Sem markdown, sem blocos de código, sem texto antes ou depois.
-O HTML começa com <div style="background:#FFFFFF e termina com </div>`;
+O HTML começa com <div style="background:#EEF1F5 e termina com </div>`;
 
 // ── User Prompt ───────────────────────────────────────────────────────────────
 
@@ -633,32 +665,41 @@ export async function buildOmniReport(input: {
 function buildFallbackHtml(
   clientName: string,
   period: string,
-  monthlyCrm: MonthlyCrm[],
-  monthlyMeta: MonthlyMeta[],
+  _monthlyCrm: MonthlyCrm[],
+  _monthlyMeta: MonthlyMeta[],
 ): string {
-  const totalRegistros    = monthlyCrm.reduce((s, m) => s + m.registros, 0);
-  const totalNovosClientes= monthlyCrm.reduce((s, m) => s + m.novosClientes, 0);
-  const totalSpend        = monthlyMeta.reduce((s, m) => s + m.spend, 0);
-  const hasMeta           = monthlyMeta.length > 0;
+  void _monthlyCrm;
+  void _monthlyMeta;
 
-  return `<div style="background:#F4F4F4;padding:28px;font-family:var(--font-inter),sans-serif">
-  <div style="width:1440px;min-height:810px;background:#111111;margin:0 auto 20px;box-shadow:0 4px 20px rgba(0,0,0,0.08);overflow:hidden;box-sizing:border-box;display:flex;flex-direction:column">
-    <div style="height:52px;padding:0 48px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #222222;flex-shrink:0">
-      <span style="font-family:var(--font-bebas),sans-serif;font-size:22px;color:#00C853;letter-spacing:0.06em">ONMID</span>
-      <span style="font-size:12px;color:#777777">01/01</span>
-    </div>
-    <div style="flex:1;padding:56px 48px 48px;display:flex;flex-direction:column;justify-content:space-between">
-      <div>
-        <div style="font-size:11px;font-weight:700;color:#00C853;text-transform:uppercase;letter-spacing:0.15em;margin-bottom:16px">ONMID · RELATÓRIO DE PERFORMANCE</div>
-        <h1 style="font-family:var(--font-bebas),sans-serif;font-size:80px;color:#FFFFFF;line-height:0.9;margin:0">${clientName.toUpperCase()}</h1>
-        <div style="font-size:13px;color:#777777;margin-top:20px;text-transform:uppercase;letter-spacing:0.08em">Período · ${period}</div>
+  return `<div style="background:#EEF1F5;padding:28px;font-family:var(--font-inter),sans-serif">
+  <div style="width:1440px;min-height:810px;background:#F7F8FA;border:1px solid #D6DEE8;margin:0 auto 20px;box-shadow:0 16px 42px rgba(15,23,42,0.12);overflow:hidden;box-sizing:border-box;display:flex;flex-direction:column;position:relative">
+    <div style="position:absolute;left:-110px;bottom:-130px;width:360px;height:360px;border-radius:50%;background:radial-gradient(circle,#55f52f33 0%,#55f52f16 38%,transparent 72%)"></div>
+    <div style="position:absolute;right:96px;top:88px;width:520px;height:520px;border-radius:50%;background:linear-gradient(135deg,rgba(219,234,254,.68),rgba(255,255,255,.2));opacity:.72"></div>
+    <div style="height:92px;padding:34px 48px 0;display:flex;align-items:flex-start;justify-content:space-between;flex-shrink:0">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-family:var(--font-inter),sans-serif;font-size:34px;font-weight:900;letter-spacing:-0.06em;color:#0F172A;line-height:1">onmid</span>
+        <span style="width:44px;height:22px;border-radius:999px;background:#55f52f;display:inline-flex;align-items:center;justify-content:flex-end;padding-right:4px;box-sizing:border-box;box-shadow:0 8px 20px #55f52f55"><span style="width:14px;height:14px;border-radius:50%;background:#FFFFFF;display:block"></span></span>
+        <span style="font-size:9px;font-weight:700;color:#334155;align-self:flex-start;margin-top:1px">®</span>
       </div>
-      <div style="display:flex;gap:16px;flex-wrap:wrap">
-        ${totalRegistros > 0 ? `<div style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:18px 24px"><div style="font-size:11px;color:#777777;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px">LEADS</div><div style="font-family:var(--font-bebas),sans-serif;font-size:36px;color:#FFFFFF;line-height:1">${totalRegistros}</div></div>` : ''}
-        ${totalNovosClientes > 0 ? `<div style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:18px 24px"><div style="font-size:11px;color:#777777;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px">NOVOS CLIENTES</div><div style="font-family:var(--font-bebas),sans-serif;font-size:36px;color:#FFFFFF;line-height:1">${totalNovosClientes}</div></div>` : ''}
-        ${hasMeta ? `<div style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:18px 24px"><div style="font-size:11px;color:#777777;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px">INVESTIMENTO META</div><div style="font-family:var(--font-bebas),sans-serif;font-size:36px;color:#FFFFFF;line-height:1">${brl(totalSpend)}</div></div>` : ''}
+      <div style="font-family:var(--font-inter),sans-serif;font-size:22px;font-weight:900;color:#0F172A;line-height:1;text-align:right">01/01<div style="height:2px;background:#55f52f;margin-top:9px;width:58px;margin-left:auto"></div></div>
+    </div>
+    <div style="position:relative;z-index:1;flex:1;padding:82px 48px 68px;display:grid;grid-template-columns:650px 1fr;column-gap:40px">
+      <div style="display:flex;flex-direction:column;min-width:0">
+        <h1 style="font-family:var(--font-inter),sans-serif;font-size:58px;font-weight:900;letter-spacing:-0.045em;color:#0F172A;line-height:1.04;margin:0 0 20px">Relatório de Performance —<br>${clientName}</h1>
+        <p style="font-size:20px;font-weight:500;color:#163461;line-height:1.48;margin:0 0 34px;max-width:590px">Análise de faturamento, pedidos, tráfego, base de clientes, produtos e oportunidades para o próximo ciclo.</p>
+        <div style="display:flex;flex-direction:column;gap:18px;margin-top:4px">
+          <div style="display:flex;align-items:center;gap:20px"><div style="width:48px;height:48px;border-radius:15px;background:#55f52f16;display:flex;align-items:center;justify-content:center;font-size:24px;color:#1a8a00">□</div><p style="font-size:18px;color:#14305B;margin:0"><strong style="color:#0F172A">Período analisado:</strong> ${period}</p></div>
+          <div style="display:flex;align-items:center;gap:20px"><div style="width:48px;height:48px;border-radius:15px;background:#0B84FF12;display:flex;align-items:center;justify-content:center;font-size:24px;color:#0B84FF">i</div><p style="font-size:18px;color:#14305B;margin:0"><strong style="color:#0F172A">Comparativo:</strong> período anterior disponível nos dados</p></div>
+        </div>
+      </div>
+      <div style="position:relative;min-height:440px">
+        <div style="position:absolute;right:70px;top:10px;width:360px;height:150px;border-radius:18px;background:#FFFFFF;border:1px solid #E7ECF3;box-shadow:0 18px 42px rgba(15,23,42,.09);padding:22px"><div style="display:flex;gap:8px;margin-bottom:16px"><span style="width:10px;height:10px;border-radius:50%;background:#55f52f"></span><span style="width:10px;height:10px;border-radius:50%;background:#55f52f55"></span><span style="width:10px;height:10px;border-radius:50%;background:#D7DEE8"></span></div><svg viewBox="0 0 460 110" width="100%" height="86"><rect x="0" y="4" width="460" height="104" fill="#F8FAFD" stroke="#E6EDF6"/><path d="M0 86 C46 72 42 34 86 44 C120 52 130 12 164 20 C198 28 190 70 232 62 C270 54 270 18 308 28 C342 38 330 72 378 46 C410 30 414 8 446 12" fill="none" stroke="#0B84FF" stroke-width="3" stroke-linecap="round"/></svg></div>
+        <div style="position:absolute;left:56px;top:144px;width:230px;height:112px;border-radius:17px;background:#FFFFFF;border:1px solid #E7ECF3;box-shadow:0 18px 38px rgba(15,23,42,.10);display:flex;align-items:center;gap:18px;padding:18px"><div style="width:72px;height:72px;border-radius:50%;background:conic-gradient(#55f52f 0 68%,#55f52f55 68% 82%,#DBEAFE 82% 100%);position:relative;flex-shrink:0"><span style="position:absolute;inset:21px;border-radius:50%;background:#FFFFFF"></span></div><div style="flex:1;display:flex;flex-direction:column;gap:12px"><span style="height:8px;border-radius:8px;background:#55f52f;width:18px"></span><span style="height:8px;border-radius:8px;background:#D9E2EE;width:86px"></span><span style="height:8px;border-radius:8px;background:#D9E2EE;width:64px"></span></div></div>
+        <div style="position:absolute;right:0;top:250px;width:196px;height:112px;border-radius:15px;background:#FFFFFF;border:1px solid #E7ECF3;box-shadow:0 18px 38px rgba(15,23,42,.09);display:flex;align-items:flex-end;gap:14px;padding:22px 24px">${[34, 50, 66, 84, 104].map((h, i) => `<span style="width:15px;height:${h}px;border-radius:5px;background:#55f52f;opacity:${0.38 + i * 0.14}"></span>`).join('')}</div>
       </div>
     </div>
+    <div data-conclusion="1" style="position:absolute;right:70px;bottom:78px;width:850px;min-height:116px;border-radius:18px;background:#FFFFFF;border:1px solid #E7ECF3;box-shadow:0 18px 42px rgba(15,23,42,.08);display:grid;grid-template-columns:112px 1fr;align-items:center;padding:26px 34px"><div style="width:78px;height:78px;border-radius:50%;background:#55f52f16;display:flex;align-items:center;justify-content:center;color:#1a8a00;font-size:44px">◎</div><div style="border-left:2px solid #55f52f;padding-left:24px"><p style="font-size:22px;font-weight:900;color:#0F172A;margin:0 0 8px">Objetivo do relatório</p><p style="font-size:16px;font-weight:500;color:#163461;line-height:1.55;margin:0">Apresentar uma leitura clara dos resultados do período, entender o que compôs a performance e indicar oportunidades para aumentar recorrência, reativar clientes e otimizar campanhas.</p></div></div>
+    <div style="height:56px;border-top:1px solid #D6DEE8;display:flex;align-items:center;padding:0 48px;gap:12px"><span style="width:34px;height:18px;border-radius:999px;background:#55f52f;display:inline-flex;align-items:center;justify-content:flex-end;padding-right:3px;box-sizing:border-box"><span style="width:11px;height:11px;border-radius:50%;background:#FFFFFF"></span></span><span style="font-size:13px;font-weight:900;color:#0F172A;letter-spacing:.03em">ONMID</span><span style="font-size:13px;color:#163461">Reports</span></div>
   </div>
 </div>`;
 }

@@ -9,11 +9,13 @@ const GL = '#f0fdf4';
 const GB = '#bbf7d0';
 const B  = '#3b82f6';
 const BL = '#eff6ff';
-const TX = '#111827';
-const TG = '#6b7280';
-const TM = '#374151';
-const BD = '#f1f5f9';
-const SH = '0 12px 34px rgba(15,23,42,0.10), 0 1px 2px rgba(15,23,42,0.04)';
+const RP = '#F7F8FA';
+const SF = '#FFFFFF';
+const TX = '#0F172A';
+const TG = '#475569';
+const TM = '#334155';
+const BD = '#D6DEE8';
+const SH = '0 14px 34px rgba(15,23,42,0.10), 0 1px 2px rgba(15,23,42,0.04)';
 
 // ── SVG icon registry (Lucide-style line icons) ────────────────────────────
 
@@ -74,7 +76,7 @@ function Bar({ pct, color = G }: { pct: number; color?: string }) {
 function Card({ children, style, accent }: { children: ReactNode; style?: CSSProperties; accent?: boolean }) {
   return (
     <div style={{
-      background: accent ? GL : '#fff',
+      background: accent ? GL : SF,
       border: `1.5px solid ${accent ? GB : BD}`,
       borderRadius: 14, padding: '14px 18px',
       boxShadow: accent ? 'none' : SH,
@@ -174,7 +176,7 @@ function Slide({ n, children }: { n: number; children: ReactNode }) {
   return (
     <section className="onmid-report-page" aria-label={`Página ${n}`} style={{
       position: 'relative', width: 'min(100%, var(--screen-w))', aspectRatio: '16 / 9',
-      background: '#fff', overflow: 'hidden', boxSizing: 'border-box',
+      background: RP, overflow: 'hidden', boxSizing: 'border-box',
       fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
       pageBreakAfter: 'always', breakAfter: 'page',
     }}>
@@ -219,7 +221,7 @@ function Page1({ d }: { d: DiagnosticoData }) {
           </div>
           <div style={{
             display: 'inline-flex', alignItems: 'center', gap: 8,
-            background: '#f8fafc', border: `1px solid ${BD}`, borderRadius: 10, padding: '7px 14px',
+            background: SF, border: `1px solid ${BD}`, borderRadius: 10, padding: '7px 14px',
           }}>
             <IBox icon="📊" green size={22} />
             <span style={{ fontSize: 12, color: TG, fontWeight: 500 }}>{d.subtitulo}</span>
@@ -786,7 +788,7 @@ export default function DiagnosticoTemplate({ data: d }: { data: DiagnosticoData
           --slide-w: 13.333in;
           --slide-h: 7.5in;
           --screen-w: 1180px;
-          --report-bg: #f4f6f8;
+          --report-bg: #eef1f5;
         }
         html, body {
           margin: 0;
@@ -807,9 +809,9 @@ export default function DiagnosticoTemplate({ data: d }: { data: DiagnosticoData
           box-shadow: 0 14px 40px rgba(15, 23, 42, 0.16);
         }
         @media print {
-          html, body { width: var(--slide-w); background: #fff; }
+          html, body { width: var(--slide-w); background: var(--report-bg); }
           @page { size: 13.333in 7.5in; margin: 0; }
-          .onmid-report { padding: 0; gap: 0; display: block; background: #fff; }
+          .onmid-report { padding: 0; gap: 0; display: block; background: var(--report-bg); }
           .onmid-report-page {
             width: var(--slide-w) !important;
             height: var(--slide-h) !important;

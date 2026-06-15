@@ -1,11 +1,11 @@
 "use client";
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Archive, RotateCcw, ShieldAlert, Trash2, Plus, Power, PowerOff,
   Search, ArrowUpDown, ChevronDown, EyeOff, LayoutList, LayoutGrid,
-  MoreHorizontal, SlidersHorizontal, PiggyBank, Wallet, History, UserCog, X,
+  MoreHorizontal, SlidersHorizontal, PiggyBank, History, UserCog, X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -38,7 +38,7 @@ export default function ClientesPage() {
     clients, archivedClients, addClient, archiveClient,
     restoreClient, setClientStatus, deleteClient, updateClientGestor, updateClientMeta,
   } = useClients();
-  const { setPayments } = useInvestmentPayments();
+  const { payments, loading: paymentsLoading, setPayments } = useInvestmentPayments();
 
   const [dialogOpen, setDialogOpen]             = useState(false);
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
@@ -86,10 +86,6 @@ export default function ClientesPage() {
 
   const isAdmin = canManageClients(currentRole);
 
-  const allSegments = [...new Set(
-    clients.map(c => c.segment).filter(Boolean)
-  )].sort() as string[];
-
   const allGestores = [...new Set(
     clients.map(c => c.gestor_name).filter(Boolean)
   )].sort() as string[];
@@ -106,16 +102,36 @@ export default function ClientesPage() {
     })
     .sort((a, b) => sortOrder === 'az' ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name));
 
+  const financialByClient = useMemo(() => {
+    const now = new Date();
+    const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const grouped: Record<string, { pending: number; overdue: number; month: number; nextDate: string | null }> = {};
+
+    for (const payment of payments) {
+      const current = grouped[payment.clientId] ?? { pending: 0, overdue: 0, month: 0, nextDate: null };
+      if (payment.date.startsWith(monthKey)) current.month += payment.amount;
+      if (payment.status === 'Em atraso') current.overdue += payment.amount;
+      if (payment.status === 'Pendente') current.pending += payment.amount;
+      if (payment.status !== 'Pago' && (!current.nextDate || payment.date < current.nextDate)) {
+        current.nextDate = payment.date;
+      }
+      grouped[payment.clientId] = current;
+    }
+
+    return grouped;
+  }, [payments]);
+
   useEffect(() => {
-    const session = getAuthSession();
-    setCurrentRole(session?.role ?? '');
-    setSecurityEmail(session?.email ?? '');
+    queueMicrotask(() => {
+      const session = getAuthSession();
+      setCurrentRole(session?.role ?? '');
+      setSecurityEmail(session?.email ?? '');
+    });
     fetch('/api/users').then(r => r.ok ? r.json() : []).then(setUsers).catch(() => {});
     fetch('/api/clients/categories').then(r => r.ok ? r.json() : []).then(setCategories).catch(() => {});
   }, []);
 
   useEffect(() => {
-    setBalancesLoading(true);
     Promise.all([
       fetch('/api/clients/links').then(r => r.ok ? r.json() as Promise<Array<{ clientId: string; platform: string; accountId: string }>> : []),
       fetch('/api/meta/account-balances').then(r => r.ok ? r.json() as Promise<Array<{ id: string; balance: number | null }>> : []),
@@ -213,7 +229,12 @@ export default function ClientesPage() {
   }
 
   function toggleSelect(id: string) {
-    setSelectedIds(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
+    setSelectedIds(prev => {
+      const s = new Set(prev);
+      if (s.has(id)) s.delete(id);
+      else s.add(id);
+      return s;
+    });
   }
 
   function toggleSelectAll() {
@@ -291,6 +312,80 @@ export default function ClientesPage() {
     if (platform === 'meta') return 'text-blue-400 bg-blue-400/10';
     if (platform === 'google') return 'text-red-400 bg-red-400/10';
     return 'text-muted-foreground bg-muted/30';
+  }
+
+  function formatCompactBRL(value: number): string {
+    return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
+  }
+
+  function formatShortDate(iso: string | null): string {
+    if (!iso) return '';
+    return new Date(`${iso}T12:00:00`).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }).replace('.', '');
+  }
+
+  function getFinancialInfo(clientId: string, billingMode?: 'prepaid' | 'card') {
+    const balances = clientBalances[clientId];
+    const hasMeta = balances?.meta !== undefined && balances.meta !== null;
+    const hasGoogle = balances?.google !== undefined && balances.google !== null;
+    const hasBalance = hasMeta || hasGoogle;
+
+    if (balancesLoading || paymentsLoading) {
+      return { label: 'Financeiro', value: '', sub: '', tone: 'text-muted-foreground', loading: true };
+    }
+
+    if (hasBalance) {
+      const meta = balances?.meta ?? 0;
+      const google = balances?.google ?? 0;
+      const parts = [
+        hasMeta ? `Meta ${formatCompactBRL(meta)}` : null,
+        hasGoogle ? `Google ${formatCompactBRL(google)}` : null,
+      ].filter(Boolean).join(' · ');
+
+      return {
+        label: 'Saldo mídia',
+        value: formatCompactBRL(meta + google),
+        sub: parts,
+        tone: meta + google > 0 ? 'text-emerald-400' : 'text-muted-foreground',
+        loading: false,
+      };
+    }
+
+    const finance = financialByClient[clientId];
+    if (finance?.overdue) {
+      return {
+        label: 'Financeiro',
+        value: formatCompactBRL(finance.overdue),
+        sub: 'em atraso',
+        tone: 'text-red-400',
+        loading: false,
+      };
+    }
+    if (finance?.pending) {
+      return {
+        label: 'Invest. pendente',
+        value: formatCompactBRL(finance.pending),
+        sub: finance.nextDate ? `próx. ${formatShortDate(finance.nextDate)}` : 'aguardando envio',
+        tone: 'text-amber-400',
+        loading: false,
+      };
+    }
+    if (finance?.month) {
+      return {
+        label: 'Invest. mês',
+        value: formatCompactBRL(finance.month),
+        sub: 'agenda de mídia',
+        tone: 'text-foreground',
+        loading: false,
+      };
+    }
+
+    return {
+      label: 'Cobrança',
+      value: billingMode === 'card' ? 'Cartão' : 'Pré-pago',
+      sub: billingMode === 'card' ? 'sem saldo manual' : 'sem saldo vinculado',
+      tone: 'text-muted-foreground',
+      loading: false,
+    };
   }
 
   return (
@@ -385,274 +480,271 @@ export default function ClientesPage() {
 
         {/* View toggles */}
         <div className="flex items-center rounded-lg border border-border bg-card">
-          <button className="flex h-9 w-9 items-center justify-center rounded-l-lg bg-primary/10 text-primary">
+          <button className="flex h-9 w-9 items-center justify-center rounded-l-lg text-muted-foreground/50" title="Lista compacta">
             <LayoutList className="h-4 w-4" />
           </button>
-          <button className="flex h-9 w-9 items-center justify-center rounded-r-lg text-muted-foreground hover:text-foreground transition-colors">
+          <button className="flex h-9 w-9 items-center justify-center rounded-r-lg bg-primary/10 text-primary" title="Cards compactos">
             <LayoutGrid className="h-4 w-4" />
           </button>
         </div>
       </div>
 
       {/* ── CLIENT LIST ── */}
-      <div className="space-y-1">
-        {displayedClients.map(cliente => (
-          <div
-            key={cliente.id}
-            className={cn(
-              'group flex items-center gap-3 rounded-xl border bg-card px-4 py-3 transition-all',
-              selectedIds.has(cliente.id)
-                ? 'border-primary/40 bg-primary/5'
-                : 'border-border hover:border-border/80 hover:bg-muted/20'
-            )}
-          >
-            {/* Checkbox */}
-            <input
-              type="checkbox"
-              checked={selectedIds.has(cliente.id)}
-              onChange={() => toggleSelect(cliente.id)}
-              onClick={e => e.stopPropagation()}
-              className={cn(
-                'h-4 w-4 shrink-0 cursor-pointer rounded accent-primary transition-opacity',
-                selectedIds.has(cliente.id) || selectedIds.size > 0 ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-              )}
-            />
+      <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+        {displayedClients.map(cliente => {
+          const finance = getFinancialInfo(cliente.id, cliente.ads_billing_mode);
 
-            {/* Gestor column — clickable for admins */}
+          return (
             <div
+              key={cliente.id}
               className={cn(
-                'hidden sm:flex w-36 shrink-0 items-center gap-2 rounded-lg px-2 py-1 transition-colors',
-                isAdmin && 'cursor-pointer hover:bg-primary/10 hover:ring-1 hover:ring-primary/30'
+                'group relative min-w-0 rounded-xl border bg-card p-4 transition-all',
+                selectedIds.has(cliente.id)
+                  ? 'border-primary/45 bg-primary/5 shadow-[0_0_0_1px_rgba(85,245,47,0.14)]'
+                  : 'border-border hover:border-border/80 hover:bg-muted/15'
               )}
-              onClick={isAdmin ? () => openGestorDialog(cliente) : undefined}
-              title={isAdmin ? 'Alterar gestor' : undefined}
             >
-              {cliente.gestor_name ? (
-                <>
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-bold text-primary ring-1 ring-primary/30">
-                    {cliente.gestor_name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase()}
-                  </div>
-                  <span className="text-xs font-medium text-foreground truncate">{cliente.gestor_name}</span>
-                </>
-              ) : (
-                <span className={cn('text-xs italic', isAdmin ? 'text-muted-foreground/60' : 'text-muted-foreground/40')}>
-                  {isAdmin ? '+ Atribuir' : 'Sem gestor'}
-                </span>
-              )}
-            </div>
+              <div className="flex min-w-0 items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.has(cliente.id)}
+                  onChange={() => toggleSelect(cliente.id)}
+                  onClick={e => e.stopPropagation()}
+                  className={cn(
+                    'mt-3 h-4 w-4 shrink-0 cursor-pointer rounded accent-primary transition-opacity',
+                    selectedIds.has(cliente.id) || selectedIds.size > 0 ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                  )}
+                />
 
-            {/* Avatar + name */}
-            <div className="flex items-center gap-3 min-w-0 flex-1">
-              <Link href={`/clientes/${cliente.id}`}>
-                <ClientAvatar clientId={cliente.id} name={cliente.name} size="md" />
-              </Link>
-              <div className="min-w-0">
-                <Link href={`/clientes/${cliente.id}`}>
-                  <p className="font-bold text-sm text-foreground truncate">{cliente.name}</p>
+                <Link href={`/clientes/${cliente.id}`} className="shrink-0">
+                  <ClientAvatar clientId={cliente.id} name={cliente.name} size="md" />
                 </Link>
-                <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                  {/* Category badge — click to edit inline */}
-                  {inlineEdit?.id === cliente.id && inlineEdit.field === 'category' ? (
-                    <select
-                      autoFocus
-                      value={cliente.category_id ?? ''}
-                      onChange={e => {
-                        updateClientMeta(cliente.id, { category_id: e.target.value || undefined });
-                        setInlineEdit(null);
-                      }}
-                      onBlur={() => setInlineEdit(null)}
-                      className="text-[10px] rounded border border-primary/50 bg-background px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-primary"
-                    >
-                      <option value="">Sem categoria</option>
-                      {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
-                  ) : (
-                    <span
-                      onClick={() => setInlineEdit({ id: cliente.id, field: 'category' })}
-                      className="text-[10px] font-semibold text-muted-foreground bg-muted/50 px-1.5 py-0.5 rounded truncate cursor-pointer hover:bg-primary/10 hover:text-primary transition-colors"
-                      title="Clique para alterar categoria"
-                    >
-                      {cliente.category_name ?? cliente.segment ?? '+ categoria'}
-                    </span>
-                  )}
 
-                  {/* Dashboard type badge — click to edit inline */}
-                  {inlineEdit?.id === cliente.id && inlineEdit.field === 'dashtype' ? (
-                    <select
-                      autoFocus
-                      value={cliente.dashboard_type ?? 'leads'}
-                      onChange={e => {
-                        updateClientMeta(cliente.id, { dashboard_type: e.target.value as DashboardType });
-                        setInlineEdit(null);
-                      }}
-                      onBlur={() => setInlineEdit(null)}
-                      className="text-[10px] rounded border border-primary/50 bg-background px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-primary"
-                    >
-                      <option value="leads">Leads</option>
-                      <option value="branding">Branding</option>
-                      <option value="conversao">Conversão</option>
-                    </select>
-                  ) : (
-                    <span
-                      onClick={() => setInlineEdit({ id: cliente.id, field: 'dashtype' })}
-                      className={cn(
-                        'text-[10px] font-bold px-1.5 py-0.5 rounded uppercase cursor-pointer transition-colors',
-                        cliente.dashboard_type === 'leads' ? 'text-violet-400 bg-violet-500/15 hover:bg-violet-500/30' :
-                        cliente.dashboard_type === 'branding' ? 'text-blue-400 bg-blue-500/15 hover:bg-blue-500/30' :
-                        'text-emerald-400 bg-emerald-500/15 hover:bg-emerald-500/30'
+                <div className="min-w-0 flex-1">
+                  <div className="flex min-w-0 items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <Link href={`/clientes/${cliente.id}`}>
+                        <p className="truncate text-sm font-bold text-foreground hover:text-primary transition-colors">{cliente.name}</p>
+                      </Link>
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                        {inlineEdit?.id === cliente.id && inlineEdit.field === 'category' ? (
+                          <select
+                            autoFocus
+                            value={cliente.category_id ?? ''}
+                            onChange={e => {
+                              updateClientMeta(cliente.id, { category_id: e.target.value || undefined });
+                              setInlineEdit(null);
+                            }}
+                            onBlur={() => setInlineEdit(null)}
+                            className="rounded border border-primary/50 bg-background px-1 py-0.5 text-[10px] focus:outline-none focus:ring-1 focus:ring-primary"
+                          >
+                            <option value="">Sem categoria</option>
+                            {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                          </select>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setInlineEdit({ id: cliente.id, field: 'category' })}
+                            className="max-w-[11rem] truncate rounded bg-muted/50 px-1.5 py-0.5 text-left text-[10px] font-semibold text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
+                            title="Clique para alterar categoria"
+                          >
+                            {cliente.category_name ?? cliente.segment ?? '+ categoria'}
+                          </button>
+                        )}
+
+                        {inlineEdit?.id === cliente.id && inlineEdit.field === 'dashtype' ? (
+                          <select
+                            autoFocus
+                            value={cliente.dashboard_type ?? 'leads'}
+                            onChange={e => {
+                              updateClientMeta(cliente.id, { dashboard_type: e.target.value as DashboardType });
+                              setInlineEdit(null);
+                            }}
+                            onBlur={() => setInlineEdit(null)}
+                            className="rounded border border-primary/50 bg-background px-1 py-0.5 text-[10px] focus:outline-none focus:ring-1 focus:ring-primary"
+                          >
+                            <option value="leads">Leads</option>
+                            <option value="branding">Branding</option>
+                            <option value="conversao">Conversão</option>
+                          </select>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setInlineEdit({ id: cliente.id, field: 'dashtype' })}
+                            className={cn(
+                              'rounded px-1.5 py-0.5 text-[10px] font-bold uppercase transition-colors',
+                              cliente.dashboard_type === 'leads' ? 'bg-violet-500/15 text-violet-400 hover:bg-violet-500/30' :
+                              cliente.dashboard_type === 'branding' ? 'bg-blue-500/15 text-blue-400 hover:bg-blue-500/30' :
+                              'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/30'
+                            )}
+                            title="Clique para alterar tipo de dashboard"
+                          >
+                            {cliente.dashboard_type === 'leads' ? 'Leads' : cliente.dashboard_type === 'branding' ? 'Branding' : 'Conversão'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex shrink-0 items-center gap-2">
+                      <span className={cn(
+                        'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold',
+                        cliente.status === 'Ativo'
+                          ? 'bg-green-500/15 text-green-400'
+                          : cliente.status === 'Inativo'
+                          ? 'bg-orange-500/15 text-orange-400'
+                          : 'bg-muted text-muted-foreground'
+                      )}>
+                        <span className={cn('h-1.5 w-1.5 rounded-full', cliente.status === 'Ativo' ? 'bg-green-400' : cliente.status === 'Inativo' ? 'bg-orange-400' : 'bg-gray-500')} />
+                        {cliente.status}
+                      </span>
+
+                      {isAdmin && (
+                        <div className="relative">
+                          <button
+                            onClick={() => setMenuId(menuId === cliente.id ? null : cliente.id)}
+                            className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-all hover:bg-muted hover:text-foreground"
+                          >
+                            <MoreHorizontal className="h-4 w-4" />
+                          </button>
+                          {menuId === cliente.id && (
+                            <div className="absolute right-0 top-9 z-50 min-w-[160px] rounded-lg border border-border bg-popover py-1 shadow-xl">
+                              {!showArchived && (
+                                <>
+                                  <button
+                                    onClick={() => { openGestorDialog(cliente); setMenuId(null); }}
+                                    className="flex w-full items-center gap-2 px-3 py-2 text-xs transition-colors hover:bg-muted"
+                                  >
+                                    <UserCog className="h-3.5 w-3.5" /> Alterar Gestor
+                                  </button>
+                                  <button
+                                    onClick={() => { void openActivityLog(cliente.id); setMenuId(null); }}
+                                    className="flex w-full items-center gap-2 px-3 py-2 text-xs transition-colors hover:bg-muted"
+                                  >
+                                    <History className="h-3.5 w-3.5" /> Log de Atividade
+                                  </button>
+                                  <button
+                                    onClick={() => { openStatusDialog(cliente, 'Inativo'); setMenuId(null); }}
+                                    className="flex w-full items-center gap-2 px-3 py-2 text-xs text-orange-400 transition-colors hover:bg-orange-500/10"
+                                  >
+                                    <PowerOff className="h-3.5 w-3.5" /> Desativar
+                                  </button>
+                                  <button
+                                    onClick={() => { openArchiveDialog(cliente); setMenuId(null); }}
+                                    className="flex w-full items-center gap-2 px-3 py-2 text-xs transition-colors hover:bg-muted"
+                                  >
+                                    <Archive className="h-3.5 w-3.5" /> Ocultar
+                                  </button>
+                                </>
+                              )}
+                              <button
+                                onClick={() => { openDeleteDialog(cliente); setMenuId(null); }}
+                                className="flex w-full items-center gap-2 px-3 py-2 text-xs text-red-400 transition-colors hover:bg-red-500/10"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" /> Excluir
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       )}
-                      title="Clique para alterar tipo de dashboard"
+                    </div>
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      className={cn(
+                        'flex min-w-0 items-center gap-2 rounded-lg bg-muted/35 px-2.5 py-2 text-left transition-colors',
+                        isAdmin && 'hover:bg-primary/10 hover:ring-1 hover:ring-primary/25'
+                      )}
+                      onClick={isAdmin ? () => openGestorDialog(cliente) : undefined}
+                      title={isAdmin ? 'Alterar gestor' : undefined}
                     >
-                      {cliente.dashboard_type === 'leads' ? 'Leads' : cliente.dashboard_type === 'branding' ? 'Branding' : 'Conversão'}
-                    </span>
-                  )}
+                      {cliente.gestor_name ? (
+                        <>
+                          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-bold text-primary ring-1 ring-primary/30">
+                            {cliente.gestor_name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase()}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Gestor</p>
+                            <p className="truncate text-xs font-semibold text-foreground">{cliente.gestor_name}</p>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <UserCog className="h-4 w-4 shrink-0 text-muted-foreground/60" />
+                          <div>
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Gestor</p>
+                            <p className={cn('text-xs', isAdmin ? 'text-primary' : 'text-muted-foreground')}>{isAdmin ? '+ Atribuir' : 'Sem gestor'}</p>
+                          </div>
+                        </>
+                      )}
+                    </button>
+
+                    <div className="flex min-w-0 items-center gap-2 rounded-lg bg-muted/35 px-2.5 py-2">
+                      <PiggyBank className="h-4 w-4 shrink-0 text-primary" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{finance.label}</p>
+                        {finance.loading ? (
+                          <div className="mt-1 h-3 w-24 animate-pulse rounded bg-muted" />
+                        ) : (
+                          <div className="flex min-w-0 items-baseline gap-2">
+                            <p className={cn('truncate text-xs font-bold tabular-nums', finance.tone)}>{finance.value}</p>
+                            {finance.sub && <p className="truncate text-[10px] text-muted-foreground">{finance.sub}</p>}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                    {!showArchived ? (
+                      <>
+                        <div className="flex items-center gap-1">
+                          {ALL_PLATFORMS.map(p => (
+                            <PlatformIconButton
+                              key={p}
+                              platform={p}
+                              size="sm"
+                              onClick={e => {
+                                e.preventDefault();
+                                setLinkDialogClient(cliente);
+                                setLinkDialogPlatform(p);
+                                setLinkDialogOpen(true);
+                              }}
+                            />
+                          ))}
+                        </div>
+                        <Link
+                          href={`/dashboard?client=${cliente.id}`}
+                          className="inline-flex h-8 items-center justify-center rounded-lg border border-primary/35 bg-primary/10 px-3 text-xs font-bold text-primary transition-colors hover:bg-primary/20"
+                        >
+                          Ver dashboard
+                        </Link>
+                      </>
+                    ) : isAdmin ? (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          onClick={() => openStatusDialog(cliente, 'Ativo')}
+                          className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+                        >
+                          <Power className="h-3.5 w-3.5" /> Ativar
+                        </button>
+                        {cliente.status === 'Arquivado' && (
+                          <button
+                            onClick={() => restoreClient(cliente.id)}
+                            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" /> Restaurar
+                          </button>
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
               </div>
             </div>
-
-            {/* Right side */}
-            <div className="flex items-center gap-4 shrink-0">
-              {/* Status badge */}
-              <span className={cn(
-                'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold',
-                cliente.status === 'Ativo'
-                  ? 'bg-green-500/15 text-green-400'
-                  : cliente.status === 'Inativo'
-                  ? 'bg-orange-500/15 text-orange-400'
-                  : 'bg-muted text-muted-foreground'
-              )}>
-                <span className={cn('h-1.5 w-1.5 rounded-full', cliente.status === 'Ativo' ? 'bg-green-400' : cliente.status === 'Inativo' ? 'bg-orange-400' : 'bg-gray-500')} />
-                {cliente.status}
-              </span>
-
-
-              {/* Balance KPIs */}
-              {!showArchived && (
-                <div className="hidden lg:flex items-center gap-2">
-                  <div className="flex items-center gap-1.5 rounded-lg border border-border bg-background/50 px-2.5 py-1.5 min-w-[110px]">
-                    <PiggyBank className="h-3 w-3 shrink-0" style={{ color: '#0668E1' }} />
-                    {balancesLoading ? (
-                      <div className="h-3 w-14 animate-pulse rounded bg-muted/40" />
-                    ) : clientBalances[cliente.id]?.meta !== undefined && clientBalances[cliente.id]?.meta !== null ? (
-                      <span className="text-xs font-semibold">{(clientBalances[cliente.id].meta!).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })}</span>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">—</span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1.5 rounded-lg border border-border bg-background/50 px-2.5 py-1.5 min-w-[110px]">
-                    <Wallet className="h-3 w-3 shrink-0" style={{ color: '#34A853' }} />
-                    {balancesLoading ? (
-                      <div className="h-3 w-14 animate-pulse rounded bg-muted/40" />
-                    ) : clientBalances[cliente.id]?.google !== undefined && clientBalances[cliente.id]?.google !== null ? (
-                      <span className="text-xs font-semibold">{(clientBalances[cliente.id].google!).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })}</span>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">—</span>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Ver dashboard */}
-              {!showArchived && (
-                <Link
-                  href={`/dashboard?client=${cliente.id}`}
-                  className="text-sm font-medium text-primary hover:text-primary/80 transition-colors whitespace-nowrap"
-                >
-                  Ver dashboard →
-                </Link>
-              )}
-
-              {/* Platform icons */}
-              {!showArchived && (
-                <div className="flex items-center gap-0.5">
-                  {ALL_PLATFORMS.map(p => (
-                    <PlatformIconButton
-                      key={p}
-                      platform={p}
-                      size="sm"
-                      onClick={e => {
-                        e.preventDefault();
-                        setLinkDialogClient(cliente);
-                        setLinkDialogPlatform(p);
-                        setLinkDialogOpen(true);
-                      }}
-                    />
-                  ))}
-                </div>
-              )}
-
-              {/* Archived actions */}
-              {isAdmin && showArchived && (
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => openStatusDialog(cliente, 'Ativo')}
-                    className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    <Power className="h-3.5 w-3.5" /> Ativar
-                  </button>
-                  {cliente.status === 'Arquivado' && (
-                    <button
-                      onClick={() => restoreClient(cliente.id)}
-                      className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
-                    >
-                      <RotateCcw className="h-3.5 w-3.5" /> Restaurar
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {/* ⋮ Menu */}
-              {isAdmin && (
-                <div className="relative">
-                  <button
-                    onClick={() => setMenuId(menuId === cliente.id ? null : cliente.id)}
-                    className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
-                  >
-                    <MoreHorizontal className="h-4 w-4" />
-                  </button>
-                  {menuId === cliente.id && (
-                    <div className="absolute right-0 top-8 z-50 min-w-[160px] rounded-lg border border-border bg-popover shadow-xl py-1">
-                      {!showArchived && (
-                        <>
-                          <button
-                            onClick={() => { openGestorDialog(cliente); setMenuId(null); }}
-                            className="flex w-full items-center gap-2 px-3 py-2 text-xs hover:bg-muted transition-colors"
-                          >
-                            <UserCog className="h-3.5 w-3.5" /> Alterar Gestor
-                          </button>
-                          <button
-                            onClick={() => { void openActivityLog(cliente.id); setMenuId(null); }}
-                            className="flex w-full items-center gap-2 px-3 py-2 text-xs hover:bg-muted transition-colors"
-                          >
-                            <History className="h-3.5 w-3.5" /> Log de Atividade
-                          </button>
-                          <button
-                            onClick={() => { openStatusDialog(cliente, 'Inativo'); setMenuId(null); }}
-                            className="flex w-full items-center gap-2 px-3 py-2 text-xs text-orange-400 hover:bg-orange-500/10 transition-colors"
-                          >
-                            <PowerOff className="h-3.5 w-3.5" /> Desativar
-                          </button>
-                          <button
-                            onClick={() => { openArchiveDialog(cliente); setMenuId(null); }}
-                            className="flex w-full items-center gap-2 px-3 py-2 text-xs hover:bg-muted transition-colors"
-                          >
-                            <Archive className="h-3.5 w-3.5" /> Ocultar
-                          </button>
-                        </>
-                      )}
-                      <button
-                        onClick={() => { openDeleteDialog(cliente); setMenuId(null); }}
-                        className="flex w-full items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 transition-colors"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" /> Excluir
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
+          );
+        })}
 
         {displayedClients.length === 0 && (
           <div className="rounded-xl border border-dashed border-border bg-card/50 p-12 text-center">
