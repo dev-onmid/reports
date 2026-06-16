@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
-import { ensureDefaultFunnel, getFirstFunnelStageLabel } from '@/lib/crm-conversation-sync';
+import { ensureCrmMessagesSchema, ensureDefaultFunnel, getFirstFunnelStageLabel } from '@/lib/crm-conversation-sync';
 
 async function ensureTable(pool: ReturnType<typeof makeServerPool>) {
   await pool.query(`
@@ -71,9 +71,19 @@ export async function GET(req: NextRequest) {
   try {
     await ensureTable(pool);
     await ensureDefaultFunnel(pool, clientId);
+    await ensureCrmMessagesSchema(pool);
     if (since) {
       const { rows } = await pool.query(
-        `SELECT * FROM public.crm_leads WHERE client_id = $1 AND updated_at > $2 ORDER BY updated_at DESC`,
+        `SELECT l.*,
+                COALESCE(l.whatsapp_last_message_at, lm.last_contact_at, l.updated_at, l.created_at) AS last_contact_at
+           FROM public.crm_leads l
+           LEFT JOIN LATERAL (
+             SELECT MAX(m.created_at) AS last_contact_at
+               FROM public.crm_messages m
+              WHERE m.lead_id = l.id
+           ) lm ON true
+          WHERE l.client_id = $1 AND l.updated_at > $2
+          ORDER BY l.updated_at DESC`,
         [clientId, since],
       );
       return Response.json(rows);
@@ -98,8 +108,14 @@ export async function GET(req: NextRequest) {
           AND numero ~ '^[0-9]{10,15}$'
           AND numero NOT LIKE '%--%'
       )
-      SELECT *
+      SELECT ranked.*,
+             COALESCE(ranked.whatsapp_last_message_at, lm.last_contact_at, ranked.updated_at, ranked.created_at) AS last_contact_at
       FROM ranked
+      LEFT JOIN LATERAL (
+        SELECT MAX(m.created_at) AS last_contact_at
+          FROM public.crm_messages m
+         WHERE m.lead_id = ranked.id
+      ) lm ON true
       WHERE rn = 1
       ORDER BY COALESCE(normalized_date, data) DESC NULLS LAST, created_at DESC`,
       [clientId, funnelId ?? null]

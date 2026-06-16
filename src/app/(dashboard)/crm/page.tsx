@@ -38,6 +38,11 @@ type CrmLead = {
   ia_ultimo_analise?: string | null;
   ia_confianca_ultimo?: number | null;
   time_interno?: boolean;
+  last_contact_at?: string | null;
+  whatsapp_last_message_at?: string | null;
+  whatsapp_last_message_text?: string | null;
+  whatsapp_last_direction?: 'in' | 'out' | null;
+  updated_at?: string | null;
   created_at: string | null;
 };
 
@@ -279,8 +284,9 @@ function columnValueText(lead: CrmLead, key: ColumnKey) {
     case 'actions':
       return '';
     case 'data':
+    case 'last_contact_at':
     case 'data_agendada':
-      return dateText(lead[key]);
+      return dateText(lead[key] ?? null);
     case 'valor_rs':
     case 'orcamento':
       return moneyText(lead[key]);
@@ -306,6 +312,31 @@ function passesColumnFilter(lead: CrmLead, key: ColumnKey, value: string) {
   return columnValueText(lead, key).includes(value.toLowerCase());
 }
 
+function sortValue(lead: CrmLead, key: SortableColumnKey): string | number | boolean | null {
+  if (key === 'data' || key === 'data_agendada' || key === 'last_contact_at') {
+    const raw = lead[key];
+    if (!raw) return null;
+    const time = new Date(raw).getTime();
+    return Number.isFinite(time) ? time : null;
+  }
+  if (key === 'valor_rs' || key === 'orcamento') return toMoneyNumber(lead[key]);
+  if (key === 'dia1' || key === 'dia2' || key === 'dia3' || key === 'dia4' || key === 'fechou') return Boolean(lead[key]);
+  if (key === 'temperatura') {
+    const order: Record<string, number> = { quente: 0, morno: 1, frio: 2 };
+    return lead.temperatura ? order[lead.temperatura] ?? 3 : 4;
+  }
+  return columnValueText(lead, key);
+}
+
+function compareSortValues(a: string | number | boolean | null, b: string | number | boolean | null) {
+  if (a === null && b === null) return 0;
+  if (a === null) return 1;
+  if (b === null) return -1;
+  if (typeof a === 'number' && typeof b === 'number') return a - b;
+  if (typeof a === 'boolean' && typeof b === 'boolean') return Number(a) - Number(b);
+  return String(a).localeCompare(String(b), 'pt-BR', { numeric: true, sensitivity: 'base' });
+}
+
 const cell    = 'px-2 py-0 h-9 text-xs focus:outline-none focus:bg-primary/10 bg-transparent border-0 w-full text-foreground placeholder:text-muted-foreground/30';
 const cellSel = cn(cell, 'cursor-pointer appearance-none');
 const cellNew = 'px-2 py-0 h-9 text-xs focus:outline-none focus:bg-primary/10 bg-transparent border-0 w-full text-foreground placeholder:text-muted-foreground/50';
@@ -315,6 +346,7 @@ const COLS = [
   { key: 'data', label: 'Data', width: 110, min: 96, filter: 'text' },
   { key: 'nome', label: 'Nome', width: 170, min: 120, filter: 'text' },
   { key: 'numero', label: 'Número', width: 120, min: 96, filter: 'text' },
+  { key: 'last_contact_at', label: 'Últ. contato', width: 125, min: 110, filter: 'text' },
   { key: 'canal', label: 'Canal', width: 120, min: 90, filter: 'text' },
   { key: 'status', label: 'Status', width: 150, min: 120, filter: 'select' },
   { key: 'temperatura', label: 'Temp.', width: 115, min: 94, filter: 'select' },
@@ -333,11 +365,15 @@ const COLS = [
 ] as const;
 type ColumnKey = typeof COLS[number]['key'];
 type ColumnFilterKind = typeof COLS[number]['filter'];
+type SortableColumnKey = Exclude<ColumnKey, 'select' | 'actions'>;
+type SortDirection = 'asc' | 'desc';
 
 const DEFAULT_COL_WIDTHS = COLS.reduce<Record<ColumnKey, number>>((acc, col) => {
   acc[col.key] = col.width;
   return acc;
 }, {} as Record<ColumnKey, number>);
+const LOCKED_COLUMNS: ColumnKey[] = ['select', 'data', 'nome', 'numero', 'last_contact_at', 'actions'];
+const DEFAULT_VISIBLE_COLUMNS = COLS.map(col => col.key);
 
 // ── Styled select with icon ──────────────────────────────────────────────
 function IconSelect({ icon: Icon, value, onChange, placeholder, children, className }: {
@@ -1240,6 +1276,9 @@ export default function CrmPage() {
   const [temperatureFilter, setTemperatureFilter] = useState('');
   const [columnFilters, setColumnFilters] = useState<Partial<Record<ColumnKey, string>>>({});
   const [colWidths, setColWidths] = useState<Record<ColumnKey, number>>(DEFAULT_COL_WIDTHS);
+  const [visibleColumnKeys, setVisibleColumnKeys] = useState<ColumnKey[]>(DEFAULT_VISIBLE_COLUMNS);
+  const [columnMenuOpen, setColumnMenuOpen] = useState(false);
+  const [sortConfig, setSortConfig] = useState<{ key: SortableColumnKey; direction: SortDirection }>({ key: 'data', direction: 'desc' });
   const [saving, setSaving]         = useState(false);
   const [saveError, setSaveError]   = useState<string | null>(null);
   const [page, setPage]             = useState(1);
@@ -1335,6 +1374,38 @@ export default function CrmPage() {
   }, [colWidths]);
 
   useEffect(() => {
+    if (!clientId) {
+      setVisibleColumnKeys(DEFAULT_VISIBLE_COLUMNS);
+      return;
+    }
+    try {
+      const stored = localStorage.getItem(`crm:visible-columns:${clientId}`);
+      if (!stored) {
+        setVisibleColumnKeys(DEFAULT_VISIBLE_COLUMNS);
+        return;
+      }
+      const parsed = JSON.parse(stored) as ColumnKey[];
+      const allowed = new Set(COLS.map(col => col.key));
+      const next = parsed.filter(key => allowed.has(key));
+      LOCKED_COLUMNS.forEach(key => {
+        if (!next.includes(key)) next.push(key);
+      });
+      setVisibleColumnKeys(next.length > 0 ? next : DEFAULT_VISIBLE_COLUMNS);
+    } catch {
+      setVisibleColumnKeys(DEFAULT_VISIBLE_COLUMNS);
+    }
+  }, [clientId]);
+
+  useEffect(() => {
+    if (!clientId) return;
+    try {
+      localStorage.setItem(`crm:visible-columns:${clientId}`, JSON.stringify(visibleColumnKeys));
+    } catch {
+      // Browser storage can be unavailable in private mode.
+    }
+  }, [clientId, visibleColumnKeys]);
+
+  useEffect(() => {
     try { localStorage.setItem('crm:view-mode', viewMode); } catch { /* ignore */ }
   }, [viewMode]);
 
@@ -1419,6 +1490,40 @@ export default function CrmPage() {
     };
   }, [clientId, selectedFunnelId]);
 
+  function toggleSort(key: ColumnKey) {
+    if (key === 'select' || key === 'actions') return;
+    setSortConfig(prev => (
+      prev.key === key
+        ? { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' }
+        : { key, direction: 'asc' }
+    ));
+  }
+
+  function isColumnVisible(key: ColumnKey) {
+    return visibleColumnKeys.includes(key);
+  }
+
+  function toggleColumnVisibility(key: ColumnKey) {
+    if (LOCKED_COLUMNS.includes(key)) return;
+    setVisibleColumnKeys(prev => {
+      const next = prev.includes(key)
+        ? prev.filter(item => item !== key)
+        : [...prev, key].sort((a, b) => COLS.findIndex(col => col.key === a) - COLS.findIndex(col => col.key === b));
+      setColumnFilters(filters => {
+        if (next.includes(key)) return filters;
+        const copy = { ...filters };
+        delete copy[key];
+        return copy;
+      });
+      return next;
+    });
+  }
+
+  const visibleCols = useMemo(
+    () => COLS.filter(col => visibleColumnKeys.includes(col.key)),
+    [visibleColumnKeys],
+  );
+
   const filtered = useMemo(() => leads.filter(l => {
     if (statusFilter && l.status !== statusFilter) return false;
     if (temperatureFilter) {
@@ -1438,12 +1543,9 @@ export default function CrmPage() {
     return true;
   }).sort((a, b) => {
     if (a.time_interno !== b.time_interno) return a.time_interno ? 1 : -1;
-    const order: Record<string, number> = { quente: 0, morno: 1, frio: 2 };
-    const ta = a.temperatura ? order[a.temperatura] ?? 3 : 3;
-    const tb = b.temperatura ? order[b.temperatura] ?? 3 : 3;
-    if (ta !== tb) return ta - tb;
-    return new Date(b.created_at ?? b.data ?? 0).getTime() - new Date(a.created_at ?? a.data ?? 0).getTime();
-  }), [leads, search, statusFilter, temperatureFilter, columnFilters]);
+    const result = compareSortValues(sortValue(a, sortConfig.key), sortValue(b, sortConfig.key));
+    return sortConfig.direction === 'asc' ? result : -result;
+  }), [leads, search, statusFilter, temperatureFilter, columnFilters, sortConfig]);
 
   const totalPages = pageSize === 0 ? 1 : Math.max(1, Math.ceil(filtered.length / pageSize));
   const paginated  = pageSize === 0 ? filtered : filtered.slice((page - 1) * pageSize, page * pageSize);
@@ -1457,7 +1559,7 @@ export default function CrmPage() {
     () => filtered.filter(lead => lead.time_interno !== true),
     [filtered],
   );
-  const tableMinWidth = useMemo(() => COLS.reduce((sum, col) => sum + colWidths[col.key], 0), [colWidths]);
+  const tableMinWidth = useMemo(() => visibleCols.reduce((sum, col) => sum + colWidths[col.key], 0), [colWidths, visibleCols]);
   const filteredTotals = useMemo(() => ({
     faturamento: filtered.reduce((sum, lead) => sum + toMoneyNumber(lead.valor_rs), 0),
     orcamento: filtered.reduce((sum, lead) => sum + toMoneyNumber(lead.orcamento), 0),
@@ -2064,9 +2166,41 @@ export default function CrmPage() {
                   <button className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
                     <Download className="h-3.5 w-3.5" /> Exportar <ChevronDown className="h-3 w-3" />
                   </button>
-                  <button className="flex h-7 w-7 items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-foreground transition-colors">
-                    <Settings2 className="h-3.5 w-3.5" />
-                  </button>
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setColumnMenuOpen(open => !open)}
+                      title="Editar colunas"
+                      className="flex h-7 w-7 items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      <Settings2 className="h-3.5 w-3.5" />
+                    </button>
+                    {columnMenuOpen && (
+                      <div className="absolute right-0 top-9 z-50 w-64 rounded-xl border border-border bg-popover p-2 shadow-2xl">
+                        <div className="px-2 pb-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                          Colunas da lista
+                        </div>
+                        <div className="max-h-72 overflow-y-auto pr-1">
+                          {COLS.filter(col => col.key !== 'select' && col.key !== 'actions').map(col => {
+                            const locked = LOCKED_COLUMNS.includes(col.key);
+                            return (
+                              <label key={col.key} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs hover:bg-muted/60">
+                                <input
+                                  type="checkbox"
+                                  checked={visibleColumnKeys.includes(col.key)}
+                                  disabled={locked}
+                                  onChange={() => toggleColumnVisibility(col.key)}
+                                  className="h-3.5 w-3.5 accent-primary disabled:opacity-50"
+                                />
+                                <span className={cn('font-medium', locked ? 'text-muted-foreground' : 'text-foreground')}>{col.label}</span>
+                                {locked && <span className="ml-auto text-[9px] text-muted-foreground">fixa</span>}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </>
               )}
             </div>
@@ -2143,13 +2277,13 @@ export default function CrmPage() {
           {viewMode === 'list' && <div className="overflow-auto flex-1 min-h-0">
             <table className="w-full table-fixed border-collapse text-xs" style={{ minWidth: tableMinWidth }}>
               <colgroup>
-                {COLS.map(col => (
+                {visibleCols.map(col => (
                   <col key={col.key} style={{ width: colWidths[col.key] }} />
                 ))}
               </colgroup>
               <thead className="sticky top-0 z-10 bg-card border-b border-border">
                 <tr>
-                  {COLS.map(col => (
+                  {visibleCols.map(col => (
                     <th
                       key={col.key}
                       className="relative px-2 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
@@ -2164,7 +2298,24 @@ export default function CrmPage() {
                           className="h-3.5 w-3.5 accent-primary disabled:opacity-40"
                           title="Selecionar visíveis"
                         />
-                      ) : col.label}
+                      ) : col.key === 'actions' ? null : (
+                        <button
+                          type="button"
+                          onClick={() => toggleSort(col.key)}
+                          className="inline-flex max-w-full items-center gap-1 text-left font-semibold uppercase tracking-wider hover:text-foreground"
+                        >
+                          <span className="truncate">{col.label}</span>
+                          <ArrowUpDown className={cn(
+                            'h-3 w-3 shrink-0',
+                            sortConfig.key === col.key ? 'text-primary' : 'text-muted-foreground/45',
+                          )} />
+                          {sortConfig.key === col.key && (
+                            <span className="text-[9px] text-primary">
+                              {sortConfig.direction === 'asc' ? '↑' : '↓'}
+                            </span>
+                          )}
+                        </button>
+                      )}
                       {col.key !== 'actions' && col.key !== 'select' && (
                         <button
                           type="button"
@@ -2177,7 +2328,7 @@ export default function CrmPage() {
                   ))}
                 </tr>
                 <tr className="border-t border-border/40 bg-card/95">
-                  {COLS.map(col => (
+                  {visibleCols.map(col => (
                     <th key={`${col.key}-filter`} className="px-1.5 pb-2 text-left" style={{ width: colWidths[col.key] }}>
                       <ColumnFilter
                         kind={col.filter}
@@ -2201,47 +2352,48 @@ export default function CrmPage() {
                   className="border-b border-primary/20 bg-primary/5 ring-1 ring-inset ring-primary/20"
                 >
                   <Td center />
-                  <Td><input type="date" value={toD(newDraft.data)} onChange={e => setN('data', e.target.value || null)} className={cellNew} /></Td>
-                  <Td><input type="text" value={newDraft.nome ?? ''} onChange={e => setN('nome', e.target.value || null)} placeholder="Nome" className={cn(cellNew, 'text-primary placeholder:text-primary/40 font-semibold')} /></Td>
-                  <Td><input type="text" value={newDraft.numero ?? ''} onChange={e => setN('numero', e.target.value || null)} placeholder="Número" className={cellNew} /></Td>
-                  <Td>
+                  {isColumnVisible('data') && <Td><input type="date" value={toD(newDraft.data)} onChange={e => setN('data', e.target.value || null)} className={cellNew} /></Td>}
+                  {isColumnVisible('nome') && <Td><input type="text" value={newDraft.nome ?? ''} onChange={e => setN('nome', e.target.value || null)} placeholder="Nome" className={cn(cellNew, 'text-primary placeholder:text-primary/40 font-semibold')} /></Td>}
+                  {isColumnVisible('numero') && <Td><input type="text" value={newDraft.numero ?? ''} onChange={e => setN('numero', e.target.value || null)} placeholder="Número" className={cellNew} /></Td>}
+                  {isColumnVisible('last_contact_at') && <Td><span className="px-2 text-[11px] text-muted-foreground">Automático</span></Td>}
+                  {isColumnVisible('canal') && <Td>
                     <select value={newDraft.canal ?? ''} onChange={e => setN('canal', e.target.value || null)} className={cn(cellNew, 'cursor-pointer appearance-none')}>
                       <option value=""></option>
                       {CANAL_OPTIONS.map(o => <option key={o}>{o}</option>)}
                     </select>
-                  </Td>
-                  <Td>
+                  </Td>}
+                  {isColumnVisible('status') && <Td>
                     <select value={newDraft.status ?? ''} onChange={e => setN('status', e.target.value || null)} className={cn(cellNew, 'cursor-pointer appearance-none', STATUS_COLOR[newDraft.status ?? ''] ?? '')}>
                       {statusOptions.map(o => <option key={o}>{o}</option>)}
                     </select>
-                  </Td>
-                  <Td>
+                  </Td>}
+                  {isColumnVisible('temperatura') && <Td>
                     <select value={newDraft.temperatura ?? ''} onChange={e => setN('temperatura', (e.target.value || null) as Draft['temperatura'])} className={cn(cellNew, 'cursor-pointer appearance-none')}>
                       <option value=""></option>
                       <option value="quente">Quente</option>
                       <option value="morno">Morno</option>
                       <option value="frio">Frio</option>
                     </select>
-                  </Td>
+                  </Td>}
                   {(['dia1','dia2','dia3','dia4'] as const).map(k => (
-                    <Td key={k} center>
+                    isColumnVisible(k) && <Td key={k} center>
                       <input type="checkbox" checked={!!newDraft[k]} onChange={e => setN(k, e.target.checked)} className="h-3.5 w-3.5 accent-primary cursor-pointer" />
                     </Td>
                   ))}
-                  <Td><input type="date" value={toD(newDraft.data_agendada)} onChange={e => setN('data_agendada', e.target.value || null)} className={cellNew} /></Td>
-                  <Td center><input type="checkbox" checked={!!newDraft.fechou} onChange={e => setN('fechou', e.target.checked)} className="h-3.5 w-3.5 accent-primary cursor-pointer" /></Td>
-                  <Td><input type="number" step="0.01" value={newDraft.valor_rs ?? ''} onChange={e => setN('valor_rs', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cn(cellNew, 'text-primary font-semibold')} /></Td>
-                  <Td>
+                  {isColumnVisible('data_agendada') && <Td><input type="date" value={toD(newDraft.data_agendada)} onChange={e => setN('data_agendada', e.target.value || null)} className={cellNew} /></Td>}
+                  {isColumnVisible('fechou') && <Td center><input type="checkbox" checked={!!newDraft.fechou} onChange={e => setN('fechou', e.target.checked)} className="h-3.5 w-3.5 accent-primary cursor-pointer" /></Td>}
+                  {isColumnVisible('valor_rs') && <Td><input type="number" step="0.01" value={newDraft.valor_rs ?? ''} onChange={e => setN('valor_rs', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cn(cellNew, 'text-primary font-semibold')} /></Td>}
+                  {isColumnVisible('pagamento') && <Td>
                     <select value={newDraft.pagamento ?? ''} onChange={e => setN('pagamento', e.target.value || null)} className={cn(cellNew, 'cursor-pointer appearance-none')}>
                       <option value=""></option>
                       {PAGAMENTO_OPTIONS.map(o => <option key={o}>{o}</option>)}
                     </select>
-                  </Td>
-                  <Td><input type="number" step="0.01" value={newDraft.orcamento ?? ''} onChange={e => setN('orcamento', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cellNew} /></Td>
-                  <Td><input type="text" value={newDraft.observacao ?? ''} onChange={e => setN('observacao', e.target.value || null)} placeholder="Observação" className={cellNew} /></Td>
-                  <Td>
+                  </Td>}
+                  {isColumnVisible('orcamento') && <Td><input type="number" step="0.01" value={newDraft.orcamento ?? ''} onChange={e => setN('orcamento', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cellNew} /></Td>}
+                  {isColumnVisible('observacao') && <Td><input type="text" value={newDraft.observacao ?? ''} onChange={e => setN('observacao', e.target.value || null)} placeholder="Observação" className={cellNew} /></Td>}
+                  {isColumnVisible('bairro') && <Td>
                     <input type="text" value={newDraft.bairro ?? ''} onChange={e => setN('bairro', e.target.value || null)} placeholder="Bairro" className={cellNew} onKeyDown={onNewBairroKey} />
-                  </Td>
+                  </Td>}
                   <Td center />
                 </tr>
 
@@ -2279,28 +2431,35 @@ export default function CrmPage() {
                         />
                       </Td>
                       {/* Data + hora */}
-                      <Td>
+                      {isColumnVisible('data') && <Td>
                         {isEditing
                           ? <input type="date" value={toD(d.data)} onChange={e => setE('data', e.target.value || null)} className={cell} />
                           : <div className="px-2 py-1">
                               <div className="text-[11px] font-medium text-foreground">{fmtD(lead.data)}</div>
                               <div className="text-[10px] text-muted-foreground">{fmtTime(lead.created_at)}</div>
                             </div>}
-                      </Td>
+                      </Td>}
                       {/* Nome */}
-                      <Td>
+                      {isColumnVisible('nome') && <Td>
                         {isEditing
                           ? <input type="text" value={d.nome ?? ''} onChange={e => setE('nome', e.target.value || null)} placeholder="Nome" className={cell} />
                           : <span className="block truncate px-2 text-xs font-semibold text-primary" title={lead.nome ?? undefined}>{lead.nome ?? '–'}</span>}
-                      </Td>
+                      </Td>}
                       {/* Número */}
-                      <Td>
+                      {isColumnVisible('numero') && <Td>
                         {isEditing
                           ? <input type="text" value={d.numero ?? ''} onChange={e => setE('numero', e.target.value || null)} placeholder="Número" className={cell} />
                           : <span className="px-2 text-muted-foreground text-[11px]">{lead.numero ?? '–'}</span>}
-                      </Td>
+                      </Td>}
+                      {/* Último contato */}
+                      {isColumnVisible('last_contact_at') && <Td>
+                        <div className="px-2 py-1">
+                          <div className="text-[11px] font-medium text-foreground">{fmtD(lead.last_contact_at ?? lead.whatsapp_last_message_at ?? lead.updated_at ?? lead.created_at)}</div>
+                          <div className="text-[10px] text-muted-foreground">{fmtTime(lead.last_contact_at ?? lead.whatsapp_last_message_at ?? lead.updated_at ?? lead.created_at)}</div>
+                        </div>
+                      </Td>}
                       {/* Canal */}
-                      <Td>
+                      {isColumnVisible('canal') && <Td>
                         {isEditing
                           ? <select value={d.canal ?? ''} onChange={e => setE('canal', e.target.value || null)} className={cellSel}>
                               <option value=""></option>
@@ -2326,9 +2485,9 @@ export default function CrmPage() {
                             : lead.canal
                               ? <span className="block truncate px-2 text-[11px] font-semibold text-primary" title={lead.canal}>{lead.canal}</span>
                               : <span className="px-2 text-muted-foreground text-[11px]">–</span>}
-                      </Td>
+                      </Td>}
                       {/* Status */}
-                      <Td>
+                      {isColumnVisible('status') && <Td>
                         {isEditing
                           ? <select value={d.status ?? ''} onChange={e => setE('status', e.target.value || null)} className={cn(cellSel, STATUS_COLOR[d.status ?? ''] ?? '')}>
                               {statusOptions.map(o => <option key={o}>{o}</option>)}
@@ -2340,9 +2499,9 @@ export default function CrmPage() {
                                 </span>
                               </div>
                             : null}
-                      </Td>
+                      </Td>}
                       {/* Temperatura */}
-                      <Td>
+                      {isColumnVisible('temperatura') && <Td>
                         {isEditing
                           ? <select value={d.temperatura ?? ''} onChange={e => setE('temperatura', (e.target.value || null) as Draft['temperatura'])} className={cellSel}>
                               <option value=""></option>
@@ -2364,10 +2523,10 @@ export default function CrmPage() {
                                 </span>
                               )}
                             </div>}
-                      </Td>
+                      </Td>}
                       {/* 1D–4D */}
                       {(['dia1','dia2','dia3','dia4'] as const).map(k => (
-                        <Td key={k} center>
+                        isColumnVisible(k) && <Td key={k} center>
                           {isEditing
                             ? <input type="checkbox" checked={!!d[k]} onChange={e => setE(k, e.target.checked)} className="h-3.5 w-3.5 accent-primary cursor-pointer" />
                             : <span
@@ -2379,13 +2538,13 @@ export default function CrmPage() {
                         </Td>
                       ))}
                       {/* Data Ag. */}
-                      <Td>
+                      {isColumnVisible('data_agendada') && <Td>
                         {isEditing
                           ? <input type="date" value={toD(d.data_agendada)} onChange={e => setE('data_agendada', e.target.value || null)} className={cell} />
                           : <span className="px-2 text-muted-foreground text-[11px]">{fmtD(lead.data_agendada) || '–'}</span>}
-                      </Td>
+                      </Td>}
                       {/* Fechou */}
-                      <Td center>
+                      {isColumnVisible('fechou') && <Td center>
                         {isEditing
                           ? <input type="checkbox" checked={!!d.fechou} onChange={e => setE('fechou', e.target.checked)} className="h-3.5 w-3.5 accent-primary cursor-pointer" />
                           : <span
@@ -2394,40 +2553,40 @@ export default function CrmPage() {
                             >
                               {lead.fechou ? '✓' : '–'}
                             </span>}
-                      </Td>
+                      </Td>}
                       {/* Valor */}
-                      <Td>
+                      {isColumnVisible('valor_rs') && <Td>
                         {isEditing
                           ? <input type="number" step="0.01" value={d.valor_rs ?? ''} onChange={e => setE('valor_rs', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cn(cell, 'text-primary font-semibold')} />
                           : <span className="px-2 text-muted-foreground text-[11px]">{fmtN(lead.valor_rs) || '0,00'}</span>}
-                      </Td>
+                      </Td>}
                       {/* Pagamento */}
-                      <Td>
+                      {isColumnVisible('pagamento') && <Td>
                         {isEditing
                           ? <select value={d.pagamento ?? ''} onChange={e => setE('pagamento', e.target.value || null)} className={cellSel}>
                               <option value=""></option>
                               {PAGAMENTO_OPTIONS.map(o => <option key={o}>{o}</option>)}
                             </select>
                           : <span className="block truncate px-2 text-[11px] text-muted-foreground" title={lead.pagamento ?? undefined}>{lead.pagamento ?? '–'}</span>}
-                      </Td>
+                      </Td>}
                       {/* Orçamento */}
-                      <Td>
+                      {isColumnVisible('orcamento') && <Td>
                         {isEditing
                           ? <input type="number" step="0.01" value={d.orcamento ?? ''} onChange={e => setE('orcamento', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cell} />
                           : <span className="px-2 text-muted-foreground text-[11px]">{fmtN(lead.orcamento) || '0,00'}</span>}
-                      </Td>
+                      </Td>}
                       {/* Observação */}
-                      <Td>
+                      {isColumnVisible('observacao') && <Td>
                         {isEditing
                           ? <input type="text" value={d.observacao ?? ''} onChange={e => setE('observacao', e.target.value || null)} placeholder="Observação" className={cell} />
                           : <span className="block truncate px-2 text-[11px] text-muted-foreground" title={lead.observacao ?? undefined}>{lead.observacao || 'Observação'}</span>}
-                      </Td>
+                      </Td>}
                       {/* Bairro */}
-                      <Td>
+                      {isColumnVisible('bairro') && <Td>
                         {isEditing
                           ? <input type="text" value={d.bairro ?? ''} onChange={e => setE('bairro', e.target.value || null)} placeholder="Bairro" className={cell} />
                           : <span className="block truncate px-2 text-[11px] text-muted-foreground" title={lead.bairro ?? undefined}>{lead.bairro || 'Bairro'}</span>}
-                      </Td>
+                      </Td>}
                       {/* ⋮ Menu */}
                       <Td center>
                         <div className="relative" ref={menuId === lead.id ? menuRef : undefined}>
