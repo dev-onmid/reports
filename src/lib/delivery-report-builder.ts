@@ -1077,108 +1077,171 @@ function sBase(d: ParsedData, idx: number, total: number): string {
   const pUma = totalAtivos ? Math.round(d.uma_compra  / totalAtivos * 100) : 0;
   const hasDistrib = d.uma_compra > 0 || d.recorrentes > 0;
 
-  const thesis = hasDistrib
-    ? (pUma > 50
-        ? `${pUma}% comprou só 1 vez — converter a 2ª compra é o maior ganho do mês`
-        : `${pRec}% da base ativa já recompra — recorrência sustenta o resultado`)
-    : `Base total de ${numOrDash(tot)} clientes — ${pA}% ativos, ${pI}% inativos`;
+  // ── Custom donut with pct labels inside each segment ──────────────────────
+  const DS = 264;
+  const dcx = DS / 2, dcy = DS / 2;
+  const outerR = 112, innerR = 60, midR = (outerR + innerR) / 2;
 
-  // ── Icon circle (inline SVG) ───────────────────────────────────────────────
-  const ico = (path: string, color: string) => {
-    const stroke = color === PRIMARY ? PRIMARY_TEXT : color;
-    return `<div style="width:44px;height:44px;border-radius:50%;background:${color}15;border:1.5px solid ${color}28;display:flex;align-items:center;justify-content:center;flex-shrink:0">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="${stroke}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${path}</svg>
-    </div>`;
-  };
-  const ICO_USERS  = '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>';
-  const ICO_CLOCK  = '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>';
-  const ICO_STAR   = '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>';
+  const donutHtml = (() => {
+    if (!tot) return '';
+    const slices = [
+      { value: d.ativos,     color: PRIMARY,    textColor: '#0a4d00' },
+      { value: d.inativos,   color: '#f87171',  textColor: '#ffffff' },
+      { value: d.potenciais, color: '#4ade80',  textColor: '#14532d' },
+    ];
+    let angle = 0;
+    const paths: string[] = [];
+    const labels: string[] = [];
+    for (const sl of slices) {
+      if (!sl.value) continue;
+      const sliceAngle = (sl.value / tot) * 360;
+      paths.push(`<path d="${donutPath(dcx, dcy, outerR, innerR, angle, angle + sliceAngle)}" fill="${sl.color}"/>`);
+      const pct = Math.round(sl.value / tot * 100);
+      if (pct >= 7) {
+        const rad = ((angle + sliceAngle / 2) - 90) * Math.PI / 180;
+        const lx = dcx + midR * Math.cos(rad);
+        const ly = dcy + midR * Math.sin(rad);
+        labels.push(`<text x="${lx.toFixed(1)}" y="${(ly + 5).toFixed(1)}" text-anchor="middle" font-size="14" font-weight="800" font-family="Inter,sans-serif" fill="${sl.textColor}">${pct}%</text>`);
+      }
+      angle += sliceAngle;
+    }
+    return `<svg viewBox="0 0 ${DS} ${DS}" width="${DS}" height="${DS}">
+      ${paths.join('\n      ')}
+      <circle cx="${dcx}" cy="${dcy}" r="${innerR - 8}" fill="${CARD}"/>
+      <text x="${dcx}" y="${dcy - 6}" text-anchor="middle" font-size="11" font-weight="600" font-family="Inter,sans-serif" fill="${MUTED}">Total</text>
+      <text x="${dcx}" y="${dcy + 14}" text-anchor="middle" font-size="20" font-weight="800" font-family="Inter,sans-serif" fill="${FG}">${numOrDash(tot)}</text>
+      ${labels.join('\n      ')}
+    </svg>`;
+  })();
 
-  // ── KPI card — briefing spec: 4px bar | icon+LABEL | BIG NUMBER | context ──
-  const card = (label: string, value: string, ctx: string, barColor: string, icoPath: string) => {
-    const isEmpty  = value === '—';
-    const numColor = isEmpty ? MUTED : FG;
-    const numSize  = isEmpty ? '30' : '48';
-    return `<div style="background:${CARD};border:1px solid ${BORDER};overflow:hidden;box-sizing:border-box;display:flex;flex-direction:column">
-      <div style="height:4px;background:${barColor};flex-shrink:0"></div>
-      <div style="padding:18px 20px 20px;display:flex;flex-direction:column;gap:10px">
-        <div style="display:flex;align-items:center;gap:10px">
-          ${ico(icoPath, barColor)}
-          <span style="font-size:11px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};line-height:1.3">${label}</span>
-        </div>
-        <p style="font-family:${BEBAS};font-size:${numSize}px;color:${numColor};line-height:0.9;margin:0;letter-spacing:0.01em">${value}</p>
-        <p style="font-size:12px;color:${MUTED};font-family:${INTER};line-height:1.4;margin:0">${ctx}</p>
+  // ── Top stat cards ─────────────────────────────────────────────────────────
+  const ICO_USERS = '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>';
+  const ICO_CLOCK = '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>';
+  const ICO_STAR  = '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>';
+
+  const topCard = (label: string, value: string, icoPath: string, bg: string, tc: string) =>
+    `<div style="background:${CARD};border:1px solid ${BORDER};border-radius:12px;padding:14px 18px;display:flex;align-items:center;gap:12px;flex:1;min-width:0">
+      <div style="width:40px;height:40px;border-radius:50%;background:${bg}20;flex-shrink:0;display:flex;align-items:center;justify-content:center">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="${tc}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${icoPath}</svg>
+      </div>
+      <div style="min-width:0">
+        <p style="font-size:10px;font-weight:700;color:${MUTED};font-family:${INTER};margin:0 0 2px;text-transform:uppercase;letter-spacing:0.07em">${label}</p>
+        <p style="font-family:${BEBAS};font-size:34px;color:${tc};line-height:1;margin:0;letter-spacing:0.01em">${value}</p>
       </div>
     </div>`;
-  };
 
-  // ── Donut + legend — FIX: percent labels use PRIMARY_TEXT not PRIMARY ───────
-  const donut = tot > 0 ? donutSvg([
-    { label: 'Ativos',       value: d.ativos,     color: PRIMARY },
-    { label: 'Inativos',     value: d.inativos,   color: RED },
-    { label: 'Em Potencial', value: d.potenciais, color: BLUE },
-  ], 180) : '';
-
+  // ── Legend rows ────────────────────────────────────────────────────────────
   const legendRows = [
-    { label: 'Ativos',        count: d.ativos,     pct: pA, color: PRIMARY },
-    { label: 'Inativos',      count: d.inativos,   pct: pI, color: RED },
-    { label: 'Em Potencial',  count: d.potenciais, pct: pP, color: BLUE },
-  ].map(l => {
-    // FIX: PRIMARY chartreuse (#55f52f) is ~1.7:1 contrast on white → invisible.
-    // Use PRIMARY_TEXT (#1a8a00) for all green text labels instead.
-    const pctColor = l.color === PRIMARY ? PRIMARY_TEXT : l.color;
-    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid ${BORDER}">
-      <div style="width:8px;height:8px;border-radius:50%;background:${l.color};flex-shrink:0"></div>
-      <span style="flex:1;font-size:12px;font-weight:600;color:${FG};font-family:${INTER}">${l.label}</span>
-      <span style="font-family:${BEBAS};font-size:20px;color:${FG};line-height:1">${numOrDash(l.count)}</span>
-      <span style="font-size:11px;font-weight:700;color:${pctColor};font-family:${INTER};min-width:32px;text-align:right">${l.pct}%</span>
-    </div>`;
-  }).join('');
+    { label: 'Clientes ativos',       count: d.ativos,     pct: pA, dotColor: PRIMARY,   numColor: PRIMARY_TEXT },
+    { label: 'Clientes inativos',     count: d.inativos,   pct: pI, dotColor: '#ef4444', numColor: '#dc2626'    },
+    { label: 'Clientes em potencial', count: d.potenciais, pct: pP, dotColor: '#4ade80', numColor: '#16a34a'    },
+  ].map(l => `
+    <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid ${BORDER}">
+      <div style="width:10px;height:10px;border-radius:50%;background:${l.dotColor};flex-shrink:0"></div>
+      <span style="flex:1;font-size:13px;font-weight:600;color:${FG};font-family:${INTER}">${l.label}</span>
+      <span style="font-family:${BEBAS};font-size:22px;color:${FG};line-height:1">${numOrDash(l.count)}</span>
+      <span style="font-size:12px;font-weight:700;color:${l.numColor};font-family:${INTER};min-width:36px;text-align:right">${l.pct}%</span>
+    </div>`).join('');
 
-  // ── Frequency section — FIX: omit silently if no data (no client-facing error) ─
-  const freqHtml = hasDistrib ? `
-    <div style="margin-top:20px">
-      <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 10px">Frequência de Compra</p>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1px;background:${BORDER}">
-        <div style="background:${ORANGE}0D;padding:16px;text-align:center">
-          <p style="font-size:10px;font-weight:700;color:${ORANGE};text-transform:uppercase;letter-spacing:0.08em;font-family:${INTER};margin:0 0 8px">1ª compra apenas</p>
-          <p style="font-family:${BEBAS};font-size:36px;color:${FG};line-height:0.9;margin:0 0 6px">${num(d.uma_compra)}</p>
-          <p style="font-size:12px;font-weight:700;color:${ORANGE};font-family:${INTER};margin:0">${pUma}% dos ativos</p>
-        </div>
-        <div style="background:${PRIMARY}0D;padding:16px;text-align:center">
-          <p style="font-size:10px;font-weight:700;color:${PRIMARY_TEXT};text-transform:uppercase;letter-spacing:0.08em;font-family:${INTER};margin:0 0 8px">Recompra (2× ou mais)</p>
-          <p style="font-family:${BEBAS};font-size:36px;color:${FG};line-height:0.9;margin:0 0 6px">${num(d.recorrentes)}</p>
-          <p style="font-size:12px;font-weight:700;color:${PRIMARY_TEXT};font-family:${INTER};margin:0">${pRec}% dos ativos</p>
+  // ── Sub-metrics ────────────────────────────────────────────────────────────
+  const ICO_CART   = '<circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>';
+  const ICO_USER1  = '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>';
+  const ICO_USERS2 = '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>';
+
+  const subMetric = (ico: string, value: string, label: string) =>
+    `<div style="display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;flex:1">
+      <div style="width:44px;height:44px;border-radius:50%;background:${PRIMARY}18;border:1.5px solid ${PRIMARY}30;display:flex;align-items:center;justify-content:center">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="${PRIMARY_TEXT}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ico}</svg>
+      </div>
+      <p style="font-family:${BEBAS};font-size:32px;color:${FG};line-height:1;margin:0">${value}</p>
+      <p style="font-size:11px;font-weight:600;color:${MUTED};font-family:${INTER};margin:0;line-height:1.3">${label}</p>
+    </div>`;
+
+  // ── Segment cards ──────────────────────────────────────────────────────────
+  const ICO_BAG    = '<path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/>';
+  const ICO_REPEAT = '<polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>';
+  const ICO_VIP    = '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>';
+
+  const segCard = (ico: string, title: string, sub: string, ac: string, tc: string) =>
+    `<div style="background:${ac}0A;border:1.5px solid ${ac}25;border-radius:10px;padding:12px 14px;display:flex;align-items:flex-start;gap:10px;flex:1">
+      <div style="width:34px;height:34px;border-radius:50%;background:${ac}18;flex-shrink:0;display:flex;align-items:center;justify-content:center;margin-top:2px">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="${tc}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ico}</svg>
+      </div>
+      <div>
+        <p style="font-size:12px;font-weight:700;color:${tc};font-family:${INTER};margin:0 0 3px">${title}</p>
+        <p style="font-size:11px;color:${MUTED};font-family:${INTER};margin:0;line-height:1.4">${sub}</p>
+      </div>
+    </div>`;
+
+  // ── Insight texts ──────────────────────────────────────────────────────────
+  const leftQuote = pI > 50
+    ? `A base inativa (${pI}%) é o maior ativo oculto — reativação tem custo menor que aquisição.`
+    : `Base ativa sólida. Estratégia: aumentar frequência dos ${numOrDash(d.recorrentes)} clientes fiéis.`;
+
+  const rightConclusion = hasDistrib
+    ? (pUma > 50
+        ? `${num(d.uma_compra)} clientes com 1 pedido: campanha de 2ª compra pode converter 20–30% e dobrar a recorrência.`
+        : `Recorrência de ${pRec}% na base ativa. Foco em aumentar ticket e frequência dos clientes já fiéis.`)
+    : `Base total de ${numOrDash(tot)} cadastros — inativos recentes são o maior ativo para reativação imediata.`;
+
+  // ── Slide body ─────────────────────────────────────────────────────────────
+  const body = `
+<div style="flex:1;display:flex;flex-direction:column;padding-bottom:28px">
+
+  <div style="flex-shrink:0;display:flex;align-items:flex-start;gap:32px;margin-bottom:22px">
+    <div style="flex:0 0 360px">
+      <h1 style="font-family:${INTER};font-size:38px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 8px;letter-spacing:-0.03em">Base de clientes<br>e clientes ativos</h1>
+      <p style="font-size:13px;font-weight:500;color:${MUTED};font-family:${INTER};margin:0;line-height:1.4">Onde está a maior oportunidade de relacionamento</p>
+    </div>
+    <div style="flex:1;display:flex;gap:12px;align-items:stretch">
+      ${topCard('Clientes Ativos',       numOrDash(d.ativos),     ICO_USERS, PRIMARY,    PRIMARY_TEXT)}
+      ${topCard('Clientes Inativos',     numOrDash(d.inativos),   ICO_CLOCK, '#ef4444',  '#dc2626'   )}
+      ${topCard('Clientes em Potencial', numOrDash(d.potenciais), ICO_STAR,  '#4ade80',  '#16a34a'   )}
+    </div>
+  </div>
+
+  <div style="flex:1;display:grid;grid-template-columns:380px 1fr;gap:24px;min-height:0">
+
+    <div style="background:${CARD};border:1px solid ${BORDER};border-radius:16px;padding:24px;display:flex;flex-direction:column;gap:18px">
+      ${tot > 0 ? `<div style="display:flex;justify-content:center">${donutHtml}</div>` : ''}
+      <div>${legendRows}</div>
+      <div style="border-left:3px solid ${PRIMARY};padding-left:12px;margin-top:auto">
+        <p style="font-size:12px;font-weight:500;color:${FG};font-family:${INTER};line-height:1.55;margin:0">${leftQuote}</p>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:16px">
+
+      <div style="background:${CARD};border:1px solid ${BORDER};border-radius:16px;padding:20px 24px">
+        <p style="font-size:11px;font-weight:700;color:${MUTED};font-family:${INTER};margin:0 0 16px;text-transform:uppercase;letter-spacing:0.1em">Dentro da base ativa</p>
+        <div style="display:flex;align-items:flex-start;gap:4px">
+          ${subMetric(ICO_CART,   numOrDash(d.pedidos_ativos),                              'pedidos<br>registrados'  )}
+          <div style="width:1px;background:${BORDER};align-self:stretch;margin:0 8px"></div>
+          ${subMetric(ICO_USER1,  hasDistrib ? numOrDash(d.uma_compra)  : '—', 'clientes<br>1 pedido'    )}
+          <div style="width:1px;background:${BORDER};align-self:stretch;margin:0 8px"></div>
+          ${subMetric(ICO_USERS2, hasDistrib ? numOrDash(d.recorrentes) : '—', 'clientes<br>2+ pedidos'  )}
         </div>
       </div>
-      ${pUma > 50
-        ? insight('Oportunidade clara', `${num(d.uma_compra)} clientes compraram só 1 vez. Uma campanha de 2ª compra com cupom pode converter 20–30% deles.`, ORANGE)
-        : insight('Recorrência saudável', `${pRec}% dos ativos já recompraram. Foco em aumentar frequência e ticket médio por pedido.`)}
-    </div>` : '';
 
-  const conclusion = hasDistrib
-    ? (pUma > 50
-        ? `Prioridade: converter ${num(d.uma_compra)} clientes que compraram só 1 vez — é a maior oportunidade de crescimento disponível.`
-        : `Base de recorrência sólida (${pRec}%). Estratégia: aumentar frequência e ticket dos ${num(d.recorrentes)} clientes fiéis.`)
-    : `Base total: ${numOrDash(tot)} cadastros. ${pA}% ativos, ${pI}% inativos — os inativos recentes são o maior ativo oculto.`;
+      <div style="background:${CARD};border:1px solid ${BORDER};border-radius:16px;padding:20px 24px">
+        <p style="font-size:11px;font-weight:700;color:${MUTED};font-family:${INTER};margin:0 0 14px;text-transform:uppercase;letter-spacing:0.1em">Como segmentar os ativos</p>
+        <div style="display:flex;gap:10px">
+          ${segCard(ICO_BAG,    'Primeira compra',   'incentivar segunda compra',    BLUE,        '#1d4ed8'    )}
+          ${segCard(ICO_REPEAT, 'Recorrentes',       'estimular combos e fidelidade', PRIMARY_TEXT, PRIMARY_TEXT)}
+          ${segCard(ICO_VIP,    'Muito recorrentes', 'comunicação VIP exclusiva',    '#7c3aed',   '#7c3aed'    )}
+        </div>
+      </div>
 
-  const body = `
-${sectionHeader(thesis, `Total: ${numOrDash(tot)} clientes cadastrados`)}
-<div style="display:grid;grid-template-columns:1fr 252px;gap:28px;align-items:start">
-  <div>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px">
-      ${card('Clientes Ativos', numOrDash(d.ativos),     `${pA}% da base total`,    PRIMARY, ICO_USERS)}
-      ${card('Inativos',        numOrDash(d.inativos),   'sem pedido no período',   RED,     ICO_CLOCK)}
-      ${card('Em Potencial',    numOrDash(d.potenciais), 'nunca compraram',          BLUE,    ICO_STAR)}
+      <div data-conclusion="1" style="background:${CARD};border:1px solid ${BORDER};border-radius:16px;padding:18px 22px;display:flex;align-items:flex-start;gap:12px;margin-top:auto">
+        <div style="width:32px;height:32px;border-radius:50%;background:${MUTED}10;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="${MUTED}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        </div>
+        <p style="font-size:13px;font-weight:500;color:${FG};font-family:${INTER};line-height:1.6;margin:0">${rightConclusion}</p>
+      </div>
+
     </div>
-    ${freqHtml}
   </div>
-  <div>
-    ${tot > 0 ? `<div style="display:flex;justify-content:center;margin-bottom:10px">${donut}</div>` : ''}
-    ${legendRows}
-  </div>
-</div>
-${thesisBanner(conclusion)}`;
+</div>`;
 
   return auditSlide(wrapSlide(body, idx, total), 'sBase');
 }
