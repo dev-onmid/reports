@@ -179,7 +179,7 @@ export async function POST(
       return Response.json({ ok: false, error: 'telefone não identificado' }, { status: 400 });
     }
 
-    const { phone, fromMe, text: rawMessageText, timestamp, externalId, ctwaClid, sourceId, pushName, profilePictureUrl } = msg;
+    const { phone, lid, fromMe, text: rawMessageText, timestamp, externalId, ctwaClid, sourceId, pushName, profilePictureUrl } = msg;
     const messageCreatedAt = parseProviderTimestamp(timestamp);
 
     // ── CRM: upsert lead + save message (always, regardless of pixel config) ──
@@ -195,6 +195,7 @@ export async function POST(
     const { id: leadId } = await upsertLeadFromConversation(pool, {
       clientId,
       phone,
+      lid: lid ?? undefined,
       name: contactName ?? undefined,
       profilePictureUrl: profilePictureUrl ?? undefined,
       lastMessageAt: messageCreatedAt,

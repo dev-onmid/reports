@@ -4,6 +4,7 @@ export type WhatsAppProvider = 'zapi' | 'evolution';
 
 export type NormalizedMessage = {
   phone: string;
+  lid: string | undefined;
   fromMe: boolean;
   text: string;
   timestamp: unknown;
@@ -24,6 +25,7 @@ function normalizeZapiPayload(body: any): NormalizedMessage | null {
   if (!phone) return null;
   return {
     phone,
+    lid: undefined,
     fromMe: body.fromMe === true,
     text: (body.text?.message ?? body.body ?? '').trim(),
     timestamp: body.momment ?? body.moment ?? body.timestamp ?? body.messageTimestamp ?? undefined,
@@ -59,8 +61,24 @@ function normalizeEvolutionPayload(body: any): NormalizedMessage | null {
   const data = body.data;
   if (!data?.key) return null;
 
-  const phone = normalizePhone(data.key.remoteJid ?? '');
-  if (!phone) return null;
+  // LID mode (new Evolution addressing): key.remoteJid is an opaque LID ("<id>@lid")
+  // and the real phone is in key.remoteJidAlt. Capture both so the lead can be matched
+  // by phone OR lid — otherwise an inbound reply would create a lead keyed by the LID.
+  const rawRemote = String(data.key.remoteJid ?? '');
+  const altJid    = String(data.key.remoteJidAlt ?? '');
+  const isLid     = rawRemote.endsWith('@lid');
+
+  let phone: string;
+  let lid: string | undefined;
+  if (isLid) {
+    lid   = normalizePhone(rawRemote) || undefined;     // the LID digits
+    phone = altJid ? normalizePhone(altJid) : '';       // real phone from remoteJidAlt
+  } else {
+    phone = normalizePhone(rawRemote);
+    lid   = undefined;
+  }
+  // Need at least one identifier to attach the message to a lead
+  if (!phone && !lid) return null;
 
   const text = extractEvolutionText(data.message ?? {});
 
@@ -71,6 +89,7 @@ function normalizeEvolutionPayload(body: any): NormalizedMessage | null {
 
   return {
     phone,
+    lid,
     fromMe: data.key.fromMe === true,
     text,
     timestamp: data.messageTimestamp ?? data.message?.messageTimestamp ?? undefined,

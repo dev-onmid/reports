@@ -86,6 +86,47 @@ async function fetchEvolutionMessages(
   return [];
 }
 
+// ── Evolution LID mode: resolve a phone → the conversation's real remoteJid ────
+// New Evolution instances address chats by an opaque LID (e.g. "159816320323777@lid")
+// instead of "<phone>@s.whatsapp.net". Messages are stored under that LID, so a
+// findMessages by phone returns 0. The real phone is exposed inside each chat at
+// `lastMessage.key.remoteJidAlt`. We scan findChats to map phone → remoteJid (LID).
+async function resolveEvolutionRemoteJid(
+  base: string, apikey: string, instanceName: string, phone: string,
+): Promise<string | null> {
+  const headers = { 'Content-Type': 'application/json', apikey };
+  const want = phone.replace(/\D/g, '');
+  if (!want) return null;
+
+  let chats: Record<string, unknown>[] = [];
+  for (const body of [{}, { where: {} }] as const) {
+    try {
+      const res = await fetch(`${base}/chat/findChats/${instanceName}`, {
+        method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(12_000),
+      });
+      if (!res.ok) continue;
+      const j = await res.json().catch(() => null);
+      const arr = Array.isArray(j)
+        ? j
+        : ((j as Record<string, unknown> | null)?.records ?? (j as Record<string, unknown> | null)?.chats ?? []);
+      if (Array.isArray(arr) && arr.length) { chats = arr as Record<string, unknown>[]; break; }
+    } catch { continue; }
+  }
+
+  for (const c of chats) {
+    const rj = String(c.remoteJid ?? c.id ?? '');
+    if (!rj || rj.endsWith('@g.us') || rj.includes('broadcast') || rj.includes('newsletter')) continue;
+    // real phone lives in lastMessage.key.remoteJidAlt (LID mode) or top-level remoteJidAlt
+    const lastMsg = c.lastMessage as Record<string, unknown> | undefined;
+    const lastKey = lastMsg?.key as Record<string, unknown> | undefined;
+    const alt = String(lastKey?.remoteJidAlt ?? c.remoteJidAlt ?? '');
+    const altDigits = alt.replace(/\D/g, '');
+    const rjDigits  = rj.split('@')[0].replace(/\D/g, '');
+    if (altDigits === want || rjDigits === want) return rj;
+  }
+  return null;
+}
+
 // ── Z-API: fetch last N messages for a phone number ───────────────────────────
 async function fetchZapiMessages(instanceId: string, token: string, phone: string, limit: number) {
   // Normalize: Z-API expects number without country code in some endpoints
@@ -191,25 +232,48 @@ export async function POST(req: NextRequest) {
 
     let rawRecords: Record<string, unknown>[] = [];
     let usedProvider: string | null = null;
-    const tried: Array<{ instance: string; provider: string; records: number }> = [];
+    let usedJid: string | null = null;
+    const tried: Array<{ instance: string; provider: string; records: number; via?: string }> = [];
 
     for (const ist of instances) {
       let recs: Record<string, unknown>[] = [];
+      let jidUsed: string | null = null;
+      let via = 'phone';
       if (ist.provider === 'evolution') {
         if (evoBase && evoKey) {
           for (const remoteJid of jidFormats) {
             recs = await fetchEvolutionMessages(evoBase, evoKey, ist.instance_id, remoteJid, LIMIT);
-            if (recs.length > 0) break;
+            if (recs.length > 0) { jidUsed = remoteJid; break; }
+          }
+          // LID mode: phone-based lookup failed → resolve the real remoteJid (LID) via findChats
+          if (recs.length === 0) {
+            const resolved = await resolveEvolutionRemoteJid(evoBase, evoKey, ist.instance_id, phone);
+            if (resolved) {
+              recs = await fetchEvolutionMessages(evoBase, evoKey, ist.instance_id, resolved, LIMIT);
+              if (recs.length > 0) { jidUsed = resolved; via = 'lid'; }
+            }
           }
         }
       } else {
         recs = await fetchZapiMessages(ist.instance_id, ist.token, phone, LIMIT);
       }
-      tried.push({ instance: ist.instance_id, provider: ist.provider, records: recs.length });
+      tried.push({ instance: ist.instance_id, provider: ist.provider, records: recs.length, via });
       if (recs.length > 0) {
         rawRecords = recs;
         usedProvider = ist.provider;
+        usedJid = jidUsed;
         break;
+      }
+    }
+
+    // Persist the resolved LID so future syncs are instant and the webhook can match it.
+    if (usedJid && usedJid.endsWith('@lid')) {
+      const lidDigits = usedJid.split('@')[0].replace(/\D/g, '');
+      if (lidDigits && lidDigits !== phone) {
+        await pool.query(
+          `UPDATE public.crm_leads SET whatsapp_lid = COALESCE(whatsapp_lid, $2) WHERE id = $1`,
+          [leadId, lidDigits],
+        ).catch(() => null);
       }
     }
 
