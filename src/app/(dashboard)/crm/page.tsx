@@ -52,6 +52,7 @@ type CrmFunnel = { id: string; name: string; created_at: string };
 type CrmStage  = { id: string; label: string; color: string; position: number };
 type LocalStage = CrmStage & { _isNew?: boolean };
 type CrmTab = 'leads' | 'chat' | 'followup' | 'attendance';
+type DatePreset = 'all' | 'today' | 'yesterday' | 'last7' | 'last14' | 'last30' | 'thisMonth' | 'lastMonth' | 'custom';
 
 type AttendanceMetrics = {
   summary: {
@@ -217,6 +218,54 @@ function isDateInRange(v: string | null | undefined, from: string, to: string) {
 function fmtD(v: string | null) {
   const s = toD(v); if (!s) return '';
   const [y, m, d] = s.split('-'); return `${d}/${m}/${y}`;
+}
+function localDateString(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+function addDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+function presetDateRange(preset: DatePreset) {
+  const today = new Date();
+  const startThisMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+  const endThisMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+  const startLastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+  const endLastMonth = new Date(today.getFullYear(), today.getMonth(), 0);
+
+  if (preset === 'today') return { from: localDateString(today), to: localDateString(today) };
+  if (preset === 'yesterday') {
+    const yesterday = addDays(today, -1);
+    return { from: localDateString(yesterday), to: localDateString(yesterday) };
+  }
+  if (preset === 'last7') return { from: localDateString(addDays(today, -6)), to: localDateString(today) };
+  if (preset === 'last14') return { from: localDateString(addDays(today, -13)), to: localDateString(today) };
+  if (preset === 'last30') return { from: localDateString(addDays(today, -29)), to: localDateString(today) };
+  if (preset === 'thisMonth') return { from: localDateString(startThisMonth), to: localDateString(endThisMonth) };
+  if (preset === 'lastMonth') return { from: localDateString(startLastMonth), to: localDateString(endLastMonth) };
+  return { from: '', to: '' };
+}
+function shortDateLabel(value: string) {
+  const [year, month, day] = value.split('-');
+  return year && month && day ? `${day}/${month}/${year}` : '';
+}
+function periodLabel(preset: DatePreset, from: string, to: string) {
+  const labels: Record<DatePreset, string> = {
+    all: 'Todo período',
+    today: 'Hoje',
+    yesterday: 'Ontem',
+    last7: 'Últimos 7 dias',
+    last14: 'Últimos 14 dias',
+    last30: 'Últimos 30 dias',
+    thisMonth: 'Este mês',
+    lastMonth: 'Mês passado',
+    custom: from || to ? `${from ? shortDateLabel(from) : 'Início'} até ${to ? shortDateLabel(to) : 'Hoje'}` : 'Personalizado',
+  };
+  return labels[preset];
 }
 function fmtTime(v: string | null) {
   if (!v) return '';
@@ -885,11 +934,13 @@ function AttendanceView({
   month,
   from,
   to,
+  onOpenChat,
 }: {
   clientId: string;
   month: string;
   from: string;
   to: string;
+  onOpenChat: (leadId: string) => void;
 }) {
   const [data, setData] = useState<AttendanceMetrics | null>(null);
   const [loading, setLoading] = useState(true);
@@ -982,10 +1033,22 @@ function AttendanceView({
               <p className="py-6 text-center text-xs text-muted-foreground">Sem canais no período.</p>
             ) : data.sources.map(source => {
               const max = Math.max(...data.sources.map(item => item.total), 1);
+              const channel = detectChannels(source.canal)[0];
               return (
                 <div key={source.canal ?? 'Sem canal'} className="space-y-1">
                   <div className="flex justify-between text-xs">
-                    <span className="font-semibold">{source.canal ?? 'Sem canal'}</span>
+                    <span className="flex min-w-0 items-center gap-2 font-semibold">
+                      {channel ? (
+                        <span className={cn('inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-white ring-1 ring-white/10', channel.bg)}>
+                          {channel.icon}
+                        </span>
+                      ) : (
+                        <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[9px] font-black text-muted-foreground ring-1 ring-border">
+                          ?
+                        </span>
+                      )}
+                      <span className="truncate">{channel?.label ?? source.canal ?? 'Sem canal'}</span>
+                    </span>
                     <span className="text-muted-foreground">{source.total}</span>
                   </div>
                   <div className="h-2 overflow-hidden rounded-full bg-muted">
@@ -1007,7 +1070,13 @@ function AttendanceView({
           {data.waiting.length === 0 ? (
             <p className="px-4 py-8 text-center text-xs text-muted-foreground">Nenhum lead aguardando resposta.</p>
           ) : data.waiting.map(lead => (
-            <div key={lead.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-3 px-4 py-3">
+            <button
+              key={lead.id}
+              type="button"
+              onClick={() => onOpenChat(lead.id)}
+              className="grid w-full grid-cols-[1fr_auto_auto] items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/40 focus:outline-none focus:ring-1 focus:ring-primary"
+              title="Abrir conversa no chat"
+            >
               <div className="min-w-0">
                 <p className="truncate text-sm font-semibold">{lead.nome ?? lead.numero ?? 'Sem nome'}</p>
                 <p className="truncate text-xs text-muted-foreground">{lead.numero ?? 'Sem número'} · {lead.canal ?? 'Sem canal'}</p>
@@ -1019,7 +1088,7 @@ function AttendanceView({
                 <p className="text-xs font-bold text-red-300">{formatDuration(lead.waiting_seconds)}</p>
                 <p className="text-[10px] text-muted-foreground">{fmtD(lead.last_message_at)}</p>
               </div>
-            </div>
+            </button>
           ))}
         </div>
       </section>
@@ -1471,6 +1540,8 @@ export default function CrmPage() {
   const [monthFilter, setMonthFilter] = useState('');
   const [dateFromFilter, setDateFromFilter] = useState('');
   const [dateToFilter, setDateToFilter] = useState('');
+  const [datePreset, setDatePreset] = useState<DatePreset>('all');
+  const [dateMenuOpen, setDateMenuOpen] = useState(false);
   const [columnFilters, setColumnFilters] = useState<Partial<Record<ColumnKey, string>>>({});
   const [colWidths, setColWidths] = useState<Record<ColumnKey, number>>(DEFAULT_COL_WIDTHS);
   const [visibleColumnKeys, setVisibleColumnKeys] = useState<ColumnKey[]>(DEFAULT_VISIBLE_COLUMNS);
@@ -1483,6 +1554,8 @@ export default function CrmPage() {
   const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
   const [menuId, setMenuId]         = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const dateMenuRef = useRef<HTMLDivElement>(null);
+  const [chatFocusLeadId, setChatFocusLeadId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'list' | 'kanban'>(() => {
     if (typeof window === 'undefined') return 'kanban';
     return (localStorage.getItem('crm:view-mode') as 'list' | 'kanban' | null) ?? 'kanban';
@@ -1642,6 +1715,7 @@ export default function CrmPage() {
   useEffect(() => {
     function onDown(e: MouseEvent) {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuId(null);
+      if (dateMenuRef.current && !dateMenuRef.current.contains(e.target as Node)) setDateMenuOpen(false);
     }
     document.addEventListener('mousedown', onDown);
     return () => document.removeEventListener('mousedown', onDown);
@@ -1714,6 +1788,31 @@ export default function CrmPage() {
       });
       return next;
     });
+  }
+
+  function applyDatePreset(nextPreset: DatePreset) {
+    setDatePreset(nextPreset);
+    setMonthFilter('');
+    if (nextPreset === 'custom') {
+      setDateMenuOpen(true);
+      return;
+    }
+    const range = presetDateRange(nextPreset);
+    setDateFromFilter(range.from);
+    setDateToFilter(range.to);
+    setDateMenuOpen(false);
+  }
+
+  function updateCustomDateRange(side: 'from' | 'to', value: string) {
+    setDatePreset('custom');
+    setMonthFilter('');
+    if (side === 'from') setDateFromFilter(value);
+    else setDateToFilter(value);
+  }
+
+  function openLeadChat(leadId: string) {
+    setChatFocusLeadId(leadId);
+    setCrmView('chat');
   }
 
   const visibleCols = useMemo(
@@ -2272,61 +2371,84 @@ export default function CrmPage() {
               </>
             )}
 
-            <div className="relative">
-              <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-              <input
-                type="month"
-                value={monthFilter}
-                onChange={e => {
-                  setMonthFilter(e.target.value);
-                  if (e.target.value) {
-                    setDateFromFilter('');
-                    setDateToFilter('');
-                  }
-                }}
-                title="Filtrar por mês da data do lead"
-                className="w-40 rounded-lg border border-border bg-card py-2 pl-8 pr-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-              />
-            </div>
-
-            <div className="flex items-center gap-1 rounded-lg border border-border bg-card px-2 py-1">
-              <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />
-              <input
-                type="date"
-                value={dateFromFilter}
-                onChange={e => {
-                  setDateFromFilter(e.target.value);
-                  if (e.target.value) setMonthFilter('');
-                }}
-                title="Data inicial"
-                className="w-32 bg-transparent text-xs outline-none"
-              />
-              <span className="text-xs text-muted-foreground">até</span>
-              <input
-                type="date"
-                value={dateToFilter}
-                onChange={e => {
-                  setDateToFilter(e.target.value);
-                  if (e.target.value) setMonthFilter('');
-                }}
-                title="Data final"
-                className="w-32 bg-transparent text-xs outline-none"
-              />
-            </div>
-
-            {(monthFilter || dateFromFilter || dateToFilter) && (
+            <div ref={dateMenuRef} className="relative">
               <button
                 type="button"
-                onClick={() => {
-                  setMonthFilter('');
-                  setDateFromFilter('');
-                  setDateToFilter('');
-                }}
-                className="rounded-lg border border-border px-3 py-2 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground"
+                onClick={() => setDateMenuOpen(open => !open)}
+                className={cn(
+                  'flex h-10 min-w-[190px] items-center justify-between gap-2 rounded-lg border border-border bg-card px-3 text-sm font-semibold transition-colors hover:bg-muted/50',
+                  (dateFromFilter || dateToFilter || monthFilter) ? 'text-foreground' : 'text-muted-foreground',
+                )}
               >
-                Limpar período
+                <span className="flex min-w-0 items-center gap-2">
+                  <CalendarDays className="h-4 w-4 shrink-0" />
+                  <span className="truncate">{periodLabel(datePreset, dateFromFilter, dateToFilter)}</span>
+                </span>
+                <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
               </button>
-            )}
+
+              {dateMenuOpen && (
+                <div className="absolute left-0 top-11 z-50 w-72 rounded-xl border border-border bg-popover p-2 shadow-xl">
+                  <div className="grid grid-cols-2 gap-1">
+                    {([
+                      ['all', 'Todo período'],
+                      ['today', 'Hoje'],
+                      ['yesterday', 'Ontem'],
+                      ['last7', 'Últimos 7 dias'],
+                      ['last14', 'Últimos 14 dias'],
+                      ['last30', 'Últimos 30 dias'],
+                      ['thisMonth', 'Este mês'],
+                      ['lastMonth', 'Mês passado'],
+                    ] as Array<[DatePreset, string]>).map(([preset, label]) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => applyDatePreset(preset)}
+                        className={cn(
+                          'rounded-lg px-3 py-2 text-left text-xs font-semibold transition-colors hover:bg-muted',
+                          datePreset === preset ? 'bg-primary/15 text-primary' : 'text-muted-foreground',
+                        )}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="mt-2 border-t border-border pt-2">
+                    <button
+                      type="button"
+                      onClick={() => applyDatePreset('custom')}
+                      className={cn(
+                        'mb-2 w-full rounded-lg px-3 py-2 text-left text-xs font-semibold transition-colors hover:bg-muted',
+                        datePreset === 'custom' ? 'bg-primary/15 text-primary' : 'text-muted-foreground',
+                      )}
+                    >
+                      Período personalizado
+                    </button>
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="space-y-1">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">De</span>
+                        <input
+                          type="date"
+                          value={dateFromFilter}
+                          onChange={e => updateCustomDateRange('from', e.target.value)}
+                          className="h-9 w-full rounded-lg border border-border bg-background px-2 text-xs outline-none focus:ring-1 focus:ring-primary"
+                        />
+                      </label>
+                      <label className="space-y-1">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Até</span>
+                        <input
+                          type="date"
+                          value={dateToFilter}
+                          onChange={e => updateCustomDateRange('to', e.target.value)}
+                          className="h-9 w-full rounded-lg border border-border bg-background px-2 text-xs outline-none focus:ring-1 focus:ring-primary"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
 
             {crmView === 'leads' && (
               <>
@@ -2390,7 +2512,7 @@ export default function CrmPage() {
       {/* ── CHAT VIEW ───────────────────────────────────────────────── */}
       {clientId && crmView === 'chat' && (
         <div className="flex-1 min-h-0 overflow-hidden">
-          <ChatView clientId={clientId} statusOptions={statusOptions} />
+          <ChatView clientId={clientId} statusOptions={statusOptions} focusLeadId={chatFocusLeadId} />
         </div>
       )}
 
@@ -2407,6 +2529,7 @@ export default function CrmPage() {
           month={monthFilter}
           from={dateFromFilter}
           to={dateToFilter}
+          onOpenChat={openLeadChat}
         />
       )}
 

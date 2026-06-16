@@ -389,7 +389,15 @@ function ConfirmDialog({
 
 // ── Main ChatView ─────────────────────────────────────────────────────────────
 
-export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: { clientId: string; statusOptions?: string[] }) {
+export function ChatView({
+  clientId,
+  statusOptions = DEFAULT_STATUS_OPTIONS,
+  focusLeadId,
+}: {
+  clientId: string;
+  statusOptions?: string[];
+  focusLeadId?: string | null;
+}) {
   const [leads,      setLeads]      = useState<InboxLead[]>([]);
   const [loading,    setLoading]    = useState(true);
   const [search,     setSearch]     = useState('');
@@ -449,6 +457,11 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
     .slice(0, AUTO_HISTORY_CONVERSATIONS)
     .map(lead => lead.id)
     .join('|');
+
+  useEffect(() => {
+    if (!focusLeadId) return;
+    queueMicrotask(() => setSelectedId(focusLeadId));
+  }, [focusLeadId]);
 
   // ── Scroll helpers ──────────────────────────────────────────────────────────
   function isNearBottom() {
