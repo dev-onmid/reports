@@ -162,51 +162,59 @@ export async function POST(req: NextRequest) {
       return Response.json({ error: 'Lead não encontrado ou sem número' }, { status: 404 });
     }
 
-    // Prefer the Evolution instance when a client has both providers active — Evolution
-    // is the live/primary instance; Z-API rows are legacy. Must match the inbox list and
-    // the send path, otherwise we'd list conversations from one instance but fetch history
-    // from another → 0 results / wrong-number history.
-    const { rows: [inst] } = await pool.query(
+    // Try ALL active instances of this client (Evolution first) until one actually has
+    // this conversation. This removes the dependency on guessing the "right" instance:
+    // in a multi-instance setup a chat can live on instance A while another path picked B.
+    // These are still only the client's OWN instances — never another client's.
+    const { rows: instances } = await pool.query<{ instance_id: string; token: string; provider: string }>(
       `SELECT instance_id, token, provider FROM public.client_zapi_instances
        WHERE client_id = $1 AND ativo = true
-       ORDER BY CASE WHEN provider = 'evolution' THEN 0 ELSE 1 END, created_at ASC
-       LIMIT 1`,
+       ORDER BY CASE WHEN provider = 'evolution' THEN 0 ELSE 1 END, created_at ASC`,
       [clientId],
     );
-    if (!inst) {
+    if (instances.length === 0) {
       return Response.json({ error: 'Nenhuma instância WhatsApp ativa.' }, { status: 404 });
     }
 
     const phone = lead.numero.replace(/\D/g, '');
+    const lid = (lead.whatsapp_lid as string | null)?.replace(/\D/g, '') ?? null;
     const LIMIT = 50;
 
-    let rawRecords: Record<string, unknown>[] = [];
+    const evoBase = (process.env.EVOLUTION_API_URL ?? '').replace(/\/$/, '');
+    const evoKey  = process.env.EVOLUTION_API_KEY ?? '';
+    const jidFormats = [
+      `${phone}@s.whatsapp.net`,
+      `${phone}@lid`,
+      ...(lid && lid !== phone ? [`${lid}@lid`, `${lid}@s.whatsapp.net`] : []),
+      `${phone}@c.us`,
+    ];
 
-    if (inst.provider === 'evolution') {
-      const base = (process.env.EVOLUTION_API_URL ?? '').replace(/\/$/, '');
-      const apikey = process.env.EVOLUTION_API_KEY ?? '';
-      if (!base || !apikey) {
-        return Response.json({ error: 'EVOLUTION_API_URL ou EVOLUTION_API_KEY não configurados.' }, { status: 500 });
+    let rawRecords: Record<string, unknown>[] = [];
+    let usedProvider: string | null = null;
+    const tried: Array<{ instance: string; provider: string; records: number }> = [];
+
+    for (const ist of instances) {
+      let recs: Record<string, unknown>[] = [];
+      if (ist.provider === 'evolution') {
+        if (evoBase && evoKey) {
+          for (const remoteJid of jidFormats) {
+            recs = await fetchEvolutionMessages(evoBase, evoKey, ist.instance_id, remoteJid, LIMIT);
+            if (recs.length > 0) break;
+          }
+        }
+      } else {
+        recs = await fetchZapiMessages(ist.instance_id, ist.token, phone, LIMIT);
       }
-      // Build list of JIDs to try (phone in both @s.whatsapp.net and @lid, plus stored LID)
-      const lid = (lead.whatsapp_lid as string | null)?.replace(/\D/g, '') ?? null;
-      const jidFormats = [
-        `${phone}@s.whatsapp.net`,
-        `${phone}@lid`,
-        ...(lid && lid !== phone ? [`${lid}@lid`, `${lid}@s.whatsapp.net`] : []),
-        `${phone}@c.us`,
-      ];
-      for (const remoteJid of jidFormats) {
-        rawRecords = await fetchEvolutionMessages(base, apikey, inst.instance_id, remoteJid, LIMIT);
-        if (rawRecords.length > 0) break;
+      tried.push({ instance: ist.instance_id, provider: ist.provider, records: recs.length });
+      if (recs.length > 0) {
+        rawRecords = recs;
+        usedProvider = ist.provider;
+        break;
       }
-    } else {
-      // Z-API
-      rawRecords = await fetchZapiMessages(inst.instance_id, inst.token, phone, LIMIT);
     }
 
     if (rawRecords.length === 0) {
-      return Response.json({ ok: true, imported: 0, skipped: 0, provider: inst.provider });
+      return Response.json({ ok: true, imported: 0, skipped: 0, tried });
     }
 
     let imported = 0;
@@ -267,7 +275,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    return Response.json({ ok: true, imported, skipped, provider: inst.provider });
+    return Response.json({ ok: true, imported, skipped, provider: usedProvider, tried });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('[sync-history]', msg);
