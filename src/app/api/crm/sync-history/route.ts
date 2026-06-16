@@ -45,6 +45,12 @@ function extractRecords(raw: unknown): Record<string, any>[] {
 }
 
 // ── Evolution API: fetch last N messages for a remoteJid ──────────────────────
+// PERF: must stay well under the Vercel Hobby 10s function budget. Only the nested
+// `where.key.remoteJid` format filters correctly (the flat form returns ALL chats and
+// would pollute the lead). We send exactly ONE request to chat/findMessages and trust a
+// 200 (even when empty); only on a non-200 do we fall back to message/findMessages.
+// The old code tried 3 endpoints × 5 bodies = 15 requests per number, which timed out
+// for LID contacts (every phone-based lookup returns 200-empty before the LID resolves).
 async function fetchEvolutionMessages(
   base: string, apikey: string, instanceName: string, remoteJid: string, limit: number,
 ) {
@@ -52,36 +58,18 @@ async function fetchEvolutionMessages(
   const endpoints = [
     `${base}/chat/findMessages/${instanceName}`,
     `${base}/message/findMessages/${instanceName}`,
-    `${base}/messages/findMessages/${instanceName}`,
   ];
-
-  // CRITICAL: only the nested `where.key.remoteJid` format actually filters by contact.
-  // The flat `where.remoteJid` format is broken in this Evolution version — it ignores
-  // the filter and returns the last N messages across ALL chats, which would pollute the
-  // lead with another conversation's history. Verified live: nested → 7 correct records,
-  // flat → 50 unrelated records. Keep ONLY the nested-key variants (remoteJid + the
-  // remoteJidAlt used by LID-mode instances where the real phone lives in remoteJidAlt).
-  const bodies = [
-    { where: { key: { remoteJid } },               page: 1, offset: limit },
-    { where: { key: { remoteJidAlt: remoteJid } }, page: 1, offset: limit },
-    { where: { key: { remoteJid } },               skip: 0, take: limit },
-    { where: { key: { remoteJidAlt: remoteJid } }, skip: 0, take: limit },
-    { where: { key: { remoteJid } } },
-  ];
+  const body = JSON.stringify({ where: { key: { remoteJid } }, page: 1, offset: limit });
 
   for (const url of endpoints) {
-    for (const bodyObj of bodies) {
-      try {
-        const res = await fetch(url, {
-          method: 'POST', headers, body: JSON.stringify(bodyObj),
-          signal: AbortSignal.timeout(10_000),
-        });
-        if (!res.ok) continue;
-        const raw = await res.json().catch(() => null);
-        const records = extractRecords(raw);
-        if (records.length > 0) return records;
-      } catch { continue; }
-    }
+    try {
+      const res = await fetch(url, {
+        method: 'POST', headers, body, signal: AbortSignal.timeout(7_000),
+      });
+      if (!res.ok) continue;                 // invalid endpoint → try the next one
+      const raw = await res.json().catch(() => null);
+      return extractRecords(raw);            // valid response → trust it (may be empty)
+    } catch { continue; }
   }
   return [];
 }
@@ -102,7 +90,7 @@ async function resolveEvolutionRemoteJid(
   for (const body of [{}, { where: {} }] as const) {
     try {
       const res = await fetch(`${base}/chat/findChats/${instanceName}`, {
-        method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(12_000),
+        method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(8_000),
       });
       if (!res.ok) continue;
       const j = await res.json().catch(() => null);
@@ -223,11 +211,12 @@ export async function POST(req: NextRequest) {
 
     const evoBase = (process.env.EVOLUTION_API_URL ?? '').replace(/\/$/, '');
     const evoKey  = process.env.EVOLUTION_API_KEY ?? '';
+    // Keep this list short — each entry is a network round-trip against the 10s budget.
+    // phone@s.whatsapp.net covers non-LID contacts; a stored LID covers LID contacts;
+    // everything else is handled by resolveEvolutionRemoteJid() below.
     const jidFormats = [
       `${phone}@s.whatsapp.net`,
-      `${phone}@lid`,
-      ...(lid && lid !== phone ? [`${lid}@lid`, `${lid}@s.whatsapp.net`] : []),
-      `${phone}@c.us`,
+      ...(lid && lid !== phone ? [`${lid}@lid`] : []),
     ];
 
     let rawRecords: Record<string, unknown>[] = [];
