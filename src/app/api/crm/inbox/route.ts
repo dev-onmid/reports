@@ -18,6 +18,35 @@ function getNested(obj: Record<string, unknown>, path: string[]): unknown {
   }, obj);
 }
 
+function asNonEmptyString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+}
+
+function extractProfilePictureUrl(chat: Record<string, unknown>): string | null {
+  const candidates = [
+    chat.profilePicUrl,
+    chat.profilePictureUrl,
+    chat.profile_picture_url,
+    chat.picture,
+    chat.pictureUrl,
+    chat.photo,
+    chat.image,
+    chat.avatar,
+    chat.imgUrl,
+    getNested(chat, ['contact', 'profilePicUrl']),
+    getNested(chat, ['contact', 'profilePictureUrl']),
+    getNested(chat, ['contact', 'picture']),
+    getNested(chat, ['contact', 'photo']),
+    getNested(chat, ['profilePicture', 'url']),
+    getNested(chat, ['picture', 'url']),
+  ];
+  for (const candidate of candidates) {
+    const value = asNonEmptyString(candidate);
+    if (value) return value;
+  }
+  return null;
+}
+
 function parseProviderTimestamp(value: unknown): string | null {
   if (value === null || value === undefined || value === '') return null;
   if (value instanceof Date) return value.toISOString();
@@ -155,6 +184,76 @@ async function fetchProviderChats(instance: {
   return extractRecords(raw);
 }
 
+function extractProfilePictureFromResponse(raw: unknown): string | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as Record<string, unknown>;
+  const candidates = [
+    obj.profilePictureUrl,
+    obj.profilePicUrl,
+    obj.picture,
+    obj.pictureUrl,
+    obj.url,
+    obj.link,
+    obj.photo,
+    obj.avatar,
+    getNested(obj, ['data', 'profilePictureUrl']),
+    getNested(obj, ['data', 'profilePicUrl']),
+    getNested(obj, ['data', 'picture']),
+    getNested(obj, ['data', 'url']),
+  ];
+  for (const candidate of candidates) {
+    const value = asNonEmptyString(candidate);
+    if (value) return value;
+  }
+  return null;
+}
+
+async function fetchProviderProfilePicture(instance: {
+  instance_id: string;
+  token: string;
+  provider: string;
+}, phone: string, remoteJid: string): Promise<string | null> {
+  if (instance.provider === 'evolution') {
+    const base = (process.env.EVOLUTION_API_URL ?? '').replace(/\/$/, '');
+    const apikey = process.env.EVOLUTION_API_KEY ?? '';
+    if (!base || !apikey) return null;
+    const headers = { 'Content-Type': 'application/json', apikey };
+    const number = remoteJid || `${phone}@s.whatsapp.net`;
+    const attempts: RequestInit[] = [
+      { method: 'POST', headers, body: JSON.stringify({ number }) },
+      { method: 'POST', headers, body: JSON.stringify({ number: phone }) },
+      { method: 'POST', headers, body: JSON.stringify({ remoteJid: number }) },
+    ];
+
+    for (const opts of attempts) {
+      try {
+        const res = await fetch(`${base}/chat/fetchProfilePictureUrl/${instance.instance_id}`, {
+          ...opts,
+          signal: AbortSignal.timeout(4_000),
+        });
+        if (!res.ok) continue;
+        const url = extractProfilePictureFromResponse(await res.json().catch(() => null));
+        if (url) return url;
+      } catch { continue; }
+    }
+    return null;
+  }
+
+  try {
+    const res = await fetch(
+      `${ZAPI_BASE}/${instance.instance_id}/token/${instance.token}/profile-picture?phone=${encodeURIComponent(phone)}`,
+      {
+        headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(4_000),
+      },
+    );
+    if (!res.ok) return null;
+    return extractProfilePictureFromResponse(await res.json().catch(() => null));
+  } catch {
+    return null;
+  }
+}
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const clientId = searchParams.get('clientId');
@@ -223,10 +322,9 @@ export async function GET(req: NextRequest) {
     } catch { /* not critical */ }
 
     try {
-      // Avatar URLs (profile_picture_url column may not exist on every install)
+      // Avatar URLs. ensureDefaultFunnel() creates profile_picture_url through the CRM schema helper.
       const { rows: avs } = await pool.query<{ id: string; avatar_url: string | null }>(
-        `SELECT id,
-           COALESCE(profile_picture_url, picture_url, avatar_url) AS avatar_url
+        `SELECT id, profile_picture_url AS avatar_url
          FROM public.crm_leads
          WHERE id = ANY($1::uuid[])`,
         [ids],
@@ -347,15 +445,7 @@ export async function POST(req: NextRequest) {
         // Keep LID for use in message history queries
         const lid = isLid ? remoteJid.split('@')[0] : null;
         const name = String(chat.name ?? chat.pushName ?? chat.pushname ?? chat.verifiedName ?? chat.phone ?? phone);
-        const profilePictureUrl = typeof chat.profilePicUrl === 'string'
-          ? chat.profilePicUrl
-          : typeof chat.profilePictureUrl === 'string'
-            ? chat.profilePictureUrl
-            : typeof chat.profile_picture_url === 'string'
-              ? chat.profile_picture_url
-              : typeof chat.picture === 'string'
-                ? chat.picture
-                : null;
+        const profilePictureUrl = extractProfilePictureUrl(chat);
         return {
           phone,
           lid,
@@ -380,14 +470,31 @@ export async function POST(req: NextRequest) {
 
     console.log(`[inbox] fetched=${chats.length} mapped=${mapped.length} contacts=${contacts.length}`);
 
+    const profileLookups = new Map<string, string | null>();
+    const lookupTargets = contacts
+      .filter(contact => !contact.profilePictureUrl)
+      .slice(0, 12);
+    await Promise.all(lookupTargets.map(async contact => {
+      const key = contact.remoteJid || contact.phone;
+      if (profileLookups.has(key)) return;
+      profileLookups.set(
+        key,
+        await fetchProviderProfilePicture(instance, contact.phone, contact.remoteJid),
+      );
+    }));
+
     let imported = 0;
     for (const contact of contacts) {
+      const profilePictureUrl =
+        contact.profilePictureUrl
+        ?? profileLookups.get(contact.remoteJid || contact.phone)
+        ?? null;
       await upsertLeadFromConversation(pool, {
         clientId,
         phone: contact.phone,
         lid: contact.lid,
         name: contact.name,
-        profilePictureUrl: contact.profilePictureUrl,
+        profilePictureUrl,
         lastMessageAt: contact.lastMessageAt,
         lastMessageText: contact.lastMessageText,
         lastDirection: contact.lastDirection,
