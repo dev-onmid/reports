@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { ChatView } from './chat-view';
 import { FollowupTab, useActiveFollowups, FollowupBadge } from './followup-tab';
+import { DisparosTab } from './disparos-tab';
 import { useClients } from '@/lib/client-store';
 import { ClientAvatar, fetchClientPicture } from '@/components/client-avatar';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
@@ -51,7 +52,7 @@ type Draft = Partial<Omit<CrmLead, 'id' | 'client_id' | 'created_at'>>;
 type CrmFunnel = { id: string; name: string; created_at: string };
 type CrmStage  = { id: string; label: string; color: string; position: number };
 type LocalStage = CrmStage & { _isNew?: boolean };
-type CrmTab = 'leads' | 'chat' | 'followup' | 'attendance';
+type CrmTab = 'leads' | 'chat' | 'followup' | 'attendance' | 'disparos';
 type DatePreset = 'all' | 'today' | 'yesterday' | 'last7' | 'last14' | 'last30' | 'thisMonth' | 'lastMonth' | 'custom';
 
 type AttendanceMetrics = {
@@ -1563,7 +1564,7 @@ export default function CrmPage() {
   const [crmView, setCrmView] = useState<CrmTab>(() => {
     if (typeof window === 'undefined') return 'leads';
     const v = localStorage.getItem('crm:tab');
-    return (v === 'leads' || v === 'chat' || v === 'followup' || v === 'attendance') ? v : 'leads';
+    return (v === 'leads' || v === 'chat' || v === 'followup' || v === 'attendance' || v === 'disparos') ? v : 'leads';
   });
   const [kanbanEditLead, setKanbanEditLead] = useState<CrmLead | null>(null);
 
@@ -2350,6 +2351,11 @@ export default function CrmPage() {
               crmView === 'attendance' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
             <BarChart3 className="h-3.5 w-3.5" /> Atendimento
           </button>
+          <button type="button" onClick={() => setCrmView('disparos')}
+            className={cn('flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold transition-colors',
+              crmView === 'disparos' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
+            <Send className="h-3.5 w-3.5" /> Disparos
+          </button>
         </div>
 
         {clientId && (crmView === 'leads' || crmView === 'attendance') && (
@@ -2520,6 +2526,12 @@ export default function CrmPage() {
       {clientId && crmView === 'followup' && (
         <div className="flex-1 min-h-0 overflow-y-auto">
           <FollowupTab clientId={clientId} statusOptions={statusOptions} />
+        </div>
+      )}
+
+      {clientId && crmView === 'disparos' && (
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <DisparosTab clientId={clientId} />
         </div>
       )}
 
