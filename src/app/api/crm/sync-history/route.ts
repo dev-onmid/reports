@@ -55,19 +55,18 @@ async function fetchEvolutionMessages(
     `${base}/messages/findMessages/${instanceName}`,
   ];
 
-  // Use nested key format only — flat where.remoteJid is broken in this Evolution version
-  // Also try remoteJidAlt for LID-mode instances where real phone is stored there
+  // CRITICAL: only the nested `where.key.remoteJid` format actually filters by contact.
+  // The flat `where.remoteJid` format is broken in this Evolution version — it ignores
+  // the filter and returns the last N messages across ALL chats, which would pollute the
+  // lead with another conversation's history. Verified live: nested → 7 correct records,
+  // flat → 50 unrelated records. Keep ONLY the nested-key variants (remoteJid + the
+  // remoteJidAlt used by LID-mode instances where the real phone lives in remoteJidAlt).
   const bodies = [
-    { where: { key: { remoteJid } },          page: 1, offset: limit },
+    { where: { key: { remoteJid } },               page: 1, offset: limit },
     { where: { key: { remoteJidAlt: remoteJid } }, page: 1, offset: limit },
-    { where: { remoteJid },                   page: 1, offset: limit },
-    { where: { remoteJidAlt: remoteJid },     page: 1, offset: limit },
-    { where: { key: { remoteJid } },          skip: 0, take: limit },
+    { where: { key: { remoteJid } },               skip: 0, take: limit },
     { where: { key: { remoteJidAlt: remoteJid } }, skip: 0, take: limit },
-    { where: { remoteJid },                   skip: 0, take: limit },
-    { where: { remoteJidAlt: remoteJid },     skip: 0, take: limit },
     { where: { key: { remoteJid } } },
-    { where: { remoteJid } },
   ];
 
   for (const url of endpoints) {
@@ -83,17 +82,6 @@ async function fetchEvolutionMessages(
         if (records.length > 0) return records;
       } catch { continue; }
     }
-    // Also try GET (some versions)
-    try {
-      const res = await fetch(`${url}?remoteJid=${encodeURIComponent(remoteJid)}&limit=${limit}`, {
-        method: 'GET', headers, signal: AbortSignal.timeout(8_000),
-      });
-      if (res.ok) {
-        const raw = await res.json().catch(() => null);
-        const records = extractRecords(raw);
-        if (records.length > 0) return records;
-      }
-    } catch { continue; }
   }
   return [];
 }
@@ -174,10 +162,13 @@ export async function POST(req: NextRequest) {
       return Response.json({ error: 'Lead não encontrado ou sem número' }, { status: 404 });
     }
 
+    // Pick the SAME instance the inbox list and the send path use (oldest active),
+    // otherwise a client with both a Z-API and an Evolution instance would list
+    // conversations from one instance but fetch history from another → 0 results.
     const { rows: [inst] } = await pool.query(
       `SELECT instance_id, token, provider FROM public.client_zapi_instances
        WHERE client_id = $1 AND ativo = true
-       ORDER BY CASE WHEN provider = 'evolution' THEN 0 ELSE 1 END, created_at ASC
+       ORDER BY created_at ASC
        LIMIT 1`,
       [clientId],
     );
@@ -229,7 +220,7 @@ export async function POST(req: NextRequest) {
           const result = await pool.query(
             `INSERT INTO public.crm_messages (lead_id, client_id, direction, text, external_id, created_at)
              VALUES ($1, $2, $3, $4, $5, $6)
-             ON CONFLICT (lead_id, external_id) DO NOTHING
+             ON CONFLICT DO NOTHING
              RETURNING id`,
             [leadId, clientId, norm.direction, norm.text, norm.externalId, norm.ts],
           );

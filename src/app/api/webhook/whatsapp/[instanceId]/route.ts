@@ -215,24 +215,33 @@ export async function POST(
     let isFirstInbound = false;
     if (crmLead && messageText) {
       await ensureCrmMessagesSchema(pool);
-      if (externalId) {
-        // Deduplicate by external_id to prevent double-inserts from retried webhooks
-        await pool.query(
-          `INSERT INTO public.crm_messages (lead_id, client_id, direction, text, external_id, created_at)
-           VALUES ($1, $2, $3, $4, $5, $6::timestamptz)
-           ON CONFLICT (lead_id, external_id) DO NOTHING`,
-          [crmLead.id, clientId, fromMe ? 'out' : 'in', messageText, externalId, messageCreatedAt],
-        );
-      } else {
-        await pool.query(
-          `INSERT INTO public.crm_messages (lead_id, client_id, direction, text, created_at)
-           SELECT $1, $2, $3, $4, $5::timestamptz
-           WHERE NOT EXISTS (
-             SELECT 1 FROM public.crm_messages
-             WHERE lead_id = $1 AND text = $4 AND created_at = $5::timestamptz
-           )`,
-          [crmLead.id, clientId, fromMe ? 'out' : 'in', messageText, messageCreatedAt],
-        );
+      // A failure here must NEVER 500 the webhook (Evolution would retry forever and
+      // the lead's last-message preview would already be committed). Persist best-effort.
+      try {
+        if (externalId) {
+          // Deduplicate by external_id to prevent double-inserts from retried webhooks.
+          // NOTE: the unique index on (lead_id, external_id) is PARTIAL, so a bare
+          // `ON CONFLICT (lead_id, external_id)` cannot be inferred — use the bare
+          // `ON CONFLICT DO NOTHING`, which considers every usable unique index.
+          await pool.query(
+            `INSERT INTO public.crm_messages (lead_id, client_id, direction, text, external_id, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6::timestamptz)
+             ON CONFLICT DO NOTHING`,
+            [crmLead.id, clientId, fromMe ? 'out' : 'in', messageText, externalId, messageCreatedAt],
+          );
+        } else {
+          await pool.query(
+            `INSERT INTO public.crm_messages (lead_id, client_id, direction, text, created_at)
+             SELECT $1, $2, $3, $4, $5::timestamptz
+             WHERE NOT EXISTS (
+               SELECT 1 FROM public.crm_messages
+               WHERE lead_id = $1 AND text = $4 AND created_at = $5::timestamptz
+             )`,
+            [crmLead.id, clientId, fromMe ? 'out' : 'in', messageText, messageCreatedAt],
+          );
+        }
+      } catch (err) {
+        console.error('[webhook crm_messages insert]', err);
       }
       if (!fromMe) {
         // Detect first inbound message (now count = 1 after insert above)

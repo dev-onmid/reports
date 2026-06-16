@@ -181,9 +181,10 @@ async function handleMessageReceived(pool: ReturnType<typeof makeServerPool>, da
   await ensureCrmMessagesSchema(pool);
   if (externalId) {
     await pool.query(
+      // Partial unique index on (lead_id, external_id) → use bare ON CONFLICT DO NOTHING.
       `INSERT INTO public.crm_messages (lead_id, client_id, direction, text, external_id, created_at)
        VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (lead_id, external_id) DO NOTHING`,
+       ON CONFLICT DO NOTHING`,
       [lead.id, clientId, direction === 'received' ? 'in' : 'out', mensagem, String(externalId), createdAt],
     ).catch(() => null);
   } else {
