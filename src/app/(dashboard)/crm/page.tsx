@@ -51,6 +51,35 @@ type Draft = Partial<Omit<CrmLead, 'id' | 'client_id' | 'created_at'>>;
 type CrmFunnel = { id: string; name: string; created_at: string };
 type CrmStage  = { id: string; label: string; color: string; position: number };
 type LocalStage = CrmStage & { _isNew?: boolean };
+type CrmTab = 'leads' | 'chat' | 'followup' | 'attendance';
+
+type AttendanceMetrics = {
+  summary: {
+    total_leads: number;
+    active_conversations: number;
+    inbound_messages: number;
+    outbound_messages: number;
+    avg_response_seconds: number | null;
+    avg_first_response_seconds: number | null;
+    unanswered_chats: number;
+    max_waiting_seconds: number | null;
+    under_5: number;
+    under_15: number;
+    under_60: number;
+    over_60: number;
+  };
+  sources: Array<{ canal: string | null; total: number }>;
+  waiting: Array<{
+    id: string;
+    nome: string | null;
+    numero: string | null;
+    status: string | null;
+    temperatura: string | null;
+    canal: string | null;
+    last_message_at: string;
+    waiting_seconds: number;
+  }>;
+};
 
 const STAGE_COLORS = [
   '#0ea5e9', '#3b82f6', '#7dd3fc', '#10b981', '#34d399',
@@ -177,6 +206,14 @@ function freshDraft(): Draft {
 }
 
 function toD(v: string | null | undefined) { return v ? String(v).split('T')[0] : ''; }
+function monthFromDate(v: string | null | undefined) { return toD(v).slice(0, 7); }
+function isDateInRange(v: string | null | undefined, from: string, to: string) {
+  const date = toD(v);
+  if (!date) return false;
+  if (from && date < from) return false;
+  if (to && date > to) return false;
+  return true;
+}
 function fmtD(v: string | null) {
   const s = toD(v); if (!s) return '';
   const [y, m, d] = s.split('-'); return `${d}/${m}/${y}`;
@@ -833,6 +870,163 @@ function KanbanView({
   );
 }
 
+function formatDuration(seconds: number | null | undefined) {
+  if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) return '—';
+  const mins = Math.max(0, Math.round(seconds / 60));
+  if (mins < 1) return '<1min';
+  if (mins < 60) return `${mins}min`;
+  const hours = Math.round(mins / 60);
+  if (hours < 48) return `${hours}h`;
+  return `${Math.round(hours / 24)}d`;
+}
+
+function AttendanceView({
+  clientId,
+  month,
+  from,
+  to,
+}: {
+  clientId: string;
+  month: string;
+  from: string;
+  to: string;
+}) {
+  const [data, setData] = useState<AttendanceMetrics | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const params = new URLSearchParams({ clientId });
+    if (month) params.set('month', month);
+    if (!month && from) params.set('from', from);
+    if (!month && to) params.set('to', to);
+
+    setLoading(true);
+    fetch(`/api/crm/attendance?${params.toString()}`)
+      .then(r => r.ok ? r.json() as Promise<AttendanceMetrics> : null)
+      .then(setData)
+      .catch(() => setData(null))
+      .finally(() => setLoading(false));
+  }, [clientId, month, from, to]);
+
+  const summary = data?.summary;
+  const responseTotal = (summary?.under_5 ?? 0) + (summary?.under_15 ?? 0) + (summary?.under_60 ?? 0) + (summary?.over_60 ?? 0);
+  const slaRows = [
+    { label: 'Até 5min', value: summary?.under_5 ?? 0, color: 'bg-primary' },
+    { label: 'Até 15min', value: summary?.under_15 ?? 0, color: 'bg-emerald-400' },
+    { label: 'Até 1h', value: summary?.under_60 ?? 0, color: 'bg-amber-400' },
+    { label: '+1h', value: summary?.over_60 ?? 0, color: 'bg-red-400' },
+  ];
+
+  if (loading) {
+    return <div className="rounded-[var(--radius)] border border-border bg-card p-12 text-center text-sm text-muted-foreground">Carregando métricas de atendimento...</div>;
+  }
+
+  if (!data || !summary) {
+    return <div className="rounded-[var(--radius)] border border-border bg-card p-12 text-center text-sm text-muted-foreground">Não foi possível carregar as métricas.</div>;
+  }
+
+  return (
+    <div className="flex-1 min-h-0 overflow-y-auto space-y-3">
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-6">
+        {[
+          { label: 'Leads no período', value: summary.total_leads.toLocaleString('pt-BR'), sub: 'base filtrada', Icon: Users, tone: 'text-purple-300 border-purple-500/25 bg-purple-500/10' },
+          { label: 'Conversas atuais', value: summary.active_conversations.toLocaleString('pt-BR'), sub: 'com mensagens', Icon: MessageCircle, tone: 'text-blue-300 border-blue-500/25 bg-blue-500/10' },
+          { label: 'Sem resposta', value: summary.unanswered_chats.toLocaleString('pt-BR'), sub: 'última msg do lead', Icon: Clock3, tone: 'text-red-300 border-red-500/25 bg-red-500/10' },
+          { label: '1ª resposta', value: formatDuration(summary.avg_first_response_seconds), sub: 'média', Icon: Sparkles, tone: 'text-primary border-primary/25 bg-primary/10' },
+          { label: 'Resposta média', value: formatDuration(summary.avg_response_seconds), sub: 'entre mensagens', Icon: BarChart3, tone: 'text-emerald-300 border-emerald-500/25 bg-emerald-500/10' },
+          { label: 'Maior espera', value: formatDuration(summary.max_waiting_seconds), sub: 'lead aguardando', Icon: CalendarDays, tone: 'text-amber-300 border-amber-500/25 bg-amber-500/10' },
+        ].map(card => (
+          <div key={card.label} className={cn('rounded-xl border bg-card p-4', card.tone)}>
+            <card.Icon className="mb-3 h-5 w-5" />
+            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{card.label}</p>
+            <p className="mt-1 font-heading text-2xl leading-none text-foreground">{card.value}</p>
+            <p className="mt-1 text-[10px] text-muted-foreground">{card.sub}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid gap-3 xl:grid-cols-[1.1fr_0.9fr]">
+        <section className="rounded-xl border border-border bg-card p-4">
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-bold">SLA de resposta</h3>
+              <p className="text-xs text-muted-foreground">Distribuição das respostas após mensagens recebidas.</p>
+            </div>
+            <span className="rounded-full border border-border bg-background px-2 py-1 text-xs font-semibold text-muted-foreground">
+              {responseTotal} resposta{responseTotal !== 1 ? 's' : ''}
+            </span>
+          </div>
+          <div className="space-y-3">
+            {slaRows.map(row => {
+              const percent = responseTotal > 0 ? Math.round((row.value / responseTotal) * 100) : 0;
+              return (
+                <div key={row.label} className="space-y-1.5">
+                  <div className="flex justify-between text-xs">
+                    <span className="font-semibold">{row.label}</span>
+                    <span className="text-muted-foreground">{row.value} ({percent}%)</span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-muted">
+                    <div className={cn('h-full rounded-full', row.color)} style={{ width: `${percent}%` }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="rounded-xl border border-border bg-card p-4">
+          <h3 className="text-sm font-bold">Fontes de lead</h3>
+          <p className="mb-4 text-xs text-muted-foreground">Canais mais presentes no período.</p>
+          <div className="space-y-2">
+            {data.sources.length === 0 ? (
+              <p className="py-6 text-center text-xs text-muted-foreground">Sem canais no período.</p>
+            ) : data.sources.map(source => {
+              const max = Math.max(...data.sources.map(item => item.total), 1);
+              return (
+                <div key={source.canal ?? 'Sem canal'} className="space-y-1">
+                  <div className="flex justify-between text-xs">
+                    <span className="font-semibold">{source.canal ?? 'Sem canal'}</span>
+                    <span className="text-muted-foreground">{source.total}</span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-muted">
+                    <div className="h-full rounded-full bg-primary" style={{ width: `${Math.round((source.total / max) * 100)}%` }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      </div>
+
+      <section className="rounded-xl border border-border bg-card">
+        <div className="border-b border-border px-4 py-3">
+          <h3 className="text-sm font-bold">Prioridade de atendimento</h3>
+          <p className="text-xs text-muted-foreground">Leads com última mensagem recebida e ainda sem resposta.</p>
+        </div>
+        <div className="divide-y divide-border">
+          {data.waiting.length === 0 ? (
+            <p className="px-4 py-8 text-center text-xs text-muted-foreground">Nenhum lead aguardando resposta.</p>
+          ) : data.waiting.map(lead => (
+            <div key={lead.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-3 px-4 py-3">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold">{lead.nome ?? lead.numero ?? 'Sem nome'}</p>
+                <p className="truncate text-xs text-muted-foreground">{lead.numero ?? 'Sem número'} · {lead.canal ?? 'Sem canal'}</p>
+              </div>
+              <span className={cn('rounded-full border px-2 py-1 text-[10px] font-bold', temperatureBadgeClass(lead.temperatura))}>
+                {lead.temperatura ? TEMPERATURE_LABEL[lead.temperatura] : 'Sem IA'}
+              </span>
+              <div className="text-right">
+                <p className="text-xs font-bold text-red-300">{formatDuration(lead.waiting_seconds)}</p>
+                <p className="text-[10px] text-muted-foreground">{fmtD(lead.last_message_at)}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 // ── Funnel Editor ────────────────────────────────────────────────────────────
 
 function SortableStageRow({
@@ -1274,6 +1468,9 @@ export default function CrmPage() {
   const [search, setSearch]         = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [temperatureFilter, setTemperatureFilter] = useState('');
+  const [monthFilter, setMonthFilter] = useState('');
+  const [dateFromFilter, setDateFromFilter] = useState('');
+  const [dateToFilter, setDateToFilter] = useState('');
   const [columnFilters, setColumnFilters] = useState<Partial<Record<ColumnKey, string>>>({});
   const [colWidths, setColWidths] = useState<Record<ColumnKey, number>>(DEFAULT_COL_WIDTHS);
   const [visibleColumnKeys, setVisibleColumnKeys] = useState<ColumnKey[]>(DEFAULT_VISIBLE_COLUMNS);
@@ -1290,10 +1487,10 @@ export default function CrmPage() {
     if (typeof window === 'undefined') return 'kanban';
     return (localStorage.getItem('crm:view-mode') as 'list' | 'kanban' | null) ?? 'kanban';
   });
-  const [crmView, setCrmView] = useState<'leads' | 'chat' | 'followup'>(() => {
+  const [crmView, setCrmView] = useState<CrmTab>(() => {
     if (typeof window === 'undefined') return 'leads';
     const v = localStorage.getItem('crm:tab');
-    return (v === 'leads' || v === 'chat' || v === 'followup') ? v : 'leads';
+    return (v === 'leads' || v === 'chat' || v === 'followup' || v === 'attendance') ? v : 'leads';
   });
   const [kanbanEditLead, setKanbanEditLead] = useState<CrmLead | null>(null);
 
@@ -1450,7 +1647,7 @@ export default function CrmPage() {
     return () => document.removeEventListener('mousedown', onDown);
   }, []);
 
-  useEffect(() => { setPage(1); }, [statusFilter, temperatureFilter, search, clientId, columnFilters]);
+  useEffect(() => { setPage(1); }, [statusFilter, temperatureFilter, monthFilter, dateFromFilter, dateToFilter, search, clientId, columnFilters]);
 
   useEffect(() => {
     if (!clientId) { setFunnels([]); setSelectedFunnelId(''); setStages([]); return; }
@@ -1525,6 +1722,8 @@ export default function CrmPage() {
   );
 
   const filtered = useMemo(() => leads.filter(l => {
+    if (monthFilter && monthFromDate(l.data) !== monthFilter) return false;
+    if ((dateFromFilter || dateToFilter) && !isDateInRange(l.data, dateFromFilter, dateToFilter)) return false;
     if (statusFilter && l.status !== statusFilter) return false;
     if (temperatureFilter) {
       if (temperatureFilter === 'sem' && l.temperatura) return false;
@@ -1545,7 +1744,7 @@ export default function CrmPage() {
     if (a.time_interno !== b.time_interno) return a.time_interno ? 1 : -1;
     const result = compareSortValues(sortValue(a, sortConfig.key), sortValue(b, sortConfig.key));
     return sortConfig.direction === 'asc' ? result : -result;
-  }), [leads, search, statusFilter, temperatureFilter, columnFilters, sortConfig]);
+  }), [leads, search, statusFilter, temperatureFilter, monthFilter, dateFromFilter, dateToFilter, columnFilters, sortConfig]);
 
   const totalPages = pageSize === 0 ? 1 : Math.max(1, Math.ceil(filtered.length / pageSize));
   const paginated  = pageSize === 0 ? filtered : filtered.slice((page - 1) * pageSize, page * pageSize);
@@ -2047,42 +2246,111 @@ export default function CrmPage() {
               crmView === 'followup' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
             <Send className="h-3.5 w-3.5" /> Follow up
           </button>
+          <button type="button" onClick={() => setCrmView('attendance')}
+            className={cn('flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold transition-colors',
+              crmView === 'attendance' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
+            <BarChart3 className="h-3.5 w-3.5" /> Atendimento
+          </button>
         </div>
 
-        {clientId && crmView === 'leads' && (
+        {clientId && (crmView === 'leads' || crmView === 'attendance') && (
           <>
-            <IconSelect icon={SlidersHorizontal} value={statusFilter} onChange={setStatusFilter}
-              placeholder="Todos status" className="min-w-[160px]">
-              {statusOptions.map(s => <option key={s}>{s}</option>)}
-            </IconSelect>
+            {crmView === 'leads' && (
+              <>
+                <IconSelect icon={SlidersHorizontal} value={statusFilter} onChange={setStatusFilter}
+                  placeholder="Todos status" className="min-w-[160px]">
+                  {statusOptions.map(s => <option key={s}>{s}</option>)}
+                </IconSelect>
 
-            <IconSelect icon={Sparkles} value={temperatureFilter} onChange={setTemperatureFilter}
-              placeholder="Temperatura" className="min-w-[150px]">
-              <option value="quente">Quente</option>
-              <option value="morno">Morno</option>
-              <option value="frio">Frio</option>
-              <option value="sem">Sem classificação</option>
-            </IconSelect>
+                <IconSelect icon={Sparkles} value={temperatureFilter} onChange={setTemperatureFilter}
+                  placeholder="Temperatura" className="min-w-[150px]">
+                  <option value="quente">Quente</option>
+                  <option value="morno">Morno</option>
+                  <option value="frio">Frio</option>
+                  <option value="sem">Sem classificação</option>
+                </IconSelect>
+              </>
+            )}
 
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar leads..."
-                className="pl-8 pr-3 py-2 rounded-lg border border-border bg-card text-sm focus:outline-none focus:ring-1 focus:ring-primary w-48" />
+              <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <input
+                type="month"
+                value={monthFilter}
+                onChange={e => {
+                  setMonthFilter(e.target.value);
+                  if (e.target.value) {
+                    setDateFromFilter('');
+                    setDateToFilter('');
+                  }
+                }}
+                title="Filtrar por mês da data do lead"
+                className="w-40 rounded-lg border border-border bg-card py-2 pl-8 pr-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+              />
             </div>
 
-            <button
-              type="button"
-              onClick={() => setShowAiCriteria(true)}
-              className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-            >
-              <Sparkles className="h-4 w-4" /> Critérios IA
-            </button>
+            <div className="flex items-center gap-1 rounded-lg border border-border bg-card px-2 py-1">
+              <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />
+              <input
+                type="date"
+                value={dateFromFilter}
+                onChange={e => {
+                  setDateFromFilter(e.target.value);
+                  if (e.target.value) setMonthFilter('');
+                }}
+                title="Data inicial"
+                className="w-32 bg-transparent text-xs outline-none"
+              />
+              <span className="text-xs text-muted-foreground">até</span>
+              <input
+                type="date"
+                value={dateToFilter}
+                onChange={e => {
+                  setDateToFilter(e.target.value);
+                  if (e.target.value) setMonthFilter('');
+                }}
+                title="Data final"
+                className="w-32 bg-transparent text-xs outline-none"
+              />
+            </div>
 
-            <button onClick={() => void saveNew()}
-              className="ml-auto flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
-            >
-              <Plus className="h-4 w-4" /> Novo Lead
-            </button>
+            {(monthFilter || dateFromFilter || dateToFilter) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMonthFilter('');
+                  setDateFromFilter('');
+                  setDateToFilter('');
+                }}
+                className="rounded-lg border border-border px-3 py-2 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                Limpar período
+              </button>
+            )}
+
+            {crmView === 'leads' && (
+              <>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                  <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar leads..."
+                    className="pl-8 pr-3 py-2 rounded-lg border border-border bg-card text-sm focus:outline-none focus:ring-1 focus:ring-primary w-48" />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowAiCriteria(true)}
+                  className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                >
+                  <Sparkles className="h-4 w-4" /> Critérios IA
+                </button>
+
+                <button onClick={() => void saveNew()}
+                  className="ml-auto flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
+                >
+                  <Plus className="h-4 w-4" /> Novo Lead
+                </button>
+              </>
+            )}
           </>
         )}
       </div>
@@ -2131,6 +2399,15 @@ export default function CrmPage() {
         <div className="flex-1 min-h-0 overflow-y-auto">
           <FollowupTab clientId={clientId} statusOptions={statusOptions} />
         </div>
+      )}
+
+      {clientId && crmView === 'attendance' && (
+        <AttendanceView
+          clientId={clientId}
+          month={monthFilter}
+          from={dateFromFilter}
+          to={dateToFilter}
+        />
       )}
 
       {/* ── TABLE / KANBAN ──────────────────────────────────────────── */}
