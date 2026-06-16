@@ -272,6 +272,7 @@ export async function POST(req: NextRequest) {
 
     let imported = 0;
     let skipped  = 0;
+    let firstError: string | null = null;   // surface the real INSERT failure to the UI
 
     for (const raw of rawRecords) {
       const norm = normalizeRecord(raw as Record<string, unknown>);
@@ -301,7 +302,11 @@ export async function POST(req: NextRequest) {
           );
           if ((result.rowCount ?? 0) > 0) imported++; else skipped++;
         }
-      } catch { skipped++; }
+      } catch (e) {
+        skipped++;
+        if (!firstError) firstError = e instanceof Error ? e.message : String(e);
+        console.error('[sync-history insert]', firstError);
+      }
     }
 
     if (imported > 0) {
@@ -328,7 +333,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    return Response.json({ ok: true, imported, skipped, provider: usedProvider, tried });
+    return Response.json({ ok: true, imported, skipped, firstError, provider: usedProvider, tried });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('[sync-history]', msg);

@@ -691,12 +691,15 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ leadId: id, clientId }),
       });
-      const data = await res.json() as { ok?: boolean; imported?: number; error?: string };
+      const data = await res.json() as { ok?: boolean; imported?: number; error?: string; firstError?: string | null };
       imported = data.imported ?? 0;
       if (data.ok) {
         if (imported > 0) {
           setSyncResult(`${imported} mensagem(ns) importada(s)!`);
           loadMessages(id, true);
+        } else if (data.firstError) {
+          // Surface the real DB error (e.g. a NOT NULL / missing column) so it's diagnosable
+          setSyncResult(`Falha ao gravar: ${data.firstError}`);
         } else {
           setSyncResult('Histórico sem mensagens novas.');
         }

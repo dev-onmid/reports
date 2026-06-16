@@ -93,7 +93,17 @@ export async function ensureCrmMessagesSchema(pool: Pool) {
     `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS client_id TEXT`,
     `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS tipo TEXT NOT NULL DEFAULT 'texto'`,
     `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS external_id TEXT`,
+    // ── Legacy-schema repair ──────────────────────────────────────────────────
+    // The original migration (migration_crm.sql) created crm_messages with
+    // `contact_id UUID NOT NULL REFERENCES crm_contacts(id)` and a direction CHECK.
+    // Lead-based chat messages set lead_id and leave contact_id NULL, so on installs
+    // that still carry the legacy constraints every INSERT fails (NOT NULL / FK /
+    // CHECK). Make the column nullable, drop the FK to crm_contacts, and drop the
+    // legacy direction CHECK so inbound/outbound rows always persist.
     `ALTER TABLE public.crm_messages ALTER COLUMN contact_id DROP NOT NULL`,
+    `ALTER TABLE public.crm_messages DROP CONSTRAINT IF EXISTS crm_messages_contact_id_fkey`,
+    `ALTER TABLE public.crm_messages DROP CONSTRAINT IF EXISTS crm_messages_direction_check`,
+    `ALTER TABLE public.crm_messages ALTER COLUMN text DROP NOT NULL`,
     `CREATE INDEX IF NOT EXISTS idx_crm_messages_lead
        ON public.crm_messages (lead_id, created_at DESC)
        WHERE lead_id IS NOT NULL`,
