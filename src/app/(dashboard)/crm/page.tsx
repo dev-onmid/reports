@@ -275,6 +275,9 @@ function relativeAnalysisTime(iso: string | null | undefined) {
 
 function columnValueText(lead: CrmLead, key: ColumnKey) {
   switch (key) {
+    case 'select':
+    case 'actions':
+      return '';
     case 'data':
     case 'data_agendada':
       return dateText(lead[key]);
@@ -287,8 +290,6 @@ function columnValueText(lead: CrmLead, key: ColumnKey) {
     case 'dia4':
     case 'fechou':
       return lead[key] ? 'sim true fechado marcado' : 'nao não false';
-    case 'actions':
-      return '';
     default:
       return plain(lead[key]);
   }
@@ -310,6 +311,7 @@ const cellSel = cn(cell, 'cursor-pointer appearance-none');
 const cellNew = 'px-2 py-0 h-9 text-xs focus:outline-none focus:bg-primary/10 bg-transparent border-0 w-full text-foreground placeholder:text-muted-foreground/50';
 
 const COLS = [
+  { key: 'select', label: '', width: 44, min: 40, filter: 'none' },
   { key: 'data', label: 'Data', width: 110, min: 96, filter: 'text' },
   { key: 'nome', label: 'Nome', width: 170, min: 120, filter: 'text' },
   { key: 'numero', label: 'Número', width: 120, min: 96, filter: 'text' },
@@ -530,11 +532,12 @@ function QuickEditModal({
 
 // ── Kanban Card (draggable) ──────────────────────────────────────────────────
 function KanbanCard({
-  lead, onEdit, onDelete, isDragOverlay, hasActiveFollowup,
+  lead, onEdit, onDelete, onToggleInternal, isDragOverlay, hasActiveFollowup,
 }: {
   lead: CrmLead;
   onEdit: (lead: CrmLead) => void;
   onDelete: (id: string) => void;
+  onToggleInternal: (lead: CrmLead) => void;
   isDragOverlay?: boolean;
   hasActiveFollowup?: boolean;
 }) {
@@ -574,25 +577,42 @@ function KanbanCard({
           <p className="text-xs font-semibold text-foreground truncate">{lead.nome ?? '—'}</p>
           {lead.numero && <p className="text-[10px] text-muted-foreground mt-0.5">{lead.numero}</p>}
         </div>
-        <div className="relative shrink-0" ref={menuRef}>
+        <div className="flex shrink-0 items-center gap-1">
           <button
-            onClick={e => { e.stopPropagation(); setMenuOpen(v => !v); }}
-            className="opacity-0 group-hover:opacity-100 h-5 w-5 flex items-center justify-center rounded text-muted-foreground hover:text-foreground transition-all"
+            type="button"
+            title={lead.time_interno ? 'Remover de time interno' : 'Marcar como time interno'}
+            onPointerDown={e => e.stopPropagation()}
+            onClick={e => { e.stopPropagation(); onToggleInternal(lead); }}
+            className={cn(
+              'flex h-6 w-6 items-center justify-center rounded-md border transition-all',
+              lead.time_interno
+                ? 'border-zinc-400/30 bg-zinc-500/20 text-zinc-200'
+                : 'border-transparent text-muted-foreground opacity-0 hover:border-border hover:bg-muted hover:text-foreground group-hover:opacity-100',
+            )}
           >
-            <MoreVertical className="h-3.5 w-3.5" />
+            <UserRound className="h-3.5 w-3.5" />
           </button>
-          {menuOpen && (
-            <div className="absolute right-0 top-6 z-50 min-w-[130px] rounded-lg border border-border bg-popover shadow-xl py-1">
-              <button onClick={e => { e.stopPropagation(); setMenuOpen(false); onEdit(lead); }}
-                className="flex w-full items-center gap-2 px-3 py-2 text-xs hover:bg-muted transition-colors">
-                <Pencil className="h-3.5 w-3.5" /> Editar
-              </button>
-              <button onClick={e => { e.stopPropagation(); setMenuOpen(false); onDelete(lead.id); }}
-                className="flex w-full items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 transition-colors">
-                <Trash2 className="h-3.5 w-3.5" /> Excluir
-              </button>
-            </div>
-          )}
+          <div className="relative" ref={menuRef}>
+            <button
+              onPointerDown={e => e.stopPropagation()}
+              onClick={e => { e.stopPropagation(); setMenuOpen(v => !v); }}
+              className="opacity-0 group-hover:opacity-100 h-5 w-5 flex items-center justify-center rounded text-muted-foreground hover:text-foreground transition-all"
+            >
+              <MoreVertical className="h-3.5 w-3.5" />
+            </button>
+            {menuOpen && (
+              <div className="absolute right-0 top-6 z-50 min-w-[130px] rounded-lg border border-border bg-popover shadow-xl py-1">
+                <button onClick={e => { e.stopPropagation(); setMenuOpen(false); onEdit(lead); }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-xs hover:bg-muted transition-colors">
+                  <Pencil className="h-3.5 w-3.5" /> Editar
+                </button>
+                <button onClick={e => { e.stopPropagation(); setMenuOpen(false); onDelete(lead.id); }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 transition-colors">
+                  <Trash2 className="h-3.5 w-3.5" /> Excluir
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -647,13 +667,14 @@ function KanbanCard({
 
 // ── Kanban Column (droppable) ────────────────────────────────────────────────
 function KanbanColumn({
-  status, color, leads, onEdit, onDelete, activeLead, activeFollowupIds,
+  status, color, leads, onEdit, onDelete, onToggleInternal, activeLead, activeFollowupIds,
 }: {
   status: string;
   color: string;
   leads: CrmLead[];
   onEdit: (lead: CrmLead) => void;
   onDelete: (id: string) => void;
+  onToggleInternal: (lead: CrmLead) => void;
   activeLead: CrmLead | null;
   activeFollowupIds: Set<string>;
 }) {
@@ -680,7 +701,14 @@ function KanbanColumn({
         style={{ maxHeight: 'calc(100vh - 400px)', minHeight: 100 }}
       >
         {leads.map(lead => (
-          <KanbanCard key={lead.id} lead={lead} onEdit={onEdit} onDelete={onDelete} hasActiveFollowup={activeFollowupIds.has(lead.id)} />
+          <KanbanCard
+            key={lead.id}
+            lead={lead}
+            onEdit={onEdit}
+            onDelete={onDelete}
+            onToggleInternal={onToggleInternal}
+            hasActiveFollowup={activeFollowupIds.has(lead.id)}
+          />
         ))}
         {leads.length === 0 && (
           <div className="flex items-center justify-center py-6">
@@ -696,13 +724,14 @@ function KanbanColumn({
 
 // ── Kanban View ──────────────────────────────────────────────────────────────
 function KanbanView({
-  leads, stages, onEdit, onDelete, onStatusChange, activeFollowupIds,
+  leads, stages, onEdit, onDelete, onStatusChange, onToggleInternal, activeFollowupIds,
 }: {
   leads: CrmLead[];
   stages: CrmStage[];
   onEdit: (lead: CrmLead) => void;
   onDelete: (id: string) => void;
   onStatusChange: (id: string, status: string) => void;
+  onToggleInternal: (lead: CrmLead) => void;
   activeFollowupIds: Set<string>;
 }) {
   const [activeLead, setActiveLead] = useState<CrmLead | null>(null);
@@ -746,6 +775,7 @@ function KanbanView({
             leads={grouped.get(stage.label) ?? []}
             onEdit={onEdit}
             onDelete={onDelete}
+            onToggleInternal={onToggleInternal}
             activeLead={activeLead}
             activeFollowupIds={activeFollowupIds}
           />
@@ -757,6 +787,7 @@ function KanbanView({
             lead={activeLead}
             onEdit={() => {}}
             onDelete={() => {}}
+            onToggleInternal={() => {}}
             isDragOverlay
             hasActiveFollowup={activeFollowupIds.has(activeLead.id)}
           />
@@ -1212,7 +1243,8 @@ export default function CrmPage() {
   const [saving, setSaving]         = useState(false);
   const [saveError, setSaveError]   = useState<string | null>(null);
   const [page, setPage]             = useState(1);
-  const [pageSize, setPageSize]     = useState(10);
+  const [pageSize, setPageSize]     = useState(0);
+  const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
   const [menuId, setMenuId]         = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [viewMode, setViewMode] = useState<'list' | 'kanban'>(() => {
@@ -1413,8 +1445,18 @@ export default function CrmPage() {
     return new Date(b.created_at ?? b.data ?? 0).getTime() - new Date(a.created_at ?? a.data ?? 0).getTime();
   }), [leads, search, statusFilter, temperatureFilter, columnFilters]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const paginated  = filtered.slice((page - 1) * pageSize, page * pageSize);
+  const totalPages = pageSize === 0 ? 1 : Math.max(1, Math.ceil(filtered.length / pageSize));
+  const paginated  = pageSize === 0 ? filtered : filtered.slice((page - 1) * pageSize, page * pageSize);
+  const selectedLeads = useMemo(
+    () => leads.filter(lead => selectedLeadIds.has(lead.id)),
+    [leads, selectedLeadIds],
+  );
+  const selectedVisibleCount = paginated.filter(lead => selectedLeadIds.has(lead.id)).length;
+  const allVisibleSelected = paginated.length > 0 && selectedVisibleCount === paginated.length;
+  const kanbanLeads = useMemo(
+    () => filtered.filter(lead => lead.time_interno !== true),
+    [filtered],
+  );
   const tableMinWidth = useMemo(() => COLS.reduce((sum, col) => sum + colWidths[col.key], 0), [colWidths]);
   const filteredTotals = useMemo(() => ({
     faturamento: filtered.reduce((sum, lead) => sum + toMoneyNumber(lead.valor_rs), 0),
@@ -1544,12 +1586,116 @@ export default function CrmPage() {
   async function deleteRow(id: string) {
     setMenuId(null);
     const res = await fetch(`/api/crm/${id}`, { method: 'DELETE' });
-    if (res.ok) { setLeads(prev => prev.filter(l => l.id !== id)); if (editId === id) setEditId(null); }
+    if (res.ok) {
+      setLeads(prev => prev.filter(l => l.id !== id));
+      setSelectedLeadIds(prev => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      if (editId === id) setEditId(null);
+    }
   }
 
   async function changeLeadStatus(id: string, status: string) {
     setLeads(prev => prev.map(l => l.id === id ? { ...l, status } : l));
     await fetch(`/api/crm/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
+  }
+
+  function toggleLeadSelection(id: string) {
+    setSelectedLeadIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleVisibleSelection() {
+    setSelectedLeadIds(prev => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        paginated.forEach(lead => next.delete(lead.id));
+      } else {
+        paginated.forEach(lead => next.add(lead.id));
+      }
+      return next;
+    });
+  }
+
+  function clearLeadSelection() {
+    setSelectedLeadIds(new Set());
+  }
+
+  async function bulkUpdateSelected(patch: Draft) {
+    const targets = selectedLeads;
+    if (targets.length === 0) return;
+    setLeads(prev => prev.map(lead => selectedLeadIds.has(lead.id) ? { ...lead, ...patch } : lead));
+
+    const results = await Promise.all(
+      targets.map(lead =>
+        fetch(`/api/crm/${lead.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patch),
+        }).then(async res => (res.ok ? await res.json() as CrmLead : null)).catch(() => null),
+      ),
+    );
+
+    const savedById = new Map(results.filter(Boolean).map(lead => [lead!.id, lead!]));
+    if (savedById.size > 0) {
+      setLeads(prev => prev.map(lead => savedById.get(lead.id) ?? lead));
+    }
+  }
+
+  async function bulkChangeStatus(status: string) {
+    if (!status) return;
+    await bulkUpdateSelected({ status });
+  }
+
+  async function bulkToggleInternal(nextTimeInterno: boolean) {
+    if (nextTimeInterno) {
+      const ok = window.confirm('Ao marcar como Time Interno, nenhuma automação será executada para estes contatos. Tem certeza?');
+      if (!ok) return;
+    }
+    await bulkUpdateSelected({ time_interno: nextTimeInterno });
+  }
+
+  async function bulkDeleteSelected() {
+    const ids = [...selectedLeadIds];
+    if (ids.length === 0) return;
+    const ok = window.confirm(`Excluir ${ids.length} lead${ids.length !== 1 ? 's' : ''} selecionado${ids.length !== 1 ? 's' : ''}?`);
+    if (!ok) return;
+    await Promise.all(ids.map(id => fetch(`/api/crm/${id}`, { method: 'DELETE' }).catch(() => null)));
+    setLeads(prev => prev.filter(lead => !selectedLeadIds.has(lead.id)));
+    setSelectedLeadIds(new Set());
+    if (editId && selectedLeadIds.has(editId)) setEditId(null);
+  }
+
+  async function toggleLeadInternal(lead: CrmLead) {
+    const nextTimeInterno = !lead.time_interno;
+    if (nextTimeInterno) {
+      const ok = window.confirm('Ao marcar como Time Interno, nenhuma automação será executada para este contato. Tem certeza?');
+      if (!ok) return;
+    }
+
+    const leadPhone = String(lead.numero ?? '').replace(/\D/g, '');
+    const isSameLead = (item: CrmLead) => {
+      const itemPhone = String(item.numero ?? '').replace(/\D/g, '');
+      return item.id === lead.id || (!!leadPhone && itemPhone === leadPhone);
+    };
+
+    setLeads(prev => prev.map(l => isSameLead(l) ? { ...l, time_interno: nextTimeInterno } : l));
+    const res = await fetch(`/api/crm/${lead.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ time_interno: nextTimeInterno }),
+    });
+    if (res.ok) {
+      const saved = await res.json() as CrmLead;
+      setLeads(prev => prev.map(l => isSameLead(l) ? { ...l, time_interno: saved.time_interno } : l));
+    } else {
+      setLeads(prev => prev.map(l => isSameLead(l) ? { ...l, time_interno: lead.time_interno } : l));
+    }
   }
 
   async function saveKanbanEdit(data: Draft) {
@@ -1926,15 +2072,68 @@ export default function CrmPage() {
             </div>
           </div>
 
+          {viewMode === 'list' && selectedLeadIds.size > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-primary/20 bg-primary/5 px-4 py-2 shrink-0">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-primary">
+                  {selectedLeadIds.size} selecionado{selectedLeadIds.size !== 1 ? 's' : ''}
+                </span>
+                <button
+                  type="button"
+                  onClick={clearLeadSelection}
+                  className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                >
+                  Limpar
+                </button>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  defaultValue=""
+                  onChange={event => {
+                    const value = event.target.value;
+                    event.target.value = '';
+                    if (value) void bulkChangeStatus(value);
+                  }}
+                  className="h-8 rounded-lg border border-border bg-background px-2 text-xs font-semibold text-foreground outline-none focus:border-primary"
+                >
+                  <option value="">Mudar status</option>
+                  {statusOptions.map(status => <option key={status} value={status}>{status}</option>)}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => void bulkToggleInternal(true)}
+                  className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:border-primary/40 hover:text-foreground"
+                >
+                  Time interno
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void bulkToggleInternal(false)}
+                  className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:border-primary/40 hover:text-foreground"
+                >
+                  Remover interno
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void bulkDeleteSelected()}
+                  className="rounded-lg border border-red-500/30 px-3 py-1.5 text-xs font-semibold text-red-400 hover:bg-red-500/10"
+                >
+                  Excluir
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Kanban view */}
           {viewMode === 'kanban' && (
             <div className="overflow-auto flex-1 min-h-0 p-3">
               <KanbanView
-                leads={filtered}
+                leads={kanbanLeads}
                 stages={stages}
                 onEdit={setKanbanEditLead}
                 onDelete={id => void deleteRow(id)}
                 onStatusChange={(id, status) => void changeLeadStatus(id, status)}
+                onToggleInternal={lead => void toggleLeadInternal(lead)}
                 activeFollowupIds={activeFollowupLeadIds}
               />
             </div>
@@ -1956,8 +2155,17 @@ export default function CrmPage() {
                       className="relative px-2 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
                       style={{ width: colWidths[col.key] }}
                     >
-                      {col.label}
-                      {col.key !== 'actions' && (
+                      {col.key === 'select' ? (
+                        <input
+                          type="checkbox"
+                          checked={allVisibleSelected}
+                          disabled={paginated.length === 0}
+                          onChange={toggleVisibleSelection}
+                          className="h-3.5 w-3.5 accent-primary disabled:opacity-40"
+                          title="Selecionar visíveis"
+                        />
+                      ) : col.label}
+                      {col.key !== 'actions' && col.key !== 'select' && (
                         <button
                           type="button"
                           onMouseDown={e => startColumnResize(col.key, col.min, e)}
@@ -1992,6 +2200,7 @@ export default function CrmPage() {
                   onFocus={handleNewFocus}
                   className="border-b border-primary/20 bg-primary/5 ring-1 ring-inset ring-primary/20"
                 >
+                  <Td center />
                   <Td><input type="date" value={toD(newDraft.data)} onChange={e => setN('data', e.target.value || null)} className={cellNew} /></Td>
                   <Td><input type="text" value={newDraft.nome ?? ''} onChange={e => setN('nome', e.target.value || null)} placeholder="Nome" className={cn(cellNew, 'text-primary placeholder:text-primary/40 font-semibold')} /></Td>
                   <Td><input type="text" value={newDraft.numero ?? ''} onChange={e => setN('numero', e.target.value || null)} placeholder="Número" className={cellNew} /></Td>
@@ -2042,6 +2251,7 @@ export default function CrmPage() {
                   const d = isEditing ? editDraft : lead;
                   const channels = detectChannels(lead.canal);
                   const statusBadge = lead.status ? STATUS_BADGE[lead.status] ?? 'bg-zinc-600 text-white' : null;
+                  const isSelected = selectedLeadIds.has(lead.id);
                   return (
                     <tr
                       key={lead.id}
@@ -2053,9 +2263,21 @@ export default function CrmPage() {
                         'border-b border-border/30 transition-colors group',
                         isEditing
                           ? 'bg-blue-500/10 ring-1 ring-inset ring-blue-500/25'
-                          : idx % 2 === 0 ? 'hover:bg-muted/30 cursor-pointer' : 'bg-muted/10 hover:bg-muted/30 cursor-pointer'
+                          : isSelected
+                            ? 'bg-primary/10 ring-1 ring-inset ring-primary/20 hover:bg-primary/15 cursor-pointer'
+                            : idx % 2 === 0 ? 'hover:bg-muted/30 cursor-pointer' : 'bg-muted/10 hover:bg-muted/30 cursor-pointer'
                       )}
                     >
+                      {/* Seleção */}
+                      <Td center>
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onClick={e => e.stopPropagation()}
+                          onChange={() => toggleLeadSelection(lead.id)}
+                          className="h-3.5 w-3.5 accent-primary cursor-pointer"
+                        />
+                      </Td>
                       {/* Data + hora */}
                       <Td>
                         {isEditing
@@ -2246,7 +2468,9 @@ export default function CrmPage() {
               <span className="text-xs text-muted-foreground">
                 {filtered.length === 0
                   ? 'Nenhum lead'
-                  : `Mostrando ${(page-1)*pageSize+1} a ${Math.min(page*pageSize, filtered.length)} de ${filtered.length} lead${filtered.length !== 1 ? 's' : ''}`}
+                  : pageSize === 0
+                    ? `Mostrando todos os ${filtered.length} lead${filtered.length !== 1 ? 's' : ''}`
+                    : `Mostrando ${(page-1)*pageSize+1} a ${Math.min(page*pageSize, filtered.length)} de ${filtered.length} lead${filtered.length !== 1 ? 's' : ''}`}
               </span>
               <div className="flex items-center gap-2 rounded-lg border border-border bg-background/60 px-3 py-1.5">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Total faturamento</span>
@@ -2258,19 +2482,24 @@ export default function CrmPage() {
               </div>
             </div>
             <div className="flex items-center gap-1.5">
-              <button onClick={() => setPage(p => Math.max(1, p-1))} disabled={page === 1}
-                className="flex h-7 w-7 items-center justify-center rounded border border-border disabled:opacity-30 hover:bg-muted transition-colors">
-                <ChevronLeft className="h-3.5 w-3.5" />
-              </button>
-              <span className="flex h-7 min-w-[28px] items-center justify-center rounded border border-primary bg-primary/10 px-2.5 text-xs font-bold text-primary">{page}</span>
-              <button onClick={() => setPage(p => Math.min(totalPages, p+1))} disabled={page === totalPages}
-                className="flex h-7 w-7 items-center justify-center rounded border border-border disabled:opacity-30 hover:bg-muted transition-colors">
-                <ChevronRight className="h-3.5 w-3.5" />
-              </button>
+              {pageSize !== 0 && (
+                <>
+                  <button onClick={() => setPage(p => Math.max(1, p-1))} disabled={page === 1}
+                    className="flex h-7 w-7 items-center justify-center rounded border border-border disabled:opacity-30 hover:bg-muted transition-colors">
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                  </button>
+                  <span className="flex h-7 min-w-[28px] items-center justify-center rounded border border-primary bg-primary/10 px-2.5 text-xs font-bold text-primary">{page}</span>
+                  <button onClick={() => setPage(p => Math.min(totalPages, p+1))} disabled={page === totalPages}
+                    className="flex h-7 w-7 items-center justify-center rounded border border-border disabled:opacity-30 hover:bg-muted transition-colors">
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
+                </>
+              )}
               <div className="relative ml-2">
                 <select value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(1); }}
                   className="appearance-none rounded border border-border bg-card pl-2 pr-6 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary">
-                  {[10, 25, 50, 100].map(n => <option key={n} value={n}>{n} / página</option>)}
+                  <option value={0}>Todos</option>
+                  {[25, 50, 100, 250].map(n => <option key={n} value={n}>{n} / página</option>)}
                 </select>
                 <ChevronDown className="absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground pointer-events-none" />
               </div>
