@@ -49,6 +49,9 @@ type InstanceInfo = { id: string; nome: string; provider: string; status: string
 
 const INSTANCE_ALERT_KEY = 'crm-instance-alert-shown';
 const INSTANCE_ALERT_COOLDOWN = 10 * 60 * 1000; // 10 min
+const AUTO_HISTORY_CONVERSATIONS = 30;
+const AUTO_HISTORY_MESSAGES_PER_CONVERSATION = 10;
+const AUTO_HISTORY_CONCURRENCY = 3;
 
 const COMMON_EMOJIS = [
   '😊','😂','❤️','👍','🙏','😍','🎉','✅','🔥','💪',
@@ -438,8 +441,14 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
   const pollRef          = useRef<ReturnType<typeof setInterval> | null>(null);
   const textareaRef      = useRef<HTMLTextAreaElement>(null);
   const autoSyncedRef    = useRef<Set<string>>(new Set());
+  const autoRecentHistoryLeadIdsRef = useRef<Set<string>>(new Set());
+  const autoRecentHistoryRunningRef = useRef(false);
 
   const selectedLead = leads.find(l => l.id === selectedId) ?? null;
+  const recentLeadIds = leads
+    .slice(0, AUTO_HISTORY_CONVERSATIONS)
+    .map(lead => lead.id)
+    .join('|');
 
   // ── Scroll helpers ──────────────────────────────────────────────────────────
   function isNearBottom() {
@@ -550,6 +559,67 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ── Auto-sync recent conversation history ─────────────────────────────────
+  useEffect(() => {
+    if (loading || !recentLeadIds || autoRecentHistoryRunningRef.current) return;
+
+    const targets = recentLeadIds
+      .split('|')
+      .filter(id => !autoRecentHistoryLeadIdsRef.current.has(id));
+
+    if (targets.length === 0) return;
+
+    targets.forEach(id => autoRecentHistoryLeadIdsRef.current.add(id));
+    autoRecentHistoryRunningRef.current = true;
+    let cancelled = false;
+
+    async function syncOne(leadId: string) {
+      const res = await fetch('/api/crm/sync-history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          leadId,
+          clientId,
+          limit: AUTO_HISTORY_MESSAGES_PER_CONVERSATION,
+        }),
+      });
+      const data = await res.json().catch(() => ({})) as { imported?: number };
+      return res.ok ? data.imported ?? 0 : 0;
+    }
+
+    async function run() {
+      let cursor = 0;
+      let imported = 0;
+      async function worker() {
+        while (!cancelled) {
+          const leadId = targets[cursor];
+          cursor += 1;
+          if (!leadId) return;
+          try {
+            imported += await syncOne(leadId);
+          } catch {
+            // Best-effort background sync. Manual history/debug buttons still surface errors.
+          }
+        }
+      }
+
+      await Promise.all(
+        Array.from(
+          { length: Math.min(AUTO_HISTORY_CONCURRENCY, targets.length) },
+          () => worker(),
+        ),
+      );
+
+      autoRecentHistoryRunningRef.current = false;
+      if (cancelled || imported === 0) return;
+      loadInbox();
+      if (selectedId && targets.includes(selectedId)) loadMessages(selectedId, true);
+    }
+
+    void run();
+    return () => { cancelled = true; };
+  }, [clientId, loadInbox, loadMessages, loading, recentLeadIds, selectedId]);
+
   // ── Inbox auto-refresh ─────────────────────────────────────────────────────
   useEffect(() => {
     loadInbox();
@@ -578,12 +648,18 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
     : false;
 
   useEffect(() => {
-    if (!selectedId) { setMessages([]); return; }
-    loadMessages(selectedId, true);
-    if (!isRecentLead) return;
+    if (!selectedId) {
+      queueMicrotask(() => setMessages([]));
+      return;
+    }
+    const loadTimer = window.setTimeout(() => loadMessages(selectedId, true), 0);
+    if (!isRecentLead) return () => window.clearTimeout(loadTimer);
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(() => loadMessages(selectedId), 5_000);
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+    return () => {
+      window.clearTimeout(loadTimer);
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
   }, [selectedId, loadMessages, isRecentLead]);
 
   // ── Auto-sync history when conversation has no messages ────────────────────

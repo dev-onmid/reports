@@ -104,11 +104,13 @@ export async function ensureCrmMessagesSchema(pool: Pool) {
     // ── Legacy-schema repair ──────────────────────────────────────────────────
     // The original migration (migration_crm.sql) created crm_messages with
     // `contact_id UUID NOT NULL REFERENCES crm_contacts(id)` and a direction CHECK.
-    // Lead-based chat messages set lead_id and leave contact_id NULL, so on installs
+    // Some intermediate schemas also added `conversation_id NOT NULL`. Lead-based chat
+    // messages set lead_id and leave those legacy relation columns NULL, so on installs
     // that still carry the legacy constraints every INSERT fails (NOT NULL / FK /
-    // CHECK). Make the column nullable, drop the FK to crm_contacts, and drop the
-    // legacy direction CHECK so inbound/outbound rows always persist.
+    // CHECK). Make the relation columns nullable, drop the FK to crm_contacts, and drop
+    // the legacy direction CHECK so inbound/outbound rows always persist.
     `ALTER TABLE public.crm_messages ALTER COLUMN contact_id DROP NOT NULL`,
+    `ALTER TABLE public.crm_messages ALTER COLUMN conversation_id DROP NOT NULL`,
     `ALTER TABLE public.crm_messages DROP CONSTRAINT IF EXISTS crm_messages_contact_id_fkey`,
     `ALTER TABLE public.crm_messages DROP CONSTRAINT IF EXISTS crm_messages_direction_check`,
     `ALTER TABLE public.crm_messages ALTER COLUMN text DROP NOT NULL`,

@@ -166,9 +166,10 @@ function normalizeRecord(msg: Record<string, any>): {
 }
 
 export async function POST(req: NextRequest) {
-  const { leadId, clientId } = await req.json().catch(() => ({})) as {
+  const { leadId, clientId, limit } = await req.json().catch(() => ({})) as {
     leadId?: string;
     clientId?: string;
+    limit?: number;
   };
 
   if (!leadId || !clientId) {
@@ -207,7 +208,7 @@ export async function POST(req: NextRequest) {
 
     const phone = lead.numero.replace(/\D/g, '');
     const lid = (lead.whatsapp_lid as string | null)?.replace(/\D/g, '') ?? null;
-    const LIMIT = 50;
+    const LIMIT = Math.min(Math.max(Number(limit ?? 50), 1), 50);
 
     const evoBase = (process.env.EVOLUTION_API_URL ?? '').replace(/\/$/, '');
     const evoKey  = process.env.EVOLUTION_API_KEY ?? '';
