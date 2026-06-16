@@ -1349,66 +1349,98 @@ ${thesisBanner(`Use "${topProd?.nome ?? '—'}" como âncora em campanhas de ups
   return auditSlide(wrapSlide(body, idx, total), 'sProdutos');
 }
 
-function sMetaAds(meta: MetaAdsFull, idx: number, total: number): string {
-  const cpc = meta.cliques ? brl(meta.investimento / meta.cliques) : '—';
+function sMetaAdsResumo(meta: MetaAdsFull, idx: number, total: number): string {
+  const totalConversas = meta.campanhas.reduce((s, c) => s + c.metricas.conversas, 0);
+  const totalCompras   = meta.campanhas.reduce((s, c) => s + c.metricas.compras, 0);
+  const totalValVendas = meta.campanhas.reduce((s, c) => s + c.metricas.valor_compras, 0);
+  const cpc            = meta.cliques > 0 ? brl(meta.investimento / meta.cliques) : '—';
 
-  // Rank campaigns: winner = highest resultado (conversas+compras), loser = highest spend + lowest resultado
-  const ranked = [...meta.campanhas].map(c => ({
-    ...c,
-    score: c.metricas.conversas + c.metricas.compras * 3 + (c.metricas.purchase_roas > 0 ? c.metricas.purchase_roas : 0),
-  })).sort((a, b) => b.score - a.score);
+  // ── Summary KPI card (icon circle + label + big number) ───────────────────
+  const bigKpi = (label: string, value: string, ico: string, icoColor = PRIMARY_TEXT, bgColor = PRIMARY) =>
+    `<div style="background:${CARD};border:1px solid ${BORDER};border-radius:14px;padding:18px 22px;display:flex;align-items:center;gap:16px;flex:1">
+      <div style="width:50px;height:50px;border-radius:50%;background:${bgColor}15;border:1.5px solid ${bgColor}28;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="${icoColor}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ico}</svg>
+      </div>
+      <div>
+        <p style="font-size:12px;font-weight:600;color:${MUTED};font-family:${INTER};margin:0 0 3px">${label}</p>
+        <p style="font-family:${BEBAS};font-size:34px;color:${FG};line-height:1;margin:0;letter-spacing:0.01em">${value}</p>
+      </div>
+    </div>`;
 
-  const winner = ranked[0];
-  const loser  = ranked.length > 1
-    ? [...ranked].sort((a, b) => b.metricas.investimento - b.score - (a.metricas.investimento - a.score))[ranked.length - 1]
-    : null;
+  const ICO_MONEY  = '<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>';
+  const ICO_EYE    = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
+  const ICO_USERS  = '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>';
+  const ICO_CURSOR = '<path d="m3 3 7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="m13 13 6 6"/>';
+  const ICO_CHAT   = '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>';
+  const ICO_CART   = '<circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>';
+  const ICO_SHIELD = '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>';
+  const ICO_LIST   = '<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>';
 
-  const thesis = winner
-    ? `Uma campanha concentra o retorno — priorizar a verba de "${winner.nome.slice(0,30)}${winner.nome.length>30?'…':''}" aumenta o ROAS`
-    : 'Investimento em Meta Ads — resultados e alcance no período';
+  const row1 = [
+    bigKpi('Investimento',    brlOrDash(meta.investimento),  ICO_MONEY ),
+    bigKpi('Impressões',      numOrDash(meta.impressoes),    ICO_EYE   ),
+    bigKpi('Alcance somado',  numOrDash(meta.alcance),       ICO_USERS ),
+    bigKpi('Cliques no link', numOrDash(meta.cliques),       ICO_CURSOR),
+  ];
 
-  function campMetrics(c: typeof ranked[0]): Array<{label:string;value:string}> {
-    const m = c.metricas;
-    const rows: Array<{label:string;value:string}> = [
-      { label: 'Investido', value: brlOrDash(m.investimento) },
-      { label: 'Alcance',   value: numOrDash(m.alcance) },
-    ];
-    if (m.frequencia > 0) rows.push({ label: 'Freq.', value: `${m.frequencia.toFixed(1)}×` });
-    if (m.conversas > 0)  rows.push({ label: 'Conversas', value: num(Math.round(m.conversas)) });
-    if (m.compras > 0)    rows.push({ label: 'Compras', value: num(Math.round(m.compras)) });
-    if (m.purchase_roas > 0) rows.push({ label: 'ROAS', value: `${m.purchase_roas.toFixed(2)}×` });
-    return rows;
-  }
+  const row2: string[] = [];
+  if (totalConversas > 0) row2.push(bigKpi('Conversas iniciadas',  num(Math.round(totalConversas)), ICO_CHAT,   '#059669', '#10b981'));
+  if (totalCompras > 0)   row2.push(bigKpi('Compras registradas',  num(Math.round(totalCompras)),   ICO_CART,   ORANGE,    ORANGE  ));
+  if (meta.cliques > 0)   row2.push(bigKpi('CPC médio',            cpc,                              ICO_SHIELD, BLUE,      BLUE    ));
+  if (totalValVendas > 0) row2.push(bigKpi('Valor de compras',     brl(totalValVendas),              ICO_CART,   ORANGE,    ORANGE  ));
 
-  const winnerCard = winner
-    ? rankCard(1, winner.nome, campMetrics(winner), 'winner')
-    : '';
-  const otherCards = ranked.slice(1).map((c, i) =>
-    rankCard(i + 2, c.nome, campMetrics(c), c === loser ? 'loser' : 'normal'),
+  // ── Campaign bullet list ──────────────────────────────────────────────────
+  const bulletCols  = Math.min(4, Math.max(2, Math.ceil(meta.campanhas.length / 2)));
+  const bullets = meta.campanhas.map(c =>
+    `<div style="display:flex;align-items:flex-start;gap:8px">
+      <div style="width:6px;height:6px;border-radius:50%;background:${PRIMARY};flex-shrink:0;margin-top:7px"></div>
+      <span style="font-size:13px;font-weight:500;color:${FG};font-family:${INTER};line-height:1.4">${c.nome}</span>
+    </div>`,
   ).join('');
 
-  const conclusion = winner
-    ? (winner.metricas.purchase_roas > 2
-        ? `ROAS de ${winner.metricas.purchase_roas.toFixed(1)}× na campanha vencedora — cada real investido retornou ${brl(winner.metricas.purchase_roas)}. Escalar o orçamento nessa campanha.`
-        : winner.metricas.conversas > 0
-        ? `${num(Math.round(winner.metricas.conversas))} conversas iniciadas na campanha líder — nutrição via WhatsApp converte esses contatos em pedidos.`
-        : `Campanha líder investiu ${brlOrDash(winner.metricas.investimento)} e alcançou ${numOrDash(winner.metricas.alcance)} pessoas.`)
-    : `Total investido: ${brlOrDash(meta.investimento)} · alcance de ${numOrDash(meta.alcance)} pessoas · ${numOrDash(meta.cliques)} cliques.`;
+  // ── Summary note for conclusion marker ────────────────────────────────────
+  const summaryNote = totalConversas > 0 && totalCompras > 0
+    ? `Período com campanhas de conversa (${num(Math.round(totalConversas))} msg) e vendas (${num(Math.round(totalCompras))} compras) rodando em paralelo — avaliar custo por resultado de cada objetivo separadamente.`
+    : totalConversas > 0
+    ? `${num(Math.round(totalConversas))} conversas iniciadas — custo por mensagem é a métrica principal para campanhas de relacionamento.`
+    : totalCompras > 0
+    ? `${num(Math.round(totalCompras))} compras registradas com ${brlOrDash(meta.investimento)} investido — ROAS é a métrica central para avaliar o retorno.`
+    : `${brlOrDash(meta.investimento)} investidos em ${meta.campanhas.length} campanha${meta.campanhas.length !== 1 ? 's' : ''} com alcance de ${numOrDash(meta.alcance)} pessoas únicas.`;
 
   const body = `
-${sectionHeader(thesis, 'Meta Ads — investimento e resultados por campanha')}
-<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">
-  ${kpi('Investimento', brlOrDash(meta.investimento), 'total em anúncios', BLUE)}
-  ${kpi('Alcance', numOrDash(meta.alcance), 'pessoas únicas', BLUE)}
-  ${kpi('Impressões', numOrDash(meta.impressoes), 'exibições totais', BLUE)}
-  ${kpi('CPC', cpc, `${numOrDash(meta.cliques)} cliques`, BLUE)}
-</div>
-${ranked.length ? `<div style="display:grid;grid-template-columns:${ranked.length > 1 ? '1fr 1fr' : '1fr'};gap:14px">
-  <div>${winnerCard}</div>
-  ${ranked.length > 1 ? `<div style="display:grid;grid-template-columns:1fr;gap:10px">${otherCards}</div>` : ''}
-</div>` : ''}
-${thesisBanner(conclusion, 'insight')}`;
-  return auditSlide(wrapSlide(body, idx, total), 'sMetaAds');
+<div style="flex:1;display:flex;flex-direction:column;padding-bottom:28px">
+
+  <div style="flex-shrink:0;margin-bottom:20px">
+    <h1 style="font-family:${INTER};font-size:46px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 7px;letter-spacing:-0.03em">Resumo de tráfego pago</h1>
+    <p style="font-size:14px;font-weight:500;color:${MUTED};font-family:${INTER};margin:0">Visibilidade, cliques e destaques de todas as campanhas do período</p>
+  </div>
+
+  <div style="display:flex;gap:12px;flex-shrink:0;margin-bottom:12px">
+    ${row1.join('')}
+  </div>
+
+  ${row2.length > 0 ? `<div style="display:flex;gap:12px;flex-shrink:0;margin-bottom:12px">${row2.join('')}</div>` : ''}
+
+  <div style="flex:1;background:${CARD};border:1px solid ${BORDER};border-radius:16px;padding:20px 26px;display:flex;flex-direction:column">
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px">
+      <div style="width:40px;height:40px;border-radius:50%;background:${BLUE}10;border:1.5px solid ${BLUE}20;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${BLUE}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICO_LIST}</svg>
+      </div>
+      <div>
+        <p style="font-size:14px;font-weight:700;color:${FG};font-family:${INTER};margin:0">Campanhas analisadas</p>
+        <p style="font-size:11px;color:${MUTED};font-family:${INTER};margin:3px 0 0">${meta.campanhas.length} campanha${meta.campanhas.length !== 1 ? 's' : ''} no período</p>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(${bulletCols},1fr);gap:8px 28px;flex:1">
+      ${bullets}
+    </div>
+    <div data-conclusion="1" style="border-top:1px solid ${BORDER};margin-top:16px;padding-top:12px">
+      <p style="font-size:12px;color:${MUTED};font-family:${INTER};line-height:1.55;margin:0">${summaryNote}</p>
+    </div>
+  </div>
+
+</div>`;
+  return auditSlide(wrapSlide(body, idx, total), 'sMetaAdsResumo');
 }
 
 // ── Instagram Insights ────────────────────────────────────────────────────────
@@ -1607,89 +1639,153 @@ ${thesisBanner(
 
 // ── Expanded slides ───────────────────────────────────────────────────────────
 
-function sDestaqueCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number, total: number): string {
-  const conversa  = meta.campanhas.filter(c => c.metricas.conversas > 0 || c.tipo.toLowerCase().includes('messages'));
-  const conversao = meta.campanhas.filter(c => c.metricas.compras > 0 || c.tipo.toLowerCase().includes('conversions'));
-  const others    = meta.campanhas.filter(c => !conversa.includes(c) && !conversao.includes(c));
+function sMetaAdsCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number, total: number): string {
+  const isWA = (c: CampanhaDetalhada) =>
+    c.metricas.conversas > 0
+    || c.tipo.toLowerCase().includes('message')
+    || c.tipo.toLowerCase().includes('whatsapp');
 
-  function sectionConversa(camps: CampanhaDetalhada[]) {
-    if (!camps.length) return '';
-    const sorted = [...camps].sort((a, b) => b.metricas.conversas - a.metricas.conversas);
-    const cards = sorted.map((c, i) => {
-      const m = c.metricas;
-      const metrics: Array<{label:string;value:string}> = [
-        { label: 'Investido',     value: brlOrDash(m.investimento) },
-        { label: 'Alcance',       value: numOrDash(m.alcance) },
-        { label: 'Freq.',         value: `${m.frequencia.toFixed(1)}×` },
-        { label: 'Mensagens',     value: m.conversas > 0 ? num(Math.round(m.conversas)) : '—' },
-        { label: 'Custo/msg',     value: m.conversas > 0 && m.investimento > 0 ? brl(m.investimento / m.conversas) : '—' },
-      ];
-      return rankCard(i + 1, c.nome, metrics, i === 0 ? 'winner' : 'normal');
-    }).join('');
-    return `<div style="margin-bottom:20px">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
-        <div style="width:3px;height:14px;background:${PRIMARY}"></div>
-        <p style="font-size:10px;font-weight:700;color:${PRIMARY_TEXT};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0">Campanhas de Conversa — métrica: mensagens iniciadas</p>
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(${Math.min(sorted.length,3)},1fr);gap:10px;margin-bottom:8px">${cards}</div>
-      ${diag.insight_campanha_conversa ? insight('Análise', diag.insight_campanha_conversa, PRIMARY) : ''}
+  const isSales = (c: CampanhaDetalhada) =>
+    c.metricas.compras > 0
+    || c.tipo.toLowerCase().includes('conversion');
+
+  // ── Auto insight per campaign ─────────────────────────────────────────────
+  function autoInsight(c: CampanhaDetalhada): string {
+    const m = c.metricas;
+    if (isWA(c)) {
+      const cpm = m.conversas > 0 && m.investimento > 0 ? m.investimento / m.conversas : 0;
+      if (m.frequencia > 5)    return `frequência de ${m.frequencia.toFixed(1)}× — audiência saturando, considere ampliar o público`;
+      if (m.conversas > 300)   return `alto volume de conversas — pipeline aquecido para nutrição via WhatsApp`;
+      if (cpm > 0 && cpm < 8)  return `custo por conversa eficiente (${brl(cpm)}) — campanha rentável, considere escalar`;
+      return `${numOrDash(Math.round(m.conversas))} conversas com ${brlOrDash(m.investimento)} investido — monitorar qualidade dos leads`;
+    }
+    if (isSales(c)) {
+      if (m.purchase_roas > 6)  return `ROAS de ${m.purchase_roas.toFixed(1)}× — excelente retorno, priorizar verba nessa campanha`;
+      if (m.purchase_roas > 3)  return `boa relação entre investimento e retorno (ROAS ${m.purchase_roas.toFixed(1)}×)`;
+      if (m.purchase_roas > 0)  return `ROAS de ${m.purchase_roas.toFixed(1)}× abaixo do ideal — revisar criativo e segmentação`;
+      if (m.compras > 0)        return `${num(Math.round(m.compras))} compras registradas — monitorar ROAS nas próximas semanas`;
+      return `campanha de vendas com investimento de ${brlOrDash(m.investimento)} — aguardar conversões`;
+    }
+    if (m.cliques > 500)        return `alto volume de cliques (${numOrDash(m.cliques)}) — audiência engajada com o criativo`;
+    if (m.frequencia > 4)       return `frequência de ${m.frequencia.toFixed(1)}× — campanha de reconhecimento com boa repetição`;
+    return `alcance de ${numOrDash(m.alcance)} pessoas com ${brlOrDash(m.investimento)} — campanha de visibilidade ativa`;
+  }
+
+  // ── Campaign block matching reference design ───────────────────────────────
+  const ICO_WA   = '<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>';
+  const ICO_CART = '<circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>';
+  const ICO_ACT  = '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>';
+  const ICO_ARR  = '<line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>';
+
+  function metricCol(label: string, value: string, last = false): string {
+    return `<div style="flex:1;padding:12px 16px;${last ? '' : `border-right:1px solid ${BORDER};`}">
+      <p style="font-size:11px;font-weight:600;color:${MUTED};font-family:${INTER};margin:0 0 5px;line-height:1.2">${label}</p>
+      <p style="font-family:${BEBAS};font-size:${value === '—' ? '22' : '28'}px;color:${value === '—' ? MUTED : FG};line-height:1;margin:0;letter-spacing:0.01em">${value}</p>
     </div>`;
   }
 
-  function sectionVendas(camps: CampanhaDetalhada[]) {
-    if (!camps.length) return '';
-    const sorted = [...camps].sort((a, b) => b.metricas.purchase_roas - a.metricas.purchase_roas);
-    const cards = sorted.map((c, i) => {
-      const m = c.metricas;
-      const metrics: Array<{label:string;value:string}> = [
-        { label: 'Investido',     value: brlOrDash(m.investimento) },
-        { label: 'Valor vendas',  value: m.valor_compras > 0 ? brl(m.valor_compras) : '—' },
-        { label: 'Vendas',        value: m.compras > 0 ? num(Math.round(m.compras)) : '—' },
-        { label: 'ROAS',          value: m.purchase_roas > 0 ? `${m.purchase_roas.toFixed(2)}×` : '—' },
-        { label: 'Custo/venda',   value: m.compras > 0 && m.investimento > 0 ? brl(m.investimento / m.compras) : '—' },
-      ];
-      return rankCard(i + 1, c.nome, metrics, i === 0 ? 'winner' : 'normal');
-    }).join('');
-    return `<div style="margin-bottom:20px">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
-        <div style="width:3px;height:14px;background:${ORANGE}"></div>
-        <p style="font-size:10px;font-weight:700;color:${ORANGE};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0">Campanhas de Vendas — métrica: valor e quantidade de vendas</p>
+  function campBlock(c: CampanhaDetalhada): string {
+    const m = c.metricas;
+    const campIsWA    = isWA(c);
+    const campIsSales = !campIsWA && isSales(c);
+    const icoPath     = campIsWA ? ICO_WA : campIsSales ? ICO_CART : ICO_ACT;
+    const iconBg      = campIsWA ? '#25D366' : campIsSales ? ORANGE : BLUE;
+    const iconFg      = '#ffffff';
+
+    let cols: string;
+    if (campIsWA) {
+      const cpm = m.conversas > 0 && m.investimento > 0 ? brl(m.investimento / m.conversas) : '—';
+      cols = [
+        metricCol('Investimento',       brlOrDash(m.investimento)),
+        metricCol('Conversas iniciadas', m.conversas > 0 ? num(Math.round(m.conversas)) : '—'),
+        metricCol('Custo por conversa',  cpm),
+        metricCol('Cliques no link',     numOrDash(m.cliques)),
+        metricCol('Frequência',          m.frequencia > 0 ? m.frequencia.toFixed(2) : '—', true),
+      ].join('');
+    } else if (campIsSales) {
+      const cpp = m.compras > 0 && m.investimento > 0 ? brl(m.investimento / m.compras) : '—';
+      cols = [
+        metricCol('Investimento',       brlOrDash(m.investimento)),
+        metricCol('Compras registradas', m.compras > 0 ? num(Math.round(m.compras)) : '—'),
+        metricCol('Custo por compra',    cpp),
+        metricCol('Valor de compra',     m.valor_compras > 0 ? brl(m.valor_compras) : '—'),
+        metricCol('ROAS',                m.purchase_roas > 0 ? m.purchase_roas.toFixed(2) : '—', true),
+      ].join('');
+    } else {
+      cols = [
+        metricCol('Investimento',  brlOrDash(m.investimento)),
+        metricCol('Alcance',       numOrDash(m.alcance)),
+        metricCol('Impressões',    numOrDash(m.impressoes)),
+        metricCol('Cliques',       numOrDash(m.cliques)),
+        metricCol('Frequência',    m.frequencia > 0 ? m.frequencia.toFixed(2) : '—', true),
+      ].join('');
+    }
+
+    const insightText = autoInsight(c);
+
+    return `<div style="background:${CARD};border:1px solid ${BORDER};border-radius:16px;overflow:hidden">
+      <div style="display:flex;align-items:stretch">
+        <div style="width:76px;flex-shrink:0;background:${iconBg}12;display:flex;align-items:center;justify-content:center">
+          <div style="width:52px;height:52px;border-radius:50%;background:${iconBg};display:flex;align-items:center;justify-content:center">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="${iconFg}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${icoPath}</svg>
+          </div>
+        </div>
+        <div style="width:1px;background:${BORDER};flex-shrink:0"></div>
+        <div style="flex:1;min-width:0">
+          <div style="padding:14px 18px 12px">
+            <p style="font-size:14px;font-weight:700;color:${FG};font-family:${INTER};margin:0;line-height:1.3">${c.nome}</p>
+          </div>
+          <div style="display:flex;border-top:1px solid ${BORDER}">${cols}</div>
+        </div>
       </div>
-      <div style="display:grid;grid-template-columns:repeat(${Math.min(sorted.length,3)},1fr);gap:10px;margin-bottom:8px">${cards}</div>
-      ${diag.insight_campanha_conversao ? insight('Análise', diag.insight_campanha_conversao, ORANGE) : ''}
+      <div style="border-top:1px solid ${BORDER};padding:10px 18px;display:flex;align-items:center;gap:10px;background:${ROW}">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="${PRIMARY_TEXT}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">${ICO_ARR}</svg>
+        <p style="font-size:12px;font-weight:500;color:${FG};font-family:${INTER};margin:0;line-height:1.4">${insightText}</p>
+      </div>
     </div>`;
   }
 
-  function sectionOthers(camps: CampanhaDetalhada[]) {
-    if (!camps.length) return '';
-    const cards = camps.map((c, i) => {
-      const m = c.metricas;
-      const metrics: Array<{label:string;value:string}> = [
-        { label: 'Investido', value: brlOrDash(m.investimento) },
-        { label: 'Alcance',   value: numOrDash(m.alcance) },
-        { label: 'Cliques',   value: numOrDash(m.cliques) },
-        { label: 'Freq.',     value: `${m.frequencia.toFixed(1)}×` },
-      ];
-      return rankCard(i + 1, c.nome, metrics, i === 0 ? 'winner' : 'normal');
-    }).join('');
-    return `<div style="margin-bottom:20px">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
-        <div style="width:3px;height:14px;background:${BLUE}"></div>
-        <p style="font-size:10px;font-weight:700;color:${BLUE};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0">Demais Campanhas — alcance e engajamento</p>
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(${Math.min(camps.length,3)},1fr);gap:10px">${cards}</div>
-    </div>`;
-  }
+  // ── Recommendation block ──────────────────────────────────────────────────
+  const ICO_TGT = '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>';
+  const hasConversa   = meta.campanhas.some(isWA);
+  const hasSales      = meta.campanhas.some(isSales);
+  const recText = diag.insight_campanha_conversa && diag.insight_campanha_conversao
+    ? `${diag.insight_campanha_conversa} ${diag.insight_campanha_conversao}`
+    : diag.insight_campanha_conversa || diag.insight_campanha_conversao
+    || (hasConversa && hasSales
+        ? 'separar campanhas por objetivo — reconhecimento, venda direta, WhatsApp, reativação e remarketing'
+        : hasConversa
+        ? 'nutrir as conversas iniciadas via WhatsApp com sequência de follow-up para converter em pedidos'
+        : 'escalar o orçamento nas campanhas com melhor ROAS e testar novos criativos para o público mais responsivo');
+
+  const campGrid = meta.campanhas.length > 0
+    ? `<div style="display:grid;grid-template-columns:${meta.campanhas.length === 1 ? '1fr' : '1fr 1fr'};gap:14px">${meta.campanhas.map(campBlock).join('')}</div>`
+    : '';
 
   const body = `
-${sectionHeader('Cada campanha tem um objetivo — compare pelo custo por resultado, não pelo investimento', 'Análise expandida Meta Ads por tipo de campanha')}
-<div style="flex:1;overflow:hidden">
-  ${sectionConversa(conversa)}
-  ${sectionVendas(conversao)}
-  ${sectionOthers(others)}
-</div>
-${thesisBanner('Conversa = custo por mensagem. Venda = ROAS e valor gerado. Nunca misture as métricas de sucesso entre tipos de campanha.', 'neutral')}`;
-  return auditSlide(wrapSlide(body, idx, total, 'ANÁLISE EXPANDIDA'), 'sDestaqueCampanhas');
+<div style="flex:1;display:flex;flex-direction:column;padding-bottom:28px">
+
+  <div style="flex-shrink:0;margin-bottom:18px">
+    <h1 style="font-family:${INTER};font-size:36px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 6px;letter-spacing:-0.03em">Detalhamento por campanha</h1>
+    <p style="font-size:13px;font-weight:500;color:${MUTED};font-family:${INTER};margin:0">Métricas individuais — cada campanha avaliada pelo seu objetivo principal</p>
+  </div>
+
+  <div style="flex:1;display:flex;flex-direction:column;gap:14px;min-height:0">
+    ${campGrid}
+  </div>
+
+  <div data-conclusion="1" style="flex-shrink:0;background:${CARD};border:1px solid ${BORDER};border-radius:14px;padding:16px 20px;display:flex;align-items:center;gap:16px;margin-top:14px">
+    <div style="width:40px;height:40px;border-radius:50%;background:${PRIMARY}15;border:1.5px solid ${PRIMARY}28;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${PRIMARY_TEXT}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICO_TGT}</svg>
+    </div>
+    <div>
+      <p style="font-size:11px;font-weight:700;color:${PRIMARY_TEXT};text-transform:uppercase;letter-spacing:0.09em;font-family:${INTER};margin:0 0 4px">Recomendação</p>
+      <p style="font-size:13px;font-weight:500;color:${FG};font-family:${INTER};line-height:1.5;margin:0">${recText}</p>
+    </div>
+  </div>
+
+</div>`;
+  return auditSlide(wrapSlide(body, idx, total), 'sMetaAdsCampanhas');
 }
 
 function sDiagnosticoFat(diag: DiagJson, d: ParsedData, bairros: Bairro[], idx: number, total: number): string {
@@ -1975,11 +2071,11 @@ export async function buildDeliveryReport(opts: {
   if (hasBase)        slides.push(sBase(data, ++i, total));
   if (hasInat)        slides.push(sInativos(data, ++i, total));
   if (hasProd)        slides.push(sProdutos(data, ++i, total));
-  if (hasMeta)        slides.push(sMetaAds(meta!, ++i, total));
+  if (hasMeta)        slides.push(sMetaAdsResumo(meta!, ++i, total));
   if (hasInstagram)   slides.push(sInstagram(instagram!, ++i, total));
   slides.push(sDiagnosticoA(diag, ++i, total));
   slides.push(sDiagnosticoPlan(diag, ++i, total));
-  if (hasDestaques)   slides.push(sDestaqueCampanhas(meta!, diag, ++i, total));
+  if (hasDestaques)   slides.push(sMetaAdsCampanhas(meta!, diag, ++i, total));
   if (hasCriativos)   slides.push(sCriativos(creatives, ++i, total));
   if (hasDiagFat)     slides.push(sDiagnosticoFat(diag, data, bairros, ++i, total));
   if (hasPlanoDetalh) slides.push(sPlanoDetalhado(diag, ++i, total));
