@@ -20,10 +20,14 @@ export type FollowupVars = {
 // ── Instance resolver ────────────────────────────────────────────────────────
 
 export async function getClientInstance(pool: Pool, clientId: string): Promise<WaInstance | null> {
+  // Prefer the Evolution instance when a client has both providers active —
+  // Evolution is the live/primary instance; Z-API rows are legacy. All CRM paths
+  // (inbox list, history, send) must agree on the same instance.
   const { rows: [inst] } = await pool.query(
     `SELECT instance_id, token, provider FROM public.client_zapi_instances
      WHERE client_id = $1 AND ativo = true
-     ORDER BY created_at ASC LIMIT 1`,
+     ORDER BY CASE WHEN provider = 'evolution' THEN 0 ELSE 1 END, created_at ASC
+     LIMIT 1`,
     [clientId],
   );
   if (!inst) return null;

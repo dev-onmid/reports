@@ -162,13 +162,14 @@ export async function POST(req: NextRequest) {
       return Response.json({ error: 'Lead não encontrado ou sem número' }, { status: 404 });
     }
 
-    // Pick the SAME instance the inbox list and the send path use (oldest active),
-    // otherwise a client with both a Z-API and an Evolution instance would list
-    // conversations from one instance but fetch history from another → 0 results.
+    // Prefer the Evolution instance when a client has both providers active — Evolution
+    // is the live/primary instance; Z-API rows are legacy. Must match the inbox list and
+    // the send path, otherwise we'd list conversations from one instance but fetch history
+    // from another → 0 results / wrong-number history.
     const { rows: [inst] } = await pool.query(
       `SELECT instance_id, token, provider FROM public.client_zapi_instances
        WHERE client_id = $1 AND ativo = true
-       ORDER BY created_at ASC
+       ORDER BY CASE WHEN provider = 'evolution' THEN 0 ELSE 1 END, created_at ASC
        LIMIT 1`,
       [clientId],
     );

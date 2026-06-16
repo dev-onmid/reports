@@ -304,11 +304,13 @@ export async function POST(req: NextRequest) {
   try {
     await ensureDefaultFunnel(pool, clientId);
 
+    // Prefer the Evolution instance when both providers are active (Evolution is the
+    // live/primary; Z-API rows are legacy). Must match getClientInstance + sync-history.
     const { rows: [instance] } = await pool.query(
       `SELECT instance_id, token, provider
        FROM public.client_zapi_instances
        WHERE client_id = $1 AND ativo = true
-       ORDER BY created_at ASC
+       ORDER BY CASE WHEN provider = 'evolution' THEN 0 ELSE 1 END, created_at ASC
        LIMIT 1`,
       [clientId],
     );
