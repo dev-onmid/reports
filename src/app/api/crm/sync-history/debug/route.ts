@@ -123,12 +123,78 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ── DRY-RUN IMPORT: replay exactly what sync-history does, inside a tx we ROLL BACK.
+    // This surfaces the real INSERT error in production without writing anything.
+    const dryRun: {
+      recordsFound: number; wouldImport: number; normalizedNull: number;
+      insertErrors: string[]; sample: Array<{ direction: string; text: string; externalId: string | null }>;
+    } = { recordsFound: 0, wouldImport: 0, normalizedNull: 0, insertErrors: [], sample: [] };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const extractText = (msg: any): string => {
+      const m = msg.message ?? msg;
+      if (typeof m === 'string') return m;
+      if (m?.conversation) return m.conversation;
+      if (m?.extendedTextMessage?.text) return m.extendedTextMessage.text;
+      if (m?.imageMessage) return '[Imagem]';
+      if (m?.audioMessage) return '[Áudio]';
+      if (m?.videoMessage) return '[Vídeo]';
+      if (typeof msg.body === 'string' && msg.body) return msg.body;
+      return '';
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const norm = (msg: any) => {
+      const key = msg.key;
+      const externalId = (key?.id ?? msg.id ?? null) as string | null;
+      const text = extractText(msg);
+      if (!text) return null;
+      const direction = (key?.fromMe ?? false) ? 'out' : 'in';
+      const n = Number(msg.messageTimestamp);
+      const ts = (Number.isFinite(n) && n > 0) ? new Date(n < 1e10 ? n * 1000 : n).toISOString() : new Date().toISOString();
+      return { externalId, text, direction, ts };
+    };
+
+    // gather records from the first apiResult that returned some
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let records: any[] = [];
+    for (const r of results) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const recs = (r.preview as any)?.messages?.records;
+      if (Array.isArray(recs) && recs.length) { records = recs; break; }
+    }
+    dryRun.recordsFound = records.length;
+
+    if (records.length) {
+      await pool.query('BEGIN').catch(() => null);
+      try {
+        for (const raw of records.slice(0, 10)) {
+          const n = norm(raw);
+          if (!n) { dryRun.normalizedNull++; continue; }
+          if (dryRun.sample.length < 3) dryRun.sample.push({ direction: n.direction, text: n.text.slice(0, 40), externalId: n.externalId });
+          try {
+            const r = await pool.query(
+              `INSERT INTO public.crm_messages (lead_id, client_id, direction, text, external_id, created_at)
+               VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING RETURNING id`,
+              [leadId, clientId, n.direction, n.text, n.externalId, n.ts],
+            );
+            if ((r.rowCount ?? 0) > 0) dryRun.wouldImport++;
+          } catch (e) {
+            const m = e instanceof Error ? e.message : String(e);
+            if (!dryRun.insertErrors.includes(m)) dryRun.insertErrors.push(m);
+          }
+        }
+      } finally {
+        await pool.query('ROLLBACK').catch(() => null);
+      }
+    }
+
     return Response.json({
       lead: { id: lead.id, nome: lead.nome, numero: lead.numero, whatsapp_lid: lead.whatsapp_lid, phone },
       allInstances,
       selectedInstance: inst ? { instance_id: inst.instance_id, provider: inst.provider } : null,
       storedMessages: { byLeadId: storedByLead?.n, byPhone: storedByPhone?.n },
       duplicateLeadsWithSamePhone: dupLeads,
+      dryRunImport: dryRun,
       apiResults: results,
     });
   } finally {
