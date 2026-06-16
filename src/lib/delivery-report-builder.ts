@@ -439,12 +439,45 @@ async function fetchMetaData(
 
   const creatives: Creative[] = await Promise.all(top5.map(async (ad) => {
     if (!ad.ad_id) return { nome: ad.ad_name, spend: ad.spend, resultado: ad.resultado, thumbnail_url: null };
-    const url = `https://graph.facebook.com/v21.0/${ad.ad_id}?fields=creative{thumbnail_url}&access_token=${token}`;
+    // Fetch creative fields needed to resolve the best thumbnail.
+    // video_id is the direct reference used by Reels/video ads; image_url is for static ads.
+    // creative.thumbnail_url has an oe= expiry param — we prefer video.picture when possible.
+    const creativeFields = 'image_url,thumbnail_url,video_id,object_story_spec{video_data{video_id,image_url}}';
+    const url = `https://graph.facebook.com/v21.0/${ad.ad_id}?fields=creative{${creativeFields}}&access_token=${token}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(8000) }).catch(() => null);
     let thumbnail_url: string | null = null;
     if (res?.ok) {
-      const j = await res.json() as { creative?: { thumbnail_url?: string } };
-      thumbnail_url = j.creative?.thumbnail_url ?? null;
+      const j = await res.json() as {
+        creative?: {
+          image_url?: string;
+          thumbnail_url?: string;
+          video_id?: string;
+          object_story_spec?: { video_data?: { video_id?: string; image_url?: string } };
+        };
+      };
+      const cr = j.creative ?? {};
+      const videoId = cr.video_id ?? cr.object_story_spec?.video_data?.video_id ?? null;
+
+      // For video/Reels ads, fetch the video object's picture — a stable CDN URL
+      // (unlike creative.thumbnail_url which uses oe= expiry timestamps).
+      if (videoId) {
+        const vRes = await fetch(
+          `https://graph.facebook.com/v21.0/${videoId}?fields=picture&access_token=${token}`,
+          { signal: AbortSignal.timeout(6000) },
+        ).catch(() => null);
+        if (vRes?.ok) {
+          const vj = await vRes.json() as { picture?: string };
+          thumbnail_url = vj.picture ?? null;
+        }
+        // Fallback: image_url set at ad creation time (explicit thumbnail in video_data)
+        if (!thumbnail_url) {
+          thumbnail_url = cr.object_story_spec?.video_data?.image_url ?? null;
+        }
+      }
+      // Static image ad or last resort
+      if (!thumbnail_url) {
+        thumbnail_url = cr.image_url ?? cr.thumbnail_url ?? null;
+      }
     }
     return { nome: ad.ad_name, spend: ad.spend, resultado: ad.resultado, thumbnail_url };
   }));

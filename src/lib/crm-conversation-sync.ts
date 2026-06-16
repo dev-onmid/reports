@@ -58,7 +58,10 @@ export async function ensureCrmConversationSchema(pool: Pool) {
       ADD COLUMN IF NOT EXISTS whatsapp_last_message_at TIMESTAMPTZ,
       ADD COLUMN IF NOT EXISTS whatsapp_last_message_text TEXT,
       ADD COLUMN IF NOT EXISTS whatsapp_last_direction TEXT,
-      ADD COLUMN IF NOT EXISTS whatsapp_lid TEXT;
+      ADD COLUMN IF NOT EXISTS whatsapp_lid TEXT,
+      ADD COLUMN IF NOT EXISTS ctwa_clid TEXT,
+      ADD COLUMN IF NOT EXISTS utm_source TEXT,
+      ADD COLUMN IF NOT EXISTS instance_id TEXT;
     CREATE INDEX IF NOT EXISTS crm_leads_client_id_idx ON public.crm_leads(client_id);
     CREATE INDEX IF NOT EXISTS crm_leads_funnel_id_idx ON public.crm_leads(funnel_id);
     CREATE INDEX IF NOT EXISTS crm_leads_normalized_phone_idx

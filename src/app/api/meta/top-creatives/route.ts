@@ -51,9 +51,14 @@ export type TopCreative = {
   campaignName?: string;
   adSetId?: string;
   adSetName?: string;
+  /** Stable thumbnail / best image for display — never an expiring signed URL */
   imageUrl?: string;
+  /** Secondary fallback thumbnail */
   thumbnailUrl?: string;
+  /** Video source URL (may expire — used only for in-overlay playback attempt) */
   videoUrl?: string;
+  /** Detected creative format for UI badges */
+  mediaType: 'image' | 'video' | 'carousel' | 'unknown';
   permalink?: string;
   headline?: string;
   body?: string;
@@ -64,6 +69,44 @@ export type TopCreative = {
   ctr: number;
   cpl: number;
 };
+
+// ── Video ID collection ───────────────────────────────────────────────────────
+// Meta Ads has THREE ways a creative can reference a video:
+//   1. creative.video_id           — direct (Reels, boosted posts)
+//   2. object_story_spec.video_data.video_id — standard video ads
+//   3. asset_feed_spec.videos[].video_id    — Advantage+/dynamic creatives
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function extractVideoIds(creative: Record<string, any>): string[] {
+  const ids: string[] = [];
+  const storySpec = creative.object_story_spec ?? {};
+  const assetFeed = creative.asset_feed_spec ?? {};
+
+  if (typeof creative.video_id === 'string' && creative.video_id) ids.push(creative.video_id);
+  if (typeof storySpec.video_data?.video_id === 'string') ids.push(storySpec.video_data.video_id);
+  for (const v of (assetFeed.videos ?? []) as Array<Record<string, string>>) {
+    if (typeof v.video_id === 'string' && v.video_id) ids.push(v.video_id);
+  }
+
+  return [...new Set(ids)];
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function detectMediaType(creative: Record<string, any>): TopCreative['mediaType'] {
+  const objectType = (creative.object_type as string ?? '').toUpperCase();
+  if (objectType === 'VIDEO' || objectType === 'REELS') return 'video';
+
+  const videoIds = extractVideoIds(creative);
+  if (videoIds.length > 0) return 'video';
+
+  const storySpec = creative.object_story_spec ?? {};
+  const assetFeed = creative.asset_feed_spec ?? {};
+  const childAttachments = (storySpec.link_data?.child_attachments ?? []) as unknown[];
+  if (childAttachments.length > 1) return 'carousel';
+  if ((assetFeed.videos ?? []).length > 0) return 'video';
+  if (creative.image_url || creative.thumbnail_url) return 'image';
+
+  return 'unknown';
+}
 
 export async function GET(request: NextRequest) {
   const period = request.nextUrl.searchParams.get('period') ?? 'last_30d';
@@ -181,45 +224,99 @@ export async function GET(request: NextRequest) {
           if (adsInsights.length === 0) return;
 
           // Batch-fetch creative details
+          // video_id is the direct reference on the creative object (used for Reels and boosted posts).
+          // object_type distinguishes VIDEO/REELS/PHOTO/LINK for badge rendering.
           const adIds = adsInsights.map(a => a.ad_id as string).filter(Boolean);
+          const creativeFields = [
+            'body', 'title', 'image_url', 'thumbnail_url',
+            'video_id', 'object_type',
+            'object_story_spec', 'asset_feed_spec',
+            'instagram_permalink_url', 'effective_object_story_id',
+          ].join(',');
           const batchRes = await fetch(
-            `https://graph.facebook.com/v21.0/?ids=${adIds.join(',')}&fields=name,creative{body,title,image_url,thumbnail_url,object_story_spec,asset_feed_spec,instagram_permalink_url,effective_object_story_id}&access_token=${token}`
+            `https://graph.facebook.com/v21.0/?ids=${adIds.join(',')}&fields=name,creative{${creativeFields}}&access_token=${token}`
           );
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const batchData: Record<string, any> = batchRes.ok ? await batchRes.json() : {};
-          const videoIds = [...new Set(
-            Object.values(batchData)
+
+          // Collect all unique video IDs from every ad in this batch
+          const allVideoIds = [...new Set(
+            Object.values(batchData).flatMap((adObj: unknown) => {
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              .map((ad: any) => ad.creative?.object_story_spec?.video_data?.video_id as string | undefined)
-              .filter(Boolean)
+              const ad = adObj as Record<string, any>;
+              return extractVideoIds(ad.creative ?? {});
+            })
           )];
-          const videoBatchRes = videoIds.length > 0
-            ? await fetch(`https://graph.facebook.com/v21.0/?ids=${videoIds.join(',')}&fields=source,picture,thumbnails{uri,height,width},format{picture,width,height}&access_token=${token}`)
-            : null;
+
+          // Fetch video thumbnails: picture is a stable CDN URL (no expiry param),
+          // unlike creative.thumbnail_url which contains oe= (Unix expiry timestamp).
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const videoBatchData: Record<string, any> = videoBatchRes?.ok ? await videoBatchRes.json() : {};
+          const videoBatchData: Record<string, any> = {};
+          if (allVideoIds.length > 0) {
+            const vRes = await fetch(
+              `https://graph.facebook.com/v21.0/?ids=${allVideoIds.join(',')}&fields=source,picture,thumbnails{uri,height,width}&access_token=${token}`
+            );
+            if (vRes.ok) {
+              Object.assign(videoBatchData, await vRes.json());
+            }
+          }
 
           for (const insight of adsInsights) {
-            const adData = batchData[insight.ad_id] ?? {};
-            const creative = adData.creative ?? {};
-            const storySpec = creative.object_story_spec ?? {};
-            const videoId = storySpec.video_data?.video_id as string | undefined;
-            const videoInfo = videoId ? videoBatchData[videoId] ?? {} : {};
-            // Pick the highest-resolution thumbnail: prefer thumbnails API, fallback to format pictures
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const videoThumbs: { uri: string; height?: number }[] = videoInfo.thumbnails?.data ?? [];
-            const bestThumbFromThumbnails = videoThumbs.sort((a, b) => (b.height ?? 0) - (a.height ?? 0))[0]?.uri;
+            const adData: Record<string, any> = batchData[insight.ad_id] ?? {};
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const videoFormats: { picture?: string; width?: number }[] = videoInfo.format ?? [];
-            const bestThumbFromFormat = videoFormats.sort((a, b) => (b.width ?? 0) - (a.width ?? 0))[0]?.picture;
-            const storyImageUrl =
-              storySpec.video_data?.image_url ??
-              videoInfo.picture ??
-              bestThumbFromThumbnails ??
-              bestThumbFromFormat ??
-              storySpec.photo_data?.url ??
-              storySpec.link_data?.picture ??
+            const creative: Record<string, any> = adData.creative ?? {};
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const storySpec: Record<string, any> = creative.object_story_spec ?? {};
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const assetFeed: Record<string, any> = creative.asset_feed_spec ?? {};
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const videoData: Record<string, any> = storySpec.video_data ?? {};
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const linkData: Record<string, any> = storySpec.link_data ?? {};
+
+            const videoIds = extractVideoIds(creative);
+
+            // Find the best video info: first video ID that has a stable picture URL
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const videoInfo: Record<string, any> = videoIds.reduce((best, vid) => {
+              if (best.picture) return best;
+              return videoBatchData[vid] ?? {};
+            }, {} as Record<string, unknown>);
+
+            // Best-quality thumbnail from video thumbnails API (sorted by height desc)
+            const videoThumbs: Array<{ uri: string; height?: number }> = videoInfo.thumbnails?.data ?? [];
+            const bestThumb = videoThumbs.sort((a, b) => (b.height ?? 0) - (a.height ?? 0))[0]?.uri;
+
+            // asset_feed has direct image/video asset URLs from Advantage+/dynamic creatives
+            const assetFeedImages = (assetFeed.images ?? []) as Array<Record<string, string>>;
+            const assetFeedVideos = (assetFeed.videos ?? []) as Array<Record<string, string>>;
+            const assetFeedImageUrl: string | undefined =
+              assetFeedImages[0]?.url ??
+              assetFeedVideos[0]?.thumbnail_url ??
               undefined;
+
+            // imageUrl priority:
+            // 1. asset_feed direct URL (Advantage+ originals)
+            // 2. Video ad's image_url (explicit thumbnail set at ad creation)
+            // 3. Video object's picture (stable CDN — preferred over creative.thumbnail_url)
+            // 4. Best-resolution frame from thumbnails API
+            // 5. Static ad image_url
+            // 6. story spec photo / link picture
+            // creative.thumbnail_url is intentionally LAST — it carries an oe= expiry param
+            const imageUrl: string | undefined =
+              assetFeedImageUrl ??
+              (videoData.image_url as string | undefined) ??
+              (videoInfo.picture as string | undefined) ??
+              bestThumb ??
+              (creative.image_url as string | undefined) ??
+              (storySpec.photo_data?.url as string | undefined) ??
+              (linkData.picture as string | undefined) ??
+              (creative.thumbnail_url as string | undefined) ??
+              undefined;
+
+            const mediaType = detectMediaType(creative);
+
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const leads = ((insight.actions ?? []) as { action_type: string; value: string }[])
               .filter(a => LEAD_ACTIONS.includes(a.action_type))
@@ -228,15 +325,14 @@ export async function GET(request: NextRequest) {
             const clicks = parseInt(insight.clicks || '0', 10);
             const impressions = parseInt(insight.impressions || '0', 10);
 
-            // asset_feed_spec has original URLs for dynamic/carousel ads
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const assetFeedImageUrl: string | undefined = (creative.asset_feed_spec?.images as any[])?.[0]?.url ?? undefined;
-
             // Build permalink: prefer Instagram URL, fallback to Facebook post URL
             const igPermalink: string | undefined = creative.instagram_permalink_url ?? undefined;
             const storyId: string | undefined = creative.effective_object_story_id ?? undefined;
             const fbPermalink = storyId
-              ? (() => { const [pageId, postId] = storyId.split('_'); return postId ? `https://www.facebook.com/permalink.php?story_fbid=${postId}&id=${pageId}` : undefined; })()
+              ? (() => {
+                const [pageId, postId] = storyId.split('_');
+                return postId ? `https://www.facebook.com/permalink.php?story_fbid=${postId}&id=${pageId}` : undefined;
+              })()
               : undefined;
             const permalink = igPermalink ?? fbPermalink;
 
@@ -249,12 +345,13 @@ export async function GET(request: NextRequest) {
               campaignName: insight.campaign_name ?? undefined,
               adSetId: insight.adset_id ?? undefined,
               adSetName: insight.adset_name ?? undefined,
-              imageUrl: assetFeedImageUrl ?? storyImageUrl ?? creative.image_url ?? creative.thumbnail_url ?? undefined,
-              thumbnailUrl: creative.thumbnail_url ?? undefined,
-              videoUrl: videoInfo.source ?? undefined,
+              imageUrl,
+              thumbnailUrl: (creative.thumbnail_url as string | undefined) ?? undefined,
+              videoUrl: (videoInfo.source as string | undefined) ?? undefined,
+              mediaType,
               permalink,
-              headline: creative.title ?? undefined,
-              body: creative.body ?? undefined,
+              headline: (creative.title as string | undefined) ?? undefined,
+              body: (creative.body as string | undefined) ?? undefined,
               spend,
               impressions,
               clicks,
@@ -272,7 +369,7 @@ export async function GET(request: NextRequest) {
   allCreatives.sort((a, b) => {
     const av = a[sortBy as keyof TopCreative] as number ?? 0;
     const bv = b[sortBy as keyof TopCreative] as number ?? 0;
-    if (sortBy === 'cpl') return av - bv; // lower is better
+    if (sortBy === 'cpl') return av - bv;
     return bv - av;
   });
 

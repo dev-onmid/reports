@@ -4,6 +4,7 @@ import { normalizeWebhookPayload, type WhatsAppProvider } from '@/lib/whatsapp-p
 import { markLeadResponded } from '@/lib/followup-send';
 import { analisarConversa } from '@/lib/crm-ai-analysis';
 import { enviarEventoMeta, enviarEventoGoogle } from '@/lib/conversions';
+import { upsertLeadFromConversation, ensureCrmMessagesSchema } from '@/lib/crm-conversation-sync';
 import type { NextRequest } from 'next/server';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -178,55 +179,61 @@ export async function POST(
       return Response.json({ ok: false, error: 'telefone não identificado' }, { status: 400 });
     }
 
-    const { phone, fromMe, text: messageText, timestamp, ctwaClid, sourceId, pushName, profilePictureUrl } = msg;
+    const { phone, fromMe, text: rawMessageText, timestamp, externalId, ctwaClid, sourceId, pushName, profilePictureUrl } = msg;
     const messageCreatedAt = parseProviderTimestamp(timestamp);
 
     // ── CRM: upsert lead + save message (always, regardless of pixel config) ──
-    const utmData = extractUtm(messageText);
-    const origin = detectOrigin(ctwaClid, utmData.utm_source, messageText, fromMe);
+    const utmData = extractUtm(rawMessageText);
+    const origin = detectOrigin(ctwaClid, utmData.utm_source, rawMessageText, fromMe);
 
     // When fromMe=true the pushName is the instance owner's name, not the contact's.
     // Only set nome from pushName on incoming messages (fromMe=false).
     const contactName = fromMe ? null : (pushName ?? null);
+    const canal = originToCanal(origin);
 
-    await pool.query(
-      `ALTER TABLE public.crm_leads
-         ADD COLUMN IF NOT EXISTS profile_picture_url TEXT,
-         ADD COLUMN IF NOT EXISTS time_interno BOOLEAN NOT NULL DEFAULT false`,
-    ).catch(() => null);
+    // Use upsertLeadFromConversation — works without a unique constraint on (client_id, numero)
+    const { id: leadId } = await upsertLeadFromConversation(pool, {
+      clientId,
+      phone,
+      name: contactName ?? undefined,
+      profilePictureUrl: profilePictureUrl ?? undefined,
+      lastMessageAt: messageCreatedAt,
+      lastMessageText: rawMessageText || undefined,
+      lastDirection: fromMe ? 'out' : 'in',
+      canal,
+      origin,
+    });
 
-    const { rows: [crmLead] } = await pool.query(
-      `INSERT INTO public.crm_leads
-         (client_id, nome, numero, canal, origin, ctwa_clid, utm_source, instance_id, data, status, profile_picture_url)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_DATE, 'Em Atendimento', $9)
-       ON CONFLICT (client_id, numero) DO UPDATE SET
-         nome       = COALESCE(EXCLUDED.nome, crm_leads.nome),
-         profile_picture_url = COALESCE(EXCLUDED.profile_picture_url, crm_leads.profile_picture_url),
-         origin     = CASE
-                        WHEN crm_leads.origin IN ('organic', 'cliente')
-                             AND EXCLUDED.origin NOT IN ('organic', 'cliente')
-                        THEN EXCLUDED.origin
-                        ELSE crm_leads.origin
-                      END,
-         canal      = CASE
-                        WHEN crm_leads.origin IN ('organic', 'cliente')
-                             AND EXCLUDED.origin NOT IN ('organic', 'cliente')
-                        THEN EXCLUDED.canal
-                        ELSE crm_leads.canal
-                      END,
-         updated_at = NOW()
-       RETURNING id, time_interno`,
-      [clientId, contactName, phone, originToCanal(origin),
-       origin, ctwaClid ?? null, utmData.utm_source ?? null, instanceId, profilePictureUrl ?? null],
+    const { rows: [crmLead] } = await pool.query<{ id: string; time_interno: boolean }>(
+      `SELECT id, time_interno FROM public.crm_leads WHERE id = $1`,
+      [leadId],
     );
+
+    // messageText: prefer rawMessageText; media messages already have placeholder text from normalizer
+    const messageText = rawMessageText;
 
     let isFirstInbound = false;
     if (crmLead && messageText) {
-      await pool.query(
-        `INSERT INTO public.crm_messages (lead_id, client_id, direction, text, created_at)
-         VALUES ($1, $2, $3, $4, $5::timestamptz)`,
-        [crmLead.id, clientId, fromMe ? 'out' : 'in', messageText, messageCreatedAt],
-      );
+      await ensureCrmMessagesSchema(pool);
+      if (externalId) {
+        // Deduplicate by external_id to prevent double-inserts from retried webhooks
+        await pool.query(
+          `INSERT INTO public.crm_messages (lead_id, client_id, direction, text, external_id, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6::timestamptz)
+           ON CONFLICT (lead_id, external_id) DO NOTHING`,
+          [crmLead.id, clientId, fromMe ? 'out' : 'in', messageText, externalId, messageCreatedAt],
+        );
+      } else {
+        await pool.query(
+          `INSERT INTO public.crm_messages (lead_id, client_id, direction, text, created_at)
+           SELECT $1, $2, $3, $4, $5::timestamptz
+           WHERE NOT EXISTS (
+             SELECT 1 FROM public.crm_messages
+             WHERE lead_id = $1 AND text = $4 AND created_at = $5::timestamptz
+           )`,
+          [crmLead.id, clientId, fromMe ? 'out' : 'in', messageText, messageCreatedAt],
+        );
+      }
       if (!fromMe) {
         // Detect first inbound message (now count = 1 after insert above)
         const { rows: [{ cnt }] } = await pool.query(

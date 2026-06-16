@@ -1214,9 +1214,18 @@ function CreativePreviewOverlay({
   onClose: () => void;
 }) {
   const [videoFailed, setVideoFailed] = useState(false);
+
+  // Reset video failed state whenever a different creative is opened
+  const prevAdId = useRef<string | null>(null);
+  if (creative && prevAdId.current !== creative.adId) {
+    prevAdId.current = creative.adId;
+    setVideoFailed(false);
+  }
+
   if (!creative) return null;
   const imgUrl = creative.imageUrl ?? creative.thumbnailUrl;
   const showVideo = !!creative.videoUrl && !videoFailed;
+  const isVideo = creative.mediaType === 'video';
 
   return (
     <div className="fixed inset-0 z-[100] bg-black/90 p-4 backdrop-blur-sm" onClick={onClose}>
@@ -1250,9 +1259,38 @@ function CreativePreviewOverlay({
               style={{ imageRendering: 'auto' }}
               loading="eager"
             />
+          ) : creative.permalink ? (
+            /* Video creative with no thumbnail — offer link to original */
+            <a
+              href={creative.permalink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex flex-col items-center justify-center gap-3 text-white/60 hover:text-white/90 transition-colors"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <Play className="h-12 w-12 fill-current opacity-40" />
+              <span className="text-sm font-semibold">Ver publicação original</span>
+              <ExternalLink className="h-4 w-4" />
+            </a>
           ) : (
             <div className="flex h-full w-full items-center justify-center bg-white/5">
               <ImageIcon className="h-10 w-10 text-white/30" />
+            </div>
+          )}
+
+          {/* When video source failed but there is a permalink — show an overlay link */}
+          {isVideo && videoFailed && creative.permalink && (
+            <div className="absolute inset-x-0 bottom-0 flex justify-center pb-4">
+              <a
+                href={creative.permalink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 rounded-lg border border-white/20 bg-black/70 px-4 py-2 text-xs font-semibold text-white hover:bg-black/90 transition-colors backdrop-blur-sm"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                Ver vídeo original
+              </a>
             </div>
           )}
         </div>
@@ -3705,20 +3743,36 @@ function CircularQuality({ pct, color, size = 120 }: { pct: number; color: strin
 }
 
 // ── Creative Carousel Card ───────────────────────────────────────────────────
+const MEDIA_TYPE_BADGE: Record<string, { label: string; bg: string }> = {
+  video:    { label: 'VÍDEO',     bg: 'rgba(139,92,246,0.85)' },
+  carousel: { label: 'CARROSSEL', bg: 'rgba(247,119,55,0.85)' },
+  image:    { label: 'IMAGEM',    bg: 'rgba(64,93,230,0.85)'  },
+};
+
 function CreativeCarouselCard({ creative, idx, sortBy, onPreview }: {
   creative: TopCreative; idx: number; sortBy: SortKey; onPreview: (c: TopCreative) => void;
 }) {
   const [imgStage, setImgStage] = useState<'primary' | 'thumb' | 'error'>('primary');
+
+  // Reset image state when creative changes so stale error from a previous ad doesn't bleed through
+  const prevAdId = useRef(creative.adId);
+  if (prevAdId.current !== creative.adId) {
+    prevAdId.current = creative.adId;
+    setImgStage('primary');
+  }
+
   const primaryUrl = creative.imageUrl;
   const thumbUrl = creative.thumbnailUrl;
   const imgUrl = imgStage === 'primary' ? (primaryUrl ?? thumbUrl) : imgStage === 'thumb' ? thumbUrl : undefined;
+  const isVideo = creative.mediaType === 'video';
+  const mediaBadge = MEDIA_TYPE_BADGE[creative.mediaType];
+
   const metricValue = sortBy === 'leads' ? creative.leads.toLocaleString('pt-BR')
     : sortBy === 'cpl' ? (creative.cpl > 0 ? formatCurrencyBRL(creative.cpl) : '—')
     : sortBy === 'ctr' ? `${creative.ctr.toFixed(2)}%`
     : formatCurrencyBRL(creative.spend);
 
   function handleImgError() {
-    // Only fall back to thumbnail if imageUrl was actually tried and is distinct from thumbnail
     if (imgStage === 'primary' && primaryUrl && thumbUrl && thumbUrl !== primaryUrl) {
       setImgStage('thumb');
     } else {
@@ -3733,7 +3787,7 @@ function CreativeCarouselCard({ creative, idx, sortBy, onPreview }: {
           <button type="button" onClick={() => onPreview(creative)} className="block h-full w-full">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={imgUrl} alt={creative.adName} className="h-full w-full object-cover" onError={handleImgError} />
-            {creative.videoUrl && <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/20 pointer-events-none" />}
+            {isVideo && <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/20 pointer-events-none" />}
           </button>
         ) : creative.permalink ? (
           <a
@@ -3748,11 +3802,24 @@ function CreativeCarouselCard({ creative, idx, sortBy, onPreview }: {
             <span className="text-[10px] font-semibold text-white/50">Ver publicação</span>
           </a>
         ) : <ImageIcon className="absolute inset-0 m-auto h-8 w-8 text-muted-foreground/30" />}
-        {creative.videoUrl && (
-          <span className="absolute left-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-black/70">
+
+        {/* Play button — shows for any video creative, not only when videoUrl is available */}
+        {isVideo && imgStage !== 'error' && imgUrl && (
+          <span className="absolute left-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-black/70 pointer-events-none">
             <Play className="h-3 w-3 fill-white text-white" />
           </span>
         )}
+
+        {/* Media type badge — bottom-left, above rank */}
+        {mediaBadge && (
+          <span
+            className="absolute bottom-9 left-2 rounded px-1.5 py-0.5 text-[8px] font-black text-white leading-none"
+            style={{ backgroundColor: mediaBadge.bg }}
+          >
+            {mediaBadge.label}
+          </span>
+        )}
+
         <span className="absolute left-2 bottom-2 flex h-6 w-6 items-center justify-center rounded-full bg-black/85 text-[11px] font-bold text-white shadow-[0_0_14px_rgba(255,255,255,0.18)]">{idx + 1}</span>
         <span className="absolute right-2 top-2 rounded-full bg-primary px-2 py-0.5 text-[10px] font-bold text-black shadow-[0_0_16px_rgba(85,245,47,0.72)]">{metricValue}</span>
       </div>
