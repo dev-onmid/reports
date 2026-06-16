@@ -591,7 +591,13 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
     if (!selectedId || msgLoading || messages.length > 0) return;
     if (autoSyncedRef.current.has(selectedId)) return;
     autoSyncedRef.current.add(selectedId);
-    void syncHistory();
+    const id = selectedId;
+    void syncHistory(id).then(imported => {
+      // If nothing was imported (e.g. a transient API/instance hiccup, or a fix that
+      // only went live after the first attempt), don't cache the failure for the whole
+      // session — allow a retry the next time this conversation is opened.
+      if (!imported) autoSyncedRef.current.delete(id);
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId, msgLoading, messages.length]);
 
@@ -673,11 +679,12 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
   }
 
   // ── Send helpers ────────────────────────────────────────────────────────────
-  async function syncHistory(leadId?: string) {
+  async function syncHistory(leadId?: string): Promise<number> {
     const id = leadId ?? selectedId;
-    if (!id) return;
+    if (!id) return 0;
     setSyncing(true);
     setSyncResult(null);
+    let imported = 0;
     try {
       const res = await fetch('/api/crm/sync-history', {
         method: 'POST',
@@ -685,9 +692,10 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
         body: JSON.stringify({ leadId: id, clientId }),
       });
       const data = await res.json() as { ok?: boolean; imported?: number; error?: string };
+      imported = data.imported ?? 0;
       if (data.ok) {
-        if ((data.imported ?? 0) > 0) {
-          setSyncResult(`${data.imported} mensagem(ns) importada(s)!`);
+        if (imported > 0) {
+          setSyncResult(`${imported} mensagem(ns) importada(s)!`);
           loadMessages(id, true);
         } else {
           setSyncResult('Histórico sem mensagens novas.');
@@ -701,6 +709,7 @@ export function ChatView({ clientId, statusOptions = DEFAULT_STATUS_OPTIONS }: {
       setSyncing(false);
       setTimeout(() => setSyncResult(null), 5000);
     }
+    return imported;
   }
 
   async function doSend(payload: Record<string, unknown>) {
