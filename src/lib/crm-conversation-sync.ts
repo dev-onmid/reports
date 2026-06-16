@@ -89,6 +89,14 @@ export async function ensureCrmMessagesSchema(pool: Pool) {
   `);
 
   const stmts = [
+    // Base columns the chat code reads/writes. The prod table was created by an early
+    // minimal version MISSING `direction` (and possibly text/created_at/contact_id), so
+    // every INSERT/SELECT referencing `direction` failed ("column direction does not
+    // exist") — empty chat for everyone. Add every column the code depends on.
+    `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS contact_id UUID`,
+    `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS direction TEXT`,
+    `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS text TEXT`,
+    `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`,
     `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS lead_id UUID`,
     `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS client_id TEXT`,
     `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS tipo TEXT NOT NULL DEFAULT 'texto'`,
