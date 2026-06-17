@@ -33,7 +33,6 @@ const CARD         = '#FFFFFF';
 const BG           = '#F7F8FA';
 const ROW          = '#F1F5F9';
 const BORDER       = '#D6DEE8';
-const INVERSE      = '#FFFFFF';
 const FG           = '#0F172A';   // near-black — titles, values
 const MUTED        = '#334155';   // cinza chumbo — body text, labels, secondary
 const RED          = '#e52020';
@@ -42,6 +41,14 @@ const ORANGE       = '#FF6B35';
 
 const INTER = 'var(--font-inter), Inter, sans-serif';
 const BEBAS = "var(--font-bebas), 'Bebas Neue', sans-serif";
+const FONT_LINK = `<style>@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@100..900&display=swap');@font-face{font-family:Inter Fallback;src:local(Arial);ascent-override:90.44%;descent-override:22.52%;line-gap-override:0%;size-adjust:107.12%}@font-face{font-family:Bebas Neue Fallback;src:local(Arial);ascent-override:117.32%;descent-override:39.11%;line-gap-override:0%;size-adjust:76.72%}:root{--font-inter:"Inter","Inter Fallback";--font-bebas:"Bebas Neue","Bebas Neue Fallback";}.onmid-report h1{line-height:1.08!important;letter-spacing:.01em!important}.onmid-report :is(strong,b,th,[style*="font-weight:700"],[style*="font-weight:800"],[style*="font-weight:850"],[style*="font-weight:900"],[style*="font-weight:950"]):not(h1):not(h2){letter-spacing:.004em!important}.onmid-report :is(h3,h4,h5,h6){letter-spacing:.002em!important}</style>`;
+const REPORT_MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+
+function nextMonthName(periodo: string): string {
+  const [monthName] = periodo.split('/');
+  const index = REPORT_MONTHS.findIndex((month) => month.toLowerCase() === monthName.toLowerCase());
+  return REPORT_MONTHS[(index >= 0 ? index + 1 : 5) % REPORT_MONTHS.length];
+}
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -78,6 +85,13 @@ type Creative = {
   nome: string;
   spend: number;
   resultado: number;
+  campaign_name?: string;
+  adset_name?: string;
+  objective?: string;
+  impressions?: number;
+  reach?: number;
+  clicks?: number;
+  ctr?: number;
   thumbnail_url: string | null;
 };
 
@@ -103,18 +117,12 @@ type ParsedData = {
   produtos:        Product[];
   inativos_faixas: Faixa[];
   por_dia:         DiaDaSemana[];
+  entregas_por_dia?: DiaDaSemana[];
 };
 
 type DiagJson = {
-  diagnostico:                string;
-  forcas:                     Array<{ titulo: string; descricao: string }>;
-  pontos_fortes:              string[];
-  pontos_atencao:             string[];
-  plano:                      Array<{ acao: string; objetivo: string; publico: string; mensagem: string }>;
   insight_campanha_conversa:  string;
   insight_campanha_conversao: string;
-  frase_fechamento:           string;
-  jornada:                    string[];
 };
 
 // ── CSV helpers ────────────────────────────────────────────────────────────────
@@ -337,7 +345,19 @@ async function fetchMetaData(
 
   let totalSpend = 0, totalImpressions = 0, totalReach = 0, totalCliques = 0;
   const campanhas: CampanhaDetalhada[] = [];
-  const adInsights: Array<{ ad_id: string; ad_name: string; spend: number; resultado: number }> = [];
+  const adInsights: Array<{
+    ad_id: string;
+    ad_name: string;
+    campaign_name: string;
+    adset_name: string;
+    objective: string;
+    spend: number;
+    resultado: number;
+    impressions: number;
+    reach: number;
+    clicks: number;
+    ctr: number;
+  }> = [];
 
   await Promise.allSettled(accountIds.map(async (accountId) => {
     const acct = accountId.startsWith('act_') ? accountId : `act_${accountId}`;
@@ -396,7 +416,7 @@ async function fetchMetaData(
 
     // Ad-level for creative ranking
     const urlAd = new URL(`https://graph.facebook.com/v21.0/${acct}/insights`);
-    urlAd.searchParams.set('fields', 'ad_id,ad_name,spend,actions');
+    urlAd.searchParams.set('fields', 'ad_id,ad_name,campaign_name,adset_name,spend,impressions,reach,clicks,ctr,actions');
     urlAd.searchParams.set('time_range', timeRange);
     urlAd.searchParams.set('level', 'ad');
     urlAd.searchParams.set('limit', '20');
@@ -412,11 +432,22 @@ async function fetchMetaData(
         const resultado = (actMap['messaging_conversation_started_7d'] || 0) +
           (actMap['offsite_conversion.fb_pixel_purchase'] || 0) +
           (actMap['lead'] || 0);
+        const objective =
+          actMap['offsite_conversion.fb_pixel_purchase'] > 0 ? 'Vendas' :
+          (actMap['messaging_conversation_started_7d'] > 0 || actMap['lead'] > 0) ? 'Leads' :
+          'Tráfego pago';
         adInsights.push({
-          ad_id:   String(row.ad_id || ''),
-          ad_name: String(row.ad_name || 'Sem nome'),
-          spend:   parseFloat(String(row.spend || '0')),
+          ad_id:         String(row.ad_id || ''),
+          ad_name:       String(row.ad_name || 'Sem nome'),
+          campaign_name: String(row.campaign_name || 'Meta Ads'),
+          adset_name:    String(row.adset_name || '—'),
+          objective,
+          spend:         parseFloat(String(row.spend || '0')),
           resultado,
+          impressions:   parseInt(String(row.impressions || '0'), 10),
+          reach:         parseInt(String(row.reach || '0'), 10),
+          clicks:        parseInt(String(row.clicks || '0'), 10),
+          ctr:           parseFloat(String(row.ctr || '0')),
         });
       }
     }
@@ -438,7 +469,7 @@ async function fetchMetaData(
     .slice(0, 5);
 
   const creatives: Creative[] = await Promise.all(top5.map(async (ad) => {
-    if (!ad.ad_id) return { nome: ad.ad_name, spend: ad.spend, resultado: ad.resultado, thumbnail_url: null };
+    if (!ad.ad_id) return { nome: ad.ad_name, spend: ad.spend, resultado: ad.resultado, campaign_name: ad.campaign_name, adset_name: ad.adset_name, objective: ad.objective, impressions: ad.impressions, reach: ad.reach, clicks: ad.clicks, ctr: ad.ctr, thumbnail_url: null };
     // Fetch creative fields needed to resolve the best thumbnail.
     // video_id is the direct reference used by Reels/video ads; image_url is for static ads.
     // creative.thumbnail_url has an oe= expiry param — we prefer video.picture when possible.
@@ -479,7 +510,19 @@ async function fetchMetaData(
         thumbnail_url = cr.image_url ?? cr.thumbnail_url ?? null;
       }
     }
-    return { nome: ad.ad_name, spend: ad.spend, resultado: ad.resultado, thumbnail_url };
+    return {
+      nome: ad.ad_name,
+      spend: ad.spend,
+      resultado: ad.resultado,
+      campaign_name: ad.campaign_name,
+      adset_name: ad.adset_name,
+      objective: ad.objective,
+      impressions: ad.impressions,
+      reach: ad.reach,
+      clicks: ad.clicks,
+      ctr: ad.ctr,
+      thumbnail_url,
+    };
   }));
 
   return { meta, creatives };
@@ -685,45 +728,9 @@ function donutPath(cx: number, cy: number, outer: number, inner: number, a1: num
   return `M ${os.x.toFixed(1)} ${os.y.toFixed(1)} A ${outer} ${outer} 0 ${arc} 0 ${oe.x.toFixed(1)} ${oe.y.toFixed(1)} L ${is.x.toFixed(1)} ${is.y.toFixed(1)} A ${inner} ${inner} 0 ${arc} 1 ${ie.x.toFixed(1)} ${ie.y.toFixed(1)} Z`;
 }
 
-// s=320 → outer=140 (s/2−20), inner=64 (s/5). Centro circle r=56 (inner−8).
-function donutSvg(slices: { label: string; value: number; color: string }[], s = 320): string {
-  const total = slices.reduce((a, b) => a + b.value, 0);
-  if (!total) return '';
-  const outerR = Math.round(s / 2 - 20);
-  const innerR = Math.round(s / 5);
-  let c = 0;
-  const paths = slices.map(sl => {
-    const angle = (sl.value / total) * 360;
-    const p = donutPath(s / 2, s / 2, outerR, innerR, c, c + angle);
-    c += angle;
-    return `<path d="${p}" fill="${sl.color}" stroke="rgba(0,0,0,0.35)" stroke-width="1" style="filter:drop-shadow(0 0 8px ${sl.color}80)"/>`;
-  });
-  return `<svg viewBox="0 0 ${s} ${s}" width="${s}" height="${s}" style="flex-shrink:0">
-    ${paths.join('')}
-    <circle cx="${s / 2}" cy="${s / 2}" r="${innerR - 8}" fill="${CARD}"/>
-  </svg>`;
-}
-
 // ── HTML component helpers ─────────────────────────────────────────────────────
 
 // ── Core layout primitives ────────────────────────────────────────────────────
-
-/** Premium header (onmid wordmark + toggle, "NN/TT" counter with green underline) — same style as the cover. */
-function richHeader(idx: number, total: number): string {
-  return `<div style="height:92px;padding:34px 48px 0;display:flex;align-items:flex-start;justify-content:space-between;flex-shrink:0">
-    <div style="display:flex;align-items:center;gap:8px">
-      <span style="font-family:${INTER};font-size:34px;font-weight:900;letter-spacing:-0.06em;color:${FG};line-height:1">onmid</span>
-      <span style="width:44px;height:22px;border-radius:999px;background:${PRIMARY};display:inline-flex;align-items:center;justify-content:flex-end;padding-right:4px;box-sizing:border-box;box-shadow:0 8px 20px ${PRIMARY}55">
-        <span style="width:14px;height:14px;border-radius:50%;background:#FFFFFF;display:block"></span>
-      </span>
-      <span style="font-size:9px;font-weight:700;color:${MUTED};align-self:flex-start;margin-top:1px">®</span>
-    </div>
-    <div style="font-family:${INTER};font-size:22px;font-weight:900;color:${FG};line-height:1;text-align:right">
-      ${String(idx).padStart(2, '0')}/${String(total).padStart(2, '0')}
-      <div style="height:2px;background:${PRIMARY};margin-top:9px;width:58px;margin-left:auto"></div>
-    </div>
-  </div>`;
-}
 
 /** Premium footer (toggle pill + ONMID Reports wordmark) — same style as the cover. */
 function richFooter(): string {
@@ -760,31 +767,6 @@ function sectionHeader(thesis: string, context: string): string {
 </div>`;
 }
 
-/** Hero KPI — ONE per slide, the anchor metric */
-function kpiHero(label: string, value: string, sub: string, color = PRIMARY): string {
-  const isEmpty = value === '—';
-  const textColor = color === PRIMARY ? PRIMARY_TEXT : color;
-  return `<div style="position:relative;overflow:hidden;border:1px solid ${color}40;background:${CARD};padding:28px 28px 24px;box-sizing:border-box">
-  <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,${color},${color}00)"></div>
-  <div style="position:absolute;top:0;left:0;width:14px;height:14px;background:${color}"></div>
-  <p style="font-size:10px;font-weight:700;color:${textColor};text-transform:uppercase;letter-spacing:0.12em;font-family:${INTER};margin:4px 0 10px">${label}</p>
-  <p style="font-family:${BEBAS};font-size:${isEmpty ? '36' : '60'}px;color:${isEmpty ? MUTED : FG};line-height:0.9;margin:0 0 10px;letter-spacing:0.01em">${value}</p>
-  <p style="font-size:13px;color:${MUTED};font-family:${INTER};line-height:1.5;margin:0">${sub}</p>
-</div>`;
-}
-
-/** Secondary KPI card with corner-square motif */
-function kpi(label: string, value: string, context: string, accentColor = PRIMARY): string {
-  const isEmpty = value === '—';
-  return `<div style="position:relative;overflow:hidden;border:1px solid ${BORDER};background:${CARD};padding:20px 18px;box-sizing:border-box">
-  <div style="position:absolute;top:0;left:0;right:0;height:2px;background:${accentColor}"></div>
-  <div style="position:absolute;top:0;left:0;width:12px;height:12px;background:${accentColor}"></div>
-  <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:4px 0 8px">${label}</p>
-  <p style="font-family:${BEBAS};font-size:${isEmpty ? '24' : '36'}px;color:${isEmpty ? MUTED : FG};line-height:1;margin:0 0 5px">${value}</p>
-  <p style="font-size:11px;color:${MUTED};font-family:${INTER};line-height:1.4;margin:0">${context}</p>
-</div>`;
-}
-
 function hbar(label: string, value: string, pct: number, hi: boolean, barH = 6): string {
   const barColor = hi ? PRIMARY : `${PRIMARY}30`;
   return `<div style="margin-bottom:11px">
@@ -818,71 +800,6 @@ function insight(title: string, text: string, color = PRIMARY): string {
 </div>`;
 }
 
-/** Campaign/product rank card — winner gets full weight, others get reduced weight */
-function rankCard(rank: number, title: string, metrics: Array<{label:string;value:string}>, status: 'winner'|'loser'|'normal'): string {
-  const accent     = status === 'winner' ? PRIMARY : status === 'loser' ? RED : BORDER;
-  const accentText = status === 'winner' ? PRIMARY_TEXT : status === 'loser' ? RED : MUTED;
-  const badge      = status === 'winner' ? `<span style="font-size:9px;font-weight:800;color:${INVERSE};background:${PRIMARY};padding:2px 7px;letter-spacing:0.08em;font-family:${INTER}">CAMPEÃ</span>`
-                   : status === 'loser'  ? `<span style="font-size:9px;font-weight:800;color:#FFFFFF;background:${RED};padding:2px 7px;letter-spacing:0.08em;font-family:${INTER}">ATENÇÃO</span>`
-                   : '';
-  const opacity = status === 'normal' ? 'opacity:0.72' : '';
-  const rows = metrics.map(m =>
-    `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid ${BORDER};font-family:${INTER}">
-      <span style="font-size:11px;color:${MUTED}">${m.label}</span>
-      <span style="font-size:11px;font-weight:700;color:${FG}">${m.value}</span>
-    </div>`,
-  ).join('');
-  return `<div style="position:relative;overflow:hidden;border:1px solid ${accent}60;background:${CARD};padding:16px;${opacity}">
-  <div style="position:absolute;top:0;left:0;right:0;height:2px;background:${accent}"></div>
-  <div style="position:absolute;top:0;left:0;width:12px;height:12px;background:${accent}"></div>
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin:4px 0 12px;gap:8px">
-    <div style="display:flex;align-items:center;gap:8px">
-      <span style="font-family:${BEBAS};font-size:26px;color:${accentText};line-height:1">#${rank}</span>
-      <span style="font-size:12px;font-weight:700;color:${FG};font-family:${INTER};line-height:1.3">${title}</span>
-    </div>
-    ${badge}
-  </div>
-  <div>${rows}</div>
-</div>`;
-}
-
-/** 2×2 decision matrix — Impacto × Esforço */
-function decisionMatrix(cells: {label:string;color:string;axis:string;items:string[]}[]): string {
-  const q = cells.map(c => `<div style="border:1px solid ${c.color}30;background:${c.color}0A;padding:14px;display:flex;flex-direction:column;gap:6px">
-    <p style="font-size:9px;font-weight:800;color:${c.color};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 4px">${c.label}</p>
-    ${c.items.slice(0,2).map(item =>
-      `<div style="font-size:11px;color:${FG};font-family:${INTER};line-height:1.4;padding:5px 0;border-bottom:1px solid ${BORDER}">${item}</div>`,
-    ).join('')}
-  </div>`).join('');
-  return `<div>
-  <div style="display:flex;gap:4px;margin-bottom:4px">
-    <div style="width:60px;flex-shrink:0"></div>
-    <div style="flex:1;text-align:center;font-size:9px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER}">Esforço Baixo</div>
-    <div style="flex:1;text-align:center;font-size:9px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER}">Esforço Alto</div>
-  </div>
-  <div style="display:flex;gap:4px">
-    <div style="display:flex;flex-direction:column;justify-content:space-around;width:60px;flex-shrink:0">
-      <div style="font-size:9px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};transform:rotate(-90deg);transform-origin:center;white-space:nowrap">↑ Impacto Alto</div>
-      <div style="font-size:9px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};transform:rotate(-90deg);transform-origin:center;white-space:nowrap">↓ Impacto Baixo</div>
-    </div>
-    <div style="flex:1;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:4px;height:300px">${q}</div>
-  </div>
-</div>`;
-}
-
-/** 5-step horizontal journey bar */
-function journeyBar(steps: string[]): string {
-  const LABELS: Record<string,string> = {
-    descoberta:'Descoberta', primeira_compra:'1ª Compra',
-    recompra:'Recompra', reativacao_leve:'Reat. Leve', reativacao_forte:'Reat. Forte',
-  };
-  return `<div style="display:flex;align-items:stretch;margin-bottom:20px">
-    ${steps.map((s, i) => `<div style="flex:1;text-align:center;padding:8px 4px;background:${i===0?PRIMARY:CARD};border:1px solid ${i===0?PRIMARY:BORDER};margin-right:-1px;position:relative">
-      <p style="font-size:10px;font-weight:700;color:${i===0?INVERSE:MUTED};text-transform:uppercase;letter-spacing:0.06em;font-family:${INTER};margin:0">${LABELS[s]??s}</p>
-    </div>`).join('')}
-  </div>`;
-}
-
 // ── Slide builders ────────────────────────────────────────────────────────────
 
 // ── Slide builders — Executive Layout Recipes ─────────────────────────────────
@@ -893,20 +810,28 @@ function sCapa(
 ): string {
   void d;
   void meta;
+  void diag;
 
   const apoio = `Análise de faturamento, pedidos, tráfego, base de clientes, produtos e oportunidades para o próximo ciclo.`;
-  const objetivo = diag.diagnostico || diag.frase_fechamento || `Apresentar uma leitura clara dos resultados do período, entender o que compôs o faturamento, quais públicos e produtos tiveram maior força e quais oportunidades podem ser aproveitadas para aumentar recorrência, reativar clientes e otimizar campanhas.`;
 
   const chartPath = 'M0 86 C46 72 42 34 86 44 C120 52 130 12 164 20 C198 28 190 70 232 62 C270 54 270 18 308 28 C342 38 330 72 378 46 C410 30 414 8 446 12';
-  const body = `<div style="width:1440px;min-height:810px;background:${BG};border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
+  const body = `<div data-slide-index="1" data-slide-total="${total}" style="width:1440px;min-height:810px;background:${BG};border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
   <div style="position:absolute;left:-110px;bottom:-130px;width:360px;height:360px;border-radius:50%;background:radial-gradient(circle,${PRIMARY}33 0%,${PRIMARY}16 38%,transparent 72%);pointer-events:none"></div>
   <div style="position:absolute;right:96px;top:88px;width:520px;height:520px;border-radius:50%;background:linear-gradient(135deg,rgba(219,234,254,.68),rgba(255,255,255,.2));opacity:.72;pointer-events:none"></div>
 
-  ${richHeader(1, total)}
+  <div style="height:92px;padding:34px 48px 0;display:flex;align-items:flex-start;justify-content:space-between;flex-shrink:0">
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-family:${INTER};font-size:34px;font-weight:900;letter-spacing:-0.06em;color:${FG};line-height:1">onmid</span>
+      <span style="width:44px;height:22px;border-radius:999px;background:${PRIMARY};display:inline-flex;align-items:center;justify-content:flex-end;padding-right:4px;box-sizing:border-box;box-shadow:0 8px 20px ${PRIMARY}55">
+        <span style="width:14px;height:14px;border-radius:50%;background:#FFFFFF;display:block"></span>
+      </span>
+      <span style="font-size:9px;font-weight:700;color:${MUTED};align-self:flex-start;margin-top:1px">®</span>
+    </div>
+  </div>
 
   <div style="position:relative;z-index:1;flex:1;padding:82px 48px 68px;display:grid;grid-template-columns:650px 1fr;column-gap:40px">
     <div style="display:flex;flex-direction:column;min-width:0">
-      <h1 style="font-family:${INTER};font-size:58px;font-weight:900;letter-spacing:-0.045em;color:${FG};line-height:1.04;margin:0 0 20px">
+      <h1 style="font-family:${INTER};font-size:52px;font-weight:900;letter-spacing:-0.045em;color:${FG};line-height:1.04;margin:0 0 20px">
         Relatório de Performance —<br>${clientName}
       </h1>
       <p style="font-family:${INTER};font-size:20px;font-weight:500;color:#163461;line-height:1.48;margin:0 0 34px;max-width:590px">${apoio}</p>
@@ -974,16 +899,6 @@ function sCapa(
       <div style="position:absolute;right:24px;top:104px;width:96px;height:96px;border-radius:50%;background:${PRIMARY}18;box-shadow:0 14px 36px ${PRIMARY}22;display:flex;align-items:center;justify-content:center">
         <svg width="50" height="50" viewBox="0 0 24 24" fill="none" stroke="${PRIMARY_TEXT}" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13c0-4 3-7 8-7s8 3 8 7"></path><path d="M5 13h14l-1 5H6z"></path><path d="M8 7l1-3M16 7l-1-3M10 5h4"></path></svg>
       </div>
-    </div>
-  </div>
-
-  <div data-conclusion="1" style="position:absolute;right:70px;bottom:78px;width:850px;min-height:116px;border-radius:18px;background:#FFFFFF;border:1px solid #E7ECF3;box-shadow:0 18px 42px rgba(15,23,42,.08);display:grid;grid-template-columns:112px 1fr;align-items:center;padding:26px 34px">
-    <div style="width:78px;height:78px;border-radius:50%;background:${PRIMARY}16;display:flex;align-items:center;justify-content:center">
-      <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="${PRIMARY}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"></circle><circle cx="12" cy="12" r="4"></circle><path d="M12 12l7-7"></path><path d="M16 5h3v3"></path></svg>
-    </div>
-    <div style="border-left:2px solid ${PRIMARY};padding-left:24px">
-      <p style="font-family:${INTER};font-size:22px;font-weight:900;color:${FG};margin:0 0 8px">Objetivo do relatório</p>
-      <p style="font-family:${INTER};font-size:16px;font-weight:500;color:#163461;line-height:1.55;margin:0">${objetivo}</p>
     </div>
   </div>
 
@@ -1076,7 +991,7 @@ function sVisaoGeral(
 
   <div style="position:relative;z-index:1;flex:1;padding:56px 48px 0;display:flex;flex-direction:column">
     <div style="margin-bottom:26px">
-      <h1 style="font-family:${INTER};font-size:58px;font-weight:900;letter-spacing:-0.045em;color:${FG};line-height:1.04;margin:0 0 10px">Visão geral do mês</h1>
+      <h1 style="font-family:${INTER};font-size:52px;font-weight:900;letter-spacing:-0.045em;color:${FG};line-height:1.04;margin:0 0 10px">Visão geral do mês</h1>
       <p style="font-family:${INTER};font-size:22px;font-weight:500;color:#163461;line-height:1.35;margin:0">
         ${hasCompare ? `Comparativo de ${curPeriod.month} com ${cmpPeriod.month}${curPeriod.year ? ` de ${curPeriod.year}` : ''}` : `Resultado de ${periodo}`}
       </p>
@@ -1113,82 +1028,251 @@ function sVisaoGeral(
   return auditSlide(body, 'sVisaoGeral');
 }
 
-function sPorDia(d: ParsedData, idx: number, total: number): string {
-  const sorted = [...d.por_dia].sort((a, b) => b.pedidos - a.pedidos);
-  const top2   = new Set(sorted.slice(0, 2).map(x => x.dia));
-  const weakest = sorted[sorted.length - 1];
-  const totalPed = d.por_dia.reduce((s, x) => s + x.pedidos, 0);
-  const top2pct  = totalPed ? Math.round((sorted[0].pedidos + (sorted[1]?.pedidos ?? 0)) / totalPed * 100) : 0;
+function sPorDia(d: ParsedData, idx: number, total: number, periodo = 'Maio/2026'): string {
+  type Weekday = { short: string; label: string; value: number };
+  const dayMeta = [
+    { short: 'Seg', label: 'Segunda' },
+    { short: 'Ter', label: 'Terça' },
+    { short: 'Qua', label: 'Quarta' },
+    { short: 'Qui', label: 'Quinta' },
+    { short: 'Sex', label: 'Sexta' },
+    { short: 'Sáb', label: 'Sábado' },
+    { short: 'Dom', label: 'Domingo' },
+  ];
+  const dayValue = new Map(d.por_dia.map((x) => [x.dia, x.pedidos]));
+  const orders: Weekday[] = dayMeta.map((day) => ({ ...day, value: dayValue.get(day.short) ?? 0 }));
+  const sortedOrders = [...orders].sort((a, b) => b.value - a.value);
+  const strongest = sortedOrders.filter((x) => x.value > 0).slice(0, 2);
+  const weakest = [...orders].filter((x) => x.value > 0).sort((a, b) => a.value - b.value).slice(0, 2);
+  const topSet = new Set(strongest.map((x) => x.short));
+  const maxOrders = Math.max(...orders.map((x) => x.value), 1);
+  const totalOrders = orders.reduce((sum, x) => sum + x.value, 0);
+  const topPct = totalOrders && strongest.length
+    ? Math.round(strongest.reduce((sum, x) => sum + x.value, 0) / totalOrders * 100)
+    : 0;
+  const month = (periodo.split('/')[0] || 'maio').toLowerCase();
 
-  const thesis = sorted[0]
-    ? `${sorted[0].dia} e ${sorted[1]?.dia ?? '—'} concentram ${top2pct}% dos pedidos da semana`
-    : 'Distribuição de pedidos por dia da semana';
+  const deliveryValue = new Map((d.entregas_por_dia ?? []).map((x) => [x.dia, x.pedidos]));
+  const deliveries: Weekday[] = (d.entregas_por_dia ?? []).length
+    ? dayMeta.map((day) => ({ ...day, value: deliveryValue.get(day.short) ?? 0 }))
+    : [];
+  const sortedDeliveries = deliveries.length ? [...deliveries].sort((a, b) => b.value - a.value) : [];
+  const topDeliverySet = new Set(sortedDeliveries.slice(0, 2).map((x) => x.short));
+  const maxDeliveries = Math.max(...sortedDeliveries.map((x) => x.value), 1);
 
-  const bars = d.por_dia.map(x => hbar(x.dia, num(x.pedidos), x.pct, top2.has(x.dia), 10)).join('');
+  void idx;
+  void total;
+  const cardTitle = (iconPath: string, title: string) => `<div style="display:flex;align-items:center;gap:14px">
+    <div style="width:48px;height:48px;border-radius:50%;background:${PRIMARY}18;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="${PRIMARY_TEXT}" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">${iconPath}</svg>
+    </div>
+    <h2 style="font-family:${INTER};font-size:22px;font-weight:950;color:#050816;letter-spacing:-0.04em;line-height:1.02;margin:0">${title}</h2>
+  </div>`;
+  const ICO_CAL = '<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M16 2v5M8 2v5M3 10h18"/>';
+  const ICO_TRUCK = '<path d="M10 17h4V5H2v12h3"/><path d="M14 8h4l4 4v5h-3"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/>';
+  const ICO_TARGET = '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 12l7-7"/><path d="M16 5h3v3"/>';
+  const ICO_BULB = '<path d="M9 18h6"/><path d="M10 22h4"/><path d="M8.5 14.5A6 6 0 1 1 15.5 14c-.7.7-1.1 1.4-1.2 2H9.7c-.1-.7-.5-1.2-1.2-1.5z"/><path d="M4 12H2M22 12h-2M5.6 5.6 4.2 4.2M19.8 4.2l-1.4 1.4"/>';
 
-  const body = `
-${sectionHeader(thesis, 'Pedidos por dia da semana — identifica picos e vales operacionais')}
-<div style="display:grid;grid-template-columns:1fr 320px;gap:32px;flex:1">
-  <div style="padding-top:8px">${bars}</div>
-  <div style="display:flex;flex-direction:column;gap:10px">
-    ${insight('Pico de demanda', `${sorted[0]?.dia ?? '—'} e ${sorted[1]?.dia ?? '—'} são os dias mais fortes. Lance campanhas na quarta ou quinta para aquecer a demanda antes do pico.`, PRIMARY)}
-    ${weakest ? insight('Dia mais fraco', `${weakest.dia} tem o menor volume (${num(weakest.pedidos)} pedidos). Um cupom ou oferta exclusiva nesse dia equilibra o fluxo semanal.`, ORANGE) : ''}
+  const orderColumns = orders.map((day) => {
+    const height = Math.max(18, Math.round(day.value / maxOrders * 250));
+    const active = topSet.has(day.short);
+    return `<div style="height:318px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:12px;min-width:0">
+      <p style="font-family:${INTER};font-size:18px;font-weight:950;color:#050816;margin:0;line-height:1">${day.value ? num(day.value) : '—'}</p>
+      <div style="width:34px;height:${height}px;border-radius:8px 8px 0 0;background:${active ? 'linear-gradient(180deg,#10F02E,#00C81F)' : 'linear-gradient(180deg,#DBE7F7,#EEF4FC)'};box-shadow:${active ? `0 12px 22px ${PRIMARY}36` : 'none'}"></div>
+      <p style="font-family:${INTER};font-size:12px;font-weight:700;color:#163461;margin:0;line-height:1.15;white-space:nowrap">${day.label}</p>
+    </div>`;
+  }).join('');
+
+  const deliveryRows = sortedDeliveries.length
+    ? sortedDeliveries.map((day) => {
+      const width = Math.max(7, Math.round(day.value / maxDeliveries * 100));
+      const active = topDeliverySet.has(day.short);
+      return `<div style="display:grid;grid-template-columns:88px 1fr 44px;align-items:center;gap:12px">
+        <p style="font-family:${INTER};font-size:17px;font-weight:650;color:#163461;margin:0;line-height:1">${day.label}</p>
+        <div style="height:26px;background:#F4F7FB;border-radius:5px;overflow:hidden"><div style="height:100%;width:${width}%;border-radius:5px;background:${active ? 'linear-gradient(90deg,#16E52B,#00C91F)' : '#DCE8F7'}"></div></div>
+        <p style="font-family:${INTER};font-size:18px;font-weight:950;color:#050816;margin:0;text-align:right;line-height:1">${num(day.value)}</p>
+      </div>`;
+    }).join('')
+    : dayMeta.map((day) => `<div style="display:grid;grid-template-columns:88px 1fr 44px;align-items:center;gap:12px;opacity:.78">
+        <p style="font-family:${INTER};font-size:17px;font-weight:650;color:#163461;margin:0;line-height:1">${day.label}</p>
+        <div style="height:26px;background:#F4F7FB;border-radius:5px;overflow:hidden"><div style="height:100%;width:0%;border-radius:5px;background:#DCE8F7"></div></div>
+        <p style="font-family:${INTER};font-size:18px;font-weight:950;color:#94A3B8;margin:0;text-align:right;line-height:1">—</p>
+      </div>`).join('');
+
+  const strongText = strongest.length >= 2
+    ? `${strongest[0].label} e ${strongest[1].label.toLowerCase()} concentram ${topPct}% dos pedidos.`
+    : `Ainda não há volume suficiente para destacar dias fortes.`;
+  const deliveryText = sortedDeliveries[0]
+    ? `${sortedDeliveries[0].label} também tem papel importante em entregas.`
+    : `Entregas por dia ainda não foram informadas neste arquivo.`;
+  const weakText = weakest.length >= 2
+    ? `${weakest[0].label} e ${weakest[1].label.toLowerCase()} são os dias mais fracos e pedem campanhas específicas.`
+    : `Use campanhas específicas nos dias com menor volume quando houver histórico suficiente.`;
+  const opportunityItems = weakest.length >= 2
+    ? [`campanhas para ${weakest[0].label.toLowerCase()} e ${weakest[1].label.toLowerCase()}`, 'combos leves', `benefícios para ${weakest.map((x) => x.label.toLowerCase()).join(' e ')}`]
+    : ['campanhas de meio de semana', 'combos leves', 'benefícios para dias fracos'];
+  const sideCard = (icon: string, title: string, content: string) => `<div data-conclusion="1" style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 18px 42px rgba(15,23,42,.075);padding:24px 26px;box-sizing:border-box;flex:1;min-height:0;overflow:hidden">
+    ${cardTitle(icon, title)}
+    <div style="border-left:3px solid ${PRIMARY};margin:18px 0 0 10px;padding-left:20px">${content}</div>
+  </div>`;
+
+  const body = `<div data-slide-index="${idx}" data-slide-total="${total}" style="width:1440px;min-height:810px;background:#FFFFFF;border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
+  <div style="position:absolute;right:-95px;top:74px;width:520px;height:520px;border-radius:50%;background:radial-gradient(circle at 54% 48%,${PRIMARY}2E 0%,#DBEAFE78 35%,rgba(255,255,255,0) 72%);pointer-events:none"></div>
+  <div style="position:absolute;left:-120px;bottom:-150px;width:360px;height:360px;border-radius:50%;background:radial-gradient(circle,${PRIMARY}28 0%,rgba(219,234,254,.25) 44%,transparent 74%);pointer-events:none"></div>
+
+  <div style="position:relative;z-index:1;flex:1;padding:48px 42px 34px;display:flex;flex-direction:column;box-sizing:border-box">
+    <div style="margin-bottom:28px">
+      <h1 style="font-family:${INTER};font-size:52px;font-weight:950;color:#050816;letter-spacing:-0.06em;line-height:.98;margin:0 0 14px">Comportamento por dia da semana</h1>
+      <p style="font-family:${INTER};font-size:23px;font-weight:500;color:#163461;letter-spacing:-0.025em;margin:0">Pedidos e entregas em ${month}</p>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1.24fr 1fr 0.96fr;gap:22px;align-items:stretch;min-height:0">
+      <div style="height:486px;background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 18px 42px rgba(15,23,42,.075);padding:26px 28px 24px;box-sizing:border-box">
+        ${cardTitle(ICO_CAL, 'Pedidos por dia')}
+        <div style="height:380px;margin-top:22px;display:grid;grid-template-columns:repeat(7,minmax(0,1fr));align-items:end;gap:10px;border-bottom:1px solid #DDE6F2;padding:0 2px 10px;box-sizing:border-box">${orderColumns}</div>
+      </div>
+
+      <div style="height:486px;background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 18px 42px rgba(15,23,42,.075);padding:26px 28px 24px;box-sizing:border-box">
+        ${cardTitle(ICO_TRUCK, 'Entregas por dia')}
+        <div style="height:374px;margin-top:26px;display:flex;flex-direction:column;justify-content:space-between">${deliveryRows}</div>
+      </div>
+
+      <div style="height:486px;display:flex;flex-direction:column;gap:18px">
+        ${sideCard(ICO_TARGET, 'Leitura estratégica', `<p style="font-family:${INTER};font-size:15px;font-weight:500;color:#163461;line-height:1.46;margin:0">${strongText} ${deliveryText} ${weakText}</p>`)}
+        ${sideCard(ICO_BULB, `Oportunidade para ${nextMonthName(periodo).toLowerCase()}`, `<ul style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px">${opportunityItems.map((item) => `<li style="font-family:${INTER};font-size:14px;font-weight:500;color:#163461;line-height:1.22;display:flex;align-items:flex-start;gap:10px"><span style="width:7px;height:7px;border-radius:50%;background:${PRIMARY};margin-top:5px;flex-shrink:0"></span><span style="min-width:0">${item}</span></li>`).join('')}</ul>`)}
+      </div>
+    </div>
   </div>
-</div>
-${thesisBanner(`Concentre investimento nos dias ${sorted[0]?.dia ?? '—'} e ${sorted[1]?.dia ?? '—'} — eles sozinhos justificam ${top2pct}% do volume.`)}`;
-  return auditSlide(wrapSlide(body, idx, total), 'sPorDia');
+
+  ${richFooter()}
+</div>`;
+  return auditSlide(body, 'sPorDia');
 }
 
 function sRegioes(bairros: Bairro[], idx: number, total: number): string {
-  const top3total = bairros.slice(0, 3).reduce((s, b) => s + b.pedidos, 0);
-  const grandTotal = bairros.reduce((s, b) => s + b.pedidos, 0);
-  const top3pct = grandTotal ? Math.round(top3total / grandTotal * 100) : 0;
+  const top = [...bairros].sort((a, b) => b.pedidos - a.pedidos).slice(0, 8);
+  const top3 = top.slice(0, 3);
+  const potential = top.slice(3, 8);
+  const month = 'maio';
+  const money = (n: number) => n > 0
+    ? n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : '—';
+  const shortName = (name?: string) => String(name || '—').replace('Jardim ', '').replace('Fazenda ', '').trim();
 
-  const thesis = bairros[0]
-    ? `${bairros[0].bairro} lidera com ${num(bairros[0].pedidos)} pedidos — fortalecer antes de expandir`
-    : 'Distribuição de pedidos por bairro';
+  const icon = (path: string, color = PRIMARY_TEXT, bg = `${PRIMARY}18`) =>
+    `<div style="width:54px;height:54px;border-radius:50%;background:${bg};display:flex;align-items:center;justify-content:center;flex-shrink:0">
+      <svg width="27" height="27" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">${path}</svg>
+    </div>`;
+  const ICO_PIN = '<path d="M21 10c0 7-9 12-9 12S3 17 3 10a9 9 0 1 1 18 0z"/><circle cx="12" cy="10" r="3"/>';
+  const ICO_BAG = '<path d="M6 7h12l1 14H5L6 7z"/><path d="M9 7a3 3 0 0 1 6 0"/>';
+  const ICO_COIN = '<circle cx="12" cy="12" r="9"/><path d="M12 7v10M9.5 9.5c0-1.1 1-1.8 2.5-1.8s2.5.7 2.5 1.8-1 1.8-2.5 1.8-2.5.7-2.5 1.8 1 1.8 2.5 1.8 2.5-.7 2.5-1.8"/>';
+  const ICO_GROW = '<polyline points="3 17 9 11 13 15 21 7"/><polyline points="15 7 21 7 21 13"/><path d="M3 21h18"/>';
+  const ICO_ROCKET = '<path d="M4.5 16.5c-1.5 1.2-2 3-2 5 2 0 3.8-.5 5-2"/><path d="M9 15 4 10l4-1 7-7c2.5.7 4.3 2.5 5 5l-7 7-1 4-5-5z"/><circle cx="15" cy="7" r="2"/>';
+  const ICO_TARGET = '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 12l7-7"/><path d="M16 5h3v3"/>';
 
-  const maxPed = bairros[0]?.pedidos ?? 1;
-  const tableRows = bairros.map((b, i) => {
-    const barW = Math.round(b.pedidos / maxPed * 100);
-    return `<tr style="background:${i%2===0?CARD:ROW};border-bottom:1px solid ${BORDER}">
-      <td style="padding:9px 14px;font-size:13px;font-family:${INTER};color:${i<2?FG:MUTED};font-weight:${i<2?'600':'400'}">${b.bairro}</td>
-      <td style="padding:9px 14px;width:180px">
-        <div style="display:flex;align-items:center;gap:8px">
-          <div style="flex:1;height:6px;background:${BORDER};overflow:hidden">
-            <div style="height:100%;background:${i===0?PRIMARY:PRIMARY+'50'};width:${barW}%"></div>
-          </div>
-          <span style="font-size:12px;font-weight:700;color:${i===0?PRIMARY:MUTED};font-family:${INTER};min-width:32px;text-align:right">${num(b.pedidos)}</span>
-        </div>
-      </td>
-      <td style="padding:9px 14px;text-align:right;font-size:12px;color:${MUTED};font-family:${INTER}">${brl(b.faturamento)}</td>
-    </tr>`;
+  const rows = top.length
+    ? top.map((b, i) => `<tr style="border-bottom:${i === top.length - 1 ? '0' : '1px solid #E7ECF3'}">
+        <td style="width:54px;padding:13px 0 13px 10px"><span style="width:27px;height:27px;border-radius:9px;background:${PRIMARY}18;color:${PRIMARY_TEXT};font-family:${INTER};font-size:15px;font-weight:950;display:flex;align-items:center;justify-content:center">${i + 1}</span></td>
+        <td style="padding:13px 8px;font-family:${INTER};font-size:16px;font-weight:850;color:#050816;line-height:1.2">${b.bairro}</td>
+        <td style="padding:13px 8px;text-align:center;font-family:${INTER};font-size:20px;font-weight:650;color:#0B1B3A">${num(b.pedidos)}</td>
+        <td style="padding:13px 10px 13px 8px;text-align:right;font-family:${INTER};font-size:18px;font-weight:500;color:#0B1B3A;white-space:nowrap">${money(b.faturamento)}</td>
+      </tr>`).join('')
+    : `<tr><td colspan="4" style="height:360px;text-align:center;font-family:${INTER};font-size:18px;color:#94A3B8">Sem bairros disponíveis neste período</td></tr>`;
+
+  const mapPoints = [
+    { x: 344, y: 78, area: 'M270 82 L322 42 L414 58 L436 112 L376 144 L285 130 Z', labelX: 323, labelY: 104, pinX: 348, pinY: 64 },
+    { x: 130, y: 195, area: 'M70 214 L118 152 L202 144 L236 207 L168 244 Z', labelX: 76, labelY: 184, pinX: 200, pinY: 184 },
+    { x: 391, y: 205, area: 'M310 214 L365 157 L442 178 L461 233 L396 262 Z', labelX: 406, labelY: 194, pinX: 374, pinY: 205 },
+    { x: 622, y: 118, area: 'M575 121 L634 74 L719 93 L739 155 L660 180 Z', labelX: 656, labelY: 112, pinX: 639, pinY: 110 },
+    { x: 688, y: 247, area: 'M614 257 L674 211 L758 228 L776 282 L702 308 Z', labelX: 617, labelY: 258, pinX: 727, pinY: 238 },
+    { x: 266, y: 301, area: 'M218 317 L278 266 L354 286 L330 346 L252 366 Z', labelX: 262, labelY: 291, pinX: 258, pinY: 316 },
+    { x: 601, y: 354, area: 'M548 348 L614 301 L686 324 L671 386 L586 397 Z', labelX: 583, labelY: 351, pinX: 608, pinY: 310 },
+    { x: 822, y: 309, area: 'M765 315 L831 266 L910 289 L898 348 L814 359 Z', labelX: 838, labelY: 298, pinX: 801, pinY: 306 },
+  ];
+  const mapped = (top.length ? top : [{ bairro: '—', pedidos: 0, faturamento: 0 }]).slice(0, 8);
+  const mapAreas = mapped.map((b, i) => {
+    const p = mapPoints[i] ?? mapPoints[mapPoints.length - 1];
+    const main = i === 0;
+    return `<path d="${p.area}" fill="${main ? '#05C83A' : '#B9F7C8'}" stroke="${main ? '#0BAF35' : '#7EE899'}" stroke-width="2.2" opacity="${main ? '.92' : '.72'}" filter="url(#mapShadow)"/>
+      <g transform="translate(${p.pinX - 13} ${p.pinY - 31})">
+        <path d="M13 0C6 0 0 5.7 0 12.7 0 22 13 31 13 31s13-9 13-18.3C26 5.7 20 0 13 0z" fill="#12B935"/><circle cx="13" cy="12" r="4.3" fill="#FFFFFF"/>
+      </g>
+      <foreignObject x="${p.labelX}" y="${p.labelY}" width="154" height="52">
+        <div xmlns="http://www.w3.org/1999/xhtml" style="display:inline-flex;max-width:146px;min-height:31px;align-items:center;justify-content:center;text-align:center;background:#FFFFFF;border:1.5px solid #13B63D;border-radius:8px;box-shadow:0 5px 10px rgba(15,23,42,.13);padding:5px 10px;font-family:${INTER};font-size:14px;font-weight:850;color:#0B1B3A;line-height:1.12;box-sizing:border-box">${shortName(b.bairro)}</div>
+      </foreignObject>`;
   }).join('');
 
-  const top2 = bairros.slice(0, 2);
-  const mid  = bairros.slice(2, 5);
+  const map = `<svg viewBox="0 0 940 430" width="100%" height="100%" preserveAspectRatio="none" style="display:block">
+    <defs>
+      <filter id="mapShadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="7" stdDeviation="7" flood-color="#0F172A" flood-opacity=".12"/></filter>
+      <pattern id="gridRoads" width="74" height="74" patternUnits="userSpaceOnUse">
+        <path d="M0 38 H74 M36 0 V74 M10 0 L74 64 M0 68 L68 0" stroke="#DDE5EE" stroke-width="2" opacity=".55"/>
+      </pattern>
+    </defs>
+    <rect width="940" height="430" fill="#F5F8FB"/>
+    <rect width="940" height="430" fill="url(#gridRoads)" opacity=".92"/>
+    <path d="M0 118 C120 42 222 88 322 25 C430 -42 588 62 712 16 C816 -22 890 18 940 42" fill="none" stroke="#E8EEF5" stroke-width="34" opacity=".78"/>
+    <path d="M0 318 C120 238 210 302 322 224 C442 140 575 240 710 175 C815 125 878 148 940 176" fill="none" stroke="#E8EEF5" stroke-width="30" opacity=".82"/>
+    <path d="M102 0 C65 91 90 159 13 260 C-20 303 -12 361 20 430" fill="none" stroke="#BDE2FF" stroke-width="18" opacity=".9"/>
+    <path d="M0 0 H940 V430 H0 Z" fill="url(#gridRoads)" opacity=".18"/>
+    ${mapAreas}
+  </svg>`;
 
-  const body = `
-${sectionHeader(thesis, `${bairros.length} bairros · top 3 concentram ${top3pct}% dos pedidos — CRM`)}
-<div style="display:grid;grid-template-columns:1fr 300px;gap:28px;flex:1">
-  <table style="width:100%;border-collapse:collapse;border:1px solid ${BORDER};height:fit-content">
-    <thead><tr style="background:${CARD};border-bottom:1px solid ${BORDER}">
-      <th style="padding:9px 14px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:${MUTED};font-family:${INTER}">Bairro</th>
-      <th style="padding:9px 14px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:${MUTED};font-family:${INTER}">Pedidos</th>
-      <th style="padding:9px 14px;text-align:right;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:${MUTED};font-family:${INTER}">Faturamento</th>
-    </tr></thead>
-    <tbody>${tableRows}</tbody>
-  </table>
-  <div style="display:flex;flex-direction:column;gap:10px">
-    ${top2.length ? insight('Fortalecer', `${top2.map(b=>b.bairro).join(' e ')} — demanda consolidada. Segmente Meta para esses bairros e eleve o ticket com combo exclusivo.`, PRIMARY) : ''}
-    ${mid.length ? insight('Estimular', `${mid.map(b=>b.bairro).join(', ')} — volume crescente. Lance campanha de reconhecimento para construir presença antes de escalar.`, BLUE) : ''}
+  const strongNames = top3.map((b) => shortName(b.bairro)).join(', ') || '—';
+  const potentialNames = potential.map((b) => shortName(b.bairro)).join(', ') || '—';
+  const strategyCard = (iconPath: string, title: string, text: string, color = PRIMARY_TEXT, bg = `${PRIMARY}18`) =>
+    `<div data-conclusion="1" style="background:${CARD};border:1px solid #E7ECF3;border-radius:16px;box-shadow:0 14px 34px rgba(15,23,42,.065);padding:15px 18px;display:grid;grid-template-columns:58px 1fr;gap:14px;box-sizing:border-box;height:180px;overflow:hidden">
+      ${icon(iconPath, color, bg).replace('width:54px;height:54px;', 'width:52px;height:52px;').replace('width="27" height="27"', 'width="25" height="25"')}
+      <div style="border-left:3px solid ${color};padding-left:15px;min-width:0">
+        <h3 style="font-family:${INTER};font-size:18px;font-weight:950;color:#050816;line-height:1.08;letter-spacing:-0.04em;margin:0 0 8px">${title}</h3>
+        <p style="font-family:${INTER};font-size:13px;font-weight:500;color:#163461;line-height:1.34;margin:0">${text}</p>
+      </div>
+    </div>`;
+
+  const body = `<div data-slide-index="${idx}" data-slide-total="${total}" style="width:1440px;min-height:810px;background:#FFFFFF;border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
+  <div style="position:absolute;left:-135px;bottom:-170px;width:390px;height:390px;border-radius:50%;background:radial-gradient(circle,${PRIMARY}2E 0%,rgba(219,234,254,.24) 45%,transparent 74%);pointer-events:none"></div>
+  <div style="height:92px;padding:34px 40px 0;display:flex;align-items:flex-start;justify-content:space-between;box-sizing:border-box"></div>
+  <div style="flex:1;padding:22px 40px 30px;display:grid;grid-template-columns:610px 1fr;gap:28px;box-sizing:border-box">
+    <div style="display:flex;flex-direction:column;min-width:0">
+      <h1 style="font-family:${INTER};font-size:52px;font-weight:950;color:#050816;letter-spacing:-0.06em;line-height:1.08;margin:0 0 14px">Regiões com maior<br>volume de pedidos</h1>
+      <p style="font-family:${INTER};font-size:22px;font-weight:500;color:#163461;letter-spacing:-0.02em;margin:0 0 24px">Bairros com maior força em ${month}</p>
+      <div style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 18px 42px rgba(15,23,42,.075);padding:18px 18px 16px;box-sizing:border-box;flex:1;min-height:0">
+        <table style="width:100%;border-collapse:collapse;table-layout:fixed">
+          <thead>
+            <tr style="border-bottom:1px solid #E7ECF3">
+              <th style="width:54px"></th>
+              <th style="padding:0 8px 14px;text-align:left;font-family:${INTER};font-size:17px;font-weight:950;color:#050816">${icon(ICO_PIN).replace('width:54px;height:54px;', 'width:30px;height:30px;').replace('width="27" height="27"', 'width="16" height="16"')}<span style="vertical-align:middle;margin-left:8px">Bairro</span></th>
+              <th style="width:130px;padding:0 8px 14px;text-align:center;font-family:${INTER};font-size:17px;font-weight:950;color:#050816">${icon(ICO_BAG).replace('width:54px;height:54px;', 'width:30px;height:30px;').replace('width="27" height="27"', 'width="16" height="16"')}<span style="vertical-align:middle;margin-left:8px">Pedidos</span></th>
+              <th style="width:176px;padding:0 10px 14px 8px;text-align:right;font-family:${INTER};font-size:17px;font-weight:950;color:#050816">${icon(ICO_COIN).replace('width:54px;height:54px;', 'width:30px;height:30px;').replace('width="27" height="27"', 'width="16" height="16"')}<span style="vertical-align:middle;margin-left:8px">Faturamento</span></th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-rows:285px 180px 109px;gap:18px;min-width:0">
+      <div style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 18px 42px rgba(15,23,42,.075);overflow:hidden">${map}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
+        ${strategyCard(ICO_GROW, 'Fortalecer onde já existe demanda', `${strongNames} lideram em pedidos e faturamento. Manter presença ativa, investir em visibilidade e promoções geo-segmentadas.`)}
+        ${strategyCard(ICO_ROCKET, 'Estimular onde há potencial de crescimento', `${potentialNames} mostram espaço para crescer. Campanhas locais e ofertas direcionadas podem acelerar a demanda.`)}
+      </div>
+      <div style="background:${CARD};border:1px solid #E7ECF3;border-radius:16px;box-shadow:0 14px 34px rgba(15,23,42,.065);display:grid;grid-template-columns:76px 1fr;gap:16px;align-items:center;padding:14px 20px;box-sizing:border-box;overflow:hidden">
+        ${icon(ICO_TARGET, BLUE, `${BLUE}16`).replace('width:54px;height:54px;', 'width:52px;height:52px;').replace('width="27" height="27"', 'width="25" height="25"')}
+        <div style="border-left:3px solid ${BLUE};padding-left:18px;min-width:0">
+          <h3 style="font-family:${INTER};font-size:17px;font-weight:950;color:#050816;letter-spacing:-0.035em;margin:0 0 5px">Insight para remarketing e campanhas geográficas</h3>
+          <p style="font-family:${INTER};font-size:13px;font-weight:500;color:#163461;line-height:1.28;margin:0">Use segmentações por bairro para impactar novamente quem já comprou nessas regiões e criar campanhas específicas para os bairros com maior potencial de crescimento.</p>
+        </div>
+      </div>
+    </div>
   </div>
-</div>
-${thesisBanner(`Os 3 bairros mais fortes concentram ${top3pct}% dos pedidos — toda campanha local deve começar por eles.`)}`;
-  return auditSlide(wrapSlide(body, idx, total), 'sRegioes');
+  ${richFooter()}
+</div>`;
+  return auditSlide(body, 'sRegioes');
 }
 
 function sBase(d: ParsedData, idx: number, total: number): string {
+  void idx;
+  void total;
   const tot = d.ativos + d.inativos + d.potenciais;
   const pct1 = (n: number) => tot ? (n / tot * 100).toFixed(1).replace('.', ',') : '0,0';
   const pA = pct1(d.ativos), pI = pct1(d.inativos), pP = pct1(d.potenciais);
@@ -1325,7 +1409,7 @@ function sBase(d: ParsedData, idx: number, total: number): string {
 
     <div style="flex-shrink:0;display:flex;align-items:flex-start;gap:32px;margin-bottom:24px">
       <div style="flex:0 0 380px">
-        <h1 style="font-family:${INTER};font-size:42px;font-weight:900;color:${FG};line-height:1.08;margin:0 0 10px;letter-spacing:-0.03em">Base de clientes e<br>clientes ativos</h1>
+        <h1 style="font-family:${INTER};font-size:46px;font-weight:900;color:${FG};line-height:1.08;margin:0 0 10px;letter-spacing:-0.03em">Base de clientes e<br>clientes ativos</h1>
         <p style="font-size:15px;font-weight:500;color:#163461;font-family:${INTER};margin:0;line-height:1.4">Onde está a maior oportunidade de relacionamento</p>
       </div>
       <div style="flex:1;display:flex;gap:14px;align-items:stretch">
@@ -1433,64 +1517,6 @@ ${thesisBanner(`Reativar ${num(shortCount || d.inativos)} inativos com um cupom 
   return auditSlide(wrapSlide(body, idx, total), 'sInativos');
 }
 
-function sProdutos(d: ParsedData, idx: number, total: number): string {
-  const allZeroQty = d.produtos.every(p => p.qtd === 0);
-
-  if (allZeroQty) {
-    const catalogCards = d.produtos.slice(0, 8).map(p =>
-      `<div style="border:1px solid ${BORDER};background:${CARD};padding:12px 14px">
-        <p style="font-size:13px;font-weight:600;color:${FG};font-family:${INTER};margin:0 0 4px">${p.nome}</p>
-        ${p.total > 0 ? `<p style="font-size:11px;color:${MUTED};font-family:${INTER};margin:0">${brl(p.total)}</p>` : ''}
-      </div>`,
-    ).join('');
-    const body = `
-${sectionHeader('Catálogo identificado — volume de vendas não capturado neste arquivo', 'Produtos cadastrados')}
-<div style="border-left:3px solid ${ORANGE};background:${ORANGE}0A;padding:10px 16px;margin-bottom:18px">
-  <p style="font-size:12px;color:${ORANGE};font-family:${INTER};margin:0">Arquivo de produtos sem coluna de quantidade vendida. Para exibir o ranking, inclua uma coluna "qtd" ou "qtd_vendida".</p>
-</div>
-<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">${catalogCards}</div>
-${thesisBanner('Sem dados de volume, não é possível identificar o produto âncora. Integre o relatório de vendas para descobrir.', 'neutral')}`;
-    return auditSlide(wrapSlide(body, idx, total), 'sProdutos');
-  }
-
-  const max  = Math.max(...d.produtos.map(p => p.qtd), 1);
-  const topProd = d.produtos[0];
-  const topPct  = d.pedidos_ativos > 0 ? Math.round(topProd.qtd / d.pedidos_ativos * 100) : 0;
-  const thesis  = topProd
-    ? `"${topProd.nome}" responde por ${topPct}% dos pedidos — é o produto âncora do negócio`
-    : 'Ranking de produtos por volume de pedidos';
-
-  const bars = d.produtos.slice(0, 8).map((p, i) =>
-    hbar(p.nome, `${num(p.qtd)} ped${p.total > 0 ? ` · ${brl(p.total)}` : ''}`, p.qtd / max * 100, i < 3, 12),
-  ).join('');
-
-  // Combo suggestions from top 4
-  const top4 = d.produtos.slice(0, 4);
-  const combos = [
-    top4[0] && top4[1] ? `${top4[0].nome} + ${top4[1].nome}` : null,
-    top4[0] && top4[2] ? `${top4[0].nome} + ${top4[2].nome}` : null,
-    top4[2] && top4[3] ? `${top4[2].nome} + ${top4[3].nome}` : null,
-  ].filter(Boolean) as string[];
-
-  const body = `
-${sectionHeader(thesis, 'Ranking por volume de pedidos no período')}
-<div style="display:grid;grid-template-columns:1fr 320px;gap:32px;flex:1">
-  <div style="padding-top:8px">${bars}</div>
-  <div style="display:flex;flex-direction:column;gap:10px">
-    ${topProd ? `${kpiHero('Produto #1', topProd.nome.length > 16 ? topProd.nome.slice(0,16)+'…' : topProd.nome, `${num(topProd.qtd)} pedidos · ${brlOrDash(topProd.total)}`, ORANGE)}` : ''}
-    ${combos.length ? `<div>
-      <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:10px 0 8px">Combos Sugeridos</p>
-      ${combos.map(c => `<div style="border:1px solid ${BORDER};background:${CARD};padding:10px 12px;margin-bottom:6px">
-        <p style="font-size:11px;font-weight:700;color:${ORANGE};font-family:${INTER};margin:0 0 2px;text-transform:uppercase;letter-spacing:.08em">Combo</p>
-        <p style="font-size:12px;font-weight:600;color:${FG};font-family:${INTER};margin:0">${c}</p>
-      </div>`).join('')}
-    </div>` : ''}
-  </div>
-</div>
-${thesisBanner(`Use "${topProd?.nome ?? '—'}" como âncora em campanhas de upsell — oferecer um segundo item junto eleva o ticket sem aumentar o esforço de aquisição.`)}`;
-  return auditSlide(wrapSlide(body, idx, total), 'sProdutos');
-}
-
 // Cleans bracket-tagged ad-platform campaign names (e.g. "[ON] [WHATS] [ANIVERSÁRIO] [MAIO]")
 // into a readable label. Drops agency/noise tags; keeps the rest in original order.
 const CAMPAIGN_NAME_MAP: Record<string, string> = {
@@ -1526,6 +1552,8 @@ function cleanCampaignHighlightTitle(raw: string): string {
 }
 
 function sMetaAdsResumo(meta: MetaAdsFull, idx: number, total: number): string {
+  void idx;
+  void total;
   const totalConversas = meta.campanhas.reduce((s, c) => s + c.metricas.conversas, 0);
   const totalCompras   = meta.campanhas.reduce((s, c) => s + c.metricas.compras, 0);
   const brlC = (n: number) => n > 0 ? n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '—';
@@ -1546,7 +1574,6 @@ function sMetaAdsResumo(meta: MetaAdsFull, idx: number, total: number): string {
   const ICO_EYE    = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
   const ICO_USERS  = '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>';
   const ICO_CURSOR = '<path d="m3 3 7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="m13 13 6 6"/>';
-  const ICO_CHAT   = '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>';
   const ICO_CART   = '<circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>';
   const ICO_LIST   = '<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>';
   const ICO_TARGET = '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>';
@@ -1654,7 +1681,7 @@ function sMetaAdsResumo(meta: MetaAdsFull, idx: number, total: number): string {
   <div style="position:relative;z-index:1;flex:1;padding:56px 48px 0;display:flex;flex-direction:column;gap:16px">
 
     <div style="flex-shrink:0">
-      <h1 style="font-family:${INTER};font-size:46px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 8px;letter-spacing:-0.03em">Resumo de tráfego pago</h1>
+      <h1 style="font-family:${INTER};font-size:52px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 8px;letter-spacing:-0.03em">Resumo de tráfego pago</h1>
       <p style="font-size:16px;font-weight:500;color:#163461;font-family:${INTER};margin:0">Visibilidade, cliques e destaques das campanhas do período</p>
     </div>
 
@@ -1758,19 +1785,12 @@ function sInstagram(ig: InstagramData, idx: number, total: number): string {
     </div>
   </div>
 
-  <!-- Header: logo only — pagination intentionally suppressed on this slide -->
-  <div style="position:relative;z-index:1;padding:34px 48px 0;flex-shrink:0">
-    <div style="display:flex;align-items:center;gap:8px">
-      <span style="font-family:${INTER};font-size:30px;font-weight:900;letter-spacing:-0.05em;color:${FG};line-height:1">onmid</span>
-      <span style="width:38px;height:20px;border-radius:999px;background:${PRIMARY};display:inline-flex;align-items:center;justify-content:flex-end;padding-right:4px;box-sizing:border-box">
-        <span style="width:12px;height:12px;border-radius:50%;background:#FFFFFF;display:block"></span>
-      </span>
-    </div>
-  </div>
+  <!-- Header spacing preserved; logo intentionally suppressed on this slide -->
+  <div style="position:relative;z-index:1;height:64px;flex-shrink:0"></div>
 
   <div style="position:relative;z-index:1;flex:1;padding:30px 48px 0;display:flex;flex-direction:column">
     <div style="flex-shrink:0;margin-bottom:30px">
-      <h1 style="font-family:${INTER};font-size:60px;font-weight:900;color:${FG};line-height:1;margin:0 0 12px;letter-spacing:-0.03em">Instagram</h1>
+      <h1 style="font-family:${INTER};font-size:52px;font-weight:900;color:${FG};line-height:1;margin:0 0 12px;letter-spacing:-0.03em">Instagram</h1>
       <p style="font-size:18px;font-weight:500;color:#163461;font-family:${INTER};margin:0 0 10px">Período: mês anterior</p>
       <span style="width:46px;height:3px;background:${PRIMARY};display:block"></span>
     </div>
@@ -1821,53 +1841,257 @@ const ICO_COMMENT  = '<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6
 const ICO_PLAY      = '<polygon points="5 3 19 12 5 21 5 3"/>';
 const ICO_LAYERS    = '<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>';
 
-function sInstagramPosts(posts: InstagramPost[], idx: number, total: number): string {
-  const best = bestInstagramPost(posts);
+function sInstagramCalendar(posts: InstagramPost[], idx: number, total: number, monthDate: Date): string {
+  const MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  const month = monthDate.getMonth();
+  const year = monthDate.getFullYear();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const firstDay = new Date(year, month, 1).getDay();
+  const leadingBlanks = (firstDay + 6) % 7; // Monday-first calendar
 
-  const mediaBadge = (mediaType: string) => {
-    if (mediaType === 'REELS' || mediaType === 'VIDEO') return `<div style="position:absolute;top:8px;right:8px;width:26px;height:26px;border-radius:50%;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center"><svg width="13" height="13" viewBox="0 0 24 24" fill="white">${ICO_PLAY}</svg></div>`;
-    if (mediaType === 'CAROUSEL_ALBUM') return `<div style="position:absolute;top:8px;right:8px;width:26px;height:26px;border-radius:50%;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICO_LAYERS}</svg></div>`;
+  type ContentKind = 'Reel' | 'Carrossel' | 'Story' | 'Feed' | 'Bastidores' | 'Oferta' | 'Prova social' | 'Institucional';
+  const kindStyles: Record<ContentKind, { bg: string; border: string; color: string }> = {
+    Reel:          { bg: '#EAFDE6', border: '#B9F7AE', color: PRIMARY_TEXT },
+    Carrossel:     { bg: '#EAF3FF', border: '#BFDBFE', color: '#2563EB' },
+    Story:         { bg: '#FFF7E6', border: '#FDE68A', color: '#B45309' },
+    Feed:          { bg: '#F8FAFC', border: '#E2E8F0', color: '#475569' },
+    Bastidores:    { bg: '#F5F0FF', border: '#DDD6FE', color: '#7C3AED' },
+    Oferta:        { bg: '#FFF1E8', border: '#FDBA74', color: '#EA580C' },
+    'Prova social': { bg: '#E6FFFB', border: '#99F6E4', color: '#0F766E' },
+    Institucional: { bg: '#FFF0F6', border: '#FBCFE8', color: '#DB2777' },
+  };
+  const legendKinds = Object.keys(kindStyles) as ContentKind[];
+
+  const formatKind = (p: InstagramPost): ContentKind => {
+    const type = p.mediaType;
+    if (type === 'REELS' || type === 'VIDEO') return 'Reel';
+    if (type === 'CAROUSEL_ALBUM') return 'Carrossel';
+    if (type === 'STORY') return 'Story';
+    return 'Feed';
+  };
+
+  const displayKind = (p: InstagramPost): ContentKind => {
+    const caption = p.caption.toLowerCase();
+    if (/(promo|oferta|desconto|cupom|comb[oó]|imperd[ií]vel)/i.test(caption)) return 'Oferta';
+    if (/(bastidor|equipe|making of|por tr[aá]s|rotina)/i.test(caption)) return 'Bastidores';
+    if (/(depoimento|cliente|resultado|antes e depois|avalia[cç][aã]o)/i.test(caption)) return 'Prova social';
+    if (/(institucional|marca|hist[oó]ria|miss[aã]o|valores)/i.test(caption)) return 'Institucional';
+    return formatKind(p);
+  };
+
+  const dayKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const postsInMonth = posts.filter((p) => {
+    const d = new Date(p.timestamp);
+    return !isNaN(d.getTime()) && d.getMonth() === month && d.getFullYear() === year;
+  });
+  const postsByDay = new Map<string, InstagramPost[]>();
+  for (const post of postsInMonth) {
+    const key = dayKey(new Date(post.timestamp));
+    postsByDay.set(key, [...(postsByDay.get(key) ?? []), post]);
+  }
+
+  const formatCounts = postsInMonth.reduce<Record<ContentKind, number>>((acc, post) => {
+    const kind = formatKind(post);
+    acc[kind] = (acc[kind] ?? 0) + 1;
+    return acc;
+  }, {} as Record<ContentKind, number>);
+  const formatScores = postsInMonth.reduce<Record<string, { label: ContentKind; total: number; count: number }>>((acc, post) => {
+    const kind = formatKind(post);
+    const score = post.reach > 0 ? post.reach : post.likes + post.comments + post.saves;
+    acc[kind] = acc[kind] ?? { label: kind, total: 0, count: 0 };
+    acc[kind].total += score;
+    acc[kind].count += 1;
+    return acc;
+  }, {});
+  const bestFormat = Object.values(formatScores).sort((a, b) => (b.total / Math.max(1, b.count)) - (a.total / Math.max(1, a.count)))[0]?.label ?? '—';
+  const postingDays = new Set([...postsByDay.keys()]).size;
+  const frequency = postsInMonth.length / daysInMonth;
+  const frequencyLabel = `${frequency.toFixed(1).replace('.', ',')}/dia`;
+  const consistency = frequency >= 0.75 ? 'Consistência boa' : frequency >= 0.35 ? 'Ritmo regular' : 'Ritmo leve';
+
+  const pill = (kind: ContentKind) => {
+    const s = kindStyles[kind] ?? kindStyles.Feed;
+    return `<span style="display:inline-flex;max-width:100%;height:18px;align-items:center;border-radius:999px;border:1px solid ${s.border};background:${s.bg};color:${s.color};padding:0 7px;font-family:${INTER};font-size:9px;font-weight:850;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${kind}</span>`;
+  };
+
+  const dayCell = (day: number | null) => {
+    if (!day) return `<div style="height:62px;border:1px solid #EDF1F6;background:#F8FAFC;border-radius:12px;opacity:.6"></div>`;
+    const key = dayKey(new Date(year, month, day));
+    const dayPosts = postsByDay.get(key) ?? [];
+    const uniqueKinds = [...new Set(dayPosts.map(displayKind))].slice(0, 3);
+    const extra = dayPosts.length > uniqueKinds.length ? `<span style="font-family:${INTER};font-size:9px;font-weight:900;color:#94A3B8">+${dayPosts.length - uniqueKinds.length}</span>` : '';
+    return `<div style="height:62px;border:1px solid ${dayPosts.length ? '#DDEFE1' : '#EDF1F6'};background:${dayPosts.length ? '#FBFFFA' : '#FFFFFF'};border-radius:12px;padding:8px;box-sizing:border-box;display:flex;flex-direction:column;gap:5px;overflow:hidden">
+      <span style="font-family:${INTER};font-size:12px;font-weight:850;color:${dayPosts.length ? FG : '#94A3B8'};line-height:1">${day}</span>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;min-width:0">${uniqueKinds.map(pill).join('')}${extra}</div>
+    </div>`;
+  };
+
+  const calendarCells: Array<number | null> = [
+    ...Array.from({ length: leadingBlanks }, () => null),
+    ...Array.from({ length: daysInMonth }, (_, n) => n + 1),
+  ];
+  while (calendarCells.length % 7 !== 0) calendarCells.push(null);
+
+  const statIcon = (paths: string) =>
+    `<div style="width:40px;height:40px;border-radius:50%;background:${PRIMARY}18;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${PRIMARY_TEXT}" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>
+    </div>`;
+  const statCard = (title: string, value: string, helper: string, iconPath: string) =>
+    `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:16px;box-shadow:0 14px 30px rgba(15,23,42,.055);padding:15px 17px;display:flex;align-items:center;gap:14px;box-sizing:border-box">
+      ${statIcon(iconPath)}
+      <div style="min-width:0">
+        <p style="font-family:${INTER};font-size:12px;font-weight:800;color:#64748B;margin:0 0 4px;line-height:1.1">${title}</p>
+        <p style="font-family:${INTER};font-size:25px;font-weight:950;color:#050816;margin:0;line-height:1;letter-spacing:-0.04em">${value}</p>
+        <p style="font-family:${INTER};font-size:10px;font-weight:700;color:#94A3B8;margin:6px 0 0;line-height:1.2">${helper}</p>
+      </div>
+    </div>`;
+
+  const body = `<div data-slide-index="${idx}" data-slide-total="${total}" style="width:1440px;min-height:810px;background:${BG};border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
+  <div style="position:absolute;right:-100px;top:-170px;width:610px;height:540px;border-radius:50%;background:linear-gradient(135deg,rgba(226,232,240,.7),rgba(255,255,255,.12));opacity:.8;pointer-events:none"></div>
+
+  <div style="position:relative;z-index:1;flex:1;padding:42px 46px 34px;box-sizing:border-box;display:flex;flex-direction:column">
+    <div style="flex-shrink:0;margin:0 0 21px">
+      <h1 style="font-family:${INTER};font-size:52px;font-weight:950;color:#050816;line-height:.95;margin:0 0 15px;letter-spacing:-0.055em">Calendário de postagens</h1>
+      <div style="width:38px;height:3px;border-radius:999px;background:${PRIMARY}"></div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:minmax(0,1fr) 292px;gap:24px;flex:1;min-height:0">
+      <div style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 14px 34px rgba(15,23,42,.055);padding:22px;box-sizing:border-box;display:flex;flex-direction:column;min-width:0">
+        <div style="display:flex;align-items:center;gap:13px;margin-bottom:18px">
+          <div style="width:42px;height:42px;border-radius:12px;background:${PRIMARY}18;display:flex;align-items:center;justify-content:center">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="${PRIMARY_TEXT}" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M16 2v5M8 2v5M3 10h18"/></svg>
+          </div>
+          <div>
+            <p style="font-family:${INTER};font-size:28px;font-weight:950;color:#050816;letter-spacing:-0.04em;line-height:1;margin:0">${MONTHS[month]} <span style="color:${PRIMARY_TEXT}">${year}</span></p>
+            <p style="font-family:${INTER};font-size:12px;font-weight:700;color:#94A3B8;margin:5px 0 0">${postingDays} dia${postingDays !== 1 ? 's' : ''} com conteúdo publicado</p>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin-bottom:8px">
+          ${['SEG','TER','QUA','QUI','SEX','SÁB','DOM'].map((d) => `<div style="font-family:${INTER};font-size:10px;font-weight:950;color:#64748B;letter-spacing:.08em;text-align:center">${d}</div>`).join('')}
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:8px">
+          ${calendarCells.map(dayCell).join('')}
+        </div>
+
+        <div style="margin-top:auto;padding-top:17px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-top:1px solid #EEF2F7">
+          ${legendKinds.map((kind) => {
+            const s = kindStyles[kind];
+            return `<span style="display:inline-flex;align-items:center;gap:6px;font-family:${INTER};font-size:10px;font-weight:800;color:#64748B;line-height:1"><i style="width:8px;height:8px;border-radius:50%;background:${s.color};display:block"></i>${kind}</span>`;
+          }).join('')}
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:12px">
+        ${statCard('Total de publicações', num(postsInMonth.length), '— vs mês anterior', '<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M16 2v5M8 2v5M3 10h18"/>')}
+        ${statCard('Reels', num(formatCounts.Reel ?? 0), '— vs mês anterior', ICO_PLAY)}
+        ${statCard('Carrosséis', num(formatCounts.Carrossel ?? 0), '— vs mês anterior', ICO_LAYERS)}
+        ${statCard('Stories publicados', num(formatCounts.Story ?? 0), '— vs mês anterior', '<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>')}
+        ${statCard('Melhor formato', String(bestFormat), bestFormat === '—' ? 'Sem dados suficientes' : 'Maior desempenho médio', '<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>')}
+        ${statCard('Frequência média', frequencyLabel, consistency, '<path d="M4 19V9"/><path d="M10 19V5"/><path d="M16 19v-8"/><path d="M22 19H2"/>')}
+      </div>
+    </div>
+  </div>
+</div>`;
+  return auditSlide(body, 'sInstagramCalendar');
+}
+
+function sInstagramPosts(posts: InstagramPost[], idx: number, total: number): string {
+  const compact = (n: number): string => {
+    if (!n) return '—';
+    if (n >= 1000000) return `${(n / 1000000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mi`;
+    if (n >= 1000) return `${(n / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil`;
+    return num(n);
+  };
+
+  const normalizeMediaType = (mediaType: string) => {
+    if (mediaType === 'REELS' || mediaType === 'VIDEO') return { label: 'Reel', color: '#FF4F8B', bg: '#FFF0F6', icon: ICO_PLAY };
+    if (mediaType === 'CAROUSEL_ALBUM') return { label: 'Carrossel', color: '#7C5CFF', bg: '#F2EEFF', icon: ICO_LAYERS };
+    if (mediaType === 'STORY') return { label: 'Story', color: '#F59E0B', bg: '#FFF7E6', icon: '<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>' };
+    return { label: 'Post Feed', color: PRIMARY_TEXT, bg: '#EAFDE6', icon: '<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 10h16M10 4v16"/>' };
+  };
+
+  const mediaOverlay = (mediaType: string) => {
+    if (mediaType === 'REELS' || mediaType === 'VIDEO') return `<div style="position:absolute;top:14px;right:14px;width:34px;height:34px;border-radius:50%;background:rgba(15,23,42,.62);display:flex;align-items:center;justify-content:center;box-shadow:0 8px 18px rgba(15,23,42,.25)"><svg width="15" height="15" viewBox="0 0 24 24" fill="white">${ICO_PLAY}</svg></div>`;
+    if (mediaType === 'CAROUSEL_ALBUM') return `<div style="position:absolute;top:14px;right:14px;width:34px;height:34px;border-radius:50%;background:rgba(15,23,42,.62);display:flex;align-items:center;justify-content:center;box-shadow:0 8px 18px rgba(15,23,42,.25)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICO_LAYERS}</svg></div>`;
     return '';
   };
 
-  const postCard = (p: InstagramPost) => {
-    const isBest = best && p.id === best.id;
-    const thumb = p.thumbnailUrl
-      ? `<img src="${p.thumbnailUrl}" style="width:100%;height:100%;object-fit:cover" />`
-      : `<div style="width:100%;height:100%;background:linear-gradient(135deg,#E1306C22,#F7717122);display:flex;align-items:center;justify-content:center"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#E1306C" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${ICO_LAYERS}</svg></div>`;
-    return `<div style="background:${CARD};border:${isBest ? `2px solid ${PRIMARY}` : '1px solid #E7ECF3'};border-radius:14px;box-shadow:0 10px 24px rgba(15,23,42,.07);overflow:hidden;display:flex;flex-direction:column">
-      <div style="position:relative;width:100%;aspect-ratio:1/1;background:${ROW}">
-        ${thumb}
-        ${mediaBadge(p.mediaType)}
-        ${isBest ? `<div style="position:absolute;top:8px;left:8px;background:${PRIMARY};color:#0a4d00;font-family:${INTER};font-size:10px;font-weight:800;padding:3px 8px;border-radius:999px">Destaque</div>` : ''}
+  const iconSvg = (paths: string, color = PRIMARY_TEXT, size = 17, fill = 'none') =>
+    `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="${fill}" stroke="${color}" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0">${paths}</svg>`;
+
+  const ICO_REACH = '<circle cx="12" cy="12" r="2"/><path d="M16.24 16.24a6 6 0 0 0 0-8.49"/><path d="M7.76 7.76a6 6 0 0 0 0 8.49"/><path d="M19.07 19.07a10 10 0 0 0 0-14.14"/><path d="M4.93 4.93a10 10 0 0 0 0 14.14"/>';
+  const ICO_EYE = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
+  const ICO_SAVE = '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>';
+  const ICO_SHARE = '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.59 13.51l6.83 3.98M15.41 6.51L8.59 10.49"/>';
+
+  const score = (p: InstagramPost) => (p.reach > 0 ? p.reach : 0) + (p.likes + p.comments + p.saves) * 12 + p.videoViews * 0.2;
+  const featuredPosts = [...posts].sort((a, b) => score(b) - score(a)).slice(0, 4);
+
+  const metricPill = (iconPath: string, label: string, value: string) =>
+    `<div style="height:36px;border:1px solid #E8EDF4;border-radius:9px;background:rgba(255,255,255,.92);display:flex;align-items:center;gap:9px;padding:0 11px;box-sizing:border-box">
+      ${iconSvg(iconPath, PRIMARY_TEXT, 15)}
+      <div style="min-width:0">
+        <p style="font-family:${INTER};font-size:9px;font-weight:800;color:#64748B;margin:0 0 2px;line-height:1">${label}</p>
+        <p style="font-family:${INTER};font-size:15px;font-weight:900;color:#111827;margin:0;line-height:1;letter-spacing:-0.03em;white-space:nowrap">${value}</p>
       </div>
-      <div style="padding:10px 12px">
-        <p style="font-size:11px;font-weight:600;color:${MUTED};font-family:${INTER};margin:0 0 6px;text-transform:capitalize">${formatPostDate(p.timestamp)}</p>
-        <div style="display:flex;align-items:center;gap:12px">
-          <span style="display:flex;align-items:center;gap:4px;font-size:12px;font-weight:700;color:${FG};font-family:${INTER}"><svg width="13" height="13" viewBox="0 0 24 24" fill="#e52020" stroke="#e52020">${ICO_HEART}</svg>${num(p.likes)}</span>
-          <span style="display:flex;align-items:center;gap:4px;font-size:12px;font-weight:700;color:${FG};font-family:${INTER}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="${BLUE}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICO_COMMENT}</svg>${num(p.comments)}</span>
+    </div>`;
+
+  const postCard = (p: InstagramPost) => {
+    const kind = normalizeMediaType(p.mediaType);
+    const interactions = p.likes + p.comments + p.saves;
+    const engagement = p.reach > 0 ? (interactions / p.reach) * 100 : interactions > 0 ? 0 : 0;
+    const engagementText = p.reach > 0 ? `${engagement.toFixed(1).replace('.', ',')}%` : '—';
+    const thumb = p.thumbnailUrl
+      ? `<img src="${p.thumbnailUrl}" alt="" style="width:100%;height:100%;object-fit:cover;display:block" />`
+      : `<div style="width:100%;height:100%;background:linear-gradient(135deg,#EAFDE6,#F8FAFC);display:flex;align-items:center;justify-content:center"><svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="${PRIMARY_TEXT}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${ICO_LAYERS}</svg></div>`;
+
+    return `<div style="height:262px;background:${CARD};border:1px solid #E7ECF3;border-radius:16px;box-shadow:0 14px 34px rgba(15,23,42,.055);display:flex;gap:22px;padding:14px;box-sizing:border-box;overflow:hidden">
+      <div style="position:relative;width:208px;height:234px;border-radius:12px;background:${ROW};overflow:hidden;flex-shrink:0">
+        ${thumb}
+        ${mediaOverlay(p.mediaType)}
+      </div>
+
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column;padding:6px 4px 2px 0">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:9px">
+          <div style="height:31px;border-radius:9px;background:${kind.bg};color:${kind.color};display:inline-flex;align-items:center;gap:8px;padding:0 13px;font-family:${INTER};font-size:13px;font-weight:900;line-height:1">
+            ${iconSvg(kind.icon, kind.color, 16)}
+            ${kind.label}
+          </div>
+          <p style="font-family:${INTER};font-size:11px;font-weight:800;color:#64748B;margin:0;text-transform:capitalize;white-space:nowrap">${formatPostDate(p.timestamp)}</p>
         </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 10px">
+          ${metricPill(ICO_REACH, 'Alcance', compact(p.reach))}
+          ${metricPill(ICO_SHARE, 'Interações', compact(interactions))}
+          ${metricPill(ICO_EYE, p.videoViews > 0 ? 'Visualizações' : 'Curtidas', compact(p.videoViews > 0 ? p.videoViews : p.likes))}
+          ${metricPill(ICO_SAVE, 'Salvamentos', compact(p.saves))}
+          ${metricPill(ICO_HEART, 'Curtidas', compact(p.likes))}
+          <div style="height:78px;grid-row:span 2;border:1px solid #DDF6D8;border-radius:9px;background:linear-gradient(135deg,#F0FDEC,#FFFFFF);display:flex;flex-direction:column;align-items:center;justify-content:center;box-sizing:border-box">
+            <p style="font-family:${INTER};font-size:12px;font-weight:800;color:#64748B;margin:0 0 6px">Engajamento</p>
+            <p style="font-family:${INTER};font-size:24px;font-weight:950;color:${PRIMARY_TEXT};letter-spacing:-0.045em;line-height:1;margin:0">${engagementText}</p>
+          </div>
+          ${metricPill(ICO_COMMENT, 'Comentários', compact(p.comments))}
+        </div>
+
       </div>
     </div>`;
   };
 
-  const body = `<div style="width:1440px;min-height:810px;background:${BG};border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
-  <div style="position:absolute;right:60px;top:-100px;width:560px;height:480px;border-radius:50%;background:linear-gradient(135deg,rgba(219,234,254,.55),rgba(255,255,255,.15));opacity:.7;pointer-events:none"></div>
+  const body = `<div data-slide-index="${idx}" data-slide-total="${total}" style="width:1440px;min-height:810px;background:${BG};border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
+  <div style="position:absolute;right:-90px;top:-180px;width:620px;height:560px;border-radius:50%;background:linear-gradient(135deg,rgba(241,245,249,.72),rgba(255,255,255,.1));opacity:.78;pointer-events:none"></div>
 
-  ${richHeader(idx, total)}
-
-  <div style="position:relative;z-index:1;flex:1;padding:36px 48px 0;display:flex;flex-direction:column">
-    <div style="flex-shrink:0;margin-bottom:22px">
-      <h1 style="font-family:${INTER};font-size:42px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 8px;letter-spacing:-0.03em">Conteúdos do mês</h1>
-      <p style="font-size:16px;font-weight:500;color:#163461;font-family:${INTER};margin:0">Painel dos últimos posts publicados — o que saiu, quando saiu e como performou</p>
+  <div style="position:relative;z-index:1;flex:1;padding:42px 44px 30px;box-sizing:border-box;display:flex;flex-direction:column">
+    <div style="flex-shrink:0;margin:0 0 18px">
+      <h1 style="font-family:${INTER};font-size:52px;font-weight:950;color:#050816;line-height:.95;margin:0 0 13px;letter-spacing:-0.055em">Preview de Conteúdos</h1>
+      <p style="font-size:18px;font-weight:500;color:#6B7280;font-family:${INTER};margin:0;letter-spacing:-0.015em">Entregas dos principais posts do último mês</p>
+      <div style="width:36px;height:3px;border-radius:999px;background:${PRIMARY};margin-top:13px"></div>
     </div>
 
-    <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:16px">
-      ${posts.map(postCard).join('')}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px 24px;flex:1;align-content:start">
+      ${featuredPosts.map(postCard).join('')}
     </div>
   </div>
-
-  ${richFooter()}
 </div>`;
   return auditSlide(body, 'sInstagramPosts');
 }
@@ -1902,14 +2126,12 @@ function sInstagramSpotlight(posts: InstagramPost[], idx: number, total: number)
     isVideo ? metric('Visualizações', num(best.videoViews)) : metric('Salvamentos', num(best.saves)),
   ];
 
-  const body = `<div style="width:1440px;min-height:810px;background:${BG};border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
+  const body = `<div data-slide-index="${idx}" data-slide-total="${total}" style="width:1440px;min-height:810px;background:${BG};border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
   <div style="position:absolute;right:60px;top:-100px;width:560px;height:480px;border-radius:50%;background:linear-gradient(135deg,rgba(219,234,254,.55),rgba(255,255,255,.15));opacity:.7;pointer-events:none"></div>
 
-  ${richHeader(idx, total)}
-
-  <div style="position:relative;z-index:1;flex:1;padding:36px 48px 0;display:flex;flex-direction:column">
+  <div style="position:relative;z-index:1;flex:1;padding:92px 48px 0;display:flex;flex-direction:column">
     <div style="flex-shrink:0;margin-bottom:22px">
-      <h1 style="font-family:${INTER};font-size:42px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 8px;letter-spacing:-0.03em">Melhor conteúdo do mês</h1>
+      <h1 style="font-family:${INTER};font-size:52px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 8px;letter-spacing:-0.03em">Melhor conteúdo do mês</h1>
       <p style="font-size:16px;font-weight:500;color:#163461;font-family:${INTER};margin:0">O post com melhor desempenho entre os publicados no período</p>
     </div>
 
@@ -1954,151 +2176,130 @@ function sInstagramSpotlight(posts: InstagramPost[], idx: number, total: number)
   return auditSlide(body, 'sInstagramSpotlight');
 }
 
-// ── Diagnóstico A — Decision Matrix + análise (slide 1 de 2) ─────────────────
-
-function sDiagnosticoA(diag: DiagJson, idx: number, total: number): string {
-  // Map plano + pontos to decision matrix quadrants
-  const matrixCells = [
-    {
-      label: 'Prioridade Imediata',
-      color: PRIMARY,
-      axis: 'top-left',
-      items: diag.plano.slice(0, 2).map(p => p.acao).filter(Boolean).length > 0
-        ? diag.plano.slice(0, 2).map(p => p.acao)
-        : diag.pontos_fortes.slice(0, 2),
-    },
-    {
-      label: 'Aposta Estratégica',
-      color: BLUE,
-      axis: 'top-right',
-      items: diag.plano.slice(2, 4).map(p => p.acao).filter(Boolean).length > 0
-        ? diag.plano.slice(2, 4).map(p => p.acao)
-        : diag.pontos_fortes.slice(2, 4),
-    },
-    {
-      label: 'Manter Monitorado',
-      color: MUTED,
-      axis: 'bottom-left',
-      items: diag.forcas.slice(0, 2).map(f => f.titulo + ': ' + f.descricao.slice(0, 50) + (f.descricao.length > 50 ? '…' : '')),
-    },
-    {
-      label: 'Evitar Agora',
-      color: RED,
-      axis: 'bottom-right',
-      items: diag.pontos_atencao.slice(0, 2),
-    },
-  ];
-
-  const fortes = diag.pontos_fortes.slice(0, 3).map(p =>
-    `<div style="display:flex;gap:9px;align-items:flex-start;padding:8px 0;border-bottom:1px solid ${BORDER}">
-      <span style="font-size:12px;color:${PRIMARY};flex-shrink:0;margin-top:1px">✓</span>
-      <span style="font-size:12px;color:${FG};font-family:${INTER};line-height:1.5">${p}</span>
-    </div>`,
-  ).join('');
-
-  const atencao = diag.pontos_atencao.slice(0, 2).map(p =>
-    `<div style="display:flex;gap:9px;align-items:flex-start;padding:8px 0;border-bottom:1px solid ${BORDER}">
-      <span style="font-size:12px;color:${RED};flex-shrink:0;margin-top:1px">!</span>
-      <span style="font-size:12px;color:${FG};font-family:${INTER};line-height:1.5">${p}</span>
-    </div>`,
-  ).join('');
-
-  const body = `
-${sectionHeader('Diagnóstico: forças, riscos e prioridades do período', 'Matriz Impacto × Esforço + pontos de atenção')}
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:28px;flex:1">
-  <div>${decisionMatrix(matrixCells)}</div>
-  <div style="display:flex;flex-direction:column;gap:0">
-    <div style="border:1px solid ${BORDER};background:${CARD};padding:16px 20px;margin-bottom:12px">
-      <p style="font-size:13px;color:${FG};font-family:${INTER};line-height:1.75;margin:0">${diag.diagnostico}</p>
-    </div>
-    <div style="margin-bottom:6px">
-      <p style="font-size:10px;font-weight:700;color:${PRIMARY};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 2px">Pontos Fortes</p>
-      ${fortes}
-    </div>
-    <div style="margin-top:8px">
-      <p style="font-size:10px;font-weight:700;color:${RED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 2px">Pontos de Atenção</p>
-      ${atencao}
-    </div>
-  </div>
-</div>
-${diag.frase_fechamento ? thesisBanner(`"${diag.frase_fechamento}"`) : ''}`;
-  return auditSlide(wrapSlide(body, idx, total), 'sDiagnosticoA');
-}
-
-// ── Diagnóstico B — plano 5 passos + criativos (slide 2 de 2) ────────────────
-
-function sDiagnosticoPlan(diag: DiagJson, idx: number, total: number): string {
-  const plano = diag.plano.slice(0, 5);
-
-  const card = (p: typeof plano[0], i: number) =>
-    `<div style="position:relative;overflow:hidden;border:1px solid ${BORDER};background:${CARD};padding:14px;display:flex;flex-direction:column;gap:7px">
-      <div style="position:absolute;top:0;left:0;right:0;height:2px;background:${PRIMARY}"></div>
-      <div style="display:flex;align-items:center;gap:8px">
-        <div style="width:24px;height:24px;background:${PRIMARY};display:flex;align-items:center;justify-content:center;flex-shrink:0">
-          <span style="font-size:12px;font-weight:800;color:${INVERSE};font-family:${INTER}">${i+1}</span>
-        </div>
-        <p style="font-size:12px;font-weight:700;color:${FG};font-family:${INTER};margin:0;line-height:1.3">${p.acao}</p>
-      </div>
-      ${p.objetivo ? `<p style="font-size:11px;color:${PRIMARY};font-family:${INTER};margin:0;line-height:1.4">Obj: ${p.objetivo}</p>` : ''}
-      ${p.publico  ? `<p style="font-size:11px;color:${MUTED};font-family:${INTER};margin:0;line-height:1.4">Para: ${p.publico}</p>` : ''}
-      ${p.mensagem ? `<div style="padding:6px 8px;background:${CARD};border:1px solid ${BORDER}">
-        <p style="font-size:10px;color:${MUTED};font-family:${INTER};margin:0;line-height:1.5;font-style:italic">"${p.mensagem.slice(0,90)}${p.mensagem.length>90?'…':''}"</p>
-      </div>` : ''}
-    </div>`;
-
-  const row1 = plano.slice(0, 3).map((p, i) => card(p, i)).join('');
-  const row2 = plano.slice(3, 5).map((p, i) => card(p, i + 3)).join('');
-
-  const body = `
-${sectionHeader('5 ações para o próximo mês — priorizadas por impacto nos dados', 'Plano de ação baseado no diagnóstico do período')}
-<div style="flex:1;display:flex;flex-direction:column;gap:10px">
-  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">${row1}</div>
-  <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;max-width:67%">${row2}</div>
-</div>
-${thesisBanner('Executar estas 5 ações em sequência, da mais fácil para a mais complexa, garante resultado consistente no próximo mês.')}`;
-  return auditSlide(wrapSlide(body, idx, total), 'sDiagnosticoPlan');
-}
-
 function sCriativos(creatives: Creative[], idx: number, total: number): string {
-  const top = creatives.slice(0, 6);
-  const best = top[0];
+  const cleanText = (text?: string) => String(text || '')
+    .replace(/\[[^\]]+\]/g, ' ')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b(on|meta|ads|maio|junho|julho|alcance|vendas|whats|leads?)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const titleCase = (text: string) => text
+    .toLowerCase()
+    .replace(/(^|\s)\S/g, (m) => m.toUpperCase());
+  const titleFor = (c: Creative) => {
+    const clean = cleanText(c.nome) || cleanText(c.campaign_name) || c.nome || 'Criativo pago';
+    const title = titleCase(clean).slice(0, 58);
+    return title.length < clean.length ? `${title}…` : title;
+  };
+  const compact = (n?: number): string => {
+    if (!n) return '—';
+    if (n >= 1000000) return `${(n / 1000000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mi`;
+    if (n >= 1000) return `${(n / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil`;
+    return num(n);
+  };
+  const brlCents = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const pct = (n?: number) => n && n > 0 ? `${n.toFixed(2).replace('.', ',')}%` : '—';
+  const cpl = (c: Creative) => c.resultado > 0 && c.spend > 0 ? c.spend / c.resultado : 0;
+  const rankScore = (c: Creative) => (c.resultado * 1000) - cpl(c) + ((c.ctr ?? 0) * 20) + ((c.clicks ?? 0) * 0.2);
+  const top = [...creatives].sort((a, b) => rankScore(b) - rankScore(a)).slice(0, 4);
 
-  const creativeCard = (c: Creative, i: number) => {
-    const isFirst = i === 0;
-    const accent = isFirst ? PRIMARY : BORDER;
-    return `<div style="position:relative;overflow:hidden;border:1px solid ${accent};background:${CARD};display:flex;flex-direction:column">
-      ${isFirst ? `<div style="position:absolute;top:0;left:0;right:0;height:2px;background:${PRIMARY}"></div>` : ''}
-      ${c.thumbnail_url
-        ? `<img src="${c.thumbnail_url}" style="width:100%;aspect-ratio:16/9;object-fit:cover;display:block" />`
-        : `<div style="width:100%;aspect-ratio:16/9;background:${CARD};display:flex;align-items:center;justify-content:center">
-            <span style="font-size:10px;color:${MUTED};font-family:${INTER}">Sem thumbnail</span>
-           </div>`}
-      <div style="padding:10px 12px;display:flex;flex-direction:column;gap:5px">
-        ${isFirst ? `<span style="font-size:9px;font-weight:800;color:${PRIMARY};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER}">MELHOR CRIATIVO</span>` : ''}
-        <p style="font-size:11px;font-weight:700;color:${FG};font-family:${INTER};margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.nome}</p>
-        <div style="display:flex;gap:12px">
-          <span style="font-size:10px;color:${MUTED};font-family:${INTER}">${brlOrDash(c.spend)}</span>
-          ${c.resultado > 0 ? `<span style="font-size:10px;color:${isFirst?PRIMARY:MUTED};font-family:${INTER};font-weight:${isFirst?'700':'400'}">${num(Math.round(c.resultado))} resultados</span>` : ''}
+  const iconSvg = (path: string, size = 14) =>
+    `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${PRIMARY_TEXT}" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0">${path}</svg>`;
+  const ICO_CAMPAIGN = '<path d="M4 13a8 8 0 0 1 8-8h7v7a8 8 0 0 1-8 8H4v-7z"/><path d="M14 6l4 4"/>';
+  const ICO_SET = '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 8h10M7 12h7M7 16h5"/>';
+  const ICO_OBJ = '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/>';
+  const ICO_USER = '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>';
+  const ICO_COIN = '<circle cx="12" cy="12" r="9"/><path d="M12 7v10M9.5 9.5c0-1.1 1-1.8 2.5-1.8s2.5.7 2.5 1.8-1 1.8-2.5 1.8-2.5.7-2.5 1.8 1 1.8 2.5 1.8 2.5-.7 2.5-1.8"/>';
+  const ICO_TREND = '<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>';
+  const ICO_CURSOR = '<path d="m3 3 7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="m13 13 6 6"/>';
+  const ICO_ALERT = '<circle cx="12" cy="12" r="10"/><path d="M12 8v5M12 16h.01"/>';
+  const ICO_STAR = '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>';
+
+  const originLine = (icon: string, label: string, value?: string) =>
+    `<div style="display:flex;align-items:center;gap:10px;min-width:0">
+      ${iconSvg(icon, 15)}
+      <p style="font-family:${INTER};font-size:12px;color:#475569;margin:0;line-height:1.2;min-width:0"><strong style="font-weight:850;color:#64748B">${label}:</strong> <span style="color:#475569">${value && value !== '—' ? value : '—'}</span></p>
+    </div>`;
+  const metric = (icon: string, label: string, value: string) =>
+    `<div style="height:50px;border:1px solid #E8EDF4;border-radius:10px;background:#FFFFFF;display:flex;align-items:center;gap:10px;padding:0 12px;box-sizing:border-box">
+      ${iconSvg(icon, 14)}
+      <div>
+        <p style="font-family:${INTER};font-size:9px;font-weight:850;color:#64748B;margin:0 0 3px;line-height:1">${label}</p>
+        <p style="font-family:${INTER};font-size:17px;font-weight:950;color:#050816;margin:0;line-height:1;letter-spacing:-0.035em;white-space:nowrap">${value}</p>
+      </div>
+    </div>`;
+  const statusFor = (c: Creative, i: number) => {
+    if (i === 0) return { label: 'Maior volume', icon: ICO_STAR, color: PRIMARY_TEXT, bg: '#ECFCE8', border: '#D7F8D0' };
+    const cost = cpl(c);
+    const worstCost = Math.max(...top.map((item) => cpl(item)).filter((v) => v > 0));
+    if (cost > 0 && cost === worstCost && i >= 2) return { label: 'Ponto de atenção', icon: ICO_ALERT, color: RED, bg: '#FFF1F2', border: '#FECACA' };
+    const positiveCost = cost > 0 && top.some((item) => item !== c && cpl(item) > 0 && cost <= cpl(item));
+    if (positiveCost) return { label: 'Melhor CPL', icon: '<path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7H14a3.5 3.5 0 0 1 0 7H6"/>', color: PRIMARY_TEXT, bg: '#ECFCE8', border: '#D7F8D0' };
+    if ((c.ctr ?? 0) >= 1.5 || c.resultado > 0) return { label: 'Boa eficiência', icon: ICO_TREND, color: PRIMARY_TEXT, bg: '#ECFCE8', border: '#D7F8D0' };
+    return { label: 'Ponto de atenção', icon: ICO_ALERT, color: RED, bg: '#FFF1F2', border: '#FECACA' };
+  };
+
+  const card = (c: Creative, i: number) => {
+    const status = statusFor(c, i);
+    const isVideo = /video|reel|narrad/i.test(c.nome);
+    const preview = c.thumbnail_url
+      ? `<img src="${c.thumbnail_url}" style="width:100%;height:100%;object-fit:cover;display:block" />`
+      : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#ECFCE8,#F8FAFC);color:#94A3B8;font-family:${INTER};font-size:12px;font-weight:800;text-align:center;padding:18px;box-sizing:border-box">Preview indisponível</div>`;
+    const resultLabel = c.resultado > 0 ? `${num(Math.round(c.resultado))} leads` : '—';
+    return `<div style="height:286px;background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 14px 34px rgba(15,23,42,.055);display:grid;grid-template-columns:42px 232px minmax(0,1fr);gap:18px;padding:16px;box-sizing:border-box;overflow:hidden">
+      <div style="width:38px;height:42px;border-radius:10px;background:${PRIMARY}14;border:1px solid ${PRIMARY}33;display:flex;align-items:center;justify-content:center">
+        <span style="font-family:${INTER};font-size:25px;font-weight:950;color:${PRIMARY_TEXT};letter-spacing:-0.05em;line-height:1">${i + 1}º</span>
+      </div>
+      <div style="position:relative;width:232px;height:254px;border-radius:12px;background:${ROW};border:1px solid #E8EDF4;overflow:hidden">
+        ${preview}
+        ${isVideo ? `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none"><div style="width:46px;height:46px;border-radius:50%;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;border:2px solid rgba(255,255,255,.75)"><svg width="18" height="18" viewBox="0 0 24 24" fill="white" style="margin-left:3px">${ICO_PLAY}</svg></div></div>` : ''}
+      </div>
+      <div style="min-width:0;display:flex;flex-direction:column">
+        <h2 style="font-family:${INTER};font-size:21px;font-weight:950;color:#050816;letter-spacing:-0.04em;line-height:1.1;margin:4px 0 16px">${titleFor(c)}</h2>
+        <div style="display:flex;flex-direction:column;gap:9px;margin-bottom:15px">
+          ${originLine(ICO_CAMPAIGN, 'Campanha', c.campaign_name || 'Meta Ads')}
+          ${originLine(ICO_SET, 'Conjunto', c.adset_name)}
+          ${originLine(ICO_OBJ, 'Objetivo', c.objective)}
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+          ${metric(ICO_USER, 'Resultados', resultLabel)}
+          ${metric(ICO_COIN, 'Investimento', brlOrDash(c.spend))}
+          ${metric(ICO_TREND, 'CTR', pct(c.ctr))}
+          ${metric(ICO_COIN, 'CPL', cpl(c) > 0 ? brlCents(cpl(c)) : '—')}
+          ${metric(ICO_OBJ, 'Alcance', compact(c.reach))}
+          ${metric(ICO_CURSOR, 'Cliques', compact(c.clicks))}
+        </div>
+        <div style="height:36px;margin-top:auto;border:1px solid ${status.border};border-radius:10px;background:${status.bg};display:flex;align-items:center;gap:10px;padding:0 16px;box-sizing:border-box">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${status.color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${status.icon}</svg>
+          <span style="font-family:${INTER};font-size:15px;font-weight:950;color:${status.color};line-height:1">${status.label}</span>
         </div>
       </div>
     </div>`;
   };
 
-  const body = `
-${sectionHeader(
-  best ? `"${best.nome.slice(0,48)}${best.nome.length>48?'…':''}" lidera o desempenho — referência para os próximos criativos` : 'Análise de criativos — identifique o padrão vencedor',
-  'Top criativos Meta Ads por resultado no período'
-)}
-<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;flex:1;align-items:start">
-  ${top.map((c, i) => creativeCard(c, i)).join('')}
-</div>
-${thesisBanner(
-  best
-    ? `O criativo "${best.nome.slice(0,40)}${best.nome.length>40?'…':''}" deve ser referência para novas peças — replicar o formato e testar variações de copy.`
-    : 'Analise o padrão visual dos criativos com maior resultado e replique o formato nos próximos anúncios.'
-)}`;
+  const emptyState = `<div style="grid-column:1/-1;background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 14px 34px rgba(15,23,42,.055);height:360px;display:flex;align-items:center;justify-content:center;color:#94A3B8;font-family:${INTER};font-size:16px;font-weight:800">Sem criativos pagos disponíveis neste período</div>`;
+  const body = `<div data-slide-index="${idx}" data-slide-total="${total}" style="width:1440px;min-height:810px;background:${BG};border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
+  <div style="position:absolute;right:-120px;top:-170px;width:640px;height:540px;border-radius:50%;background:linear-gradient(135deg,rgba(241,245,249,.74),rgba(255,255,255,.12));opacity:.78;pointer-events:none"></div>
+  <div style="position:relative;z-index:1;flex:1;padding:26px 40px 24px;box-sizing:border-box;display:flex;flex-direction:column">
+    <div style="flex-shrink:0;margin-bottom:18px">
+      <h1 style="font-family:${INTER};font-size:52px;font-weight:950;color:#050816;line-height:.95;margin:0 0 14px;letter-spacing:-0.055em">Principais criativos de tráfego pago</h1>
+      <p style="font-size:17px;font-weight:500;color:#6B7280;font-family:${INTER};margin:0;letter-spacing:-0.015em">Ranking por resultado com identificação de campanha, conjunto e métricas-chave</p>
+      <div style="width:38px;height:3px;border-radius:999px;background:${PRIMARY};margin-top:13px"></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px 22px;flex:1;align-content:start">
+      ${top.length ? top.map(card).join('') : emptyState}
+    </div>
+    <div style="height:34px;margin-top:auto;display:flex;align-items:center;gap:12px">
+      <div style="width:26px;height:26px;border-radius:50%;border:2px solid ${PRIMARY_TEXT};display:flex;align-items:center;justify-content:center">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="${PRIMARY_TEXT}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${ICO_OBJ}</svg>
+      </div>
+      <div style="width:1px;height:22px;background:#D7DEE8"></div>
+      <p style="font-family:${INTER};font-size:13px;font-weight:700;color:#6B7280;margin:0">Leitura visual dos principais criativos pagos com identificação de origem, estrutura e desempenho.</p>
+    </div>
+  </div>
+</div>`;
 
-  return auditSlide(wrapSlide(body, idx, total), 'sCriativos');
+  return auditSlide(body, 'sCriativos');
 }
 
 // ── Expanded slides ───────────────────────────────────────────────────────────
@@ -2230,7 +2431,7 @@ function sMetaAdsCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number, total
 <div style="flex:1;display:flex;flex-direction:column;padding-bottom:28px">
 
   <div style="flex-shrink:0;margin-bottom:18px">
-    <h1 style="font-family:${INTER};font-size:36px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 6px;letter-spacing:-0.03em">Detalhamento por campanha</h1>
+    <h1 style="font-family:${INTER};font-size:52px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 6px;letter-spacing:-0.03em">Detalhamento por campanha</h1>
     <p style="font-size:13px;font-weight:500;color:${MUTED};font-family:${INTER};margin:0">Métricas individuais — cada campanha avaliada pelo seu objetivo principal</p>
   </div>
 
@@ -2252,108 +2453,6 @@ function sMetaAdsCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number, total
   return auditSlide(wrapSlide(body, idx, total), 'sMetaAdsCampanhas');
 }
 
-function sDiagnosticoFat(diag: DiagJson, d: ParsedData, bairros: Bairro[], idx: number, total: number): string {
-  const COLORS = [PRIMARY, BLUE, ORANGE, RED];
-  const forcas = (diag.forcas.length ? diag.forcas : [
-    { titulo: 'Recorrência', descricao: d.recorrentes > 0 ? `${num(d.recorrentes)} clientes recompraram — base fidelizada ativa.` : 'Converter compradores únicos em recorrentes é a maior alavanca.' },
-    { titulo: 'Produtos', descricao: d.produtos[0]?.qtd > 0 ? `"${d.produtos[0].nome}" lidera com ${num(d.produtos[0].qtd)} pedidos.` : 'Identificar produto âncora para campanhas de entrada.' },
-    { titulo: 'Dias Fortes', descricao: d.por_dia.length ? `Pico em ${[...d.por_dia].sort((a,b)=>b.pedidos-a.pedidos)[0]?.dia??'—'} — concentrar investimento nesse dia.` : 'Mapear dias de pico para otimizar campanhas.' },
-    { titulo: 'Regiões', descricao: bairros[0] ? `${bairros[0].bairro} lidera com ${num(bairros[0].pedidos)} pedidos.` : 'Concentrar entrega nas zonas de maior demanda.' },
-  ]).slice(0, 4);
-
-  // Find dominant force (longest description = most data available)
-  const dominantIdx = forcas.reduce((best, f, i) => f.descricao.length > forcas[best].descricao.length ? i : best, 0);
-
-  const forcaCards = forcas.map((f, i) => {
-    const c = COLORS[i % COLORS.length];
-    const isDominant = i === dominantIdx;
-    return `<div style="position:relative;overflow:hidden;border:1px solid ${isDominant ? c+'60' : BORDER};background:${CARD};padding:18px">
-      <div style="position:absolute;top:0;left:0;right:0;height:${isDominant?'3':'2'}px;background:${c}"></div>
-      ${isDominant ? `<div style="position:absolute;top:0;left:0;width:12px;height:12px;background:${c}"></div>` : ''}
-      <p style="font-family:${BEBAS};font-size:${isDominant?'24':'20'}px;color:${c};margin:${isDominant?'4':'2'}px 0 8px;letter-spacing:0.04em">${f.titulo}</p>
-      <p style="font-size:12px;color:${FG};font-family:${INTER};line-height:1.6;margin:0">${f.descricao}</p>
-    </div>`;
-  }).join('');
-
-  const sidebar = `
-    <div style="border:1px solid ${BORDER};background:${CARD};padding:14px;margin-bottom:10px">
-      <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 10px">Base de Clientes</p>
-      ${[{label:'Ativos',value:numOrDash(d.ativos),color:PRIMARY},{label:'Inativos',value:numOrDash(d.inativos),color:RED},{label:'Potenciais',value:numOrDash(d.potenciais),color:BLUE}].map(item =>
-        `<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid ${BORDER};font-family:${INTER}">
-          <span style="font-size:11px;color:${MUTED}">${item.label}</span>
-          <span style="font-size:20px;font-family:${BEBAS};color:${item.color};line-height:1">${item.value}</span>
-        </div>`,
-      ).join('')}
-    </div>
-    ${bairros.length ? `<div style="border:1px solid ${BORDER};background:${CARD};padding:14px">
-      <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 8px">Top Regiões</p>
-      ${bairros.slice(0,4).map((b,i)=>`<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid ${BORDER};font-family:${INTER}">
-        <span style="font-size:11px;color:${i===0?FG:MUTED}">${b.bairro}</span>
-        <span style="font-size:11px;font-weight:700;color:${i===0?PRIMARY:MUTED}">${num(b.pedidos)} ped.</span>
-      </div>`).join('')}
-    </div>` : ''}`;
-
-  const body = `
-${sectionHeader('Quatro forças explicam o resultado — uma delas domina', 'Diagnóstico de faturamento · análise expandida')}
-<div style="display:grid;grid-template-columns:1fr 260px;gap:20px;flex:1;align-items:start">
-  <div>
-    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:14px">${forcaCards}</div>
-    ${diag.diagnostico ? `<div style="border:1px solid ${BORDER};background:${CARD};padding:14px 18px">
-      <p style="font-size:13px;color:${FG};font-family:${INTER};line-height:1.7;margin:0">${diag.diagnostico}</p>
-    </div>` : ''}
-  </div>
-  <div>${sidebar}</div>
-</div>
-${thesisBanner(`A força "${forcas[dominantIdx]?.titulo ?? '—'}" é o principal driver do resultado. Qualquer ação de crescimento deve reforçá-la primeiro.`, 'insight')}`;
-  return auditSlide(wrapSlide(body, idx, total, 'ANÁLISE EXPANDIDA'), 'sDiagnosticoFat');
-}
-
-// ── Plano Detalhado — JourneyPlanSlide com 3+2 grid ───────────────────────────
-
-function sPlanoDetalhado(diag: DiagJson, idx: number, total: number): string {
-  const jornada = diag.jornada.length
-    ? diag.jornada
-    : ['descoberta', 'primeira_compra', 'recompra', 'reativacao_leve', 'reativacao_forte'];
-
-  const LABELS: Record<string,string> = {
-    descoberta:'Descoberta', primeira_compra:'1ª Compra',
-    recompra:'Recompra', reativacao_leve:'Reat. Leve', reativacao_forte:'Reat. Forte',
-  };
-
-  const planCard = (p: DiagJson['plano'][0], i: number) => {
-    const etapa = LABELS[jornada[i] ?? ''] ?? '';
-    const STEP_COLORS = [PRIMARY, PRIMARY+'CC', BLUE, ORANGE, RED+'CC'];
-    const accent = STEP_COLORS[i] ?? PRIMARY;
-    return `<div style="position:relative;overflow:hidden;border:1px solid ${BORDER};background:${CARD};padding:14px;display:flex;flex-direction:column;gap:7px">
-      <div style="position:absolute;top:0;left:0;right:0;height:2px;background:${accent}"></div>
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:6px">
-        <div style="display:flex;align-items:center;gap:6px">
-          <div style="width:24px;height:24px;background:${accent};display:flex;align-items:center;justify-content:center;flex-shrink:0">
-            <span style="font-size:12px;font-weight:800;color:${INVERSE};font-family:${INTER}">${i+1}</span>
-          </div>
-          ${etapa ? `<span style="font-size:9px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.08em;font-family:${INTER};border:1px solid ${BORDER};padding:2px 5px">${etapa}</span>` : ''}
-        </div>
-      </div>
-      <p style="font-size:12px;font-weight:700;color:${FG};font-family:${INTER};margin:0;line-height:1.3">${p.acao}</p>
-      ${p.objetivo ? `<p style="font-size:11px;color:${accent};font-family:${INTER};margin:0;line-height:1.4">Obj: ${p.objetivo}</p>` : ''}
-      ${p.publico  ? `<p style="font-size:11px;color:${MUTED};font-family:${INTER};margin:0;line-height:1.4">Para: ${p.publico}</p>` : ''}
-      ${p.mensagem ? `<div style="padding:5px 8px;background:${CARD};border:1px solid ${BORDER}">
-        <p style="font-size:10px;color:${MUTED};font-family:${INTER};margin:0;line-height:1.5;font-style:italic">"${p.mensagem.slice(0,80)}${p.mensagem.length>80?'…':''}"</p>
-      </div>` : ''}
-    </div>`;
-  };
-
-  const cards = diag.plano.slice(0, 5).map((p, i) => planCard(p, i));
-
-  const body = `
-${sectionHeader('O próximo mês deve priorizar reativação leve e potenciais', 'Plano detalhado — estratégia por etapa da jornada')}
-${journeyBar(jornada)}
-<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px">${cards.slice(0,3).join('')}</div>
-<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;max-width:67%">${cards.slice(3).join('')}</div>
-${thesisBanner('Executar as ações na sequência da jornada garante que cada cliente seja abordado no momento certo com a mensagem certa.')}`;
-  return auditSlide(wrapSlide(body, idx, total, 'ANÁLISE EXPANDIDA'), 'sPlanoDetalhado');
-}
-
 // ── Diagnosis (Claude — expanded JSON) ────────────────────────────────────────
 
 async function fetchDiagnosis(
@@ -2362,20 +2461,8 @@ async function fetchDiagnosis(
 ): Promise<DiagJson> {
   if (process.env.SKIP_AI === 'true') {
     return {
-      diagnostico: '[Modo de teste — IA desativada]',
-      forcas: [
-        { titulo: 'Recorrência', descricao: 'Dado simulado para teste' },
-        { titulo: 'Produtos',    descricao: 'Dado simulado para teste' },
-        { titulo: 'Dias',        descricao: 'Dado simulado para teste' },
-        { titulo: 'Regiões',     descricao: 'Dado simulado para teste' },
-      ],
-      pontos_fortes:  ['Dado simulado para teste'],
-      pontos_atencao: ['Dado simulado para teste'],
-      plano: [{ acao: 'Campanha de teste', objetivo: '—', publico: '—', mensagem: '—' }],
       insight_campanha_conversa:  '',
       insight_campanha_conversao: '',
-      frase_fechamento: 'Modo de teste ativo — IA desativada.',
-      jornada: ['descoberta', 'primeira_compra', 'recompra', 'reativacao_leve', 'reativacao_forte'],
     };
   }
 
@@ -2400,26 +2487,8 @@ async function fetchDiagnosis(
   };
 
   const schema = `{
-  "diagnostico": "2-3 frases sobre o estado atual do negócio",
-  "forcas": [
-    {"titulo":"Recorrência","descricao":"..."},
-    {"titulo":"Produtos","descricao":"..."},
-    {"titulo":"Dias","descricao":"..."},
-    {"titulo":"Regiões","descricao":"..."}
-  ],
-  "pontos_fortes": ["...","...","..."],
-  "pontos_atencao": ["...","..."],
-  "plano": [
-    {"acao":"...","objetivo":"resultado esperado","publico":"quem recebe","mensagem":"texto de exemplo para disparo"},
-    {"acao":"...","objetivo":"...","publico":"...","mensagem":"..."},
-    {"acao":"...","objetivo":"...","publico":"...","mensagem":"..."},
-    {"acao":"...","objetivo":"...","publico":"...","mensagem":"..."},
-    {"acao":"...","objetivo":"...","publico":"...","mensagem":"..."}
-  ],
   "insight_campanha_conversa": "análise das campanhas de conversa — 1-2 frases ou string vazia",
-  "insight_campanha_conversao": "análise das campanhas de conversão — 1-2 frases ou string vazia",
-  "frase_fechamento": "frase motivacional de 1 linha sobre o objetivo do próximo mês",
-  "jornada": ["descoberta","primeira_compra","recompra","reativacao_leve","reativacao_forte"]
+  "insight_campanha_conversao": "análise das campanhas de conversão — 1-2 frases ou string vazia"
 }`;
 
   const msg = await anthropic.messages.create({
@@ -2434,22 +2503,12 @@ async function fetchDiagnosis(
   try {
     const parsed = JSON.parse(raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim()) as DiagJson;
     return {
-      diagnostico:                parsed.diagnostico                ?? 'Análise indisponível.',
-      forcas:                     Array.isArray(parsed.forcas)        ? parsed.forcas : [],
-      pontos_fortes:              Array.isArray(parsed.pontos_fortes) ? parsed.pontos_fortes : [],
-      pontos_atencao:             Array.isArray(parsed.pontos_atencao) ? parsed.pontos_atencao : [],
-      plano:                      Array.isArray(parsed.plano)         ? parsed.plano : [],
       insight_campanha_conversa:  parsed.insight_campanha_conversa  ?? '',
       insight_campanha_conversao: parsed.insight_campanha_conversao ?? '',
-      frase_fechamento:           parsed.frase_fechamento            ?? '',
-      jornada:                    Array.isArray(parsed.jornada)       ? parsed.jornada : ['descoberta','primeira_compra','recompra','reativacao_leve','reativacao_forte'],
     };
   } catch {
     return {
-      diagnostico: 'Análise indisponível.',
-      forcas: [], pontos_fortes: [], pontos_atencao: [], plano: [],
       insight_campanha_conversa: '', insight_campanha_conversao: '',
-      frase_fechamento: '', jornada: [],
     };
   }
 }
@@ -2502,58 +2561,46 @@ export async function buildDeliveryReport(opts: {
   const hasDia               = data.por_dia.length > 0;
   const hasBase              = data.ativos > 0 || data.inativos > 0 || data.potenciais > 0;
   const hasInat              = data.inativos_faixas.length > 0;
-  const hasProd              = data.produtos.length > 0;
   const hasRegiao            = bairros.length > 0;
   const hasMeta              = meta !== null;
   const hasInstagram         = instagram !== null;
   const hasInstagramPosts    = igPosts.length > 0;
   const hasInstagramSpotlight = hasInstagramPosts;
   const hasDestaques         = hasMeta && meta!.campanhas.length > 0;
-  const hasDiagFat           = hasBase || hasRegiao;
-  const hasPlanoDetalh       = diag.plano.length > 0;
   const hasCriativos         = creatives.length > 0;
 
-  // Diagnóstico sempre gera 2 slides (A + Plan)
   const total = 1
     + (hasVisao      ? 1 : 0)
     + (hasDia        ? 1 : 0)
     + (hasRegiao     ? 1 : 0)
     + (hasBase       ? 1 : 0)
     + (hasInat       ? 1 : 0)
-    + (hasProd       ? 1 : 0)
     + (hasMeta       ? 1 : 0)
     + (hasInstagram  ? 1 : 0)
     + (hasInstagramPosts ? 1 : 0)
+    + (hasInstagramPosts ? 1 : 0)
     + (hasInstagramSpotlight ? 1 : 0)
-    + 2                           // sDiagnosticoA + sDiagnosticoPlan
     + (hasDestaques   ? 1 : 0)
-    + (hasCriativos   ? 1 : 0)
-    + (hasDiagFat     ? 1 : 0)
-    + (hasPlanoDetalh ? 1 : 0);
+    + (hasCriativos   ? 1 : 0);
 
   const slides: string[] = [];
   let i = 1;
 
   slides.push(sCapa(data, meta, clientName, periodo, prevPeriodo, diag, total));
   if (hasVisao)       slides.push(sVisaoGeral(data, prevData, ++i, total, periodo, prevPeriodo));
-  if (hasDia)         slides.push(sPorDia(data, ++i, total));
+  if (hasDia)         slides.push(sPorDia(data, ++i, total, periodo));
   if (hasRegiao)      slides.push(sRegioes(bairros, ++i, total));
   if (hasBase)        slides.push(sBase(data, ++i, total));
   if (hasInat)        slides.push(sInativos(data, ++i, total));
-  if (hasProd)        slides.push(sProdutos(data, ++i, total));
   if (hasMeta)        slides.push(sMetaAdsResumo(meta!, ++i, total));
   if (hasInstagram)   slides.push(sInstagram(instagram!, ++i, total));
+  if (hasInstagramPosts)     slides.push(sInstagramCalendar(igPosts, ++i, total, fromDate));
   if (hasInstagramPosts)     slides.push(sInstagramPosts(igPosts, ++i, total));
   if (hasInstagramSpotlight) slides.push(sInstagramSpotlight(igPosts, ++i, total));
-  slides.push(sDiagnosticoA(diag, ++i, total));
-  slides.push(sDiagnosticoPlan(diag, ++i, total));
   if (hasDestaques)   slides.push(sMetaAdsCampanhas(meta!, diag, ++i, total));
   if (hasCriativos)   slides.push(sCriativos(creatives, ++i, total));
-  if (hasDiagFat)     slides.push(sDiagnosticoFat(diag, data, bairros, ++i, total));
-  if (hasPlanoDetalh) slides.push(sPlanoDetalhado(diag, ++i, total));
 
-  const fontLink = `<style>@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&display=swap');</style>`;
-  return { html: `${fontLink}<div style="background:${CANVAS};padding:28px;font-family:${INTER}">${slides.join('')}</div>` };
+  return { html: `${FONT_LINK}<div class="onmid-report" style="background:${CANVAS};padding:28px;font-family:${INTER}">${slides.join('')}</div>` };
 }
 
 // ── Save to DB ─────────────────────────────────────────────────────────────────
@@ -2647,7 +2694,8 @@ export function __devPreviewInstagramPosts(): string {
     mk('p11', 100, 10, 2100, 21),
     mk('p12', 130, 16, 2800, 23),
   ];
-  return sInstagramPosts(posts, 8, 10) + sInstagramSpotlight(posts, 9, 10);
+  const monthDate = new Date();
+  return sInstagramCalendar(posts, 8, 11, monthDate) + sInstagramPosts(posts, 9, 11) + sInstagramSpotlight(posts, 10, 11);
 }
 
 // ── TEMP DEV PREVIEW — full report walkthrough — remove before shipping ─────
@@ -2669,23 +2717,35 @@ export function __devPreviewFullReport(): string {
       { label: '90+ dias', count: 3145 },
     ],
     por_dia: [
-      { dia: 'Seg', pedidos: 180, pct: 9 },
-      { dia: 'Ter', pedidos: 210, pct: 11 },
-      { dia: 'Qua', pedidos: 240, pct: 12 },
-      { dia: 'Qui', pedidos: 290, pct: 15 },
-      { dia: 'Sex', pedidos: 410, pct: 21 },
-      { dia: 'Sáb', pedidos: 380, pct: 20 },
-      { dia: 'Dom', pedidos: 227, pct: 12 },
+      { dia: 'Seg', pedidos: 182, pct: 9 },
+      { dia: 'Ter', pedidos: 157, pct: 8 },
+      { dia: 'Qua', pedidos: 146, pct: 8 },
+      { dia: 'Qui', pedidos: 230, pct: 12 },
+      { dia: 'Sex', pedidos: 426, pct: 22 },
+      { dia: 'Sáb', pedidos: 460, pct: 24 },
+      { dia: 'Dom', pedidos: 336, pct: 17 },
+    ],
+    entregas_por_dia: [
+      { dia: 'Dom', pedidos: 151, pct: 21 },
+      { dia: 'Sex', pedidos: 132, pct: 19 },
+      { dia: 'Sáb', pedidos: 123, pct: 17 },
+      { dia: 'Seg', pedidos: 95, pct: 13 },
+      { dia: 'Qui', pedidos: 86, pct: 12 },
+      { dia: 'Ter', pedidos: 63, pct: 9 },
+      { dia: 'Qua', pedidos: 59, pct: 8 },
     ],
   };
   const prevData: ParsedData = { ...data, faturamento: 134535.98, pedidos_ativos: 1980, ticket: 67.95 };
 
   const bairros: Bairro[] = [
-    { bairro: 'Centro', pedidos: 520, faturamento: 35400 },
-    { bairro: 'Jardim das Flores', pedidos: 410, faturamento: 28900 },
-    { bairro: 'Vila Nova', pedidos: 305, faturamento: 21200 },
-    { bairro: 'Boa Vista', pedidos: 240, faturamento: 16800 },
-    { bairro: 'São José', pedidos: 180, faturamento: 12500 },
+    { bairro: 'Centro', pedidos: 108, faturamento: 8030.25 },
+    { bairro: 'Gleba Fazenda Palhano', pedidos: 70, faturamento: 5089 },
+    { bairro: 'Palhano 1', pedidos: 66, faturamento: 5080.94 },
+    { bairro: 'Aurora', pedidos: 37, faturamento: 2126.57 },
+    { bairro: 'Terra Bonita', pedidos: 34, faturamento: 3486.10 },
+    { bairro: 'Palhano 2', pedidos: 25, faturamento: 1771.22 },
+    { bairro: 'Jardim Higienópolis', pedidos: 18, faturamento: 1097.51 },
+    { bairro: 'Guanabara', pedidos: 14, faturamento: 918.45 },
   ];
 
   const mkMetricas = (investimento: number, conversas: number, compras: number, valor_compras: number, cliques: number, frequencia: number) => ({
@@ -2721,67 +2781,43 @@ export function __devPreviewFullReport(): string {
   ];
 
   const creatives: Creative[] = [
-    { nome: 'Criativo Combo Família', spend: 800, resultado: 42, thumbnail_url: 'https://picsum.photos/seed/cr1/300/300' },
-    { nome: 'Criativo Promo Sexta', spend: 600, resultado: 31, thumbnail_url: 'https://picsum.photos/seed/cr2/300/300' },
-    { nome: 'Criativo Anota Aí', spend: 400, resultado: 18, thumbnail_url: 'https://picsum.photos/seed/cr3/300/300' },
+    { nome: '[ON] [LEADS] Loja pronta em condomínio', spend: 1492, resultado: 48, campaign_name: 'Meta Ads | Captação de leads | Franquias', adset_name: 'Interesse em franquias | Londrina', objective: 'Leads', reach: 38200, clicks: 1420, ctr: 2.84, thumbnail_url: 'https://picsum.photos/seed/cr1/420/520' },
+    { nome: '[ON] [VIDEO] Vídeo narrado oportunidade', spend: 914, resultado: 32, campaign_name: 'Meta Ads | Geração de demanda', adset_name: 'Empreendedorismo | Maringá', objective: 'Leads', reach: 24700, clicks: 960, ctr: 2.17, thumbnail_url: 'https://picsum.photos/seed/cr2/420/520' },
+    { nome: '[ON] [PROVA SOCIAL] Depoimento de franqueado', spend: 738, resultado: 21, campaign_name: 'Meta Ads | Prova social', adset_name: 'Lookalike | Curitiba', objective: 'Leads', reach: 18900, clicks: 740, ctr: 1.96, thumbnail_url: 'https://picsum.photos/seed/cr3/420/520' },
+    { nome: '[ON] [CARROSSEL] Modelo de negócio', spend: 812, resultado: 15, campaign_name: 'Meta Ads | Conversão', adset_name: 'Interesses amplos | Curitiba', objective: 'Leads', reach: 21300, clicks: 615, ctr: 1.72, thumbnail_url: 'https://picsum.photos/seed/cr4/420/520' },
   ];
 
   const diag: DiagJson = {
-    diagnostico: 'A PicoLocos manteve performance estável em maio, com leve queda no faturamento frente a abril, mas com sinais claros de oportunidade na base inativa e no tráfego pago de conversa.',
-    forcas: [
-      { titulo: 'Ticket médio em alta', descricao: 'O ticket médio cresceu mesmo com a leve queda em pedidos, indicando que os clientes ativos estão gastando mais por compra.' },
-      { titulo: 'Base ativa engajada', descricao: 'Recorrência de 60% entre os clientes ativos mostra fidelização saudável no núcleo da base.' },
-    ],
-    pontos_fortes: [
-      'Ticket médio subiu 0,4% mesmo com queda de pedidos.',
-      'Campanha de WhatsApp Aniversário gerou 332 conversas a custo baixo.',
-      'Centro e Jardim das Flores concentram quase metade do faturamento.',
-    ],
-    pontos_atencao: [
-      '84% da base está inativa — maior alavanca de crescimento não explorada.',
-      'Sexta-feira concentra 21% dos pedidos — risco de operação sobrecarregada num único dia.',
-    ],
-    plano: [
-      { acao: 'Campanha de reativação via WhatsApp', objetivo: 'Reativar clientes inativos há 30-60 dias', publico: '1.200 clientes inativos recentes', mensagem: 'Oferta de retorno com cupom de primeira compra novamente' },
-      { acao: 'Cupom de quarta-feira', objetivo: 'Equilibrar a demanda semanal', publico: 'Base ativa completa', mensagem: 'Desconto exclusivo para pedidos feitos às quartas' },
-    ],
     insight_campanha_conversa: 'Campanhas de conversa via WhatsApp tiveram o menor custo por resultado do mês.',
     insight_campanha_conversao: 'Anota Aí Low Budget entregou o melhor ROAS entre as campanhas de venda direta.',
-    frase_fechamento: 'Junho deve focar em recorrência: reativar a base inativa é a maior oportunidade de crescimento da PicoLocos.',
-    jornada: ['Descoberta via Instagram/Meta Ads', 'Primeira compra via iFood', 'Reativação via WhatsApp', 'Fidelização com cupons recorrentes'],
   };
 
   const periodo = 'Maio/2026';
   const prevPeriodo = 'Abril/2026';
 
-  const hasVisao = true, hasDia = true, hasRegiao = true, hasBase = true, hasInat = true, hasProd = true;
+  const hasVisao = true, hasDia = true, hasRegiao = true, hasBase = true, hasInat = true;
   const hasMeta = true, hasInstagram = true, hasInstagramPosts = true, hasInstagramSpotlight = true;
-  const hasDestaques = true, hasCriativos = true, hasDiagFat = true, hasPlanoDetalh = true;
+  const hasDestaques = true, hasCriativos = true;
 
-  const total = 1 + 14 + 2; // cover + 14 conditional sections (all true here) + diag A/Plan
+  const total = 1 + 12; // cover + 12 conditional sections (all true here)
   const slides: string[] = [];
   let i = 1;
 
   slides.push(sCapa(data, meta, 'PicoLocos', periodo, prevPeriodo, diag, total));
   if (hasVisao)              slides.push(sVisaoGeral(data, prevData, ++i, total, periodo, prevPeriodo));
-  if (hasDia)                slides.push(sPorDia(data, ++i, total));
+  if (hasDia)                slides.push(sPorDia(data, ++i, total, periodo));
   if (hasRegiao)             slides.push(sRegioes(bairros, ++i, total));
   if (hasBase)               slides.push(sBase(data, ++i, total));
   if (hasInat)               slides.push(sInativos(data, ++i, total));
-  if (hasProd)               slides.push(sProdutos(data, ++i, total));
   if (hasMeta)               slides.push(sMetaAdsResumo(meta, ++i, total));
   if (hasInstagram)          slides.push(sInstagram(instagram, ++i, total));
+  if (hasInstagramPosts)     slides.push(sInstagramCalendar(igPosts, ++i, total, new Date()));
   if (hasInstagramPosts)     slides.push(sInstagramPosts(igPosts, ++i, total));
   if (hasInstagramSpotlight) slides.push(sInstagramSpotlight(igPosts, ++i, total));
-  slides.push(sDiagnosticoA(diag, ++i, total));
-  slides.push(sDiagnosticoPlan(diag, ++i, total));
   if (hasDestaques)          slides.push(sMetaAdsCampanhas(meta, diag, ++i, total));
   if (hasCriativos)          slides.push(sCriativos(creatives, ++i, total));
-  if (hasDiagFat)            slides.push(sDiagnosticoFat(diag, data, bairros, ++i, total));
-  if (hasPlanoDetalh)        slides.push(sPlanoDetalhado(diag, ++i, total));
 
-  const fontLink = `<style>@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&display=swap');</style>`;
-  return `${fontLink}<div style="background:${CANVAS};padding:28px;font-family:${INTER}">${slides.join('')}</div>`;
+  return `${FONT_LINK}<div class="onmid-report" style="background:${CANVAS};padding:28px;font-family:${INTER}">${slides.join('')}</div>`;
 }
 
 // ── TEMP DEV PREVIEW — remove before shipping ───────────────────────────────
