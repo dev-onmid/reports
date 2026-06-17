@@ -40,6 +40,7 @@ export type CreativeData = {
 
 export type DeliveryReportData = {
   clientName: string;
+  clientLogoUrl?: string | null;
   templateSlug: 'onmid-delivery';
 
   cover: {

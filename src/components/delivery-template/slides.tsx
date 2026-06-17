@@ -51,27 +51,60 @@ function pctDelta(a: number, b: number): { text: string; up: boolean } {
   return { text: (v >= 0 ? '+' : '') + v.toFixed(1) + '%', up: v >= 0 };
 }
 
-// ── Brand components ───────────────────────────────────────────────────────────
-function OnmidLogo() {
+// ── Client avatar (logo from client's page/Instagram, with initials fallback) ──
+const AVATAR_PALETTE = ['#7B2CFF', '#3B82F6', '#10B981', '#F59E0B', '#EC4899', '#EF4444', '#8B5CF6', '#06B6D4', '#84CC16', '#F97316'];
+
+function avatarColor(name: string): string {
+  let hash = 0;
+  for (const c of name) hash = (hash * 31 + c.charCodeAt(0)) >>> 0;
+  return AVATAR_PALETTE[hash % AVATAR_PALETTE.length];
+}
+
+function avatarInitials(name: string): string {
+  return name.split(' ').filter(Boolean).map(p => p[0]).join('').slice(0, 2).toUpperCase();
+}
+
+function ClientLogoAvatar({ name, logoUrl, size = 56 }: { name: string; logoUrl?: string | null; size?: number }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-      <span style={{ fontWeight: 900, fontSize: 22, color: C.text, letterSpacing: '-0.04em', lineHeight: 1, fontFamily: FONT }}>onmid</span>
-      <svg width={44} height={24} viewBox="0 0 44 24" style={{ flexShrink: 0 }}>
-        <rect x="0" y="0" width="44" height="24" rx="12" fill={C.green} />
-        <circle cx="32" cy="12" r="9" fill="white" />
-      </svg>
-      <span style={{ fontSize: 10, fontWeight: 700, color: C.muted, marginTop: -10, fontFamily: FONT }}>®</span>
+    <div style={{
+      width: size, height: size, borderRadius: '50%', flexShrink: 0, overflow: 'hidden',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: logoUrl ? C.row : avatarColor(name),
+      border: `2px solid ${C.surface}`, boxShadow: '0 4px 14px rgba(15,23,42,0.16)',
+    }}>
+      {logoUrl ? (
+        <img src={logoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+      ) : (
+        <span style={{ fontSize: size * 0.36, fontWeight: 800, color: 'white', fontFamily: FONT }}>{avatarInitials(name)}</span>
+      )}
     </div>
   );
 }
 
-function SlideCounter({ current, total }: { current: number; total: number }) {
+// ── Brand components ───────────────────────────────────────────────────────────
+function OnmidLogo({ big }: { big?: boolean } = {}) {
+  const textSize = big ? 28 : 22;
+  const toggleW = big ? 54 : 44;
+  const toggleH = big ? 29 : 24;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: big ? 9 : 7 }}>
+      <span style={{ fontWeight: 900, fontSize: textSize, color: C.text, letterSpacing: '-0.04em', lineHeight: 1, fontFamily: FONT }}>onmid</span>
+      <svg width={toggleW} height={toggleH} viewBox="0 0 44 24" style={{ flexShrink: 0 }}>
+        <rect x="0" y="0" width="44" height="24" rx="12" fill={C.green} />
+        <circle cx="32" cy="12" r="9" fill="white" />
+      </svg>
+      <span style={{ fontSize: big ? 12 : 10, fontWeight: 700, color: C.muted, marginTop: big ? -13 : -10, fontFamily: FONT }}>®</span>
+    </div>
+  );
+}
+
+function SlideCounter({ current, total, big }: { current: number; total: number; big?: boolean }) {
   const cur = String(current).padStart(2, '0');
   const tot = String(total).padStart(2, '0');
   return (
     <div style={{ display: 'flex', alignItems: 'baseline', gap: 1, fontFamily: FONT }}>
-      <span style={{ fontSize: 18, fontWeight: 800, color: C.text, borderBottom: `2.5px solid ${C.green}`, paddingBottom: 2, lineHeight: 1.1 }}>{cur}</span>
-      <span style={{ fontSize: 15, fontWeight: 600, color: C.muted, lineHeight: 1.1 }}>/{tot}</span>
+      <span style={{ fontSize: big ? 22 : 18, fontWeight: 800, color: C.text, borderBottom: `3px solid ${C.green}`, paddingBottom: big ? 3 : 2, lineHeight: 1.1 }}>{cur}</span>
+      <span style={{ fontSize: big ? 17 : 15, fontWeight: 600, color: C.muted, lineHeight: 1.1 }}>/{tot}</span>
     </div>
   );
 }
@@ -307,166 +340,242 @@ export function Slide01Cover({ data, current, total }: { data: DeliveryReportDat
   return (
     <div style={{
       width: SLIDE_W, height: SLIDE_H,
-      background: C.bg,
+      background: C.surface,
       position: 'relative',
       overflow: 'hidden',
       fontFamily: FONT,
     }}>
-      {/* Blob top-right */}
+      {/* Blob top-right — soft, contained behind the dashboard composition */}
       <div style={{
-        position: 'absolute', top: -120, right: -120,
-        width: 520, height: 520, borderRadius: '50%',
-        background: 'radial-gradient(circle, rgba(219,234,254,0.55) 0%, rgba(220,252,231,0.25) 45%, transparent 70%)',
+        position: 'absolute', top: -160, right: -160,
+        width: 760, height: 760, borderRadius: '50%',
+        background: 'radial-gradient(circle, rgba(219,234,254,0.50) 0%, rgba(220,252,231,0.22) 45%, transparent 72%)',
         pointerEvents: 'none',
       }} />
-      {/* Blob bottom-left */}
+      {/* Blob bottom-left — footer glow */}
       <div style={{
-        position: 'absolute', bottom: -80, left: -80,
-        width: 280, height: 280, borderRadius: '50%',
-        background: 'radial-gradient(circle, rgba(34,197,94,0.12) 0%, transparent 70%)',
+        position: 'absolute', bottom: -90, left: -90,
+        width: 300, height: 300, borderRadius: '50%',
+        background: 'radial-gradient(circle, rgba(34,197,94,0.14) 0%, transparent 70%)',
         pointerEvents: 'none',
       }} />
 
-      {/* Logo */}
-      <div style={{ position: 'absolute', top: 24, left: 40 }}><OnmidLogo /></div>
-      {/* Counter */}
-      <div style={{ position: 'absolute', top: 24, right: 40 }}><SlideCounter current={current} total={total} /></div>
       {/* Footer */}
-      <div style={{ position: 'absolute', bottom: 18, left: 40 }}><ReportsFooter /></div>
+      <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
+        <div style={{ borderTop: `1px solid ${C.border}`, margin: '0 48px' }} />
+        <div style={{ padding: '16px 48px' }}><ReportsFooter /></div>
+      </div>
 
-      {/* Left content — 58% width */}
-      <div style={{ position: 'absolute', top: 72, left: 40, width: 700, bottom: 52 }}>
-        {/* Title */}
+      {/* Left content — title, subtitle, period block */}
+      <div style={{ position: 'absolute', top: 56, left: 48, width: 600 }}>
         <h1 style={{
-          margin: 0, fontSize: 58, fontWeight: 900, color: C.text,
-          letterSpacing: '-0.03em', lineHeight: 1.05, marginBottom: 14,
+          margin: 0, fontSize: 60, fontWeight: 900, color: C.text,
+          letterSpacing: '-0.03em', lineHeight: 1.08, marginBottom: 20,
         }}>
-          Relatório de<br />Performance —<br />
-          <span style={{ color: C.green }}>{data.clientName}</span>
+          Relatório de Performance —<br />
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 16, marginTop: 6 }}>
+            <ClientLogoAvatar name={data.clientName} logoUrl={data.clientLogoUrl} />
+            {data.clientName}
+          </span>
         </h1>
-        <p style={{ margin: '0 0 26px', fontSize: 17, color: C.sub, fontWeight: 400, lineHeight: 1.5, maxWidth: 580 }}>
+        <p style={{ margin: '0 0 28px', fontSize: 18, color: C.sub, fontWeight: 400, lineHeight: 1.55, maxWidth: 540 }}>
           {data.cover.subtitle}
         </p>
 
         {/* Period rows */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 24 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{ width: 36, height: 36, borderRadius: 8, background: C.greenLight, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <div style={{ width: 40, height: 40, borderRadius: 10, background: C.greenLight, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
               {Icon.calendar()}
             </div>
-            <span style={{ fontSize: 15, color: C.text }}>
+            <span style={{ fontSize: 16, color: C.text }}>
               <strong>Período analisado:</strong> <span style={{ color: C.green, fontWeight: 700 }}>{data.cover.periodLabel}</span>
             </span>
           </div>
           {data.cover.prevPeriodLabel && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div style={{ width: 36, height: 36, borderRadius: 8, background: C.blueLight, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 10, background: C.blueLight, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 {Icon.info()}
               </div>
-              <span style={{ fontSize: 15, color: C.text }}>
+              <span style={{ fontSize: 16, color: C.text }}>
                 <strong>Comparativo:</strong> <span style={{ color: C.blue, fontWeight: 600 }}>{data.cover.prevPeriodLabel}</span>
               </span>
             </div>
           )}
         </div>
-
-        {/* Objective — borda esquerda */}
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, borderLeft: `4px solid ${C.green}`, paddingLeft: 16 }}>
-          <GreenCircle size={44}>{Icon.target()}</GreenCircle>
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 4 }}>Objetivo do relatório</div>
-            <div style={{ fontSize: 13, color: C.sub, lineHeight: 1.6 }}>{data.cover.objective}</div>
-          </div>
-        </div>
       </div>
 
-      {/* Right: Dashboard mockup — 42% width */}
-      <div style={{ position: 'absolute', top: 60, right: 24, width: 500, bottom: 52 }}>
+      {/* Right: Dashboard mockup composition */}
+      <div style={{ position: 'absolute', top: 56, right: 40, width: 600, height: 470 }}>
         <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-          {/* Card 1 — Line chart (browser mockup) */}
+          {/* Card A — Line chart (browser mockup), top */}
           <div style={{
-            position: 'absolute', top: 10, right: 0, width: 300, height: 160,
+            position: 'absolute', top: 0, left: 200, width: 320, height: 160,
             background: 'white', borderRadius: 16,
-            boxShadow: '0 8px 32px rgba(0,0,0,0.10)',
+            boxShadow: '0 10px 30px rgba(15,23,42,0.10)',
             border: `1px solid ${C.border}`,
-            padding: '12px 14px',
+            padding: '12px 16px',
             overflow: 'hidden',
           }}>
-            {/* browser dots */}
             <div style={{ display: 'flex', gap: 5, marginBottom: 10 }}>
               <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#FCA5A5' }} />
               <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#FDE68A' }} />
               <div style={{ width: 8, height: 8, borderRadius: '50%', background: C.greenMid }} />
             </div>
-            <svg viewBox="0 0 260 90" style={{ width: '100%', height: 90 }}>
+            <svg viewBox="0 0 280 96" style={{ width: '100%', height: 96 }}>
               <defs>
                 <linearGradient id="lg1" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={C.green} stopOpacity="0.25" />
-                  <stop offset="100%" stopColor={C.green} stopOpacity="0" />
+                  <stop offset="0%" stopColor={C.blue} stopOpacity="0.22" />
+                  <stop offset="100%" stopColor={C.blue} stopOpacity="0" />
                 </linearGradient>
               </defs>
-              <polyline points="0,78 36,62 72,66 108,38 144,44 180,18 216,22 260,10"
-                fill="none" stroke={C.green} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-              <polygon points="0,78 36,62 72,66 108,38 144,44 180,18 216,22 260,10 260,90 0,90"
+              <polyline points="0,70 40,58 80,64 120,30 160,40 200,14 240,20 280,8"
+                fill="none" stroke={C.blue} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+              <polygon points="0,70 40,58 80,64 120,30 160,40 200,14 240,20 280,8 280,96 0,96"
                 fill="url(#lg1)" />
-              {/* Data points */}
-              {[[108,38],[180,18],[260,10]].map(([x,y],i) => (
-                <circle key={i} cx={x} cy={y} r={4} fill={C.green} />
-              ))}
             </svg>
           </div>
 
-          {/* Card 2 — Donut */}
+          {/* Card B — Donut + legend */}
           <div style={{
-            position: 'absolute', top: 130, left: 0, width: 180, height: 180,
+            position: 'absolute', top: 70, left: 0, width: 210, height: 150,
             background: 'white', borderRadius: 16,
-            boxShadow: '0 8px 32px rgba(0,0,0,0.10)',
+            boxShadow: '0 10px 30px rgba(15,23,42,0.10)',
             border: `1px solid ${C.border}`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+            padding: '0 14px',
           }}>
-            <svg viewBox="0 0 120 120" width={120} height={120}>
+            <svg viewBox="0 0 120 120" width={90} height={90} style={{ flexShrink: 0 }}>
               <circle cx="60" cy="60" r="44" fill="none" stroke={C.greenLight} strokeWidth="22" />
               <circle cx="60" cy="60" r="44" fill="none" stroke={C.green} strokeWidth="22"
                 strokeDasharray={`${276.5 * 0.62} ${276.5 * 0.38}`}
                 strokeDashoffset={`${276.5 * 0.25}`} strokeLinecap="butt" />
-              <circle cx="60" cy="60" r="44" fill="none" stroke={C.salmon} strokeWidth="22"
+              <circle cx="60" cy="60" r="44" fill="none" stroke={C.blueMid} strokeWidth="22"
                 strokeDasharray={`${276.5 * 0.24} ${276.5 * 0.76}`}
                 strokeDashoffset={`${276.5 * (0.25 - 0.62)}`} strokeLinecap="butt" />
-              <circle cx="60" cy="60" r="22" fill={C.greenLight} />
-              <text x="60" y="65" textAnchor="middle" fontSize="13" fontWeight="800" fill={C.greenDark}>62%</text>
             </svg>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+              {[[C.green, 28], [C.blueMid, 20], [C.border, 14]].map(([color, w], i) => (
+                <div key={i} style={{ width: w as number, height: 6, borderRadius: 3, background: color as string }} />
+              ))}
+            </div>
           </div>
 
-          {/* Card 3 — Bars */}
+          {/* Card C — Bars, right column under A */}
           <div style={{
-            position: 'absolute', bottom: 40, right: 10, width: 240, height: 160,
+            position: 'absolute', top: 175, left: 425, width: 160, height: 180,
             background: 'white', borderRadius: 16,
-            boxShadow: '0 8px 32px rgba(0,0,0,0.10)',
+            boxShadow: '0 10px 30px rgba(15,23,42,0.10)',
             border: `1px solid ${C.border}`,
             padding: '14px 16px',
           }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: C.sub, marginBottom: 10 }}>Pedidos por dia</div>
-            <svg viewBox="0 0 200 90" style={{ width: '100%', height: 90 }}>
-              {[38, 55, 44, 82, 64, 90, 72].map((h, i) => (
-                <rect key={i} x={i * 29 + 2} y={90 - h} width={20} height={h} rx={5}
+            <svg viewBox="0 0 130 100" style={{ width: '100%', height: 100 }}>
+              {[34, 50, 40, 76, 58, 92, 70].map((h, i) => (
+                <rect key={i} x={i * 19 + 1} y={100 - h} width={14} height={h} rx={4}
                   fill={i === 5 ? C.green : i === 3 ? C.greenMid : C.border} />
               ))}
             </svg>
           </div>
 
-          {/* Card 4 — Stat chip */}
+          {/* Card D — Map with route + pins */}
           <div style={{
-            position: 'absolute', top: 88, left: 60,
-            background: C.greenLight, borderRadius: 20,
-            padding: '7px 16px',
-            display: 'flex', alignItems: 'center', gap: 7,
-            boxShadow: '0 4px 12px rgba(34,197,94,0.2)',
+            position: 'absolute', top: 240, left: 0, width: 200, height: 120,
+            background: C.row, borderRadius: 16,
+            boxShadow: '0 10px 30px rgba(15,23,42,0.10)',
+            border: `1px solid ${C.border}`,
+            overflow: 'hidden',
           }}>
-            <div style={{ width: 7, height: 7, borderRadius: '50%', background: C.green }} />
-            <span style={{ fontSize: 12, fontWeight: 800, color: C.greenDark }}>
-              +{data.monthlyOverview.current.orders > 0 ? num(data.monthlyOverview.current.orders) : '—'} pedidos
-            </span>
+            <svg viewBox="0 0 200 120" style={{ width: '100%', height: '100%' }}>
+              <path d="M0,90 L60,70 L100,95 L150,55 L200,40" fill="none" stroke={C.blueMid} strokeWidth="2" strokeDasharray="5 5" strokeLinecap="round" />
+              <circle cx="60" cy="70" r="5" fill={C.green} stroke="white" strokeWidth="2" />
+              <circle cx="150" cy="55" r="5" fill={C.green} stroke="white" strokeWidth="2" />
+            </svg>
           </div>
+
+          {/* Card E — Audience row */}
+          <div style={{
+            position: 'absolute', top: 375, left: 0, width: 200, height: 64,
+            background: 'white', borderRadius: 16,
+            boxShadow: '0 10px 30px rgba(15,23,42,0.10)',
+            border: `1px solid ${C.border}`,
+            display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 8,
+            padding: '0 16px',
+          }}>
+            <div style={{ display: 'flex', gap: -6 }}>
+              {[C.blueMid, C.border, C.greenMid, C.green].map((c, i) => (
+                <div key={i} style={{
+                  width: 20, height: 20, borderRadius: '50%', background: c,
+                  border: '2px solid white', marginLeft: i === 0 ? 0 : -7,
+                }} />
+              ))}
+            </div>
+            <div style={{ width: 110, height: 6, borderRadius: 3, background: C.greenLight }}>
+              <div style={{ width: '70%', height: '100%', borderRadius: 3, background: C.green }} />
+            </div>
+          </div>
+
+          {/* Card F — Product highlight */}
+          <div style={{
+            position: 'absolute', top: 230, left: 220, width: 250, height: 130,
+            background: 'white', borderRadius: 16,
+            boxShadow: '0 10px 30px rgba(15,23,42,0.10)',
+            border: `1px solid ${C.border}`,
+            display: 'flex', alignItems: 'center', gap: 14,
+            padding: 14,
+          }}>
+            <div style={{
+              width: 88, height: 88, borderRadius: 14, flexShrink: 0,
+              background: 'linear-gradient(135deg, #FDBA74 0%, #FB923C 55%, #EA580C 100%)',
+              position: 'relative', overflow: 'hidden',
+            }}>
+              <div style={{ position: 'absolute', width: 36, height: 36, borderRadius: '50%', background: 'rgba(255,255,255,0.35)', top: 12, left: 10 }} />
+              <div style={{ position: 'absolute', width: 24, height: 24, borderRadius: '50%', background: 'rgba(255,255,255,0.25)', bottom: 10, right: 12 }} />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>
+              <div style={{ width: '90%', height: 8, borderRadius: 4, background: C.row }} />
+              <div style={{ width: '70%', height: 8, borderRadius: 4, background: C.row }} />
+              <div style={{ width: '50%', height: 8, borderRadius: 4, background: C.greenLight }} />
+              <div style={{ width: 54, height: 18, borderRadius: 9, background: C.greenLight, marginTop: 4 }} />
+            </div>
+          </div>
+
+          {/* Card G — Bottom line chart */}
+          <div style={{
+            position: 'absolute', top: 300, left: 425, width: 175, height: 130,
+            background: 'white', borderRadius: 16,
+            boxShadow: '0 10px 30px rgba(15,23,42,0.10)',
+            border: `1px solid ${C.border}`,
+            padding: '12px 14px',
+          }}>
+            <svg viewBox="0 0 150 100" style={{ width: '100%', height: 100 }}>
+              <defs>
+                <linearGradient id="lg2" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={C.blue} stopOpacity="0.20" />
+                  <stop offset="100%" stopColor={C.blue} stopOpacity="0" />
+                </linearGradient>
+              </defs>
+              <polyline points="0,70 25,60 50,66 75,42 100,48 125,24 150,30"
+                fill="none" stroke={C.blue} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+              <polygon points="0,70 25,60 50,66 75,42 100,48 125,24 150,30 150,100 0,100" fill="url(#lg2)" />
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      {/* Objective — wide horizontal card spanning the bottom */}
+      <div style={{
+        position: 'absolute', left: 48, right: 48, bottom: 100,
+        background: 'white', borderRadius: 16,
+        boxShadow: '0 10px 30px rgba(15,23,42,0.08)',
+        border: `1px solid ${C.border}`,
+        display: 'flex', alignItems: 'flex-start', gap: 16,
+        padding: '20px 28px',
+      }}>
+        <GreenCircle size={44}>{Icon.target()}</GreenCircle>
+        <div style={{ flex: 1, borderLeft: `3px solid ${C.green}`, paddingLeft: 18 }}>
+          <div style={{ fontSize: 16, fontWeight: 800, color: C.text, marginBottom: 6 }}>Objetivo do relatório</div>
+          <div style={{ fontSize: 13.5, color: C.sub, lineHeight: 1.6 }}>{data.cover.objective}</div>
         </div>
       </div>
     </div>
