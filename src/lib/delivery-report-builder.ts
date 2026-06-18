@@ -1747,10 +1747,6 @@ function cleanCampaignTags(raw: string): string[] {
       .replace(/(^|\s)\S/g, c => c.toUpperCase()));
 }
 
-function cleanCampaignName(raw: string): string {
-  return cleanCampaignTags(raw).join(' ');
-}
-
 function cleanCampaignHighlightTitle(raw: string): string {
   let tags = cleanCampaignTags(raw);
   if (tags.length > 1 && MONTH_NAMES_LC.includes(tags[tags.length - 1].toLowerCase())) {
@@ -1767,17 +1763,28 @@ function sMetaAdsResumo(meta: MetaAdsFull, idx: number, total: number): string {
   void total;
   const totalConversas = meta.campanhas.reduce((s, c) => s + c.metricas.conversas, 0);
   const totalCompras   = meta.campanhas.reduce((s, c) => s + c.metricas.compras, 0);
+  const valorCompras   = meta.campanhas.reduce((s, c) => s + c.metricas.valor_compras, 0);
+  const visitasPagina  = meta.campanhas.reduce((s, c) => s + c.metricas.visitas_pagina, 0);
+  const checkouts      = meta.campanhas.reduce((s, c) => s + c.metricas.iniciaram_checkout, 0);
+  const ctr = meta.impressoes > 0 ? (meta.cliques / meta.impressoes) * 100 : 0;
+  const cpm = meta.impressoes > 0 ? meta.investimento / (meta.impressoes / 1000) : 0;
+  const cpc = meta.cliques > 0 ? meta.investimento / meta.cliques : 0;
+  const cpl = totalConversas > 0 ? meta.investimento / totalConversas : 0;
+  const cpa = totalCompras > 0 ? meta.investimento / totalCompras : 0;
+  const roas = meta.investimento > 0 ? valorCompras / meta.investimento : 0;
   const brlC = (n: number) => n > 0 ? n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '—';
+  const pctC = (n: number) => n > 0 ? `${n.toFixed(2).replace('.', ',')}%` : '—';
+  const decC = (n: number) => n > 0 ? n.toFixed(2).replace('.', ',') : '—';
 
   // ── Top KPI card (icon circle + label + big number) ───────────────────────
   const bigKpi = (label: string, value: string, ico: string) =>
-    `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:16px;box-shadow:0 10px 26px rgba(15,23,42,.06);padding:18px 22px;display:flex;align-items:center;gap:16px;flex:1;min-width:0">
+    `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:16px;box-shadow:0 10px 26px rgba(15,23,42,.06);padding:16px 18px;display:flex;align-items:center;gap:13px;min-width:0">
       <div style="width:48px;height:48px;border-radius:50%;background:${PRIMARY}1F;flex-shrink:0;display:flex;align-items:center;justify-content:center">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="${PRIMARY_TEXT}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ico}</svg>
+        <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="${PRIMARY_TEXT}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ico}</svg>
       </div>
       <div style="min-width:0">
-        <p style="font-size:14px;font-weight:500;color:#163461;font-family:${INTER};margin:0 0 4px">${label}</p>
-        <p style="font-family:${INTER};font-size:28px;font-weight:900;letter-spacing:-0.025em;color:${FG};line-height:1;margin:0;white-space:nowrap">${value}</p>
+        <p style="font-size:12px;font-weight:700;color:#163461;font-family:${INTER};margin:0 0 5px;line-height:1.2">${label}</p>
+        <p style="font-family:${INTER};font-size:23px;font-weight:900;letter-spacing:0;color:${FG};line-height:1;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${value}</p>
       </div>
     </div>`;
 
@@ -1786,105 +1793,54 @@ function sMetaAdsResumo(meta: MetaAdsFull, idx: number, total: number): string {
   const ICO_USERS  = '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>';
   const ICO_CURSOR = '<path d="m3 3 7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="m13 13 6 6"/>';
   const ICO_CART   = '<circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>';
-  const ICO_LIST   = '<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>';
   const ICO_TARGET = '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>';
+  const ICO_PERCENT = '<path d="M19 5 5 19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/>';
+  const ICO_CHART = '<path d="M4 19V9"/><path d="M10 19V5"/><path d="M16 19v-8"/><path d="M22 19H2"/>';
+  const ICO_FUNNEL = '<path d="M3 4h18l-7 8v6l-4 2v-8z"/>';
 
-  const row1 = [
-    bigKpi('Investimento',    brlC(meta.investimento),       ICO_MONEY ),
-    bigKpi('Impressões',      numOrDash(meta.impressoes),    ICO_EYE   ),
-    bigKpi('Alcance somado',  numOrDash(meta.alcance),       ICO_USERS ),
-    bigKpi('Cliques no link', numOrDash(meta.cliques),       ICO_CURSOR),
+  const metrics = [
+    bigKpi('Investimento', brlC(meta.investimento), ICO_MONEY),
+    bigKpi('Impressões', numOrDash(meta.impressoes), ICO_EYE),
+    bigKpi('Alcance', numOrDash(meta.alcance), ICO_USERS),
+    bigKpi('Cliques', numOrDash(meta.cliques), ICO_CURSOR),
+    bigKpi('CTR', pctC(ctr), ICO_PERCENT),
+    bigKpi('CPM', brlC(cpm), ICO_CHART),
+    bigKpi('CPC', brlC(cpc), ICO_CURSOR),
+    bigKpi('Leads / conversas', totalConversas > 0 ? num(Math.round(totalConversas)) : '—', ICO_USERS),
+    bigKpi('Custo por lead', brlC(cpl), ICO_MONEY),
+    bigKpi('Compras', totalCompras > 0 ? num(Math.round(totalCompras)) : '—', ICO_CART),
+    bigKpi('Custo por compra', brlC(cpa), ICO_MONEY),
+    bigKpi('Valor de venda', brlC(valorCompras), ICO_CART),
+    bigKpi('ROAS', decC(roas), ICO_CHART),
+    bigKpi('Visitas à página', numOrDash(visitasPagina), ICO_EYE),
+    bigKpi('Checkouts iniciados', numOrDash(checkouts), ICO_FUNNEL),
   ];
 
-  // ── Campaign bullet list (cleaned names) ───────────────────────────────────
-  const bulletCols = Math.min(4, Math.max(2, Math.ceil(meta.campanhas.length / 2)));
-  const bullets = meta.campanhas.map(c =>
-    `<div style="display:flex;align-items:flex-start;gap:8px">
-      <div style="width:6px;height:6px;border-radius:50%;background:${BLUE};flex-shrink:0;margin-top:7px"></div>
-      <span style="font-size:13px;font-weight:500;color:${FG};font-family:${INTER};line-height:1.4">${cleanCampaignName(c.nome)}</span>
-    </div>`,
-  ).join('');
-
-  // ── Highlight cards: best conversation campaign + best sales campaign ─────
-  const chatCampaign  = [...meta.campanhas].filter(c => c.metricas.conversas > 0).sort((a, b) => b.metricas.conversas - a.metricas.conversas)[0];
-  const salesCampaign = [...meta.campanhas].filter(c => c.metricas.compras > 0 && c !== chatCampaign).sort((a, b) => b.metricas.valor_compras - a.metricas.valor_compras)[0];
-
-  const highlightMetric = (label: string, value: string) =>
-    `<div style="flex:1;min-width:0">
-      <p style="font-size:11px;font-weight:600;color:${MUTED};font-family:${INTER};margin:0 0 4px;line-height:1.3">${label}</p>
-      <p style="font-family:${INTER};font-size:18px;font-weight:800;color:${FG};margin:0;white-space:nowrap">${value}</p>
+  const summaryItem = (label: string, value: string, helper: string) =>
+    `<div style="flex:1;min-width:0;border-left:1px solid ${BORDER};padding-left:18px">
+      <p style="font-family:${INTER};font-size:11px;font-weight:800;color:${MUTED};margin:0 0 5px;line-height:1.2">${label}</p>
+      <p style="font-family:${INTER};font-size:21px;font-weight:900;color:${FG};margin:0 0 5px;line-height:1;letter-spacing:0">${value}</p>
+      <p style="font-family:${INTER};font-size:11px;font-weight:600;color:#64748B;margin:0;line-height:1.3">${helper}</p>
     </div>`;
 
-  const highlightDivider = `<div style="width:1px;background:${BORDER};align-self:stretch"></div>`;
-
-  const highlightCard = (ico: string, filled: boolean, title: string, metrics: string[], insight: string) =>
-    `<div style="flex:1;background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 14px 34px rgba(15,23,42,.07);padding:22px 26px;display:flex;flex-direction:column;gap:16px;min-width:0">
-      <div style="display:flex;align-items:center;gap:16px">
-        <div style="width:46px;height:46px;border-radius:50%;background:${PRIMARY}1A;flex-shrink:0;display:flex;align-items:center;justify-content:center">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="${filled ? PRIMARY_TEXT : 'none'}" stroke="${PRIMARY_TEXT}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ico}</svg>
-        </div>
-        <div style="border-left:2px solid ${PRIMARY};padding-left:14px">
-          <p style="font-size:17px;font-weight:800;color:${FG};font-family:${INTER};margin:0">${title}</p>
-        </div>
-      </div>
-      <div style="display:flex;align-items:flex-start;gap:14px">
-        ${metrics.map((m, i) => i === 0 ? m : highlightDivider + m).join('')}
-      </div>
-      <p style="font-size:13px;font-weight:500;color:#163461;font-family:${INTER};margin:0;display:flex;align-items:flex-start;gap:8px">
-        <span style="color:${PRIMARY_TEXT};flex-shrink:0">→</span> ${insight}
-      </p>
-    </div>`;
-
-  const ICO_WHATSAPP_PATH = '<path d="M3 21l1.65-4.95A8.5 8.5 0 1 1 8.05 19.4z"></path><path d="M8.5 9.5a.5.5 0 0 1 1 0v1a.5.5 0 0 1-1 0z"></path>';
-
-  let highlightSection = '';
-  if (chatCampaign || salesCampaign) {
-    const cards: string[] = [];
-    if (chatCampaign) {
-      const m = chatCampaign.metricas;
-      const custoConversa = m.conversas > 0 ? m.investimento / m.conversas : 0;
-      cards.push(highlightCard(
-        ICO_WHATSAPP_PATH,
-        true,
-        cleanCampaignHighlightTitle(chatCampaign.nome),
-        [
-          highlightMetric('Investimento', brlC(m.investimento)),
-          highlightMetric('Conversas iniciadas', num(Math.round(m.conversas))),
-          highlightMetric('Custo por conversa', brlC(custoConversa)),
-          highlightMetric('Cliques no link', numOrDash(m.cliques)),
-          highlightMetric('Frequência', m.frequencia.toFixed(2).replace('.', ',')),
-        ],
-        `${num(Math.round(m.conversas))} conversas iniciadas a um custo de ${brlC(custoConversa)} cada, com frequência de ${m.frequencia.toFixed(2).replace('.', ',')}.`,
-      ));
-    }
-    if (salesCampaign) {
-      const m = salesCampaign.metricas;
-      const custoCompra = m.compras > 0 ? m.investimento / m.compras : 0;
-      cards.push(highlightCard(
-        ICO_CART,
-        false,
-        cleanCampaignHighlightTitle(salesCampaign.nome),
-        [
-          highlightMetric('Investimento', brlC(m.investimento)),
-          highlightMetric('Compras registradas', num(Math.round(m.compras))),
-          highlightMetric('Custo por compra', brlC(custoCompra)),
-          highlightMetric('Valor de compra', brlC(m.valor_compras)),
-          highlightMetric('ROAS', m.purchase_roas.toFixed(2).replace('.', ',')),
-        ],
-        `ROAS de ${m.purchase_roas.toFixed(2).replace('.', ',')} — ${m.purchase_roas >= 3 ? 'boa relação entre investimento e retorno' : 'abaixo do ideal, vale revisar criativos e público'}.`,
-      ));
-    }
-    highlightSection = `<div style="display:flex;gap:16px">${cards.join('')}</div>`;
-  }
+  const efficiencyPanel = `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 10px 26px rgba(15,23,42,.06);padding:22px 26px;display:flex;align-items:center;gap:24px">
+    <div style="width:48px;height:48px;border-radius:50%;background:${PRIMARY}16;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="${PRIMARY_TEXT}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICO_TARGET}</svg>
+    </div>
+    ${summaryItem('Eficiência de mídia', `${pctC(ctr)} CTR`, `CPM ${brlC(cpm)} e CPC ${brlC(cpc)}`)}
+    ${summaryItem('Geração de demanda', totalConversas > 0 ? `${num(Math.round(totalConversas))} leads` : '—', `CPL ${brlC(cpl)}`)}
+    ${summaryItem('Resultado comercial', totalCompras > 0 ? `${num(Math.round(totalCompras))} compras` : '—', `CPA ${brlC(cpa)} e ROAS ${decC(roas)}`)}
+    ${summaryItem('Receita atribuída', brlC(valorCompras), `${numOrDash(checkouts)} checkouts iniciados`)}
+  </div>`;
 
   // ── Final recommendation ───────────────────────────────────────────────────
-  const recommendation = totalConversas > 0 && totalCompras > 0
-    ? 'separar campanhas por objetivo — reconhecimento, venda direta, WhatsApp, reativação e remarketing.'
+  const recommendation = roas >= 3
+    ? `O tráfego pago apresentou retorno positivo no período, com ROAS de ${decC(roas)}. Acompanhar escala mantendo controle de CPM, CPC e custo por compra.`
     : totalCompras > 0
-    ? `manter o foco em campanhas de conversão — ROAS é a métrica central para avaliar o retorno de cada uma.`
+    ? `O tráfego gerou compras, mas o ROAS de ${decC(roas)} pede atenção a eficiência: acompanhar CPM, CTR, CPC e custo por compra antes de ampliar investimento.`
     : totalConversas > 0
-    ? `priorizar campanhas de conversa — custo por mensagem é a métrica principal para relacionamento via WhatsApp.`
-    : `${brlOrDash(meta.investimento)} investidos em ${meta.campanhas.length} campanha${meta.campanhas.length !== 1 ? 's' : ''} com alcance de ${numOrDash(meta.alcance)} pessoas únicas.`;
+    ? `O tráfego gerou demanda e conversas no período. O próximo foco é transformar esse volume em compra, acompanhando CPL, taxa de clique e qualidade dos leads.`
+    : `${brlOrDash(meta.investimento)} investidos com ${numOrDash(meta.alcance)} pessoas alcançadas e ${numOrDash(meta.cliques)} cliques no período. Avaliar CTR, CPC e volume de conversões para orientar o próximo ciclo.`;
 
   const body = `<div style="width:1440px;min-height:810px;background:${BG};border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
   <div style="position:absolute;right:60px;top:-100px;width:560px;height:480px;border-radius:50%;background:linear-gradient(135deg,rgba(219,234,254,.55),rgba(255,255,255,.15));opacity:.7;pointer-events:none"></div>
@@ -1893,28 +1849,14 @@ function sMetaAdsResumo(meta: MetaAdsFull, idx: number, total: number): string {
 
     <div style="flex-shrink:0">
       <h1 style="font-family:${INTER};font-size:52px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 8px;letter-spacing:-0.03em">Resumo de tráfego pago</h1>
-      <p style="font-size:16px;font-weight:500;color:#163461;font-family:${INTER};margin:0">Visibilidade, cliques e destaques das campanhas do período</p>
+      <p style="font-size:16px;font-weight:500;color:#163461;font-family:${INTER};margin:0">Métricas consolidadas de mídia paga no período</p>
     </div>
 
-    <div style="display:flex;gap:16px;flex-shrink:0">
-      ${row1.join('')}
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:14px;flex-shrink:0">
+      ${metrics.join('')}
     </div>
 
-    <div style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 10px 26px rgba(15,23,42,.06);padding:18px 26px;display:flex;align-items:center;gap:24px;flex-shrink:0">
-      <div style="display:flex;align-items:center;gap:14px;flex-shrink:0">
-        <div style="width:44px;height:44px;border-radius:50%;background:${BLUE}10;display:flex;align-items:center;justify-content:center;flex-shrink:0">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="${BLUE}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICO_LIST}</svg>
-        </div>
-        <div>
-          <p style="font-size:15px;font-weight:800;color:${FG};font-family:${INTER};margin:0">Campanhas<br>analisadas</p>
-        </div>
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(${bulletCols},1fr);gap:8px 28px;flex:1;min-width:0">
-        ${bullets}
-      </div>
-    </div>
-
-    ${highlightSection}
+    ${efficiencyPanel}
 
     <div data-conclusion="1" style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 10px 26px rgba(15,23,42,.06);display:flex;align-items:flex-start;gap:16px;padding:20px 26px">
       <div style="width:40px;height:40px;border-radius:50%;background:${PRIMARY}16;display:flex;align-items:center;justify-content:center;flex-shrink:0">
