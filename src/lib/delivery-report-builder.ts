@@ -18,6 +18,36 @@ function num(n: number) { return n.toLocaleString('pt-BR'); }
 function brlOrDash(n: number) { return n > 0 ? brl(n) : '—'; }
 function numOrDash(n: number) { return n > 0 ? num(n) : '—'; }
 
+function cleanJsonString(value: string): string {
+  let out = '';
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code === 0) continue;
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        out += value[i] + value[i + 1];
+        i++;
+      }
+      continue;
+    }
+    if (code >= 0xdc00 && code <= 0xdfff) continue;
+    out += value[i];
+  }
+  return out;
+}
+
+function sanitizeJsonValue<T>(value: T): T {
+  if (typeof value === 'string') return cleanJsonString(value) as T;
+  if (Array.isArray(value)) return value.map((item) => sanitizeJsonValue(item)) as T;
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, sanitizeJsonValue(item)]),
+    ) as T;
+  }
+  return value;
+}
+
 function deltaInfo(current: number, prev: number): { label: string; up: boolean; hasData: boolean } {
   if (!prev) return { label: '—', up: true, hasData: false };
   const diff = ((current - prev) / prev) * 100;
@@ -2908,10 +2938,11 @@ export async function saveDeliveryReport(opts: {
   const token = randomUUID();
   const pool  = makeServerPool();
   try {
+    const safeData = sanitizeJsonValue(data);
     const { rows } = await pool.query(
       `INSERT INTO public.diagnostic_reports (client_id,client_name,period_from,period_to,template_slug,report_data,public_token)
        VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-      [clientId, clientName, from, to, 'onmid-narrative-delivery', JSON.stringify(data), token],
+      [clientId, clientName, from, to, 'onmid-narrative-delivery', safeData, token],
     );
     return { token, reportId: rows[0].id as string };
   } finally { await pool.end(); }
