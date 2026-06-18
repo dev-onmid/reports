@@ -391,8 +391,8 @@ const OBJECTIVE_META: Record<ObjectiveCategory, {
   // costLabel stays short on purpose — it renders inside a ~110px-wide metric box
   // alongside an icon; "Custo por venda" truncates, "Custo/venda" fits cleanly.
   vendas:      { label: 'Vendas',           resultWord: 'vendas',      costLabel: 'Custo/venda',    actionKeys: ['offsite_conversion.fb_pixel_purchase', 'purchase', 'omni_purchase'] },
-  leads:       { label: 'Geração de leads', resultWord: 'leads',       costLabel: 'CPL',            actionKeys: ['lead', 'onsite_conversion.lead_grouped', 'offsite_conversion.fb_pixel_lead'] },
-  mensagens:   { label: 'Conversas',        resultWord: 'conversas',   costLabel: 'Custo/conversa', actionKeys: ['messaging_conversation_started_7d', 'onsite_conversion.messaging_conversation_started_7d', 'omni_messaging_conversation_started_7d', 'onsite_conversion.messaging_first_reply'] },
+  leads:       { label: 'Geração de leads', resultWord: 'leads',       costLabel: 'CPL',            actionKeys: ['lead', 'onsite_conversion.lead', 'onsite_conversion.lead_grouped', 'offsite_conversion.fb_pixel_lead'] },
+  mensagens:   { label: 'Conversas',        resultWord: 'conversas',   costLabel: 'Custo/conversa', actionKeys: ['messaging_conversation_started', 'messaging_conversation_started_7d', 'onsite_conversion.messaging_conversation_started', 'onsite_conversion.messaging_conversation_started_7d', 'omni_messaging_conversation_started', 'omni_messaging_conversation_started_7d', 'onsite_conversion.messaging_first_reply', 'onsite_conversion.messaging_conversation_replied_7d'] },
   trafego:     { label: 'Tráfego',          resultWord: 'cliques',     costLabel: 'CPC',            actionKeys: ['link_click'] },
   engajamento: { label: 'Engajamento',      resultWord: 'engajamentos', costLabel: 'Custo/engaj.',  actionKeys: ['post_engagement', 'page_engagement'] },
   alcance:     { label: 'Alcance',          resultWord: 'pessoas alcançadas', costLabel: 'CPM',     actionKeys: [] },
@@ -401,17 +401,32 @@ const OBJECTIVE_META: Record<ObjectiveCategory, {
 type CampaignKind = 'mensagens' | 'leads' | 'vendas' | 'trafego' | 'alcance' | 'engajamento';
 
 const MESSAGE_ACTION_KEYS = [
+  'messaging_conversation_started',
   'messaging_conversation_started_7d',
+  'onsite_conversion.messaging_conversation_started',
   'onsite_conversion.messaging_conversation_started_7d',
+  'omni_messaging_conversation_started',
   'omni_messaging_conversation_started_7d',
   'onsite_conversion.messaging_first_reply',
   'onsite_conversion.messaging_conversation_replied_7d',
 ];
 
-const LEAD_ACTION_KEYS = ['lead', 'onsite_conversion.lead_grouped', 'offsite_conversion.fb_pixel_lead'];
+const LEAD_ACTION_KEYS = ['lead', 'onsite_conversion.lead', 'onsite_conversion.lead_grouped', 'offsite_conversion.fb_pixel_lead'];
 
 function sumActionMap(actMap: Record<string, number>, keys: string[]): number {
   return keys.reduce((total, key) => total + (actMap[key] || 0), 0);
+}
+
+function addInsightActions(target: Record<string, number>, rows: unknown): void {
+  for (const action of (rows as Array<{ action_type: string; value: string }> ?? [])) {
+    target[action.action_type] = (target[action.action_type] || 0) + parseFloat(action.value || '0');
+  }
+}
+
+function estimateActionsFromCost(spend: number, costMap: Record<string, number>, keys: string[]): number {
+  if (spend <= 0) return 0;
+  const cost = keys.map(key => costMap[key]).find(value => value > 0) ?? 0;
+  return cost > 0 ? spend / cost : 0;
 }
 
 function campaignKindFor(c: CampanhaDetalhada): CampaignKind {
@@ -486,7 +501,7 @@ async function fetchMetaData(
 
     // Campaign-level with actions + frequency
     const urlCamp = new URL(`https://graph.facebook.com/v21.0/${acct}/insights`);
-    urlCamp.searchParams.set('fields', 'campaign_name,objective,spend,impressions,reach,clicks,frequency,actions,purchase_roas');
+    urlCamp.searchParams.set('fields', 'campaign_name,objective,spend,impressions,reach,clicks,frequency,actions,conversions,cost_per_action_type,purchase_roas');
     urlCamp.searchParams.set('time_range', timeRange);
     urlCamp.searchParams.set('level', 'campaign');
     urlCamp.searchParams.set('limit', '8');
@@ -496,12 +511,15 @@ async function fetchMetaData(
       const j = await resCamp.json() as { data?: Record<string, unknown>[] };
       for (const row of j.data ?? []) {
         const actMap: Record<string, number> = {};
-        for (const a of (row.actions as Array<{ action_type: string; value: string }> ?? [])) {
-          actMap[a.action_type] = (actMap[a.action_type] || 0) + parseFloat(a.value || '0');
-        }
+        const costMap: Record<string, number> = {};
+        addInsightActions(actMap, row.actions);
+        addInsightActions(actMap, row.conversions);
+        addInsightActions(costMap, row.cost_per_action_type);
         const purchaseRoasArr = row.purchase_roas as Array<{ action_type: string; value: string }> | undefined;
         const purchase_roas   = parseFloat(purchaseRoasArr?.[0]?.value ?? '0') || 0;
         const investimento    = parseFloat(String(row.spend ?? '0'));
+        const leads = sumActionMap(actMap, LEAD_ACTION_KEYS) || estimateActionsFromCost(investimento, costMap, LEAD_ACTION_KEYS);
+        const conversas = sumActionMap(actMap, MESSAGE_ACTION_KEYS) || estimateActionsFromCost(investimento, costMap, MESSAGE_ACTION_KEYS);
         const valorComprasApi =
           actMap['offsite_conversion.fb_pixel_purchase_value'] ||
           actMap['omni_purchase_value'] ||
@@ -516,8 +534,8 @@ async function fetchMetaData(
             alcance:       parseInt(String(row.reach ?? '0'), 10),
             cliques:       parseInt(String(row.clicks ?? '0'), 10),
             frequencia:    parseFloat(String(row.frequency ?? '0')),
-            leads:         sumActionMap(actMap, LEAD_ACTION_KEYS),
-            conversas:     sumActionMap(actMap, MESSAGE_ACTION_KEYS),
+            leads,
+            conversas,
             compras:       actMap['offsite_conversion.fb_pixel_purchase'] || actMap['purchase'] || actMap['omni_purchase'] || 0,
             valor_compras: valorComprasApi || (purchase_roas > 0 ? investimento * purchase_roas : 0),
             purchase_roas,
@@ -531,7 +549,7 @@ async function fetchMetaData(
     // Ad-level for creative ranking. `objective` is requested directly so the result
     // metric always reflects the REAL campaign objective — never a guessed/fixed one.
     const urlAd = new URL(`https://graph.facebook.com/v21.0/${acct}/insights`);
-    urlAd.searchParams.set('fields', 'ad_id,ad_name,campaign_name,adset_name,objective,spend,impressions,reach,clicks,ctr,actions');
+    urlAd.searchParams.set('fields', 'ad_id,ad_name,campaign_name,adset_name,objective,spend,impressions,reach,clicks,ctr,actions,conversions');
     urlAd.searchParams.set('time_range', timeRange);
     urlAd.searchParams.set('level', 'ad');
     urlAd.searchParams.set('limit', '20');
@@ -541,9 +559,8 @@ async function fetchMetaData(
       const j = await resAd.json() as { data?: Record<string, unknown>[] };
       for (const row of j.data ?? []) {
         const actMap: Record<string, number> = {};
-        for (const a of (row.actions as Array<{ action_type: string; value: string }> ?? [])) {
-          actMap[a.action_type] = (actMap[a.action_type] || 0) + parseFloat(a.value || '0');
-        }
+        addInsightActions(actMap, row.actions);
+        addInsightActions(actMap, row.conversions);
         const objectiveRaw = String(row.objective || '');
         const category = categorizeMetaObjective(objectiveRaw);
         const om = OBJECTIVE_META[category];
@@ -2838,14 +2855,15 @@ function sMetaAdsCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number, total
     let row1: string, row2: string;
     if (campIsWA) {
       const demand = m.leads + m.conversas;
-      const cpm = demand > 0 && m.investimento > 0 ? brl(m.investimento / demand) : '—';
+      const cpl = demand > 0 && m.investimento > 0 ? brl(m.investimento / demand) : '—';
       row1 = [
         metricItem(ICO_MONEY, 'Investimento', brlOrDash(m.investimento), style.accent, style.iconBg),
-        metricItem(ICO_CHAT, 'Leads / conversas', demand > 0 ? num(Math.round(demand)) : '—', style.accent, style.iconBg),
-        metricItem(ICO_MONEY, 'Custo por lead', cpm, style.accent, style.iconBg),
+        metricItem(ICO_CHAT, 'Leads', demand > 0 ? num(Math.round(demand)) : '—', style.accent, style.iconBg),
+        metricItem(ICO_MONEY, 'Custo por lead', cpl, style.accent, style.iconBg),
       ].join('');
       row2 = [
-        metricItem(ICO_CURSOR, 'Cliques no link', numOrDash(m.cliques), style.accent, style.iconBg),
+        metricItem(ICO_CHAT, 'Conversas iniciadas', m.conversas > 0 ? num(Math.round(m.conversas)) : '—', style.accent, style.iconBg),
+        ...(m.leads > 0 ? [metricItem(ICO_TARGET, 'Formulários', num(Math.round(m.leads)), style.accent, style.iconBg)] : []),
         metricItem(ICO_BARS, 'Frequência', m.frequencia > 0 ? m.frequencia.toFixed(2) : '—', style.accent, style.iconBg),
       ].join('');
     } else if (campIsSales) {
