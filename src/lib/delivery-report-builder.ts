@@ -818,10 +818,24 @@ async function fetchInstagramData(
   // combo is invalid. In v21, reach works with period=day without metric_type, while
   // the other profile metrics use metric_type=total_value. "impressions" is deprecated
   // for many IG accounts; "views" is the current replacement.
-  async function fetchIgProfileMetric(metric: string, metricType?: 'total_value'): Promise<number> {
-    const since = Math.floor(new Date(from + 'T00:00:00Z').getTime() / 1000);
-    const untilRaw = Math.floor(new Date(to + 'T23:59:59Z').getTime() / 1000);
-    const until = Math.min(untilRaw, Math.floor(Date.now() / 1000));
+  const rangeStart = new Date(from + 'T00:00:00Z');
+  const rangeEndRaw = new Date(to + 'T23:59:59Z');
+  const rangeEnd = new Date(Math.min(rangeEndRaw.getTime(), Date.now()));
+
+  const periodChunks: Array<{ since: number; until: number }> = [];
+  for (const cursor = new Date(rangeStart); cursor <= rangeEnd;) {
+    const chunkEnd = new Date(cursor);
+    chunkEnd.setUTCDate(chunkEnd.getUTCDate() + 27);
+    chunkEnd.setUTCHours(23, 59, 59, 999);
+    const finalEnd = new Date(Math.min(chunkEnd.getTime(), rangeEnd.getTime()));
+    periodChunks.push({
+      since: Math.floor(cursor.getTime() / 1000),
+      until: Math.floor(finalEnd.getTime() / 1000),
+    });
+    cursor.setTime(finalEnd.getTime() + 1000);
+  }
+
+  async function fetchIgProfileMetricRange(metric: string, since: number, until: number, metricType?: 'total_value'): Promise<number> {
     const url = new URL(`https://graph.facebook.com/v21.0/${ig!.id}/insights`);
     url.searchParams.set('metric', metric);
     url.searchParams.set('period', 'day');
@@ -842,6 +856,24 @@ async function fetchInstagramData(
     const totalValue = first?.total_value?.value;
     if (typeof totalValue === 'number') return totalValue;
     return (first?.values ?? []).reduce((sum, item) => sum + (typeof item.value === 'number' ? item.value : 0), 0);
+  }
+
+  async function fetchIgProfileMetric(metric: string, metricType?: 'total_value'): Promise<number> {
+    if (!periodChunks.length) return 0;
+    const chunks = periodChunks;
+    const totals = await Promise.all(
+      chunks.map((chunk) => fetchIgProfileMetricRange(metric, chunk.since, chunk.until, metricType)),
+    );
+    const total = totals.reduce((sum, value) => sum + value, 0);
+    if (total > 0 || !metricType) return total;
+
+    // Some IG accounts reject metric_type=total_value for longer windows even when the
+    // per-day series exists. Fallback to summing daily values so the selected period is
+    // still represented instead of showing only followers.
+    const fallbackTotals = await Promise.all(
+      chunks.map((chunk) => fetchIgProfileMetricRange(metric, chunk.since, chunk.until)),
+    );
+    return fallbackTotals.reduce((sum, value) => sum + value, 0);
   }
 
   const [reach, views, profile_views, website_clicks, accounts_engaged] = await Promise.all([
@@ -1876,7 +1908,7 @@ function sMetaAdsResumo(meta: MetaAdsFull, idx: number, total: number): string {
 
 // ── Instagram Insights ────────────────────────────────────────────────────────
 
-function sInstagram(ig: InstagramData, idx: number, total: number): string {
+function sInstagram(ig: InstagramData, idx: number, total: number, periodLabel = 'período selecionado'): string {
   void idx; void total; // page counter intentionally suppressed on this slide — see header below
 
   const engRate = ig.reach > 0 ? (ig.accounts_engaged / ig.reach) * 100 : 0;
@@ -1906,7 +1938,7 @@ function sInstagram(ig: InstagramData, idx: number, total: number): string {
         <p style="font-family:${INTER};font-size:32px;font-weight:900;letter-spacing:-0.02em;color:${FG};margin:0 0 8px">${value}</p>
         <div style="display:flex;align-items:center;gap:8px">
           <span style="width:16px;height:2px;background:${PRIMARY};display:inline-block"></span>
-          <span style="font-size:12px;color:${MUTED};font-family:${INTER}">mês anterior</span>
+          <span style="font-size:12px;color:${MUTED};font-family:${INTER}">período selecionado</span>
         </div>
       </div>
     </div>`;
@@ -1944,7 +1976,7 @@ function sInstagram(ig: InstagramData, idx: number, total: number): string {
   <div style="position:relative;z-index:1;flex:1;padding:30px 48px 0;display:flex;flex-direction:column">
     <div style="flex-shrink:0;margin-bottom:30px">
       <h1 style="font-family:${INTER};font-size:52px;font-weight:900;color:${FG};line-height:1;margin:0 0 12px;letter-spacing:-0.03em">Instagram</h1>
-      <p style="font-size:18px;font-weight:500;color:#163461;font-family:${INTER};margin:0 0 10px">Período: mês anterior</p>
+      <p style="font-size:18px;font-weight:500;color:#163461;font-family:${INTER};margin:0 0 10px">Período: ${periodLabel}</p>
       <span style="width:46px;height:3px;background:${PRIMARY};display:block"></span>
     </div>
 
@@ -2790,6 +2822,9 @@ export async function buildDeliveryReport(opts: {
   const toDate   = new Date(to   + 'T12:00:00');
   const MONTHS   = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
   const periodo  = `${MONTHS[fromDate.getMonth()]}/${fromDate.getFullYear()}`;
+  const instagramPeriodLabel = fromDate.getMonth() === toDate.getMonth() && fromDate.getFullYear() === toDate.getFullYear()
+    ? periodo
+    : `${periodo} a ${MONTHS[toDate.getMonth()]}/${toDate.getFullYear()}`;
 
   const { current: currentFiles, previous: prevFiles } = separateFiles(csvFiles);
   const hasPrev = prevFiles.length > 0;
@@ -2853,7 +2888,7 @@ export async function buildDeliveryReport(opts: {
   if (hasBase)        slides.push(sBase(data, ++i, total));
   if (hasInat)        slides.push(sInativos(data, ++i, total));
   if (hasMeta)        slides.push(sMetaAdsResumo(meta!, ++i, total));
-  if (hasInstagram)   slides.push(sInstagram(instagram!, ++i, total));
+  if (hasInstagram)   slides.push(sInstagram(instagram!, ++i, total, instagramPeriodLabel));
   if (hasInstagramPosts) {
     for (const monthDate of instagramCalendarMonths) {
       slides.push(sInstagramCalendar(igPosts, ++i, total, monthDate));
@@ -3084,7 +3119,7 @@ export function __devPreviewFullReport(): string {
   if (hasBase)               slides.push(sBase(data, ++i, total));
   if (hasInat)               slides.push(sInativos(data, ++i, total));
   if (hasMeta)               slides.push(sMetaAdsResumo(meta, ++i, total));
-  if (hasInstagram)          slides.push(sInstagram(instagram, ++i, total));
+  if (hasInstagram)          slides.push(sInstagram(instagram, ++i, total, 'Março/2026 a Maio/2026'));
   if (hasInstagramPosts) {
     for (const monthDate of instagramCalendarMonths) {
       slides.push(sInstagramCalendar(igPosts, ++i, total, monthDate));
@@ -3104,5 +3139,5 @@ export function __devPreviewInstagram(): string {
     username: 'picolocos.oficial', followers: 8240, reach: 42000, impressions: 61000,
     profile_views: 1850, website_clicks: 620, accounts_engaged: 3100,
   };
-  return sInstagram(ig, 9, 17);
+  return sInstagram(ig, 9, 17, 'Maio/2026');
 }
