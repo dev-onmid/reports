@@ -117,6 +117,7 @@ type Creative = {
   nome: string;
   spend: number;
   resultado: number;
+  purchaseValue?: number;
   campaign_name?: string;
   adset_name?: string;
   objective?: string;
@@ -473,6 +474,7 @@ async function fetchMetaData(
     objective: string;
     spend: number;
     resultado: number;
+    purchaseValue: number;
     impressions: number;
     reach: number;
     clicks: number;
@@ -548,8 +550,10 @@ async function fetchMetaData(
 
     // Ad-level for creative ranking. `objective` is requested directly so the result
     // metric always reflects the REAL campaign objective — never a guessed/fixed one.
+    // action_values is needed to rank Vendas creatives by actual revenue/ROAS, not just
+    // a raw purchase count.
     const urlAd = new URL(`https://graph.facebook.com/v21.0/${acct}/insights`);
-    urlAd.searchParams.set('fields', 'ad_id,ad_name,campaign_name,adset_name,objective,spend,impressions,reach,clicks,ctr,actions,conversions');
+    urlAd.searchParams.set('fields', 'ad_id,ad_name,campaign_name,adset_name,objective,spend,impressions,reach,clicks,ctr,actions,conversions,action_values,cost_per_action_type');
     urlAd.searchParams.set('time_range', timeRange);
     urlAd.searchParams.set('level', 'ad');
     urlAd.searchParams.set('limit', '20');
@@ -559,24 +563,34 @@ async function fetchMetaData(
       const j = await resAd.json() as { data?: Record<string, unknown>[] };
       for (const row of j.data ?? []) {
         const actMap: Record<string, number> = {};
+        const valueMap: Record<string, number> = {};
+        const costMap: Record<string, number> = {};
         addInsightActions(actMap, row.actions);
         addInsightActions(actMap, row.conversions);
+        addInsightActions(valueMap, row.action_values);
+        addInsightActions(costMap, row.cost_per_action_type);
         const objectiveRaw = String(row.objective || '');
         const category = categorizeMetaObjective(objectiveRaw);
         const om = OBJECTIVE_META[category];
+        const investimento = parseFloat(String(row.spend || '0'));
         const resultado = category === 'trafego'
           ? parseInt(String(row.clicks || '0'), 10)
           : category === 'alcance'
           ? parseInt(String(row.reach || '0'), 10)
-          : om.actionKeys.reduce((sum, k) => sum + (actMap[k] || 0), 0);
+          : om.actionKeys.reduce((sum, k) => sum + (actMap[k] || 0), 0)
+            || estimateActionsFromCost(investimento, costMap, om.actionKeys);
+        const purchaseValue = category === 'vendas'
+          ? (valueMap['offsite_conversion.fb_pixel_purchase_value'] || valueMap['omni_purchase_value'] || valueMap['purchase_value'] || 0)
+          : 0;
         adInsights.push({
           ad_id:         String(row.ad_id || ''),
           ad_name:       String(row.ad_name || 'Sem nome'),
           campaign_name: String(row.campaign_name || 'Meta Ads'),
           adset_name:    String(row.adset_name || '—'),
           objective:     objectiveRaw,
-          spend:         parseFloat(String(row.spend || '0')),
+          spend:         investimento,
           resultado,
+          purchaseValue,
           impressions:   parseInt(String(row.impressions || '0'), 10),
           reach:         parseInt(String(row.reach || '0'), 10),
           clicks:        parseInt(String(row.clicks || '0'), 10),
@@ -596,13 +610,43 @@ async function fetchMetaData(
     campanhas:    campanhas.sort((a, b) => b.metricas.investimento - a.metricas.investimento).slice(0, 5),
   };
 
-  // Fetch thumbnails for top-5 ads by resultado then spend
-  const top5 = adInsights
-    .sort((a, b) => b.resultado - a.resultado || b.spend - a.spend)
-    .slice(0, 5);
+  // Pick top creatives PER OBJECTIVE CATEGORY (Vendas/Leads/Mensagens/Tráfego/Engajamento/
+  // Alcance), not one flat ranking by raw volume — a global "highest resultado" sort lets
+  // Alcance ads (whose resultado = reach, naturally in the tens of thousands) permanently
+  // crowd out every Vendas/Leads ad (whose resultado is a small purchase/lead count), even
+  // when those ads are the ones that actually made money. Each category is ranked by the
+  // metric that matters for that objective: Vendas by revenue, Leads/Mensagens by lowest
+  // cost per result, Tráfego by CTR, Engajamento by engagement count, Alcance by reach.
+  const rankWithinCategory = (category: ObjectiveCategory, list: typeof adInsights) => {
+    if (category === 'vendas') {
+      return [...list].sort((a, b) => (b.purchaseValue || b.resultado) - (a.purchaseValue || a.resultado));
+    }
+    if (category === 'leads' || category === 'mensagens') {
+      const withResult = list.filter(a => a.resultado > 0).sort((a, b) => (a.spend / a.resultado) - (b.spend / b.resultado));
+      const withoutResult = list.filter(a => a.resultado === 0).sort((a, b) => b.spend - a.spend);
+      return [...withResult, ...withoutResult];
+    }
+    if (category === 'trafego') return [...list].sort((a, b) => (b.ctr || 0) - (a.ctr || 0) || b.clicks - a.clicks);
+    if (category === 'engajamento') return [...list].sort((a, b) => b.resultado - a.resultado);
+    return [...list].sort((a, b) => b.resultado - a.resultado); // alcance — reach is the right metric here
+  };
 
-  const creatives: Creative[] = await Promise.all(top5.map(async (ad) => {
-    if (!ad.ad_id) return { nome: ad.ad_name, spend: ad.spend, resultado: ad.resultado, campaign_name: ad.campaign_name, adset_name: ad.adset_name, objective: ad.objective, impressions: ad.impressions, reach: ad.reach, clicks: ad.clicks, ctr: ad.ctr, thumbnail_url: null };
+  const byCategory = new Map<ObjectiveCategory, typeof adInsights>();
+  for (const ad of adInsights) {
+    const cat = categorizeMetaObjective(ad.objective);
+    if (!byCategory.has(cat)) byCategory.set(cat, []);
+    byCategory.get(cat)!.push(ad);
+  }
+  // Categories with more spend get more representation in the final list (closer to how
+  // much the client actually invested in that objective), but every active category gets
+  // at least 1 slot — so a small Vendas push never gets fully omitted by a big Alcance one.
+  const PER_CATEGORY_CAP = 2;
+  const orderedCategories = [...byCategory.entries()]
+    .sort((a, b) => b[1].reduce((s, x) => s + x.spend, 0) - a[1].reduce((s, x) => s + x.spend, 0));
+  const topByCategory = orderedCategories.flatMap(([cat, list]) => rankWithinCategory(cat, list).slice(0, PER_CATEGORY_CAP));
+
+  const creatives: Creative[] = await Promise.all(topByCategory.map(async (ad) => {
+    if (!ad.ad_id) return { nome: ad.ad_name, spend: ad.spend, resultado: ad.resultado, purchaseValue: ad.purchaseValue, campaign_name: ad.campaign_name, adset_name: ad.adset_name, objective: ad.objective, impressions: ad.impressions, reach: ad.reach, clicks: ad.clicks, ctr: ad.ctr, thumbnail_url: null };
     // Fetch creative fields needed to resolve the best thumbnail.
     // video_id is the direct reference used by Reels/video ads; image_url is for static ads.
     // creative.thumbnail_url has an oe= expiry param — we prefer video.picture when possible.
@@ -647,6 +691,7 @@ async function fetchMetaData(
       nome: ad.ad_name,
       spend: ad.spend,
       resultado: ad.resultado,
+      purchaseValue: ad.purchaseValue,
       campaign_name: ad.campaign_name,
       adset_name: ad.adset_name,
       objective: ad.objective,
@@ -2652,11 +2697,11 @@ function sCriativos(creatives: Creative[], idx: number, total: number): string {
   };
   const pct = (n?: number) => n && n > 0 ? `${n.toFixed(2).replace('.', ',')}%` : '—';
   const cpl = (c: Creative) => c.resultado > 0 && c.spend > 0 ? c.spend / c.resultado : 0;
-  const rankScore = (c: Creative) => (c.resultado * 1000) - cpl(c) + ((c.ctr ?? 0) * 20) + ((c.clicks ?? 0) * 0.2);
-  const top = [...creatives].sort((a, b) => rankScore(b) - rankScore(a)).slice(0, 4);
+  const cpm = (c: Creative) => c.spend > 0 && (c.impressions ?? 0) > 0 ? c.spend / ((c.impressions ?? 0) / 1000) : 0;
+  const roas = (c: Creative) => c.spend > 0 && (c.purchaseValue ?? 0) > 0 ? (c.purchaseValue ?? 0) / c.spend : 0;
 
-  const iconSvg = (path: string, size = 14) =>
-    `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${PRIMARY_TEXT}" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0">${path}</svg>`;
+  const iconSvg = (path: string, size = 14, color = PRIMARY_TEXT) =>
+    `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0">${path}</svg>`;
   const ICO_CAMPAIGN = '<path d="M4 13a8 8 0 0 1 8-8h7v7a8 8 0 0 1-8 8H4v-7z"/><path d="M14 6l4 4"/>';
   const ICO_SET = '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 8h10M7 12h7M7 16h5"/>';
   const ICO_OBJ = '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/>';
@@ -2665,7 +2710,28 @@ function sCriativos(creatives: Creative[], idx: number, total: number): string {
   const ICO_TREND = '<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>';
   const ICO_CURSOR = '<path d="m3 3 7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="m13 13 6 6"/>';
   const ICO_ALERT = '<circle cx="12" cy="12" r="10"/><path d="M12 8v5M12 16h.01"/>';
-  const ICO_STAR = '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>';
+  const ICO_CART = '<circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>';
+  const ICO_RECEIPT = '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>';
+
+  // Each objective gets its own accent color (reused from sMetaAdsCampanhas) and a
+  // one-line explanation of WHAT metric decides the ranking — this is the actual fix:
+  // a Vendas section is ranked by revenue/ROAS, an Alcance section by reach/CPM, etc.
+  // Mixing them into one "highest volume wins" ranking is how vanity metrics creep in.
+  const styleForCategory = (cat: ObjectiveCategory) => {
+    if (cat === 'vendas') return { bg: '#F7FFF4', border: '#D7F8D0', accent: PRIMARY_TEXT, iconBg: '#ECFCE8' };
+    if (cat === 'trafego') return { bg: '#F6FAFF', border: '#BFDBFE', accent: '#2563EB', iconBg: '#EAF3FF' };
+    if (cat === 'alcance') return { bg: '#FFFDF5', border: '#FDE68A', accent: '#B45309', iconBg: '#FFF7E6' };
+    if (cat === 'mensagens' || cat === 'leads') return { bg: '#F4FFFB', border: '#99F6E4', accent: '#0F766E', iconBg: '#E6FFFB' };
+    return { bg: '#FAF7FF', border: '#DDD6FE', accent: '#7C3AED', iconBg: '#F5F0FF' };
+  };
+  const criterionFor = (cat: ObjectiveCategory) => ({
+    vendas:      'ranqueado por valor de venda e ROAS — o que realmente vendeu',
+    leads:       'ranqueado por menor custo por lead',
+    mensagens:   'ranqueado por menor custo por conversa',
+    trafego:     'ranqueado por CTR — engajamento real com o criativo',
+    engajamento: 'ranqueado por volume de engajamento',
+    alcance:     'ranqueado por alcance e CPM — visibilidade da marca',
+  }[cat]);
 
   // Single-line + ellipsis (instead of wrapping) so a long campaign/conjunto name can
   // never push the card taller than its fixed height and clip the status badge below.
@@ -2674,46 +2740,87 @@ function sCriativos(creatives: Creative[], idx: number, total: number): string {
       ${iconSvg(icon, 15)}
       <p style="font-family:${INTER};font-size:12px;color:#475569;margin:0;line-height:1.2;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><strong style="font-weight:850;color:#64748B">${label}:</strong> <span style="color:#475569">${value && value !== '—' ? value : '—'}</span></p>
     </div>`;
-  const metric = (icon: string, label: string, value: string) =>
+  const metric = (icon: string, label: string, value: string, color = PRIMARY_TEXT) =>
     `<div style="height:50px;min-width:0;overflow:hidden;border:1px solid #E8EDF4;border-radius:10px;background:#FFFFFF;display:flex;align-items:center;gap:7px;padding:0 9px;box-sizing:border-box">
-      ${iconSvg(icon, 13)}
+      ${iconSvg(icon, 13, color)}
       <div style="min-width:0;overflow:hidden">
         <p style="font-family:${INTER};font-size:8px;font-weight:850;color:#64748B;margin:0 0 4px;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${label}</p>
         <p style="font-family:${INTER};font-size:15px;font-weight:950;color:#050816;margin:0;line-height:1;letter-spacing:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${value}</p>
       </div>
     </div>`;
-  const statusFor = (c: Creative, i: number) => {
-    if (i === 0) return { label: 'Maior volume', icon: ICO_STAR, color: PRIMARY_TEXT, bg: '#ECFCE8', border: '#D7F8D0' };
-    const cost = cpl(c);
-    const worstCost = Math.max(...top.map((item) => cpl(item)).filter((v) => v > 0));
-    if (cost > 0 && cost === worstCost && i >= 2) return { label: 'Ponto de atenção', icon: ICO_ALERT, color: RED, bg: '#FFF1F2', border: '#FECACA' };
-    const positiveCost = cost > 0 && top.some((item) => item !== c && cpl(item) > 0 && cost <= cpl(item));
-    if (positiveCost) return { label: `Melhor ${OBJECTIVE_META[categorizeMetaObjective(c.objective)].costLabel}`, icon: '<path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7H14a3.5 3.5 0 0 1 0 7H6"/>', color: PRIMARY_TEXT, bg: '#ECFCE8', border: '#D7F8D0' };
-    if ((c.ctr ?? 0) >= 1.5 || c.resultado > 0) return { label: 'Boa eficiência', icon: ICO_TREND, color: PRIMARY_TEXT, bg: '#ECFCE8', border: '#D7F8D0' };
-    return { label: 'Ponto de atenção', icon: ICO_ALERT, color: RED, bg: '#FFF1F2', border: '#FECACA' };
+
+  // Metric grid tailored to the objective — a Vendas creative shows revenue/ROAS, a
+  // Tráfego creative shows CPC/CTR, etc. Never the same generic 6 boxes for everyone.
+  const metricsFor = (c: Creative, cat: ObjectiveCategory, accent: string) => {
+    if (cat === 'vendas') return [
+      metric(ICO_COIN, 'Invest.', moneyCompact(c.spend), accent),
+      metric(ICO_CART, 'Compras', c.resultado > 0 ? compact(Math.round(c.resultado)) : '—', accent),
+      metric(ICO_COIN, 'Custo/venda', cpl(c) > 0 ? moneyCompact(cpl(c)) : '—', accent),
+      metric(ICO_RECEIPT, 'Valor de venda', moneyCompact(c.purchaseValue ?? 0), accent),
+      metric(ICO_TREND, 'ROAS', roas(c) > 0 ? `${roas(c).toFixed(2)}×` : '—', accent),
+      metric(ICO_CURSOR, 'Cliques', compact(c.clicks), accent),
+    ];
+    if (cat === 'leads' || cat === 'mensagens') {
+      const om = OBJECTIVE_META[cat];
+      return [
+        metric(ICO_COIN, 'Invest.', moneyCompact(c.spend), accent),
+        metric(ICO_USER, om.resultWord === 'leads' ? 'Leads' : 'Conversas', c.resultado > 0 ? compact(Math.round(c.resultado)) : '—', accent),
+        metric(ICO_COIN, om.costLabel, cpl(c) > 0 ? moneyCompact(cpl(c)) : '—', accent),
+        metric(ICO_CURSOR, 'Cliques', compact(c.clicks), accent),
+        metric(ICO_TREND, 'CTR', pct(c.ctr), accent),
+      ];
+    }
+    if (cat === 'trafego') return [
+      metric(ICO_COIN, 'Invest.', moneyCompact(c.spend), accent),
+      metric(ICO_CURSOR, 'Cliques', compact(c.clicks), accent),
+      metric(ICO_COIN, 'CPC', c.clicks && c.spend > 0 ? moneyCompact(c.spend / c.clicks) : '—', accent),
+      metric(ICO_TREND, 'CTR', pct(c.ctr), accent),
+      metric(ICO_OBJ, 'Alcance', compact(c.reach), accent),
+    ];
+    if (cat === 'engajamento') return [
+      metric(ICO_COIN, 'Invest.', moneyCompact(c.spend), accent),
+      metric(ICO_USER, 'Engajamentos', c.resultado > 0 ? compact(Math.round(c.resultado)) : '—', accent),
+      metric(ICO_COIN, 'Custo/engaj.', cpl(c) > 0 ? moneyCompact(cpl(c)) : '—', accent),
+      metric(ICO_OBJ, 'Alcance', compact(c.reach), accent),
+      metric(ICO_TREND, 'CTR', pct(c.ctr), accent),
+    ];
+    // alcance — volume IS the correct metric for this objective, so reach/CPM lead here.
+    return [
+      metric(ICO_COIN, 'Invest.', moneyCompact(c.spend), accent),
+      metric(ICO_OBJ, 'Pessoas atingidas', compact(c.reach), accent),
+      metric(ICO_COIN, 'CPM', cpm(c) > 0 ? moneyCompact(cpm(c)) : '—', accent),
+      metric(ICO_USER, 'Impressões', compact(c.impressions), accent),
+      metric(ICO_CURSOR, 'Cliques', compact(c.clicks), accent),
+    ];
   };
 
-  const card = (c: Creative, i: number) => {
-    const status = statusFor(c, i);
+  // Status badge per category — the #1 in each group gets a badge that names the metric
+  // it actually won on, instead of a blanket "Maior volume" applied regardless of goal.
+  const statusFor = (c: Creative, i: number, cat: ObjectiveCategory, group: Creative[]) => {
+    const winnerLabel = {
+      vendas: roas(c) > 0 ? `Melhor ROAS (${roas(c).toFixed(1)}×)` : 'Mais vendas',
+      leads: 'Melhor CPL', mensagens: 'Melhor custo/conversa',
+      trafego: 'Melhor CTR', engajamento: 'Mais engajamento', alcance: 'Maior alcance',
+    }[cat];
+    if (i === 0) return { label: winnerLabel, icon: ICO_TREND, color: PRIMARY_TEXT, bg: '#ECFCE8', border: '#D7F8D0' };
+    const cost = cpl(c);
+    const costs = group.map(cpl).filter(v => v > 0);
+    if (cost > 0 && costs.length > 1 && cost === Math.max(...costs)) {
+      return { label: 'Ponto de atenção', icon: ICO_ALERT, color: RED, bg: '#FFF1F2', border: '#FECACA' };
+    }
+    return { label: 'Boa eficiência', icon: ICO_TREND, color: PRIMARY_TEXT, bg: '#ECFCE8', border: '#D7F8D0' };
+  };
+
+  const card = (c: Creative, i: number, cat: ObjectiveCategory, group: Creative[], style: ReturnType<typeof styleForCategory>) => {
+    const status = statusFor(c, i, cat, group);
     const isVideo = /video|reel|narrad/i.test(c.nome);
     const preview = c.thumbnail_url
       ? `<img src="${c.thumbnail_url}" style="width:100%;height:100%;object-fit:cover;display:block" />`
-      : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#ECFCE8,#F8FAFC);color:#94A3B8;font-family:${INTER};font-size:12px;font-weight:800;text-align:center;padding:18px;box-sizing:border-box">Preview indisponível</div>`;
-
-    // Result + cost metric MUST match the campaign's real objective — a Vendas campaign
-    // shows "vendas"/Custo por venda, a Tráfego campaign shows "cliques"/CPC, etc.
-    // Never hardcode "leads"/CPL regardless of what the campaign actually optimizes for.
-    const category = categorizeMetaObjective(c.objective);
-    const om = OBJECTIVE_META[category];
-    const resultLabel = c.resultado > 0 ? compact(Math.round(c.resultado)) : '—';
-    const costValue = category === 'alcance'
-      ? (c.spend > 0 && (c.impressions ?? 0) > 0 ? c.spend / ((c.impressions ?? 0) / 1000) : 0)
-      : cpl(c);
-    const costLabel = costValue > 0 ? moneyCompact(costValue) : '—';
+      : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,${style.iconBg},#F8FAFC);color:#94A3B8;font-family:${INTER};font-size:12px;font-weight:800;text-align:center;padding:18px;box-sizing:border-box">Preview indisponível</div>`;
 
     return `<div style="min-height:286px;background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 14px 34px rgba(15,23,42,.055);display:grid;grid-template-columns:42px 232px minmax(0,1fr);gap:18px;padding:16px;box-sizing:border-box;overflow:hidden">
-      <div style="width:38px;height:42px;border-radius:10px;background:${PRIMARY}14;border:1px solid ${PRIMARY}33;display:flex;align-items:center;justify-content:center">
-        <span style="font-family:${INTER};font-size:25px;font-weight:950;color:${PRIMARY_TEXT};letter-spacing:-0.05em;line-height:1">${i + 1}º</span>
+      <div style="width:38px;height:42px;border-radius:10px;background:${style.accent}14;border:1px solid ${style.accent}33;display:flex;align-items:center;justify-content:center">
+        <span style="font-family:${INTER};font-size:25px;font-weight:950;color:${style.accent};letter-spacing:-0.05em;line-height:1">${i + 1}º</span>
       </div>
       <div style="position:relative;width:232px;height:254px;border-radius:12px;background:${ROW};border:1px solid #E8EDF4;overflow:hidden">
         ${preview}
@@ -2724,15 +2831,9 @@ function sCriativos(creatives: Creative[], idx: number, total: number): string {
         <div style="display:flex;flex-direction:column;gap:9px;margin-bottom:15px">
           ${originLine(ICO_CAMPAIGN, 'Campanha', c.campaign_name || 'Meta Ads')}
           ${originLine(ICO_SET, 'Conjunto', c.adset_name)}
-          ${originLine(ICO_OBJ, 'Objetivo', om.label)}
         </div>
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
-          ${metric(ICO_USER, 'Resultados', resultLabel)}
-          ${metric(ICO_COIN, 'Invest.', moneyCompact(c.spend))}
-          ${metric(ICO_TREND, 'CTR', pct(c.ctr))}
-          ${metric(ICO_COIN, om.costLabel, costLabel)}
-          ${metric(ICO_OBJ, 'Alcance', compact(c.reach))}
-          ${metric(ICO_CURSOR, 'Cliques', compact(c.clicks))}
+          ${metricsFor(c, cat, style.accent).join('')}
         </div>
         <div style="height:36px;margin-top:auto;border:1px solid ${status.border};border-radius:10px;background:${status.bg};display:flex;align-items:center;gap:10px;padding:0 16px;box-sizing:border-box">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${status.color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${status.icon}</svg>
@@ -2742,24 +2843,48 @@ function sCriativos(creatives: Creative[], idx: number, total: number): string {
     </div>`;
   };
 
-  const emptyState = `<div style="grid-column:1/-1;background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 14px 34px rgba(15,23,42,.055);height:360px;display:flex;align-items:center;justify-content:center;color:#94A3B8;font-family:${INTER};font-size:16px;font-weight:800">Sem criativos pagos disponíveis neste período</div>`;
+  // Group by real objective (in the same spend-desc priority order the fetch already
+  // selected them in) — each group becomes its own labeled section with its own ranking.
+  const groups = new Map<ObjectiveCategory, Creative[]>();
+  for (const c of creatives) {
+    const cat = categorizeMetaObjective(c.objective);
+    if (!groups.has(cat)) groups.set(cat, []);
+    groups.get(cat)!.push(c);
+  }
+
+  const section = ([cat, group]: [ObjectiveCategory, Creative[]]) => {
+    const style = styleForCategory(cat);
+    const om = OBJECTIVE_META[cat];
+    return `<div style="margin-bottom:22px">
+      <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:12px">
+        <div style="width:4px;height:18px;background:${style.accent};border-radius:2px;flex-shrink:0"></div>
+        <p style="font-family:${INTER};font-size:16px;font-weight:900;color:#050816;margin:0">${om.label}</p>
+        <p style="font-family:${INTER};font-size:12px;font-weight:600;color:#64748B;margin:0">— ${criterionFor(cat)}</p>
+      </div>
+      <div style="display:grid;grid-template-columns:${group.length === 1 ? '1fr' : '1fr 1fr'};gap:14px 22px">
+        ${group.map((c, i) => card(c, i, cat, group, style)).join('')}
+      </div>
+    </div>`;
+  };
+
+  const emptyState = `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 14px 34px rgba(15,23,42,.055);height:360px;display:flex;align-items:center;justify-content:center;color:#94A3B8;font-family:${INTER};font-size:16px;font-weight:800">Sem criativos pagos disponíveis neste período</div>`;
   const body = `<div data-slide-index="${idx}" data-slide-total="${total}" style="width:1440px;min-height:810px;background:${BG};border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
   <div style="position:absolute;right:-120px;top:-170px;width:640px;height:540px;border-radius:50%;background:linear-gradient(135deg,rgba(241,245,249,.74),rgba(255,255,255,.12));opacity:.78;pointer-events:none"></div>
   <div style="position:relative;z-index:1;flex:1;padding:26px 40px 24px;box-sizing:border-box;display:flex;flex-direction:column">
     <div style="flex-shrink:0;margin-bottom:18px">
       <h1 style="font-family:${INTER};font-size:52px;font-weight:950;color:#050816;line-height:.95;margin:0 0 14px;letter-spacing:-0.055em">Principais criativos de tráfego pago</h1>
-      <p style="font-size:17px;font-weight:500;color:#6B7280;font-family:${INTER};margin:0;letter-spacing:-0.015em">Ranking por resultado com identificação de campanha, conjunto e métricas-chave</p>
+      <p style="font-size:17px;font-weight:500;color:#6B7280;font-family:${INTER};margin:0;letter-spacing:-0.015em">Melhores criativos por objetivo — cada campanha avaliada pela métrica certa para o seu tipo</p>
       <div style="width:38px;height:3px;border-radius:999px;background:${PRIMARY};margin-top:13px"></div>
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px 22px;flex:1;align-content:start">
-      ${top.length ? top.map(card).join('') : emptyState}
+    <div style="flex:1">
+      ${groups.size ? [...groups.entries()].map(section).join('') : emptyState}
     </div>
-    <div style="height:34px;margin-top:auto;display:flex;align-items:center;gap:12px">
+    <div data-conclusion="1" style="height:34px;margin-top:auto;display:flex;align-items:center;gap:12px">
       <div style="width:26px;height:26px;border-radius:50%;border:2px solid ${PRIMARY_TEXT};display:flex;align-items:center;justify-content:center">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="${PRIMARY_TEXT}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${ICO_OBJ}</svg>
       </div>
       <div style="width:1px;height:22px;background:#D7DEE8"></div>
-      <p style="font-family:${INTER};font-size:13px;font-weight:700;color:#6B7280;margin:0">Leitura visual dos principais criativos pagos com identificação de origem, estrutura e desempenho.</p>
+      <p style="font-family:${INTER};font-size:13px;font-weight:700;color:#6B7280;margin:0">Cada objetivo é ranqueado pela métrica que realmente importa para ele — não por volume genérico.</p>
     </div>
   </div>
 </div>`;
@@ -2774,33 +2899,6 @@ function sMetaAdsCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number, total
 
   const isDemand = (c: CampanhaDetalhada) => ['mensagens', 'leads'].includes(campaignKind(c));
   const isSales = (c: CampanhaDetalhada) => campaignKind(c) === 'vendas';
-
-  // ── Auto insight per campaign ─────────────────────────────────────────────
-  function autoInsight(c: CampanhaDetalhada): string {
-    const m = c.metricas;
-    if (isDemand(c)) {
-      const demand = m.leads + m.conversas;
-      const cpm = demand > 0 && m.investimento > 0 ? m.investimento / demand : 0;
-      if (m.frequencia > 5)    return `Maior investimento e maior volume de cliques, indicando forte alcance e engajamento. No entanto, a frequência elevada (${m.frequencia.toFixed(1)}×) sinaliza desgaste da audiência, reforçando a necessidade de renovar criativos e abordagens para manter a eficiência da campanha.`;
-      if (m.conversas > 300)   return `Alto volume de conversas iniciadas — pipeline aquecido para nutrição via WhatsApp. Vale estruturar um fluxo de follow-up para converter esses contatos em pedidos.`;
-      if (cpm > 0 && cpm < 8)  return `Custo por lead eficiente (${brl(cpm)}) — campanha rentável e com espaço para escalar o investimento mantendo o mesmo padrão de criativo.`;
-      return `${numOrDash(Math.round(demand))} leads/conversas com ${brlOrDash(m.investimento)} investido — monitorar a qualidade dos contatos recebidos nas próximas semanas.`;
-    }
-    if (isSales(c)) {
-      if (m.purchase_roas > 6)  return `Excelente relação entre investimento e retorno, com ROAS de ${m.purchase_roas.toFixed(1)}× e custo por compra eficiente. A campanha apresenta forte potencial de escala e deve ser mantida com testes contínuos de novos criativos.`;
-      if (m.purchase_roas > 3)  return `Boa relação entre investimento e retorno, com ROAS positivo (${m.purchase_roas.toFixed(1)}×) e custo por compra eficiente. A campanha tem potencial de escala com testes de novos criativos e produtos campeões.`;
-      if (m.purchase_roas > 0)  return `ROAS de ${m.purchase_roas.toFixed(1)}× abaixo do ideal — vale revisar criativo, página de destino e segmentação antes de aumentar o investimento.`;
-      if (m.compras > 0)        return `${num(Math.round(m.compras))} compras registradas no período — acompanhar a evolução do ROAS nas próximas semanas antes de escalar.`;
-      return `Campanha de vendas com ${brlOrDash(m.investimento)} investido e ainda sem conversões no período — monitorar de perto e ajustar segmentação se não houver retorno em breve.`;
-    }
-    if (campaignKind(c) === 'trafego') {
-      const cpc = m.cliques > 0 && m.investimento > 0 ? m.investimento / m.cliques : 0;
-      if (m.cliques > 500) return `Alto volume de cliques (${numOrDash(m.cliques)}) com CPC de ${brlOrDash(cpc)} — bom sinal de interesse e tráfego qualificado para o destino.`;
-      return `${numOrDash(m.cliques)} cliques com ${numOrDash(m.alcance)} pessoas alcançadas — acompanhar CTR e CPC para ganhar eficiência no tráfego de link.`;
-    }
-    if (m.frequencia > 4)       return `Frequência de ${m.frequencia.toFixed(1)}× com boa repetição de mensagem — campanha de reconhecimento consolidando a marca junto ao público.`;
-    return `Alcance de ${numOrDash(m.alcance)} pessoas com ${brlOrDash(m.investimento)} investido — campanha de visibilidade ativa, ideal para aquecer o público antes de uma campanha de conversão.`;
-  }
 
   const descriptionFor = (c: CampanhaDetalhada): string => {
     if (isDemand(c)) return 'Campanha de geração de demanda com foco em leads e conversas.';
@@ -2829,7 +2927,6 @@ function sMetaAdsCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number, total
   const ICO_BARS    = '<path d="M4 19V9"/><path d="M10 19V5"/><path d="M16 19v-8"/><path d="M22 19H2"/>';
   const ICO_CART    = '<circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>';
   const ICO_RECEIPT = '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>';
-  const ICO_BULB    = '<path d="M9 18h6"/><path d="M10 22h4"/><path d="M8.5 14.5A6 6 0 1 1 15.5 14c-.7.7-1.1 1.4-1.2 2H9.7c-.1-.7-.5-1.2-1.2-1.5z"/><path d="M4 12H2M22 12h-2M5.6 5.6 4.2 4.2M19.8 4.2l-1.4 1.4"/>';
   const ICO_TARGET  = '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 12l7-7"/><path d="M16 5h3v3"/>';
 
   const metricItem = (iconPath: string, label: string, value: string, accent = PRIMARY_TEXT, bg = `${PRIMARY}18`) =>
@@ -2904,7 +3001,7 @@ function sMetaAdsCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number, total
       ].join('');
     }
 
-    return `<div style="background:${style.bg};border:1px solid ${style.border};border-left:5px solid ${style.accent};border-radius:18px;box-shadow:0 12px 28px rgba(15,23,42,.052);padding:20px 22px;box-sizing:border-box;display:flex;flex-direction:column;min-height:286px">
+    return `<div style="background:${style.bg};border:1px solid ${style.border};border-left:5px solid ${style.accent};border-radius:18px;box-shadow:0 12px 28px rgba(15,23,42,.052);padding:20px 22px;box-sizing:border-box;display:flex;flex-direction:column;min-height:200px">
       <div style="display:flex;align-items:flex-start;gap:16px;padding-bottom:20px">
         <div style="width:52px;height:52px;border-radius:50%;background:${style.iconBg};display:flex;align-items:center;justify-content:center;flex-shrink:0">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="${style.accent}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${icoPath}</svg>
@@ -2917,21 +3014,9 @@ function sMetaAdsCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number, total
 
       <div style="border-top:1px solid #EEF2F7"></div>
 
-      <div style="padding:20px 0;display:flex;flex-direction:column;gap:18px">
+      <div style="padding:20px 0 4px;display:flex;flex-direction:column;gap:18px">
         <div style="display:flex;gap:12px">${row1}</div>
         <div style="display:flex;gap:12px">${row2}</div>
-      </div>
-
-      <div style="border-top:1px solid #EEF2F7"></div>
-
-      <div data-conclusion="1" style="margin-top:18px;background:#FFFFFFAA;border-radius:14px;padding:15px 18px;display:flex;align-items:flex-start;gap:14px">
-        <div style="width:34px;height:34px;border-radius:50%;background:${style.iconBg};display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="${style.accent}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${campIsWA ? ICO_TARGET : ICO_BULB}</svg>
-        </div>
-        <div style="border-left:2px solid ${style.accent};padding-left:14px">
-          <p style="font-size:14px;font-weight:800;color:${FG};font-family:${INTER};margin:0 0 4px">Insight estratégico</p>
-          <p style="font-size:13px;font-weight:500;color:#163461;font-family:${INTER};line-height:1.6;margin:0">${autoInsight(c)}</p>
-        </div>
       </div>
     </div>`;
   }
@@ -2956,8 +3041,8 @@ function sMetaAdsCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number, total
 
   <div style="position:relative;z-index:1;flex:1;padding:8px 48px 0;display:flex;flex-direction:column">
     <div style="flex-shrink:0;margin-bottom:28px">
-      <h1 style="font-family:${INTER};font-size:52px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 8px;letter-spacing:-0.03em">Destaques das campanhas</h1>
-      <p style="font-size:16px;font-weight:500;color:#163461;font-family:${INTER};margin:0">Desempenho das campanhas em ${month}</p>
+      <h1 style="font-family:${INTER};font-size:52px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 8px;letter-spacing:-0.03em">Campanhas veiculadas</h1>
+      <p data-conclusion="1" style="font-size:16px;font-weight:500;color:#163461;font-family:${INTER};margin:0">Desempenho das campanhas em ${month}</p>
     </div>
 
     <div style="flex:1;min-height:0">
@@ -3108,13 +3193,28 @@ export async function buildDeliveryReport(opts: {
   const slides: string[] = [];
   let i = 1;
 
+  // Slides are grouped into topic blocks — base de clientes/produtos, depois tráfego
+  // pago (resumo + campanhas + criativos) inteiro, depois Instagram inteiro — em vez de
+  // intercalar assuntos. Cada bloco fica de uma vez só, sem voltar a um assunto anterior.
   slides.push(sCapa(data, meta, clientName, periodo, prevPeriodo, diag, total));
+
+  // ── Bloco: base de clientes / produtos ────────────────────────────────────
   if (hasVisao)       slides.push(sVisaoGeral(data, prevData, ++i, total, periodo, prevPeriodo));
   if (hasDia)         slides.push(sPorDia(data, ++i, total, periodo));
   if (hasRegiao)      slides.push(sRegioes(bairros, ++i, total));
   if (hasBase)        slides.push(sBase(data, ++i, total));
   if (hasInat)        slides.push(sInativos(data, ++i, total));
+
+  // ── Bloco: tráfego pago (Meta Ads) ─────────────────────────────────────────
   if (hasMeta)        slides.push(sMetaAdsResumo(meta!, ++i, total));
+  if (hasDestaques) {
+    for (let start = 0; start < meta!.campanhas.length; start += 4) {
+      slides.push(sMetaAdsCampanhas(meta!, diag, ++i, total, periodo, meta!.campanhas.slice(start, start + 4)));
+    }
+  }
+  if (hasCriativos)   slides.push(sCriativos(creatives, ++i, total));
+
+  // ── Bloco: Instagram ───────────────────────────────────────────────────────
   if (hasInstagram)   slides.push(sInstagram(instagram!, ++i, total, instagramPeriodLabel));
   if (hasInstagramPosts) {
     for (const monthDate of instagramCalendarMonths) {
@@ -3123,12 +3223,6 @@ export async function buildDeliveryReport(opts: {
   }
   if (hasInstagramPosts)     slides.push(sInstagramPosts(igPosts, ++i, total));
   if (hasInstagramSpotlight) slides.push(sInstagramSpotlight(igPosts, ++i, total));
-  if (hasDestaques) {
-    for (let start = 0; start < meta!.campanhas.length; start += 4) {
-      slides.push(sMetaAdsCampanhas(meta!, diag, ++i, total, periodo, meta!.campanhas.slice(start, start + 4)));
-    }
-  }
-  if (hasCriativos)   slides.push(sCriativos(creatives, ++i, total));
 
   return { html: `${FONT_LINK}<div class="onmid-report" style="background:${CANVAS};padding:28px;font-family:${INTER}">${slides.join('')}</div>` };
 }
@@ -3346,12 +3440,21 @@ export function __devPreviewFullReport(): string {
   let i = 1;
 
   slides.push(sCapa(data, meta, 'PicoLocos', periodo, prevPeriodo, diag, total));
+  // ── Bloco: base de clientes / produtos ────────────────────────────────────
   if (hasVisao)              slides.push(sVisaoGeral(data, prevData, ++i, total, periodo, prevPeriodo));
   if (hasDia)                slides.push(sPorDia(data, ++i, total, periodo));
   if (hasRegiao)             slides.push(sRegioes(bairros, ++i, total));
   if (hasBase)               slides.push(sBase(data, ++i, total));
   if (hasInat)               slides.push(sInativos(data, ++i, total));
+  // ── Bloco: tráfego pago (Meta Ads) ─────────────────────────────────────────
   if (hasMeta)               slides.push(sMetaAdsResumo(meta, ++i, total));
+  if (hasDestaques) {
+    for (let start = 0; start < meta.campanhas.length; start += 4) {
+      slides.push(sMetaAdsCampanhas(meta, diag, ++i, total, periodo, meta.campanhas.slice(start, start + 4)));
+    }
+  }
+  if (hasCriativos)          slides.push(sCriativos(creatives, ++i, total));
+  // ── Bloco: Instagram ───────────────────────────────────────────────────────
   if (hasInstagram)          slides.push(sInstagram(instagram, ++i, total, 'Março/2026 a Maio/2026'));
   if (hasInstagramPosts) {
     for (const monthDate of instagramCalendarMonths) {
@@ -3360,12 +3463,6 @@ export function __devPreviewFullReport(): string {
   }
   if (hasInstagramPosts)     slides.push(sInstagramPosts(igPosts, ++i, total));
   if (hasInstagramSpotlight) slides.push(sInstagramSpotlight(igPosts, ++i, total));
-  if (hasDestaques) {
-    for (let start = 0; start < meta.campanhas.length; start += 4) {
-      slides.push(sMetaAdsCampanhas(meta, diag, ++i, total, periodo, meta.campanhas.slice(start, start + 4)));
-    }
-  }
-  if (hasCriativos)          slides.push(sCriativos(creatives, ++i, total));
 
   return `${FONT_LINK}<div class="onmid-report" style="background:${CANVAS};padding:28px;font-family:${INTER}">${slides.join('')}</div>`;
 }
