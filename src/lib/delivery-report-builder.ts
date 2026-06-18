@@ -1115,6 +1115,29 @@ function donutPath(cx: number, cy: number, outer: number, inner: number, a1: num
 
 // ── Core layout primitives ────────────────────────────────────────────────────
 
+const TITLE_SMALL_WORDS = new Set(['a', 'o', 'as', 'os', 'de', 'do', 'da', 'dos', 'das', 'e', 'em', 'no', 'na', 'nos', 'nas', 'por', 'para', 'com']);
+
+function reportTitle(text: string): string {
+  let wordIndex = 0;
+  return text
+    .split(/(<br\s*\/?>|\s+)/i)
+    .map((part) => {
+      if (!part || /^\s+$/.test(part) || /^<br\s*\/?>$/i.test(part)) return part;
+      return part
+        .split(/([—-])/)
+        .map((token) => {
+          if (!token || token === '—' || token === '-') return token;
+          const lower = token.toLocaleLowerCase('pt-BR');
+          const shouldStayLower = wordIndex > 0 && TITLE_SMALL_WORDS.has(lower);
+          wordIndex += 1;
+          if (shouldStayLower) return lower;
+          return lower.charAt(0).toLocaleUpperCase('pt-BR') + lower.slice(1);
+        })
+        .join('');
+    })
+    .join('');
+}
+
 /** Premium footer (toggle pill + ONMID Reports wordmark) — same style as the cover. */
 function richFooter(): string {
   return `<div style="height:56px;border-top:1px solid ${BORDER};display:flex;align-items:center;padding:0 48px;gap:12px;flex-shrink:0">
@@ -1215,7 +1238,7 @@ function sCapa(
   <div style="position:relative;z-index:1;flex:1;padding:82px 48px 68px;display:grid;grid-template-columns:650px 1fr;column-gap:40px">
     <div style="display:flex;flex-direction:column;min-width:0">
       <h1 style="font-family:${INTER};font-size:52px;font-weight:900;letter-spacing:-0.045em;color:${FG};line-height:1.04;margin:0 0 20px">
-        Relatório de Performance —<br>${clientName}
+        ${reportTitle('Relatório de Performance')} —<br>${clientName}
       </h1>
       <p style="font-family:${INTER};font-size:20px;font-weight:500;color:#163461;line-height:1.48;margin:0 0 34px;max-width:590px">${apoio}</p>
 
@@ -1374,7 +1397,7 @@ function sVisaoGeral(
 
   <div style="position:relative;z-index:1;flex:1;padding:56px 48px 0;display:flex;flex-direction:column">
     <div style="margin-bottom:26px">
-      <h1 style="font-family:${INTER};font-size:52px;font-weight:900;letter-spacing:-0.045em;color:${FG};line-height:1.04;margin:0 0 10px">Visão geral do mês</h1>
+      <h1 style="font-family:${INTER};font-size:52px;font-weight:900;letter-spacing:-0.045em;color:${FG};line-height:1.04;margin:0 0 10px">${reportTitle('Visão geral do mês')}</h1>
       <p style="font-family:${INTER};font-size:22px;font-weight:500;color:#163461;line-height:1.35;margin:0">
         ${hasCompare ? `Comparativo de ${curPeriod.month} com ${cmpPeriod.month}${curPeriod.year ? ` de ${curPeriod.year}` : ''}` : `Resultado de ${periodo}`}
       </p>
@@ -1505,7 +1528,7 @@ function sPorDia(d: ParsedData, idx: number, total: number, periodo = 'Maio/2026
 
   <div style="position:relative;z-index:1;flex:1;padding:48px 42px 34px;display:flex;flex-direction:column;box-sizing:border-box">
     <div style="margin-bottom:28px">
-      <h1 style="font-family:${INTER};font-size:52px;font-weight:950;color:#050816;letter-spacing:-0.06em;line-height:.98;margin:0 0 14px">Comportamento por dia da semana</h1>
+      <h1 style="font-family:${INTER};font-size:52px;font-weight:950;color:#050816;letter-spacing:-0.06em;line-height:.98;margin:0 0 14px">${reportTitle('Comportamento por dia da semana')}</h1>
       <p style="font-family:${INTER};font-size:23px;font-weight:500;color:#163461;letter-spacing:-0.025em;margin:0">Pedidos e entregas em ${month}</p>
     </div>
 
@@ -1617,7 +1640,7 @@ function sRegioes(bairros: Bairro[], idx: number, total: number): string {
   <div style="height:92px;padding:34px 40px 0;display:flex;align-items:flex-start;justify-content:space-between;box-sizing:border-box"></div>
   <div style="flex:1;padding:22px 40px 30px;display:grid;grid-template-columns:610px 1fr;gap:28px;box-sizing:border-box">
     <div style="display:flex;flex-direction:column;min-width:0">
-      <h1 style="font-family:${INTER};font-size:52px;font-weight:950;color:#050816;letter-spacing:-0.06em;line-height:1.08;margin:0 0 14px">Regiões com maior<br>volume de pedidos</h1>
+      <h1 style="font-family:${INTER};font-size:52px;font-weight:950;color:#050816;letter-spacing:-0.06em;line-height:1.08;margin:0 0 14px">${reportTitle('Regiões com maior<br>volume de pedidos')}</h1>
       <p style="font-family:${INTER};font-size:22px;font-weight:500;color:#163461;letter-spacing:-0.02em;margin:0 0 24px">Bairros com maior força em ${month}</p>
       <div style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 18px 42px rgba(15,23,42,.075);padding:18px 18px 16px;box-sizing:border-box;flex:1;min-height:0">
         <table style="width:100%;border-collapse:collapse;table-layout:fixed">
@@ -1792,7 +1815,7 @@ function sBase(d: ParsedData, idx: number, total: number): string {
 
     <div style="flex-shrink:0;display:flex;align-items:flex-start;gap:32px;margin-bottom:24px">
       <div style="flex:0 0 380px">
-        <h1 style="font-family:${INTER};font-size:46px;font-weight:900;color:${FG};line-height:1.08;margin:0 0 10px;letter-spacing:-0.03em">Base de clientes e<br>clientes ativos</h1>
+        <h1 style="font-family:${INTER};font-size:46px;font-weight:900;color:${FG};line-height:1.08;margin:0 0 10px;letter-spacing:-0.03em">${reportTitle('Base de clientes e<br>clientes ativos')}</h1>
         <p style="font-size:15px;font-weight:500;color:#163461;font-family:${INTER};margin:0;line-height:1.4">Onde está a maior oportunidade de relacionamento</p>
       </div>
       <div style="flex:1;display:flex;gap:14px;align-items:stretch">
@@ -2089,7 +2112,7 @@ function sMetaAdsResumo(meta: MetaAdsFull, idx: number, total: number): string {
   <div style="position:relative;z-index:1;flex:1;padding:52px 48px 0;display:flex;flex-direction:column;gap:16px">
 
     <div style="flex-shrink:0">
-      <h1 style="font-family:${INTER};font-size:52px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 8px;letter-spacing:-0.03em">Resumo de tráfego pago</h1>
+      <h1 style="font-family:${INTER};font-size:52px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 8px;letter-spacing:-0.03em">${reportTitle('Resumo de tráfego pago')}</h1>
       <p style="font-size:16px;font-weight:500;color:#163461;font-family:${INTER};margin:0">Métricas gerais e resultados separados por objetivo de campanha</p>
     </div>
 
@@ -2438,7 +2461,7 @@ function sInstagramCalendar(posts: InstagramPost[], idx: number, total: number, 
 
   <div style="position:relative;z-index:1;flex:1;padding:42px 46px 34px;box-sizing:border-box;display:flex;flex-direction:column">
     <div style="flex-shrink:0;margin:0 0 21px">
-      <h1 style="font-family:${INTER};font-size:52px;font-weight:950;color:#050816;line-height:.95;margin:0 0 15px;letter-spacing:-0.055em">Calendário de postagens</h1>
+      <h1 style="font-family:${INTER};font-size:52px;font-weight:950;color:#050816;line-height:.95;margin:0 0 15px;letter-spacing:-0.055em">${reportTitle('Calendário de postagens')}</h1>
       <div style="width:38px;height:3px;border-radius:999px;background:${PRIMARY}"></div>
     </div>
 
@@ -2554,7 +2577,7 @@ function sInstagramPosts(posts: InstagramPost[], idx: number, total: number): st
 
   <div style="position:relative;z-index:1;flex:1;padding:42px 44px 30px;box-sizing:border-box;display:flex;flex-direction:column">
     <div style="flex-shrink:0;margin:0 0 18px">
-      <h1 style="font-family:${INTER};font-size:52px;font-weight:950;color:#050816;line-height:.95;margin:0 0 13px;letter-spacing:-0.055em">Top conteúdos do mês</h1>
+      <h1 style="font-family:${INTER};font-size:52px;font-weight:950;color:#050816;line-height:.95;margin:0 0 13px;letter-spacing:-0.055em">${reportTitle('Top conteúdos do mês')}</h1>
       <p style="font-size:18px;font-weight:500;color:#6B7280;font-family:${INTER};margin:0;letter-spacing:-0.015em">Entregas dos principais posts do último mês</p>
       <div style="width:36px;height:3px;border-radius:999px;background:${PRIMARY};margin-top:13px"></div>
     </div>
@@ -2617,7 +2640,7 @@ function sInstagramSpotlight(posts: InstagramPost[], idx: number, total: number)
 
   <div style="position:relative;z-index:1;flex:1;padding:80px 48px 0;display:flex;flex-direction:column">
     <div style="flex-shrink:0;margin-bottom:24px">
-      <h1 style="font-family:${INTER};font-size:52px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 8px;letter-spacing:-0.03em">Melhor conteúdo do mês</h1>
+      <h1 style="font-family:${INTER};font-size:52px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 8px;letter-spacing:-0.03em">${reportTitle('Melhor conteúdo do mês')}</h1>
       <p style="font-size:16px;font-weight:500;color:#163461;font-family:${INTER};margin:0">O post com melhor desempenho entre os publicados no período</p>
     </div>
 
@@ -2874,7 +2897,7 @@ function sCriativos(creatives: Creative[], idx: number, total: number): string {
   <div style="position:absolute;right:-120px;top:-170px;width:640px;height:540px;border-radius:50%;background:linear-gradient(135deg,rgba(241,245,249,.74),rgba(255,255,255,.12));opacity:.78;pointer-events:none"></div>
   <div style="position:relative;z-index:1;flex:1;padding:26px 40px 24px;box-sizing:border-box;display:flex;flex-direction:column">
     <div style="flex-shrink:0;margin-bottom:18px">
-      <h1 style="font-family:${INTER};font-size:52px;font-weight:950;color:#050816;line-height:.95;margin:0 0 14px;letter-spacing:-0.055em">Principais criativos de tráfego pago</h1>
+      <h1 style="font-family:${INTER};font-size:52px;font-weight:950;color:#050816;line-height:.95;margin:0 0 14px;letter-spacing:-0.055em">${reportTitle('Principais criativos de tráfego pago')}</h1>
       <p style="font-size:17px;font-weight:500;color:#6B7280;font-family:${INTER};margin:0;letter-spacing:-0.015em">Melhores criativos por objetivo — cada campanha avaliada pela métrica certa para o seu tipo</p>
       <div style="width:38px;height:3px;border-radius:999px;background:${PRIMARY};margin-top:13px"></div>
     </div>
@@ -3031,19 +3054,9 @@ function sMetaAdsCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number, total
   const body = `<div data-slide-index="${idx}" data-slide-total="${total}" style="width:1440px;min-height:810px;background:${BG};border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
   <div style="position:absolute;right:80px;top:-120px;width:560px;height:500px;border-radius:50%;background:linear-gradient(135deg,rgba(219,234,254,.5),${PRIMARY}14,rgba(255,255,255,.1));opacity:.75;pointer-events:none"></div>
 
-  <div style="height:92px;padding:34px 48px 0;display:flex;align-items:flex-start;justify-content:space-between;flex-shrink:0">
-    <div style="display:flex;align-items:center;gap:8px">
-      <span style="font-family:${INTER};font-size:30px;font-weight:900;letter-spacing:-0.06em;color:${FG};line-height:1">onmid</span>
-      <span style="width:38px;height:19px;border-radius:999px;background:${PRIMARY};display:inline-flex;align-items:center;justify-content:flex-end;padding-right:3px;box-sizing:border-box;box-shadow:0 6px 16px ${PRIMARY}55">
-        <span style="width:12px;height:12px;border-radius:50%;background:#FFFFFF;display:block"></span>
-      </span>
-      <span style="font-size:8px;font-weight:700;color:${MUTED};align-self:flex-start;margin-top:1px">®</span>
-    </div>
-  </div>
-
-  <div style="position:relative;z-index:1;flex:1;padding:8px 48px 0;display:flex;flex-direction:column">
+  <div style="position:relative;z-index:1;flex:1;padding:52px 48px 0;display:flex;flex-direction:column">
     <div style="flex-shrink:0;margin-bottom:28px">
-      <h1 style="font-family:${INTER};font-size:52px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 8px;letter-spacing:-0.03em">Campanhas veiculadas</h1>
+      <h1 style="font-family:${INTER};font-size:52px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 8px;letter-spacing:-0.03em">${reportTitle('Campanhas veiculadas')}</h1>
       <p data-conclusion="1" style="font-size:16px;font-weight:500;color:#163461;font-family:${INTER};margin:0">Desempenho das campanhas em ${month}</p>
     </div>
 
