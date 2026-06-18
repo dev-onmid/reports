@@ -2960,9 +2960,13 @@ export function __devPreviewFullReport(): string {
     { bairro: 'Guanabara', pedidos: 14, faturamento: 918.45 },
   ];
 
-  const mkMetricas = (investimento: number, conversas: number, compras: number, valor_compras: number, cliques: number, frequencia: number) => ({
+  const mkMetricas = (
+    investimento: number, conversas: number, compras: number, valor_compras: number,
+    cliques: number, frequencia: number, visitas_pagina = 0, iniciaram_checkout = 0,
+  ) => ({
     investimento, impressoes: Math.round(cliques * 60), alcance: Math.round(cliques * 40), cliques, frequencia, conversas, compras, valor_compras,
     purchase_roas: investimento > 0 ? valor_compras / investimento : 0,
+    visitas_pagina, iniciaram_checkout,
   });
   const meta: MetaAdsFull = {
     investimento: 2826.62, impressoes: 583994, alcance: 240617, cliques: 1858,
