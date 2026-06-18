@@ -553,7 +553,7 @@ async function fetchMetaData(
     // action_values is needed to rank Vendas creatives by actual revenue/ROAS, not just
     // a raw purchase count.
     const urlAd = new URL(`https://graph.facebook.com/v21.0/${acct}/insights`);
-    urlAd.searchParams.set('fields', 'ad_id,ad_name,campaign_name,adset_name,objective,spend,impressions,reach,clicks,ctr,actions,conversions,action_values,cost_per_action_type');
+    urlAd.searchParams.set('fields', 'ad_id,ad_name,campaign_name,adset_name,objective,spend,impressions,reach,clicks,ctr,actions,conversions,action_values,cost_per_action_type,purchase_roas');
     urlAd.searchParams.set('time_range', timeRange);
     urlAd.searchParams.set('level', 'ad');
     urlAd.searchParams.set('limit', '20');
@@ -573,6 +573,8 @@ async function fetchMetaData(
         const category = categorizeMetaObjective(objectiveRaw);
         const om = OBJECTIVE_META[category];
         const investimento = parseFloat(String(row.spend || '0'));
+        const purchaseRoasArr = row.purchase_roas as Array<{ action_type: string; value: string }> | undefined;
+        const purchaseRoas = parseFloat(purchaseRoasArr?.[0]?.value ?? '0') || 0;
         const resultado = category === 'trafego'
           ? parseInt(String(row.clicks || '0'), 10)
           : category === 'alcance'
@@ -580,7 +582,7 @@ async function fetchMetaData(
           : om.actionKeys.reduce((sum, k) => sum + (actMap[k] || 0), 0)
             || estimateActionsFromCost(investimento, costMap, om.actionKeys);
         const purchaseValue = category === 'vendas'
-          ? (valueMap['offsite_conversion.fb_pixel_purchase_value'] || valueMap['omni_purchase_value'] || valueMap['purchase_value'] || 0)
+          ? (valueMap['offsite_conversion.fb_pixel_purchase_value'] || valueMap['omni_purchase_value'] || valueMap['purchase_value'] || (purchaseRoas > 0 ? investimento * purchaseRoas : 0))
           : 0;
         adInsights.push({
           ad_id:         String(row.ad_id || ''),
@@ -2693,7 +2695,7 @@ function sCriativos(creatives: Creative[], idx: number, total: number): string {
   const moneyCompact = (n: number) => {
     if (!n || n <= 0) return '—';
     if (n >= 1000) return `R$ ${(n / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil`;
-    return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: n >= 100 ? 0 : 2, maximumFractionDigits: n >= 100 ? 0 : 2 });
+    return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: n >= 10 ? 0 : 2, maximumFractionDigits: n >= 10 ? 0 : 2 });
   };
   const pct = (n?: number) => n && n > 0 ? `${n.toFixed(2).replace('.', ',')}%` : '—';
   const cpl = (c: Creative) => c.resultado > 0 && c.spend > 0 ? c.spend / c.resultado : 0;
@@ -2741,11 +2743,11 @@ function sCriativos(creatives: Creative[], idx: number, total: number): string {
       <p style="font-family:${INTER};font-size:12px;color:#475569;margin:0;line-height:1.2;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><strong style="font-weight:850;color:#64748B">${label}:</strong> <span style="color:#475569">${value && value !== '—' ? value : '—'}</span></p>
     </div>`;
   const metric = (icon: string, label: string, value: string, color = PRIMARY_TEXT) =>
-    `<div style="height:50px;min-width:0;overflow:hidden;border:1px solid #E8EDF4;border-radius:10px;background:#FFFFFF;display:flex;align-items:center;gap:7px;padding:0 9px;box-sizing:border-box">
-      ${iconSvg(icon, 13, color)}
-      <div style="min-width:0;overflow:hidden">
+    `<div style="height:50px;min-width:0;overflow:hidden;border:1px solid #E8EDF4;border-radius:10px;background:#FFFFFF;display:flex;align-items:center;gap:5px;padding:0 7px;box-sizing:border-box">
+      ${iconSvg(icon, 11, color)}
+      <div style="min-width:0;overflow:visible">
         <p style="font-family:${INTER};font-size:8px;font-weight:850;color:#64748B;margin:0 0 4px;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${label}</p>
-        <p style="font-family:${INTER};font-size:15px;font-weight:950;color:#050816;margin:0;line-height:1;letter-spacing:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${value}</p>
+        <p style="font-family:${INTER};font-size:14px;font-weight:950;color:#050816;margin:0;line-height:1.05;letter-spacing:0;white-space:normal;overflow:visible;word-break:normal">${value}</p>
       </div>
     </div>`;
 
@@ -2756,7 +2758,7 @@ function sCriativos(creatives: Creative[], idx: number, total: number): string {
       metric(ICO_COIN, 'Invest.', moneyCompact(c.spend), accent),
       metric(ICO_CART, 'Compras', c.resultado > 0 ? compact(Math.round(c.resultado)) : '—', accent),
       metric(ICO_COIN, 'Custo/venda', cpl(c) > 0 ? moneyCompact(cpl(c)) : '—', accent),
-      metric(ICO_RECEIPT, 'Valor de venda', moneyCompact(c.purchaseValue ?? 0), accent),
+      metric(ICO_RECEIPT, 'Valor venda', moneyCompact(c.purchaseValue ?? 0), accent),
       metric(ICO_TREND, 'ROAS', roas(c) > 0 ? `${roas(c).toFixed(2)}×` : '—', accent),
       metric(ICO_CURSOR, 'Cliques', compact(c.clicks), accent),
     ];
@@ -2787,9 +2789,9 @@ function sCriativos(creatives: Creative[], idx: number, total: number): string {
     // alcance — volume IS the correct metric for this objective, so reach/CPM lead here.
     return [
       metric(ICO_COIN, 'Invest.', moneyCompact(c.spend), accent),
-      metric(ICO_OBJ, 'Pessoas atingidas', compact(c.reach), accent),
+      metric(ICO_OBJ, 'Alcance', compact(c.reach), accent),
       metric(ICO_COIN, 'CPM', cpm(c) > 0 ? moneyCompact(cpm(c)) : '—', accent),
-      metric(ICO_USER, 'Impressões', compact(c.impressions), accent),
+      metric(ICO_USER, 'Impress.', compact(c.impressions), accent),
       metric(ICO_CURSOR, 'Cliques', compact(c.clicks), accent),
     ];
   };
