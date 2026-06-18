@@ -6,7 +6,7 @@ import {
   FileText, Search, ChevronDown, RefreshCw, ArrowUpRight,
   FileCheck2, CalendarDays, Users, CheckCircle2, ChevronLeft,
   ChevronRight, Settings2, Zap, Play, ExternalLink, Pencil,
-  X, Loader2,
+  X, Loader2, Copy, Send, Download,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ClientAvatar } from '@/components/client-avatar';
@@ -304,6 +304,47 @@ export default function RelatoriosPage() {
     setDiagnostics(prev => prev.filter(r => r.id !== id));
   }
 
+  function reportPath(token: string) {
+    return `/relatorio/${token}`;
+  }
+
+  function publicReportUrl(token: string) {
+    return `${window.location.origin}${reportPath(token)}`;
+  }
+
+  async function copyReportLink(token: string) {
+    const url = publicReportUrl(token);
+    try {
+      await navigator.clipboard.writeText(url);
+      alert('Link público copiado.');
+    } catch {
+      window.prompt('Copie o link público do relatório:', url);
+    }
+  }
+
+  async function sendPublicLink(token: string, title: string) {
+    const url = publicReportUrl(token);
+    const text = `${title}\n\nLink para visualizar sem login:\n${url}`;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title, text, url });
+        return;
+      } catch {
+        // User canceled native share; fall back to email below.
+      }
+    }
+    window.location.href = `mailto:?subject=${encodeURIComponent(title)}&body=${encodeURIComponent(text)}`;
+  }
+
+  async function sendReportLink(report: DiagnosticReport) {
+    if (!report.public_token) return;
+    await sendPublicLink(report.public_token, report.title || `Relatório — ${report.client_name}`);
+  }
+
+  function downloadReport(token: string) {
+    window.open(`${reportPath(token)}?print=1`, '_blank', 'noopener,noreferrer');
+  }
+
   const activeClientIds = new Set(clients.map(c => c.id));
   const activeClientNames = new Set(clients.map(c => c.name));
   const visibleDiagnostics = diagnostics.filter(r =>
@@ -543,15 +584,38 @@ export default function RelatoriosPage() {
                       <td className="px-5 py-3.5">
                         <div className="flex items-center justify-end gap-1">
                           {row.public_token ? (
-                            <a
-                              href={`/relatorio/${row.public_token}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              title="Ver relatório"
-                              className="p-1.5 rounded-md text-muted-foreground hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
-                            >
-                              <Eye className="w-4 h-4" />
-                            </a>
+                            <>
+                              <a
+                                href={reportPath(row.public_token)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title="Ver relatório público"
+                                className="p-1.5 rounded-md text-muted-foreground hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                              >
+                                <Eye className="w-4 h-4" />
+                              </a>
+                              <button
+                                title="Copiar link público"
+                                onClick={() => copyReportLink(row.public_token!)}
+                                className="p-1.5 rounded-md text-muted-foreground hover:text-blue-400 hover:bg-blue-500/10 transition-colors"
+                              >
+                                <Copy className="w-4 h-4" />
+                              </button>
+                              <button
+                                title="Enviar link ao cliente"
+                                onClick={() => sendReportLink(row)}
+                                className="p-1.5 rounded-md text-muted-foreground hover:text-sky-400 hover:bg-sky-500/10 transition-colors"
+                              >
+                                <Send className="w-4 h-4" />
+                              </button>
+                              <button
+                                title="Baixar PDF"
+                                onClick={() => downloadReport(row.public_token!)}
+                                className="p-1.5 rounded-md text-muted-foreground hover:text-violet-400 hover:bg-violet-500/10 transition-colors"
+                              >
+                                <Download className="w-4 h-4" />
+                              </button>
+                            </>
                           ) : (
                             <button disabled className="p-1.5 rounded-md text-muted-foreground/30 cursor-not-allowed">
                               <Eye className="w-4 h-4" />
@@ -755,14 +819,37 @@ export default function RelatoriosPage() {
                           {runningId === cfg.id ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
                         </button>
                         {cfg.last_token && (
-                          <a
-                            href={`/relatorio/${cfg.last_token}`}
-                            target="_blank" rel="noopener noreferrer"
-                            title="Ver último relatório"
-                            className="p-1.5 rounded-md text-muted-foreground hover:text-blue-400 hover:bg-blue-500/10 transition-colors"
-                          >
-                            <ExternalLink className="w-4 h-4" />
-                          </a>
+                          <>
+                            <a
+                              href={reportPath(cfg.last_token)}
+                              target="_blank" rel="noopener noreferrer"
+                              title="Ver último relatório público"
+                              className="p-1.5 rounded-md text-muted-foreground hover:text-blue-400 hover:bg-blue-500/10 transition-colors"
+                            >
+                              <ExternalLink className="w-4 h-4" />
+                            </a>
+                            <button
+                              title="Copiar link público"
+                              onClick={() => copyReportLink(cfg.last_token!)}
+                              className="p-1.5 rounded-md text-muted-foreground hover:text-blue-400 hover:bg-blue-500/10 transition-colors"
+                            >
+                              <Copy className="w-4 h-4" />
+                            </button>
+                            <button
+                              title="Enviar link ao cliente"
+                              onClick={() => sendPublicLink(cfg.last_token!, `Relatório — ${cfg.client_name}`)}
+                              className="p-1.5 rounded-md text-muted-foreground hover:text-sky-400 hover:bg-sky-500/10 transition-colors"
+                            >
+                              <Send className="w-4 h-4" />
+                            </button>
+                            <button
+                              title="Baixar PDF"
+                              onClick={() => downloadReport(cfg.last_token!)}
+                              className="p-1.5 rounded-md text-muted-foreground hover:text-violet-400 hover:bg-violet-500/10 transition-colors"
+                            >
+                              <Download className="w-4 h-4" />
+                            </button>
+                          </>
                         )}
                         <button
                           title="Editar"

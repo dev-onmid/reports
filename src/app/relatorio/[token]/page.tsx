@@ -8,8 +8,20 @@ import type { DeliveryReportData } from '@/components/delivery-template/types';
 
 export const dynamic = 'force-dynamic';
 
-export default async function RelatorioPublicoPage({ params }: { params: Promise<{ token: string }> }) {
+export default async function RelatorioPublicoPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ token: string }>;
+  searchParams: Promise<{ print?: string | string[] }>;
+}) {
   const { token } = await params;
+  const query = await searchParams;
+  const printParam = Array.isArray(query.print) ? query.print[0] : query.print;
+  const shouldPrint = printParam === '1' || printParam === 'true';
+  const printScript = shouldPrint
+    ? <script dangerouslySetInnerHTML={{ __html: 'setTimeout(() => window.print(), 900);' }} />
+    : null;
 
   const pool = makeServerPool();
   let report: {
@@ -94,6 +106,7 @@ export default async function RelatorioPublicoPage({ params }: { params: Promise
       <>
         <title>{`Relatório ${isDelivery ? 'Delivery' : 'de Performance'} — ${report.client_name}`}</title>
         <style dangerouslySetInnerHTML={{ __html: printCss }} />
+        {printScript}
         <div style={{ background: '#EEF1F5', minHeight: '100vh', overflowX: 'auto' }}>
           <div dangerouslySetInnerHTML={{ __html: data.html ?? '' }} />
         </div>
@@ -106,6 +119,7 @@ export default async function RelatorioPublicoPage({ params }: { params: Promise
     return (
       <>
         <title>{`Relatório Delivery — ${report.client_name}`}</title>
+        {printScript}
         <DeliveryViewer data={report.report_data as DeliveryReportData} />
       </>
     );
@@ -115,6 +129,7 @@ export default async function RelatorioPublicoPage({ params }: { params: Promise
     return (
       <>
         <title>{`Relatório — ${report.client_name}`}</title>
+        {printScript}
         <OmniPerformanceTemplate data={report.report_data as OmniReportData} />
       </>
     );
@@ -123,6 +138,7 @@ export default async function RelatorioPublicoPage({ params }: { params: Promise
   return (
     <>
       <title>{`Relatório — ${report.client_name}`}</title>
+      {printScript}
       <DiagnosticoTemplate data={report.report_data as DiagnosticoData} />
     </>
   );
