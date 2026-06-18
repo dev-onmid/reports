@@ -784,48 +784,44 @@ async function fetchInstagramData(
   const pageToken = page.access_token;
 
   // Fetch profile-level insights for the period.
-  // IMPORTANT: each call below is fault-isolated on purpose. The IG Graph API rejects the
-  // ENTIRE request if even one metric in a combined `metric=a,b,c` list is invalid/deprecated
-  // for that account, silently zeroing out metrics that would otherwise have worked. We
-  // also use the current `metric_type=total_value&period=day` shape — `period=total_over_range`
-  // was deprecated by Meta and now errors on many accounts.
-  async function fetchIgProfileMetrics(metrics: string): Promise<Record<string, number>> {
+  // Keep every metric isolated: IG rejects the entire request if one metric/parameter
+  // combo is invalid. In v21, reach works with period=day without metric_type, while
+  // the other profile metrics use metric_type=total_value. "impressions" is deprecated
+  // for many IG accounts; "views" is the current replacement.
+  async function fetchIgProfileMetric(metric: string, metricType?: 'total_value'): Promise<number> {
+    const since = Math.floor(new Date(from + 'T00:00:00Z').getTime() / 1000);
+    const untilRaw = Math.floor(new Date(to + 'T23:59:59Z').getTime() / 1000);
+    const until = Math.min(untilRaw, Math.floor(Date.now() / 1000));
     const url = new URL(`https://graph.facebook.com/v21.0/${ig!.id}/insights`);
-    url.searchParams.set('metric', metrics);
-    url.searchParams.set('metric_type', 'total_value');
+    url.searchParams.set('metric', metric);
     url.searchParams.set('period', 'day');
-    url.searchParams.set('since', from);
-    url.searchParams.set('until', to);
+    url.searchParams.set('since', String(since));
+    url.searchParams.set('until', String(until));
+    if (metricType) url.searchParams.set('metric_type', metricType);
     url.searchParams.set('access_token', pageToken);
     const res = await fetch(url.toString(), { signal: AbortSignal.timeout(12000) }).catch(() => null);
-    const out: Record<string, number> = {};
     if (!res?.ok) {
       const body = await res?.text().catch(() => '');
-      console.error(`[delivery][ig-insights] falha ao buscar "${metrics}" (status ${res?.status ?? 'sem resposta'}):`, body);
-      return out;
+      console.error(`[delivery][ig-insights] falha ao buscar "${metric}" (status ${res?.status ?? 'sem resposta'}):`, body);
+      return 0;
     }
     const data = await res.json() as {
-      data?: Array<{ name: string; total_value?: { value: number }; values?: Array<{ value: number }> }>;
+      data?: Array<{ total_value?: { value: number }; values?: Array<{ value: number }> }>;
     };
-    for (const m of data.data ?? []) {
-      const val = m.total_value?.value ?? m.values?.[0]?.value;
-      out[m.name] = typeof val === 'number' ? val : 0;
-    }
-    return out;
+    const first = data.data?.[0];
+    const totalValue = first?.total_value?.value;
+    if (typeof totalValue === 'number') return totalValue;
+    return (first?.values ?? []).reduce((sum, item) => sum + (typeof item.value === 'number' ? item.value : 0), 0);
   }
 
-  // `impressions` is requested in its own call: it's the metric most likely to be deprecated
-  // for a given account, and isolating it means a failure there can't zero out the other four.
-  const [coreMetrics, impressionsMetric] = await Promise.all([
-    fetchIgProfileMetrics('reach,profile_views,website_clicks,accounts_engaged'),
-    fetchIgProfileMetrics('impressions'),
+  const [reach, views, profile_views, website_clicks, accounts_engaged] = await Promise.all([
+    fetchIgProfileMetric('reach'),
+    fetchIgProfileMetric('views', 'total_value'),
+    fetchIgProfileMetric('profile_views', 'total_value'),
+    fetchIgProfileMetric('website_clicks', 'total_value'),
+    fetchIgProfileMetric('accounts_engaged', 'total_value'),
   ]);
-
-  const reach            = coreMetrics.reach ?? 0;
-  const impressions      = impressionsMetric.impressions ?? 0;
-  const profile_views    = coreMetrics.profile_views ?? 0;
-  const website_clicks   = coreMetrics.website_clicks ?? 0;
-  const accounts_engaged = coreMetrics.accounts_engaged ?? 0;
+  const impressions = views;
 
   if (reach === 0 && impressions === 0 && (ig.followers_count ?? 0) === 0) return null;
 
@@ -1983,7 +1979,7 @@ function sInstagram(ig: InstagramData, idx: number, total: number): string {
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-bottom:20px">
       ${metricCard('Seguidores', 'followers', numOrDash(ig.followers), ICO_USERS_IG)}
       ${metricCard('Alcance', 'reach', numOrDash(ig.reach), ICO_SIGNAL)}
-      ${metricCard('Impressões', 'impressions', numOrDash(ig.impressions), ICO_EYE_IG)}
+      ${metricCard('Visualizações', 'views', numOrDash(ig.impressions), ICO_EYE_IG)}
       ${metricCard('Visitas ao perfil', 'profile_views', numOrDash(ig.profile_views), ICO_USER_IG)}
       ${metricCard('Cliques no site', 'website_clicks', numOrDash(ig.website_clicks), ICO_CURSOR_IG)}
       ${metricCard('Contas engajadas', 'accounts_engaged', numOrDash(ig.accounts_engaged), ICO_HEART_IG)}
