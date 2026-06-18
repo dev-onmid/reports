@@ -1903,7 +1903,8 @@ function sInstagramCalendar(posts: InstagramPost[], idx: number, total: number, 
     acc[kind].count += 1;
     return acc;
   }, {});
-  const bestFormat = Object.values(formatScores).sort((a, b) => (b.total / Math.max(1, b.count)) - (a.total / Math.max(1, a.count)))[0]?.label ?? '—';
+  const bestFormatEntry = Object.values(formatScores).sort((a, b) => (b.total / Math.max(1, b.count)) - (a.total / Math.max(1, a.count)))[0];
+  const bestFormatLabel = bestFormatEntry?.label ?? '—';
   const postingDays = new Set([...postsByDay.keys()]).size;
   const frequency = postsInMonth.length / daysInMonth;
   const frequencyLabel = `${frequency.toFixed(1).replace('.', ',')}/dia`;
@@ -1987,7 +1988,7 @@ function sInstagramCalendar(posts: InstagramPost[], idx: number, total: number, 
         ${statCard('Reels', num(formatCounts.Reel ?? 0), '— vs mês anterior', ICO_PLAY)}
         ${statCard('Carrosséis', num(formatCounts.Carrossel ?? 0), '— vs mês anterior', ICO_LAYERS)}
         ${statCard('Stories publicados', num(formatCounts.Story ?? 0), '— vs mês anterior', '<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>')}
-        ${statCard('Melhor formato', String(bestFormat), bestFormat === '—' ? 'Sem dados suficientes' : 'Maior desempenho médio', '<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>')}
+        ${statCard('Melhor formato', bestFormatLabel, bestFormatEntry ? 'Maior desempenho médio' : 'Sem dados suficientes', '<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>')}
         ${statCard('Frequência média', frequencyLabel, consistency, '<path d="M4 19V9"/><path d="M10 19V5"/><path d="M16 19v-8"/><path d="M22 19H2"/>')}
       </div>
     </div>
