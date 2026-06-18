@@ -13,11 +13,12 @@ import {
   Users, CalendarDays, HeartHandshake, CircleDollarSign,
   ChevronLeft, ChevronRight, ChevronDown, SlidersHorizontal,
   AlignJustify, Trash2, Pencil, Sparkles, Clock3, LayoutGrid, List, ArrowUpDown,
-  BarChart3, Plug, UserRound, MessageCircle, X, Send, GripVertical, Layers, WifiOff,
+  BarChart3, Plug, UserRound, MessageCircle, X, Send, GripVertical, Layers, WifiOff, Link2,
 } from 'lucide-react';
 import { ChatView } from './chat-view';
 import { FollowupTab, useActiveFollowups, FollowupBadge } from './followup-tab';
 import { DisparosTab } from './disparos-tab';
+import { CaptureLinksTab } from '../clientes/[id]/capture-links-tab';
 import { useClients } from '@/lib/client-store';
 import { ClientAvatar, fetchClientPicture } from '@/components/client-avatar';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
@@ -52,7 +53,7 @@ type Draft = Partial<Omit<CrmLead, 'id' | 'client_id' | 'created_at'>>;
 type CrmFunnel = { id: string; name: string; created_at: string };
 type CrmStage  = { id: string; label: string; color: string; position: number };
 type LocalStage = CrmStage & { _isNew?: boolean };
-type CrmTab = 'leads' | 'chat' | 'followup' | 'attendance' | 'disparos';
+type CrmTab = 'leads' | 'capture' | 'chat' | 'followup' | 'attendance' | 'disparos';
 type DatePreset = 'all' | 'today' | 'yesterday' | 'last7' | 'last14' | 'last30' | 'thisMonth' | 'lastMonth' | 'custom';
 
 type AttendanceMetrics = {
@@ -1564,7 +1565,7 @@ export default function CrmPage() {
   const [crmView, setCrmView] = useState<CrmTab>(() => {
     if (typeof window === 'undefined') return 'leads';
     const v = localStorage.getItem('crm:tab');
-    return (v === 'leads' || v === 'chat' || v === 'followup' || v === 'attendance' || v === 'disparos') ? v : 'leads';
+    return (v === 'leads' || v === 'capture' || v === 'chat' || v === 'followup' || v === 'attendance' || v === 'disparos') ? v : 'leads';
   });
   const [kanbanEditLead, setKanbanEditLead] = useState<CrmLead | null>(null);
 
@@ -2321,6 +2322,11 @@ export default function CrmPage() {
               crmView === 'leads' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
             <Users className="h-3.5 w-3.5" /> Leads
           </button>
+          <button type="button" onClick={() => setCrmView('capture')}
+            className={cn('flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold transition-colors',
+              crmView === 'capture' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
+            <Link2 className="h-3.5 w-3.5" /> Fontes de Captura
+          </button>
           <button type="button" onClick={() => setCrmView('chat')}
             className={cn('relative flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold transition-colors',
               crmView === 'chat' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
@@ -2519,6 +2525,12 @@ export default function CrmPage() {
       {clientId && crmView === 'chat' && (
         <div className="flex-1 min-h-0 overflow-hidden">
           <ChatView clientId={clientId} statusOptions={statusOptions} focusLeadId={chatFocusLeadId} />
+        </div>
+      )}
+
+      {clientId && crmView === 'capture' && (
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <CaptureLinksTab clientId={clientId} />
         </div>
       )}
 
