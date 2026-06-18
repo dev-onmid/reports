@@ -5,11 +5,19 @@ import { markLeadResponded } from '@/lib/followup-send';
 import { analisarConversa } from '@/lib/crm-ai-analysis';
 import { enviarEventoMeta, enviarEventoGoogle } from '@/lib/conversions';
 import { upsertLeadFromConversation, ensureCrmMessagesSchema } from '@/lib/crm-conversation-sync';
+import { fetchEvolutionMediaBase64, uploadBase64ToStorage } from '@/lib/evolution-media';
 import type { NextRequest } from 'next/server';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-function extractUtm(text: string): { utm_source?: string; utm_medium?: string; utm_campaign?: string } {
+function extractUtm(text: string): {
+  utm_source?: string;
+  utm_medium?: string;
+  utm_campaign?: string;
+  utm_content?: string;
+  utm_term?: string;
+  source_url?: string;
+} {
   const urls = text.match(/https?:\/\/[^\s]+/g) ?? [];
   for (const url of urls) {
     try {
@@ -20,6 +28,9 @@ function extractUtm(text: string): { utm_source?: string; utm_medium?: string; u
           utm_source,
           utm_medium: u.searchParams.get('utm_medium') ?? undefined,
           utm_campaign: u.searchParams.get('utm_campaign') ?? undefined,
+          utm_content: u.searchParams.get('utm_content') ?? undefined,
+          utm_term: u.searchParams.get('utm_term') ?? undefined,
+          source_url: url,
         };
       }
     } catch { /* invalid URL, skip */ }
@@ -30,6 +41,8 @@ function extractUtm(text: string): { utm_source?: string; utm_medium?: string; u
       utm_source: srcMatch[1],
       utm_medium: text.match(/utm_medium=([^\s&]+)/i)?.[1],
       utm_campaign: text.match(/utm_campaign=([^\s&]+)/i)?.[1],
+      utm_content: text.match(/utm_content=([^\s&]+)/i)?.[1],
+      utm_term: text.match(/utm_term=([^\s&]+)/i)?.[1],
     };
   }
   return {};
@@ -145,7 +158,7 @@ export async function POST(
   try {
     // 1. Resolve instance → client + provider (accepts UUID or instance_id name)
     const { rows: [inst] } = await pool.query(
-      `SELECT client_id, provider FROM public.client_zapi_instances
+      `SELECT client_id, provider, instance_id FROM public.client_zapi_instances
        WHERE (id::text = $1 OR instance_id = $1) AND ativo = true`,
       [instanceId],
     );
@@ -154,6 +167,8 @@ export async function POST(
     }
     const clientId: string = inst.client_id;
     const provider: WhatsAppProvider = inst.provider === 'evolution' ? 'evolution' : 'zapi';
+    // The URL param may be the DB UUID; Evolution's own endpoints need the instance NAME.
+    const evolutionInstanceName: string = inst.instance_id ?? instanceId;
 
     // 2. Parse and normalize payload based on provider
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -179,8 +194,28 @@ export async function POST(
       return Response.json({ ok: false, error: 'telefone não identificado' }, { status: 400 });
     }
 
-    const { phone, lid, fromMe, text: rawMessageText, timestamp, externalId, ctwaClid, sourceId, pushName, profilePictureUrl } = msg;
+    const {
+      phone, lid, fromMe, text: rawMessageText, timestamp, externalId, ctwaClid, sourceId,
+      sourceUrl, campaignName, adsetName, adName, creativeName, pushName, profilePictureUrl,
+    } = msg;
     const messageCreatedAt = parseProviderTimestamp(timestamp);
+
+    // Evolution's webhook text for audio messages is just a "[Áudio]" placeholder — the
+    // real bytes are end-to-end encrypted and not in the payload. Fetch+decode them via
+    // getBase64FromMediaMessage and persist as a public URL so the chat can actually play
+    // it back (MessageBubble renders an <audio> player for tipo 'audio').
+    let messageTipo: string = 'texto';
+    let resolvedMessageText: string = rawMessageText;
+    if (provider === 'evolution' && body?.data?.message?.audioMessage && body?.data?.key) {
+      const media = await fetchEvolutionMediaBase64(evolutionInstanceName, body.data.key);
+      if (media) {
+        const audioUrl = await uploadBase64ToStorage(media.base64, media.mimetype);
+        if (audioUrl) {
+          resolvedMessageText = audioUrl;
+          messageTipo = 'audio';
+        }
+      }
+    }
 
     // ── CRM: upsert lead + save message (always, regardless of pixel config) ──
     const utmData = extractUtm(rawMessageText);
@@ -203,6 +238,19 @@ export async function POST(
       lastDirection: fromMe ? 'out' : 'in',
       canal,
       origin,
+      ctwaClid: ctwaClid ?? null,
+      sourceId: sourceId ?? null,
+      sourceUrl: sourceUrl ?? utmData.source_url ?? null,
+      utmSource: utmData.utm_source ?? null,
+      utmMedium: utmData.utm_medium ?? null,
+      utmCampaign: utmData.utm_campaign ?? null,
+      utmContent: utmData.utm_content ?? null,
+      utmTerm: utmData.utm_term ?? null,
+      campaignName: campaignName ?? null,
+      adsetName: adsetName ?? null,
+      adName: adName ?? null,
+      creativeName: creativeName ?? null,
+      instanceId: evolutionInstanceName ?? instanceId,
     });
 
     const { rows: [crmLead] } = await pool.query<{ id: string; time_interno: boolean }>(
@@ -210,8 +258,9 @@ export async function POST(
       [leadId],
     );
 
-    // messageText: prefer rawMessageText; media messages already have placeholder text from normalizer
-    const messageText = rawMessageText;
+    // messageText: the resolved audio URL for audio messages (see above), otherwise the
+    // normalizer's placeholder text ("[Imagem]", "[Vídeo]"...) for other media types.
+    const messageText = resolvedMessageText;
 
     let isFirstInbound = false;
     if (crmLead && messageText) {
@@ -225,20 +274,20 @@ export async function POST(
           // `ON CONFLICT (lead_id, external_id)` cannot be inferred — use the bare
           // `ON CONFLICT DO NOTHING`, which considers every usable unique index.
           await pool.query(
-            `INSERT INTO public.crm_messages (lead_id, client_id, direction, text, external_id, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6::timestamptz)
+            `INSERT INTO public.crm_messages (lead_id, client_id, direction, text, tipo, external_id, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz)
              ON CONFLICT DO NOTHING`,
-            [crmLead.id, clientId, fromMe ? 'out' : 'in', messageText, externalId, messageCreatedAt],
+            [crmLead.id, clientId, fromMe ? 'out' : 'in', messageText, messageTipo, externalId, messageCreatedAt],
           );
         } else {
           await pool.query(
-            `INSERT INTO public.crm_messages (lead_id, client_id, direction, text, created_at)
-             SELECT $1, $2, $3, $4, $5::timestamptz
+            `INSERT INTO public.crm_messages (lead_id, client_id, direction, text, tipo, created_at)
+             SELECT $1, $2, $3, $4, $5, $6::timestamptz
              WHERE NOT EXISTS (
                SELECT 1 FROM public.crm_messages
-               WHERE lead_id = $1 AND text = $4 AND created_at = $5::timestamptz
+               WHERE lead_id = $1 AND text = $4 AND created_at = $6::timestamptz
              )`,
-            [crmLead.id, clientId, fromMe ? 'out' : 'in', messageText, messageCreatedAt],
+            [crmLead.id, clientId, fromMe ? 'out' : 'in', messageText, messageTipo, messageCreatedAt],
           );
         }
       } catch (err) {

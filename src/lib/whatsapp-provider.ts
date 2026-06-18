@@ -11,6 +11,11 @@ export type NormalizedMessage = {
   externalId: string | undefined;
   ctwaClid: string | undefined;
   sourceId: string | undefined;
+  sourceUrl: string | undefined;
+  campaignName: string | undefined;
+  adsetName: string | undefined;
+  adName: string | undefined;
+  creativeName: string | undefined;
   pushName: string | undefined;
   profilePictureUrl: string | undefined;
 };
@@ -32,6 +37,11 @@ function normalizeZapiPayload(body: any): NormalizedMessage | null {
     externalId: body.messageId ?? body.id ?? undefined,
     ctwaClid: body.ctwaClid ?? body.ctwa_clid ?? body.ctwaclid ?? undefined,
     sourceId: body.sourceId ?? body.source_id ?? body.adId ?? undefined,
+    sourceUrl: body.sourceUrl ?? body.source_url ?? body.url ?? undefined,
+    campaignName: body.campaignName ?? body.campaign_name ?? body.campanha ?? undefined,
+    adsetName: body.adsetName ?? body.adset_name ?? body.conjunto ?? undefined,
+    adName: body.adName ?? body.ad_name ?? body.anuncio ?? undefined,
+    creativeName: body.creativeName ?? body.creative_name ?? body.criativo ?? undefined,
     pushName: body.senderName ?? body.pushName ?? undefined,
     profilePictureUrl: body.profilePicUrl ?? body.profilePictureUrl ?? body.photo ?? undefined,
   };
@@ -96,6 +106,11 @@ function normalizeEvolutionPayload(body: any): NormalizedMessage | null {
     externalId: typeof data.key.id === 'string' ? data.key.id : undefined,
     ctwaClid: adReply?.ctwaClid ?? undefined,
     sourceId: adReply?.sourceId ?? undefined,
+    sourceUrl: adReply?.sourceUrl ?? adReply?.mediaUrl ?? undefined,
+    campaignName: adReply?.campaignName ?? undefined,
+    adsetName: adReply?.adsetName ?? undefined,
+    adName: adReply?.title ?? undefined,
+    creativeName: adReply?.body ?? undefined,
     pushName: data.pushName ?? undefined,
     profilePictureUrl: data.profilePicUrl ?? data.profilePictureUrl ?? data.picture ?? undefined,
   };

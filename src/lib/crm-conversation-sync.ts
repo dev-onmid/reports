@@ -61,6 +61,17 @@ export async function ensureCrmConversationSchema(pool: Pool) {
       ADD COLUMN IF NOT EXISTS whatsapp_lid TEXT,
       ADD COLUMN IF NOT EXISTS ctwa_clid TEXT,
       ADD COLUMN IF NOT EXISTS utm_source TEXT,
+      ADD COLUMN IF NOT EXISTS utm_medium TEXT,
+      ADD COLUMN IF NOT EXISTS utm_campaign TEXT,
+      ADD COLUMN IF NOT EXISTS utm_content TEXT,
+      ADD COLUMN IF NOT EXISTS utm_term TEXT,
+      ADD COLUMN IF NOT EXISTS source_id TEXT,
+      ADD COLUMN IF NOT EXISTS source_url TEXT,
+      ADD COLUMN IF NOT EXISTS campaign_name TEXT,
+      ADD COLUMN IF NOT EXISTS adset_name TEXT,
+      ADD COLUMN IF NOT EXISTS ad_name TEXT,
+      ADD COLUMN IF NOT EXISTS creative_name TEXT,
+      ADD COLUMN IF NOT EXISTS first_origin_at TIMESTAMPTZ,
       ADD COLUMN IF NOT EXISTS instance_id TEXT;
     CREATE INDEX IF NOT EXISTS crm_leads_client_id_idx ON public.crm_leads(client_id);
     CREATE INDEX IF NOT EXISTS crm_leads_funnel_id_idx ON public.crm_leads(funnel_id);
@@ -207,6 +218,19 @@ export type ConversationLeadInput = {
   origin?: string | null;
   status?: string | null;
   observacao?: string | null;
+  ctwaClid?: string | null;
+  sourceId?: string | null;
+  sourceUrl?: string | null;
+  utmSource?: string | null;
+  utmMedium?: string | null;
+  utmCampaign?: string | null;
+  utmContent?: string | null;
+  utmTerm?: string | null;
+  campaignName?: string | null;
+  adsetName?: string | null;
+  adName?: string | null;
+  creativeName?: string | null;
+  instanceId?: string | null;
 };
 
 export async function upsertLeadFromConversation(pool: Pool, input: ConversationLeadInput) {
@@ -264,6 +288,20 @@ export async function upsertLeadFromConversation(pool: Pool, input: Conversation
                 whatsapp_last_message_text = COALESCE(NULLIF($11, ''), whatsapp_last_message_text),
                 whatsapp_last_direction = COALESCE(NULLIF($12, ''), whatsapp_last_direction),
                 observacao = COALESCE(NULLIF($13, ''), observacao),
+                ctwa_clid = COALESCE(NULLIF(ctwa_clid, ''), NULLIF($14, '')),
+                source_id = COALESCE(NULLIF(source_id, ''), NULLIF($15, '')),
+                source_url = COALESCE(NULLIF(source_url, ''), NULLIF($16, '')),
+                utm_source = COALESCE(NULLIF(utm_source, ''), NULLIF($17, '')),
+                utm_medium = COALESCE(NULLIF(utm_medium, ''), NULLIF($18, '')),
+                utm_campaign = COALESCE(NULLIF(utm_campaign, ''), NULLIF($19, '')),
+                utm_content = COALESCE(NULLIF(utm_content, ''), NULLIF($20, '')),
+                utm_term = COALESCE(NULLIF(utm_term, ''), NULLIF($21, '')),
+                campaign_name = COALESCE(NULLIF(campaign_name, ''), NULLIF($22, '')),
+                adset_name = COALESCE(NULLIF(adset_name, ''), NULLIF($23, '')),
+                ad_name = COALESCE(NULLIF(ad_name, ''), NULLIF($24, '')),
+                creative_name = COALESCE(NULLIF(creative_name, ''), NULLIF($25, '')),
+                instance_id = COALESCE(NULLIF(instance_id, ''), NULLIF($26, '')),
+                first_origin_at = COALESCE(first_origin_at, CASE WHEN NULLIF($14, '') IS NOT NULL OR NULLIF($15, '') IS NOT NULL OR NULLIF($17, '') IS NOT NULL THEN NOW() ELSE NULL END),
                 updated_at = NOW()
           WHERE id = $1
           RETURNING id`,
@@ -281,6 +319,19 @@ export async function upsertLeadFromConversation(pool: Pool, input: Conversation
           input.lastMessageText ?? null,
           input.lastDirection ?? null,
           input.observacao ?? null,
+          input.ctwaClid ?? null,
+          input.sourceId ?? null,
+          input.sourceUrl ?? null,
+          input.utmSource ?? null,
+          input.utmMedium ?? null,
+          input.utmCampaign ?? null,
+          input.utmContent ?? null,
+          input.utmTerm ?? null,
+          input.campaignName ?? null,
+          input.adsetName ?? null,
+          input.adName ?? null,
+          input.creativeName ?? null,
+          input.instanceId ?? null,
         ],
       );
       leadId = updated.rows[0].id;
@@ -289,9 +340,15 @@ export async function upsertLeadFromConversation(pool: Pool, input: Conversation
         `INSERT INTO public.crm_leads
           (client_id, nome, numero, canal, origin, data, status, funnel_id, profile_picture_url,
            whatsapp_last_message_at, whatsapp_last_message_text, whatsapp_last_direction,
-           whatsapp_lid, observacao)
+           whatsapp_lid, observacao, ctwa_clid, source_id, source_url, utm_source, utm_medium,
+           utm_campaign, utm_content, utm_term, campaign_name, adset_name, ad_name, creative_name,
+           instance_id, first_origin_at)
          VALUES ($1, $2, NULLIF($3, ''), $4, $5, CURRENT_DATE, $6, $7, $8,
-                 $9::timestamptz, NULLIF($10, ''), NULLIF($11, ''), NULLIF($12, ''), NULLIF($13, ''))
+                 $9::timestamptz, NULLIF($10, ''), NULLIF($11, ''), NULLIF($12, ''), NULLIF($13, ''),
+                 NULLIF($14, ''), NULLIF($15, ''), NULLIF($16, ''), NULLIF($17, ''), NULLIF($18, ''),
+                 NULLIF($19, ''), NULLIF($20, ''), NULLIF($21, ''), NULLIF($22, ''), NULLIF($23, ''),
+                 NULLIF($24, ''), NULLIF($25, ''), NULLIF($26, ''),
+                 CASE WHEN NULLIF($14, '') IS NOT NULL OR NULLIF($15, '') IS NOT NULL OR NULLIF($17, '') IS NOT NULL THEN NOW() ELSE NULL END)
          RETURNING id`,
         [
           input.clientId,
@@ -307,6 +364,19 @@ export async function upsertLeadFromConversation(pool: Pool, input: Conversation
           input.lastDirection ?? null,
           lid,
           input.observacao ?? null,
+          input.ctwaClid ?? null,
+          input.sourceId ?? null,
+          input.sourceUrl ?? null,
+          input.utmSource ?? null,
+          input.utmMedium ?? null,
+          input.utmCampaign ?? null,
+          input.utmContent ?? null,
+          input.utmTerm ?? null,
+          input.campaignName ?? null,
+          input.adsetName ?? null,
+          input.adName ?? null,
+          input.creativeName ?? null,
+          input.instanceId ?? null,
         ],
       );
       leadId = inserted.rows[0].id;

@@ -46,7 +46,6 @@ import { LinkAccountsDialog } from '@/components/link-accounts-dialog';
 import { ClientAvatar } from '@/components/client-avatar';
 import { HistoricoTab } from '@/components/historico-tab';
 import { VaultTab } from '@/components/vault-tab';
-import { ClientTrackingTab } from './tracking-tab';
 import { ClientCrmTab } from './crm-tab';
 import { ChatView } from '@/app/(dashboard)/crm/chat-view';
 
@@ -4579,7 +4578,7 @@ function SheetsResultsTab({ clientId }: { clientId: string }) {
 }
 
 // ── Page ───────────────────────────────────────────────────────────────────────
-const TABS = ['planejamento', 'mapa', 'historico', 'integracoes', 'links', 'pagamentos', 'dna', 'rastreio', 'crm', 'chat'] as const;
+const TABS = ['planejamento', 'mapa', 'historico', 'integracoes', 'links', 'pagamentos', 'dna', 'crm', 'chat'] as const;
 type Tab = typeof TABS[number];
 
 export default function ClientPage({ params }: { params: Promise<{ id: string }> }) {
@@ -4740,7 +4739,6 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
     links:        'Links & Senhas',
     pagamentos:   'Pagamentos',
     dna:          'DNA do Cliente',
-    rastreio:     'Rastreio WA',
     crm:          'CRM',
     chat:         'Chat WhatsApp',
   };
@@ -4898,9 +4896,6 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
       {tab === 'dna' && <ClientDnaTab clientId={id} clientName={client.name} />}
 
       {tab === 'pagamentos' && <InvestmentPaymentsTab clientId={id} clientName={client.name} />}
-
-
-      {tab === 'rastreio' && <ClientTrackingTab clientId={id} />}
 
       {tab === 'crm' && <ClientCrmTab clientId={id} />}
       {tab === 'chat' && <ChatView clientId={id} />}
