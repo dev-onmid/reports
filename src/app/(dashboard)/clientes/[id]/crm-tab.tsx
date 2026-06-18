@@ -7,6 +7,7 @@ import {
   MousePointerClick, BarChart3, Settings2, ExternalLink,
 } from 'lucide-react';
 import { ClientTrackingTab } from './tracking-tab';
+import { CaptureLinksTab } from './capture-links-tab';
 
 type CrmLead = {
   id: string;
@@ -268,7 +269,7 @@ function MessagePanel({ leadId }: { leadId: string }) {
 }
 
 export function ClientCrmTab({ clientId }: { clientId: string }) {
-  const [activeTab, setActiveTab] = useState<'leads' | 'tracking' | 'guide'>('leads');
+  const [activeTab, setActiveTab] = useState<'leads' | 'capture' | 'tracking' | 'guide'>('leads');
   const [leads, setLeads] = useState<CrmLead[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -316,6 +317,7 @@ export function ClientCrmTab({ clientId }: { clientId: string }) {
       <div className="flex w-fit flex-wrap items-center gap-1 rounded-xl border border-border bg-card p-1">
         {([
           { id: 'leads' as const, label: 'Leads', icon: MessageCircle },
+          { id: 'capture' as const, label: 'Fontes de Captura', icon: MousePointerClick },
           { id: 'tracking' as const, label: 'Rastreio de Campanhas', icon: BarChart3 },
           { id: 'guide' as const, label: 'Como Configurar', icon: Settings2 },
         ]).map(({ id, label, icon: Icon }) => (
@@ -333,6 +335,7 @@ export function ClientCrmTab({ clientId }: { clientId: string }) {
         ))}
       </div>
 
+      {activeTab === 'capture' && <CaptureLinksTab clientId={clientId} />}
       {activeTab === 'tracking' && <ClientTrackingTab clientId={clientId} />}
       {activeTab === 'guide' && <TrackingInstructions />}
 

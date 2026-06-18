@@ -65,7 +65,9 @@ export async function GET(
     ).catch(() => null).finally(() => pool.end());
 
     const waNumber = (link.whatsapp as string).replace(/\D/g, '');
-    const waText = encodeURIComponent(link.message as string);
+    const trackingUrl = req.nextUrl.toString();
+    const messageWithTracking = `${link.message as string}\n\nOrigem: ${trackingUrl}`;
+    const waText = encodeURIComponent(messageWithTracking);
     const waUrl = `https://wa.me/${waNumber}?text=${waText}`;
 
     // Client-side JS redirect so crawlers (that don't run JS) see a real HTML page
