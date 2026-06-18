@@ -543,6 +543,93 @@ type InstagramPost = {
 };
 
 type InstagramFull = { insights: InstagramData; posts: InstagramPost[] };
+type InstagramPageEntry = {
+  id: string;
+  name?: string;
+  access_token: string;
+  instagram_business_account?: {
+    id: string;
+    username?: string;
+    followers_count?: number;
+  };
+};
+type ClientMetaLink = { connection_id: string | null; account_id: string | null };
+
+function normalizeMetaAccountId(accountId: string | null | undefined): string {
+  return String(accountId ?? '').trim().replace(/^act_/, '');
+}
+
+function uniqueNonEmpty(items: Array<string | null | undefined>): string[] {
+  return [...new Set(items.map(item => String(item ?? '').trim()).filter(Boolean))];
+}
+
+async function fetchInstagramPagesForAccount(accountId: string, token: string): Promise<InstagramPageEntry[]> {
+  const cleanId = normalizeMetaAccountId(accountId);
+  if (!cleanId) return [];
+
+  const url = new URL(`https://graph.facebook.com/v21.0/act_${cleanId}/promote_pages`);
+  url.searchParams.set('fields', 'id,name,access_token,instagram_business_account{id,username,followers_count}');
+  url.searchParams.set('limit', '25');
+  url.searchParams.set('access_token', token);
+
+  const res = await fetch(url.toString(), { signal: AbortSignal.timeout(12000) }).catch(() => null);
+  if (!res?.ok) return [];
+  const data = await res.json() as { data?: InstagramPageEntry[] };
+  return data.data ?? [];
+}
+
+async function fetchInstagramUserPages(token: string): Promise<InstagramPageEntry[]> {
+  const url = new URL('https://graph.facebook.com/v21.0/me/accounts');
+  url.searchParams.set('fields', 'id,name,access_token,instagram_business_account{id,username,followers_count}');
+  url.searchParams.set('limit', '50');
+  url.searchParams.set('access_token', token);
+
+  const res = await fetch(url.toString(), { signal: AbortSignal.timeout(12000) }).catch(() => null);
+  if (!res?.ok) return [];
+  const data = await res.json() as { data?: InstagramPageEntry[] };
+  return data.data ?? [];
+}
+
+// Deterministic resolution: instead of "which pages COULD this ad account promote"
+// (act_X/promote_pages — a broad permission-based list that, in an agency Business
+// Manager, can surface OTHER clients' pages first), ask "which page do THIS account's
+// OWN ads actually run as". We read the page_id straight out of a real ad's creative
+// (object_story_spec.page_id, or the <page_id>_<post_id> prefix of effective_object_story_id)
+// — that's a 1:1 fact tied to ads this specific client is actually running, not a guess.
+async function resolveClientPageIdFromAds(accountId: string, token: string): Promise<string | null> {
+  const cleanId = normalizeMetaAccountId(accountId);
+  if (!cleanId) return null;
+
+  const url = new URL(`https://graph.facebook.com/v21.0/act_${cleanId}/ads`);
+  url.searchParams.set('fields', 'creative{object_story_spec{page_id},effective_object_story_id}');
+  url.searchParams.set('limit', '25');
+  url.searchParams.set('access_token', token);
+
+  const res = await fetch(url.toString(), { signal: AbortSignal.timeout(10000) }).catch(() => null);
+  if (!res?.ok) return null;
+  const data = await res.json() as {
+    data?: Array<{ creative?: { object_story_spec?: { page_id?: string }; effective_object_story_id?: string } }>;
+  };
+  for (const ad of data.data ?? []) {
+    const cr = ad.creative;
+    const pageId = cr?.object_story_spec?.page_id ?? cr?.effective_object_story_id?.split('_')[0];
+    if (pageId) return pageId;
+  }
+  return null;
+}
+
+async function fetchInstagramPageByAccountAds(accountId: string, token: string): Promise<InstagramPageEntry | null> {
+  const pageId = await resolveClientPageIdFromAds(accountId, token);
+  if (!pageId) return null;
+
+  const url = new URL(`https://graph.facebook.com/v21.0/${pageId}`);
+  url.searchParams.set('fields', 'id,name,access_token,instagram_business_account{id,username,followers_count}');
+  url.searchParams.set('access_token', token);
+
+  const res = await fetch(url.toString(), { signal: AbortSignal.timeout(10000) }).catch(() => null);
+  if (!res?.ok) return null;
+  return await res.json() as InstagramPageEntry;
+}
 
 // Per-media insights — reach/saved work for all types; video_views/plays only apply to video/reels.
 // Uses the Graph API batch endpoint so N posts cost 1-2 HTTP round trips instead of N.
@@ -587,17 +674,42 @@ async function fetchInstagramPostInsightsBatch(
 }
 
 async function fetchInstagramData(
+  clientId: string,
   connectionId: string | null | undefined,
+  accountIds: string[],
   from: string, to: string,
 ): Promise<InstagramFull | null> {
-  if (!connectionId) return null;
-
   const pool = makeServerPool();
   let conn: { id: string; app_id: string; access_token: string; token_expiry: string | null } | null = null;
+  let linkedAccountIds: string[] = [];
   try {
+    const { rows: links } = await pool.query(
+      `SELECT connection_id, account_id
+         FROM public.client_account_links
+        WHERE client_id = $1
+          AND platform IN ('meta_ads','meta')
+        ORDER BY created_at ASC`,
+      [clientId],
+    ).catch(() => ({ rows: [] as ClientMetaLink[] }));
+
+    const scopedLinks = (links as ClientMetaLink[]).filter(link => link.connection_id || link.account_id);
+    const preferredConnectionId =
+      connectionId ??
+      scopedLinks.find(link => link.connection_id)?.connection_id ??
+      null;
+
+    if (!preferredConnectionId) return null;
+
+    linkedAccountIds = uniqueNonEmpty([
+      ...scopedLinks
+        .filter(link => !connectionId || !link.connection_id || link.connection_id === preferredConnectionId)
+        .map(link => normalizeMetaAccountId(link.account_id)),
+      ...accountIds.map(normalizeMetaAccountId),
+    ]);
+
     const { rows } = await pool.query(
       `SELECT id,app_id,access_token,token_expiry FROM public.meta_connections WHERE id=$1`,
-      [connectionId],
+      [preferredConnectionId],
     );
     conn = rows[0] ?? null;
   } finally { await pool.end(); }
@@ -605,17 +717,29 @@ async function fetchInstagramData(
 
   const token = await getFreshMetaToken(conn);
 
-  // Discover Instagram Business accounts via Facebook Pages (page access_token needed for media/insights calls)
-  const pagesUrl = new URL('https://graph.facebook.com/v21.0/me/accounts');
-  pagesUrl.searchParams.set('fields', 'id,name,access_token,instagram_business_account{id,username,followers_count}');
-  pagesUrl.searchParams.set('access_token', token);
-  const pagesRes = await fetch(pagesUrl.toString(), { signal: AbortSignal.timeout(12000) }).catch(() => null);
-  if (!pagesRes?.ok) return null;
+  // 1) Deterministic: the page this account's OWN ads actually run as (no guessing).
+  let page: InstagramPageEntry | undefined;
+  for (const accountId of linkedAccountIds) {
+    const resolved = await fetchInstagramPageByAccountAds(accountId, token);
+    if (resolved?.instagram_business_account) { page = resolved; break; }
+  }
 
-  const pagesData = await pagesRes.json() as {
-    data?: Array<{ access_token: string; instagram_business_account?: { id: string; username: string; followers_count: number } }>;
-  };
-  const page = (pagesData.data ?? []).find(p => p.instagram_business_account);
+  // 2) Fallback only if the account has no ads yet to read a page from: the old
+  // "what could this account promote" guess (may surface another client's page
+  // in a shared Business Manager — kept only as a last resort).
+  if (!page) {
+    for (const accountId of linkedAccountIds) {
+      const pages = await fetchInstagramPagesForAccount(accountId, token);
+      page = pages.find(p => p.instagram_business_account);
+      if (page) break;
+    }
+  }
+
+  if (!page && linkedAccountIds.length === 0) {
+    const pages = await fetchInstagramUserPages(token);
+    page = pages.find(p => p.instagram_business_account);
+  }
+
   if (!page?.instagram_business_account) return null;
   const ig = page.instagram_business_account;
   const pageToken = page.access_token;
@@ -644,9 +768,9 @@ async function fetchInstagramData(
     }
   }
 
-  if (reach === 0 && impressions === 0 && ig.followers_count === 0) return null;
+  if (reach === 0 && impressions === 0 && (ig.followers_count ?? 0) === 0) return null;
 
-  const insights: InstagramData = { username: ig.username, followers: ig.followers_count, reach, impressions, profile_views, website_clicks, accounts_engaged };
+  const insights: InstagramData = { username: ig.username ?? ig.id, followers: ig.followers_count ?? 0, reach, impressions, profile_views, website_clicks, accounts_engaged };
 
   // Last posts published within the report period (newest first, capped at 12)
   let posts: InstagramPost[] = [];
@@ -2549,7 +2673,7 @@ export async function buildDeliveryReport(opts: {
   const [bairros, { meta, creatives }, instagramFull] = await Promise.all([
     fetchBairros(clientId, from, to),
     fetchMetaData(connectionId, accountIds, from, to),
-    fetchInstagramData(connectionId, from, to),
+    fetchInstagramData(clientId, connectionId, accountIds, from, to),
   ]);
   const instagram = instagramFull?.insights ?? null;
   const igPosts    = instagramFull?.posts ?? [];

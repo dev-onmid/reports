@@ -50,27 +50,69 @@ function resolveDateRange(period: string, dateFrom: string, dateTo: string): { s
   }
 }
 
+// Deterministic resolution: instead of "<adAccount>/promote_pages" (a broad
+// permission-based list of pages this token COULD promote — in a shared agency
+// Business Manager this can surface OTHER clients' pages first), read the page_id
+// straight out of a real ad this account is running. That's a 1:1 fact tied to the
+// client's actual campaigns, not a guess. promote_pages stays only as a last resort.
+async function resolvePageIdFromAds(accountId: string, token: string): Promise<string | null> {
+  const id = accountId.startsWith('act_') ? accountId : `act_${accountId}`;
+  const url = `https://graph.facebook.com/v21.0/${id}/ads?fields=creative{object_story_spec{page_id},effective_object_story_id}&limit=25&access_token=${token}`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json() as {
+      data?: Array<{ creative?: { object_story_spec?: { page_id?: string }; effective_object_story_id?: string } }>;
+    };
+    for (const ad of data.data ?? []) {
+      const cr = ad.creative;
+      const pageId = cr?.object_story_spec?.page_id ?? cr?.effective_object_story_id?.split('_')[0];
+      if (pageId) return pageId;
+    }
+  } catch { /* fall through to promote_pages */ }
+  return null;
+}
+
+function pageToIgResult(page: PageEntry | undefined) {
+  if (!page?.instagram_business_account) return null;
+  const ig = page.instagram_business_account;
+  return { igId: ig.id, username: ig.username ?? ig.id, picture: ig.profile_picture_url, pageToken: page.access_token };
+}
+
 async function getIgAccount(accountId: string, token: string): Promise<{ igId: string; username: string; picture?: string; pageToken: string } | null> {
-  // Try promote_pages first (per ad account), then /me/accounts fallback
-  const tryPages = async (url: string) => {
+  const fields = 'id,name,access_token,instagram_business_account{id,username,profile_picture_url}';
+
+  // Single page by ID (used for the deterministic ads-based resolution)
+  const fetchSinglePage = async (url: string) => {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      return pageToIgResult(await res.json() as PageEntry);
+    } catch { return null; }
+  };
+  // List of pages (used for the promote_pages / me/accounts guesses)
+  const fetchPageList = async (url: string) => {
     try {
       const res = await fetch(url);
       if (!res.ok) return null;
       const data = await res.json() as { data?: PageEntry[] };
-      const page = data.data?.find(p => p.instagram_business_account) ?? data.data?.[0];
-      if (!page?.instagram_business_account) return null;
-      const ig = page.instagram_business_account;
-      return { igId: ig.id, username: ig.username ?? ig.id, picture: ig.profile_picture_url, pageToken: page.access_token };
+      return pageToIgResult(data.data?.find(p => p.instagram_business_account) ?? data.data?.[0]);
     } catch { return null; }
   };
 
-  const fields = 'id,name,access_token,instagram_business_account{id,username,profile_picture_url}';
   if (accountId) {
     const id = accountId.startsWith('act_') ? accountId : `act_${accountId}`;
-    const result = await tryPages(`https://graph.facebook.com/v21.0/${id}/promote_pages?fields=${fields}&limit=5&access_token=${token}`);
+    // 1) Deterministic: the page this account's own ads actually run as.
+    const pageId = await resolvePageIdFromAds(accountId, token);
+    if (pageId) {
+      const result = await fetchSinglePage(`https://graph.facebook.com/v21.0/${pageId}?fields=${fields}&access_token=${token}`);
+      if (result) return result;
+    }
+    // 2) Fallback only if the account has no ads yet: the old "could promote" guess.
+    const result = await fetchPageList(`https://graph.facebook.com/v21.0/${id}/promote_pages?fields=${fields}&limit=5&access_token=${token}`);
     if (result) return result;
   }
-  return tryPages(`https://graph.facebook.com/v21.0/me/accounts?fields=${fields}&limit=20&access_token=${token}`);
+  return fetchPageList(`https://graph.facebook.com/v21.0/me/accounts?fields=${fields}&limit=20&access_token=${token}`);
 }
 
 async function fetchInsightsBatch(
