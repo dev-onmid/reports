@@ -2124,7 +2124,7 @@ function sInstagramCalendar(posts: InstagramPost[], idx: number, total: number, 
 
   const pill = (kind: ContentKind) => {
     const s = kindStyles[kind] ?? kindStyles.Feed;
-    return `<span style="display:inline-flex;max-width:100%;height:16px;align-items:center;border-radius:999px;border:1px solid ${s.border};background:${s.bg};color:${s.color};padding:0 6px;font-family:${INTER};font-size:8px;font-weight:850;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0">${kind}</span>`;
+    return `<span style="display:inline-flex;max-width:84px;height:16px;align-items:center;border-radius:999px;border:1px solid ${s.border};background:${s.bg};color:${s.color};padding:0 7px;font-family:${INTER};font-size:8px;font-weight:850;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0">${kind}</span>`;
   };
 
   const truncate = (text: string, max: number) => {
@@ -2155,16 +2155,18 @@ function sInstagramCalendar(posts: InstagramPost[], idx: number, total: number, 
     const main = dayPosts[0];
     const extraCount = dayPosts.length - 1;
     const extra = extraCount > 0 ? `<span style="font-family:${INTER};font-size:9px;font-weight:900;color:#94A3B8;flex-shrink:0">+${extraCount}</span>` : '';
-    return `<div style="height:100px;border:1px solid #DDEFE1;background:#FBFFFA;border-radius:12px;padding:8px;box-sizing:border-box;display:flex;flex-direction:column;gap:6px;overflow:hidden">
-      <div style="display:flex;align-items:center;justify-content:space-between;flex-shrink:0">
-        <span style="font-family:${INTER};font-size:12px;font-weight:850;color:${FG};line-height:1">${day}</span>
-        ${extra}
+    return `<div style="height:100px;border:1px solid #DDEFE1;background:#FBFFFA;border-radius:12px;padding:8px;box-sizing:border-box;display:flex;flex-direction:column;gap:5px;overflow:hidden">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:5px;flex-shrink:0">
+        <span style="font-family:${INTER};font-size:12px;font-weight:850;color:${FG};line-height:1;flex-shrink:0">${day}</span>
+        <div style="display:flex;align-items:center;gap:4px;min-width:0">
+          ${pill(displayKind(main))}
+          ${extra}
+        </div>
       </div>
       <div style="display:flex;gap:6px;align-items:flex-start;min-width:0;flex:1">
         ${thumbBox(main)}
-        <div style="min-width:0;flex:1;display:flex;flex-direction:column;gap:3px">
-          ${pill(displayKind(main))}
-          <p style="font-family:${INTER};font-size:9px;font-weight:600;color:#64748B;line-height:1.25;margin:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${truncate(main.caption, 46) || 'sem legenda'}</p>
+        <div style="min-width:0;flex:1;display:flex;flex-direction:column">
+          <p style="font-family:${INTER};font-size:9px;font-weight:650;color:#475569;line-height:1.22;margin:0;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden">${truncate(main.caption, 78) || 'sem legenda'}</p>
         </div>
       </div>
     </div>`;
@@ -2181,7 +2183,7 @@ function sInstagramCalendar(posts: InstagramPost[], idx: number, total: number, 
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${PRIMARY_TEXT}" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>
     </div>`;
   const statCard = (title: string, value: string, helper: string, iconPath: string) =>
-    `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:16px;box-shadow:0 14px 30px rgba(15,23,42,.055);padding:15px 17px;display:flex;align-items:center;gap:14px;box-sizing:border-box">
+    `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:16px;box-shadow:0 14px 30px rgba(15,23,42,.055);padding:18px 17px;display:flex;align-items:center;gap:14px;box-sizing:border-box;flex:1">
       ${statIcon(iconPath)}
       <div style="min-width:0">
         <p style="font-family:${INTER};font-size:12px;font-weight:800;color:#64748B;margin:0 0 4px;line-height:1.1">${title}</p>
@@ -2230,7 +2232,6 @@ function sInstagramCalendar(posts: InstagramPost[], idx: number, total: number, 
         ${statCard('Total de publicações', num(postsInMonth.length), '— vs mês anterior', '<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M16 2v5M8 2v5M3 10h18"/>')}
         ${statCard('Reels', num(formatCounts.Reel ?? 0), '— vs mês anterior', ICO_PLAY)}
         ${statCard('Carrosséis', num(formatCounts.Carrossel ?? 0), '— vs mês anterior', ICO_LAYERS)}
-        ${statCard('Stories publicados', '—', 'Stories expiram em 24h — sem histórico via API', '<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>')}
         ${statCard('Melhor formato', bestFormatLabel, bestFormatEntry ? 'Maior desempenho médio' : 'Sem dados suficientes', '<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>')}
         ${statCard('Frequência média', frequencyLabel, consistency, '<path d="M4 19V9"/><path d="M10 19V5"/><path d="M16 19v-8"/><path d="M22 19H2"/>')}
       </div>
