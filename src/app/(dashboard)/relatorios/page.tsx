@@ -118,7 +118,7 @@ export default function RelatoriosPage() {
 
   // Fetch connected assets when client changes
   useEffect(() => {
-    if (!genForm.clientId) { setClientLinks([]); return; }
+    if (!genForm.clientId) return;
     fetch(`/api/clients/${genForm.clientId}/links`)
       .then(r => r.ok ? r.json() : [])
       .then((rows: ClientLink[]) => setClientLinks(rows))
@@ -183,7 +183,6 @@ export default function RelatoriosPage() {
 
   async function generateReport() {
     if (!genForm.clientId || !genForm.from || !genForm.to) return;
-    if (genTemplate === 'delivery' && !genCsvFiles.length) return;
     setGenerating(true);
     try {
       const payload: Record<string, unknown> = {
@@ -865,7 +864,10 @@ export default function RelatoriosPage() {
                 <label className="text-xs text-muted-foreground font-medium">Cliente</label>
                 <select
                   value={genForm.clientId}
-                  onChange={e => setGenForm(f => ({ ...f, clientId: e.target.value }))}
+                  onChange={e => {
+                    setClientLinks([]);
+                    setGenForm(f => ({ ...f, clientId: e.target.value }));
+                  }}
                   className="w-full px-3 py-2.5 text-sm bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50"
                 >
                   <option value="">Selecionar cliente...</option>
@@ -923,9 +925,10 @@ export default function RelatoriosPage() {
               {genTemplate === 'delivery' && (
                 <div className="space-y-1.5">
                   <label className="text-xs text-muted-foreground font-medium">
-                    Planilhas do cardápio digital <span className="text-muted-foreground/50">(CSV / XLSX — pode anexar várias)</span>
+                    Planilhas do cardápio digital <span className="text-muted-foreground/50">(opcional — CSV / XLSX, pode anexar várias)</span>
                   </label>
                   <p className="text-xs text-muted-foreground/60 leading-relaxed">
+                    Sem planilha, o relatório sai só com tráfego pago e Instagram. Para incluir base de clientes, produtos e pedidos por dia, anexe os arquivos do cardápio digital.
                     Para exibir comparativo com mês anterior, nomeie os arquivos com prefixo{' '}
                     <code className="bg-muted px-1 py-0.5 rounded text-[10px] font-mono">ant-</code>
                     {' '}— ex: <code className="bg-muted px-1 py-0.5 rounded text-[10px] font-mono">ant-ativos.csv</code>
@@ -1002,8 +1005,7 @@ export default function RelatoriosPage() {
                     generating ||
                     !genForm.clientId ||
                     !genForm.from ||
-                    !genForm.to ||
-                    (genTemplate === 'delivery' && !genCsvFiles.length)
+                    !genForm.to
                   }
                   className={cn(
                     'text-white gap-2 text-sm min-w-[120px]',

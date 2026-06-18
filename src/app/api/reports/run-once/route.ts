@@ -51,11 +51,10 @@ export async function POST(request: NextRequest) {
     }
 
     // ── Delivery template ──────────────────────────────────────────────────────
+    // csvFiles is optional — without it, sections derived from the cardápio digital
+    // (base de clientes, produtos, pedidos por dia) are simply omitted; Meta Ads and
+    // Instagram slides still render normally since they don't depend on CSV data.
     if (template === 'delivery') {
-      if (!csvFiles.length) {
-        return Response.json({ error: 'Anexe ao menos uma planilha para o template Delivery.' }, { status: 400 });
-      }
-
       const reportData = await buildDeliveryReport({
         clientId, clientName, from, to, csvFiles, agencyContext,
         connectionId: metaConnectionId,
