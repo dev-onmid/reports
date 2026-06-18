@@ -2440,7 +2440,11 @@ function sCriativos(creatives: Creative[], idx: number, total: number): string {
     if (n >= 1000) return `${(n / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil`;
     return num(n);
   };
-  const brlCents = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const moneyCompact = (n: number) => {
+    if (!n || n <= 0) return '—';
+    if (n >= 1000) return `R$ ${(n / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil`;
+    return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: n >= 100 ? 0 : 2, maximumFractionDigits: n >= 100 ? 0 : 2 });
+  };
   const pct = (n?: number) => n && n > 0 ? `${n.toFixed(2).replace('.', ',')}%` : '—';
   const cpl = (c: Creative) => c.resultado > 0 && c.spend > 0 ? c.spend / c.resultado : 0;
   const rankScore = (c: Creative) => (c.resultado * 1000) - cpl(c) + ((c.ctr ?? 0) * 20) + ((c.clicks ?? 0) * 0.2);
@@ -2465,14 +2469,12 @@ function sCriativos(creatives: Creative[], idx: number, total: number): string {
       ${iconSvg(icon, 15)}
       <p style="font-family:${INTER};font-size:12px;color:#475569;margin:0;line-height:1.2;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><strong style="font-weight:850;color:#64748B">${label}:</strong> <span style="color:#475569">${value && value !== '—' ? value : '—'}</span></p>
     </div>`;
-  // overflow:hidden + ellipsis on both the box and the value text — a long metric value
-  // (e.g. "R$ 192,97") truncates gracefully instead of bleeding past the box edge.
   const metric = (icon: string, label: string, value: string) =>
-    `<div style="height:50px;min-width:0;overflow:hidden;border:1px solid #E8EDF4;border-radius:10px;background:#FFFFFF;display:flex;align-items:center;gap:10px;padding:0 12px;box-sizing:border-box">
-      ${iconSvg(icon, 14)}
+    `<div style="height:50px;min-width:0;overflow:hidden;border:1px solid #E8EDF4;border-radius:10px;background:#FFFFFF;display:flex;align-items:center;gap:7px;padding:0 9px;box-sizing:border-box">
+      ${iconSvg(icon, 13)}
       <div style="min-width:0;overflow:hidden">
-        <p style="font-family:${INTER};font-size:9px;font-weight:850;color:#64748B;margin:0 0 3px;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${label}</p>
-        <p style="font-family:${INTER};font-size:17px;font-weight:950;color:#050816;margin:0;line-height:1;letter-spacing:-0.035em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${value}</p>
+        <p style="font-family:${INTER};font-size:8px;font-weight:850;color:#64748B;margin:0 0 4px;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${label}</p>
+        <p style="font-family:${INTER};font-size:15px;font-weight:950;color:#050816;margin:0;line-height:1;letter-spacing:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${value}</p>
       </div>
     </div>`;
   const statusFor = (c: Creative, i: number) => {
@@ -2498,11 +2500,11 @@ function sCriativos(creatives: Creative[], idx: number, total: number): string {
     // Never hardcode "leads"/CPL regardless of what the campaign actually optimizes for.
     const category = categorizeMetaObjective(c.objective);
     const om = OBJECTIVE_META[category];
-    const resultLabel = c.resultado > 0 ? `${compact(Math.round(c.resultado))} ${om.resultWord}` : '—';
+    const resultLabel = c.resultado > 0 ? compact(Math.round(c.resultado)) : '—';
     const costValue = category === 'alcance'
       ? (c.spend > 0 && (c.impressions ?? 0) > 0 ? c.spend / ((c.impressions ?? 0) / 1000) : 0)
       : cpl(c);
-    const costLabel = costValue > 0 ? brlCents(costValue) : '—';
+    const costLabel = costValue > 0 ? moneyCompact(costValue) : '—';
 
     return `<div style="min-height:286px;background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 14px 34px rgba(15,23,42,.055);display:grid;grid-template-columns:42px 232px minmax(0,1fr);gap:18px;padding:16px;box-sizing:border-box;overflow:hidden">
       <div style="width:38px;height:42px;border-radius:10px;background:${PRIMARY}14;border:1px solid ${PRIMARY}33;display:flex;align-items:center;justify-content:center">
@@ -2521,7 +2523,7 @@ function sCriativos(creatives: Creative[], idx: number, total: number): string {
         </div>
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
           ${metric(ICO_USER, 'Resultados', resultLabel)}
-          ${metric(ICO_COIN, 'Investimento', brlOrDash(c.spend))}
+          ${metric(ICO_COIN, 'Invest.', moneyCompact(c.spend))}
           ${metric(ICO_TREND, 'CTR', pct(c.ctr))}
           ${metric(ICO_COIN, om.costLabel, costLabel)}
           ${metric(ICO_OBJ, 'Alcance', compact(c.reach))}
