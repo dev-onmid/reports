@@ -2494,7 +2494,7 @@ function monthsBetweenInclusive(fromDate: Date, toDate: Date): Date[] {
 
 function sInstagramPosts(posts: InstagramPost[], idx: number, total: number): string {
   const score = (p: InstagramPost) => (p.reach > 0 ? p.reach : 0) + (p.likes + p.comments + p.saves) * 12 + p.videoViews * 0.2;
-  const featuredPosts = [...posts].sort((a, b) => score(b) - score(a)).slice(0, 6);
+  const featuredPosts = [...posts].sort((a, b) => score(b) - score(a)).slice(0, 4);
 
   const truncateCaption = (text: string, max: number) => {
     const clean = text.replace(/\s+/g, ' ').trim();
@@ -2503,11 +2503,11 @@ function sInstagramPosts(posts: InstagramPost[], idx: number, total: number): st
 
   // Compact pill: icon + label + value on one line. `highlight` styles the Engajamento cell.
   const metricPill = (iconPath: string, label: string, value: string, highlight = false) =>
-    `<div style="height:32px;border:1px solid ${highlight ? '#DDF6D8' : '#E8EDF4'};border-radius:8px;background:${highlight ? 'linear-gradient(135deg,#F0FDEC,#FFFFFF)' : 'rgba(255,255,255,.92)'};display:flex;align-items:center;gap:6px;padding:0 8px;box-sizing:border-box;overflow:hidden">
-      ${igIconSvg(iconPath, PRIMARY_TEXT, 12)}
+    `<div style="height:30px;border:1px solid ${highlight ? '#DDF6D8' : '#E8EDF4'};border-radius:8px;background:${highlight ? 'linear-gradient(135deg,#F0FDEC,#FFFFFF)' : 'rgba(255,255,255,.92)'};display:flex;align-items:center;gap:5px;padding:0 7px;box-sizing:border-box;overflow:hidden">
+      ${igIconSvg(iconPath, PRIMARY_TEXT, 11)}
       <div style="min-width:0;display:flex;align-items:baseline;gap:4px;overflow:hidden">
-        <p style="font-family:${INTER};font-size:8px;font-weight:800;color:#64748B;margin:0;line-height:1;white-space:nowrap">${label}</p>
-        <p style="font-family:${INTER};font-size:12px;font-weight:900;color:${highlight ? PRIMARY_TEXT : '#111827'};margin:0;line-height:1;letter-spacing:-0.02em;white-space:nowrap">${value}</p>
+        <p style="font-family:${INTER};font-size:8.5px;font-weight:850;color:#64748B;margin:0;line-height:1;white-space:nowrap">${label}</p>
+        <p style="font-family:${INTER};font-size:12px;font-weight:950;color:${highlight ? PRIMARY_TEXT : '#111827'};margin:0;line-height:1;letter-spacing:-0.02em;white-space:nowrap">${value}</p>
       </div>
     </div>`;
 
@@ -2520,13 +2520,13 @@ function sInstagramPosts(posts: InstagramPost[], idx: number, total: number): st
       ? `<img src="${p.thumbnailUrl}" alt="" style="width:100%;height:100%;object-fit:cover;display:block" />`
       : `<div style="width:100%;height:100%;background:linear-gradient(135deg,#EAFDE6,#F8FAFC);display:flex;align-items:center;justify-content:center"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="${PRIMARY_TEXT}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${ICO_LAYERS}</svg></div>`;
 
-    return `<div style="height:208px;background:${CARD};border:1px solid #E7ECF3;border-radius:14px;box-shadow:0 12px 28px rgba(15,23,42,.05);display:flex;gap:14px;padding:12px;box-sizing:border-box;overflow:hidden">
-      <div style="position:relative;width:148px;border-radius:10px;background:${ROW};overflow:hidden;flex-shrink:0">
+    return `<div style="height:236px;background:${CARD};border:1px solid #E7ECF3;border-radius:14px;box-shadow:0 12px 28px rgba(15,23,42,.05);display:flex;gap:16px;padding:12px;box-sizing:border-box;overflow:hidden">
+      <div style="position:relative;width:190px;border-radius:10px;background:${ROW};overflow:hidden;flex-shrink:0">
         ${thumb}
         ${igMediaOverlay(p.mediaType)}
       </div>
 
-      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:7px">
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;padding-top:2px">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-shrink:0">
           <div style="height:24px;border-radius:7px;background:${kind.bg};color:${kind.color};display:inline-flex;align-items:center;gap:5px;padding:0 9px;font-family:${INTER};font-size:10px;font-weight:900;line-height:1;flex-shrink:0">
             ${igIconSvg(kind.icon, kind.color, 12)}
@@ -2535,7 +2535,7 @@ function sInstagramPosts(posts: InstagramPost[], idx: number, total: number): st
           <p style="font-family:${INTER};font-size:10px;font-weight:800;color:#64748B;margin:0;text-transform:capitalize;white-space:nowrap;flex-shrink:0">${formatPostDate(p.timestamp)}</p>
         </div>
 
-        <p style="font-family:${INTER};font-size:10px;font-weight:600;color:#475569;line-height:1.3;margin:0;flex-shrink:0;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden">${truncateCaption(p.caption, 56) || 'sem legenda'}</p>
+        <p style="font-family:${INTER};font-size:11px;font-weight:650;color:#475569;line-height:1.3;margin:0;flex-shrink:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${truncateCaption(p.caption, 86) || 'sem legenda'}</p>
 
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
           ${metricPill(ICO_REACH, 'Alcance', igCompact(p.reach))}
@@ -2559,7 +2559,7 @@ function sInstagramPosts(posts: InstagramPost[], idx: number, total: number): st
       <div style="width:36px;height:3px;border-radius:999px;background:${PRIMARY};margin-top:13px"></div>
     </div>
 
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px 24px;flex:1;align-content:start">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px 24px;flex:1;align-content:start">
       ${featuredPosts.map(postCard).join('')}
     </div>
   </div>
