@@ -1138,6 +1138,14 @@ function reportTitle(text: string): string {
     .join('');
 }
 
+function escapeHtmlAttr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 /** Premium footer (toggle pill + ONMID Reports wordmark) — same style as the cover. */
 function richFooter(): string {
   return `<div style="height:56px;border-top:1px solid ${BORDER};display:flex;align-items:center;padding:0 48px;gap:12px;flex-shrink:0">
@@ -2417,9 +2425,10 @@ function sInstagramCalendar(posts: InstagramPost[], idx: number, total: number, 
       </div>`;
     }
     const main = dayPosts[0];
+    const mainPermalink = main.permalink?.trim();
     const extraCount = dayPosts.length - 1;
     const extra = extraCount > 0 ? `<span style="font-family:${INTER};font-size:9px;font-weight:900;color:#94A3B8;flex-shrink:0">+${extraCount}</span>` : '';
-    return `<div style="height:100px;border:1px solid #DDEFE1;background:#FBFFFA;border-radius:12px;padding:8px;box-sizing:border-box;display:flex;flex-direction:column;gap:5px;overflow:hidden">
+    const inner = `<div style="height:100px;border:1px solid #DDEFE1;background:#FBFFFA;border-radius:12px;padding:8px;box-sizing:border-box;display:flex;flex-direction:column;gap:5px;overflow:hidden">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:5px;flex-shrink:0">
         <span style="font-family:${INTER};font-size:12px;font-weight:850;color:${FG};line-height:1;flex-shrink:0">${day}</span>
         <div style="display:flex;align-items:center;gap:4px;min-width:0">
@@ -2434,6 +2443,8 @@ function sInstagramCalendar(posts: InstagramPost[], idx: number, total: number, 
         </div>
       </div>
     </div>`;
+    if (!mainPermalink || mainPermalink === '#') return inner;
+    return `<a href="${escapeHtmlAttr(mainPermalink)}" target="_blank" rel="noopener noreferrer" style="display:block;height:100px;text-decoration:none;color:inherit">${inner}</a>`;
   };
 
   const calendarCells: Array<number | null> = [
