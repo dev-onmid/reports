@@ -2240,6 +2240,16 @@ function sInstagramCalendar(posts: InstagramPost[], idx: number, total: number, 
   return auditSlide(body, 'sInstagramCalendar');
 }
 
+function monthsBetweenInclusive(fromDate: Date, toDate: Date): Date[] {
+  const start = new Date(fromDate.getFullYear(), fromDate.getMonth(), 1, 12);
+  const end = new Date(toDate.getFullYear(), toDate.getMonth(), 1, 12);
+  const months: Date[] = [];
+  for (const cursor = new Date(start); cursor <= end; cursor.setMonth(cursor.getMonth() + 1)) {
+    months.push(new Date(cursor));
+  }
+  return months.length ? months : [start];
+}
+
 function sInstagramPosts(posts: InstagramPost[], idx: number, total: number): string {
   const score = (p: InstagramPost) => (p.reach > 0 ? p.reach : 0) + (p.likes + p.comments + p.saves) * 12 + p.videoViews * 0.2;
   const featuredPosts = [...posts].sort((a, b) => score(b) - score(a)).slice(0, 6);
@@ -2833,6 +2843,7 @@ export async function buildDeliveryReport(opts: {
   ]);
   const instagram = instagramFull?.insights ?? null;
   const igPosts    = instagramFull?.posts ?? [];
+  const instagramCalendarMonths = monthsBetweenInclusive(fromDate, toDate);
 
   console.log(`[delivery] ${clientName} | fat:${brlOrDash(data.faturamento)} ativos:${data.ativos} prod:${data.produtos.length} bairros:${bairros.length} meta:${meta ? 'sim' : 'não'} ig:${instagram ? `@${instagram.username}` : 'não'} igPosts:${igPosts.length} criativos:${creatives.length} prev:${hasPrev}`);
 
@@ -2858,7 +2869,7 @@ export async function buildDeliveryReport(opts: {
     + (hasInat       ? 1 : 0)
     + (hasMeta       ? 1 : 0)
     + (hasInstagram  ? 1 : 0)
-    + (hasInstagramPosts ? 1 : 0)
+    + (hasInstagramPosts ? instagramCalendarMonths.length : 0)
     + (hasInstagramPosts ? 1 : 0)
     + (hasInstagramSpotlight ? 1 : 0)
     + (hasDestaques   ? 1 : 0)
@@ -2875,7 +2886,11 @@ export async function buildDeliveryReport(opts: {
   if (hasInat)        slides.push(sInativos(data, ++i, total));
   if (hasMeta)        slides.push(sMetaAdsResumo(meta!, ++i, total));
   if (hasInstagram)   slides.push(sInstagram(instagram!, ++i, total));
-  if (hasInstagramPosts)     slides.push(sInstagramCalendar(igPosts, ++i, total, fromDate));
+  if (hasInstagramPosts) {
+    for (const monthDate of instagramCalendarMonths) {
+      slides.push(sInstagramCalendar(igPosts, ++i, total, monthDate));
+    }
+  }
   if (hasInstagramPosts)     slides.push(sInstagramPosts(igPosts, ++i, total));
   if (hasInstagramSpotlight) slides.push(sInstagramSpotlight(igPosts, ++i, total));
   if (hasDestaques)   slides.push(sMetaAdsCampanhas(meta!, diag, ++i, total, periodo));
@@ -3087,8 +3102,9 @@ export function __devPreviewFullReport(): string {
   const hasVisao = true, hasDia = true, hasRegiao = true, hasBase = true, hasInat = true;
   const hasMeta = true, hasInstagram = true, hasInstagramPosts = true, hasInstagramSpotlight = true;
   const hasDestaques = true, hasCriativos = true;
+  const instagramCalendarMonths = monthsBetweenInclusive(new Date(2026, 2, 1, 12), new Date(2026, 4, 31, 12));
 
-  const total = 1 + 12; // cover + 12 conditional sections (all true here)
+  const total = 12 + instagramCalendarMonths.length; // cover + non-calendar sections + one calendar per month
   const slides: string[] = [];
   let i = 1;
 
@@ -3100,7 +3116,11 @@ export function __devPreviewFullReport(): string {
   if (hasInat)               slides.push(sInativos(data, ++i, total));
   if (hasMeta)               slides.push(sMetaAdsResumo(meta, ++i, total));
   if (hasInstagram)          slides.push(sInstagram(instagram, ++i, total));
-  if (hasInstagramPosts)     slides.push(sInstagramCalendar(igPosts, ++i, total, new Date()));
+  if (hasInstagramPosts) {
+    for (const monthDate of instagramCalendarMonths) {
+      slides.push(sInstagramCalendar(igPosts, ++i, total, monthDate));
+    }
+  }
   if (hasInstagramPosts)     slides.push(sInstagramPosts(igPosts, ++i, total));
   if (hasInstagramSpotlight) slides.push(sInstagramSpotlight(igPosts, ++i, total));
   if (hasDestaques)          slides.push(sMetaAdsCampanhas(meta, diag, ++i, total, periodo));
