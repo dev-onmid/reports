@@ -46,7 +46,7 @@ import { LinkAccountsDialog } from '@/components/link-accounts-dialog';
 import { ClientAvatar } from '@/components/client-avatar';
 import { HistoricoTab } from '@/components/historico-tab';
 import { VaultTab } from '@/components/vault-tab';
-import { ClientCrmTab } from './crm-tab';
+import CrmWorkspace from '@/app/(dashboard)/crm/page';
 import { ChatView } from '@/app/(dashboard)/crm/chat-view';
 
 // ── Funnel types & logic ───────────────────────────────────────────────────────
@@ -4578,8 +4578,20 @@ function SheetsResultsTab({ clientId }: { clientId: string }) {
 }
 
 // ── Page ───────────────────────────────────────────────────────────────────────
-const TABS = ['planejamento', 'mapa', 'historico', 'integracoes', 'links', 'pagamentos', 'dna', 'crm', 'chat'] as const;
+const TABS = ['dashboard', 'planejamento', 'mapa', 'historico', 'integracoes', 'links', 'pagamentos', 'dna', 'crm', 'chat'] as const;
 type Tab = typeof TABS[number];
+
+function readSavedDashboardBlocks(clientId: string): ClientDashboardWidget[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(`clientDashboardBlocks_${clientId}`);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as ClientDashboardWidget[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
 
 export default function ClientPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -4631,6 +4643,8 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
   const [securityPassword, setSecurityPassword] = useState('');
   const [securityError, setSecurityError] = useState('');
   const [securityLoading, setSecurityLoading] = useState(false);
+  const [dashboardEditable, setDashboardEditable] = useState(false);
+  const [customBlocks, setCustomBlocks] = useState<ClientDashboardWidget[]>(() => readSavedDashboardBlocks(id));
 
   const [categories, setCategories] = useState<{ id: string; name: string; is_default: boolean }[]>([]);
   const [clientCategoryId, setClientCategoryId] = useState<string>(storedClient?.category_id ?? '');
@@ -4702,6 +4716,30 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
     setSecurityEmail(getAuthSession()?.email ?? '');
   }, []);
 
+  useEffect(() => {
+    setCustomBlocks(readSavedDashboardBlocks(id));
+    setDashboardEditable(false);
+  }, [id]);
+
+  useEffect(() => {
+    window.localStorage.setItem(`clientDashboardBlocks_${id}`, JSON.stringify(customBlocks));
+  }, [id, customBlocks]);
+
+  const dashboardData = isNewClient
+    ? ZERO_DASHBOARD_DATA
+    : buildDashboardDataFromPaidMedia(realMetrics, googleMetrics);
+  const todayProgress = isNewClient
+    ? ZERO_TODAY_PROGRESS
+    : buildTodayProgress(realMetrics, googleMetrics, crmMetrics);
+
+  function addCustomBlock(widget: Omit<ClientDashboardWidget, 'id'>) {
+    setCustomBlocks(prev => [...prev, { ...widget, id: `widget-${Date.now()}` }]);
+  }
+
+  function removeCustomBlock(widgetId: string) {
+    setCustomBlocks(prev => prev.filter(widget => widget.id !== widgetId));
+  }
+
   function openStatusDialog(nextStatus: ClientStatus) {
     const session = getAuthSession();
     setPendingStatus(nextStatus);
@@ -4732,6 +4770,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
   }
 
   const tabLabel: Record<Tab, string> = {
+    dashboard:    'Dashboard',
     planejamento: 'Planejamento',
     mapa:         'Mapa Mental',
     historico:    'Histórico',
@@ -4878,6 +4917,19 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
       </div>
 
       {/* Tab content */}
+      {tab === 'dashboard' && (
+        <ClientDashboardTab
+          editable={dashboardEditable}
+          goalConfig={clientGoal}
+          dashboardData={dashboardData}
+          todayProgress={todayProgress}
+          customBlocks={customBlocks}
+          onAddCustomBlock={addCustomBlock}
+          onRemoveCustomBlock={removeCustomBlock}
+          onEditToggle={() => setDashboardEditable(prev => !prev)}
+        />
+      )}
+
       {tab === 'planejamento' && (
         <div className="space-y-5">
           <ClientGoalSettings goal={clientGoal} onChange={setClientGoal} />
@@ -4897,7 +4949,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
 
       {tab === 'pagamentos' && <InvestmentPaymentsTab clientId={id} clientName={client.name} />}
 
-      {tab === 'crm' && <ClientCrmTab clientId={id} />}
+      {tab === 'crm' && <CrmWorkspace lockedClientId={id} embedded />}
       {tab === 'chat' && <ChatView clientId={id} />}
 
 

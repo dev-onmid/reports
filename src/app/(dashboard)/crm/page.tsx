@@ -1512,11 +1512,17 @@ function ClientChoiceCard({
   );
 }
 
-export default function CrmPage() {
+type CrmPageProps = {
+  lockedClientId?: string;
+  embedded?: boolean;
+};
+
+export default function CrmPage({ lockedClientId, embedded = false }: CrmPageProps = {}) {
   const { clients } = useClients();
   const activeClients = useMemo(() => clients.filter(c => c.status === 'Ativo'), [clients]);
 
   const [clientId, setClientId] = useState<string>(() => {
+    if (lockedClientId) return lockedClientId;
     if (typeof window === 'undefined') return '';
     return localStorage.getItem('crm:last-client') ?? '';
   });
@@ -1568,6 +1574,10 @@ export default function CrmPage() {
     return (v === 'leads' || v === 'capture' || v === 'chat' || v === 'followup' || v === 'attendance' || v === 'disparos') ? v : 'leads';
   });
   const [kanbanEditLead, setKanbanEditLead] = useState<CrmLead | null>(null);
+
+  useEffect(() => {
+    if (lockedClientId) setClientId(lockedClientId);
+  }, [lockedClientId]);
 
   // ── NEW ROW ──────────────────────────────────────────────────────────
   const [newDraft, setNewDraft] = useState<Draft>(freshDraft());
@@ -1690,6 +1700,7 @@ export default function CrmPage() {
   }, [crmView]);
 
   function openClientCrm(id: string) {
+    if (lockedClientId) return;
     setClientId(id);
     try { localStorage.setItem('crm:last-client', id); } catch { /* ignore */ }
     setRecentClientIds(prev => {
@@ -2148,8 +2159,10 @@ export default function CrmPage() {
     window.addEventListener('mouseup', onUp);
   }
 
+  const lockedClient = lockedClientId ? activeClients.find(c => c.id === lockedClientId) : null;
+
   return (
-    <div className="flex flex-col gap-5 h-full overflow-hidden">
+    <div className={cn('flex flex-col gap-5 overflow-hidden', embedded ? 'min-h-[720px]' : 'h-full')}>
 
       {/* ── PAGE HEADER ─────────────────────────────────────────────── */}
       <div className="flex items-center gap-3">
@@ -2285,10 +2298,17 @@ export default function CrmPage() {
       {/* ── FILTERS BAR ─────────────────────────────────────────────── */}
       {clientId && (
       <div className="flex flex-wrap items-center gap-2">
-        <IconSelect icon={Users} value={clientId} onChange={openClientCrm}
-          placeholder="Selecionar cliente..." className="min-w-[180px]">
-          {activeClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </IconSelect>
+        {lockedClientId ? (
+          <div className="flex h-10 items-center gap-2 rounded-lg border border-border bg-card px-3 text-sm font-semibold">
+            <Users className="h-3.5 w-3.5 text-primary" />
+            <span>{lockedClient?.name ?? 'Cliente selecionado'}</span>
+          </div>
+        ) : (
+          <IconSelect icon={Users} value={clientId} onChange={openClientCrm}
+            placeholder="Selecionar cliente..." className="min-w-[180px]">
+            {activeClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </IconSelect>
+        )}
 
         {/* Funnel selector */}
         {funnels.length > 0 && (
