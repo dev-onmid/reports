@@ -130,6 +130,17 @@ type Creative = {
 type InstagramData = {
   username: string;
   followers: number;
+  followers_period?: number;
+  reach: number;
+  impressions: number;
+  profile_views: number;
+  website_clicks: number;
+  accounts_engaged: number;
+  previous?: InstagramPeriodMetrics | null;
+};
+
+type InstagramPeriodMetrics = {
+  followers_period: number;
   reach: number;
   impressions: number;
   profile_views: number;
@@ -840,21 +851,31 @@ async function fetchInstagramData(
   // combo is invalid. In v21, reach works with period=day without metric_type, while
   // the other profile metrics use metric_type=total_value. "impressions" is deprecated
   // for many IG accounts; "views" is the current replacement.
+  const dateOnly = (date: Date) => date.toISOString().slice(0, 10);
   const rangeStart = new Date(from + 'T00:00:00Z');
-  const rangeEndRaw = new Date(to + 'T23:59:59Z');
-  const rangeEnd = new Date(Math.min(rangeEndRaw.getTime(), Date.now()));
+  const selectedDays = Math.max(1, Math.round((new Date(to + 'T00:00:00Z').getTime() - rangeStart.getTime()) / 86400000) + 1);
+  const previousEnd = new Date(rangeStart);
+  previousEnd.setUTCDate(previousEnd.getUTCDate() - 1);
+  const previousStart = new Date(previousEnd);
+  previousStart.setUTCDate(previousStart.getUTCDate() - selectedDays + 1);
 
-  const periodChunks: Array<{ since: number; until: number }> = [];
-  for (const cursor = new Date(rangeStart); cursor <= rangeEnd;) {
-    const chunkEnd = new Date(cursor);
-    chunkEnd.setUTCDate(chunkEnd.getUTCDate() + 27);
-    chunkEnd.setUTCHours(23, 59, 59, 999);
-    const finalEnd = new Date(Math.min(chunkEnd.getTime(), rangeEnd.getTime()));
-    periodChunks.push({
-      since: Math.floor(cursor.getTime() / 1000),
-      until: Math.floor(finalEnd.getTime() / 1000),
-    });
-    cursor.setTime(finalEnd.getTime() + 1000);
+  function makePeriodChunks(periodFrom: string, periodTo: string): Array<{ since: number; until: number }> {
+    const start = new Date(periodFrom + 'T00:00:00Z');
+    const endRaw = new Date(periodTo + 'T23:59:59Z');
+    const end = new Date(Math.min(endRaw.getTime(), Date.now()));
+    const chunks: Array<{ since: number; until: number }> = [];
+    for (const cursor = new Date(start); cursor <= end;) {
+      const chunkEnd = new Date(cursor);
+      chunkEnd.setUTCDate(chunkEnd.getUTCDate() + 27);
+      chunkEnd.setUTCHours(23, 59, 59, 999);
+      const finalEnd = new Date(Math.min(chunkEnd.getTime(), end.getTime()));
+      chunks.push({
+        since: Math.floor(cursor.getTime() / 1000),
+        until: Math.floor(finalEnd.getTime() / 1000),
+      });
+      cursor.setTime(finalEnd.getTime() + 1000);
+    }
+    return chunks;
   }
 
   async function fetchIgProfileMetricRange(metric: string, since: number, until: number, metricType?: 'total_value'): Promise<number> {
@@ -880,9 +901,8 @@ async function fetchInstagramData(
     return (first?.values ?? []).reduce((sum, item) => sum + (typeof item.value === 'number' ? item.value : 0), 0);
   }
 
-  async function fetchIgProfileMetric(metric: string, metricType?: 'total_value'): Promise<number> {
-    if (!periodChunks.length) return 0;
-    const chunks = periodChunks;
+  async function fetchIgProfileMetric(metric: string, chunks: Array<{ since: number; until: number }>, metricType?: 'total_value'): Promise<number> {
+    if (!chunks.length) return 0;
     const totals = await Promise.all(
       chunks.map((chunk) => fetchIgProfileMetricRange(metric, chunk.since, chunk.until, metricType)),
     );
@@ -898,18 +918,38 @@ async function fetchInstagramData(
     return fallbackTotals.reduce((sum, value) => sum + value, 0);
   }
 
-  const [reach, views, profile_views, website_clicks, accounts_engaged] = await Promise.all([
-    fetchIgProfileMetric('reach'),
-    fetchIgProfileMetric('views', 'total_value'),
-    fetchIgProfileMetric('profile_views', 'total_value'),
-    fetchIgProfileMetric('website_clicks', 'total_value'),
-    fetchIgProfileMetric('accounts_engaged', 'total_value'),
+  async function fetchIgPeriodMetrics(periodFrom: string, periodTo: string): Promise<InstagramPeriodMetrics> {
+    const chunks = makePeriodChunks(periodFrom, periodTo);
+    const [followers_period, reach, views, profile_views, website_clicks, accounts_engaged] = await Promise.all([
+      fetchIgProfileMetric('follower_count', chunks),
+      fetchIgProfileMetric('reach', chunks),
+      fetchIgProfileMetric('views', chunks, 'total_value'),
+      fetchIgProfileMetric('profile_views', chunks, 'total_value'),
+      fetchIgProfileMetric('website_clicks', chunks, 'total_value'),
+      fetchIgProfileMetric('accounts_engaged', chunks, 'total_value'),
+    ]);
+    return { followers_period, reach, impressions: views, profile_views, website_clicks, accounts_engaged };
+  }
+
+  const [currentMetrics, previousMetrics] = await Promise.all([
+    fetchIgPeriodMetrics(from, to),
+    fetchIgPeriodMetrics(dateOnly(previousStart), dateOnly(previousEnd)),
   ]);
-  const impressions = views;
+  const { reach, impressions, profile_views, website_clicks, accounts_engaged } = currentMetrics;
 
   if (reach === 0 && impressions === 0 && (ig.followers_count ?? 0) === 0) return null;
 
-  const insights: InstagramData = { username: ig.username ?? ig.id, followers: ig.followers_count ?? 0, reach, impressions, profile_views, website_clicks, accounts_engaged };
+  const insights: InstagramData = {
+    username: ig.username ?? ig.id,
+    followers: ig.followers_count ?? 0,
+    followers_period: currentMetrics.followers_period,
+    reach,
+    impressions,
+    profile_views,
+    website_clicks,
+    accounts_engaged,
+    previous: previousMetrics,
+  };
 
   // Last posts published within the report period (newest first, capped at 12)
   let posts: InstagramPost[] = [];
@@ -2009,7 +2049,36 @@ function sInstagram(ig: InstagramData, idx: number, total: number, periodLabel =
       <rect x="2" y="2" width="20" height="20" rx="6"/><circle cx="12" cy="12" r="4.5"/><circle cx="17.2" cy="6.8" r="1.1" fill="${color}" stroke="none"/>
     </svg>`;
 
-  const metricCard = (label: string, enLabel: string, value: string, icoPath: string) =>
+  const compareLine = (current: number, previous: number | undefined, baseLabel = 'vs período anterior') => {
+    if (!previous) {
+      return { text: 'sem comparativo anterior', color: MUTED, mark: PRIMARY };
+    }
+    const diff = current - previous;
+    const pct = previous > 0 ? (diff / previous) * 100 : 0;
+    if (diff === 0) {
+      return { text: `estável ${baseLabel}`, color: MUTED, mark: BORDER };
+    }
+    const sign = diff > 0 ? '+' : '';
+    const abs = `${sign}${num(Math.round(diff))}`;
+    const pctText = `${sign}${pct.toFixed(1).replace('.', ',')}%`;
+    return {
+      text: `${abs} (${pctText}) ${baseLabel}`,
+      color: diff > 0 ? PRIMARY_TEXT : RED,
+      mark: diff > 0 ? PRIMARY : RED,
+    };
+  };
+
+  const metricCard = (
+    label: string,
+    enLabel: string,
+    value: string,
+    icoPath: string,
+    currentCompare: number,
+    previousCompare?: number,
+    compareLabel = 'vs período anterior',
+  ) => {
+    const compare = compareLine(currentCompare, previousCompare, compareLabel);
+    return (
     `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:16px;box-shadow:0 10px 26px rgba(15,23,42,.06);padding:20px 22px;display:flex;flex-direction:column;gap:14px">
       <div style="display:flex;align-items:center;gap:14px">
         <div style="width:46px;height:46px;border-radius:50%;background:${PRIMARY}1A;flex-shrink:0;display:flex;align-items:center;justify-content:center">
@@ -2020,11 +2089,12 @@ function sInstagram(ig: InstagramData, idx: number, total: number, periodLabel =
       <div>
         <p style="font-family:${INTER};font-size:32px;font-weight:900;letter-spacing:-0.02em;color:${FG};margin:0 0 8px">${value}</p>
         <div style="display:flex;align-items:center;gap:8px">
-          <span style="width:16px;height:2px;background:${PRIMARY};display:inline-block"></span>
-          <span style="font-size:12px;color:${MUTED};font-family:${INTER}">período selecionado</span>
+          <span style="width:16px;height:2px;background:${compare.mark};display:inline-block"></span>
+          <span style="font-size:12px;color:${compare.color};font-weight:700;font-family:${INTER};line-height:1.25">${compare.text}</span>
         </div>
       </div>
-    </div>`;
+    </div>`);
+  };
 
   const insightText = ig.accounts_engaged > 0
     ? `${numOrDash(ig.accounts_engaged)} contas engajaram com o perfil @${ig.username} (${engRate.toFixed(1)}% do alcance). Audiência orgânica aquecida converte melhor em campanhas pagas.`
@@ -2064,12 +2134,12 @@ function sInstagram(ig: InstagramData, idx: number, total: number, periodLabel =
     </div>
 
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-bottom:20px">
-      ${metricCard('Seguidores', 'followers', numOrDash(ig.followers), ICO_USERS_IG)}
-      ${metricCard('Alcance', 'reach', numOrDash(ig.reach), ICO_SIGNAL)}
-      ${metricCard('Visualizações', 'views', numOrDash(ig.impressions), ICO_EYE_IG)}
-      ${metricCard('Visitas ao perfil', 'profile_views', numOrDash(ig.profile_views), ICO_USER_IG)}
-      ${metricCard('Cliques no site', 'website_clicks', numOrDash(ig.website_clicks), ICO_CURSOR_IG)}
-      ${metricCard('Contas engajadas', 'accounts_engaged', numOrDash(ig.accounts_engaged), ICO_HEART_IG)}
+      ${metricCard('Seguidores', 'followers', numOrDash(ig.followers), ICO_USERS_IG, ig.followers_period ?? 0, ig.previous?.followers_period, 'novos vs período anterior')}
+      ${metricCard('Alcance', 'reach', numOrDash(ig.reach), ICO_SIGNAL, ig.reach, ig.previous?.reach)}
+      ${metricCard('Visualizações', 'views', numOrDash(ig.impressions), ICO_EYE_IG, ig.impressions, ig.previous?.impressions)}
+      ${metricCard('Visitas ao perfil', 'profile_views', numOrDash(ig.profile_views), ICO_USER_IG, ig.profile_views, ig.previous?.profile_views)}
+      ${metricCard('Cliques no site', 'website_clicks', numOrDash(ig.website_clicks), ICO_CURSOR_IG, ig.website_clicks, ig.previous?.website_clicks)}
+      ${metricCard('Contas engajadas', 'accounts_engaged', numOrDash(ig.accounts_engaged), ICO_HEART_IG, ig.accounts_engaged, ig.previous?.accounts_engaged)}
     </div>
 
     <div data-conclusion="1" style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 14px 34px rgba(15,23,42,.07);display:flex;align-items:flex-start;gap:16px;padding:22px 28px;margin-top:auto;margin-bottom:32px">
@@ -3191,8 +3261,9 @@ export function __devPreviewFullReport(): string {
   };
 
   const instagram: InstagramData = {
-    username: 'picolocos.oficial', followers: 8240, reach: 42000, impressions: 61000,
+    username: 'picolocos.oficial', followers: 8240, followers_period: 180, reach: 42000, impressions: 61000,
     profile_views: 1850, website_clicks: 620, accounts_engaged: 3100,
+    previous: { followers_period: 126, reach: 36500, impressions: 54800, profile_views: 1620, website_clicks: 710, accounts_engaged: 2800 },
   };
   const mkPost = (id: string, likes: number, comments: number, reach: number, daysAgo: number, mediaType = 'IMAGE'): InstagramPost => ({
     id, caption: 'Hoje é dia de promoção especial! Vem conferir nosso cardápio de hoje, com ofertas exclusivas pra você que acompanha a gente por aqui 🔥',
@@ -3260,8 +3331,9 @@ export function __devPreviewFullReport(): string {
 // ── TEMP DEV PREVIEW — remove before shipping ───────────────────────────────
 export function __devPreviewInstagram(): string {
   const ig: InstagramData = {
-    username: 'picolocos.oficial', followers: 8240, reach: 42000, impressions: 61000,
+    username: 'picolocos.oficial', followers: 8240, followers_period: 180, reach: 42000, impressions: 61000,
     profile_views: 1850, website_clicks: 620, accounts_engaged: 3100,
+    previous: { followers_period: 126, reach: 36500, impressions: 54800, profile_views: 1620, website_clicks: 710, accounts_engaged: 2800 },
   };
   return sInstagram(ig, 9, 17, 'Maio/2026');
 }
