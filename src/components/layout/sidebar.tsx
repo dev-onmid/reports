@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { clearAuthSession, getAuthSession } from '@/lib/auth-store';
 import {
   LayoutDashboard,
@@ -20,11 +20,7 @@ import {
   ChevronRight,
   Zap,
   Bot,
-  Trophy,
   ShieldCheck,
-  Mail,
-  Link2,
-  Palette,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { APP_VERSION } from '@/lib/app-version';
@@ -40,15 +36,11 @@ const navItems: { name: string; href: string; icon: React.ElementType; roles: Ro
   { name: 'Radar',       href: '/resultados',  icon: BarChart3,       roles: ['Administrador', 'Usuário'] },
   { name: 'Pagamentos',  href: '/pagamentos',  icon: WalletCards,     roles: ['Administrador', 'Usuário'] },
   { name: 'Disparos',    href: '/disparos',    icon: MessageCircle,   roles: ['Administrador', 'Usuário'] },
-  { name: 'Rastreamento', href: '/rastreamento', icon: Link2,           roles: ['Administrador', 'Usuário'] },
-  { name: 'E-mail',      href: '/email-marketing', icon: Mail,        roles: ['Administrador', 'Usuário'] },
   { name: 'Luna IA',     href: '/agente',      icon: Bot,             roles: ['Administrador', 'Usuário'] },
-  { name: 'Score',       href: '/score',       icon: Trophy,          roles: ['Administrador', 'Usuário'] },
   { name: 'Cofre',       href: '/vault',       icon: ShieldCheck,     roles: ['Administrador', 'Usuário'] },
   { name: 'Automações',  href: '/automacoes',  icon: Zap,             roles: ['Administrador'] },
   { name: 'Integrações', href: '/integracoes', icon: Plug,            roles: ['Administrador'] },
   { name: 'Logs',        href: '/logs',        icon: ClipboardList,   roles: ['Administrador'] },
-  { name: 'Design',     href: '/design-system', icon: Palette,        roles: ['Administrador'] },
 ];
 
 export function Sidebar({
@@ -63,13 +55,11 @@ export function Sidebar({
   const pathname = usePathname();
   const session = getAuthSession();
   const role = (session?.role ?? 'Visualizador') as Role;
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return localStorage.getItem('sidebar-collapsed') === 'true';
+  });
   const isMobile = mode === 'mobile';
-
-  useEffect(() => {
-    const stored = localStorage.getItem('sidebar-collapsed');
-    if (stored === 'true') setCollapsed(true);
-  }, []);
 
   function toggle() {
     setCollapsed(prev => {
