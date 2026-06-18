@@ -461,18 +461,24 @@ async function fetchMetaData(
         }
         const purchaseRoasArr = row.purchase_roas as Array<{ action_type: string; value: string }> | undefined;
         const purchase_roas   = parseFloat(purchaseRoasArr?.[0]?.value ?? '0') || 0;
+        const investimento    = parseFloat(String(row.spend ?? '0'));
+        const valorComprasApi =
+          actMap['offsite_conversion.fb_pixel_purchase_value'] ||
+          actMap['omni_purchase_value'] ||
+          actMap['purchase_value'] ||
+          0;
         campanhas.push({
           nome: String(row.campaign_name ?? 'Sem nome'),
           tipo: String(row.objective ?? ''),
           metricas: {
-            investimento:  parseFloat(String(row.spend ?? '0')),
+            investimento,
             impressoes:    parseInt(String(row.impressions ?? '0'), 10),
             alcance:       parseInt(String(row.reach ?? '0'), 10),
             cliques:       parseInt(String(row.clicks ?? '0'), 10),
             frequencia:    parseFloat(String(row.frequency ?? '0')),
             conversas:     actMap['messaging_conversation_started_7d'] || 0,
-            compras:       actMap['offsite_conversion.fb_pixel_purchase'] || 0,
-            valor_compras: actMap['offsite_conversion.fb_pixel_purchase_value'] || actMap['purchase'] || 0,
+            compras:       actMap['offsite_conversion.fb_pixel_purchase'] || actMap['purchase'] || actMap['omni_purchase'] || 0,
+            valor_compras: valorComprasApi || (purchase_roas > 0 ? investimento * purchase_roas : 0),
             purchase_roas,
             visitas_pagina:     actMap['landing_page_view'] || 0,
             iniciaram_checkout: actMap['offsite_conversion.fb_pixel_initiate_checkout'] || actMap['initiate_checkout'] || 0,
@@ -2575,15 +2581,21 @@ function sCriativos(creatives: Creative[], idx: number, total: number): string {
 
 // ── Expanded slides ───────────────────────────────────────────────────────────
 
-function sMetaAdsCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number, total: number, periodo = 'Maio/2026'): string {
-  const isWA = (c: CampanhaDetalhada) =>
-    c.metricas.conversas > 0
-    || c.tipo.toLowerCase().includes('message')
-    || c.tipo.toLowerCase().includes('whatsapp');
+function sMetaAdsCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number, total: number, periodo = 'Maio/2026', campanhas = meta.campanhas): string {
+  type CampaignKind = 'mensagens' | 'vendas' | 'trafego' | 'alcance' | 'engajamento';
+  const campaignKind = (c: CampanhaDetalhada): CampaignKind => {
+    const name = c.nome.toLowerCase();
+    const objective = categorizeMetaObjective(c.tipo);
+    if (/(tr[aá]fego|traffic|link|clique|click)/i.test(name) || objective === 'trafego') return 'trafego';
+    if (/(topo|funil|alcance|reconhecimento|awareness|reach)/i.test(name) || objective === 'alcance') return 'alcance';
+    if (objective === 'mensagens' || /(whats|mensagem|conversa)/i.test(name)) return 'mensagens';
+    if (objective === 'engajamento') return 'engajamento';
+    if (objective === 'vendas' || /(venda|convers[aã]o|compra|prato digital)/i.test(name) || c.metricas.compras > 0) return 'vendas';
+    return 'trafego';
+  };
 
-  const isSales = (c: CampanhaDetalhada) =>
-    c.metricas.compras > 0
-    || c.tipo.toLowerCase().includes('conversion');
+  const isWA = (c: CampanhaDetalhada) => campaignKind(c) === 'mensagens';
+  const isSales = (c: CampanhaDetalhada) => campaignKind(c) === 'vendas';
 
   // ── Auto insight per campaign ─────────────────────────────────────────────
   function autoInsight(c: CampanhaDetalhada): string {
@@ -2602,7 +2614,11 @@ function sMetaAdsCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number, total
       if (m.compras > 0)        return `${num(Math.round(m.compras))} compras registradas no período — acompanhar a evolução do ROAS nas próximas semanas antes de escalar.`;
       return `Campanha de vendas com ${brlOrDash(m.investimento)} investido e ainda sem conversões no período — monitorar de perto e ajustar segmentação se não houver retorno em breve.`;
     }
-    if (m.cliques > 500)        return `Alto volume de cliques (${numOrDash(m.cliques)}) — audiência engajada com o criativo, bom indicador para uma futura campanha de conversão com o mesmo público.`;
+    if (campaignKind(c) === 'trafego') {
+      const cpc = m.cliques > 0 && m.investimento > 0 ? m.investimento / m.cliques : 0;
+      if (m.cliques > 500) return `Alto volume de cliques (${numOrDash(m.cliques)}) com CPC de ${brlOrDash(cpc)} — bom sinal de interesse e tráfego qualificado para o destino.`;
+      return `${numOrDash(m.cliques)} cliques com ${numOrDash(m.alcance)} pessoas alcançadas — acompanhar CTR e CPC para ganhar eficiência no tráfego de link.`;
+    }
     if (m.frequencia > 4)       return `Frequência de ${m.frequencia.toFixed(1)}× com boa repetição de mensagem — campanha de reconhecimento consolidando a marca junto ao público.`;
     return `Alcance de ${numOrDash(m.alcance)} pessoas com ${brlOrDash(m.investimento)} investido — campanha de visibilidade ativa, ideal para aquecer o público antes de uma campanha de conversão.`;
   }
@@ -2610,7 +2626,17 @@ function sMetaAdsCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number, total
   const descriptionFor = (c: CampanhaDetalhada): string => {
     if (isWA(c))    return 'Campanha de relacionamento e engajamento com foco em conversas.';
     if (isSales(c)) return 'Campanha de conversão com foco em vendas e retorno sobre investimento.';
-    return 'Campanha de reconhecimento e alcance da marca.';
+    if (campaignKind(c) === 'trafego') return 'Campanha de tráfego com foco em cliques no link e visitas ao destino.';
+    return 'Campanha de topo de funil com foco em alcance e reconhecimento da marca.';
+  };
+
+  const styleFor = (c: CampanhaDetalhada) => {
+    const kind = campaignKind(c);
+    if (kind === 'vendas') return { bg: '#F7FFF4', border: '#D7F8D0', accent: PRIMARY_TEXT, iconBg: '#ECFCE8' };
+    if (kind === 'trafego') return { bg: '#F6FAFF', border: '#BFDBFE', accent: '#2563EB', iconBg: '#EAF3FF' };
+    if (kind === 'alcance') return { bg: '#FFFDF5', border: '#FDE68A', accent: '#B45309', iconBg: '#FFF7E6' };
+    if (kind === 'mensagens') return { bg: '#F4FFFB', border: '#99F6E4', accent: '#0F766E', iconBg: '#E6FFFB' };
+    return { bg: '#FAF7FF', border: '#DDD6FE', accent: '#7C3AED', iconBg: '#F5F0FF' };
   };
 
   // ── Icons — premium green treatment, shape conveys campaign type ───────────
@@ -2620,69 +2646,87 @@ function sMetaAdsCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number, total
   const ICO_MONEY   = '<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>';
   const ICO_CHAT    = '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>';
   const ICO_CURSOR  = '<path d="m3 3 7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="m13 13 6 6"/>';
+  const ICO_EYE     = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
   const ICO_BARS    = '<path d="M4 19V9"/><path d="M10 19V5"/><path d="M16 19v-8"/><path d="M22 19H2"/>';
   const ICO_CART    = '<circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>';
   const ICO_RECEIPT = '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>';
   const ICO_BULB    = '<path d="M9 18h6"/><path d="M10 22h4"/><path d="M8.5 14.5A6 6 0 1 1 15.5 14c-.7.7-1.1 1.4-1.2 2H9.7c-.1-.7-.5-1.2-1.2-1.5z"/><path d="M4 12H2M22 12h-2M5.6 5.6 4.2 4.2M19.8 4.2l-1.4 1.4"/>';
   const ICO_TARGET  = '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 12l7-7"/><path d="M16 5h3v3"/>';
 
-  const metricItem = (iconPath: string, label: string, value: string) =>
+  const metricItem = (iconPath: string, label: string, value: string, accent = PRIMARY_TEXT, bg = `${PRIMARY}18`) =>
     `<div style="flex:1;display:flex;align-items:flex-start;gap:10px;min-width:0">
-      <div style="width:34px;height:34px;border-radius:50%;background:${PRIMARY}18;display:flex;align-items:center;justify-content:center;flex-shrink:0">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="${PRIMARY_TEXT}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${iconPath}</svg>
+      <div style="width:34px;height:34px;border-radius:50%;background:${bg};display:flex;align-items:center;justify-content:center;flex-shrink:0">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="${accent}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${iconPath}</svg>
       </div>
       <div style="min-width:0">
         <p style="font-size:12px;font-weight:600;color:${FG};font-family:${INTER};margin:0 0 3px;line-height:1.25">${label}</p>
-        <p style="font-size:19px;font-weight:800;color:${value === '—' ? MUTED : PRIMARY_TEXT};font-family:${INTER};margin:0;line-height:1.1;letter-spacing:-0.01em">${value}</p>
+        <p style="font-size:19px;font-weight:800;color:${value === '—' ? MUTED : accent};font-family:${INTER};margin:0;line-height:1.1;letter-spacing:-0.01em">${value}</p>
       </div>
     </div>`;
 
   function campBlock(c: CampanhaDetalhada): string {
     const m = c.metricas;
-    const campIsWA    = isWA(c);
-    const campIsSales = !campIsWA && isSales(c);
-    const icoPath = campIsWA ? ICO_WA : campIsSales ? ICO_DOC : ICO_ACT;
+    const kind = campaignKind(c);
+    const campIsWA = kind === 'mensagens';
+    const campIsSales = kind === 'vendas';
+    const style = styleFor(c);
+    const icoPath = campIsWA ? ICO_WA : campIsSales ? ICO_DOC : kind === 'trafego' ? ICO_CURSOR : ICO_ACT;
     const name = cleanCampaignHighlightTitle(c.nome);
 
     let row1: string, row2: string;
     if (campIsWA) {
       const cpm = m.conversas > 0 && m.investimento > 0 ? brl(m.investimento / m.conversas) : '—';
       row1 = [
-        metricItem(ICO_MONEY, 'Investimento', brlOrDash(m.investimento)),
-        metricItem(ICO_CHAT, 'Conversas iniciadas', m.conversas > 0 ? num(Math.round(m.conversas)) : '—'),
-        metricItem(ICO_MONEY, 'Custo por conversa', cpm),
+        metricItem(ICO_MONEY, 'Investimento', brlOrDash(m.investimento), style.accent, style.iconBg),
+        metricItem(ICO_CHAT, 'Conversas iniciadas', m.conversas > 0 ? num(Math.round(m.conversas)) : '—', style.accent, style.iconBg),
+        metricItem(ICO_MONEY, 'Custo por conversa', cpm, style.accent, style.iconBg),
       ].join('');
       row2 = [
-        metricItem(ICO_CURSOR, 'Cliques no link', numOrDash(m.cliques)),
-        metricItem(ICO_BARS, 'Frequência', m.frequencia > 0 ? m.frequencia.toFixed(2) : '—'),
+        metricItem(ICO_CURSOR, 'Cliques no link', numOrDash(m.cliques), style.accent, style.iconBg),
+        metricItem(ICO_BARS, 'Frequência', m.frequencia > 0 ? m.frequencia.toFixed(2) : '—', style.accent, style.iconBg),
       ].join('');
     } else if (campIsSales) {
       const cpp = m.compras > 0 && m.investimento > 0 ? brl(m.investimento / m.compras) : '—';
       row1 = [
-        metricItem(ICO_MONEY, 'Investimento', brlOrDash(m.investimento)),
-        metricItem(ICO_CART, 'Compras registradas', m.compras > 0 ? num(Math.round(m.compras)) : '—'),
-        metricItem(ICO_MONEY, 'Custo por compra', cpp),
+        metricItem(ICO_MONEY, 'Investimento', brlOrDash(m.investimento), style.accent, style.iconBg),
+        metricItem(ICO_CART, 'Compras registradas', m.compras > 0 ? num(Math.round(m.compras)) : '—', style.accent, style.iconBg),
+        metricItem(ICO_MONEY, 'Custo por compra', cpp, style.accent, style.iconBg),
       ].join('');
       row2 = [
-        metricItem(ICO_RECEIPT, 'Valor de compra registrado', m.valor_compras > 0 ? brl(m.valor_compras) : '—'),
-        metricItem(ICO_TREND, 'ROAS', m.purchase_roas > 0 ? m.purchase_roas.toFixed(2) : '—'),
+        metricItem(ICO_RECEIPT, 'Valor de venda', m.valor_compras > 0 ? brl(m.valor_compras) : '—', style.accent, style.iconBg),
+        metricItem(ICO_TREND, 'ROAS', m.purchase_roas > 0 ? m.purchase_roas.toFixed(2) : '—', style.accent, style.iconBg),
+      ].join('');
+    } else if (kind === 'trafego') {
+      const cpc = m.cliques > 0 && m.investimento > 0 ? m.investimento / m.cliques : 0;
+      const ctr = m.impressoes > 0 && m.cliques > 0 ? (m.cliques / m.impressoes) * 100 : 0;
+      row1 = [
+        metricItem(ICO_MONEY, 'Investimento', brlOrDash(m.investimento), style.accent, style.iconBg),
+        metricItem(ICO_CURSOR, 'Cliques no link', numOrDash(m.cliques), style.accent, style.iconBg),
+        metricItem(ICO_MONEY, 'CPC', brlOrDash(cpc), style.accent, style.iconBg),
+      ].join('');
+      row2 = [
+        metricItem(ICO_REACH, 'Pessoas atingidas', numOrDash(m.alcance), style.accent, style.iconBg),
+        metricItem(ICO_EYE, 'Impressões', numOrDash(m.impressoes), style.accent, style.iconBg),
+        metricItem(ICO_TREND, 'CTR', ctr > 0 ? `${ctr.toFixed(2).replace('.', ',')}%` : '—', style.accent, style.iconBg),
       ].join('');
     } else {
+      const cpm = m.impressoes > 0 && m.investimento > 0 ? m.investimento / (m.impressoes / 1000) : 0;
       row1 = [
-        metricItem(ICO_MONEY, 'Investimento', brlOrDash(m.investimento)),
-        metricItem(ICO_REACH, 'Alcance', numOrDash(m.alcance)),
-        metricItem(ICO_CURSOR, 'Cliques', numOrDash(m.cliques)),
+        metricItem(ICO_MONEY, 'Investimento', brlOrDash(m.investimento), style.accent, style.iconBg),
+        metricItem(ICO_REACH, 'Pessoas atingidas', numOrDash(m.alcance), style.accent, style.iconBg),
+        metricItem(ICO_EYE, 'Impressões', numOrDash(m.impressoes), style.accent, style.iconBg),
       ].join('');
       row2 = [
-        metricItem(ICO_BARS, 'Frequência', m.frequencia > 0 ? m.frequencia.toFixed(2) : '—'),
-        metricItem(ICO_REACH, 'Impressões', numOrDash(m.impressoes)),
+        metricItem(ICO_MONEY, 'CPM', brlOrDash(cpm), style.accent, style.iconBg),
+        metricItem(ICO_BARS, 'Frequência', m.frequencia > 0 ? m.frequencia.toFixed(2) : '—', style.accent, style.iconBg),
+        metricItem(ICO_CURSOR, 'Cliques', numOrDash(m.cliques), style.accent, style.iconBg),
       ].join('');
     }
 
-    return `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:20px;box-shadow:0 14px 34px rgba(15,23,42,.06);padding:28px;box-sizing:border-box;display:flex;flex-direction:column">
+    return `<div style="background:${style.bg};border:1px solid ${style.border};border-left:5px solid ${style.accent};border-radius:18px;box-shadow:0 12px 28px rgba(15,23,42,.052);padding:20px 22px;box-sizing:border-box;display:flex;flex-direction:column;min-height:286px">
       <div style="display:flex;align-items:flex-start;gap:16px;padding-bottom:20px">
-        <div style="width:56px;height:56px;border-radius:50%;background:${PRIMARY}18;display:flex;align-items:center;justify-content:center;flex-shrink:0">
-          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="${PRIMARY_TEXT}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${icoPath}</svg>
+        <div style="width:52px;height:52px;border-radius:50%;background:${style.iconBg};display:flex;align-items:center;justify-content:center;flex-shrink:0">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="${style.accent}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${icoPath}</svg>
         </div>
         <div style="min-width:0">
           <p style="font-size:19px;font-weight:800;color:${FG};font-family:${INTER};margin:0 0 4px;line-height:1.25">${name}</p>
@@ -2699,11 +2743,11 @@ function sMetaAdsCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number, total
 
       <div style="border-top:1px solid #EEF2F7"></div>
 
-      <div data-conclusion="1" style="margin-top:20px;background:${PRIMARY}0D;border-radius:14px;padding:18px 20px;display:flex;align-items:flex-start;gap:14px">
-        <div style="width:36px;height:36px;border-radius:50%;background:${PRIMARY}22;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="${PRIMARY_TEXT}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${campIsWA ? ICO_TARGET : ICO_BULB}</svg>
+      <div data-conclusion="1" style="margin-top:18px;background:#FFFFFFAA;border-radius:14px;padding:15px 18px;display:flex;align-items:flex-start;gap:14px">
+        <div style="width:34px;height:34px;border-radius:50%;background:${style.iconBg};display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="${style.accent}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${campIsWA ? ICO_TARGET : ICO_BULB}</svg>
         </div>
-        <div style="border-left:2px solid ${PRIMARY};padding-left:14px">
+        <div style="border-left:2px solid ${style.accent};padding-left:14px">
           <p style="font-size:14px;font-weight:800;color:${FG};font-family:${INTER};margin:0 0 4px">Insight estratégico</p>
           <p style="font-size:13px;font-weight:500;color:#163461;font-family:${INTER};line-height:1.6;margin:0">${autoInsight(c)}</p>
         </div>
@@ -2712,8 +2756,8 @@ function sMetaAdsCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number, total
   }
 
   const month = periodo.split('/')[0]?.toLowerCase() || periodo.toLowerCase();
-  const campGrid = meta.campanhas.length > 0
-    ? `<div style="display:grid;grid-template-columns:${meta.campanhas.length === 1 ? '1fr' : '1fr 1fr'};gap:24px">${meta.campanhas.map(campBlock).join('')}</div>`
+  const campGrid = campanhas.length > 0
+    ? `<div style="display:grid;grid-template-columns:${campanhas.length === 1 ? '1fr' : '1fr 1fr'};gap:18px 22px">${campanhas.map(campBlock).join('')}</div>`
     : '';
 
   const body = `<div data-slide-index="${idx}" data-slide-total="${total}" style="width:1440px;min-height:810px;background:${BG};border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
@@ -2864,6 +2908,7 @@ export async function buildDeliveryReport(opts: {
   const hasInstagramSpotlight = hasInstagramPosts;
   const hasDestaques         = hasMeta && meta!.campanhas.length > 0;
   const hasCriativos         = creatives.length > 0;
+  const destaquePages        = hasDestaques ? Math.ceil(meta!.campanhas.length / 4) : 0;
 
   const total = 1
     + (hasVisao      ? 1 : 0)
@@ -2876,7 +2921,7 @@ export async function buildDeliveryReport(opts: {
     + (hasInstagramPosts ? instagramCalendarMonths.length : 0)
     + (hasInstagramPosts ? 1 : 0)
     + (hasInstagramSpotlight ? 1 : 0)
-    + (hasDestaques   ? 1 : 0)
+    + destaquePages
     + (hasCriativos   ? 1 : 0);
 
   const slides: string[] = [];
@@ -2897,7 +2942,11 @@ export async function buildDeliveryReport(opts: {
   }
   if (hasInstagramPosts)     slides.push(sInstagramPosts(igPosts, ++i, total));
   if (hasInstagramSpotlight) slides.push(sInstagramSpotlight(igPosts, ++i, total));
-  if (hasDestaques)   slides.push(sMetaAdsCampanhas(meta!, diag, ++i, total, periodo));
+  if (hasDestaques) {
+    for (let start = 0; start < meta!.campanhas.length; start += 4) {
+      slides.push(sMetaAdsCampanhas(meta!, diag, ++i, total, periodo, meta!.campanhas.slice(start, start + 4)));
+    }
+  }
   if (hasCriativos)   slides.push(sCriativos(creatives, ++i, total));
 
   return { html: `${FONT_LINK}<div class="onmid-report" style="background:${CANVAS};padding:28px;font-family:${INTER}">${slides.join('')}</div>` };
@@ -3108,8 +3157,9 @@ export function __devPreviewFullReport(): string {
   const hasMeta = true, hasInstagram = true, hasInstagramPosts = true, hasInstagramSpotlight = true;
   const hasDestaques = true, hasCriativos = true;
   const instagramCalendarMonths = monthsBetweenInclusive(new Date(2026, 2, 1, 12), new Date(2026, 4, 31, 12));
+  const destaquePages = Math.ceil(meta.campanhas.length / 4);
 
-  const total = 12 + instagramCalendarMonths.length; // cover + non-calendar sections + one calendar per month
+  const total = 11 + instagramCalendarMonths.length + destaquePages; // cover + non-calendar sections + one calendar per month
   const slides: string[] = [];
   let i = 1;
 
@@ -3128,7 +3178,11 @@ export function __devPreviewFullReport(): string {
   }
   if (hasInstagramPosts)     slides.push(sInstagramPosts(igPosts, ++i, total));
   if (hasInstagramSpotlight) slides.push(sInstagramSpotlight(igPosts, ++i, total));
-  if (hasDestaques)          slides.push(sMetaAdsCampanhas(meta, diag, ++i, total, periodo));
+  if (hasDestaques) {
+    for (let start = 0; start < meta.campanhas.length; start += 4) {
+      slides.push(sMetaAdsCampanhas(meta, diag, ++i, total, periodo, meta.campanhas.slice(start, start + 4)));
+    }
+  }
   if (hasCriativos)          slides.push(sCriativos(creatives, ++i, total));
 
   return `${FONT_LINK}<div class="onmid-report" style="background:${CANVAS};padding:28px;font-family:${INTER}">${slides.join('')}</div>`;
