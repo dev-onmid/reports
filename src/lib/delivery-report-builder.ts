@@ -1747,13 +1747,13 @@ function sBase(d: ParsedData, idx: number, total: number): string {
 
   // ── Top stat cards ─────────────────────────────────────────────────────────
   const topCard = (label: string, value: string, icoPath: string, bg: string, tc: string) =>
-    `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:16px;box-shadow:0 10px 26px rgba(15,23,42,.06);padding:18px 22px;display:flex;align-items:center;gap:16px;flex:1;min-width:0">
-      <div style="width:48px;height:48px;border-radius:50%;background:${bg}1F;flex-shrink:0;display:flex;align-items:center;justify-content:center">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="${tc}" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${icoPath}</svg>
+    `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:16px;box-shadow:0 14px 32px rgba(15,23,42,.065);padding:24px 26px;display:flex;align-items:flex-start;gap:18px;min-width:0;min-height:128px;box-sizing:border-box">
+      <div style="width:58px;height:58px;border-radius:50%;background:${bg}1F;flex-shrink:0;display:flex;align-items:center;justify-content:center">
+        <svg width="27" height="27" viewBox="0 0 24 24" fill="none" stroke="${tc}" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${icoPath}</svg>
       </div>
       <div style="min-width:0">
-        <p style="font-size:14px;font-weight:500;color:#163461;font-family:${INTER};margin:0 0 4px">${label}</p>
-        <p style="font-family:${INTER};font-size:30px;font-weight:900;letter-spacing:-0.03em;color:${tc};line-height:1;margin:0">${value}</p>
+        <p style="font-size:15px;font-weight:600;color:#163461;font-family:${INTER};margin:2px 0 6px">${label}</p>
+        <p style="font-family:${INTER};font-size:34px;font-weight:950;letter-spacing:-0.04em;color:${tc};line-height:1;margin:0">${value}</p>
       </div>
     </div>`;
 
@@ -1821,12 +1821,12 @@ function sBase(d: ParsedData, idx: number, total: number): string {
 
   <div style="position:relative;z-index:1;flex:1;padding:56px 48px 0;display:flex;flex-direction:column">
 
-    <div style="flex-shrink:0;display:flex;align-items:flex-start;gap:32px;margin-bottom:24px">
-      <div style="flex:0 0 380px">
+    <div style="flex-shrink:0;display:grid;grid-template-columns:360px minmax(0,1fr);gap:28px;align-items:start;margin-bottom:24px">
+      <div>
         <h1 style="font-family:${INTER};font-size:46px;font-weight:900;color:${FG};line-height:1.08;margin:0 0 10px;letter-spacing:-0.03em">${reportTitle('Base de clientes e<br>clientes ativos')}</h1>
         <p style="font-size:15px;font-weight:500;color:#163461;font-family:${INTER};margin:0;line-height:1.4">Onde está a maior oportunidade de relacionamento</p>
       </div>
-      <div style="flex:1;display:flex;gap:14px;align-items:stretch">
+      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;align-items:stretch">
         ${topCard('Clientes ativos',       numOrDash(d.ativos),     ICO_USERS,    PRIMARY,   PRIMARY_TEXT)}
         ${topCard('Clientes inativos',     numOrDash(d.inativos),   ICO_USER_X,   '#f87171', '#dc2626'   )}
         ${topCard('Clientes em potencial', numOrDash(d.potenciais), ICO_USER_STAR,'#4ade80', '#16a34a'   )}
