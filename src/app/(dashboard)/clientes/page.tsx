@@ -582,6 +582,24 @@ export default function ClientesPage() {
                             {cliente.dashboard_type === 'leads' ? 'Leads' : cliente.dashboard_type === 'branding' ? 'Branding' : 'Conversão'}
                           </button>
                         )}
+
+                        {!showArchived && (
+                          <div className="ml-1 flex items-center gap-1">
+                            {ALL_PLATFORMS.map(p => (
+                              <PlatformIconButton
+                                key={p}
+                                platform={p}
+                                size="sm"
+                                onClick={e => {
+                                  e.preventDefault();
+                                  setLinkDialogClient(cliente);
+                                  setLinkDialogPlatform(p);
+                                  setLinkDialogOpen(true);
+                                }}
+                              />
+                            ))}
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -649,7 +667,7 @@ export default function ClientesPage() {
                     </div>
                   </div>
 
-                  <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
                     <button
                       type="button"
                       className={cn(
@@ -694,34 +712,19 @@ export default function ClientesPage() {
                         )}
                       </div>
                     </div>
+
+                    {!showArchived ? (
+                      <Link
+                        href={`/dashboard?client=${cliente.id}`}
+                        className="inline-flex h-full min-h-[48px] items-center justify-center rounded-lg border border-primary/35 bg-primary/10 px-3 text-xs font-bold text-primary transition-colors hover:bg-primary/20 sm:min-w-[118px]"
+                      >
+                        Ver dashboard
+                      </Link>
+                    ) : null}
                   </div>
 
-                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                    {!showArchived ? (
-                      <>
-                        <div className="flex items-center gap-1">
-                          {ALL_PLATFORMS.map(p => (
-                            <PlatformIconButton
-                              key={p}
-                              platform={p}
-                              size="sm"
-                              onClick={e => {
-                                e.preventDefault();
-                                setLinkDialogClient(cliente);
-                                setLinkDialogPlatform(p);
-                                setLinkDialogOpen(true);
-                              }}
-                            />
-                          ))}
-                        </div>
-                        <Link
-                          href={`/dashboard?client=${cliente.id}`}
-                          className="inline-flex h-8 items-center justify-center rounded-lg border border-primary/35 bg-primary/10 px-3 text-xs font-bold text-primary transition-colors hover:bg-primary/20"
-                        >
-                          Ver dashboard
-                        </Link>
-                      </>
-                    ) : isAdmin ? (
+                  {showArchived && isAdmin ? (
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                       <div className="flex flex-wrap items-center gap-2">
                         <button
                           onClick={() => openStatusDialog(cliente, 'Ativo')}
@@ -738,8 +741,8 @@ export default function ClientesPage() {
                           </button>
                         )}
                       </div>
-                    ) : null}
-                  </div>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </div>
