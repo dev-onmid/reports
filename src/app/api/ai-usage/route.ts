@@ -16,6 +16,21 @@ export type AiUsageBySource = {
   cost_brl: number;
 };
 
+export type AiUsageBilling = {
+  credit_brl: number;
+  used_brl: number;
+  balance_brl: number;
+  used_pct: number;
+} | null;
+
+function configuredCreditBrl(): number | null {
+  const brl = Number(process.env.AI_CLOUD_CREDIT_BRL ?? '');
+  if (Number.isFinite(brl) && brl > 0) return brl;
+  const usd = Number(process.env.AI_CLOUD_CREDIT_USD ?? '');
+  if (Number.isFinite(usd) && usd > 0) return usd * USD_TO_BRL;
+  return null;
+}
+
 export async function GET() {
   const pool = makeServerPool();
   try {
@@ -57,6 +72,16 @@ export async function GET() {
     `);
 
     const costUsd = parseFloat(month.cost_usd);
+    const costBrl = costUsd * USD_TO_BRL;
+    const creditBrl = configuredCreditBrl();
+    const billing: AiUsageBilling = creditBrl
+      ? {
+          credit_brl: creditBrl,
+          used_brl: costBrl,
+          balance_brl: Math.max(creditBrl - costBrl, 0),
+          used_pct: Math.min((costBrl / creditBrl) * 100, 100),
+        }
+      : null;
 
     return Response.json({
       month: {
@@ -64,7 +89,7 @@ export async function GET() {
         input_tokens:  parseInt(month.input_tokens),
         output_tokens: parseInt(month.output_tokens),
         cost_usd:      costUsd,
-        cost_brl:      costUsd * USD_TO_BRL,
+        cost_brl:      costBrl,
       } satisfies AiUsageMonth,
       by_source: bySource.map(r => ({
         source:    r.source,
@@ -72,6 +97,7 @@ export async function GET() {
         cost_usd:  parseFloat(r.cost_usd),
         cost_brl:  parseFloat(r.cost_usd) * USD_TO_BRL,
       })) satisfies AiUsageBySource[],
+      billing,
     });
   } finally {
     await pool.end();

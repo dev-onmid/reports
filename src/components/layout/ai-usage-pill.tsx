@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Zap } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import type { AiUsageMonth, AiUsageBySource } from '@/app/api/ai-usage/route';
+import type { AiUsageMonth, AiUsageBySource, AiUsageBilling } from '@/app/api/ai-usage/route';
 import { ESTIMATES, calcCostUsd, USD_TO_BRL } from '@/lib/ai-usage-config';
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -37,14 +37,16 @@ function EstimateRow({ source }: { source: string }) {
 export function AIUsagePill() {
   const [month, setMonth] = useState<AiUsageMonth | null>(null);
   const [bySource, setBySource] = useState<AiUsageBySource[]>([]);
+  const [billing, setBilling] = useState<AiUsageBilling>(null);
 
   useEffect(() => {
     fetch('/api/ai-usage')
       .then(r => r.ok ? r.json() : null)
-      .then((data: { month: AiUsageMonth; by_source: AiUsageBySource[] } | null) => {
+      .then((data: { month: AiUsageMonth; by_source: AiUsageBySource[]; billing?: AiUsageBilling } | null) => {
         if (!data) return;
         setMonth(data.month);
         setBySource(data.by_source);
+        setBilling(data.billing ?? null);
       })
       .catch(() => undefined);
   }, []);
@@ -80,6 +82,29 @@ export function AIUsagePill() {
                 <span>Tokens usados</span>
                 <span>{(month.input_tokens + month.output_tokens).toLocaleString('pt-BR')}</span>
               </div>
+            </div>
+          )}
+
+          {billing ? (
+            <div className="space-y-2 border-t border-border pt-2">
+              <div className="flex justify-between text-xs">
+                <span className="text-muted-foreground">Saldo estimado</span>
+                <span className="font-semibold text-foreground">{fmtBrl(billing.balance_brl)}</span>
+              </div>
+              <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-violet-400"
+                  style={{ width: `${billing.used_pct}%` }}
+                />
+              </div>
+              <div className="flex justify-between text-[11px] text-muted-foreground">
+                <span>Crédito configurado</span>
+                <span>{fmtBrl(billing.credit_brl)}</span>
+              </div>
+            </div>
+          ) : (
+            <div className="border-t border-border pt-2 text-[11px] leading-relaxed text-muted-foreground">
+              Configure <span className="font-mono">AI_CLOUD_CREDIT_BRL</span> para mostrar saldo estimado.
             </div>
           )}
 
