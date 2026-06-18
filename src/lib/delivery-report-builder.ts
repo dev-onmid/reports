@@ -186,11 +186,56 @@ function splitCsv(content: string): { headers: string[]; rows: string[][] } {
   if (lines.length < 2) return { headers: [], rows: [] };
   const sep = (lines[0].match(/;/g)?.length ?? 0) > (lines[0].match(/,/g)?.length ?? 0) ? ';' : ',';
   const parse = (line: string) => line.split(sep).map(c => c.replace(/^"|"$/g, '').trim());
-  return { headers: parse(lines[0]).map(h => h.toLowerCase()), rows: lines.slice(1).map(parse) };
+  return { headers: parse(lines[0]).map(normalizeHeader), rows: lines.slice(1).map(parse) };
 }
 
-function parseFloat2(s: string): number {
-  return parseFloat(s.replace(/[R$\s.]/g, '').replace(',', '.')) || 0;
+function normalizeHeader(value: unknown): string {
+  return String(value ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+}
+
+function readTabular(content: string): { headers: string[]; rows: string[][] } {
+  if (content.startsWith('data:')) {
+    const b64 = content.includes(';base64,') ? content.split(';base64,')[1] : content;
+    try {
+      const wb = XLSX.read(b64, { type: 'base64' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rawRows = XLSX.utils.sheet_to_json<(string | number | boolean | null)[]>(sheet, { header: 1, defval: '', raw: false });
+      const [headerRow, ...bodyRows] = rawRows.filter(row => row.some(cell => String(cell ?? '').trim()));
+      if (!headerRow) return { headers: [], rows: [] };
+      return {
+        headers: headerRow.map(normalizeHeader),
+        rows: bodyRows.map(row => headerRow.map((_, index) => String(row[index] ?? '').trim())),
+      };
+    } catch {
+      return { headers: [], rows: [] };
+    }
+  }
+  return splitCsv(content);
+}
+
+function parseFloat2(value: unknown): number {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  let s = String(value ?? '')
+    .replace(/\u00A0/g, ' ')
+    .replace(/[R$\s]/g, '')
+    .trim();
+  if (!s) return 0;
+
+  const comma = s.lastIndexOf(',');
+  const dot = s.lastIndexOf('.');
+  if (comma >= 0 && dot >= 0) {
+    s = comma > dot ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '');
+  } else if (comma >= 0) {
+    s = s.replace(/\./g, '').replace(',', '.');
+  } else if (dot >= 0 && /\.\d{3}(\D|$)/.test(s)) {
+    s = s.replace(/\./g, '');
+  }
+
+  return parseFloat(s.replace(/[^\d.-]/g, '')) || 0;
 }
 
 // Files prefixed with "ant-" (or containing "anterior") belong to the previous period.
@@ -217,10 +262,19 @@ function separateFiles(files: { name: string; content: string }[]): {
 function parseClientesCsvExtended(content: string): {
   count: number; faturamento: number; pedidos: number; uma_compra: number; recorrentes: number;
 } {
-  const { headers, rows } = splitCsv(content);
+  const { headers, rows } = readTabular(content);
   if (!headers.length) return { count: 0, faturamento: 0, pedidos: 0, uma_compra: 0, recorrentes: 0 };
 
-  const vIdx = headers.findIndex(h => (h.includes('valor') || h.includes('gasto') || h.includes('faturamento')) && !h.includes('pedido'));
+  const vIdx = headers.findIndex(h =>
+    h.includes('valor') ||
+    h.includes('gasto') ||
+    h.includes('faturamento') ||
+    h.includes('receita') ||
+    h.includes('revenue') ||
+    h.includes('total pago') ||
+    h.includes('total comprado') ||
+    h.includes('total vendido'),
+  );
   const pIdx = headers.findIndex(h =>
     (h.includes('pedido') || h.includes('qtd') || h.includes('quantidade')) &&
     !h.includes('ultimo') && !h.includes('data') && !h.includes('valor'),
