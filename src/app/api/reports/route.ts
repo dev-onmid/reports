@@ -25,11 +25,13 @@ export async function GET(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   const id = req.nextUrl.searchParams.get('id');
-  if (!id) return Response.json({ error: 'id obrigatório' }, { status: 400 });
+  const body = await req.json().catch(() => ({})) as { ids?: string[] };
+  const ids = id ? [id] : Array.isArray(body.ids) ? body.ids.filter(Boolean) : [];
+  if (!ids.length) return Response.json({ error: 'id obrigatório' }, { status: 400 });
   const pool = makeServerPool();
   try {
-    await pool.query(`DELETE FROM public.diagnostic_reports WHERE id = $1`, [id]);
-    return Response.json({ ok: true });
+    await pool.query(`DELETE FROM public.diagnostic_reports WHERE id = ANY($1::uuid[])`, [ids]);
+    return Response.json({ ok: true, deleted: ids.length });
   } finally {
     await pool.end();
   }

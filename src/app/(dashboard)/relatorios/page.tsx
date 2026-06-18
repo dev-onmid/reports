@@ -96,6 +96,8 @@ export default function RelatoriosPage() {
   const [filterClient, setFilterClient] = useState('');
   const [filterOrigin, setFilterOrigin] = useState('');
   const [page, setPage] = useState(1);
+  const [selectedReportIds, setSelectedReportIds] = useState<string[]>([]);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   // Load reports
   useEffect(() => {
@@ -302,6 +304,42 @@ export default function RelatoriosPage() {
     if (!confirm(`Excluir "${title}"?`)) return;
     await fetch(`/api/reports?id=${id}`, { method: 'DELETE' });
     setDiagnostics(prev => prev.filter(r => r.id !== id));
+    setSelectedReportIds(prev => prev.filter(selectedId => selectedId !== id));
+  }
+
+  function toggleReportSelection(id: string) {
+    setSelectedReportIds(prev => prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]);
+  }
+
+  function togglePageSelection(ids: string[]) {
+    if (!ids.length) return;
+    setSelectedReportIds(prev => {
+      const pageSelected = ids.every(id => prev.includes(id));
+      if (pageSelected) return prev.filter(id => !ids.includes(id));
+      return Array.from(new Set([...prev, ...ids]));
+    });
+  }
+
+  async function deleteSelectedReports() {
+    if (!selectedReportIds.length) return;
+    const count = selectedReportIds.length;
+    if (!confirm(`Excluir ${count} relatório${count > 1 ? 's' : ''} selecionado${count > 1 ? 's' : ''}?`)) return;
+    setBulkDeleting(true);
+    try {
+      const ids = [...selectedReportIds];
+      const res = await fetch('/api/reports', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      });
+      if (!res.ok) throw new Error('delete_failed');
+      setDiagnostics(prev => prev.filter(report => !ids.includes(report.id)));
+      setSelectedReportIds([]);
+    } catch {
+      alert('Não foi possível excluir os relatórios selecionados. Tente novamente.');
+    } finally {
+      setBulkDeleting(false);
+    }
   }
 
   function reportPath(token: string) {
@@ -364,6 +402,9 @@ export default function RelatoriosPage() {
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const pagedIds = paged.map(report => report.id);
+  const allPagedSelected = pagedIds.length > 0 && pagedIds.every(id => selectedReportIds.includes(id));
+  const somePagedSelected = pagedIds.some(id => selectedReportIds.includes(id));
   const clientsById = new Map(clients.map(c => [c.id, c]));
   const clientsByName = new Map(clients.map(c => [c.name, c]));
   const allClientNames = Array.from(new Set(visibleDiagnostics.map(d => d.client_name))).sort();
@@ -520,11 +561,47 @@ export default function RelatoriosPage() {
             </button>
           </div>
 
+          {selectedReportIds.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-500/20 bg-red-500/8 px-4 py-3">
+              <p className="text-sm text-red-100">
+                {selectedReportIds.length} relatório{selectedReportIds.length > 1 ? 's' : ''} selecionado{selectedReportIds.length > 1 ? 's' : ''}
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setSelectedReportIds([])}
+                  className="px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Limpar seleção
+                </button>
+                <button
+                  onClick={deleteSelectedReports}
+                  disabled={bulkDeleting}
+                  className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-3 py-2 text-xs font-bold text-white transition-colors hover:bg-red-700 disabled:opacity-60"
+                >
+                  {bulkDeleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                  Excluir selecionados
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Table */}
           <div className="bg-card border border-border rounded-[var(--radius)] overflow-hidden">
             <table className="w-full text-sm text-left">
               <thead className="border-b border-border">
                 <tr>
+                  <th className="w-10 px-5 py-3">
+                    <input
+                      type="checkbox"
+                      aria-label="Selecionar relatórios desta página"
+                      checked={allPagedSelected}
+                      ref={(input) => {
+                        if (input) input.indeterminate = somePagedSelected && !allPagedSelected;
+                      }}
+                      onChange={() => togglePageSelection(pagedIds)}
+                      className="h-4 w-4 rounded border-border bg-background text-violet-500 accent-violet-600"
+                    />
+                  </th>
                   <th className="px-5 py-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Relatório</th>
                   <th className="px-5 py-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Cliente</th>
                   <th className="px-5 py-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Período</th>
@@ -536,7 +613,7 @@ export default function RelatoriosPage() {
               <tbody className="divide-y divide-border">
                 {paged.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="py-14 text-center">
+                    <td colSpan={7} className="py-14 text-center">
                       <div className="flex flex-col items-center gap-3">
                         <FileText className="w-8 h-8 text-muted-foreground/40" />
                         <p className="text-sm text-muted-foreground">Nenhum relatório encontrado.</p>
@@ -550,8 +627,18 @@ export default function RelatoriosPage() {
                 {paged.map(row => {
                   const dt = fmtDateTime(row.created_at);
                   const isAuto = row.generated_by === 'auto';
+                  const isSelected = selectedReportIds.includes(row.id);
                   return (
-                    <tr key={row.id} className="hover:bg-muted/40 transition-colors group">
+                    <tr key={row.id} className={cn('hover:bg-muted/40 transition-colors group', isSelected && 'bg-violet-500/8')}>
+                      <td className="px-5 py-3.5">
+                        <input
+                          type="checkbox"
+                          aria-label={`Selecionar ${row.title}`}
+                          checked={isSelected}
+                          onChange={() => toggleReportSelection(row.id)}
+                          className="h-4 w-4 rounded border-border bg-background text-violet-500 accent-violet-600"
+                        />
+                      </td>
                       <td className="px-5 py-3.5">
                         <div className="flex items-center gap-3">
                           <div className="w-8 h-8 rounded-md bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center shrink-0">
