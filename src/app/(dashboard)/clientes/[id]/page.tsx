@@ -19,6 +19,7 @@ import {
   Power, PowerOff, Search, BookMarked, ExternalLink, RefreshCw, ChevronRight,
   PiggyBank, Wallet, Info, Lightbulb, UserPlus, Brain, Save, MousePointer2,
   Maximize2, Minimize2, ZoomIn, ZoomOut, ImageIcon, Unlink, History, Copy, Sparkles,
+  Store,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -3944,12 +3945,44 @@ function GoogleAdsConnectionDialog({
 
 const CLIENT_BILLING_MODE_PREFIX = 'clientAdsBillingMode_';
 
+type AnotaAiStore = {
+  id: string;
+  storeName: string;
+  storeId: string;
+  ifoodStoreId: string | null;
+  integrationToken: string;
+  active: boolean;
+  lastTestStatus: string | null;
+  lastTestMessage: string | null;
+  lastTestAt: string | null;
+};
+
+const EMPTY_ANOTA_AI_FORM = {
+  id: '',
+  storeName: '',
+  storeId: '',
+  ifoodStoreId: '',
+  integrationToken: '',
+  active: true,
+};
+
+function maskToken(token: string) {
+  if (!token) return '—';
+  if (token.length <= 14) return `${token.slice(0, 4)}...`;
+  return `${token.slice(0, 10)}...${token.slice(-6)}`;
+}
+
 function ClientIntegrationsTab({ clientId, clientName }: { clientId: string; clientName: string }) {
   const { getConnection, getClientAccounts, getClientMetrics } = useMetaAdsConnections();
   const googleAds = useGoogleAds();
   const [metaDialogOpen, setMetaDialogOpen] = useState(false);
   const [googleDialogOpen, setGoogleDialogOpen] = useState(false);
   const [billingMode, setBillingMode] = useState<'prepaid' | 'card'>('prepaid');
+  const [anotaStores, setAnotaStores] = useState<AnotaAiStore[]>([]);
+  const [anotaForm, setAnotaForm] = useState(EMPTY_ANOTA_AI_FORM);
+  const [anotaLoading, setAnotaLoading] = useState(true);
+  const [anotaSaving, setAnotaSaving] = useState(false);
+  const [anotaError, setAnotaError] = useState('');
   const metaConnection = getConnection(clientId);
   const metaAccounts = getClientAccounts(clientId);
   const metaMetrics = getClientMetrics(clientId);
@@ -3972,6 +4005,14 @@ function ClientIntegrationsTab({ clientId, clientName }: { clientId: string; cli
     return () => { cancelled = true; };
   }, [clientId]);
 
+  useEffect(() => {
+    fetch(`/api/clients/${clientId}/anota-ai`)
+      .then(r => r.ok ? r.json() as Promise<AnotaAiStore[]> : [])
+      .then(rows => setAnotaStores(rows))
+      .catch(() => setAnotaStores([]))
+      .finally(() => setAnotaLoading(false));
+  }, [clientId]);
+
   function updateBillingMode(next: 'prepaid' | 'card') {
     setBillingMode(next);
     localStorage.setItem(`${CLIENT_BILLING_MODE_PREFIX}${clientId}`, next);
@@ -3980,6 +4021,53 @@ function ClientIntegrationsTab({ clientId, clientName }: { clientId: string; cli
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mode: next }),
     }).catch(() => {});
+  }
+
+  async function saveAnotaStore() {
+    setAnotaError('');
+    if (!anotaForm.storeName.trim() || !anotaForm.storeId.trim() || !anotaForm.integrationToken.trim()) {
+      setAnotaError('Preencha nome da loja, ID da loja e token.');
+      return;
+    }
+    setAnotaSaving(true);
+    try {
+      const res = await fetch(`/api/clients/${clientId}/anota-ai`, {
+        method: anotaForm.id ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(anotaForm),
+      });
+      const data = await res.json().catch(() => ({})) as AnotaAiStore & { error?: string };
+      if (!res.ok || data.error) {
+        setAnotaError(data.error ?? 'Erro ao salvar integração.');
+        return;
+      }
+      setAnotaStores(prev => anotaForm.id
+        ? prev.map(store => store.id === data.id ? data : store)
+        : [...prev, data]
+      );
+      setAnotaForm(EMPTY_ANOTA_AI_FORM);
+    } finally {
+      setAnotaSaving(false);
+    }
+  }
+
+  async function removeAnotaStore(store: AnotaAiStore) {
+    if (!window.confirm(`Remover a loja "${store.storeName}" do Anota Aí?`)) return;
+    await fetch(`/api/clients/${clientId}/anota-ai?storeId=${store.id}`, { method: 'DELETE' });
+    setAnotaStores(prev => prev.filter(item => item.id !== store.id));
+    if (anotaForm.id === store.id) setAnotaForm(EMPTY_ANOTA_AI_FORM);
+  }
+
+  function editAnotaStore(store: AnotaAiStore) {
+    setAnotaError('');
+    setAnotaForm({
+      id: store.id,
+      storeName: store.storeName,
+      storeId: store.storeId,
+      ifoodStoreId: store.ifoodStoreId ?? '',
+      integrationToken: store.integrationToken,
+      active: store.active,
+    });
   }
 
   return (
@@ -4020,6 +4108,132 @@ function ClientIntegrationsTab({ clientId, clientName }: { clientId: string; cli
             </div>
           </div>
         </CardHeader>
+      </Card>
+
+      <Card className="mb-4 border-border bg-card">
+        <CardHeader>
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-emerald-500/25 bg-emerald-500/10">
+                <Store className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <CardTitle>Anota Aí</CardTitle>
+                <CardDescription className="mt-1">
+                  Cadastre uma ou mais lojas do Anota Aí para este cliente. A coleta de pedidos será conectada depois a partir desses tokens.
+                </CardDescription>
+              </div>
+            </div>
+            <span className={cn(
+              'shrink-0 rounded-full border px-2 py-1 text-[10px] font-bold uppercase tracking-widest',
+              anotaStores.some(store => store.active)
+                ? 'border-primary/30 bg-primary/15 text-primary'
+                : 'border-border bg-muted text-muted-foreground',
+            )}>
+              {anotaStores.some(store => store.active) ? 'Preparado' : 'Não vinculado'}
+            </span>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 lg:grid-cols-[1fr_1fr_1fr]">
+            <div className="space-y-1.5">
+              <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Nome da loja</Label>
+              <Input
+                value={anotaForm.storeName}
+                onChange={e => setAnotaForm(prev => ({ ...prev, storeName: e.target.value }))}
+                placeholder="Ex: Prochet"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">ID da loja</Label>
+              <Input
+                value={anotaForm.storeId}
+                onChange={e => setAnotaForm(prev => ({ ...prev, storeId: e.target.value }))}
+                placeholder="ID Anota Aí"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">ID da loja iFood</Label>
+              <Input
+                value={anotaForm.ifoodStoreId}
+                onChange={e => setAnotaForm(prev => ({ ...prev, ifoodStoreId: e.target.value }))}
+                placeholder="Opcional"
+              />
+            </div>
+          </div>
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
+            <div className="space-y-1.5">
+              <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Token de integração</Label>
+              <Input
+                value={anotaForm.integrationToken}
+                onChange={e => setAnotaForm(prev => ({ ...prev, integrationToken: e.target.value }))}
+                placeholder="Cole a chave de integração"
+              />
+            </div>
+            <div className="flex items-end gap-2">
+              <button
+                type="button"
+                onClick={() => setAnotaForm(prev => ({ ...prev, active: !prev.active }))}
+                className={cn(
+                  'h-10 rounded-lg border px-3 text-xs font-bold transition-colors',
+                  anotaForm.active
+                    ? 'border-primary/30 bg-primary/10 text-primary'
+                    : 'border-border text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {anotaForm.active ? 'Ativa' : 'Inativa'}
+              </button>
+              {anotaForm.id && (
+                <Button variant="outline" onClick={() => setAnotaForm(EMPTY_ANOTA_AI_FORM)} className="h-10 text-xs">
+                  Cancelar
+                </Button>
+              )}
+              <Button onClick={saveAnotaStore} disabled={anotaSaving} className="h-10 text-xs font-bold">
+                {anotaSaving ? 'Salvando...' : anotaForm.id ? 'Salvar loja' : 'Adicionar loja'}
+              </Button>
+            </div>
+          </div>
+          {anotaError && <p className="text-xs text-red-400">{anotaError}</p>}
+
+          <div className="rounded-xl border border-border bg-background">
+            {anotaLoading ? (
+              <div className="p-4 text-sm text-muted-foreground">Carregando lojas...</div>
+            ) : anotaStores.length === 0 ? (
+              <div className="p-4 text-sm text-muted-foreground">Nenhuma loja Anota Aí cadastrada para este cliente.</div>
+            ) : (
+              <div className="divide-y divide-border">
+                {anotaStores.map(store => (
+                  <div key={store.id} className="flex flex-wrap items-center justify-between gap-3 p-4">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="font-semibold text-foreground">{store.storeName}</p>
+                        <span className={cn(
+                          'rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider',
+                          store.active ? 'border-primary/30 bg-primary/10 text-primary' : 'border-border bg-muted text-muted-foreground',
+                        )}>
+                          {store.active ? 'Ativa' : 'Inativa'}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Loja: {store.storeId}
+                        {store.ifoodStoreId ? ` · iFood: ${store.ifoodStoreId}` : ''}
+                        {' · '}Token: {maskToken(store.integrationToken)}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button variant="outline" size="sm" onClick={() => editAnotaStore(store)} className="h-8 text-xs">
+                        Editar
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => removeAnotaStore(store)} className="h-8 border-red-500/30 text-red-300 hover:text-red-200">
+                        Remover
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </CardContent>
       </Card>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 pt-1">
@@ -4365,7 +4579,7 @@ function SheetsResultsTab({ clientId }: { clientId: string }) {
 }
 
 // ── Page ───────────────────────────────────────────────────────────────────────
-const TABS = ['planejamento', 'mapa', 'historico', 'links', 'pagamentos', 'dna', 'rastreio', 'crm', 'chat'] as const;
+const TABS = ['planejamento', 'mapa', 'historico', 'integracoes', 'links', 'pagamentos', 'dna', 'rastreio', 'crm', 'chat'] as const;
 type Tab = typeof TABS[number];
 
 export default function ClientPage({ params }: { params: Promise<{ id: string }> }) {
@@ -4522,6 +4736,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
     planejamento: 'Planejamento',
     mapa:         'Mapa Mental',
     historico:    'Histórico',
+    integracoes:  'Integrações',
     links:        'Links & Senhas',
     pagamentos:   'Pagamentos',
     dna:          'DNA do Cliente',
@@ -4675,6 +4890,8 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
       {tab === 'mapa' && <ClientMindMapTab clientId={id} clientName={client.name} />}
 
       {tab === 'historico' && <HistoricoTab clientId={id} />}
+
+      {tab === 'integracoes' && <ClientIntegrationsTab clientId={id} clientName={client.name} />}
 
       {tab === 'links' && <VaultTab clientId={id} />}
 
