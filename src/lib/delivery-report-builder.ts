@@ -70,6 +70,8 @@ type CampanhaDetalhada = {
     compras: number;
     valor_compras: number;
     purchase_roas: number;
+    visitas_pagina: number;       // landing_page_view — pessoas que de fato abriram o cardápio
+    iniciaram_checkout: number;   // initiate_checkout
   };
 };
 
@@ -409,6 +411,8 @@ async function fetchMetaData(
             compras:       actMap['offsite_conversion.fb_pixel_purchase'] || 0,
             valor_compras: actMap['offsite_conversion.fb_pixel_purchase_value'] || actMap['purchase'] || 0,
             purchase_roas,
+            visitas_pagina:     actMap['landing_page_view'] || 0,
+            iniciaram_checkout: actMap['offsite_conversion.fb_pixel_initiate_checkout'] || actMap['initiate_checkout'] || 0,
           },
         });
       }
@@ -744,29 +748,49 @@ async function fetchInstagramData(
   const ig = page.instagram_business_account;
   const pageToken = page.access_token;
 
-  // Fetch profile-level insights for the period
-  const insUrl = new URL(`https://graph.facebook.com/v21.0/${ig.id}/insights`);
-  insUrl.searchParams.set('metric', 'reach,impressions,profile_views,website_clicks,accounts_engaged');
-  insUrl.searchParams.set('period', 'total_over_range');
-  insUrl.searchParams.set('since', from);
-  insUrl.searchParams.set('until', to);
-  insUrl.searchParams.set('access_token', pageToken);
-  const insRes = await fetch(insUrl.toString(), { signal: AbortSignal.timeout(12000) }).catch(() => null);
-
-  let reach = 0, impressions = 0, profile_views = 0, website_clicks = 0, accounts_engaged = 0;
-  if (insRes?.ok) {
-    const insData = await insRes.json() as {
-      data?: Array<{ name: string; values: Array<{ value: number }> }>;
-    };
-    for (const m of insData.data ?? []) {
-      const val = typeof m.values?.[0]?.value === 'number' ? m.values[0].value : 0;
-      if (m.name === 'reach')             reach = val;
-      else if (m.name === 'impressions')  impressions = val;
-      else if (m.name === 'profile_views') profile_views = val;
-      else if (m.name === 'website_clicks') website_clicks = val;
-      else if (m.name === 'accounts_engaged') accounts_engaged = val;
+  // Fetch profile-level insights for the period.
+  // IMPORTANT: each call below is fault-isolated on purpose. The IG Graph API rejects the
+  // ENTIRE request if even one metric in a combined `metric=a,b,c` list is invalid/deprecated
+  // for that account, silently zeroing out metrics that would otherwise have worked. We
+  // also use the current `metric_type=total_value&period=day` shape — `period=total_over_range`
+  // was deprecated by Meta and now errors on many accounts.
+  async function fetchIgProfileMetrics(metrics: string): Promise<Record<string, number>> {
+    const url = new URL(`https://graph.facebook.com/v21.0/${ig!.id}/insights`);
+    url.searchParams.set('metric', metrics);
+    url.searchParams.set('metric_type', 'total_value');
+    url.searchParams.set('period', 'day');
+    url.searchParams.set('since', from);
+    url.searchParams.set('until', to);
+    url.searchParams.set('access_token', pageToken);
+    const res = await fetch(url.toString(), { signal: AbortSignal.timeout(12000) }).catch(() => null);
+    const out: Record<string, number> = {};
+    if (!res?.ok) {
+      const body = await res?.text().catch(() => '');
+      console.error(`[delivery][ig-insights] falha ao buscar "${metrics}" (status ${res?.status ?? 'sem resposta'}):`, body);
+      return out;
     }
+    const data = await res.json() as {
+      data?: Array<{ name: string; total_value?: { value: number }; values?: Array<{ value: number }> }>;
+    };
+    for (const m of data.data ?? []) {
+      const val = m.total_value?.value ?? m.values?.[0]?.value;
+      out[m.name] = typeof val === 'number' ? val : 0;
+    }
+    return out;
   }
+
+  // `impressions` is requested in its own call: it's the metric most likely to be deprecated
+  // for a given account, and isolating it means a failure there can't zero out the other four.
+  const [coreMetrics, impressionsMetric] = await Promise.all([
+    fetchIgProfileMetrics('reach,profile_views,website_clicks,accounts_engaged'),
+    fetchIgProfileMetrics('impressions'),
+  ]);
+
+  const reach            = coreMetrics.reach ?? 0;
+  const impressions      = impressionsMetric.impressions ?? 0;
+  const profile_views    = coreMetrics.profile_views ?? 0;
+  const website_clicks   = coreMetrics.website_clicks ?? 0;
+  const accounts_engaged = coreMetrics.accounts_engaged ?? 0;
 
   if (reach === 0 && impressions === 0 && (ig.followers_count ?? 0) === 0) return null;
 
@@ -777,9 +801,11 @@ async function fetchInstagramData(
   try {
     const since = Math.floor(new Date(from + 'T00:00:00Z').getTime() / 1000);
     const until = Math.floor(new Date(to + 'T23:59:59Z').getTime() / 1000);
+    // limit=50 covers virtually any monthly posting cadence — the old limit=12 silently
+    // undercounted "Total de publicações" and the calendar for clients posting more often.
     const mediaUrl = new URL(`https://graph.facebook.com/v21.0/${ig.id}/media`);
     mediaUrl.searchParams.set('fields', 'id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count');
-    mediaUrl.searchParams.set('limit', '12');
+    mediaUrl.searchParams.set('limit', '50');
     mediaUrl.searchParams.set('since', String(since));
     mediaUrl.searchParams.set('until', String(until));
     mediaUrl.searchParams.set('access_token', pageToken);
@@ -1964,6 +1990,33 @@ const ICO_HEART    = '<path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.
 const ICO_COMMENT  = '<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>';
 const ICO_PLAY      = '<polygon points="5 3 19 12 5 21 5 3"/>';
 const ICO_LAYERS    = '<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>';
+const ICO_REACH     = '<circle cx="12" cy="12" r="2"/><path d="M16.24 16.24a6 6 0 0 0 0-8.49"/><path d="M7.76 7.76a6 6 0 0 0 0 8.49"/><path d="M19.07 19.07a10 10 0 0 0 0-14.14"/><path d="M4.93 4.93a10 10 0 0 0 0 14.14"/>';
+const ICO_SAVE      = '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>';
+const ICO_SHARE     = '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.59 13.51l6.83 3.98M15.41 6.51L8.59 10.49"/>';
+const ICO_TREND     = '<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>';
+
+// Shared by sInstagramPosts and sInstagramSpotlight so both slides render the exact
+// same icon set, type badge style, and number formatting — same visual standard.
+function igCompact(n: number): string {
+  if (!n) return '—';
+  if (n >= 1000000) return `${(n / 1000000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mi`;
+  if (n >= 1000) return `${(n / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil`;
+  return num(n);
+}
+function igIconSvg(paths: string, color = PRIMARY_TEXT, size = 17, fill = 'none') {
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="${fill}" stroke="${color}" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0">${paths}</svg>`;
+}
+function igMediaKind(mediaType: string): { label: string; color: string; bg: string; icon: string } {
+  if (mediaType === 'REELS' || mediaType === 'VIDEO') return { label: 'Reel', color: '#FF4F8B', bg: '#FFF0F6', icon: ICO_PLAY };
+  if (mediaType === 'CAROUSEL_ALBUM') return { label: 'Carrossel', color: '#7C5CFF', bg: '#F2EEFF', icon: ICO_LAYERS };
+  if (mediaType === 'STORY') return { label: 'Story', color: '#F59E0B', bg: '#FFF7E6', icon: '<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>' };
+  return { label: 'Post Feed', color: PRIMARY_TEXT, bg: '#EAFDE6', icon: '<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 10h16M10 4v16"/>' };
+}
+function igMediaOverlay(mediaType: string): string {
+  if (mediaType === 'REELS' || mediaType === 'VIDEO') return `<div style="position:absolute;top:14px;right:14px;width:34px;height:34px;border-radius:50%;background:rgba(15,23,42,.62);display:flex;align-items:center;justify-content:center;box-shadow:0 8px 18px rgba(15,23,42,.25)"><svg width="15" height="15" viewBox="0 0 24 24" fill="white">${ICO_PLAY}</svg></div>`;
+  if (mediaType === 'CAROUSEL_ALBUM') return `<div style="position:absolute;top:14px;right:14px;width:34px;height:34px;border-radius:50%;background:rgba(15,23,42,.62);display:flex;align-items:center;justify-content:center;box-shadow:0 8px 18px rgba(15,23,42,.25)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICO_LAYERS}</svg></div>`;
+  return '';
+}
 
 function sInstagramCalendar(posts: InstagramPost[], idx: number, total: number, monthDate: Date): string {
   const MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
@@ -2036,18 +2089,49 @@ function sInstagramCalendar(posts: InstagramPost[], idx: number, total: number, 
 
   const pill = (kind: ContentKind) => {
     const s = kindStyles[kind] ?? kindStyles.Feed;
-    return `<span style="display:inline-flex;max-width:100%;height:18px;align-items:center;border-radius:999px;border:1px solid ${s.border};background:${s.bg};color:${s.color};padding:0 7px;font-family:${INTER};font-size:9px;font-weight:850;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${kind}</span>`;
+    return `<span style="display:inline-flex;max-width:100%;height:16px;align-items:center;border-radius:999px;border:1px solid ${s.border};background:${s.bg};color:${s.color};padding:0 6px;font-family:${INTER};font-size:8px;font-weight:850;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0">${kind}</span>`;
+  };
+
+  const truncate = (text: string, max: number) => {
+    const clean = text.replace(/\s+/g, ' ').trim();
+    return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
+  };
+
+  const thumbBox = (post: InstagramPost) => {
+    const s = kindStyles[displayKind(post)] ?? kindStyles.Feed;
+    return post.thumbnailUrl
+      ? `<div style="width:34px;height:34px;border-radius:7px;overflow:hidden;flex-shrink:0;background:${s.bg};border:1px solid ${s.border}">
+          <img src="${post.thumbnailUrl}" alt="" style="width:100%;height:100%;object-fit:cover;display:block" onerror="this.parentElement.style.background='${s.bg}';this.remove()" />
+        </div>`
+      : `<div style="width:34px;height:34px;border-radius:7px;flex-shrink:0;background:${s.bg};border:1px solid ${s.border};display:flex;align-items:center;justify-content:center">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="${s.color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></svg>
+        </div>`;
   };
 
   const dayCell = (day: number | null) => {
-    if (!day) return `<div style="height:62px;border:1px solid #EDF1F6;background:#F8FAFC;border-radius:12px;opacity:.6"></div>`;
+    if (!day) return `<div style="height:100px;border:1px solid #EDF1F6;background:#F8FAFC;border-radius:12px;opacity:.6"></div>`;
     const key = dayKey(new Date(year, month, day));
     const dayPosts = postsByDay.get(key) ?? [];
-    const uniqueKinds = [...new Set(dayPosts.map(displayKind))].slice(0, 3);
-    const extra = dayPosts.length > uniqueKinds.length ? `<span style="font-family:${INTER};font-size:9px;font-weight:900;color:#94A3B8">+${dayPosts.length - uniqueKinds.length}</span>` : '';
-    return `<div style="height:62px;border:1px solid ${dayPosts.length ? '#DDEFE1' : '#EDF1F6'};background:${dayPosts.length ? '#FBFFFA' : '#FFFFFF'};border-radius:12px;padding:8px;box-sizing:border-box;display:flex;flex-direction:column;gap:5px;overflow:hidden">
-      <span style="font-family:${INTER};font-size:12px;font-weight:850;color:${dayPosts.length ? FG : '#94A3B8'};line-height:1">${day}</span>
-      <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;min-width:0">${uniqueKinds.map(pill).join('')}${extra}</div>
+    if (!dayPosts.length) {
+      return `<div style="height:100px;border:1px solid #EDF1F6;background:#FFFFFF;border-radius:12px;padding:8px;box-sizing:border-box">
+        <span style="font-family:${INTER};font-size:12px;font-weight:850;color:#94A3B8;line-height:1">${day}</span>
+      </div>`;
+    }
+    const main = dayPosts[0];
+    const extraCount = dayPosts.length - 1;
+    const extra = extraCount > 0 ? `<span style="font-family:${INTER};font-size:9px;font-weight:900;color:#94A3B8;flex-shrink:0">+${extraCount}</span>` : '';
+    return `<div style="height:100px;border:1px solid #DDEFE1;background:#FBFFFA;border-radius:12px;padding:8px;box-sizing:border-box;display:flex;flex-direction:column;gap:6px;overflow:hidden">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-shrink:0">
+        <span style="font-family:${INTER};font-size:12px;font-weight:850;color:${FG};line-height:1">${day}</span>
+        ${extra}
+      </div>
+      <div style="display:flex;gap:6px;align-items:flex-start;min-width:0;flex:1">
+        ${thumbBox(main)}
+        <div style="min-width:0;flex:1;display:flex;flex-direction:column;gap:3px">
+          ${pill(displayKind(main))}
+          <p style="font-family:${INTER};font-size:9px;font-weight:600;color:#64748B;line-height:1.25;margin:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${truncate(main.caption, 46) || 'sem legenda'}</p>
+        </div>
+      </div>
     </div>`;
   };
 
@@ -2111,7 +2195,7 @@ function sInstagramCalendar(posts: InstagramPost[], idx: number, total: number, 
         ${statCard('Total de publicações', num(postsInMonth.length), '— vs mês anterior', '<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M16 2v5M8 2v5M3 10h18"/>')}
         ${statCard('Reels', num(formatCounts.Reel ?? 0), '— vs mês anterior', ICO_PLAY)}
         ${statCard('Carrosséis', num(formatCounts.Carrossel ?? 0), '— vs mês anterior', ICO_LAYERS)}
-        ${statCard('Stories publicados', num(formatCounts.Story ?? 0), '— vs mês anterior', '<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>')}
+        ${statCard('Stories publicados', '—', 'Stories expiram em 24h — sem histórico via API', '<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>')}
         ${statCard('Melhor formato', bestFormatLabel, bestFormatEntry ? 'Maior desempenho médio' : 'Sem dados suficientes', '<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>')}
         ${statCard('Frequência média', frequencyLabel, consistency, '<path d="M4 19V9"/><path d="M10 19V5"/><path d="M16 19v-8"/><path d="M22 19H2"/>')}
       </div>
@@ -2122,83 +2206,58 @@ function sInstagramCalendar(posts: InstagramPost[], idx: number, total: number, 
 }
 
 function sInstagramPosts(posts: InstagramPost[], idx: number, total: number): string {
-  const compact = (n: number): string => {
-    if (!n) return '—';
-    if (n >= 1000000) return `${(n / 1000000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mi`;
-    if (n >= 1000) return `${(n / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil`;
-    return num(n);
-  };
-
-  const normalizeMediaType = (mediaType: string) => {
-    if (mediaType === 'REELS' || mediaType === 'VIDEO') return { label: 'Reel', color: '#FF4F8B', bg: '#FFF0F6', icon: ICO_PLAY };
-    if (mediaType === 'CAROUSEL_ALBUM') return { label: 'Carrossel', color: '#7C5CFF', bg: '#F2EEFF', icon: ICO_LAYERS };
-    if (mediaType === 'STORY') return { label: 'Story', color: '#F59E0B', bg: '#FFF7E6', icon: '<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>' };
-    return { label: 'Post Feed', color: PRIMARY_TEXT, bg: '#EAFDE6', icon: '<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 10h16M10 4v16"/>' };
-  };
-
-  const mediaOverlay = (mediaType: string) => {
-    if (mediaType === 'REELS' || mediaType === 'VIDEO') return `<div style="position:absolute;top:14px;right:14px;width:34px;height:34px;border-radius:50%;background:rgba(15,23,42,.62);display:flex;align-items:center;justify-content:center;box-shadow:0 8px 18px rgba(15,23,42,.25)"><svg width="15" height="15" viewBox="0 0 24 24" fill="white">${ICO_PLAY}</svg></div>`;
-    if (mediaType === 'CAROUSEL_ALBUM') return `<div style="position:absolute;top:14px;right:14px;width:34px;height:34px;border-radius:50%;background:rgba(15,23,42,.62);display:flex;align-items:center;justify-content:center;box-shadow:0 8px 18px rgba(15,23,42,.25)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICO_LAYERS}</svg></div>`;
-    return '';
-  };
-
-  const iconSvg = (paths: string, color = PRIMARY_TEXT, size = 17, fill = 'none') =>
-    `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="${fill}" stroke="${color}" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0">${paths}</svg>`;
-
-  const ICO_REACH = '<circle cx="12" cy="12" r="2"/><path d="M16.24 16.24a6 6 0 0 0 0-8.49"/><path d="M7.76 7.76a6 6 0 0 0 0 8.49"/><path d="M19.07 19.07a10 10 0 0 0 0-14.14"/><path d="M4.93 4.93a10 10 0 0 0 0 14.14"/>';
-  const ICO_EYE = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
-  const ICO_SAVE = '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>';
-  const ICO_SHARE = '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.59 13.51l6.83 3.98M15.41 6.51L8.59 10.49"/>';
-
   const score = (p: InstagramPost) => (p.reach > 0 ? p.reach : 0) + (p.likes + p.comments + p.saves) * 12 + p.videoViews * 0.2;
-  const featuredPosts = [...posts].sort((a, b) => score(b) - score(a)).slice(0, 4);
+  const featuredPosts = [...posts].sort((a, b) => score(b) - score(a)).slice(0, 6);
 
-  const metricPill = (iconPath: string, label: string, value: string) =>
-    `<div style="height:36px;border:1px solid #E8EDF4;border-radius:9px;background:rgba(255,255,255,.92);display:flex;align-items:center;gap:9px;padding:0 11px;box-sizing:border-box">
-      ${iconSvg(iconPath, PRIMARY_TEXT, 15)}
-      <div style="min-width:0">
-        <p style="font-family:${INTER};font-size:9px;font-weight:800;color:#64748B;margin:0 0 2px;line-height:1">${label}</p>
-        <p style="font-family:${INTER};font-size:15px;font-weight:900;color:#111827;margin:0;line-height:1;letter-spacing:-0.03em;white-space:nowrap">${value}</p>
+  const truncateCaption = (text: string, max: number) => {
+    const clean = text.replace(/\s+/g, ' ').trim();
+    return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
+  };
+
+  // Compact pill: icon + label + value on one line. `highlight` styles the Engajamento cell.
+  const metricPill = (iconPath: string, label: string, value: string, highlight = false) =>
+    `<div style="height:32px;border:1px solid ${highlight ? '#DDF6D8' : '#E8EDF4'};border-radius:8px;background:${highlight ? 'linear-gradient(135deg,#F0FDEC,#FFFFFF)' : 'rgba(255,255,255,.92)'};display:flex;align-items:center;gap:6px;padding:0 8px;box-sizing:border-box;overflow:hidden">
+      ${igIconSvg(iconPath, PRIMARY_TEXT, 12)}
+      <div style="min-width:0;display:flex;align-items:baseline;gap:4px;overflow:hidden">
+        <p style="font-family:${INTER};font-size:8px;font-weight:800;color:#64748B;margin:0;line-height:1;white-space:nowrap">${label}</p>
+        <p style="font-family:${INTER};font-size:12px;font-weight:900;color:${highlight ? PRIMARY_TEXT : '#111827'};margin:0;line-height:1;letter-spacing:-0.02em;white-space:nowrap">${value}</p>
       </div>
     </div>`;
 
   const postCard = (p: InstagramPost) => {
-    const kind = normalizeMediaType(p.mediaType);
+    const kind = igMediaKind(p.mediaType);
     const interactions = p.likes + p.comments + p.saves;
-    const engagement = p.reach > 0 ? (interactions / p.reach) * 100 : interactions > 0 ? 0 : 0;
+    const engagement = p.reach > 0 ? (interactions / p.reach) * 100 : 0;
     const engagementText = p.reach > 0 ? `${engagement.toFixed(1).replace('.', ',')}%` : '—';
     const thumb = p.thumbnailUrl
       ? `<img src="${p.thumbnailUrl}" alt="" style="width:100%;height:100%;object-fit:cover;display:block" />`
-      : `<div style="width:100%;height:100%;background:linear-gradient(135deg,#EAFDE6,#F8FAFC);display:flex;align-items:center;justify-content:center"><svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="${PRIMARY_TEXT}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${ICO_LAYERS}</svg></div>`;
+      : `<div style="width:100%;height:100%;background:linear-gradient(135deg,#EAFDE6,#F8FAFC);display:flex;align-items:center;justify-content:center"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="${PRIMARY_TEXT}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${ICO_LAYERS}</svg></div>`;
 
-    return `<div style="height:262px;background:${CARD};border:1px solid #E7ECF3;border-radius:16px;box-shadow:0 14px 34px rgba(15,23,42,.055);display:flex;gap:22px;padding:14px;box-sizing:border-box;overflow:hidden">
-      <div style="position:relative;width:208px;height:234px;border-radius:12px;background:${ROW};overflow:hidden;flex-shrink:0">
+    return `<div style="height:208px;background:${CARD};border:1px solid #E7ECF3;border-radius:14px;box-shadow:0 12px 28px rgba(15,23,42,.05);display:flex;gap:14px;padding:12px;box-sizing:border-box;overflow:hidden">
+      <div style="position:relative;width:148px;border-radius:10px;background:${ROW};overflow:hidden;flex-shrink:0">
         ${thumb}
-        ${mediaOverlay(p.mediaType)}
+        ${igMediaOverlay(p.mediaType)}
       </div>
 
-      <div style="flex:1;min-width:0;display:flex;flex-direction:column;padding:6px 4px 2px 0">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:9px">
-          <div style="height:31px;border-radius:9px;background:${kind.bg};color:${kind.color};display:inline-flex;align-items:center;gap:8px;padding:0 13px;font-family:${INTER};font-size:13px;font-weight:900;line-height:1">
-            ${iconSvg(kind.icon, kind.color, 16)}
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:7px">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-shrink:0">
+          <div style="height:24px;border-radius:7px;background:${kind.bg};color:${kind.color};display:inline-flex;align-items:center;gap:5px;padding:0 9px;font-family:${INTER};font-size:10px;font-weight:900;line-height:1;flex-shrink:0">
+            ${igIconSvg(kind.icon, kind.color, 12)}
             ${kind.label}
           </div>
-          <p style="font-family:${INTER};font-size:11px;font-weight:800;color:#64748B;margin:0;text-transform:capitalize;white-space:nowrap">${formatPostDate(p.timestamp)}</p>
+          <p style="font-family:${INTER};font-size:10px;font-weight:800;color:#64748B;margin:0;text-transform:capitalize;white-space:nowrap;flex-shrink:0">${formatPostDate(p.timestamp)}</p>
         </div>
 
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 10px">
-          ${metricPill(ICO_REACH, 'Alcance', compact(p.reach))}
-          ${metricPill(ICO_SHARE, 'Interações', compact(interactions))}
-          ${metricPill(ICO_EYE, p.videoViews > 0 ? 'Visualizações' : 'Curtidas', compact(p.videoViews > 0 ? p.videoViews : p.likes))}
-          ${metricPill(ICO_SAVE, 'Salvamentos', compact(p.saves))}
-          ${metricPill(ICO_HEART, 'Curtidas', compact(p.likes))}
-          <div style="height:78px;grid-row:span 2;border:1px solid #DDF6D8;border-radius:9px;background:linear-gradient(135deg,#F0FDEC,#FFFFFF);display:flex;flex-direction:column;align-items:center;justify-content:center;box-sizing:border-box">
-            <p style="font-family:${INTER};font-size:12px;font-weight:800;color:#64748B;margin:0 0 6px">Engajamento</p>
-            <p style="font-family:${INTER};font-size:24px;font-weight:950;color:${PRIMARY_TEXT};letter-spacing:-0.045em;line-height:1;margin:0">${engagementText}</p>
-          </div>
-          ${metricPill(ICO_COMMENT, 'Comentários', compact(p.comments))}
-        </div>
+        <p style="font-family:${INTER};font-size:10px;font-weight:600;color:#475569;line-height:1.3;margin:0;flex-shrink:0;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden">${truncateCaption(p.caption, 56) || 'sem legenda'}</p>
 
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+          ${metricPill(ICO_REACH, 'Alcance', igCompact(p.reach))}
+          ${metricPill(ICO_SHARE, 'Interações', igCompact(interactions))}
+          ${metricPill(ICO_HEART, 'Curtidas', igCompact(p.likes))}
+          ${metricPill(ICO_SAVE, 'Salvamentos', igCompact(p.saves))}
+          ${metricPill(ICO_COMMENT, 'Comentários', igCompact(p.comments))}
+          ${metricPill(ICO_TREND, 'Engajamento', engagementText, true)}
+        </div>
       </div>
     </div>`;
   };
@@ -2208,7 +2267,7 @@ function sInstagramPosts(posts: InstagramPost[], idx: number, total: number): st
 
   <div style="position:relative;z-index:1;flex:1;padding:42px 44px 30px;box-sizing:border-box;display:flex;flex-direction:column">
     <div style="flex-shrink:0;margin:0 0 18px">
-      <h1 style="font-family:${INTER};font-size:52px;font-weight:950;color:#050816;line-height:.95;margin:0 0 13px;letter-spacing:-0.055em">Preview de Conteúdos</h1>
+      <h1 style="font-family:${INTER};font-size:52px;font-weight:950;color:#050816;line-height:.95;margin:0 0 13px;letter-spacing:-0.055em">Top conteúdos do mês</h1>
       <p style="font-size:18px;font-weight:500;color:#6B7280;font-family:${INTER};margin:0;letter-spacing:-0.015em">Entregas dos principais posts do último mês</p>
       <div style="width:36px;height:3px;border-radius:999px;background:${PRIMARY};margin-top:13px"></div>
     </div>
@@ -2235,62 +2294,86 @@ function sInstagramSpotlight(posts: InstagramPost[], idx: number, total: number)
   const bestScore = hasReach ? best.reach : best.likes + best.comments;
   const liftPct = avgOthers > 0 ? Math.round(((bestScore - avgOthers) / avgOthers) * 100) : 0;
 
+  const kind = igMediaKind(best.mediaType);
   const isVideo = best.mediaType === 'REELS' || best.mediaType === 'VIDEO';
   const caption = best.caption.length > 220 ? best.caption.slice(0, 220).trim() + '…' : best.caption;
+  const interactions = best.likes + best.comments + best.saves;
+  const engagement = best.reach > 0 ? (interactions / best.reach) * 100 : 0;
+  const engagementText = best.reach > 0 ? `${engagement.toFixed(1).replace('.', ',')}%` : '—';
 
-  const metric = (label: string, value: string) =>
-    `<div style="background:${ROW};border-radius:14px;padding:16px 18px">
-      <p style="font-size:12px;font-weight:600;color:${MUTED};font-family:${INTER};margin:0 0 6px">${label}</p>
-      <p style="font-family:${INTER};font-size:24px;font-weight:900;letter-spacing:-0.02em;color:${FG};margin:0">${value}</p>
+  // Same icon set + pill language as "Top conteúdos do mês" — same visual standard,
+  // just sized up for a hero treatment around the centered, larger thumbnail.
+  const heroMetric = (iconPath: string, label: string, value: string, highlight = false) =>
+    `<div style="height:72px;border:1px solid ${highlight ? '#DDF6D8' : '#E7ECF3'};border-radius:14px;background:${highlight ? 'linear-gradient(135deg,#F0FDEC,#FFFFFF)' : CARD};box-shadow:0 10px 24px rgba(15,23,42,.05);display:flex;align-items:center;gap:13px;padding:0 16px;box-sizing:border-box">
+      <div style="width:38px;height:38px;border-radius:10px;background:${highlight ? `${PRIMARY}22` : `${PRIMARY}15`};display:flex;align-items:center;justify-content:center;flex-shrink:0">
+        ${igIconSvg(iconPath, PRIMARY_TEXT, 19)}
+      </div>
+      <div style="min-width:0">
+        <p style="font-size:11px;font-weight:700;color:${MUTED};margin:0 0 2px;font-family:${INTER};line-height:1">${label}</p>
+        <p style="font-size:21px;font-weight:900;color:${highlight ? PRIMARY_TEXT : FG};margin:0;font-family:${INTER};line-height:1;letter-spacing:-0.02em">${value}</p>
+      </div>
     </div>`;
 
-  const metrics = [
-    metric('Curtidas', num(best.likes)),
-    metric('Comentários', num(best.comments)),
-    metric(hasReach ? 'Alcance' : 'Engajamento', hasReach ? num(best.reach) : num(best.likes + best.comments)),
-    isVideo ? metric('Visualizações', num(best.videoViews)) : metric('Salvamentos', num(best.saves)),
+  const leftMetrics = [
+    heroMetric(ICO_REACH, 'Alcance', hasReach ? num(best.reach) : '—'),
+    heroMetric(ICO_HEART, 'Curtidas', num(best.likes)),
+    heroMetric(ICO_COMMENT, 'Comentários', num(best.comments)),
+  ];
+  const rightMetrics = [
+    heroMetric(ICO_SHARE, 'Interações', num(interactions)),
+    heroMetric(ICO_SAVE, 'Salvamentos', num(best.saves)),
+    heroMetric(ICO_TREND, 'Engajamento', engagementText, true),
   ];
 
   const body = `<div data-slide-index="${idx}" data-slide-total="${total}" style="width:1440px;min-height:810px;background:${BG};border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
   <div style="position:absolute;right:60px;top:-100px;width:560px;height:480px;border-radius:50%;background:linear-gradient(135deg,rgba(219,234,254,.55),rgba(255,255,255,.15));opacity:.7;pointer-events:none"></div>
 
-  <div style="position:relative;z-index:1;flex:1;padding:92px 48px 0;display:flex;flex-direction:column">
-    <div style="flex-shrink:0;margin-bottom:22px">
+  <div style="position:relative;z-index:1;flex:1;padding:80px 48px 0;display:flex;flex-direction:column">
+    <div style="flex-shrink:0;margin-bottom:24px">
       <h1 style="font-family:${INTER};font-size:52px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 8px;letter-spacing:-0.03em">Melhor conteúdo do mês</h1>
       <p style="font-size:16px;font-weight:500;color:#163461;font-family:${INTER};margin:0">O post com melhor desempenho entre os publicados no período</p>
     </div>
 
-    <div style="display:grid;grid-template-columns:340px 1fr;gap:28px;flex:1">
-      <div style="position:relative;border-radius:18px;overflow:hidden;background:${ROW};box-shadow:0 14px 34px rgba(15,23,42,.10)">
+    <div style="display:flex;align-items:center;justify-content:center;gap:28px;flex-shrink:0;margin-bottom:24px">
+      <div style="display:flex;flex-direction:column;gap:14px;width:250px;flex-shrink:0">
+        ${leftMetrics.join('')}
+      </div>
+
+      <div style="position:relative;width:380px;height:440px;border-radius:22px;overflow:hidden;background:${ROW};box-shadow:0 20px 46px rgba(15,23,42,.16);flex-shrink:0">
         ${best.thumbnailUrl
           ? `<img src="${best.thumbnailUrl}" style="width:100%;height:100%;object-fit:cover" />`
-          : `<div style="width:100%;height:100%;min-height:340px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#E1306C22,#F7717122)"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#E1306C" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${ICO_LAYERS}</svg></div>`}
-        ${isVideo ? `<div style="position:absolute;top:14px;right:14px;width:36px;height:36px;border-radius:50%;background:rgba(15,23,42,.6);display:flex;align-items:center;justify-content:center"><svg width="17" height="17" viewBox="0 0 24 24" fill="white">${ICO_PLAY}</svg></div>` : ''}
-        <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(0deg,rgba(15,23,42,.78),transparent);padding:24px 16px 14px">
-          <p style="color:white;font-family:${INTER};font-size:13px;font-weight:700;margin:0;text-transform:capitalize">${formatPostDate(best.timestamp)}</p>
+          : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#E1306C22,#F7717122)"><svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="#E1306C" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${ICO_LAYERS}</svg></div>`}
+        ${isVideo ? `<div style="position:absolute;top:16px;right:16px;width:40px;height:40px;border-radius:50%;background:rgba(15,23,42,.62);display:flex;align-items:center;justify-content:center;box-shadow:0 8px 18px rgba(15,23,42,.25)"><svg width="18" height="18" viewBox="0 0 24 24" fill="white">${ICO_PLAY}</svg></div>` : ''}
+        <div style="position:absolute;top:16px;left:16px;height:28px;border-radius:8px;background:${kind.bg};color:${kind.color};display:inline-flex;align-items:center;gap:6px;padding:0 12px;font-family:${INTER};font-size:11px;font-weight:900;line-height:1;box-shadow:0 6px 16px rgba(15,23,42,.12)">
+          ${igIconSvg(kind.icon, kind.color, 13)}
+          ${kind.label}
+        </div>
+        <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(0deg,rgba(15,23,42,.8),transparent);padding:26px 18px 16px">
+          <p style="color:white;font-family:${INTER};font-size:14px;font-weight:700;margin:0;text-transform:capitalize">${formatPostDate(best.timestamp)}</p>
         </div>
       </div>
 
-      <div style="display:flex;flex-direction:column;gap:20px;min-width:0">
-        <div style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 14px 34px rgba(15,23,42,.07);padding:26px">
-          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px">
-            ${metrics.join('')}
-          </div>
-          ${caption ? `<p style="font-size:14px;color:#163461;font-family:${INTER};line-height:1.6;margin:0;padding-top:16px;border-top:1px solid ${BORDER}">"${caption}"</p>` : ''}
-        </div>
+      <div style="display:flex;flex-direction:column;gap:14px;width:250px;flex-shrink:0">
+        ${rightMetrics.join('')}
+      </div>
+    </div>
 
-        <div data-conclusion="1" style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 14px 34px rgba(15,23,42,.07);display:flex;align-items:flex-start;gap:16px;padding:20px 26px">
-          <div style="width:40px;height:40px;border-radius:50%;background:${PRIMARY}16;display:flex;align-items:center;justify-content:center;flex-shrink:0">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${PRIMARY_TEXT}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
-          </div>
-          <div style="border-left:2px solid ${PRIMARY};padding-left:18px">
-            <p style="font-size:15px;font-weight:800;color:${FG};font-family:${INTER};margin:0 0 4px">Por que esse post se destacou</p>
-            <p style="font-size:14px;font-weight:500;color:#163461;font-family:${INTER};line-height:1.5;margin:0">
-              ${liftPct > 0
-                ? `${hasReach ? 'Alcance' : 'Engajamento'} ${liftPct}% acima da média dos outros posts do período — vale repetir o formato e o tema.`
-                : `Melhor resultado do período entre os posts publicados — bom modelo para repetir formato e tema.`}
-            </p>
-          </div>
+    <div style="display:flex;flex-direction:column;gap:16px;max-width:1000px;margin:0 auto;width:100%">
+      ${caption ? `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:16px;box-shadow:0 12px 28px rgba(15,23,42,.06);padding:20px 24px">
+        <p style="font-size:14px;color:#163461;font-family:${INTER};line-height:1.6;margin:0">"${caption}"</p>
+      </div>` : ''}
+
+      <div data-conclusion="1" style="background:${CARD};border:1px solid #E7ECF3;border-radius:16px;box-shadow:0 12px 28px rgba(15,23,42,.06);display:flex;align-items:flex-start;gap:16px;padding:18px 24px">
+        <div style="width:38px;height:38px;border-radius:50%;background:${PRIMARY}16;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+          ${igIconSvg(ICO_TREND, PRIMARY_TEXT, 17)}
+        </div>
+        <div style="border-left:2px solid ${PRIMARY};padding-left:16px">
+          <p style="font-size:14px;font-weight:800;color:${FG};font-family:${INTER};margin:0 0 4px">Por que esse post se destacou</p>
+          <p style="font-size:13px;font-weight:500;color:#163461;font-family:${INTER};line-height:1.5;margin:0">
+            ${liftPct > 0
+              ? `${hasReach ? 'Alcance' : 'Engajamento'} ${liftPct}% acima da média dos outros posts do período — vale repetir o formato e o tema.`
+              : `Melhor resultado do período entre os posts publicados — bom modelo para repetir formato e tema.`}
+          </p>
         </div>
       </div>
     </div>
@@ -2778,20 +2861,24 @@ export function __devPreviewBase(): string {
 
 // ── TEMP DEV PREVIEW — remove before shipping ───────────────────────────────
 export function __devPreviewMetaAdsResumo(): string {
-  const mk = (investimento: number, conversas: number, compras: number, valor_compras: number, cliques: number, frequencia: number) => ({
+  const mk = (
+    investimento: number, conversas: number, compras: number, valor_compras: number,
+    cliques: number, frequencia: number, visitas_pagina = 0, iniciaram_checkout = 0,
+  ) => ({
     investimento, impressoes: 0, alcance: 0, cliques, frequencia, conversas, compras, valor_compras,
     purchase_roas: compras > 0 ? valor_compras / investimento : 0,
+    visitas_pagina, iniciaram_checkout,
   });
   const meta: MetaAdsFull = {
     investimento: 2826.62, impressoes: 583994, alcance: 240617, cliques: 1858,
     campanhas: [
-      { nome: '[ON] [RECONHECIMENTO] [MAIO]', tipo: 'reconhecimento', metricas: mk(400, 0, 0, 0, 200, 2) },
-      { nome: '[ON] [WHATS] [ANIVERSÁRIO] [MAIO]', tipo: 'conversas', metricas: mk(1730.85, 332, 0, 0, 1276, 5.38) },
-      { nome: '[ON] [VENDAS] [IFOOD] [GUANABARA]', tipo: 'vendas', metricas: mk(300, 0, 8, 400, 150, 1.5) },
-      { nome: '[ON] [VENDAS] [ANOTA AÍ] [LOW-BUDGET]', tipo: 'vendas', metricas: mk(235.90, 0, 27, 1860.27, 180, 1.8) },
-      { nome: '[ON] [ALCANCE] [BURRITO FIT]', tipo: 'alcance', metricas: mk(60, 0, 0, 0, 30, 1.1) },
-      { nome: '[ON] [ALCANCE] [MERCADÃO] [DA] [PROCHET]', tipo: 'alcance', metricas: mk(60, 0, 0, 0, 12, 1.0) },
-      { nome: '[ON] [VENDAS] [ANOTA AÍ] [PROCHET]', tipo: 'vendas', metricas: mk(40, 0, 2, 60, 10, 1.0) },
+      { nome: '[ON] [RECONHECIMENTO] [MAIO]', tipo: 'reconhecimento', metricas: mk(400, 0, 0, 0, 200, 2, 150, 0) },
+      { nome: '[ON] [WHATS] [ANIVERSÁRIO] [MAIO]', tipo: 'conversas', metricas: mk(1730.85, 332, 0, 0, 1276, 5.38, 980, 0) },
+      { nome: '[ON] [VENDAS] [IFOOD] [GUANABARA]', tipo: 'vendas', metricas: mk(300, 0, 8, 400, 150, 1.5, 120, 18) },
+      { nome: '[ON] [VENDAS] [ANOTA AÍ] [LOW-BUDGET]', tipo: 'vendas', metricas: mk(235.90, 0, 27, 1860.27, 180, 1.8, 140, 41) },
+      { nome: '[ON] [ALCANCE] [BURRITO FIT]', tipo: 'alcance', metricas: mk(60, 0, 0, 0, 30, 1.1, 22, 0) },
+      { nome: '[ON] [ALCANCE] [MERCADÃO] [DA] [PROCHET]', tipo: 'alcance', metricas: mk(60, 0, 0, 0, 12, 1.0, 9, 0) },
+      { nome: '[ON] [VENDAS] [ANOTA AÍ] [PROCHET]', tipo: 'vendas', metricas: mk(40, 0, 2, 60, 10, 1.0, 8, 3) },
     ],
   };
   return sMetaAdsResumo(meta, 8, 9);
