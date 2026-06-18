@@ -392,13 +392,27 @@ const OBJECTIVE_META: Record<ObjectiveCategory, {
   // alongside an icon; "Custo por venda" truncates, "Custo/venda" fits cleanly.
   vendas:      { label: 'Vendas',           resultWord: 'vendas',      costLabel: 'Custo/venda',    actionKeys: ['offsite_conversion.fb_pixel_purchase', 'purchase', 'omni_purchase'] },
   leads:       { label: 'Geração de leads', resultWord: 'leads',       costLabel: 'CPL',            actionKeys: ['lead', 'onsite_conversion.lead_grouped', 'offsite_conversion.fb_pixel_lead'] },
-  mensagens:   { label: 'Conversas',        resultWord: 'conversas',   costLabel: 'Custo/conversa', actionKeys: ['messaging_conversation_started_7d', 'onsite_conversion.messaging_conversation_started_7d'] },
+  mensagens:   { label: 'Conversas',        resultWord: 'conversas',   costLabel: 'Custo/conversa', actionKeys: ['messaging_conversation_started_7d', 'onsite_conversion.messaging_conversation_started_7d', 'omni_messaging_conversation_started_7d', 'onsite_conversion.messaging_first_reply'] },
   trafego:     { label: 'Tráfego',          resultWord: 'cliques',     costLabel: 'CPC',            actionKeys: ['link_click'] },
   engajamento: { label: 'Engajamento',      resultWord: 'engajamentos', costLabel: 'Custo/engaj.',  actionKeys: ['post_engagement', 'page_engagement'] },
   alcance:     { label: 'Alcance',          resultWord: 'pessoas alcançadas', costLabel: 'CPM',     actionKeys: [] },
 };
 
 type CampaignKind = 'mensagens' | 'leads' | 'vendas' | 'trafego' | 'alcance' | 'engajamento';
+
+const MESSAGE_ACTION_KEYS = [
+  'messaging_conversation_started_7d',
+  'onsite_conversion.messaging_conversation_started_7d',
+  'omni_messaging_conversation_started_7d',
+  'onsite_conversion.messaging_first_reply',
+  'onsite_conversion.messaging_conversation_replied_7d',
+];
+
+const LEAD_ACTION_KEYS = ['lead', 'onsite_conversion.lead_grouped', 'offsite_conversion.fb_pixel_lead'];
+
+function sumActionMap(actMap: Record<string, number>, keys: string[]): number {
+  return keys.reduce((total, key) => total + (actMap[key] || 0), 0);
+}
 
 function campaignKindFor(c: CampanhaDetalhada): CampaignKind {
   const name = c.nome.toLowerCase();
@@ -502,8 +516,8 @@ async function fetchMetaData(
             alcance:       parseInt(String(row.reach ?? '0'), 10),
             cliques:       parseInt(String(row.clicks ?? '0'), 10),
             frequencia:    parseFloat(String(row.frequency ?? '0')),
-            leads:         actMap['lead'] || actMap['onsite_conversion.lead_grouped'] || actMap['offsite_conversion.fb_pixel_lead'] || 0,
-            conversas:     actMap['messaging_conversation_started_7d'] || 0,
+            leads:         sumActionMap(actMap, LEAD_ACTION_KEYS),
+            conversas:     sumActionMap(actMap, MESSAGE_ACTION_KEYS),
             compras:       actMap['offsite_conversion.fb_pixel_purchase'] || actMap['purchase'] || actMap['omni_purchase'] || 0,
             valor_compras: valorComprasApi || (purchase_roas > 0 ? investimento * purchase_roas : 0),
             purchase_roas,
@@ -1884,7 +1898,7 @@ function sMetaAdsResumo(meta: MetaAdsFull, idx: number, total: number): string {
   const totalLeads = sum(leadCampaigns, c => c.metricas.leads + c.metricas.conversas);
   const totalConversas = sum(leadCampaigns, c => c.metricas.conversas);
   const totalFormLeads = sum(leadCampaigns, c => c.metricas.leads);
-  const cpl = totalLeads > 0 ? leadInvestment / totalLeads : 0;
+  const custoConversa = totalConversas > 0 ? leadInvestment / totalConversas : 0;
 
   const salesInvestment = sum(salesCampaigns, c => c.metricas.investimento);
   const totalCompras = sum(salesCampaigns, c => c.metricas.compras);
@@ -1959,40 +1973,50 @@ function sMetaAdsResumo(meta: MetaAdsFull, idx: number, total: number): string {
       </div>
     </div>`;
 
+  const hasSegmentData = (campaigns: CampanhaDetalhada[], values: number[]) =>
+    campaigns.length > 0 || values.some(value => value > 0);
+
+  const leadLines: Array<[string, string]> = [
+    ['Investimento', brlC(leadInvestment)],
+    ['Conversas iniciadas', totalConversas > 0 ? num(Math.round(totalConversas)) : '—'],
+    ['Custo por conversa', brlC(custoConversa)],
+  ];
+  if (totalFormLeads > 0) {
+    leadLines.push(['Leads de formulário', num(Math.round(totalFormLeads))]);
+  }
+
   const segmentCards = [
-    segmentCard('Alcance e topo', countLabel(awarenessCampaigns.length), ICO_TARGET, '#FFFDF2', '#B45309', [
+    hasSegmentData(awarenessCampaigns, [awarenessInvestment, awarenessReach, awarenessImpressions]) ? segmentCard('Alcance e topo', countLabel(awarenessCampaigns.length), ICO_TARGET, '#FFFDF2', '#B45309', [
       ['Investimento', brlC(awarenessInvestment)],
       ['Pessoas atingidas', numOrDash(awarenessReach)],
       ['CPM', brlC(awarenessCpm)],
-    ]),
-    segmentCard('Tráfego de link', countLabel(trafficCampaigns.length), ICO_CURSOR, '#F4F8FF', '#2563EB', [
+    ]) : '',
+    hasSegmentData(trafficCampaigns, [trafficInvestment, trafficClicks, trafficImpressions, trafficReach]) ? segmentCard('Tráfego de link', countLabel(trafficCampaigns.length), ICO_CURSOR, '#F4F8FF', '#2563EB', [
       ['Investimento', brlC(trafficInvestment)],
       ['Cliques', numOrDash(trafficClicks)],
       ['CPC / CTR', `${brlC(trafficCpc)} / ${pctC(trafficCtr)}`],
       ['Alcance', numOrDash(trafficReach)],
-    ]),
-    segmentCard('Leads e conversas', countLabel(leadCampaigns.length), ICO_USERS, '#F2FFFB', '#0F766E', [
-      ['Investimento', brlC(leadInvestment)],
-      ['Leads totais', totalLeads > 0 ? num(Math.round(totalLeads)) : '—'],
-      ['Custo por lead', brlC(cpl)],
-      ['Forms / conversas', `${totalFormLeads > 0 ? num(Math.round(totalFormLeads)) : '—'} / ${totalConversas > 0 ? num(Math.round(totalConversas)) : '—'}`],
-    ]),
-    segmentCard('Vendas', countLabel(salesCampaigns.length), ICO_CART, '#F7FFF4', PRIMARY_TEXT, [
+    ]) : '',
+    hasSegmentData(leadCampaigns, [leadInvestment, totalConversas, totalFormLeads]) ? segmentCard('Leads e conversas', countLabel(leadCampaigns.length), ICO_USERS, '#F2FFFB', '#0F766E', leadLines) : '',
+    hasSegmentData(salesCampaigns, [salesInvestment, totalCompras, valorCompras, visitasPagina, checkouts]) ? segmentCard('Vendas', countLabel(salesCampaigns.length), ICO_CART, '#F7FFF4', PRIMARY_TEXT, [
       ['Investimento', brlC(salesInvestment)],
       ['Compras / CPA', `${totalCompras > 0 ? num(Math.round(totalCompras)) : '—'} / ${brlC(cpa)}`],
       ['Valor de venda', brlC(valorCompras)],
       ['ROAS', decC(roas)],
       ['Visitas / checkouts', `${numOrDash(visitasPagina)} / ${numOrDash(checkouts)}`],
-    ]),
-  ];
+    ]) : '',
+  ].filter(Boolean);
+  const segmentGridColumns = Math.max(1, Math.min(segmentCards.length, 4));
 
   // ── Final recommendation ───────────────────────────────────────────────────
   const recommendation = roas >= 3
     ? `As campanhas de vendas apresentaram retorno positivo, com ROAS de ${decC(roas)}. Acompanhar escala mantendo controle de CPM, CPC e custo por compra.`
     : totalCompras > 0
     ? `As campanhas de vendas geraram compras, mas o ROAS de ${decC(roas)} pede atenção: acompanhar custo por compra, valor de venda e checkout antes de ampliar investimento.`
+    : totalConversas > 0
+    ? `As campanhas de leads e mensagens geraram conversas no período. O próximo foco é qualificar esses contatos, acompanhando custo por conversa e evolução para compra.`
     : totalLeads > 0
-    ? `As campanhas de leads e mensagens geraram demanda no período. O próximo foco é qualificar essas conversas e formulários, acompanhando CPL e evolução para compra.`
+    ? `As campanhas de leads captaram formulários no período. O próximo foco é qualificar esses contatos, acompanhando CPL e evolução para compra.`
     : `${brlOrDash(meta.investimento)} investidos com ${numOrDash(meta.alcance)} pessoas alcançadas e ${numOrDash(meta.cliques)} cliques no período. Avaliar CTR, CPC e volume de conversões para orientar o próximo ciclo.`;
 
   const body = `<div style="width:1440px;min-height:810px;background:${BG};border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
@@ -2009,7 +2033,7 @@ function sMetaAdsResumo(meta: MetaAdsFull, idx: number, total: number): string {
       ${generalMetrics.join('')}
     </div>
 
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;flex-shrink:0">
+    <div style="display:grid;grid-template-columns:repeat(${segmentGridColumns},1fr);gap:14px;flex-shrink:0">
       ${segmentCards.join('')}
     </div>
 
