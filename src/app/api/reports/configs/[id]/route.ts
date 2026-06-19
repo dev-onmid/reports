@@ -9,6 +9,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     zapiClientId?: string;
     sendDay?: number;
     active?: boolean;
+    template?: 'performance' | 'delivery';
   };
   const pool = makeServerPool();
   try {
@@ -20,6 +21,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (body.zapiClientId !== undefined)  { sets.push(`zapi_client_id = $${idx++}`); vals.push(body.zapiClientId || null); }
     if (body.sendDay !== undefined)       { sets.push(`send_day = $${idx++}`);       vals.push(body.sendDay); }
     if (body.active !== undefined)        { sets.push(`active = $${idx++}`);         vals.push(body.active); }
+    if (body.template !== undefined)      { sets.push(`template = $${idx++}`);       vals.push(body.template); }
     if (sets.length === 0) return Response.json({ error: 'nothing to update' }, { status: 400 });
     vals.push(id);
     await pool.query(`UPDATE public.report_configs SET ${sets.join(', ')} WHERE id = $${idx}`, vals);

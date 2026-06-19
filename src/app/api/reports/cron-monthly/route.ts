@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
 
   const pool = makeServerPool();
   let configs: {
-    id: string; client_id: string; client_name: string;
+    id: string; client_id: string; client_name: string; template: 'performance' | 'delivery';
     whatsapp_group: string | null; zapi_client_id: string | null;
     send_day: number; zapi_instance_id: string | null;
     zapi_token: string | null; zapi_security_token: string | null;
@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
   try {
     const { rows } = await pool.query(`
       SELECT
-        rc.id, rc.client_id, c.name AS client_name,
+        rc.id, rc.client_id, c.name AS client_name, rc.template,
         rc.whatsapp_group, rc.zapi_client_id, rc.send_day,
         z.instance_id AS zapi_instance_id,
         z.token AS zapi_token,
@@ -63,7 +63,8 @@ export async function GET(request: NextRequest) {
       if (cfg.whatsapp_group && cfg.zapi_instance_id && cfg.zapi_token) {
         const now = new Date();
         const month = now.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
-        const message = `📊 *Relatório de Performance — ${cfg.client_name}*\n\nO relatório de *${month}* está pronto!\n\nAcesse aqui: ${reportUrl}`;
+        const label = cfg.template === 'delivery' ? 'Relatório de Delivery' : 'Relatório de Performance';
+        const message = `📊 *${label} — ${cfg.client_name}*\n\nO relatório de *${month}* está pronto!\n\nAcesse aqui: ${reportUrl}`;
 
         await sendWhatsapp(
           {

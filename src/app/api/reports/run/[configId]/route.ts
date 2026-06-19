@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { buildOmniReport, saveOmniReport } from '@/lib/report-builder';
+import { buildDeliveryReport, saveDeliveryReport } from '@/lib/delivery-report-builder';
 
 export const maxDuration = 60;
 
@@ -18,7 +19,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   const pool = makeServerPool();
   let config: {
-    client_id: string; client_name: string;
+    client_id: string; client_name: string; template: 'performance' | 'delivery';
     meta_connection_id: string | null; meta_account_ids: string[];
     google_connection_id: string | null; google_account_ids: string[];
   } | null = null;
@@ -26,7 +27,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   try {
     const { rows } = await pool.query(`
       SELECT
-        rc.client_id, c.name AS client_name,
+        rc.client_id, c.name AS client_name, rc.template,
         (SELECT cal.connection_id FROM public.client_account_links cal
          WHERE cal.client_id = rc.client_id AND cal.platform IN ('meta','meta_ads') LIMIT 1) AS meta_connection_id,
         ARRAY(SELECT cal.account_id FROM public.client_account_links cal
@@ -50,6 +51,25 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     ? { from: body.dateFrom, to: body.dateTo ?? body.dateFrom }
     : prevMonth();
 
+  // ── Delivery template ──────────────────────────────────────────────────────
+  // Automated runs never have CSVs to attach — sections derived from the
+  // cardápio digital are simply omitted, same as a manual run without uploads.
+  if (config.template === 'delivery') {
+    const reportData = await buildDeliveryReport({
+      clientId: config.client_id, clientName: config.client_name,
+      from: period.from, to: period.to, csvFiles: [],
+      connectionId: config.meta_connection_id,
+      accountIds: config.meta_account_ids,
+    });
+    const { token, reportId } = await saveDeliveryReport({
+      clientId: config.client_id, clientName: config.client_name,
+      from: period.from, to: period.to, data: reportData,
+      generatedBy: 'auto', configId,
+    });
+    return Response.json({ ok: true, id: reportId, public_token: token });
+  }
+
+  // ── Performance template (default) ────────────────────────────────────────
   const apiKey = process.env.ANTHROPIC_API_KEY ?? '';
 
   const reportData = await buildOmniReport({

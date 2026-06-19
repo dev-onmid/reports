@@ -3310,21 +3310,23 @@ export async function buildDeliveryReport(opts: {
 // ── Save to DB ─────────────────────────────────────────────────────────────────
 
 export async function saveDeliveryReport(opts: {
-  clientId:   string;
-  clientName: string;
-  from:       string;
-  to:         string;
-  data:       { html: string };
+  clientId:    string;
+  clientName:  string;
+  from:        string;
+  to:          string;
+  data:        { html: string };
+  generatedBy?: string;
+  configId?:   string;
 }): Promise<{ token: string; reportId: string }> {
-  const { clientId, clientName, from, to, data } = opts;
+  const { clientId, clientName, from, to, data, generatedBy = 'manual', configId } = opts;
   const token = randomUUID();
   const pool  = makeServerPool();
   try {
     const safeData = sanitizeJsonValue(data);
     const { rows } = await pool.query(
-      `INSERT INTO public.diagnostic_reports (client_id,client_name,period_from,period_to,template_slug,report_data,public_token)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-      [clientId, clientName, from, to, 'onmid-narrative-delivery', safeData, token],
+      `INSERT INTO public.diagnostic_reports (client_id,client_name,period_from,period_to,template_slug,report_data,public_token,generated_by,config_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+      [clientId, clientName, from, to, 'onmid-narrative-delivery', safeData, token, generatedBy, configId ?? null],
     );
     return { token, reportId: rows[0].id as string };
   } finally { await pool.end(); }

@@ -25,6 +25,7 @@ type ReportConfig = {
   id: string; client_id: string; client_name: string; name: string;
   whatsapp_group: string | null; zapi_client_id: string | null;
   zapi_name: string | null; send_day: number; active: boolean;
+  template: 'performance' | 'delivery';
   report_count: number; last_run_at: string | null; last_token: string | null; created_at: string;
 };
 
@@ -87,7 +88,7 @@ export default function RelatoriosPage() {
   const [zapiClients, setZapiClients] = useState<ZapiClient[]>([]);
   const [showConfigForm, setShowConfigForm] = useState(false);
   const [editingConfig, setEditingConfig] = useState<ReportConfig | null>(null);
-  const [configForm, setConfigForm] = useState({ clientId: '', name: '', whatsappGroup: '', zapiClientId: '', sendDay: 1 });
+  const [configForm, setConfigForm] = useState<{ clientId: string; name: string; whatsappGroup: string; zapiClientId: string; sendDay: number; template: 'performance' | 'delivery' }>({ clientId: '', name: '', whatsappGroup: '', zapiClientId: '', sendDay: 1, template: 'performance' });
   const [savingConfig, setSavingConfig] = useState(false);
   const [runningId, setRunningId] = useState<string | null>(null);
 
@@ -231,10 +232,11 @@ export default function RelatoriosPage() {
             whatsappGroup: configForm.whatsappGroup,
             zapiClientId: configForm.zapiClientId || undefined,
             sendDay: configForm.sendDay,
+            template: configForm.template,
           }),
         });
         setConfigs(prev => prev.map(c => c.id === editingConfig.id
-          ? { ...c, name: configForm.name, whatsapp_group: configForm.whatsappGroup || null, zapi_client_id: configForm.zapiClientId || null, send_day: configForm.sendDay, zapi_name: zapiClients.find(z => z.id === configForm.zapiClientId)?.name ?? null }
+          ? { ...c, name: configForm.name, whatsapp_group: configForm.whatsappGroup || null, zapi_client_id: configForm.zapiClientId || null, send_day: configForm.sendDay, template: configForm.template, zapi_name: zapiClients.find(z => z.id === configForm.zapiClientId)?.name ?? null }
           : c));
       } else {
         const res = await fetch('/api/reports/configs', {
@@ -245,6 +247,7 @@ export default function RelatoriosPage() {
             whatsappGroup: configForm.whatsappGroup,
             zapiClientId: configForm.zapiClientId || undefined,
             sendDay: configForm.sendDay,
+            template: configForm.template,
           }),
         });
         const created = await res.json() as ReportConfig;
@@ -290,13 +293,13 @@ export default function RelatoriosPage() {
 
   function openEditConfig(cfg: ReportConfig) {
     setEditingConfig(cfg);
-    setConfigForm({ clientId: cfg.client_id, name: cfg.name, whatsappGroup: cfg.whatsapp_group ?? '', zapiClientId: cfg.zapi_client_id ?? '', sendDay: cfg.send_day });
+    setConfigForm({ clientId: cfg.client_id, name: cfg.name, whatsappGroup: cfg.whatsapp_group ?? '', zapiClientId: cfg.zapi_client_id ?? '', sendDay: cfg.send_day, template: cfg.template ?? 'performance' });
     setShowConfigForm(true);
   }
 
   function openNewConfig() {
     setEditingConfig(null);
-    setConfigForm({ clientId: '', name: '', whatsappGroup: '', zapiClientId: '', sendDay: 1 });
+    setConfigForm({ clientId: '', name: '', whatsappGroup: '', zapiClientId: '', sendDay: 1, template: 'performance' });
     setShowConfigForm(true);
   }
 
@@ -795,6 +798,17 @@ export default function RelatoriosPage() {
                   </div>
                 )}
                 <div className="space-y-1.5">
+                  <label className="text-xs text-muted-foreground font-medium">Template</label>
+                  <select
+                    value={configForm.template}
+                    onChange={e => setConfigForm(f => ({ ...f, template: e.target.value as 'performance' | 'delivery' }))}
+                    className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50"
+                  >
+                    <option value="performance">Performance</option>
+                    <option value="delivery">Delivery</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
                   <label className="text-xs text-muted-foreground font-medium">Nome da automação</label>
                   <input
                     type="text"
@@ -852,6 +866,7 @@ export default function RelatoriosPage() {
               <thead className="border-b border-border">
                 <tr>
                   <th className="px-5 py-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Cliente</th>
+                  <th className="px-5 py-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Template</th>
                   <th className="px-5 py-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Grupo WhatsApp</th>
                   <th className="px-5 py-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Z-API</th>
                   <th className="px-5 py-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Dia</th>
@@ -863,7 +878,7 @@ export default function RelatoriosPage() {
               <tbody className="divide-y divide-border">
                 {visibleConfigs.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="py-14 text-center">
+                    <td colSpan={8} className="py-14 text-center">
                       <div className="flex flex-col items-center gap-3">
                         <Settings2 className="w-8 h-8 text-muted-foreground/40" />
                         <p className="text-sm text-muted-foreground">Nenhuma automação configurada.</p>
@@ -879,6 +894,16 @@ export default function RelatoriosPage() {
                     <td className="px-5 py-3.5">
                       <p className="font-medium text-foreground text-sm">{cfg.client_name}</p>
                       <p className="text-[11px] text-muted-foreground">{cfg.name}</p>
+                    </td>
+                    <td className="px-5 py-3.5">
+                      <span className={cn(
+                        'inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border',
+                        cfg.template === 'delivery'
+                          ? 'bg-emerald-500/15 text-emerald-300 border-emerald-400/30'
+                          : 'bg-violet-500/15 text-violet-300 border-violet-400/30',
+                      )}>
+                        {cfg.template === 'delivery' ? 'Delivery' : 'Performance'}
+                      </span>
                     </td>
                     <td className="px-5 py-3.5">
                       {cfg.whatsapp_group

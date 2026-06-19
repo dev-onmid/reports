@@ -14,6 +14,9 @@ async function ensureTables(pool: ReturnType<typeof makeServerPool>) {
       created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
+    ALTER TABLE public.report_configs
+      ADD COLUMN IF NOT EXISTS template TEXT NOT NULL DEFAULT 'performance';
+
     ALTER TABLE public.diagnostic_reports
       ADD COLUMN IF NOT EXISTS public_token  TEXT UNIQUE DEFAULT encode(gen_random_bytes(16), 'hex'),
       ADD COLUMN IF NOT EXISTS html_content  TEXT,
@@ -30,7 +33,7 @@ export async function GET() {
     const { rows } = await pool.query(`
       SELECT
         rc.id, rc.client_id, rc.name, rc.whatsapp_group,
-        rc.zapi_client_id, rc.send_day, rc.active, rc.created_at,
+        rc.zapi_client_id, rc.send_day, rc.active, rc.created_at, rc.template,
         c.name AS client_name,
         z.name AS zapi_name,
         (SELECT COUNT(*) FROM public.diagnostic_reports dr
@@ -57,15 +60,16 @@ export async function POST(request: NextRequest) {
     whatsappGroup?: string;
     zapiClientId?: string;
     sendDay?: number;
+    template?: 'performance' | 'delivery';
   };
   const pool = makeServerPool();
   try {
     await ensureTables(pool);
     const { rows } = await pool.query(
-      `INSERT INTO public.report_configs (client_id, name, whatsapp_group, zapi_client_id, send_day)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO public.report_configs (client_id, name, whatsapp_group, zapi_client_id, send_day, template)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
-      [body.clientId, body.name, body.whatsappGroup ?? null, body.zapiClientId ?? null, body.sendDay ?? 1],
+      [body.clientId, body.name, body.whatsappGroup ?? null, body.zapiClientId ?? null, body.sendDay ?? 1, body.template ?? 'performance'],
     );
     return Response.json(rows[0]);
   } finally {
