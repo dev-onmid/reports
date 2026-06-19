@@ -2,6 +2,7 @@ import { makeServerPool } from '@/lib/server-db';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import { RESULT_ACTIONS, NEW_CONTACT_ACTIONS, PURCHASE_ACTIONS, sumActions, brl } from './report-runner';
 import { logAiUsage } from '@/lib/ai-usage-logger';
+import { parseLeadRows, mergeLeadRows, buildLeadFunnelByCity, formatLeadFunnelForPrompt } from './lead-funnel-by-city';
 
 // ── Persist ───────────────────────────────────────────────────────────────────
 
@@ -381,6 +382,12 @@ SLIDE 4 — BASE DE CLIENTES (com CRM) [Layout B]
 • Área principal: evolução mensal em tabela com mini-barras
 • Lateral: taxa de conversão hero + insight tendência
 
+SLIDE 4B — FUNIL POR CIDADE E CANAL (só se houver bloco "CRUZAMENTO DE LEADS POR CIDADE E CANAL" nos dados suplementares) [Layout B + tabela]
+• Tese: ex. "[Cidade líder] concentra o volume, mas [cidade com pior CPA] queima o orçamento sem retorno"
+• Tabela (modelo "TABELA DE COMPARATIVO"): colunas Cidade | Canal | Leads | Ganhos | Perdidos | Custo estimado | CPA — uma linha por combinação cidade×canal fornecida, na ordem dada. Reproduza os números exatamente como vieram nos dados; não some, não arredonde diferente, não invente linha.
+• Abaixo da tabela, resumo do funil por canal (em que etapa os leads mais "morrem" por canal) usando os dados de "Funil por canal" fornecidos.
+• Conclusão executiva: aponte a cidade/canal com melhor CPA (escalar) e a com pior CPA (revisar ou pausar).
+
 SLIDE 5 — COMPARATIVO ANTERIOR×ATUAL (sempre) [Layout B]
 • Tabela lado a lado com variação em badge colorido por linha
 • Contexto: por que subiu/caiu e o que muda
@@ -588,12 +595,13 @@ export async function buildOmniReport(input: {
   apiKey: string;
   manualNotes?: string;
   supplementaryContent?: string;
+  leadFunnelFiles?: { name: string; content: string }[];
 }): Promise<{ html: string }> {
   const { clientId, clientName, connectionId, accountIds, periodFrom, periodTo, apiKey } = input;
   const googleConnectionId = input.googleConnectionId ?? null;
   const googleAccountIds = input.googleAccountIds ?? [];
   const agencyContext = input.agencyContext ?? input.manualNotes ?? '';
-  const supplementaryContent = input.supplementaryContent ?? '';
+  let supplementaryContent = input.supplementaryContent ?? '';
 
   const prev = calcPrevPeriod(periodFrom, periodTo);
   const hasGoogle = Boolean(googleConnectionId && googleAccountIds.length);
@@ -625,6 +633,17 @@ export async function buildOmniReport(input: {
   const googleData   = formatGoogleData(googleTotals) || undefined;
   const googlePrevData = formatGoogleData(googlePrevTotals) || undefined;
   const segment      = 'Marketing Digital';
+
+  if (input.leadFunnelFiles?.length) {
+    const leadRows = mergeLeadRows(parseLeadRows(input.leadFunnelFiles));
+    if (leadRows.length) {
+      const totalMetaSpend   = monthlyMeta.reduce((sum, m) => sum + m.spend, 0);
+      const totalGoogleSpend = googleTotals.spend;
+      const funnel = buildLeadFunnelByCity(leadRows, { meta: totalMetaSpend, google: totalGoogleSpend });
+      const funnelText = formatLeadFunnelForPrompt(funnel, brl);
+      if (funnelText) supplementaryContent = [supplementaryContent, funnelText].filter(Boolean).join('\n\n');
+    }
+  }
 
   const userPrompt = buildUserPrompt(
     clientName, segment, period, prevPeriodLabel, agencyContext,

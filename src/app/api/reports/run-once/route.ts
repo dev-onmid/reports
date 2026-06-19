@@ -13,10 +13,12 @@ export async function POST(request: NextRequest) {
       csvContent?: string;
       csvFiles?: { name: string; content: string }[];
       supplementaryContent?: string;
+      leadFunnelFiles?: { name: string; content: string }[];
     };
 
     const { clientId, from, to, manualNotes, agencyContext, template, supplementaryContent } = body;
     const csvFiles = body.csvFiles ?? [];
+    const leadFunnelFiles = body.leadFunnelFiles ?? [];
     if (!clientId || !from || !to) {
       return Response.json({ error: 'clientId, from e to são obrigatórios' }, { status: 400 });
     }
@@ -78,6 +80,7 @@ export async function POST(request: NextRequest) {
       periodTo: to,
       agencyContext: agencyContext ?? manualNotes,
       supplementaryContent: supplementaryContent ?? undefined,
+      leadFunnelFiles,
       apiKey,
     });
 

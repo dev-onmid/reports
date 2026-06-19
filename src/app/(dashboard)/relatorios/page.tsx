@@ -80,6 +80,7 @@ export default function RelatoriosPage() {
   const [genTemplate, setGenTemplate] = useState<'performance' | 'delivery'>('performance');
   const [genCsvFiles, setGenCsvFiles] = useState<{ name: string; content: string }[]>([]);
   const [genSupplementaryFiles, setGenSupplementaryFiles] = useState<{ name: string; content: string }[]>([]);
+  const [genLeadFunnelFiles, setGenLeadFunnelFiles] = useState<{ name: string; content: string }[]>([]);
   const [clientLinks, setClientLinks] = useState<ClientLink[]>([]);
   const [generating, setGenerating] = useState(false);
 
@@ -135,6 +136,7 @@ export default function RelatoriosPage() {
     setGenTemplate('performance');
     setGenCsvFiles([]);
     setGenSupplementaryFiles([]);
+    setGenLeadFunnelFiles([]);
     setClientLinks([]);
     setShowGenModal(true);
   }
@@ -184,6 +186,28 @@ export default function RelatoriosPage() {
     setGenSupplementaryFiles(prev => prev.filter((_, i) => i !== index));
   }
 
+  function handleLeadFunnelFiles(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    if (!files.length) return;
+    files.forEach(file => {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const content = (ev.target?.result as string) ?? '';
+        setGenLeadFunnelFiles(prev => [...prev, { name: file.name, content }]);
+      };
+      if (/\.xlsx?$/i.test(file.name)) {
+        reader.readAsDataURL(file);
+      } else {
+        reader.readAsText(file, 'utf-8');
+      }
+    });
+    e.target.value = '';
+  }
+
+  function removeLeadFunnelFile(index: number) {
+    setGenLeadFunnelFiles(prev => prev.filter((_, i) => i !== index));
+  }
+
   async function generateReport() {
     if (!genForm.clientId || !genForm.from || !genForm.to) return;
     setGenerating(true);
@@ -196,6 +220,9 @@ export default function RelatoriosPage() {
       };
       if (genForm.agencyContext) payload.agencyContext = genForm.agencyContext;
       if (genTemplate === 'delivery') payload.csvFiles = genCsvFiles;
+      if (genTemplate === 'performance' && genLeadFunnelFiles.length) {
+        payload.leadFunnelFiles = genLeadFunnelFiles;
+      }
       if (genTemplate === 'performance' && genSupplementaryFiles.length) {
         payload.supplementaryContent = genSupplementaryFiles.map(f => `[${f.name}]\n${f.content}`).join('\n\n');
       }
@@ -1001,7 +1028,7 @@ export default function RelatoriosPage() {
                   <p className="text-xs text-muted-foreground">Escolha o template e preencha os dados</p>
                 </div>
               </div>
-              <button onClick={() => { setShowGenModal(false); setGenSupplementaryFiles([]); setClientLinks([]); }} className="text-muted-foreground hover:text-foreground">
+              <button onClick={() => { setShowGenModal(false); setGenSupplementaryFiles([]); setGenLeadFunnelFiles([]); setClientLinks([]); }} className="text-muted-foreground hover:text-foreground">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -1187,6 +1214,37 @@ export default function RelatoriosPage() {
                   </label>
                 </div>
               )}
+
+              {genTemplate === 'performance' && (
+                <div className="space-y-1.5">
+                  <label className="text-xs text-muted-foreground font-medium">
+                    Funil por cidade e canal <span className="text-muted-foreground/50">(opcional — export do CRM com cidade/canal/etapa/situação)</span>
+                  </label>
+                  <p className="text-xs text-muted-foreground/60 leading-relaxed">
+                    Pode anexar mais de um arquivo (ex: exports de meses diferentes) — o sistema cruza por ID e usa sempre a atualização mais recente de cada lead.
+                  </p>
+                  {genLeadFunnelFiles.length > 0 && (
+                    <div className="space-y-1">
+                      {genLeadFunnelFiles.map((f, i) => (
+                        <div key={i} className="flex items-center gap-2 px-3 py-2 rounded-md bg-violet-500/8 border border-violet-500/20">
+                          <FileCheck2 className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+                          <span className="text-xs text-violet-400 truncate flex-1">{f.name}</span>
+                          <button onClick={() => removeLeadFunnelFile(i)} className="text-muted-foreground hover:text-destructive transition-colors shrink-0">
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <label className="flex items-center gap-3 px-4 py-3 rounded-lg border-2 border-dashed border-border hover:border-violet-500/40 cursor-pointer transition-colors">
+                    <input type="file" multiple accept=".csv,.xlsx" onChange={handleLeadFunnelFiles} className="hidden" />
+                    <FileText className="w-4 h-4 text-muted-foreground shrink-0" />
+                    <span className="text-xs text-muted-foreground">
+                      {genLeadFunnelFiles.length > 0 ? 'Adicionar mais planilhas...' : 'CSV / XLSX exportado do CRM (negócios/leads)'}
+                    </span>
+                  </label>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center justify-between gap-2 pt-1">
@@ -1195,7 +1253,7 @@ export default function RelatoriosPage() {
                 {genTemplate === 'delivery' ? '~R$ 0,21 estimado' : '~R$ 0,59 estimado'}
               </span>
               <div className="flex gap-2">
-                <button onClick={() => { setShowGenModal(false); setGenSupplementaryFiles([]); setClientLinks([]); }} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
+                <button onClick={() => { setShowGenModal(false); setGenSupplementaryFiles([]); setGenLeadFunnelFiles([]); setClientLinks([]); }} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
                   Cancelar
                 </button>
                 <Button

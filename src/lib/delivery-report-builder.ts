@@ -189,7 +189,7 @@ function splitCsv(content: string): { headers: string[]; rows: string[][] } {
   return { headers: parse(lines[0]).map(normalizeHeader), rows: lines.slice(1).map(parse) };
 }
 
-function normalizeHeader(value: unknown): string {
+export function normalizeHeader(value: unknown): string {
   return String(value ?? '')
     .toLowerCase()
     .normalize('NFD')
@@ -197,7 +197,7 @@ function normalizeHeader(value: unknown): string {
     .trim();
 }
 
-function readTabular(content: string): { headers: string[]; rows: string[][] } {
+export function readTabular(content: string): { headers: string[]; rows: string[][] } {
   if (content.startsWith('data:')) {
     const b64 = content.includes(';base64,') ? content.split(';base64,')[1] : content;
     try {
@@ -217,7 +217,7 @@ function readTabular(content: string): { headers: string[]; rows: string[][] } {
   return splitCsv(content);
 }
 
-function parseFloat2(value: unknown): number {
+export function parseFloat2(value: unknown): number {
   if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
   let s = String(value ?? '')
     .replace(/\u00A0/g, ' ')
