@@ -47,7 +47,7 @@ import { ClientAvatar } from '@/components/client-avatar';
 import { HistoricoTab } from '@/components/historico-tab';
 import { VaultTab } from '@/components/vault-tab';
 import CrmWorkspace from '@/app/(dashboard)/crm/page';
-import { ChatView } from '@/app/(dashboard)/crm/chat-view';
+import { ClientTrackingTab } from './tracking-tab';
 
 // ── Funnel types & logic ───────────────────────────────────────────────────────
 type FunnelStage = { id: string; name: string; conversion: number };
@@ -4578,7 +4578,7 @@ function SheetsResultsTab({ clientId }: { clientId: string }) {
 }
 
 // ── Page ───────────────────────────────────────────────────────────────────────
-const TABS = ['dashboard', 'planejamento', 'mapa', 'historico', 'integracoes', 'links', 'pagamentos', 'dna', 'crm', 'chat'] as const;
+const TABS = ['dashboard', 'planejamento', 'mapa', 'historico', 'integracoes', 'rastreio', 'links', 'pagamentos', 'dna', 'crm'] as const;
 type Tab = typeof TABS[number];
 
 function readSavedDashboardBlocks(clientId: string): ClientDashboardWidget[] {
@@ -4775,11 +4775,11 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
     mapa:         'Mapa Mental',
     historico:    'Histórico',
     integracoes:  'Integrações',
+    rastreio:     'Rastreio',
     links:        'Links & Senhas',
     pagamentos:   'Pagamentos',
     dna:          'DNA do Cliente',
     crm:          'CRM',
-    chat:         'Chat WhatsApp',
   };
 
   return (
@@ -4943,6 +4943,8 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
 
       {tab === 'integracoes' && <ClientIntegrationsTab clientId={id} clientName={client.name} />}
 
+      {tab === 'rastreio' && <ClientTrackingTab clientId={id} />}
+
       {tab === 'links' && <VaultTab clientId={id} />}
 
       {tab === 'dna' && <ClientDnaTab clientId={id} clientName={client.name} />}
@@ -4950,7 +4952,6 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
       {tab === 'pagamentos' && <InvestmentPaymentsTab clientId={id} clientName={client.name} />}
 
       {tab === 'crm' && <CrmWorkspace lockedClientId={id} embedded />}
-      {tab === 'chat' && <ChatView clientId={id} />}
 
 
       <Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>
