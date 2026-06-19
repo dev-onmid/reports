@@ -189,16 +189,35 @@ async function postEvolutionMessage(
 function extractEvolutionMessageId(data: unknown): string | undefined {
   if (!data || typeof data !== 'object') return undefined;
   const obj = data as Record<string, unknown>;
-  const key = obj.key as Record<string, unknown> | undefined;
-  const dataObj = obj.data as Record<string, unknown> | undefined;
-  const dataKey = dataObj?.key as Record<string, unknown> | undefined;
-  return String(
-    key?.id
-    ?? dataKey?.id
-    ?? obj.messageId
-    ?? obj.id
-    ?? '',
-  ) || undefined;
+  const dataObj = asRecord(obj.data);
+  const messageObj = asRecord(obj.message);
+  const responseObj = asRecord(obj.response);
+  const dataMessageObj = asRecord(dataObj?.message);
+  const candidates = [
+    asRecord(obj.key)?.id,
+    asRecord(dataObj?.key)?.id,
+    asRecord(messageObj?.key)?.id,
+    asRecord(responseObj?.key)?.id,
+    asRecord(dataMessageObj?.key)?.id,
+    dataObj?.messageId,
+    dataObj?.message_id,
+    dataObj?.id,
+    responseObj?.messageId,
+    responseObj?.message_id,
+    responseObj?.id,
+    obj.messageId,
+    obj.message_id,
+    obj.id,
+  ];
+  for (const candidate of candidates) {
+    const id = String(candidate ?? '').trim();
+    if (id) return id;
+  }
+  return undefined;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' ? value as Record<string, unknown> : undefined;
 }
 
 // ── Queue follow-up on status change ─────────────────────────────────────────

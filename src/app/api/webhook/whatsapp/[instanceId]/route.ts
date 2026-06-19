@@ -111,34 +111,80 @@ function parseProviderTimestamp(value: unknown): string {
 function normalizeEvolutionDeliveryStatus(raw: unknown): string | null {
   const status = String(raw ?? '').toLowerCase();
   if (!status) return null;
-  if (status.includes('read') || status === '4') return 'read';
-  if (status.includes('delivery') || status.includes('delivered') || status === '3') return 'delivered';
-  if (status.includes('server') || status.includes('sent') || status === '2' || status === '1') return 'sent';
+  if (status.includes('read') || status.includes('played') || status === '4') return 'read';
+  if (
+    status.includes('delivery')
+    || status.includes('delivered')
+    || status.includes('device_ack')
+    || status === '3'
+  ) return 'delivered';
+  if (
+    status.includes('server')
+    || status.includes('sent')
+    || status.includes('ack')
+    || status === '2'
+    || status === '1'
+  ) return 'sent';
   if (status.includes('error') || status.includes('fail')) return 'failed';
   return null;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function extractEvolutionStatusUpdates(body: any): Array<{ id: string; status: string; error?: string }> {
+function extractEvolutionStatusUpdates(body: any): Array<{ id: string; status: string; error?: string; remoteJid?: string; remoteDigits?: string }> {
   const eventName = String(body?.event ?? body?.type ?? '').toUpperCase();
   const rawData = Array.isArray(body?.data) ? body.data : [body?.data ?? body];
-  const updates: Array<{ id: string; status: string; error?: string }> = [];
+  const updates: Array<{ id: string; status: string; error?: string; remoteJid?: string; remoteDigits?: string }> = [];
 
   for (const item of rawData) {
-    const key = item?.key ?? item?.message?.key ?? {};
-    const update = item?.update ?? item?.message?.update ?? item;
-    const id = String(key?.id ?? item?.id ?? item?.messageId ?? item?.message_id ?? '');
-    const status = normalizeEvolutionDeliveryStatus(update?.status ?? item?.status ?? item?.messageStatus ?? item?.ack ?? item?.deliveryStatus);
-    if (!id || !status) continue;
+    const key = item?.key ?? item?.message?.key ?? item?.data?.key ?? item?.update?.key ?? {};
+    const update = item?.update ?? item?.message?.update ?? item?.data?.update ?? item;
+    const id = String(
+      key?.id
+      ?? update?.id
+      ?? update?.messageId
+      ?? update?.message_id
+      ?? item?.id
+      ?? item?.messageId
+      ?? item?.message_id
+      ?? '',
+    );
+    const status = normalizeEvolutionDeliveryStatus(
+      update?.status
+      ?? update?.messageStatus
+      ?? update?.ack
+      ?? update?.deliveryStatus
+      ?? item?.status
+      ?? item?.messageStatus
+      ?? item?.ack
+      ?? item?.deliveryStatus
+      ?? item?.message?.status
+      ?? item?.message?.ack
+      ?? item?.message?.messageStatus,
+    );
+    const remoteJid = String(
+      key?.remoteJid
+      ?? update?.remoteJid
+      ?? item?.remoteJid
+      ?? item?.message?.key?.remoteJid
+      ?? '',
+    );
+    const remoteDigits = normalizeEvolutionJidDigits(remoteJid);
+    if ((!id && !remoteDigits) || !status) continue;
     updates.push({
       id,
       status,
       error: typeof update?.error === 'string' ? update.error : undefined,
+      remoteJid: remoteJid || undefined,
+      remoteDigits: remoteDigits || undefined,
     });
   }
 
   if (updates.length === 0 && !eventName.includes('MESSAGES_UPDATE')) return [];
   return updates;
+}
+
+function normalizeEvolutionJidDigits(raw: unknown): string {
+  return String(raw ?? '').split('@')[0].replace(/\D/g, '');
 }
 
 async function sendMetaEvent({
@@ -212,14 +258,53 @@ export async function POST(
       if (statusUpdates.length > 0) {
         await ensureCrmMessagesSchema(pool);
         for (const update of statusUpdates) {
-          await pool.query(
-            `UPDATE public.crm_messages
-                SET whatsapp_status = $3,
-                    whatsapp_error = CASE WHEN $3 = 'failed' THEN COALESCE($4, whatsapp_error) ELSE whatsapp_error END
-              WHERE client_id = $1
-                AND external_id = $2`,
-            [clientId, update.id, update.status, update.error ?? null],
-          ).catch(err => console.error('[webhook message status update]', err));
+          let updated = 0;
+          if (update.id) {
+            const result = await pool.query(
+              `UPDATE public.crm_messages
+                  SET whatsapp_status = $3,
+                      whatsapp_error = CASE WHEN $3 = 'failed' THEN COALESCE($4, whatsapp_error) ELSE whatsapp_error END
+                WHERE client_id = $1
+                  AND external_id = $2`,
+              [clientId, update.id, update.status, update.error ?? null],
+            ).catch(err => {
+              console.error('[webhook message status update]', err);
+              return { rowCount: 0 };
+            });
+            updated = result.rowCount ?? 0;
+          }
+
+          if (updated === 0 && update.remoteDigits) {
+            await pool.query(
+              `WITH target_leads AS (
+                 SELECT id
+                   FROM public.crm_leads
+                  WHERE client_id = $1
+                    AND (
+                      NULLIF(regexp_replace(COALESCE(numero, ''), '\\D', '', 'g'), '') = $5
+                      OR NULLIF(regexp_replace(COALESCE(whatsapp_lid, ''), '\\D', '', 'g'), '') = $5
+                    )
+               ),
+               target_message AS (
+                 SELECT id
+                   FROM public.crm_messages
+                  WHERE client_id = $1
+                    AND direction = 'out'
+                    AND lead_id IN (SELECT id FROM target_leads)
+                    AND created_at > NOW() - INTERVAL '7 days'
+                    AND COALESCE(whatsapp_status, 'sent') IN ('pending', 'sent', 'delivered')
+                  ORDER BY created_at DESC
+                  LIMIT 1
+               )
+               UPDATE public.crm_messages m
+                  SET whatsapp_status = $3,
+                      whatsapp_error = CASE WHEN $3 = 'failed' THEN COALESCE($4, m.whatsapp_error) ELSE m.whatsapp_error END,
+                      external_id = COALESCE(NULLIF($2, ''), m.external_id)
+                 FROM target_message
+                WHERE m.id = target_message.id`,
+              [clientId, update.id, update.status, update.error ?? null, update.remoteDigits],
+            ).catch(err => console.error('[webhook message status fallback]', err));
+          }
         }
         return Response.json({ ok: true, status_updates: statusUpdates.length });
       }
