@@ -2272,7 +2272,10 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
   const lockedClient = lockedClientId ? activeClients.find(c => c.id === lockedClientId) : null;
 
   return (
-    <div className={cn('flex flex-col gap-5 overflow-hidden', embedded ? 'min-h-[720px]' : 'h-full')}>
+    <div className={cn(
+      'flex flex-col gap-5 overflow-hidden',
+      embedded ? 'h-[calc(100vh-360px)] min-h-[640px]' : 'h-full',
+    )}>
 
       {/* ── PAGE HEADER ─────────────────────────────────────────────── */}
       <div className="flex items-center gap-3">
