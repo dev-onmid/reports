@@ -438,6 +438,7 @@ export function ChatView({
   const [chatAvatars, setChatAvatars] = useState<Record<string, string>>({});
   const [importingChats, setImportingChats] = useState(false);
   const [importResult, setImportResult] = useState<string | null>(null);
+  const [recordingAudio, setRecordingAudio] = useState(false);
 
   // Select mode
   const [selectMode,      setSelectMode]      = useState(false);
@@ -474,6 +475,10 @@ export function ChatView({
   const autoSyncedRef    = useRef<Set<string>>(new Set());
   const autoRecentHistoryLeadIdsRef = useRef<Set<string>>(new Set());
   const autoRecentHistoryRunningRef = useRef(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingStreamRef = useRef<MediaStream | null>(null);
+  const recordingChunksRef = useRef<BlobPart[]>([]);
+  const recordingCancelledRef = useRef(false);
 
   const selectedLead = leads.find(l => l.id === selectedId) ?? null;
   const recentLeadIds = leads
@@ -485,6 +490,14 @@ export function ChatView({
     if (!focusLeadId) return;
     queueMicrotask(() => setSelectedId(focusLeadId));
   }, [focusLeadId]);
+
+  useEffect(() => () => {
+    recordingCancelledRef.current = true;
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+    recordingStreamRef.current?.getTracks().forEach(track => track.stop());
+  }, []);
 
   // ── Scroll helpers ──────────────────────────────────────────────────────────
   function isNearBottom() {
@@ -875,6 +888,109 @@ export function ChatView({
   async function sendMedia(payload: Record<string, unknown>) {
     setMediaModal(null);
     await doSend(payload);
+  }
+
+  function preferredAudioMimeType() {
+    if (typeof MediaRecorder === 'undefined') return '';
+    const options = [
+      'audio/ogg;codecs=opus',
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/mp4',
+    ];
+    return options.find(type => MediaRecorder.isTypeSupported(type)) ?? '';
+  }
+
+  function audioExtension(mimeType: string) {
+    if (mimeType.includes('ogg')) return 'ogg';
+    if (mimeType.includes('mp4')) return 'm4a';
+    if (mimeType.includes('mpeg')) return 'mp3';
+    return 'webm';
+  }
+
+  async function uploadAndSendRecordedAudio(blob: Blob) {
+    if (!selectedId || blob.size === 0) return;
+    setSending(true);
+    setSendStatus(null);
+    setSendError(null);
+    try {
+      const formData = new FormData();
+      const ext = audioExtension(blob.type);
+      formData.append('file', new File([blob], `audio-${Date.now()}.${ext}`, {
+        type: blob.type || 'audio/webm',
+      }));
+      const res = await fetch('/api/upload', { method: 'POST', body: formData });
+      const data = await res.json().catch(() => ({})) as { url?: string; error?: string };
+      if (!res.ok || !data.url) {
+        setSendStatus('err');
+        setSendError(data.error ?? 'Não foi possível subir o áudio');
+        setTimeout(() => { setSendStatus(null); setSendError(null); }, 6000);
+        return;
+      }
+      setSending(false);
+      await doSend({ tipo: 'audio', url: data.url });
+    } catch (err) {
+      setSendStatus('err');
+      setSendError(err instanceof Error ? err.message : 'Erro ao gravar áudio');
+      setTimeout(() => { setSendStatus(null); setSendError(null); }, 6000);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function startAudioRecording() {
+    if (!selectedId || recordingAudio) return;
+    if (typeof window === 'undefined' || typeof MediaRecorder === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      setSendStatus('err');
+      setSendError('Este navegador não permite gravação de áudio aqui.');
+      setTimeout(() => { setSendStatus(null); setSendError(null); }, 6000);
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = preferredAudioMimeType();
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      recordingCancelledRef.current = false;
+      recordingStreamRef.current = stream;
+      recordingChunksRef.current = [];
+      recorder.ondataavailable = event => {
+        if (event.data.size > 0) recordingChunksRef.current.push(event.data);
+      };
+      recorder.onstop = () => {
+        setRecordingAudio(false);
+        stream.getTracks().forEach(track => track.stop());
+        recordingStreamRef.current = null;
+        const type = recorder.mimeType || mimeType || 'audio/webm';
+        const blob = new Blob(recordingChunksRef.current, { type });
+        recordingChunksRef.current = [];
+        if (recordingCancelledRef.current) return;
+        void uploadAndSendRecordedAudio(blob);
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setRecordingAudio(true);
+      setSendStatus(null);
+      setSendError(null);
+    } catch (err) {
+      setRecordingAudio(false);
+      setSendStatus('err');
+      setSendError(err instanceof Error ? err.message : 'Não foi possível acessar o microfone');
+      setTimeout(() => { setSendStatus(null); setSendError(null); }, 6000);
+    }
+  }
+
+  function stopAudioRecording() {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder || recorder.state === 'inactive') return;
+    recorder.stop();
+  }
+
+  function toggleAudioRecording() {
+    if (recordingAudio) {
+      stopAudioRecording();
+    } else {
+      void startAudioRecording();
+    }
   }
 
   async function changeSelectedStatus(status: string) {
@@ -1381,6 +1497,12 @@ export function ChatView({
                       : <><AlertCircle  className="h-3.5 w-3.5" /> {sendError ?? 'Salvo — falha ao enviar pelo WhatsApp'}</>}
                   </div>
                 )}
+                {recordingAudio && (
+                  <div className="flex items-center gap-2 border-b border-red-500/20 bg-red-500/10 px-4 py-1.5 text-xs font-semibold text-red-300">
+                    <span className="h-2 w-2 animate-pulse rounded-full bg-red-400" />
+                    Gravando áudio — clique no microfone para enviar
+                  </div>
+                )}
 
                 <div className="flex items-end gap-3 px-3 py-3">
                   {/* Attachment button */}
@@ -1418,8 +1540,26 @@ export function ChatView({
                     style={{ minHeight: 44, maxHeight: 140 }}
                   />
 
-                  {/* Emoji button */}
+                  {/* Voice recording button */}
                   <div className="relative -ml-14 mb-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={toggleAudioRecording}
+                      disabled={!selectedId || (sending && !recordingAudio)}
+                      className={cn(
+                        'flex h-8 w-8 items-center justify-center rounded-[var(--radius)] transition-colors disabled:opacity-40',
+                        recordingAudio
+                          ? 'bg-red-500/15 text-red-300 hover:bg-red-500/25'
+                          : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                      )}
+                      title={recordingAudio ? 'Parar e enviar áudio' : 'Gravar áudio'}
+                    >
+                      <Mic className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  {/* Emoji button */}
+                  <div className="relative mb-1.5 shrink-0">
                     <button
                       type="button"
                       onClick={() => { setEmojiPicker(v => !v); setAttachMenu(false); }}
