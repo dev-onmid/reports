@@ -6,6 +6,7 @@ import { analisarConversa } from '@/lib/crm-ai-analysis';
 import { enviarEventoMeta, enviarEventoGoogle } from '@/lib/conversions';
 import { upsertLeadFromConversation, ensureCrmMessagesSchema } from '@/lib/crm-conversation-sync';
 import { fetchEvolutionMediaBase64, uploadBase64ToStorage } from '@/lib/evolution-media';
+import { logMissingAdTracking } from '@/lib/crm-tracking-debug';
 import type { NextRequest } from 'next/server';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -361,6 +362,18 @@ export async function POST(
     // Only set nome from pushName on incoming messages (fromMe=false).
     const contactName = fromMe ? null : (pushName ?? null);
     const canal = originToCanal(origin);
+
+    // Diagnostic: origin says it came from an ad channel (Facebook/Instagram/Google/TikTok/
+    // YouTube) but NO tracking identifier came through at all — neither ctwa_clid/externalAdReply
+    // (Meta) nor any utm_*/source_id (Google, TikTok, etc.) — so campanha/conjunto/anúncio would
+    // all show "Não recebido" in the UI. Persist the raw payload so we can inspect, after the
+    // fact, whether the provider actually forwarded the ad-tracking context for this message —
+    // there's no other record of it once this request ends.
+    const AD_ORIGINS = ['meta', 'instagram', 'google', 'tiktok', 'youtube'];
+    const hasAnyTracking = Boolean(ctwaClid || sourceId || utmData.utm_source || utmData.utm_campaign);
+    if (!fromMe && AD_ORIGINS.includes(origin) && !hasAnyTracking) {
+      await logMissingAdTracking(pool, { clientId, phone, canal, rawPayload: body });
+    }
 
     // Use upsertLeadFromConversation — works without a unique constraint on (client_id, numero)
     const { id: leadId } = await upsertLeadFromConversation(pool, {

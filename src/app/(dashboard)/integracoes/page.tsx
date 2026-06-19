@@ -1415,6 +1415,14 @@ const SPREADSHEET_FIELD_GROUPS: Array<{
       { key: 'notes', label: 'Observação', hint: 'Campo livre para detalhes adicionais.' },
     ],
   },
+  {
+    title: 'Funil por cidade/canal (opcional — exports de CRM tipo Pipedrive)',
+    fields: [
+      { key: 'dealId', label: 'ID do negócio', hint: 'Identificador único — permite reimportar meses diferentes sem duplicar.' },
+      { key: 'stage', label: 'Etapa do funil', hint: 'Ex: Abordagem D1, Reunião Agendada — diferente do status final.' },
+      { key: 'updatedDate', label: 'Última atualização', hint: 'Data da última mudança no negócio — usada para resolver duplicados entre planilhas.' },
+    ],
+  },
 ];
 
 function SpreadsheetImportPanel() {
@@ -1439,6 +1447,9 @@ function SpreadsheetImportPanel() {
     notes: '',
     scheduledDate: '',
     status: '',
+    dealId: '',
+    stage: '',
+    updatedDate: '',
   });
   const [importResults, setImportResults] = useState<Record<string, number> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1499,6 +1510,9 @@ function SpreadsheetImportPanel() {
         notes: data.mapping.notes ?? '',
         scheduledDate: data.mapping.scheduledDate ?? '',
         status: data.mapping.status ?? '',
+        dealId: data.mapping.dealId ?? '',
+        stage: data.mapping.stage ?? '',
+        updatedDate: data.mapping.updatedDate ?? '',
       }));
       const initialMappings: SpreadsheetMapping[] = data.clinicValues.map(v => ({ clinicValue: v, clientId: '', clientName: '' }));
       setMappings(initialMappings);
@@ -1532,6 +1546,9 @@ function SpreadsheetImportPanel() {
       if (columnOverrides.notes) fd.append('notesColumn', columnOverrides.notes);
       if (columnOverrides.scheduledDate) fd.append('scheduledDateColumn', columnOverrides.scheduledDate);
       if (columnOverrides.status) fd.append('statusColumn', columnOverrides.status);
+      if (columnOverrides.dealId) fd.append('dealIdColumn', columnOverrides.dealId);
+      if (columnOverrides.stage) fd.append('stageColumn', columnOverrides.stage);
+      if (columnOverrides.updatedDate) fd.append('updatedDateColumn', columnOverrides.updatedDate);
       const res = await fetch('/api/integrations/spreadsheet?step=import', { method: 'POST', body: fd });
       const data = await res.json() as { ok?: boolean; results?: Record<string, number>; error?: string };
       if (!res.ok || data.error) { setError(data.error ?? 'Erro ao importar planilha'); return; }
@@ -1562,6 +1579,9 @@ function SpreadsheetImportPanel() {
       notes: '',
       scheduledDate: '',
       status: '',
+      dealId: '',
+      stage: '',
+      updatedDate: '',
     });
     setImportResults(null);
     setError('');

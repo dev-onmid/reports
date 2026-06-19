@@ -81,12 +81,12 @@ function nextMonthName(periodo: string): string {
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-type Bairro      = { bairro: string; pedidos: number; faturamento: number };
+export type Bairro = { bairro: string; pedidos: number; faturamento: number };
 type Product     = { nome: string; qtd: number; total: number };
 type Faixa       = { label: string; count: number };
 type DiaDaSemana = { dia: string; pedidos: number; pct: number };
 
-type CampanhaDetalhada = {
+export type CampanhaDetalhada = {
   nome: string;
   tipo: string;
   metricas: {
@@ -105,7 +105,7 @@ type CampanhaDetalhada = {
   };
 };
 
-type MetaAdsFull = {
+export type MetaAdsFull = {
   investimento: number;
   impressoes: number;
   alcance: number;
@@ -113,7 +113,7 @@ type MetaAdsFull = {
   campanhas: CampanhaDetalhada[];
 };
 
-type Creative = {
+export type Creative = {
   nome: string;
   spend: number;
   resultado: number;
@@ -128,7 +128,7 @@ type Creative = {
   thumbnail_url: string | null;
 };
 
-type InstagramData = {
+export type InstagramData = {
   username: string;
   followers: number;
   followers_period?: number;
@@ -140,7 +140,7 @@ type InstagramData = {
   previous?: InstagramPeriodMetrics | null;
 };
 
-type InstagramPeriodMetrics = {
+export type InstagramPeriodMetrics = {
   followers_period: number;
   reach: number;
   impressions: number;
@@ -402,7 +402,7 @@ function parseAllFiles(files: { name: string; content: string }[], refDate: Date
 
 // ── DB / API fetchers ──────────────────────────────────────────────────────────
 
-async function fetchBairros(clientId: string, from: string, to: string): Promise<Bairro[]> {
+export async function fetchBairros(clientId: string, from: string, to: string): Promise<Bairro[]> {
   const pool = makeServerPool();
   try {
     const { rows } = await pool.query(
@@ -497,7 +497,7 @@ function campaignKindFor(c: CampanhaDetalhada): CampaignKind {
 }
 
 // Combined Meta fetch: account totals + campaign details (actions/frequency) + creative thumbnails.
-async function fetchMetaData(
+export async function fetchMetaData(
   connectionId: string | null | undefined,
   accountIds: string[],
   from: string, to: string,
@@ -776,7 +776,7 @@ type InstagramPost = {
   videoViews: number;
 };
 
-type InstagramFull = { insights: InstagramData; posts: InstagramPost[] };
+export type InstagramFull = { insights: InstagramData; posts: InstagramPost[] };
 type InstagramPageEntry = {
   id: string;
   name?: string;
@@ -907,7 +907,7 @@ async function fetchInstagramPostInsightsBatch(
   return result;
 }
 
-async function fetchInstagramData(
+export async function fetchInstagramData(
   clientId: string,
   connectionId: string | null | undefined,
   accountIds: string[],

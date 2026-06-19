@@ -598,20 +598,100 @@ function clientTheme(clientId: string) {
 }
 
 // ── Quick Edit Modal (Kanban) ────────────────────────────────────────────────
+type LeadChatMessage = {
+  id: string;
+  direction: 'in' | 'out';
+  text: string;
+  tipo: string;
+  created_at: string;
+};
+
+function ChatPreviewPanel({ leadId, onOpenChat }: { leadId: string; onOpenChat: () => void }) {
+  const [messages, setMessages] = useState<LeadChatMessage[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetch(`/api/crm/${leadId}/messages`)
+      .then(r => r.ok ? r.json() as Promise<{ messages?: LeadChatMessage[] }> : null)
+      .then(data => { if (!cancelled) setMessages((data?.messages ?? []).slice(-10)); })
+      .catch(() => { if (!cancelled) setMessages([]); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [leadId]);
+
+  return (
+    <div className="rounded-lg border border-border bg-background/50 p-3 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <MessageCircle className="h-3.5 w-3.5 text-primary" />
+          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Conversa recente</p>
+        </div>
+        <button type="button" onClick={onOpenChat} className="text-[11px] font-semibold text-primary hover:underline shrink-0">
+          Ver conversa completa
+        </button>
+      </div>
+      {loading ? (
+        <p className="py-3 text-center text-xs text-muted-foreground">Carregando mensagens…</p>
+      ) : messages.length === 0 ? (
+        <p className="py-3 text-center text-xs text-muted-foreground">Nenhuma mensagem encontrada para este lead.</p>
+      ) : (
+        <div className="max-h-56 space-y-1.5 overflow-y-auto pr-1">
+          {messages.map(m => (
+            <div key={m.id} className={cn('flex', m.direction === 'out' ? 'justify-end' : 'justify-start')}>
+              <div className={cn(
+                'max-w-[85%] rounded-lg px-2.5 py-1.5 text-xs',
+                m.direction === 'out' ? 'bg-primary/15 text-foreground' : 'bg-muted text-foreground',
+              )}>
+                <p className="whitespace-pre-wrap break-words">
+                  {m.tipo && m.tipo !== 'texto' ? `[${m.tipo}]${m.text ? ' ' + m.text : ''}` : (m.text || '—')}
+                </p>
+                <p className="mt-0.5 text-[10px] text-muted-foreground">{fmtTime(m.created_at)} · {fmtD(m.created_at)}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function QuickEditModal({
-  lead, onSave, onClose, onDelete, statusOptions,
+  lead, onSave, onClose, onDelete, statusOptions, onOpenChat,
 }: {
   lead: CrmLead;
   onSave: (data: Draft) => Promise<void>;
   onClose: () => void;
   onDelete: () => void;
   statusOptions: string[];
+  onOpenChat: (leadId: string) => void;
 }) {
   const [draft, setDraft] = useState<Draft>({ ...lead });
   const [saving, setSaving] = useState(false);
   const [aiInfo, setAiInfo] = useState<{ motivo?: string; created_at?: string; confianca?: number } | null>(null);
   const [, setNowTick] = useState(0);
+  const [dealCheck, setDealCheck] = useState<'idle' | 'checking' | 'found' | 'empty'>('idle');
+  const [dealSuggestion, setDealSuggestion] = useState<{ valor: number; trecho: string | null } | null>(null);
   function set<K extends keyof Draft>(k: K, v: Draft[K]) { setDraft(prev => ({ ...prev, [k]: v })); }
+
+  function toggleFechou(checked: boolean) {
+    set('fechou', checked);
+    if (checked && !lead.fechou) {
+      setDealCheck('checking');
+      setDealSuggestion(null);
+      fetch(`/api/crm/${lead.id}/extract-value`, { method: 'POST' })
+        .then(r => r.ok ? r.json() as Promise<{ valor: number | null; trecho: string | null }> : null)
+        .then(data => {
+          if (data?.valor) { setDealSuggestion({ valor: data.valor, trecho: data.trecho }); setDealCheck('found'); }
+          else setDealCheck('empty');
+        })
+        .catch(() => setDealCheck('empty'));
+    } else {
+      setDealCheck('idle');
+      setDealSuggestion(null);
+    }
+  }
 
   useEffect(() => {
     fetch(`/api/crm/ai/lead/${lead.id}`)
@@ -675,6 +755,7 @@ function QuickEditModal({
             </label>
           </div>
           <TrackingSourcePanel lead={lead} />
+          <ChatPreviewPanel leadId={lead.id} onOpenChat={() => { onOpenChat(lead.id); onClose(); }} />
           <div className="grid grid-cols-2 gap-3">
             <label className="space-y-1">
               <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Valor (R$)</span>
@@ -689,9 +770,43 @@ function QuickEditModal({
             </label>
           </div>
           <label className="flex items-center gap-3 cursor-pointer py-1">
-            <input type="checkbox" checked={!!draft.fechou} onChange={e => set('fechou', e.target.checked)} className="h-4 w-4 accent-primary" />
+            <input type="checkbox" checked={!!draft.fechou} onChange={e => toggleFechou(e.target.checked)} className="h-4 w-4 accent-primary" />
             <span className="text-sm font-semibold">Fechou negócio</span>
           </label>
+          {dealCheck === 'checking' && (
+            <div className="flex items-center gap-2 rounded-lg border border-border bg-background/50 px-3 py-2 text-xs text-muted-foreground">
+              <Sparkles className="h-3.5 w-3.5 shrink-0 animate-pulse text-primary" />
+              IA lendo a conversa pra identificar o valor combinado…
+            </div>
+          )}
+          {dealCheck === 'found' && dealSuggestion && (
+            <div className="space-y-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5 text-xs">
+              <div className="flex items-center gap-2 font-semibold text-foreground">
+                <Sparkles className="h-3.5 w-3.5 shrink-0 text-primary" />
+                IA identificou {formatCurrencyBRL(dealSuggestion.valor)} nesta conversa
+              </div>
+              {dealSuggestion.trecho && (
+                <p className="text-muted-foreground italic">&ldquo;{dealSuggestion.trecho}&rdquo;</p>
+              )}
+              <div className="flex gap-2 pt-1">
+                <button type="button"
+                  onClick={() => { set('valor_rs', dealSuggestion.valor); setDealCheck('idle'); setDealSuggestion(null); }}
+                  className="rounded-md bg-primary px-2.5 py-1 text-[11px] font-semibold text-primary-foreground hover:bg-primary/90">
+                  Usar este valor
+                </button>
+                <button type="button"
+                  onClick={() => { setDealCheck('idle'); setDealSuggestion(null); }}
+                  className="rounded-md border border-border px-2.5 py-1 text-[11px] font-semibold text-muted-foreground hover:text-foreground">
+                  Ignorar
+                </button>
+              </div>
+            </div>
+          )}
+          {dealCheck === 'empty' && (
+            <div className="rounded-lg border border-border bg-background/50 px-3 py-2 text-xs text-muted-foreground">
+              IA não conseguiu identificar um valor na conversa — preencha manualmente.
+            </div>
+          )}
           <div className="rounded-lg border border-border bg-background/50 p-3 space-y-3">
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -3231,6 +3346,7 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
           onClose={() => setKanbanEditLead(null)}
           onDelete={() => { void deleteRow(kanbanEditLead.id); setKanbanEditLead(null); }}
           statusOptions={statusOptions}
+          onOpenChat={openLeadChat}
         />
       )}
 

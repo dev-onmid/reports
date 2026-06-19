@@ -3,6 +3,7 @@ import { getFreshMetaToken } from '@/lib/meta-token';
 import { RESULT_ACTIONS, NEW_CONTACT_ACTIONS, PURCHASE_ACTIONS, sumActions, brl } from './report-runner';
 import { logAiUsage } from '@/lib/ai-usage-logger';
 import { parseLeadRows, mergeLeadRows, buildLeadFunnelByCity, formatLeadFunnelForPrompt } from './lead-funnel-by-city';
+import { fetchBairros, fetchMetaData, fetchInstagramData, type MetaAdsFull, type Creative, type InstagramFull, type Bairro } from './delivery-report-builder';
 
 // ── Persist ───────────────────────────────────────────────────────────────────
 
@@ -72,9 +73,9 @@ function calcPrevPeriod(from: string, to: string): { from: string; to: string } 
 
 // ── Google Ads fetch ──────────────────────────────────────────────────────────
 
-type GoogleAdsTotals = { spend: number; impressions: number; clicks: number; conversions: number };
+export type GoogleAdsTotals = { spend: number; impressions: number; clicks: number; conversions: number };
 
-async function fetchGoogleAdsTotals(connectionId: string, accountIds: string[], from: string, to: string): Promise<GoogleAdsTotals> {
+export async function fetchGoogleAdsTotals(connectionId: string, accountIds: string[], from: string, to: string): Promise<GoogleAdsTotals> {
   const pool = makeServerPool();
   let conn: { access_token: string; refresh_token: string; token_expiry: string | null } | null = null;
   try {
@@ -155,13 +156,13 @@ function formatGoogleData(g: GoogleAdsTotals): string {
 
 // ── Monthly Meta Ads fetch ────────────────────────────────────────────────────
 
-type MonthlyMeta = {
+export type MonthlyMeta = {
   month: string; label: string;
   spend: number; impressions: number; reach: number;
   results: number; newContacts: number; purchases: number;
 };
 
-async function fetchMonthlyMeta(connectionId: string, accountIds: string[], from: string, to: string): Promise<MonthlyMeta[]> {
+export async function fetchMonthlyMeta(connectionId: string, accountIds: string[], from: string, to: string): Promise<MonthlyMeta[]> {
   const pool = makeServerPool();
   let conn: { id: string; app_id: string; access_token: string; token_expiry: string | null } | null = null;
   try {
@@ -308,6 +309,73 @@ function formatCrmData(monthlyCrm: MonthlyCrm[]): string {
   ].filter(l => l !== null).join('\n');
 }
 
+function formatCampaignsData(metaFull: MetaAdsFull | null, creatives: Creative[]): string | undefined {
+  if (!metaFull || !metaFull.campanhas.length) return undefined;
+
+  const campLines = metaFull.campanhas.map(c => {
+    const m = c.metricas;
+    const parts = [
+      `${c.nome} (${c.tipo || 'objetivo não informado'})`,
+      `investimento: ${brl(m.investimento)}`,
+      `impressões: ${m.impressoes.toLocaleString('pt-BR')}`,
+      `alcance: ${m.alcance.toLocaleString('pt-BR')}`,
+      `cliques: ${m.cliques.toLocaleString('pt-BR')}`,
+      `frequência: ${m.frequencia.toFixed(2)}`,
+    ];
+    if (m.leads > 0) parts.push(`leads: ${m.leads}`);
+    if (m.conversas > 0) parts.push(`conversas: ${m.conversas}`);
+    if (m.compras > 0) parts.push(`compras: ${m.compras} (${brl(m.valor_compras)}, ROAS ${m.purchase_roas.toFixed(2)}x)`);
+    if (m.visitas_pagina > 0) parts.push(`visitas à página: ${m.visitas_pagina}`);
+    if (m.iniciaram_checkout > 0) parts.push(`iniciaram checkout: ${m.iniciaram_checkout}`);
+    return `- ${parts.join(' | ')}`;
+  });
+
+  const creativeLines = creatives.slice(0, 10).map(cr =>
+    `- ${cr.nome} (campanha: ${cr.campaign_name ?? '—'}, objetivo: ${cr.objective ?? '—'}): investimento ${brl(cr.spend)}, resultado ${cr.resultado}${cr.purchaseValue ? `, valor compras ${brl(cr.purchaseValue)}` : ''}`,
+  );
+
+  return [
+    'Ranking de campanhas por investimento (top 5):',
+    ...campLines,
+    creativeLines.length ? '\nMelhores criativos por objetivo:' : null,
+    ...creativeLines,
+  ].filter((l): l is string => l !== null).join('\n');
+}
+
+function formatInstagramData(ig: InstagramFull | null): string | undefined {
+  if (!ig) return undefined;
+  const i = ig.insights;
+  const lines = [
+    `Perfil: @${i.username}`,
+    `Seguidores: ${i.followers.toLocaleString('pt-BR')}`,
+    i.followers_period ? `Variação de seguidores no período: ${i.followers_period > 0 ? '+' : ''}${i.followers_period}` : null,
+    `Alcance no período: ${i.reach.toLocaleString('pt-BR')}`,
+    `Impressões/visualizações no período: ${i.impressions.toLocaleString('pt-BR')}`,
+    `Visitas ao perfil: ${i.profile_views.toLocaleString('pt-BR')}`,
+    `Cliques no site: ${i.website_clicks.toLocaleString('pt-BR')}`,
+    `Contas alcançadas/engajadas: ${i.accounts_engaged.toLocaleString('pt-BR')}`,
+  ];
+  if (i.previous) {
+    lines.push(
+      '',
+      'Período anterior (comparativo):',
+      `Alcance: ${i.previous.reach.toLocaleString('pt-BR')}`,
+      `Impressões/visualizações: ${i.previous.impressions.toLocaleString('pt-BR')}`,
+      `Visitas ao perfil: ${i.previous.profile_views.toLocaleString('pt-BR')}`,
+    );
+  }
+  if (ig.posts.length) lines.push('', `Publicações no período: ${ig.posts.length}`);
+  return lines.filter((l): l is string => l !== null).join('\n');
+}
+
+function formatBairrosData(bairros: Bairro[]): string | undefined {
+  if (!bairros.length) return undefined;
+  return [
+    'Top bairros/regiões por volume de registros (base interna):',
+    ...bairros.map(b => `- ${b.bairro}: ${b.pedidos} registros${b.faturamento > 0 ? `, ${brl(b.faturamento)} faturamento` : ''}`),
+  ].join('\n');
+}
+
 // ── System Prompt ─────────────────────────────────────────────────────────────
 
 const SYSTEM_PROMPT = `Você é um analista sênior de marketing digital. Você escreve para donos de negócio — não para marqueteiros. O resultado deve parecer uma apresentação executiva premium, não um dashboard exportado.
@@ -371,11 +439,17 @@ SLIDE 2 — RESULTADOS DO MÊS (com CRM ou Meta) [Layout B]
 SLIDE 3 — META ADS [Layout C]
 • Tese: "Uma campanha concentra o ROAS — priorizar sua verba aumenta o retorno"
 • 4 KPIs compactos: Investimento, Alcance, Impressões, CPC
-• Scoreboard: campanha vencedora (card maior, badge CAMPEÃ) + demais (menores, badge ATENÇÃO se aplicável)
+• Scoreboard: use o "DETALHAMENTO DE CAMPANHAS META ADS" fornecido (uma das campanhas listadas) — campanha vencedora (card maior, badge CAMPEÃ) + demais (menores, badge ATENÇÃO se aplicável). Mostre, por campanha, investimento, resultado principal (leads/conversas/compras conforme o objetivo) e custo por resultado. Cite os melhores criativos por objetivo quando houver.
 
 SLIDE 3B — GOOGLE ADS [Layout C] (só se houver dados)
 • Tese: ex. "Google Ads gerou X conversões — CTR indica oportunidade de expansão"
 • Mesma estrutura de scoreboard
+
+SLIDE 3C — INSTAGRAM [Layout B] (só se houver bloco "DADOS INSTAGRAM")
+• Tese: ex. "O perfil ganhou X seguidores, mas o alcance orgânico ainda depende de poucos posts"
+• KPIs: seguidores, alcance no período, visitas ao perfil, cliques no site, contas engajadas
+• Comparativo com período anterior quando disponível
+• Conclusão executiva sobre crescimento/engajamento orgânico
 
 SLIDE 4 — BASE DE CLIENTES (com CRM) [Layout B]
 • Tese: ex. "X% dos leads nunca converteu — a nutrição é o gargalo principal"
@@ -387,6 +461,11 @@ SLIDE 4B — FUNIL POR CIDADE E CANAL (só se houver bloco "CRUZAMENTO DE LEADS 
 • Tabela (modelo "TABELA DE COMPARATIVO"): colunas Cidade | Canal | Leads | Ganhos | Perdidos | Custo estimado | CPA — uma linha por combinação cidade×canal fornecida, na ordem dada. Reproduza os números exatamente como vieram nos dados; não some, não arredonde diferente, não invente linha.
 • Abaixo da tabela, resumo do funil por canal (em que etapa os leads mais "morrem" por canal) usando os dados de "Funil por canal" fornecidos.
 • Conclusão executiva: aponte a cidade/canal com melhor CPA (escalar) e a com pior CPA (revisar ou pausar).
+
+SLIDE 4C — REGIÕES/BAIRROS (só se houver bloco "DADOS DE REGIÕES/BAIRROS") [Layout B]
+• Tese: ex. "[Bairro líder] concentra o volume de registros da base interna"
+• Lista/tabela com os bairros fornecidos, registros e faturamento (quando houver)
+• Conclusão executiva: onde concentrar esforço comercial/mídia local
 
 SLIDE 5 — COMPARATIVO ANTERIOR×ATUAL (sempre) [Layout B]
 • Tabela lado a lado com variação em badge colorido por linha
@@ -554,6 +633,9 @@ function buildUserPrompt(
   googleData?: string,
   googlePrevData?: string,
   supplementary?: string,
+  campaignsData?: string,
+  instagramData?: string,
+  bairrosData?: string,
 ): string {
   return [
     `Cliente: ${clientName}`,
@@ -566,15 +648,21 @@ function buildUserPrompt(
     metaData,
     metaPrevData ? `\nDADOS META ADS — PERÍODO ANTERIOR (${prevPeriodLabel}):` : null,
     metaPrevData ?? null,
+    campaignsData ? `\nDETALHAMENTO DE CAMPANHAS META ADS — PERÍODO ATUAL (use para o scoreboard do slide de Meta Ads):` : null,
+    campaignsData ?? null,
     googleData ? `\nDADOS GOOGLE ADS — PERÍODO ATUAL (${period}):` : null,
     googleData ?? null,
     googlePrevData ? `\nDADOS GOOGLE ADS — PERÍODO ANTERIOR (${prevPeriodLabel}):` : null,
     googlePrevData ?? null,
+    instagramData ? `\nDADOS INSTAGRAM — PERÍODO ATUAL (${period}):` : null,
+    instagramData ?? null,
     '',
     `DADOS CRM / RESULTADOS DO NEGÓCIO — PERÍODO ATUAL (${period}):`,
     crmData,
     crmPrevData ? `\nDADOS CRM — PERÍODO ANTERIOR (${prevPeriodLabel}):` : null,
     crmPrevData ?? null,
+    bairrosData ? `\nDADOS DE REGIÕES/BAIRROS — BASE INTERNA (${period}):` : null,
+    bairrosData ?? null,
     supplementary ? `\nDADOS SUPLEMENTARES (planilha anexada pelo cliente):` : null,
     supplementary ?? null,
   ].filter(l => l !== null).join('\n');
@@ -606,7 +694,7 @@ export async function buildOmniReport(input: {
   const prev = calcPrevPeriod(periodFrom, periodTo);
   const hasGoogle = Boolean(googleConnectionId && googleAccountIds.length);
 
-  const [monthlyMeta, monthlyCrm, prevMonthlyMeta, prevMonthlyCrm, googleTotals, googlePrevTotals] = await Promise.all([
+  const [monthlyMeta, monthlyCrm, prevMonthlyMeta, prevMonthlyCrm, googleTotals, googlePrevTotals, metaDetailed, instagramData, bairros] = await Promise.all([
     connectionId && accountIds?.length
       ? fetchMonthlyMeta(connectionId, accountIds, periodFrom, periodTo)
       : Promise.resolve([] as MonthlyMeta[]),
@@ -621,6 +709,13 @@ export async function buildOmniReport(input: {
     hasGoogle
       ? fetchGoogleAdsTotals(googleConnectionId!, googleAccountIds, prev.from, prev.to)
       : Promise.resolve({ spend: 0, impressions: 0, clicks: 0, conversions: 0 }),
+    connectionId && accountIds?.length
+      ? fetchMetaData(connectionId, accountIds, periodFrom, periodTo)
+      : Promise.resolve({ meta: null, creatives: [] }),
+    connectionId && accountIds?.length
+      ? fetchInstagramData(clientId, connectionId, accountIds, periodFrom, periodTo)
+      : Promise.resolve(null),
+    fetchBairros(clientId, periodFrom, periodTo),
   ]);
 
   const period          = `${fmtMonth(periodFrom)} a ${fmtMonth(periodTo)}`;
@@ -632,6 +727,9 @@ export async function buildOmniReport(input: {
   const crmPrevData  = formatCrmData(prevMonthlyCrm);
   const googleData   = formatGoogleData(googleTotals) || undefined;
   const googlePrevData = formatGoogleData(googlePrevTotals) || undefined;
+  const campaignsData = formatCampaignsData(metaDetailed.meta, metaDetailed.creatives);
+  const instagramText  = formatInstagramData(instagramData);
+  const bairrosData    = formatBairrosData(bairros);
   const segment      = 'Marketing Digital';
 
   if (input.leadFunnelFiles?.length) {
@@ -648,7 +746,7 @@ export async function buildOmniReport(input: {
   const userPrompt = buildUserPrompt(
     clientName, segment, period, prevPeriodLabel, agencyContext,
     metaData, crmData, metaPrevData, crmPrevData, googleData, googlePrevData,
-    supplementaryContent || undefined,
+    supplementaryContent || undefined, campaignsData, instagramText, bairrosData,
   );
 
   let html = '';
