@@ -64,7 +64,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
           pool,
           lead.client_id,
           newStatus,
-          { id, phone: leadPhone },
+          { id, phone: leadPhone, ctwaClid: lead.ctwa_clid ?? current.ctwa_clid ?? null },
+          Number(lead.valor_rs ?? current.valor_rs ?? 0) || null,
         ).catch(() => null);
       }
     }

@@ -66,6 +66,7 @@ async function ensureTable(pool: ReturnType<typeof makeServerPool>) {
       ADD COLUMN IF NOT EXISTS ad_name TEXT,
       ADD COLUMN IF NOT EXISTS creative_name TEXT,
       ADD COLUMN IF NOT EXISTS first_origin_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS instance_id TEXT,
       ADD COLUMN IF NOT EXISTS temperatura TEXT,
       ADD COLUMN IF NOT EXISTS temperatura_atualizada_em TIMESTAMPTZ,
       ADD COLUMN IF NOT EXISTS ia_ultimo_analise TIMESTAMPTZ,

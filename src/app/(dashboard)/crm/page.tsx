@@ -40,6 +40,20 @@ type CrmLead = {
   ia_ultimo_analise?: string | null;
   ia_confianca_ultimo?: number | null;
   time_interno?: boolean;
+  ctwa_clid?: string | null;
+  source_id?: string | null;
+  source_url?: string | null;
+  utm_source?: string | null;
+  utm_medium?: string | null;
+  utm_campaign?: string | null;
+  utm_content?: string | null;
+  utm_term?: string | null;
+  campaign_name?: string | null;
+  adset_name?: string | null;
+  ad_name?: string | null;
+  creative_name?: string | null;
+  first_origin_at?: string | null;
+  instance_id?: string | null;
   last_contact_at?: string | null;
   whatsapp_last_message_at?: string | null;
   whatsapp_last_message_text?: string | null;
@@ -324,6 +338,53 @@ function leadOriginPreview(lead: CrmLead) {
     channels,
   };
 }
+function hasValue(value: unknown) {
+  return value !== null && value !== undefined && String(value).trim() !== '';
+}
+function leadTrackingStatus(lead: CrmLead) {
+  if (hasValue(lead.ctwa_clid) || hasValue(lead.source_id) || hasValue(lead.campaign_name) || hasValue(lead.adset_name) || hasValue(lead.ad_name)) {
+    return {
+      label: 'Meta Click-to-WhatsApp',
+      detail: 'A Evolution enviou contexto do anúncio.',
+      className: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
+    };
+  }
+  if (hasValue(lead.utm_source) || hasValue(lead.utm_campaign) || hasValue(lead.utm_content) || hasValue(lead.utm_medium)) {
+    return {
+      label: 'Link rastreável',
+      detail: 'Origem identificada pelas UTMs do link.',
+      className: 'border-blue-500/30 bg-blue-500/10 text-blue-300',
+    };
+  }
+  if (normalizeChannelText(lead.origin ?? '').includes('organic')) {
+    return {
+      label: 'Orgânico',
+      detail: 'Lead sem campanha/anúncio detectado.',
+      className: 'border-zinc-500/30 bg-zinc-500/10 text-zinc-300',
+    };
+  }
+  return {
+    label: 'Sem rastreio',
+    detail: 'Nenhum dado de campanha chegou neste lead.',
+    className: 'border-amber-500/30 bg-amber-500/10 text-amber-300',
+  };
+}
+function trackingRows(lead: CrmLead) {
+  return [
+    ['Canal', lead.canal],
+    ['Origem', originLabel(lead.origin) ?? lead.origin],
+    ['Campanha', lead.campaign_name ?? lead.utm_campaign],
+    ['Conjunto', lead.adset_name ?? lead.utm_medium],
+    ['Anúncio', lead.ad_name ?? lead.utm_content],
+    ['Criativo', lead.creative_name],
+    ['UTM source', lead.utm_source],
+    ['UTM term', lead.utm_term],
+    ['Click ID Meta', lead.ctwa_clid],
+    ['Source ID', lead.source_id],
+    ['Instância', lead.instance_id],
+    ['Primeira captura', lead.first_origin_at ? fmtD(lead.first_origin_at) : null],
+  ] as const;
+}
 function inferLeadAiTag(lead: CrmLead) {
   const value = toMoneyNumber(lead.valor_rs);
   const text = normalizeChannelText([
@@ -423,6 +484,47 @@ function compareSortValues(a: string | number | boolean | null, b: string | numb
   if (typeof a === 'number' && typeof b === 'number') return a - b;
   if (typeof a === 'boolean' && typeof b === 'boolean') return Number(a) - Number(b);
   return String(a).localeCompare(String(b), 'pt-BR', { numeric: true, sensitivity: 'base' });
+}
+
+function TrackingSourcePanel({ lead }: { lead: CrmLead }) {
+  const status = leadTrackingStatus(lead);
+  const rows = trackingRows(lead);
+  const sourceUrl = lead.source_url;
+
+  return (
+    <div className="rounded-lg border border-border bg-background/50 p-3 space-y-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Fonte de captura</p>
+          <p className="mt-1 text-xs text-muted-foreground">{status.detail}</p>
+        </div>
+        <span className={cn('rounded-full border px-2 py-1 text-[10px] font-bold', status.className)}>
+          {status.label}
+        </span>
+      </div>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        {rows.map(([label, value]) => (
+          <div key={label} className="rounded border border-border/60 bg-card px-2 py-1.5">
+            <span className="block text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{label}</span>
+            <span className={cn('mt-0.5 block truncate text-xs font-semibold', hasValue(value) ? 'text-foreground' : 'text-muted-foreground')}>
+              {hasValue(value) ? String(value) : 'Não recebido'}
+            </span>
+          </div>
+        ))}
+      </div>
+      {hasValue(sourceUrl) && (
+        <a
+          href={String(sourceUrl)}
+          target="_blank"
+          rel="noreferrer"
+          className="flex items-center gap-2 rounded border border-border/60 bg-card px-2 py-2 text-xs font-semibold text-primary hover:bg-primary/10 transition-colors"
+        >
+          <Link2 className="h-3.5 w-3.5" />
+          Abrir URL de origem
+        </a>
+      )}
+    </div>
+  );
 }
 
 const cell    = 'px-2 py-0 h-9 text-xs focus:outline-none focus:bg-primary/10 bg-transparent border-0 w-full text-foreground placeholder:text-muted-foreground/30';
@@ -572,6 +674,7 @@ function QuickEditModal({
               </select>
             </label>
           </div>
+          <TrackingSourcePanel lead={lead} />
           <div className="grid grid-cols-2 gap-3">
             <label className="space-y-1">
               <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Valor (R$)</span>
@@ -671,6 +774,7 @@ function KanbanCard({
   const channels = detectChannels(lead.canal);
   const origin = leadOriginPreview(lead);
   const aiTag = inferLeadAiTag(lead);
+  const trackingStatus = leadTrackingStatus(lead);
   const value = toMoneyNumber(lead.valor_rs);
 
   useEffect(() => {
@@ -778,6 +882,12 @@ function KanbanCard({
               </span>
             )}
             <span className="truncate">{origin.label}</span>
+          </span>
+          <span
+            className={cn('inline-flex max-w-[90px] truncate rounded-full border px-1.5 py-0.5 text-[9px] font-semibold', trackingStatus.className)}
+            title={`${trackingStatus.label}: ${trackingStatus.detail}`}
+          >
+            {trackingStatus.label === 'Meta Click-to-WhatsApp' ? 'Meta' : trackingStatus.label === 'Link rastreável' ? 'UTM' : trackingStatus.label}
           </span>
           <span className="inline-flex max-w-[115px] items-center gap-1 truncate rounded-full border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[9px] font-semibold text-primary" title={aiTag}>
             <Sparkles className="h-2.5 w-2.5 shrink-0" />

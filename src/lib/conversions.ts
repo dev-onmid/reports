@@ -128,6 +128,27 @@ async function logConversion(pool: Pool, data: {
   ).catch(() => null);
 }
 
+async function hasSuccessfulConversion(pool: Pool, data: {
+  clientId: string;
+  leadId?: string | null;
+  plataforma: 'meta' | 'google';
+  eventName: string;
+}): Promise<boolean> {
+  if (!data.leadId) return false;
+  const { rows: [row] } = await pool.query(
+    `SELECT 1
+       FROM public.conversion_log
+      WHERE client_id = $1
+        AND lead_id = $2
+        AND plataforma = $3
+        AND event_name = $4
+        AND sucesso = true
+      LIMIT 1`,
+    [data.clientId, data.leadId, data.plataforma, data.eventName],
+  ).catch(() => ({ rows: [] as Array<{ '?column?': number }> }));
+  return Boolean(row);
+}
+
 // ── Meta CAPI ─────────────────────────────────────────────────────────────────
 
 export async function enviarEventoMeta(
@@ -280,9 +301,23 @@ export async function dispararEventosPorStatus(
 
     for (const row of rows) {
       if (row.meta_event_name) {
+        const alreadySent = await hasSuccessfulConversion(pool, {
+          clientId,
+          leadId: leadData.id,
+          plataforma: 'meta',
+          eventName: row.meta_event_name,
+        });
+        if (alreadySent) continue;
         await enviarEventoMeta(pool, clientId, row.meta_event_name, leadData, valor).catch(() => null);
       }
       if (row.google_conversion_label) {
+        const alreadySent = await hasSuccessfulConversion(pool, {
+          clientId,
+          leadId: leadData.id,
+          plataforma: 'google',
+          eventName: row.google_conversion_label,
+        });
+        if (alreadySent) continue;
         await enviarEventoGoogle(pool, clientId, row.google_conversion_label, leadData, valor).catch(() => null);
       }
     }
