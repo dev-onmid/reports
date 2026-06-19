@@ -266,7 +266,7 @@ function MessageDeliveryIcon({ status, error }: { status: string | null; error?:
     return wrap('Lida', <CheckCheck className="h-3.5 w-3.5 shrink-0 text-[#53BDEB]" />);
   }
   if (status === 'delivered') {
-    return wrap('Entregue', <CheckCheck className="h-3.5 w-3.5 shrink-0 text-emerald-400" />);
+    return wrap('Entregue', <CheckCheck className="h-3.5 w-3.5 shrink-0 text-[#9BB5A8]/70" />);
   }
   if (status === 'pending') {
     return wrap('Enviando', <Clock3 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />);
