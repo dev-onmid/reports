@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import {
   Plus, Trash2, ExternalLink, Users2, Shield, User, Mail,
   Edit2, Search, Filter, Download, Eye, ChevronLeft, ChevronRight,
-  Sparkles,
+  Sparkles, Bell, DollarSign, MessageCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -55,6 +55,23 @@ type AiUsageRow = {
   custo_estimado_usd: number;
   ia_limite_chamadas_dia: number;
   chamadas_hoje: number;
+};
+
+type AiBillingSettings = {
+  openai_credit_usd: number;
+  claude_credit_usd: number;
+  alert_enabled: boolean;
+  alert_threshold_usd: number;
+  alert_phone: string;
+  zapi_client_id: string;
+  last_alert_at: string | null;
+};
+
+type ZapiOption = {
+  id: string;
+  name: string;
+  instance_id: string;
+  active: boolean;
 };
 
 // Mock registration dates per id for display purposes
@@ -113,6 +130,18 @@ export default function ConfiguracoesPage() {
   const [search, setSearch] = useState('');
   const [aiUsage, setAiUsage] = useState<AiUsageRow[]>([]);
   const [aiUsageLoading, setAiUsageLoading] = useState(false);
+  const [aiBilling, setAiBilling] = useState<AiBillingSettings>({
+    openai_credit_usd: 0,
+    claude_credit_usd: 0,
+    alert_enabled: false,
+    alert_threshold_usd: 2,
+    alert_phone: '',
+    zapi_client_id: '',
+    last_alert_at: null,
+  });
+  const [zapiOptions, setZapiOptions] = useState<ZapiOption[]>([]);
+  const [aiBillingSaving, setAiBillingSaving] = useState(false);
+  const [aiBillingSaved, setAiBillingSaved] = useState<string | null>(null);
 
   // Load from database on mount
   useEffect(() => {
@@ -135,12 +164,42 @@ export default function ConfiguracoesPage() {
   useEffect(() => {
     if (activeTab !== 'ia') return;
     setAiUsageLoading(true);
+    void fetch('/api/ai-usage/settings')
+      .then((res) => res.ok ? res.json() as Promise<{ settings: AiBillingSettings; zapi_clients: ZapiOption[] }> : null)
+      .then((data) => {
+        if (!data) return;
+        setAiBilling(data.settings);
+        setZapiOptions(data.zapi_clients ?? []);
+      })
+      .catch(() => undefined);
     fetch('/api/crm/ai/usage')
       .then((res) => res.ok ? res.json() as Promise<AiUsageRow[]> : [])
       .then(setAiUsage)
       .catch(() => setAiUsage([]))
       .finally(() => setAiUsageLoading(false));
   }, [activeTab]);
+
+  async function saveAiBilling() {
+    setAiBillingSaving(true);
+    setAiBillingSaved(null);
+    try {
+      const res = await fetch('/api/ai-usage/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(aiBilling),
+      });
+      const data = await res.json().catch(() => ({})) as { settings?: AiBillingSettings; error?: string };
+      if (!res.ok || !data.settings) {
+        setAiBillingSaved(data.error ?? 'Erro ao salvar configuração');
+        return;
+      }
+      setAiBilling(data.settings);
+      setAiBillingSaved('Configuração salva');
+      setTimeout(() => setAiBillingSaved(null), 4000);
+    } finally {
+      setAiBillingSaving(false);
+    }
+  }
 
   function openCreateDialog() {
     setEditingUserId(null);
@@ -561,6 +620,126 @@ export default function ConfiguracoesPage() {
       ══════════════════════════════════ */}
       {activeTab === 'ia' && (
         <div className="space-y-4">
+          <div className="bg-card border border-border rounded-[var(--radius)] p-5">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-bold">Saldo e alertas das IAs</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Informe o crédito disponível nas plataformas e receba alerta quando o saldo estimado estiver baixo.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void saveAiBilling()}
+                disabled={aiBillingSaving}
+                className="h-9 px-4 rounded-lg bg-primary text-primary-foreground text-xs font-bold hover:bg-primary/90 disabled:opacity-50"
+              >
+                {aiBillingSaving ? 'Salvando...' : 'Salvar'}
+              </button>
+            </div>
+
+            <div className="mt-5 grid gap-4 lg:grid-cols-4">
+              <label className="space-y-2">
+                <span className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                  <DollarSign className="w-3.5 h-3.5" /> Crédito OpenAI (US$)
+                </span>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={aiBilling.openai_credit_usd}
+                  onChange={(e) => setAiBilling(prev => ({ ...prev, openai_credit_usd: Number(e.target.value) }))}
+                  placeholder="0.00"
+                />
+              </label>
+              <label className="space-y-2">
+                <span className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                  <DollarSign className="w-3.5 h-3.5" /> Crédito Claude (US$)
+                </span>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={aiBilling.claude_credit_usd}
+                  onChange={(e) => setAiBilling(prev => ({ ...prev, claude_credit_usd: Number(e.target.value) }))}
+                  placeholder="0.00"
+                />
+              </label>
+              <label className="space-y-2">
+                <span className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                  <Bell className="w-3.5 h-3.5" /> Alertar abaixo de (US$)
+                </span>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={aiBilling.alert_threshold_usd}
+                  onChange={(e) => setAiBilling(prev => ({ ...prev, alert_threshold_usd: Number(e.target.value) }))}
+                  placeholder="2.00"
+                />
+              </label>
+              <label className="space-y-2">
+                <span className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                  <MessageCircle className="w-3.5 h-3.5" /> WhatsApp de alerta
+                </span>
+                <Input
+                  value={aiBilling.alert_phone}
+                  onChange={(e) => setAiBilling(prev => ({ ...prev, alert_phone: e.target.value }))}
+                  placeholder="5543999999999"
+                />
+              </label>
+            </div>
+
+            <div className="mt-4 grid gap-4 lg:grid-cols-[220px_1fr]">
+              <label className="flex items-center gap-3 rounded-lg border border-border bg-background px-3 py-3">
+                <button
+                  type="button"
+                  onClick={() => setAiBilling(prev => ({ ...prev, alert_enabled: !prev.alert_enabled }))}
+                  className={cn(
+                    'relative inline-flex h-6 w-11 rounded-full border-2 border-transparent transition-colors',
+                    aiBilling.alert_enabled ? 'bg-emerald-500' : 'bg-muted-foreground/30',
+                  )}
+                >
+                  <span
+                    className={cn(
+                      'inline-block h-5 w-5 transform rounded-full bg-white shadow transition',
+                      aiBilling.alert_enabled ? 'translate-x-5' : 'translate-x-0',
+                    )}
+                  />
+                </button>
+                <span className="text-xs font-semibold">Enviar alerta</span>
+              </label>
+
+              <label className="space-y-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Instância para envio</span>
+                <Select
+                  value={aiBilling.zapi_client_id || 'none'}
+                  onValueChange={(value) => setAiBilling(prev => ({ ...prev, zapi_client_id: value === 'none' ? '' : String(value) }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione a instância WhatsApp" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Nenhuma</SelectItem>
+                    {zapiOptions.map(option => (
+                      <SelectItem key={option.id} value={option.id}>
+                        {option.name} · {option.instance_id}{option.active ? '' : ' · inativa'}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </label>
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+              <span>Endpoint para automação: <span className="font-mono text-foreground">/api/ai-usage/alert-check</span></span>
+              {aiBilling.last_alert_at && (
+                <span>Último alerta: {new Date(aiBilling.last_alert_at).toLocaleString('pt-BR')}</span>
+              )}
+              {aiBillingSaved && <span className="text-primary font-semibold">{aiBillingSaved}</span>}
+            </div>
+          </div>
+
           <div className="grid gap-4 md:grid-cols-3">
             <div className="bg-card border border-border rounded-[var(--radius)] p-5 space-y-3">
               <div className="w-12 h-12 rounded-full bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center">

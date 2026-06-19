@@ -1,5 +1,6 @@
 import { makeServerPool } from '@/lib/server-db';
 import { USD_TO_BRL } from '@/lib/ai-usage-logger';
+import { getAiBillingSettings, type AiBillingSettings } from '@/lib/ai-billing-settings';
 
 export type AiUsageMonth = {
   calls: number;
@@ -18,17 +19,42 @@ export type AiUsageBySource = {
 
 export type AiUsageBilling = {
   credit_brl: number;
+  credit_usd: number;
   used_brl: number;
+  used_usd: number;
   balance_brl: number;
+  balance_usd: number;
   used_pct: number;
 } | null;
 
-function configuredCreditBrl(): number | null {
-  const brl = Number(process.env.AI_CLOUD_CREDIT_BRL ?? '');
-  if (Number.isFinite(brl) && brl > 0) return brl;
-  const usd = Number(process.env.AI_CLOUD_CREDIT_USD ?? '');
-  if (Number.isFinite(usd) && usd > 0) return usd * USD_TO_BRL;
-  return null;
+export type AiUsageProvider = {
+  provider: 'openai' | 'claude';
+  label: string;
+  calls: number;
+  cost_usd: number;
+  cost_brl: number;
+  credit_usd: number;
+  credit_brl: number;
+  balance_usd: number;
+  balance_brl: number;
+  used_pct: number;
+};
+
+function providerFromModel(model: string): 'openai' | 'claude' {
+  return model.toLowerCase().includes('claude') ? 'claude' : 'openai';
+}
+
+function buildBilling(creditUsd: number, usedUsd: number): AiUsageBilling {
+  if (!creditUsd || creditUsd <= 0) return null;
+  return {
+    credit_usd: creditUsd,
+    credit_brl: creditUsd * USD_TO_BRL,
+    used_usd: usedUsd,
+    used_brl: usedUsd * USD_TO_BRL,
+    balance_usd: Math.max(creditUsd - usedUsd, 0),
+    balance_brl: Math.max(creditUsd - usedUsd, 0) * USD_TO_BRL,
+    used_pct: Math.min((usedUsd / creditUsd) * 100, 100),
+  };
 }
 
 export async function GET() {
@@ -71,17 +97,58 @@ export async function GET() {
       ORDER BY cost_usd DESC
     `);
 
+    const { rows: byProviderRows } = await pool.query<{
+      model: string; calls: string; cost_usd: string;
+    }>(`
+      SELECT
+        model,
+        COUNT(*) AS calls,
+        COALESCE(SUM(cost_usd), 0) AS cost_usd
+      FROM ai_usage_log
+      WHERE created_at >= date_trunc('month', NOW())
+      GROUP BY model
+    `);
+
     const costUsd = parseFloat(month.cost_usd);
     const costBrl = costUsd * USD_TO_BRL;
-    const creditBrl = configuredCreditBrl();
-    const billing: AiUsageBilling = creditBrl
-      ? {
-          credit_brl: creditBrl,
-          used_brl: costBrl,
-          balance_brl: Math.max(creditBrl - costBrl, 0),
-          used_pct: Math.min((costBrl / creditBrl) * 100, 100),
-        }
-      : null;
+    const settings: AiBillingSettings = await getAiBillingSettings(pool);
+    const providerTotals = {
+      openai: { calls: 0, cost_usd: 0 },
+      claude: { calls: 0, cost_usd: 0 },
+    };
+    byProviderRows.forEach(row => {
+      const provider = providerFromModel(row.model);
+      providerTotals[provider].calls += parseInt(row.calls);
+      providerTotals[provider].cost_usd += parseFloat(row.cost_usd);
+    });
+    const providers: AiUsageProvider[] = [
+      {
+        provider: 'claude',
+        label: 'Claude',
+        calls: providerTotals.claude.calls,
+        cost_usd: providerTotals.claude.cost_usd,
+        cost_brl: providerTotals.claude.cost_usd * USD_TO_BRL,
+        credit_usd: settings.claude_credit_usd,
+        credit_brl: settings.claude_credit_usd * USD_TO_BRL,
+        balance_usd: Math.max(settings.claude_credit_usd - providerTotals.claude.cost_usd, 0),
+        balance_brl: Math.max(settings.claude_credit_usd - providerTotals.claude.cost_usd, 0) * USD_TO_BRL,
+        used_pct: settings.claude_credit_usd > 0 ? Math.min((providerTotals.claude.cost_usd / settings.claude_credit_usd) * 100, 100) : 0,
+      },
+      {
+        provider: 'openai',
+        label: 'OpenAI',
+        calls: providerTotals.openai.calls,
+        cost_usd: providerTotals.openai.cost_usd,
+        cost_brl: providerTotals.openai.cost_usd * USD_TO_BRL,
+        credit_usd: settings.openai_credit_usd,
+        credit_brl: settings.openai_credit_usd * USD_TO_BRL,
+        balance_usd: Math.max(settings.openai_credit_usd - providerTotals.openai.cost_usd, 0),
+        balance_brl: Math.max(settings.openai_credit_usd - providerTotals.openai.cost_usd, 0) * USD_TO_BRL,
+        used_pct: settings.openai_credit_usd > 0 ? Math.min((providerTotals.openai.cost_usd / settings.openai_credit_usd) * 100, 100) : 0,
+      },
+    ];
+    const totalCreditUsd = settings.openai_credit_usd + settings.claude_credit_usd;
+    const billing = buildBilling(totalCreditUsd, costUsd);
 
     return Response.json({
       month: {
@@ -98,6 +165,8 @@ export async function GET() {
         cost_brl:  parseFloat(r.cost_usd) * USD_TO_BRL,
       })) satisfies AiUsageBySource[],
       billing,
+      providers,
+      settings,
     });
   } finally {
     await pool.end();
