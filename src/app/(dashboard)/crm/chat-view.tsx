@@ -439,6 +439,7 @@ export function ChatView({
   const [importingChats, setImportingChats] = useState(false);
   const [importResult, setImportResult] = useState<string | null>(null);
   const [recordingAudio, setRecordingAudio] = useState(false);
+  const [recordingLevel, setRecordingLevel] = useState(0);
 
   // Select mode
   const [selectMode,      setSelectMode]      = useState(false);
@@ -479,6 +480,9 @@ export function ChatView({
   const recordingStreamRef = useRef<MediaStream | null>(null);
   const recordingChunksRef = useRef<BlobPart[]>([]);
   const recordingCancelledRef = useRef(false);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const levelFrameRef = useRef<number | null>(null);
 
   const selectedLead = leads.find(l => l.id === selectedId) ?? null;
   const recentLeadIds = leads
@@ -497,7 +501,46 @@ export function ChatView({
       mediaRecorderRef.current.stop();
     }
     recordingStreamRef.current?.getTracks().forEach(track => track.stop());
+    stopLevelMeter();
   }, []);
+
+  function stopLevelMeter() {
+    if (levelFrameRef.current !== null) {
+      cancelAnimationFrame(levelFrameRef.current);
+      levelFrameRef.current = null;
+    }
+    analyserRef.current = null;
+    if (audioContextRef.current) {
+      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
+    }
+    setRecordingLevel(0);
+  }
+
+  function startLevelMeter(stream: MediaStream) {
+    const AudioContextCtor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextCtor) return;
+    const audioCtx = new AudioContextCtor();
+    const source = audioCtx.createMediaStreamSource(stream);
+    const analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.6;
+    source.connect(analyser);
+    audioContextRef.current = audioCtx;
+    analyserRef.current = analyser;
+
+    const data = new Uint8Array(analyser.frequencyBinCount);
+    const tick = () => {
+      if (!analyserRef.current) return;
+      analyserRef.current.getByteFrequencyData(data);
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
+      const rms = Math.sqrt(sum / data.length) / 255;
+      setRecordingLevel(prev => prev + (Math.min(1, rms * 2.2) - prev) * 0.35);
+      levelFrameRef.current = requestAnimationFrame(tick);
+    };
+    levelFrameRef.current = requestAnimationFrame(tick);
+  }
 
   // ── Scroll helpers ──────────────────────────────────────────────────────────
   function isNearBottom() {
@@ -958,6 +1001,7 @@ export function ChatView({
       };
       recorder.onstop = () => {
         setRecordingAudio(false);
+        stopLevelMeter();
         stream.getTracks().forEach(track => track.stop());
         recordingStreamRef.current = null;
         const type = recorder.mimeType || mimeType || 'audio/webm';
@@ -968,11 +1012,13 @@ export function ChatView({
       };
       mediaRecorderRef.current = recorder;
       recorder.start();
+      startLevelMeter(stream);
       setRecordingAudio(true);
       setSendStatus(null);
       setSendError(null);
     } catch (err) {
       setRecordingAudio(false);
+      stopLevelMeter();
       setSendStatus('err');
       setSendError(err instanceof Error ? err.message : 'Não foi possível acessar o microfone');
       setTimeout(() => { setSendStatus(null); setSendError(null); }, 6000);
@@ -1294,7 +1340,21 @@ export function ChatView({
         </div>
 
         {/* ── Right: Conversation ── */}
-        <div className="flex min-w-0 min-h-0 flex-1 flex-col bg-background/50">
+        <div className="relative flex min-w-0 min-h-0 flex-1 flex-col bg-background/50">
+          {recordingAudio && (
+            <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
+              <div
+                className="flex items-center justify-center rounded-full bg-red-500/90 shadow-[0_0_0_8px_rgba(239,68,68,0.15)] transition-transform duration-75"
+                style={{
+                  width: 72 + recordingLevel * 56,
+                  height: 72 + recordingLevel * 56,
+                  boxShadow: `0 0 0 ${8 + recordingLevel * 22}px rgba(239,68,68,${0.18 - recordingLevel * 0.06})`,
+                }}
+              >
+                <Mic className="h-7 w-7 text-white" />
+              </div>
+            </div>
+          )}
           {!selectedLead ? (
             <div className="flex flex-1 items-center justify-center">
               <div className="text-center space-y-2">
