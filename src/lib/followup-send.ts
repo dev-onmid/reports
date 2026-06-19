@@ -129,29 +129,30 @@ async function sendViaEvolution(
     return { ok: false, error: `Evolution sendText failed: ${errors.at(-1) ?? 'unknown error'}` };
   }
 
-  const mediatype =
-    tipo === 'imagem' ? 'image'
-    : tipo === 'audio' ? 'audio'
-    : tipo === 'video' ? 'video'
-    : 'document';
+  const targets = buildEvolutionTargets(phone, vars.whatsapp_lid);
+  const errors: string[] = [];
 
-  const res = await fetch(`${base}/message/sendMedia/${instanceName}`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      number: phone,
-      options: { delay: 1200 },
-      mediaMessage: {
-        mediatype,
-        media: conteudo,
-        caption: tipo !== 'audio' ? interpolate(vars.caption ?? '', vars) : undefined,
-        ptt: tipo === 'audio',
-      },
-    }),
-  });
-  if (!res.ok) return { ok: false, error: await res.text() };
-  const data = await res.json().catch(() => null);
-  return { ok: true, externalId: extractEvolutionMessageId(data) };
+  for (const target of targets) {
+    // Voice notes (PTT) have their own endpoint — sendMedia with mediatype
+    // "audio" doesn't render as a playable waveform bubble in WhatsApp.
+    const result = tipo === 'audio'
+      ? await postEvolutionMessage(`${base}/message/sendWhatsAppAudio/${instanceName}`, headers, {
+          number: target,
+          options: { delay: 1200, encoding: true },
+          audio: conteudo,
+        })
+      : await postEvolutionMessage(`${base}/message/sendMedia/${instanceName}`, headers, {
+          number: target,
+          options: { delay: 1200 },
+          mediatype: tipo === 'imagem' ? 'image' : tipo === 'video' ? 'video' : 'document',
+          media: conteudo,
+          caption: interpolate(vars.caption ?? '', vars),
+        });
+    if (result.ok) return { ...result, target };
+    errors.push(`${target}: ${result.error ?? 'erro'}`);
+  }
+
+  return { ok: false, error: `Evolution sendMedia failed: ${errors.at(-1) ?? 'unknown error'}` };
 }
 
 function buildEvolutionTargets(phone: string, lid?: string): string[] {
