@@ -14,8 +14,11 @@ export type FollowupVars = {
   telefone?: string;
   status?: string;
   campanha?: string;
+  whatsapp_lid?: string;
   [key: string]: string | undefined;
 };
+
+export type SendMessageResult = { ok: boolean; error?: string; externalId?: string; target?: string };
 
 // ── Instance resolver ────────────────────────────────────────────────────────
 
@@ -58,7 +61,7 @@ export async function sendFollowupMessage({
   tipo: string;       // 'texto' | 'imagem' | 'audio' | 'video' | 'documento'
   conteudo: string;   // text content or media URL
   vars: FollowupVars;
-}): Promise<{ ok: boolean; error?: string }> {
+}): Promise<SendMessageResult> {
   try {
     if (instance.provider === 'evolution') {
       return sendViaEvolution(instance, phone, tipo, conteudo, vars);
@@ -75,7 +78,7 @@ async function sendViaZapi(
   tipo: string,
   conteudo: string,
   vars: FollowupVars,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<SendMessageResult> {
   const client = { instanceId: instance.instanceId, token: instance.token };
 
   if (tipo === 'imagem') {
@@ -94,7 +97,7 @@ async function sendViaEvolution(
   tipo: string,
   conteudo: string,
   vars: FollowupVars,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<SendMessageResult> {
   const base = process.env.EVOLUTION_API_URL;
   const apikey = process.env.EVOLUTION_API_KEY;
   if (!base || !apikey) return { ok: false, error: 'Evolution API not configured' };
@@ -104,30 +107,26 @@ async function sendViaEvolution(
 
   if (tipo === 'texto') {
     const text = interpolate(conteudo, vars);
+    const targets = buildEvolutionTargets(phone, vars.whatsapp_lid);
+    const errors: string[] = [];
 
-    // Try v2 format first (more common in recent Evolution API versions)
-    const v2Res = await fetch(`${base}/message/sendText/${instanceName}`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        number: phone,
+    for (const target of targets) {
+      // Try v2 format first (more common in recent Evolution API versions)
+      const v2 = await postEvolutionMessage(`${base}/message/sendText/${instanceName}`, headers, {
+        number: target,
         options: { delay: 1200, presence: 'composing' },
         textMessage: { text },
-      }),
-    });
-    if (v2Res.ok) return { ok: true };
+      });
+      if (v2.ok) return { ...v2, target };
+      errors.push(`${target}: ${v2.error ?? 'erro v2'}`);
 
-    // Fallback: simpler format used by some versions
-    const v1Res = await fetch(`${base}/message/sendText/${instanceName}`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ number: phone, text }),
-    });
-    if (v1Res.ok) return { ok: true };
+      // Fallback: simpler format used by some versions
+      const v1 = await postEvolutionMessage(`${base}/message/sendText/${instanceName}`, headers, { number: target, text });
+      if (v1.ok) return { ...v1, target };
+      errors.push(`${target}: ${v1.error ?? 'erro v1'}`);
+    }
 
-    // Both failed — return the last error body
-    const errText = await v1Res.text().catch(() => 'unknown error');
-    return { ok: false, error: `Evolution sendText failed: ${errText}` };
+    return { ok: false, error: `Evolution sendText failed: ${errors.at(-1) ?? 'unknown error'}` };
   }
 
   const mediatype =
@@ -151,7 +150,55 @@ async function sendViaEvolution(
     }),
   });
   if (!res.ok) return { ok: false, error: await res.text() };
-  return { ok: true };
+  const data = await res.json().catch(() => null);
+  return { ok: true, externalId: extractEvolutionMessageId(data) };
+}
+
+function buildEvolutionTargets(phone: string, lid?: string): string[] {
+  const raw = String(phone ?? '').trim();
+  const digits = raw.replace(/\D/g, '');
+  const lidDigits = String(lid ?? '').replace(/\D/g, '');
+  const targets: string[] = [];
+
+  if (raw.includes('@')) targets.push(raw);
+  if (lidDigits) targets.push(`${lidDigits}@lid`);
+  if (digits.length > 13 && !digits.startsWith('55')) targets.push(`${digits}@lid`);
+  if (digits) targets.push(digits);
+  if ((digits.length === 10 || digits.length === 11) && !digits.startsWith('55')) targets.push(`55${digits}`);
+
+  return Array.from(new Set(targets.filter(Boolean)));
+}
+
+async function postEvolutionMessage(
+  url: string,
+  headers: { 'Content-Type': string; apikey: string },
+  body: Record<string, unknown>,
+): Promise<SendMessageResult> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
+  const text = await res.text().catch(() => '');
+  let data: unknown = null;
+  try { data = text ? JSON.parse(text) : null; } catch { /* keep raw text */ }
+  if (!res.ok) return { ok: false, error: text || `HTTP ${res.status}` };
+  return { ok: true, externalId: extractEvolutionMessageId(data) };
+}
+
+function extractEvolutionMessageId(data: unknown): string | undefined {
+  if (!data || typeof data !== 'object') return undefined;
+  const obj = data as Record<string, unknown>;
+  const key = obj.key as Record<string, unknown> | undefined;
+  const dataObj = obj.data as Record<string, unknown> | undefined;
+  const dataKey = dataObj?.key as Record<string, unknown> | undefined;
+  return String(
+    key?.id
+    ?? dataKey?.id
+    ?? obj.messageId
+    ?? obj.id
+    ?? '',
+  ) || undefined;
 }
 
 // ── Queue follow-up on status change ─────────────────────────────────────────

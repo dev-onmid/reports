@@ -76,7 +76,7 @@ export async function setEvolutionWebhook(instanceName: string, webhookUrl: stri
         url: webhookUrl,
         webhookByEvents: false,
         webhookBase64: false,
-        events: ['MESSAGES_UPSERT'],
+        events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE'],
       },
     }),
   }).catch(() => {});

@@ -108,6 +108,39 @@ function parseProviderTimestamp(value: unknown): string {
   return new Date().toISOString();
 }
 
+function normalizeEvolutionDeliveryStatus(raw: unknown): string | null {
+  const status = String(raw ?? '').toLowerCase();
+  if (!status) return null;
+  if (status.includes('read') || status === '4') return 'read';
+  if (status.includes('delivery') || status.includes('delivered') || status === '3') return 'delivered';
+  if (status.includes('server') || status.includes('sent') || status === '2' || status === '1') return 'sent';
+  if (status.includes('error') || status.includes('fail')) return 'failed';
+  return null;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function extractEvolutionStatusUpdates(body: any): Array<{ id: string; status: string; error?: string }> {
+  const eventName = String(body?.event ?? body?.type ?? '').toUpperCase();
+  const rawData = Array.isArray(body?.data) ? body.data : [body?.data ?? body];
+  const updates: Array<{ id: string; status: string; error?: string }> = [];
+
+  for (const item of rawData) {
+    const key = item?.key ?? item?.message?.key ?? {};
+    const update = item?.update ?? item?.message?.update ?? item;
+    const id = String(key?.id ?? item?.id ?? item?.messageId ?? item?.message_id ?? '');
+    const status = normalizeEvolutionDeliveryStatus(update?.status ?? item?.status ?? item?.messageStatus ?? item?.ack ?? item?.deliveryStatus);
+    if (!id || !status) continue;
+    updates.push({
+      id,
+      status,
+      error: typeof update?.error === 'string' ? update.error : undefined,
+    });
+  }
+
+  if (updates.length === 0 && !eventName.includes('MESSAGES_UPDATE')) return [];
+  return updates;
+}
+
 async function sendMetaEvent({
   pixelId, accessToken, eventName, phone, ctwaClid, value,
 }: {
@@ -173,6 +206,24 @@ export async function POST(
     // 2. Parse and normalize payload based on provider
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const body: any = await req.json().catch(() => ({}));
+
+    if (provider === 'evolution') {
+      const statusUpdates = extractEvolutionStatusUpdates(body);
+      if (statusUpdates.length > 0) {
+        await ensureCrmMessagesSchema(pool);
+        for (const update of statusUpdates) {
+          await pool.query(
+            `UPDATE public.crm_messages
+                SET whatsapp_status = $3,
+                    whatsapp_error = CASE WHEN $3 = 'failed' THEN COALESCE($4, whatsapp_error) ELSE whatsapp_error END
+              WHERE client_id = $1
+                AND external_id = $2`,
+            [clientId, update.id, update.status, update.error ?? null],
+          ).catch(err => console.error('[webhook message status update]', err));
+        }
+        return Response.json({ ok: true, status_updates: statusUpdates.length });
+      }
+    }
 
     // REGRA ABSOLUTA: mensagens de grupos NUNCA entram no CRM.
     // JIDs de grupo terminam em @g.us; listas de transmissão em @broadcast.
@@ -274,20 +325,21 @@ export async function POST(
           // `ON CONFLICT (lead_id, external_id)` cannot be inferred — use the bare
           // `ON CONFLICT DO NOTHING`, which considers every usable unique index.
           await pool.query(
-            `INSERT INTO public.crm_messages (lead_id, client_id, direction, text, tipo, external_id, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz)
+            `INSERT INTO public.crm_messages
+              (lead_id, client_id, direction, text, tipo, external_id, created_at, whatsapp_status)
+             VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz, $8)
              ON CONFLICT DO NOTHING`,
-            [crmLead.id, clientId, fromMe ? 'out' : 'in', messageText, messageTipo, externalId, messageCreatedAt],
+            [crmLead.id, clientId, fromMe ? 'out' : 'in', messageText, messageTipo, externalId, messageCreatedAt, fromMe ? 'sent' : null],
           );
         } else {
           await pool.query(
-            `INSERT INTO public.crm_messages (lead_id, client_id, direction, text, tipo, created_at)
-             SELECT $1, $2, $3, $4, $5, $6::timestamptz
+            `INSERT INTO public.crm_messages (lead_id, client_id, direction, text, tipo, created_at, whatsapp_status)
+             SELECT $1, $2, $3, $4, $5, $6::timestamptz, $7
              WHERE NOT EXISTS (
                SELECT 1 FROM public.crm_messages
                WHERE lead_id = $1 AND text = $4 AND created_at = $6::timestamptz
              )`,
-            [crmLead.id, clientId, fromMe ? 'out' : 'in', messageText, messageTipo, messageCreatedAt],
+            [crmLead.id, clientId, fromMe ? 'out' : 'in', messageText, messageTipo, messageCreatedAt, fromMe ? 'sent' : null],
           );
         }
       } catch (err) {

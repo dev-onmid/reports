@@ -282,24 +282,24 @@ export async function POST(req: NextRequest) {
       try {
         if (norm.externalId) {
           const result = await pool.query(
-            `INSERT INTO public.crm_messages (lead_id, client_id, direction, text, external_id, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6)
+            `INSERT INTO public.crm_messages (lead_id, client_id, direction, text, external_id, created_at, whatsapp_status)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
              ON CONFLICT DO NOTHING
              RETURNING id`,
-            [leadId, clientId, norm.direction, norm.text, norm.externalId, norm.ts],
+            [leadId, clientId, norm.direction, norm.text, norm.externalId, norm.ts, norm.direction === 'out' ? 'sent' : null],
           );
           if ((result.rowCount ?? 0) > 0) imported++; else skipped++;
         } else {
           // No external_id — insert without dedup (skip if exact duplicate by text+ts)
           const result = await pool.query(
-            `INSERT INTO public.crm_messages (lead_id, client_id, direction, text, created_at)
-             SELECT $1, $2, $3, $4, $5
+            `INSERT INTO public.crm_messages (lead_id, client_id, direction, text, created_at, whatsapp_status)
+             SELECT $1, $2, $3, $4, $5, $6
              WHERE NOT EXISTS (
                SELECT 1 FROM public.crm_messages
                WHERE lead_id=$1 AND text=$4 AND created_at=$5
              )
              RETURNING id`,
-            [leadId, clientId, norm.direction, norm.text, norm.ts],
+            [leadId, clientId, norm.direction, norm.text, norm.ts, norm.direction === 'out' ? 'sent' : null],
           );
           if ((result.rowCount ?? 0) > 0) imported++; else skipped++;
         }

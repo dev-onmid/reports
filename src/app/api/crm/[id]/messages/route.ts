@@ -79,7 +79,8 @@ export async function GET(
     try {
       const result = await pool.query(
         `${BASE_WITH_CONTACTS}
-         SELECT m.id, m.direction, m.text, COALESCE(m.tipo, 'texto') AS tipo, m.created_at
+         SELECT m.id, m.direction, m.text, COALESCE(m.tipo, 'texto') AS tipo, m.created_at,
+                m.whatsapp_status, m.whatsapp_error
          FROM public.crm_messages m ${WHERE_WITH_CONTACTS}`,
         [id],
       );
@@ -87,7 +88,8 @@ export async function GET(
     } catch (withContactsErr) {
       const result = await pool.query(
         `${BASE_WITHOUT_CONTACTS}
-         SELECT m.id, m.direction, m.text, 'texto' AS tipo, m.created_at
+         SELECT m.id, m.direction, m.text, 'texto' AS tipo, m.created_at,
+                m.whatsapp_status, m.whatsapp_error
          FROM public.crm_messages m ${WHERE_WITHOUT_CONTACTS}`,
         [id],
       ).catch(async () => {
@@ -140,7 +142,7 @@ export async function POST(
   const pool = makeServerPool();
   try {
     const { rows: [lead] } = await pool.query(
-      `SELECT client_id, numero, nome, status, origin, canal, time_interno FROM public.crm_leads WHERE id = $1`,
+      `SELECT client_id, numero, whatsapp_lid, nome, status, origin, canal, time_interno FROM public.crm_leads WHERE id = $1`,
       [id],
     );
     if (!lead) return Response.json({ error: 'lead not found' }, { status: 404 });
@@ -171,36 +173,50 @@ export async function POST(
     // Send via WhatsApp when outbound and lead has a phone number
     let waSent = false;
     let waError: string | undefined;
+    let waExternalId: string | undefined;
+    let whatsappStatus: string | null = direction === 'out' ? 'pending' : null;
 
-    if (direction === 'out' && lead.numero) {
-      const instance = await getClientInstance(pool, lead.client_id);
-      if (instance) {
-        if (tipo === 'localizacao') {
-          waSent = await sendLocation(instance, lead.numero, body.lat ?? 0, body.lng ?? 0, body.location_name ?? '');
+    if (direction === 'out') {
+      if (lead.numero) {
+        const instance = await getClientInstance(pool, lead.client_id);
+        if (instance) {
+          if (tipo === 'localizacao') {
+            waSent = await sendLocation(instance, lead.numero, body.lat ?? 0, body.lng ?? 0, body.location_name ?? '');
+            if (!waSent) waError = 'Falha ao enviar localização pelo WhatsApp';
+          } else {
+            const result = await sendFollowupMessage({
+              instance,
+              phone: lead.numero,
+              tipo,
+              conteudo: tipo === 'texto' ? dbText : (body.url ?? ''),
+              vars: {
+                nome: lead.nome ?? lead.numero,
+                telefone: lead.numero,
+                status: lead.status ?? '',
+                campanha: lead.origin ?? lead.canal ?? '',
+                caption: body.caption ?? '',
+                whatsapp_lid: lead.whatsapp_lid ?? '',
+              },
+            });
+            waSent = result.ok;
+            waError = result.error;
+            waExternalId = result.externalId;
+          }
         } else {
-          const result = await sendFollowupMessage({
-            instance,
-            phone: lead.numero,
-            tipo,
-            conteudo: tipo === 'texto' ? dbText : (body.url ?? ''),
-            vars: {
-              nome: lead.nome ?? lead.numero,
-              telefone: lead.numero,
-              status: lead.status ?? '',
-              campanha: lead.origin ?? lead.canal ?? '',
-              caption: body.caption ?? '',
-            },
-          });
-          waSent = result.ok;
-          waError = result.error;
+          waError = 'Nenhuma instância WhatsApp ativa para este cliente';
         }
+      } else {
+        waError = 'Lead sem telefone para envio';
       }
+      whatsappStatus = waSent ? 'sent' : 'failed';
     }
 
     const { rows: [msg] } = await pool.query(
-      `INSERT INTO public.crm_messages (lead_id, client_id, direction, text, tipo)
-       VALUES ($1, $2, $3, $4, $5) RETURNING id, direction, text, tipo, created_at`,
-      [targetLeadId, lead.client_id, direction, dbText, tipo],
+      `INSERT INTO public.crm_messages
+        (lead_id, client_id, direction, text, tipo, external_id, whatsapp_status, whatsapp_error)
+       VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), $7, NULLIF($8, ''))
+       RETURNING id, direction, text, tipo, created_at, whatsapp_status, whatsapp_error`,
+      [targetLeadId, lead.client_id, direction, dbText, tipo, waExternalId ?? '', whatsappStatus, waError ?? ''],
     );
     await pool.query(
       `UPDATE public.crm_leads

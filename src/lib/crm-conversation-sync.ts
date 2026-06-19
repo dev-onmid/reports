@@ -95,6 +95,8 @@ export async function ensureCrmMessagesSchema(pool: Pool) {
       text TEXT NOT NULL,
       tipo TEXT NOT NULL DEFAULT 'texto',
       external_id TEXT,
+      whatsapp_status TEXT,
+      whatsapp_error TEXT,
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
   `);
@@ -113,6 +115,8 @@ export async function ensureCrmMessagesSchema(pool: Pool) {
     `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS client_id TEXT`,
     `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS tipo TEXT NOT NULL DEFAULT 'texto'`,
     `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS external_id TEXT`,
+    `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS whatsapp_status TEXT`,
+    `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS whatsapp_error TEXT`,
     // ── Legacy-schema repair ──────────────────────────────────────────────────
     // The original migration (migration_crm.sql) created crm_messages with
     // `contact_id UUID NOT NULL REFERENCES crm_contacts(id)` and a direction CHECK.

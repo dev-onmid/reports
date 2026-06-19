@@ -1,13 +1,14 @@
 'use client';
 
 import { Fragment, useEffect, useState, useRef, useCallback } from 'react';
+import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import {
   Search, MessageCircle, RefreshCw, Send, Paperclip,
   Image, Mic, Video, FileText, MapPin, X, CheckCircle2,
   AlertCircle, History, Filter, MoreHorizontal, Smile,
   CheckSquare2, Square, Trash2, Ban, UserX,
-  Wifi, WifiOff, AlertTriangle,
+  Wifi, WifiOff, AlertTriangle, Check, CheckCheck, Clock3,
 } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -38,6 +39,8 @@ type CrmMessage = {
   text: string;
   tipo: string;
   created_at: string;
+  whatsapp_status?: 'pending' | 'sent' | 'delivered' | 'read' | 'failed' | string | null;
+  whatsapp_error?: string | null;
 };
 
 type MediaType = 'imagem' | 'audio' | 'video' | 'documento' | 'localizacao';
@@ -191,6 +194,7 @@ function MessageBubble({ msg }: { msg: CrmMessage }) {
   const t = msg.tipo ?? 'texto';
   const text = msg.text;
   const time = msgTimeFmt(msg.created_at);
+  const waStatus = msg.whatsapp_status ?? (isOut ? 'sent' : null);
 
   const content = (() => {
     if (t === 'localizacao') {
@@ -231,7 +235,9 @@ function MessageBubble({ msg }: { msg: CrmMessage }) {
     <div className={cn('flex px-3', isOut ? 'justify-end' : 'justify-start')}>
       <div className={cn(
         'relative max-w-[72%] rounded-[var(--radius)] px-3 pb-1.5 pt-2 shadow-sm',
-        isOut
+        isOut && waStatus === 'failed'
+          ? 'bg-red-500/10 text-foreground border border-red-500/35'
+          : isOut
           ? 'bg-primary/25 text-foreground border border-primary/20'
           : 'bg-card text-foreground border border-border',
       )}>
@@ -241,14 +247,31 @@ function MessageBubble({ msg }: { msg: CrmMessage }) {
             {time}
           </span>
           {isOut && (
-            <svg viewBox="0 0 18 11" className="h-2.5 w-[18px] shrink-0 text-[#53BDEB]" fill="currentColor">
-              <path d="M17.394.601L6.35 11.648 1.606 6.903l-.803.803L6.35 13.255 18.197 1.404 17.394.601zM1 5.702L.197 6.505l3.396 3.395.803-.803L1 5.702zm10.646.95l-5.26 5.26-.804-.803 5.26-5.26.804.803z" />
-            </svg>
+            <MessageDeliveryIcon status={waStatus} error={msg.whatsapp_error} />
           )}
         </div>
       </div>
     </div>
   );
+}
+
+function MessageDeliveryIcon({ status, error }: { status: string | null; error?: string | null }) {
+  const wrap = (label: string, icon: ReactNode) => (
+    <span className="inline-flex" aria-label={label} title={label}>{icon}</span>
+  );
+  if (status === 'failed') {
+    return wrap(error ?? 'Falha ao enviar', <AlertCircle className="h-3.5 w-3.5 shrink-0 text-red-400" />);
+  }
+  if (status === 'read') {
+    return wrap('Lida', <CheckCheck className="h-3.5 w-3.5 shrink-0 text-[#53BDEB]" />);
+  }
+  if (status === 'delivered') {
+    return wrap('Entregue', <CheckCheck className="h-3.5 w-3.5 shrink-0 text-emerald-400" />);
+  }
+  if (status === 'pending') {
+    return wrap('Enviando', <Clock3 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />);
+  }
+  return wrap('Enviada', <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />);
 }
 
 // ── Media attachment modal ────────────────────────────────────────────────────
