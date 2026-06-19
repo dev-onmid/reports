@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
-import { deleteEvolutionInstance } from '@/lib/evolution-api';
+import { deleteEvolutionInstance, setEvolutionWebhook } from '@/lib/evolution-api';
 
 export async function PATCH(
   req: NextRequest,
@@ -11,13 +11,26 @@ export async function PATCH(
 
   const pool = makeServerPool();
   try {
+    const { rows: [inst] } = await pool.query(
+      `SELECT instance_id, provider FROM public.client_zapi_instances
+       WHERE id = $1 AND client_id = $2`,
+      [instanceId, id],
+    );
     await pool.query(
       `UPDATE public.client_zapi_instances
        SET ativo = $1
        WHERE id = $2 AND client_id = $3`,
       [body.ativo ?? true, instanceId, id],
     );
-    return Response.json({ ok: true });
+    let webhookSynced: boolean | null = null;
+    let webhookError: string | null = null;
+    if ((body.ativo ?? true) && inst?.provider === 'evolution') {
+      const webhookUrl = `${new URL(req.url).origin}/api/webhook/whatsapp/${instanceId}`;
+      const webhook = await setEvolutionWebhook(inst.instance_id, webhookUrl);
+      webhookSynced = webhook.ok;
+      webhookError = webhook.error ?? null;
+    }
+    return Response.json({ ok: true, webhook_synced: webhookSynced, webhook_error: webhookError });
   } finally {
     await pool.end();
   }

@@ -66,18 +66,27 @@ export async function deleteEvolutionInstance(instanceName: string): Promise<voi
   }).catch(() => {});
 }
 
-export async function setEvolutionWebhook(instanceName: string, webhookUrl: string): Promise<void> {
-  await fetch(`${base()}/webhook/set/${encodeURIComponent(instanceName)}`, {
-    method: 'POST',
-    headers: headers(),
-    body: JSON.stringify({
-      webhook: {
-        enabled: true,
-        url: webhookUrl,
-        webhookByEvents: false,
-        webhookBase64: false,
-        events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE'],
-      },
-    }),
-  }).catch(() => {});
+export async function setEvolutionWebhook(
+  instanceName: string,
+  webhookUrl: string,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch(`${base()}/webhook/set/${encodeURIComponent(instanceName)}`, {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({
+        webhook: {
+          enabled: true,
+          url: webhookUrl,
+          webhookByEvents: false,
+          webhookBase64: false,
+          events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE'],
+        },
+      }),
+    });
+    if (!res.ok) return { ok: false, error: await res.text().catch(() => `HTTP ${res.status}`) };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
 }
