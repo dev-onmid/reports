@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useEffect, useState, useRef, useCallback } from 'react';
+import { Fragment, useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import {
@@ -9,6 +9,7 @@ import {
   AlertCircle, History, Filter, MoreHorizontal, Smile,
   CheckSquare2, Square, Trash2, Ban, UserX,
   Wifi, WifiOff, AlertTriangle, Check, CheckCheck, Clock3,
+  Play, Pause,
 } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -214,7 +215,7 @@ function MessageBubble({ msg }: { msg: CrmMessage }) {
       );
     }
     if (t === 'audio' || (t === 'texto' && isAudioUrl(text))) {
-      return <audio controls src={text} className="max-w-full h-9 rounded-lg" />;
+      return <VoiceMessagePlayer src={text} isOut={isOut} />;
     }
     if (t === 'video' || (t === 'texto' && isVideoUrl(text))) {
       return <video controls src={text} className="max-w-full max-h-52 rounded-lg" />;
@@ -251,6 +252,97 @@ function MessageBubble({ msg }: { msg: CrmMessage }) {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function fmtAudioTime(s: number) {
+  if (!Number.isFinite(s) || s < 0) return '0:00';
+  const m = Math.floor(s / 60);
+  const sec = Math.floor(s % 60);
+  return `${m}:${sec.toString().padStart(2, '0')}`;
+}
+
+function VoiceMessagePlayer({ src, isOut }: { src: string; isOut: boolean }) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [duration, setDuration] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const onTime = () => setCurrentTime(audio.currentTime);
+    const onLoaded = () => setDuration(audio.duration || 0);
+    const onEnd = () => { setPlaying(false); setCurrentTime(0); };
+    audio.addEventListener('timeupdate', onTime);
+    audio.addEventListener('loadedmetadata', onLoaded);
+    audio.addEventListener('ended', onEnd);
+    return () => {
+      audio.removeEventListener('timeupdate', onTime);
+      audio.removeEventListener('loadedmetadata', onLoaded);
+      audio.removeEventListener('ended', onEnd);
+    };
+  }, []);
+
+  function toggle() {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (playing) audio.pause(); else void audio.play();
+    setPlaying(!playing);
+  }
+
+  function seekTo(ratio: number) {
+    const audio = audioRef.current;
+    if (!audio || !duration) return;
+    audio.currentTime = ratio * duration;
+    setCurrentTime(audio.currentTime);
+  }
+
+  // Deterministic pseudo-waveform — purely visual, not decoded from the audio.
+  const bars = useMemo(() => {
+    let seed = 0;
+    for (let i = 0; i < src.length; i++) seed = (seed * 31 + src.charCodeAt(i)) >>> 0;
+    return Array.from({ length: 28 }, (_, i) => {
+      const x = Math.sin(seed + i * 12.9898) * 43758.5453123;
+      return 0.25 + (x - Math.floor(x)) * 0.75;
+    });
+  }, [src]);
+
+  const progress = duration > 0 ? currentTime / duration : 0;
+  const playedBars = Math.round(progress * bars.length);
+  const accentBg = isOut ? 'bg-emerald-500' : 'bg-primary';
+  const accentBtn = isOut ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-primary hover:bg-primary/90 text-primary-foreground';
+
+  return (
+    <div className="flex min-w-[190px] items-center gap-2.5 py-0.5">
+      <audio ref={audioRef} src={src} preload="metadata" className="hidden" />
+      <button
+        onClick={toggle}
+        className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors', accentBtn)}
+        aria-label={playing ? 'Pausar' : 'Reproduzir'}
+      >
+        {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 ml-0.5" fill="currentColor" />}
+      </button>
+      <button
+        onClick={e => {
+          const rect = e.currentTarget.getBoundingClientRect();
+          seekTo(Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width)));
+        }}
+        className="flex flex-1 items-center gap-[2.5px] h-8 cursor-pointer"
+        aria-label="Avançar/retroceder áudio"
+      >
+        {bars.map((h, i) => (
+          <span
+            key={i}
+            className={cn('w-[3px] rounded-full transition-colors', i < playedBars ? accentBg : 'bg-muted-foreground/30')}
+            style={{ height: `${h * 100}%` }}
+          />
+        ))}
+      </button>
+      <span className="text-[11px] text-muted-foreground tabular-nums shrink-0 w-9 text-right">
+        {fmtAudioTime(currentTime > 0 ? currentTime : duration)}
+      </span>
     </div>
   );
 }
