@@ -2,7 +2,7 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { queueFollowupIfExists } from '@/lib/followup-send';
 import { ensureCrmAiSchema } from '@/lib/crm-ai-analysis';
-import { dispararEventosPorStatus } from '@/lib/conversions';
+import { dispararEventosPorStatus, dispararEventoFechamento } from '@/lib/conversions';
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -56,17 +56,22 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
     // Queue follow-up and fire conversion events if status changed
     const newStatus = (next.status ?? 'Em Atendimento') as string;
-    if (current && lead.client_id && current.status !== newStatus) {
-      await queueFollowupIfExists(pool, id, lead.client_id, newStatus).catch(() => null);
-      const leadPhone = lead.numero ?? current.numero ?? null;
-      if (leadPhone) {
-        await dispararEventosPorStatus(
-          pool,
-          lead.client_id,
-          newStatus,
-          { id, phone: leadPhone, ctwaClid: lead.ctwa_clid ?? current.ctwa_clid ?? null },
-          Number(lead.valor_rs ?? current.valor_rs ?? 0) || null,
-        ).catch(() => null);
+    const leadPhone = lead.numero ?? current.numero ?? null;
+    const valor = Number(lead.valor_rs ?? current.valor_rs ?? 0) || null;
+    if (current && lead.client_id && leadPhone) {
+      const leadData = { id, phone: leadPhone, ctwaClid: lead.ctwa_clid ?? current.ctwa_clid ?? null };
+
+      if (current.status !== newStatus) {
+        await queueFollowupIfExists(pool, id, lead.client_id, newStatus).catch(() => null);
+        await dispararEventosPorStatus(pool, lead.client_id, newStatus, leadData, valor).catch(() => null);
+      }
+
+      // "Fechou negócio" can be marked (manually or by the AI deal-value suggestion)
+      // without the lead moving Kanban column — fire Purchase straight away too, not
+      // just when a status-based custom event happens to be configured for the column.
+      const fechouJustNow = current.fechou !== true && lead.fechou === true;
+      if (fechouJustNow && valor && valor > 0) {
+        await dispararEventoFechamento(pool, lead.client_id, leadData, valor).catch(() => null);
       }
     }
 

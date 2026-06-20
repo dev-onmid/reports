@@ -326,6 +326,44 @@ export async function dispararEventosPorStatus(
   }
 }
 
+// ── Deal-closed trigger (independent of status/Kanban column) ─────────────────
+// "Fechou negócio" can be marked manually or by the AI deal-value suggestion without
+// the lead ever moving Kanban column — dispararEventosPorStatus alone would miss that
+// case since it only fires on a status change. This always sends a Purchase event
+// (Meta + Google, when configured) the moment fechou flips to true with a value,
+// independent of whatever status-based custom event mapping exists. The dedup check
+// (hasSuccessfulConversion) keeps this safe to call alongside dispararEventosPorStatus
+// for the same lead without sending Purchase to Meta/Google twice.
+export async function dispararEventoFechamento(
+  pool: Pool,
+  clientId: string,
+  leadData: ConversionLeadData,
+  valor: number,
+): Promise<void> {
+  try {
+    await ensureConversionSchema(pool);
+
+    const alreadySentMeta = await hasSuccessfulConversion(pool, {
+      clientId, leadId: leadData.id, plataforma: 'meta', eventName: 'Purchase',
+    });
+    if (!alreadySentMeta) {
+      await enviarEventoMeta(pool, clientId, 'Purchase', leadData, valor).catch(() => null);
+    }
+
+    const cfg = await loadConfig(pool, clientId);
+    if (cfg?.google_conversion_label_purchase) {
+      const alreadySentGoogle = await hasSuccessfulConversion(pool, {
+        clientId, leadId: leadData.id, plataforma: 'google', eventName: cfg.google_conversion_label_purchase,
+      });
+      if (!alreadySentGoogle) {
+        await enviarEventoGoogle(pool, clientId, cfg.google_conversion_label_purchase, leadData, valor).catch(() => null);
+      }
+    }
+  } catch (err) {
+    console.error('[dispararEventoFechamento]', err);
+  }
+}
+
 // ── Load config (for API routes) ──────────────────────────────────────────────
 
 export async function getConversionConfig(pool: Pool, clientId: string) {

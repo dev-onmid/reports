@@ -7,6 +7,7 @@ import { enviarEventoMeta, enviarEventoGoogle } from '@/lib/conversions';
 import { upsertLeadFromConversation, ensureCrmMessagesSchema } from '@/lib/crm-conversation-sync';
 import { fetchEvolutionMediaBase64, uploadBase64ToStorage } from '@/lib/evolution-media';
 import { logMissingAdTracking } from '@/lib/crm-tracking-debug';
+import { resolveMetaAdHierarchy } from '@/lib/meta-ad-resolver';
 import type { NextRequest } from 'next/server';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -375,6 +376,22 @@ export async function POST(
       await logMissingAdTracking(pool, { clientId, phone, canal, rawPayload: body });
     }
 
+    // WhatsApp's own ad-referral payload never carries campaign/adset names — only
+    // `sourceId` (the ad's Graph API object ID). Resolve the real names via the Marketing
+    // API using the client's connected ads account, same as third-party CTWA tracking
+    // tools do. Best-effort: falls back to whatever (likely empty) names came inline.
+    let resolvedCampaignName = campaignName ?? null;
+    let resolvedAdsetName = adsetName ?? null;
+    let resolvedAdName = adName ?? null;
+    if (!fromMe && sourceId) {
+      const hierarchy = await resolveMetaAdHierarchy(pool, clientId, sourceId).catch(() => null);
+      if (hierarchy) {
+        resolvedCampaignName = hierarchy.campaign_name ?? resolvedCampaignName;
+        resolvedAdsetName = hierarchy.adset_name ?? resolvedAdsetName;
+        resolvedAdName = hierarchy.ad_name ?? resolvedAdName;
+      }
+    }
+
     // Use upsertLeadFromConversation — works without a unique constraint on (client_id, numero)
     const { id: leadId } = await upsertLeadFromConversation(pool, {
       clientId,
@@ -395,9 +412,9 @@ export async function POST(
       utmCampaign: utmData.utm_campaign ?? null,
       utmContent: utmData.utm_content ?? null,
       utmTerm: utmData.utm_term ?? null,
-      campaignName: campaignName ?? null,
-      adsetName: adsetName ?? null,
-      adName: adName ?? null,
+      campaignName: resolvedCampaignName,
+      adsetName: resolvedAdsetName,
+      adName: resolvedAdName,
       creativeName: creativeName ?? null,
       instanceId: evolutionInstanceName ?? instanceId,
     });
