@@ -118,6 +118,13 @@ export function AIUsagePill() {
                   <p className="text-[10px] text-muted-foreground tabular-nums">
                     {fmtTokens(provider.input_tokens + provider.output_tokens)} tokens
                   </p>
+                  <span className={
+                    provider.cost_source === 'api'
+                      ? 'inline-flex items-center rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-medium text-emerald-400'
+                      : 'inline-flex items-center rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground'
+                  }>
+                    {provider.cost_source === 'api' ? 'dado real da conta' : 'estimado'}
+                  </span>
                 </div>
               ))}
             </div>

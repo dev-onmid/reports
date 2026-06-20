@@ -1,6 +1,7 @@
 import { makeServerPool } from '@/lib/server-db';
 import { USD_TO_BRL } from '@/lib/ai-usage-logger';
 import { getAiBillingSettings, type AiBillingSettings } from '@/lib/ai-billing-settings';
+import { fetchAnthropicCostUsd, fetchOpenAiCostUsd } from '@/lib/ai-provider-cost';
 
 export type AiUsageMonth = {
   calls: number;
@@ -40,6 +41,10 @@ export type AiUsageProvider = {
   balance_usd: number;
   balance_brl: number;
   used_pct: number;
+  // 'api': cost_usd came straight from the provider's own billing ledger (Admin API key
+  // configured). 'estimado': no Admin key configured (or the call failed), so cost_usd is
+  // our own per-call estimate based on token counts × the price table in ai-usage-config.
+  cost_source: 'api' | 'estimado';
 };
 
 function providerFromModel(model: string): 'openai' | 'claude' {
@@ -127,6 +132,20 @@ export async function GET() {
       providerTotals[provider].input_tokens += parseInt(row.input_tokens);
       providerTotals[provider].output_tokens += parseInt(row.output_tokens);
     });
+
+    // Best-effort: if an Admin API key is configured for a provider, replace our own
+    // per-call estimate with the real spend-to-date from that provider's billing ledger.
+    const monthStart = new Date(new Date().toISOString().slice(0, 7) + '-01T00:00:00.000Z');
+    const now = new Date();
+    const anthropicAdminKey = process.env.ANTHROPIC_ADMIN_API_KEY;
+    const openaiAdminKey = process.env.OPENAI_ADMIN_API_KEY;
+    const [realClaudeCostUsd, realOpenaiCostUsd] = await Promise.all([
+      anthropicAdminKey ? fetchAnthropicCostUsd(anthropicAdminKey, monthStart, now) : Promise.resolve(null),
+      openaiAdminKey ? fetchOpenAiCostUsd(openaiAdminKey, monthStart, now) : Promise.resolve(null),
+    ]);
+    const claudeCostUsd = realClaudeCostUsd ?? providerTotals.claude.cost_usd;
+    const openaiCostUsd = realOpenaiCostUsd ?? providerTotals.openai.cost_usd;
+
     const providers: AiUsageProvider[] = [
       {
         provider: 'claude',
@@ -134,13 +153,14 @@ export async function GET() {
         calls: providerTotals.claude.calls,
         input_tokens: providerTotals.claude.input_tokens,
         output_tokens: providerTotals.claude.output_tokens,
-        cost_usd: providerTotals.claude.cost_usd,
-        cost_brl: providerTotals.claude.cost_usd * USD_TO_BRL,
+        cost_usd: claudeCostUsd,
+        cost_brl: claudeCostUsd * USD_TO_BRL,
         credit_usd: settings.claude_credit_usd,
         credit_brl: settings.claude_credit_usd * USD_TO_BRL,
-        balance_usd: Math.max(settings.claude_credit_usd - providerTotals.claude.cost_usd, 0),
-        balance_brl: Math.max(settings.claude_credit_usd - providerTotals.claude.cost_usd, 0) * USD_TO_BRL,
-        used_pct: settings.claude_credit_usd > 0 ? Math.min((providerTotals.claude.cost_usd / settings.claude_credit_usd) * 100, 100) : 0,
+        balance_usd: Math.max(settings.claude_credit_usd - claudeCostUsd, 0),
+        balance_brl: Math.max(settings.claude_credit_usd - claudeCostUsd, 0) * USD_TO_BRL,
+        used_pct: settings.claude_credit_usd > 0 ? Math.min((claudeCostUsd / settings.claude_credit_usd) * 100, 100) : 0,
+        cost_source: realClaudeCostUsd !== null ? 'api' : 'estimado',
       },
       {
         provider: 'openai',
@@ -148,17 +168,19 @@ export async function GET() {
         calls: providerTotals.openai.calls,
         input_tokens: providerTotals.openai.input_tokens,
         output_tokens: providerTotals.openai.output_tokens,
-        cost_usd: providerTotals.openai.cost_usd,
-        cost_brl: providerTotals.openai.cost_usd * USD_TO_BRL,
+        cost_usd: openaiCostUsd,
+        cost_brl: openaiCostUsd * USD_TO_BRL,
         credit_usd: settings.openai_credit_usd,
         credit_brl: settings.openai_credit_usd * USD_TO_BRL,
-        balance_usd: Math.max(settings.openai_credit_usd - providerTotals.openai.cost_usd, 0),
-        balance_brl: Math.max(settings.openai_credit_usd - providerTotals.openai.cost_usd, 0) * USD_TO_BRL,
-        used_pct: settings.openai_credit_usd > 0 ? Math.min((providerTotals.openai.cost_usd / settings.openai_credit_usd) * 100, 100) : 0,
+        balance_usd: Math.max(settings.openai_credit_usd - openaiCostUsd, 0),
+        balance_brl: Math.max(settings.openai_credit_usd - openaiCostUsd, 0) * USD_TO_BRL,
+        used_pct: settings.openai_credit_usd > 0 ? Math.min((openaiCostUsd / settings.openai_credit_usd) * 100, 100) : 0,
+        cost_source: realOpenaiCostUsd !== null ? 'api' : 'estimado',
       },
     ];
     const totalCreditUsd = settings.openai_credit_usd + settings.claude_credit_usd;
-    const billing = buildBilling(totalCreditUsd, costUsd);
+    const totalRealCostUsd = claudeCostUsd + openaiCostUsd;
+    const billing = buildBilling(totalCreditUsd, totalRealCostUsd);
 
     return Response.json({
       month: {
