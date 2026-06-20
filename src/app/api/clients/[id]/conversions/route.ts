@@ -20,7 +20,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const pool = makeServerPool();
   try {
     const allowed = [
-      'meta_pixel_id', 'meta_access_token', 'meta_test_event_code', 'meta_ativo',
+      'meta_pixel_id', 'meta_access_token', 'meta_test_event_code', 'meta_page_id', 'meta_ativo',
       'google_customer_id', 'google_conversion_label_lead', 'google_conversion_label_contact',
       'google_conversion_label_purchase', 'google_api_secret', 'google_measurement_id', 'google_ativo',
     ];

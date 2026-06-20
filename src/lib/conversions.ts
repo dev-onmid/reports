@@ -13,6 +13,7 @@ type ConversionConfig = {
   meta_pixel_id: string | null;
   meta_access_token: string | null;
   meta_test_event_code: string | null;
+  meta_page_id: string | null;
   meta_ativo: boolean;
   google_conversion_label_lead: string | null;
   google_conversion_label_contact: string | null;
@@ -32,6 +33,7 @@ export async function ensureConversionSchema(pool: Pool): Promise<void> {
       meta_pixel_id TEXT,
       meta_access_token TEXT,
       meta_test_event_code TEXT,
+      meta_page_id TEXT,
       meta_ativo BOOLEAN NOT NULL DEFAULT false,
       google_customer_id TEXT,
       google_conversion_label_lead TEXT,
@@ -43,6 +45,7 @@ export async function ensureConversionSchema(pool: Pool): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    ALTER TABLE public.client_conversion_config ADD COLUMN IF NOT EXISTS meta_page_id TEXT;
 
     CREATE TABLE IF NOT EXISTS public.client_conversion_eventos_custom (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -179,17 +182,23 @@ export async function enviarEventoMeta(
       }
     }
 
+    // Required by Meta's Conversions API for Business Messaging — without action_source
+    // "business_messaging" + messaging_channel "whatsapp" + user_data.page_id, the API
+    // still returns 200 OK but the event is NOT attributed to the WhatsApp ad/campaign
+    // (there's no test-events tool for this dataset to catch that silently — see
+    // platform.claude.com research from the Dericson Calari transcripts review).
     const userData: Record<string, unknown> = {
       ph: [phoneHash],
-      client_user_agent: 'WhatsApp',
     };
+    if (cfg.meta_page_id) userData.page_id = cfg.meta_page_id;
     if (leadData.ctwaClid) userData.ctwa_clid = leadData.ctwaClid;
 
     const eventData: Record<string, unknown> = {
       event_name: eventName,
       event_time: Math.floor(Date.now() / 1000),
       event_id: eventId,
-      action_source: 'other',
+      action_source: 'business_messaging',
+      messaging_channel: 'whatsapp',
       user_data: userData,
       custom_data: {
         currency: 'BRL',

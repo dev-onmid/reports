@@ -51,6 +51,7 @@ type ConversionConfig = {
   meta_pixel_id: string;
   meta_access_token: string;
   meta_test_event_code: string;
+  meta_page_id: string;
   meta_ativo: boolean;
   google_customer_id: string;
   google_conversion_label_lead: string;
@@ -228,7 +229,7 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
 
   // ── Conversion config ──────────────────────────────────────────────────
   const [convConfig, setConvConfig] = useState<ConversionConfig>({
-    meta_pixel_id: '', meta_access_token: '', meta_test_event_code: '', meta_ativo: false,
+    meta_pixel_id: '', meta_access_token: '', meta_test_event_code: '', meta_page_id: '', meta_ativo: false,
     google_customer_id: '', google_conversion_label_lead: '', google_conversion_label_contact: '',
     google_conversion_label_purchase: '', google_api_secret: '', google_measurement_id: '', google_ativo: false,
   });
@@ -644,6 +645,12 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
                 </label>
                 <input value={convConfig.meta_test_event_code} onChange={e => setConvConfig(p => ({ ...p, meta_test_event_code: e.target.value }))} placeholder="TEST12345 (opcional)" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
               </div>
+              <div>
+                <label className="mb-1 flex items-center text-xs font-semibold text-muted-foreground">
+                  Page ID (obrigatório p/ WhatsApp) <HelpBtn text={'1. Gerenciador de Eventos → clique no Pixel de Mensagem\n2. Aba "Configurações" → "Dados Vinculados"\n3. Copie o ID que aparece embaixo da Página conectada\n⚠️ Sem isso, os eventos são aceitos pela Meta (200 OK) mas NÃO aparecem atribuídos na campanha — falha silenciosa.'} />
+                </label>
+                <input value={convConfig.meta_page_id} onChange={e => setConvConfig(p => ({ ...p, meta_page_id: e.target.value }))} placeholder="Ex: 1029384756" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
+              </div>
               <div className="flex items-end">
                 <button onClick={() => testConversion('meta')} disabled={testingMeta} className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-blue-400/30 bg-blue-500/10 px-4 py-2 text-xs font-bold text-blue-400 hover:bg-blue-500/20 disabled:opacity-50 transition-colors">
                   {testingMeta ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
@@ -758,8 +765,10 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
                 <input value={newEvento.status_gatilho} onChange={e => setNewEvento(p => ({ ...p, status_gatilho: e.target.value }))} placeholder="Ex: Proposta" className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-xs outline-none focus:border-primary" />
               </div>
               <div>
-                <label className="mb-1 block text-[10px] font-semibold text-muted-foreground uppercase">Evento Meta</label>
-                <input value={newEvento.meta_event_name} onChange={e => setNewEvento(p => ({ ...p, meta_event_name: e.target.value }))} placeholder="Ex: InitiateCheckout" className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-mono outline-none focus:border-primary" />
+                <label className="mb-1 flex items-center text-[10px] font-semibold text-muted-foreground uppercase">
+                  Evento Meta <HelpBtn text={'Para o pixel/conjunto de dados de mensagem (WhatsApp), o evento de lead chama-se "LeadSubmitted" — NÃO "Lead" (esse é o nome usado no pixel convencional de site). "Purchase" continua igual nos dois.'} />
+                </label>
+                <input value={newEvento.meta_event_name} onChange={e => setNewEvento(p => ({ ...p, meta_event_name: e.target.value }))} placeholder="Ex: LeadSubmitted" className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-mono outline-none focus:border-primary" />
               </div>
               <div>
                 <label className="mb-1 block text-[10px] font-semibold text-muted-foreground uppercase">Label Google</label>

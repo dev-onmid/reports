@@ -17,7 +17,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       if (!cfg.meta_pixel_id || !cfg.meta_access_token) {
         return Response.json({ error: 'Pixel ID e Token são obrigatórios.' }, { status: 400 });
       }
-      await enviarEventoMeta(pool, id, 'Lead', testLead);
+      // The WhatsApp message dataset uses "LeadSubmitted", not the website pixel's "Lead".
+      await enviarEventoMeta(pool, id, 'LeadSubmitted', testLead);
     } else {
       if (!cfg.google_measurement_id || !cfg.google_api_secret) {
         return Response.json({ error: 'Measurement ID e API Secret são obrigatórios.' }, { status: 400 });
