@@ -126,7 +126,7 @@ export async function fetchGoogleAdsTotals(connectionId: string, accountIds: str
     const customerId = accountId.replace(/\D/g, '');
     if (!customerId) return;
     const res = await fetch(
-      `https://googleads.googleapis.com/v20/customers/${customerId}/googleAds:search`,
+      `https://googleads.googleapis.com/v24/customers/${customerId}/googleAds:search`,
       {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${accessToken}`, 'developer-token': devToken, 'Content-Type': 'application/json' },
@@ -170,7 +170,7 @@ export async function fetchGoogleAdsDetailed(
     const customerId = accountId.replace(/\D/g, '');
     if (!customerId) return;
     const res = await fetch(
-      `https://googleads.googleapis.com/v20/customers/${customerId}/googleAds:search`,
+      `https://googleads.googleapis.com/v24/customers/${customerId}/googleAds:search`,
       {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${accessToken}`, 'developer-token': devToken, 'Content-Type': 'application/json' },

@@ -520,7 +520,7 @@ async function execSystemTool(
             'developer-token': DEV_TOKEN,
             'Content-Type': 'application/json',
           };
-          const res = await fetch(`https://googleads.googleapis.com/v20/customers/${accountId}/googleAds:search`, {
+          const res = await fetch(`https://googleads.googleapis.com/v24/customers/${accountId}/googleAds:search`, {
             method: 'POST',
             headers,
             body: JSON.stringify({

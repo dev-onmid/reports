@@ -83,7 +83,7 @@ export async function GET(
   `;
 
   const res = await fetch(
-    `https://googleads.googleapis.com/v20/customers/${accountId}/googleAds:search`,
+    `https://googleads.googleapis.com/v24/customers/${accountId}/googleAds:search`,
     { method: 'POST', headers, body: JSON.stringify({ query }) },
   );
 

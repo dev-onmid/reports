@@ -216,7 +216,7 @@ async function fetchGoogleData(
 
     await Promise.allSettled(links.map(async (link: { account_id: string }) => {
       const accountId = link.account_id.replace(/\D/g, '');
-      const res = await fetch(`https://googleads.googleapis.com/v20/customers/${accountId}/googleAds:search`, {
+      const res = await fetch(`https://googleads.googleapis.com/v24/customers/${accountId}/googleAds:search`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${accessToken}`, 'developer-token': DEV_TOKEN, 'Content-Type': 'application/json' },
         body: JSON.stringify({

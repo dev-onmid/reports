@@ -48,7 +48,7 @@ async function gadsSearch(customerId: string, query: string, accessToken: string
   const normalizedCustomerId = normalizeGoogleCustomerId(customerId);
   if (!normalizedCustomerId) return null;
   const res = await fetch(
-    `https://googleads.googleapis.com/v20/customers/${normalizedCustomerId}/googleAds:search`,
+    `https://googleads.googleapis.com/v24/customers/${normalizedCustomerId}/googleAds:search`,
     { method: 'POST', headers: gadsHeaders(accessToken, loginCustomerId), body: JSON.stringify({ query }) },
   );
   if (!res.ok) return null;
@@ -67,7 +67,7 @@ async function getFreshGoogleToken(conn: { access_token: string; refresh_token: 
 }
 
 async function buildMccMap(accessToken: string): Promise<Record<string, string>> {
-  const listRes = await fetch('https://googleads.googleapis.com/v20/customers:listAccessibleCustomers', {
+  const listRes = await fetch('https://googleads.googleapis.com/v24/customers:listAccessibleCustomers', {
     headers: { Authorization: `Bearer ${accessToken}`, 'developer-token': DEV_TOKEN },
   });
   if (!listRes.ok) return {};

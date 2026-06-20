@@ -52,7 +52,7 @@ export async function POST(
   if (loginCustomerId) headers['login-customer-id'] = loginCustomerId;
 
   const res = await fetch(
-    `https://googleads.googleapis.com/v20/customers/${accountId}/adGroups:mutate`,
+    `https://googleads.googleapis.com/v24/customers/${accountId}/adGroups:mutate`,
     {
       method: 'POST',
       headers,

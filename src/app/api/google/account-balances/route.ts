@@ -51,7 +51,7 @@ function makeHeaders(accessToken: string, developerToken: string, loginCustomerI
 
 async function gadsSearch(customerId: string, query: string, accessToken: string, developerToken: string, loginCustomerId?: string) {
   const res = await fetch(
-    `https://googleads.googleapis.com/v20/customers/${customerId}/googleAds:search`,
+    `https://googleads.googleapis.com/v24/customers/${customerId}/googleAds:search`,
     {
       method: 'POST',
       headers: makeHeaders(accessToken, developerToken, loginCustomerId),
@@ -178,7 +178,7 @@ export async function GET() {
   await Promise.allSettled(
     connections.map(async (conn) => {
       const accessToken = await getFreshAccessToken(conn);
-      const listRes = await fetch('https://googleads.googleapis.com/v20/customers:listAccessibleCustomers', {
+      const listRes = await fetch('https://googleads.googleapis.com/v24/customers:listAccessibleCustomers', {
         headers: { Authorization: `Bearer ${accessToken}`, 'developer-token': developerToken },
       });
       if (!listRes.ok) return;

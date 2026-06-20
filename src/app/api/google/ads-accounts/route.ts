@@ -37,6 +37,58 @@ type AdsAccount = {
   metrics?: AdsMetrics;
 };
 
+type GoogleAdsApiError = {
+  error?: {
+    code?: number;
+    message?: string;
+    status?: string;
+    details?: Array<{
+      errors?: Array<{
+        message?: string;
+        errorCode?: Record<string, string>;
+        location?: {
+          fieldPathElements?: Array<{ fieldName?: string }>;
+        };
+        details?: {
+          quotaErrorDetails?: { retryDelay?: string };
+        };
+      }>;
+    }>;
+  };
+};
+
+function parseGoogleAdsError(body: string, status: number) {
+  let friendlyError = `Erro Google Ads (${status})`;
+
+  try {
+    const parsed = JSON.parse(body) as GoogleAdsApiError;
+    const gErr = parsed.error;
+    const detail = gErr?.details?.flatMap((d) => d.errors ?? [])[0];
+    const detailMessage = detail?.message;
+    const errorCode = detail?.errorCode
+      ? Object.entries(detail.errorCode).map(([key, value]) => `${key}: ${value}`).join(', ')
+      : '';
+    const fieldPath = detail?.location?.fieldPathElements?.map((f) => f.fieldName).filter(Boolean).join('.');
+
+    if (gErr?.status === 'RESOURCE_EXHAUSTED') {
+      const retryDelay = detail?.details?.quotaErrorDetails?.retryDelay;
+      const retryHours = retryDelay ? Math.ceil(parseInt(retryDelay, 10) / 3600) : null;
+      return retryHours
+        ? `Cota da API Google Ads esgotada. Tente novamente em ~${retryHours}h.`
+        : 'Cota da API Google Ads esgotada. Aguarde antes de tentar novamente.';
+    }
+
+    if (detailMessage || gErr?.message) {
+      friendlyError = detailMessage ?? gErr?.message ?? friendlyError;
+    }
+
+    const extra = [errorCode, fieldPath ? `Campo: ${fieldPath}` : ''].filter(Boolean).join(' — ');
+    return extra ? `${friendlyError} — ${extra}` : friendlyError;
+  } catch {
+    return body ? `${friendlyError}: ${body.slice(0, 240)}` : friendlyError;
+  }
+}
+
 function makeHeaders(accessToken: string, developerToken: string, loginCustomerId?: string) {
   const h: Record<string, string> = {
     'Authorization': `Bearer ${accessToken}`,
@@ -49,14 +101,22 @@ function makeHeaders(accessToken: string, developerToken: string, loginCustomerI
 
 async function gadsSearch(customerId: string, query: string, accessToken: string, developerToken: string, loginCustomerId?: string) {
   const res = await fetch(
-    `https://googleads.googleapis.com/v20/customers/${customerId}/googleAds:search`,
+    `https://googleads.googleapis.com/v24/customers/${customerId}/googleAds:search`,
     {
       method: 'POST',
       headers: makeHeaders(accessToken, developerToken, loginCustomerId),
       body: JSON.stringify({ query }),
     }
   );
-  if (!res.ok) return null;
+  if (!res.ok) {
+    const body = await res.text();
+    console.error('[google/ads-accounts] GAQL failed', {
+      customerId,
+      loginCustomerId,
+      error: parseGoogleAdsError(body, res.status),
+    });
+    return null;
+  }
   return res.json() as Promise<{ results?: Record<string, unknown>[] }>;
 }
 
@@ -171,26 +231,13 @@ export async function GET(request: NextRequest) {
   const accessToken = await getFreshAccessToken(conn);
   const developerToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? '1vR8GhAk4UMZoPaqo7Qq8Q';
 
-  const listRes = await fetch('https://googleads.googleapis.com/v20/customers:listAccessibleCustomers', {
+  const listRes = await fetch('https://googleads.googleapis.com/v24/customers:listAccessibleCustomers', {
     headers: { 'Authorization': `Bearer ${accessToken}`, 'developer-token': developerToken },
   });
   if (!listRes.ok) {
     const body = await listRes.text();
-    let friendlyError = `Erro Google Ads (${listRes.status})`;
-    try {
-      const parsed = JSON.parse(body) as { error?: { message?: string; status?: string; details?: Array<{ errors?: Array<{ message?: string; details?: { quotaErrorDetails?: { rateName?: string; retryDelay?: string } } }> }> } };
-      const gErr = parsed.error;
-      if (gErr?.status === 'RESOURCE_EXHAUSTED') {
-        const detail = gErr.details?.[0]?.errors?.[0];
-        const retryDelay = detail?.details?.quotaErrorDetails?.retryDelay;
-        const retryHours = retryDelay ? Math.ceil(parseInt(retryDelay) / 3600) : null;
-        friendlyError = retryHours
-          ? `Cota da API Google Ads esgotada. Tente novamente em ~${retryHours}h.`
-          : 'Cota da API Google Ads esgotada. Aguarde antes de tentar novamente.';
-      } else if (gErr?.message) {
-        friendlyError = gErr.message;
-      }
-    } catch { /* keep default */ }
+    const friendlyError = parseGoogleAdsError(body, listRes.status);
+    console.error('[google/ads-accounts] listAccessibleCustomers failed', friendlyError);
     return Response.json({ error: friendlyError }, { status: listRes.status });
   }
 

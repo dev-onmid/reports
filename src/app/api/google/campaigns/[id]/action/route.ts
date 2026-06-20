@@ -61,7 +61,7 @@ export async function POST(
       return Response.json({ error: 'budgetResourceName e dailyBudget são obrigatórios.' }, { status: 400 });
     }
     const res = await fetch(
-      `https://googleads.googleapis.com/v20/customers/${accountId}/campaignBudgets:mutate`,
+      `https://googleads.googleapis.com/v24/customers/${accountId}/campaignBudgets:mutate`,
       {
         method: 'POST',
         headers,
@@ -83,7 +83,7 @@ export async function POST(
   // Status mutation
   const newGadsStatus = action === 'pause' ? 'PAUSED' : 'ENABLED';
   const res = await fetch(
-    `https://googleads.googleapis.com/v20/customers/${accountId}/campaigns:mutate`,
+    `https://googleads.googleapis.com/v24/customers/${accountId}/campaigns:mutate`,
     {
       method: 'POST',
       headers,

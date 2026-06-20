@@ -1223,7 +1223,7 @@ function GoogleConnectionsPanel({
       setError(null);
       try {
         if (isAds) {
-          const res = await fetch(`/api/google/ads-accounts?connectionId=${conn.id}&period=THIS_MONTH`);
+          const res = await fetch(`/api/google/ads-accounts?connectionId=${conn.id}&noMetrics=true`);
           const data = await res.json() as { error?: string } | AdsAccount[];
           if (!res.ok) throw new Error((data as { error?: string }).error ?? 'Erro ao buscar contas');
           setAdsAccounts(data as AdsAccount[]);
