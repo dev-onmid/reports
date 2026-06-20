@@ -15,7 +15,7 @@ function prevMonth(): { from: string; to: string } {
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ configId: string }> }) {
   const { configId } = await params;
-  const body = await request.json().catch(() => ({})) as { dateFrom?: string; dateTo?: string; manualNotes?: string };
+  const body = await request.json().catch(() => ({})) as { dateFrom?: string; dateTo?: string };
 
   const pool = makeServerPool();
   let config: {
@@ -70,8 +70,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 
   // ── Performance template (default) ────────────────────────────────────────
-  const apiKey = process.env.ANTHROPIC_API_KEY ?? '';
-
   const reportData = await buildOmniReport({
     clientId: config.client_id,
     clientName: config.client_name,
@@ -81,8 +79,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     googleAccountIds: config.google_account_ids,
     periodFrom: period.from,
     periodTo: period.to,
-    manualNotes: body.manualNotes,
-    apiKey,
   });
 
   const { id, public_token } = await saveOmniReport({

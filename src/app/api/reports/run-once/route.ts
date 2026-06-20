@@ -8,17 +8,13 @@ export const maxDuration = 300;
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({})) as {
-      clientId?: string; from?: string; to?: string; manualNotes?: string;
+      clientId?: string; from?: string; to?: string;
       agencyContext?: string; template?: string;
-      csvContent?: string;
       csvFiles?: { name: string; content: string }[];
-      supplementaryContent?: string;
-      leadFunnelFiles?: { name: string; content: string }[];
     };
 
-    const { clientId, from, to, manualNotes, agencyContext, template, supplementaryContent } = body;
+    const { clientId, from, to, agencyContext, template } = body;
     const csvFiles = body.csvFiles ?? [];
-    const leadFunnelFiles = body.leadFunnelFiles ?? [];
     if (!clientId || !from || !to) {
       return Response.json({ error: 'clientId, from e to são obrigatórios' }, { status: 400 });
     }
@@ -67,8 +63,6 @@ export async function POST(request: NextRequest) {
     }
 
     // ── Performance template (default) ────────────────────────────────────────
-    const apiKey = process.env.ANTHROPIC_API_KEY ?? '';
-
     const reportData = await buildOmniReport({
       clientId,
       clientName,
@@ -78,10 +72,6 @@ export async function POST(request: NextRequest) {
       googleAccountIds,
       periodFrom: from,
       periodTo: to,
-      agencyContext: agencyContext ?? manualNotes,
-      supplementaryContent: supplementaryContent ?? undefined,
-      leadFunnelFiles,
-      apiKey,
     });
 
     const { id, public_token } = await saveOmniReport({

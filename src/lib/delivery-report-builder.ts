@@ -58,7 +58,7 @@ function deltaInfo(current: number, prev: number): { label: string; up: boolean;
 
 const PRIMARY      = '#55f52f';   // graphic fills only (bars, borders, squares)
 const PRIMARY_TEXT = '#1a8a00';   // green as readable text on white (5.4:1 contrast)
-const CANVAS       = '#EEF1F5';
+export const CANVAS = '#EEF1F5';
 const CARD         = '#FFFFFF';
 const BG           = '#F7F8FA';
 const ROW          = '#F1F5F9';
@@ -67,10 +67,11 @@ const FG           = '#0F172A';   // near-black — titles, values
 const MUTED        = '#334155';   // cinza chumbo — body text, labels, secondary
 const RED          = '#e52020';
 const BLUE         = '#0B84FF';
+const GOOGLE_BLUE  = '#4285F4';
 
-const INTER = 'var(--font-inter), Inter, sans-serif';
+export const INTER = 'var(--font-inter), Inter, sans-serif';
 const BEBAS = "var(--font-bebas), 'Bebas Neue', sans-serif";
-const FONT_LINK = `<style>@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@100..900&display=swap');@font-face{font-family:Inter Fallback;src:local(Arial);ascent-override:90.44%;descent-override:22.52%;line-gap-override:0%;size-adjust:107.12%}@font-face{font-family:Bebas Neue Fallback;src:local(Arial);ascent-override:117.32%;descent-override:39.11%;line-gap-override:0%;size-adjust:76.72%}:root{--font-inter:"Inter","Inter Fallback";--font-bebas:"Bebas Neue","Bebas Neue Fallback";}.onmid-report h1{line-height:1.08!important;letter-spacing:.01em!important}.onmid-report :is(strong,b,th,[style*="font-weight:700"],[style*="font-weight:800"],[style*="font-weight:850"],[style*="font-weight:900"],[style*="font-weight:950"]):not(h1):not(h2){letter-spacing:.004em!important}.onmid-report :is(h3,h4,h5,h6){letter-spacing:.002em!important}</style>`;
+export const FONT_LINK = `<style>@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@100..900&display=swap');@font-face{font-family:Inter Fallback;src:local(Arial);ascent-override:90.44%;descent-override:22.52%;line-gap-override:0%;size-adjust:107.12%}@font-face{font-family:Bebas Neue Fallback;src:local(Arial);ascent-override:117.32%;descent-override:39.11%;line-gap-override:0%;size-adjust:76.72%}:root{--font-inter:"Inter","Inter Fallback";--font-bebas:"Bebas Neue","Bebas Neue Fallback";}.onmid-report h1{line-height:1.08!important;letter-spacing:.01em!important}.onmid-report :is(strong,b,th,[style*="font-weight:700"],[style*="font-weight:800"],[style*="font-weight:850"],[style*="font-weight:900"],[style*="font-weight:950"]):not(h1):not(h2){letter-spacing:.004em!important}.onmid-report :is(h3,h4,h5,h6){letter-spacing:.002em!important}</style>`;
 const REPORT_MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 
 function nextMonthName(periodo: string): string {
@@ -113,6 +114,27 @@ export type MetaAdsFull = {
   campanhas: CampanhaDetalhada[];
 };
 
+export type CampanhaGoogleDetalhada = {
+  nome: string;
+  tipo: string; // campaign.advertising_channel_type (SEARCH, DISPLAY, SHOPPING, PERFORMANCE_MAX...)
+  metricas: {
+    investimento: number;
+    impressoes: number;
+    cliques: number;
+    conversoes: number;
+    valorConversoes: number;
+  };
+};
+
+export type GoogleAdsFull = {
+  investimento: number;
+  impressoes: number;
+  cliques: number;
+  conversoes: number;
+  valorConversoes: number;
+  campanhas: CampanhaGoogleDetalhada[];
+};
+
 export type Creative = {
   nome: string;
   spend: number;
@@ -149,7 +171,7 @@ export type InstagramPeriodMetrics = {
   accounts_engaged: number;
 };
 
-type ParsedData = {
+export type ParsedData = {
   ativos:          number;
   inativos:        number;
   potenciais:      number;
@@ -164,7 +186,7 @@ type ParsedData = {
   entregas_por_dia?: DiaDaSemana[];
 };
 
-type DiagJson = {
+export type DiagJson = {
   insight_campanha_conversa:  string;
   insight_campanha_conversao: string;
 };
@@ -438,6 +460,30 @@ function categorizeMetaObjective(raw: string | undefined): ObjectiveCategory {
   if (o.includes('ENGAGEMENT') || o.includes('VIDEO_VIEW') || o.includes('ENGAJAMENTO')) return 'engajamento';
   if (o.includes('AWARENESS') || o.includes('ALCANCE') || o.includes('RECONHECIMENTO') || (o.includes('REACH') && !o.includes('TRAFFIC'))) return 'alcance';
   return 'trafego'; // TRAFFIC, LINK_CLICKS, or unrecognized — clicks/CTR are always meaningful
+}
+
+// ── Google Ads campaign type → objective-style mapping ──────────────────────
+// Google Ads has no "objective" field like Meta — campaigns are typed by channel
+// (SEARCH/DISPLAY/SHOPPING/PERFORMANCE_MAX/VIDEO...). We use the channel type as a
+// proxy for funnel stage, refined by whether the campaign actually has tracked
+// conversions/conversion value, so a Search campaign with no conversion tracking
+// still reads as "tráfego" rather than being miscategorized as "vendas".
+type GoogleCampaignKind = 'vendas' | 'leads' | 'trafego' | 'alcance';
+
+const GOOGLE_CHANNEL_LABEL: Record<string, string> = {
+  SEARCH: 'Pesquisa', DISPLAY: 'Display', SHOPPING: 'Shopping', VIDEO: 'Vídeo',
+  PERFORMANCE_MAX: 'Performance Max', DEMAND_GEN: 'Demand Gen', DISCOVERY: 'Discovery',
+  LOCAL: 'Local', LOCAL_SERVICES: 'Serviços Locais', SMART: 'Smart', TRAVEL: 'Viagens',
+  MULTI_CHANNEL: 'Multicanal', APP: 'App', HOTEL: 'Hotel',
+};
+
+function categorizeGoogleCampaign(channelType: string | undefined, conversions: number, conversionsValue: number): GoogleCampaignKind {
+  const t = (channelType ?? '').toUpperCase();
+  if (t === 'SHOPPING') return 'vendas';
+  if (['DISPLAY', 'VIDEO', 'DEMAND_GEN', 'DISCOVERY', 'SMART'].includes(t)) return 'alcance';
+  if (conversionsValue > 0) return 'vendas';
+  if (conversions > 0) return 'leads';
+  return 'trafego'; // SEARCH, PERFORMANCE_MAX, or unrecognized without conversion data
 }
 
 const OBJECTIVE_META: Record<ObjectiveCategory, {
@@ -762,7 +808,7 @@ export async function fetchMetaData(
   return { meta, creatives };
 }
 
-type InstagramPost = {
+export type InstagramPost = {
   id: string;
   caption: string;
   mediaType: string; // IMAGE | VIDEO | CAROUSEL_ALBUM | REELS
@@ -1272,7 +1318,7 @@ function insight(title: string, text: string, color = PRIMARY): string {
 
 // ── Slide builders — Executive Layout Recipes ─────────────────────────────────
 
-function sCapa(
+export function sCapa(
   d: ParsedData, meta: MetaAdsFull | null, clientName: string,
   periodo: string, prevPeriodo: string, diag: DiagJson, total: number,
 ): string {
@@ -1375,7 +1421,7 @@ function sCapa(
   return auditSlide(body, 'sCapa');
 }
 
-function sVisaoGeral(
+export function sVisaoGeral(
   d: ParsedData, prevD: ParsedData | null, idx: number, total: number,
   periodo: string, prevPeriodo: string,
 ): string {
@@ -1617,7 +1663,7 @@ function sPorDia(d: ParsedData, idx: number, total: number, periodo = 'Maio/2026
   return auditSlide(body, 'sPorDia');
 }
 
-function sRegioes(bairros: Bairro[], idx: number, total: number): string {
+export function sRegioes(bairros: Bairro[], idx: number, total: number): string {
   const top = [...bairros].sort((a, b) => b.pedidos - a.pedidos).slice(0, 8);
   const top3 = top.slice(0, 3);
   const potential = top.slice(3, 8);
@@ -2015,7 +2061,7 @@ function cleanCampaignHighlightTitle(raw: string): string {
   return tags.join(' ') || raw;
 }
 
-function sMetaAdsResumo(meta: MetaAdsFull, idx: number, total: number): string {
+export function sMetaAdsResumo(meta: MetaAdsFull, idx: number, total: number): string {
   void idx;
   void total;
   const ctr = meta.impressoes > 0 ? (meta.cliques / meta.impressoes) * 100 : 0;
@@ -2204,7 +2250,7 @@ function sMetaAdsResumo(meta: MetaAdsFull, idx: number, total: number): string {
 
 // ── Instagram Insights ────────────────────────────────────────────────────────
 
-function sInstagram(ig: InstagramData, idx: number, total: number, periodLabel = 'período selecionado'): string {
+export function sInstagram(ig: InstagramData, idx: number, total: number, periodLabel = 'período selecionado'): string {
   void idx; void total; // page counter intentionally suppressed on this slide — see header below
 
   const engRate = ig.reach > 0 ? (ig.accounts_engaged / ig.reach) * 100 : 0;
@@ -2379,7 +2425,7 @@ function igMediaOverlay(mediaType: string): string {
   return '';
 }
 
-function sInstagramCalendar(posts: InstagramPost[], idx: number, total: number, monthDate: Date): string {
+export function sInstagramCalendar(posts: InstagramPost[], idx: number, total: number, monthDate: Date): string {
   const MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
   const month = monthDate.getMonth();
   const year = monthDate.getFullYear();
@@ -2570,7 +2616,7 @@ function sInstagramCalendar(posts: InstagramPost[], idx: number, total: number, 
   return auditSlide(body, 'sInstagramCalendar');
 }
 
-function monthsBetweenInclusive(fromDate: Date, toDate: Date): Date[] {
+export function monthsBetweenInclusive(fromDate: Date, toDate: Date): Date[] {
   const start = new Date(fromDate.getFullYear(), fromDate.getMonth(), 1, 12);
   const end = new Date(toDate.getFullYear(), toDate.getMonth(), 1, 12);
   const months: Date[] = [];
@@ -2580,7 +2626,7 @@ function monthsBetweenInclusive(fromDate: Date, toDate: Date): Date[] {
   return months.length ? months : [start];
 }
 
-function sInstagramPosts(posts: InstagramPost[], idx: number, total: number): string {
+export function sInstagramPosts(posts: InstagramPost[], idx: number, total: number): string {
   const score = (p: InstagramPost) => (p.reach > 0 ? p.reach : 0) + (p.likes + p.comments + p.saves) * 12 + p.videoViews * 0.2;
   const featuredPosts = [...posts].sort((a, b) => score(b) - score(a)).slice(0, 4);
 
@@ -2657,7 +2703,7 @@ function sInstagramPosts(posts: InstagramPost[], idx: number, total: number): st
 
 // ── Instagram — spotlight on the best-performing post ─────────────────────────
 
-function sInstagramSpotlight(posts: InstagramPost[], idx: number, total: number): string {
+export function sInstagramSpotlight(posts: InstagramPost[], idx: number, total: number): string {
   const best = bestInstagramPost(posts);
   if (!best) return '';
 
@@ -2759,7 +2805,7 @@ function sInstagramSpotlight(posts: InstagramPost[], idx: number, total: number)
   return auditSlide(body, 'sInstagramSpotlight');
 }
 
-function sCriativos(creatives: Creative[], idx: number, total: number): string {
+export function sCriativos(creatives: Creative[], idx: number, total: number): string {
   const cleanText = (text?: string) => String(text || '')
     .replace(/\[[^\]]+\]/g, ' ')
     .replace(/[_-]+/g, ' ')
@@ -2984,7 +3030,7 @@ function sCriativos(creatives: Creative[], idx: number, total: number): string {
 
 // ── Expanded slides ───────────────────────────────────────────────────────────
 
-function sMetaAdsCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number, total: number, periodo = 'Maio/2026', campanhas = meta.campanhas): string {
+export function sMetaAdsCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number, total: number, periodo = 'Maio/2026', campanhas = meta.campanhas): string {
   const campaignKind = campaignKindFor;
 
   const isDemand = (c: CampanhaDetalhada) => ['mensagens', 'leads'].includes(campaignKind(c));
@@ -3133,6 +3179,303 @@ function sMetaAdsCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number, total
   ${richFooter()}
 </div>`;
   return auditSlide(body, 'sMetaAdsCampanhas');
+}
+
+// ── Google Ads — Resumo ───────────────────────────────────────────────────────
+
+export function sGoogleAdsResumo(google: GoogleAdsFull, idx: number, total: number): string {
+  void idx;
+  void total;
+  const ctr = google.impressoes > 0 ? (google.cliques / google.impressoes) * 100 : 0;
+  const cpc = google.cliques > 0 ? google.investimento / google.cliques : 0;
+  const custoConversao = google.conversoes > 0 ? google.investimento / google.conversoes : 0;
+  const roasGeral = google.investimento > 0 ? google.valorConversoes / google.investimento : 0;
+
+  const campaignsBy = (kinds: GoogleCampaignKind[]) => google.campanhas.filter(c => kinds.includes(categorizeGoogleCampaign(c.tipo, c.metricas.conversoes, c.metricas.valorConversoes)));
+  const sum = (campaigns: CampanhaGoogleDetalhada[], selector: (c: CampanhaGoogleDetalhada) => number) =>
+    campaigns.reduce((totalValue, campaign) => totalValue + selector(campaign), 0);
+
+  const awarenessCampaigns = campaignsBy(['alcance']);
+  const trafficCampaigns = campaignsBy(['trafego']);
+  const leadCampaigns = campaignsBy(['leads']);
+  const salesCampaigns = campaignsBy(['vendas']);
+
+  const awarenessInvestment = sum(awarenessCampaigns, c => c.metricas.investimento);
+  const awarenessImpressions = sum(awarenessCampaigns, c => c.metricas.impressoes);
+  const awarenessCliques = sum(awarenessCampaigns, c => c.metricas.cliques);
+  const awarenessCpm = awarenessImpressions > 0 ? awarenessInvestment / (awarenessImpressions / 1000) : 0;
+
+  const trafficInvestment = sum(trafficCampaigns, c => c.metricas.investimento);
+  const trafficClicks = sum(trafficCampaigns, c => c.metricas.cliques);
+  const trafficImpressions = sum(trafficCampaigns, c => c.metricas.impressoes);
+  const trafficCpc = trafficClicks > 0 ? trafficInvestment / trafficClicks : 0;
+  const trafficCtr = trafficImpressions > 0 ? (trafficClicks / trafficImpressions) * 100 : 0;
+
+  const leadInvestment = sum(leadCampaigns, c => c.metricas.investimento);
+  const totalLeadConversoes = sum(leadCampaigns, c => c.metricas.conversoes);
+  const custoLead = totalLeadConversoes > 0 ? leadInvestment / totalLeadConversoes : 0;
+
+  const salesInvestment = sum(salesCampaigns, c => c.metricas.investimento);
+  const totalCompras = sum(salesCampaigns, c => c.metricas.conversoes);
+  const valorCompras = sum(salesCampaigns, c => c.metricas.valorConversoes);
+  const cpa = totalCompras > 0 ? salesInvestment / totalCompras : 0;
+  const roas = salesInvestment > 0 ? valorCompras / salesInvestment : 0;
+
+  const brlC = (n: number) => n > 0 ? n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '—';
+  const pctC = (n: number) => n > 0 ? `${n.toFixed(2).replace('.', ',')}%` : '—';
+  const decC = (n: number) => n > 0 ? n.toFixed(2).replace('.', ',') : '—';
+  const countLabel = (count: number) => count === 1 ? '1 campanha' : `${count} campanhas`;
+
+  const bigKpi = (label: string, value: string, ico: string) =>
+    `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:16px;box-shadow:0 10px 26px rgba(15,23,42,.06);padding:14px 16px;display:flex;align-items:center;gap:12px;min-width:0">
+      <div style="width:44px;height:44px;border-radius:50%;background:${GOOGLE_BLUE}1F;flex-shrink:0;display:flex;align-items:center;justify-content:center">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="${GOOGLE_BLUE}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ico}</svg>
+      </div>
+      <div style="min-width:0">
+        <p style="font-size:12px;font-weight:700;color:#163461;font-family:${INTER};margin:0 0 5px;line-height:1.2">${label}</p>
+        <p style="font-family:${INTER};font-size:22px;font-weight:900;letter-spacing:0;color:${FG};line-height:1;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${value}</p>
+      </div>
+    </div>`;
+
+  const ICO_MONEY  = '<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>';
+  const ICO_EYE    = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
+  const ICO_CURSOR = '<path d="m3 3 7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="m13 13 6 6"/>';
+  const ICO_CART   = '<circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>';
+  const ICO_TARGET = '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>';
+  const ICO_PERCENT = '<path d="M19 5 5 19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/>';
+
+  const generalMetrics = [
+    bigKpi('Investimento', brlC(google.investimento), ICO_MONEY),
+    bigKpi('Impressões', numOrDash(google.impressoes), ICO_EYE),
+    bigKpi('Cliques', numOrDash(google.cliques), ICO_CURSOR),
+    bigKpi('CTR', pctC(ctr), ICO_PERCENT),
+    bigKpi('CPC', brlC(cpc), ICO_CURSOR),
+    bigKpi('Conversões', numOrDash(google.conversoes), ICO_TARGET),
+    bigKpi('Custo/conversão', brlC(custoConversao), ICO_MONEY),
+  ];
+
+  const segmentLine = (label: string, value: string) =>
+    `<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;border-top:1px solid rgba(148,163,184,.18);padding-top:8px">
+      <span style="font-family:${INTER};font-size:11px;font-weight:700;color:${MUTED};line-height:1.15">${label}</span>
+      <span style="font-family:${INTER};font-size:16px;font-weight:900;color:${FG};line-height:1;text-align:right;white-space:nowrap">${value}</span>
+    </div>`;
+
+  const segmentCard = (
+    title: string, subtitle: string, icon: string, tint: string, accent: string, lines: Array<[string, string]>,
+  ) =>
+    `<div style="background:${tint};border:1px solid ${accent}33;border-radius:18px;box-shadow:0 10px 24px rgba(15,23,42,.05);padding:18px;min-width:0;display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;gap:12px;align-items:flex-start;min-height:52px">
+        <div style="width:42px;height:42px;border-radius:50%;background:#FFFFFFB8;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="${accent}" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${icon}</svg>
+        </div>
+        <div style="min-width:0">
+          <p style="font-family:${INTER};font-size:15px;font-weight:900;color:${FG};margin:0 0 4px;line-height:1.1">${title}</p>
+          <p style="font-family:${INTER};font-size:11px;font-weight:700;color:#475569;margin:0;line-height:1.3">${subtitle}</p>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        ${lines.map(([label, value]) => segmentLine(label, value)).join('')}
+      </div>
+    </div>`;
+
+  const hasSegmentData = (campaigns: CampanhaGoogleDetalhada[], values: number[]) =>
+    campaigns.length > 0 || values.some(value => value > 0);
+
+  const segmentCards = [
+    hasSegmentData(awarenessCampaigns, [awarenessInvestment, awarenessImpressions, awarenessCliques]) ? segmentCard('Display e vídeo', countLabel(awarenessCampaigns.length), ICO_TARGET, '#FFFDF2', '#B45309', [
+      ['Investimento', brlC(awarenessInvestment)],
+      ['Impressões', numOrDash(awarenessImpressions)],
+      ['CPM', brlC(awarenessCpm)],
+    ]) : '',
+    hasSegmentData(trafficCampaigns, [trafficInvestment, trafficClicks, trafficImpressions]) ? segmentCard('Pesquisa / tráfego', countLabel(trafficCampaigns.length), ICO_CURSOR, '#F4F8FF', GOOGLE_BLUE, [
+      ['Investimento', brlC(trafficInvestment)],
+      ['Cliques', numOrDash(trafficClicks)],
+      ['CPC / CTR', `${brlC(trafficCpc)} / ${pctC(trafficCtr)}`],
+    ]) : '',
+    hasSegmentData(leadCampaigns, [leadInvestment, totalLeadConversoes]) ? segmentCard('Geração de leads', countLabel(leadCampaigns.length), ICO_TARGET, '#F2FFFB', '#0F766E', [
+      ['Investimento', brlC(leadInvestment)],
+      ['Conversões', numOrDash(totalLeadConversoes)],
+      ['Custo por lead', brlC(custoLead)],
+    ]) : '',
+    hasSegmentData(salesCampaigns, [salesInvestment, totalCompras, valorCompras]) ? segmentCard('Vendas / Shopping', countLabel(salesCampaigns.length), ICO_CART, '#F7FFF4', PRIMARY_TEXT, [
+      ['Investimento', brlC(salesInvestment)],
+      ['Compras / CPA', `${numOrDash(totalCompras)} / ${brlC(cpa)}`],
+      ['Valor de venda', brlC(valorCompras)],
+      ['ROAS', decC(roas)],
+    ]) : '',
+  ].filter(Boolean);
+  const segmentGridColumns = Math.max(1, Math.min(segmentCards.length, 4));
+
+  const recommendation = roas >= 3
+    ? `As campanhas de Shopping/vendas apresentaram retorno positivo, com ROAS de ${decC(roas)}. Acompanhar escala mantendo controle de CPC e custo por conversão.`
+    : totalCompras > 0
+    ? `As campanhas de vendas geraram conversões, mas o ROAS de ${decC(roas)} pede atenção: acompanhar custo por conversão e valor médio antes de ampliar investimento.`
+    : totalLeadConversoes > 0
+    ? `As campanhas de geração de leads converteram no período. O próximo foco é qualificar esses contatos, acompanhando custo por lead e evolução para venda.`
+    : `${brlOrDash(google.investimento)} investidos com ${numOrDash(google.cliques)} cliques e ${numOrDash(google.conversoes)} conversões no período. Avaliar CTR, CPC e volume de conversões (ROAS geral ${decC(roasGeral)}) para orientar o próximo ciclo.`;
+
+  const body = `<div style="width:1440px;min-height:810px;background:${BG};border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
+  <div style="position:absolute;right:60px;top:-100px;width:560px;height:480px;border-radius:50%;background:linear-gradient(135deg,rgba(219,234,254,.55),rgba(255,255,255,.15));opacity:.7;pointer-events:none"></div>
+
+  <div style="position:relative;z-index:1;flex:1;padding:52px 48px 0;display:flex;flex-direction:column;gap:16px">
+
+    <div style="flex-shrink:0">
+      <h1 style="font-family:${INTER};font-size:52px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 8px;letter-spacing:-0.03em">${reportTitle('Resumo Google Ads')}</h1>
+      <p style="font-size:16px;font-weight:500;color:#163461;font-family:${INTER};margin:0">Métricas gerais e resultados separados por tipo de campanha</p>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;flex-shrink:0">
+      ${generalMetrics.join('')}
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(${segmentGridColumns},1fr);gap:14px;flex-shrink:0">
+      ${segmentCards.join('')}
+    </div>
+
+    <div data-conclusion="1" style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 10px 26px rgba(15,23,42,.06);display:flex;align-items:flex-start;gap:16px;padding:20px 26px">
+      <div style="width:40px;height:40px;border-radius:50%;background:${GOOGLE_BLUE}16;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${GOOGLE_BLUE}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICO_TARGET}</svg>
+      </div>
+      <div style="border-left:2px solid ${GOOGLE_BLUE};padding-left:18px">
+        <p style="font-size:15px;font-weight:800;color:${FG};font-family:${INTER};margin:0 0 4px">Recomendação</p>
+        <p style="font-size:14px;font-weight:500;color:#163461;font-family:${INTER};line-height:1.5;margin:0">${recommendation}</p>
+      </div>
+    </div>
+  </div>
+
+  ${richFooter()}
+</div>`;
+  return auditSlide(body, 'sGoogleAdsResumo');
+}
+
+// ── Google Ads — Campanhas ────────────────────────────────────────────────────
+
+export function sGoogleAdsCampanhas(google: GoogleAdsFull, idx: number, total: number, periodo = 'Maio/2026', campanhas = google.campanhas): string {
+  const kindFor = (c: CampanhaGoogleDetalhada) => categorizeGoogleCampaign(c.tipo, c.metricas.conversoes, c.metricas.valorConversoes);
+
+  const styleFor = (kind: GoogleCampaignKind) => {
+    if (kind === 'vendas') return { bg: '#F7FFF4', border: '#D7F8D0', accent: PRIMARY_TEXT, iconBg: '#ECFCE8' };
+    if (kind === 'trafego') return { bg: '#F6FAFF', border: '#BFDBFE', accent: GOOGLE_BLUE, iconBg: '#EAF3FF' };
+    if (kind === 'leads') return { bg: '#F4FFFB', border: '#99F6E4', accent: '#0F766E', iconBg: '#E6FFFB' };
+    return { bg: '#FFFDF5', border: '#FDE68A', accent: '#B45309', iconBg: '#FFF7E6' };
+  };
+
+  const ICO_MONEY   = '<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>';
+  const ICO_CURSOR  = '<path d="m3 3 7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="m13 13 6 6"/>';
+  const ICO_EYE     = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
+  const ICO_CART    = '<circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>';
+  const ICO_TARGET  = '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 12l7-7"/><path d="M16 5h3v3"/>';
+  const ICO_TREND   = '<polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/>';
+  const ICO_GOOGLE  = '<path d="M21.8 12.2c0-.7-.06-1.3-.18-1.9H12v3.6h5.5c-.24 1.3-.97 2.4-2.06 3.1v2.6h3.3c1.9-1.8 3.06-4.4 3.06-7.4Z"/><path d="M12 22c2.4 0 4.4-.8 5.84-2.16l-3.3-2.6c-.9.6-2.06 1-3.0.96-2.3 0-4.26-1.5-4.96-3.6H2.18v2.66C3.6 19.9 7.5 22 12 22Z"/><path d="M7.04 13.6a5.4 5.4 0 0 1 0-3.4V7.54H2.18a9.96 9.96 0 0 0 0 9.1l4.86-3.04Z"/><path d="M12 6.4c1.3 0 2.5.46 3.4 1.34l2.9-2.86C16.4 3.3 14.4 2.5 12 2.5 7.5 2.5 3.6 4.6 2.18 7.54L7.04 10.6c.7-2.1 2.66-3.6 4.96-4.2Z"/>';
+
+  const metricItem = (iconPath: string, label: string, value: string, accent = GOOGLE_BLUE, bg = `${GOOGLE_BLUE}18`) =>
+    `<div style="flex:1;display:flex;align-items:flex-start;gap:10px;min-width:0">
+      <div style="width:34px;height:34px;border-radius:50%;background:${bg};display:flex;align-items:center;justify-content:center;flex-shrink:0">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="${accent}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${iconPath}</svg>
+      </div>
+      <div style="min-width:0">
+        <p style="font-size:12px;font-weight:600;color:${FG};font-family:${INTER};margin:0 0 3px;line-height:1.25">${label}</p>
+        <p style="font-size:19px;font-weight:800;color:${value === '—' ? MUTED : accent};font-family:${INTER};margin:0;line-height:1.1;letter-spacing:-0.01em">${value}</p>
+      </div>
+    </div>`;
+
+  function campBlock(c: CampanhaGoogleDetalhada): string {
+    const m = c.metricas;
+    const kind = kindFor(c);
+    const style = styleFor(kind);
+    const name = c.nome;
+    const channelLabel = GOOGLE_CHANNEL_LABEL[(c.tipo || '').toUpperCase()] ?? 'Campanha';
+
+    let row1: string, row2: string;
+    if (kind === 'vendas') {
+      const cpa = m.conversoes > 0 && m.investimento > 0 ? brl(m.investimento / m.conversoes) : '—';
+      const roas = m.investimento > 0 && m.valorConversoes > 0 ? m.valorConversoes / m.investimento : 0;
+      row1 = [
+        metricItem(ICO_MONEY, 'Investimento', brlOrDash(m.investimento), style.accent, style.iconBg),
+        metricItem(ICO_CART, 'Conversões', numOrDash(m.conversoes), style.accent, style.iconBg),
+        metricItem(ICO_MONEY, 'Custo/conversão', cpa, style.accent, style.iconBg),
+      ].join('');
+      row2 = [
+        metricItem(ICO_MONEY, 'Valor de conversão', brlOrDash(m.valorConversoes), style.accent, style.iconBg),
+        metricItem(ICO_TREND, 'ROAS', roas > 0 ? roas.toFixed(2) : '—', style.accent, style.iconBg),
+      ].join('');
+    } else if (kind === 'leads') {
+      const custoLead = m.conversoes > 0 && m.investimento > 0 ? brl(m.investimento / m.conversoes) : '—';
+      row1 = [
+        metricItem(ICO_MONEY, 'Investimento', brlOrDash(m.investimento), style.accent, style.iconBg),
+        metricItem(ICO_TARGET, 'Conversões', numOrDash(m.conversoes), style.accent, style.iconBg),
+        metricItem(ICO_MONEY, 'Custo por lead', custoLead, style.accent, style.iconBg),
+      ].join('');
+      row2 = [
+        metricItem(ICO_CURSOR, 'Cliques', numOrDash(m.cliques), style.accent, style.iconBg),
+        metricItem(ICO_EYE, 'Impressões', numOrDash(m.impressoes), style.accent, style.iconBg),
+      ].join('');
+    } else if (kind === 'trafego') {
+      const cpc = m.cliques > 0 && m.investimento > 0 ? m.investimento / m.cliques : 0;
+      const ctr = m.impressoes > 0 && m.cliques > 0 ? (m.cliques / m.impressoes) * 100 : 0;
+      row1 = [
+        metricItem(ICO_MONEY, 'Investimento', brlOrDash(m.investimento), style.accent, style.iconBg),
+        metricItem(ICO_CURSOR, 'Cliques', numOrDash(m.cliques), style.accent, style.iconBg),
+        metricItem(ICO_MONEY, 'CPC', brlOrDash(cpc), style.accent, style.iconBg),
+      ].join('');
+      row2 = [
+        metricItem(ICO_EYE, 'Impressões', numOrDash(m.impressoes), style.accent, style.iconBg),
+        metricItem(ICO_TREND, 'CTR', ctr > 0 ? `${ctr.toFixed(2).replace('.', ',')}%` : '—', style.accent, style.iconBg),
+      ].join('');
+    } else {
+      const cpm = m.impressoes > 0 && m.investimento > 0 ? m.investimento / (m.impressoes / 1000) : 0;
+      row1 = [
+        metricItem(ICO_MONEY, 'Investimento', brlOrDash(m.investimento), style.accent, style.iconBg),
+        metricItem(ICO_EYE, 'Impressões', numOrDash(m.impressoes), style.accent, style.iconBg),
+        metricItem(ICO_MONEY, 'CPM', brlOrDash(cpm), style.accent, style.iconBg),
+      ].join('');
+      row2 = [
+        metricItem(ICO_CURSOR, 'Cliques', numOrDash(m.cliques), style.accent, style.iconBg),
+      ].join('');
+    }
+
+    return `<div style="background:${style.bg};border:1px solid ${style.border};border-left:5px solid ${style.accent};border-radius:18px;box-shadow:0 12px 28px rgba(15,23,42,.052);padding:20px 22px;box-sizing:border-box;display:flex;flex-direction:column;min-height:200px">
+      <div style="display:flex;align-items:flex-start;gap:16px;padding-bottom:20px">
+        <div style="width:52px;height:52px;border-radius:50%;background:${style.iconBg};display:flex;align-items:center;justify-content:center;flex-shrink:0">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="${style.accent}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICO_GOOGLE}</svg>
+        </div>
+        <div style="min-width:0">
+          <p style="font-size:19px;font-weight:800;color:${FG};font-family:${INTER};margin:0 0 4px;line-height:1.25">${name}</p>
+          <p style="font-size:13px;font-weight:500;color:#163461;font-family:${INTER};margin:0;line-height:1.45;max-width:320px">Campanha de ${channelLabel.toLowerCase()}.</p>
+        </div>
+      </div>
+
+      <div style="border-top:1px solid #EEF2F7"></div>
+
+      <div style="padding:20px 0 4px;display:flex;flex-direction:column;gap:18px">
+        <div style="display:flex;gap:12px">${row1}</div>
+        <div style="display:flex;gap:12px">${row2}</div>
+      </div>
+    </div>`;
+  }
+
+  const month = periodo.split('/')[0]?.toLowerCase() || periodo.toLowerCase();
+  const campGrid = campanhas.length > 0
+    ? `<div style="display:grid;grid-template-columns:${campanhas.length === 1 ? '1fr' : '1fr 1fr'};gap:18px 22px">${campanhas.map(campBlock).join('')}</div>`
+    : '';
+
+  const body = `<div data-slide-index="${idx}" data-slide-total="${total}" style="width:1440px;min-height:810px;background:${BG};border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
+  <div style="position:absolute;right:80px;top:-120px;width:560px;height:500px;border-radius:50%;background:linear-gradient(135deg,rgba(219,234,254,.5),${GOOGLE_BLUE}14,rgba(255,255,255,.1));opacity:.75;pointer-events:none"></div>
+
+  <div style="position:relative;z-index:1;flex:1;padding:52px 48px 0;display:flex;flex-direction:column">
+    <div style="flex-shrink:0;margin-bottom:28px">
+      <h1 style="font-family:${INTER};font-size:52px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 8px;letter-spacing:-0.03em">${reportTitle('Campanhas Google Ads')}</h1>
+      <p data-conclusion="1" style="font-size:16px;font-weight:500;color:#163461;font-family:${INTER};margin:0">Desempenho das campanhas em ${month}</p>
+    </div>
+
+    <div style="flex:1;min-height:0">
+      ${campGrid}
+    </div>
+  </div>
+
+  ${richFooter()}
+</div>`;
+  return auditSlide(body, 'sGoogleAdsCampanhas');
 }
 
 // ── Diagnosis (Claude — expanded JSON) ────────────────────────────────────────
