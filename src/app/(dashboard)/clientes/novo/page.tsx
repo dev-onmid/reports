@@ -8,8 +8,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useClients } from '@/lib/client-store';
-import { useMetaAdsConnections } from '@/lib/meta-ads-store';
-import { loadIntegrations, loadCachedAdAccounts, type CachedAdAccount } from '@/lib/integration-store';
+import { addClientLink, loadClientLinks, type ClientAccountLink } from '@/lib/client-links-store';
+import type { MetaAdAccount } from '@/app/api/meta/ad-accounts/route';
 import type { DashboardType } from '@/lib/mock-data';
 import { cn } from '@/lib/utils';
 
@@ -53,7 +53,6 @@ function NovoClienteWizard() {
   const existingId = searchParams.get('id');
 
   const { addClient, markOnboardingComplete } = useClients();
-  const { getConnection, saveConnection } = useMetaAdsConnections();
 
   const [clientId, setClientId] = useState<string | null>(existingId);
   const [step, setStep] = useState(1);
@@ -107,32 +106,67 @@ function NovoClienteWizard() {
   }
 
   // ── Passo 2: conta de anúncios Meta ─────────────────────────────────────────
-  const [globalMetaConnected, setGlobalMetaConnected] = useState<boolean | null>(null);
-  const [cachedAccounts, setCachedAccounts] = useState<CachedAdAccount[]>([]);
-  const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
+  // Usa o mesmo sistema do diálogo "Vincular contas" (client_account_links + meta_connections)
+  // que já alimenta os relatórios e o resolver de campanha/conjunto — não o login via SDK do
+  // Facebook em /integracoes, que está desconectado/sem uso na prática.
+  type MetaConn = { id: string; label: string; userName: string };
+  const [metaConns, setMetaConns] = useState<MetaConn[]>([]);
+  const [accountsByConn, setAccountsByConn] = useState<Record<string, MetaAdAccount[]>>({});
+  const [existingLinks, setExistingLinks] = useState<ClientAccountLink[]>([]);
+  const [selectedAccountIds, setSelectedAccountIds] = useState<Set<string>>(new Set());
   const [loadingAccounts, setLoadingAccounts] = useState(true);
+  const [savingAccounts, setSavingAccounts] = useState(false);
 
   useEffect(() => {
-    if (step !== 2) return;
-    Promise.all([loadIntegrations(), loadCachedAdAccounts()]).then(([store, accounts]) => {
-      setGlobalMetaConnected(store.meta.status === 'connected');
-      setCachedAccounts(accounts);
-      if (clientId) {
-        const conn = getConnection(clientId);
-        if (conn && conn.accountIds.length > 0) setSelectedAccountIds(conn.accountIds);
-      }
+    if (step !== 2 || !clientId) return;
+    Promise.all([
+      loadClientLinks(clientId).catch(() => []),
+      fetch('/api/meta/connections').then(r => r.ok ? r.json() as Promise<MetaConn[]> : []),
+    ]).then(async ([links, conns]) => {
+      const existing = links.filter(l => l.platform === 'meta_ads');
+      setExistingLinks(existing);
+      setSelectedAccountIds(new Set(existing.map(l => l.accountId)));
+      setMetaConns(conns);
+
+      const map: Record<string, MetaAdAccount[]> = {};
+      await Promise.allSettled(conns.map(async (conn) => {
+        const res = await fetch(`/api/meta/ad-accounts?connectionId=${conn.id}`);
+        if (res.ok) map[conn.id] = await res.json() as MetaAdAccount[];
+      }));
+      setAccountsByConn(map);
     }).finally(() => setLoadingAccounts(false));
-  }, [step, clientId, getConnection]);
+  }, [step, clientId]);
 
   function toggleAccount(id: string) {
-    setSelectedAccountIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+    setSelectedAccountIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
   }
 
-  function handleSaveAccounts() {
-    if (!clientId || selectedAccountIds.length === 0) return;
-    const firstName = cachedAccounts.find(a => a.id === selectedAccountIds[0])?.name ?? selectedAccountIds[0];
-    saveConnection(clientId, firstName, selectedAccountIds);
-    setStep(3);
+  const allAccounts = Object.entries(accountsByConn).flatMap(([connId, accs]) =>
+    accs.map(a => ({ ...a, connId })));
+
+  async function handleSaveAccounts() {
+    if (selectedAccountIds.size === 0) return;
+    setSavingAccounts(true);
+    try {
+      const existingIds = new Set(existingLinks.map(l => l.accountId));
+      await Promise.allSettled(
+        [...selectedAccountIds].filter(id => !existingIds.has(id)).map(accountId => {
+          const account = allAccounts.find(a => a.id === accountId);
+          if (!account) return Promise.resolve();
+          return addClientLink(clientId!, {
+            platform: 'meta_ads', connectionId: account.connId,
+            accountId: account.id, accountName: account.name, currency: account.currency ?? 'BRL',
+          });
+        })
+      );
+      setStep(3);
+    } finally {
+      setSavingAccounts(false);
+    }
   }
 
   // ── Passo 3: pixel de mensagem ───────────────────────────────────────────────
@@ -217,12 +251,12 @@ function NovoClienteWizard() {
   useEffect(() => {
     if (!existingId || resumeChecked) return;
     (async () => {
-      const [accounts, cfgRes, eventosRes] = await Promise.all([
-        loadCachedAdAccounts().then(() => getConnection(existingId)),
+      const [links, cfgRes, eventosRes] = await Promise.all([
+        loadClientLinks(existingId).catch(() => []),
         fetch(`/api/clients/${existingId}/conversions`).then(r => r.ok ? r.json() as Promise<ConversionConfig> : null),
         fetch(`/api/clients/${existingId}/conversions/eventos-custom`).then(r => r.ok ? r.json() as Promise<EventoCustom[]> : []),
       ]);
-      const step2Done = Boolean(accounts && accounts.accountIds.length > 0);
+      const step2Done = links.some(l => l.platform === 'meta_ads');
       const step3Done = Boolean(cfgRes?.meta_pixel_id && cfgRes?.meta_access_token && cfgRes?.meta_page_id);
       const step4Done = eventosRes.length > 0;
       if (!step2Done) setStep(2);
@@ -300,29 +334,25 @@ function NovoClienteWizard() {
         <div className="space-y-4 rounded-xl border border-border bg-card p-5">
           <p className="text-sm text-muted-foreground">Selecione a conta de anúncios do Meta que pertence a este cliente.</p>
           {loadingAccounts && <p className="text-xs text-muted-foreground">Carregando contas...</p>}
-          {!loadingAccounts && globalMetaConnected === false && (
+          {!loadingAccounts && metaConns.length === 0 && (
             <div className="flex items-start gap-2 rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>A conta master de anúncios da agência ainda não foi conectada. Peça pra um admin conectar em{' '}
-                <Link href="/integracoes" target="_blank" className="underline inline-flex items-center gap-0.5">Integrações <ExternalLink className="h-3 w-3" /></Link>, depois volte aqui.
-              </span>
+              <span>Nenhuma conexão Meta disponível na agência. Peça pra um admin cadastrar uma conexão antes de continuar.</span>
             </div>
           )}
-          {!loadingAccounts && globalMetaConnected === true && cachedAccounts.length === 0 && (
+          {!loadingAccounts && metaConns.length > 0 && allAccounts.length === 0 && (
             <div className="flex items-start gap-2 rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>Nenhuma conta de anúncio encontrada. Abra{' '}
-                <Link href="/integracoes" target="_blank" className="underline inline-flex items-center gap-0.5">Integrações <ExternalLink className="h-3 w-3" /></Link>{' '}e atualize a lista de contas.
-              </span>
+              <span>Nenhuma conta de anúncio retornada pela Meta para as conexões cadastradas.</span>
             </div>
           )}
-          {!loadingAccounts && cachedAccounts.length > 0 && (
+          {!loadingAccounts && allAccounts.length > 0 && (
             <div className="grid gap-2 sm:grid-cols-2">
-              {cachedAccounts.map(a => (
+              {allAccounts.map(a => (
                 <button key={a.id} onClick={() => toggleAccount(a.id)}
                   className={cn(
                     'rounded-lg border px-3 py-2 text-left text-xs transition-colors',
-                    selectedAccountIds.includes(a.id) ? 'border-primary bg-primary/10' : 'border-border hover:bg-muted/40',
+                    selectedAccountIds.has(a.id) ? 'border-primary bg-primary/10' : 'border-border hover:bg-muted/40',
                   )}>
                   <p className="font-semibold">{a.name}</p>
                   <p className="text-muted-foreground font-mono">{a.id}</p>
@@ -332,7 +362,9 @@ function NovoClienteWizard() {
           )}
           <div className="flex justify-between pt-2">
             <Button variant="outline" onClick={() => setStep(1)}>Voltar</Button>
-            <Button onClick={handleSaveAccounts} disabled={selectedAccountIds.length === 0}>Avançar</Button>
+            <Button onClick={() => void handleSaveAccounts()} disabled={selectedAccountIds.size === 0 || savingAccounts}>
+              {savingAccounts ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : null} Avançar
+            </Button>
           </div>
         </div>
       )}
