@@ -31,6 +31,8 @@ export type AiUsageProvider = {
   provider: 'openai' | 'claude';
   label: string;
   calls: number;
+  input_tokens: number;
+  output_tokens: number;
   cost_usd: number;
   cost_brl: number;
   credit_usd: number;
@@ -98,12 +100,14 @@ export async function GET() {
     `);
 
     const { rows: byProviderRows } = await pool.query<{
-      model: string; calls: string; cost_usd: string;
+      model: string; calls: string; cost_usd: string; input_tokens: string; output_tokens: string;
     }>(`
       SELECT
         model,
         COUNT(*) AS calls,
-        COALESCE(SUM(cost_usd), 0) AS cost_usd
+        COALESCE(SUM(cost_usd), 0) AS cost_usd,
+        COALESCE(SUM(input_tokens), 0) AS input_tokens,
+        COALESCE(SUM(output_tokens), 0) AS output_tokens
       FROM ai_usage_log
       WHERE created_at >= date_trunc('month', NOW())
       GROUP BY model
@@ -113,19 +117,23 @@ export async function GET() {
     const costBrl = costUsd * USD_TO_BRL;
     const settings: AiBillingSettings = await getAiBillingSettings(pool);
     const providerTotals = {
-      openai: { calls: 0, cost_usd: 0 },
-      claude: { calls: 0, cost_usd: 0 },
+      openai: { calls: 0, cost_usd: 0, input_tokens: 0, output_tokens: 0 },
+      claude: { calls: 0, cost_usd: 0, input_tokens: 0, output_tokens: 0 },
     };
     byProviderRows.forEach(row => {
       const provider = providerFromModel(row.model);
       providerTotals[provider].calls += parseInt(row.calls);
       providerTotals[provider].cost_usd += parseFloat(row.cost_usd);
+      providerTotals[provider].input_tokens += parseInt(row.input_tokens);
+      providerTotals[provider].output_tokens += parseInt(row.output_tokens);
     });
     const providers: AiUsageProvider[] = [
       {
         provider: 'claude',
         label: 'Claude',
         calls: providerTotals.claude.calls,
+        input_tokens: providerTotals.claude.input_tokens,
+        output_tokens: providerTotals.claude.output_tokens,
         cost_usd: providerTotals.claude.cost_usd,
         cost_brl: providerTotals.claude.cost_usd * USD_TO_BRL,
         credit_usd: settings.claude_credit_usd,
@@ -138,6 +146,8 @@ export async function GET() {
         provider: 'openai',
         label: 'OpenAI',
         calls: providerTotals.openai.calls,
+        input_tokens: providerTotals.openai.input_tokens,
+        output_tokens: providerTotals.openai.output_tokens,
         cost_usd: providerTotals.openai.cost_usd,
         cost_brl: providerTotals.openai.cost_usd * USD_TO_BRL,
         credit_usd: settings.openai_credit_usd,
