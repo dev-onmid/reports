@@ -1,6 +1,7 @@
 "use client";
 
 import { use, useEffect, useRef, useState, type ComponentType, type CSSProperties, type PointerEvent } from 'react';
+import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { mockDashboardData, mockClients, type ClientStatus, type DashboardType } from '@/lib/mock-data';
 import { useClients } from '@/lib/client-store';
@@ -4595,12 +4596,20 @@ function readSavedDashboardBlocks(clientId: string): ClientDashboardWidget[] {
 
 export default function ClientPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const router = useRouter();
   const { allClients, setClientStatus } = useClients();
   const googleAds = useGoogleAds();
   const baseClient = mockClients.find((c) => c.id === id);
   const storedClient = allClients.find((c) => c.id === id);
   const client = storedClient ?? { name: 'Cliente', segment: '', status: 'Ativo' };
   const isNewClient = !baseClient || !storedClient;
+  const onboardingPending = storedClient?.onboarding_completed === false;
+
+  // Cadastro feito pelo wizard obrigatório (/clientes/novo) ainda não foi concluído —
+  // volta pra lá em vez de abrir as abas normais. Ver markOnboardingComplete em client-store.ts.
+  useEffect(() => {
+    if (onboardingPending) router.replace(`/clientes/novo?id=${id}`);
+  }, [onboardingPending, id, router]);
 
   const [realMetrics, setRealMetrics] = useState<MetaAdsMetrics | null>(null);
   const [apiGoogleMetrics, setApiGoogleMetrics] = useState<GoogleAdsMetrics | null>(null);
@@ -4781,6 +4790,10 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
     dna:          'DNA do Cliente',
     crm:          'CRM',
   };
+
+  if (onboardingPending) {
+    return <div className="flex h-[60vh] items-center justify-center text-sm text-muted-foreground">Redirecionando para o cadastro pendente...</div>;
+  }
 
   return (
     <div className="space-y-6 pb-10 relative">

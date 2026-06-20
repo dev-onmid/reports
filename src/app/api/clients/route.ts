@@ -22,6 +22,9 @@ async function ensureColumns(pool: ReturnType<typeof makeServerPool>) {
   await pool.query(`ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS ads_billing_mode TEXT NOT NULL DEFAULT 'prepaid'`).catch(() => {});
   await pool.query('ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS category_id UUID REFERENCES public.client_categories(id)').catch(() => {});
   await pool.query(`ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS dashboard_type TEXT NOT NULL DEFAULT 'leads'`).catch(() => {});
+  // Default TRUE so every pre-existing client stays fully accessible — only clients
+  // created through the mandatory onboarding wizard (/clientes/novo) get FALSE explicitly.
+  await pool.query(`ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS onboarding_completed BOOLEAN NOT NULL DEFAULT true`).catch(() => {});
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -37,6 +40,7 @@ function rowToJson(r: any) {
     category_id: r.category_id ?? null,
     category_name: r.category_name ?? null,
     dashboard_type: r.dashboard_type ?? 'leads',
+    onboarding_completed: r.onboarding_completed ?? true,
   };
 }
 
@@ -46,7 +50,7 @@ export async function GET() {
     await ensureColumns(pool);
     const { rows } = await pool.query(`
       SELECT c.id, c.name, c.segment, c.status, c.gestor_id, c.ads_billing_mode,
-             c.category_id, c.dashboard_type, u.name as gestor_name, cat.name as category_name
+             c.category_id, c.dashboard_type, c.onboarding_completed, u.name as gestor_name, cat.name as category_name
       FROM public.clients c
       LEFT JOIN public.users u ON c.gestor_id = u.id
       LEFT JOIN public.client_categories cat ON cat.id = c.category_id
@@ -61,20 +65,20 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const body = await req.json() as {
     id: string; name: string; segment: string; status: string;
-    gestor_id?: string; category_id?: string; dashboard_type?: string;
+    gestor_id?: string; category_id?: string; dashboard_type?: string; onboarding_completed?: boolean;
   };
   const pool = makeServerPool();
   try {
     await ensureColumns(pool);
     const { rows } = await pool.query(
-      `INSERT INTO public.clients (id, name, segment, status, gestor_id, category_id, dashboard_type)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO public.clients (id, name, segment, status, gestor_id, category_id, dashboard_type, onboarding_completed)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        ON CONFLICT (id) DO UPDATE SET name = $2, segment = $3, status = $4, gestor_id = $5,
          category_id = COALESCE($6, clients.category_id),
          dashboard_type = COALESCE($7, clients.dashboard_type)
-       RETURNING id, name, segment, status, gestor_id, category_id, dashboard_type`,
+       RETURNING id, name, segment, status, gestor_id, category_id, dashboard_type, onboarding_completed`,
       [body.id, body.name, body.segment, body.status, body.gestor_id ?? null,
-       body.category_id ?? null, body.dashboard_type ?? 'leads']
+       body.category_id ?? null, body.dashboard_type ?? 'leads', body.onboarding_completed ?? true]
     );
     const row = rows[0];
     let gestor_name = null;
@@ -99,6 +103,7 @@ export async function PATCH(req: NextRequest) {
   const body = await req.json() as Partial<{
     name: string; segment: string; status: string;
     gestor_id: string | null; category_id: string | null; dashboard_type: string;
+    onboarding_completed: boolean;
   }>;
   const pool = makeServerPool();
   try {
@@ -112,6 +117,7 @@ export async function PATCH(req: NextRequest) {
     if (body.gestor_id      !== undefined) { sets.push(`gestor_id = $${idx++}`);      vals.push(body.gestor_id); }
     if (body.category_id    !== undefined) { sets.push(`category_id = $${idx++}`);    vals.push(body.category_id); }
     if (body.dashboard_type !== undefined) { sets.push(`dashboard_type = $${idx++}`); vals.push(body.dashboard_type); }
+    if (body.onboarding_completed !== undefined) { sets.push(`onboarding_completed = $${idx++}`); vals.push(body.onboarding_completed); }
     if (sets.length === 0) return Response.json({ error: 'Nothing to update' }, { status: 400 });
     vals.push(id);
     await pool.query(`UPDATE public.clients SET ${sets.join(', ')} WHERE id = $${idx}`, vals);

@@ -35,12 +35,11 @@ type ActivityLog = {
 
 export default function ClientesPage() {
   const {
-    clients, archivedClients, addClient, archiveClient,
+    clients, archivedClients, archiveClient,
     restoreClient, setClientStatus, deleteClient, updateClientGestor, updateClientMeta,
   } = useClients();
   const { payments, loading: paymentsLoading, setPayments } = useInvestmentPayments();
 
-  const [dialogOpen, setDialogOpen]             = useState(false);
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen]   = useState(false);
   const [statusDialogOpen, setStatusDialogOpen]   = useState(false);
@@ -55,16 +54,9 @@ export default function ClientesPage() {
   const [securityPassword, setSecurityPassword]   = useState('');
   const [securityError, setSecurityError]         = useState('');
   const [securityLoading, setSecurityLoading]     = useState(false);
-  const [name, setName]                                 = useState('');
-  const [segment, setSegment]                           = useState('');
-  const [status, setStatus]                             = useState<ClientStatus>('Ativo');
   const [search, setSearch]                             = useState('');
   const [segmentFilter, setSegmentFilter]               = useState('');
   const [categories, setCategories]                     = useState<{ id: string; name: string; is_default: boolean }[]>([]);
-  const [categoryId, setCategoryId]                     = useState('');
-  const [newClientDashType, setNewClientDashType]       = useState<DashboardType>('leads');
-  const [newCategoryName, setNewCategoryName]           = useState('');
-  const [showNewCategory, setShowNewCategory]           = useState(false);
   const [gestorFilter, setGestorFilter]           = useState('');
   const [sortOrder, setSortOrder]                 = useState<'az' | 'za'>('az');
   const [menuId, setMenuId]                       = useState<string | null>(null);
@@ -73,7 +65,6 @@ export default function ClientesPage() {
   const [users, setUsers]                          = useState<{id: string; name: string; role: string}[]>([]);
   const [gestorClientId, setGestorClientId]        = useState<string | null>(null);
   const [selectedGestorId, setSelectedGestorId]    = useState('');
-  const [newClientGestorId, setNewClientGestorId]  = useState('');
   const [activityClientId, setActivityClientId]    = useState<string | null>(null);
   const [activityLogs, setActivityLogs]            = useState<ActivityLog[]>([]);
   const [activityLoading, setActivityLoading]      = useState(false);
@@ -153,41 +144,6 @@ export default function ClientesPage() {
       setClientBalances(result);
     }).catch(() => {}).finally(() => setBalancesLoading(false));
   }, []);
-
-  function handleAddClient() {
-    if (!name.trim() || !categoryId) return;
-    const cat = categories.find(c => c.id === categoryId);
-    addClient({
-      name,
-      segment: cat?.name ?? segment,
-      status,
-      gestor_id: newClientGestorId || undefined,
-      category_id: categoryId,
-      dashboard_type: newClientDashType,
-    });
-    setName(''); setSegment(''); setCategoryId(''); setStatus('Ativo');
-    setNewClientGestorId(''); setNewClientDashType('leads');
-    setShowNewCategory(false); setNewCategoryName('');
-    setDialogOpen(false);
-  }
-
-  async function handleCreateCategory() {
-    if (!newCategoryName.trim()) return;
-    const res = await fetch('/api/clients/categories', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: newCategoryName.trim() }),
-    });
-    if (res.ok) {
-      const newCat = await res.json() as { id: string; name: string; is_default: boolean };
-      setCategories(prev => [...prev, newCat].sort((a, b) =>
-        (b.is_default ? 1 : 0) - (a.is_default ? 1 : 0) || a.name.localeCompare(b.name)
-      ));
-      setCategoryId(newCat.id);
-      setNewCategoryName('');
-      setShowNewCategory(false);
-    }
-  }
 
   function openArchiveDialog(client: { id: string; name: string }) {
     if (!isAdmin) return;
@@ -400,12 +356,12 @@ export default function ClientesPage() {
             Gerencie a base de clientes e acesse os dashboards individuais.
           </p>
         </div>
-        <button
-          onClick={() => setDialogOpen(true)}
+        <Link
+          href="/clientes/novo"
           className="flex shrink-0 items-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
         >
           <Plus className="h-4 w-4" /> Novo Cliente
-        </button>
+        </Link>
       </div>
 
       {/* ── TOOLBAR ── */}
@@ -759,76 +715,6 @@ export default function ClientesPage() {
       </div>
 
       {/* ── DIALOGS ── */}
-
-      {/* Novo cliente */}
-      <Dialog open={dialogOpen} onOpenChange={(v) => {
-        setDialogOpen(v);
-        if (!v) { setName(''); setSegment(''); setCategoryId(''); setStatus('Ativo'); setNewClientGestorId(''); setNewClientDashType('leads'); setShowNewCategory(false); setNewCategoryName(''); }
-      }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle>Novo Cliente</DialogTitle></DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="client-name">Nome do cliente</Label>
-              <Input id="client-name" value={name} onChange={e => setName(e.target.value)} placeholder="Ex: Clínica Nova Vida" className="bg-background" />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="client-category">Categoria <span className="text-destructive">*</span></Label>
-              <select id="client-category" value={categoryId} onChange={e => { if (e.target.value === '__new__') { setShowNewCategory(true); } else { setCategoryId(e.target.value); setShowNewCategory(false); } }}
-                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
-                <option value="">Selecione uma categoria...</option>
-                {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                <option value="__new__">+ Nova categoria</option>
-              </select>
-              {showNewCategory && (
-                <div className="flex gap-2 mt-1.5">
-                  <Input
-                    value={newCategoryName}
-                    onChange={e => setNewCategoryName(e.target.value)}
-                    placeholder="Nome da nova categoria"
-                    className="bg-background flex-1"
-                    onKeyDown={e => e.key === 'Enter' && void handleCreateCategory()}
-                  />
-                  <Button size="sm" onClick={() => void handleCreateCategory()} disabled={!newCategoryName.trim()}>Criar</Button>
-                  <Button size="sm" variant="outline" onClick={() => { setShowNewCategory(false); setNewCategoryName(''); }}>✕</Button>
-                </div>
-              )}
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="client-dash-type">Tipo de Dashboard</Label>
-              <select id="client-dash-type" value={newClientDashType} onChange={e => setNewClientDashType(e.target.value as DashboardType)}
-                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
-                <option value="leads">Leads — foco em captação e custo por lead</option>
-                <option value="branding">Branding — métricas de alcance e entrega</option>
-                <option value="conversao">Conversão — vendas, ROAS e receita</option>
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="client-status">Status</Label>
-              <select id="client-status" value={status} onChange={e => setStatus(e.target.value as ClientStatus)}
-                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
-                <option value="Ativo">Ativo</option>
-                <option value="Alerta">Alerta</option>
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="client-gestor">Gestor</Label>
-              <select id="client-gestor" value={newClientGestorId} onChange={e => setNewClientGestorId(e.target.value)}
-                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
-                <option value="">Sem gestor</option>
-                {users.map(u => <option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}
-              </select>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
-            <Button onClick={handleAddClient} disabled={!name.trim() || !categoryId}
-              className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
-              <Plus className="w-4 h-4 mr-1" /> Criar Cliente
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Status change */}
       <Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>

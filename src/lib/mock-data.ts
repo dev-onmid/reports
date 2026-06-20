@@ -44,6 +44,7 @@ export type Client = {
   category_id?: string;
   category_name?: string;
   dashboard_type?: DashboardType;
+  onboarding_completed?: boolean;
 };
 
 export const mockClients: Client[] = [

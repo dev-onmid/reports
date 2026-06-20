@@ -14,6 +14,7 @@ export type NewClientInput = {
   gestor_id?: string;
   category_id?: string;
   dashboard_type?: DashboardType;
+  onboarding_completed?: boolean;
 };
 
 export function canManageClients(role?: string): boolean {
@@ -67,6 +68,7 @@ export function useClients() {
         gestor_id: input.gestor_id,
         category_id: input.category_id,
         dashboard_type: input.dashboard_type ?? 'leads',
+        onboarding_completed: input.onboarding_completed ?? true,
       };
       setClients((prev) => [...prev, client]);
       void apiClients('POST', client).then(() => {
@@ -74,6 +76,13 @@ export function useClients() {
       }).catch((e) => console.error('Erro ao salvar cliente:', e));
       logActivity('client_created', `Cliente ${client.name} criado no segmento ${client.segment}`);
       return client;
+    },
+
+    markOnboardingComplete(id: string) {
+      setClients((prev) => prev.map((c) => c.id === id ? { ...c, onboarding_completed: true } : c));
+      void apiClients('PATCH', { onboarding_completed: true }, id)
+        .then(() => window.dispatchEvent(new Event(CLIENTS_UPDATED_EVENT)))
+        .catch((e) => console.error('Erro ao concluir onboarding:', e));
     },
 
     updateClientGestor(id: string, gestorId: string | null) {
