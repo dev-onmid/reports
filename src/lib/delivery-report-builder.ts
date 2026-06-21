@@ -12,10 +12,17 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 function brl(n: number) {
   return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 0, maximumFractionDigits: 0 });
 }
+// Per-unit costs (CPC, CPM, custo por lead/conversa/compra) are often under R$1 —
+// rounding to 0 decimals would show "R$ 0" for a real R$0,26 CPC. Use this instead
+// of brl() for any "custo por X" / CPC / CPM metric.
+function brlPrecise(n: number) {
+  return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
 function num(n: number) { return n.toLocaleString('pt-BR'); }
 
 // Use these when 0 means "data not available", not "actually zero"
 function brlOrDash(n: number) { return n > 0 ? brl(n) : '—'; }
+function brlPreciseOrDash(n: number) { return n > 0 ? brlPrecise(n) : '—'; }
 function numOrDash(n: number) { return n > 0 ? num(n) : '—'; }
 
 function cleanJsonString(value: string): string {
@@ -3244,7 +3251,7 @@ export function sMetaAdsCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number
     let row1: string, row2: string;
     if (campIsWA) {
       const demand = m.leads + m.conversas;
-      const cpl = demand > 0 && m.investimento > 0 ? brl(m.investimento / demand) : '—';
+      const cpl = demand > 0 && m.investimento > 0 ? brlPrecise(m.investimento / demand) : '—';
       row1 = [
         metricItem(ICO_MONEY, 'Investimento', brlOrDash(m.investimento), style.accent, style.iconBg),
         metricItem(ICO_CHAT, 'Leads', demand > 0 ? num(Math.round(demand)) : '—', style.accent, style.iconBg),
@@ -3256,7 +3263,7 @@ export function sMetaAdsCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number
         metricItem(ICO_BARS, 'Frequência', m.frequencia > 0 ? m.frequencia.toFixed(2) : '—', style.accent, style.iconBg),
       ].join('');
     } else if (campIsSales) {
-      const cpp = m.compras > 0 && m.investimento > 0 ? brl(m.investimento / m.compras) : '—';
+      const cpp = m.compras > 0 && m.investimento > 0 ? brlPrecise(m.investimento / m.compras) : '—';
       row1 = [
         metricItem(ICO_MONEY, 'Investimento', brlOrDash(m.investimento), style.accent, style.iconBg),
         metricItem(ICO_CART, 'Compras registradas', m.compras > 0 ? num(Math.round(m.compras)) : '—', style.accent, style.iconBg),
@@ -3272,7 +3279,7 @@ export function sMetaAdsCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number
       row1 = [
         metricItem(ICO_MONEY, 'Investimento', brlOrDash(m.investimento), style.accent, style.iconBg),
         metricItem(ICO_CURSOR, 'Cliques no link', numOrDash(m.cliques), style.accent, style.iconBg),
-        metricItem(ICO_MONEY, 'CPC', brlOrDash(cpc), style.accent, style.iconBg),
+        metricItem(ICO_MONEY, 'CPC', brlPreciseOrDash(cpc), style.accent, style.iconBg),
       ].join('');
       row2 = [
         metricItem(ICO_REACH, 'Pessoas atingidas', numOrDash(m.alcance), style.accent, style.iconBg),
@@ -3287,7 +3294,7 @@ export function sMetaAdsCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number
         metricItem(ICO_EYE, 'Impressões', numOrDash(m.impressoes), style.accent, style.iconBg),
       ].join('');
       row2 = [
-        metricItem(ICO_MONEY, 'CPM', brlOrDash(cpm), style.accent, style.iconBg),
+        metricItem(ICO_MONEY, 'CPM', brlPreciseOrDash(cpm), style.accent, style.iconBg),
         metricItem(ICO_BARS, 'Frequência', m.frequencia > 0 ? m.frequencia.toFixed(2) : '—', style.accent, style.iconBg),
         metricItem(ICO_CURSOR, 'Cliques', numOrDash(m.cliques), style.accent, style.iconBg),
       ].join('');
@@ -3544,7 +3551,7 @@ export function sGoogleAdsCampanhas(google: GoogleAdsFull, idx: number, total: n
 
     let row1: string, row2: string;
     if (kind === 'vendas') {
-      const cpa = m.conversoes > 0 && m.investimento > 0 ? brl(m.investimento / m.conversoes) : '—';
+      const cpa = m.conversoes > 0 && m.investimento > 0 ? brlPrecise(m.investimento / m.conversoes) : '—';
       const roas = m.investimento > 0 && m.valorConversoes > 0 ? m.valorConversoes / m.investimento : 0;
       row1 = [
         metricItem(ICO_MONEY, 'Investimento', brlOrDash(m.investimento), style.accent, style.iconBg),
@@ -3556,7 +3563,7 @@ export function sGoogleAdsCampanhas(google: GoogleAdsFull, idx: number, total: n
         metricItem(ICO_TREND, 'ROAS', roas > 0 ? roas.toFixed(2) : '—', style.accent, style.iconBg),
       ].join('');
     } else if (kind === 'leads') {
-      const custoLead = m.conversoes > 0 && m.investimento > 0 ? brl(m.investimento / m.conversoes) : '—';
+      const custoLead = m.conversoes > 0 && m.investimento > 0 ? brlPrecise(m.investimento / m.conversoes) : '—';
       row1 = [
         metricItem(ICO_MONEY, 'Investimento', brlOrDash(m.investimento), style.accent, style.iconBg),
         metricItem(ICO_TARGET, 'Conversões', numOrDash(m.conversoes), style.accent, style.iconBg),
@@ -3572,7 +3579,7 @@ export function sGoogleAdsCampanhas(google: GoogleAdsFull, idx: number, total: n
       row1 = [
         metricItem(ICO_MONEY, 'Investimento', brlOrDash(m.investimento), style.accent, style.iconBg),
         metricItem(ICO_CURSOR, 'Cliques', numOrDash(m.cliques), style.accent, style.iconBg),
-        metricItem(ICO_MONEY, 'CPC', brlOrDash(cpc), style.accent, style.iconBg),
+        metricItem(ICO_MONEY, 'CPC', brlPreciseOrDash(cpc), style.accent, style.iconBg),
       ].join('');
       row2 = [
         metricItem(ICO_EYE, 'Impressões', numOrDash(m.impressoes), style.accent, style.iconBg),
@@ -3583,7 +3590,7 @@ export function sGoogleAdsCampanhas(google: GoogleAdsFull, idx: number, total: n
       row1 = [
         metricItem(ICO_MONEY, 'Investimento', brlOrDash(m.investimento), style.accent, style.iconBg),
         metricItem(ICO_EYE, 'Impressões', numOrDash(m.impressoes), style.accent, style.iconBg),
-        metricItem(ICO_MONEY, 'CPM', brlOrDash(cpm), style.accent, style.iconBg),
+        metricItem(ICO_MONEY, 'CPM', brlPreciseOrDash(cpm), style.accent, style.iconBg),
       ].join('');
       row2 = [
         metricItem(ICO_CURSOR, 'Cliques', numOrDash(m.cliques), style.accent, style.iconBg),
