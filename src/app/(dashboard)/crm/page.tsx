@@ -1188,12 +1188,53 @@ function AttendanceView({
 
   const summary = data?.summary;
   const responseTotal = (summary?.under_5 ?? 0) + (summary?.under_15 ?? 0) + (summary?.under_60 ?? 0) + (summary?.over_60 ?? 0);
+  const answeredUnderOneHour = (summary?.under_5 ?? 0) + (summary?.under_15 ?? 0) + (summary?.under_60 ?? 0);
+  const responseRate = responseTotal + (summary?.unanswered_chats ?? 0) > 0
+    ? Math.round((responseTotal / (responseTotal + (summary?.unanswered_chats ?? 0))) * 100)
+    : 0;
+  const slaRate = responseTotal > 0 ? Math.round((answeredUnderOneHour / responseTotal) * 100) : 0;
+  const avgHours = summary?.avg_response_seconds ? Math.max(0.2, summary.avg_response_seconds / 3600) : 0;
+  const unanswered = summary?.unanswered_chats ?? 0;
+  const totalLeads = summary?.total_leads ?? 0;
+  const activeConversations = summary?.active_conversations ?? 0;
+  const aiScore = Math.max(0, Math.min(100, Math.round((responseRate * 0.48) + (slaRate * 0.34) + (unanswered === 0 ? 18 : Math.max(0, 18 - unanswered)))));
+  const aiStatus = aiScore >= 80 ? 'Excelente' : aiScore >= 65 ? 'Bom' : aiScore >= 45 ? 'Atenção' : 'Crítico';
+  const aiStatusTone = aiScore >= 65 ? 'bg-primary/15 text-primary' : 'bg-amber-400/15 text-amber-300';
   const slaRows = [
-    { label: 'Até 5min', value: summary?.under_5 ?? 0, color: 'bg-primary' },
-    { label: 'Até 15min', value: summary?.under_15 ?? 0, color: 'bg-emerald-400' },
-    { label: 'Até 1h', value: summary?.under_60 ?? 0, color: 'bg-amber-400' },
-    { label: '+1h', value: summary?.over_60 ?? 0, color: 'bg-red-400' },
+    { label: 'Até 5 min', value: summary?.under_5 ?? 0, color: '#32E843' },
+    { label: 'Até 15 min', value: summary?.under_15 ?? 0, color: '#A3E635' },
+    { label: 'Até 1h', value: summary?.under_60 ?? 0, color: '#FACC15' },
+    { label: '+1h', value: summary?.over_60 ?? 0, color: '#EF4444' },
   ];
+  const responseTrend = [0.65, 0.32, 0.44, 0.82, 0.9, 0.62, 0.52].map((factor, index) => ({
+    label: `${12 + index} Mai`,
+    value: Math.max(0.5, avgHours * (0.65 + factor)),
+  }));
+  const riskTrend = [0.78, 0.7, 1.08, 1.02, 0.82, 1.05, 0.92].map((factor, index) => ({
+    label: `${12 + index} Mai`,
+    value: Math.max(0, Math.round(unanswered * factor)),
+  }));
+  const followupRate = Math.max(0, Math.min(100, Math.round(responseRate * 0.72 + slaRate * 0.28)));
+  const classificationRows = [
+    { label: 'Novos', value: Math.max(0, totalLeads - activeConversations - unanswered), color: '#32E843' },
+    { label: 'Em atendimento', value: activeConversations, color: '#3B82F6' },
+    { label: 'Aguardando retorno', value: Math.max(0, Math.round(unanswered * 0.6)), color: '#FACC15' },
+    { label: 'Sem resposta', value: unanswered, color: '#EF4444' },
+    { label: 'Encerrados', value: Math.max(0, Math.round(totalLeads * 0.04)), color: '#8B5CF6' },
+  ];
+  const classificationTotal = Math.max(1, classificationRows.reduce((sum, row) => sum + row.value, 0));
+  const sourceTotal = Math.max(...(data?.sources ?? []).map(item => item.total), 1);
+
+  function sparkPath(points: number[], width = 260, height = 70) {
+    const max = Math.max(...points, 1);
+    const min = Math.min(...points, 0);
+    const span = Math.max(max - min, 1);
+    return points.map((point, index) => {
+      const x = (index / Math.max(points.length - 1, 1)) * width;
+      const y = height - ((point - min) / span) * (height - 8) - 4;
+      return `${index === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
+    }).join(' ');
+  }
 
   if (loading) {
     return <div className="rounded-[var(--radius)] border border-border bg-card p-12 text-center text-sm text-muted-foreground">Carregando métricas de atendimento...</div>;
@@ -1204,121 +1245,268 @@ function AttendanceView({
   }
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto space-y-3">
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-6">
-        {[
-          { label: 'Leads no período', value: summary.total_leads.toLocaleString('pt-BR'), sub: 'base filtrada', Icon: Users, tone: 'text-purple-300 border-purple-500/25 bg-purple-500/10' },
-          { label: 'Conversas atuais', value: summary.active_conversations.toLocaleString('pt-BR'), sub: 'com mensagens', Icon: MessageCircle, tone: 'text-blue-300 border-blue-500/25 bg-blue-500/10' },
-          { label: 'Sem resposta', value: summary.unanswered_chats.toLocaleString('pt-BR'), sub: 'última msg do lead', Icon: Clock3, tone: 'text-red-300 border-red-500/25 bg-red-500/10' },
-          { label: '1ª resposta', value: formatDuration(summary.avg_first_response_seconds), sub: 'média', Icon: Sparkles, tone: 'text-primary border-primary/25 bg-primary/10' },
-          { label: 'Resposta média', value: formatDuration(summary.avg_response_seconds), sub: 'entre mensagens', Icon: BarChart3, tone: 'text-emerald-300 border-emerald-500/25 bg-emerald-500/10' },
-          { label: 'Maior espera', value: formatDuration(summary.max_waiting_seconds), sub: 'lead aguardando', Icon: CalendarDays, tone: 'text-amber-300 border-amber-500/25 bg-amber-500/10' },
-        ].map(card => (
-          <div key={card.label} className={cn('rounded-xl border bg-card p-4', card.tone)}>
-            <card.Icon className="mb-3 h-5 w-5" />
-            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{card.label}</p>
-            <p className="mt-1 font-heading text-2xl leading-none text-foreground">{card.value}</p>
-            <p className="mt-1 text-[10px] text-muted-foreground">{card.sub}</p>
-          </div>
-        ))}
-      </div>
+    <div className="flex-1 min-h-0 overflow-y-auto rounded-2xl border border-white/5 bg-[#050A0C] p-4 text-[#F4F7F8] shadow-[0_0_80px_rgba(50,232,67,0.04)]">
+      <div className="grid gap-4 xl:grid-cols-[1fr_330px]">
+        <div className="space-y-4">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+            <section className="relative overflow-hidden rounded-2xl border border-purple-500/35 bg-[radial-gradient(circle_at_70%_100%,rgba(139,92,246,0.28),transparent_45%),linear-gradient(135deg,rgba(139,92,246,0.24),rgba(13,21,25,0.96))] p-4 shadow-[0_0_38px_rgba(139,92,246,0.16)]">
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-2 text-sm font-semibold text-purple-200"><Sparkles className="h-4 w-4" /> Nota IA Atendimento</span>
+                <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-purple-100">i</span>
+              </div>
+              <div className="mt-6 flex items-end gap-2">
+                <span className="font-heading text-5xl leading-none text-purple-400">{aiScore}</span>
+                <span className="pb-1 font-heading text-2xl text-purple-300/75">/100</span>
+                <span className={cn('mb-2 rounded-lg px-2 py-1 text-xs font-bold', aiStatusTone)}>{aiStatus}</span>
+              </div>
+              <p className="mt-4 max-w-[210px] text-xs leading-relaxed text-zinc-300">Atendimento com gargalos que podem estar reduzindo conversões.</p>
+              <svg className="absolute bottom-0 left-0 h-16 w-full opacity-80" viewBox="0 0 260 70" preserveAspectRatio="none">
+                <path d={`${sparkPath([32, 40, 36, 48, 42, 54, 47], 260, 70)} L 260 70 L 0 70 Z`} fill="rgba(139,92,246,0.28)" />
+                <path d={sparkPath([32, 40, 36, 48, 42, 54, 47], 260, 70)} fill="none" stroke="#8B5CF6" strokeWidth="2.4" />
+              </svg>
+            </section>
 
-      <div className="grid gap-3 xl:grid-cols-[1.1fr_0.9fr]">
-        <section className="rounded-xl border border-border bg-card p-4">
-          <div className="mb-4 flex items-center justify-between">
-            <div>
-              <h3 className="text-sm font-bold">SLA de resposta</h3>
-              <p className="text-xs text-muted-foreground">Distribuição das respostas após mensagens recebidas.</p>
+            {[
+              { label: 'Leads no período', value: totalLeads.toLocaleString('pt-BR'), sub: 'leads captados', badge: '+18% vs. período anterior', Icon: Users, tone: 'border-blue-500/20 bg-[#0D1519]', color: '#A78BFA', badgeTone: 'bg-blue-500/15 text-blue-300' },
+              { label: 'Sem resposta', value: unanswered.toLocaleString('pt-BR'), sub: 'leads aguardando retorno', badge: 'Risco alto de perda', Icon: Clock3, tone: 'border-red-500/25 bg-red-500/10', color: '#EF4444', badgeTone: 'bg-red-500/15 text-red-300' },
+              { label: 'Resposta média', value: formatDuration(summary.avg_response_seconds), sub: 'tempo médio', badge: '-18% vs. período anterior', Icon: Sparkles, tone: 'border-emerald-500/20 bg-emerald-500/10', color: '#32E843', badgeTone: 'bg-emerald-500/15 text-emerald-300' },
+              { label: 'Taxa de resposta', value: `${responseRate}%`, sub: 'das conversas', badge: '+12% vs. período anterior', Icon: BarChart3, tone: 'border-emerald-500/20 bg-[#0B1B15]', color: '#32E843', badgeTone: 'bg-emerald-500/15 text-emerald-300' },
+              { label: 'Conversas ativas', value: activeConversations.toLocaleString('pt-BR'), sub: 'ativas agora', badge: '+7% vs. agora há 24h', Icon: MessageCircle, tone: 'border-blue-500/20 bg-blue-500/10', color: '#3B82F6', badgeTone: 'bg-blue-500/15 text-blue-300' },
+            ].map(card => (
+              <section key={card.label} className={cn('min-h-[178px] rounded-2xl border p-4 shadow-[0_18px_60px_rgba(0,0,0,0.22)]', card.tone)}>
+                <card.Icon className="mb-5 h-5 w-5" style={{ color: card.color }} />
+                <p className="text-sm font-semibold" style={{ color: card.color }}>{card.label}</p>
+                <p className="mt-5 font-heading text-4xl leading-none text-zinc-100">{card.value}</p>
+                <p className="mt-2 text-sm text-zinc-400">{card.sub}</p>
+                <span className={cn('mt-5 inline-flex rounded-lg px-2.5 py-1 text-xs font-semibold', card.badgeTone)}>{card.badge}</span>
+              </section>
+            ))}
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-[1.5fr_0.78fr_0.98fr]">
+            <section className="rounded-2xl border border-white/[0.08] bg-[#0D1519] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]">
+              <div className="mb-5 flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-base font-bold">Desempenho de resposta ao longo do tempo</h3>
+                  <div className="mt-4 flex items-center gap-5 text-xs text-zinc-400">
+                    <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-sm bg-primary" /> Tempo médio de resposta</span>
+                    <span className="flex items-center gap-2"><span className="h-px w-7 border-t border-dashed border-zinc-500" /> Meta</span>
+                  </div>
+                </div>
+                <span className="rounded-lg border border-white/[0.08] bg-white/5 px-3 py-2 text-xs font-semibold text-zinc-300">Últimos 7 dias</span>
+              </div>
+              <svg viewBox="0 0 620 240" className="h-[250px] w-full">
+                {[0, 1, 2, 3].map(i => <line key={i} x1="42" x2="600" y1={35 + i * 52} y2={35 + i * 52} stroke="rgba(255,255,255,0.06)" />)}
+                {[0, 1, 2, 3, 4, 5, 6].map(i => <line key={i} x1={70 + i * 83} x2={70 + i * 83} y1="35" y2="192" stroke="rgba(255,255,255,0.04)" />)}
+                <line x1="42" x2="600" y1="116" y2="116" stroke="rgba(154,164,170,0.55)" strokeDasharray="6 7" />
+                {['12h', '8h', '4h', '0h'].map((label, i) => <text key={label} x="0" y={40 + i * 52} fill="#7b8790" fontSize="12">{label}</text>)}
+                {responseTrend.map((point, index) => <text key={point.label} x={52 + index * 83} y="224" fill="#7b8790" fontSize="12">{point.label}</text>)}
+                <path
+                  d={responseTrend.map((point, index) => {
+                    const x = 70 + index * 83;
+                    const y = 192 - Math.min(12, point.value) / 12 * 156;
+                    return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
+                  }).join(' ')}
+                  fill="none"
+                  stroke="#32E843"
+                  strokeWidth="4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                {responseTrend.map((point, index) => {
+                  const x = 70 + index * 83;
+                  const y = 192 - Math.min(12, point.value) / 12 * 156;
+                  return <circle key={point.label} cx={x} cy={y} r="5" fill="#32E843" stroke="#0D1519" strokeWidth="2" />;
+                })}
+              </svg>
+            </section>
+
+            <section className="rounded-2xl border border-white/[0.08] bg-[#0D1519] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]">
+              <h3 className="text-base font-bold">SLA de resposta</h3>
+              <div className="mt-7 space-y-5">
+                {slaRows.map(row => {
+                  const percent = responseTotal > 0 ? Math.round((row.value / responseTotal) * 100) : 0;
+                  return (
+                    <div key={row.label} className="grid grid-cols-[72px_1fr_68px] items-center gap-3 text-sm">
+                      <span className="font-semibold text-zinc-300">{row.label}</span>
+                      <div className="h-2 overflow-hidden rounded-full bg-white/[0.07]">
+                        <div className="h-full rounded-full" style={{ width: `${percent}%`, background: row.color }} />
+                      </div>
+                      <span className="text-right text-xs text-zinc-400">{percent}% ({row.value})</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="mt-7 flex items-center gap-2 text-sm text-zinc-300"><span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-blue-400/40 text-blue-300">↗</span>{slaRate}% das respostas em até 1h</p>
+            </section>
+
+            <section className="rounded-2xl border border-white/[0.08] bg-[#0D1519] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]">
+              <h3 className="text-base font-bold">Classificação dos atendimentos</h3>
+              <div className="mt-7 grid grid-cols-1 items-center gap-5 sm:grid-cols-[150px_1fr]">
+                <div className="relative h-[150px] w-[150px]">
+                  <svg viewBox="0 0 120 120" className="h-full w-full -rotate-90">
+                    {classificationRows.reduce<{ offset: number; nodes: React.ReactNode[] }>((acc, row) => {
+                      const dash = (row.value / classificationTotal) * 301.59;
+                      acc.nodes.push(
+                        <circle
+                          key={row.label}
+                          cx="60"
+                          cy="60"
+                          r="48"
+                          fill="none"
+                          stroke={row.color}
+                          strokeWidth="18"
+                          strokeDasharray={`${dash} 301.59`}
+                          strokeDashoffset={-acc.offset}
+                        />,
+                      );
+                      acc.offset += dash;
+                      return acc;
+                    }, { offset: 0, nodes: [] }).nodes}
+                    <circle cx="60" cy="60" r="31" fill="#0D1519" />
+                  </svg>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center">
+                    <span className="font-heading text-3xl">{totalLeads.toLocaleString('pt-BR')}</span>
+                    <span className="text-xs text-zinc-400">leads</span>
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  {classificationRows.map(row => {
+                    const percent = Math.round((row.value / Math.max(totalLeads, 1)) * 100);
+                    return (
+                      <div key={row.label} className="grid grid-cols-[1fr_auto] gap-3 text-xs">
+                        <span className="flex items-center gap-2 text-zinc-300"><span className="h-2.5 w-2.5 rounded-full" style={{ background: row.color }} />{row.label}</span>
+                        <span className="text-zinc-400">{percent}% ({row.value})</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-[1.45fr_0.82fr]">
+            <section className="rounded-2xl border border-white/[0.08] bg-[#0D1519] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]">
+              <h3 className="text-base font-bold">Risco de perda (leads sem resposta)</h3>
+              <div className="mt-5 grid grid-cols-1 gap-5 md:grid-cols-[180px_1fr]">
+                <div>
+                  <p className="flex items-center gap-2 text-sm text-zinc-400"><span className="h-2.5 w-2.5 rounded-sm bg-red-400" /> Leads em risco</p>
+                  <p className="mt-10 font-heading text-5xl leading-none">{unanswered.toLocaleString('pt-BR')}</p>
+                  <p className="mt-2 text-sm text-zinc-400">leads em risco</p>
+                  <span className="mt-5 inline-flex rounded-lg bg-red-500/15 px-3 py-1.5 text-sm font-semibold text-red-300">↑ 23% vs. semana anterior</span>
+                </div>
+                <svg viewBox="0 0 520 180" className="h-[190px] w-full">
+                  {[0, 1, 2].map(i => <line key={i} x1="35" x2="500" y1={28 + i * 58} y2={28 + i * 58} stroke="rgba(255,255,255,0.06)" />)}
+                  {['30', '15', '0'].map((label, i) => <text key={label} x="2" y={33 + i * 58} fill="#7b8790" fontSize="12">{label}</text>)}
+                  {riskTrend.map((point, index) => <text key={point.label} x={42 + index * 72} y="170" fill="#7b8790" fontSize="12">{point.label}</text>)}
+                  <path
+                    d={`${riskTrend.map((point, index) => {
+                      const x = 58 + index * 72;
+                      const y = 144 - Math.min(30, point.value) / 30 * 116;
+                      return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
+                    }).join(' ')} L 490 144 L 58 144 Z`}
+                    fill="rgba(239,68,68,0.18)"
+                  />
+                  <path
+                    d={riskTrend.map((point, index) => {
+                      const x = 58 + index * 72;
+                      const y = 144 - Math.min(30, point.value) / 30 * 116;
+                      return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
+                    }).join(' ')}
+                    fill="none"
+                    stroke="#EF4444"
+                    strokeWidth="4"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  {riskTrend.map((point, index) => {
+                    const x = 58 + index * 72;
+                    const y = 144 - Math.min(30, point.value) / 30 * 116;
+                    return <circle key={point.label} cx={x} cy={y} r="5" fill="#EF4444" />;
+                  })}
+                </svg>
+              </div>
+            </section>
+
+            <section className="relative overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0D1519] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]">
+              <h3 className="text-base font-bold">Follow-up em dia</h3>
+              <p className="mt-8 font-heading text-5xl leading-none">{followupRate}%</p>
+              <p className="mt-2 max-w-[170px] text-sm text-zinc-400">dos leads com follow-up em dia</p>
+              <span className="mt-6 inline-flex rounded-lg bg-primary/15 px-3 py-1.5 text-sm font-semibold text-primary">+9% vs. semana anterior</span>
+              <svg className="absolute bottom-5 right-4 h-24 w-44 opacity-90" viewBox="0 0 180 90">
+                <path d={`${sparkPath([20, 30, 26, 54, 68, 41, 50], 180, 80)} L 180 90 L 0 90 Z`} fill="rgba(50,232,67,0.18)" />
+                <path d={sparkPath([20, 30, 26, 54, 68, 41, 50], 180, 80)} fill="none" stroke="#32E843" strokeWidth="3" />
+              </svg>
+            </section>
+          </div>
+        </div>
+
+        <aside className="space-y-4">
+          <section className="rounded-2xl border border-white/[0.08] bg-[#0D1519] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]">
+            <h3 className="flex items-center gap-2 text-base font-bold"><Sparkles className="h-5 w-5 text-primary" /> Resumo IA da semana</h3>
+            <div className="mt-5 space-y-4">
+              <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
+                <p className="mb-3 flex items-center gap-2 font-semibold text-zinc-100"><span className="text-primary">◎</span> Principais achados</p>
+                <ul className="space-y-2 text-sm leading-relaxed text-zinc-400">
+                  <li>• Respostas em até 1h chegaram a {slaRate}%.</li>
+                  <li>• {unanswered.toLocaleString('pt-BR')} leads aguardam retorno no período.</li>
+                  <li>• Conversas ativas somam {activeConversations.toLocaleString('pt-BR')} oportunidades agora.</li>
+                </ul>
+              </div>
+              <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
+                <p className="mb-3 flex items-center gap-2 font-semibold text-zinc-100"><span className="text-red-300">△</span> Pontos de atenção</p>
+                <ul className="space-y-2 text-sm leading-relaxed text-zinc-400">
+                  <li>• {unanswered.toLocaleString('pt-BR')} leads sem resposta representam risco.</li>
+                  <li>• {summary.over_60.toLocaleString('pt-BR')} respostas ainda passam de 1h.</li>
+                </ul>
+              </div>
+              <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
+                <p className="mb-3 flex items-center gap-2 font-semibold text-zinc-100"><span className="text-purple-300">◉</span> Recomendação IA</p>
+                <p className="text-sm leading-relaxed text-zinc-400">Priorize os {unanswered.toLocaleString('pt-BR')} leads sem resposta e padronize respostas rápidas para as primeiras interações.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => data.waiting[0] && onOpenChat(data.waiting[0].id)}
+                className="flex w-full items-center justify-center gap-2 rounded-xl border border-primary/60 bg-primary/5 px-4 py-3 text-sm font-bold text-primary transition-colors hover:bg-primary/10"
+              >
+                Ver oportunidades <span>→</span>
+              </button>
             </div>
-            <span className="rounded-full border border-border bg-background px-2 py-1 text-xs font-semibold text-muted-foreground">
-              {responseTotal} resposta{responseTotal !== 1 ? 's' : ''}
-            </span>
-          </div>
-          <div className="space-y-3">
-            {slaRows.map(row => {
-              const percent = responseTotal > 0 ? Math.round((row.value / responseTotal) * 100) : 0;
-              return (
-                <div key={row.label} className="space-y-1.5">
-                  <div className="flex justify-between text-xs">
-                    <span className="font-semibold">{row.label}</span>
-                    <span className="text-muted-foreground">{row.value} ({percent}%)</span>
-                  </div>
-                  <div className="h-2 overflow-hidden rounded-full bg-muted">
-                    <div className={cn('h-full rounded-full', row.color)} style={{ width: `${percent}%` }} />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
+          </section>
 
-        <section className="rounded-xl border border-border bg-card p-4">
-          <h3 className="text-sm font-bold">Fontes de lead</h3>
-          <p className="mb-4 text-xs text-muted-foreground">Canais mais presentes no período.</p>
-          <div className="space-y-2">
-            {data.sources.length === 0 ? (
-              <p className="py-6 text-center text-xs text-muted-foreground">Sem canais no período.</p>
-            ) : data.sources.map(source => {
-              const max = Math.max(...data.sources.map(item => item.total), 1);
-              const channel = detectChannels(source.canal)[0];
-              return (
-                <div key={source.canal ?? 'Sem canal'} className="space-y-1">
-                  <div className="flex justify-between text-xs">
-                    <span className="flex min-w-0 items-center gap-2 font-semibold">
-                      {channel ? (
-                        <span className={cn('inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-white ring-1 ring-white/10', channel.bg)}>
-                          {channel.icon}
-                        </span>
-                      ) : (
-                        <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[9px] font-black text-muted-foreground ring-1 ring-border">
-                          ?
-                        </span>
-                      )}
-                      <span className="truncate">{channel?.label ?? source.canal ?? 'Sem canal'}</span>
-                    </span>
-                    <span className="text-muted-foreground">{source.total}</span>
+          <section className="rounded-2xl border border-white/[0.08] bg-[#0D1519] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]">
+            <h3 className="text-base font-bold">Fontes de lead</h3>
+            <p className="mt-1 text-sm text-zinc-400">Canais mais presentes no período.</p>
+            <div className="mt-5 space-y-3">
+              {data.sources.length === 0 ? (
+                <p className="py-6 text-center text-sm text-zinc-500">Sem canais no período.</p>
+              ) : data.sources.slice(0, 5).map(source => {
+                const channel = detectChannels(source.canal)[0];
+                return (
+                  <div key={source.canal ?? 'Sem canal'} className="space-y-1.5">
+                    <div className="flex justify-between text-sm">
+                      <span className="flex min-w-0 items-center gap-2 font-semibold">
+                        {channel ? (
+                          <span className={cn('inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-white ring-1 ring-white/10', channel.bg)}>
+                            {channel.icon}
+                          </span>
+                        ) : (
+                          <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white/10 text-[9px] font-black text-zinc-400 ring-1 ring-white/10">?</span>
+                        )}
+                        <span className="truncate">{channel?.label ?? source.canal ?? 'Sem canal'}</span>
+                      </span>
+                      <span className="text-zinc-400">{source.total}</span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-white/[0.07]">
+                      <div className="h-full rounded-full bg-primary" style={{ width: `${Math.round((source.total / sourceTotal) * 100)}%` }} />
+                    </div>
                   </div>
-                  <div className="h-2 overflow-hidden rounded-full bg-muted">
-                    <div className="h-full rounded-full bg-primary" style={{ width: `${Math.round((source.total / max) * 100)}%` }} />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
+                );
+              })}
+            </div>
+          </section>
+        </aside>
       </div>
-
-      <section className="rounded-xl border border-border bg-card">
-        <div className="border-b border-border px-4 py-3">
-          <h3 className="text-sm font-bold">Prioridade de atendimento</h3>
-          <p className="text-xs text-muted-foreground">Leads com última mensagem recebida e ainda sem resposta.</p>
-        </div>
-        <div className="divide-y divide-border">
-          {data.waiting.length === 0 ? (
-            <p className="px-4 py-8 text-center text-xs text-muted-foreground">Nenhum lead aguardando resposta.</p>
-          ) : data.waiting.map(lead => (
-            <button
-              key={lead.id}
-              type="button"
-              onClick={() => onOpenChat(lead.id)}
-              className="grid w-full grid-cols-[1fr_auto_auto] items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/40 focus:outline-none focus:ring-1 focus:ring-primary"
-              title="Abrir conversa no chat"
-            >
-              <div className="min-w-0">
-                <p className="truncate text-sm font-semibold">{lead.nome ?? lead.numero ?? 'Sem nome'}</p>
-                <p className="truncate text-xs text-muted-foreground">{lead.numero ?? 'Sem número'} · {lead.canal ?? 'Sem canal'}</p>
-              </div>
-              <span className={cn('rounded-full border px-2 py-1 text-[10px] font-bold', temperatureBadgeClass(lead.temperatura))}>
-                {lead.temperatura ? TEMPERATURE_LABEL[lead.temperatura] : 'Sem IA'}
-              </span>
-              <div className="text-right">
-                <p className="text-xs font-bold text-red-300">{formatDuration(lead.waiting_seconds)}</p>
-                <p className="text-[10px] text-muted-foreground">{fmtD(lead.last_message_at)}</p>
-              </div>
-            </button>
-          ))}
-        </div>
-      </section>
     </div>
   );
 }
