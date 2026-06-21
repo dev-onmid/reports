@@ -2101,16 +2101,51 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
     orcamento: filtered.reduce((sum, lead) => sum + toMoneyNumber(lead.orcamento), 0),
   }), [filtered]);
 
-  const stats = useMemo(() => ({
-    total:       leads.length,
-    agendados:   leads.filter(l => l.status === 'Agendado' || l.status === 'Reagendado').length,
-    fechamentos: leads.filter(l => l.fechou).length,
-    faturamento: leads.filter(l => l.fechou).reduce((s, l) => s + toMoneyNumber(l.valor_rs), 0),
-    quentes: leads.filter(l => l.temperatura === 'quente').length,
-    mornos: leads.filter(l => l.temperatura === 'morno').length,
-    frios: leads.filter(l => l.temperatura === 'frio').length,
-    semClassificacao: leads.filter(l => !l.temperatura).length,
-  }), [leads]);
+  const stats = useMemo(() => {
+    const closedLeads = kanbanLeads.filter(l => l.status === 'Comprou' || l.status === 'Fechado' || l.fechou);
+    return {
+      total: kanbanLeads.length,
+      fechamentos: closedLeads.length,
+      faturamento: closedLeads.reduce((s, l) => s + toMoneyNumber(l.valor_rs), 0),
+    };
+  }, [kanbanLeads]);
+
+  const kanbanSummary = useMemo(() => {
+    const stageList = stages.length > 0
+      ? stages
+      : STATUS_OPTIONS.map((label, index) => ({
+        id: label,
+        label,
+        color: STATUS_KANBAN_COLOR[label] ?? STAGE_COLORS[index % STAGE_COLORS.length],
+        position: index,
+      }));
+    const firstStage = stageList[0]?.label ?? 'Em Atendimento';
+    const summaries = stageList.map((stage, index) => {
+      const color = stage.color || STATUS_KANBAN_COLOR[stage.label] || STAGE_COLORS[index % STAGE_COLORS.length];
+      const stageLeads = kanbanLeads.filter(lead => (lead.status ?? firstStage) === stage.label);
+      return {
+        id: stage.id,
+        label: stage.label,
+        color,
+        count: stageLeads.length,
+        total: stageLeads.reduce((sum, lead) => sum + toMoneyNumber(lead.valor_rs), 0),
+        isClosed: stage.label === 'Comprou' || stage.label === 'Fechado',
+      };
+    });
+    const knownStages = new Set(stageList.map(stage => stage.label));
+    const outsideStages = kanbanLeads.filter(lead => !knownStages.has(lead.status ?? firstStage));
+    if (outsideStages.length > 0) {
+      summaries.push({
+        id: 'outside-stage',
+        label: 'Outros',
+        color: '#8b5cf6',
+        count: outsideStages.length,
+        total: outsideStages.reduce((sum, lead) => sum + toMoneyNumber(lead.valor_rs), 0),
+        isClosed: false,
+      });
+    }
+    return summaries;
+  }, [kanbanLeads, stages]);
 
   const statusOptions = useMemo(
     () => stages.length > 0 ? stages.map(s => s.label) : STATUS_OPTIONS,
@@ -2740,28 +2775,59 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
 
       {/* ── STATS ───────────────────────────────────────────────────── */}
       {clientId && !loading && leads.length > 0 && crmView === 'leads' && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8 shrink-0">
-          {([
-            { label: 'TOTAL',       sub: 'leads cadastrados',   value: stats.total,       fmt: 'n', Icon: Users,             iconCls: 'text-purple-400',  bgCls: 'bg-purple-500/10',  borderCls: 'border-purple-500/25' },
-            { label: 'AGENDADOS',   sub: 'leads agendados',     value: stats.agendados,   fmt: 'n', Icon: CalendarDays,       iconCls: 'text-green-400',   bgCls: 'bg-green-500/10',   borderCls: 'border-green-500/25'  },
-            { label: 'FECHAMENTOS', sub: 'negócios fechados',   value: stats.fechamentos, fmt: 'n', Icon: HeartHandshake,     iconCls: 'text-blue-400',    bgCls: 'bg-blue-500/10',    borderCls: 'border-blue-500/25'   },
-            { label: 'FATURAMENTO', sub: 'valor total faturado',value: stats.faturamento, fmt: 'c', Icon: CircleDollarSign,   iconCls: 'text-violet-400',  bgCls: 'bg-violet-500/10',  borderCls: 'border-violet-500/25' },
-            { label: 'QUENTES',     sub: 'alta intenção',       value: stats.quentes,     fmt: 'n', Icon: Sparkles,          iconCls: 'text-red-300',     bgCls: 'bg-red-500/10',     borderCls: 'border-red-500/25'    },
-            { label: 'MORNOS',      sub: 'interesse ativo',     value: stats.mornos,      fmt: 'n', Icon: Sparkles,          iconCls: 'text-orange-300',  bgCls: 'bg-orange-500/10',  borderCls: 'border-orange-500/25' },
-            { label: 'FRIOS',       sub: 'baixa resposta',      value: stats.frios,       fmt: 'n', Icon: Sparkles,          iconCls: 'text-blue-300',    bgCls: 'bg-blue-500/10',    borderCls: 'border-blue-500/25'   },
-            { label: 'SEM IA',      sub: 'sem classificação',   value: stats.semClassificacao, fmt: 'n', Icon: Sparkles,     iconCls: 'text-zinc-300',    bgCls: 'bg-zinc-500/10',    borderCls: 'border-zinc-500/25'   },
-          ] as const).map(({ label, sub, value, fmt, Icon, iconCls, bgCls, borderCls }) => (
-            <div key={label} className={cn('rounded-xl border bg-card px-4 py-3 flex items-center gap-3', borderCls)}>
-              <div className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-lg', bgCls)}>
-                <Icon className={cn('h-5 w-5', iconCls)} />
+        <div className="shrink-0 space-y-3">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+            {([
+              { label: 'TOTAL', sub: 'leads no funil', value: stats.total.toLocaleString('pt-BR'), Icon: Users, color: '#8b5cf6' },
+              { label: 'COMPROU', sub: 'novo fechamento', value: stats.fechamentos.toLocaleString('pt-BR'), Icon: HeartHandshake, color: '#10b981' },
+              { label: 'FATURAMENTO', sub: 'valor em comprou', value: formatCurrencyBRL(stats.faturamento), Icon: CircleDollarSign, color: '#7c3aed' },
+            ] as const).map(({ label, sub, value, Icon, color }) => (
+              <div
+                key={label}
+                className="flex items-center gap-3 rounded-xl border bg-card px-4 py-3"
+                style={{ borderColor: `${color}45` }}
+              >
+                <div
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg"
+                  style={{ background: `${color}20` }}
+                >
+                  <Icon className="h-5 w-5" style={{ color }} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
+                  <p className="font-heading text-xl leading-none">{value}</p>
+                  <p className="text-[10px] text-muted-foreground">{sub}</p>
+                </div>
               </div>
-              <div className="min-w-0">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
-                <p className="font-heading font-normal text-xl leading-none">{fmt === 'c' ? formatCurrencyBRL(value) : value.toLocaleString('pt-BR')}</p>
-                <p className="text-[10px] text-muted-foreground">{sub}</p>
+            ))}
+          </div>
+
+          <div className="flex gap-3 overflow-x-auto pb-1">
+            {kanbanSummary.map(stage => (
+              <div
+                key={stage.id}
+                className="min-w-[190px] rounded-xl border bg-card px-4 py-3"
+                style={{ borderColor: `${stage.color}45`, borderTop: `3px solid ${stage.color}` }}
+              >
+                <div className="mb-2 flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{stage.label}</p>
+                    <p className="font-heading text-2xl leading-none" style={{ color: stage.color }}>{stage.count.toLocaleString('pt-BR')}</p>
+                  </div>
+                  <span
+                    className="rounded-full px-2 py-0.5 text-[10px] font-bold"
+                    style={{ background: `${stage.color}25`, color: stage.color }}
+                  >
+                    {stage.count}
+                  </span>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  {stage.total > 0 ? formatCurrencyBRL(stage.total) : 'R$ 0'}
+                  {stage.isClosed ? ' em compras' : ''}
+                </p>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       )}
 

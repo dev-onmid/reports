@@ -389,7 +389,7 @@ export function CaptureLinksTab({ clientId }: { clientId: string }) {
         }),
       });
       const data = await res.json().catch(() => null) as WebhookConfig | { error?: string } | null;
-      if (!res.ok || !data || 'error' in data) {
+      if (!res.ok || !data || !('token' in data)) {
         setError(data && 'error' in data && data.error ? data.error : 'Não consegui criar a fonte.');
         return;
       }
