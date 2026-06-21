@@ -2107,45 +2107,11 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
       total: kanbanLeads.length,
       fechamentos: closedLeads.length,
       faturamento: closedLeads.reduce((s, l) => s + toMoneyNumber(l.valor_rs), 0),
+      quentes: kanbanLeads.filter(l => l.temperatura === 'quente').length,
+      mornos: kanbanLeads.filter(l => l.temperatura === 'morno').length,
+      frios: kanbanLeads.filter(l => l.temperatura === 'frio').length,
     };
   }, [kanbanLeads]);
-
-  const kanbanSummary = useMemo(() => {
-    const stageList = stages.length > 0
-      ? stages
-      : STATUS_OPTIONS.map((label, index) => ({
-        id: label,
-        label,
-        color: STATUS_KANBAN_COLOR[label] ?? STAGE_COLORS[index % STAGE_COLORS.length],
-        position: index,
-      }));
-    const firstStage = stageList[0]?.label ?? 'Em Atendimento';
-    const summaries = stageList.map((stage, index) => {
-      const color = stage.color || STATUS_KANBAN_COLOR[stage.label] || STAGE_COLORS[index % STAGE_COLORS.length];
-      const stageLeads = kanbanLeads.filter(lead => (lead.status ?? firstStage) === stage.label);
-      return {
-        id: stage.id,
-        label: stage.label,
-        color,
-        count: stageLeads.length,
-        total: stageLeads.reduce((sum, lead) => sum + toMoneyNumber(lead.valor_rs), 0),
-        isClosed: stage.label === 'Comprou' || stage.label === 'Fechado',
-      };
-    });
-    const knownStages = new Set(stageList.map(stage => stage.label));
-    const outsideStages = kanbanLeads.filter(lead => !knownStages.has(lead.status ?? firstStage));
-    if (outsideStages.length > 0) {
-      summaries.push({
-        id: 'outside-stage',
-        label: 'Outros',
-        color: '#8b5cf6',
-        count: outsideStages.length,
-        total: outsideStages.reduce((sum, lead) => sum + toMoneyNumber(lead.valor_rs), 0),
-        isClosed: false,
-      });
-    }
-    return summaries;
-  }, [kanbanLeads, stages]);
 
   const statusOptions = useMemo(
     () => stages.length > 0 ? stages.map(s => s.label) : STATUS_OPTIONS,
@@ -2775,7 +2741,7 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
 
       {/* ── STATS ───────────────────────────────────────────────────── */}
       {clientId && !loading && leads.length > 0 && crmView === 'leads' && (
-        <div className="shrink-0 space-y-3">
+        <div className="shrink-0 space-y-4">
           <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
             {([
               { label: 'TOTAL', sub: 'leads no funil', value: stats.total.toLocaleString('pt-BR'), Icon: Users, color: '#8b5cf6' },
@@ -2784,47 +2750,40 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
             ] as const).map(({ label, sub, value, Icon, color }) => (
               <div
                 key={label}
-                className="flex items-center gap-3 rounded-xl border bg-card px-4 py-3"
+                className="flex min-h-[92px] items-center gap-4 rounded-xl border bg-card px-5 py-5"
                 style={{ borderColor: `${color}45` }}
               >
                 <div
-                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg"
+                  className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl"
                   style={{ background: `${color}20` }}
                 >
-                  <Icon className="h-5 w-5" style={{ color }} />
+                  <Icon className="h-6 w-6" style={{ color }} />
                 </div>
                 <div className="min-w-0">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
-                  <p className="font-heading text-xl leading-none">{value}</p>
-                  <p className="text-[10px] text-muted-foreground">{sub}</p>
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
+                  <p className="font-heading text-3xl leading-none">{value}</p>
+                  <p className="text-xs text-muted-foreground">{sub}</p>
                 </div>
               </div>
             ))}
           </div>
 
-          <div className="flex gap-3 overflow-x-auto pb-1">
-            {kanbanSummary.map(stage => (
+          <div className="grid grid-cols-3 gap-3">
+            {([
+              { label: 'Frio', value: stats.frios, color: '#60a5fa', sub: 'baixa resposta' },
+              { label: 'Morno', value: stats.mornos, color: '#f59e0b', sub: 'interesse ativo' },
+              { label: 'Quente', value: stats.quentes, color: '#f87171', sub: 'alta intenção' },
+            ] as const).map(item => (
               <div
-                key={stage.id}
-                className="min-w-[190px] rounded-xl border bg-card px-4 py-3"
-                style={{ borderColor: `${stage.color}45`, borderTop: `3px solid ${stage.color}` }}
+                key={item.label}
+                className="rounded-xl border bg-card px-4 py-3"
+                style={{ borderColor: `${item.color}45` }}
               >
-                <div className="mb-2 flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="truncate text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{stage.label}</p>
-                    <p className="font-heading text-2xl leading-none" style={{ color: stage.color }}>{stage.count.toLocaleString('pt-BR')}</p>
-                  </div>
-                  <span
-                    className="rounded-full px-2 py-0.5 text-[10px] font-bold"
-                    style={{ background: `${stage.color}25`, color: stage.color }}
-                  >
-                    {stage.count}
-                  </span>
-                </div>
-                <p className="text-[11px] text-muted-foreground">
-                  {stage.total > 0 ? formatCurrencyBRL(stage.total) : 'R$ 0'}
-                  {stage.isClosed ? ' em compras' : ''}
+                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{item.label}</p>
+                <p className="font-heading text-2xl leading-none" style={{ color: item.color }}>
+                  {item.value.toLocaleString('pt-BR')}
                 </p>
+                <p className="text-[11px] text-muted-foreground">{item.sub}</p>
               </div>
             ))}
           </div>
