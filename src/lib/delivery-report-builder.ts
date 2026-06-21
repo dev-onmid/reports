@@ -584,12 +584,23 @@ function estimateActionsFromCost(spend: number, costMap: Record<string, number>,
 // name happened to contain that word. Name regexes now only kick in as a fallback when the
 // objective itself is missing/unrecognized (categorizeMetaObjective default of 'trafego').
 function campaignKindFor(c: CampanhaDetalhada): CampaignKind {
+  const m = c.metricas;
+  // What the campaign actually achieved outranks what its objective is labeled as in
+  // Ads Manager. A campaign set up as Alcance/Reconhecimento that still drove real
+  // purchases/conversations/leads (e.g. a "Send message" CTA bolted onto a Reach
+  // campaign) should be read by that real result, not filed under Alcance just
+  // because that's the declared objective — leads/vendas/conversas always win over
+  // alcance when there's an actual non-zero result to show for it.
+  if (m.compras > 0)  return 'vendas';
+  if (m.conversas > 0) return 'mensagens';
+  if (m.leads > 0)     return 'leads';
+
   const objective = categorizeMetaObjective(c.tipo);
-  if (objective === 'vendas' || c.metricas.compras > 0) return 'vendas';
-  if (objective === 'mensagens') return 'mensagens';
-  if (objective === 'leads') return 'leads';
+  if (objective === 'vendas')      return 'vendas';
+  if (objective === 'mensagens')   return 'mensagens';
+  if (objective === 'leads')       return 'leads';
   if (objective === 'engajamento') return 'engajamento';
-  if (objective === 'alcance') return 'alcance';
+  if (objective === 'alcance')     return 'alcance';
 
   // objective came back 'trafego' (i.e. unrecognized) — only then fall back to the name.
   const name = c.nome.toLowerCase();
