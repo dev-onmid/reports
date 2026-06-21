@@ -537,9 +537,9 @@ const OBJECTIVE_META: Record<ObjectiveCategory, {
 }> = {
   // costLabel stays short on purpose — it renders inside a ~110px-wide metric box
   // alongside an icon; "Custo por venda" truncates, "Custo/venda" fits cleanly.
-  vendas:      { label: 'Vendas',           resultWord: 'vendas',      costLabel: 'Custo/venda',    actionKeys: ['offsite_conversion.fb_pixel_purchase', 'purchase', 'omni_purchase'] },
-  leads:       { label: 'Geração de leads', resultWord: 'leads',       costLabel: 'CPL',            actionKeys: ['lead', 'onsite_conversion.lead', 'onsite_conversion.lead_grouped', 'offsite_conversion.fb_pixel_lead'] },
-  mensagens:   { label: 'Conversas',        resultWord: 'conversas',   costLabel: 'Custo/conversa', actionKeys: ['messaging_conversation_started', 'messaging_conversation_started_7d', 'onsite_conversion.messaging_conversation_started', 'onsite_conversion.messaging_conversation_started_7d', 'omni_messaging_conversation_started', 'omni_messaging_conversation_started_7d', 'onsite_conversion.messaging_first_reply', 'onsite_conversion.messaging_conversation_replied_7d'] },
+  vendas:      { label: 'Vendas',           resultWord: 'vendas',      costLabel: 'Custo/venda',    actionKeys: ['offsite_conversion.fb_pixel_purchase', 'omni_purchase', 'purchase'] },
+  leads:       { label: 'Geração de leads', resultWord: 'leads',       costLabel: 'CPL',            actionKeys: ['onsite_conversion.lead_grouped', 'onsite_conversion.lead', 'offsite_conversion.fb_pixel_lead', 'lead'] },
+  mensagens:   { label: 'Conversas',        resultWord: 'conversas',   costLabel: 'Custo/conversa', actionKeys: ['onsite_conversion.messaging_conversation_started_7d', 'onsite_conversion.messaging_conversation_started', 'omni_messaging_conversation_started_7d', 'omni_messaging_conversation_started', 'messaging_conversation_started_7d', 'messaging_conversation_started'] },
   trafego:     { label: 'Tráfego',          resultWord: 'cliques',     costLabel: 'CPC',            actionKeys: ['link_click'] },
   engajamento: { label: 'Engajamento',      resultWord: 'engajamentos', costLabel: 'Custo/engaj.',  actionKeys: ['post_engagement', 'page_engagement'] },
   alcance:     { label: 'Alcance',          resultWord: 'pessoas alcançadas', costLabel: 'CPM',     actionKeys: [] },
@@ -547,33 +547,36 @@ const OBJECTIVE_META: Record<ObjectiveCategory, {
 
 type CampaignKind = 'mensagens' | 'leads' | 'vendas' | 'trafego' | 'alcance' | 'engajamento';
 
+// These are NOT additive — Meta reports the same underlying conversion under several
+// action_type aliases at once (bare / onsite_conversion.* / omni_* namespaces, plus
+// different click-attribution windows), so summing all of them multiplies the real
+// count by however many aliases happen to be present (we saw a real 31 inflate to 60+
+// this way). Ordered most-canonical-first; firstActionValue() picks the first one Meta
+// actually reported for that account instead of adding them together.
 const MESSAGE_ACTION_KEYS = [
-  'messaging_conversation_started',
-  'messaging_conversation_started_7d',
-  'onsite_conversion.messaging_conversation_started',
   'onsite_conversion.messaging_conversation_started_7d',
-  'omni_messaging_conversation_started',
+  'onsite_conversion.messaging_conversation_started',
   'omni_messaging_conversation_started_7d',
-  'onsite_conversion.messaging_first_reply',
-  'onsite_conversion.messaging_conversation_replied_7d',
+  'omni_messaging_conversation_started',
+  'messaging_conversation_started_7d',
+  'messaging_conversation_started',
 ];
 
-const LEAD_ACTION_KEYS = ['lead', 'onsite_conversion.lead', 'onsite_conversion.lead_grouped', 'offsite_conversion.fb_pixel_lead'];
+const LEAD_ACTION_KEYS = ['onsite_conversion.lead_grouped', 'onsite_conversion.lead', 'offsite_conversion.fb_pixel_lead', 'lead'];
 
-function sumActionMap(actMap: Record<string, number>, keys: string[]): number {
-  return keys.reduce((total, key) => total + (actMap[key] || 0), 0);
+// Picks the value for the first key Meta actually reported, in priority order — see
+// note above MESSAGE_ACTION_KEYS on why these aliases must not be summed together.
+function firstActionValue(actMap: Record<string, number>, keys: string[]): number {
+  for (const key of keys) {
+    if (actMap[key] !== undefined) return actMap[key];
+  }
+  return 0;
 }
 
 function addInsightActions(target: Record<string, number>, rows: unknown): void {
   for (const action of (rows as Array<{ action_type: string; value: string }> ?? [])) {
     target[action.action_type] = (target[action.action_type] || 0) + parseFloat(action.value || '0');
   }
-}
-
-function estimateActionsFromCost(spend: number, costMap: Record<string, number>, keys: string[]): number {
-  if (spend <= 0) return 0;
-  const cost = keys.map(key => costMap[key]).find(value => value > 0) ?? 0;
-  return cost > 0 ? spend / cost : 0;
 }
 
 // The real Meta objective (from the API) is the source of truth, and leads/mensagens/
@@ -675,22 +678,24 @@ export async function fetchMetaData(
     urlCamp.searchParams.set('fields', 'campaign_name,objective,spend,impressions,reach,clicks,frequency,actions,conversions,cost_per_action_type,purchase_roas');
     urlCamp.searchParams.set('time_range', timeRange);
     urlCamp.searchParams.set('level', 'campaign');
-    urlCamp.searchParams.set('limit', '8');
+    // High enough to capture every campaign an account ran in the period — the resumo
+    // slide sums leads/conversas/compras across ALL of `campanhas`, so truncating this
+    // list (it used to be limit=8, further sliced to 5) silently dropped real results
+    // from the totals instead of just trimming which ones get a detail card later.
+    urlCamp.searchParams.set('limit', '100');
     urlCamp.searchParams.set('access_token', token);
     const resCamp = await fetch(urlCamp.toString(), { signal: AbortSignal.timeout(12000) }).catch(() => null);
     if (resCamp?.ok) {
       const j = await resCamp.json() as { data?: Record<string, unknown>[] };
       for (const row of j.data ?? []) {
         const actMap: Record<string, number> = {};
-        const costMap: Record<string, number> = {};
         addInsightActions(actMap, row.actions);
         addInsightActions(actMap, row.conversions);
-        addInsightActions(costMap, row.cost_per_action_type);
         const purchaseRoasArr = row.purchase_roas as Array<{ action_type: string; value: string }> | undefined;
         const purchase_roas   = parseFloat(purchaseRoasArr?.[0]?.value ?? '0') || 0;
         const investimento    = parseFloat(String(row.spend ?? '0'));
-        const leads = sumActionMap(actMap, LEAD_ACTION_KEYS) || estimateActionsFromCost(investimento, costMap, LEAD_ACTION_KEYS);
-        const conversas = sumActionMap(actMap, MESSAGE_ACTION_KEYS) || estimateActionsFromCost(investimento, costMap, MESSAGE_ACTION_KEYS);
+        const leads = firstActionValue(actMap, LEAD_ACTION_KEYS);
+        const conversas = firstActionValue(actMap, MESSAGE_ACTION_KEYS);
         const valorComprasApi =
           actMap['offsite_conversion.fb_pixel_purchase_value'] ||
           actMap['omni_purchase_value'] ||
@@ -733,11 +738,9 @@ export async function fetchMetaData(
       for (const row of j.data ?? []) {
         const actMap: Record<string, number> = {};
         const valueMap: Record<string, number> = {};
-        const costMap: Record<string, number> = {};
         addInsightActions(actMap, row.actions);
         addInsightActions(actMap, row.conversions);
         addInsightActions(valueMap, row.action_values);
-        addInsightActions(costMap, row.cost_per_action_type);
         const objectiveRaw = String(row.objective || '');
         const category = categorizeMetaObjective(objectiveRaw);
         const om = OBJECTIVE_META[category];
@@ -748,8 +751,7 @@ export async function fetchMetaData(
           ? parseInt(String(row.clicks || '0'), 10)
           : category === 'alcance'
           ? parseInt(String(row.reach || '0'), 10)
-          : om.actionKeys.reduce((sum, k) => sum + (actMap[k] || 0), 0)
-            || estimateActionsFromCost(investimento, costMap, om.actionKeys);
+          : firstActionValue(actMap, om.actionKeys);
         const purchaseValue = category === 'vendas'
           ? (valueMap['offsite_conversion.fb_pixel_purchase_value'] || valueMap['omni_purchase_value'] || valueMap['purchase_value'] || (purchaseRoas > 0 ? investimento * purchaseRoas : 0))
           : 0;
@@ -773,12 +775,15 @@ export async function fetchMetaData(
 
   if (totalSpend === 0 && campanhas.length === 0) return { meta: null, creatives: [] };
 
+  // Keep every campaign here, sorted by spend — sMetaAdsResumo sums leads/conversas/
+  // compras across the FULL list, and sMetaAdsCampanhas paginates through all of them
+  // (4 per slide) rather than silently hiding whichever ones don't fit on one slide.
   const meta: MetaAdsFull = {
     investimento: totalSpend,
     impressoes:   totalImpressions,
     alcance:      totalReach,
     cliques:      totalCliques,
-    campanhas:    campanhas.sort((a, b) => b.metricas.investimento - a.metricas.investimento).slice(0, 5),
+    campanhas:    campanhas.sort((a, b) => b.metricas.investimento - a.metricas.investimento),
   };
 
   // Pick top creatives PER OBJECTIVE CATEGORY (Vendas/Leads/Mensagens/Tráfego/Engajamento/
@@ -3293,16 +3298,24 @@ export function sMetaAdsCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number
 
     let row1: string, row2: string;
     if (campIsWA) {
-      const demand = m.leads + m.conversas;
-      const cpl = demand > 0 && m.investimento > 0 ? brlPrecise(m.investimento / demand) : '—';
+      // This campaign's own kind (mensagens vs leads) picks the headline metric — a
+      // campaign isn't both at once, so showing leads+conversas added together under
+      // a single "Leads" headline (the old behavior) was redundant at best, and
+      // actively misleading for WhatsApp-only accounts that never used a lead form.
+      const isLeadsCampaign = kind === 'leads';
+      const primary      = isLeadsCampaign ? m.leads : m.conversas;
+      const primaryLabel = isLeadsCampaign ? 'Leads' : 'Conversas iniciadas';
+      const custoLabel   = isLeadsCampaign ? 'Custo por lead' : 'Custo/conversa';
+      const custoPrimario = primary > 0 && m.investimento > 0 ? brlPrecise(m.investimento / primary) : '—';
+      const secondary = isLeadsCampaign ? m.conversas : m.leads;
+      const secondaryLabel = isLeadsCampaign ? 'Conversas iniciadas' : 'Formulários (leads)';
       row1 = [
         metricItem(ICO_MONEY, 'Investimento', brlOrDash(m.investimento), style.accent, style.iconBg),
-        metricItem(ICO_CHAT, 'Leads', demand > 0 ? num(Math.round(demand)) : '—', style.accent, style.iconBg),
-        metricItem(ICO_MONEY, 'Custo por lead', cpl, style.accent, style.iconBg),
+        metricItem(ICO_CHAT, primaryLabel, primary > 0 ? num(Math.round(primary)) : '—', style.accent, style.iconBg),
+        metricItem(ICO_MONEY, custoLabel, custoPrimario, style.accent, style.iconBg),
       ].join('');
       row2 = [
-        metricItem(ICO_CHAT, 'Conversas iniciadas', m.conversas > 0 ? num(Math.round(m.conversas)) : '—', style.accent, style.iconBg),
-        ...(m.leads > 0 ? [metricItem(ICO_TARGET, 'Formulários', num(Math.round(m.leads)), style.accent, style.iconBg)] : []),
+        ...(secondary > 0 ? [metricItem(ICO_TARGET, secondaryLabel, num(Math.round(secondary)), style.accent, style.iconBg)] : []),
         metricItem(ICO_BARS, 'Frequência', m.frequencia > 0 ? m.frequencia.toFixed(2) : '—', style.accent, style.iconBg),
       ].join('');
     } else if (campIsSales) {
