@@ -151,12 +151,15 @@ export type CampanhaDetalhada = {
   };
 };
 
+export type MetaBreakdownLevel = 'campaign' | 'adset';
+
 export type MetaAdsFull = {
   investimento: number;
   impressoes: number;
   alcance: number;
   cliques: number;
   campanhas: CampanhaDetalhada[];
+  nivel: MetaBreakdownLevel;
 };
 
 export type CampanhaGoogleDetalhada = {
@@ -619,6 +622,7 @@ export async function fetchMetaData(
   connectionId: string | null | undefined,
   accountIds: string[],
   from: string, to: string,
+  breakdownLevel: MetaBreakdownLevel = 'campaign',
 ): Promise<{ meta: MetaAdsFull | null; creatives: Creative[] }> {
   if (!connectionId || !accountIds.length) return { meta: null, creatives: [] };
 
@@ -673,11 +677,11 @@ export async function fetchMetaData(
       }
     }
 
-    // Campaign-level with actions + frequency
+    // Campaign- or adset-level with actions + frequency, depending on breakdownLevel
     const urlCamp = new URL(`https://graph.facebook.com/v21.0/${acct}/insights`);
-    urlCamp.searchParams.set('fields', 'campaign_name,objective,spend,impressions,reach,clicks,frequency,actions,conversions,cost_per_action_type,purchase_roas');
+    urlCamp.searchParams.set('fields', 'campaign_name,adset_name,objective,spend,impressions,reach,clicks,frequency,actions,conversions,cost_per_action_type,purchase_roas');
     urlCamp.searchParams.set('time_range', timeRange);
-    urlCamp.searchParams.set('level', 'campaign');
+    urlCamp.searchParams.set('level', breakdownLevel);
     // High enough to capture every campaign an account ran in the period — the resumo
     // slide sums leads/conversas/compras across ALL of `campanhas`, so truncating this
     // list (it used to be limit=8, further sliced to 5) silently dropped real results
@@ -701,8 +705,9 @@ export async function fetchMetaData(
           actMap['omni_purchase_value'] ||
           actMap['purchase_value'] ||
           0;
+        const nomeField = breakdownLevel === 'adset' ? row.adset_name : row.campaign_name;
         campanhas.push({
-          nome: String(row.campaign_name ?? 'Sem nome'),
+          nome: String(nomeField ?? row.campaign_name ?? 'Sem nome'),
           tipo: String(row.objective ?? ''),
           metricas: {
             investimento,
@@ -784,6 +789,7 @@ export async function fetchMetaData(
     alcance:      totalReach,
     cliques:      totalCliques,
     campanhas:    campanhas.sort((a, b) => b.metricas.investimento - a.metricas.investimento),
+    nivel:        breakdownLevel,
   };
 
   // Pick top creatives PER OBJECTIVE CATEGORY (Vendas/Leads/Mensagens/Tráfego/Engajamento/
@@ -2129,7 +2135,13 @@ export function sMetaAdsResumo(meta: MetaAdsFull, idx: number, total: number): s
 
   const awarenessCampaigns = campaignsBy(['alcance', 'engajamento']);
   const trafficCampaigns = campaignsBy(['trafego']);
-  const leadCampaigns = campaignsBy(['leads', 'mensagens']);
+  // Mensagens and leads are kept as two separate groups, never blended into one sum —
+  // a "mensagens" campaign's conversas and a "leads" campaign's formulários are two
+  // different kinds of result. Mixing them previously made WhatsApp-only accounts show
+  // a "Leads de formulário" figure pulled from data that didn't represent a real form.
+  const messagingCampaigns = campaignsBy(['mensagens']);
+  const leadFormCampaigns = campaignsBy(['leads']);
+  const leadCampaigns = [...messagingCampaigns, ...leadFormCampaigns];
   const salesCampaigns = campaignsBy(['vendas']);
 
   const awarenessInvestment = sum(awarenessCampaigns, c => c.metricas.investimento);
@@ -2145,10 +2157,12 @@ export function sMetaAdsResumo(meta: MetaAdsFull, idx: number, total: number): s
   const trafficCtr = trafficImpressions > 0 ? (trafficClicks / trafficImpressions) * 100 : 0;
 
   const leadInvestment = sum(leadCampaigns, c => c.metricas.investimento);
-  const totalLeads = sum(leadCampaigns, c => c.metricas.leads + c.metricas.conversas);
-  const totalConversas = sum(leadCampaigns, c => c.metricas.conversas);
-  const totalFormLeads = sum(leadCampaigns, c => c.metricas.leads);
-  const custoConversa = totalConversas > 0 ? leadInvestment / totalConversas : 0;
+  const messagingInvestment = sum(messagingCampaigns, c => c.metricas.investimento);
+  const leadFormInvestment = sum(leadFormCampaigns, c => c.metricas.investimento);
+  const totalConversas = sum(messagingCampaigns, c => c.metricas.conversas);
+  const totalFormLeads = sum(leadFormCampaigns, c => c.metricas.leads);
+  const custoConversa = totalConversas > 0 ? messagingInvestment / totalConversas : 0;
+  const custoFormLead = totalFormLeads > 0 ? leadFormInvestment / totalFormLeads : 0;
 
   const salesInvestment = sum(salesCampaigns, c => c.metricas.investimento);
   const totalCompras = sum(salesCampaigns, c => c.metricas.compras);
@@ -2161,7 +2175,8 @@ export function sMetaAdsResumo(meta: MetaAdsFull, idx: number, total: number): s
   const brlC = (n: number) => n > 0 ? n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '—';
   const pctC = (n: number) => n > 0 ? `${n.toFixed(2).replace('.', ',')}%` : '—';
   const decC = (n: number) => n > 0 ? n.toFixed(2).replace('.', ',') : '—';
-  const countLabel = (count: number) => count === 1 ? '1 campanha' : `${count} campanhas`;
+  const unitWord = meta.nivel === 'adset' ? 'conjunto' : 'campanha';
+  const countLabel = (count: number) => count === 1 ? `1 ${unitWord}` : `${count} ${unitWord}s`;
 
   // ── Top KPI card (icon circle + label + big number) ───────────────────────
   const bigKpi = (label: string, value: string, ico: string) =>
@@ -2228,11 +2243,14 @@ export function sMetaAdsResumo(meta: MetaAdsFull, idx: number, total: number): s
 
   const leadLines: Array<[string, string]> = [
     ['Investimento', brlC(leadInvestment)],
-    ['Conversas iniciadas', totalConversas > 0 ? num(Math.round(totalConversas)) : '—'],
-    ['Custo por conversa', brlC(custoConversa)],
   ];
-  if (totalFormLeads > 0) {
-    leadLines.push(['Leads de formulário', num(Math.round(totalFormLeads))]);
+  if (messagingCampaigns.length > 0 || totalConversas > 0) {
+    leadLines.push(['Conversas iniciadas', totalConversas > 0 ? num(Math.round(totalConversas)) : '—']);
+    leadLines.push(['Custo por conversa', brlC(custoConversa)]);
+  }
+  if (leadFormCampaigns.length > 0 || totalFormLeads > 0) {
+    leadLines.push(['Leads de formulário', totalFormLeads > 0 ? num(Math.round(totalFormLeads)) : '—']);
+    leadLines.push(['Custo por lead', brlC(custoFormLead)]);
   }
 
   const segmentCards = [
@@ -2265,7 +2283,7 @@ export function sMetaAdsResumo(meta: MetaAdsFull, idx: number, total: number): s
     ? `As campanhas de vendas geraram compras, mas o ROAS de ${decC(roas)} pede atenção: acompanhar custo por compra, valor de venda e checkout antes de ampliar investimento.`
     : totalConversas > 0
     ? `As campanhas de leads e mensagens geraram conversas no período. O próximo foco é qualificar esses contatos, acompanhando custo por conversa e evolução para compra.`
-    : totalLeads > 0
+    : totalFormLeads > 0
     ? `As campanhas de leads captaram formulários no período. O próximo foco é qualificar esses contatos, acompanhando CPL e evolução para compra.`
     : `${brlOrDash(meta.investimento)} investidos com ${numOrDash(meta.alcance)} pessoas alcançadas e ${numOrDash(meta.cliques)} cliques no período. Avaliar CTR, CPC e volume de conversões para orientar o próximo ciclo.`;
 
@@ -2276,7 +2294,7 @@ export function sMetaAdsResumo(meta: MetaAdsFull, idx: number, total: number): s
 
     <div style="flex-shrink:0">
       <h1 style="font-family:${INTER};font-size:52px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 8px;letter-spacing:-0.03em">${reportTitle('Resumo Meta Ads')}</h1>
-      <p style="font-size:16px;font-weight:500;color:#163461;font-family:${INTER};margin:0">Métricas Meta Ads e resultados separados por objetivo de campanha</p>
+      <p style="font-size:16px;font-weight:500;color:#163461;font-family:${INTER};margin:0">Métricas Meta Ads e resultados separados por objetivo de ${meta.nivel === 'adset' ? 'conjunto de anúncios' : 'campanha'}</p>
     </div>
 
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;flex-shrink:0">
@@ -2314,7 +2332,19 @@ export function sPaidTrafficResumo(meta: MetaAdsFull | null, google: GoogleAdsFu
   const metaImpressions = meta?.impressoes ?? 0;
   const metaClicks = meta?.cliques ?? 0;
   const metaReach = meta?.alcance ?? 0;
-  const metaResults = sumMeta(c => c.metricas.compras + c.metricas.leads + c.metricas.conversas);
+  // One result type per campaign — a "mensagens" campaign's result is its conversas,
+  // a "leads" campaign's is its formulários, a "vendas" campaign's is its compras.
+  // Adding all three fields together regardless of the campaign's real kind double-
+  // counted accounts where a messaging campaign also carries a (non-representative)
+  // leads value, inflating the headline number well past what any campaign actually
+  // converted to.
+  const metaResults = sumMeta(c => {
+    const kind = campaignKindFor(c);
+    if (kind === 'vendas')    return c.metricas.compras;
+    if (kind === 'mensagens') return c.metricas.conversas;
+    if (kind === 'leads')     return c.metricas.leads;
+    return 0;
+  });
   const metaRevenue = sumMeta(c => c.metricas.valor_compras);
 
   const googleSpend = google?.investimento ?? 0;
@@ -3307,15 +3337,17 @@ export function sMetaAdsCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number
       const primaryLabel = isLeadsCampaign ? 'Leads' : 'Conversas iniciadas';
       const custoLabel   = isLeadsCampaign ? 'Custo por lead' : 'Custo/conversa';
       const custoPrimario = primary > 0 && m.investimento > 0 ? brlPrecise(m.investimento / primary) : '—';
-      const secondary = isLeadsCampaign ? m.conversas : m.leads;
-      const secondaryLabel = isLeadsCampaign ? 'Conversas iniciadas' : 'Formulários (leads)';
+      // Only a genuine "leads" campaign gets a secondary metric here (its bonus
+      // conversas, if any). A "mensagens" campaign's m.leads is not shown at all —
+      // for WhatsApp-only accounts that figure doesn't represent a real lead form,
+      // it's Meta tagging the same conversation under a second action_type.
       row1 = [
         metricItem(ICO_MONEY, 'Investimento', brlOrDash(m.investimento), style.accent, style.iconBg),
         metricItem(ICO_CHAT, primaryLabel, primary > 0 ? num(Math.round(primary)) : '—', style.accent, style.iconBg),
         metricItem(ICO_MONEY, custoLabel, custoPrimario, style.accent, style.iconBg),
       ].join('');
       row2 = [
-        ...(secondary > 0 ? [metricItem(ICO_TARGET, secondaryLabel, num(Math.round(secondary)), style.accent, style.iconBg)] : []),
+        ...(isLeadsCampaign && m.conversas > 0 ? [metricItem(ICO_TARGET, 'Conversas iniciadas', num(Math.round(m.conversas)), style.accent, style.iconBg)] : []),
         metricItem(ICO_BARS, 'Frequência', m.frequencia > 0 ? m.frequencia.toFixed(2) : '—', style.accent, style.iconBg),
       ].join('');
     } else if (campIsSales) {
@@ -3386,8 +3418,8 @@ export function sMetaAdsCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number
 
   <div style="position:relative;z-index:1;flex:1;padding:52px 48px 0;display:flex;flex-direction:column">
     <div style="flex-shrink:0;margin-bottom:28px">
-      <h1 style="font-family:${INTER};font-size:52px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 8px;letter-spacing:-0.03em">${reportTitle('Campanhas Veiculadas Meta Ads')}</h1>
-      <p data-conclusion="1" style="font-size:16px;font-weight:500;color:#163461;font-family:${INTER};margin:0">Desempenho das campanhas Meta Ads em ${month}</p>
+      <h1 style="font-family:${INTER};font-size:52px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 8px;letter-spacing:-0.03em">${reportTitle(meta.nivel === 'adset' ? 'Conjuntos de Anúncios Veiculados Meta Ads' : 'Campanhas Veiculadas Meta Ads')}</h1>
+      <p data-conclusion="1" style="font-size:16px;font-weight:500;color:#163461;font-family:${INTER};margin:0">Desempenho ${meta.nivel === 'adset' ? 'dos conjuntos de anúncios Meta Ads' : 'das campanhas Meta Ads'} em ${month}</p>
     </div>
 
     <div style="flex:1;min-height:0">
@@ -3769,8 +3801,9 @@ export async function buildDeliveryReport(opts: {
   connectionId?:  string | null;
   accountIds?:    string[];
   coverId?:       string | null;
+  metaLevel?:     MetaBreakdownLevel;
 }): Promise<{ html: string }> {
-  const { clientId, clientName, from, to, csvFiles = [], agencyContext = '', connectionId, accountIds = [], coverId } = opts;
+  const { clientId, clientName, from, to, csvFiles = [], agencyContext = '', connectionId, accountIds = [], coverId, metaLevel = 'campaign' } = opts;
 
   const fromDate = new Date(from + 'T12:00:00');
   const toDate   = new Date(to   + 'T12:00:00');
@@ -3795,7 +3828,7 @@ export async function buildDeliveryReport(opts: {
 
   const [bairros, { meta, creatives }, instagramFull, rotationSeed] = await Promise.all([
     fetchBairros(clientId, from, to),
-    fetchMetaData(connectionId, accountIds, from, to),
+    fetchMetaData(connectionId, accountIds, from, to, metaLevel),
     fetchInstagramData(clientId, connectionId, accountIds, from, to),
     fetchReportRotationSeed(),
   ]);
@@ -3944,6 +3977,7 @@ export function __devPreviewMetaAdsResumo(): string {
       { nome: '[ON] [ALCANCE] [MERCADÃO] [DA] [PROCHET]', tipo: 'alcance', metricas: mk(60, 0, 0, 0, 12, 1.0, 9, 0) },
       { nome: '[ON] [VENDAS] [ANOTA AÍ] [PROCHET]', tipo: 'vendas', metricas: mk(40, 0, 2, 60, 10, 1.0, 8, 3) },
     ],
+    nivel: 'campaign',
   };
   return sMetaAdsResumo(meta, 8, 9);
 }
@@ -4041,6 +4075,7 @@ export function __devPreviewFullReport(): string {
       { nome: '[ON] [VENDAS] [ANOTA AÍ] [LOW-BUDGET]', tipo: 'vendas', metricas: mkMetricas(235.90, 0, 27, 1860.27, 180, 1.8) },
       { nome: '[ON] [ALCANCE] [BURRITO FIT]', tipo: 'alcance', metricas: mkMetricas(60, 0, 0, 0, 30, 1.1) },
     ],
+    nivel: 'campaign',
   };
 
   const instagram: InstagramData = {

@@ -1,7 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { buildOmniReport, saveOmniReport } from '@/lib/report-builder';
-import { buildDeliveryReport, saveDeliveryReport } from '@/lib/delivery-report-builder';
+import { buildDeliveryReport, saveDeliveryReport, type MetaBreakdownLevel } from '@/lib/delivery-report-builder';
 
 export const maxDuration = 300;
 
@@ -12,9 +12,10 @@ export async function POST(request: NextRequest) {
       agencyContext?: string; template?: string;
       csvFiles?: { name: string; content: string }[];
       coverId?: string;
+      metaLevel?: MetaBreakdownLevel;
     };
 
-    const { clientId, from, to, agencyContext, template, coverId } = body;
+    const { clientId, from, to, agencyContext, template, coverId, metaLevel } = body;
     const csvFiles = body.csvFiles ?? [];
     if (!clientId || !from || !to) {
       return Response.json({ error: 'clientId, from e to são obrigatórios' }, { status: 400 });
@@ -59,6 +60,7 @@ export async function POST(request: NextRequest) {
         connectionId: metaConnectionId,
         accountIds: metaAccountIds,
         coverId,
+        metaLevel,
       });
       const { token, reportId } = await saveDeliveryReport({ clientId, clientName, from, to, data: reportData });
       return Response.json({ ok: true, id: reportId, public_token: token });
@@ -75,6 +77,7 @@ export async function POST(request: NextRequest) {
       periodFrom: from,
       periodTo: to,
       coverId,
+      metaLevel,
     });
 
     const { id, public_token } = await saveOmniReport({

@@ -8,7 +8,7 @@ import {
   sInstagram, sInstagramCalendar, sInstagramPosts, sInstagramSpotlight,
   monthsBetweenInclusive, FONT_LINK, CANVAS, INTER,
   resolveReportCover, fetchReportRotationSeed,
-  type ParsedData, type DiagJson, type GoogleAdsFull, type CampanhaGoogleDetalhada,
+  type ParsedData, type DiagJson, type GoogleAdsFull, type CampanhaGoogleDetalhada, type MetaBreakdownLevel,
 } from './delivery-report-builder';
 
 // ── Persist ───────────────────────────────────────────────────────────────────
@@ -558,8 +558,9 @@ export async function buildOmniReport(input: {
   periodFrom: string;
   periodTo: string;
   coverId?: string | null;
+  metaLevel?: MetaBreakdownLevel;
 }): Promise<{ html: string }> {
-  const { clientId, clientName, connectionId, accountIds, googleConnectionId, googleAccountIds, periodFrom, periodTo, coverId } = input;
+  const { clientId, clientName, connectionId, accountIds, googleConnectionId, googleAccountIds, periodFrom, periodTo, coverId, metaLevel = 'campaign' } = input;
 
   const prev = calcPrevPeriod(periodFrom, periodTo);
   const fromDate = new Date(periodFrom + 'T12:00:00');
@@ -573,7 +574,7 @@ export async function buildOmniReport(input: {
     fetchMonthlyCrm(clientId, periodFrom, periodTo),
     fetchMonthlyCrm(clientId, prev.from, prev.to),
     connectionId && accountIds?.length
-      ? fetchMetaData(connectionId, accountIds, periodFrom, periodTo)
+      ? fetchMetaData(connectionId, accountIds, periodFrom, periodTo, metaLevel)
       : Promise.resolve({ meta: null, creatives: [] }),
     fetchGoogleAdsDetailed(googleConnectionId, googleAccountIds ?? [], periodFrom, periodTo),
     connectionId && accountIds?.length

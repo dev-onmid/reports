@@ -89,6 +89,7 @@ export default function RelatoriosPage() {
   const [genTemplate, setGenTemplate] = useState<'performance' | 'delivery'>('performance');
   const [genCsvFiles, setGenCsvFiles] = useState<{ name: string; content: string }[]>([]);
   const [genCoverId, setGenCoverId] = useState<string | null>(null);
+  const [genMetaLevel, setGenMetaLevel] = useState<'campaign' | 'adset'>('campaign');
   const [clientLinks, setClientLinks] = useState<ClientLink[]>([]);
   const [generating, setGenerating] = useState(false);
 
@@ -144,6 +145,7 @@ export default function RelatoriosPage() {
     setGenTemplate('performance');
     setGenCsvFiles([]);
     setGenCoverId(null);
+    setGenMetaLevel('campaign');
     setClientLinks([]);
     setShowGenModal(true);
   }
@@ -184,6 +186,7 @@ export default function RelatoriosPage() {
       if (genForm.agencyContext) payload.agencyContext = genForm.agencyContext;
       if (genTemplate === 'delivery') payload.csvFiles = genCsvFiles;
       if (genCoverId) payload.coverId = genCoverId;
+      if (genMetaLevel === 'adset') payload.metaLevel = genMetaLevel;
 
       const res = await fetch('/api/reports/run-once', {
         method: 'POST',
@@ -1134,6 +1137,35 @@ export default function RelatoriosPage() {
                       aria-label={`Capa ${cover.id}`}
                     />
                   ))}
+                </div>
+              </div>
+
+              {/* Meta Ads breakdown level — campaign vs ad set */}
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground font-medium">
+                  Detalhamento Meta Ads <span className="text-muted-foreground/50">(nível dos cards de campanha)</span>
+                </label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setGenMetaLevel('campaign')}
+                    className={cn(
+                      'flex-1 px-3 py-2 text-sm rounded-lg border-2 transition-colors',
+                      genMetaLevel === 'campaign' ? 'border-violet-500 text-violet-300 bg-violet-500/10' : 'border-border text-muted-foreground hover:border-violet-500/40',
+                    )}
+                  >
+                    Campanha
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setGenMetaLevel('adset')}
+                    className={cn(
+                      'flex-1 px-3 py-2 text-sm rounded-lg border-2 transition-colors',
+                      genMetaLevel === 'adset' ? 'border-violet-500 text-violet-300 bg-violet-500/10' : 'border-border text-muted-foreground hover:border-violet-500/40',
+                    )}
+                  >
+                    Conjunto de anúncios
+                  </button>
                 </div>
               </div>
 
