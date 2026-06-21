@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
-  Check, Copy, ExternalLink, Link2, MessageCircle, Plus, RefreshCw,
-  Settings2, Trash2, X, MousePointerClick,
+  Check, Code2, Copy, ExternalLink, FileText, Globe2, Link2, Megaphone,
+  MessageCircle, MousePointerClick, Plus, RefreshCw, Settings2, Trash2, Wand2, X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -19,6 +19,17 @@ type RedirectLink = {
   last_click: string | null;
   created_at: string;
 };
+
+type WebhookConfig = {
+  id: string;
+  name: string;
+  token: string;
+  description: string | null;
+  enabled: boolean;
+  created_at: string;
+};
+
+type SourceKind = 'whatsapp' | 'landing' | 'meta_form' | 'api';
 
 const DEFAULT_MESSAGE = 'Olá, vim pelo anúncio!';
 const META_UTM = 'utm_source=facebookads&utm_medium={{adset.id}}&utm_campaign={{campaign.id}}&utm_content={{ad.id}}&placement={{placement}}';
@@ -67,6 +78,98 @@ function CodeLine({ text }: { text: string }) {
     <div className="flex items-center gap-2 rounded-lg border border-border bg-background/70 p-2">
       <code className="min-w-0 flex-1 break-all font-mono text-[11px] leading-relaxed text-muted-foreground">{text}</code>
       <CopyButton text={text} label="Copiar" />
+    </div>
+  );
+}
+
+function SourceCard({
+  active,
+  icon: Icon,
+  title,
+  desc,
+  badge,
+  onClick,
+}: {
+  active?: boolean;
+  icon: React.ElementType;
+  title: string;
+  desc: string;
+  badge?: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'flex h-full items-start gap-3 rounded-xl border p-4 text-left transition-colors',
+        active
+          ? 'border-primary/50 bg-primary/10 text-primary'
+          : 'border-border bg-background/40 text-muted-foreground hover:border-primary/30 hover:bg-muted/30 hover:text-foreground',
+      )}
+    >
+      <span className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-xl', active ? 'bg-primary/15' : 'bg-muted/50')}>
+        <Icon className="h-5 w-5" />
+      </span>
+      <span className="min-w-0">
+        <span className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-bold">{title}</span>
+          {badge && <span className="rounded-full border border-current/20 px-2 py-0.5 text-[10px] font-bold">{badge}</span>}
+        </span>
+        <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">{desc}</span>
+      </span>
+    </button>
+  );
+}
+
+function SetupResult({ webhook, sourceName, sourceKind, clientId }: { webhook: WebhookConfig; sourceName: string; sourceKind: SourceKind; clientId: string }) {
+  const endpoint = `${publicBase()}/api/webhooks/${webhook.token}`;
+  const sourceLabel = sourceKind === 'meta_form' ? 'meta_form' : sourceKind === 'landing' ? 'landing_page' : 'api';
+  const payload = JSON.stringify({
+    event: 'lead.create',
+    data: {
+      client_id: clientId,
+      name: '{{nome_do_lead}}',
+      phone: '{{telefone_do_lead}}',
+      source: sourceLabel,
+      mensagem: sourceName ? `Lead vindo de ${sourceName}` : 'Lead vindo da fonte de captura',
+      status: 'Em Atendimento',
+    },
+  }, null, 2);
+
+  return (
+    <div className="space-y-4 rounded-xl border border-primary/30 bg-primary/5 p-4">
+      <div className="flex items-start gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary">
+          <Check className="h-5 w-5" />
+        </div>
+        <div>
+          <p className="text-sm font-bold text-foreground">Fonte pronta para receber leads</p>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            Copie o webhook abaixo para o formulário, Make, Zapier, Elementor, Webflow ou ferramenta da landing page.
+          </p>
+        </div>
+      </div>
+      <div>
+        <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Webhook</p>
+        <CodeLine text={endpoint} />
+      </div>
+      <div>
+        <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Modelo de dados</p>
+        <CodeLine text={payload} />
+      </div>
+      <div className="grid gap-3 md:grid-cols-3">
+        {[
+          ['1', 'Cole o webhook no formulário ou automação.'],
+          ['2', 'Mapeie nome e telefone do lead.'],
+          ['3', 'Faça um teste e confira o lead no CRM.'],
+        ].map(([step, text]) => (
+          <div key={step} className="rounded-lg border border-border bg-background/50 p-3">
+            <p className="text-xs font-bold text-primary">Passo {step}</p>
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{text}</p>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -186,6 +289,13 @@ export function CaptureLinksTab({ clientId }: { clientId: string }) {
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState('');
   const [selectedLink, setSelectedLink] = useState<RedirectLink | null>(null);
+  const [sourceKind, setSourceKind] = useState<SourceKind>('whatsapp');
+  const [createdWebhook, setCreatedWebhook] = useState<WebhookConfig | null>(null);
+  const [setupForm, setSetupForm] = useState({
+    name: '',
+    destination: '',
+    initialStatus: 'Em Atendimento',
+  });
   const [form, setForm] = useState({
     name: '',
     whatsapp: '',
@@ -256,6 +366,52 @@ export function CaptureLinksTab({ clientId }: { clientId: string }) {
     }
   }
 
+  async function createWebhookSource() {
+    setError('');
+    if (!setupForm.name.trim()) {
+      setError('Dê um nome para a fonte.');
+      return;
+    }
+    setSaving(true);
+    setCreatedWebhook(null);
+    try {
+      const label = sourceKind === 'landing'
+        ? 'Landing Page'
+        : sourceKind === 'meta_form'
+          ? 'Formulário Meta'
+          : 'API/Webhook';
+      const res = await fetch('/api/automacoes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: `${label} - ${setupForm.name.trim()}`,
+          description: `Fonte de captura plug and play para cliente ${clientId}`,
+        }),
+      });
+      const data = await res.json().catch(() => null) as WebhookConfig | { error?: string } | null;
+      if (!res.ok || !data || 'error' in data) {
+        setError(data && 'error' in data && data.error ? data.error : 'Não consegui criar a fonte.');
+        return;
+      }
+      setCreatedWebhook(data);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function resetWizard(kind: SourceKind = 'whatsapp') {
+    setSourceKind(kind);
+    setCreatedWebhook(null);
+    setError('');
+    setSetupForm({ name: '', destination: '', initialStatus: 'Em Atendimento' });
+    setForm({ name: '', whatsapp: '', message: DEFAULT_MESSAGE, slug: '' });
+  }
+
+  function openWizard(kind: SourceKind = 'whatsapp') {
+    resetWizard(kind);
+    setShowForm(true);
+  }
+
   async function remove(id: string) {
     if (!confirm('Remover este link e todos os cliques dele?')) return;
     await fetch(`/api/link-redirects/${id}`, { method: 'DELETE' });
@@ -268,7 +424,7 @@ export function CaptureLinksTab({ clientId }: { clientId: string }) {
         <div>
           <h3 className="text-sm font-bold text-foreground">Fontes de Captura</h3>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-            Crie links rastreáveis para WhatsApp e use as instruções para Meta, Google, site, bio ou influenciadores.
+            Configure WhatsApp, landing pages, formulários do Meta e webhooks sem precisar montar API manualmente.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -281,20 +437,51 @@ export function CaptureLinksTab({ clientId }: { clientId: string }) {
           </button>
           <button
             type="button"
-            onClick={() => setShowForm(true)}
+            onClick={() => openWizard('whatsapp')}
             className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-3 text-sm font-bold text-black transition-colors hover:bg-primary/90"
           >
             <Plus className="h-4 w-4" />
-            Novo Link
+            Nova Fonte
           </button>
         </div>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-4">
+        <SourceCard
+          icon={MessageCircle}
+          title="WhatsApp Rastreável"
+          desc="Gera link para anúncios, bio, Google, Meta e influenciadores."
+          badge="Link"
+          onClick={() => openWizard('whatsapp')}
+        />
+        <SourceCard
+          icon={Globe2}
+          title="Landing Page"
+          desc="Cria webhook pronto para Elementor, Webflow, Framer ou formulário próprio."
+          badge="Webhook"
+          onClick={() => openWizard('landing')}
+        />
+        <SourceCard
+          icon={Megaphone}
+          title="Formulário Meta"
+          desc="Prepara a captura via Make/Zapier enquanto a conexão nativa entra no sistema."
+          badge="Meta"
+          onClick={() => openWizard('meta_form')}
+        />
+        <SourceCard
+          icon={Code2}
+          title="API Direta"
+          desc="Para ferramentas externas enviarem leads direto ao CRM do cliente."
+          badge="API"
+          onClick={() => openWizard('api')}
+        />
       </div>
 
       <div className="grid gap-3 md:grid-cols-3">
         {[
           { label: 'Links cadastrados', value: links.length, icon: Link2 },
           { label: 'Cliques registrados', value: totalClicks, icon: MousePointerClick },
-          { label: 'Próximo passo', value: 'Formulários', icon: Settings2 },
+          { label: 'Configuração', value: 'Plug and play', icon: Wand2 },
         ].map(({ label, value, icon: Icon }) => (
           <div key={label} className="rounded-xl border border-border bg-card p-4">
             <div className="flex items-center justify-between gap-3">
@@ -368,15 +555,26 @@ export function CaptureLinksTab({ clientId }: { clientId: string }) {
 
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-xl rounded-2xl border border-border bg-card p-5 shadow-2xl">
+          <div className="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-2xl border border-border bg-card p-5 shadow-2xl">
             <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-lg font-bold text-foreground">Novo Link de Captura</h3>
+              <div>
+                <h3 className="text-lg font-bold text-foreground">Nova Fonte de Captura</h3>
+                <p className="mt-1 text-xs text-muted-foreground">Escolha o tipo e o sistema entrega o link, webhook ou instrução pronta.</p>
+              </div>
               <button type="button" onClick={() => setShowForm(false)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground">
                 <X className="h-4 w-4" />
               </button>
             </div>
 
-            <div className="space-y-4">
+            <div className="mb-5 grid gap-2 md:grid-cols-4">
+              <SourceCard active={sourceKind === 'whatsapp'} icon={MessageCircle} title="WhatsApp" desc="Link rastreável." onClick={() => resetWizard('whatsapp')} />
+              <SourceCard active={sourceKind === 'landing'} icon={Globe2} title="Landing" desc="Webhook para form." onClick={() => resetWizard('landing')} />
+              <SourceCard active={sourceKind === 'meta_form'} icon={Megaphone} title="Meta Forms" desc="Lead Ads." onClick={() => resetWizard('meta_form')} />
+              <SourceCard active={sourceKind === 'api'} icon={Code2} title="API" desc="Integração externa." onClick={() => resetWizard('api')} />
+            </div>
+
+            {sourceKind === 'whatsapp' ? (
+              <div className="space-y-4">
               <Field label="Nome">
                 <input
                   value={form.name}
@@ -422,6 +620,79 @@ export function CaptureLinksTab({ clientId }: { clientId: string }) {
                 </button>
               </div>
             </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="grid gap-3 md:grid-cols-2">
+                  <Field label="Nome da fonte">
+                    <input
+                      value={setupForm.name}
+                      onChange={e => setSetupForm(prev => ({ ...prev, name: e.target.value }))}
+                      placeholder={sourceKind === 'meta_form' ? 'Ex: Formulário Meta - Junho' : sourceKind === 'landing' ? 'Ex: Landing Franquia' : 'Ex: Integração externa'}
+                      className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none focus:border-primary"
+                    />
+                  </Field>
+                  <Field label={sourceKind === 'meta_form' ? 'Página ou formulário' : sourceKind === 'landing' ? 'URL da landing' : 'Ferramenta de origem'}>
+                    <input
+                      value={setupForm.destination}
+                      onChange={e => setSetupForm(prev => ({ ...prev, destination: e.target.value }))}
+                      placeholder={sourceKind === 'meta_form' ? 'Ex: Página PicoLocos / Formulário Orçamento' : sourceKind === 'landing' ? 'https://...' : 'Ex: Typeform, n8n, Make'}
+                      className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none focus:border-primary"
+                    />
+                  </Field>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-3">
+                  {sourceKind === 'landing' && (
+                    <>
+                      <div className="rounded-xl border border-border bg-background/50 p-3">
+                        <FileText className="mb-2 h-5 w-5 text-primary" />
+                        <p className="text-xs font-bold text-foreground">Para landing page</p>
+                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Cole o webhook no envio do formulário ou peça para o dev usar o POST.</p>
+                      </div>
+                      <div className="rounded-xl border border-border bg-background/50 p-3">
+                        <MousePointerClick className="mb-2 h-5 w-5 text-primary" />
+                        <p className="text-xs font-bold text-foreground">Com rastreio</p>
+                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Use UTMs da campanha e envie junto no campo observação.</p>
+                      </div>
+                    </>
+                  )}
+                  {sourceKind === 'meta_form' && (
+                    <>
+                      <div className="rounded-xl border border-border bg-background/50 p-3">
+                        <Megaphone className="mb-2 h-5 w-5 text-primary" />
+                        <p className="text-xs font-bold text-foreground">Meta Lead Ads</p>
+                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Use Make/Zapier para receber o lead do formulário e enviar ao CRM.</p>
+                      </div>
+                      <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 p-3">
+                        <Settings2 className="mb-2 h-5 w-5 text-amber-300" />
+                        <p className="text-xs font-bold text-foreground">Conexão nativa</p>
+                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Próxima etapa: selecionar página e formulário direto aqui.</p>
+                      </div>
+                    </>
+                  )}
+                  <div className="rounded-xl border border-border bg-background/50 p-3">
+                    <MessageCircle className="mb-2 h-5 w-5 text-primary" />
+                    <p className="text-xs font-bold text-foreground">Cai no CRM</p>
+                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">O lead entra vinculado a este cliente com status Em Atendimento.</p>
+                  </div>
+                </div>
+
+                {error && <p className="rounded-lg border border-red-400/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300">{error}</p>}
+
+                {createdWebhook ? (
+                  <SetupResult webhook={createdWebhook} sourceName={setupForm.name} sourceKind={sourceKind} clientId={clientId} />
+                ) : (
+                  <div className="flex gap-2 pt-1">
+                    <button type="button" onClick={() => setShowForm(false)} className="flex-1 rounded-lg border border-border py-2 text-sm font-bold text-muted-foreground hover:bg-muted/40 hover:text-foreground">
+                      Cancelar
+                    </button>
+                    <button type="button" onClick={createWebhookSource} disabled={saving} className="flex-1 rounded-lg bg-primary py-2 text-sm font-bold text-black hover:bg-primary/90 disabled:opacity-60">
+                      {saving ? 'Criando...' : 'Gerar Configuração'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
