@@ -10,6 +10,7 @@ export type AiUsageSource =
   | 'whatsapp'
   | 'mindmap'
   | 'crm_analysis'
+  | 'crm_attendance_audit'
   | 'other';
 
 // Re-export for server-side convenience

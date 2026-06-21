@@ -23,6 +23,8 @@ import { useClients } from '@/lib/client-store';
 import { ClientAvatar, fetchClientPicture } from '@/components/client-avatar';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 import type { Client } from '@/lib/mock-data';
+import type { AttendanceAudit } from '@/lib/crm-attendance-audit';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 
 type CrmLead = {
   id: string; client_id: string; mes: string | null; data: string | null;
@@ -1171,6 +1173,11 @@ function AttendanceView({
 }) {
   const [data, setData] = useState<AttendanceMetrics | null>(null);
   const [loading, setLoading] = useState(true);
+  const [audit, setAudit] = useState<{ result: AttendanceAudit; periodFrom: string; periodTo: string; createdAt: string } | null>(null);
+  const [auditLoading, setAuditLoading] = useState(true);
+  const [auditGenerating, setAuditGenerating] = useState(false);
+  const [auditError, setAuditError] = useState<string | null>(null);
+  const [showAuditModal, setShowAuditModal] = useState(false);
 
   useEffect(() => {
     const params = new URLSearchParams({ clientId });
@@ -1186,6 +1193,39 @@ function AttendanceView({
       .finally(() => setLoading(false));
   }, [clientId, month, from, to]);
 
+  useEffect(() => {
+    setAuditLoading(true);
+    fetch(`/api/crm/attendance/audit?${new URLSearchParams({ clientId })}`)
+      .then(r => r.ok ? r.json() : { audit: null })
+      .then(json => setAudit(json.audit ?? null))
+      .catch(() => setAudit(null))
+      .finally(() => setAuditLoading(false));
+  }, [clientId]);
+
+  async function generateAudit() {
+    setAuditGenerating(true);
+    setAuditError(null);
+    try {
+      const body: Record<string, string> = { clientId };
+      if (month) body.month = month;
+      if (!month && from) body.from = from;
+      if (!month && to) body.to = to;
+      const res = await fetch('/api/crm/attendance/audit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error ?? 'Erro ao gerar auditoria.');
+      setAudit(json.audit);
+      setShowAuditModal(true);
+    } catch (err) {
+      setAuditError(err instanceof Error ? err.message : 'Erro ao gerar auditoria.');
+    } finally {
+      setAuditGenerating(false);
+    }
+  }
+
   const summary = data?.summary;
   const responseTotal = (summary?.under_5 ?? 0) + (summary?.under_15 ?? 0) + (summary?.under_60 ?? 0) + (summary?.over_60 ?? 0);
   const answeredUnderOneHour = (summary?.under_5 ?? 0) + (summary?.under_15 ?? 0) + (summary?.under_60 ?? 0);
@@ -1197,9 +1237,11 @@ function AttendanceView({
   const unanswered = summary?.unanswered_chats ?? 0;
   const totalLeads = summary?.total_leads ?? 0;
   const activeConversations = summary?.active_conversations ?? 0;
-  const aiScore = Math.max(0, Math.min(100, Math.round((responseRate * 0.48) + (slaRate * 0.34) + (unanswered === 0 ? 18 : Math.max(0, 18 - unanswered)))));
-  const aiStatus = aiScore >= 80 ? 'Excelente' : aiScore >= 65 ? 'Bom' : aiScore >= 45 ? 'Atenção' : 'Crítico';
-  const aiStatusTone = aiScore >= 65 ? 'bg-primary/15 text-primary' : 'bg-amber-400/15 text-amber-300';
+  // Real score comes from the AI audit (crm_attendance_audit) — no audit generated
+  // yet means no score to show, not a guessed number.
+  const aiScore = audit?.result.nota_geral ?? null;
+  const aiStatus = audit?.result.classificacao ?? 'Sem auditoria';
+  const aiStatusTone = aiScore !== null && aiScore >= 65 ? 'bg-primary/15 text-primary' : aiScore !== null ? 'bg-amber-400/15 text-amber-300' : 'bg-white/10 text-zinc-300';
   const slaRows = [
     { label: 'Até 5 min', value: summary?.under_5 ?? 0, color: '#32E843' },
     { label: 'Até 15 min', value: summary?.under_15 ?? 0, color: '#A3E635' },
@@ -1255,16 +1297,37 @@ function AttendanceView({
                 <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-purple-100">i</span>
               </div>
               <div className="mt-6 flex items-end gap-2">
-                <span className="font-heading text-5xl leading-none text-purple-400">{aiScore}</span>
+                <span className="font-heading text-5xl leading-none text-purple-400">{auditLoading ? '…' : aiScore ?? '—'}</span>
                 <span className="pb-1 font-heading text-2xl text-purple-300/75">/100</span>
                 <span className={cn('mb-2 rounded-lg px-2 py-1 text-xs font-bold', aiStatusTone)}>{aiStatus}</span>
               </div>
-              <p className="mt-4 max-w-[210px] text-xs leading-relaxed text-zinc-300">Atendimento com gargalos que podem estar reduzindo conversões.</p>
+              <p className="mt-3 max-w-[210px] text-xs leading-relaxed text-zinc-300">
+                {audit ? `Última auditoria: ${new Date(audit.createdAt).toLocaleDateString('pt-BR')}` : 'Nenhuma auditoria gerada ainda para este período.'}
+              </p>
+              <div className="relative z-10 mt-3 flex flex-wrap gap-2">
+                <button
+                  onClick={generateAudit}
+                  disabled={auditGenerating}
+                  className="rounded-lg border border-purple-400/40 bg-purple-500/20 px-2.5 py-1.5 text-[11px] font-semibold text-purple-100 transition-colors hover:bg-purple-500/30 disabled:opacity-60"
+                >
+                  {auditGenerating ? 'Gerando…' : audit ? 'Gerar nova auditoria' : 'Gerar auditoria'}
+                </button>
+                {audit && (
+                  <button
+                    onClick={() => setShowAuditModal(true)}
+                    className="rounded-lg border border-white/15 bg-white/5 px-2.5 py-1.5 text-[11px] font-semibold text-zinc-200 transition-colors hover:bg-white/10"
+                  >
+                    Ver relatório completo
+                  </button>
+                )}
+              </div>
+              {auditError && <p className="relative z-10 mt-2 max-w-[220px] text-[11px] text-red-300">{auditError}</p>}
               <svg className="absolute bottom-0 left-0 h-16 w-full opacity-80" viewBox="0 0 260 70" preserveAspectRatio="none">
                 <path d={`${sparkPath([32, 40, 36, 48, 42, 54, 47], 260, 70)} L 260 70 L 0 70 Z`} fill="rgba(139,92,246,0.28)" />
                 <path d={sparkPath([32, 40, 36, 48, 42, 54, 47], 260, 70)} fill="none" stroke="#8B5CF6" strokeWidth="2.4" />
               </svg>
             </section>
+            <AttendanceAuditModal open={showAuditModal} onOpenChange={setShowAuditModal} audit={audit} />
 
             {[
               { label: 'Leads no período', value: totalLeads.toLocaleString('pt-BR'), sub: 'leads captados', badge: '+18% vs. período anterior', Icon: Users, tone: 'border-blue-500/20 bg-[#0D1519]', color: '#A78BFA', badgeTone: 'bg-blue-500/15 text-blue-300' },
@@ -1508,6 +1571,162 @@ function AttendanceView({
         </aside>
       </div>
     </div>
+  );
+}
+
+function AuditSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-2">
+      <h4 className="text-sm font-bold text-zinc-100">{title}</h4>
+      {children}
+    </div>
+  );
+}
+
+function AttendanceAuditModal({
+  open, onOpenChange, audit,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  audit: { result: AttendanceAudit; periodFrom: string; periodTo: string; createdAt: string } | null;
+}) {
+  if (!audit) return null;
+  const r = audit.result;
+  const gravidadeTone: Record<string, string> = {
+    alta: 'bg-red-500/15 text-red-300 border-red-400/30',
+    média: 'bg-amber-500/15 text-amber-300 border-amber-400/30',
+    baixa: 'bg-zinc-500/15 text-zinc-300 border-zinc-400/30',
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto bg-[#0A0F12] text-zinc-100 border-white/10">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2"><Sparkles className="h-4 w-4 text-purple-300" /> Auditoria de Atendimento (IA)</DialogTitle>
+          <DialogDescription className="text-zinc-400">
+            Período: {new Date(audit.periodFrom + 'T12:00:00').toLocaleDateString('pt-BR')} a {new Date(audit.periodTo + 'T12:00:00').toLocaleDateString('pt-BR')} · Gerado em {new Date(audit.createdAt).toLocaleString('pt-BR')}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-6 pt-2">
+          <div className="flex items-center gap-4 rounded-xl border border-purple-500/30 bg-purple-500/10 p-4">
+            <span className="font-heading text-4xl text-purple-300">{r.nota_geral}/100</span>
+            <span className="rounded-lg bg-purple-500/20 px-2 py-1 text-xs font-bold text-purple-100">{r.classificacao}</span>
+            <p className="flex-1 text-sm text-zinc-300">{r.resumo_semana}</p>
+          </div>
+
+          <AuditSection title="Notas por critério">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+              {[
+                ['Velocidade/SLA', r.notas_criterios.velocidade_sla, 25],
+                ['Qualidade conversa', r.notas_criterios.qualidade_conversa, 30],
+                ['Condução comercial', r.notas_criterios.conducao_comercial, 30],
+                ['Follow-up', r.notas_criterios.followup_recuperacao, 10],
+                ['CRM organizado', r.notas_criterios.organizacao_crm, 5],
+              ].map(([label, value, max]) => (
+                <div key={label as string} className="rounded-lg border border-white/10 bg-white/5 p-2.5 text-center">
+                  <p className="text-[10px] text-zinc-400">{label}</p>
+                  <p className="font-heading text-lg text-zinc-100">{value}/{max}</p>
+                </div>
+              ))}
+            </div>
+          </AuditSection>
+
+          {r.principais_problemas?.length > 0 && (
+            <AuditSection title="Principais problemas">
+              <ul className="list-disc space-y-1 pl-4 text-sm text-zinc-300">
+                {r.principais_problemas.map((p, i) => <li key={i}>{p}</li>)}
+              </ul>
+            </AuditSection>
+          )}
+
+          {r.oportunidades_perdidas?.length > 0 && (
+            <AuditSection title="Oportunidades perdidas">
+              <div className="space-y-2">
+                {r.oportunidades_perdidas.map((o, i) => (
+                  <div key={i} className="rounded-lg border border-white/10 bg-white/5 p-3 text-sm">
+                    <div className="mb-1 flex items-center justify-between gap-2">
+                      <span className="font-mono text-[11px] text-zinc-500">{o.lead_id} · {o.canal}</span>
+                      <span className={cn('rounded border px-1.5 py-0.5 text-[10px] font-bold', gravidadeTone[o.gravidade] ?? gravidadeTone.baixa)}>{o.gravidade}</span>
+                    </div>
+                    <p className="text-zinc-300"><strong className="text-zinc-100">Queria:</strong> {o.o_que_queria}</p>
+                    <p className="text-zinc-300"><strong className="text-zinc-100">Falha:</strong> {o.onde_falhou}</p>
+                    <p className="text-zinc-300"><strong className="text-zinc-100">Ação:</strong> {o.acao_deveria}</p>
+                  </div>
+                ))}
+              </div>
+            </AuditSection>
+          )}
+
+          {r.bons_exemplos?.length > 0 && (
+            <AuditSection title="Bons exemplos">
+              <div className="space-y-2">
+                {r.bons_exemplos.map((b, i) => (
+                  <div key={i} className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3 text-sm">
+                    <p className="font-mono text-[11px] text-zinc-500">{b.lead_id}</p>
+                    <p className="text-zinc-300"><strong className="text-zinc-100">Bem feito:</strong> {b.o_que_foi_bem}</p>
+                    <p className="text-zinc-300"><strong className="text-zinc-100">Por quê:</strong> {b.motivo_referencia}</p>
+                  </div>
+                ))}
+              </div>
+            </AuditSection>
+          )}
+
+          {r.analise_fontes?.length > 0 && (
+            <AuditSection title="Análise por fonte de captação">
+              <div className="space-y-2">
+                {r.analise_fontes.map((f, i) => (
+                  <div key={i} className="rounded-lg border border-white/10 bg-white/5 p-3 text-sm">
+                    <p className="font-semibold text-zinc-100">{f.fonte} — {f.quantidade_leads} leads</p>
+                    <p className="text-zinc-300">Qualidade: {f.qualidade_atendimento} · Taxa de avanço: {f.taxa_avanco}</p>
+                    <p className="text-zinc-400">Gargalos: {f.principais_gargalos}</p>
+                  </div>
+                ))}
+              </div>
+            </AuditSection>
+          )}
+
+          <AuditSection title="Análise por atendente">
+            {r.analise_atendentes?.length > 0 ? (
+              <div className="space-y-2">
+                {r.analise_atendentes.map((a, i) => (
+                  <div key={i} className="rounded-lg border border-white/10 bg-white/5 p-3 text-sm text-zinc-300">
+                    <p className="font-semibold text-zinc-100">{a.atendente}</p>
+                    <p>Pontos de melhoria: {a.pontos_melhoria}</p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-zinc-400">Não informado — este CRM ainda não rastreia qual atendente enviou cada mensagem.</p>
+            )}
+          </AuditSection>
+
+          <AuditSection title="Plano de ação para a próxima semana">
+            <div className="grid gap-3 sm:grid-cols-2">
+              {[
+                ['Ações urgentes', r.plano_acao.urgentes],
+                ['Melhorias de processo', r.plano_acao.melhorias_processo],
+                ['Treinamento do time', r.plano_acao.treinamento_time],
+                ['Ajustes de script', r.plano_acao.ajustes_script],
+                ['Ajustes no CRM/automações', r.plano_acao.ajustes_crm_automacoes],
+              ].map(([label, items]) => (
+                <div key={label as string} className="rounded-lg border border-white/10 bg-white/5 p-3">
+                  <p className="mb-1.5 text-xs font-bold text-zinc-200">{label}</p>
+                  <ul className="list-disc space-y-1 pl-4 text-xs text-zinc-300">
+                    {(items as string[]).map((item, i) => <li key={i}>{item}</li>)}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          </AuditSection>
+
+          <div className="rounded-xl border border-purple-500/20 bg-purple-500/5 p-4">
+            <p className="mb-1 text-xs font-bold uppercase tracking-wide text-purple-300">Recomendação final</p>
+            <p className="text-sm text-zinc-200">{r.recomendacao_final}</p>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

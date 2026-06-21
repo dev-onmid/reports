@@ -22,6 +22,7 @@ export const ESTIMATES: Record<string, AiEstimate> = {
   copy:               { model: 'claude-haiku-4-5-20251001', inputTokens: 400,  outputTokens: 600,  labelPt: 'Variações de Copy' },
   whatsapp:           { model: 'claude-haiku-4-5-20251001', inputTokens: 400,  outputTokens: 800,  labelPt: 'Variações WhatsApp' },
   crm_analysis:       { model: 'claude-haiku-4-5-20251001', inputTokens: 500,  outputTokens: 300,  labelPt: 'Análise CRM (por lead)' },
+  crm_attendance_audit: { model: 'claude-sonnet-4-6', inputTokens: 8000, outputTokens: 3000, labelPt: 'Auditoria de Atendimento (IA)' },
 };
 
 export function calcCostUsd(model: string, inputTokens: number, outputTokens: number): number {
