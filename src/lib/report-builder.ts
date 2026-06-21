@@ -81,6 +81,9 @@ function calcPrevPeriod(from: string, to: string): { from: string; to: string } 
 export type GoogleAdsTotals = { spend: number; impressions: number; clicks: number; conversions: number };
 
 const GOOGLE_ADS_API_VERSION = 'v24';
+const GOOGLE_ADS_DEVELOPER_TOKEN = process.env.GOOGLE_ADS_DEVELOPER_TOKEN || '1vR8GhAk4UMZoPaqo7Qq8Q';
+
+type GoogleConnectionToken = { id: string; accessToken: string };
 
 async function getGoogleAccessToken(connectionId: string): Promise<string | null> {
   const pool = makeServerPool();
@@ -114,6 +117,67 @@ async function getGoogleAccessToken(connectionId: string): Promise<string | null
     }
   }
   return accessToken;
+}
+
+async function getGoogleAccessCandidates(connectionId: string | null | undefined): Promise<GoogleConnectionToken[]> {
+  const pool = makeServerPool();
+  let rows: Array<{ id: string; access_token: string; refresh_token: string; token_expiry: string | null }> = [];
+  try {
+    const { rows: found } = await pool.query(
+      `SELECT id, access_token, refresh_token, token_expiry
+       FROM public.google_connections
+       WHERE status = 'connected'
+         AND (account_type = 'google_ads' OR scope ILIKE '%adwords%')
+       ORDER BY
+         CASE WHEN id::text = $1 THEN 0 ELSE 1 END,
+         connected_at DESC`,
+      [connectionId ?? ''],
+    );
+    rows = found;
+    if (!rows.length) {
+      const { rows: connected } = await pool.query(
+        `SELECT id, access_token, refresh_token, token_expiry
+         FROM public.google_connections
+         WHERE status = 'connected'
+         ORDER BY
+           CASE WHEN id::text = $1 THEN 0 ELSE 1 END,
+           connected_at DESC`,
+        [connectionId ?? ''],
+      );
+      rows = connected;
+    }
+  } finally {
+    await pool.end();
+  }
+
+  const candidates: GoogleConnectionToken[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    if (seen.has(row.id)) continue;
+    seen.add(row.id);
+
+    let accessToken = row.access_token;
+    if (!row.token_expiry || new Date(row.token_expiry).getTime() < Date.now() + 60_000) {
+      const res = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id: process.env.GOOGLE_CLIENT_ID ?? '',
+          client_secret: process.env.GOOGLE_CLIENT_SECRET ?? '',
+          refresh_token: row.refresh_token,
+          grant_type: 'refresh_token',
+        }).toString(),
+      }).catch(() => null);
+      if (res?.ok) {
+        const data = await res.json() as { access_token?: string };
+        accessToken = data.access_token ?? accessToken;
+      }
+    }
+
+    if (accessToken) candidates.push({ id: row.id, accessToken });
+  }
+
+  return candidates;
 }
 
 function googleAdsHeaders(accessToken: string, developerToken: string, loginCustomerId?: string): Record<string, string> {
@@ -155,6 +219,21 @@ async function googleAdsSearch(
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return res.json() as Promise<{ results?: any[] }>;
+}
+
+async function googleAdsSearchWithFallback(
+  customerId: string,
+  query: string,
+  accessToken: string,
+  developerToken: string,
+  loginCustomerId?: string,
+) {
+  let data = await googleAdsSearch(customerId, query, accessToken, developerToken, loginCustomerId);
+  if (data) return data;
+
+  const fallbackLogin = loginCustomerId ? undefined : customerId;
+  data = await googleAdsSearch(customerId, query, accessToken, developerToken, fallbackLogin);
+  return data;
 }
 
 async function buildGoogleLoginCustomerMap(
@@ -214,33 +293,42 @@ async function buildGoogleLoginCustomerMap(
 
 export async function fetchGoogleAdsTotals(connectionId: string, accountIds: string[], from: string, to: string): Promise<GoogleAdsTotals> {
   const empty: GoogleAdsTotals = { spend: 0, impressions: 0, clicks: 0, conversions: 0 };
-  const accessToken = await getGoogleAccessToken(connectionId);
-  if (!accessToken) return empty;
+  const candidates = await getGoogleAccessCandidates(connectionId);
+  if (!candidates.length) {
+    const accessToken = await getGoogleAccessToken(connectionId);
+    if (!accessToken) return empty;
+    candidates.push({ id: connectionId, accessToken });
+  }
 
-  const devToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? '';
+  const devToken = GOOGLE_ADS_DEVELOPER_TOKEN;
   const result = { ...empty };
-  const loginCustomerByAccount = await buildGoogleLoginCustomerMap(accountIds, accessToken, devToken);
+  const pendingAccounts = new Set(accountIds.map((accountId) => accountId.replace(/\D/g, '')).filter(Boolean));
 
-  await Promise.allSettled(accountIds.map(async (accountId) => {
-    const customerId = accountId.replace(/\D/g, '');
-    if (!customerId) return;
-    const data = await googleAdsSearch(
-      customerId,
-      `SELECT metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM campaign WHERE segments.date BETWEEN '${from}' AND '${to}' AND campaign.status != 'REMOVED'`,
-      accessToken,
-      devToken,
-      loginCustomerByAccount[customerId],
-    );
-    if (!data) return;
-    for (const row of (data.results ?? [])) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const m = ((row as any).metrics ?? {}) as Record<string, number>;
-      result.spend += (m.costMicros ?? 0) / 1_000_000;
-      result.impressions += m.impressions ?? 0;
-      result.clicks += m.clicks ?? 0;
-      result.conversions += m.conversions ?? 0;
-    }
-  }));
+  for (const candidate of candidates) {
+    if (pendingAccounts.size === 0) break;
+    const accountList = [...pendingAccounts];
+    const loginCustomerByAccount = await buildGoogleLoginCustomerMap(accountList, candidate.accessToken, devToken);
+
+    await Promise.allSettled(accountList.map(async (customerId) => {
+      const data = await googleAdsSearchWithFallback(
+        customerId,
+        `SELECT metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM campaign WHERE segments.date BETWEEN '${from}' AND '${to}' AND campaign.status != 'REMOVED'`,
+        candidate.accessToken,
+        devToken,
+        loginCustomerByAccount[customerId],
+      );
+      if (!data) return;
+      pendingAccounts.delete(customerId);
+      for (const row of (data.results ?? [])) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const m = ((row as any).metrics ?? {}) as Record<string, number>;
+        result.spend += (m.costMicros ?? 0) / 1_000_000;
+        result.impressions += m.impressions ?? 0;
+        result.clicks += m.clicks ?? 0;
+        result.conversions += m.conversions ?? 0;
+      }
+    }));
+  }
 
   return result;
 }
@@ -254,44 +342,53 @@ export async function fetchGoogleAdsDetailed(
   from: string, to: string,
 ): Promise<GoogleAdsFull | null> {
   if (!connectionId || !accountIds.length) return null;
-  const accessToken = await getGoogleAccessToken(connectionId);
-  if (!accessToken) return null;
+  const candidates = await getGoogleAccessCandidates(connectionId);
+  if (!candidates.length) {
+    const accessToken = await getGoogleAccessToken(connectionId);
+    if (!accessToken) return null;
+    candidates.push({ id: connectionId, accessToken });
+  }
 
-  const devToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? '';
+  const devToken = GOOGLE_ADS_DEVELOPER_TOKEN;
   const campanhas: CampanhaGoogleDetalhada[] = [];
-  const loginCustomerByAccount = await buildGoogleLoginCustomerMap(accountIds, accessToken, devToken);
+  const pendingAccounts = new Set(accountIds.map((accountId) => accountId.replace(/\D/g, '')).filter(Boolean));
 
-  await Promise.allSettled(accountIds.map(async (accountId) => {
-    const customerId = accountId.replace(/\D/g, '');
-    if (!customerId) return;
-    const data = await googleAdsSearch(
-      customerId,
-      `SELECT campaign.name, campaign.advertising_channel_type, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value
-                  FROM campaign
-                  WHERE segments.date BETWEEN '${from}' AND '${to}' AND campaign.status != 'REMOVED'
-                  LIMIT 50`,
-      accessToken,
-      devToken,
-      loginCustomerByAccount[customerId],
-    );
-    if (!data) return;
-    for (const row of (data.results ?? [])) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const r = row as any;
-      const m = (r.metrics ?? {}) as Record<string, number>;
-      campanhas.push({
-        nome: String(r.campaign?.name ?? 'Sem nome'),
-        tipo: String(r.campaign?.advertisingChannelType ?? ''),
-        metricas: {
-          investimento:     (m.costMicros ?? 0) / 1_000_000,
-          impressoes:       m.impressions ?? 0,
-          cliques:          m.clicks ?? 0,
-          conversoes:       m.conversions ?? 0,
-          valorConversoes:  m.conversionsValue ?? 0,
-        },
-      });
-    }
-  }));
+  for (const candidate of candidates) {
+    if (pendingAccounts.size === 0) break;
+    const accountList = [...pendingAccounts];
+    const loginCustomerByAccount = await buildGoogleLoginCustomerMap(accountList, candidate.accessToken, devToken);
+
+    await Promise.allSettled(accountList.map(async (customerId) => {
+      const data = await googleAdsSearchWithFallback(
+        customerId,
+        `SELECT campaign.name, campaign.advertising_channel_type, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value
+                    FROM campaign
+                    WHERE segments.date BETWEEN '${from}' AND '${to}' AND campaign.status != 'REMOVED'
+                    LIMIT 50`,
+        candidate.accessToken,
+        devToken,
+        loginCustomerByAccount[customerId],
+      );
+      if (!data) return;
+      pendingAccounts.delete(customerId);
+      for (const row of (data.results ?? [])) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const r = row as any;
+        const m = (r.metrics ?? {}) as Record<string, number>;
+        campanhas.push({
+          nome: String(r.campaign?.name ?? 'Sem nome'),
+          tipo: String(r.campaign?.advertisingChannelType ?? ''),
+          metricas: {
+            investimento:     (m.costMicros ?? 0) / 1_000_000,
+            impressoes:       m.impressions ?? 0,
+            cliques:          m.clicks ?? 0,
+            conversoes:       m.conversions ?? 0,
+            valorConversoes:  m.conversionsValue ?? 0,
+          },
+        });
+      }
+    }));
+  }
 
   if (!campanhas.length) return null;
 
