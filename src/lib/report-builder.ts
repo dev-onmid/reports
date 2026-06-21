@@ -80,6 +80,8 @@ function calcPrevPeriod(from: string, to: string): { from: string; to: string } 
 
 export type GoogleAdsTotals = { spend: number; impressions: number; clicks: number; conversions: number };
 
+const GOOGLE_ADS_API_VERSION = 'v24';
+
 async function getGoogleAccessToken(connectionId: string): Promise<string | null> {
   const pool = makeServerPool();
   let conn: { access_token: string; refresh_token: string; token_expiry: string | null } | null = null;
@@ -114,6 +116,102 @@ async function getGoogleAccessToken(connectionId: string): Promise<string | null
   return accessToken;
 }
 
+function googleAdsHeaders(accessToken: string, developerToken: string, loginCustomerId?: string): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Authorization': `Bearer ${accessToken}`,
+    'developer-token': developerToken,
+    'Content-Type': 'application/json',
+  };
+  if (loginCustomerId) headers['login-customer-id'] = loginCustomerId;
+  return headers;
+}
+
+async function googleAdsSearch(
+  customerId: string,
+  query: string,
+  accessToken: string,
+  developerToken: string,
+  loginCustomerId?: string,
+) {
+  const res = await fetch(
+    `https://googleads.googleapis.com/${GOOGLE_ADS_API_VERSION}/customers/${customerId}/googleAds:search`,
+    {
+      method: 'POST',
+      headers: googleAdsHeaders(accessToken, developerToken, loginCustomerId),
+      body: JSON.stringify({ query }),
+    },
+  ).catch(() => null);
+
+  if (!res?.ok) {
+    const body = await res?.text().catch(() => '') ?? '';
+    console.error('[reports/google] Google Ads query failed', {
+      customerId,
+      loginCustomerId,
+      status: res?.status,
+      body: body.slice(0, 500),
+    });
+    return null;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return res.json() as Promise<{ results?: any[] }>;
+}
+
+async function buildGoogleLoginCustomerMap(
+  accountIds: string[],
+  accessToken: string,
+  developerToken: string,
+): Promise<Record<string, string>> {
+  const wanted = new Set(accountIds.map((id) => id.replace(/\D/g, '')).filter(Boolean));
+  if (wanted.size === 0) return {};
+
+  const listRes = await fetch(
+    `https://googleads.googleapis.com/${GOOGLE_ADS_API_VERSION}/customers:listAccessibleCustomers`,
+    { headers: googleAdsHeaders(accessToken, developerToken) },
+  ).catch(() => null);
+
+  if (!listRes?.ok) {
+    const body = await listRes?.text().catch(() => '') ?? '';
+    console.error('[reports/google] listAccessibleCustomers failed while resolving MCC', {
+      status: listRes?.status,
+      body: body.slice(0, 500),
+    });
+    return {};
+  }
+
+  const { resourceNames = [] } = await listRes.json() as { resourceNames?: string[] };
+  const map: Record<string, string> = {};
+
+  await Promise.allSettled(resourceNames.map(async (resourceName) => {
+    const managerId = resourceName.replace('customers/', '').replace(/\D/g, '');
+    if (!managerId) return;
+
+    const managerInfo = await googleAdsSearch(
+      managerId,
+      'SELECT customer.id, customer.manager FROM customer LIMIT 1',
+      accessToken,
+      developerToken,
+    );
+    const isManager = Boolean(managerInfo?.results?.[0]?.customer?.manager);
+    if (!isManager) return;
+
+    const childData = await googleAdsSearch(
+      managerId,
+      'SELECT customer_client.id, customer_client.manager, customer_client.level FROM customer_client WHERE customer_client.level >= 1',
+      accessToken,
+      developerToken,
+      managerId,
+    );
+
+    for (const row of childData?.results ?? []) {
+      const childId = String(row.customerClient?.id ?? '').replace(/\D/g, '');
+      if (wanted.has(childId) && !map[childId]) map[childId] = managerId;
+    }
+  }));
+
+  return map;
+}
+
 export async function fetchGoogleAdsTotals(connectionId: string, accountIds: string[], from: string, to: string): Promise<GoogleAdsTotals> {
   const empty: GoogleAdsTotals = { spend: 0, impressions: 0, clicks: 0, conversions: 0 };
   const accessToken = await getGoogleAccessToken(connectionId);
@@ -121,23 +219,19 @@ export async function fetchGoogleAdsTotals(connectionId: string, accountIds: str
 
   const devToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? '';
   const result = { ...empty };
+  const loginCustomerByAccount = await buildGoogleLoginCustomerMap(accountIds, accessToken, devToken);
 
   await Promise.allSettled(accountIds.map(async (accountId) => {
     const customerId = accountId.replace(/\D/g, '');
     if (!customerId) return;
-    const res = await fetch(
-      `https://googleads.googleapis.com/v24/customers/${customerId}/googleAds:search`,
-      {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${accessToken}`, 'developer-token': devToken, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query: `SELECT metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM campaign WHERE segments.date BETWEEN '${from}' AND '${to}' AND campaign.status != 'REMOVED'`,
-        }),
-      },
-    ).catch(() => null);
-    if (!res?.ok) return;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const data = await res.json() as { results?: any[] };
+    const data = await googleAdsSearch(
+      customerId,
+      `SELECT metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM campaign WHERE segments.date BETWEEN '${from}' AND '${to}' AND campaign.status != 'REMOVED'`,
+      accessToken,
+      devToken,
+      loginCustomerByAccount[customerId],
+    );
+    if (!data) return;
     for (const row of (data.results ?? [])) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const m = ((row as any).metrics ?? {}) as Record<string, number>;
@@ -165,26 +259,22 @@ export async function fetchGoogleAdsDetailed(
 
   const devToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? '';
   const campanhas: CampanhaGoogleDetalhada[] = [];
+  const loginCustomerByAccount = await buildGoogleLoginCustomerMap(accountIds, accessToken, devToken);
 
   await Promise.allSettled(accountIds.map(async (accountId) => {
     const customerId = accountId.replace(/\D/g, '');
     if (!customerId) return;
-    const res = await fetch(
-      `https://googleads.googleapis.com/v24/customers/${customerId}/googleAds:search`,
-      {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${accessToken}`, 'developer-token': devToken, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query: `SELECT campaign.name, campaign.advertising_channel_type, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value
+    const data = await googleAdsSearch(
+      customerId,
+      `SELECT campaign.name, campaign.advertising_channel_type, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value
                   FROM campaign
                   WHERE segments.date BETWEEN '${from}' AND '${to}' AND campaign.status != 'REMOVED'
                   LIMIT 50`,
-        }),
-      },
-    ).catch(() => null);
-    if (!res?.ok) return;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const data = await res.json() as { results?: any[] };
+      accessToken,
+      devToken,
+      loginCustomerByAccount[customerId],
+    );
+    if (!data) return;
     for (const row of (data.results ?? [])) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const r = row as any;
