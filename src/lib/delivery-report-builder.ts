@@ -576,15 +576,27 @@ function estimateActionsFromCost(spend: number, costMap: Record<string, number>,
   return cost > 0 ? spend / cost : 0;
 }
 
+// The real Meta objective (from the API) is the source of truth, and leads/mensagens/
+// vendas always take priority over alcance — never the other way around. Agency naming
+// conventions like "[MEIO_FUNIL]"/"[TOPO_FUNIL]" describe funnel STAGE, not objective, and
+// "funil" alone used to be matched as an alcance signal before objective was even checked,
+// which silently downgraded real lead/message/sales campaigns to "alcance" any time their
+// name happened to contain that word. Name regexes now only kick in as a fallback when the
+// objective itself is missing/unrecognized (categorizeMetaObjective default of 'trafego').
 function campaignKindFor(c: CampanhaDetalhada): CampaignKind {
-  const name = c.nome.toLowerCase();
   const objective = categorizeMetaObjective(c.tipo);
-  if (/(tr[aá]fego|traffic|link|clique|click)/i.test(name) || objective === 'trafego') return 'trafego';
-  if (/(topo|funil|alcance|reconhecimento|awareness|reach)/i.test(name) || objective === 'alcance') return 'alcance';
-  if (objective === 'mensagens' || /(whats|mensagem|conversa)/i.test(name)) return 'mensagens';
-  if (objective === 'leads' || /(lead|formul[aá]rio|cadastro)/i.test(name)) return 'leads';
+  if (objective === 'vendas' || c.metricas.compras > 0) return 'vendas';
+  if (objective === 'mensagens') return 'mensagens';
+  if (objective === 'leads') return 'leads';
   if (objective === 'engajamento') return 'engajamento';
-  if (objective === 'vendas' || /(venda|convers[aã]o|compra|prato digital)/i.test(name) || c.metricas.compras > 0) return 'vendas';
+  if (objective === 'alcance') return 'alcance';
+
+  // objective came back 'trafego' (i.e. unrecognized) — only then fall back to the name.
+  const name = c.nome.toLowerCase();
+  if (/(venda|convers[aã]o|compra|prato digital)/i.test(name)) return 'vendas';
+  if (/(whats|mensagem|conversa)/i.test(name)) return 'mensagens';
+  if (/(lead|formul[aá]rio|cadastro)/i.test(name)) return 'leads';
+  if (/(topo|alcance|reconhecimento|awareness|reach)/i.test(name)) return 'alcance';
   return 'trafego';
 }
 
