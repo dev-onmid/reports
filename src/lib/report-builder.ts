@@ -85,6 +85,23 @@ const GOOGLE_ADS_DEVELOPER_TOKEN = process.env.GOOGLE_ADS_DEVELOPER_TOKEN || '1v
 
 type GoogleConnectionToken = { id: string; accessToken: string };
 
+function googleMetricNumber(value: unknown): number {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  if (typeof value === 'string') {
+    const parsed = Number(value.replace(',', '.'));
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+}
+
+function hasGoogleActivity(metrics: CampanhaGoogleDetalhada['metricas']): boolean {
+  return metrics.investimento > 0
+    || metrics.impressoes > 0
+    || metrics.cliques > 0
+    || metrics.conversoes > 0
+    || metrics.valorConversoes > 0;
+}
+
 async function getGoogleAccessToken(connectionId: string): Promise<string | null> {
   const pool = makeServerPool();
   let conn: { access_token: string; refresh_token: string; token_expiry: string | null } | null = null;
@@ -312,7 +329,7 @@ export async function fetchGoogleAdsTotals(connectionId: string, accountIds: str
     await Promise.allSettled(accountList.map(async (customerId) => {
       const data = await googleAdsSearchWithFallback(
         customerId,
-        `SELECT metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM campaign WHERE segments.date BETWEEN '${from}' AND '${to}' AND campaign.status != 'REMOVED'`,
+        `SELECT metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM campaign WHERE segments.date BETWEEN '${from}' AND '${to}' AND campaign.status = 'ENABLED'`,
         candidate.accessToken,
         devToken,
         loginCustomerByAccount[customerId],
@@ -322,10 +339,10 @@ export async function fetchGoogleAdsTotals(connectionId: string, accountIds: str
       for (const row of (data.results ?? [])) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const m = ((row as any).metrics ?? {}) as Record<string, number>;
-        result.spend += (m.costMicros ?? 0) / 1_000_000;
-        result.impressions += m.impressions ?? 0;
-        result.clicks += m.clicks ?? 0;
-        result.conversions += m.conversions ?? 0;
+        result.spend += googleMetricNumber(m.costMicros) / 1_000_000;
+        result.impressions += googleMetricNumber(m.impressions);
+        result.clicks += googleMetricNumber(m.clicks);
+        result.conversions += googleMetricNumber(m.conversions);
       }
     }));
   }
@@ -361,9 +378,9 @@ export async function fetchGoogleAdsDetailed(
     await Promise.allSettled(accountList.map(async (customerId) => {
       const data = await googleAdsSearchWithFallback(
         customerId,
-        `SELECT campaign.name, campaign.advertising_channel_type, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value
+        `SELECT campaign.name, campaign.advertising_channel_type, campaign.status, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value
                     FROM campaign
-                    WHERE segments.date BETWEEN '${from}' AND '${to}' AND campaign.status != 'REMOVED'
+                    WHERE segments.date BETWEEN '${from}' AND '${to}' AND campaign.status = 'ENABLED'
                     LIMIT 50`,
         candidate.accessToken,
         devToken,
@@ -375,16 +392,18 @@ export async function fetchGoogleAdsDetailed(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const r = row as any;
         const m = (r.metrics ?? {}) as Record<string, number>;
+        const metricas = {
+          investimento:     googleMetricNumber(m.costMicros) / 1_000_000,
+          impressoes:       googleMetricNumber(m.impressions),
+          cliques:          googleMetricNumber(m.clicks),
+          conversoes:       googleMetricNumber(m.conversions),
+          valorConversoes:  googleMetricNumber(m.conversionsValue),
+        };
+        if (!hasGoogleActivity(metricas)) continue;
         campanhas.push({
           nome: String(r.campaign?.name ?? 'Sem nome'),
           tipo: String(r.campaign?.advertisingChannelType ?? ''),
-          metricas: {
-            investimento:     (m.costMicros ?? 0) / 1_000_000,
-            impressoes:       m.impressions ?? 0,
-            cliques:          m.clicks ?? 0,
-            conversoes:       m.conversions ?? 0,
-            valorConversoes:  m.conversionsValue ?? 0,
-          },
+          metricas,
         });
       }
     }));
