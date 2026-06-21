@@ -3,7 +3,7 @@ import { getFreshMetaToken } from '@/lib/meta-token';
 import { RESULT_ACTIONS, NEW_CONTACT_ACTIONS, PURCHASE_ACTIONS, sumActions } from './report-runner';
 import {
   fetchBairros, fetchMetaData, fetchInstagramData,
-  sCapa, sVisaoGeral, sRegioes, sMetaAdsResumo, sMetaAdsCampanhas, sCriativos,
+  sCapa, sVisaoGeral, sRegioes, sPaidTrafficResumo, sMetaAdsResumo, sMetaAdsCampanhas, sCriativos,
   sGoogleAdsResumo, sGoogleAdsCampanhas,
   sInstagram, sInstagramCalendar, sInstagramPosts, sInstagramSpotlight,
   monthsBetweenInclusive, FONT_LINK, CANVAS, INTER,
@@ -481,6 +481,7 @@ export async function buildOmniReport(input: {
   const hasRegiao             = bairros.length > 0;
   const hasMeta               = meta !== null;
   const hasGoogle             = googleDetailed !== null;
+  const hasPaidTraffic        = hasMeta || hasGoogle;
   const hasInstagram          = instagram !== null;
   const hasInstagramPosts     = igPosts.length > 0;
   const hasInstagramSpotlight = hasInstagramPosts;
@@ -493,6 +494,7 @@ export async function buildOmniReport(input: {
   const total = 1
     + (hasVisao      ? 1 : 0)
     + (hasRegiao     ? 1 : 0)
+    + (hasPaidTraffic ? 1 : 0)
     + (hasMeta       ? 1 : 0)
     + (hasGoogle     ? 1 : 0)
     + (hasInstagram  ? 1 : 0)
@@ -510,6 +512,8 @@ export async function buildOmniReport(input: {
 
   if (hasVisao)   slides.push(sVisaoGeral(data, prevData, ++i, total, periodo, prevPeriodo));
   if (hasRegiao)  slides.push(sRegioes(bairros, ++i, total));
+
+  if (hasPaidTraffic) slides.push(sPaidTrafficResumo(meta, googleDetailed, ++i, total));
 
   if (hasMeta)        slides.push(sMetaAdsResumo(meta!, ++i, total));
   if (hasDestaques) {

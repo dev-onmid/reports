@@ -2220,8 +2220,8 @@ export function sMetaAdsResumo(meta: MetaAdsFull, idx: number, total: number): s
   <div style="position:relative;z-index:1;flex:1;padding:52px 48px 0;display:flex;flex-direction:column;gap:16px">
 
     <div style="flex-shrink:0">
-      <h1 style="font-family:${INTER};font-size:52px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 8px;letter-spacing:-0.03em">${reportTitle('Resumo de tráfego pago')}</h1>
-      <p style="font-size:16px;font-weight:500;color:#163461;font-family:${INTER};margin:0">Métricas gerais e resultados separados por objetivo de campanha</p>
+      <h1 style="font-family:${INTER};font-size:52px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 8px;letter-spacing:-0.03em">${reportTitle('Resumo Meta Ads')}</h1>
+      <p style="font-size:16px;font-weight:500;color:#163461;font-family:${INTER};margin:0">Métricas Meta Ads e resultados separados por objetivo de campanha</p>
     </div>
 
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;flex-shrink:0">
@@ -2246,6 +2246,162 @@ export function sMetaAdsResumo(meta: MetaAdsFull, idx: number, total: number): s
   ${richFooter()}
 </div>`;
   return auditSlide(body, 'sMetaAdsResumo');
+}
+
+export function sPaidTrafficResumo(meta: MetaAdsFull | null, google: GoogleAdsFull | null, idx: number, total: number): string {
+  void idx;
+  void total;
+
+  const sumMeta = (selector: (c: CampanhaDetalhada) => number) =>
+    (meta?.campanhas ?? []).reduce((totalValue, campaign) => totalValue + selector(campaign), 0);
+
+  const metaSpend = meta?.investimento ?? 0;
+  const metaImpressions = meta?.impressoes ?? 0;
+  const metaClicks = meta?.cliques ?? 0;
+  const metaReach = meta?.alcance ?? 0;
+  const metaResults = sumMeta(c => c.metricas.compras + c.metricas.leads + c.metricas.conversas);
+  const metaRevenue = sumMeta(c => c.metricas.valor_compras);
+
+  const googleSpend = google?.investimento ?? 0;
+  const googleImpressions = google?.impressoes ?? 0;
+  const googleClicks = google?.cliques ?? 0;
+  const googleConversions = google?.conversoes ?? 0;
+  const googleRevenue = google?.valorConversoes ?? 0;
+
+  const totalSpend = metaSpend + googleSpend;
+  const totalImpressions = metaImpressions + googleImpressions;
+  const totalClicks = metaClicks + googleClicks;
+  const totalResults = metaResults + googleConversions;
+  const totalRevenue = metaRevenue + googleRevenue;
+  const totalCtr = totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : 0;
+  const totalCpc = totalClicks > 0 ? totalSpend / totalClicks : 0;
+  const totalCpm = totalImpressions > 0 ? totalSpend / (totalImpressions / 1000) : 0;
+  const totalCpa = totalResults > 0 ? totalSpend / totalResults : 0;
+  const totalRoas = totalSpend > 0 && totalRevenue > 0 ? totalRevenue / totalSpend : 0;
+
+  const brlC = (n: number) => n > 0 ? n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '—';
+  const pctC = (n: number) => n > 0 ? `${n.toFixed(2).replace('.', ',')}%` : '—';
+  const decC = (n: number) => n > 0 ? n.toFixed(2).replace('.', ',') : '—';
+
+  const ICO_MONEY  = '<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>';
+  const ICO_EYE    = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
+  const ICO_CURSOR = '<path d="m3 3 7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="m13 13 6 6"/>';
+  const ICO_TARGET = '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>';
+  const ICO_PERCENT = '<path d="M19 5 5 19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/>';
+  const ICO_CHART = '<path d="M4 19V9"/><path d="M10 19V5"/><path d="M16 19v-8"/><path d="M22 19H2"/>';
+  const ICO_USERS  = '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>';
+  const ICO_META = '<path d="M6.5 15.5c2.5 0 3.2-7 5.5-7s3 7 5.5 7c1.9 0 3.5-1.6 3.5-3.5s-1.6-3.5-3.5-3.5c-2.5 0-3.2 7-5.5 7s-3-7-5.5-7C4.6 8.5 3 10.1 3 12s1.6 3.5 3.5 3.5z"/>';
+  const ICO_GOOGLE = '<path d="M21.8 12.2c0-.7-.06-1.3-.18-1.9H12v3.6h5.5c-.24 1.3-.97 2.4-2.06 3.1v2.6h3.3c1.9-1.8 3.06-4.4 3.06-7.4Z"/><path d="M12 22c2.4 0 4.4-.8 5.84-2.16l-3.3-2.6c-.9.6-2.06 1-3.0.96-2.3 0-4.26-1.5-4.96-3.6H2.18v2.66C3.6 19.9 7.5 22 12 22Z"/><path d="M7.04 13.6a5.4 5.4 0 0 1 0-3.4V7.54H2.18a9.96 9.96 0 0 0 0 9.1l4.86-3.04Z"/><path d="M12 6.4c1.3 0 2.5.46 3.4 1.34l2.9-2.86C16.4 3.3 14.4 2.5 12 2.5 7.5 2.5 3.6 4.6 2.18 7.54L7.04 10.6c.7-2.1 2.66-3.6 4.96-4.2Z"/>';
+
+  const bigKpi = (label: string, value: string, ico: string) =>
+    `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:16px;box-shadow:0 10px 26px rgba(15,23,42,.06);padding:14px 16px;display:flex;align-items:center;gap:12px;min-width:0">
+      <div style="width:44px;height:44px;border-radius:50%;background:${PRIMARY}1F;flex-shrink:0;display:flex;align-items:center;justify-content:center">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="${PRIMARY_TEXT}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ico}</svg>
+      </div>
+      <div style="min-width:0">
+        <p style="font-size:12px;font-weight:700;color:#163461;font-family:${INTER};margin:0 0 5px;line-height:1.2">${label}</p>
+        <p style="font-family:${INTER};font-size:22px;font-weight:900;letter-spacing:0;color:${FG};line-height:1;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${value}</p>
+      </div>
+    </div>`;
+
+  const line = (label: string, value: string) =>
+    `<div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;border-top:1px solid rgba(148,163,184,.2);padding-top:9px">
+      <span style="font-family:${INTER};font-size:12px;font-weight:750;color:${MUTED};line-height:1.15">${label}</span>
+      <span style="font-family:${INTER};font-size:17px;font-weight:950;color:${FG};line-height:1;text-align:right;white-space:nowrap">${value}</span>
+    </div>`;
+
+  const platformCard = (
+    title: string,
+    subtitle: string,
+    icon: string,
+    accent: string,
+    tint: string,
+    rows: Array<[string, string]>,
+  ) =>
+    `<div style="background:${tint};border:1px solid ${accent}33;border-left:5px solid ${accent};border-radius:18px;box-shadow:0 12px 28px rgba(15,23,42,.052);padding:22px 24px;display:flex;flex-direction:column;gap:14px;min-width:0">
+      <div style="display:flex;align-items:center;gap:14px">
+        <div style="width:52px;height:52px;border-radius:50%;background:#FFFFFFB8;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+          <svg width="25" height="25" viewBox="0 0 24 24" fill="none" stroke="${accent}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${icon}</svg>
+        </div>
+        <div style="min-width:0">
+          <p style="font-family:${INTER};font-size:20px;font-weight:950;color:${FG};margin:0 0 4px;line-height:1.1">${title}</p>
+          <p style="font-family:${INTER};font-size:12px;font-weight:700;color:#475569;margin:0;line-height:1.35">${subtitle}</p>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 22px">
+        ${rows.map(([label, value]) => line(label, value)).join('')}
+      </div>
+    </div>`;
+
+  const metaCtr = metaImpressions > 0 ? (metaClicks / metaImpressions) * 100 : 0;
+  const googleCtr = googleImpressions > 0 ? (googleClicks / googleImpressions) * 100 : 0;
+  const platformCards = [
+    meta ? platformCard('Meta Ads', 'Facebook, Instagram e campanhas vinculadas ao Meta', ICO_META, '#0866FF', '#F4F8FF', [
+      ['Investimento', brlC(metaSpend)],
+      ['Impressões', numOrDash(metaImpressions)],
+      ['Alcance', numOrDash(metaReach)],
+      ['Cliques', numOrDash(metaClicks)],
+      ['CTR', pctC(metaCtr)],
+      ['Resultados', numOrDash(metaResults)],
+    ]) : '',
+    google ? platformCard('Google Ads', 'Pesquisa, Display, Performance Max e demais campanhas Google', ICO_GOOGLE, GOOGLE_BLUE, '#F6FAFF', [
+      ['Investimento', brlC(googleSpend)],
+      ['Impressões', numOrDash(googleImpressions)],
+      ['Cliques', numOrDash(googleClicks)],
+      ['CTR', pctC(googleCtr)],
+      ['Conversões', numOrDash(googleConversions)],
+      ['Valor conversões', brlC(googleRevenue)],
+    ]) : '',
+  ].filter(Boolean);
+
+  const generalMetrics = [
+    bigKpi('Investimento total', brlC(totalSpend), ICO_MONEY),
+    bigKpi('Impressões totais', numOrDash(totalImpressions), ICO_EYE),
+    bigKpi('Cliques totais', numOrDash(totalClicks), ICO_CURSOR),
+    bigKpi('CTR consolidado', pctC(totalCtr), ICO_PERCENT),
+    bigKpi('CPC médio', brlC(totalCpc), ICO_CURSOR),
+    bigKpi('CPM médio', brlC(totalCpm), ICO_CHART),
+    bigKpi('Resultados / conversões', numOrDash(totalResults), ICO_TARGET),
+    bigKpi('ROAS consolidado', decC(totalRoas), ICO_CHART),
+  ];
+
+  const recommendation = totalRevenue > 0
+    ? `A mídia paga consolidada gerou ${brlC(totalRevenue)} em receita atribuída com ROAS ${decC(totalRoas)}. Comparar Meta Ads e Google Ads separadamente ajuda a decidir onde escalar verba sem misturar objetivos.`
+    : totalResults > 0
+    ? `A mídia paga consolidada gerou ${numOrDash(totalResults)} resultados/conversões com custo médio de ${brlC(totalCpa)}. Acompanhar a visão individual de cada plataforma antes de redistribuir orçamento.`
+    : `Foram investidos ${brlC(totalSpend)} em mídia paga, com ${numOrDash(totalClicks)} cliques e CTR de ${pctC(totalCtr)}. Validar a contribuição individual de Meta Ads e Google Ads no próximo ciclo.`;
+
+  const body = `<div style="width:1440px;min-height:810px;background:${BG};border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
+  <div style="position:absolute;right:60px;top:-100px;width:560px;height:480px;border-radius:50%;background:linear-gradient(135deg,rgba(219,234,254,.55),rgba(255,255,255,.15));opacity:.7;pointer-events:none"></div>
+
+  <div style="position:relative;z-index:1;flex:1;padding:52px 48px 0;display:flex;flex-direction:column;gap:16px">
+    <div style="flex-shrink:0">
+      <h1 style="font-family:${INTER};font-size:52px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 8px;letter-spacing:-0.03em">${reportTitle('Resultados de Tráfego Pago')}</h1>
+      <p style="font-size:16px;font-weight:500;color:#163461;font-family:${INTER};margin:0">Consolidado de Meta Ads e Google Ads, com leitura geral e visão individual por plataforma</p>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;flex-shrink:0">
+      ${generalMetrics.join('')}
+    </div>
+
+    <div style="display:grid;grid-template-columns:${platformCards.length === 1 ? '1fr' : '1fr 1fr'};gap:18px;flex-shrink:0">
+      ${platformCards.join('')}
+    </div>
+
+    <div data-conclusion="1" style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 10px 26px rgba(15,23,42,.06);display:flex;align-items:flex-start;gap:16px;padding:20px 26px">
+      <div style="width:40px;height:40px;border-radius:50%;background:${PRIMARY}16;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${PRIMARY_TEXT}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICO_USERS}</svg>
+      </div>
+      <div style="border-left:2px solid ${PRIMARY};padding-left:18px">
+        <p style="font-size:15px;font-weight:800;color:${FG};font-family:${INTER};margin:0 0 4px">Leitura consolidada</p>
+        <p style="font-size:14px;font-weight:500;color:#163461;font-family:${INTER};line-height:1.5;margin:0">${recommendation}</p>
+      </div>
+    </div>
+  </div>
+
+  ${richFooter()}
+</div>`;
+  return auditSlide(body, 'sPaidTrafficResumo');
 }
 
 // ── Instagram Insights ────────────────────────────────────────────────────────
@@ -3008,8 +3164,8 @@ export function sCriativos(creatives: Creative[], idx: number, total: number): s
   <div style="position:absolute;right:-120px;top:-170px;width:640px;height:540px;border-radius:50%;background:linear-gradient(135deg,rgba(241,245,249,.74),rgba(255,255,255,.12));opacity:.78;pointer-events:none"></div>
   <div style="position:relative;z-index:1;flex:1;padding:26px 40px 24px;box-sizing:border-box;display:flex;flex-direction:column">
     <div style="flex-shrink:0;margin-bottom:18px">
-      <h1 style="font-family:${INTER};font-size:52px;font-weight:950;color:#050816;line-height:.95;margin:0 0 14px;letter-spacing:-0.055em">${reportTitle('Principais criativos de tráfego pago')}</h1>
-      <p style="font-size:17px;font-weight:500;color:#6B7280;font-family:${INTER};margin:0;letter-spacing:-0.015em">Melhores criativos por objetivo — cada campanha avaliada pela métrica certa para o seu tipo</p>
+      <h1 style="font-family:${INTER};font-size:52px;font-weight:950;color:#050816;line-height:.95;margin:0 0 14px;letter-spacing:-0.055em">${reportTitle('Principais Criativos Meta Ads')}</h1>
+      <p style="font-size:17px;font-weight:500;color:#6B7280;font-family:${INTER};margin:0;letter-spacing:-0.015em">Melhores criativos Meta Ads por objetivo — cada campanha avaliada pela métrica certa para o seu tipo</p>
       <div style="width:38px;height:3px;border-radius:999px;background:${PRIMARY};margin-top:13px"></div>
     </div>
     <div style="flex:1">
@@ -3167,8 +3323,8 @@ export function sMetaAdsCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number
 
   <div style="position:relative;z-index:1;flex:1;padding:52px 48px 0;display:flex;flex-direction:column">
     <div style="flex-shrink:0;margin-bottom:28px">
-      <h1 style="font-family:${INTER};font-size:52px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 8px;letter-spacing:-0.03em">${reportTitle('Campanhas veiculadas')}</h1>
-      <p data-conclusion="1" style="font-size:16px;font-weight:500;color:#163461;font-family:${INTER};margin:0">Desempenho das campanhas em ${month}</p>
+      <h1 style="font-family:${INTER};font-size:52px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 8px;letter-spacing:-0.03em">${reportTitle('Campanhas Veiculadas Meta Ads')}</h1>
+      <p data-conclusion="1" style="font-size:16px;font-weight:500;color:#163461;font-family:${INTER};margin:0">Desempenho das campanhas Meta Ads em ${month}</p>
     </div>
 
     <div style="flex:1;min-height:0">
