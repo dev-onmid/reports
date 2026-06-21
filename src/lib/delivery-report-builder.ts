@@ -89,6 +89,44 @@ function nextMonthName(periodo: string): string {
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
+// ── Report covers ────────────────────────────────────────────────────────────
+// Static background art for the capa (cover) slide. `dark` controls whether the
+// overlaid title/text switches to white — these images fill the whole slide, the
+// left ~45% of each one is a flat color reserved for the text block.
+export type ReportCover = { id: string; url: string; dark: boolean };
+
+export const REPORT_COVERS: ReportCover[] = [
+  { id: 'light',           url: '/report-covers/cover-light.png',           dark: false },
+  { id: 'dark-green',      url: '/report-covers/cover-dark-green.png',      dark: true },
+  { id: 'dark-navy-green', url: '/report-covers/cover-dark-navy-green.png', dark: true },
+  { id: 'dark-navy',       url: '/report-covers/cover-dark-navy.png',       dark: true },
+  { id: 'dark-purple',     url: '/report-covers/cover-dark-purple.png',     dark: true },
+];
+
+// `seed` rotates through the list deterministically (sequential round-robin) when
+// no explicit coverId is chosen — callers typically pass a count of reports already
+// generated so each new report advances to the next cover instead of repeating one.
+export function resolveReportCover(coverId: string | null | undefined, seed: number): ReportCover {
+  const found = coverId ? REPORT_COVERS.find(c => c.id === coverId) : undefined;
+  if (found) return found;
+  const index = ((seed % REPORT_COVERS.length) + REPORT_COVERS.length) % REPORT_COVERS.length;
+  return REPORT_COVERS[index];
+}
+
+// Total reports generated so far, across all clients — used as the rotation seed so
+// each new report (regardless of template) advances to the next cover in sequence.
+export async function fetchReportRotationSeed(): Promise<number> {
+  const pool = makeServerPool();
+  try {
+    const { rows } = await pool.query(`SELECT COUNT(*)::int AS count FROM public.diagnostic_reports`);
+    return rows[0]?.count ?? 0;
+  } catch {
+    return 0;
+  } finally {
+    await pool.end();
+  }
+}
+
 export type Bairro = { bairro: string; pedidos: number; faturamento: number };
 type Product     = { nome: string; qtd: number; total: number };
 type Faixa       = { label: string; count: number };
@@ -155,6 +193,7 @@ export type Creative = {
   clicks?: number;
   ctr?: number;
   thumbnail_url: string | null;
+  media_url: string | null; // playable video source (mp4) or full-size static image — click target
 };
 
 export type InstagramData = {
@@ -755,7 +794,7 @@ export async function fetchMetaData(
   const topByCategory = orderedCategories.flatMap(([cat, list]) => rankWithinCategory(cat, list).slice(0, PER_CATEGORY_CAP));
 
   const creatives: Creative[] = await Promise.all(topByCategory.map(async (ad) => {
-    if (!ad.ad_id) return { nome: ad.ad_name, spend: ad.spend, resultado: ad.resultado, purchaseValue: ad.purchaseValue, campaign_name: ad.campaign_name, adset_name: ad.adset_name, objective: ad.objective, impressions: ad.impressions, reach: ad.reach, clicks: ad.clicks, ctr: ad.ctr, thumbnail_url: null };
+    if (!ad.ad_id) return { nome: ad.ad_name, spend: ad.spend, resultado: ad.resultado, purchaseValue: ad.purchaseValue, campaign_name: ad.campaign_name, adset_name: ad.adset_name, objective: ad.objective, impressions: ad.impressions, reach: ad.reach, clicks: ad.clicks, ctr: ad.ctr, thumbnail_url: null, media_url: null };
     // Fetch creative fields needed to resolve the best thumbnail.
     // video_id is the direct reference used by Reels/video ads; image_url is for static ads.
     // creative.thumbnail_url has an oe= expiry param — we prefer video.picture when possible.
@@ -763,6 +802,7 @@ export async function fetchMetaData(
     const url = `https://graph.facebook.com/v21.0/${ad.ad_id}?fields=creative{${creativeFields}}&access_token=${token}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(8000) }).catch(() => null);
     let thumbnail_url: string | null = null;
+    let media_url: string | null = null;
     if (res?.ok) {
       const j = await res.json() as {
         creative?: {
@@ -775,25 +815,30 @@ export async function fetchMetaData(
       const cr = j.creative ?? {};
       const videoId = cr.video_id ?? cr.object_story_spec?.video_data?.video_id ?? null;
 
-      // For video/Reels ads, fetch the video object's picture — a stable CDN URL
-      // (unlike creative.thumbnail_url which uses oe= expiry timestamps).
+      // For video/Reels ads, fetch the video object's picture (stable CDN thumbnail) and
+      // source (the playable mp4 file) — `source` is what we link to so the click actually
+      // plays the ad, not just shows the cover frame.
       if (videoId) {
         const vRes = await fetch(
-          `https://graph.facebook.com/v21.0/${videoId}?fields=picture&access_token=${token}`,
+          `https://graph.facebook.com/v21.0/${videoId}?fields=picture,source&access_token=${token}`,
           { signal: AbortSignal.timeout(6000) },
         ).catch(() => null);
         if (vRes?.ok) {
-          const vj = await vRes.json() as { picture?: string };
+          const vj = await vRes.json() as { picture?: string; source?: string };
           thumbnail_url = vj.picture ?? null;
+          media_url = vj.source ?? null;
         }
         // Fallback: image_url set at ad creation time (explicit thumbnail in video_data)
         if (!thumbnail_url) {
           thumbnail_url = cr.object_story_spec?.video_data?.image_url ?? null;
         }
       }
-      // Static image ad or last resort
+      // Static image ad or last resort — the full-size image is itself the click target.
       if (!thumbnail_url) {
         thumbnail_url = cr.image_url ?? cr.thumbnail_url ?? null;
+      }
+      if (!media_url) {
+        media_url = cr.image_url ?? thumbnail_url ?? null;
       }
     }
     return {
@@ -809,6 +854,7 @@ export async function fetchMetaData(
       clicks: ad.clicks,
       ctr: ad.ctr,
       thumbnail_url,
+      media_url,
     };
   }));
 
@@ -1328,6 +1374,7 @@ function insight(title: string, text: string, color = PRIMARY): string {
 export function sCapa(
   d: ParsedData, meta: MetaAdsFull | null, clientName: string,
   periodo: string, prevPeriodo: string, diag: DiagJson, total: number,
+  cover: ReportCover,
 ): string {
   void d;
   void meta;
@@ -1335,27 +1382,36 @@ export function sCapa(
 
   const apoio = `Análise de faturamento, pedidos, tráfego, base de clientes, produtos e oportunidades para o próximo ciclo.`;
 
-  const chartPath = 'M0 86 C46 72 42 34 86 44 C120 52 130 12 164 20 C198 28 190 70 232 62 C270 54 270 18 308 28 C342 38 330 72 378 46 C410 30 414 8 446 12';
-  const body = `<div data-slide-index="1" data-slide-total="${total}" style="width:1440px;min-height:810px;background:${BG};border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
-  <div style="position:absolute;left:-110px;bottom:-130px;width:360px;height:360px;border-radius:50%;background:radial-gradient(circle,${PRIMARY}33 0%,${PRIMARY}16 38%,transparent 72%);pointer-events:none"></div>
-  <div style="position:absolute;right:96px;top:88px;width:520px;height:520px;border-radius:50%;background:linear-gradient(135deg,rgba(219,234,254,.68),rgba(255,255,255,.2));opacity:.72;pointer-events:none"></div>
+  // The cover art is a full-bleed background photo/illustration (left side is a flat
+  // color reserved for this text block) — on dark covers the title/labels switch to
+  // white since FG/MUTED were tuned for the plain light background this slide used
+  // to have before covers existed.
+  const titleColor   = cover.dark ? '#FFFFFF' : FG;
+  const bodyColor     = cover.dark ? 'rgba(255,255,255,.86)' : '#163461';
+  const labelColor    = cover.dark ? 'rgba(255,255,255,.86)' : '#14305B';
+  const wordmarkColor = cover.dark ? '#FFFFFF' : FG;
+  const trademarkColor = cover.dark ? 'rgba(255,255,255,.6)' : MUTED;
+  const footerOnmidColor = cover.dark ? '#FFFFFF' : FG;
+  const footerReportsColor = cover.dark ? 'rgba(255,255,255,.75)' : '#163461';
+  const footerBorder = cover.dark ? 'rgba(255,255,255,.18)' : BORDER;
 
+  const body = `<div data-slide-index="1" data-slide-total="${total}" style="width:1440px;min-height:810px;background:${BG} url('${cover.url}') center/cover no-repeat;border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
   <div style="height:92px;padding:34px 48px 0;display:flex;align-items:flex-start;justify-content:space-between;flex-shrink:0">
     <div style="display:flex;align-items:center;gap:8px">
-      <span style="font-family:${INTER};font-size:34px;font-weight:900;letter-spacing:-0.06em;color:${FG};line-height:1">onmid</span>
+      <span style="font-family:${INTER};font-size:34px;font-weight:900;letter-spacing:-0.06em;color:${wordmarkColor};line-height:1">onmid</span>
       <span style="width:44px;height:22px;border-radius:999px;background:${PRIMARY};display:inline-flex;align-items:center;justify-content:flex-end;padding-right:4px;box-sizing:border-box;box-shadow:0 8px 20px ${PRIMARY}55">
         <span style="width:14px;height:14px;border-radius:50%;background:#FFFFFF;display:block"></span>
       </span>
-      <span style="font-size:9px;font-weight:700;color:${MUTED};align-self:flex-start;margin-top:1px">®</span>
+      <span style="font-size:9px;font-weight:700;color:${trademarkColor};align-self:flex-start;margin-top:1px">®</span>
     </div>
   </div>
 
   <div style="position:relative;z-index:1;flex:1;padding:82px 48px 68px;display:grid;grid-template-columns:650px 1fr;column-gap:40px">
     <div style="display:flex;flex-direction:column;min-width:0">
-      <h1 style="font-family:${INTER};font-size:52px;font-weight:900;letter-spacing:-0.045em;color:${FG};line-height:1.04;margin:0 0 20px">
+      <h1 style="font-family:${INTER};font-size:52px;font-weight:900;letter-spacing:-0.045em;color:${titleColor};line-height:1.04;margin:0 0 20px">
         ${reportTitle('Relatório de Performance')} —<br>${clientName}
       </h1>
-      <p style="font-family:${INTER};font-size:20px;font-weight:500;color:#163461;line-height:1.48;margin:0 0 34px;max-width:590px">${apoio}</p>
+      <p style="font-family:${INTER};font-size:20px;font-weight:500;color:${bodyColor};line-height:1.48;margin:0 0 34px;max-width:590px">${apoio}</p>
 
       <div style="display:flex;flex-direction:column;gap:18px;margin-top:4px">
         <div style="display:flex;align-items:center;gap:20px">
@@ -1364,7 +1420,7 @@ export function sCapa(
               <rect x="3" y="4" width="18" height="17" rx="2"></rect><path d="M16 2v5M8 2v5M3 10h18"></path>
             </svg>
           </div>
-          <p style="font-family:${INTER};font-size:18px;color:#14305B;margin:0"><strong style="color:${FG}">Período analisado:</strong> ${periodo}</p>
+          <p style="font-family:${INTER};font-size:18px;color:${labelColor};margin:0"><strong style="color:${titleColor}">Período analisado:</strong> ${periodo}</p>
         </div>
         <div style="display:flex;align-items:center;gap:20px">
           <div style="width:48px;height:48px;border-radius:15px;background:${BLUE}12;display:flex;align-items:center;justify-content:center;flex-shrink:0">
@@ -1372,58 +1428,17 @@ export function sCapa(
               <circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4M12 8h.01"></path>
             </svg>
           </div>
-          <p style="font-family:${INTER};font-size:18px;color:#14305B;margin:0"><strong style="color:${FG}">Comparativo:</strong> ${prevPeriodo || 'Período anterior não informado'}</p>
+          <p style="font-family:${INTER};font-size:18px;color:${labelColor};margin:0"><strong style="color:${titleColor}">Comparativo:</strong> ${prevPeriodo || 'Período anterior não informado'}</p>
         </div>
-      </div>
-    </div>
-
-    <div style="position:relative;min-height:440px">
-      <div style="position:absolute;right:70px;top:10px;width:360px;height:150px;border-radius:18px;background:#FFFFFF;border:1px solid #E7ECF3;box-shadow:0 18px 42px rgba(15,23,42,.09);padding:22px">
-        <div style="display:flex;gap:8px;margin-bottom:16px"><span style="width:10px;height:10px;border-radius:50%;background:${PRIMARY}"></span><span style="width:10px;height:10px;border-radius:50%;background:${PRIMARY}55"></span><span style="width:10px;height:10px;border-radius:50%;background:#D7DEE8"></span></div>
-        <svg viewBox="0 0 460 110" width="100%" height="86">
-          <rect x="0" y="4" width="460" height="104" fill="#F8FAFD" stroke="#E6EDF6"/>
-          <path d="${chartPath}" fill="none" stroke="${BLUE}" stroke-width="3" stroke-linecap="round"/>
-          <path d="${chartPath} L446 108 L0 108 Z" fill="${BLUE}" opacity=".10"/>
-        </svg>
-      </div>
-
-      <div style="position:absolute;left:56px;top:144px;width:230px;height:112px;border-radius:17px;background:#FFFFFF;border:1px solid #E7ECF3;box-shadow:0 18px 38px rgba(15,23,42,.10);display:flex;align-items:center;gap:18px;padding:18px">
-        <div style="width:72px;height:72px;border-radius:50%;background:conic-gradient(${PRIMARY} 0 68%,${PRIMARY}55 68% 82%,#DBEAFE 82% 100%);position:relative;flex-shrink:0"><span style="position:absolute;inset:21px;border-radius:50%;background:#FFFFFF"></span></div>
-        <div style="flex:1;display:flex;flex-direction:column;gap:12px"><span style="height:8px;border-radius:8px;background:${PRIMARY};width:18px"></span><span style="height:8px;border-radius:8px;background:#D9E2EE;width:86px"></span><span style="height:8px;border-radius:8px;background:#D9E2EE;width:64px"></span></div>
-      </div>
-
-      <div style="position:absolute;right:0;top:250px;width:196px;height:112px;border-radius:15px;background:#FFFFFF;border:1px solid #E7ECF3;box-shadow:0 18px 38px rgba(15,23,42,.09);display:flex;align-items:flex-end;gap:14px;padding:22px 24px">
-        ${[34, 50, 66, 84, 104].map((h, i) => `<span style="width:15px;height:${h}px;border-radius:5px;background:${PRIMARY};opacity:${0.38 + i * 0.14}"></span>`).join('')}
-      </div>
-
-      <div style="position:absolute;right:212px;top:220px;width:230px;height:112px;border-radius:15px;background:#FFFFFF;border:1px solid #E7ECF3;box-shadow:0 18px 38px rgba(15,23,42,.09);display:grid;grid-template-columns:96px 1fr;gap:15px;padding:14px">
-        <div style="border-radius:13px;background:linear-gradient(135deg,#FDE68A,#F97316);position:relative;overflow:hidden">
-          <span style="position:absolute;left:15px;top:18px;width:26px;height:26px;border-radius:50%;background:#22C55E"></span>
-          <span style="position:absolute;right:14px;top:26px;width:34px;height:24px;border-radius:14px;background:#FEF3C7"></span>
-          <span style="position:absolute;left:24px;bottom:18px;width:48px;height:28px;border-radius:16px;background:#B45309"></span>
-        </div>
-        <div style="display:flex;flex-direction:column;gap:10px;justify-content:center"><span style="height:9px;border-radius:9px;background:#D9E2EE;width:92px"></span><span style="height:9px;border-radius:9px;background:#D9E2EE;width:70px"></span><span style="height:9px;border-radius:9px;background:#D9E2EE;width:52px"></span><span style="height:17px;border-radius:9px;background:${PRIMARY};width:54px;margin-top:4px"></span></div>
-      </div>
-
-      <div style="position:absolute;left:104px;bottom:38px;width:210px;height:112px;border-radius:15px;background:#FFFFFF;border:1px solid #E7ECF3;box-shadow:0 18px 38px rgba(15,23,42,.08);padding:12px">
-        <div style="height:88px;border-radius:12px;background:#EFF6FF;position:relative;overflow:hidden">
-          <svg viewBox="0 0 210 88" width="100%" height="88"><path d="M0 62 L48 28 L96 46 L144 18 L210 56" fill="none" stroke="#BFDBFE" stroke-width="12"/><path d="M30 78 L86 28 L138 52 L190 10" fill="none" stroke="#93C5FD" stroke-width="2"/></svg>
-          <span style="position:absolute;left:58px;top:38px;width:22px;height:22px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:${PRIMARY}"><span style="position:absolute;inset:7px;border-radius:50%;background:#FFFFFF"></span></span>
-          <span style="position:absolute;right:52px;top:22px;width:22px;height:22px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:${PRIMARY}"><span style="position:absolute;inset:7px;border-radius:50%;background:#FFFFFF"></span></span>
-        </div>
-      </div>
-
-      <div style="position:absolute;right:34px;bottom:30px;width:220px;height:96px;border-radius:14px;background:#FFFFFF;border:1px solid #E7ECF3;box-shadow:0 18px 38px rgba(15,23,42,.08);padding:18px">
-        <svg viewBox="0 0 196 58" width="100%" height="58"><path d="M0 42 C22 20 34 54 54 28 C76 4 92 54 112 32 C132 10 144 34 160 18 C178 0 186 24 196 8" fill="none" stroke="${BLUE}" stroke-width="2.4"/><path d="M0 42 C22 20 34 54 54 28 C76 4 92 54 112 32 C132 10 144 34 160 18 C178 0 186 24 196 8 L196 58 L0 58 Z" fill="${BLUE}" opacity=".10"/></svg>
-      </div>
-
-      <div style="position:absolute;right:24px;top:104px;width:96px;height:96px;border-radius:50%;background:${PRIMARY}18;box-shadow:0 14px 36px ${PRIMARY}22;display:flex;align-items:center;justify-content:center">
-        <svg width="50" height="50" viewBox="0 0 24 24" fill="none" stroke="${PRIMARY_TEXT}" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13c0-4 3-7 8-7s8 3 8 7"></path><path d="M5 13h14l-1 5H6z"></path><path d="M8 7l1-3M16 7l-1-3M10 5h4"></path></svg>
       </div>
     </div>
   </div>
 
-  ${richFooter()}
+  <div style="height:56px;border-top:1px solid ${footerBorder};display:flex;align-items:center;padding:0 48px;gap:12px;flex-shrink:0">
+    <span style="width:34px;height:18px;border-radius:999px;background:${PRIMARY};display:inline-flex;align-items:center;justify-content:flex-end;padding-right:3px;box-sizing:border-box"><span style="width:11px;height:11px;border-radius:50%;background:#FFFFFF"></span></span>
+    <span style="font-family:${INTER};font-size:13px;font-weight:900;color:${footerOnmidColor};letter-spacing:.03em">ONMID</span>
+    <span style="font-family:${INTER};font-size:13px;color:${footerReportsColor}">Reports</span>
+  </div>
 </div>`;
   return auditSlide(body, 'sCapa');
 }
@@ -3121,10 +3136,10 @@ export function sCriativos(creatives: Creative[], idx: number, total: number): s
       <div style="width:38px;height:42px;border-radius:10px;background:${style.accent}14;border:1px solid ${style.accent}33;display:flex;align-items:center;justify-content:center">
         <span style="font-family:${INTER};font-size:25px;font-weight:950;color:${style.accent};letter-spacing:-0.05em;line-height:1">${i + 1}º</span>
       </div>
-      <div style="position:relative;width:232px;height:254px;border-radius:12px;background:${ROW};border:1px solid #E8EDF4;overflow:hidden">
+      ${c.media_url ? `<a href="${c.media_url}" target="_blank" rel="noopener noreferrer" style="position:relative;display:block;width:232px;height:254px;border-radius:12px;background:${ROW};border:1px solid #E8EDF4;overflow:hidden;cursor:pointer">` : `<div style="position:relative;width:232px;height:254px;border-radius:12px;background:${ROW};border:1px solid #E8EDF4;overflow:hidden">`}
         ${preview}
         ${isVideo ? `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none"><div style="width:46px;height:46px;border-radius:50%;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;border:2px solid rgba(255,255,255,.75)"><svg width="18" height="18" viewBox="0 0 24 24" fill="white" style="margin-left:3px">${ICO_PLAY}</svg></div></div>` : ''}
-      </div>
+      ${c.media_url ? '</a>' : '</div>'}
       <div style="min-width:0;display:flex;flex-direction:column">
         <h2 style="font-family:${INTER};font-size:21px;font-weight:950;color:#050816;letter-spacing:-0.04em;line-height:1.1;margin:4px 0 16px">${titleFor(c)}</h2>
         <div style="display:flex;flex-direction:column;gap:9px;margin-bottom:15px">
@@ -3712,8 +3727,9 @@ export async function buildDeliveryReport(opts: {
   agencyContext?: string;
   connectionId?:  string | null;
   accountIds?:    string[];
+  coverId?:       string | null;
 }): Promise<{ html: string }> {
-  const { clientId, clientName, from, to, csvFiles = [], agencyContext = '', connectionId, accountIds = [] } = opts;
+  const { clientId, clientName, from, to, csvFiles = [], agencyContext = '', connectionId, accountIds = [], coverId } = opts;
 
   const fromDate = new Date(from + 'T12:00:00');
   const toDate   = new Date(to   + 'T12:00:00');
@@ -3736,14 +3752,16 @@ export async function buildDeliveryReport(opts: {
       })()
     : '';
 
-  const [bairros, { meta, creatives }, instagramFull] = await Promise.all([
+  const [bairros, { meta, creatives }, instagramFull, rotationSeed] = await Promise.all([
     fetchBairros(clientId, from, to),
     fetchMetaData(connectionId, accountIds, from, to),
     fetchInstagramData(clientId, connectionId, accountIds, from, to),
+    fetchReportRotationSeed(),
   ]);
   const instagram = instagramFull?.insights ?? null;
   const igPosts    = instagramFull?.posts ?? [];
   const instagramCalendarMonths = monthsBetweenInclusive(fromDate, toDate);
+  const cover = resolveReportCover(coverId, rotationSeed);
 
   console.log(`[delivery] ${clientName} | fat:${brlOrDash(data.faturamento)} ativos:${data.ativos} prod:${data.produtos.length} bairros:${bairros.length} meta:${meta ? 'sim' : 'não'} ig:${instagram ? `@${instagram.username}` : 'não'} igPosts:${igPosts.length} criativos:${creatives.length} prev:${hasPrev}`);
 
@@ -3782,7 +3800,7 @@ export async function buildDeliveryReport(opts: {
   // Slides are grouped into topic blocks — base de clientes/produtos, depois tráfego
   // pago (resumo + campanhas + criativos) inteiro, depois Instagram inteiro — em vez de
   // intercalar assuntos. Cada bloco fica de uma vez só, sem voltar a um assunto anterior.
-  slides.push(sCapa(data, meta, clientName, periodo, prevPeriodo, diag, total));
+  slides.push(sCapa(data, meta, clientName, periodo, prevPeriodo, diag, total, cover));
 
   // ── Bloco: base de clientes / produtos ────────────────────────────────────
   if (hasVisao)       slides.push(sVisaoGeral(data, prevData, ++i, total, periodo, prevPeriodo));
@@ -4003,10 +4021,10 @@ export function __devPreviewFullReport(): string {
   ];
 
   const creatives: Creative[] = [
-    { nome: '[ON] [LEADS] Loja pronta em condomínio', spend: 1492, resultado: 48, campaign_name: 'Meta Ads | Captação de leads | Franquias', adset_name: 'Interesse em franquias | Londrina', objective: 'Leads', reach: 38200, clicks: 1420, ctr: 2.84, thumbnail_url: 'https://picsum.photos/seed/cr1/420/520' },
-    { nome: '[ON] [VIDEO] Vídeo narrado oportunidade', spend: 914, resultado: 32, campaign_name: 'Meta Ads | Geração de demanda', adset_name: 'Empreendedorismo | Maringá', objective: 'Leads', reach: 24700, clicks: 960, ctr: 2.17, thumbnail_url: 'https://picsum.photos/seed/cr2/420/520' },
-    { nome: '[ON] [PROVA SOCIAL] Depoimento de franqueado', spend: 738, resultado: 21, campaign_name: 'Meta Ads | Prova social', adset_name: 'Lookalike | Curitiba', objective: 'Leads', reach: 18900, clicks: 740, ctr: 1.96, thumbnail_url: 'https://picsum.photos/seed/cr3/420/520' },
-    { nome: '[ON] [CARROSSEL] Modelo de negócio', spend: 812, resultado: 15, campaign_name: 'Meta Ads | Conversão', adset_name: 'Interesses amplos | Curitiba', objective: 'Leads', reach: 21300, clicks: 615, ctr: 1.72, thumbnail_url: 'https://picsum.photos/seed/cr4/420/520' },
+    { nome: '[ON] [LEADS] Loja pronta em condomínio', spend: 1492, resultado: 48, campaign_name: 'Meta Ads | Captação de leads | Franquias', adset_name: 'Interesse em franquias | Londrina', objective: 'Leads', reach: 38200, clicks: 1420, ctr: 2.84, thumbnail_url: 'https://picsum.photos/seed/cr1/420/520', media_url: 'https://picsum.photos/seed/cr1/420/520' },
+    { nome: '[ON] [VIDEO] Vídeo narrado oportunidade', spend: 914, resultado: 32, campaign_name: 'Meta Ads | Geração de demanda', adset_name: 'Empreendedorismo | Maringá', objective: 'Leads', reach: 24700, clicks: 960, ctr: 2.17, thumbnail_url: 'https://picsum.photos/seed/cr2/420/520', media_url: 'https://picsum.photos/seed/cr2/420/520' },
+    { nome: '[ON] [PROVA SOCIAL] Depoimento de franqueado', spend: 738, resultado: 21, campaign_name: 'Meta Ads | Prova social', adset_name: 'Lookalike | Curitiba', objective: 'Leads', reach: 18900, clicks: 740, ctr: 1.96, thumbnail_url: 'https://picsum.photos/seed/cr3/420/520', media_url: 'https://picsum.photos/seed/cr3/420/520' },
+    { nome: '[ON] [CARROSSEL] Modelo de negócio', spend: 812, resultado: 15, campaign_name: 'Meta Ads | Conversão', adset_name: 'Interesses amplos | Curitiba', objective: 'Leads', reach: 21300, clicks: 615, ctr: 1.72, thumbnail_url: 'https://picsum.photos/seed/cr4/420/520', media_url: 'https://picsum.photos/seed/cr4/420/520' },
   ];
 
   const diag: DiagJson = {
@@ -4027,7 +4045,7 @@ export function __devPreviewFullReport(): string {
   const slides: string[] = [];
   let i = 1;
 
-  slides.push(sCapa(data, meta, 'PicoLocos', periodo, prevPeriodo, diag, total));
+  slides.push(sCapa(data, meta, 'PicoLocos', periodo, prevPeriodo, diag, total, REPORT_COVERS[0]));
   // ── Bloco: base de clientes / produtos ────────────────────────────────────
   if (hasVisao)              slides.push(sVisaoGeral(data, prevData, ++i, total, periodo, prevPeriodo));
   if (hasDia)                slides.push(sPorDia(data, ++i, total, periodo));

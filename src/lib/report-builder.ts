@@ -7,6 +7,7 @@ import {
   sGoogleAdsResumo, sGoogleAdsCampanhas,
   sInstagram, sInstagramCalendar, sInstagramPosts, sInstagramSpotlight,
   monthsBetweenInclusive, FONT_LINK, CANVAS, INTER,
+  resolveReportCover, fetchReportRotationSeed,
   type ParsedData, type DiagJson, type GoogleAdsFull, type CampanhaGoogleDetalhada,
 } from './delivery-report-builder';
 
@@ -556,8 +557,9 @@ export async function buildOmniReport(input: {
   googleAccountIds?: string[];
   periodFrom: string;
   periodTo: string;
+  coverId?: string | null;
 }): Promise<{ html: string }> {
-  const { clientId, clientName, connectionId, accountIds, googleConnectionId, googleAccountIds, periodFrom, periodTo } = input;
+  const { clientId, clientName, connectionId, accountIds, googleConnectionId, googleAccountIds, periodFrom, periodTo, coverId } = input;
 
   const prev = calcPrevPeriod(periodFrom, periodTo);
   const fromDate = new Date(periodFrom + 'T12:00:00');
@@ -567,7 +569,7 @@ export async function buildOmniReport(input: {
   const prevFromDate = new Date(prev.from + 'T12:00:00');
   const prevPeriodo  = `${MONTHS[prevFromDate.getMonth()]}/${prevFromDate.getFullYear()}`;
 
-  const [monthlyCrm, prevMonthlyCrm, metaDetailed, googleDetailed, instagramFull, bairros] = await Promise.all([
+  const [monthlyCrm, prevMonthlyCrm, metaDetailed, googleDetailed, instagramFull, bairros, rotationSeed] = await Promise.all([
     fetchMonthlyCrm(clientId, periodFrom, periodTo),
     fetchMonthlyCrm(clientId, prev.from, prev.to),
     connectionId && accountIds?.length
@@ -578,7 +580,9 @@ export async function buildOmniReport(input: {
       ? fetchInstagramData(clientId, connectionId, accountIds, periodFrom, periodTo)
       : Promise.resolve(null),
     fetchBairros(clientId, periodFrom, periodTo),
+    fetchReportRotationSeed(),
   ]);
+  const cover = resolveReportCover(coverId, rotationSeed);
 
   const data    = toParsedData(monthlyCrm);
   const hasPrevData = prevMonthlyCrm.some(m => m.faturamento > 0 || m.fechados > 0);
@@ -624,7 +628,7 @@ export async function buildOmniReport(input: {
   const slides: string[] = [];
   let i = 1;
 
-  slides.push(sCapa(data, meta, clientName, periodo, prevPeriodo, diag, total));
+  slides.push(sCapa(data, meta, clientName, periodo, prevPeriodo, diag, total, cover));
 
   if (hasVisao)   slides.push(sVisaoGeral(data, prevData, ++i, total, periodo, prevPeriodo));
   if (hasRegiao)  slides.push(sRegioes(bairros, ++i, total));

@@ -11,9 +11,10 @@ export async function POST(request: NextRequest) {
       clientId?: string; from?: string; to?: string;
       agencyContext?: string; template?: string;
       csvFiles?: { name: string; content: string }[];
+      coverId?: string;
     };
 
-    const { clientId, from, to, agencyContext, template } = body;
+    const { clientId, from, to, agencyContext, template, coverId } = body;
     const csvFiles = body.csvFiles ?? [];
     if (!clientId || !from || !to) {
       return Response.json({ error: 'clientId, from e to são obrigatórios' }, { status: 400 });
@@ -57,6 +58,7 @@ export async function POST(request: NextRequest) {
         clientId, clientName, from, to, csvFiles, agencyContext,
         connectionId: metaConnectionId,
         accountIds: metaAccountIds,
+        coverId,
       });
       const { token, reportId } = await saveDeliveryReport({ clientId, clientName, from, to, data: reportData });
       return Response.json({ ok: true, id: reportId, public_token: token });
@@ -72,6 +74,7 @@ export async function POST(request: NextRequest) {
       googleAccountIds,
       periodFrom: from,
       periodTo: to,
+      coverId,
     });
 
     const { id, public_token } = await saveOmniReport({

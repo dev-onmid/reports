@@ -67,6 +67,15 @@ function platformColor(platform: string): string {
 
 const PAGE_SIZE = 8;
 
+// Mirrors REPORT_COVERS in src/lib/delivery-report-builder.ts — keep ids in sync.
+const REPORT_COVER_OPTIONS: { id: string; url: string; dark: boolean }[] = [
+  { id: 'light',           url: '/report-covers/cover-light.png',           dark: false },
+  { id: 'dark-green',      url: '/report-covers/cover-dark-green.png',      dark: true },
+  { id: 'dark-navy-green', url: '/report-covers/cover-dark-navy-green.png', dark: true },
+  { id: 'dark-navy',       url: '/report-covers/cover-dark-navy.png',       dark: true },
+  { id: 'dark-purple',     url: '/report-covers/cover-dark-purple.png',     dark: true },
+];
+
 // ── Page ────────────────────────────────────────────────────────────────────
 
 export default function RelatoriosPage() {
@@ -79,6 +88,7 @@ export default function RelatoriosPage() {
   const [genForm, setGenForm] = useState({ clientId: '', from: '', to: '', agencyContext: '' });
   const [genTemplate, setGenTemplate] = useState<'performance' | 'delivery'>('performance');
   const [genCsvFiles, setGenCsvFiles] = useState<{ name: string; content: string }[]>([]);
+  const [genCoverId, setGenCoverId] = useState<string | null>(null);
   const [clientLinks, setClientLinks] = useState<ClientLink[]>([]);
   const [generating, setGenerating] = useState(false);
 
@@ -133,6 +143,7 @@ export default function RelatoriosPage() {
     setGenForm({ clientId: '', from, to, agencyContext: '' });
     setGenTemplate('performance');
     setGenCsvFiles([]);
+    setGenCoverId(null);
     setClientLinks([]);
     setShowGenModal(true);
   }
@@ -172,6 +183,7 @@ export default function RelatoriosPage() {
       };
       if (genForm.agencyContext) payload.agencyContext = genForm.agencyContext;
       if (genTemplate === 'delivery') payload.csvFiles = genCsvFiles;
+      if (genCoverId) payload.coverId = genCoverId;
 
       const res = await fetch('/api/reports/run-once', {
         method: 'POST',
@@ -1091,6 +1103,38 @@ export default function RelatoriosPage() {
                   rows={2}
                   className="w-full px-3 py-2.5 text-sm bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50 resize-none placeholder:text-muted-foreground/40"
                 />
+              </div>
+
+              {/* Cover picker — optional for both templates; defaults to sequential rotation */}
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground font-medium">
+                  Capa do relatório <span className="text-muted-foreground/50">(opcional — sem escolha, alterna automaticamente)</span>
+                </label>
+                <div className="flex gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => setGenCoverId(null)}
+                    className={cn(
+                      'h-14 w-20 rounded-lg border-2 flex items-center justify-center text-[10px] font-medium transition-colors shrink-0',
+                      genCoverId === null ? 'border-violet-500 text-violet-300' : 'border-border text-muted-foreground hover:border-violet-500/40',
+                    )}
+                  >
+                    Aleatório
+                  </button>
+                  {REPORT_COVER_OPTIONS.map(cover => (
+                    <button
+                      key={cover.id}
+                      type="button"
+                      onClick={() => setGenCoverId(cover.id)}
+                      style={{ backgroundImage: `url(${cover.url})`, backgroundSize: 'cover', backgroundPosition: 'center' }}
+                      className={cn(
+                        'h-14 w-20 rounded-lg border-2 shrink-0 transition-colors',
+                        genCoverId === cover.id ? 'border-violet-500' : 'border-border hover:border-violet-500/40',
+                      )}
+                      aria-label={`Capa ${cover.id}`}
+                    />
+                  ))}
+                </div>
               </div>
 
               {/* CSV upload — only for Delivery */}
