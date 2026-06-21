@@ -1395,7 +1395,12 @@ export function sCapa(
   const footerReportsColor = cover.dark ? 'rgba(255,255,255,.75)' : '#163461';
   const footerBorder = cover.dark ? 'rgba(255,255,255,.18)' : BORDER;
 
-  const body = `<div data-slide-index="1" data-slide-total="${total}" style="width:1440px;min-height:810px;background:${BG} url('${cover.url}') center/cover no-repeat;border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
+  // Background is split into separate background-* properties (instead of the
+  // `background:${BG} url(...)` shorthand) on purpose — the public report viewer
+  // page has a CSS rule matching `[style*="background:${BG}"]` to retheme plain
+  // slide backgrounds, and that substring match would otherwise hit this string
+  // too and strip the cover image out via !important.
+  const body = `<div data-slide-index="1" data-slide-total="${total}" style="width:1440px;min-height:810px;background-color:${BG};background-image:url('${cover.url}');background-size:cover;background-position:center;background-repeat:no-repeat;border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
   <div style="height:92px;padding:34px 48px 0;display:flex;align-items:flex-start;justify-content:space-between;flex-shrink:0">
     <div style="display:flex;align-items:center;gap:8px">
       <span style="font-family:${INTER};font-size:34px;font-weight:900;letter-spacing:-0.06em;color:${wordmarkColor};line-height:1">onmid</span>
