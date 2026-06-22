@@ -1163,13 +1163,11 @@ function AttendanceView({
   month,
   from,
   to,
-  onOpenChat,
 }: {
   clientId: string;
   month: string;
   from: string;
   to: string;
-  onOpenChat: (leadId: string) => void;
 }) {
   const [data, setData] = useState<AttendanceMetrics | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1505,38 +1503,6 @@ function AttendanceView({
         </div>
 
         <aside className="space-y-4">
-          <section className="rounded-2xl border border-white/[0.08] bg-[#0D1519] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]">
-            <h3 className="flex items-center gap-2 text-base font-bold"><Sparkles className="h-5 w-5 text-primary" /> Resumo IA da semana</h3>
-            <div className="mt-5 space-y-4">
-              <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
-                <p className="mb-3 flex items-center gap-2 font-semibold text-zinc-100"><span className="text-primary">◎</span> Principais achados</p>
-                <ul className="space-y-2 text-sm leading-relaxed text-zinc-400">
-                  <li>• Respostas em até 1h chegaram a {slaRate}%.</li>
-                  <li>• {unanswered.toLocaleString('pt-BR')} leads aguardam retorno no período.</li>
-                  <li>• Conversas ativas somam {activeConversations.toLocaleString('pt-BR')} oportunidades agora.</li>
-                </ul>
-              </div>
-              <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
-                <p className="mb-3 flex items-center gap-2 font-semibold text-zinc-100"><span className="text-red-300">△</span> Pontos de atenção</p>
-                <ul className="space-y-2 text-sm leading-relaxed text-zinc-400">
-                  <li>• {unanswered.toLocaleString('pt-BR')} leads sem resposta representam risco.</li>
-                  <li>• {summary.over_60.toLocaleString('pt-BR')} respostas ainda passam de 1h.</li>
-                </ul>
-              </div>
-              <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
-                <p className="mb-3 flex items-center gap-2 font-semibold text-zinc-100"><span className="text-purple-300">◉</span> Recomendação IA</p>
-                <p className="text-sm leading-relaxed text-zinc-400">Priorize os {unanswered.toLocaleString('pt-BR')} leads sem resposta e padronize respostas rápidas para as primeiras interações.</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => data.waiting[0] && onOpenChat(data.waiting[0].id)}
-                className="flex w-full items-center justify-center gap-2 rounded-xl border border-primary/60 bg-primary/5 px-4 py-3 text-sm font-bold text-primary transition-colors hover:bg-primary/10"
-              >
-                Ver oportunidades <span>→</span>
-              </button>
-            </div>
-          </section>
-
           <section className="rounded-2xl border border-white/[0.08] bg-[#0D1519] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]">
             <h3 className="text-base font-bold">Fontes de lead</h3>
             <p className="mt-1 text-sm text-zinc-400">Canais mais presentes no período.</p>
@@ -3233,7 +3199,6 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
           month={monthFilter}
           from={dateFromFilter}
           to={dateToFilter}
-          onOpenChat={openLeadChat}
         />
       )}
 
