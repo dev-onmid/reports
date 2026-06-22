@@ -104,6 +104,10 @@ export default function RelatoriosPage() {
   const [runningId, setRunningId] = useState<string | null>(null);
   const [clientPickerOpen, setClientPickerOpen] = useState(false);
   const [clientSearch, setClientSearch] = useState('');
+  const [zapiGroups, setZapiGroups] = useState<{ phone: string; name: string }[]>([]);
+  const [loadingZapiGroups, setLoadingZapiGroups] = useState(false);
+  const [groupPickerOpen, setGroupPickerOpen] = useState(false);
+  const [groupSearch, setGroupSearch] = useState('');
 
   // Filters
   const [search, setSearch] = useState('');
@@ -131,6 +135,17 @@ export default function RelatoriosPage() {
       setZapiClients(zapis as ZapiClient[]);
     }).catch(() => {});
   }, []);
+
+  // Fetch WhatsApp groups when the chosen Z-API instance changes
+  useEffect(() => {
+    if (!configForm.zapiClientId) return;
+    setLoadingZapiGroups(true);
+    fetch(`/api/disparos/extract/chats?clientId=${configForm.zapiClientId}&type=groups`)
+      .then(r => r.ok ? r.json() : [])
+      .then((rows: { phone: string; name: string }[]) => setZapiGroups(Array.isArray(rows) ? rows : []))
+      .catch(() => setZapiGroups([]))
+      .finally(() => setLoadingZapiGroups(false));
+  }, [configForm.zapiClientId]);
 
   // Fetch connected assets when client changes
   useEffect(() => {
@@ -300,10 +315,10 @@ export default function RelatoriosPage() {
   }
 
   function toggleConfigClient(id: string) {
-    setConfigForm(f => {
-      const clientIds = f.clientIds.includes(id) ? f.clientIds.filter(c => c !== id) : [...f.clientIds, id];
-      return { ...f, clientIds, whatsappGroup: clientIds.length > 1 ? '' : f.whatsappGroup };
-    });
+    setConfigForm(f => ({
+      ...f,
+      clientIds: f.clientIds.includes(id) ? f.clientIds.filter(c => c !== id) : [...f.clientIds, id],
+    }));
   }
 
   async function handleDelete(id: string, title: string) {
@@ -822,10 +837,7 @@ export default function RelatoriosPage() {
                             type="button"
                             onClick={() => {
                               const visible = clients.filter(c => c.name.toLowerCase().includes(clientSearch.toLowerCase())).map(c => c.id);
-                              setConfigForm(f => {
-                                const clientIds = Array.from(new Set([...f.clientIds, ...visible]));
-                                return { ...f, clientIds, whatsappGroup: clientIds.length > 1 ? '' : f.whatsappGroup };
-                              });
+                              setConfigForm(f => ({ ...f, clientIds: Array.from(new Set([...f.clientIds, ...visible])) }));
                             }}
                             className="text-[11px] text-violet-400 hover:underline"
                           >
@@ -888,26 +900,72 @@ export default function RelatoriosPage() {
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-xs text-muted-foreground font-medium">ID do Grupo WhatsApp</label>
-                  <input
-                    type="text"
-                    value={configForm.whatsappGroup}
-                    disabled={!editingConfig && configForm.clientIds.length > 1}
-                    onChange={e => setConfigForm(f => ({ ...f, whatsappGroup: e.target.value }))}
-                    placeholder={!editingConfig && configForm.clientIds.length > 1 ? 'Cada cliente tem um grupo — defina depois, individualmente' : 'Ex: 5583999999999-1234567890@g.us'}
-                    className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
-                  />
-                </div>
-                <div className="space-y-1.5">
                   <label className="text-xs text-muted-foreground font-medium">Instância Z-API</label>
                   <select
                     value={configForm.zapiClientId}
-                    onChange={e => setConfigForm(f => ({ ...f, zapiClientId: e.target.value }))}
+                    onChange={e => setConfigForm(f => ({ ...f, zapiClientId: e.target.value, whatsappGroup: '' }))}
                     className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50"
                   >
                     <option value="">Nenhuma (sem envio automático)</option>
                     {zapiClients.map(z => <option key={z.id} value={z.id}>{z.name}</option>)}
                   </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs text-muted-foreground font-medium">
+                    Grupo WhatsApp {!editingConfig && configForm.clientIds.length > 1 && '(aplicado a todas as automações)'}
+                  </label>
+                  <Popover open={groupPickerOpen} onOpenChange={setGroupPickerOpen}>
+                    <PopoverTrigger
+                      disabled={!configForm.zapiClientId}
+                      className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg text-left text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50 flex items-center justify-between disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <span className={cn((!configForm.whatsappGroup) && 'text-muted-foreground', 'truncate')}>
+                        {!configForm.zapiClientId
+                          ? 'Selecione uma instância primeiro'
+                          : loadingZapiGroups
+                            ? 'Carregando grupos...'
+                            : configForm.whatsappGroup
+                              ? (zapiGroups.find(g => g.phone === configForm.whatsappGroup)?.name ?? configForm.whatsappGroup)
+                              : 'Selecionar grupo...'}
+                      </span>
+                      <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
+                    </PopoverTrigger>
+                    <PopoverContent align="start" className="w-[--anchor-width] p-0">
+                      <div className="p-2 border-b border-border">
+                        <input
+                          autoFocus
+                          type="text"
+                          value={groupSearch}
+                          onChange={e => setGroupSearch(e.target.value)}
+                          placeholder="Buscar grupo..."
+                          className="w-full px-2.5 py-1.5 text-sm bg-background border border-border rounded-md text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50"
+                        />
+                      </div>
+                      <div className="max-h-64 overflow-y-auto py-1">
+                        {loadingZapiGroups && (
+                          <p className="px-3 py-2 text-xs text-muted-foreground">Carregando grupos...</p>
+                        )}
+                        {!loadingZapiGroups && zapiGroups.length === 0 && (
+                          <p className="px-3 py-2 text-xs text-muted-foreground">Nenhum grupo encontrado nessa instância.</p>
+                        )}
+                        {zapiGroups
+                          .filter(g => g.name.toLowerCase().includes(groupSearch.toLowerCase()))
+                          .map(g => (
+                            <button
+                              type="button"
+                              key={g.phone}
+                              onClick={() => { setConfigForm(f => ({ ...f, whatsappGroup: g.phone })); setGroupPickerOpen(false); setGroupSearch(''); }}
+                              className={cn(
+                                'w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left hover:bg-muted/60 transition-colors',
+                                g.phone === configForm.whatsappGroup && 'bg-muted/40',
+                              )}
+                            >
+                              <span className="text-foreground truncate">{g.name}</span>
+                            </button>
+                          ))}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-xs text-muted-foreground font-medium">Dia de envio (do mês)</label>
