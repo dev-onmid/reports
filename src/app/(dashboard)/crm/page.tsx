@@ -1263,7 +1263,6 @@ function AttendanceView({
     { label: 'Encerrados', value: Math.max(0, Math.round(totalLeads * 0.04)), color: '#8B5CF6' },
   ];
   const classificationTotal = Math.max(1, classificationRows.reduce((sum, row) => sum + row.value, 0));
-  const sourceTotal = Math.max(...(data?.sources ?? []).map(item => item.total), 1);
 
   function sparkPath(points: number[], width = 260, height = 70) {
     const max = Math.max(...points, 1);
@@ -1286,7 +1285,7 @@ function AttendanceView({
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto rounded-2xl border border-white/5 bg-[#050A0C] p-4 text-[#F4F7F8] shadow-[0_0_80px_rgba(50,232,67,0.04)]">
-      <div className="grid gap-4 xl:grid-cols-[1fr_330px]">
+      <div className="grid gap-4">
         <div className="space-y-4">
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
             <section className="relative overflow-hidden rounded-2xl border border-purple-500/35 bg-[radial-gradient(circle_at_70%_100%,rgba(139,92,246,0.28),transparent_45%),linear-gradient(135deg,rgba(139,92,246,0.24),rgba(13,21,25,0.96))] p-4 shadow-[0_0_38px_rgba(139,92,246,0.16)]">
@@ -1502,39 +1501,6 @@ function AttendanceView({
           </div>
         </div>
 
-        <aside className="space-y-4">
-          <section className="rounded-2xl border border-white/[0.08] bg-[#0D1519] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]">
-            <h3 className="text-base font-bold">Fontes de lead</h3>
-            <p className="mt-1 text-sm text-zinc-400">Canais mais presentes no período.</p>
-            <div className="mt-5 space-y-3">
-              {data.sources.length === 0 ? (
-                <p className="py-6 text-center text-sm text-zinc-500">Sem canais no período.</p>
-              ) : data.sources.slice(0, 5).map(source => {
-                const channel = detectChannels(source.canal)[0];
-                return (
-                  <div key={source.canal ?? 'Sem canal'} className="space-y-1.5">
-                    <div className="flex justify-between text-sm">
-                      <span className="flex min-w-0 items-center gap-2 font-semibold">
-                        {channel ? (
-                          <span className={cn('inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-white ring-1 ring-white/10', channel.bg)}>
-                            {channel.icon}
-                          </span>
-                        ) : (
-                          <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white/10 text-[9px] font-black text-zinc-400 ring-1 ring-white/10">?</span>
-                        )}
-                        <span className="truncate">{channel?.label ?? source.canal ?? 'Sem canal'}</span>
-                      </span>
-                      <span className="text-zinc-400">{source.total}</span>
-                    </div>
-                    <div className="h-2 overflow-hidden rounded-full bg-white/[0.07]">
-                      <div className="h-full rounded-full bg-primary" style={{ width: `${Math.round((source.total / sourceTotal) * 100)}%` }} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        </aside>
       </div>
     </div>
   );
