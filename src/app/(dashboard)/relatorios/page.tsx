@@ -9,6 +9,7 @@ import {
   X, Loader2, Copy, Send, Download,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { ClientAvatar } from '@/components/client-avatar';
 import { useClients } from '@/lib/client-store';
 import { cn } from '@/lib/utils';
@@ -98,9 +99,11 @@ export default function RelatoriosPage() {
   const [zapiClients, setZapiClients] = useState<ZapiClient[]>([]);
   const [showConfigForm, setShowConfigForm] = useState(false);
   const [editingConfig, setEditingConfig] = useState<ReportConfig | null>(null);
-  const [configForm, setConfigForm] = useState<{ clientId: string; name: string; whatsappGroup: string; zapiClientId: string; sendDay: number; template: 'performance' | 'delivery' }>({ clientId: '', name: '', whatsappGroup: '', zapiClientId: '', sendDay: 1, template: 'performance' });
+  const [configForm, setConfigForm] = useState<{ clientIds: string[]; name: string; whatsappGroup: string; zapiClientId: string; sendDay: number; template: 'performance' | 'delivery' }>({ clientIds: [], name: '', whatsappGroup: '', zapiClientId: '', sendDay: 1, template: 'performance' });
   const [savingConfig, setSavingConfig] = useState(false);
   const [runningId, setRunningId] = useState<string | null>(null);
+  const [clientPickerOpen, setClientPickerOpen] = useState(false);
+  const [clientSearch, setClientSearch] = useState('');
 
   // Filters
   const [search, setSearch] = useState('');
@@ -227,24 +230,28 @@ export default function RelatoriosPage() {
           ? { ...c, name: configForm.name, whatsapp_group: configForm.whatsappGroup || null, zapi_client_id: configForm.zapiClientId || null, send_day: configForm.sendDay, template: configForm.template, zapi_name: zapiClients.find(z => z.id === configForm.zapiClientId)?.name ?? null }
           : c));
       } else {
-        const res = await fetch('/api/reports/configs', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            clientId: configForm.clientId, name: configForm.name,
-            whatsappGroup: configForm.whatsappGroup,
-            zapiClientId: configForm.zapiClientId || undefined,
-            sendDay: configForm.sendDay,
-            template: configForm.template,
-          }),
-        });
-        const created = await res.json() as ReportConfig;
-        setConfigs(prev => [{
-          ...created,
-          client_name: clients.find(c => c.id === configForm.clientId)?.name ?? configForm.clientId,
-          zapi_name: zapiClients.find(z => z.id === configForm.zapiClientId)?.name ?? null,
-          report_count: 0, last_run_at: null, last_token: null,
-        }, ...prev]);
+        const created = await Promise.all(configForm.clientIds.map(async (clientId) => {
+          const clientName = clients.find(c => c.id === clientId)?.name ?? clientId;
+          const res = await fetch('/api/reports/configs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              clientId, name: configForm.name || `Relatório mensal ${clientName}`,
+              whatsappGroup: configForm.whatsappGroup,
+              zapiClientId: configForm.zapiClientId || undefined,
+              sendDay: configForm.sendDay,
+              template: configForm.template,
+            }),
+          });
+          const row = await res.json() as ReportConfig;
+          return {
+            ...row,
+            client_name: clientName,
+            zapi_name: zapiClients.find(z => z.id === configForm.zapiClientId)?.name ?? null,
+            report_count: 0, last_run_at: null, last_token: null,
+          };
+        }));
+        setConfigs(prev => [...created, ...prev]);
       }
       setShowConfigForm(false);
       setEditingConfig(null);
@@ -281,14 +288,22 @@ export default function RelatoriosPage() {
 
   function openEditConfig(cfg: ReportConfig) {
     setEditingConfig(cfg);
-    setConfigForm({ clientId: cfg.client_id, name: cfg.name, whatsappGroup: cfg.whatsapp_group ?? '', zapiClientId: cfg.zapi_client_id ?? '', sendDay: cfg.send_day, template: cfg.template ?? 'performance' });
+    setConfigForm({ clientIds: [cfg.client_id], name: cfg.name, whatsappGroup: cfg.whatsapp_group ?? '', zapiClientId: cfg.zapi_client_id ?? '', sendDay: cfg.send_day, template: cfg.template ?? 'performance' });
     setShowConfigForm(true);
   }
 
   function openNewConfig() {
     setEditingConfig(null);
-    setConfigForm({ clientId: '', name: '', whatsappGroup: '', zapiClientId: '', sendDay: 1, template: 'performance' });
+    setConfigForm({ clientIds: [], name: '', whatsappGroup: '', zapiClientId: '', sendDay: 1, template: 'performance' });
+    setClientSearch('');
     setShowConfigForm(true);
+  }
+
+  function toggleConfigClient(id: string) {
+    setConfigForm(f => {
+      const clientIds = f.clientIds.includes(id) ? f.clientIds.filter(c => c !== id) : [...f.clientIds, id];
+      return { ...f, clientIds, whatsappGroup: clientIds.length > 1 ? '' : f.whatsappGroup };
+    });
   }
 
   async function handleDelete(id: string, title: string) {
@@ -773,16 +788,82 @@ export default function RelatoriosPage() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 {!editingConfig && (
-                  <div className="space-y-1.5">
-                    <label className="text-xs text-muted-foreground font-medium">Cliente</label>
-                    <select
-                      value={configForm.clientId}
-                      onChange={e => setConfigForm(f => ({ ...f, clientId: e.target.value }))}
-                      className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50"
-                    >
-                      <option value="">Selecionar cliente...</option>
-                      {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
+                  <div className="space-y-1.5 col-span-2">
+                    <label className="text-xs text-muted-foreground font-medium">
+                      Clientes {configForm.clientIds.length > 0 && `(${configForm.clientIds.length} selecionado${configForm.clientIds.length > 1 ? 's' : ''})`}
+                    </label>
+                    <Popover open={clientPickerOpen} onOpenChange={setClientPickerOpen}>
+                      <PopoverTrigger
+                        className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg text-left text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50 flex items-center justify-between"
+                      >
+                        <span className={cn(configForm.clientIds.length === 0 && 'text-muted-foreground')}>
+                          {configForm.clientIds.length === 0
+                            ? 'Selecionar clientes...'
+                            : configForm.clientIds
+                              .slice(0, 3)
+                              .map(id => clients.find(c => c.id === id)?.name ?? id)
+                              .join(', ') + (configForm.clientIds.length > 3 ? ` +${configForm.clientIds.length - 3}` : '')}
+                        </span>
+                        <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
+                      </PopoverTrigger>
+                      <PopoverContent align="start" className="w-[--anchor-width] p-0">
+                        <div className="p-2 border-b border-border">
+                          <input
+                            autoFocus
+                            type="text"
+                            value={clientSearch}
+                            onChange={e => setClientSearch(e.target.value)}
+                            placeholder="Buscar cliente..."
+                            className="w-full px-2.5 py-1.5 text-sm bg-background border border-border rounded-md text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50"
+                          />
+                        </div>
+                        <div className="flex items-center justify-between px-3 py-1.5 border-b border-border">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const visible = clients.filter(c => c.name.toLowerCase().includes(clientSearch.toLowerCase())).map(c => c.id);
+                              setConfigForm(f => {
+                                const clientIds = Array.from(new Set([...f.clientIds, ...visible]));
+                                return { ...f, clientIds, whatsappGroup: clientIds.length > 1 ? '' : f.whatsappGroup };
+                              });
+                            }}
+                            className="text-[11px] text-violet-400 hover:underline"
+                          >
+                            Selecionar todos
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfigForm(f => ({ ...f, clientIds: [] }))}
+                            className="text-[11px] text-muted-foreground hover:underline"
+                          >
+                            Limpar
+                          </button>
+                        </div>
+                        <div className="max-h-64 overflow-y-auto py-1">
+                          {clients
+                            .filter(c => c.name.toLowerCase().includes(clientSearch.toLowerCase()))
+                            .map(c => {
+                              const checked = configForm.clientIds.includes(c.id);
+                              return (
+                                <button
+                                  type="button"
+                                  key={c.id}
+                                  onClick={() => toggleConfigClient(c.id)}
+                                  className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left hover:bg-muted/60 transition-colors"
+                                >
+                                  <div className={cn(
+                                    'w-4 h-4 rounded border flex items-center justify-center shrink-0',
+                                    checked ? 'bg-violet-600 border-violet-600' : 'border-border',
+                                  )}>
+                                    {checked && <CheckCircle2 className="w-3 h-3 text-white" />}
+                                  </div>
+                                  <span className="text-foreground">{c.name}</span>
+                                </button>
+                              );
+                            })}
+                        </div>
+                      </PopoverContent>
+                    </Popover>
                   </div>
                 )}
                 <div className="space-y-1.5">
@@ -802,7 +883,7 @@ export default function RelatoriosPage() {
                     type="text"
                     value={configForm.name}
                     onChange={e => setConfigForm(f => ({ ...f, name: e.target.value }))}
-                    placeholder="Ex: Relatório mensal Sorrifácil"
+                    placeholder={!editingConfig && configForm.clientIds.length > 1 ? 'Deixe em branco para usar o nome de cada cliente' : 'Ex: Relatório mensal Sorrifácil'}
                     className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50"
                   />
                 </div>
@@ -811,9 +892,10 @@ export default function RelatoriosPage() {
                   <input
                     type="text"
                     value={configForm.whatsappGroup}
+                    disabled={!editingConfig && configForm.clientIds.length > 1}
                     onChange={e => setConfigForm(f => ({ ...f, whatsappGroup: e.target.value }))}
-                    placeholder="Ex: 5583999999999-1234567890@g.us"
-                    className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50"
+                    placeholder={!editingConfig && configForm.clientIds.length > 1 ? 'Cada cliente tem um grupo — defina depois, individualmente' : 'Ex: 5583999999999-1234567890@g.us'}
+                    className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
                   />
                 </div>
                 <div className="space-y-1.5">
@@ -841,9 +923,13 @@ export default function RelatoriosPage() {
                 <button onClick={() => setShowConfigForm(false)} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
                   Cancelar
                 </button>
-                <Button onClick={saveConfig} disabled={savingConfig} className="bg-violet-600 hover:bg-violet-700 text-white gap-2 text-sm">
+                <Button
+                  onClick={saveConfig}
+                  disabled={savingConfig || (!editingConfig && configForm.clientIds.length === 0)}
+                  className="bg-violet-600 hover:bg-violet-700 text-white gap-2 text-sm"
+                >
                   {savingConfig ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
-                  {editingConfig ? 'Salvar' : 'Criar'}
+                  {editingConfig ? 'Salvar' : configForm.clientIds.length > 1 ? `Criar ${configForm.clientIds.length} automações` : 'Criar'}
                 </Button>
               </div>
             </div>
