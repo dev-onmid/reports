@@ -3,7 +3,8 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
-import { clearAuthSession, getAuthSession } from '@/lib/auth-store';
+import { clearAuthSession, getAuthSession, useMyPermissions } from '@/lib/auth-store';
+import type { Permission } from '@/lib/mock-data';
 import {
   LayoutDashboard,
   Users,
@@ -28,19 +29,19 @@ import { APP_VERSION } from '@/lib/app-version';
 type Role = 'Administrador' | 'Usuário' | 'Visualizador';
 type SidebarMode = 'desktop' | 'mobile';
 
-const navItems: { name: string; href: string; icon: React.ElementType; roles: Role[] }[] = [
-  { name: 'Dashboard',   href: '/dashboard',   icon: LayoutDashboard, roles: ['Administrador', 'Usuário', 'Visualizador'] },
-  { name: 'Clientes',    href: '/clientes',    icon: Users,           roles: ['Administrador', 'Usuário'] },
-  { name: 'CRM',         href: '/crm',         icon: TableProperties, roles: ['Administrador', 'Usuário'] },
-  { name: 'Relatórios',  href: '/relatorios',  icon: FileText,        roles: ['Administrador', 'Usuário'] },
-  { name: 'Radar',       href: '/resultados',  icon: BarChart3,       roles: ['Administrador', 'Usuário'] },
-  { name: 'Pagamentos',  href: '/pagamentos',  icon: WalletCards,     roles: ['Administrador', 'Usuário'] },
-  { name: 'Disparos',    href: '/disparos',    icon: MessageCircle,   roles: ['Administrador', 'Usuário'] },
-  { name: 'Luna IA',     href: '/agente',      icon: Bot,             roles: ['Administrador', 'Usuário'] },
-  { name: 'Cofre',       href: '/vault',       icon: ShieldCheck,     roles: ['Administrador', 'Usuário'] },
-  { name: 'Automações',  href: '/automacoes',  icon: Zap,             roles: ['Administrador'] },
-  { name: 'Integrações', href: '/integracoes', icon: Plug,            roles: ['Administrador'] },
-  { name: 'Logs',        href: '/logs',        icon: ClipboardList,   roles: ['Administrador'] },
+const navItems: { name: string; href: string; icon: React.ElementType; key: keyof Permission }[] = [
+  { name: 'Dashboard',   href: '/dashboard',   icon: LayoutDashboard, key: 'dashboard' },
+  { name: 'Clientes',    href: '/clientes',    icon: Users,           key: 'clientes' },
+  { name: 'CRM',         href: '/crm',         icon: TableProperties, key: 'crm' },
+  { name: 'Relatórios',  href: '/relatorios',  icon: FileText,        key: 'relatorios' },
+  { name: 'Radar',       href: '/resultados',  icon: BarChart3,       key: 'radar' },
+  { name: 'Pagamentos',  href: '/pagamentos',  icon: WalletCards,     key: 'pagamentos' },
+  { name: 'Disparos',    href: '/disparos',    icon: MessageCircle,   key: 'disparos' },
+  { name: 'Luna IA',     href: '/agente',      icon: Bot,             key: 'luna_ia' },
+  { name: 'Cofre',       href: '/vault',       icon: ShieldCheck,     key: 'cofre' },
+  { name: 'Automações',  href: '/automacoes',  icon: Zap,             key: 'automacoes' },
+  { name: 'Integrações', href: '/integracoes', icon: Plug,            key: 'integracoes' },
+  { name: 'Logs',        href: '/logs',        icon: ClipboardList,   key: 'logs' },
 ];
 
 export function Sidebar({
@@ -55,6 +56,7 @@ export function Sidebar({
   const pathname = usePathname();
   const session = getAuthSession();
   const role = (session?.role ?? 'Visualizador') as Role;
+  const { permissions } = useMyPermissions();
   const [collapsed, setCollapsed] = useState(() => {
     if (typeof window === 'undefined') return false;
     return localStorage.getItem('sidebar-collapsed') === 'true';
@@ -68,7 +70,7 @@ export function Sidebar({
     });
   }
 
-  const visibleItems = navItems.filter(item => item.roles.includes(role));
+  const visibleItems = navItems.filter(item => permissions[item.key]);
   const showConfiguracoes = role === 'Administrador';
   const isCollapsed = !isMobile && collapsed;
 

@@ -1,6 +1,7 @@
 "use client";
 
-import { mockUsers, type User } from '@/lib/mock-data';
+import { useEffect, useState } from 'react';
+import { mockUsers, defaultPermission, allPermission, type User, type Permission } from '@/lib/mock-data';
 
 const SESSION_STORAGE_KEY = 'onmid-session';
 
@@ -66,4 +67,37 @@ export function getAuthSession(): AuthSession | null {
 export function clearAuthSession() {
   if (typeof window === 'undefined') return;
   window.localStorage.removeItem(SESSION_STORAGE_KEY);
+}
+
+/**
+ * Live permissions for the logged-in user. Fetches on every mount so that
+ * access granted by an admin shows up without requiring a re-login.
+ */
+export function useMyPermissions(): { permissions: Permission; loading: boolean } {
+  const [permissions, setPermissions] = useState<Permission>(defaultPermission);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const session = getAuthSession();
+    if (!session) { setLoading(false); return; }
+
+    let active = true;
+    (async () => {
+      try {
+        const res = await fetch('/api/permissions');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const map = await res.json() as Record<string, Permission>;
+        if (active) setPermissions(map[session.userId] ?? defaultPermission);
+      } catch {
+        // The endpoint itself failed (not "no permission row") — fail open.
+        if (active) setPermissions(allPermission);
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+
+    return () => { active = false; };
+  }, []);
+
+  return { permissions, loading };
 }

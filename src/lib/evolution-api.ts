@@ -66,6 +66,59 @@ export async function deleteEvolutionInstance(instanceName: string): Promise<voi
   }).catch(() => {});
 }
 
+export interface SendResult {
+  ok: boolean;
+  error?: string;
+}
+
+export async function sendEvolutionText(
+  instanceName: string,
+  phone: string,
+  message: string,
+): Promise<SendResult> {
+  try {
+    const res = await fetch(`${base()}/message/sendText/${encodeURIComponent(instanceName)}`, {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({ number: phone, text: message }),
+    });
+    const body = await res.json().catch(() => ({})) as Record<string, unknown>;
+    if (!res.ok) return { ok: false, error: String(body.message ?? body.error ?? `HTTP ${res.status}`) };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+export async function sendEvolutionImage(
+  instanceName: string,
+  phone: string,
+  imageUrl: string,
+  caption: string,
+): Promise<SendResult> {
+  try {
+    const res = await fetch(`${base()}/message/sendMedia/${encodeURIComponent(instanceName)}`, {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({ number: phone, mediatype: 'image', media: imageUrl, caption }),
+    });
+    const body = await res.json().catch(() => ({})) as Record<string, unknown>;
+    if (!res.ok) return { ok: false, error: String(body.message ?? body.error ?? `HTTP ${res.status}`) };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+export async function checkEvolutionStatus(instanceName: string): Promise<boolean> {
+  try {
+    const { state } = await getEvolutionState(instanceName);
+    return state === 'open';
+  } catch {
+    return false;
+  }
+}
+
 export async function setEvolutionWebhook(
   instanceName: string,
   webhookUrl: string,

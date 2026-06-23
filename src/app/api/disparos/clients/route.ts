@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
-import { checkStatus } from '@/lib/zapi';
+import { createEvolutionInstance, setEvolutionWebhook } from '@/lib/evolution-api';
 
 async function ensureTables(pool: ReturnType<typeof makeServerPool>) {
   await pool.query(`
@@ -14,6 +14,7 @@ async function ensureTables(pool: ReturnType<typeof makeServerPool>) {
       created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     ALTER TABLE public.zapi_clients ADD COLUMN IF NOT EXISTS security_token TEXT;
+    ALTER TABLE public.zapi_clients ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT 'zapi';
     CREATE TABLE IF NOT EXISTS public.zapi_campaigns (
       id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
       client_id     UUID        NOT NULL REFERENCES public.zapi_clients(id) ON DELETE CASCADE,
@@ -50,7 +51,7 @@ export async function GET() {
   try {
     await ensureTables(pool);
     const { rows } = await pool.query(
-      `SELECT id, name, instance_id, active, created_at FROM public.zapi_clients ORDER BY created_at DESC`,
+      `SELECT id, name, instance_id, provider, active, created_at FROM public.zapi_clients ORDER BY created_at DESC`,
     );
     return Response.json(rows);
   } finally {
@@ -58,28 +59,38 @@ export async function GET() {
   }
 }
 
+// New instances can only be created on Evolution (our own, simpler to operate) — Z-API
+// stays available for the instances already registered, managed from Configurações.
 export async function POST(request: NextRequest) {
-  const { name, instanceId, token, securityToken } = await request.json() as {
-    name: string;
-    instanceId: string;
-    token: string;
-    securityToken?: string;
-  };
+  const { name } = await request.json() as { name: string };
 
-  if (!name || !instanceId || !token) {
-    return Response.json({ error: 'name, instanceId e token são obrigatórios' }, { status: 400 });
+  if (!name) {
+    return Response.json({ error: 'name é obrigatório' }, { status: 400 });
   }
 
   const pool = makeServerPool();
   try {
     await ensureTables(pool);
+
+    const instanceId = `disparo-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')}-${Date.now().toString(36)}`;
+
+    let token: string;
+    try {
+      const created = await createEvolutionInstance(instanceId);
+      token = created.hash;
+    } catch (err) {
+      return Response.json({ error: `Erro ao criar instância na Evolution API: ${String(err)}` }, { status: 502 });
+    }
+
     const { rows } = await pool.query(
-      `INSERT INTO public.zapi_clients (name, instance_id, token, security_token) VALUES ($1, $2, $3, $4) RETURNING id, name, instance_id, active, created_at`,
-      [name, instanceId, token, securityToken || null],
+      `INSERT INTO public.zapi_clients (name, instance_id, token, provider) VALUES ($1, $2, $3, 'evolution') RETURNING id, name, instance_id, provider, active, created_at`,
+      [name, instanceId, token],
     );
 
-    const online = await checkStatus({ instanceId, token, clientToken: securityToken });
-    return Response.json({ ...rows[0], online }, { status: 201 });
+    const appUrl = new URL(request.url).origin;
+    await setEvolutionWebhook(instanceId, `${appUrl}/api/webhook/whatsapp/${rows[0].id}`);
+
+    return Response.json(rows[0], { status: 201 });
   } finally {
     await pool.end();
   }

@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
+import { checkEvolutionStatus } from '@/lib/evolution-api';
 
 export async function POST(request: NextRequest) {
   const { clientId } = await request.json() as { clientId: string };
@@ -8,10 +9,15 @@ export async function POST(request: NextRequest) {
   const pool = makeServerPool();
   try {
     const { rows: [client] } = await pool.query(
-      `SELECT instance_id, token, security_token FROM public.zapi_clients WHERE id = $1`,
+      `SELECT instance_id, token, security_token, provider FROM public.zapi_clients WHERE id = $1`,
       [clientId],
     );
     if (!client) return Response.json({ error: 'Instância não encontrada' }, { status: 404 });
+
+    if (client.provider === 'evolution') {
+      const connected = await checkEvolutionStatus(client.instance_id);
+      return Response.json({ connected });
+    }
 
     const url = `https://api.z-api.io/instances/${client.instance_id}/token/${client.token}/status`;
 

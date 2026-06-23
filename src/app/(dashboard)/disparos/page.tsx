@@ -8,7 +8,7 @@ import {
   Send, AlertTriangle, Monitor, Calendar, Zap,
   Eye, ChevronRight, Info, BookOpen, UserCog,
   Search, Pencil, ChevronLeft, FileText, Smile, Sparkles,
-  Download, Filter, Hash, ArrowRight,
+  Download, Filter, Hash, ArrowRight, QrCode,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -19,7 +19,7 @@ import { cn } from '@/lib/utils';
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 type ZClient = {
-  id: string; name: string; instance_id: string;
+  id: string; name: string; instance_id: string; provider?: 'zapi' | 'evolution';
   active: boolean; online?: boolean; created_at: string;
 };
 
@@ -423,7 +423,7 @@ function BarSparkline2({ color = '#A855F7' }: { color?: string }) {
 function ClientesTab() {
   const [clients, setClients] = useState<ZClient[]>([]);
   const [loading, setLoading] = useState(true);
-  const [form, setForm] = useState({ name: '', instanceId: '', token: '', securityToken: '' });
+  const [form, setForm] = useState({ name: '' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [testing, setTesting] = useState<string | null>(null);
@@ -431,20 +431,24 @@ function ClientesTab() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [copied, setCopied] = useState<string | null>(null);
+  const [qrClient, setQrClient] = useState<ZClient | null>(null);
+  const [qrData, setQrData] = useState<{ base64?: string; code?: string; error?: string } | null>(null);
+  const [qrLoading, setQrLoading] = useState(false);
 
   useEffect(() => {
     fetch('/api/disparos/clients').then(r => r.json() as Promise<ZClient[]>).then(setClients).finally(() => setLoading(false));
   }, []);
 
   async function add() {
-    if (!form.name || !form.instanceId || !form.token) { setError('Preencha nome, Instance ID e Token.'); return; }
+    if (!form.name) { setError('Informe um nome para a instância.'); return; }
     setSaving(true); setError('');
     try {
       const res = await fetch('/api/disparos/clients', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
       const data = await res.json() as ZClient;
       if (!res.ok) { setError((data as { error?: string }).error ?? 'Erro'); return; }
       setClients(prev => [data, ...prev]);
-      setForm({ name: '', instanceId: '', token: '', securityToken: '' });
+      setForm({ name: '' });
+      void openQr(data);
     } finally { setSaving(false); }
   }
 
@@ -460,6 +464,23 @@ function ClientesTab() {
       const data = await res.json() as { connected: boolean; error?: string; raw?: unknown };
       setTestResult(prev => ({ ...prev, [id]: { ...data, testedAt: new Date() } }));
     } finally { setTesting(null); }
+  }
+
+  async function openQr(client: ZClient) {
+    setQrClient(client); setQrData(null); setQrLoading(true);
+    try {
+      const res = await fetch(`/api/disparos/clients/${client.id}/connect`);
+      setQrData(await res.json() as { base64?: string; code?: string; error?: string });
+    } finally { setQrLoading(false); }
+  }
+
+  async function refreshQr() {
+    if (!qrClient) return;
+    setQrLoading(true); setQrData(null);
+    try {
+      const res = await fetch(`/api/disparos/clients/${qrClient.id}/connect`);
+      setQrData(await res.json() as { base64?: string; code?: string; error?: string });
+    } finally { setQrLoading(false); }
   }
 
   function copyId(text: string) {
@@ -516,12 +537,12 @@ function ClientesTab() {
 
           {/* Nova instância form */}
           <div className="relative overflow-hidden rounded-xl border p-6" style={{ borderColor: 'rgba(34,197,94,0.3)', background: 'linear-gradient(135deg, rgba(34,197,94,0.04) 0%, transparent 60%)', boxShadow: '0 0 0 1px rgba(34,197,94,0.08), 0 16px 48px rgba(34,197,94,0.07)' }}>
-            {/* Decorative Z-API 3D box */}
+            {/* Decorative Evolution 3D box */}
             <div className="pointer-events-none absolute right-5 top-1/2 -translate-y-1/2 opacity-15 hidden lg:flex items-center justify-center" style={{ width: 100, height: 100 }}>
               <div className="relative w-20 h-20">
                 <div className="absolute inset-0 rounded-[var(--radius)] border-2 border-emerald-400 rotate-6" style={{ background: 'linear-gradient(135deg, rgba(34,197,94,0.25), rgba(6,182,212,0.15))' }} />
                 <div className="absolute inset-0 flex items-center justify-center">
-                  <span className="text-xl font-bold text-emerald-400 rotate-6 select-none">Z</span>
+                  <Zap className="h-8 w-8 text-emerald-400 rotate-6" />
                 </div>
                 <div className="absolute -bottom-2 -right-2 w-5 h-5 rounded-full bg-emerald-500/30 border border-emerald-400/50" />
                 <div className="absolute -top-2 -left-2 w-4 h-4 rounded-full bg-cyan-500/30 border border-cyan-400/50" />
@@ -533,33 +554,26 @@ function ClientesTab() {
                 <Server className="h-4 w-4 text-emerald-400" />
               </div>
               <div>
-                <p className="font-bold text-base">Nova instância Z-API</p>
-                <p className="text-sm text-muted-foreground mt-0.5">Cadastre uma nova instância para começar a enviar mensagens.</p>
+                <p className="font-bold text-base">Nova instância Evolution</p>
+                <p className="text-sm text-muted-foreground mt-0.5">Dê um nome e conecte escaneando o QR Code com o WhatsApp. Instâncias Z-API existentes continuam em Configurações.</p>
               </div>
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:pr-28">
-              {[
-                { key: 'name',          label: 'Nome (ex: Clínica A)',      ph: 'Ex: Clínica Odonto Prime', t: 'text' },
-                { key: 'instanceId',    label: 'Instance ID',               ph: 'Ex: 5F30B52A...',           t: 'text' },
-                { key: 'token',         label: 'Token',                     ph: 'Ex: 3ecff8a9...',            t: 'password' },
-                { key: 'securityToken', label: 'Client Token (segurança)',   ph: 'Ex: zkl9...pQw',            t: 'password' },
-              ].map(({ key, label, ph, t }) => (
-                <div key={key} className="space-y-1.5">
-                  <label className="text-xs text-muted-foreground">{label}</label>
-                  <input
-                    value={form[key as keyof typeof form]}
-                    onChange={e => setForm(p => ({ ...p, [key]: e.target.value }))}
-                    placeholder={ph} type={t}
-                    className="w-full h-9 rounded-lg border border-border bg-background/60 px-3 text-sm outline-none focus:ring-1 focus:ring-emerald-500/50 focus:border-emerald-500/40 placeholder:text-muted-foreground/40"
-                  />
-                </div>
-              ))}
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground">Nome (ex: Clínica A)</label>
+                <input
+                  value={form.name}
+                  onChange={e => setForm({ name: e.target.value })}
+                  placeholder="Ex: Clínica Odonto Prime"
+                  className="w-full h-9 rounded-lg border border-border bg-background/60 px-3 text-sm outline-none focus:ring-1 focus:ring-emerald-500/50 focus:border-emerald-500/40 placeholder:text-muted-foreground/40"
+                />
+              </div>
             </div>
             {error && <p className="mt-3 text-xs text-red-400">{error}</p>}
             <button type="button" onClick={add} disabled={saving}
               className="mt-5 flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-xs font-bold uppercase tracking-wider text-black hover:bg-primary/90 disabled:opacity-50 transition-colors">
-              {saving ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}Adicionar instância
+              {saving ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}Criar e conectar
             </button>
           </div>
 
@@ -649,7 +663,7 @@ function ClientesTab() {
                                   className="rounded p-0.5 text-muted-foreground hover:text-foreground transition-colors shrink-0">
                                   {copied === c.instance_id ? <CheckCircle2 className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
                                 </button>
-                                <span className="text-[10px] text-muted-foreground/40 font-mono">Z-API</span>
+                                <span className="text-[10px] text-muted-foreground/40 font-mono">{c.provider === 'evolution' ? 'Evolution' : 'Z-API'}</span>
                               </div>
                             </td>
                             <td className="py-3 px-4">
@@ -672,8 +686,9 @@ function ClientesTab() {
                               <div className="flex items-center justify-center gap-4">
                                 {[
                                   { icon: Wifi, label: 'Testar', color: 'hover:text-emerald-400', onClick: () => testConnection(c.id), spin: testing === c.id },
-                                  { icon: Pencil, label: 'Editar', color: 'hover:text-blue-400', onClick: () => {} },
-                                  { icon: RefreshCw, label: 'Reiniciar', color: 'hover:text-cyan-400', onClick: () => {} },
+                                  ...(c.provider === 'evolution'
+                                    ? [{ icon: QrCode, label: 'Conectar', color: 'hover:text-blue-400', onClick: () => void openQr(c), spin: false }]
+                                    : [{ icon: Pencil, label: 'Editar', color: 'hover:text-blue-400', onClick: () => {}, spin: false }]),
                                 ].map(({ icon: Icon, label, color, onClick, spin }) => (
                                   <button key={label} type="button" onClick={onClick}
                                     className={cn('flex flex-col items-center gap-0.5 text-muted-foreground transition-colors', color)}>
@@ -765,6 +780,42 @@ function ClientesTab() {
           </div>
         </div>
       </div>
+
+      {/* QR Code Modal */}
+      {qrClient && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-bold text-base">Conectar WhatsApp</h3>
+                <p className="text-xs text-muted-foreground">{qrClient.name} · {qrClient.instance_id}</p>
+              </div>
+              <button onClick={() => { setQrClient(null); setQrData(null); }} className="text-muted-foreground hover:text-foreground">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="flex flex-col items-center gap-3">
+              {qrLoading ? (
+                <div className="flex h-48 w-48 items-center justify-center rounded-xl border border-border bg-muted/20">
+                  <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground/40" />
+                </div>
+              ) : qrData?.base64 ? (
+                <img src={qrData.base64} alt="QR Code WhatsApp" className="h-48 w-48 rounded-xl border border-border object-contain" />
+              ) : (
+                <div className="flex h-48 w-48 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border px-4 text-center">
+                  <WifiOff className="h-8 w-8 text-muted-foreground/40" />
+                  <p className="text-xs text-muted-foreground">{qrData?.error ?? 'QR não disponível'}</p>
+                </div>
+              )}
+              {qrData?.base64 && <p className="text-center text-xs text-muted-foreground">Abra o WhatsApp → Menu → Dispositivos conectados → Conectar dispositivo</p>}
+            </div>
+            <button onClick={refreshQr} disabled={qrLoading} className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-border py-2 text-sm font-semibold hover:bg-muted/50 disabled:opacity-50 transition-colors">
+              <RefreshCw className={cn('h-3.5 w-3.5', qrLoading && 'animate-spin')} />
+              Atualizar QR
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

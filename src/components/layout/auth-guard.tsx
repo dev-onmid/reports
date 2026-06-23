@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { getAuthSession } from '@/lib/auth-store';
+import { defaultPermission, type Permission } from '@/lib/mock-data';
 
 type Role = 'Administrador' | 'Usuário' | 'Visualizador';
 
@@ -15,9 +16,29 @@ const routeRoles: Record<string, Role[]> = {
   '/pagamentos':  ['Administrador', 'Usuário'],
   '/biblioteca':  ['Administrador', 'Usuário'],
   '/disparos':    ['Administrador', 'Usuário'],
+  '/agente':      ['Administrador', 'Usuário'],
+  '/vault':       ['Administrador', 'Usuário'],
+  '/automacoes':  ['Administrador'],
   '/integracoes': ['Administrador'],
   '/logs':        ['Administrador'],
   '/configuracoes': ['Administrador'],
+};
+
+// Feature gate per route, checked against the user's live permissions on top of
+// the role check above. Routes not listed here (e.g. /configuracoes) are role-only.
+const routeFeature: Record<string, keyof Permission> = {
+  '/dashboard':   'dashboard',
+  '/clientes':    'clientes',
+  '/crm':         'crm',
+  '/relatorios':  'relatorios',
+  '/resultados':  'radar',
+  '/pagamentos':  'pagamentos',
+  '/disparos':    'disparos',
+  '/agente':      'luna_ia',
+  '/vault':       'cofre',
+  '/automacoes':  'automacoes',
+  '/integracoes': 'integracoes',
+  '/logs':        'logs',
 };
 
 function getAllowedRoles(pathname: string): Role[] {
@@ -25,6 +46,13 @@ function getAllowedRoles(pathname: string): Role[] {
     if (pathname === route || pathname.startsWith(`${route}/`)) return roles;
   }
   return ['Administrador', 'Usuário', 'Visualizador'];
+}
+
+function getRequiredFeature(pathname: string): keyof Permission | null {
+  for (const [route, feature] of Object.entries(routeFeature)) {
+    if (pathname === route || pathname.startsWith(`${route}/`)) return feature;
+  }
+  return null;
 }
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
@@ -46,7 +74,31 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    setAllowed(true);
+    const requiredFeature = getRequiredFeature(pathname);
+    if (!requiredFeature) {
+      setAllowed(true);
+      return;
+    }
+
+    let active = true;
+    setAllowed(false);
+    void fetch('/api/permissions')
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json() as Promise<Record<string, Permission>>;
+      })
+      .then((map) => {
+        if (!active) return;
+        const permissions = map[session.userId] ?? defaultPermission;
+        if (!permissions[requiredFeature]) {
+          router.replace('/dashboard');
+          return;
+        }
+        setAllowed(true);
+      })
+      .catch(() => { if (active) setAllowed(true); }); // fail open: the endpoint itself errored, not a denied permission
+
+    return () => { active = false; };
   }, [router, pathname]);
 
   if (!allowed) {

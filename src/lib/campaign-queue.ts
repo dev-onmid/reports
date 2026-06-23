@@ -5,6 +5,7 @@
 
 import { makeServerPool } from '@/lib/server-db';
 import { sendText, sendImage } from '@/lib/zapi';
+import { sendEvolutionText, sendEvolutionImage } from '@/lib/evolution-api';
 
 export interface CampaignProgress {
   campaignId: string;
@@ -44,7 +45,7 @@ export async function startCampaign(campaignId: string): Promise<void> {
   const pool = makeServerPool();
   try {
     const { rows: [campaign] } = await pool.query(
-      `SELECT c.*, cl.instance_id, cl.token
+      `SELECT c.*, cl.instance_id, cl.token, cl.provider
          FROM public.zapi_campaigns c
          JOIN public.zapi_clients cl ON cl.id = c.client_id
         WHERE c.id = $1`,
@@ -112,11 +113,14 @@ async function processNext(
     }
 
     const message = interpolate(campaign.message, number.phone, number.name ?? '');
-    const client = { instanceId: campaign.instance_id, token: campaign.token };
 
-    const result = campaign.image_url
-      ? await sendImage(client, number.phone, campaign.image_url, message)
-      : await sendText(client, number.phone, message);
+    const result = campaign.provider === 'evolution'
+      ? campaign.image_url
+        ? await sendEvolutionImage(campaign.instance_id, number.phone, campaign.image_url, message)
+        : await sendEvolutionText(campaign.instance_id, number.phone, message)
+      : campaign.image_url
+        ? await sendImage({ instanceId: campaign.instance_id, token: campaign.token }, number.phone, campaign.image_url, message)
+        : await sendText({ instanceId: campaign.instance_id, token: campaign.token }, number.phone, message);
 
     const newStatus = result.ok ? 'sent' : 'failed';
     await pool.query(

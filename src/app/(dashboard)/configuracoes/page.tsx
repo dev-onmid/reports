@@ -5,6 +5,8 @@ import {
   Plus, Trash2, ExternalLink, Users2, Shield, User, Mail,
   Edit2, Search, Filter, Download, Eye, ChevronLeft, ChevronRight,
   Sparkles, Bell, DollarSign, MessageCircle,
+  LayoutDashboard, Users, TableProperties, FileText, BarChart3,
+  WalletCards, Bot, ShieldCheck, Zap, Plug, ClipboardList,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -23,27 +25,29 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { mockUsers as initialUsers, mockPermissions as initialPermissions } from '@/lib/mock-data';
+import { mockUsers as initialUsers, mockPermissions as initialPermissions, defaultPermission } from '@/lib/mock-data';
 import type { User as UserType, Permission } from '@/lib/mock-data';
 import { cn } from '@/lib/utils';
 
-const MODULES: { key: keyof Permission; label: string }[] = [
-  { key: 'dashboard', label: 'Dashboard' },
-  { key: 'clientes', label: 'Clientes' },
-  { key: 'relatorios', label: 'Relatórios' },
-  { key: 'configuracoes', label: 'Configurações' },
-  { key: 'integracoes', label: 'Integrações' },
+// Mirrors the sidebar nav order (src/components/layout/sidebar.tsx) so admins
+// can grant access to exactly the items a user will see in the menu.
+const MODULES: { key: keyof Permission; label: string; icon: React.ElementType }[] = [
+  { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { key: 'clientes', label: 'Clientes', icon: Users },
+  { key: 'crm', label: 'CRM', icon: TableProperties },
+  { key: 'relatorios', label: 'Relatórios', icon: FileText },
+  { key: 'radar', label: 'Radar', icon: BarChart3 },
+  { key: 'pagamentos', label: 'Pagamentos', icon: WalletCards },
+  { key: 'disparos', label: 'Disparos', icon: MessageCircle },
+  { key: 'luna_ia', label: 'Luna IA', icon: Bot },
+  { key: 'cofre', label: 'Cofre', icon: ShieldCheck },
+  { key: 'automacoes', label: 'Automações', icon: Zap },
+  { key: 'integracoes', label: 'Integrações', icon: Plug },
+  { key: 'logs', label: 'Logs', icon: ClipboardList },
 ];
 
 const ROLES = ['Administrador', 'Usuário', 'Visualizador'];
 
-const defaultPermission: Permission = {
-  dashboard: true,
-  clientes: false,
-  relatorios: false,
-  configuracoes: false,
-  integracoes: false,
-};
 const emptyForm = { name: '', email: '', password: '', role: 'Usuário', status: 'Ativo' };
 
 type AiUsageRow = {
@@ -550,68 +554,73 @@ export default function ConfiguracoesPage() {
           TAB: PERMISSÕES
       ══════════════════════════════════ */}
       {activeTab === 'permissoes' && (
-        <div className="bg-card border border-border rounded-[var(--radius)] overflow-hidden">
-          <table className="w-full text-sm text-left">
-            <thead>
-              <tr className="border-b border-border">
-                <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  Usuário
-                </th>
-                {MODULES.map((m) => (
-                  <th
-                    key={m.key}
-                    className="px-6 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground text-center"
+        <div className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            Escolha exatamente quais itens do menu cada pessoa pode acessar — independente do perfil dela.
+          </p>
+          {users.map((user) => {
+            const { cls: badgeCls, Icon: BadgeIcon } = roleBadge(user.role);
+            const userPermission = permissions[user.id] ?? defaultPermission;
+            return (
+              <div key={user.id} className="bg-card border border-border rounded-[var(--radius)] overflow-hidden">
+                <div className="flex items-center gap-3 px-5 py-4 border-b border-border">
+                  <div
+                    className={cn(
+                      'w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold shrink-0',
+                      avatarColor(user.name)
+                    )}
                   >
-                    {m.label}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {users.map((user) => (
-                <tr key={user.id} className="hover:bg-muted/30 transition-colors">
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <div
+                    {user.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-semibold text-sm">{user.name}</p>
+                    <p className="text-[11px] text-muted-foreground">{user.email}</p>
+                  </div>
+                  <span className={cn('ml-auto inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium shrink-0', badgeCls)}>
+                    <BadgeIcon className="w-3 h-3" />
+                    {user.role}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 p-4">
+                  {MODULES.map((m) => {
+                    const enabled = userPermission[m.key] ?? defaultPermission[m.key];
+                    return (
+                      <button
+                        key={m.key}
+                        onClick={() => togglePermission(user.id, m.key)}
+                        aria-pressed={enabled}
+                        aria-label={`${enabled ? 'Desativar' : 'Ativar'} ${m.label} para ${user.name}`}
                         className={cn(
-                          'w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold shrink-0',
-                          avatarColor(user.name)
+                          'flex items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-colors',
+                          enabled
+                            ? 'border-emerald-500/30 bg-emerald-500/10'
+                            : 'border-border bg-background hover:bg-muted/30'
                         )}
                       >
-                        {user.name.charAt(0).toUpperCase()}
-                      </div>
-                      <div>
-                        <p className="font-semibold text-sm">{user.name}</p>
-                        <p className="text-[11px] text-muted-foreground">{user.role}</p>
-                      </div>
-                    </div>
-                  </td>
-                  {MODULES.map((m) => {
-                    const enabled = permissions[user.id]?.[m.key] ?? defaultPermission[m.key];
-                    return (
-                      <td key={m.key} className="px-6 py-4 text-center">
-                        <button
-                          onClick={() => togglePermission(user.id, m.key)}
-                          aria-label={`${enabled ? 'Desativar' : 'Ativar'} ${m.label} para ${user.name}`}
+                        <m.icon className={cn('w-4 h-4 shrink-0', enabled ? 'text-emerald-400' : 'text-muted-foreground')} />
+                        <span className={cn('text-xs font-medium flex-1 truncate', enabled ? 'text-foreground' : 'text-muted-foreground')}>
+                          {m.label}
+                        </span>
+                        <span
                           className={cn(
-                            'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200',
+                            'relative inline-flex h-5 w-9 flex-shrink-0 rounded-full border-2 border-transparent transition-colors duration-200',
                             enabled ? 'bg-emerald-500' : 'bg-muted-foreground/30'
                           )}
                         >
                           <span
                             className={cn(
-                              'inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200',
-                              enabled ? 'translate-x-5' : 'translate-x-0'
+                              'inline-block h-4 w-4 transform rounded-full bg-white shadow transition duration-200',
+                              enabled ? 'translate-x-4' : 'translate-x-0'
                             )}
                           />
-                        </button>
-                      </td>
+                        </span>
+                      </button>
                     );
                   })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 

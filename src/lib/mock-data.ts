@@ -1,10 +1,50 @@
+// One key per item in the sidebar (src/components/layout/sidebar.tsx), plus the
+// legacy `configuracoes` flag which isn't tied to a nav item.
 export type Permission = {
   dashboard: boolean;
   clientes: boolean;
+  crm: boolean;
   relatorios: boolean;
-  configuracoes: boolean;
+  radar: boolean;
+  pagamentos: boolean;
+  disparos: boolean;
+  luna_ia: boolean;
+  cofre: boolean;
+  automacoes: boolean;
   integracoes: boolean;
+  logs: boolean;
+  configuracoes: boolean;
 };
+
+export const PERMISSION_KEYS = [
+  'dashboard', 'clientes', 'crm', 'relatorios', 'radar', 'pagamentos',
+  'disparos', 'luna_ia', 'cofre', 'automacoes', 'integracoes', 'logs', 'configuracoes',
+] as const satisfies readonly (keyof Permission)[];
+
+// New users get the bare minimum until an admin grants more in Configurações > Permissões.
+export const defaultPermission: Permission = {
+  dashboard: true,
+  clientes: false,
+  crm: false,
+  relatorios: false,
+  radar: false,
+  pagamentos: false,
+  disparos: false,
+  luna_ia: false,
+  cofre: false,
+  automacoes: false,
+  integracoes: false,
+  logs: false,
+  configuracoes: false,
+};
+
+// Used only when /api/permissions itself is unreachable (DB outage, network error).
+// Fail OPEN here — an infra hiccup shouldn't make the whole menu vanish for every
+// user. Fail CLOSED (defaultPermission) only applies when the request succeeds and
+// simply has no row for that user yet, which is the real "not granted" state.
+export const allPermission: Permission = Object.fromEntries(
+  PERMISSION_KEYS.map((key) => [key, true]),
+) as Permission;
 
 export type User = {
   id: string;
@@ -22,11 +62,13 @@ export const mockUsers: User[] = [
   { id: '3', name: 'João Costa', email: 'joao@onmid.com', password: 'joao123', role: 'Visualizador', status: 'Inativo' },
 ];
 
+const adminPermission: Permission = { ...defaultPermission, clientes: true, crm: true, relatorios: true, radar: true, pagamentos: true, disparos: true, luna_ia: true, cofre: true, automacoes: true, integracoes: true, logs: true, configuracoes: true };
+
 export const mockPermissions: Record<string, Permission> = {
-  '1': { dashboard: true, clientes: true, relatorios: true, configuracoes: true, integracoes: true },
-  '4': { dashboard: true, clientes: true, relatorios: true, configuracoes: true, integracoes: true },
-  '2': { dashboard: true, clientes: true, relatorios: true, configuracoes: false, integracoes: false },
-  '3': { dashboard: true, clientes: false, relatorios: false, configuracoes: false, integracoes: false },
+  '1': adminPermission,
+  '4': adminPermission,
+  '2': { ...defaultPermission, clientes: true, crm: true, relatorios: true, radar: true, pagamentos: true, luna_ia: true, cofre: true },
+  '3': { ...defaultPermission },
 };
 
 export type ClientStatus = 'Ativo' | 'Alerta' | 'Arquivado' | 'Inativo';
