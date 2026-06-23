@@ -52,12 +52,25 @@ export async function GET(request: NextRequest) {
   const pool = makeServerPool();
   try {
     await ensureTables(pool);
+    await pool.query(`CREATE TABLE IF NOT EXISTS public.client_zapi_instances (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(), client_id TEXT NOT NULL, nome TEXT NOT NULL,
+      instance_id TEXT NOT NULL, token TEXT NOT NULL DEFAULT '', ativo BOOLEAN NOT NULL DEFAULT true,
+      provider TEXT NOT NULL DEFAULT 'zapi', created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
     const scope = await getCallerScope(request, pool);
+    // linked_client_* surfaces the CRM client this instance currently feeds (if any),
+    // so the Disparos list can show the link without a request per row.
     const { rows } = await pool.query(
-      `SELECT id, name, instance_id, provider, active, created_at, owner_id
-         FROM public.zapi_clients
-        WHERE ($1::boolean OR owner_id = $2)
-        ORDER BY created_at DESC`,
+      `SELECT z.id, z.name, z.instance_id, z.provider, z.active, z.created_at, z.owner_id,
+              link.client_id AS linked_client_id, c.name AS linked_client_name
+         FROM public.zapi_clients z
+         LEFT JOIN LATERAL (
+           SELECT client_id FROM public.client_zapi_instances
+            WHERE instance_id = z.instance_id AND ativo = true
+            ORDER BY created_at DESC LIMIT 1
+         ) link ON true
+         LEFT JOIN public.clients c ON c.id = link.client_id
+        WHERE ($1::boolean OR z.owner_id = $2)
+        ORDER BY z.created_at DESC`,
       [scope.unrestricted, scope.userId],
     );
     return Response.json(rows);

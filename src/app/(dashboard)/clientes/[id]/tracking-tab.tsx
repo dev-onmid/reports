@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   Copy, Check, Trash2, Plus, RefreshCw, Eye, EyeOff,
   Settings2, MessageCircle, ShoppingCart, X, TrendingUp, Wifi, WifiOff, QrCode,
-  HelpCircle, Zap, AlertCircle, ExternalLink, Globe, BarChart3,
+  HelpCircle, Zap, AlertCircle, ExternalLink, Globe, BarChart3, Search,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -211,10 +211,15 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
   const [statuses, setStatuses]         = useState<Record<string, ConnState>>({});
   const statusTimer                     = useRef<ReturnType<typeof setInterval> | null>(null);
   const [showModal, setShowModal]       = useState(false);
+  const [instMode, setInstMode]         = useState<'create' | 'attach'>('create');
   const [instProvider, setInstProvider] = useState<WhatsAppProvider>('zapi');
   const [instForm, setInstForm]         = useState({ nome: '', instance_id: '', token: '' });
   const [instError, setInstError]       = useState('');
   const [adding, setAdding]             = useState(false);
+  // Attach an existing (e.g. Disparos) instance to this client
+  type AvailableInstance = { id: string; name: string; instance_id: string; provider: string; linked_client_id: string | null; linked_client_name: string | null };
+  const [availableInsts, setAvailableInsts] = useState<AvailableInstance[]>([]);
+  const [attachSearch, setAttachSearch]     = useState('');
 
   // ── QR ─────────────────────────────────────────────────────────────────
   const [qrInst, setQrInst]   = useState<Instance | null>(null);
@@ -350,7 +355,28 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
     setConvLog(rows);
   }
 
-  function openAddModal() { setInstForm({ nome: '', instance_id: '', token: '' }); setInstProvider('zapi'); setInstError(''); setShowModal(true); }
+  function openAddModal() { setInstForm({ nome: '', instance_id: '', token: '' }); setInstProvider('zapi'); setInstError(''); setInstMode('create'); setAttachSearch(''); setShowModal(true); }
+
+  async function loadAvailableInstances() {
+    try {
+      const res = await fetch(`/api/clients/${clientId}/tracking/instances/available`);
+      if (res.ok) setAvailableInsts(await res.json() as AvailableInstance[]);
+    } catch { /* ignore */ }
+  }
+
+  async function attachInstance(sourceId: string) {
+    setInstError('');
+    setAdding(true);
+    try {
+      const res = await fetch(`/api/clients/${clientId}/tracking/instances/attach`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sourceId }),
+      });
+      const data = await res.json() as Instance & { error?: string };
+      if (!res.ok) { setInstError(data.error ?? 'Erro ao vincular instância.'); return; }
+      setInstances(prev => prev.some(i => i.id === data.id) ? prev.map(i => i.id === data.id ? data : i) : [...prev, data]);
+      setShowModal(false);
+    } finally { setAdding(false); }
+  }
 
   async function addInstance() {
     setInstError('');
@@ -893,9 +919,56 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="font-bold text-base">Nova instância WhatsApp</h3>
+              <h3 className="font-bold text-base">Instância WhatsApp</h3>
               <button onClick={() => setShowModal(false)} className="text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>
             </div>
+            <div className="flex items-center gap-1 rounded-lg border border-border bg-background p-0.5">
+              {([{ value: 'create' as const, label: 'Criar nova' }, { value: 'attach' as const, label: 'Vincular existente' }]).map(({ value, label }) => (
+                <button key={value} type="button"
+                  onClick={() => { setInstMode(value); setInstError(''); if (value === 'attach') void loadAvailableInstances(); }}
+                  className={cn('flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-all', instMode === value ? 'bg-primary text-black' : 'text-muted-foreground hover:text-foreground')}>
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {instMode === 'attach' ? (
+              <div className="space-y-3">
+                <p className="text-xs text-muted-foreground">
+                  Use uma instância já criada (ex: no Disparos). A mesma conexão passa a alimentar o CRM e a IA deste cliente.
+                </p>
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                  <input value={attachSearch} onChange={e => setAttachSearch(e.target.value)} placeholder="Buscar instância..."
+                    className="h-9 w-full rounded-lg border border-border bg-background pl-8 pr-3 text-sm outline-none focus:border-primary" />
+                </div>
+                <div className="max-h-64 space-y-1 overflow-y-auto">
+                  {availableInsts
+                    .filter(a => a.name.toLowerCase().includes(attachSearch.toLowerCase()) || a.instance_id.toLowerCase().includes(attachSearch.toLowerCase()))
+                    .map(a => {
+                      const here = a.linked_client_id === clientId;
+                      return (
+                        <button key={a.id} type="button" disabled={adding || here} onClick={() => void attachInstance(a.id)}
+                          className={cn('flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left transition-colors disabled:opacity-60',
+                            here ? 'border-primary/40 bg-primary/10' : 'border-border hover:bg-muted/40')}>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold">{a.name}</p>
+                            <p className="truncate text-[11px] text-muted-foreground">
+                              {a.provider === 'evolution' ? 'Evolution' : 'Z-API'} · {a.instance_id}
+                              {a.linked_client_id && !here && <span className="text-amber-400"> · vinculada a {a.linked_client_name ?? 'outro cliente'}</span>}
+                            </p>
+                          </div>
+                          {here ? <span className="shrink-0 text-[11px] font-bold text-primary">Vinculada aqui</span> : <span className="shrink-0 text-[11px] font-semibold text-primary">Vincular</span>}
+                        </button>
+                      );
+                    })}
+                  {availableInsts.length === 0 && <p className="py-6 text-center text-xs text-muted-foreground">Nenhuma instância disponível. Crie uma no Disparos primeiro.</p>}
+                </div>
+                {instError && <p className="rounded-lg border border-red-400/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">{instError}</p>}
+                <button onClick={() => setShowModal(false)} className="w-full rounded-lg border border-border py-2 text-sm font-semibold hover:bg-muted/50 transition-colors">Fechar</button>
+              </div>
+            ) : (
+            <>
             <div>
               <p className="mb-2 text-xs font-semibold text-muted-foreground">Provedor</p>
               <div className="flex items-center gap-1 rounded-lg border border-border bg-background p-0.5 w-fit">
@@ -938,6 +1011,8 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
                 {instProvider === 'evolution' ? 'Criar na Evolution API' : 'Adicionar'}
               </button>
             </div>
+            </>
+            )}
           </div>
         </div>
       )}

@@ -16,12 +16,14 @@ import {
 } from 'recharts';
 import { cn } from '@/lib/utils';
 import { callerHeaders } from '@/lib/auth-store';
+import { useClients } from '@/lib/client-store';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 type ZClient = {
   id: string; name: string; instance_id: string; provider?: 'zapi' | 'evolution';
   active: boolean; online?: boolean; created_at: string;
+  linked_client_id?: string | null; linked_client_name?: string | null;
 };
 
 type Campaign = {
@@ -435,10 +437,35 @@ function ClientesTab() {
   const [qrClient, setQrClient] = useState<ZClient | null>(null);
   const [qrData, setQrData] = useState<{ base64?: string; code?: string; error?: string } | null>(null);
   const [qrLoading, setQrLoading] = useState(false);
+  // Instance ↔ CRM client linking
+  const { clients: crmClients } = useClients();
+  const [linkInst, setLinkInst] = useState<ZClient | null>(null);
+  const [linkSearch, setLinkSearch] = useState('');
+  const [linkSaving, setLinkSaving] = useState(false);
 
   useEffect(() => {
     fetch('/api/disparos/clients', { headers: callerHeaders() }).then(r => r.json() as Promise<ZClient[]>).then(setClients).finally(() => setLoading(false));
   }, []);
+
+  async function saveLink(inst: ZClient, clientId: string | null) {
+    setLinkSaving(true);
+    try {
+      const res = await fetch(`/api/disparos/clients/${inst.id}/link`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...callerHeaders() },
+        body: JSON.stringify({ clientId }),
+      });
+      const data = await res.json() as { link?: { clientId: string; clientName: string | null } | null };
+      if (res.ok) {
+        const link = data.link ?? null;
+        setClients(prev => prev.map(c => c.id === inst.id
+          ? { ...c, linked_client_id: link?.clientId ?? null, linked_client_name: link?.clientName ?? null }
+          : c));
+        setLinkInst(null);
+        setLinkSearch('');
+      }
+    } finally { setLinkSaving(false); }
+  }
 
   async function add() {
     if (!form.name) { setError('Informe um nome para a instância.'); return; }
@@ -640,11 +667,16 @@ function ClientesTab() {
                                   <Users className="h-4.5 w-4.5" style={{ color: iconColor }} />
                                 </div>
                                 <div className="min-w-0">
-                                  <div className="flex items-center gap-2">
+                                  <div className="flex items-center gap-2 flex-wrap">
                                     <span className="font-bold text-sm">{c.name}</span>
                                     {isFirst && <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-1.5 py-0.5 text-[9px] font-bold text-blue-400 uppercase">Padrão</span>}
+                                    {c.linked_client_id && (
+                                      <span className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[9px] font-bold text-primary">
+                                        <Users className="h-2.5 w-2.5" /> {c.linked_client_name ?? 'Cliente vinculado'}
+                                      </span>
+                                    )}
                                   </div>
-                                  <p className="text-[11px] text-muted-foreground mt-0.5">{c.active ? 'Disparos e campanhas ativas' : 'Ambiente de testes'}</p>
+                                  <p className="text-[11px] text-muted-foreground mt-0.5">{c.linked_client_id ? 'Vinculada ao CRM deste cliente' : (c.active ? 'Disparos e campanhas ativas' : 'Ambiente de testes')}</p>
                                 </div>
                               </div>
                             </td>
@@ -690,6 +722,7 @@ function ClientesTab() {
                                   ...(c.provider === 'evolution'
                                     ? [{ icon: QrCode, label: 'Conectar', color: 'hover:text-blue-400', onClick: () => void openQr(c), spin: false }]
                                     : [{ icon: Pencil, label: 'Editar', color: 'hover:text-blue-400', onClick: () => {}, spin: false }]),
+                                  { icon: Users, label: c.linked_client_id ? 'Vínculo' : 'Vincular', color: 'hover:text-primary', onClick: () => { setLinkInst(c); setLinkSearch(''); }, spin: false },
                                 ].map(({ icon: Icon, label, color, onClick, spin }) => (
                                   <button key={label} type="button" onClick={onClick}
                                     className={cn('flex flex-col items-center gap-0.5 text-muted-foreground transition-colors', color)}>
@@ -814,6 +847,53 @@ function ClientesTab() {
               <RefreshCw className={cn('h-3.5 w-3.5', qrLoading && 'animate-spin')} />
               Atualizar QR
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Link instance ↔ CRM client */}
+      {linkInst && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-bold text-base">Vincular a um cliente</h3>
+                <p className="text-xs text-muted-foreground">{linkInst.name} · {linkInst.instance_id}</p>
+              </div>
+              <button onClick={() => setLinkInst(null)} className="text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              O cliente vinculado passa a receber as conversas desta instância no CRM, com IA e kanban. Uma instância atende um cliente por vez.
+            </p>
+            {linkInst.linked_client_id && (
+              <div className="flex items-center justify-between rounded-lg border border-primary/30 bg-primary/10 px-3 py-2">
+                <span className="text-xs font-semibold text-primary flex items-center gap-1.5"><Users className="h-3.5 w-3.5" /> {linkInst.linked_client_name ?? 'Cliente vinculado'}</span>
+                <button onClick={() => void saveLink(linkInst, null)} disabled={linkSaving} className="text-xs font-semibold text-red-400 hover:text-red-300 disabled:opacity-50">Desvincular</button>
+              </div>
+            )}
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+              <input value={linkSearch} onChange={e => setLinkSearch(e.target.value)} placeholder="Buscar cliente..."
+                className="h-9 w-full rounded-lg border border-border bg-background pl-8 pr-3 text-sm outline-none focus:ring-1 focus:ring-primary" />
+            </div>
+            <div className="max-h-64 overflow-y-auto space-y-1">
+              {crmClients
+                .filter(cl => cl.name.toLowerCase().includes(linkSearch.toLowerCase()))
+                .map(cl => {
+                  const isCurrent = linkInst.linked_client_id === cl.id;
+                  return (
+                    <button key={cl.id} type="button" disabled={linkSaving || isCurrent} onClick={() => void saveLink(linkInst, cl.id)}
+                      className={cn('flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-sm transition-colors disabled:opacity-60',
+                        isCurrent ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border hover:bg-muted/40')}>
+                      <span className="truncate">{cl.name}</span>
+                      {isCurrent ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
+                    </button>
+                  );
+                })}
+              {crmClients.filter(cl => cl.name.toLowerCase().includes(linkSearch.toLowerCase())).length === 0 && (
+                <p className="py-6 text-center text-xs text-muted-foreground">Nenhum cliente encontrado.</p>
+              )}
+            </div>
           </div>
         </div>
       )}
