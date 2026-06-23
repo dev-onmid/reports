@@ -43,12 +43,12 @@ async function fetchMetaLowBalanceAlerts(): Promise<LowBalanceAlert[]> {
   const pool = makeServerPool();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let conns: any[];
-  let links: { account_id: string; client_id: string; client_name: string }[];
+  let links: { account_id: string; client_id: string; client_name: string; ads_billing_mode: string }[];
   try {
     const { rows } = await pool.query("SELECT * FROM public.meta_connections WHERE status = 'connected'");
     conns = rows;
     const { rows: linkRows } = await pool.query(`
-      SELECT cal.account_id, cal.client_id, c.name AS client_name
+      SELECT cal.account_id, cal.client_id, c.name AS client_name, c.ads_billing_mode
       FROM public.client_account_links cal
       JOIN public.clients c ON c.id = cal.client_id
       WHERE cal.platform IN ('meta', 'meta_ads')
@@ -58,7 +58,13 @@ async function fetchMetaLowBalanceAlerts(): Promise<LowBalanceAlert[]> {
     await pool.end();
   }
 
-  const linkMap = new Map(links.map(l => [l.account_id.replace(/^act_/, ''), { clientId: l.client_id, clientName: l.client_name }]));
+  // Card-billed clients top up their own ad account — they're never "out of balance"
+  // for our purposes, so they're excluded the same way the Pagamentos page excludes them.
+  const linkMap = new Map(
+    links
+      .filter(l => (l.ads_billing_mode ?? 'prepaid') !== 'card')
+      .map(l => [l.account_id.replace(/^act_/, ''), { clientId: l.client_id, clientName: l.client_name }]),
+  );
   const yesterday = yesterdayDateStr();
   const results: LowBalanceAlert[] = [];
 
@@ -211,7 +217,7 @@ async function fetchGoogleYesterdaySpend(customerId: string, accessToken: string
 async function fetchGoogleLowBalanceAlerts(): Promise<LowBalanceAlert[]> {
   const pool = makeServerPool();
   let connections: GoogleConnectionRow[] = [];
-  let links: { account_id: string; client_id: string; client_name: string }[] = [];
+  let links: { account_id: string; client_id: string; client_name: string; ads_billing_mode: string }[] = [];
   try {
     const { rows } = await pool.query(`
       SELECT * FROM public.google_connections
@@ -219,7 +225,7 @@ async function fetchGoogleLowBalanceAlerts(): Promise<LowBalanceAlert[]> {
     `);
     connections = rows as GoogleConnectionRow[];
     const { rows: linkRows } = await pool.query(`
-      SELECT cal.account_id, cal.client_id, c.name AS client_name
+      SELECT cal.account_id, cal.client_id, c.name AS client_name, c.ads_billing_mode
       FROM public.client_account_links cal
       JOIN public.clients c ON c.id = cal.client_id
       WHERE cal.platform IN ('google', 'google_ads')
@@ -229,7 +235,12 @@ async function fetchGoogleLowBalanceAlerts(): Promise<LowBalanceAlert[]> {
     await pool.end();
   }
 
-  const linkMap = new Map(links.map(l => [l.account_id.replace(/\D/g, ''), { clientId: l.client_id, clientName: l.client_name }]));
+  // Card-billed clients top up their own ad account — excluded, same criteria as Pagamentos.
+  const linkMap = new Map(
+    links
+      .filter(l => (l.ads_billing_mode ?? 'prepaid') !== 'card')
+      .map(l => [l.account_id.replace(/\D/g, ''), { clientId: l.client_id, clientName: l.client_name }]),
+  );
   const developerToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? '1vR8GhAk4UMZoPaqo7Qq8Q';
   const results: LowBalanceAlert[] = [];
   const seen = new Set<string>();
