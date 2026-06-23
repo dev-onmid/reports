@@ -25,26 +25,46 @@ export async function GET(request: NextRequest) {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (security_token) headers['Client-Token'] = security_token;
 
-    const res = await fetch(
-      `${BASE}/${instance_id}/token/${token}/chats?conversationLimit=300`,
-      { headers },
-    );
+    // The /chats endpoint paginates (default page size ~30) — a single call
+    // only returns the first page. Page through until Z-API returns a
+    // short/empty page, capped to avoid looping forever on a flaky response.
+    const pageSize = 100;
+    const chats: Array<Record<string, unknown>> = [];
+    for (let page = 1; page <= 30; page++) {
+      const res = await fetch(
+        `${BASE}/${instance_id}/token/${token}/chats?page=${page}&pageSize=${pageSize}`,
+        { headers },
+      );
 
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      return Response.json({ error: `Z-API error ${res.status}: ${text}` }, { status: 502 });
+      if (!res.ok) {
+        if (page === 1) {
+          const text = await res.text().catch(() => '');
+          return Response.json({ error: `Z-API error ${res.status}: ${text}` }, { status: 502 });
+        }
+        break;
+      }
+
+      const raw = await res.json() as unknown;
+      // Z-API may return array directly or { value: [...] }
+      const batch: Array<Record<string, unknown>> = Array.isArray(raw)
+        ? (raw as Array<Record<string, unknown>>)
+        : Array.isArray((raw as Record<string, unknown>).value)
+          ? ((raw as Record<string, unknown>).value as Array<Record<string, unknown>>)
+          : [];
+
+      chats.push(...batch);
+      if (batch.length < pageSize) break;
     }
 
-    const raw = await res.json() as unknown;
+    const seen = new Set<string>();
+    const deduped = chats.filter((c) => {
+      const key = String(c.phone ?? c.id ?? '');
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 
-    // Z-API may return array directly or { value: [...] }
-    const chats: Array<Record<string, unknown>> = Array.isArray(raw)
-      ? (raw as Array<Record<string, unknown>>)
-      : Array.isArray((raw as Record<string, unknown>).value)
-        ? ((raw as Record<string, unknown>).value as Array<Record<string, unknown>>)
-        : [];
-
-    const filtered = chats.filter((c) => {
+    const filtered = deduped.filter((c) => {
       if (type === 'groups') return c.isGroup === true;
       if (type === 'conversations') return c.isGroup !== true;
       return true;
