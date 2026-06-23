@@ -6,7 +6,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { sendText, sendImage } from '@/lib/zapi';
-import { sendEvolutionText, sendEvolutionImage } from '@/lib/evolution-api';
+import { sendFollowupMessage, type WaInstance } from '@/lib/followup-send';
 
 function interpolate(template: string, phone: string, name: string) {
   return template.replace(/\{telefone\}/g, phone).replace(/\{nome\}/g, name);
@@ -128,23 +128,26 @@ export async function POST(
     }
 
     const isEvolution = campaign.provider === 'evolution';
+    // Evolution routes through the same dispatcher the CRM uses (lib/followup-send.ts).
+    // Z-API keeps its own path because disparos instances carry a security_token.
+    const waInstance: WaInstance = { instanceId: campaign.instance_id, token: campaign.token, provider: 'evolution' };
 
     let result;
     if (imageUrls.length > 0) {
       // Send first image with caption
       result = isEvolution
-        ? await sendEvolutionImage(campaign.instance_id, number.phone, imageUrls[0], message)
+        ? await sendFollowupMessage({ instance: waInstance, phone: number.phone, tipo: 'imagem', conteudo: imageUrls[0], vars: { caption: message } })
         : await sendImage(client, number.phone, imageUrls[0], message);
       // Send remaining images without caption (best-effort, don't fail the number)
       if (result.ok) {
         for (let i = 1; i < imageUrls.length; i++) {
-          if (isEvolution) await sendEvolutionImage(campaign.instance_id, number.phone, imageUrls[i], '');
+          if (isEvolution) await sendFollowupMessage({ instance: waInstance, phone: number.phone, tipo: 'imagem', conteudo: imageUrls[i], vars: { caption: '' } });
           else await sendImage(client, number.phone, imageUrls[i], '');
         }
       }
     } else {
       result = isEvolution
-        ? await sendEvolutionText(campaign.instance_id, number.phone, message)
+        ? await sendFollowupMessage({ instance: waInstance, phone: number.phone, tipo: 'texto', conteudo: message, vars: {} })
         : await sendText(client, number.phone, message);
     }
 

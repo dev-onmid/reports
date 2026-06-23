@@ -12,7 +12,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { sendText, sendImage } from '@/lib/zapi';
-import { sendEvolutionText, sendEvolutionImage } from '@/lib/evolution-api';
+import { sendFollowupMessage, type WaInstance } from '@/lib/followup-send';
 
 export const maxDuration = 30;
 
@@ -172,21 +172,26 @@ async function runWorker(req: NextRequest) {
         const message = interpolate(rawMessage, number.phone, number.name ?? '');
 
         const isEvolution = campaign.provider === 'evolution';
+        // Evolution goes through the exact same dispatcher the CRM uses
+        // (lib/followup-send.ts) — proven for text/image/audio/doc + LID targets.
+        // Z-API stays on its own path because disparos instances carry a
+        // security_token that the CRM resolver doesn't pass.
+        const waInstance: WaInstance = { instanceId: campaign.instance_id, token: campaign.token, provider: 'evolution' };
 
         let result;
         if (imageUrls.length > 0) {
           result = isEvolution
-            ? await sendEvolutionImage(campaign.instance_id, number.phone, imageUrls[0], message)
+            ? await sendFollowupMessage({ instance: waInstance, phone: number.phone, tipo: 'imagem', conteudo: imageUrls[0], vars: { caption: message } })
             : await sendImage(client, number.phone, imageUrls[0], message);
           if (result.ok) {
             for (let i = 1; i < imageUrls.length; i++) {
-              if (isEvolution) await sendEvolutionImage(campaign.instance_id, number.phone, imageUrls[i], '');
+              if (isEvolution) await sendFollowupMessage({ instance: waInstance, phone: number.phone, tipo: 'imagem', conteudo: imageUrls[i], vars: { caption: '' } });
               else await sendImage(client, number.phone, imageUrls[i], '');
             }
           }
         } else {
           result = isEvolution
-            ? await sendEvolutionText(campaign.instance_id, number.phone, message)
+            ? await sendFollowupMessage({ instance: waInstance, phone: number.phone, tipo: 'texto', conteudo: message, vars: {} })
             : await sendText(client, number.phone, message);
         }
 

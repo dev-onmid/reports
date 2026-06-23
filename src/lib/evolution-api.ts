@@ -71,23 +71,39 @@ export interface SendResult {
   error?: string;
 }
 
+// Surfaces the raw Evolution error body instead of a generic "Bad Request",
+// so a failed dispatch tells you exactly why the server rejected it.
+async function postEvolution(url: string, body: Record<string, unknown>): Promise<SendResult> {
+  try {
+    const res = await fetch(url, { method: 'POST', headers: headers(), body: JSON.stringify(body) });
+    const text = await res.text().catch(() => '');
+    if (!res.ok) return { ok: false, error: text || `HTTP ${res.status}` };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
 export async function sendEvolutionText(
   instanceName: string,
   phone: string,
   message: string,
 ): Promise<SendResult> {
-  try {
-    const res = await fetch(`${base()}/message/sendText/${encodeURIComponent(instanceName)}`, {
-      method: 'POST',
-      headers: headers(),
-      body: JSON.stringify({ number: phone, text: message }),
-    });
-    const body = await res.json().catch(() => ({})) as Record<string, unknown>;
-    if (!res.ok) return { ok: false, error: String(body.message ?? body.error ?? `HTTP ${res.status}`) };
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: String(err) };
-  }
+  const url = `${base()}/message/sendText/${encodeURIComponent(instanceName)}`;
+  // This Evolution server (same one the CRM uses) wants the v2 shape with
+  // `textMessage: { text }`. Try it first, then fall back to the flat v1 shape
+  // for older servers — mirrors the proven path in lib/followup-send.ts.
+  const v2 = await postEvolution(url, {
+    number: phone,
+    options: { delay: 1200, presence: 'composing' },
+    textMessage: { text: message },
+  });
+  if (v2.ok) return v2;
+
+  const v1 = await postEvolution(url, { number: phone, text: message });
+  if (v1.ok) return v1;
+
+  return { ok: false, error: v2.error ?? v1.error ?? 'Evolution sendText falhou' };
 }
 
 export async function sendEvolutionImage(
@@ -96,18 +112,13 @@ export async function sendEvolutionImage(
   imageUrl: string,
   caption: string,
 ): Promise<SendResult> {
-  try {
-    const res = await fetch(`${base()}/message/sendMedia/${encodeURIComponent(instanceName)}`, {
-      method: 'POST',
-      headers: headers(),
-      body: JSON.stringify({ number: phone, mediatype: 'image', media: imageUrl, caption }),
-    });
-    const body = await res.json().catch(() => ({})) as Record<string, unknown>;
-    if (!res.ok) return { ok: false, error: String(body.message ?? body.error ?? `HTTP ${res.status}`) };
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: String(err) };
-  }
+  return postEvolution(`${base()}/message/sendMedia/${encodeURIComponent(instanceName)}`, {
+    number: phone,
+    options: { delay: 1200 },
+    mediatype: 'image',
+    media: imageUrl,
+    caption,
+  });
 }
 
 export async function checkEvolutionStatus(instanceName: string): Promise<boolean> {
