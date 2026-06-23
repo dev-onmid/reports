@@ -145,7 +145,10 @@ async function sendViaEvolution(
           number: target,
           options: { delay: 1200 },
           mediatype: tipo === 'imagem' ? 'image' : tipo === 'video' ? 'video' : 'document',
+          // Some Evolution API builds use "mediaUrl" for URL-based media, others use "media".
+          // Sending both covers v1/v2 server variants without a round-trip probe.
           media: conteudo,
+          mediaUrl: conteudo,
           caption: interpolate(vars.caption ?? '', vars),
         });
     if (result.ok) return { ...result, target };
