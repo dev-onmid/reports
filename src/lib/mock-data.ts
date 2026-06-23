@@ -46,6 +46,11 @@ export const allPermission: Permission = Object.fromEntries(
   PERMISSION_KEYS.map((key) => [key, true]),
 ) as Permission;
 
+// Orthogonal to `role`: which org someone belongs to. Only matters inside Disparos
+// today — 'onmid' sees every instance/campaign, 'parceiro' sees only their own.
+// Admins (role) always see everything regardless of team.
+export type Team = 'onmid' | 'parceiro';
+
 export type User = {
   id: string;
   name: string;
@@ -53,13 +58,14 @@ export type User = {
   password: string;
   role: string;
   status: string;
+  team: Team;
 };
 
 export const mockUsers: User[] = [
-  { id: '1', name: 'Admin', email: 'admin@onmid.com', password: 'admin123', role: 'Administrador', status: 'Ativo' },
-  { id: '4', name: 'Matheus', email: 'matheus@onmid.com.br', password: '1234', role: 'Administrador', status: 'Ativo' },
-  { id: '2', name: 'Maria Silva', email: 'maria@onmid.com', password: 'maria123', role: 'Usuário', status: 'Ativo' },
-  { id: '3', name: 'João Costa', email: 'joao@onmid.com', password: 'joao123', role: 'Visualizador', status: 'Inativo' },
+  { id: '1', name: 'Admin', email: 'admin@onmid.com', password: 'admin123', role: 'Administrador', status: 'Ativo', team: 'onmid' },
+  { id: '4', name: 'Matheus', email: 'matheus@onmid.com.br', password: '1234', role: 'Administrador', status: 'Ativo', team: 'onmid' },
+  { id: '2', name: 'Maria Silva', email: 'maria@onmid.com', password: 'maria123', role: 'Usuário', status: 'Ativo', team: 'onmid' },
+  { id: '3', name: 'João Costa', email: 'joao@onmid.com', password: 'joao123', role: 'Visualizador', status: 'Inativo', team: 'onmid' },
 ];
 
 const adminPermission: Permission = { ...defaultPermission, clientes: true, crm: true, relatorios: true, radar: true, pagamentos: true, disparos: true, luna_ia: true, cofre: true, automacoes: true, integracoes: true, logs: true, configuracoes: true };

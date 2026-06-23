@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { parsePhoneList } from '@/lib/phone-formatter';
+import { getCallerScope } from '@/lib/disparos-access';
 
 async function ensureColumns(pool: ReturnType<typeof makeServerPool>) {
   await pool.query(`
@@ -11,15 +12,18 @@ async function ensureColumns(pool: ReturnType<typeof makeServerPool>) {
   `);
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const pool = makeServerPool();
   try {
     await ensureColumns(pool);
+    const scope = await getCallerScope(request, pool);
     const { rows } = await pool.query(
       `SELECT c.*, cl.name AS client_name
          FROM public.zapi_campaigns c
          JOIN public.zapi_clients cl ON cl.id = c.client_id
+        WHERE ($1::boolean OR cl.owner_id = $2)
         ORDER BY c.created_at DESC`,
+      [scope.unrestricted, scope.userId],
     );
     return Response.json(rows);
   } finally {
@@ -67,6 +71,15 @@ export async function POST(request: NextRequest) {
   const pool = makeServerPool();
   try {
     await ensureColumns(pool);
+    const scope = await getCallerScope(request, pool);
+    if (!scope.unrestricted) {
+      const { rows: [owned] } = await pool.query(
+        `SELECT 1 FROM public.zapi_clients WHERE id = $1 AND owner_id = $2`,
+        [clientId, scope.userId],
+      );
+      if (!owned) return Response.json({ error: 'Sem permissão para esta instância' }, { status: 403 });
+    }
+
     const startsAtDate = new Date(startsAt);
     const initialStatus = startsAtDate <= new Date() ? 'running' : 'pending';
 

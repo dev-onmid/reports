@@ -15,6 +15,7 @@ import {
   ResponsiveContainer, PieChart, Pie, Cell,
 } from 'recharts';
 import { cn } from '@/lib/utils';
+import { callerHeaders } from '@/lib/auth-store';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -436,14 +437,14 @@ function ClientesTab() {
   const [qrLoading, setQrLoading] = useState(false);
 
   useEffect(() => {
-    fetch('/api/disparos/clients').then(r => r.json() as Promise<ZClient[]>).then(setClients).finally(() => setLoading(false));
+    fetch('/api/disparos/clients', { headers: callerHeaders() }).then(r => r.json() as Promise<ZClient[]>).then(setClients).finally(() => setLoading(false));
   }, []);
 
   async function add() {
     if (!form.name) { setError('Informe um nome para a instância.'); return; }
     setSaving(true); setError('');
     try {
-      const res = await fetch('/api/disparos/clients', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
+      const res = await fetch('/api/disparos/clients', { method: 'POST', headers: { 'Content-Type': 'application/json', ...callerHeaders() }, body: JSON.stringify(form) });
       const data = await res.json() as ZClient;
       if (!res.ok) { setError((data as { error?: string }).error ?? 'Erro'); return; }
       setClients(prev => [data, ...prev]);
@@ -453,14 +454,14 @@ function ClientesTab() {
   }
 
   async function remove(id: string) {
-    await fetch('/api/disparos/clients', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+    await fetch('/api/disparos/clients', { method: 'DELETE', headers: { 'Content-Type': 'application/json', ...callerHeaders() }, body: JSON.stringify({ id }) });
     setClients(prev => prev.filter(c => c.id !== id));
   }
 
   async function testConnection(id: string) {
     setTesting(id);
     try {
-      const res = await fetch('/api/disparos/clients/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId: id }) });
+      const res = await fetch('/api/disparos/clients/test', { method: 'POST', headers: { 'Content-Type': 'application/json', ...callerHeaders() }, body: JSON.stringify({ clientId: id }) });
       const data = await res.json() as { connected: boolean; error?: string; raw?: unknown };
       setTestResult(prev => ({ ...prev, [id]: { ...data, testedAt: new Date() } }));
     } finally { setTesting(null); }
@@ -469,7 +470,7 @@ function ClientesTab() {
   async function openQr(client: ZClient) {
     setQrClient(client); setQrData(null); setQrLoading(true);
     try {
-      const res = await fetch(`/api/disparos/clients/${client.id}/connect`);
+      const res = await fetch(`/api/disparos/clients/${client.id}/connect`, { headers: callerHeaders() });
       setQrData(await res.json() as { base64?: string; code?: string; error?: string });
     } finally { setQrLoading(false); }
   }
@@ -478,7 +479,7 @@ function ClientesTab() {
     if (!qrClient) return;
     setQrLoading(true); setQrData(null);
     try {
-      const res = await fetch(`/api/disparos/clients/${qrClient.id}/connect`);
+      const res = await fetch(`/api/disparos/clients/${qrClient.id}/connect`, { headers: callerHeaders() });
       setQrData(await res.json() as { base64?: string; code?: string; error?: string });
     } finally { setQrLoading(false); }
   }
@@ -860,7 +861,7 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
   }
 
   useEffect(() => {
-    fetch('/api/disparos/clients').then(r => r.json() as Promise<ZClient[]>).then(data => {
+    fetch('/api/disparos/clients', { headers: callerHeaders() }).then(r => r.json() as Promise<ZClient[]>).then(data => {
       setClients(data);
       if (data[0]) setForm(p => ({ ...p, clientId: p.clientId || data[0].id }));
     });
@@ -1009,7 +1010,7 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
           interval_min: form.intervalMin,
           interval_max: form.intervalMax,
         };
-        const res = await fetch(`/api/disparos/campaigns/${editCampaign.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const res = await fetch(`/api/disparos/campaigns/${editCampaign.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...callerHeaders() }, body: JSON.stringify(body) });
         const data = await res.json() as { error?: string };
         if (!res.ok) { setError(data.error ?? 'Erro ao salvar.'); return; }
         onCreated();
@@ -1017,7 +1018,7 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
       }
 
       const startsAt = form.isNow ? new Date().toISOString() : toISO(form.startsAt);
-      const res = await fetch('/api/disparos/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId: form.clientId, name: form.name, message: form.message, messages: allMessages, numbers: form.numbers, startsAt, endsAt, activeFrom, activeUntil, intervalMin: form.intervalMin, intervalMax: form.intervalMax, imageUrls: imageUrls.length > 0 ? imageUrls : undefined }) });
+      const res = await fetch('/api/disparos/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json', ...callerHeaders() }, body: JSON.stringify({ clientId: form.clientId, name: form.name, message: form.message, messages: allMessages, numbers: form.numbers, startsAt, endsAt, activeFrom, activeUntil, intervalMin: form.intervalMin, intervalMax: form.intervalMax, imageUrls: imageUrls.length > 0 ? imageUrls : undefined }) });
       const data = await res.json() as { error?: string };
       if (!res.ok) { setError(data.error ?? 'Erro ao criar campanha.'); return; }
       setForm({ clientId: clients[0]?.id ?? '', name: '', message: '', numbers: '', isNow: true, startsAt: '', endsAt: '', activeFrom: '', activeUntil: '', intervalMin: 5, intervalMax: 15 });
@@ -1476,8 +1477,8 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances, onEdit }: {
 
   async function load() {
     const [cData, iData] = await Promise.all([
-      fetch('/api/disparos/campaigns').then(r => r.json() as Promise<Campaign[]>),
-      fetch('/api/disparos/clients').then(r => r.json() as Promise<ZClient[]>),
+      fetch('/api/disparos/campaigns', { headers: callerHeaders() }).then(r => r.json() as Promise<Campaign[]>),
+      fetch('/api/disparos/clients', { headers: callerHeaders() }).then(r => r.json() as Promise<ZClient[]>),
     ]);
     setCampaigns(cData);
     setInstances({ total: iData.length, online: iData.filter(c => c.active).length });
@@ -1487,14 +1488,14 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances, onEdit }: {
   useEffect(() => { load(); }, []);
 
   async function handleAction(id: string, action: string) {
-    await fetch(`/api/disparos/campaigns/${id}/action`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) });
+    await fetch(`/api/disparos/campaigns/${id}/action`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...callerHeaders() }, body: JSON.stringify({ action }) });
     load();
   }
 
   async function fetchNumbers(id: string) {
     if (expandedNumbers[id]) return expandedNumbers[id];
     setLoadingDetail(id);
-    const data = await fetch(`/api/disparos/campaigns/${id}/numbers`).then(r => r.json() as Promise<NumberDetail[]>);
+    const data = await fetch(`/api/disparos/campaigns/${id}/numbers`, { headers: callerHeaders() }).then(r => r.json() as Promise<NumberDetail[]>);
     setExpandedNumbers(prev => ({ ...prev, [id]: data }));
     setLoadingDetail(null);
     return data;
@@ -1503,7 +1504,7 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances, onEdit }: {
   async function handleDelete(id: string) {
     if (!window.confirm('Excluir esta campanha permanentemente?')) return;
     setDeleting(id);
-    await fetch(`/api/disparos/campaigns/${id}`, { method: 'DELETE' });
+    await fetch(`/api/disparos/campaigns/${id}`, { method: 'DELETE', headers: callerHeaders() });
     setDeleting(null);
     setExpandedId(null);
     load();
@@ -1944,7 +1945,7 @@ function ExtratorTab({ onUseCampaign }: { onUseCampaign: (numbers: string) => vo
   }
 
   useEffect(() => {
-    fetch('/api/disparos/clients')
+    fetch('/api/disparos/clients', { headers: callerHeaders() })
       .then((r) => r.json())
       .then((rows: ZClient[]) => {
         setClients(rows);
@@ -1961,7 +1962,7 @@ function ExtratorTab({ onUseCampaign }: { onUseCampaign: (numbers: string) => vo
     setSelected(new Set());
     setExtracted([]);
     try {
-      const res = await fetch(`/api/disparos/extract/chats?clientId=${clientId}&type=${extractType}`);
+      const res = await fetch(`/api/disparos/extract/chats?clientId=${clientId}&type=${extractType}`, { headers: callerHeaders() });
       const data = await res.json() as ChatItem[] | { error: string };
       if (!res.ok || 'error' in data) {
         setChatsError((data as { error: string }).error ?? 'Erro ao carregar');
@@ -2027,6 +2028,7 @@ function ExtratorTab({ onUseCampaign }: { onUseCampaign: (numbers: string) => vo
       try {
         const res = await fetch(
           `/api/disparos/extract/members?clientId=${clientId}&groupId=${encodeURIComponent(group.phone)}`,
+          { headers: callerHeaders() },
         );
         const text = await res.text();
         let data: MemberItem[] | { error: string };

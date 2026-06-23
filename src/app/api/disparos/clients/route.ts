@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { createEvolutionInstance, setEvolutionWebhook } from '@/lib/evolution-api';
+import { getCallerScope } from '@/lib/disparos-access';
 
 async function ensureTables(pool: ReturnType<typeof makeServerPool>) {
   await pool.query(`
@@ -15,6 +16,7 @@ async function ensureTables(pool: ReturnType<typeof makeServerPool>) {
     );
     ALTER TABLE public.zapi_clients ADD COLUMN IF NOT EXISTS security_token TEXT;
     ALTER TABLE public.zapi_clients ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT 'zapi';
+    ALTER TABLE public.zapi_clients ADD COLUMN IF NOT EXISTS owner_id TEXT;
     CREATE TABLE IF NOT EXISTS public.zapi_campaigns (
       id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
       client_id     UUID        NOT NULL REFERENCES public.zapi_clients(id) ON DELETE CASCADE,
@@ -46,12 +48,17 @@ async function ensureTables(pool: ReturnType<typeof makeServerPool>) {
   `);
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const pool = makeServerPool();
   try {
     await ensureTables(pool);
+    const scope = await getCallerScope(request, pool);
     const { rows } = await pool.query(
-      `SELECT id, name, instance_id, provider, active, created_at FROM public.zapi_clients ORDER BY created_at DESC`,
+      `SELECT id, name, instance_id, provider, active, created_at, owner_id
+         FROM public.zapi_clients
+        WHERE ($1::boolean OR owner_id = $2)
+        ORDER BY created_at DESC`,
+      [scope.unrestricted, scope.userId],
     );
     return Response.json(rows);
   } finally {
@@ -71,6 +78,7 @@ export async function POST(request: NextRequest) {
   const pool = makeServerPool();
   try {
     await ensureTables(pool);
+    const scope = await getCallerScope(request, pool);
 
     const instanceId = `disparo-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')}-${Date.now().toString(36)}`;
 
@@ -83,8 +91,8 @@ export async function POST(request: NextRequest) {
     }
 
     const { rows } = await pool.query(
-      `INSERT INTO public.zapi_clients (name, instance_id, token, provider) VALUES ($1, $2, $3, 'evolution') RETURNING id, name, instance_id, provider, active, created_at`,
-      [name, instanceId, token],
+      `INSERT INTO public.zapi_clients (name, instance_id, token, provider, owner_id) VALUES ($1, $2, $3, 'evolution', $4) RETURNING id, name, instance_id, provider, active, created_at, owner_id`,
+      [name, instanceId, token, scope.userId],
     );
 
     const appUrl = new URL(request.url).origin;
@@ -102,7 +110,11 @@ export async function DELETE(request: NextRequest) {
 
   const pool = makeServerPool();
   try {
-    await pool.query(`DELETE FROM public.zapi_clients WHERE id = $1`, [id]);
+    const scope = await getCallerScope(request, pool);
+    await pool.query(
+      `DELETE FROM public.zapi_clients WHERE id = $1 AND ($2::boolean OR owner_id = $3)`,
+      [id, scope.unrestricted, scope.userId],
+    );
     return Response.json({ ok: true });
   } finally {
     await pool.end();

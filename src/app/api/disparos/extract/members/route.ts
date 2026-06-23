@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
+import { getCallerScope } from '@/lib/disparos-access';
 
 const BASE = 'https://api.z-api.io/instances';
 
@@ -42,11 +43,15 @@ export async function GET(request: NextRequest) {
 
   const pool = makeServerPool();
   try {
+    const scope = await getCallerScope(request, pool);
     const { rows } = await pool.query(
-      `SELECT instance_id, token, security_token FROM public.zapi_clients WHERE id = $1`,
+      `SELECT instance_id, token, security_token, owner_id FROM public.zapi_clients WHERE id = $1`,
       [clientId],
     );
     if (rows.length === 0) return Response.json({ error: 'Instância não encontrada' }, { status: 404 });
+    if (!scope.unrestricted && rows[0].owner_id !== scope.userId) {
+      return Response.json({ error: 'Sem permissão para esta instância' }, { status: 403 });
+    }
 
     const { instance_id, token, security_token } = rows[0] as {
       instance_id: string; token: string; security_token: string | null;

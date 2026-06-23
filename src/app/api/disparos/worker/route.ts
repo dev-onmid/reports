@@ -12,6 +12,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { sendText, sendImage } from '@/lib/zapi';
+import { sendEvolutionText, sendEvolutionImage } from '@/lib/evolution-api';
 
 export const maxDuration = 30;
 
@@ -81,10 +82,11 @@ async function runWorker(req: NextRequest) {
       instance_id: string;
       token: string;
       security_token: string | null;
+      provider: string;
     }>(`
       SELECT c.id, c.status, c.message, c.messages, c.message_index, c.image_url, c.ends_at,
              c.active_from, c.active_until, c.interval_min, c.interval_max,
-             cl.instance_id, cl.token, cl.security_token
+             cl.instance_id, cl.token, cl.security_token, cl.provider
         FROM public.zapi_campaigns c
         JOIN public.zapi_clients cl ON cl.id = c.client_id
        WHERE c.status = 'running'
@@ -169,16 +171,23 @@ async function runWorker(req: NextRequest) {
         const rawMessage = messagePool[localIndex % messagePool.length];
         const message = interpolate(rawMessage, number.phone, number.name ?? '');
 
+        const isEvolution = campaign.provider === 'evolution';
+
         let result;
         if (imageUrls.length > 0) {
-          result = await sendImage(client, number.phone, imageUrls[0], message);
+          result = isEvolution
+            ? await sendEvolutionImage(campaign.instance_id, number.phone, imageUrls[0], message)
+            : await sendImage(client, number.phone, imageUrls[0], message);
           if (result.ok) {
             for (let i = 1; i < imageUrls.length; i++) {
-              await sendImage(client, number.phone, imageUrls[i], '');
+              if (isEvolution) await sendEvolutionImage(campaign.instance_id, number.phone, imageUrls[i], '');
+              else await sendImage(client, number.phone, imageUrls[i], '');
             }
           }
         } else {
-          result = await sendText(client, number.phone, message);
+          result = isEvolution
+            ? await sendEvolutionText(campaign.instance_id, number.phone, message)
+            : await sendText(client, number.phone, message);
         }
 
         const newStatus = result.ok ? 'sent' : 'failed';

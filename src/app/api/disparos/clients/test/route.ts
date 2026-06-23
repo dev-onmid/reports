@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { checkEvolutionStatus } from '@/lib/evolution-api';
+import { getCallerScope } from '@/lib/disparos-access';
 
 export async function POST(request: NextRequest) {
   const { clientId } = await request.json() as { clientId: string };
@@ -8,11 +9,15 @@ export async function POST(request: NextRequest) {
 
   const pool = makeServerPool();
   try {
+    const scope = await getCallerScope(request, pool);
     const { rows: [client] } = await pool.query(
-      `SELECT instance_id, token, security_token, provider FROM public.zapi_clients WHERE id = $1`,
+      `SELECT instance_id, token, security_token, provider, owner_id FROM public.zapi_clients WHERE id = $1`,
       [clientId],
     );
     if (!client) return Response.json({ error: 'Instância não encontrada' }, { status: 404 });
+    if (!scope.unrestricted && client.owner_id !== scope.userId) {
+      return Response.json({ error: 'Sem permissão para esta instância' }, { status: 403 });
+    }
 
     if (client.provider === 'evolution') {
       const connected = await checkEvolutionStatus(client.instance_id);

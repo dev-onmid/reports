@@ -70,6 +70,17 @@ export function clearAuthSession() {
 }
 
 /**
+ * Identifies the logged-in user to API routes that need to scope data per-caller
+ * (e.g. Disparos: a "parceiro" only sees their own instances/campaigns). This app
+ * has no server session of its own, so — like /api/permissions — the server trusts
+ * whatever id the client reports here. Spread into a fetch's `headers` option.
+ */
+export function callerHeaders(): Record<string, string> {
+  const session = getAuthSession();
+  return session ? { 'x-onmid-user-id': session.userId } : {};
+}
+
+/**
  * Live permissions for the logged-in user. Fetches on every mount so that
  * access granted by an admin shows up without requiring a re-login.
  */

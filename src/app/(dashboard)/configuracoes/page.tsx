@@ -26,7 +26,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { mockUsers as initialUsers, mockPermissions as initialPermissions, defaultPermission } from '@/lib/mock-data';
-import type { User as UserType, Permission } from '@/lib/mock-data';
+import type { User as UserType, Permission, Team } from '@/lib/mock-data';
 import { cn } from '@/lib/utils';
 
 // Mirrors the sidebar nav order (src/components/layout/sidebar.tsx) so admins
@@ -48,7 +48,12 @@ const MODULES: { key: keyof Permission; label: string; icon: React.ElementType }
 
 const ROLES = ['Administrador', 'Usuário', 'Visualizador'];
 
-const emptyForm = { name: '', email: '', password: '', role: 'Usuário', status: 'Ativo' };
+const TEAMS: { value: Team; label: string }[] = [
+  { value: 'onmid', label: 'Time Onmid' },
+  { value: 'parceiro', label: 'Parceiro' },
+];
+
+const emptyForm = { name: '', email: '', password: '', role: 'Usuário', status: 'Ativo', team: 'onmid' as Team };
 
 type AiUsageRow = {
   client_id: string;
@@ -219,6 +224,7 @@ export default function ConfiguracoesPage() {
       password: user.password,
       role: user.role,
       status: user.status,
+      team: user.team ?? 'onmid',
     });
     setDialogOpen(true);
   }
@@ -234,6 +240,7 @@ export default function ConfiguracoesPage() {
         password: form.password,
         role: form.role,
         status: form.status,
+        team: form.team,
       };
       const snapshot = users;
       setUsers((prev) => prev.map((u) => u.id === editingUserId ? updated : u));
@@ -252,6 +259,7 @@ export default function ConfiguracoesPage() {
       password: form.password,
       role: form.role,
       status: form.status,
+      team: form.team,
     };
     const snapshot = users;
     setUsers((prev) => [...prev, user]);
@@ -453,6 +461,7 @@ export default function ConfiguracoesPage() {
                   <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Usuário</th>
                   <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Email</th>
                   <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Perfil</th>
+                  <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Equipe</th>
                   <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Status</th>
                   <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Ações</th>
                 </tr>
@@ -488,6 +497,17 @@ export default function ConfiguracoesPage() {
                         <span className={cn('inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium', badgeCls)}>
                           <BadgeIcon className="w-3 h-3" />
                           {user.role}
+                        </span>
+                      </td>
+                      {/* Team badge */}
+                      <td className="px-6 py-4">
+                        <span className={cn(
+                          'inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium',
+                          user.team === 'parceiro'
+                            ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                            : 'bg-zinc-700/50 text-zinc-400 border border-zinc-600/50',
+                        )}>
+                          {user.team === 'parceiro' ? 'Parceiro' : 'Time Onmid'}
                         </span>
                       </td>
                       {/* Status */}
@@ -943,6 +963,24 @@ export default function ConfiguracoesPage() {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Equipe</Label>
+              <Select value={form.team} onValueChange={(team) => team && setForm({ ...form, team: team as Team })}>
+                <SelectTrigger className="w-full">
+                  <SelectValue>{(v: Team) => TEAMS.find((t) => t.value === v)?.label ?? v}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {TEAMS.map((t) => (
+                    <SelectItem key={t.value} value={t.value}>
+                      {t.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Parceiro só vê as próprias instâncias e campanhas em Disparos — nunca as de outras pessoas.
+              </p>
             </div>
             <div className="space-y-1.5">
               <Label>Status</Label>

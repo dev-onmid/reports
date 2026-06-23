@@ -6,6 +6,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { sendText, sendImage } from '@/lib/zapi';
+import { sendEvolutionText, sendEvolutionImage } from '@/lib/evolution-api';
 
 function interpolate(template: string, phone: string, name: string) {
   return template.replace(/\{telefone\}/g, phone).replace(/\{nome\}/g, name);
@@ -38,7 +39,7 @@ export async function POST(
     await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS message_index INT NOT NULL DEFAULT 0`);
 
     const { rows: [campaign] } = await pool.query(
-      `SELECT c.*, cl.instance_id, cl.token, cl.security_token
+      `SELECT c.*, cl.instance_id, cl.token, cl.security_token, cl.provider
          FROM public.zapi_campaigns c
          JOIN public.zapi_clients cl ON cl.id = c.client_id
         WHERE c.id = $1`,
@@ -126,18 +127,25 @@ export async function POST(
       }
     }
 
+    const isEvolution = campaign.provider === 'evolution';
+
     let result;
     if (imageUrls.length > 0) {
       // Send first image with caption
-      result = await sendImage(client, number.phone, imageUrls[0], message);
+      result = isEvolution
+        ? await sendEvolutionImage(campaign.instance_id, number.phone, imageUrls[0], message)
+        : await sendImage(client, number.phone, imageUrls[0], message);
       // Send remaining images without caption (best-effort, don't fail the number)
       if (result.ok) {
         for (let i = 1; i < imageUrls.length; i++) {
-          await sendImage(client, number.phone, imageUrls[i], '');
+          if (isEvolution) await sendEvolutionImage(campaign.instance_id, number.phone, imageUrls[i], '');
+          else await sendImage(client, number.phone, imageUrls[i], '');
         }
       }
     } else {
-      result = await sendText(client, number.phone, message);
+      result = isEvolution
+        ? await sendEvolutionText(campaign.instance_id, number.phone, message)
+        : await sendText(client, number.phone, message);
     }
 
     const newStatus = result.ok ? 'sent' : 'failed';
