@@ -5,6 +5,7 @@ import { type ElementType, type ReactNode, useCallback, useEffect, useRef, useSt
 import {
   AlertTriangle,
   BarChart3,
+  Bell,
   CalendarDays,
   CheckCircle2,
   ChevronDown,
@@ -14,6 +15,7 @@ import {
   ExternalLink,
   Eye,
   Filter,
+  MessageCircle,
   Pencil,
   Plus,
   PlusCircle,
@@ -30,6 +32,7 @@ import {
 } from 'recharts';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { useClients } from '@/lib/client-store';
 import {
   type InvestmentPayment,
@@ -297,6 +300,233 @@ function CriticalBalanceAlerts({
         <div className="space-y-3 border-t border-red-500/20 p-4">
           {metaCritical.length > 0 && renderPlatformColumn('meta', metaCritical, visibleMetaCritical)}
           {googleCritical.length > 0 && renderPlatformColumn('google', googleCritical, visibleGoogleCritical)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Daily low-balance WhatsApp alerts (balance < yesterday's spend) ──────────
+type BalanceAlertConfig = {
+  id: string; whatsapp_group: string; zapi_client_id: string | null;
+  zapi_name: string | null; active: boolean; created_at: string;
+};
+
+type ZapiClientOption = { id: string; name: string };
+
+function BalanceAlertSettings() {
+  const [configs, setConfigs] = useState<BalanceAlertConfig[]>([]);
+  const [zapiClients, setZapiClients] = useState<ZapiClientOption[]>([]);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ whatsappGroup: '', zapiClientId: '' });
+  const [saving, setSaving] = useState(false);
+  const [testingId, setTestingId] = useState<string | null>(null);
+  const [groupPickerOpen, setGroupPickerOpen] = useState(false);
+  const [groupSearch, setGroupSearch] = useState('');
+  const [zapiGroups, setZapiGroups] = useState<{ phone: string; name: string }[]>([]);
+  const [loadingGroups, setLoadingGroups] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    Promise.all([
+      fetch('/api/alerts/balance-configs').then(r => r.ok ? r.json() : []),
+      fetch('/api/disparos/clients').then(r => r.ok ? r.json() : []),
+    ]).then(([cfgs, zapis]) => {
+      setConfigs(cfgs as BalanceAlertConfig[]);
+      setZapiClients(zapis as ZapiClientOption[]);
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!form.zapiClientId) return;
+    setLoadingGroups(true);
+    fetch(`/api/disparos/extract/chats?clientId=${form.zapiClientId}&type=groups`)
+      .then(r => r.ok ? r.json() : [])
+      .then((rows: { phone: string; name: string }[]) => setZapiGroups(Array.isArray(rows) ? rows : []))
+      .catch(() => setZapiGroups([]))
+      .finally(() => setLoadingGroups(false));
+  }, [form.zapiClientId]);
+
+  async function saveConfig() {
+    if (!form.whatsappGroup || !form.zapiClientId) return;
+    setSaving(true);
+    try {
+      const res = await fetch('/api/alerts/balance-configs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ whatsappGroup: form.whatsappGroup, zapiClientId: form.zapiClientId }),
+      });
+      const created = await res.json() as BalanceAlertConfig;
+      setConfigs(prev => [{ ...created, zapi_name: zapiClients.find(z => z.id === form.zapiClientId)?.name ?? null }, ...prev]);
+      setShowForm(false);
+      setForm({ whatsappGroup: '', zapiClientId: '' });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function toggleActive(cfg: BalanceAlertConfig) {
+    await fetch(`/api/alerts/balance-configs/${cfg.id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active: !cfg.active }),
+    });
+    setConfigs(prev => prev.map(c => c.id === cfg.id ? { ...c, active: !c.active } : c));
+  }
+
+  async function deleteConfig(id: string) {
+    if (!confirm('Excluir esse destino de alertas?')) return;
+    await fetch(`/api/alerts/balance-configs/${id}`, { method: 'DELETE' });
+    setConfigs(prev => prev.filter(c => c.id !== id));
+  }
+
+  async function testConfig(cfg: BalanceAlertConfig) {
+    setTestingId(cfg.id);
+    try {
+      const res = await fetch(`/api/alerts/balance-configs/${cfg.id}/test`, { method: 'POST' });
+      const data = await res.json().catch(() => ({})) as { ok?: boolean; error?: string; totalChecked?: number; sent?: unknown[] };
+      if (!res.ok || !data.ok) {
+        alert(data.error ?? 'Erro ao testar alertas.');
+        return;
+      }
+      const sentCount = Array.isArray(data.sent) ? data.sent.length : 0;
+      alert(sentCount > 0
+        ? `${sentCount} alerta(s) de saldo baixo enviados no grupo.`
+        : `Nenhuma conta com saldo abaixo do gasto de ontem agora (${data.totalChecked ?? 0} conta(s) verificada(s)).`);
+    } finally {
+      setTestingId(null);
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-card">
+      <button type="button" onClick={() => setExpanded(v => !v)} className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left">
+        <div className="flex items-center gap-3">
+          <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-background">
+            <Bell className="h-4 w-4 text-muted-foreground" />
+          </span>
+          <div>
+            <p className="text-sm font-bold uppercase tracking-wider">Alertas diários de saldo no WhatsApp</p>
+            <p className="text-xs text-muted-foreground">
+              Todo dia às 7h, avisa no grupo se o saldo disponível for menor que o gasto de ontem.
+            </p>
+          </div>
+        </div>
+        <ChevronDown className={cn('h-4 w-4 text-muted-foreground transition-transform shrink-0', expanded && 'rotate-180')} />
+      </button>
+
+      {expanded && (
+        <div className="border-t border-border p-4 space-y-3">
+          {configs.length === 0 && !showForm && (
+            <p className="text-xs text-muted-foreground">Nenhum grupo configurado ainda.</p>
+          )}
+          {configs.map(cfg => (
+            <div key={cfg.id} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background/50 px-3 py-2">
+              <div className="min-w-0">
+                <p className="text-sm font-medium truncate">{cfg.whatsapp_group}</p>
+                <p className="text-[11px] text-muted-foreground">via {cfg.zapi_name ?? 'instância removida'}</p>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  title={cfg.active ? 'Ativo — clique para desativar' : 'Inativo — clique para ativar'}
+                  onClick={() => toggleActive(cfg)}
+                  className={cn('px-2 py-1 rounded-md text-[10px] font-bold border', cfg.active ? 'border-emerald-500/30 text-emerald-400 bg-emerald-500/10' : 'border-border text-muted-foreground')}
+                >
+                  {cfg.active ? 'Ativo' : 'Inativo'}
+                </button>
+                <button
+                  title="Testar agora"
+                  disabled={testingId === cfg.id}
+                  onClick={() => testConfig(cfg)}
+                  className="p-1.5 rounded-md text-muted-foreground hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors disabled:opacity-40"
+                >
+                  {testingId === cfg.id ? <RefreshCw className="w-4 h-4 animate-spin" /> : <MessageCircle className="w-4 h-4" />}
+                </button>
+                <button
+                  title="Excluir"
+                  onClick={() => deleteConfig(cfg.id)}
+                  className="p-1.5 rounded-md text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          ))}
+
+          {showForm ? (
+            <div className="rounded-lg border border-border p-3 space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs text-muted-foreground font-medium">Instância Z-API</label>
+                  <select
+                    value={form.zapiClientId}
+                    onChange={e => setForm(f => ({ ...f, zapiClientId: e.target.value, whatsappGroup: '' }))}
+                    className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50"
+                  >
+                    <option value="">Selecionar instância...</option>
+                    {zapiClients.map(z => <option key={z.id} value={z.id}>{z.name}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs text-muted-foreground font-medium">Grupo WhatsApp</label>
+                  <Popover open={groupPickerOpen} onOpenChange={setGroupPickerOpen}>
+                    <PopoverTrigger
+                      disabled={!form.zapiClientId}
+                      className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg text-left text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50 flex items-center justify-between disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <span className={cn(!form.whatsappGroup && 'text-muted-foreground', 'truncate')}>
+                        {!form.zapiClientId
+                          ? 'Selecione uma instância primeiro'
+                          : loadingGroups
+                            ? 'Carregando grupos...'
+                            : form.whatsappGroup
+                              ? (zapiGroups.find(g => g.phone === form.whatsappGroup)?.name ?? form.whatsappGroup)
+                              : 'Selecionar grupo...'}
+                      </span>
+                      <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
+                    </PopoverTrigger>
+                    <PopoverContent align="start" className="w-[--anchor-width] p-0">
+                      <div className="p-2 border-b border-border">
+                        <input
+                          autoFocus type="text" value={groupSearch} onChange={e => setGroupSearch(e.target.value)}
+                          placeholder="Buscar grupo..."
+                          className="w-full px-2.5 py-1.5 text-sm bg-background border border-border rounded-md text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50"
+                        />
+                      </div>
+                      <div className="max-h-64 overflow-y-auto py-1">
+                        {loadingGroups && <p className="px-3 py-2 text-xs text-muted-foreground">Carregando grupos...</p>}
+                        {!loadingGroups && zapiGroups.length === 0 && <p className="px-3 py-2 text-xs text-muted-foreground">Nenhum grupo encontrado.</p>}
+                        {zapiGroups
+                          .filter(g => g.name.toLowerCase().includes(groupSearch.toLowerCase()))
+                          .map(g => (
+                            <button
+                              type="button" key={g.phone}
+                              onClick={() => { setForm(f => ({ ...f, whatsappGroup: g.phone })); setGroupPickerOpen(false); setGroupSearch(''); }}
+                              className={cn('w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left hover:bg-muted/60 transition-colors', g.phone === form.whatsappGroup && 'bg-muted/40')}
+                            >
+                              <span className="text-foreground truncate">{g.name}</span>
+                            </button>
+                          ))}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2">
+                <button onClick={() => { setShowForm(false); setForm({ whatsappGroup: '', zapiClientId: '' }); }} className="px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
+                  Cancelar
+                </button>
+                <Button onClick={saveConfig} disabled={saving || !form.whatsappGroup || !form.zapiClientId} className="bg-violet-600 hover:bg-violet-700 text-white gap-2 text-xs h-8">
+                  {saving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+                  Salvar
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <button onClick={() => setShowForm(true)} className="flex items-center gap-1.5 text-xs font-bold text-violet-400 hover:underline">
+              <Plus className="w-3.5 h-3.5" />
+              Adicionar grupo de alerta
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -1634,6 +1864,8 @@ export default function PagamentosPage() {
       {(activeBalances.length > 0 || balancesLoading) && (
         <CriticalBalanceAlerts balances={activeBalances} loading={balancesLoading} lastUpdated={balancesLastUpdated} onRefresh={loadBalances} />
       )}
+
+      <BalanceAlertSettings />
 
       <div className="grid gap-4 xl:grid-cols-5">
         {viewMode === 'dia' ? (

@@ -6,7 +6,7 @@ import {
   FileText, Search, ChevronDown, RefreshCw, ArrowUpRight,
   FileCheck2, CalendarDays, Users, CheckCircle2, ChevronLeft,
   ChevronRight, Settings2, Zap, Play, ExternalLink, Pencil,
-  X, Loader2, Copy, Send, Download,
+  X, Loader2, Copy, Send, Download, MessageCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
@@ -102,6 +102,7 @@ export default function RelatoriosPage() {
   const [configForm, setConfigForm] = useState<{ clientIds: string[]; name: string; whatsappGroup: string; zapiClientId: string; sendDay: number; template: 'performance' | 'delivery' }>({ clientIds: [], name: '', whatsappGroup: '', zapiClientId: '', sendDay: 1, template: 'performance' });
   const [savingConfig, setSavingConfig] = useState(false);
   const [runningId, setRunningId] = useState<string | null>(null);
+  const [sendingId, setSendingId] = useState<string | null>(null);
   const [clientPickerOpen, setClientPickerOpen] = useState(false);
   const [clientSearch, setClientSearch] = useState('');
   const [zapiGroups, setZapiGroups] = useState<{ phone: string; name: string }[]>([]);
@@ -292,6 +293,21 @@ export default function RelatoriosPage() {
       }
     } finally {
       setRunningId(null);
+    }
+  }
+
+  async function sendConfigWhatsapp(cfg: ReportConfig) {
+    setSendingId(cfg.id);
+    try {
+      const res = await fetch(`/api/reports/configs/${cfg.id}/send`, { method: 'POST' });
+      const data = await res.json().catch(() => ({})) as { ok?: boolean; error?: string };
+      if (!res.ok || !data.ok) {
+        alert(data.error ?? 'Erro ao enviar no WhatsApp. Tente novamente.');
+        return;
+      }
+      alert(`Mensagem enviada no grupo de ${cfg.client_name}.`);
+    } finally {
+      setSendingId(null);
     }
   }
 
@@ -1093,6 +1109,16 @@ export default function RelatoriosPage() {
                             >
                               <Download className="w-4 h-4" />
                             </button>
+                            {cfg.whatsapp_group && cfg.zapi_client_id && (
+                              <button
+                                title="Testar envio no grupo do WhatsApp"
+                                disabled={sendingId === cfg.id}
+                                onClick={() => sendConfigWhatsapp(cfg)}
+                                className="p-1.5 rounded-md text-muted-foreground hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors disabled:opacity-40"
+                              >
+                                {sendingId === cfg.id ? <RefreshCw className="w-4 h-4 animate-spin" /> : <MessageCircle className="w-4 h-4" />}
+                              </button>
+                            )}
                           </>
                         )}
                         <button
