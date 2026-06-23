@@ -1884,6 +1884,13 @@ function ExtratorTab({ onUseCampaign }: { onUseCampaign: (numbers: string) => vo
   const [extractError, setExtractError] = useState('');
   const [extractDone, setExtractDone] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copiedPhone, setCopiedPhone] = useState<string | null>(null);
+
+  function copyId(text: string) {
+    void navigator.clipboard.writeText(text);
+    setCopiedPhone(text);
+    setTimeout(() => setCopiedPhone(null), 2000);
+  }
 
   useEffect(() => {
     fetch('/api/disparos/clients')
@@ -2133,7 +2140,17 @@ function ExtratorTab({ onUseCampaign }: { onUseCampaign: (numbers: string) => vo
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-foreground">{chat.name || chat.phone}</p>
-                  <p className="text-[10px] text-muted-foreground">{chat.phone}</p>
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => { e.stopPropagation(); copyId(chat.phone); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); copyId(chat.phone); } }}
+                    className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-emerald-400"
+                    title="Copiar ID do grupo"
+                  >
+                    {chat.phone}
+                    {copiedPhone === chat.phone ? <CheckCircle2 className="h-2.5 w-2.5" /> : <Copy className="h-2.5 w-2.5" />}
+                  </span>
                 </div>
                 {chat.membersCount !== undefined && (
                   <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-bold text-muted-foreground">
