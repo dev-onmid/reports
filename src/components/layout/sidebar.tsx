@@ -4,45 +4,19 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 import { clearAuthSession, getAuthSession, useMyPermissions } from '@/lib/auth-store';
-import type { Permission } from '@/lib/mock-data';
+import { NAV_ITEMS } from '@/lib/nav-items';
 import {
-  LayoutDashboard,
-  Users,
-  FileText,
+  Home,
   Settings,
   LogOut,
-  Plug,
-  WalletCards,
-  ClipboardList,
-  BarChart3,
-  MessageCircle,
-  TableProperties,
   ChevronLeft,
   ChevronRight,
-  Zap,
-  Bot,
-  ShieldCheck,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { APP_VERSION } from '@/lib/app-version';
 
 type Role = 'Administrador' | 'Usuário' | 'Visualizador';
 type SidebarMode = 'desktop' | 'mobile';
-
-const navItems: { name: string; href: string; icon: React.ElementType; key: keyof Permission }[] = [
-  { name: 'Dashboard',   href: '/dashboard',   icon: LayoutDashboard, key: 'dashboard' },
-  { name: 'Clientes',    href: '/clientes',    icon: Users,           key: 'clientes' },
-  { name: 'CRM',         href: '/crm',         icon: TableProperties, key: 'crm' },
-  { name: 'Relatórios',  href: '/relatorios',  icon: FileText,        key: 'relatorios' },
-  { name: 'Radar',       href: '/resultados',  icon: BarChart3,       key: 'radar' },
-  { name: 'Pagamentos',  href: '/pagamentos',  icon: WalletCards,     key: 'pagamentos' },
-  { name: 'Disparos',    href: '/disparos',    icon: MessageCircle,   key: 'disparos' },
-  { name: 'Luna IA',     href: '/agente',      icon: Bot,             key: 'luna_ia' },
-  { name: 'Cofre',       href: '/vault',       icon: ShieldCheck,     key: 'cofre' },
-  { name: 'Automações',  href: '/automacoes',  icon: Zap,             key: 'automacoes' },
-  { name: 'Integrações', href: '/integracoes', icon: Plug,            key: 'integracoes' },
-  { name: 'Logs',        href: '/logs',        icon: ClipboardList,   key: 'logs' },
-];
 
 export function Sidebar({
   className,
@@ -70,9 +44,11 @@ export function Sidebar({
     });
   }
 
-  const visibleItems = navItems.filter(item => permissions[item.key]);
+  const visibleItems = NAV_ITEMS.filter(item => permissions[item.key]);
   const showConfiguracoes = role === 'Administrador';
   const isCollapsed = !isMobile && collapsed;
+
+  const isHomeActive = pathname === '/inicio' || pathname.startsWith('/inicio/');
 
   return (
     <aside className={cn(
@@ -83,11 +59,11 @@ export function Sidebar({
       {/* Header */}
       <div className={cn('h-14 flex items-center border-b border-border relative', isCollapsed ? 'justify-center' : 'px-5')}>
         {isCollapsed ? (
-          <Link href="/dashboard" onClick={onNavigate}>
+          <Link href="/inicio" onClick={onNavigate}>
             <img src="/brand/onmid-logo-white.png" alt="Onmid" className="h-6 w-auto object-contain" />
           </Link>
         ) : (
-          <Link href="/dashboard" onClick={onNavigate} className="flex items-center gap-3 overflow-hidden">
+          <Link href="/inicio" onClick={onNavigate} className="flex items-center gap-3 overflow-hidden">
             <img src="/brand/onmid-logo-white.png" alt="Onmid" className="h-8 w-auto max-w-[120px] object-contain" />
             <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary whitespace-nowrap">
               v{APP_VERSION}
@@ -107,6 +83,28 @@ export function Sidebar({
 
       {/* Nav */}
       <nav className={cn('flex-1 py-6 space-y-1 overflow-y-auto', isCollapsed ? 'px-2' : 'px-3')}>
+        {/* Início — sempre visível, sem trava de permissão (porta de entrada do sistema) */}
+        <Link
+          href="/inicio"
+          title={isCollapsed ? 'Início' : undefined}
+          onClick={onNavigate}
+          className={cn(
+            'flex items-center rounded-md text-sm font-semibold transition-all relative overflow-hidden',
+            isCollapsed ? 'justify-center h-10 w-10 mx-auto' : 'gap-3 px-3 py-2.5',
+            isHomeActive
+              ? 'text-primary bg-primary/10'
+              : 'text-muted-foreground hover:bg-card hover:text-foreground'
+          )}
+        >
+          {isHomeActive && !isCollapsed && (
+            <div className="absolute left-0 top-0 bottom-0 w-1 bg-primary shadow-[0_0_10px_rgba(85,245,47,0.8)]" />
+          )}
+          {isHomeActive && isCollapsed && (
+            <div className="absolute inset-0 rounded-md ring-1 ring-inset ring-primary/40 bg-primary/10" />
+          )}
+          <Home className={cn('w-5 h-5 shrink-0 relative z-10', isHomeActive ? 'text-primary drop-shadow-[0_0_5px_rgba(85,245,47,0.5)]' : '')} />
+          {!isCollapsed && 'Início'}
+        </Link>
         {visibleItems.map((item) => {
           const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
           return (

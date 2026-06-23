@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import { mockUsers, defaultPermission, allPermission, type User, type Permission } from '@/lib/mock-data';
+import { mockUsers, defaultPermission, allPermission, type User, type Permission, type Team } from '@/lib/mock-data';
 
 const SESSION_STORAGE_KEY = 'onmid-session';
 
@@ -10,6 +10,7 @@ export type AuthSession = {
   name: string;
   email: string;
   role: string;
+  team: Team;
 };
 
 async function loadAuthUsers(): Promise<User[]> {
@@ -45,7 +46,7 @@ export async function authenticateUser(email: string, password: string): Promise
   const user = await verifyUserCredentials(email, password);
   if (!user) return null;
 
-  const session: AuthSession = { userId: user.id, name: user.name, email: user.email, role: user.role };
+  const session: AuthSession = { userId: user.id, name: user.name, email: user.email, role: user.role, team: user.team ?? 'onmid' };
   window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
   return session;
 }
@@ -57,7 +58,9 @@ export function getAuthSession(): AuthSession | null {
   if (!stored) return null;
 
   try {
-    return JSON.parse(stored) as AuthSession;
+    const parsed = JSON.parse(stored) as Partial<AuthSession>;
+    // Sessions created before the `team` field existed default to 'onmid'.
+    return { team: 'onmid', ...parsed } as AuthSession;
   } catch {
     window.localStorage.removeItem(SESSION_STORAGE_KEY);
     return null;

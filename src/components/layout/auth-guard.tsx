@@ -8,6 +8,9 @@ import { defaultPermission, type Permission } from '@/lib/mock-data';
 type Role = 'Administrador' | 'Usuário' | 'Visualizador';
 
 const routeRoles: Record<string, Role[]> = {
+  // /inicio is the system's free landing — everyone gets in, no feature gate.
+  // It's also the safe redirect target so denied users never loop.
+  '/inicio':      ['Administrador', 'Usuário', 'Visualizador'],
   '/dashboard':   ['Administrador', 'Usuário', 'Visualizador'],
   '/clientes':    ['Administrador', 'Usuário'],
   '/crm':         ['Administrador', 'Usuário'],
@@ -70,7 +73,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     const role = session.role as Role;
     const allowedRoles = getAllowedRoles(pathname);
     if (!allowedRoles.includes(role)) {
-      router.replace('/dashboard');
+      router.replace('/inicio');
       return;
     }
 
@@ -91,7 +94,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
         if (!active) return;
         const permissions = map[session.userId] ?? defaultPermission;
         if (!permissions[requiredFeature]) {
-          router.replace('/dashboard');
+          router.replace('/inicio');
           return;
         }
         setAllowed(true);

@@ -26,7 +26,7 @@ export default function LoginPage() {
     }
 
     setError('');
-    router.push('/dashboard');
+    router.push('/inicio');
   }
 
   return (
