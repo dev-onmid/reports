@@ -24,6 +24,9 @@ export type CampaignPerformance = {
   ctr: number;
   cpc: number;
   cpl: number;
+  searchImprShare?: number;
+  searchBudgetLostIS?: number;
+  searchAbsTopIS?: number;
 };
 
 
@@ -323,7 +326,10 @@ export async function GET(request: NextRequest) {
             `SELECT campaign.id, campaign.name, campaign.status,
                     campaign_budget.amount_micros, campaign_budget.resource_name,
                     metrics.cost_micros, metrics.impressions, metrics.clicks,
-                    metrics.conversions
+                    metrics.conversions,
+                    metrics.search_impression_share,
+                    metrics.search_budget_lost_impression_share,
+                    metrics.search_absolute_top_impression_share
              FROM campaign
              WHERE ${gaqlPeriod}
                AND campaign.status IN ('ENABLED', 'PAUSED')
@@ -350,6 +356,9 @@ export async function GET(request: NextRequest) {
             const leads = Number(metrics.conversions ?? 0);
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const budget = (row as any).campaignBudget ?? {};
+            const rawIS = Number(metrics.searchImpressionShare ?? 0);
+            const rawBudgetLostIS = Number(metrics.searchBudgetLostImpressionShare ?? 0);
+            const rawAbsTopIS = Number(metrics.searchAbsoluteTopImpressionShare ?? 0);
             campaigns.push({
               id: String(campaign.id),
               name: campaign.name ?? `Campanha ${campaign.id}`,
@@ -368,6 +377,9 @@ export async function GET(request: NextRequest) {
               ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,
               cpc: clicks > 0 ? spend / clicks : 0,
               cpl: leads > 0 ? spend / leads : 0,
+              searchImprShare: rawIS > 0 ? rawIS * 100 : undefined,
+              searchBudgetLostIS: rawBudgetLostIS > 0 ? rawBudgetLostIS * 100 : undefined,
+              searchAbsTopIS: rawAbsTopIS > 0 ? rawAbsTopIS * 100 : undefined,
             });
           }
         }),

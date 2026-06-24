@@ -2145,7 +2145,7 @@ function CampaignPerformanceTable({
     if (row.kind === 'loading') {
       return (
         <tr key={row.key} className="border-t border-border/50">
-          <td colSpan={9} className={cn('px-4 py-2', INDENT[row.level])}>
+          <td colSpan={12} className={cn('px-4 py-2', INDENT[row.level])}>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <RefreshCw className="h-3 w-3 animate-spin" /> Carregando...
             </div>
@@ -2332,6 +2332,27 @@ function CampaignPerformanceTable({
         <td className="px-3 py-2.5 text-right text-xs text-muted-foreground">{impressions > 0 ? impressions.toLocaleString('pt-BR') : <span className="opacity-40">—</span>}</td>
         <td className="px-3 py-2.5 text-right text-xs text-muted-foreground">{ctr > 0 ? `${ctr.toFixed(2)}%` : <span className="opacity-40">—</span>}</td>
 
+        {/* IS metrics — Google Search campaigns only */}
+        {(() => {
+          const isGoogleCampaign = row.kind === 'campaign' && row.data.platform === 'google';
+          const imprShare = isGoogleCampaign ? (row.data as CampaignPerformance).searchImprShare : undefined;
+          const budgetLostIS = isGoogleCampaign ? (row.data as CampaignPerformance).searchBudgetLostIS : undefined;
+          const absTopIS = isGoogleCampaign ? (row.data as CampaignPerformance).searchAbsTopIS : undefined;
+          return (
+            <>
+              <td className="px-3 py-2.5 text-right text-xs font-semibold">
+                {imprShare != null ? <span className="text-[#6cff2f]">{imprShare.toFixed(1)}%</span> : <span className="opacity-40">—</span>}
+              </td>
+              <td className="px-3 py-2.5 text-right text-xs font-semibold">
+                {budgetLostIS != null ? <span className={budgetLostIS > 20 ? 'text-red-400' : 'text-muted-foreground'}>{budgetLostIS.toFixed(1)}%</span> : <span className="opacity-40">—</span>}
+              </td>
+              <td className="px-3 py-2.5 text-right text-xs font-semibold">
+                {absTopIS != null ? <span className="text-[#6cff2f]">{absTopIS.toFixed(1)}%</span> : <span className="opacity-40">—</span>}
+              </td>
+            </>
+          );
+        })()}
+
         {/* Actions */}
         <td className="px-3 py-2.5">
           <div className="flex items-center justify-center gap-1">
@@ -2439,6 +2460,9 @@ function CampaignPerformanceTable({
                 <th className="px-4 py-3 text-right">CPL</th>
                 <th className="px-4 py-3 text-right">Impressões</th>
                 <th className="px-4 py-3 text-right">CTR</th>
+                <th className="px-4 py-3 text-right">IS%</th>
+                <th className="px-4 py-3 text-right">IS Orç.</th>
+                <th className="px-4 py-3 text-right">Topo Abs.</th>
                 <th className="px-4 py-3 text-center">Ações</th>
               </tr>
             </thead>
@@ -5934,28 +5958,6 @@ export default function GeneralDashboard() {
                 <div className="mb-3 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
                   Campanhas com Veiculação
                 </div>
-                {/* Métricas competitivas Search */}
-                {hasGoogleLink && (
-                  <div className="mb-3 grid grid-cols-3 gap-2">
-                    <div className="rounded-[8px] border border-white/[0.07] bg-[#0a1419]/80 px-3 py-2">
-                      <p className="text-[9px] font-bold uppercase tracking-wider text-[#9aa4aa]">Quota IS</p>
-                      <p className="mt-0.5 text-sm font-black text-[#f4f7f8]">{googleSearchImprShare > 0 ? `${googleSearchImprShare.toFixed(1)}%` : '—'}</p>
-                      <p className="text-[9px] text-[#9aa4aa]/70">% impressões ganhas</p>
-                    </div>
-                    <div className="rounded-[8px] border border-white/[0.07] bg-[#0a1419]/80 px-3 py-2">
-                      <p className="text-[9px] font-bold uppercase tracking-wider text-[#9aa4aa]">IS Perdida por Orç.</p>
-                      <p className={`mt-0.5 text-sm font-black ${googleSearchBudgetLostIS > 20 ? 'text-red-400' : 'text-[#f4f7f8]'}`}>
-                        {googleSearchBudgetLostIS > 0 ? `${googleSearchBudgetLostIS.toFixed(1)}%` : '—'}
-                      </p>
-                      <p className="text-[9px] text-[#9aa4aa]/70">perdida por budget</p>
-                    </div>
-                    <div className="rounded-[8px] border border-white/[0.07] bg-[#0a1419]/80 px-3 py-2">
-                      <p className="text-[9px] font-bold uppercase tracking-wider text-[#9aa4aa]">Topo Absoluto</p>
-                      <p className="mt-0.5 text-sm font-black text-[#6cff2f]">{googleSearchAbsTopIS > 0 ? `${googleSearchAbsTopIS.toFixed(1)}%` : '—'}</p>
-                      <p className="text-[9px] text-[#9aa4aa]/70">1ª posição Search</p>
-                    </div>
-                  </div>
-                )}
                 <CampaignPerformanceTable
                   campaigns={googleCampaigns}
                   loading={campaignsLoading}
