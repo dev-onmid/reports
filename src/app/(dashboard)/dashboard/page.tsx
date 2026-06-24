@@ -5773,11 +5773,16 @@ export default function GeneralDashboard() {
               <h2 className="text-2xl font-black text-[#f4f7f8]">Escolha um cliente</h2>
               <p className="mt-2 text-sm text-[#9aa4aa]">Selecione para abrir o dashboard executivo.</p>
             </div>
-            <div className="grid w-full grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+            <div className="grid w-full grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
               {clients.map(c => (
-                <button key={c.id} type="button" onClick={() => setSelectedIds(new Set([c.id]))} className="rounded-[14px] border border-white/[0.08] bg-[#0d1519] px-4 py-6 text-center transition hover:border-[#6cff2f]/45 hover:bg-[#102018]">
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => setSelectedIds(new Set([c.id]))}
+                  className="group flex flex-col items-center gap-3 rounded-[14px] border border-white/[0.08] bg-[#0d1519] px-3 py-5 text-center transition-all duration-150 hover:border-[#6cff2f]/40 hover:bg-[#0e1c12] hover:shadow-[0_0_20px_rgba(108,255,47,0.08)]"
+                >
                   <ClientAvatar clientId={c.id} name={c.name} size="lg" />
-                  <p className="mt-3 truncate text-sm font-black text-[#f4f7f8]">{c.name}</p>
+                  <p className="w-full text-center text-[13px] font-bold leading-snug text-[#dce4e8] line-clamp-2 group-hover:text-[#6cff2f] transition-colors">{c.name}</p>
                 </button>
               ))}
             </div>
