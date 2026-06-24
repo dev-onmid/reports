@@ -8,6 +8,7 @@ export type Permission = {
   radar: boolean;
   pagamentos: boolean;
   disparos: boolean;
+  otimizador: boolean;
   luna_ia: boolean;
   cofre: boolean;
   automacoes: boolean;
@@ -18,7 +19,7 @@ export type Permission = {
 
 export const PERMISSION_KEYS = [
   'dashboard', 'clientes', 'crm', 'relatorios', 'radar', 'pagamentos',
-  'disparos', 'luna_ia', 'cofre', 'automacoes', 'integracoes', 'logs', 'configuracoes',
+  'disparos', 'otimizador', 'luna_ia', 'cofre', 'automacoes', 'integracoes', 'logs', 'configuracoes',
 ] as const satisfies readonly (keyof Permission)[];
 
 // New users get the bare minimum until an admin grants more in Configurações > Permissões.
@@ -30,6 +31,7 @@ export const defaultPermission: Permission = {
   radar: false,
   pagamentos: false,
   disparos: false,
+  otimizador: false,
   luna_ia: false,
   cofre: false,
   automacoes: false,
@@ -68,12 +70,12 @@ export const mockUsers: User[] = [
   { id: '3', name: 'João Costa', email: 'joao@onmid.com', password: 'joao123', role: 'Visualizador', status: 'Inativo', team: 'onmid' },
 ];
 
-const adminPermission: Permission = { ...defaultPermission, clientes: true, crm: true, relatorios: true, radar: true, pagamentos: true, disparos: true, luna_ia: true, cofre: true, automacoes: true, integracoes: true, logs: true, configuracoes: true };
+const adminPermission: Permission = { ...defaultPermission, clientes: true, crm: true, relatorios: true, radar: true, pagamentos: true, disparos: true, otimizador: true, luna_ia: true, cofre: true, automacoes: true, integracoes: true, logs: true, configuracoes: true };
 
 export const mockPermissions: Record<string, Permission> = {
   '1': adminPermission,
   '4': adminPermission,
-  '2': { ...defaultPermission, clientes: true, crm: true, relatorios: true, radar: true, pagamentos: true, luna_ia: true, cofre: true },
+  '2': { ...defaultPermission, clientes: true, crm: true, relatorios: true, radar: true, pagamentos: true, otimizador: true, luna_ia: true, cofre: true },
   '3': { ...defaultPermission },
 };
 

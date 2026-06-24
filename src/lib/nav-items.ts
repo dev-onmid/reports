@@ -1,6 +1,6 @@
 import {
   LayoutDashboard, Users, FileText, Plug, WalletCards, ClipboardList,
-  BarChart3, MessageCircle, TableProperties, Zap, Bot, ShieldCheck,
+  BarChart3, MessageCircle, TableProperties, Zap, Bot, ShieldCheck, WandSparkles,
 } from 'lucide-react';
 import type { Permission } from '@/lib/mock-data';
 
@@ -24,6 +24,7 @@ export const NAV_ITEMS: NavItem[] = [
   { name: 'Radar',       href: '/resultados',  icon: BarChart3,       key: 'radar',       desc: 'Resultados' },
   { name: 'Pagamentos',  href: '/pagamentos',  icon: WalletCards,     key: 'pagamentos',  desc: 'Investimento em mídia' },
   { name: 'Disparos',    href: '/disparos',    icon: MessageCircle,   key: 'disparos',    desc: 'Campanhas WhatsApp' },
+  { name: 'Otimizador',  href: '/otimizador',  icon: WandSparkles,    key: 'otimizador',  desc: 'Ações de tráfego' },
   { name: 'Luna IA',     href: '/agente',      icon: Bot,             key: 'luna_ia',     desc: 'Assistente' },
   { name: 'Cofre',       href: '/vault',       icon: ShieldCheck,     key: 'cofre',       desc: 'Credenciais' },
   { name: 'Automações',  href: '/automacoes',  icon: Zap,             key: 'automacoes',  desc: 'Fluxos automáticos' },

@@ -15,6 +15,7 @@ async function ensureSchema(pool: Pool) {
       ADD COLUMN IF NOT EXISTS radar BOOLEAN NOT NULL DEFAULT FALSE,
       ADD COLUMN IF NOT EXISTS pagamentos BOOLEAN NOT NULL DEFAULT FALSE,
       ADD COLUMN IF NOT EXISTS disparos BOOLEAN NOT NULL DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS otimizador BOOLEAN NOT NULL DEFAULT FALSE,
       ADD COLUMN IF NOT EXISTS luna_ia BOOLEAN NOT NULL DEFAULT FALSE,
       ADD COLUMN IF NOT EXISTS cofre BOOLEAN NOT NULL DEFAULT FALSE,
       ADD COLUMN IF NOT EXISTS automacoes BOOLEAN NOT NULL DEFAULT FALSE,
@@ -30,12 +31,20 @@ async function ensureSchema(pool: Pool) {
     await pool.query(`
       UPDATE public.user_permissions up SET crm = TRUE, radar = TRUE, pagamentos = TRUE, luna_ia = TRUE, cofre = TRUE
         FROM public.users u WHERE u.id = up.user_id AND u.role IN ('Administrador', 'Usuário');
-      UPDATE public.user_permissions up SET automacoes = TRUE, logs = TRUE, disparos = TRUE
+      UPDATE public.user_permissions up SET automacoes = TRUE, logs = TRUE, disparos = TRUE, otimizador = TRUE
         FROM public.users u WHERE u.id = up.user_id AND u.role = 'Administrador';
       INSERT INTO public.schema_migrations (name) VALUES ('permissions_v2_features')
         ON CONFLICT (name) DO NOTHING;
     `);
   }
+
+  await pool.query(`
+    UPDATE public.user_permissions up SET otimizador = TRUE
+      FROM public.users u
+      WHERE u.id = up.user_id
+        AND u.role IN ('Administrador', 'Usuário')
+        AND otimizador = FALSE
+  `).catch(() => {});
 }
 
 export async function GET() {

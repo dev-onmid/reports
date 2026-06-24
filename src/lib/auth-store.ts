@@ -101,7 +101,14 @@ export function useMyPermissions(): { permissions: Permission; loading: boolean 
         const res = await fetch('/api/permissions');
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const map = await res.json() as Record<string, Permission>;
-        if (active) setPermissions(map[session.userId] ?? defaultPermission);
+        if (active) {
+          const current = map[session.userId] ?? defaultPermission;
+          setPermissions(
+            session.role === 'Administrador'
+              ? { ...current, otimizador: true }
+              : current,
+          );
+        }
       } catch {
         // The endpoint itself failed (not "no permission row") — fail open.
         if (active) setPermissions(allPermission);

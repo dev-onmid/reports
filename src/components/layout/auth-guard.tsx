@@ -19,6 +19,7 @@ const routeRoles: Record<string, Role[]> = {
   '/pagamentos':  ['Administrador', 'Usuário'],
   '/biblioteca':  ['Administrador', 'Usuário'],
   '/disparos':    ['Administrador', 'Usuário'],
+  '/otimizador':  ['Administrador', 'Usuário'],
   '/agente':      ['Administrador', 'Usuário'],
   '/vault':       ['Administrador', 'Usuário'],
   '/automacoes':  ['Administrador'],
@@ -37,6 +38,7 @@ const routeFeature: Record<string, keyof Permission> = {
   '/resultados':  'radar',
   '/pagamentos':  'pagamentos',
   '/disparos':    'disparos',
+  '/otimizador':  'otimizador',
   '/agente':      'luna_ia',
   '/vault':       'cofre',
   '/automacoes':  'automacoes',
@@ -79,6 +81,10 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 
     const requiredFeature = getRequiredFeature(pathname);
     if (!requiredFeature) {
+      setAllowed(true);
+      return;
+    }
+    if (requiredFeature === 'otimizador' && role === 'Administrador') {
       setAllowed(true);
       return;
     }

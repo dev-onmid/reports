@@ -44,7 +44,10 @@ export function Sidebar({
     });
   }
 
-  const visibleItems = NAV_ITEMS.filter(item => permissions[item.key]);
+  const visibleItems = NAV_ITEMS.filter(item => {
+    if (item.key === 'otimizador' && role === 'Administrador') return true;
+    return permissions[item.key];
+  });
   const showConfiguracoes = role === 'Administrador';
   const isCollapsed = !isMobile && collapsed;
 

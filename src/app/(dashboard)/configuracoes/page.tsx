@@ -6,7 +6,7 @@ import {
   Edit2, Search, Filter, Download, Eye, ChevronLeft, ChevronRight,
   Sparkles, Bell, DollarSign, MessageCircle,
   LayoutDashboard, Users, TableProperties, FileText, BarChart3,
-  WalletCards, Bot, ShieldCheck, Zap, Plug, ClipboardList,
+  WalletCards, Bot, ShieldCheck, Zap, Plug, ClipboardList, WandSparkles,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -39,6 +39,7 @@ const MODULES: { key: keyof Permission; label: string; icon: React.ElementType }
   { key: 'radar', label: 'Radar', icon: BarChart3 },
   { key: 'pagamentos', label: 'Pagamentos', icon: WalletCards },
   { key: 'disparos', label: 'Disparos', icon: MessageCircle },
+  { key: 'otimizador', label: 'Otimizador', icon: WandSparkles },
   { key: 'luna_ia', label: 'Luna IA', icon: Bot },
   { key: 'cofre', label: 'Cofre', icon: ShieldCheck },
   { key: 'automacoes', label: 'Automações', icon: Zap },
