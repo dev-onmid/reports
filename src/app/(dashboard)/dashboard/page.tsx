@@ -4557,6 +4557,85 @@ function creativeObjectiveMetrics(c: TopCreative): Array<{ label: string; value:
   ];
 }
 
+function HorizontalCreativeCard({ creative, index, onPreview }: {
+  creative: TopCreative;
+  index: number;
+  onPreview: (c: TopCreative) => void;
+}) {
+  const [imgFailed, setImgFailed] = useState(false);
+  const [imgStage, setImgStage] = useState<'primary' | 'thumb' | 'error'>('primary');
+
+  const primaryUrl = creative.imageUrl;
+  const thumbUrl = creative.thumbnailUrl;
+  const imgUrl = imgStage === 'primary' ? (primaryUrl ?? thumbUrl) : imgStage === 'thumb' ? thumbUrl : undefined;
+  const hasVideo = !!creative.videoUrl;
+  const metrics = creativeObjectiveMetrics(creative);
+
+  function handleImgError() {
+    if (imgStage === 'primary' && primaryUrl && thumbUrl && thumbUrl !== primaryUrl) {
+      setImgStage('thumb');
+    } else {
+      setImgStage('error');
+    }
+  }
+
+  const showImage = !!imgUrl && imgStage !== 'error' && !imgFailed;
+
+  return (
+    <button
+      type="button"
+      onClick={() => onPreview(creative)}
+      className="group w-[170px] shrink-0 overflow-hidden rounded-xl border border-white/[0.08] bg-[#0d1519] text-left transition hover:border-[#6cff2f]/40"
+    >
+      <div className="relative overflow-hidden bg-[#071014]" style={{ aspectRatio: '4/5' }}>
+        {showImage ? (
+          <img
+            src={imgUrl}
+            alt={creative.adName}
+            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+            onError={handleImgError}
+          />
+        ) : creative.permalink ? (
+          <div className="flex h-full flex-col items-center justify-center gap-1.5 bg-black/30">
+            <ExternalLink className="h-5 w-5 text-white/40" />
+            <span className="text-[9px] text-white/30">Ver publicação</span>
+          </div>
+        ) : (
+          <div className="flex h-full items-center justify-center">
+            <ImageIcon className="h-6 w-6 text-[#9aa4aa]/40" />
+          </div>
+        )}
+        {/* Play icon — only when videoUrl exists (confirma que o vídeo toca no modal) */}
+        {hasVideo && showImage && (
+          <span className="absolute left-2 top-2 flex h-5 w-5 items-center justify-center rounded-full bg-black/70">
+            <Play className="h-2.5 w-2.5 fill-white text-white" />
+          </span>
+        )}
+        <span className="absolute bottom-2 left-2 flex h-5 w-5 items-center justify-center rounded-full bg-black/85 text-[10px] font-black text-white">{index + 1}</span>
+        <span className="absolute right-2 top-2 rounded bg-[#6cff2f] px-1.5 py-0.5 text-[9px] font-black text-black">
+          {premiumValue(creative.spend, 'currency')}
+        </span>
+      </div>
+      <div className="p-2">
+        {creative.campaignName && (
+          <p className="mb-1 truncate text-[9px] font-semibold uppercase tracking-[0.05em] text-[#6cff2f]/70" title={creative.campaignName}>
+            {creative.campaignName}
+          </p>
+        )}
+        <p className="mb-2 truncate text-[10px] font-bold text-[#dce4e8]" title={creative.adName}>{creative.adName}</p>
+        <div className="grid grid-cols-3 gap-1">
+          {metrics.map(m => (
+            <div key={m.label} className="rounded border border-white/[0.07] bg-white/[0.04] px-1 py-1">
+              <p className="text-[8px] font-bold uppercase tracking-wider text-[#9aa4aa]">{m.label}</p>
+              <p className="text-[10px] font-black text-[#f4f7f8]">{m.value}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </button>
+  );
+}
+
 function CreativeHorizontalStrip({ creatives, loading, onPreview }: {
   creatives: TopCreative[];
   loading: boolean;
@@ -4576,50 +4655,9 @@ function CreativeHorizontalStrip({ creatives, loading, onPreview }: {
   }
   return (
     <div className="flex gap-3 overflow-x-auto pb-2 [scrollbar-width:thin] [scrollbar-color:#2a2d3a_transparent]">
-      {creatives.slice(0, 10).map((creative, index) => {
-        const image = creative.imageUrl || creative.thumbnailUrl;
-        const metrics = creativeObjectiveMetrics(creative);
-        const isVideo = creative.mediaType === 'video';
-        return (
-          <button
-            key={creative.adId}
-            type="button"
-            onClick={() => onPreview(creative)}
-            className="group w-[170px] shrink-0 overflow-hidden rounded-xl border border-white/[0.08] bg-[#0d1519] text-left transition hover:border-[#6cff2f]/40"
-          >
-            <div className="relative overflow-hidden bg-[#071014]" style={{ aspectRatio: '4/5' }}>
-              {image
-                ? <img src={image} alt={creative.adName} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" />
-                : <div className="flex h-full items-center justify-center text-[#9aa4aa]"><ImageIcon className="h-6 w-6" /></div>}
-              {isVideo && (
-                <span className="absolute left-2 top-2 flex h-5 w-5 items-center justify-center rounded-full bg-black/70">
-                  <Play className="h-2.5 w-2.5 fill-white text-white" />
-                </span>
-              )}
-              <span className="absolute bottom-2 left-2 flex h-5 w-5 items-center justify-center rounded-full bg-black/85 text-[10px] font-black text-white">{index + 1}</span>
-              <span className="absolute right-2 top-2 rounded bg-[#6cff2f] px-1.5 py-0.5 text-[9px] font-black text-black">
-                {premiumValue(creative.spend, 'currency')}
-              </span>
-            </div>
-            <div className="p-2">
-              {creative.campaignName && (
-                <p className="mb-1 truncate text-[9px] font-semibold uppercase tracking-[0.05em] text-[#6cff2f]/70" title={creative.campaignName}>
-                  {creative.campaignName}
-                </p>
-              )}
-              <p className="mb-2 truncate text-[10px] font-bold text-[#dce4e8]" title={creative.adName}>{creative.adName}</p>
-              <div className="grid grid-cols-3 gap-1">
-                {metrics.map(m => (
-                  <div key={m.label} className="rounded border border-white/[0.07] bg-white/[0.04] px-1 py-1">
-                    <p className="text-[8px] font-bold uppercase tracking-wider text-[#9aa4aa]">{m.label}</p>
-                    <p className="text-[10px] font-black text-[#f4f7f8]">{m.value}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </button>
-        );
-      })}
+      {creatives.slice(0, 10).map((creative, index) => (
+        <HorizontalCreativeCard key={creative.adId} creative={creative} index={index} onPreview={onPreview} />
+      ))}
     </div>
   );
 }
