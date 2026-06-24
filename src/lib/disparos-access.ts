@@ -27,7 +27,9 @@ export async function getCallerScope(
   try {
     const { rows: [user] } = await pool.query('SELECT role, team FROM public.users WHERE id = $1', [userId]);
     if (!user) return { userId, unrestricted: false };
-    return { userId, unrestricted: user.role === 'Administrador' || user.team !== 'parceiro' };
+    // Explicit allowlist: only Administrador role or explicitly-tagged 'onmid' team
+    // members are unrestricted. NULL team (legacy rows) and 'parceiro' are scoped.
+    return { userId, unrestricted: user.role === 'Administrador' || user.team === 'onmid' };
   } catch {
     return { userId, unrestricted: false };
   }
