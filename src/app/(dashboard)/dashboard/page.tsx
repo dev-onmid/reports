@@ -5601,26 +5601,30 @@ export default function GeneralDashboard() {
               </div>
             </PremiumPanel>
 
-            {/* ── Google Ads: campanhas + keywords ── */}
-            <PremiumPanel className="border-[#4285F4]/24 p-4 shadow-[0_0_40px_rgba(66,133,244,0.10)]">
-              <div className="mb-4 flex items-center">
+            {/* ── Google Ads: palavras-chave + campanhas com veiculação ── */}
+            <PremiumPanel className="border-[#4285F4]/24 shadow-[0_0_40px_rgba(66,133,244,0.10)]">
+              <div className="flex items-center px-4 pt-4 pb-3">
                 <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">
                   <GoogleAdsMark className="h-5 w-5" /> Google Ads
                 </h3>
               </div>
-              <div className="grid gap-4 lg:grid-cols-2">
-                <div>
-                  <div className="mb-3 flex items-center justify-between text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
-                    <span>Top Campanhas Google</span>
-                  </div>
-                  <CompactCampaignTable campaigns={googleCampaigns} loading={campaignsLoading} platform="google" />
+
+              {/* Top Palavras-chave — scroll horizontal */}
+              <div className="px-4 pb-4">
+                <div className="mb-3 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
+                  Top Palavras-chave
                 </div>
-                <div>
-                  <div className="mb-3 flex items-center justify-between text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
-                    <span>Top Palavras-chave</span>
-                  </div>
+                <div className="flex gap-3 overflow-x-auto pb-2 [scrollbar-width:thin] [scrollbar-color:#2a2d3a_transparent]">
                   <CompactKeywordTable keywords={keywords} loading={keywordsLoading} />
                 </div>
+              </div>
+
+              {/* Campanhas com Veiculação — abaixo das palavras-chave */}
+              <div className="border-t border-white/[0.06] px-4 py-4">
+                <div className="mb-3 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
+                  Campanhas com Veiculação
+                </div>
+                <CompactCampaignTable campaigns={googleCampaigns} loading={campaignsLoading} platform="google" />
               </div>
             </PremiumPanel>
 
