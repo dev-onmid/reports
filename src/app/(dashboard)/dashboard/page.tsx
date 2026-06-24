@@ -1075,17 +1075,30 @@ function ClientSelector({
       )}
       <div className="max-h-48 overflow-y-auto space-y-0.5">
         {visibleClients.map(c => (
-          <button
+          <div
             key={c.id}
-            onClick={() => toggle(c.id)}
-            className="w-full flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm hover:bg-muted/50 transition-colors"
+            className={cn('w-full flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm transition-colors',
+              selected.has(c.id) ? 'bg-primary/10' : 'hover:bg-muted/50'
+            )}
           >
-            <span className={cn('w-4 h-4 rounded border flex items-center justify-center text-[10px] shrink-0',
-              selected.has(c.id) ? 'bg-primary border-primary text-black' : 'border-border'
-            )}>{selected.has(c.id) && '✓'}</span>
-            <ClientAvatar clientId={c.id} name={c.name} size="sm" />
-            <span className="truncate">{c.name}</span>
-          </button>
+            {/* Checkbox — multi-select */}
+            <button
+              type="button"
+              onClick={() => toggle(c.id)}
+              className={cn('w-4 h-4 rounded border flex items-center justify-center text-[10px] shrink-0 transition-colors',
+                selected.has(c.id) ? 'bg-primary border-primary text-black' : 'border-border hover:border-primary/60'
+              )}
+            >{selected.has(c.id) && '✓'}</button>
+            {/* Avatar + nome — single select */}
+            <button
+              type="button"
+              onClick={() => { onChange(new Set([c.id])); setOpen(false); }}
+              className="flex items-center gap-2 min-w-0 flex-1 text-left"
+            >
+              <ClientAvatar clientId={c.id} name={c.name} size="sm" />
+              <span className="truncate">{c.name}</span>
+            </button>
+          </div>
         ))}
       </div>
     </div>
@@ -4295,12 +4308,13 @@ function QuickMetricCard({ title, value, change, icon: Icon }: {
   );
 }
 
-function MiniPlatformMetric({ label, value, sub, icon: Icon, logo }: {
+function MiniPlatformMetric({ label, value, sub, icon: Icon, logo, change }: {
   label: string;
   value: string;
   sub?: string;
   icon?: React.ElementType;
   logo?: ReactNode;
+  change?: number | null;
 }) {
   return (
     <div className="rounded-[10px] border border-white/[0.07] bg-[#111a20]/80 p-3">
@@ -4310,41 +4324,102 @@ function MiniPlatformMetric({ label, value, sub, icon: Icon, logo }: {
       </div>
       <p className="font-heading text-xl leading-none text-[#f4f7f8]">{value}</p>
       {sub && <p className="mt-1 text-xs font-semibold text-[#78d957]">{sub}</p>}
+      {change != null && (
+        <p className={cn('mt-1 text-[10px] font-bold', change >= 0 ? 'text-[#6cff2f]' : 'text-red-400')}>
+          {change >= 0 ? '+' : ''}{change.toFixed(1)}%
+        </p>
+      )}
     </div>
   );
 }
 
-function SimpleFunnel({ steps, totalRate, metaRate, previousRate }: {
-  steps: Array<{ label: string; value: string; percent: string }>;
-  totalRate: string;
-  metaRate: string;
-  previousRate: string;
-}) {
+function IgMark({ className }: { className?: string }) {
   return (
-    <PremiumPanel className="p-4">
-      <div className="mb-4 flex items-center justify-between">
+    <svg viewBox="0 0 24 24" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="ig-grad" x1="0" y1="24" x2="24" y2="0" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#F77737" />
+          <stop offset="0.4" stopColor="#E1306C" />
+          <stop offset="1" stopColor="#833AB4" />
+        </linearGradient>
+      </defs>
+      <rect x="2" y="2" width="20" height="20" rx="6" stroke="url(#ig-grad)" strokeWidth="2" />
+      <circle cx="12" cy="12" r="4" stroke="url(#ig-grad)" strokeWidth="2" />
+      <circle cx="17.5" cy="6.5" r="1" fill="#E1306C" />
+    </svg>
+  );
+}
+
+const FUNNEL_STEP_COLORS = ['#6cff2f', '#0ea5e9', '#7b2cff', '#f97316', '#ec4899', '#f59e0b', '#84cc16'];
+
+function SimpleFunnel({ steps, totalRate }: {
+  steps: Array<{ label: string; actual: number; planned: number; color: string }>;
+  totalRate: string;
+}) {
+  if (!steps.length) return null;
+  const maxActual = Math.max(steps[0]?.actual ?? 1, 1);
+  const SVG_W = 1000;
+  const SVG_H = 140;
+  const centerY = SVG_H / 2;
+  const segW = SVG_W / steps.length;
+  const GAP = 4;
+  const getH = (v: number) => Math.max(18, (v / maxActual) * SVG_H);
+
+  return (
+    <PremiumPanel className="p-5">
+      <div className="mb-5 flex items-center justify-between">
         <h3 className="text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">Funil de Performance</h3>
-        <span className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-[#a7b0b6]">Conversão: {totalRate}</span>
+        <span className="text-xs text-[#9aa4aa]">
+          Conversão geral: <span className="font-black text-[#6cff2f]">{totalRate}</span>
+        </span>
       </div>
-      <div className="grid grid-cols-3 gap-3 xl:grid-cols-6">
-        {steps.map((step, index) => (
-          <div key={step.label} className="relative">
-            <p className="text-xs font-black uppercase tracking-[0.06em] text-[#9aa4aa]">{step.label}</p>
-            <div className="mt-2 flex items-end justify-between gap-2">
-              <span className="font-heading text-xl leading-none text-[#f4f7f8]">{step.value}</span>
-              <span className="text-xs text-[#a7b0b6]">{step.percent}</span>
+
+      {/* SVG colored funnel */}
+      <svg viewBox={`0 0 ${SVG_W} ${SVG_H}`} className="w-full" style={{ height: 110 }} preserveAspectRatio="none">
+        <defs>
+          {steps.map((step, i) => (
+            <linearGradient key={`g${i}`} id={`fg${i}`} x1="0" x2="1" y1="0" y2="0">
+              <stop offset="0%" stopColor={step.color} stopOpacity="0.9" />
+              <stop offset="100%" stopColor={step.color} stopOpacity="0.65" />
+            </linearGradient>
+          ))}
+        </defs>
+        {steps.map((step, i) => {
+          const x1 = i * segW + (i > 0 ? GAP / 2 : 0);
+          const x2 = (i + 1) * segW - (i < steps.length - 1 ? GAP / 2 : 0);
+          const h1 = getH(step.actual);
+          const h2 = i < steps.length - 1 ? getH(steps[i + 1].actual) : getH(step.actual);
+          const d = `M ${x1} ${centerY - h1 / 2} L ${x2} ${centerY - h2 / 2} L ${x2} ${centerY + h2 / 2} L ${x1} ${centerY + h1 / 2} Z`;
+          return <path key={step.label} d={d} fill={`url(#fg${i})`} />;
+        })}
+      </svg>
+
+      {/* Labels + actual vs planned per stage */}
+      <div className="mt-4 grid gap-1" style={{ gridTemplateColumns: `repeat(${steps.length}, 1fr)` }}>
+        {steps.map((step, i) => {
+          const prev = steps[i - 1];
+          const actualPct = i === 0 ? null : prev && prev.actual > 0 ? (step.actual / prev.actual) * 100 : 0;
+          const plannedPct = i === 0 ? null : prev && prev.planned > 0 ? (step.planned / prev.planned) * 100 : 0;
+          const isBottleneck = actualPct !== null && plannedPct !== null && actualPct < plannedPct * 0.85;
+          return (
+            <div key={step.label} className="px-1 text-center">
+              <div className="mx-auto mb-2 h-0.5 w-6 rounded-full" style={{ backgroundColor: step.color }} />
+              <p className="truncate text-[9px] font-black uppercase tracking-wider text-[#9aa4aa]">{step.label}</p>
+              <p className="mt-1 font-heading text-lg leading-none text-[#f4f7f8]">{step.actual.toLocaleString('pt-BR')}</p>
+              {actualPct !== null && (
+                <div className="mt-1">
+                  <span className={cn('text-[10px] font-black', isBottleneck ? 'text-red-400' : 'text-[#6cff2f]')}>
+                    {actualPct.toFixed(1)}%
+                  </span>
+                  {plannedPct !== null && plannedPct > 0 && (
+                    <span className="ml-1 text-[9px] text-[#9aa4aa]">/ {plannedPct.toFixed(0)}%p</span>
+                  )}
+                  {isBottleneck && <span className="ml-1 text-[8px] font-black text-red-400">⚠</span>}
+                </div>
+              )}
             </div>
-            {index < steps.length - 1 && <ChevronRight className="absolute -right-3 top-8 hidden h-4 w-4 text-[#a7b0b6] xl:block" />}
-          </div>
-        ))}
-      </div>
-      <div className="mt-5 h-12 overflow-hidden rounded-sm bg-[#081014]">
-        <div className="h-full w-full bg-[linear-gradient(100deg,#9ad76c_0%,#85d35e_52%,#62b843_100%)] [clip-path:polygon(0_0,100%_18%,100%_82%,0_100%)]" />
-      </div>
-      <div className="mt-4 grid grid-cols-3 gap-3 border-t border-white/[0.08] pt-3 text-xs">
-        <div><p className="text-[#9aa4aa]">Taxa de conversão geral</p><p className="font-heading text-xl leading-none text-[#6cff2f]">{totalRate}</p></div>
-        <div><p className="text-[#9aa4aa]">Meta geral</p><p className="font-heading text-xl leading-none text-[#f4f7f8]">{metaRate}</p></div>
-        <div><p className="text-[#9aa4aa]">Vs mês passado</p><p className="font-heading text-xl leading-none text-[#6cff2f]">{previousRate}</p></div>
+          );
+        })}
       </div>
     </PremiumPanel>
   );
@@ -5425,14 +5500,26 @@ export default function GeneralDashboard() {
     { title: 'ROI', value: roi > 0 ? premiumValue(roi, 'times') : '—', change: pctChange(roi, prevRoi), icon: TrendingUp },
     { title: 'Conversão Geral', value: conversionRate > 0 ? premiumValue(conversionRate, 'percent') : '—', change: previousConversionRate !== null ? pctChange(conversionRate, previousConversionRate) : null, icon: Target },
   ];
-  const funnelSteps = [
-    { label: 'Investimento', value: premiumValue(totalSpend, 'currency'), percent: '100%' },
-    { label: 'Leads', value: premiumValue(totalLeads), percent: funnelVisitors > 0 ? premiumValue((totalLeads / funnelVisitors) * 100, 'percent') : '—' },
-    { label: 'Qualificações', value: premiumValue(qualified), percent: totalLeads > 0 ? premiumValue((qualified / totalLeads) * 100, 'percent') : '—' },
-    { label: 'Agendamentos', value: premiumValue(appointments), percent: qualified > 0 ? premiumValue((appointments / qualified) * 100, 'percent') : '—' },
-    { label: 'Comparecimentos', value: premiumValue(showUps), percent: appointments > 0 ? premiumValue((showUps / appointments) * 100, 'percent') : '—' },
-    { label: 'Conversões', value: premiumValue(conversions), percent: showUps > 0 ? premiumValue((conversions / showUps) * 100, 'percent') : '—' },
-  ];
+  // Build dynamic funnel steps from first selected client's planning stages
+  const firstClientIdForFunnel = [...selectedIds][0];
+  const firstPlanningForFunnel = firstClientIdForFunnel
+    ? (planningsByClient[firstClientIdForFunnel] ?? readPlanningFromStorage(firstClientIdForFunnel))
+    : DEFAULT_PLANNING;
+  const cleanFunnelLabel = (name: string) => name.replace(/^\d+[ºo]?\s*[—–-]\s*/i, '').trim();
+  // Aggregate planned volumes across selected clients (aligned to first client's stage count)
+  const plannedFunnelAgg: number[] = [];
+  for (const id of selectedIds) {
+    const pf = plannedFunnelFromGoal(goalsByClient[id], planningsByClient[id] ?? readPlanningFromStorage(id));
+    pf.forEach((v, i) => { plannedFunnelAgg[i] = (plannedFunnelAgg[i] ?? 0) + v; });
+  }
+  // Actual volumes per stage index (maps to planning stage order)
+  const actualFunnelVolumes = [totalLeads, qualified, appointments, showUps, conversions];
+  const funnelStepsNew = firstPlanningForFunnel.stages.map((stage, i) => ({
+    label: cleanFunnelLabel(stage.name),
+    actual: actualFunnelVolumes[i] ?? 0,
+    planned: plannedFunnelAgg[i] ?? 0,
+    color: FUNNEL_STEP_COLORS[i % FUNNEL_STEP_COLORS.length],
+  }));
   const channelRows = [
     {
       channel: 'Meta Ads',
@@ -5552,27 +5639,28 @@ export default function GeneralDashboard() {
                   <div className="mb-3 flex items-center gap-2 text-sm font-black uppercase tracking-[0.06em] text-[#f4f7f8]"><MetaAdsMark className="h-5 w-5 text-[#168BFF]" /> Meta Ads</div>
                   <div className="grid gap-2 sm:grid-cols-5">
                     <MiniPlatformMetric label="Saldo Meta Ads" value={metaBalance > 0 ? premiumValue(metaBalance, 'currency') : '—'} logo={<MetaAdsMark className="h-4 w-4 text-[#168BFF]" />} sub="Saldo disponível" />
-                    <MiniPlatformMetric label="Alcance Meta" value={premiumValue(metaReach)} icon={Users} />
-                    <MiniPlatformMetric label="Impressões Meta" value={premiumValue(metaImpressions)} icon={BarChart3} />
-                    <MiniPlatformMetric label="CTR Meta" value={premiumValue(metaCtr, 'percent')} icon={MousePointerClick} />
-                    <MiniPlatformMetric label="CPL Meta" value={avgCpl > 0 ? premiumValue(avgCpl, 'currency') : '—'} icon={Tag} />
+                    <MiniPlatformMetric label="Alcance" value={metaReach > 0 ? premiumValue(metaReach) : '—'} icon={Users} />
+                    <MiniPlatformMetric label="CTR" value={metaCtr > 0 ? premiumValue(metaCtr, 'percent') : '—'} icon={MousePointerClick} />
+                    <MiniPlatformMetric label="Leads" value={premiumValue(metaLeads)} icon={UserPlus} />
+                    <MiniPlatformMetric label="CPL" value={avgCpl > 0 ? premiumValue(avgCpl, 'currency') : '—'} icon={Tag} />
                   </div>
                 </div>
                 <div className="rounded-[12px] border border-white/[0.08] bg-[#071014] p-3">
                   <div className="mb-3 flex items-center gap-2 text-sm font-black uppercase tracking-[0.06em] text-[#f4f7f8]"><GoogleAdsMark className="h-5 w-5" /> Google Ads</div>
-                  <div className="grid gap-2 sm:grid-cols-5">
+                  <div className="grid gap-2 sm:grid-cols-6">
                     <MiniPlatformMetric label="Saldo Google Ads" value={googleBalance > 0 ? premiumValue(googleBalance, 'currency') : '—'} logo={<GoogleAdsMark className="h-4 w-4" />} sub="Saldo disponível" />
-                    <MiniPlatformMetric label="Alcance Google" value="—" icon={Users} />
-                    <MiniPlatformMetric label="Impressões Google" value={premiumValue(googleImpressions)} icon={BarChart3} />
-                    <MiniPlatformMetric label="Cliques Google" value={premiumValue(googleClicks)} icon={MousePointerClick} />
-                    <MiniPlatformMetric label="CTR Google" value={premiumValue(googleCtrValue, 'percent')} icon={Target} />
+                    <MiniPlatformMetric label="Impressões" value={premiumValue(googleImpressions)} icon={BarChart3} />
+                    <MiniPlatformMetric label="CTR" value={premiumValue(googleCtrValue, 'percent')} icon={Target} />
+                    <MiniPlatformMetric label="CPC" value={googleCpc > 0 ? premiumValue(googleCpc, 'currency') : '—'} icon={MousePointerClick} />
+                    <MiniPlatformMetric label="Conversões" value={premiumValue(googleConv)} icon={CheckCircle2} />
+                    <MiniPlatformMetric label="Custo por Conv." value={avgCpa > 0 ? premiumValue(avgCpa, 'currency') : '—'} icon={TrendingUp} />
                   </div>
                 </div>
               </div>
             </PremiumPanel>
 
             <div className="grid gap-4 xl:grid-cols-[1.08fr_0.92fr]">
-              <SimpleFunnel steps={funnelSteps} totalRate={conversionRate > 0 ? premiumValue(conversionRate, 'percent') : '—'} metaRate={roiGoal > 0 ? premiumValue(Math.min(100, roiGoal), 'percent') : '—'} previousRate={previousConversionRate !== null ? premiumValue(Math.abs(previousConversionRate), 'percent') : '—'} />
+              <SimpleFunnel steps={funnelStepsNew} totalRate={conversionRate > 0 ? premiumValue(conversionRate, 'percent') : '—'} />
               <ChannelSummaryTable rows={channelRows} />
             </div>
 
@@ -5627,6 +5715,74 @@ export default function GeneralDashboard() {
                 <CompactCampaignTable campaigns={googleCampaigns} loading={campaignsLoading} platform="google" />
               </div>
             </PremiumPanel>
+
+            {/* ── Instagram Orgânico ── */}
+            {(() => {
+              const allIg = pageInsights.filter(p => p.instagram).map(p => p.instagram!);
+              const prevIg = prevPageInsights.filter(p => p.instagram).map(p => p.instagram!);
+              if (allIg.length === 0 && !pageInsightsLoading) return null;
+              const sum = (arr: typeof allIg, key: keyof InstagramPageData & string) =>
+                arr.reduce((s, d) => s + (typeof d[key] === 'number' ? (d[key] as number) : 0), 0);
+              const chg = (cur: number, prev: number): number | null =>
+                prev > 0 ? ((cur - prev) / prev) * 100 : null;
+              const igFollow   = sum(allIg, 'followers');
+              const igReach    = sum(allIg, 'reach');
+              const igClicks   = sum(allIg, 'websiteClicks');
+              const igEngaged  = sum(allIg, 'accountsEngaged');
+              const igViews    = sum(allIg, 'views');
+              const igInteract = sum(allIg, 'totalInteractions');
+              const igSaves    = sum(allIg, 'saves');
+              const igPViews   = sum(allIg, 'profileViews');
+              const prevFollow   = sum(prevIg, 'followers');
+              const prevReach    = sum(prevIg, 'reach');
+              const prevClicks   = sum(prevIg, 'websiteClicks');
+              const prevEngaged  = sum(prevIg, 'accountsEngaged');
+              const prevViews    = sum(prevIg, 'views');
+              const prevInteract = sum(prevIg, 'totalInteractions');
+              const prevSaves    = sum(prevIg, 'saves');
+              const prevPViews   = sum(prevIg, 'profileViews');
+              const igHandles = allIg.map(d => d.username).filter(Boolean);
+              return (
+                <PremiumPanel className="border-[#E1306C]/24 shadow-[0_0_40px_rgba(225,48,108,0.10)]">
+                  <div className="flex items-center justify-between px-4 pt-4 pb-3">
+                    <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">
+                      <IgMark className="h-5 w-5" /> Instagram Orgânico
+                    </h3>
+                    {igHandles.length > 0 && (
+                      <span className="text-[10px] text-[#9aa4aa]">{igHandles.map(h => `@${h}`).join(', ')}</span>
+                    )}
+                  </div>
+
+                  <div className="px-4 pb-4">
+                    <div className="grid gap-2 sm:grid-cols-4 lg:grid-cols-8">
+                      <MiniPlatformMetric label="Seguidores" value={pageInsightsLoading ? '…' : igFollow > 0 ? premiumValue(igFollow) : '—'} icon={Users} change={chg(igFollow, prevFollow)} />
+                      <MiniPlatformMetric label="Alcance" value={pageInsightsLoading ? '…' : igReach > 0 ? premiumValue(igReach) : '—'} icon={Eye} change={chg(igReach, prevReach)} />
+                      <MiniPlatformMetric label="Cliques Bio" value={pageInsightsLoading ? '…' : igClicks > 0 ? premiumValue(igClicks) : '—'} icon={ExternalLink} change={chg(igClicks, prevClicks)} />
+                      <MiniPlatformMetric label="Engajamento" value={pageInsightsLoading ? '…' : igEngaged > 0 ? premiumValue(igEngaged) : '—'} icon={Heart} change={chg(igEngaged, prevEngaged)} />
+                      <MiniPlatformMetric label="Visualizações" value={pageInsightsLoading ? '…' : igViews > 0 ? premiumValue(igViews) : '—'} icon={BarChart3} change={chg(igViews, prevViews)} />
+                      <MiniPlatformMetric label="Interações" value={pageInsightsLoading ? '…' : igInteract > 0 ? premiumValue(igInteract) : '—'} icon={Zap} change={chg(igInteract, prevInteract)} />
+                      <MiniPlatformMetric label="Salvamentos" value={pageInsightsLoading ? '…' : igSaves > 0 ? premiumValue(igSaves) : '—'} icon={Bookmark} change={chg(igSaves, prevSaves)} />
+                      <MiniPlatformMetric label="Visitas Perfil" value={pageInsightsLoading ? '…' : igPViews > 0 ? premiumValue(igPViews) : '—'} icon={Monitor} change={chg(igPViews, prevPViews)} />
+                    </div>
+                  </div>
+
+                  {/* Top Posts */}
+                  <div className="border-t border-white/[0.06] px-4 py-4">
+                    <div className="mb-3 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
+                      Melhores Posts do Período
+                    </div>
+                    <IgTopPostsCard
+                      posts={igPosts}
+                      loading={igPostsLoading}
+                      sortBy={igSortBy}
+                      onSortChange={setIgSortBy}
+                      periodFrom={selectedRange.from.toISOString().split('T')[0]}
+                      periodTo={selectedRange.to.toISOString().split('T')[0]}
+                    />
+                  </div>
+                </PremiumPanel>
+              );
+            })()}
 
             {selectedClients.length > 1 && (
               <PremiumPanel className="p-4">
