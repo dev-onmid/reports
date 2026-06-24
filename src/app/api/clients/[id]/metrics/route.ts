@@ -3,7 +3,7 @@ import { google } from 'googleapis';
 import { makeServerPool } from '@/lib/server-db';
 import { resolveMetaPeriod, resolveGaqlPeriod, applyMetaDateToUrl } from '@/lib/period-utils';
 import { getFreshMetaToken } from '@/lib/meta-token';
-import { getCached, setCached, cachedJson } from '@/lib/api-cache';
+import { getCached, setCached, cachedJson, TTL_4H } from '@/lib/api-cache';
 
 async function getFreshGoogleToken(conn: { access_token: string; refresh_token: string; token_expiry: string | null }): Promise<string> {
   if (conn.token_expiry) {
@@ -123,13 +123,18 @@ async function fetchGadsAccountDailyMetrics(customerId: string, accessToken: str
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function buildMccMap(accessToken: string): Promise<Record<string, string>> {
+async function buildMccMap(accessToken: string, connectionId: string): Promise<Record<string, string>> {
+  const cacheKey = `mccmap:${connectionId}`;
+  const cached = getCached(cacheKey);
+  if (cached) return cached.data as Record<string, string>;
+
   const listRes = await fetch('https://googleads.googleapis.com/v24/customers:listAccessibleCustomers', {
     headers: { Authorization: `Bearer ${accessToken}`, 'developer-token': DEV_TOKEN },
   });
   if (!listRes.ok) {
     const errText = await listRes.text().catch(() => '');
     console.error(`[metrics/gads] listAccessibleCustomers failed status=${listRes.status}`, errText.slice(0, 300));
+    setCached(cacheKey, {}, TTL_4H);
     return {};
   }
   const { resourceNames = [] } = await listRes.json() as { resourceNames?: string[] };
@@ -158,6 +163,7 @@ async function buildMccMap(accessToken: string): Promise<Record<string, string>>
       }
     })
   );
+  setCached(cacheKey, mccMap, TTL_4H);
   return mccMap;
 }
 
@@ -398,13 +404,19 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const dailyMap: Record<string, DailyMetrics> = {};
 
   if (gadsLinks.length > 0) {
-    // Collect unique account IDs regardless of connection_id
-    // (connection_id in the link may be stale if Google was reconnected)
     const uniqueAccountIds = [...new Set(
       gadsLinks.map(l => normalizeGoogleCustomerId(l.account_id)).filter(Boolean)
     )];
 
-    console.log(`[metrics] client=${clientId} gads uniqueAccounts=${uniqueAccountIds.join(',')} connections=${googleConns.length}`);
+    // Build a set of connection IDs explicitly linked to this client's accounts,
+    // then sort so those come first — avoids building MCC maps for unrelated connections.
+    const linkedConnIds = new Set(gadsLinks.map(l => l.connection_id).filter(Boolean));
+    const sortedConns = [
+      ...googleConns.filter(c => linkedConnIds.has(c.id)),
+      ...googleConns.filter(c => !linkedConnIds.has(c.id)),
+    ];
+
+    console.log(`[metrics] client=${clientId} gads uniqueAccounts=${uniqueAccountIds.join(',')} connections=${sortedConns.length} linked=${[...linkedConnIds].join(',')}`);
 
     const connMetrics: GResult[] = [];
     const connDaily: Awaited<ReturnType<typeof fetchGadsAccountDailyMetrics>> = [];
@@ -412,7 +424,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     // Process connections sequentially so each gets a chance to resolve accounts
     // that a previous connection failed to fetch (e.g. different MCC hierarchies).
-    for (const conn of googleConns) {
+    for (const conn of sortedConns) {
       const pendingIds = uniqueAccountIds.filter(id => !seenAccounts.has(id));
       if (pendingIds.length === 0) break;
 
@@ -420,7 +432,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       let mccMap: Record<string, string>;
       try {
         accessToken = await getFreshGoogleToken(conn);
-        mccMap = await buildMccMap(accessToken);
+        mccMap = await buildMccMap(accessToken, conn.id);
       } catch (e) {
         console.error('[metrics] google token/mcc error', e);
         continue;

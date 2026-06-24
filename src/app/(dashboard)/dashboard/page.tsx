@@ -5366,6 +5366,8 @@ export default function GeneralDashboard() {
       googleClicks += m.google.clicks;
     }
   }
+  const hasGoogleData = [...selectedIds].some(id => metricsByClient[id]?.google != null);
+  const hasGoogleLink = clientLinks.some(l => selectedIds.has(l.clientId) && l.platform === 'google_ads');
   const googleCpc = googleClicks > 0 ? googleCost / googleClicks : 0;
   const googleCtrValue = googleImpressions > 0 ? (googleClicks / googleImpressions) * 100 : 0;
   let googleSearchImprShare = 0, googleSearchBudgetLostIS = 0, googleSearchRankLostIS = 0, googleSearchAbsTopIS = 0, googleSearchTopIS = 0;
@@ -5822,10 +5824,10 @@ export default function GeneralDashboard() {
                   <div className="mb-3 flex items-center gap-2 text-sm font-black uppercase tracking-[0.06em] text-[#f4f7f8]"><GoogleAdsMark className="h-5 w-5" /> Google Ads</div>
                   <div className="grid gap-2 sm:grid-cols-5">
                     <MiniPlatformMetric label="Saldo Google Ads" value={googleBalance > 0 ? premiumValue(googleBalance, 'currency') : '—'} logo={<GoogleAdsMark className="h-4 w-4" />} sub="Saldo disponível" />
-                    <MiniPlatformMetric label="Impressões" value={premiumValue(googleImpressions)} icon={BarChart3} change={pct(googleImpressions, prevGoogleImpressions)} />
-                    <MiniPlatformMetric label="Cliques" value={premiumValue(googleClicks)} icon={MousePointerClick} change={pct(googleClicks, prevGoogleClicks)} />
+                    <MiniPlatformMetric label="Impressões" value={hasGoogleData ? premiumValue(googleImpressions) : '—'} icon={BarChart3} change={hasGoogleData ? pct(googleImpressions, prevGoogleImpressions) : null} />
+                    <MiniPlatformMetric label="Cliques" value={hasGoogleData ? premiumValue(googleClicks) : '—'} icon={MousePointerClick} change={hasGoogleData ? pct(googleClicks, prevGoogleClicks) : null} />
                     <MiniPlatformMetric label="CPC Médio" value={googleCpc > 0 ? premiumValue(googleCpc, 'currency') : '—'} icon={Tag} change={googleCpc > 0 && prevGoogleCpc > 0 ? pct(googleCpc, prevGoogleCpc) : null} />
-                    <MiniPlatformMetric label="Conversões" value={premiumValue(googleConv)} icon={CheckCircle2} change={pct(googleConv, prevGoogleConv)} />
+                    <MiniPlatformMetric label="Conversões" value={hasGoogleData ? premiumValue(googleConv) : '—'} icon={CheckCircle2} change={hasGoogleData ? pct(googleConv, prevGoogleConv) : null} />
                   </div>
                 </div>
               </div>
@@ -5933,7 +5935,7 @@ export default function GeneralDashboard() {
                   Campanhas com Veiculação
                 </div>
                 {/* Métricas competitivas Search */}
-                {(googleSearchImprShare > 0 || googleSearchBudgetLostIS > 0 || googleSearchAbsTopIS > 0) && (
+                {hasGoogleLink && (
                   <div className="mb-3 grid grid-cols-3 gap-2">
                     <div className="rounded-[8px] border border-white/[0.07] bg-[#0a1419]/80 px-3 py-2">
                       <p className="text-[9px] font-bold uppercase tracking-wider text-[#9aa4aa]">Quota IS</p>
