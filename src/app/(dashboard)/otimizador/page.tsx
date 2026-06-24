@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   BadgeCheck,
@@ -83,6 +83,8 @@ export default function OtimizadorPage() {
   const [loading, setLoading] = useState(true);
   const [runLoading, setRunLoading] = useState(false);
   const [runMessage, setRunMessage] = useState<string | null>(null);
+  const [runProgress, setRunProgress] = useState<{ current: number; total: number; clientName: string } | null>(null);
+  const abortRef = useRef(false);
   const [actionFeedback, setActionFeedback] = useState<Record<number, string>>({});
   const isAdmin = getAuthSession()?.role === 'Administrador';
 
@@ -175,31 +177,47 @@ export default function OtimizadorPage() {
   }
 
   async function runAllAccountsNow() {
+    if (clients.length === 0) {
+      setRunMessage('Nenhum cliente ativo encontrado.');
+      return;
+    }
     setRunLoading(true);
     setRunMessage(null);
-    try {
-      const res = await fetch('/api/otimizador/daily?limitClients=200&limitCampaigns=8', {
-        method: 'POST',
-        headers: callerHeaders(),
-      });
-      const data = await res.json().catch(() => ({})) as {
-        analyzed?: number;
-        errors?: number;
-        stoppedByBudget?: boolean;
-        error?: string;
-      };
-      if (!res.ok) {
-        setRunMessage(data.error ?? 'Não foi possível iniciar a análise geral.');
-        return;
+    setRunProgress(null);
+    abortRef.current = false;
+    let analyzed = 0;
+    let errors = 0;
+
+    for (let i = 0; i < clients.length; i++) {
+      if (abortRef.current) break;
+      const client = clients[i];
+      setRunProgress({ current: i + 1, total: clients.length, clientName: client.name });
+      try {
+        const res = await fetch(
+          `/api/otimizador/daily?clientId=${encodeURIComponent(client.id)}&period=7&limitCampaigns=4`,
+          { method: 'POST', headers: callerHeaders() },
+        );
+        const data = await res.json().catch(() => ({})) as { analyzed?: number; errors?: number };
+        if (res.ok) {
+          analyzed += data.analyzed ?? 0;
+          errors += data.errors ?? 0;
+        } else {
+          errors += 1;
+        }
+      } catch {
+        errors += 1;
       }
-      const suffix = data.stoppedByBudget ? ' O restante continua no próximo processamento.' : '';
-      setRunMessage(`Análise geral concluída: ${data.analyzed ?? 0} itens analisados, ${data.errors ?? 0} erros.${suffix}`);
-      await loadQueue();
-    } catch {
-      setRunMessage('Não foi possível iniciar a análise geral agora.');
-    } finally {
-      setRunLoading(false);
     }
+
+    setRunProgress(null);
+    setRunLoading(false);
+    const stopped = abortRef.current ? ' Interrompido.' : '';
+    setRunMessage(`Análise concluída: ${analyzed} itens analisados, ${errors} erros.${stopped}`);
+    await loadQueue();
+  }
+
+  function stopRunAll() {
+    abortRef.current = true;
   }
 
   return (
@@ -254,15 +272,35 @@ export default function OtimizadorPage() {
 
       {isAdmin && (
         <section className="flex flex-col gap-3 rounded-[var(--radius)] border border-primary/30 bg-primary/5 p-4 md:flex-row md:items-center md:justify-between">
-          <div>
+          <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold text-foreground">Análise geral manual</p>
-            <p className="text-xs text-muted-foreground">Roda agora o mesmo processamento automático das 7h para todas as contas ativas.</p>
-            {runMessage && <p className="mt-2 text-xs text-primary">{runMessage}</p>}
+            <p className="text-xs text-muted-foreground">Analisa cada cliente individualmente (7 dias, até 4 campanhas) dentro do limite da plataforma.</p>
+            {runProgress && (
+              <div className="mt-2 space-y-1">
+                <p className="text-xs text-primary">
+                  {runProgress.current}/{runProgress.total} — {runProgress.clientName}
+                </p>
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-primary/20">
+                  <div
+                    className="h-full rounded-full bg-primary transition-all"
+                    style={{ width: `${(runProgress.current / runProgress.total) * 100}%` }}
+                  />
+                </div>
+              </div>
+            )}
+            {!runProgress && runMessage && <p className="mt-2 text-xs text-primary">{runMessage}</p>}
           </div>
-          <Button onClick={runAllAccountsNow} disabled={runLoading}>
-            {runLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-            Analisar todas agora
-          </Button>
+          <div className="flex shrink-0 gap-2">
+            {runLoading && (
+              <Button variant="outline" onClick={stopRunAll}>
+                Parar
+              </Button>
+            )}
+            <Button onClick={runAllAccountsNow} disabled={runLoading}>
+              {runLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+              Analisar todas agora
+            </Button>
+          </div>
         </section>
       )}
 

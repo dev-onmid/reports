@@ -35,9 +35,19 @@ function rangeForPeriod(period: OptimizerPeriodKey): { dateFrom: string; dateTo:
   };
 }
 
-async function loadClients(limit: number): Promise<ClientRow[]> {
+async function loadClients(limit: number, clientId?: string): Promise<ClientRow[]> {
   const pool = makeServerPool();
   try {
+    if (clientId) {
+      const { rows } = await pool.query<ClientRow>(
+        `SELECT id, name, segment, status
+           FROM public.clients
+          WHERE id = $1
+            AND status NOT IN ('Arquivado', 'Inativo')`,
+        [clientId],
+      );
+      return rows;
+    }
     const { rows } = await pool.query<ClientRow>(
       `SELECT id, name, segment, status
          FROM public.clients
@@ -125,8 +135,9 @@ async function runDailyOptimizer(request: NextRequest) {
     ? [requestedPeriod]
     : OPTIMIZER_PERIODS.map((period) => period.key);
 
+  const clientId = request.nextUrl.searchParams.get('clientId') ?? undefined;
   const startedAt = Date.now();
-  const clients = await loadClients(limitClients);
+  const clients = await loadClients(limitClients, clientId);
   const planning = await loadPlanning(clients.map((client) => client.id));
   const results: Array<{ clientId: string; clientName: string; period: string; campaigns: number; analyzed: number; errors: number }> = [];
 
