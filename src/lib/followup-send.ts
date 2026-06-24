@@ -132,6 +132,20 @@ async function sendViaEvolution(
   const targets = buildEvolutionTargets(phone, vars.whatsapp_lid);
   const errors: string[] = [];
 
+  // Evolution API expects either a plain http URL or raw base64 (no data: prefix).
+  // Canvas uploads arrive as data URLs — strip the prefix before sending.
+  function resolveMediaPayload(raw: string, mediatype: string) {
+    const dataUrlMatch = raw.match(/^data:([^;]+);base64,(.+)$/s);
+    if (dataUrlMatch) {
+      const mime = dataUrlMatch[1];
+      const b64  = dataUrlMatch[2];
+      const ext  = mime.split('/')[1] ?? 'bin';
+      return { media: b64, mimetype: mime, fileName: `media.${ext}` };
+    }
+    // Plain URL — send both field names to cover Evolution API v1/v2 variants
+    return { media: raw, mediaUrl: raw };
+  }
+
   for (const target of targets) {
     // Voice notes (PTT) have their own endpoint — sendMedia with mediatype
     // "audio" doesn't render as a playable waveform bubble in WhatsApp.
@@ -145,10 +159,7 @@ async function sendViaEvolution(
           number: target,
           options: { delay: 1200 },
           mediatype: tipo === 'imagem' ? 'image' : tipo === 'video' ? 'video' : 'document',
-          // Some Evolution API builds use "mediaUrl" for URL-based media, others use "media".
-          // Sending both covers v1/v2 server variants without a round-trip probe.
-          media: conteudo,
-          mediaUrl: conteudo,
+          ...resolveMediaPayload(conteudo, tipo),
           caption: interpolate(vars.caption ?? '', vars),
         });
     if (result.ok) return { ...result, target };
