@@ -130,7 +130,7 @@ function persistPermission(userId: string, permission: Permission) {
 }
 
 export default function ConfiguracoesPage() {
-  const [users, setUsers] = useState<UserType[]>(initialUsers);
+  const [users, setUsers] = useState<UserType[]>([]);
   const [permissions, setPermissions] = useState<Record<string, Permission>>(initialPermissions);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState(emptyForm);
@@ -221,7 +221,7 @@ export default function ConfiguracoesPage() {
     setForm({
       name: user.name,
       email: user.email,
-      password: user.password,
+      password: '',  // API doesn't return password; leave blank to keep current
       role: user.role,
       status: user.status,
       team: user.team ?? 'onmid',
@@ -230,7 +230,9 @@ export default function ConfiguracoesPage() {
   }
 
   function handleSaveUser() {
-    if (!form.name.trim() || !form.email.trim() || !form.password.trim()) return;
+    if (!form.name.trim() || !form.email.trim()) return;
+    // Password required only when creating; blank = keep current when editing
+    if (!editingUserId && !form.password.trim()) return;
 
     if (editingUserId) {
       const updated: UserType = {
@@ -940,13 +942,15 @@ export default function ConfiguracoesPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="user-password">Senha</Label>
+              <Label htmlFor="user-password">
+                Senha{editingUserId && <span className="ml-1 text-xs text-muted-foreground">(deixe em branco para manter)</span>}
+              </Label>
               <Input
                 id="user-password"
                 type="password"
                 value={form.password}
                 onChange={(e) => setForm({ ...form, password: e.target.value })}
-                placeholder="Defina a senha de acesso"
+                placeholder={editingUserId ? 'Nova senha (opcional)' : 'Defina a senha de acesso'}
               />
             </div>
             <div className="space-y-1.5">
@@ -1007,7 +1011,7 @@ export default function ConfiguracoesPage() {
             </Button>
             <Button
               onClick={handleSaveUser}
-              disabled={!form.name.trim() || !form.email.trim() || !form.password.trim()}
+              disabled={!form.name.trim() || !form.email.trim() || (!editingUserId && !form.password.trim())}
               className="bg-emerald-500 hover:bg-emerald-400 text-white shadow-[0_0_12px_rgba(16,185,129,0.3)]"
             >
               {editingUserId ? 'Salvar Usuário' : 'Criar Usuário'}

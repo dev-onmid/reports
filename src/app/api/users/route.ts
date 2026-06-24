@@ -31,18 +31,32 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const body = await req.json() as { id: string; name: string; email: string; password: string; role: string; status: string; team?: string };
+  const body = await req.json() as { id: string; name: string; email: string; password?: string; role: string; status: string; team?: string };
   const team = body.team === 'parceiro' ? 'parceiro' : 'onmid';
   const pool = makeServerPool();
   try {
     await ensureSchema(pool);
-    const { rows } = await pool.query(
-      `INSERT INTO public.users (id, name, email, password, role, status, team)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       ON CONFLICT (id) DO UPDATE SET name=$2, email=$3, password=$4, role=$5, status=$6, team=$7
-       RETURNING *`,
-      [body.id, body.name, body.email, body.password, body.role, body.status, team]
-    );
+    const hasPassword = typeof body.password === 'string' && body.password.trim().length > 0;
+    let rows: Record<string, unknown>[];
+    if (hasPassword) {
+      // Insert or update including password
+      ({ rows } = await pool.query(
+        `INSERT INTO public.users (id, name, email, password, role, status, team)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT (id) DO UPDATE SET name=$2, email=$3, password=$4, role=$5, status=$6, team=$7
+         RETURNING *`,
+        [body.id, body.name, body.email, body.password, body.role, body.status, team]
+      ));
+    } else {
+      // Update without touching the existing password
+      ({ rows } = await pool.query(
+        `INSERT INTO public.users (id, name, email, password, role, status, team)
+         VALUES ($1, $2, $3, '', $4, $5, $6)
+         ON CONFLICT (id) DO UPDATE SET name=$2, email=$3, role=$4, status=$5, team=$6
+         RETURNING *`,
+        [body.id, body.name, body.email, body.role, body.status, team]
+      ));
+    }
     return Response.json(rowToJson(rows[0]), { status: 201 });
   } finally {
     await pool.end();
