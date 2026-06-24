@@ -13,7 +13,7 @@ import {
   Pause, CircleDot, Pencil, Settings2, Users, Copy,
   Bell, DollarSign, Tag, TrendingUp, Calendar, BarChart3, Zap, Target, Briefcase,
   Wallet, MousePointerClick, CreditCard, PiggyBank, Clock, Info, Lightbulb, UserPlus, CheckCircle2,
-  Eye, Heart, Monitor, ExternalLink, Bookmark,
+  Eye, Heart, Monitor, ExternalLink, Bookmark, MessageCircle,
 } from 'lucide-react';
 import { getAuthSession } from '@/lib/auth-store';
 import type { AiInsight } from '@/app/api/ai/insights/route';
@@ -4183,6 +4183,320 @@ function IgTopPostsCard({ posts, loading, sortBy, onSortChange, periodFrom, peri
   );
 }
 
+type PremiumMetricFormat = 'currency' | 'number' | 'percent' | 'times';
+
+function premiumValue(value: number | null | undefined, format: PremiumMetricFormat = 'number', digits = 2) {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '—';
+  if (format === 'currency') return formatCurrencyBRL(value);
+  if (format === 'percent') return `${value.toFixed(digits).replace('.', ',')}%`;
+  if (format === 'times') return `${value.toFixed(2).replace('.', ',')}x`;
+  return value.toLocaleString('pt-BR');
+}
+
+function PremiumPanel({ children, className = '' }: { children: ReactNode; className?: string }) {
+  return (
+    <section className={cn('rounded-[14px] border border-white/[0.08] bg-[#0d1519]/92 shadow-[0_18px_60px_rgba(0,0,0,0.28)]', className)}>
+      {children}
+    </section>
+  );
+}
+
+function StatusPill({ status }: { status: 'Excelente' | 'Bom' | 'Neutro' | 'Alerta' }) {
+  const styles = {
+    Excelente: 'border-[#6cff2f]/35 bg-[#6cff2f]/18 text-[#9cff75]',
+    Bom: 'border-[#78d957]/30 bg-[#78d957]/14 text-[#85e45f]',
+    Neutro: 'border-white/10 bg-white/[0.07] text-[#a7b0b6]',
+    Alerta: 'border-amber-400/30 bg-amber-400/12 text-amber-300',
+  }[status];
+  return <span className={cn('rounded-md border px-2 py-1 text-[10px] font-black uppercase tracking-[0.04em]', styles)}>{status}</span>;
+}
+
+function GoalProgressCard({
+  title, icon: Icon, target, partial, value, format = 'number',
+}: {
+  title: string;
+  icon: React.ElementType;
+  target: number;
+  partial: number;
+  value: number;
+  format?: PremiumMetricFormat;
+}) {
+  const base = partial > 0 ? partial : target;
+  const progress = base > 0 ? Math.max(0, Math.min(100, (value / base) * 100)) : 0;
+  return (
+    <PremiumPanel className="relative overflow-hidden p-5">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_8%_0%,rgba(108,255,47,0.16),transparent_32%),linear-gradient(135deg,rgba(108,255,47,0.05),rgba(22,139,255,0.02))]" />
+      <div className="relative flex items-start gap-4">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#6cff2f]/18 bg-[#6cff2f]/10 text-[#6cff2f]">
+          <Icon className="h-5 w-5" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">{title}</h2>
+          <div className="mt-5 grid grid-cols-3 gap-3">
+            {[
+              ['Meta', target],
+              ['Meta Parcial', partial],
+              ['Realizado', value],
+            ].map(([label, amount]) => (
+              <div key={String(label)} className="min-w-0">
+                <p className="truncate text-lg font-semibold text-[#f4f7f8]">{Number(amount) > 0 ? premiumValue(Number(amount), format) : '—'}</p>
+                <p className="mt-1 text-xs font-medium text-[#a7b0b6]">{label}</p>
+              </div>
+            ))}
+          </div>
+          <div className="mt-5">
+            <div className="relative h-7 overflow-hidden rounded-md border border-white/10 bg-[#081014]">
+              <div
+                className="absolute inset-y-0 left-0 rounded-md bg-[#8bdc62] transition-all"
+                style={{
+                  width: `${progress}%`,
+                  backgroundImage: 'repeating-linear-gradient(45deg,rgba(255,255,255,0.14) 0 12px,transparent 12px 24px)',
+                }}
+              />
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="text-sm font-black text-black">{progress > 0 ? premiumValue(progress, 'percent') : '—'}</span>
+              </div>
+            </div>
+            <div className="mt-2 flex justify-between text-xs text-[#a7b0b6]">
+              <span>0%</span>
+              <span>Meta Parcial</span>
+              <span>100%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </PremiumPanel>
+  );
+}
+
+function QuickMetricCard({ title, value, change, icon: Icon }: {
+  title: string;
+  value: string;
+  change?: number | null;
+  icon: React.ElementType;
+}) {
+  const hasChange = change !== null && change !== undefined && Number.isFinite(change);
+  const positive = !hasChange || change >= 0;
+  return (
+    <PremiumPanel className="relative overflow-hidden p-4">
+      <div className="flex items-start gap-3">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#6cff2f]/18 bg-[#6cff2f]/10 text-[#6cff2f]">
+          <Icon className="h-4 w-4" />
+        </span>
+        <div className="min-w-0">
+          <p className="text-[11px] font-black uppercase tracking-[0.06em] text-[#dce4e8]">{title}</p>
+          <p className="mt-2 text-xl font-semibold text-[#f4f7f8]">{value}</p>
+          <p className={cn('mt-1 text-xs font-bold', positive ? 'text-[#6cff2f]' : 'text-red-400')}>
+            {hasChange ? `${change >= 0 ? '+' : ''}${change.toFixed(1).replace('.', ',')}%` : '—'} <span className="font-medium text-[#a7b0b6]">vs mês passado</span>
+          </p>
+        </div>
+      </div>
+    </PremiumPanel>
+  );
+}
+
+function MiniPlatformMetric({ label, value, sub, icon: Icon, logo }: {
+  label: string;
+  value: string;
+  sub?: string;
+  icon?: React.ElementType;
+  logo?: ReactNode;
+}) {
+  return (
+    <div className="rounded-[10px] border border-white/[0.07] bg-[#111a20]/80 p-3">
+      <div className="mb-3 flex items-center gap-2">
+        {logo ?? (Icon ? <Icon className="h-4 w-4 text-[#6cff2f]" /> : null)}
+        <span className="text-[10px] font-black uppercase tracking-[0.08em] text-[#a7b0b6]">{label}</span>
+      </div>
+      <p className="text-lg font-semibold text-[#f4f7f8]">{value}</p>
+      <p className="mt-1 text-xs font-semibold text-[#78d957]">{sub ?? '+0,0% vs mês passado'}</p>
+    </div>
+  );
+}
+
+function SimpleFunnel({ steps, totalRate, metaRate, previousRate }: {
+  steps: Array<{ label: string; value: string; percent: string }>;
+  totalRate: string;
+  metaRate: string;
+  previousRate: string;
+}) {
+  return (
+    <PremiumPanel className="p-4">
+      <div className="mb-4 flex items-center justify-between">
+        <h3 className="text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">Funil de Performance</h3>
+        <span className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-[#a7b0b6]">Conversão: {totalRate}</span>
+      </div>
+      <div className="grid grid-cols-3 gap-3 xl:grid-cols-6">
+        {steps.map((step, index) => (
+          <div key={step.label} className="relative">
+            <p className="text-xs font-black uppercase tracking-[0.06em] text-[#9aa4aa]">{step.label}</p>
+            <div className="mt-2 flex items-end justify-between gap-2">
+              <span className="text-lg font-semibold text-[#f4f7f8]">{step.value}</span>
+              <span className="text-xs text-[#a7b0b6]">{step.percent}</span>
+            </div>
+            {index < steps.length - 1 && <ChevronRight className="absolute -right-3 top-8 hidden h-4 w-4 text-[#a7b0b6] xl:block" />}
+          </div>
+        ))}
+      </div>
+      <div className="mt-5 h-12 overflow-hidden rounded-sm bg-[#081014]">
+        <div className="h-full w-full bg-[linear-gradient(100deg,#9ad76c_0%,#85d35e_52%,#62b843_100%)] [clip-path:polygon(0_0,100%_18%,100%_82%,0_100%)]" />
+      </div>
+      <div className="mt-4 grid grid-cols-3 gap-3 border-t border-white/[0.08] pt-3 text-xs">
+        <div><p className="text-[#9aa4aa]">Taxa de conversão geral</p><p className="text-lg font-black text-[#6cff2f]">{totalRate}</p></div>
+        <div><p className="text-[#9aa4aa]">Meta geral</p><p className="text-lg font-black text-[#f4f7f8]">{metaRate}</p></div>
+        <div><p className="text-[#9aa4aa]">Vs mês passado</p><p className="text-lg font-black text-[#6cff2f]">{previousRate}</p></div>
+      </div>
+    </PremiumPanel>
+  );
+}
+
+function ChannelSummaryTable({ rows }: {
+  rows: Array<{ channel: string; investment: string; leads: string; cpl: string; conversion: string; status: 'Excelente' | 'Bom' | 'Neutro' | 'Alerta'; logo: ReactNode }>;
+}) {
+  return (
+    <PremiumPanel className="p-4">
+      <div className="mb-4 flex items-center gap-2">
+        <h3 className="text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">Resumo por Canal</h3>
+        <Info className="h-3.5 w-3.5 text-[#a7b0b6]" />
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[620px] text-left text-xs">
+          <thead className="text-[10px] uppercase tracking-[0.08em] text-[#9aa4aa]">
+            <tr>
+              <th className="py-2">Canal</th>
+              <th>Investimento</th>
+              <th>Leads</th>
+              <th>CPL</th>
+              <th>Conversão</th>
+              <th className="text-right">Status</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-white/[0.07]">
+            {rows.map((row) => (
+              <tr key={row.channel} className="text-[#f4f7f8]">
+                <td className="py-3"><span className="flex items-center gap-2">{row.logo}{row.channel}</span></td>
+                <td>{row.investment}</td>
+                <td>{row.leads}</td>
+                <td>{row.cpl}</td>
+                <td>{row.conversion}</td>
+                <td className="text-right"><StatusPill status={row.status} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </PremiumPanel>
+  );
+}
+
+function CompactCampaignTable({ campaigns, loading, platform }: {
+  campaigns: CampaignPerformance[];
+  loading: boolean;
+  platform: AdsPlatform;
+}) {
+  const rows = campaigns.slice(0, 4);
+  if (loading) return <div className="py-8 text-center text-sm text-[#9aa4aa]">Carregando campanhas...</div>;
+  if (!rows.length) return <div className="py-8 text-center text-sm text-[#9aa4aa]">Nenhuma campanha encontrada.</div>;
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[560px] text-left text-xs">
+        <thead className="text-[10px] uppercase tracking-[0.08em] text-[#9aa4aa]">
+          <tr>
+            <th className="py-2">Campanha</th>
+            <th>Investimento</th>
+            <th>{platform === 'meta' ? 'Leads' : 'Cliques'}</th>
+            <th>CPL</th>
+            <th>{platform === 'meta' ? 'Conversão' : 'CTR'}</th>
+            <th className="text-right">Status</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-white/[0.07]">
+          {rows.map((campaign) => {
+            const status: 'Excelente' | 'Bom' | 'Neutro' = campaign.leads > 20 ? 'Excelente' : campaign.leads > 0 ? 'Bom' : 'Neutro';
+            return (
+              <tr key={campaign.id} className="text-[#f4f7f8]">
+                <td className="max-w-[220px] truncate py-3">{campaign.name}</td>
+                <td>{premiumValue(campaign.spend, 'currency')}</td>
+                <td>{platform === 'meta' ? premiumValue(campaign.leads) : premiumValue(campaign.clicks)}</td>
+                <td>{campaign.cpl > 0 ? premiumValue(campaign.cpl, 'currency') : '—'}</td>
+                <td>{premiumValue(campaign.ctr, 'percent')}</td>
+                <td className="text-right"><StatusPill status={status} /></td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function CompactKeywordTable({ keywords, loading }: { keywords: GoogleKeyword[]; loading: boolean }) {
+  const rows = keywords.slice(0, 5);
+  if (loading) return <div className="py-8 text-center text-sm text-[#9aa4aa]">Carregando palavras-chave...</div>;
+  if (!rows.length) return <div className="py-8 text-center text-sm text-[#9aa4aa]">Nenhuma palavra-chave encontrada.</div>;
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[560px] text-left text-xs">
+        <thead className="text-[10px] uppercase tracking-[0.08em] text-[#9aa4aa]">
+          <tr>
+            <th className="py-2">Palavra-chave</th>
+            <th>Cliques</th>
+            <th>Leads</th>
+            <th>CPL</th>
+            <th>Conversão</th>
+            <th className="text-right">Status</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-white/[0.07]">
+          {rows.map((keyword, index) => {
+            const rate = keyword.clicks > 0 ? (keyword.conversions / keyword.clicks) * 100 : 0;
+            return (
+              <tr key={`${keyword.text}-${index}`} className="text-[#f4f7f8]">
+                <td className="max-w-[220px] truncate py-3"><span className="mr-2 rounded bg-[#6cff2f]/18 px-1.5 py-0.5 text-[#6cff2f]">{index + 1}</span>{keyword.text}</td>
+                <td>{premiumValue(keyword.clicks)}</td>
+                <td>{premiumValue(keyword.conversions)}</td>
+                <td>{keyword.cpl > 0 ? premiumValue(keyword.cpl, 'currency') : '—'}</td>
+                <td>{premiumValue(rate, 'percent', 0)}</td>
+                <td className="text-right"><StatusPill status={rate > 20 ? 'Excelente' : rate > 0 ? 'Bom' : 'Neutro'} /></td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function CreativeRankPreview({ creatives, loading, onPreview }: {
+  creatives: TopCreative[];
+  loading: boolean;
+  onPreview: (creative: TopCreative) => void;
+}) {
+  const rows = creatives.slice(0, 4);
+  if (loading) return <div className="grid grid-cols-4 gap-3">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-40 animate-pulse rounded-xl bg-white/[0.06]" />)}</div>;
+  if (!rows.length) return <div className="py-8 text-center text-sm text-[#9aa4aa]">Nenhum criativo encontrado.</div>;
+  return (
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      {rows.map((creative, index) => {
+        const image = creative.imageUrl || creative.thumbnailUrl;
+        return (
+          <button key={creative.adId} type="button" onClick={() => onPreview(creative)} className="group text-left">
+            <div className="relative aspect-[4/5] overflow-hidden rounded-[10px] border border-white/[0.08] bg-[#071014]">
+              {image ? <img src={image} alt={creative.adName} className="h-full w-full object-cover transition-transform group-hover:scale-105" /> : <div className="flex h-full items-center justify-center text-[#9aa4aa]"><ImageIcon className="h-7 w-7" /></div>}
+              <span className="absolute left-2 top-2 rounded-md bg-[#6cff2f] px-1.5 py-0.5 text-xs font-black text-black">{index + 1}</span>
+            </div>
+            <div className="mt-2 grid grid-cols-3 gap-1 text-[10px] text-[#a7b0b6]">
+              <span>Invest.<br /><b className="text-[#f4f7f8]">{premiumValue(creative.spend, 'currency')}</b></span>
+              <span>Leads<br /><b className="text-[#f4f7f8]">{premiumValue(creative.leads)}</b></span>
+              <span>CPL<br /><b className="text-[#f4f7f8]">{creative.cpl > 0 ? premiumValue(creative.cpl, 'currency') : '—'}</b></span>
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Main Dashboard ───────────────────────────────────────────────────────────
 export default function GeneralDashboard() {
   const { clients } = useClients();
@@ -5044,6 +5358,252 @@ export default function GeneralDashboard() {
     });
   }
 
+  const qualified = funnelCounts['Atendimento'] ?? 0;
+  const appointments = funnelCounts['Agendamento'] ?? 0;
+  const showUps = funnelCounts['Comparecimento'] ?? 0;
+  const conversions = crmSales || funnelCounts['Fechamento'] || googleConv;
+  const funnelVisitors = Math.max(metaReach + googleImpressions, totalLeads, conversions);
+  const conversionRate = funnelVisitors > 0 ? (conversions / funnelVisitors) * 100 : 0;
+  const previousConversionRate = prevTotalLeads > 0 ? ((conversions || totalLeads) / Math.max(prevTotalLeads, 1)) * 100 : null;
+  const quickMetrics = [
+    { title: 'Investimento Total', value: premiumValue(totalSpend, 'currency'), change: pctChange(totalSpend, prevTotalSpend), icon: CreditCard },
+    { title: 'CPL Médio', value: totalCostPerLead > 0 ? premiumValue(totalCostPerLead, 'currency') : '—', change: pctChange(totalCostPerLead, prevCpl), icon: Tag },
+    { title: 'Conversas', value: premiumValue(metaConversations || metaSiteLeads || 0), change: null, icon: MessageCircle },
+    { title: 'Agendamentos', value: premiumValue(appointments), change: null, icon: Calendar },
+    { title: 'ROI', value: roi > 0 ? premiumValue(roi, 'times') : '—', change: pctChange(roi, prevRoi), icon: TrendingUp },
+    { title: 'Conversão Geral', value: conversionRate > 0 ? premiumValue(conversionRate, 'percent') : '—', change: previousConversionRate !== null ? pctChange(conversionRate, previousConversionRate) : null, icon: Target },
+  ];
+  const funnelSteps = [
+    { label: 'Investimento', value: premiumValue(totalSpend, 'currency'), percent: '100%' },
+    { label: 'Leads', value: premiumValue(totalLeads), percent: funnelVisitors > 0 ? premiumValue((totalLeads / funnelVisitors) * 100, 'percent') : '—' },
+    { label: 'Qualificações', value: premiumValue(qualified), percent: totalLeads > 0 ? premiumValue((qualified / totalLeads) * 100, 'percent') : '—' },
+    { label: 'Agendamentos', value: premiumValue(appointments), percent: qualified > 0 ? premiumValue((appointments / qualified) * 100, 'percent') : '—' },
+    { label: 'Comparecimentos', value: premiumValue(showUps), percent: appointments > 0 ? premiumValue((showUps / appointments) * 100, 'percent') : '—' },
+    { label: 'Conversões', value: premiumValue(conversions), percent: showUps > 0 ? premiumValue((conversions / showUps) * 100, 'percent') : '—' },
+  ];
+  const channelRows = [
+    {
+      channel: 'Meta Ads',
+      investment: premiumValue(metaSpend, 'currency'),
+      leads: premiumValue(metaLeads),
+      cpl: avgCpl > 0 ? premiumValue(avgCpl, 'currency') : '—',
+      conversion: metaReach > 0 ? premiumValue((metaLeads / metaReach) * 100, 'percent') : '—',
+      status: metaLeads > 100 ? 'Excelente' as const : metaLeads > 0 ? 'Bom' as const : 'Neutro' as const,
+      logo: <MetaAdsMark className="h-4 w-4 text-[#168BFF]" />,
+    },
+    {
+      channel: 'Google Ads',
+      investment: premiumValue(googleCost, 'currency'),
+      leads: premiumValue(googleConv),
+      cpl: avgCpa > 0 ? premiumValue(avgCpa, 'currency') : '—',
+      conversion: googleClicks > 0 ? premiumValue((googleConv / googleClicks) * 100, 'percent') : '—',
+      status: googleConv > 50 ? 'Excelente' as const : googleConv > 0 ? 'Bom' as const : 'Neutro' as const,
+      logo: <GoogleAdsMark className="h-4 w-4" />,
+    },
+    {
+      channel: 'Instagram Ads',
+      investment: '—',
+      leads: '—',
+      cpl: '—',
+      conversion: '—',
+      status: 'Neutro' as const,
+      logo: <span className="flex h-4 w-4 items-center justify-center rounded bg-pink-500/20 text-[9px] text-pink-300">IG</span>,
+    },
+    {
+      channel: 'CRM / Orgânico',
+      investment: '—',
+      leads: premiumValue(crmLeads),
+      cpl: '—',
+      conversion: crmLeads > 0 ? premiumValue((crmSales / crmLeads) * 100, 'percent') : '—',
+      status: crmLeads > 0 ? 'Bom' as const : 'Neutro' as const,
+      logo: <span className="flex h-4 w-4 items-center justify-center rounded bg-[#6cff2f]/15 text-[9px] text-[#6cff2f]">CRM</span>,
+    },
+  ];
+
+  return (
+    <div className="-m-3 min-h-full bg-[#05090B] text-[#f4f7f8] sm:-m-6">
+      {customizerOpen && (
+        <MetricConfigPanel
+          prefs={dashboardPrefs}
+          onPrefsChange={setDashboardPrefs}
+          onClose={() => setCustomizerOpen(false)}
+        />
+      )}
+
+      <div className="sticky top-0 z-20 border-b border-white/[0.08] bg-[#060a0d]/92 px-4 py-3 backdrop-blur-xl xl:px-6">
+        <div className="flex items-center gap-3 overflow-x-auto">
+          <ClientSelector clients={clients} selected={selectedIds} onChange={setSelectedIds} />
+          <div className="flex items-center rounded-[10px] border border-white/[0.08] bg-[#0b1216] p-1">
+            {PERIODS.filter(p => p.value !== 'yesterday').map((p) => (
+              <button
+                key={p.value}
+                type="button"
+                onClick={() => setPeriod(p.value)}
+                className={cn(
+                  'rounded-md px-3 py-2 text-xs font-bold transition-colors',
+                  period === p.value ? 'bg-[#6cff2f] text-black' : 'text-[#a7b0b6] hover:text-white'
+                )}
+              >
+                {p.value === 'custom' ? <Calendar className="inline h-3.5 w-3.5" /> : p.label}
+              </button>
+            ))}
+          </div>
+          <span className="ml-auto inline-flex items-center gap-2 rounded-[10px] border border-white/[0.08] bg-[#0b1216] px-3 py-2 text-xs font-semibold text-[#dce4e8]">
+            <span className="h-2 w-2 rounded-full bg-[#6cff2f]" /> Ao vivo
+          </span>
+          <div className="relative hidden w-[240px] shrink-0 2xl:block">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#9aa4aa]" />
+            <Input className="h-10 rounded-[10px] border-white/[0.08] bg-[#0b1216] pl-10 text-xs text-[#f4f7f8] placeholder:text-[#9aa4aa]" placeholder="Buscar clientes, relatórios..." />
+          </div>
+          <button type="button" className="rounded-[10px] border border-white/[0.08] bg-[#0b1216] px-4 py-2 text-xs font-bold text-[#f4f7f8] hover:border-[#6cff2f]/35">
+            Exportar
+          </button>
+          <button type="button" className="relative rounded-full p-2 text-[#f4f7f8] hover:bg-white/[0.06]">
+            <Bell className="h-5 w-5" />
+            <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-[#6cff2f]" />
+          </button>
+          <Avatar className="h-9 w-9 border border-white/[0.08]">
+            <AvatarFallback className="bg-[#78d957] text-sm font-black text-black">
+              {(session?.name ?? 'M').slice(0, 1).toUpperCase()}
+            </AvatarFallback>
+          </Avatar>
+        </div>
+        {period === 'custom' && (
+          <div className="mt-3 flex items-center gap-3">
+            <input type="date" value={customDateFrom} onChange={e => setCustomDateFrom(e.target.value)} className="h-9 rounded-lg border border-white/[0.08] bg-[#0b1216] px-3 text-xs text-[#f4f7f8] outline-none focus:border-[#6cff2f]" />
+            <span className="text-xs text-[#9aa4aa]">até</span>
+            <input type="date" value={customDateTo} onChange={e => setCustomDateTo(e.target.value)} className="h-9 rounded-lg border border-white/[0.08] bg-[#0b1216] px-3 text-xs text-[#f4f7f8] outline-none focus:border-[#6cff2f]" />
+          </div>
+        )}
+      </div>
+
+      <div className="px-4 py-5 xl:px-6">
+        {selectedIds.size === 0 && clients.length > 0 ? (
+          <div className="mx-auto flex max-w-4xl flex-col items-center justify-center gap-8 py-16">
+            <div className="text-center">
+              <h2 className="text-2xl font-black text-[#f4f7f8]">Escolha um cliente</h2>
+              <p className="mt-2 text-sm text-[#9aa4aa]">Selecione para abrir o dashboard executivo.</p>
+            </div>
+            <div className="grid w-full grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+              {clients.map(c => (
+                <button key={c.id} type="button" onClick={() => setSelectedIds(new Set([c.id]))} className="rounded-[14px] border border-white/[0.08] bg-[#0d1519] px-4 py-6 text-center transition hover:border-[#6cff2f]/45 hover:bg-[#102018]">
+                  <ClientAvatar clientId={c.id} name={c.name} size="lg" />
+                  <p className="mt-3 truncate text-sm font-black text-[#f4f7f8]">{c.name}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {aiError && <div className="rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-xs text-red-300">{aiError}</div>}
+            {!metricsLoading && alerts.length > 0 && (
+              <div className="rounded-xl border border-amber-400/20 bg-amber-400/8 px-4 py-3 text-xs text-amber-200">
+                {alerts.length} alerta{alerts.length > 1 ? 's' : ''} fora do padrão neste período.
+              </div>
+            )}
+
+            <div className="grid gap-4 xl:grid-cols-2">
+              <GoalProgressCard title="Faturamento" icon={DollarSign} target={plannedRevenue} partial={effectiveRevenueGoal} value={revenue} format="currency" />
+              <GoalProgressCard title="Leads" icon={Users} target={leadsGoal} partial={effectiveLeadsGoal} value={totalLeads} />
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+              {quickMetrics.map((metric) => <QuickMetricCard key={metric.title} {...metric} />)}
+            </div>
+
+            <PremiumPanel className="p-4">
+              <h3 className="mb-4 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">Saldos e Métricas de Alcance</h3>
+              <div className="grid gap-4 xl:grid-cols-2">
+                <div className="rounded-[12px] border border-white/[0.08] bg-[#071014] p-3">
+                  <div className="mb-3 flex items-center gap-2 text-sm font-black uppercase tracking-[0.06em] text-[#f4f7f8]"><MetaAdsMark className="h-5 w-5 text-[#168BFF]" /> Meta Ads</div>
+                  <div className="grid gap-2 sm:grid-cols-5">
+                    <MiniPlatformMetric label="Saldo Meta Ads" value={metaBalance > 0 ? premiumValue(metaBalance, 'currency') : '—'} logo={<MetaAdsMark className="h-4 w-4 text-[#168BFF]" />} sub="Saldo disponível" />
+                    <MiniPlatformMetric label="Alcance Meta" value={premiumValue(metaReach)} icon={Users} />
+                    <MiniPlatformMetric label="Impressões Meta" value={premiumValue(metaImpressions)} icon={BarChart3} />
+                    <MiniPlatformMetric label="CTR Meta" value={premiumValue(metaCtr, 'percent')} icon={MousePointerClick} />
+                    <MiniPlatformMetric label="CPL Meta" value={avgCpl > 0 ? premiumValue(avgCpl, 'currency') : '—'} icon={Tag} />
+                  </div>
+                </div>
+                <div className="rounded-[12px] border border-white/[0.08] bg-[#071014] p-3">
+                  <div className="mb-3 flex items-center gap-2 text-sm font-black uppercase tracking-[0.06em] text-[#f4f7f8]"><GoogleAdsMark className="h-5 w-5" /> Google Ads</div>
+                  <div className="grid gap-2 sm:grid-cols-5">
+                    <MiniPlatformMetric label="Saldo Google Ads" value={googleBalance > 0 ? premiumValue(googleBalance, 'currency') : '—'} logo={<GoogleAdsMark className="h-4 w-4" />} sub="Saldo disponível" />
+                    <MiniPlatformMetric label="Alcance Google" value="—" icon={Users} />
+                    <MiniPlatformMetric label="Impressões Google" value={premiumValue(googleImpressions)} icon={BarChart3} />
+                    <MiniPlatformMetric label="Cliques Google" value={premiumValue(googleClicks)} icon={MousePointerClick} />
+                    <MiniPlatformMetric label="CTR Google" value={premiumValue(googleCtrValue, 'percent')} icon={Target} />
+                  </div>
+                </div>
+              </div>
+            </PremiumPanel>
+
+            <div className="grid gap-4 xl:grid-cols-[1.08fr_0.92fr]">
+              <SimpleFunnel steps={funnelSteps} totalRate={conversionRate > 0 ? premiumValue(conversionRate, 'percent') : '—'} metaRate={roiGoal > 0 ? premiumValue(Math.min(100, roiGoal), 'percent') : '—'} previousRate={previousConversionRate !== null ? premiumValue(Math.abs(previousConversionRate), 'percent') : '—'} />
+              <ChannelSummaryTable rows={channelRows} />
+            </div>
+
+            <div className="grid gap-4 xl:grid-cols-2">
+              <PremiumPanel className="border-[#168BFF]/28 p-4 shadow-[0_0_40px_rgba(22,139,255,0.12)]">
+                <div className="mb-4 flex items-center justify-between">
+                  <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]"><MetaAdsMark className="h-5 w-5 text-[#168BFF]" /> Meta Ads</h3>
+                  <button type="button" className="text-xs font-black text-[#6cff2f]">Ver todas</button>
+                </div>
+                <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+                  <div>
+                    <div className="mb-3 flex items-center gap-2 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">Melhores Criativos <Info className="h-3.5 w-3.5 text-[#9aa4aa]" /></div>
+                    <CreativeRankPreview creatives={creatives} loading={creativesLoading} onPreview={setPreviewCreative} />
+                  </div>
+                  <div>
+                    <div className="mb-3 flex items-center justify-between text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]"><span>Top Campanhas Meta</span><span className="text-[#6cff2f]">Ver todas</span></div>
+                    <CompactCampaignTable campaigns={metaCampaigns} loading={campaignsLoading} platform="meta" />
+                  </div>
+                </div>
+              </PremiumPanel>
+
+              <PremiumPanel className="border-[#4285F4]/24 p-4 shadow-[0_0_40px_rgba(66,133,244,0.10)]">
+                <div className="mb-4 flex items-center justify-between">
+                  <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]"><GoogleAdsMark className="h-5 w-5" /> Google Ads</h3>
+                </div>
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <div>
+                    <div className="mb-3 flex items-center justify-between text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]"><span>Top Campanhas Google</span><span className="text-[#6cff2f]">Ver todas</span></div>
+                    <CompactCampaignTable campaigns={googleCampaigns} loading={campaignsLoading} platform="google" />
+                  </div>
+                  <div>
+                    <div className="mb-3 flex items-center justify-between text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]"><span>Top Palavras-chave</span><span className="text-[#6cff2f]">Ver todas</span></div>
+                    <CompactKeywordTable keywords={keywords} loading={keywordsLoading} />
+                  </div>
+                </div>
+              </PremiumPanel>
+            </div>
+
+            {selectedClients.length > 1 && (
+              <PremiumPanel className="p-4">
+                <p className="mb-3 text-[10px] font-black uppercase tracking-[0.08em] text-[#9aa4aa]">Resumo por cliente</p>
+                <div className="divide-y divide-white/[0.07]">
+                  {selectedClients.map(client => {
+                    const m = metricsByClient[client.id];
+                    const leads = (m?.meta?.leads ?? 0) + (m?.google?.conversions ?? 0);
+                    const spend = (m?.meta?.spend ?? 0) + (m?.google?.cost ?? 0);
+                    return (
+                      <div key={client.id} className="flex items-center justify-between gap-4 py-3 text-xs text-[#a7b0b6]">
+                        <Link href={`/clientes/${client.id}`} className="font-black text-[#f4f7f8] hover:text-[#6cff2f]">{client.name}</Link>
+                        <span>{premiumValue(leads)} leads</span>
+                        <span>{spend > 0 ? premiumValue(spend, 'currency') : '—'}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </PremiumPanel>
+            )}
+          </div>
+        )}
+      </div>
+
+      <CreativePreviewOverlay creative={previewCreative} onClose={() => setPreviewCreative(null)} />
+    </div>
+  );
+
   return (
     <div className="space-y-6 pb-10">
       {customizerOpen && (
@@ -5160,11 +5720,11 @@ export default function GeneralDashboard() {
 
           {!metricsLoading && dataCacheAge !== null && (
             <span
-              title={dataCacheAge === 0 ? 'Dados recém-buscados da API' : `Dados em cache — buscados há ${Math.round(dataCacheAge / 60)} min. Atualizados automaticamente a cada 15 min.`}
+              title={dataCacheAge === 0 ? 'Dados recém-buscados da API' : `Dados em cache — buscados há ${Math.round((dataCacheAge ?? 0) / 60)} min. Atualizados automaticamente a cada 15 min.`}
               className="flex items-center gap-1 rounded-full border border-border bg-muted/30 px-2 py-0.5 text-[10px] font-semibold text-muted-foreground cursor-default"
             >
               <Clock className="h-3 w-3" />
-              {dataCacheAge === 0 ? 'Ao vivo' : `Cache · ${Math.round(dataCacheAge / 60)} min`}
+              {dataCacheAge === 0 ? 'Ao vivo' : `Cache · ${Math.round((dataCacheAge ?? 0) / 60)} min`}
             </span>
           )}
 
