@@ -5357,6 +5357,12 @@ export default function GeneralDashboard() {
   }, [igPostsLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Aggregate metrics ────────────────────────────────────────────────────
+  // Pre-compute Google campaign totals for use as fallback when metrics API returns no data
+  const googleCampaignsTotals = campaigns
+    .filter(c => c.platform === 'google')
+    .reduce((a, c) => ({ spend: a.spend + c.spend, leads: a.leads + c.leads, impressions: a.impressions + c.impressions, clicks: a.clicks + c.clicks }),
+      { spend: 0, leads: 0, impressions: 0, clicks: 0 });
+
   let metaLeads = 0, metaFormLeads = 0, metaSiteLeads = 0, metaConversations = 0, metaSpend = 0, metaReach = 0, metaImpressions = 0, metaClicks = 0;
   let googleConv = 0, googleCost = 0;
 
@@ -5374,6 +5380,12 @@ export default function GeneralDashboard() {
     }
     if (m?.google) { googleConv += m.google.conversions; googleCost += m.google.cost; }
   }
+  // Fallback: metrics API returned no Google data — use campaign totals (same source as the campaign table)
+  const hasGoogleMetrics = googleCost > 0 || googleConv > 0;
+  if (!hasGoogleMetrics && !campaignsLoading && googleCampaignsTotals.spend > 0) {
+    googleCost = googleCampaignsTotals.spend;
+    googleConv = googleCampaignsTotals.leads;
+  }
 
   const totalLeads = metaLeads + googleConv;
   const totalSpend = metaSpend + googleCost;
@@ -5390,7 +5402,11 @@ export default function GeneralDashboard() {
       googleClicks += m.google.clicks;
     }
   }
-  const hasGoogleData = [...selectedIds].some(id => metricsByClient[id]?.google != null);
+  if (!hasGoogleMetrics && !campaignsLoading && googleCampaignsTotals.spend > 0) {
+    googleImpressions = googleCampaignsTotals.impressions;
+    googleClicks = googleCampaignsTotals.clicks;
+  }
+  const hasGoogleData = [...selectedIds].some(id => metricsByClient[id]?.google != null) || (!campaignsLoading && googleCampaignsTotals.spend > 0);
   const hasGoogleLink = clientLinks.some(l => selectedIds.has(l.clientId) && l.platform === 'google_ads');
   const googleCpc = googleClicks > 0 ? googleCost / googleClicks : 0;
   const googleCtrValue = googleImpressions > 0 ? (googleClicks / googleImpressions) * 100 : 0;
