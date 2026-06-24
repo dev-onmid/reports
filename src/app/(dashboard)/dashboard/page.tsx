@@ -4357,13 +4357,16 @@ function SimpleFunnel({ steps, totalRate }: {
   totalRate: string;
 }) {
   if (!steps.length) return null;
-  const maxActual = Math.max(steps[0]?.actual ?? 1, 1);
   const SVG_W = 1000;
   const SVG_H = 140;
   const centerY = SVG_H / 2;
   const segW = SVG_W / steps.length;
   const GAP = 4;
-  const getH = (v: number) => Math.max(18, (v / maxActual) * SVG_H);
+  // Fixed funnel shape: starts at full height, ends at 30% — independent of data
+  const H_START = SVG_H;
+  const H_END = SVG_H * 0.30;
+  const getFixedH = (i: number, total: number) =>
+    H_START - (H_START - H_END) * (i / Math.max(total - 1, 1));
 
   return (
     <PremiumPanel className="p-5">
@@ -4374,7 +4377,7 @@ function SimpleFunnel({ steps, totalRate }: {
         </span>
       </div>
 
-      {/* SVG colored funnel */}
+      {/* SVG colored funnel — fixed shape, starts wide, ends narrow */}
       <svg viewBox={`0 0 ${SVG_W} ${SVG_H}`} className="w-full" style={{ height: 110 }} preserveAspectRatio="none">
         <defs>
           {steps.map((step, i) => (
@@ -4387,8 +4390,8 @@ function SimpleFunnel({ steps, totalRate }: {
         {steps.map((step, i) => {
           const x1 = i * segW + (i > 0 ? GAP / 2 : 0);
           const x2 = (i + 1) * segW - (i < steps.length - 1 ? GAP / 2 : 0);
-          const h1 = getH(step.actual);
-          const h2 = i < steps.length - 1 ? getH(steps[i + 1].actual) : getH(step.actual);
+          const h1 = getFixedH(i, steps.length);
+          const h2 = getFixedH(i + 1, steps.length);
           const d = `M ${x1} ${centerY - h1 / 2} L ${x2} ${centerY - h2 / 2} L ${x2} ${centerY + h2 / 2} L ${x1} ${centerY + h1 / 2} Z`;
           return <path key={step.label} d={d} fill={`url(#fg${i})`} />;
         })}
