@@ -15,6 +15,7 @@ export type CampaignPerformance = {
   connectionId: string;
   loginCustomerId?: string;
   status: string;
+  objective?: string;
   dailyBudget?: number;
   budgetResourceName?: string;
   spend: number;
@@ -28,6 +29,29 @@ export type CampaignPerformance = {
   searchBudgetLostIS?: number;
   searchAbsTopIS?: number;
 };
+
+function normalizeMetaObjective(objective: string | undefined): string | null {
+  if (!objective) return null;
+  const obj = objective.toUpperCase();
+  if (['OUTCOME_LEADS', 'LEAD_GENERATION'].includes(obj)) return 'leads';
+  if (['OUTCOME_TRAFFIC', 'LINK_CLICKS', 'TRAFFIC'].includes(obj)) return 'trafego';
+  if (['OUTCOME_SALES', 'CONVERSIONS', 'PRODUCT_CATALOG_SALES', 'STORE_VISITS'].includes(obj)) return 'vendas';
+  if (['OUTCOME_ENGAGEMENT', 'ENGAGEMENT', 'POST_ENGAGEMENT', 'VIDEO_VIEWS', 'PAGE_LIKES'].includes(obj)) return 'engajamento';
+  if (['OUTCOME_AWARENESS', 'BRAND_AWARENESS', 'REACH'].includes(obj)) return 'reconhecimento';
+  if (['OUTCOME_APP_PROMOTION', 'APP_INSTALLS'].includes(obj)) return 'app';
+  return null;
+}
+
+function normalizeGoogleChannelType(channelType: string | undefined): string | null {
+  if (!channelType) return null;
+  const type = channelType.toUpperCase();
+  if (type === 'SEARCH') return 'trafego';
+  if (type === 'DISPLAY') return 'reconhecimento';
+  if (type === 'SHOPPING') return 'vendas';
+  if (['VIDEO', 'DISCOVERY'].includes(type)) return 'reconhecimento';
+  if (['PERFORMANCE_MAX', 'SMART'].includes(type)) return 'vendas';
+  return 'trafego';
+}
 
 
 
@@ -241,7 +265,7 @@ export async function GET(request: NextRequest) {
 
           // Fetch campaign statuses in parallel with insights
           const statusUrl = new URL(`https://graph.facebook.com/v21.0/${acctNode}/campaigns`);
-          statusUrl.searchParams.set('fields', 'id,effective_status,daily_budget,lifetime_budget');
+          statusUrl.searchParams.set('fields', 'id,effective_status,daily_budget,lifetime_budget,objective');
           statusUrl.searchParams.set('limit', '200');
           statusUrl.searchParams.set('access_token', token);
 
@@ -257,7 +281,7 @@ export async function GET(request: NextRequest) {
           if (!insightsRes.ok) return;
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const insightsData = await insightsRes.json() as { data?: any[] };
-          const statusData: Record<string, { status: string; dailyBudget?: number }> = {};
+          const statusData: Record<string, { status: string; dailyBudget?: number; objective?: string }> = {};
           if (statusRes.ok) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const sd = await statusRes.json() as { data?: any[] };
@@ -265,6 +289,7 @@ export async function GET(request: NextRequest) {
               statusData[c.id] = {
                 status: c.effective_status ?? 'ACTIVE',
                 dailyBudget: c.daily_budget ? Number(c.daily_budget) / 100 : (c.lifetime_budget ? Number(c.lifetime_budget) / 100 : undefined),
+                objective: c.objective ?? undefined,
               };
             }
           }
@@ -285,6 +310,7 @@ export async function GET(request: NextRequest) {
               accountName: account.name,
               connectionId: conn.id,
               status: statusData[row.campaign_id]?.status ?? 'ACTIVE',
+              objective: normalizeMetaObjective(statusData[row.campaign_id]?.objective) ?? undefined,
               dailyBudget: statusData[row.campaign_id]?.dailyBudget,
               spend,
               impressions,
@@ -324,6 +350,7 @@ export async function GET(request: NextRequest) {
           const data = await gadsSearch(
             normalizedAccountId,
             `SELECT campaign.id, campaign.name, campaign.status,
+                    campaign.advertising_channel_type,
                     campaign_budget.amount_micros, campaign_budget.resource_name,
                     metrics.cost_micros, metrics.impressions, metrics.clicks,
                     metrics.conversions,
@@ -368,6 +395,7 @@ export async function GET(request: NextRequest) {
               connectionId: conn.id,
               loginCustomerId: loginCustomerId ?? undefined,
               status: campaign.status ?? 'ENABLED',
+              objective: normalizeGoogleChannelType(campaign.advertisingChannelType) ?? undefined,
               dailyBudget: budget.amountMicros ? Number(budget.amountMicros) / 1_000_000 : undefined,
               budgetResourceName: budget.resourceName ?? undefined,
               spend,

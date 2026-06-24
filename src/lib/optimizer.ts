@@ -23,6 +23,7 @@ export type OptimizerPayload = {
   nicho: OptimizerNiche;
   conta_plataforma: OptimizerPlatform;
   metas_do_cliente: {
+    objetivo_campanha: OptimizerObjective;
     cpl_meta: number | null;
     cpa_meta: number | null;
     roas_meta: number | null;
@@ -121,12 +122,15 @@ export type OptimizerAnalysisResult = OptimizerDiagnosis & {
   custo_estimado_usd: number;
 };
 
+export type OptimizerObjective = 'leads' | 'trafego' | 'vendas' | 'engajamento' | 'reconhecimento' | 'app' | null;
+
 export type OptimizerCampaignInput = {
   id: string;
   name: string;
   platform: 'meta' | 'google';
   accountName?: string;
   status: string;
+  objective?: string;
   dailyBudget?: number;
   spend: number;
   impressions: number;
@@ -206,6 +210,7 @@ export function buildOptimizerPayloadFromCampaign(params: {
     nicho: segmentToOptimizerNiche(client.segment),
     conta_plataforma: campaign.platform === 'meta' ? 'meta_ads' : 'google_ads',
     metas_do_cliente: {
+      objetivo_campanha: (campaign.objective as OptimizerObjective) ?? null,
       cpl_meta: cplMeta,
       cpa_meta: null,
       roas_meta: null,
@@ -321,13 +326,16 @@ export function applyLayerOneRules(payload: OptimizerPayload): OptimizerDiagnosi
   const data = payload.dados_da_conta;
   const metrics = data.metricas_periodo;
   const audience = data.publico_info;
+  const objetivo = goals.objetivo_campanha;
+  const isLeadsOrSales = !objetivo || objetivo === 'leads' || objetivo === 'vendas';
+  const isTraffic = objetivo === 'trafego';
   const target = goals.cpl_meta ?? goals.cpa_meta;
   const currentCost = metrics.cpl_cpa_atual;
   const daysRunning = data.dias_rodando ?? 0;
   const conversionsHistory = data.total_conversoes_historico ?? metrics.conversoes;
   const badCreative = poorCreative(payload);
 
-  if (target && currentCost && currentCost > target * 2 && daysRunning > 14 && conversionsHistory > 50) {
+  if (isLeadsOrSales && target && currentCost && currentCost > target * 2 && daysRunning > 14 && conversionsHistory > 50) {
     return {
       ...base(payload),
       nivel_critico: 'vermelho',
@@ -496,7 +504,7 @@ export function applyLayerOneRules(payload: OptimizerPayload): OptimizerDiagnosi
       ...base(payload),
       nivel_critico: 'vermelho',
       titulo_problema: 'Criativo nao gera cliques',
-      o_que_esta_acontecendo: `O CTR esta em ${metrics.ctr_link.toFixed(2)}% com frequencia abaixo de 2. O publico ainda nao esta saturado; o problema mais provavel e a promessa ou visual do criativo.`,
+      o_que_esta_acontecendo: `O CTR esta em ${metrics.ctr_link.toFixed(2)}% com frequencia abaixo de 2. O publico ainda nao esta saturado; o problema mais provavel e a promessa ou visual do criativo.${isTraffic ? ' Em campanha de trafego, CTR baixo significa custo por clique alto — metrica principal comprometida.' : ''}`,
       acoes: [
         {
           prioridade: 1,
@@ -524,7 +532,7 @@ export function applyLayerOneRules(payload: OptimizerPayload): OptimizerDiagnosi
     };
   }
 
-  if (daysRunning < 7 && conversionsHistory < 50) {
+  if (isLeadsOrSales && daysRunning < 7 && conversionsHistory < 50) {
     return {
       ...base(payload),
       nivel_critico: 'amarelo',
@@ -554,18 +562,36 @@ export function applyLayerOneRules(payload: OptimizerPayload): OptimizerDiagnosi
 }
 
 export function estimateCriticalLevel(payload: OptimizerPayload): OptimizerCriticalLevel {
+  const objetivo = payload.metas_do_cliente.objetivo_campanha;
+  const isLeadsOrSales = !objetivo || objetivo === 'leads' || objetivo === 'vendas';
   const target = payload.metas_do_cliente.cpl_meta ?? payload.metas_do_cliente.cpa_meta;
   const metrics = payload.dados_da_conta.metricas_periodo;
-  if (target && metrics.cpl_cpa_atual && metrics.cpl_cpa_atual > target * 1.6) return 'vermelho';
+  if (isLeadsOrSales && target && metrics.cpl_cpa_atual && metrics.cpl_cpa_atual > target * 1.6) return 'vermelho';
   if (metrics.ctr_link < 0.9 || (metrics.ritmo_gasto_percentual ?? 0) > 110) return 'vermelho';
-  if (target && metrics.cpl_cpa_atual && metrics.cpl_cpa_atual > target * 1.1) return 'amarelo';
+  if (isLeadsOrSales && target && metrics.cpl_cpa_atual && metrics.cpl_cpa_atual > target * 1.1) return 'amarelo';
   if ((metrics.frequencia ?? 0) > 3.2) return 'amarelo';
   return 'verde';
 }
 
 export function buildGreenDiagnosis(payload: OptimizerPayload): OptimizerDiagnosis {
   const metrics = payload.dados_da_conta.metricas_periodo;
+  const objetivo = payload.metas_do_cliente.objetivo_campanha;
   const target = payload.metas_do_cliente.cpl_meta ?? payload.metas_do_cliente.cpa_meta;
+  const isLeadsOrSales = !objetivo || objetivo === 'leads' || objetivo === 'vendas';
+  const metricasEmbasam: Record<string, string> = {
+    ctr_link: `${metrics.ctr_link.toFixed(2)}%`,
+    frequencia: String(metrics.frequencia ?? 'indisponivel'),
+  };
+  if (objetivo === 'trafego') {
+    metricasEmbasam.cpc = brl(metrics.cpc);
+    metricasEmbasam.cliques = String(metrics.cliques_link);
+  } else if (objetivo === 'engajamento' || objetivo === 'reconhecimento') {
+    metricasEmbasam.cpm = brl(metrics.cpm);
+    metricasEmbasam.impressoes = String(metrics.impressoes);
+  } else {
+    metricasEmbasam.cpl_atual = brl(metrics.cpl_cpa_atual);
+    metricasEmbasam.meta = brl(target);
+  }
   return {
     ...base(payload),
     nivel_critico: 'verde',
@@ -580,15 +606,10 @@ export function buildGreenDiagnosis(payload: OptimizerPayload): OptimizerDiagnos
         endpoint_sugerido: null,
       },
     ],
-    metricas_que_embasam: {
-      cpl_atual: brl(metrics.cpl_cpa_atual),
-      meta: brl(target),
-      ctr_link: `${metrics.ctr_link.toFixed(2)}%`,
-      frequencia: String(metrics.frequencia ?? 'indisponivel'),
-    },
+    metricas_que_embasam: metricasEmbasam,
     sugestao_criativo: null,
-    confianca: target ? 'media' : 'baixa',
-    observacao: target ? null : 'Defina CPL/CPA meta para aumentar a precisao da recomendacao.',
+    confianca: (isLeadsOrSales && target) ? 'media' : (!objetivo ? 'baixa' : 'media'),
+    observacao: !objetivo ? 'Objetivo da campanha nao identificado. Defina o objetivo para analises mais precisas.' : null,
   };
 }
 
@@ -631,22 +652,98 @@ Quando solicitacao = "sugestao_criativo", preencha o campo sugestao_criativo com
 - Angulo da mensagem (prova social, urgencia, beneficio direto, objecao, curiosidade)
 - Referencia ao que ja funcionou na conta (use os dados dos criativos recebidos)
 - Adaptacao ao nicho do cliente
+- Adaptacao ao objetivo da campanha (nao recomende formulario de lead para campanha de trafego, por exemplo)
 Seja especifico. Nao use genericos como "mostre o produto". Diga exatamente o que mostrar.`
     : '';
 
   return `Voce e o Otimizador do On_Reports, um analista senior de trafego pago especializado em Meta Ads e Google Ads.
 
-Sua funcao e analisar os dados de performance de campanhas e gerar diagnosticos precisos com recomendacoes de acao para os gestores de trafego.
+Sua funcao e analisar dados de performance de campanhas e gerar diagnosticos precisos com recomendacoes de acao para os gestores de trafego.
 
-REGRAS DE COMPORTAMENTO:
+==================================================
+PASSO 1 OBRIGATORIO — IDENTIFIQUE O OBJETIVO DA CAMPANHA
+==================================================
+Leia "metas_do_cliente.objetivo_campanha" ANTES de qualquer analise. Esse campo define qual e a metrica principal e o que e considerado sucesso ou fracasso:
+
+OBJETIVO = "leads":
+  Metrica principal: CPL (custo por lead).
+  O que analisar: CPL vs meta, taxa de conversao LP, volume de leads/dia, qualidade do publico.
+  CPL acima da meta E UM PROBLEMA CRITICO.
+  Segmentacoes importantes: faixa etaria com melhor conversao, genero, posicionamentos com menor CPL, criativos com maior taxa de conversao.
+
+OBJETIVO = "trafego":
+  Metrica principal: CPC e CTR.
+  O que analisar: CPC, CTR, volume de cliques, custo por clique, ritmo de gasto.
+  CPL NAO E RELEVANTE — nao mencione CPL como problema. Nao ha meta de lead aqui.
+  Segmentacoes: posicionamentos com menor CPC, faixa etaria com maior CTR, criativos com melhor CTR.
+  Um CPL "alto" e esperado e nao deve ser mencionado.
+
+OBJETIVO = "vendas":
+  Metrica principal: ROAS e CPA.
+  O que analisar: ROAS vs meta, CPA, receita gerada, taxa de conversao pos-clique.
+  CPL isolado nao e a metrica correta. Foque em retorno sobre investimento.
+  Segmentacoes: publicos com melhor ROAS, criativos com maior taxa de compra.
+
+OBJETIVO = "engajamento":
+  Metrica principal: taxa de engajamento (curtidas, comentarios, compartilhamentos, saves).
+  O que analisar: CPE (custo por engajamento), alcance, frequencia, tipos de interacao.
+  NAO espere leads ou conversoes de vendas. CPL nao existe como metrica valida aqui.
+  Criativos de alto engajamento geralmente tem CTR mais baixo que campanhas de trafego — isso e normal.
+  Segmentacoes: publicos mais engajados, melhores horarios de entrega, formatos com mais interacao.
+
+OBJETIVO = "reconhecimento":
+  Metrica principal: CPM, alcance unico e frequencia.
+  O que analisar: eficiencia do CPM, alcance vs orcamento, frequencia (ideal: 2 a 4 exposicoes).
+  Conversoes NAO sao esperadas. Um CPL alto e totalmente irrelevante.
+  Segmentacoes: faixas etarias com maior alcance, posicionamentos mais eficientes por CPM.
+
+OBJETIVO = null (nao identificado):
+  Analise conservadoramente com base no que os dados sugerem.
+  Mencione no campo "observacao" que o objetivo nao esta definido, o que limita a precisao.
+
+==================================================
+PASSO 2 — REGRAS DE ANALISE POR OBJETIVO
+==================================================
+- NUNCA avalie CPL em campanhas de trafego, engajamento ou reconhecimento.
+- NUNCA diga que "conversoes estao baixas" em campanhas de engajamento ou reconhecimento.
+- NUNCA chame de "problema" uma metrica que nao e a metrica principal do objetivo.
+- SEMPRE adapte o que e "vermelho" vs "verde" ao objetivo da campanha.
+- SEMPRE mencione segmentacoes concretas nas acoes: faixa etaria, genero, posicionamento, criativo, copy.
+
+==================================================
+PASSO 3 — DIAGNOSTICO CRUZADO
+==================================================
+Cruze multiplas variaveis. Nunca diagnostique com base em uma metrica isolada:
+
+TRAFEGO E LEADS:
+- CPM subiu + CTR subiu + Frequencia alta = publico saturado (trocar publico, nao criativo).
+- CPM normal + CTR baixo + Frequencia baixa = criativo fraco ou publico errado (testar novo angulo).
+- CTR alto + CPL alto = problema na landing page, formulario ou alinhamento criativo-oferta.
+- CPL alto + campanha nova (menos de 7 dias ou menos de 50 conversoes) = aprendizado, nao intervir.
+- ROAS/CPL bom + frequencia baixa + orcamento sem estouro = oportunidade de escalar (+20% verba).
+
+ENGAJAMENTO:
+- Alta frequencia + baixa taxa de engajamento = criativo esgotado, renovar conteudo.
+- CPE alto + alcance baixo = publico muito estreito ou lance competitivo.
+- CTR baixo em campanha de engajamento = normal se as interacoes estiverem altas.
+
+RECONHECIMENTO:
+- Frequencia abaixo de 1.5 = orcamento insuficiente para impactar o publico.
+- Frequencia acima de 5 = saturacao, ampliar publico ou pausar temporariamente.
+- CPM acima de benchmark do nicho = lance muito competitivo ou publico estreito.
+
+==================================================
+REGRAS DE COMPORTAMENTO
+==================================================
 1. Responda SEMPRE em JSON valido, sem texto fora do JSON, sem markdown, sem explicacoes extras.
-2. Seja direto e especifico. Nada de generico. Cada diagnostico deve referenciar os numeros reais recebidos.
-3. Use linguagem simples.
-4. Priorize as acoes da mais impactante para a menos impactante.
+2. Seja direto e especifico. Nada de generico. Referencie os numeros reais recebidos.
+3. Use linguagem simples e direta.
+4. Priorize acoes da mais impactante para a menos impactante.
 5. Considere o nicho do cliente ao formular recomendacoes.
-6. Nunca recomende acoes que o sistema nao consegue executar. As acoes disponiveis estao listadas no payload.
-7. Indique o nivel de confianca: "alta", "media" ou "baixa".
-8. Se os dados forem insuficientes, diga claramente no campo "observacao".
+6. Nunca recomende acoes que o sistema nao consegue executar. Acoes disponiveis estao no payload.
+7. Indique nivel de confianca: "alta", "media" ou "baixa".
+8. Se dados forem insuficientes, diga claramente no campo "observacao".
+9. Nas acoes, inclua segmentacoes praticas: faixa etaria, genero, posicionamento, criativo ou copy.
 
 ESTRUTURA DO JSON DE SAIDA:
 {
@@ -658,30 +755,21 @@ ESTRUTURA DO JSON DE SAIDA:
   "acoes": [
     {
       "prioridade": 1,
-      "acao": "string",
+      "acao": "string — inclua segmentacao especifica quando aplicavel (ex: pausar faixa 45+ com CPC acima de R$ 2,50)",
       "por_que": "string",
       "executavel_pelo_sistema": true,
       "endpoint_sugerido": "string ou null"
     }
   ],
   "metricas_que_embasam": {
-    "metrica": "valor real recebido",
+    "metrica_principal": "valor real — use a metrica correta para o objetivo",
     "referencia": "meta ou benchmark",
     "desvio": "ex: +42% acima da meta"
   },
   "sugestao_criativo": "string ou null",
   "confianca": "alta | media | baixa",
   "observacao": "string ou null"
-}
-
-PRINCIPIOS DE ANALISE:
-- Sempre cruze multiplas variaveis. Nunca diagnostique com base em uma metrica isolada.
-- CPM subiu + CTR subiu + Frequencia alta = publico saturado.
-- CPM normal + CTR baixo + Frequencia baixa = criativo fraco ou publico errado.
-- CTR alto + CPL alto + Taxa de conversao LP baixa = problema na landing page.
-- CPL alto + campanha com menos de 7 dias + menos de 50 conversoes = fase de aprendizado.
-- ROAS acima da meta + frequencia baixa + orcamento nao estourado = oportunidade de escalar.
-- Considere fase da campanha, nicho, tendencia recente e volume de dados.${creativeAddon}`;
+}${creativeAddon}`;
 }
 
 export function extractJsonObject(text: string): unknown {
