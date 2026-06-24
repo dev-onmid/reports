@@ -328,8 +328,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     await ensureCrmMetricsColumns(pool);
     const [newLinks, g, m, legacyMetaLinks, legacyMetaIntegration] = await Promise.all([
       safeRows(pool, 'SELECT * FROM public.client_account_links WHERE client_id = $1', [clientId]),
-      safeRows(pool, 'SELECT * FROM public.google_connections'),
-      safeRows(pool, 'SELECT * FROM public.meta_connections'),
+      safeRows(pool, "SELECT * FROM public.google_connections WHERE status = 'connected'"),
+      safeRows(pool, "SELECT * FROM public.meta_connections WHERE status = 'connected'"),
       safeRows(pool, 'SELECT * FROM public.meta_ads_connections WHERE client_id = $1', [clientId]),
       safeRows(pool, "SELECT * FROM public.meta_integration WHERE id = 'global' AND status = 'connected'"),
     ]);
