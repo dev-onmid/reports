@@ -5452,24 +5452,6 @@ export default function GeneralDashboard() {
       status: googleConv > 50 ? 'Excelente' as const : googleConv > 0 ? 'Bom' as const : 'Neutro' as const,
       logo: <GoogleAdsMark className="h-4 w-4" />,
     },
-    {
-      channel: 'Instagram Ads',
-      investment: '—',
-      leads: '—',
-      cpl: '—',
-      conversion: '—',
-      status: 'Neutro' as const,
-      logo: <span className="flex h-4 w-4 items-center justify-center rounded bg-pink-500/20 text-[9px] text-pink-300">IG</span>,
-    },
-    {
-      channel: 'CRM / Orgânico',
-      investment: '—',
-      leads: premiumValue(crmLeads),
-      cpl: '—',
-      conversion: crmLeads > 0 ? premiumValue((crmSales / crmLeads) * 100, 'percent') : '—',
-      status: crmLeads > 0 ? 'Bom' as const : 'Neutro' as const,
-      logo: <span className="flex h-4 w-4 items-center justify-center rounded bg-[#6cff2f]/15 text-[9px] text-[#6cff2f]">CRM</span>,
-    },
   ];
 
   return (
