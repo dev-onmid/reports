@@ -11,13 +11,14 @@ import {
   Loader2,
   MousePointerClick,
   RefreshCw,
+  Play,
   Target,
   ThumbsDown,
   WandSparkles,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ClientAvatar } from '@/components/client-avatar';
-import { getAuthSession } from '@/lib/auth-store';
+import { callerHeaders, getAuthSession } from '@/lib/auth-store';
 import type { Client } from '@/lib/mock-data';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 import type { OptimizerAnalysisResult } from '@/lib/optimizer';
@@ -80,7 +81,10 @@ export default function OtimizadorPage() {
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState('');
   const [loading, setLoading] = useState(true);
+  const [runLoading, setRunLoading] = useState(false);
+  const [runMessage, setRunMessage] = useState<string | null>(null);
   const [actionFeedback, setActionFeedback] = useState<Record<number, string>>({});
+  const isAdmin = getAuthSession()?.role === 'Administrador';
 
   async function loadQueue() {
     setLoading(true);
@@ -170,6 +174,34 @@ export default function OtimizadorPage() {
     }
   }
 
+  async function runAllAccountsNow() {
+    setRunLoading(true);
+    setRunMessage(null);
+    try {
+      const res = await fetch('/api/otimizador/daily?limitClients=200&limitCampaigns=8', {
+        method: 'POST',
+        headers: callerHeaders(),
+      });
+      const data = await res.json().catch(() => ({})) as {
+        analyzed?: number;
+        errors?: number;
+        stoppedByBudget?: boolean;
+        error?: string;
+      };
+      if (!res.ok) {
+        setRunMessage(data.error ?? 'Não foi possível iniciar a análise geral.');
+        return;
+      }
+      const suffix = data.stoppedByBudget ? ' O restante continua no próximo processamento.' : '';
+      setRunMessage(`Análise geral concluída: ${data.analyzed ?? 0} itens analisados, ${data.errors ?? 0} erros.${suffix}`);
+      await loadQueue();
+    } catch {
+      setRunMessage('Não foi possível iniciar a análise geral agora.');
+    } finally {
+      setRunLoading(false);
+    }
+  }
+
   return (
     <div className="mx-auto max-w-7xl space-y-5 p-4 sm:p-6">
       <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -219,6 +251,20 @@ export default function OtimizadorPage() {
           </div>
         </div>
       </header>
+
+      {isAdmin && (
+        <section className="flex flex-col gap-3 rounded-[var(--radius)] border border-primary/30 bg-primary/5 p-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="text-sm font-semibold text-foreground">Análise geral manual</p>
+            <p className="text-xs text-muted-foreground">Roda agora o mesmo processamento automático das 7h para todas as contas ativas.</p>
+            {runMessage && <p className="mt-2 text-xs text-primary">{runMessage}</p>}
+          </div>
+          <Button onClick={runAllAccountsNow} disabled={runLoading}>
+            {runLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+            Analisar todas agora
+          </Button>
+        </section>
+      )}
 
       <section className="grid gap-3 md:grid-cols-5">
         <div className="rounded-[var(--radius)] border border-border bg-card p-4">

@@ -80,7 +80,7 @@ export function clearAuthSession() {
  */
 export function callerHeaders(): Record<string, string> {
   const session = getAuthSession();
-  return session ? { 'x-onmid-user-id': session.userId } : {};
+  return session ? { 'x-onmid-user-id': session.userId, 'x-onmid-role': session.role } : {};
 }
 
 /**

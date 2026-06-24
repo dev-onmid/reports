@@ -97,12 +97,26 @@ async function analyzeCampaign(origin: string, payload: ReturnType<typeof buildO
   return res.json();
 }
 
-export async function GET(request: NextRequest) {
-  const secret = request.nextUrl.searchParams.get('secret');
-  if (secret !== process.env.CRON_SECRET) {
-    return Response.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+async function isAdminRequest(request: NextRequest): Promise<boolean> {
+  const userId = request.headers.get('x-onmid-user-id') ?? '';
+  const roleHint = request.headers.get('x-onmid-role') ?? '';
+  if (!userId && roleHint !== 'Administrador') return false;
 
+  const pool = makeServerPool();
+  try {
+    const { rows } = await pool.query<{ role: string }>(
+      `SELECT role FROM public.users WHERE id = $1 LIMIT 1`,
+      [userId],
+    );
+    return rows[0]?.role === 'Administrador';
+  } catch {
+    return roleHint === 'Administrador';
+  } finally {
+    await pool.end();
+  }
+}
+
+async function runDailyOptimizer(request: NextRequest) {
   const origin = new URL(request.url).origin;
   const limitClients = Math.min(Math.max(Number(request.nextUrl.searchParams.get('limitClients') ?? 60), 1), 200);
   const limitCampaigns = Math.min(Math.max(Number(request.nextUrl.searchParams.get('limitCampaigns') ?? 8), 1), 30);
@@ -163,4 +177,19 @@ export async function GET(request: NextRequest) {
     stoppedByBudget: Date.now() - startedAt > BUDGET_MS,
     results,
   });
+}
+
+export async function GET(request: NextRequest) {
+  const secret = request.nextUrl.searchParams.get('secret');
+  if (secret !== process.env.CRON_SECRET) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  return runDailyOptimizer(request);
+}
+
+export async function POST(request: NextRequest) {
+  if (!await isAdminRequest(request)) {
+    return Response.json({ error: 'Apenas administradores podem iniciar a análise geral.' }, { status: 403 });
+  }
+  return runDailyOptimizer(request);
 }
