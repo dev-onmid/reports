@@ -1259,6 +1259,20 @@ function CreativePreviewOverlay({
   const showImg = !!resolvedImgUrl && imgStage !== 'error';
   const isVideo = creative.mediaType === 'video';
 
+  // Build iframe embed URL for Meta/Instagram video when direct CDN fails
+  const iframeEmbedUrl = (() => {
+    if (!creative.permalink) return null;
+    if (creative.permalink.includes('instagram.com')) {
+      // Extract shortcode from https://www.instagram.com/p/SHORTCODE/
+      const match = creative.permalink.match(/instagram\.com\/(?:p|reel)\/([A-Za-z0-9_-]+)/);
+      if (match) return `https://www.instagram.com/p/${match[1]}/embed/`;
+    }
+    // Facebook video embed
+    return `https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(creative.permalink)}&width=500&show_text=false&appId`;
+  })();
+
+  const showEmbed = isVideo && (videoFailed || !creative.videoUrl) && !!iframeEmbedUrl;
+
   return (
     <div className="fixed inset-0 z-[100] bg-black/90 p-4 backdrop-blur-sm" onClick={onClose}>
       <button
@@ -1281,6 +1295,14 @@ function CreativePreviewOverlay({
               autoPlay
               className="h-full w-full bg-black object-contain"
               onError={() => setVideoFailed(true)}
+            />
+          ) : showEmbed ? (
+            // iframe embed — reliable playback via Meta/Instagram player when CDN URL fails
+            <iframe
+              src={iframeEmbedUrl!}
+              className="h-full w-full border-0 bg-black"
+              allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share"
+              allowFullScreen
             />
           ) : showImg ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -1311,8 +1333,8 @@ function CreativePreviewOverlay({
             </div>
           )}
 
-          {/* When video source failed but there is a permalink — show an overlay link */}
-          {isVideo && (videoFailed || (!showVideo && !creative.videoUrl)) && creative.permalink && showImg && (
+          {/* When using CDN video with a permalink — offer embed as fallback */}
+          {isVideo && videoFailed && !iframeEmbedUrl && creative.permalink && showImg && (
             <div className="absolute inset-x-0 bottom-0 flex justify-center pb-4">
               <a
                 href={creative.permalink}
@@ -1956,6 +1978,7 @@ function CampaignPerformanceTable({
   const [childStatus, setChildStatus] = useState<Record<string, string>>({});
   const [adPreview, setAdPreview] = useState<{ ad: MetaAdWithMetrics; x: number; y: number } | null>(null);
   const adPreviewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [tableExpanded, setTableExpanded] = useState(false);
 
   useEffect(() => { setCampaigns(initialCampaigns); }, [initialCampaigns]);
 
@@ -2205,16 +2228,12 @@ function CampaignPerformanceTable({
     return (
       <tr
         key={row.key}
-        className={cn('transition-colors hover:bg-white/[0.07]', !isActive && 'opacity-60', levelBg)}
-        style={row.level === 0
-          ? { borderTop: `1px solid ${rowColor}40`, borderBottom: `1px solid ${rowColor}40` }
-          : { borderTop: `1px solid ${rowColor}18` }
-        }
+        className={cn('border-t border-white/[0.07] transition-colors hover:bg-white/[0.07]', !isActive && 'opacity-60', levelBg)}
       >
         {/* Name column — whole name area is clickable when expandable */}
         <td
           className="max-w-[300px] px-2 py-0"
-          style={{ borderLeft: `3px solid ${rowColor}${row.level === 0 ? 'cc' : '50'}` }}
+          style={{ borderLeft: `2px solid ${row.level === 0 ? rowColor + '99' : rowColor + '40'}` }}
           onMouseEnter={isMetaAd ? (e) => {
             if (adPreviewTimer.current) clearTimeout(adPreviewTimer.current);
             const rect = e.currentTarget.getBoundingClientRect();
@@ -2398,12 +2417,17 @@ function CampaignPerformanceTable({
     );
   }
 
+  const campaignCount = campaigns.length;
+
   return (
     <>
       {optimizeCampaign && <CampaignOptimizeDrawer campaign={optimizeCampaign} onClose={() => setOptimizeCampaign(null)} />}
       {adPreview && <AdCreativePreview ad={adPreview.ad} x={adPreview.x} y={adPreview.y} />}
-      <div className="overflow-hidden rounded-xl border border-white/15 bg-black/35 shadow-[0_0_28px_rgba(255,255,255,0.08)] h-full">
-        <div className="overflow-auto h-full">
+      <div className="overflow-hidden rounded-xl border border-white/15 bg-black/35 shadow-[0_0_28px_rgba(255,255,255,0.08)]">
+        <div
+          className="overflow-auto transition-all duration-300"
+          style={{ maxHeight: tableExpanded ? '9999px' : '288px' }}
+        >
           <table className="w-full min-w-[1080px] text-left">
             <thead className="border-b border-white/15 bg-white/[0.06] sticky top-0 z-10">
               <tr className="text-[10px] font-bold uppercase tracking-widest text-foreground/62">
@@ -2423,6 +2447,19 @@ function CampaignPerformanceTable({
             </tbody>
           </table>
         </div>
+        {campaignCount > 4 && (
+          <button
+            type="button"
+            onClick={() => setTableExpanded(prev => !prev)}
+            className="flex w-full items-center justify-center gap-1.5 border-t border-white/[0.06] py-2 text-[11px] font-semibold text-foreground/50 transition-colors hover:bg-white/[0.04] hover:text-foreground/80"
+          >
+            {tableExpanded ? (
+              <><ChevronUp className="h-3.5 w-3.5" /> Recolher</>
+            ) : (
+              <><ChevronDown className="h-3.5 w-3.5" /> Ver todas {campaignCount} campanhas</>
+            )}
+          </button>
+        )}
       </div>
     </>
   );
@@ -5752,15 +5789,12 @@ export default function GeneralDashboard() {
                 </div>
                 <div className="rounded-[12px] border border-white/[0.08] bg-[#071014] p-3">
                   <div className="mb-3 flex items-center gap-2 text-sm font-black uppercase tracking-[0.06em] text-[#f4f7f8]"><GoogleAdsMark className="h-5 w-5" /> Google Ads</div>
-                  <div className="grid gap-2 sm:grid-cols-4 lg:grid-cols-8">
+                  <div className="grid gap-2 sm:grid-cols-5">
                     <MiniPlatformMetric label="Saldo Google Ads" value={googleBalance > 0 ? premiumValue(googleBalance, 'currency') : '—'} logo={<GoogleAdsMark className="h-4 w-4" />} sub="Saldo disponível" />
                     <MiniPlatformMetric label="Impressões" value={premiumValue(googleImpressions)} icon={BarChart3} />
                     <MiniPlatformMetric label="Cliques" value={premiumValue(googleClicks)} icon={MousePointerClick} />
                     <MiniPlatformMetric label="CPC Médio" value={googleCpc > 0 ? premiumValue(googleCpc, 'currency') : '—'} icon={Tag} />
                     <MiniPlatformMetric label="Conversões" value={premiumValue(googleConv)} icon={CheckCircle2} />
-                    <MiniPlatformMetric label="Quota IS" value={googleSearchImprShare > 0 ? premiumValue(googleSearchImprShare, 'percent') : '—'} icon={Target} sub={googleSearchImprShare > 0 ? '% impressões ganhas' : undefined} />
-                    <MiniPlatformMetric label="IS Perdida Orç." value={googleSearchBudgetLostIS > 0 ? premiumValue(googleSearchBudgetLostIS, 'percent') : '—'} icon={TrendingUp} />
-                    <MiniPlatformMetric label="Topo Absoluto" value={googleSearchAbsTopIS > 0 ? premiumValue(googleSearchAbsTopIS, 'percent') : '—'} icon={Zap} />
                   </div>
                 </div>
               </div>
@@ -5815,6 +5849,28 @@ export default function GeneralDashboard() {
                 <div className="mb-3 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
                   Campanhas com Veiculação
                 </div>
+                {/* Métricas competitivas Search */}
+                {(googleSearchImprShare > 0 || googleSearchBudgetLostIS > 0 || googleSearchAbsTopIS > 0) && (
+                  <div className="mb-3 grid grid-cols-3 gap-2">
+                    <div className="rounded-[8px] border border-white/[0.07] bg-[#0a1419]/80 px-3 py-2">
+                      <p className="text-[9px] font-bold uppercase tracking-wider text-[#9aa4aa]">Quota IS</p>
+                      <p className="mt-0.5 text-sm font-black text-[#f4f7f8]">{googleSearchImprShare > 0 ? `${googleSearchImprShare.toFixed(1)}%` : '—'}</p>
+                      <p className="text-[9px] text-[#9aa4aa]/70">% impressões ganhas</p>
+                    </div>
+                    <div className="rounded-[8px] border border-white/[0.07] bg-[#0a1419]/80 px-3 py-2">
+                      <p className="text-[9px] font-bold uppercase tracking-wider text-[#9aa4aa]">IS Perdida por Orç.</p>
+                      <p className={`mt-0.5 text-sm font-black ${googleSearchBudgetLostIS > 20 ? 'text-red-400' : 'text-[#f4f7f8]'}`}>
+                        {googleSearchBudgetLostIS > 0 ? `${googleSearchBudgetLostIS.toFixed(1)}%` : '—'}
+                      </p>
+                      <p className="text-[9px] text-[#9aa4aa]/70">perdida por budget</p>
+                    </div>
+                    <div className="rounded-[8px] border border-white/[0.07] bg-[#0a1419]/80 px-3 py-2">
+                      <p className="text-[9px] font-bold uppercase tracking-wider text-[#9aa4aa]">Topo Absoluto</p>
+                      <p className="mt-0.5 text-sm font-black text-[#6cff2f]">{googleSearchAbsTopIS > 0 ? `${googleSearchAbsTopIS.toFixed(1)}%` : '—'}</p>
+                      <p className="text-[9px] text-[#9aa4aa]/70">1ª posição Search</p>
+                    </div>
+                  </div>
+                )}
                 <CampaignPerformanceTable
                   campaigns={googleCampaigns}
                   loading={campaignsLoading}

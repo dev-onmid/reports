@@ -52,7 +52,7 @@ async function gadsSearch(customerId: string, query: string, accessToken: string
 }
 
 async function fetchGadsAccountMetrics(customerId: string, accessToken: string, loginCustomerId: string | undefined, gaqlPeriod: string) {
-  const query = `SELECT metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.average_cpc, metrics.conversions, metrics.cost_per_conversion,
+  const query = `SELECT metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.average_cpc, metrics.conversions, metrics.all_conversions, metrics.cost_per_conversion,
        metrics.search_impression_share, metrics.search_budget_lost_impression_share, metrics.search_rank_lost_impression_share,
        metrics.search_absolute_top_impression_share, metrics.search_top_impression_share
      FROM customer WHERE ${gaqlPeriod}`;
@@ -72,7 +72,10 @@ async function fetchGadsAccountMetrics(customerId: string, accessToken: string, 
     return null;
   }
   const spend = (m.costMicros ?? 0) / 1_000_000;
-  const conversions = Number(m.conversions ?? 0);
+  const primaryConv = Number(m.conversions ?? 0);
+  const allConv = Number(m.allConversions ?? 0);
+  // Use all_conversions when primary conversions = 0 (account may not have primary conversion actions configured)
+  const conversions = primaryConv > 0 ? primaryConv : allConv;
   return {
     cost: spend,
     impressions: Number(m.impressions ?? 0),
@@ -97,7 +100,7 @@ type DailyMetrics = {
 type CrmDailyRow = { date: string; revenue: number; sales: number; leads: number };
 
 async function fetchGadsAccountDailyMetrics(customerId: string, accessToken: string, loginCustomerId: string | undefined, gaqlPeriod: string) {
-  const query = `SELECT segments.date, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions
+  const query = `SELECT segments.date, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.all_conversions
      FROM customer WHERE ${gaqlPeriod}
      ORDER BY segments.date`;
   let data = await gadsSearch(customerId, query, accessToken, loginCustomerId);
@@ -114,7 +117,7 @@ async function fetchGadsAccountDailyMetrics(customerId: string, accessToken: str
       cost: Number(m.costMicros ?? 0) / 1_000_000,
       impressions: Number(m.impressions ?? 0),
       clicks: Number(m.clicks ?? 0),
-      conversions: Number(m.conversions ?? 0),
+      conversions: (() => { const p = Number(m.conversions ?? 0); const a = Number(m.allConversions ?? 0); return p > 0 ? p : a; })(),
     };
   }).filter((row) => row.date);
 }
@@ -306,7 +309,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const metaPeriod = resolveMetaPeriod(period, dateFrom, dateTo);
   const crmPeriod = crmDateRange(period, dateFrom, dateTo);
 
-  const cacheKey = `metrics:v3:${clientId}:${period}:${dateFrom}:${dateTo}`;
+  const cacheKey = `metrics:v4:${clientId}:${period}:${dateFrom}:${dateTo}`;
   const cached = getCached(cacheKey);
   if (cached) return cachedJson(cached.data, true, cached.cachedAt);
 
