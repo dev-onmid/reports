@@ -135,7 +135,7 @@ async function sendViaEvolution(
   // Evolution API expects either a plain http URL or raw base64 (no data: prefix).
   // Canvas uploads arrive as data URLs — strip the prefix before sending.
   function resolveMediaPayload(raw: string, mediatype: string) {
-    const dataUrlMatch = raw.match(/^data:([^;]+);base64,(.+)$/s);
+    const dataUrlMatch = raw.match(/^data:([^;]+);base64,([\s\S]+)$/);
     if (dataUrlMatch) {
       const mime = dataUrlMatch[1];
       const b64  = dataUrlMatch[2];
