@@ -4467,28 +4467,80 @@ function CompactKeywordTable({ keywords, loading }: { keywords: GoogleKeyword[];
   );
 }
 
-function CreativeRankPreview({ creatives, loading, onPreview }: {
+function creativeObjectiveMetrics(c: TopCreative): Array<{ label: string; value: string }> {
+  if (c.leads > 0) {
+    return [
+      { label: 'Leads', value: premiumValue(c.leads) },
+      { label: 'CPL', value: c.cpl > 0 ? premiumValue(c.cpl, 'currency') : '—' },
+      { label: 'CTR', value: `${c.ctr.toFixed(2)}%` },
+    ];
+  }
+  return [
+    { label: 'Cliques', value: premiumValue(c.clicks) },
+    { label: 'CTR', value: `${c.ctr.toFixed(2)}%` },
+    { label: 'Invest.', value: premiumValue(c.spend, 'currency') },
+  ];
+}
+
+function CreativeHorizontalStrip({ creatives, loading, onPreview }: {
   creatives: TopCreative[];
   loading: boolean;
   onPreview: (creative: TopCreative) => void;
 }) {
-  const rows = creatives.slice(0, 4);
-  if (loading) return <div className="grid grid-cols-4 gap-3">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-40 animate-pulse rounded-xl bg-white/[0.06]" />)}</div>;
-  if (!rows.length) return <div className="py-8 text-center text-sm text-[#9aa4aa]">Nenhum criativo encontrado.</div>;
+  if (loading) {
+    return (
+      <div className="flex gap-3 overflow-x-auto pb-2">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="w-[170px] shrink-0 animate-pulse rounded-xl bg-white/[0.06]" style={{ height: 260 }} />
+        ))}
+      </div>
+    );
+  }
+  if (!creatives.length) {
+    return <div className="py-8 text-center text-sm text-[#9aa4aa]">Nenhum criativo encontrado.</div>;
+  }
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-      {rows.map((creative, index) => {
+    <div className="flex gap-3 overflow-x-auto pb-2 [scrollbar-width:thin] [scrollbar-color:#2a2d3a_transparent]">
+      {creatives.slice(0, 10).map((creative, index) => {
         const image = creative.imageUrl || creative.thumbnailUrl;
+        const metrics = creativeObjectiveMetrics(creative);
+        const isVideo = creative.mediaType === 'video';
         return (
-          <button key={creative.adId} type="button" onClick={() => onPreview(creative)} className="group text-left">
-            <div className="relative aspect-[4/5] overflow-hidden rounded-[10px] border border-white/[0.08] bg-[#071014]">
-              {image ? <img src={image} alt={creative.adName} className="h-full w-full object-cover transition-transform group-hover:scale-105" /> : <div className="flex h-full items-center justify-center text-[#9aa4aa]"><ImageIcon className="h-7 w-7" /></div>}
-              <span className="absolute left-2 top-2 rounded-md bg-[#6cff2f] px-1.5 py-0.5 text-xs font-black text-black">{index + 1}</span>
+          <button
+            key={creative.adId}
+            type="button"
+            onClick={() => onPreview(creative)}
+            className="group w-[170px] shrink-0 overflow-hidden rounded-xl border border-white/[0.08] bg-[#0d1519] text-left transition hover:border-[#6cff2f]/40"
+          >
+            <div className="relative overflow-hidden bg-[#071014]" style={{ aspectRatio: '4/5' }}>
+              {image
+                ? <img src={image} alt={creative.adName} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" />
+                : <div className="flex h-full items-center justify-center text-[#9aa4aa]"><ImageIcon className="h-6 w-6" /></div>}
+              {isVideo && (
+                <span className="absolute left-2 top-2 flex h-5 w-5 items-center justify-center rounded-full bg-black/70">
+                  <Play className="h-2.5 w-2.5 fill-white text-white" />
+                </span>
+              )}
+              <span className="absolute bottom-2 left-2 flex h-5 w-5 items-center justify-center rounded-full bg-black/85 text-[10px] font-black text-white">{index + 1}</span>
+              <span className="absolute right-2 top-2 rounded bg-[#6cff2f] px-1.5 py-0.5 text-[9px] font-black text-black">
+                {premiumValue(creative.spend, 'currency')}
+              </span>
             </div>
-            <div className="mt-2 grid grid-cols-3 gap-1 text-[10px] text-[#a7b0b6]">
-              <span>Invest.<br /><b className="text-[#f4f7f8]">{premiumValue(creative.spend, 'currency')}</b></span>
-              <span>Leads<br /><b className="text-[#f4f7f8]">{premiumValue(creative.leads)}</b></span>
-              <span>CPL<br /><b className="text-[#f4f7f8]">{creative.cpl > 0 ? premiumValue(creative.cpl, 'currency') : '—'}</b></span>
+            <div className="p-2">
+              {creative.campaignName && (
+                <p className="mb-1 truncate text-[9px] font-semibold uppercase tracking-[0.05em] text-[#6cff2f]/70" title={creative.campaignName}>
+                  {creative.campaignName}
+                </p>
+              )}
+              <p className="mb-2 truncate text-[10px] font-bold text-[#dce4e8]" title={creative.adName}>{creative.adName}</p>
+              <div className="grid grid-cols-3 gap-1">
+                {metrics.map(m => (
+                  <div key={m.label} className="rounded border border-white/[0.07] bg-white/[0.04] px-1 py-1">
+                    <p className="text-[8px] font-bold uppercase tracking-wider text-[#9aa4aa]">{m.label}</p>
+                    <p className="text-[10px] font-black text-[#f4f7f8]">{m.value}</p>
+                  </div>
+                ))}
+              </div>
             </div>
           </button>
         );
@@ -5542,40 +5594,55 @@ export default function GeneralDashboard() {
               <ChannelSummaryTable rows={channelRows} />
             </div>
 
-            <div className="grid gap-4 xl:grid-cols-2">
-              <PremiumPanel className="border-[#168BFF]/28 p-4 shadow-[0_0_40px_rgba(22,139,255,0.12)]">
-                <div className="mb-4 flex items-center justify-between">
-                  <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]"><MetaAdsMark className="h-5 w-5 text-[#168BFF]" /> Meta Ads</h3>
-                  <Link href="/resultados" className="text-xs font-black text-[#6cff2f] hover:text-[#8bff50] transition-colors">Ver todas</Link>
-                </div>
-                <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
-                  <div>
-                    <div className="mb-3 flex items-center gap-2 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">Melhores Criativos <Info className="h-3.5 w-3.5 text-[#9aa4aa]" /></div>
-                    <CreativeRankPreview creatives={creatives} loading={creativesLoading} onPreview={setPreviewCreative} />
-                  </div>
-                  <div>
-                    <div className="mb-3 flex items-center justify-between text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]"><span>Top Campanhas Meta</span><Link href="/resultados" className="text-[#6cff2f] hover:text-[#8bff50] transition-colors">Ver todas</Link></div>
-                    <CompactCampaignTable campaigns={metaCampaigns} loading={campaignsLoading} platform="meta" />
-                  </div>
-                </div>
-              </PremiumPanel>
+            {/* ── Meta Ads: criativos + campanhas com veiculação ── */}
+            <PremiumPanel className="border-[#168BFF]/28 shadow-[0_0_40px_rgba(22,139,255,0.12)]">
+              <div className="flex items-center justify-between px-4 pt-4 pb-3">
+                <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">
+                  <MetaAdsMark className="h-5 w-5 text-[#168BFF]" /> Meta Ads
+                </h3>
+                <Link href="/resultados" className="text-xs font-black text-[#6cff2f] hover:text-[#8bff50] transition-colors">Ver todas</Link>
+              </div>
 
-              <PremiumPanel className="border-[#4285F4]/24 p-4 shadow-[0_0_40px_rgba(66,133,244,0.10)]">
-                <div className="mb-4 flex items-center justify-between">
-                  <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]"><GoogleAdsMark className="h-5 w-5" /> Google Ads</h3>
+              {/* Melhores Criativos — scroll horizontal, full-width */}
+              <div className="px-4 pb-4">
+                <div className="mb-3 flex items-center gap-2 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
+                  Melhores Criativos <Info className="h-3.5 w-3.5 text-[#9aa4aa]" />
                 </div>
-                <div className="grid gap-4 lg:grid-cols-2">
-                  <div>
-                    <div className="mb-3 flex items-center justify-between text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]"><span>Top Campanhas Google</span><Link href="/resultados" className="text-[#6cff2f] hover:text-[#8bff50] transition-colors">Ver todas</Link></div>
-                    <CompactCampaignTable campaigns={googleCampaigns} loading={campaignsLoading} platform="google" />
-                  </div>
-                  <div>
-                    <div className="mb-3 flex items-center justify-between text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]"><span>Top Palavras-chave</span><Link href="/resultados" className="text-[#6cff2f] hover:text-[#8bff50] transition-colors">Ver todas</Link></div>
-                    <CompactKeywordTable keywords={keywords} loading={keywordsLoading} />
-                  </div>
+                <CreativeHorizontalStrip creatives={creatives} loading={creativesLoading} onPreview={setPreviewCreative} />
+              </div>
+
+              {/* Campanhas com Veiculação — abaixo dos criativos */}
+              <div className="border-t border-white/[0.06] px-4 py-4">
+                <div className="mb-3 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
+                  Campanhas com Veiculação
                 </div>
-              </PremiumPanel>
-            </div>
+                <CompactCampaignTable campaigns={metaCampaigns} loading={campaignsLoading} platform="meta" />
+              </div>
+            </PremiumPanel>
+
+            {/* ── Google Ads: campanhas + keywords ── */}
+            <PremiumPanel className="border-[#4285F4]/24 p-4 shadow-[0_0_40px_rgba(66,133,244,0.10)]">
+              <div className="mb-4 flex items-center justify-between">
+                <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">
+                  <GoogleAdsMark className="h-5 w-5" /> Google Ads
+                </h3>
+                <Link href="/resultados" className="text-xs font-black text-[#6cff2f] hover:text-[#8bff50] transition-colors">Ver todas</Link>
+              </div>
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div>
+                  <div className="mb-3 flex items-center justify-between text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
+                    <span>Top Campanhas Google</span>
+                  </div>
+                  <CompactCampaignTable campaigns={googleCampaigns} loading={campaignsLoading} platform="google" />
+                </div>
+                <div>
+                  <div className="mb-3 flex items-center justify-between text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
+                    <span>Top Palavras-chave</span>
+                  </div>
+                  <CompactKeywordTable keywords={keywords} loading={keywordsLoading} />
+                </div>
+              </div>
+            </PremiumPanel>
 
             {selectedClients.length > 1 && (
               <PremiumPanel className="p-4">
