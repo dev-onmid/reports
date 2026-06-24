@@ -5596,11 +5596,10 @@ export default function GeneralDashboard() {
 
             {/* ── Meta Ads: criativos + campanhas com veiculação ── */}
             <PremiumPanel className="border-[#168BFF]/28 shadow-[0_0_40px_rgba(22,139,255,0.12)]">
-              <div className="flex items-center justify-between px-4 pt-4 pb-3">
+              <div className="flex items-center px-4 pt-4 pb-3">
                 <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">
                   <MetaAdsMark className="h-5 w-5 text-[#168BFF]" /> Meta Ads
                 </h3>
-                <Link href="/resultados" className="text-xs font-black text-[#6cff2f] hover:text-[#8bff50] transition-colors">Ver todas</Link>
               </div>
 
               {/* Melhores Criativos — scroll horizontal, full-width */}
@@ -5622,11 +5621,10 @@ export default function GeneralDashboard() {
 
             {/* ── Google Ads: campanhas + keywords ── */}
             <PremiumPanel className="border-[#4285F4]/24 p-4 shadow-[0_0_40px_rgba(66,133,244,0.10)]">
-              <div className="mb-4 flex items-center justify-between">
+              <div className="mb-4 flex items-center">
                 <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">
                   <GoogleAdsMark className="h-5 w-5" /> Google Ads
                 </h3>
-                <Link href="/resultados" className="text-xs font-black text-[#6cff2f] hover:text-[#8bff50] transition-colors">Ver todas</Link>
               </div>
               <div className="grid gap-4 lg:grid-cols-2">
                 <div>
