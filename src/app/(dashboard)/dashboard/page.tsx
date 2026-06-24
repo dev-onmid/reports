@@ -4239,8 +4239,8 @@ function GoalProgressCard({
               ['Realizado', value],
             ].map(([label, amount]) => (
               <div key={String(label)} className="min-w-0">
-                <p className="truncate text-lg font-semibold text-[#f4f7f8]">{Number(amount) > 0 ? premiumValue(Number(amount), format) : '—'}</p>
-                <p className="mt-1 text-xs font-medium text-[#a7b0b6]">{label}</p>
+                <p className="truncate font-heading text-2xl leading-none text-[#f4f7f8]">{Number(amount) > 0 ? premiumValue(Number(amount), format) : '—'}</p>
+                <p className="mt-1.5 text-xs font-medium text-[#a7b0b6]">{label}</p>
               </div>
             ))}
           </div>
@@ -4285,7 +4285,7 @@ function QuickMetricCard({ title, value, change, icon: Icon }: {
         </span>
         <div className="min-w-0">
           <p className="text-[11px] font-black uppercase tracking-[0.06em] text-[#dce4e8]">{title}</p>
-          <p className="mt-2 text-xl font-semibold text-[#f4f7f8]">{value}</p>
+          <p className="mt-2 font-heading text-2xl leading-none text-[#f4f7f8]">{value}</p>
           <p className={cn('mt-1 text-xs font-bold', positive ? 'text-[#6cff2f]' : 'text-red-400')}>
             {hasChange ? `${change >= 0 ? '+' : ''}${change.toFixed(1).replace('.', ',')}%` : '—'} <span className="font-medium text-[#a7b0b6]">vs mês passado</span>
           </p>
@@ -4308,8 +4308,8 @@ function MiniPlatformMetric({ label, value, sub, icon: Icon, logo }: {
         {logo ?? (Icon ? <Icon className="h-4 w-4 text-[#6cff2f]" /> : null)}
         <span className="text-[10px] font-black uppercase tracking-[0.08em] text-[#a7b0b6]">{label}</span>
       </div>
-      <p className="text-lg font-semibold text-[#f4f7f8]">{value}</p>
-      <p className="mt-1 text-xs font-semibold text-[#78d957]">{sub ?? '+0,0% vs mês passado'}</p>
+      <p className="font-heading text-xl leading-none text-[#f4f7f8]">{value}</p>
+      {sub && <p className="mt-1 text-xs font-semibold text-[#78d957]">{sub}</p>}
     </div>
   );
 }
@@ -4331,7 +4331,7 @@ function SimpleFunnel({ steps, totalRate, metaRate, previousRate }: {
           <div key={step.label} className="relative">
             <p className="text-xs font-black uppercase tracking-[0.06em] text-[#9aa4aa]">{step.label}</p>
             <div className="mt-2 flex items-end justify-between gap-2">
-              <span className="text-lg font-semibold text-[#f4f7f8]">{step.value}</span>
+              <span className="font-heading text-xl leading-none text-[#f4f7f8]">{step.value}</span>
               <span className="text-xs text-[#a7b0b6]">{step.percent}</span>
             </div>
             {index < steps.length - 1 && <ChevronRight className="absolute -right-3 top-8 hidden h-4 w-4 text-[#a7b0b6] xl:block" />}
@@ -4342,9 +4342,9 @@ function SimpleFunnel({ steps, totalRate, metaRate, previousRate }: {
         <div className="h-full w-full bg-[linear-gradient(100deg,#9ad76c_0%,#85d35e_52%,#62b843_100%)] [clip-path:polygon(0_0,100%_18%,100%_82%,0_100%)]" />
       </div>
       <div className="mt-4 grid grid-cols-3 gap-3 border-t border-white/[0.08] pt-3 text-xs">
-        <div><p className="text-[#9aa4aa]">Taxa de conversão geral</p><p className="text-lg font-black text-[#6cff2f]">{totalRate}</p></div>
-        <div><p className="text-[#9aa4aa]">Meta geral</p><p className="text-lg font-black text-[#f4f7f8]">{metaRate}</p></div>
-        <div><p className="text-[#9aa4aa]">Vs mês passado</p><p className="text-lg font-black text-[#6cff2f]">{previousRate}</p></div>
+        <div><p className="text-[#9aa4aa]">Taxa de conversão geral</p><p className="font-heading text-xl leading-none text-[#6cff2f]">{totalRate}</p></div>
+        <div><p className="text-[#9aa4aa]">Meta geral</p><p className="font-heading text-xl leading-none text-[#f4f7f8]">{metaRate}</p></div>
+        <div><p className="text-[#9aa4aa]">Vs mês passado</p><p className="font-heading text-xl leading-none text-[#6cff2f]">{previousRate}</p></div>
       </div>
     </PremiumPanel>
   );
@@ -5477,7 +5477,7 @@ export default function GeneralDashboard() {
         )}
       </div>
 
-      <div className="px-4 py-5 xl:px-6">
+      <div className="px-5 py-6 xl:px-8">
         {selectedIds.size === 0 && clients.length > 0 ? (
           <div className="mx-auto flex max-w-4xl flex-col items-center justify-center gap-8 py-16">
             <div className="text-center">
@@ -5494,7 +5494,7 @@ export default function GeneralDashboard() {
             </div>
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-5">
             {aiError && <div className="rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-xs text-red-300">{aiError}</div>}
             {!metricsLoading && alerts.length > 0 && (
               <div className="rounded-xl border border-amber-400/20 bg-amber-400/8 px-4 py-3 text-xs text-amber-200">
@@ -5546,7 +5546,7 @@ export default function GeneralDashboard() {
               <PremiumPanel className="border-[#168BFF]/28 p-4 shadow-[0_0_40px_rgba(22,139,255,0.12)]">
                 <div className="mb-4 flex items-center justify-between">
                   <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]"><MetaAdsMark className="h-5 w-5 text-[#168BFF]" /> Meta Ads</h3>
-                  <button type="button" className="text-xs font-black text-[#6cff2f]">Ver todas</button>
+                  <Link href="/resultados" className="text-xs font-black text-[#6cff2f] hover:text-[#8bff50] transition-colors">Ver todas</Link>
                 </div>
                 <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
                   <div>
@@ -5554,7 +5554,7 @@ export default function GeneralDashboard() {
                     <CreativeRankPreview creatives={creatives} loading={creativesLoading} onPreview={setPreviewCreative} />
                   </div>
                   <div>
-                    <div className="mb-3 flex items-center justify-between text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]"><span>Top Campanhas Meta</span><span className="text-[#6cff2f]">Ver todas</span></div>
+                    <div className="mb-3 flex items-center justify-between text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]"><span>Top Campanhas Meta</span><Link href="/resultados" className="text-[#6cff2f] hover:text-[#8bff50] transition-colors">Ver todas</Link></div>
                     <CompactCampaignTable campaigns={metaCampaigns} loading={campaignsLoading} platform="meta" />
                   </div>
                 </div>
@@ -5566,11 +5566,11 @@ export default function GeneralDashboard() {
                 </div>
                 <div className="grid gap-4 lg:grid-cols-2">
                   <div>
-                    <div className="mb-3 flex items-center justify-between text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]"><span>Top Campanhas Google</span><span className="text-[#6cff2f]">Ver todas</span></div>
+                    <div className="mb-3 flex items-center justify-between text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]"><span>Top Campanhas Google</span><Link href="/resultados" className="text-[#6cff2f] hover:text-[#8bff50] transition-colors">Ver todas</Link></div>
                     <CompactCampaignTable campaigns={googleCampaigns} loading={campaignsLoading} platform="google" />
                   </div>
                   <div>
-                    <div className="mb-3 flex items-center justify-between text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]"><span>Top Palavras-chave</span><span className="text-[#6cff2f]">Ver todas</span></div>
+                    <div className="mb-3 flex items-center justify-between text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]"><span>Top Palavras-chave</span><Link href="/resultados" className="text-[#6cff2f] hover:text-[#8bff50] transition-colors">Ver todas</Link></div>
                     <CompactKeywordTable keywords={keywords} loading={keywordsLoading} />
                   </div>
                 </div>
