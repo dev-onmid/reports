@@ -4752,7 +4752,14 @@ export default function GeneralDashboard() {
   const session = getAuthSession();
   const isAdmin = session?.role === 'Administrador';
 
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set();
+    try {
+      const stored = localStorage.getItem('dashboard-selected-clients');
+      if (stored) return new Set(JSON.parse(stored) as string[]);
+    } catch { /* ignore */ }
+    return new Set();
+  });
   const [prevMetricsByClient, setPrevMetricsByClient] = useState<Record<string, ApiMetrics>>({});
   const [period, setPeriod] = useState<Period>('this_month');
   const [customDateFrom, setCustomDateFrom] = useState('');
@@ -4795,6 +4802,13 @@ export default function GeneralDashboard() {
   const [igPosts, setIgPosts] = useState<IgPost[]>([]);
   const [igPostsLoading, setIgPostsLoading] = useState(false);
   const [igSortBy, setIgSortBy] = useState<IgSortKey>('reach');
+  // Persist selected clients across page refreshes
+  useEffect(() => {
+    try {
+      localStorage.setItem('dashboard-selected-clients', JSON.stringify([...selectedIds]));
+    } catch { /* ignore */ }
+  }, [[...selectedIds].sort().join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Stable string key derived from selectedIds — used as useEffect dependency
   const selectedKey = [...selectedIds].sort().join(',');
   // Ref always points to the suffix currently in use (updated synchronously in load effect)
@@ -5472,15 +5486,27 @@ export default function GeneralDashboard() {
 
   // Período anterior
   let prevMetaLeads = 0, prevMetaSpend = 0, prevGoogleConv = 0, prevGoogleCost = 0;
+  let prevMetaReach = 0, prevMetaImpressions = 0, prevMetaClicks = 0;
+  let prevGoogleImpressions = 0, prevGoogleClicks = 0;
   for (const id of selectedIds) {
     const m = prevMetricsByClient[id];
-    if (m?.meta) { prevMetaLeads += m.meta.leads; prevMetaSpend += m.meta.spend; }
-    if (m?.google) { prevGoogleConv += m.google.conversions; prevGoogleCost += m.google.cost; }
+    if (m?.meta) {
+      prevMetaLeads += m.meta.leads; prevMetaSpend += m.meta.spend;
+      prevMetaReach += m.meta.reach ?? 0; prevMetaImpressions += m.meta.impressions; prevMetaClicks += m.meta.clicks;
+    }
+    if (m?.google) {
+      prevGoogleConv += m.google.conversions; prevGoogleCost += m.google.cost;
+      prevGoogleImpressions += m.google.impressions; prevGoogleClicks += m.google.clicks;
+    }
   }
   const prevTotalLeads = prevMetaLeads + prevGoogleConv;
   const prevTotalSpend = prevMetaSpend + prevGoogleCost;
   const prevCpl = prevTotalLeads > 0 ? prevTotalSpend / prevTotalLeads : 0;
   const prevRoi = prevTotalSpend > 0 ? 0 / prevTotalSpend : 0;
+  const prevMetaCtr = prevMetaImpressions > 0 ? (prevMetaClicks / prevMetaImpressions) * 100 : 0;
+  const prevAvgCpl = prevMetaLeads > 0 ? prevMetaSpend / prevMetaLeads : 0;
+  const prevGoogleCpc = prevGoogleClicks > 0 ? prevGoogleCost / prevGoogleClicks : 0;
+  const pct = (cur: number, prev: number): number | null => prev > 0 ? ((cur - prev) / prev) * 100 : null;
 
   // Receita efetiva: usa CRM se disponível, senão estima via fechamentos × TKM médio
   let totalTkm = 0, tkmCount = 0;
@@ -5775,26 +5801,26 @@ export default function GeneralDashboard() {
             </div>
 
             <PremiumPanel className="p-4">
-              <h3 className="mb-4 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">Saldos e Métricas de Alcance</h3>
+              <h3 className="mb-4 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">Resumo de Tráfego</h3>
               <div className="grid gap-4 xl:grid-cols-2">
                 <div className="rounded-[12px] border border-white/[0.08] bg-[#071014] p-3">
                   <div className="mb-3 flex items-center gap-2 text-sm font-black uppercase tracking-[0.06em] text-[#f4f7f8]"><MetaAdsMark className="h-5 w-5 text-[#168BFF]" /> Meta Ads</div>
                   <div className="grid gap-2 sm:grid-cols-5">
                     <MiniPlatformMetric label="Saldo Meta Ads" value={metaBalance > 0 ? premiumValue(metaBalance, 'currency') : '—'} logo={<MetaAdsMark className="h-4 w-4 text-[#168BFF]" />} sub="Saldo disponível" />
-                    <MiniPlatformMetric label="Alcance" value={metaReach > 0 ? premiumValue(metaReach) : '—'} icon={Users} />
-                    <MiniPlatformMetric label="CTR" value={metaCtr > 0 ? premiumValue(metaCtr, 'percent') : '—'} icon={MousePointerClick} />
-                    <MiniPlatformMetric label="Leads" value={premiumValue(metaLeads)} icon={UserPlus} />
-                    <MiniPlatformMetric label="CPL" value={avgCpl > 0 ? premiumValue(avgCpl, 'currency') : '—'} icon={Tag} />
+                    <MiniPlatformMetric label="Alcance" value={metaReach > 0 ? premiumValue(metaReach) : '—'} icon={Users} change={pct(metaReach, prevMetaReach)} />
+                    <MiniPlatformMetric label="CTR" value={metaCtr > 0 ? premiumValue(metaCtr, 'percent') : '—'} icon={MousePointerClick} change={pct(metaCtr, prevMetaCtr)} />
+                    <MiniPlatformMetric label="Leads" value={premiumValue(metaLeads)} icon={UserPlus} change={pct(metaLeads, prevMetaLeads)} />
+                    <MiniPlatformMetric label="CPL" value={avgCpl > 0 ? premiumValue(avgCpl, 'currency') : '—'} icon={Tag} change={avgCpl > 0 && prevAvgCpl > 0 ? pct(avgCpl, prevAvgCpl) : null} />
                   </div>
                 </div>
                 <div className="rounded-[12px] border border-white/[0.08] bg-[#071014] p-3">
                   <div className="mb-3 flex items-center gap-2 text-sm font-black uppercase tracking-[0.06em] text-[#f4f7f8]"><GoogleAdsMark className="h-5 w-5" /> Google Ads</div>
                   <div className="grid gap-2 sm:grid-cols-5">
                     <MiniPlatformMetric label="Saldo Google Ads" value={googleBalance > 0 ? premiumValue(googleBalance, 'currency') : '—'} logo={<GoogleAdsMark className="h-4 w-4" />} sub="Saldo disponível" />
-                    <MiniPlatformMetric label="Impressões" value={premiumValue(googleImpressions)} icon={BarChart3} />
-                    <MiniPlatformMetric label="Cliques" value={premiumValue(googleClicks)} icon={MousePointerClick} />
-                    <MiniPlatformMetric label="CPC Médio" value={googleCpc > 0 ? premiumValue(googleCpc, 'currency') : '—'} icon={Tag} />
-                    <MiniPlatformMetric label="Conversões" value={premiumValue(googleConv)} icon={CheckCircle2} />
+                    <MiniPlatformMetric label="Impressões" value={premiumValue(googleImpressions)} icon={BarChart3} change={pct(googleImpressions, prevGoogleImpressions)} />
+                    <MiniPlatformMetric label="Cliques" value={premiumValue(googleClicks)} icon={MousePointerClick} change={pct(googleClicks, prevGoogleClicks)} />
+                    <MiniPlatformMetric label="CPC Médio" value={googleCpc > 0 ? premiumValue(googleCpc, 'currency') : '—'} icon={Tag} change={googleCpc > 0 && prevGoogleCpc > 0 ? pct(googleCpc, prevGoogleCpc) : null} />
+                    <MiniPlatformMetric label="Conversões" value={premiumValue(googleConv)} icon={CheckCircle2} change={pct(googleConv, prevGoogleConv)} />
                   </div>
                 </div>
               </div>
@@ -5804,6 +5830,58 @@ export default function GeneralDashboard() {
               <SimpleFunnel steps={funnelStepsNew} totalRate={conversionRate > 0 ? premiumValue(conversionRate, 'percent') : '—'} />
               <ChannelSummaryTable rows={channelRows} />
             </div>
+
+            {/* ── Instagram — logo abaixo do funil ── */}
+            {(() => {
+              const allIg = pageInsights.filter(p => p.instagram).map(p => p.instagram!);
+              const prevIg = prevPageInsights.filter(p => p.instagram).map(p => p.instagram!);
+              if (allIg.length === 0 && !pageInsightsLoading) return null;
+              const sum = (arr: typeof allIg, key: keyof InstagramPageData & string) =>
+                arr.reduce((s, d) => s + (typeof d[key] === 'number' ? (d[key] as number) : 0), 0);
+              const chg = (cur: number, prev: number): number | null =>
+                prev > 0 ? ((cur - prev) / prev) * 100 : null;
+              const igFollow   = sum(allIg, 'followers');
+              const igReach    = sum(allIg, 'reach');
+              const igClicks   = sum(allIg, 'websiteClicks');
+              const igEngaged  = sum(allIg, 'accountsEngaged');
+              const igViews    = sum(allIg, 'views');
+              const igInteract = sum(allIg, 'totalInteractions');
+              const igSaves    = sum(allIg, 'saves');
+              const igPViews   = sum(allIg, 'profileViews');
+              const prevFollow   = sum(prevIg, 'followers');
+              const prevReach    = sum(prevIg, 'reach');
+              const prevClicks   = sum(prevIg, 'websiteClicks');
+              const prevEngaged  = sum(prevIg, 'accountsEngaged');
+              const prevViews    = sum(prevIg, 'views');
+              const prevInteract = sum(prevIg, 'totalInteractions');
+              const prevSaves    = sum(prevIg, 'saves');
+              const prevPViews   = sum(prevIg, 'profileViews');
+              const igHandles = allIg.map(d => d.username).filter(Boolean);
+              return (
+                <PremiumPanel className="border-[#E1306C]/24 shadow-[0_0_40px_rgba(225,48,108,0.10)]">
+                  <div className="flex items-center justify-between px-4 pt-4 pb-3">
+                    <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">
+                      <IgMark className="h-5 w-5" /> Instagram
+                    </h3>
+                    {igHandles.length > 0 && (
+                      <span className="text-[10px] text-[#9aa4aa]">{igHandles.map(h => `@${h}`).join(', ')}</span>
+                    )}
+                  </div>
+                  <div className="px-4 pb-4">
+                    <div className="grid gap-2 sm:grid-cols-4 lg:grid-cols-8">
+                      <MiniPlatformMetric label="Seguidores" value={pageInsightsLoading ? '…' : igFollow > 0 ? premiumValue(igFollow) : '—'} icon={Users} change={chg(igFollow, prevFollow)} />
+                      <MiniPlatformMetric label="Alcance" value={pageInsightsLoading ? '…' : igReach > 0 ? premiumValue(igReach) : '—'} icon={Eye} change={chg(igReach, prevReach)} />
+                      <MiniPlatformMetric label="Cliques Bio" value={pageInsightsLoading ? '…' : igClicks > 0 ? premiumValue(igClicks) : '—'} icon={ExternalLink} change={chg(igClicks, prevClicks)} />
+                      <MiniPlatformMetric label="Engajamento" value={pageInsightsLoading ? '…' : igEngaged > 0 ? premiumValue(igEngaged) : '—'} icon={Heart} change={chg(igEngaged, prevEngaged)} />
+                      <MiniPlatformMetric label="Visualizações" value={pageInsightsLoading ? '…' : igViews > 0 ? premiumValue(igViews) : '—'} icon={BarChart3} change={chg(igViews, prevViews)} />
+                      <MiniPlatformMetric label="Interações" value={pageInsightsLoading ? '…' : igInteract > 0 ? premiumValue(igInteract) : '—'} icon={Zap} change={chg(igInteract, prevInteract)} />
+                      <MiniPlatformMetric label="Salvamentos" value={pageInsightsLoading ? '…' : igSaves > 0 ? premiumValue(igSaves) : '—'} icon={Bookmark} change={chg(igSaves, prevSaves)} />
+                      <MiniPlatformMetric label="Visitas Perfil" value={pageInsightsLoading ? '…' : igPViews > 0 ? premiumValue(igPViews) : '—'} icon={Monitor} change={chg(igPViews, prevPViews)} />
+                    </div>
+                  </div>
+                </PremiumPanel>
+              );
+            })()}
 
             {/* ── Meta Ads: campanhas expansíveis + criativos ── */}
             <PremiumPanel className="border-[#168BFF]/28 shadow-[0_0_40px_rgba(22,139,255,0.12)]">
@@ -5891,59 +5969,6 @@ export default function GeneralDashboard() {
               </div>
             </PremiumPanel>
 
-            {/* ── Instagram Orgânico ── */}
-            {(() => {
-              const allIg = pageInsights.filter(p => p.instagram).map(p => p.instagram!);
-              const prevIg = prevPageInsights.filter(p => p.instagram).map(p => p.instagram!);
-              if (allIg.length === 0 && !pageInsightsLoading) return null;
-              const sum = (arr: typeof allIg, key: keyof InstagramPageData & string) =>
-                arr.reduce((s, d) => s + (typeof d[key] === 'number' ? (d[key] as number) : 0), 0);
-              const chg = (cur: number, prev: number): number | null =>
-                prev > 0 ? ((cur - prev) / prev) * 100 : null;
-              const igFollow   = sum(allIg, 'followers');
-              const igReach    = sum(allIg, 'reach');
-              const igClicks   = sum(allIg, 'websiteClicks');
-              const igEngaged  = sum(allIg, 'accountsEngaged');
-              const igViews    = sum(allIg, 'views');
-              const igInteract = sum(allIg, 'totalInteractions');
-              const igSaves    = sum(allIg, 'saves');
-              const igPViews   = sum(allIg, 'profileViews');
-              const prevFollow   = sum(prevIg, 'followers');
-              const prevReach    = sum(prevIg, 'reach');
-              const prevClicks   = sum(prevIg, 'websiteClicks');
-              const prevEngaged  = sum(prevIg, 'accountsEngaged');
-              const prevViews    = sum(prevIg, 'views');
-              const prevInteract = sum(prevIg, 'totalInteractions');
-              const prevSaves    = sum(prevIg, 'saves');
-              const prevPViews   = sum(prevIg, 'profileViews');
-              const igHandles = allIg.map(d => d.username).filter(Boolean);
-              return (
-                <PremiumPanel className="border-[#E1306C]/24 shadow-[0_0_40px_rgba(225,48,108,0.10)]">
-                  <div className="flex items-center justify-between px-4 pt-4 pb-3">
-                    <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">
-                      <IgMark className="h-5 w-5" /> Instagram Orgânico
-                    </h3>
-                    {igHandles.length > 0 && (
-                      <span className="text-[10px] text-[#9aa4aa]">{igHandles.map(h => `@${h}`).join(', ')}</span>
-                    )}
-                  </div>
-
-                  <div className="px-4 pb-4">
-                    <div className="grid gap-2 sm:grid-cols-4 lg:grid-cols-8">
-                      <MiniPlatformMetric label="Seguidores" value={pageInsightsLoading ? '…' : igFollow > 0 ? premiumValue(igFollow) : '—'} icon={Users} change={chg(igFollow, prevFollow)} />
-                      <MiniPlatformMetric label="Alcance" value={pageInsightsLoading ? '…' : igReach > 0 ? premiumValue(igReach) : '—'} icon={Eye} change={chg(igReach, prevReach)} />
-                      <MiniPlatformMetric label="Cliques Bio" value={pageInsightsLoading ? '…' : igClicks > 0 ? premiumValue(igClicks) : '—'} icon={ExternalLink} change={chg(igClicks, prevClicks)} />
-                      <MiniPlatformMetric label="Engajamento" value={pageInsightsLoading ? '…' : igEngaged > 0 ? premiumValue(igEngaged) : '—'} icon={Heart} change={chg(igEngaged, prevEngaged)} />
-                      <MiniPlatformMetric label="Visualizações" value={pageInsightsLoading ? '…' : igViews > 0 ? premiumValue(igViews) : '—'} icon={BarChart3} change={chg(igViews, prevViews)} />
-                      <MiniPlatformMetric label="Interações" value={pageInsightsLoading ? '…' : igInteract > 0 ? premiumValue(igInteract) : '—'} icon={Zap} change={chg(igInteract, prevInteract)} />
-                      <MiniPlatformMetric label="Salvamentos" value={pageInsightsLoading ? '…' : igSaves > 0 ? premiumValue(igSaves) : '—'} icon={Bookmark} change={chg(igSaves, prevSaves)} />
-                      <MiniPlatformMetric label="Visitas Perfil" value={pageInsightsLoading ? '…' : igPViews > 0 ? premiumValue(igPViews) : '—'} icon={Monitor} change={chg(igPViews, prevPViews)} />
-                    </div>
-                  </div>
-
-                </PremiumPanel>
-              );
-            })()}
 
             {selectedClients.length > 1 && (
               <PremiumPanel className="p-4">
