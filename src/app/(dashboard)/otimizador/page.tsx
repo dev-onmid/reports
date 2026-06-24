@@ -381,6 +381,9 @@ export default function OtimizadorPage() {
                         <span className="rounded-[var(--radius)] border border-border bg-background px-2 py-1 text-[11px] text-muted-foreground">
                           {SOURCE_LABEL[item.origem]}
                         </span>
+                        <span className={`rounded-[var(--radius)] border px-2 py-1 text-[11px] font-semibold ${item.conta_plataforma === 'google_ads' ? 'border-blue-400/40 bg-blue-400/10 text-blue-300' : 'border-sky-400/40 bg-sky-400/10 text-sky-300'}`}>
+                          {item.conta_plataforma === 'google_ads' ? 'Google' : 'Meta'}
+                        </span>
                       </div>
                       <div className="mt-3 flex items-start gap-3">
                         <ClientAvatar clientId={item.cliente_id} name={item.cliente_nome} size="sm" />
@@ -436,6 +439,9 @@ export default function OtimizadorPage() {
                       </span>
                       <span className="rounded-[var(--radius)] border border-border bg-background px-2 py-1 text-xs text-muted-foreground">
                         Confiança {selected.resultado.confianca}
+                      </span>
+                      <span className={`rounded-[var(--radius)] border px-2 py-1 text-xs font-semibold ${selected.conta_plataforma === 'google_ads' ? 'border-blue-400/40 bg-blue-400/10 text-blue-300' : 'border-sky-400/40 bg-sky-400/10 text-sky-300'}`}>
+                        {selected.conta_plataforma === 'google_ads' ? 'Google' : 'Meta'}
                       </span>
                     </div>
                     <h3 className="mt-3 text-lg font-bold text-foreground">{selected.resultado.titulo_problema}</h3>

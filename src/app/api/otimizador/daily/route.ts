@@ -91,7 +91,11 @@ async function fetchCampaigns(origin: string, clientId: string, period: Optimize
   url.searchParams.set('limit', String(limit));
   const res = await fetch(url.toString(), { cache: 'no-store' });
   if (!res.ok) return [];
-  return res.json() as Promise<OptimizerCampaignInput[]>;
+  const all = await res.json() as OptimizerCampaignInput[];
+  return all.filter((c) => {
+    const s = (c.status ?? '').toUpperCase();
+    return ['ACTIVE', 'ENABLED', 'IN_PROCESS', 'WITH_ISSUES'].includes(s);
+  });
 }
 
 async function analyzeCampaign(origin: string, payload: ReturnType<typeof buildOptimizerPayloadFromCampaign>) {
