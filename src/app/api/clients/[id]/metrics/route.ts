@@ -52,7 +52,9 @@ async function gadsSearch(customerId: string, query: string, accessToken: string
 }
 
 async function fetchGadsAccountMetrics(customerId: string, accessToken: string, loginCustomerId: string | undefined, gaqlPeriod: string) {
-  const query = `SELECT metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.average_cpc, metrics.conversions, metrics.cost_per_conversion
+  const query = `SELECT metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.average_cpc, metrics.conversions, metrics.cost_per_conversion,
+       metrics.search_impression_share, metrics.search_budget_lost_impression_share, metrics.search_rank_lost_impression_share,
+       metrics.search_absolute_top_impression_share, metrics.search_top_impression_share
      FROM customer WHERE ${gaqlPeriod}`;
   let data = await gadsSearch(customerId, query, accessToken, loginCustomerId);
   // If the primary attempt failed and we had a loginCustomerId, retry without it (direct account fallback).
@@ -78,6 +80,11 @@ async function fetchGadsAccountMetrics(customerId: string, accessToken: string, 
     cpc: (m.averageCpc ?? 0) / 1_000_000,
     conversions,
     cpa: conversions > 0 ? spend / conversions : 0,
+    searchImprShare: (Number(m.searchImpressionShare ?? 0)) * 100,
+    searchBudgetLostIS: (Number(m.searchBudgetLostImpressionShare ?? 0)) * 100,
+    searchRankLostIS: (Number(m.searchRankLostImpressionShare ?? 0)) * 100,
+    searchAbsTopIS: (Number(m.searchAbsoluteTopImpressionShare ?? 0)) * 100,
+    searchTopIS: (Number(m.searchTopImpressionShare ?? 0)) * 100,
   };
 }
 
@@ -299,7 +306,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const metaPeriod = resolveMetaPeriod(period, dateFrom, dateTo);
   const crmPeriod = crmDateRange(period, dateFrom, dateTo);
 
-  const cacheKey = `metrics:v2:${clientId}:${period}:${dateFrom}:${dateTo}`;
+  const cacheKey = `metrics:v3:${clientId}:${period}:${dateFrom}:${dateTo}`;
   const cached = getCached(cacheKey);
   if (cached) return cachedJson(cached.data, true, cached.cachedAt);
 
@@ -382,7 +389,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const metaLinks = links.filter(l => l.platform === 'meta_ads');
 
   // ── Google Ads ─────────────────────────────────────────────────────────────
-  type GResult = { cost: number; impressions: number; clicks: number; cpc: number; conversions: number; cpa: number };
+  type GResult = { cost: number; impressions: number; clicks: number; cpc: number; conversions: number; cpa: number;
+  searchImprShare: number; searchBudgetLostIS: number; searchRankLostIS: number; searchAbsTopIS: number; searchTopIS: number; };
   let googleResult: GResult | null = null;
   const dailyMap: Record<string, DailyMetrics> = {};
 
@@ -433,9 +441,18 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     if (connMetrics.length > 0) {
       const agg = connMetrics.reduce((a, m) => ({
-        cost: a.cost + m.cost, impressions: a.impressions + m.impressions,
-        clicks: a.clicks + m.clicks, conversions: a.conversions + m.conversions, cpc: 0, cpa: 0,
-      }), { cost: 0, impressions: 0, clicks: 0, conversions: 0, cpc: 0, cpa: 0 });
+        cost: a.cost + m.cost,
+        impressions: a.impressions + m.impressions,
+        clicks: a.clicks + m.clicks,
+        conversions: a.conversions + m.conversions,
+        cpc: 0,
+        cpa: 0,
+        searchImprShare: Math.max(a.searchImprShare, m.searchImprShare),
+        searchBudgetLostIS: Math.max(a.searchBudgetLostIS, m.searchBudgetLostIS),
+        searchRankLostIS: Math.max(a.searchRankLostIS, m.searchRankLostIS),
+        searchAbsTopIS: Math.max(a.searchAbsTopIS, m.searchAbsTopIS),
+        searchTopIS: Math.max(a.searchTopIS, m.searchTopIS),
+      }), { cost: 0, impressions: 0, clicks: 0, conversions: 0, cpc: 0, cpa: 0, searchImprShare: 0, searchBudgetLostIS: 0, searchRankLostIS: 0, searchAbsTopIS: 0, searchTopIS: 0 });
       agg.cpc = agg.clicks > 0 ? agg.cost / agg.clicks : 0;
       agg.cpa = agg.conversions > 0 ? agg.cost / agg.conversions : 0;
       googleResult = agg;

@@ -52,7 +52,8 @@ type FunnelEntry = { date: string; stage: string; amount?: number };
 type ClientSheetsSummary = { entries: FunnelEntry[]; stages: string[] };
 type ApiMetrics = {
   meta: { spend: number; reach?: number; impressions: number; clicks: number; leads: number; formLeads?: number; siteLeads?: number; conversations?: number; cpl: number } | null;
-  google: { cost: number; impressions: number; clicks: number; cpc: number; conversions: number; cpa: number } | null;
+  google: { cost: number; impressions: number; clicks: number; cpc: number; conversions: number; cpa: number;
+  searchImprShare?: number; searchBudgetLostIS?: number; searchRankLostIS?: number; searchAbsTopIS?: number; searchTopIS?: number; } | null;
   crm?: { revenue: number; sales: number; leads: number; ticket: number } | null;
   daily?: DailyMetricPoint[];
 };
@@ -1227,17 +1228,35 @@ function CreativePreviewOverlay({
   onClose: () => void;
 }) {
   const [videoFailed, setVideoFailed] = useState(false);
+  const [imgStage, setImgStage] = useState<'primary' | 'thumb' | 'error'>('primary');
 
-  // Reset video failed state whenever a different creative is opened
+  // Reset state whenever a different creative is opened
   const prevAdId = useRef<string | null>(null);
   if (creative && prevAdId.current !== creative.adId) {
     prevAdId.current = creative.adId;
     setVideoFailed(false);
+    setImgStage('primary');
   }
 
   if (!creative) return null;
-  const imgUrl = creative.imageUrl ?? creative.thumbnailUrl;
+
+  const primaryImgUrl = creative.imageUrl ?? creative.thumbnailUrl;
+  const thumbImgUrl = creative.thumbnailUrl;
+  const resolvedImgUrl =
+    imgStage === 'primary' ? primaryImgUrl
+    : imgStage === 'thumb' ? thumbImgUrl
+    : undefined;
+
+  function handleImgError() {
+    if (imgStage === 'primary' && primaryImgUrl && thumbImgUrl && thumbImgUrl !== primaryImgUrl) {
+      setImgStage('thumb');
+    } else {
+      setImgStage('error');
+    }
+  }
+
   const showVideo = !!creative.videoUrl && !videoFailed;
+  const showImg = !!resolvedImgUrl && imgStage !== 'error';
   const isVideo = creative.mediaType === 'video';
 
   return (
@@ -1251,29 +1270,30 @@ function CreativePreviewOverlay({
       </button>
       <div className="mx-auto grid h-full max-w-7xl items-center justify-center gap-6 px-4 py-8 lg:grid-cols-[minmax(360px,560px)_360px]">
         <div
-          className="flex h-[min(78vh,760px)] w-[min(82vw,560px)] items-center justify-center overflow-hidden rounded-2xl border border-white/15 bg-black shadow-[0_0_60px_rgba(11,132,255,0.18)]"
+          className="relative flex h-[min(78vh,760px)] w-[min(82vw,560px)] items-center justify-center overflow-hidden rounded-2xl border border-white/15 bg-black shadow-[0_0_60px_rgba(11,132,255,0.18)]"
           onClick={(event) => event.stopPropagation()}
         >
           {showVideo ? (
             <video
               src={creative.videoUrl}
-              poster={imgUrl}
+              poster={resolvedImgUrl}
               controls
               autoPlay
               className="h-full w-full bg-black object-contain"
               onError={() => setVideoFailed(true)}
             />
-          ) : imgUrl ? (
+          ) : showImg ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
-              src={imgUrl}
+              src={resolvedImgUrl}
               alt={creative.adName}
               className="h-full w-full bg-black object-cover"
               style={{ imageRendering: 'auto' }}
               loading="eager"
+              onError={handleImgError}
             />
           ) : creative.permalink ? (
-            /* Video creative with no thumbnail — offer link to original */
+            /* Video creative with no playable source or thumbnail — link to original */
             <a
               href={creative.permalink}
               target="_blank"
@@ -1292,7 +1312,7 @@ function CreativePreviewOverlay({
           )}
 
           {/* When video source failed but there is a permalink — show an overlay link */}
-          {isVideo && videoFailed && creative.permalink && (
+          {isVideo && (videoFailed || (!showVideo && !creative.videoUrl)) && creative.permalink && showImg && (
             <div className="absolute inset-x-0 bottom-0 flex justify-center pb-4">
               <a
                 href={creative.permalink}
@@ -1740,18 +1760,29 @@ type ChildState = { loading: boolean; data: unknown[] };
 type RowKind = 'campaign' | 'adset' | 'meta-ad' | 'adgroup' | 'google-ad';
 
 type ExpandableRow =
-  | { kind: 'campaign'; key: string; fetchUrl: string; data: CampaignPerformance; level: 0 }
-  | { kind: 'adset'; key: string; fetchUrl: string; data: AdSetWithMetrics; campaign: CampaignPerformance; level: 1 }
-  | { kind: 'meta-ad'; key: string; data: MetaAdWithMetrics; adset: AdSetWithMetrics; campaign: CampaignPerformance; level: 2 }
-  | { kind: 'adgroup'; key: string; fetchUrl: string; data: GoogleAdGroup; campaign: CampaignPerformance; level: 1 }
-  | { kind: 'google-ad'; key: string; data: GoogleAd; adgroup: GoogleAdGroup; campaign: CampaignPerformance; level: 2 }
-  | { kind: 'loading'; key: string; level: 1 | 2 };
+  | { kind: 'campaign'; key: string; fetchUrl: string; data: CampaignPerformance; level: 0; colorIdx: number }
+  | { kind: 'adset'; key: string; fetchUrl: string; data: AdSetWithMetrics; campaign: CampaignPerformance; level: 1; colorIdx: number }
+  | { kind: 'meta-ad'; key: string; data: MetaAdWithMetrics; adset: AdSetWithMetrics; campaign: CampaignPerformance; level: 2; colorIdx: number }
+  | { kind: 'adgroup'; key: string; fetchUrl: string; data: GoogleAdGroup; campaign: CampaignPerformance; level: 1; colorIdx: number }
+  | { kind: 'google-ad'; key: string; data: GoogleAd; adgroup: GoogleAdGroup; campaign: CampaignPerformance; level: 2; colorIdx: number }
+  | { kind: 'loading'; key: string; level: 1 | 2; colorIdx: number };
 
 function canExpand(r: ExpandableRow): r is Extract<ExpandableRow, { fetchUrl: string }> {
   return 'fetchUrl' in r;
 }
 
 const INDENT = ['pl-2', 'pl-8', 'pl-14'] as const;
+
+const CAMPAIGN_ROW_COLORS = [
+  '#6cff2f', // verde onmid
+  '#0ea5e9', // azul
+  '#7b2cff', // roxo
+  '#f97316', // laranja
+  '#ec4899', // pink
+  '#f59e0b', // amarelo
+  '#06b6d4', // ciano
+  '#84cc16', // lima
+];
 
 function PauseActivateBtn({
   status, busy, onClick,
@@ -1954,32 +1985,34 @@ function CampaignPerformanceTable({
 
   const rows = useMemo<ExpandableRow[]>(() => {
     const result: ExpandableRow[] = [];
+    let campaignIdx = 0;
     for (const campaign of campaigns) {
       const campKey = campaign.id;
+      const colorIdx = campaignIdx++ % CAMPAIGN_ROW_COLORS.length;
       const campUrl = campaign.platform === 'meta'
         ? `/api/meta/campaigns/${campaign.id}/adsets?connectionId=${campaign.connectionId}&${periodParams}`
         : `/api/google/campaigns/${campaign.id}/adgroups?connectionId=${campaign.connectionId}&accountId=${campaign.accountId}${campaign.loginCustomerId ? `&loginCustomerId=${campaign.loginCustomerId}` : ''}&${periodParams}`;
 
-      result.push({ kind: 'campaign', key: campKey, fetchUrl: campUrl, data: campaign, level: 0 });
+      result.push({ kind: 'campaign', key: campKey, fetchUrl: campUrl, data: campaign, level: 0, colorIdx });
 
       if (expanded.has(campKey)) {
         const campChildren = childrenMap[campKey];
         if (campChildren?.loading) {
-          result.push({ kind: 'loading', key: `${campKey}:loading`, level: 1 });
+          result.push({ kind: 'loading', key: `${campKey}:loading`, level: 1, colorIdx });
         } else {
           for (const child of campChildren?.data ?? []) {
             if (campaign.platform === 'meta') {
               const adset = child as AdSetWithMetrics;
               const adsetKey = `${campKey}:${adset.id}`;
               const adsetUrl = `/api/meta/adsets/${adset.id}/ads?connectionId=${campaign.connectionId}&${periodParams}`;
-              result.push({ kind: 'adset', key: adsetKey, fetchUrl: adsetUrl, data: adset, campaign, level: 1 });
+              result.push({ kind: 'adset', key: adsetKey, fetchUrl: adsetUrl, data: adset, campaign, level: 1, colorIdx });
               if (expanded.has(adsetKey)) {
                 const adChildren = childrenMap[adsetKey];
                 if (adChildren?.loading) {
-                  result.push({ kind: 'loading', key: `${adsetKey}:loading`, level: 2 });
+                  result.push({ kind: 'loading', key: `${adsetKey}:loading`, level: 2, colorIdx });
                 } else {
                   for (const ad of (adChildren?.data ?? []) as MetaAdWithMetrics[]) {
-                    result.push({ kind: 'meta-ad', key: `${adsetKey}:${ad.id}`, data: ad, adset, campaign, level: 2 });
+                    result.push({ kind: 'meta-ad', key: `${adsetKey}:${ad.id}`, data: ad, adset, campaign, level: 2, colorIdx });
                   }
                 }
               }
@@ -1987,14 +2020,14 @@ function CampaignPerformanceTable({
               const adgroup = child as GoogleAdGroup;
               const adgroupKey = `${campKey}:${adgroup.id}`;
               const adgroupUrl = `/api/google/adgroups/${adgroup.id}/ads?connectionId=${campaign.connectionId}&accountId=${campaign.accountId}${campaign.loginCustomerId ? `&loginCustomerId=${campaign.loginCustomerId}` : ''}&${periodParams}`;
-              result.push({ kind: 'adgroup', key: adgroupKey, fetchUrl: adgroupUrl, data: adgroup, campaign, level: 1 });
+              result.push({ kind: 'adgroup', key: adgroupKey, fetchUrl: adgroupUrl, data: adgroup, campaign, level: 1, colorIdx });
               if (expanded.has(adgroupKey)) {
                 const adChildren = childrenMap[adgroupKey];
                 if (adChildren?.loading) {
-                  result.push({ kind: 'loading', key: `${adgroupKey}:loading`, level: 2 });
+                  result.push({ kind: 'loading', key: `${adgroupKey}:loading`, level: 2, colorIdx });
                 } else {
                   for (const ad of (adChildren?.data ?? []) as GoogleAd[]) {
-                    result.push({ kind: 'google-ad', key: `${adgroupKey}:${ad.id}`, data: ad, adgroup, campaign, level: 2 });
+                    result.push({ kind: 'google-ad', key: `${adgroupKey}:${ad.id}`, data: ad, adgroup, campaign, level: 2, colorIdx });
                   }
                 }
               }
@@ -2165,14 +2198,23 @@ function CampaignPerformanceTable({
     isActive = displayStatus === 'ACTIVE' || displayStatus === 'ENABLED';
 
     const levelBg = row.level === 0 ? '' : row.level === 1 ? 'bg-white/[0.04]' : 'bg-white/[0.025]';
+    const rowColor = CAMPAIGN_ROW_COLORS[row.colorIdx % CAMPAIGN_ROW_COLORS.length];
 
     const isMetaAd = row.kind === 'meta-ad';
 
     return (
-      <tr key={row.key} className={cn('border-t border-white/10 transition-colors hover:bg-white/[0.07]', !isActive && 'opacity-60', levelBg)}>
+      <tr
+        key={row.key}
+        className={cn('transition-colors hover:bg-white/[0.07]', !isActive && 'opacity-60', levelBg)}
+        style={row.level === 0
+          ? { borderTop: `1px solid ${rowColor}40`, borderBottom: `1px solid ${rowColor}40` }
+          : { borderTop: `1px solid ${rowColor}18` }
+        }
+      >
         {/* Name column — whole name area is clickable when expandable */}
         <td
           className="max-w-[300px] px-2 py-0"
+          style={{ borderLeft: `3px solid ${rowColor}${row.level === 0 ? 'cc' : '50'}` }}
           onMouseEnter={isMetaAd ? (e) => {
             if (adPreviewTimer.current) clearTimeout(adPreviewTimer.current);
             const rect = e.currentTarget.getBoundingClientRect();
@@ -4260,14 +4302,16 @@ function GoalProgressCard({
           <div className="mt-5">
             <div className="relative h-7 overflow-hidden rounded-md border border-white/10 bg-[#081014]">
               <div
-                className="absolute inset-y-0 left-0 rounded-md bg-[#8bdc62] transition-all"
+                className="absolute inset-y-0 left-0 rounded-md transition-all"
                 style={{
                   width: `${progress}%`,
-                  backgroundImage: 'repeating-linear-gradient(45deg,rgba(255,255,255,0.14) 0 12px,transparent 12px 24px)',
+                  backgroundColor: '#6cff2f',
+                  backgroundImage: 'repeating-linear-gradient(45deg,rgba(255,255,255,0.12) 0 12px,transparent 12px 24px)',
+                  boxShadow: '0 0 16px rgba(108,255,47,0.55)',
                 }}
               />
               <div className="absolute inset-0 flex items-center justify-center">
-                <span className="text-sm font-black text-black">{progress > 0 ? premiumValue(progress, 'percent') : '—'}</span>
+                <span className="text-sm font-black text-black drop-shadow-sm">{progress > 0 ? premiumValue(progress, 'percent') : '—'}</span>
               </div>
             </div>
             <div className="mt-2 flex justify-between text-xs text-[#a7b0b6]">
@@ -5273,6 +5317,26 @@ export default function GeneralDashboard() {
   }
   const googleCpc = googleClicks > 0 ? googleCost / googleClicks : 0;
   const googleCtrValue = googleImpressions > 0 ? (googleClicks / googleImpressions) * 100 : 0;
+  let googleSearchImprShare = 0, googleSearchBudgetLostIS = 0, googleSearchRankLostIS = 0, googleSearchAbsTopIS = 0, googleSearchTopIS = 0;
+  let googleCompetitiveCount = 0;
+  for (const id of selectedIds) {
+    const m = metricsByClient[id];
+    if (m?.google?.searchImprShare != null && m.google.searchImprShare > 0) {
+      googleSearchImprShare += m.google.searchImprShare;
+      googleSearchBudgetLostIS += m.google.searchBudgetLostIS ?? 0;
+      googleSearchRankLostIS += m.google.searchRankLostIS ?? 0;
+      googleSearchAbsTopIS += m.google.searchAbsTopIS ?? 0;
+      googleSearchTopIS += m.google.searchTopIS ?? 0;
+      googleCompetitiveCount++;
+    }
+  }
+  if (googleCompetitiveCount > 1) {
+    googleSearchImprShare /= googleCompetitiveCount;
+    googleSearchBudgetLostIS /= googleCompetitiveCount;
+    googleSearchRankLostIS /= googleCompetitiveCount;
+    googleSearchAbsTopIS /= googleCompetitiveCount;
+    googleSearchTopIS /= googleCompetitiveCount;
+  }
   const ctrPlatformCount = (metaCtr > 0 ? 1 : 0) + (googleCtrValue > 0 ? 1 : 0);
   const avgCtr = ctrPlatformCount > 0 ? (metaCtr + googleCtrValue) / ctrPlatformCount : 0;
   const selectedRange = periodToDateRange(period, customDateFrom, customDateTo);
@@ -5688,13 +5752,15 @@ export default function GeneralDashboard() {
                 </div>
                 <div className="rounded-[12px] border border-white/[0.08] bg-[#071014] p-3">
                   <div className="mb-3 flex items-center gap-2 text-sm font-black uppercase tracking-[0.06em] text-[#f4f7f8]"><GoogleAdsMark className="h-5 w-5" /> Google Ads</div>
-                  <div className="grid gap-2 sm:grid-cols-6">
+                  <div className="grid gap-2 sm:grid-cols-4 lg:grid-cols-8">
                     <MiniPlatformMetric label="Saldo Google Ads" value={googleBalance > 0 ? premiumValue(googleBalance, 'currency') : '—'} logo={<GoogleAdsMark className="h-4 w-4" />} sub="Saldo disponível" />
                     <MiniPlatformMetric label="Impressões" value={premiumValue(googleImpressions)} icon={BarChart3} />
-                    <MiniPlatformMetric label="CTR" value={premiumValue(googleCtrValue, 'percent')} icon={Target} />
-                    <MiniPlatformMetric label="CPC" value={googleCpc > 0 ? premiumValue(googleCpc, 'currency') : '—'} icon={MousePointerClick} />
+                    <MiniPlatformMetric label="Cliques" value={premiumValue(googleClicks)} icon={MousePointerClick} />
+                    <MiniPlatformMetric label="CPC Médio" value={googleCpc > 0 ? premiumValue(googleCpc, 'currency') : '—'} icon={Tag} />
                     <MiniPlatformMetric label="Conversões" value={premiumValue(googleConv)} icon={CheckCircle2} />
-                    <MiniPlatformMetric label="Custo por Conv." value={avgCpa > 0 ? premiumValue(avgCpa, 'currency') : '—'} icon={TrendingUp} />
+                    <MiniPlatformMetric label="Quota IS" value={googleSearchImprShare > 0 ? premiumValue(googleSearchImprShare, 'percent') : '—'} icon={Target} sub={googleSearchImprShare > 0 ? '% impressões ganhas' : undefined} />
+                    <MiniPlatformMetric label="IS Perdida Orç." value={googleSearchBudgetLostIS > 0 ? premiumValue(googleSearchBudgetLostIS, 'percent') : '—'} icon={TrendingUp} />
+                    <MiniPlatformMetric label="Topo Absoluto" value={googleSearchAbsTopIS > 0 ? premiumValue(googleSearchAbsTopIS, 'percent') : '—'} icon={Zap} />
                   </div>
                 </div>
               </div>
@@ -5705,7 +5771,7 @@ export default function GeneralDashboard() {
               <ChannelSummaryTable rows={channelRows} />
             </div>
 
-            {/* ── Meta Ads: criativos + campanhas com veiculação ── */}
+            {/* ── Meta Ads: campanhas expansíveis + criativos ── */}
             <PremiumPanel className="border-[#168BFF]/28 shadow-[0_0_40px_rgba(22,139,255,0.12)]">
               <div className="flex items-center px-4 pt-4 pb-3">
                 <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">
@@ -5713,24 +5779,30 @@ export default function GeneralDashboard() {
                 </h3>
               </div>
 
-              {/* Melhores Criativos — scroll horizontal, full-width */}
-              <div className="px-4 pb-4">
+              {/* Campanhas com Veiculação — expansível em cascata */}
+              <div className="border-b border-white/[0.06] px-4 pb-4">
+                <div className="mb-3 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
+                  Campanhas com Veiculação
+                </div>
+                <CampaignPerformanceTable
+                  campaigns={metaCampaigns}
+                  loading={campaignsLoading}
+                  period={period}
+                  dateFrom={customDateFrom}
+                  dateTo={customDateTo}
+                />
+              </div>
+
+              {/* Melhores Criativos — scroll horizontal, abaixo das campanhas */}
+              <div className="px-4 py-4">
                 <div className="mb-3 flex items-center gap-2 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
                   Melhores Criativos <Info className="h-3.5 w-3.5 text-[#9aa4aa]" />
                 </div>
                 <CreativeHorizontalStrip creatives={creatives} loading={creativesLoading} onPreview={setPreviewCreative} />
               </div>
-
-              {/* Campanhas com Veiculação — abaixo dos criativos */}
-              <div className="border-t border-white/[0.06] px-4 py-4">
-                <div className="mb-3 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
-                  Campanhas com Veiculação
-                </div>
-                <CompactCampaignTable campaigns={metaCampaigns} loading={campaignsLoading} platform="meta" />
-              </div>
             </PremiumPanel>
 
-            {/* ── Google Ads: palavras-chave + campanhas com veiculação ── */}
+            {/* ── Google Ads: campanhas expansíveis + palavras-chave ── */}
             <PremiumPanel className="border-[#4285F4]/24 shadow-[0_0_40px_rgba(66,133,244,0.10)]">
               <div className="flex items-center px-4 pt-4 pb-3">
                 <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">
@@ -5738,22 +5810,28 @@ export default function GeneralDashboard() {
                 </h3>
               </div>
 
-              {/* Top Palavras-chave — scroll horizontal */}
-              <div className="px-4 pb-4">
-                <div className="mb-3 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
-                  Top Palavras-chave
-                </div>
-                <div className="flex gap-3 overflow-x-auto pb-2 [scrollbar-width:thin] [scrollbar-color:#2a2d3a_transparent]">
-                  <CompactKeywordTable keywords={keywords} loading={keywordsLoading} />
-                </div>
-              </div>
-
-              {/* Campanhas com Veiculação — abaixo das palavras-chave */}
-              <div className="border-t border-white/[0.06] px-4 py-4">
+              {/* Campanhas com Veiculação — expansível em cascata */}
+              <div className="border-b border-white/[0.06] px-4 pb-4">
                 <div className="mb-3 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
                   Campanhas com Veiculação
                 </div>
-                <CompactCampaignTable campaigns={googleCampaigns} loading={campaignsLoading} platform="google" />
+                <CampaignPerformanceTable
+                  campaigns={googleCampaigns}
+                  loading={campaignsLoading}
+                  period={period}
+                  dateFrom={customDateFrom}
+                  dateTo={customDateTo}
+                />
+              </div>
+
+              {/* Top Palavras-chave — abaixo das campanhas */}
+              <div className="px-4 py-4">
+                <div className="mb-3 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
+                  Top Palavras-chave
+                </div>
+                <div className="overflow-x-auto pb-2 [scrollbar-width:thin] [scrollbar-color:#2a2d3a_transparent]">
+                  <CompactKeywordTable keywords={keywords} loading={keywordsLoading} />
+                </div>
               </div>
             </PremiumPanel>
 
@@ -5807,20 +5885,6 @@ export default function GeneralDashboard() {
                     </div>
                   </div>
 
-                  {/* Top Posts */}
-                  <div className="border-t border-white/[0.06] px-4 py-4">
-                    <div className="mb-3 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
-                      Melhores Posts do Período
-                    </div>
-                    <IgTopPostsCard
-                      posts={igPosts}
-                      loading={igPostsLoading}
-                      sortBy={igSortBy}
-                      onSortChange={setIgSortBy}
-                      periodFrom={selectedRange.from.toISOString().split('T')[0]}
-                      periodTo={selectedRange.to.toISOString().split('T')[0]}
-                    />
-                  </div>
                 </PremiumPanel>
               );
             })()}
