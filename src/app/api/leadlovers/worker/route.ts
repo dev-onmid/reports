@@ -164,12 +164,19 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// Cron endpoint (GET with secret)
+// Cron endpoint (GET with secret) — usado pelo GitHub Actions e Vercel cron
 export async function GET(req: NextRequest) {
   const cronSecret = process.env.CRON_SECRET;
   const secret = new URL(req.url).searchParams.get('secret');
   if (!cronSecret || secret !== cronSecret) {
     return Response.json({ error: 'Não autorizado' }, { status: 401 });
   }
-  return POST(new Request(req.url, { method: 'POST', headers: req.headers }) as NextRequest);
+  // Repassa para o POST com o header Bearer para que o check isCron passe.
+  // Sem isso o POST cai em scope.userId=null + isCron=false e retorna 401.
+  const headers = new Headers(req.headers);
+  headers.set('authorization', `Bearer ${cronSecret}`);
+  headers.set('content-type', 'application/json');
+  // Lote de 15 por chamada: seguro dentro do limite de 10s do Vercel
+  // (cada webhook ~0,3-0,8s). GitHub Actions chama a cada 5 min.
+  return POST(new Request(req.url, { method: 'POST', headers, body: '{"limit":15}' }) as NextRequest);
 }
