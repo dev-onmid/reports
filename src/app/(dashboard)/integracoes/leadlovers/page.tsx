@@ -461,6 +461,8 @@ function CronogramaTab({
   const [editAuthKey, setEditAuthKey] = useState('');
   const [editName, setEditName] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
+  const [testingEdit, setTestingEdit] = useState(false);
+  const [editTestResult, setEditTestResult] = useState<{ ok: boolean; httpStatus: number; responseBody: string } | null>(null);
 
   const campaign = campaigns.find(c => c.id === selectedId);
 
@@ -562,6 +564,30 @@ function CronogramaTab({
       setRules(prev => prev.filter(r => r.id !== ruleId));
       onRefresh();
     } catch {}
+  }
+
+  async function testCampaignWebhook() {
+    if (!editWebhook.trim()) return;
+    setTestingEdit(true); setEditTestResult(null);
+    try {
+      const res = await fetch('/api/leadlovers/config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'x-onmid-user-id': userId ?? '' },
+        body: JSON.stringify({
+          webhook_url: editWebhook.trim(),
+          machine_code: editMachineCode.trim() || undefined,
+          email_sequence_code: editEmailSequenceCode.trim() || undefined,
+          sequence_level_code: editSequenceLevelCode.trim() || undefined,
+          auth_key: editAuthKey.trim() || undefined,
+        }),
+      });
+      const d = await res.json();
+      setEditTestResult(d);
+    } catch (err: unknown) {
+      setEditTestResult({ ok: false, httpStatus: 0, responseBody: err instanceof Error ? err.message : 'Erro de rede' });
+    } finally {
+      setTestingEdit(false);
+    }
   }
 
   async function saveCampaignEdit() {
@@ -742,13 +768,37 @@ function CronogramaTab({
                 <p className="text-xs text-muted-foreground mb-1">Bearer Token</p>
                 <Input type="password" value={editAuthKey} onChange={(e) => setEditAuthKey(e.target.value)} placeholder="eyJ0eXAiOi… (deixe em branco para manter)" />
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-wrap">
                 <Button onClick={saveCampaignEdit} disabled={savingEdit || !editWebhook.trim()}>
                   {savingEdit ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                   Salvar alterações
                 </Button>
-                <Button variant="ghost" onClick={() => setShowEditCampaign(false)}>Cancelar</Button>
+                <Button variant="outline" onClick={testCampaignWebhook} disabled={testingEdit || !editWebhook.trim()}>
+                  {testingEdit ? <Loader2 className="h-4 w-4 animate-spin" /> : <Webhook className="h-4 w-4" />}
+                  Testar conexão
+                </Button>
+                <Button variant="ghost" onClick={() => { setShowEditCampaign(false); setEditTestResult(null); }}>Cancelar</Button>
               </div>
+
+              {editTestResult && (
+                <div className={`rounded-xl border p-3 ${editTestResult.ok ? 'border-green-500/30 bg-green-500/10' : 'border-red-500/30 bg-red-500/10'}`}>
+                  <div className="flex items-center gap-2">
+                    {editTestResult.ok
+                      ? <CheckCircle2 className="h-4 w-4 text-green-400" />
+                      : <XCircle className="h-4 w-4 text-red-400" />
+                    }
+                    <span className={`text-sm font-semibold ${editTestResult.ok ? 'text-green-400' : 'text-red-400'}`}>
+                      {editTestResult.ok ? 'Conexão bem-sucedida' : 'Falha na conexão'}
+                    </span>
+                    <span className="ml-auto text-xs text-muted-foreground">HTTP {editTestResult.httpStatus}</span>
+                  </div>
+                  {editTestResult.responseBody && (
+                    <pre className="mt-2 max-h-24 overflow-auto rounded-lg bg-black/30 p-2 text-xs text-muted-foreground">
+                      {editTestResult.responseBody.slice(0, 400)}
+                    </pre>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
