@@ -149,7 +149,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({})) as { campaign_id?: string; limit?: number };
     const limit = isCron ? CRON_LIMIT : Math.min(body.limit ?? USER_LIMIT, 50);
 
-    return processContacts({
+    return await processContacts({
       isCron,
       userId: scope.userId,
       unrestricted: scope.unrestricted,
@@ -169,7 +169,7 @@ export async function GET(req: NextRequest) {
     if (!cronSecret || secret !== cronSecret) {
       return Response.json({ error: 'Não autorizado' }, { status: 401 });
     }
-    return processContacts({
+    return await processContacts({
       isCron: true,
       userId: null,
       unrestricted: true,
