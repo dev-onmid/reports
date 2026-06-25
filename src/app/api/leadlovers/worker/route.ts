@@ -171,12 +171,10 @@ export async function GET(req: NextRequest) {
   if (!cronSecret || secret !== cronSecret) {
     return Response.json({ error: 'Não autorizado' }, { status: 401 });
   }
-  // Repassa para o POST com o header Bearer para que o check isCron passe.
-  // Sem isso o POST cai em scope.userId=null + isCron=false e retorna 401.
   const headers = new Headers(req.headers);
   headers.set('authorization', `Bearer ${cronSecret}`);
   headers.set('content-type', 'application/json');
-  // Lote de 15 por chamada: seguro dentro do limite de 10s do Vercel
-  // (cada webhook ~0,3-0,8s). GitHub Actions chama a cada 5 min.
-  return POST(new Request(req.url, { method: 'POST', headers, body: '{"limit":15}' }) as NextRequest);
+  // Lote de 5 por chamada: cada webhook Leadlovers leva ~0,5-1s; 5×1s + overhead < 10s.
+  // GitHub Actions roda a cada 5 min → até 60 envios/hora.
+  return POST(new Request(req.url, { method: 'POST', headers, body: '{"limit":5}' }) as NextRequest);
 }
