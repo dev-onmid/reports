@@ -15,7 +15,7 @@
     },
     {
       "path": "/api/leadlovers/worker?secret=${CRON_SECRET}",
-      "schedule": "0 * * * 1-5"
+      "schedule": "0 12 * * 1-5"
     }
   ]
 }
