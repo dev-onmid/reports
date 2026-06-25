@@ -1,54 +1,32 @@
-/**
- * POST /api/leadlovers/worker
- *
- * Processes due contacts for all active campaigns. Called by:
- * - Frontend polling (Painel tab monitors)
- * - Vercel cron (once per day at 09:00 UTC to catch "all at once" batches)
- *
- * Each call sends up to `limit` contacts whose next_send_at <= NOW().
- * Returns stats so the frontend can update its progress display.
- */
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { getCallerScope } from '@/lib/disparos-access';
 
-const DEFAULT_LIMIT = 10;
+const CRON_LIMIT = 5;   // seguro dentro do limite de 10s do Vercel
+const USER_LIMIT = 10;  // front-end polling pode pedir até 50
 
-export async function POST(req: NextRequest) {
+async function processContacts(opts: {
+  isCron: boolean;
+  userId: string | null;
+  unrestricted: boolean;
+  campaignId?: string;
+  limit: number;
+}): Promise<Response> {
   const pool = makeServerPool();
   try {
-    // Allow both authenticated users (frontend polling) and cron secret
-    const cronSecret = process.env.CRON_SECRET;
-    const authHeader = req.headers.get('authorization') ?? '';
-    const isCron = cronSecret && authHeader === `Bearer ${cronSecret}`;
+    const { isCron, userId, unrestricted, campaignId } = opts;
+    const limit = Math.min(opts.limit, 50);
 
-    const scope = await getCallerScope(req, pool);
-    if (!scope.userId && !isCron) {
-      return Response.json({ error: 'Não autorizado' }, { status: 401 });
-    }
-
-    const body = await req.json().catch(() => ({})) as {
-      campaign_id?: string;
-      limit?: number;
-    };
-
-    const limit = Math.min(body.limit ?? DEFAULT_LIMIT, 50);
-
-    // Build owner filter — cron processes all active campaigns; user only their own
-    const ownerFilter = isCron
-      ? 'TRUE'
-      : `($1::boolean OR c.owner_id = $2)`;
-    const ownerParams: unknown[] = isCron ? [] : [scope.unrestricted, scope.userId];
+    const ownerFilter = isCron ? 'TRUE' : `($1::boolean OR c.owner_id = $2)`;
+    const ownerParams: unknown[] = isCron ? [] : [unrestricted, userId];
     let idx = ownerParams.length + 1;
 
-    const campaignFilter = body.campaign_id
-      ? ` AND ct.campaign_id = $${idx++}`
-      : '';
-    if (body.campaign_id) ownerParams.push(body.campaign_id);
+    const campaignFilter = campaignId ? ` AND ct.campaign_id = $${idx++}` : '';
+    if (campaignId) ownerParams.push(campaignId);
 
-    // Fetch due contacts — pick oldest next_send_at first
     const { rows: due } = await pool.query(
-      `SELECT ct.*, c.webhook_url, c.machine_code, c.email_sequence_code, c.sequence_level_code, c.auth_key, c.owner_id AS campaign_owner_id
+      `SELECT ct.*, c.webhook_url, c.machine_code, c.email_sequence_code,
+              c.sequence_level_code, c.auth_key
          FROM public.leadlovers_contacts ct
          JOIN public.leadlovers_campaigns c ON c.id = ct.campaign_id
         WHERE ct.status = 'pendente'
@@ -64,12 +42,10 @@ export async function POST(req: NextRequest) {
       return Response.json({ sent: 0, errors: 0, done: false });
     }
 
-    // Send each contact to its campaign webhook
     type Result = { id: string; status: 'success' | 'error'; httpStatus?: number; error?: string };
     const results: Result[] = [];
 
     for (const contact of due) {
-      // Build Leadlovers-compatible payload
       const payload: Record<string, unknown> = {
         Name:  contact.nome     ?? '',
         Email: contact.email    ?? '',
@@ -79,13 +55,12 @@ export async function POST(req: NextRequest) {
       if (contact.email_sequence_code) payload.EmailSequenceCode  = contact.email_sequence_code;
       if (contact.sequence_level_code) payload.SequenceLevelCode  = contact.sequence_level_code;
       if (contact.empresa)             payload.Company            = contact.empresa;
-      // Merge any extra fields from the spreadsheet
       if (contact.extra_data && typeof contact.extra_data === 'object') {
         Object.assign(payload, contact.extra_data);
       }
 
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (contact.auth_key) headers['Authorization'] = `Bearer ${contact.auth_key}`;
+      const reqHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (contact.auth_key) reqHeaders['Authorization'] = `Bearer ${contact.auth_key}`;
 
       let ok = false;
       let httpStatus = 0;
@@ -94,15 +69,13 @@ export async function POST(req: NextRequest) {
       try {
         const res = await fetch(contact.webhook_url as string, {
           method: 'POST',
-          headers,
+          headers: reqHeaders,
           body: JSON.stringify(payload),
           signal: AbortSignal.timeout(8000),
         });
         httpStatus = res.status;
         ok = res.ok;
-        if (!ok) {
-          errorMsg = `HTTP ${httpStatus}`;
-        }
+        if (!ok) errorMsg = `HTTP ${httpStatus}`;
       } catch (err: unknown) {
         errorMsg = err instanceof Error ? err.message : 'Erro de rede';
       }
@@ -110,7 +83,6 @@ export async function POST(req: NextRequest) {
       const contactStatus = ok ? 'enviado' : 'erro';
       const logStatus: 'success' | 'error' = ok ? 'success' : 'error';
 
-      // Update contact
       await pool.query(
         `UPDATE public.leadlovers_contacts
             SET status = $1, sent_at = $2, error_msg = $3,
@@ -119,7 +91,6 @@ export async function POST(req: NextRequest) {
         [contactStatus, ok ? new Date().toISOString() : null, errorMsg, ok ? 0 : 1, contact.id],
       );
 
-      // Log dispatch
       await pool.query(
         `INSERT INTO public.leadlovers_dispatch_log
            (campaign_id, contact_id, status, http_status, error_msg)
@@ -127,7 +98,6 @@ export async function POST(req: NextRequest) {
         [contact.campaign_id, contact.id, logStatus, httpStatus || null, errorMsg],
       );
 
-      // Increment campaign counter
       const counterCol = ok ? 'total_sent' : 'total_errors';
       await pool.query(
         `UPDATE public.leadlovers_campaigns
@@ -139,7 +109,7 @@ export async function POST(req: NextRequest) {
       results.push({ id: contact.id as string, status: logStatus, httpStatus, error: errorMsg ?? undefined });
     }
 
-    // Check if any campaign is now complete
+    // Mark campaigns as complete when no pending contacts remain
     const campaignIds = [...new Set(due.map(d => d.campaign_id as string))];
     for (const cid of campaignIds) {
       const { rows: [{ pending }] } = await pool.query(
@@ -164,17 +134,48 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// Cron endpoint (GET with secret) — usado pelo GitHub Actions e Vercel cron
-export async function GET(req: NextRequest) {
-  const cronSecret = process.env.CRON_SECRET;
-  const secret = new URL(req.url).searchParams.get('secret');
-  if (!cronSecret || secret !== cronSecret) {
-    return Response.json({ error: 'Não autorizado' }, { status: 401 });
+export async function POST(req: NextRequest) {
+  try {
+    const cronSecret = process.env.CRON_SECRET;
+    const authHeader = req.headers.get('authorization') ?? '';
+    const isCron = !!(cronSecret && authHeader === `Bearer ${cronSecret}`);
+
+    const pool = makeServerPool();
+    const scope = await getCallerScope(req, pool).finally(() => pool.end());
+    if (!scope.userId && !isCron) {
+      return Response.json({ error: 'Não autorizado' }, { status: 401 });
+    }
+
+    const body = await req.json().catch(() => ({})) as { campaign_id?: string; limit?: number };
+    const limit = isCron ? CRON_LIMIT : Math.min(body.limit ?? USER_LIMIT, 50);
+
+    return processContacts({
+      isCron,
+      userId: scope.userId,
+      unrestricted: scope.unrestricted,
+      campaignId: body.campaign_id,
+      limit,
+    });
+  } catch (err: unknown) {
+    return Response.json({ error: err instanceof Error ? err.message : 'Erro interno' }, { status: 500 });
   }
-  const headers = new Headers(req.headers);
-  headers.set('authorization', `Bearer ${cronSecret}`);
-  headers.set('content-type', 'application/json');
-  // Lote de 5 por chamada: cada webhook Leadlovers leva ~0,5-1s; 5×1s + overhead < 10s.
-  // GitHub Actions roda a cada 5 min → até 60 envios/hora.
-  return POST(new Request(req.url, { method: 'POST', headers, body: '{"limit":5}' }) as NextRequest);
+}
+
+// GET endpoint for cron (GitHub Actions + Vercel cron)
+export async function GET(req: NextRequest) {
+  try {
+    const cronSecret = process.env.CRON_SECRET;
+    const secret = new URL(req.url).searchParams.get('secret');
+    if (!cronSecret || secret !== cronSecret) {
+      return Response.json({ error: 'Não autorizado' }, { status: 401 });
+    }
+    return processContacts({
+      isCron: true,
+      userId: null,
+      unrestricted: true,
+      limit: CRON_LIMIT,
+    });
+  } catch (err: unknown) {
+    return Response.json({ error: err instanceof Error ? err.message : 'Erro interno' }, { status: 500 });
+  }
 }
