@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
 
     // Fetch due contacts — pick oldest next_send_at first
     const { rows: due } = await pool.query(
-      `SELECT ct.*, c.webhook_url, c.owner_id AS campaign_owner_id
+      `SELECT ct.*, c.webhook_url, c.machine_code, c.auth_key, c.owner_id AS campaign_owner_id
          FROM public.leadlovers_contacts ct
          JOIN public.leadlovers_campaigns c ON c.id = ct.campaign_id
         WHERE ct.status = 'pendente'
@@ -69,13 +69,21 @@ export async function POST(req: NextRequest) {
     const results: Result[] = [];
 
     for (const contact of due) {
-      const payload = {
-        nome:     contact.nome     ?? '',
-        email:    contact.email    ?? '',
-        telefone: contact.telefone ?? '',
-        empresa:  contact.empresa  ?? '',
-        ...(contact.extra_data && typeof contact.extra_data === 'object' ? contact.extra_data : {}),
+      // Build Leadlovers-compatible payload
+      const payload: Record<string, unknown> = {
+        Name:  contact.nome     ?? '',
+        Email: contact.email    ?? '',
+        Phone: contact.telefone ?? '',
       };
+      if (contact.machine_code) payload.MachineCode = contact.machine_code;
+      if (contact.empresa)      payload.Company     = contact.empresa;
+      // Merge any extra fields from the spreadsheet
+      if (contact.extra_data && typeof contact.extra_data === 'object') {
+        Object.assign(payload, contact.extra_data);
+      }
+
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (contact.auth_key) headers['Authorization'] = `Bearer ${contact.auth_key}`;
 
       let ok = false;
       let httpStatus = 0;
@@ -84,7 +92,7 @@ export async function POST(req: NextRequest) {
       try {
         const res = await fetch(contact.webhook_url as string, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify(payload),
           signal: AbortSignal.timeout(8000),
         });

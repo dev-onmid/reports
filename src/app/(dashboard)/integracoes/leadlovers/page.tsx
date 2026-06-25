@@ -8,7 +8,6 @@ import {
   CheckCircle2, XCircle, Clock, Play, Pause, RefreshCw,
   ChevronLeft, AlertCircle, Loader2, Check, X,
 } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { getAuthSession } from '@/lib/auth-store';
@@ -38,6 +37,8 @@ type Campaign = {
   id: string;
   name: string;
   webhook_url: string;
+  machine_code?: string;
+  auth_key?: string;
   status: 'rascunho' | 'ativa' | 'pausada' | 'concluida';
   total_contacts: number;
   total_sent: number;
@@ -52,11 +53,6 @@ type DispatchLog = {
   errors: number;
 };
 
-type WebhookConfig = {
-  webhook_url: string;
-  last_test_ok?: boolean;
-  last_test_at?: string;
-};
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -311,43 +307,26 @@ function UploadTab({
   );
 }
 
-// ── Tab 2: Webhook ─────────────────────────────────────────────────────────────
-function WebhookTab({ config, onSaved }: { config: WebhookConfig | null; onSaved: (c: WebhookConfig) => void }) {
+// ── Tab 2: Testar Webhook ─────────────────────────────────────────────────────
+// Standalone tester — no persistence. Each campaign stores its own credentials.
+function WebhookTab() {
   const userId = getAuthSession()?.userId ?? null;
 
-  const [url, setUrl] = useState(config?.webhook_url ?? '');
-  const [saving, setSaving] = useState(false);
+  const [url, setUrl] = useState('');
+  const [machineCode, setMachineCode] = useState('');
+  const [authKey, setAuthKey] = useState('');
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; httpStatus: number; responseBody: string } | null>(null);
   const [error, setError] = useState('');
 
-  useEffect(() => { if (config) setUrl(config.webhook_url); }, [config]);
-
-  async function save() {
-    setSaving(true); setError('');
-    try {
-      const res = await fetch('/api/leadlovers/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-onmid-user-id': userId ?? '' },
-        body: JSON.stringify({ webhook_url: url }),
-      });
-      if (!res.ok) throw new Error((await res.json()).error ?? 'Erro ao salvar');
-      const d = await res.json();
-      onSaved(d);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Erro');
-    } finally {
-      setSaving(false);
-    }
-  }
-
   async function test() {
+    if (!url.trim()) return;
     setTesting(true); setTestResult(null); setError('');
     try {
       const res = await fetch('/api/leadlovers/config', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', 'x-onmid-user-id': userId ?? '' },
-        body: JSON.stringify({ webhook_url: url }),
+        body: JSON.stringify({ webhook_url: url, machine_code: machineCode, auth_key: authKey }),
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d.error ?? 'Erro ao testar');
@@ -360,18 +339,38 @@ function WebhookTab({ config, onSaved }: { config: WebhookConfig | null; onSaved
   }
 
   return (
-    <div className="max-w-xl space-y-6">
-      <div>
-        <p className="text-sm font-semibold mb-1">URL do Webhook Leadlovers</p>
-        <p className="text-xs text-muted-foreground mb-3">
-          Cole aqui o webhook gerado no Leadlovers. Os contatos serão enviados via POST JSON para este endereço.
+    <div className="max-w-xl space-y-5">
+      <div className="rounded-xl border border-border bg-card/40 px-4 py-3">
+        <p className="text-xs text-muted-foreground">
+          Use este testador para validar as credenciais antes de criar uma campanha.
+          Nenhum dado é salvo aqui — as configurações ficam em cada campanha.
         </p>
-        <div className="flex gap-2">
+      </div>
+
+      <div className="space-y-3">
+        <div>
+          <p className="text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wide">URL do Webhook</p>
           <Input
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://evento.leadlovers.com/webhook/..."
-            className="flex-1"
+            placeholder="https://llapi.leadlovers.com/webapi/lead?token=…"
+          />
+        </div>
+        <div>
+          <p className="text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wide">Código da Máquina (MachineCode)</p>
+          <Input
+            value={machineCode}
+            onChange={(e) => setMachineCode(e.target.value)}
+            placeholder="ex: 777360"
+          />
+        </div>
+        <div>
+          <p className="text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wide">Chave de Autorização (Bearer Token)</p>
+          <Input
+            value={authKey}
+            onChange={(e) => setAuthKey(e.target.value)}
+            placeholder="eyJ0eXAiOiJKV1Qi…"
+            type="password"
           />
         </div>
       </div>
@@ -382,22 +381,14 @@ function WebhookTab({ config, onSaved }: { config: WebhookConfig | null; onSaved
         </div>
       )}
 
-      <div className="flex gap-3">
-        <Button onClick={save} disabled={saving || !url.trim()}>
-          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-          {saving ? 'Salvando…' : 'Salvar URL'}
-        </Button>
-        <Button variant="outline" onClick={test} disabled={testing || !url.trim()}>
-          {testing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Webhook className="h-4 w-4" />}
-          {testing ? 'Testando…' : 'Testar conexão'}
-        </Button>
-      </div>
+      <Button onClick={test} disabled={testing || !url.trim()} className="w-full">
+        {testing ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Webhook className="h-4 w-4 mr-2" />}
+        {testing ? 'Testando…' : 'Testar conexão'}
+      </Button>
 
       {testResult && (
         <div className={`rounded-xl border p-4 ${
-          testResult.ok
-            ? 'border-green-500/30 bg-green-500/10'
-            : 'border-red-500/30 bg-red-500/10'
+          testResult.ok ? 'border-green-500/30 bg-green-500/10' : 'border-red-500/30 bg-red-500/10'
         }`}>
           <div className="flex items-center gap-2 mb-2">
             {testResult.ok
@@ -410,20 +401,11 @@ function WebhookTab({ config, onSaved }: { config: WebhookConfig | null; onSaved
             <span className="ml-auto text-xs text-muted-foreground">HTTP {testResult.httpStatus}</span>
           </div>
           {testResult.responseBody && (
-            <pre className="mt-2 max-h-24 overflow-auto rounded-lg bg-black/30 p-3 text-xs text-muted-foreground">
-              {testResult.responseBody.slice(0, 400)}
+            <pre className="mt-2 max-h-28 overflow-auto rounded-lg bg-black/30 p-3 text-xs text-muted-foreground">
+              {testResult.responseBody.slice(0, 600)}
             </pre>
           )}
         </div>
-      )}
-
-      {config?.last_test_at && (
-        <p className="text-xs text-muted-foreground">
-          Último teste: {new Date(config.last_test_at).toLocaleString('pt-BR')} —{' '}
-          <span className={config.last_test_ok ? 'text-green-400' : 'text-red-400'}>
-            {config.last_test_ok ? 'Sucesso' : 'Falhou'}
-          </span>
-        </p>
       )}
     </div>
   );
@@ -442,6 +424,8 @@ function CronogramaTab({
   const [selectedId, setSelectedId] = useState<string>('');
   const [newCampaignName, setNewCampaignName] = useState('');
   const [webhookUrl, setWebhookUrl] = useState('');
+  const [newMachineCode, setNewMachineCode] = useState('');
+  const [newAuthKey, setNewAuthKey] = useState('');
   const [creatingCampaign, setCreatingCampaign] = useState(false);
   const [showNewForm, setShowNewForm] = useState(false);
 
@@ -483,7 +467,12 @@ function CronogramaTab({
       const res = await fetch('/api/leadlovers/campaigns', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-onmid-user-id': userId ?? '' },
-        body: JSON.stringify({ name: newCampaignName.trim(), webhook_url: webhookUrl.trim() }),
+        body: JSON.stringify({
+          name: newCampaignName.trim(),
+          webhook_url: webhookUrl.trim(),
+          machine_code: newMachineCode.trim() || undefined,
+          auth_key: newAuthKey.trim() || undefined,
+        }),
       });
       if (!res.ok) throw new Error((await res.json()).error ?? 'Erro');
       const c = await res.json();
@@ -492,6 +481,8 @@ function CronogramaTab({
       setShowNewForm(false);
       setNewCampaignName('');
       setWebhookUrl('');
+      setNewMachineCode('');
+      setNewAuthKey('');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Erro');
     } finally {
@@ -578,19 +569,41 @@ function CronogramaTab({
         <div className="rounded-xl border border-border bg-card/60 p-4 space-y-3">
           <p className="text-sm font-semibold">Nova campanha</p>
           <Input
-            placeholder="Nome da campanha"
+            placeholder="Nome da campanha (ex: Fluxo Dia dos Pais)"
             value={newCampaignName}
             onChange={(e) => setNewCampaignName(e.target.value)}
           />
           <Input
-            placeholder="URL do Webhook Leadlovers"
+            placeholder="URL do Webhook (https://llapi.leadlovers.com/webapi/lead?token=…)"
             value={webhookUrl}
             onChange={(e) => setWebhookUrl(e.target.value)}
           />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Código da Máquina</p>
+              <Input
+                placeholder="ex: 777360"
+                value={newMachineCode}
+                onChange={(e) => setNewMachineCode(e.target.value)}
+              />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Bearer Token (opcional)</p>
+              <Input
+                placeholder="eyJ0eXAiOi…"
+                type="password"
+                value={newAuthKey}
+                onChange={(e) => setNewAuthKey(e.target.value)}
+              />
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Cada campanha aponta para um fluxo diferente no Leadlovers — mude a URL e o MachineCode para o fluxo desejado.
+          </p>
           <div className="flex gap-2">
             <Button onClick={createCampaign} disabled={creatingCampaign || !newCampaignName.trim() || !webhookUrl.trim()}>
               {creatingCampaign ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-              Criar
+              Criar campanha
             </Button>
             <Button variant="ghost" onClick={() => setShowNewForm(false)}>Cancelar</Button>
           </div>
@@ -1035,9 +1048,9 @@ type Tab = 'upload' | 'webhook' | 'cronograma' | 'painel';
 
 const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: 'upload',      label: 'Upload de Contatos', icon: Upload },
-  { id: 'webhook',     label: 'Webhook',             icon: Webhook },
-  { id: 'cronograma',  label: 'Cronograma',          icon: Calendar },
-  { id: 'painel',      label: 'Painel',              icon: BarChart3 },
+  { id: 'webhook',     label: 'Testar Webhook',     icon: Webhook },
+  { id: 'cronograma',  label: 'Campanhas',          icon: Calendar },
+  { id: 'painel',      label: 'Painel',             icon: BarChart3 },
 ];
 
 export default function LeadloversPage() {
@@ -1046,21 +1059,13 @@ export default function LeadloversPage() {
 
   const [tab, setTab] = useState<Tab>('upload');
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [config, setConfig] = useState<WebhookConfig | null>(null);
   const [loading, setLoading] = useState(true);
 
   const loadData = useCallback(async () => {
     if (!userId) return;
     try {
-      const [cRes, cfgRes] = await Promise.all([
-        fetch('/api/leadlovers/campaigns', { headers: { 'x-onmid-user-id': userId } }),
-        fetch('/api/leadlovers/config',    { headers: { 'x-onmid-user-id': userId } }),
-      ]);
-      if (cRes.ok)   setCampaigns(await cRes.json());
-      if (cfgRes.ok) {
-        const d = await cfgRes.json();
-        if (d) setConfig(d);
-      }
+      const res = await fetch('/api/leadlovers/campaigns', { headers: { 'x-onmid-user-id': userId } });
+      if (res.ok) setCampaigns(await res.json());
     } catch {} finally {
       setLoading(false);
     }
@@ -1126,7 +1131,7 @@ export default function LeadloversPage() {
               <UploadTab campaigns={campaigns} onContactsUploaded={loadData} />
             )}
             {tab === 'webhook' && (
-              <WebhookTab config={config} onSaved={(c) => setConfig(c)} />
+              <WebhookTab />
             )}
             {tab === 'cronograma' && (
               <CronogramaTab campaigns={campaigns} onRefresh={loadData} />

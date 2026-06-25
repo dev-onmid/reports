@@ -36,16 +36,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (!scope.userId) return Response.json({ error: 'Não autorizado' }, { status: 401 });
 
     const body = await req.json() as Partial<{
-      name: string; webhook_url: string; status: string;
+      name: string; webhook_url: string; machine_code: string; auth_key: string; status: string;
     }>;
 
     const sets: string[] = ['updated_at = NOW()'];
     const vals: unknown[] = [];
     let idx = 1;
 
-    if (body.name !== undefined)        { sets.push(`name = $${idx++}`);        vals.push(body.name); }
-    if (body.webhook_url !== undefined) { sets.push(`webhook_url = $${idx++}`); vals.push(body.webhook_url); }
-    if (body.status !== undefined)      { sets.push(`status = $${idx++}`);      vals.push(body.status); }
+    if (body.name !== undefined)         { sets.push(`name = $${idx++}`);         vals.push(body.name); }
+    if (body.webhook_url !== undefined)  { sets.push(`webhook_url = $${idx++}`);  vals.push(body.webhook_url); }
+    if (body.machine_code !== undefined) { sets.push(`machine_code = $${idx++}`); vals.push(body.machine_code); }
+    if (body.auth_key !== undefined)     { sets.push(`auth_key = $${idx++}`);     vals.push(body.auth_key); }
+    if (body.status !== undefined)       { sets.push(`status = $${idx++}`);       vals.push(body.status); }
 
     if (sets.length === 1) return Response.json({ error: 'Nada para atualizar' }, { status: 400 });
 

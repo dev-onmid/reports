@@ -9,6 +9,8 @@ async function ensureTables(pool: ReturnType<typeof makeServerPool>) {
       owner_id       TEXT NOT NULL,
       name           TEXT NOT NULL,
       webhook_url    TEXT NOT NULL,
+      machine_code   TEXT,
+      auth_key       TEXT,
       status         TEXT DEFAULT 'rascunho',
       total_contacts INTEGER DEFAULT 0,
       total_sent     INTEGER DEFAULT 0,
@@ -16,6 +18,8 @@ async function ensureTables(pool: ReturnType<typeof makeServerPool>) {
       created_at     TIMESTAMPTZ DEFAULT NOW(),
       updated_at     TIMESTAMPTZ DEFAULT NOW()
     );
+    ALTER TABLE public.leadlovers_campaigns ADD COLUMN IF NOT EXISTS machine_code TEXT;
+    ALTER TABLE public.leadlovers_campaigns ADD COLUMN IF NOT EXISTS auth_key TEXT;
     CREATE TABLE IF NOT EXISTS public.leadlovers_schedule_rules (
       id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       campaign_id      UUID NOT NULL REFERENCES public.leadlovers_campaigns(id) ON DELETE CASCADE,
@@ -62,15 +66,26 @@ export async function POST(req: NextRequest) {
     const scope = await getCallerScope(req, pool);
     if (!scope.userId) return Response.json({ error: 'Não autorizado' }, { status: 401 });
 
-    const body = await req.json() as { name: string; webhook_url: string };
+    const body = await req.json() as {
+      name: string;
+      webhook_url: string;
+      machine_code?: string;
+      auth_key?: string;
+    };
     if (!body.name?.trim())        return Response.json({ error: 'Nome obrigatório' }, { status: 400 });
     if (!body.webhook_url?.trim()) return Response.json({ error: 'URL do webhook obrigatória' }, { status: 400 });
 
     const { rows: [campaign] } = await pool.query(
-      `INSERT INTO public.leadlovers_campaigns (owner_id, name, webhook_url)
-       VALUES ($1, $2, $3)
+      `INSERT INTO public.leadlovers_campaigns (owner_id, name, webhook_url, machine_code, auth_key)
+       VALUES ($1, $2, $3, $4, $5)
        RETURNING *`,
-      [scope.userId, body.name.trim(), body.webhook_url.trim()],
+      [
+        scope.userId,
+        body.name.trim(),
+        body.webhook_url.trim(),
+        body.machine_code?.trim() ?? null,
+        body.auth_key?.trim() ?? null,
+      ],
     );
     return Response.json({ ...campaign, rules: [] }, { status: 201 });
   } finally {
