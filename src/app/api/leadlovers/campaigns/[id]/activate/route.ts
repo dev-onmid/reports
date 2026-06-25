@@ -33,13 +33,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const scope = await getCallerScope(req, pool);
     if (!scope.userId) return Response.json({ error: 'Não autorizado' }, { status: 401 });
 
+    // ?reschedule=1 → recalcula next_send_at dos pendentes mesmo se já estiver ativa
+    const reschedule = new URL(req.url).searchParams.get('reschedule') === '1';
+
     // Fetch campaign + ownership check
     const { rows: [campaign] } = await pool.query(
       `SELECT * FROM public.leadlovers_campaigns WHERE id = $1 AND ($2::boolean OR owner_id = $3)`,
       [id, scope.unrestricted, scope.userId],
     );
     if (!campaign) return Response.json({ error: 'Campanha não encontrada' }, { status: 404 });
-    if (campaign.status === 'ativa') return Response.json({ error: 'Campanha já está ativa' }, { status: 400 });
+    if (campaign.status === 'ativa' && !reschedule) {
+      return Response.json({ error: 'Campanha já está ativa' }, { status: 400 });
+    }
 
     // Fetch rules
     const { rows: rules } = await pool.query(
@@ -62,38 +67,35 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const slots: Slot[] = [];
 
     let contactCursor = 0;
+    const now = new Date();
+    // Início do dia de hoje em UTC, para descartar dias úteis já passados
+    const todayUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    // send_time é BRT (UTC-3); converte para UTC somando 3 horas
+    const BRT_OFFSET_HOURS = 3;
 
     for (const rule of rules) {
       if (contactCursor >= contacts.length) break;
 
-      const bdays = businessDaysBetween(new Date(rule.date_from), new Date(rule.date_to));
+      // Não agenda em dias anteriores a hoje (reagendamento sempre olha pra frente)
+      const bdays = businessDaysBetween(new Date(rule.date_from), new Date(rule.date_to))
+        .filter(d => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())) >= todayUtc);
       const [sh, sm] = (rule.send_time as string).split(':').map(Number);
-      // send_time is BRT (UTC-3); convert to UTC by adding 3 hours
-      const BRT_OFFSET_HOURS = 3;
 
       for (const day of bdays) {
         if (contactCursor >= contacts.length) break;
 
         const toSendToday = Math.min(rule.qty_per_day as number, contacts.length - contactCursor);
+        const step = rule.interval_minutes ? (rule.interval_minutes as number) : 0;
 
-        if (rule.interval_minutes) {
-          // Stagger sends: first at send_time BRT, then +interval each
-          for (let i = 0; i < toSendToday; i++) {
-            if (contactCursor >= contacts.length) break;
-            const sendAt = new Date(day);
-            sendAt.setUTCHours(sh + BRT_OFFSET_HOURS, sm + i * (rule.interval_minutes as number), 0, 0);
-            slots.push({ contactId: contacts[contactCursor].id, sendAt });
-            contactCursor++;
-          }
-        } else {
-          // All at once at send_time BRT
-          for (let i = 0; i < toSendToday; i++) {
-            if (contactCursor >= contacts.length) break;
-            const sendAt = new Date(day);
-            sendAt.setUTCHours(sh + BRT_OFFSET_HOURS, sm, 0, 0);
-            slots.push({ contactId: contacts[contactCursor].id, sendAt });
-            contactCursor++;
-          }
+        for (let i = 0; i < toSendToday; i++) {
+          if (contactCursor >= contacts.length) break;
+          let sendAt = new Date(day);
+          sendAt.setUTCHours(sh + BRT_OFFSET_HOURS, sm + i * step, 0, 0);
+          // Se o horário calculado já passou (ex.: reagendar hoje após o horário),
+          // dispara em instantes — escalonando se houver intervalo.
+          if (sendAt < now) sendAt = new Date(now.getTime() + i * step * 60_000);
+          slots.push({ contactId: contacts[contactCursor].id, sendAt });
+          contactCursor++;
         }
       }
     }

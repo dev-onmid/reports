@@ -631,18 +631,21 @@ function CronogramaTab({
     } catch {}
   }
 
-  async function activateCampaign() {
+  async function activateCampaign(reschedule = false) {
     if (!selectedId) return;
+    if (reschedule && !confirm('Reagendar todos os contatos pendentes a partir de hoje, usando os horários atuais das regras?')) return;
     setActivating(true); setError('');
     try {
-      const res = await fetch(`/api/leadlovers/campaigns/${selectedId}/activate`, {
+      const res = await fetch(`/api/leadlovers/campaigns/${selectedId}/activate${reschedule ? '?reschedule=1' : ''}`, {
         method: 'POST',
         headers: { 'x-onmid-user-id': userId ?? '' },
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d.error ?? 'Erro ao ativar');
       onRefresh();
-      alert(`Campanha ativada! ${d.scheduled} contatos agendados.`);
+      alert(reschedule
+        ? `Reagendado! ${d.scheduled} contatos pendentes redistribuídos a partir de hoje.`
+        : `Campanha ativada! ${d.scheduled} contatos agendados.`);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Erro');
     } finally {
@@ -937,7 +940,7 @@ function CronogramaTab({
           {/* Activate */}
           {campaign.status === 'rascunho' && rules.length > 0 && (
             <Button
-              onClick={activateCampaign}
+              onClick={() => activateCampaign(false)}
               disabled={activating || contactCount === 0 || totalByRules === 0}
               className="w-full h-12 text-base font-bold"
             >
@@ -947,7 +950,18 @@ function CronogramaTab({
           )}
 
           {campaign.status !== 'rascunho' && (
-            <div className="flex gap-3">
+            <div className="flex gap-3 flex-wrap">
+              {(campaign.status === 'ativa' || campaign.status === 'pausada') && rules.length > 0 && (
+                <Button
+                  variant="outline"
+                  onClick={() => activateCampaign(true)}
+                  disabled={activating}
+                  title="Redistribui os contatos pendentes a partir de hoje com os horários atuais das regras"
+                >
+                  {activating ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                  Reagendar pendentes
+                </Button>
+              )}
               {campaign.status === 'ativa' && (
                 <Button
                   variant="outline"
