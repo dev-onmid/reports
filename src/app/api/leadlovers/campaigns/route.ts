@@ -9,9 +9,11 @@ async function ensureTables(pool: ReturnType<typeof makeServerPool>) {
       owner_id       TEXT NOT NULL,
       name           TEXT NOT NULL,
       webhook_url    TEXT NOT NULL,
-      machine_code   TEXT,
-      auth_key       TEXT,
-      status         TEXT DEFAULT 'rascunho',
+      machine_code        TEXT,
+      email_sequence_code TEXT,
+      sequence_level_code TEXT DEFAULT '1',
+      auth_key            TEXT,
+      status              TEXT DEFAULT 'rascunho',
       total_contacts INTEGER DEFAULT 0,
       total_sent     INTEGER DEFAULT 0,
       total_errors   INTEGER DEFAULT 0,
@@ -19,6 +21,8 @@ async function ensureTables(pool: ReturnType<typeof makeServerPool>) {
       updated_at     TIMESTAMPTZ DEFAULT NOW()
     );
     ALTER TABLE public.leadlovers_campaigns ADD COLUMN IF NOT EXISTS machine_code TEXT;
+    ALTER TABLE public.leadlovers_campaigns ADD COLUMN IF NOT EXISTS email_sequence_code TEXT;
+    ALTER TABLE public.leadlovers_campaigns ADD COLUMN IF NOT EXISTS sequence_level_code TEXT DEFAULT '1';
     ALTER TABLE public.leadlovers_campaigns ADD COLUMN IF NOT EXISTS auth_key TEXT;
     CREATE TABLE IF NOT EXISTS public.leadlovers_schedule_rules (
       id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -70,20 +74,25 @@ export async function POST(req: NextRequest) {
       name: string;
       webhook_url: string;
       machine_code?: string;
+      email_sequence_code?: string;
+      sequence_level_code?: string;
       auth_key?: string;
     };
     if (!body.name?.trim())        return Response.json({ error: 'Nome obrigatório' }, { status: 400 });
     if (!body.webhook_url?.trim()) return Response.json({ error: 'URL do webhook obrigatória' }, { status: 400 });
 
     const { rows: [campaign] } = await pool.query(
-      `INSERT INTO public.leadlovers_campaigns (owner_id, name, webhook_url, machine_code, auth_key)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO public.leadlovers_campaigns
+         (owner_id, name, webhook_url, machine_code, email_sequence_code, sequence_level_code, auth_key)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING *`,
       [
         scope.userId,
         body.name.trim(),
         body.webhook_url.trim(),
         body.machine_code?.trim() ?? null,
+        body.email_sequence_code?.trim() ?? null,
+        body.sequence_level_code?.trim() ?? '1',
         body.auth_key?.trim() ?? null,
       ],
     );

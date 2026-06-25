@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
 
     // Fetch due contacts — pick oldest next_send_at first
     const { rows: due } = await pool.query(
-      `SELECT ct.*, c.webhook_url, c.machine_code, c.auth_key, c.owner_id AS campaign_owner_id
+      `SELECT ct.*, c.webhook_url, c.machine_code, c.email_sequence_code, c.sequence_level_code, c.auth_key, c.owner_id AS campaign_owner_id
          FROM public.leadlovers_contacts ct
          JOIN public.leadlovers_campaigns c ON c.id = ct.campaign_id
         WHERE ct.status = 'pendente'
@@ -75,8 +75,10 @@ export async function POST(req: NextRequest) {
         Email: contact.email    ?? '',
         Phone: contact.telefone ?? '',
       };
-      if (contact.machine_code) payload.MachineCode = contact.machine_code;
-      if (contact.empresa)      payload.Company     = contact.empresa;
+      if (contact.machine_code)        payload.MachineCode        = contact.machine_code;
+      if (contact.email_sequence_code) payload.EmailSequenceCode  = contact.email_sequence_code;
+      if (contact.sequence_level_code) payload.SequenceLevelCode  = contact.sequence_level_code;
+      if (contact.empresa)             payload.Company            = contact.empresa;
       // Merge any extra fields from the spreadsheet
       if (contact.extra_data && typeof contact.extra_data === 'object') {
         Object.assign(payload, contact.extra_data);

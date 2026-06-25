@@ -38,6 +38,8 @@ type Campaign = {
   name: string;
   webhook_url: string;
   machine_code?: string;
+  email_sequence_code?: string;
+  sequence_level_code?: string;
   auth_key?: string;
   status: 'rascunho' | 'ativa' | 'pausada' | 'concluida';
   total_contacts: number;
@@ -314,6 +316,8 @@ function WebhookTab() {
 
   const [url, setUrl] = useState('');
   const [machineCode, setMachineCode] = useState('');
+  const [emailSequenceCode, setEmailSequenceCode] = useState('');
+  const [sequenceLevelCode, setSequenceLevelCode] = useState('1');
   const [authKey, setAuthKey] = useState('');
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; httpStatus: number; responseBody: string } | null>(null);
@@ -326,7 +330,13 @@ function WebhookTab() {
       const res = await fetch('/api/leadlovers/config', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', 'x-onmid-user-id': userId ?? '' },
-        body: JSON.stringify({ webhook_url: url, machine_code: machineCode, auth_key: authKey }),
+        body: JSON.stringify({
+          webhook_url: url,
+          machine_code: machineCode,
+          email_sequence_code: emailSequenceCode,
+          sequence_level_code: sequenceLevelCode,
+          auth_key: authKey,
+        }),
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d.error ?? 'Erro ao testar');
@@ -356,13 +366,19 @@ function WebhookTab() {
             placeholder="https://llapi.leadlovers.com/webapi/lead?token=…"
           />
         </div>
-        <div>
-          <p className="text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wide">Código da Máquina (MachineCode)</p>
-          <Input
-            value={machineCode}
-            onChange={(e) => setMachineCode(e.target.value)}
-            placeholder="ex: 777360"
-          />
+        <div className="grid grid-cols-3 gap-3">
+          <div>
+            <p className="text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wide">MachineCode</p>
+            <Input value={machineCode} onChange={(e) => setMachineCode(e.target.value)} placeholder="ex: 777360" />
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wide">EmailSequenceCode</p>
+            <Input value={emailSequenceCode} onChange={(e) => setEmailSequenceCode(e.target.value)} placeholder="ex: 1845595" />
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wide">SequenceLevelCode</p>
+            <Input value={sequenceLevelCode} onChange={(e) => setSequenceLevelCode(e.target.value)} placeholder="ex: 1" />
+          </div>
         </div>
         <div>
           <p className="text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wide">Chave de Autorização (Bearer Token)</p>
@@ -425,6 +441,8 @@ function CronogramaTab({
   const [newCampaignName, setNewCampaignName] = useState('');
   const [webhookUrl, setWebhookUrl] = useState('');
   const [newMachineCode, setNewMachineCode] = useState('');
+  const [newEmailSequenceCode, setNewEmailSequenceCode] = useState('');
+  const [newSequenceLevelCode, setNewSequenceLevelCode] = useState('1');
   const [newAuthKey, setNewAuthKey] = useState('');
   const [creatingCampaign, setCreatingCampaign] = useState(false);
   const [showNewForm, setShowNewForm] = useState(false);
@@ -471,6 +489,8 @@ function CronogramaTab({
           name: newCampaignName.trim(),
           webhook_url: webhookUrl.trim(),
           machine_code: newMachineCode.trim() || undefined,
+          email_sequence_code: newEmailSequenceCode.trim() || undefined,
+          sequence_level_code: newSequenceLevelCode.trim() || '1',
           auth_key: newAuthKey.trim() || undefined,
         }),
       });
@@ -482,6 +502,8 @@ function CronogramaTab({
       setNewCampaignName('');
       setWebhookUrl('');
       setNewMachineCode('');
+      setNewEmailSequenceCode('');
+      setNewSequenceLevelCode('1');
       setNewAuthKey('');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Erro');
@@ -578,24 +600,23 @@ function CronogramaTab({
             value={webhookUrl}
             onChange={(e) => setWebhookUrl(e.target.value)}
           />
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             <div>
-              <p className="text-xs text-muted-foreground mb-1">Código da Máquina</p>
-              <Input
-                placeholder="ex: 777360"
-                value={newMachineCode}
-                onChange={(e) => setNewMachineCode(e.target.value)}
-              />
+              <p className="text-xs text-muted-foreground mb-1">MachineCode</p>
+              <Input placeholder="ex: 777360" value={newMachineCode} onChange={(e) => setNewMachineCode(e.target.value)} />
             </div>
             <div>
-              <p className="text-xs text-muted-foreground mb-1">Bearer Token (opcional)</p>
-              <Input
-                placeholder="eyJ0eXAiOi…"
-                type="password"
-                value={newAuthKey}
-                onChange={(e) => setNewAuthKey(e.target.value)}
-              />
+              <p className="text-xs text-muted-foreground mb-1">EmailSequenceCode</p>
+              <Input placeholder="ex: 1845595" value={newEmailSequenceCode} onChange={(e) => setNewEmailSequenceCode(e.target.value)} />
             </div>
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">SequenceLevelCode</p>
+              <Input placeholder="ex: 1" value={newSequenceLevelCode} onChange={(e) => setNewSequenceLevelCode(e.target.value)} />
+            </div>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground mb-1">Bearer Token (opcional)</p>
+            <Input placeholder="eyJ0eXAiOi…" type="password" value={newAuthKey} onChange={(e) => setNewAuthKey(e.target.value)} />
           </div>
           <p className="text-xs text-muted-foreground">
             Cada campanha aponta para um fluxo diferente no Leadlovers — mude a URL e o MachineCode para o fluxo desejado.

@@ -86,6 +86,8 @@ export async function PUT(req: NextRequest) {
     const body = await req.json() as {
       webhook_url: string;
       machine_code?: string;
+      email_sequence_code?: string;
+      sequence_level_code?: string;
       auth_key?: string;
     };
     if (!body.webhook_url?.trim()) return Response.json({ error: 'URL obrigatória' }, { status: 400 });
@@ -99,9 +101,9 @@ export async function PUT(req: NextRequest) {
         Email: 'teste@onmid.com.br',
         Phone: '11999999999',
       };
-      if (body.machine_code?.trim()) {
-        testPayload.MachineCode = body.machine_code.trim();
-      }
+      if (body.machine_code?.trim())        testPayload.MachineCode       = body.machine_code.trim();
+      if (body.email_sequence_code?.trim()) testPayload.EmailSequenceCode = body.email_sequence_code.trim();
+      if (body.sequence_level_code?.trim()) testPayload.SequenceLevelCode = body.sequence_level_code.trim();
 
       const res = await fetch(body.webhook_url.trim(), {
         method: 'POST',
