@@ -68,6 +68,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
       const bdays = businessDaysBetween(new Date(rule.date_from), new Date(rule.date_to));
       const [sh, sm] = (rule.send_time as string).split(':').map(Number);
+      // send_time is BRT (UTC-3); convert to UTC by adding 3 hours
+      const BRT_OFFSET_HOURS = 3;
 
       for (const day of bdays) {
         if (contactCursor >= contacts.length) break;
@@ -75,20 +77,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         const toSendToday = Math.min(rule.qty_per_day as number, contacts.length - contactCursor);
 
         if (rule.interval_minutes) {
-          // Stagger sends: first at send_time, then +interval each
+          // Stagger sends: first at send_time BRT, then +interval each
           for (let i = 0; i < toSendToday; i++) {
             if (contactCursor >= contacts.length) break;
             const sendAt = new Date(day);
-            sendAt.setHours(sh, sm + i * (rule.interval_minutes as number), 0, 0);
+            sendAt.setUTCHours(sh + BRT_OFFSET_HOURS, sm + i * (rule.interval_minutes as number), 0, 0);
             slots.push({ contactId: contacts[contactCursor].id, sendAt });
             contactCursor++;
           }
         } else {
-          // All at once at send_time
+          // All at once at send_time BRT
           for (let i = 0; i < toSendToday; i++) {
             if (contactCursor >= contacts.length) break;
             const sendAt = new Date(day);
-            sendAt.setHours(sh, sm, 0, 0);
+            sendAt.setUTCHours(sh + BRT_OFFSET_HOURS, sm, 0, 0);
             slots.push({ contactId: contacts[contactCursor].id, sendAt });
             contactCursor++;
           }
