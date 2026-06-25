@@ -17,6 +17,19 @@ async function processContacts(opts: {
     const { isCron, userId, unrestricted, campaignId } = opts;
     const limit = Math.min(opts.limit, 50);
 
+    // Garante a tabela de log (pode não ter sido criada na migração inicial)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS public.leadlovers_dispatch_log (
+        id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        campaign_id   UUID NOT NULL REFERENCES public.leadlovers_campaigns(id) ON DELETE CASCADE,
+        contact_id    UUID NOT NULL REFERENCES public.leadlovers_contacts(id) ON DELETE CASCADE,
+        dispatched_at TIMESTAMPTZ DEFAULT NOW(),
+        status        TEXT NOT NULL,
+        http_status   INTEGER,
+        error_msg     TEXT
+      );
+    `);
+
     const ownerFilter = isCron ? 'TRUE' : `($1::boolean OR c.owner_id = $2)`;
     const ownerParams: unknown[] = isCron ? [] : [unrestricted, userId];
     let idx = ownerParams.length + 1;
