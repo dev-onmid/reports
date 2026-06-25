@@ -156,6 +156,32 @@ Definidos em `vercel.json`:
 
 ---
 
+## Otimizador de Campanhas
+
+Módulo de análise automática de performance — arquivos principais:
+
+| Arquivo | Papel |
+|---|---|
+| `src/lib/optimizer.ts` | Tipos, payload builder, Camada 1, system prompt do Claude |
+| `src/app/api/otimizador/analisar/route.ts` | POST análise (Camada 1 → cache → IA), GET fila, PATCH log de decisão |
+| `src/app/api/otimizador/daily/route.ts` | Cron/manual — busca campanhas e dispara análises em lote |
+| `src/app/(dashboard)/otimizador/page.tsx` | UI da fila de decisões |
+
+### Decisões arquiteturais do Otimizador
+
+- **`objetivo_campanha`** é o campo mais crítico do payload. Antes de qualquer análise, o Claude identifica o objetivo (`leads | trafego | vendas | engajamento | reconhecimento`) e adapta as métricas avaliadas. CPL só é problema em campanhas de `leads` ou `vendas`. Nunca mencionar CPL em `trafego`, `engajamento` ou `reconhecimento`.
+- **Meta**: objetivo vem de `campaign.objective` (campo `OUTCOME_LEADS`, `OUTCOME_TRAFFIC`, etc.) — normalizado por `normalizeMetaObjective()` em `campaigns/route.ts`.
+- **Google**: objetivo vem de `campaign.advertising_channel_type` no GAQL — normalizado por `normalizeGoogleChannelType()`. `SEARCH` → `trafego`, `SHOPPING/PERFORMANCE_MAX` → `vendas`, `DISPLAY/VIDEO` → `reconhecimento`.
+- **Campanhas pausadas são ignoradas** no daily route — filtro `['ACTIVE','ENABLED','IN_PROCESS','WITH_ISSUES']` aplicado antes de enviar para análise.
+- **Tom do prompt**: imperativo e direto, como gestor falando com gestor. Sem linguagem de relatório formal. Ex: "Pausa esse criativo agora — CTR de 0,4% com frequência baixa." (não "Recomenda-se a revisão do criativo.")
+- **Camada 1** (regras automáticas sem IA): CPL crítico e regra de aprendizado só disparam para `isLeadsOrSales`. `estimateCriticalLevel` também respeita o objetivo.
+- **Cache**: resultados de análise em `optimizer_ai_logs` (PostgreSQL). Hash do payload + drift < 5% → usa cache. Limite de 10 chamadas IA/cliente/dia.
+- **Fallback de métricas Google no Dashboard**: quando a API de métricas retorna `google: null`, o dashboard agrega spend/leads/impressions/clicks diretamente do estado `campaigns` (que usa endpoint separado que funciona). Ver `googleCampaignsTotals` em `dashboard/page.tsx`.
+- **IS metrics (Google)**: `search_impression_share`, `search_budget_lost_impression_share`, `search_absolute_top_impression_share` — disponíveis apenas no `FROM campaign` (GAQL), **não** no `FROM customer`. Nunca misturar IS com `segments.date` no `FROM customer` — quebra a query.
+- **MCC map**: `buildMccMap` cacheado por `connectionId` com TTL de 4h em `api-cache.ts`. Necessário para o header `login-customer-id` nas chamadas Google Ads.
+
+---
+
 ## Instruções para o Claude
 
 - Ao final de cada sessão, atualize este arquivo com decisões novas, tecnologias adicionadas ou mudanças importantes feitas hoje.
