@@ -20,9 +20,9 @@ jobs:
           HTTP_CODE=$(curl -s -o /tmp/resp.json -w "%{http_code}" \
             "${{ secrets.LEADLOVERS_WORKER_URL }}")
           echo "HTTP $HTTP_CODE"
-          echo "Resposta:"
-          cat /tmp/resp.json || true
-          echo ""
+          echo "=== Resposta ==="
+          cat /tmp/resp.json 2>/dev/null && echo "" || echo "(vazio)"
+          echo "================"
           if [ "$HTTP_CODE" -ge 400 ]; then
             echo "::error::Worker retornou HTTP $HTTP_CODE"
             exit 1
