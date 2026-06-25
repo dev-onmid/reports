@@ -495,15 +495,19 @@ function saveClientPlanning(clientId: string, planning: ClientPlanningConfig) {
 }
 
 // ── Funnel planning tab ────────────────────────────────────────────────────────
-function FunnelTab({ clientId, clientName, goalConfig }: { clientId: string; clientName: string; goalConfig: ClientGoalConfig }) {
+function FunnelTab({ clientId, clientName, goalConfig, isAdmin }: { clientId: string; clientName: string; goalConfig: ClientGoalConfig; isAdmin: boolean }) {
   const [planningLoadedFor, setPlanningLoadedFor] = useState(clientId);
   const [tkm, setTkm] = useState(() => readSavedClientPlanning(clientId).tkm);
   const [cplMeta, setCplMeta] = useState(() => readSavedClientPlanning(clientId).cplMeta);
   const [stages, setStages] = useState<FunnelStage[]>(() => readSavedClientPlanning(clientId).stages);
   const [simpleMode, setSimpleMode] = useState(() => readSavedClientPlanning(clientId).simpleMode);
   const [invPlaSimple, setInvPlaSimple] = useState(() => readSavedClientPlanning(clientId).invPlaSimple);
+  // Admin: localStorage wins immediately (pushes correct data to DB on first visit).
+  // Non-admin: must wait for DB load to prevent localStorage defaults from overwriting DB.
+  const planningDbLoaded = useRef(isAdmin);
 
   useEffect(() => {
+    planningDbLoaded.current = isAdmin;
     let cancelled = false;
     const saved = readSavedClientPlanning(clientId);
     setTkm(saved.tkm);
@@ -515,27 +519,32 @@ function FunnelTab({ clientId, clientName, goalConfig }: { clientId: string; cli
     fetch(`/api/clients/${clientId}/planning`)
       .then(r => r.json())
       .then((dbData: { tkm: number; cplMeta: number; stages: FunnelStage[]; simpleMode?: boolean; invPlaSimple?: number } | null) => {
-        if (cancelled || !dbData) return;
-        const planning: ClientPlanningConfig = {
-          tkm: dbData.tkm || saved.tkm,
-          cplMeta: dbData.cplMeta || saved.cplMeta,
-          stages: sanitizePlanningStages(dbData.stages),
-          simpleMode: dbData.simpleMode ?? saved.simpleMode,
-          invPlaSimple: dbData.invPlaSimple ?? saved.invPlaSimple,
-        };
-        setTkm(planning.tkm);
-        setCplMeta(planning.cplMeta);
-        setStages(planning.stages);
-        setSimpleMode(planning.simpleMode);
-        setInvPlaSimple(planning.invPlaSimple);
-        window.localStorage.setItem(`clientPlanning_${clientId}`, JSON.stringify(planning));
+        if (cancelled) return;
+        if (dbData && !isAdmin) {
+          // Non-admin: DB is authoritative — load its data into state
+          const planning: ClientPlanningConfig = {
+            tkm: dbData.tkm || saved.tkm,
+            cplMeta: dbData.cplMeta || saved.cplMeta,
+            stages: sanitizePlanningStages(dbData.stages),
+            simpleMode: dbData.simpleMode ?? saved.simpleMode,
+            invPlaSimple: dbData.invPlaSimple ?? saved.invPlaSimple,
+          };
+          setTkm(planning.tkm);
+          setCplMeta(planning.cplMeta);
+          setStages(planning.stages);
+          setSimpleMode(planning.simpleMode);
+          setInvPlaSimple(planning.invPlaSimple);
+          window.localStorage.setItem(`clientPlanning_${clientId}`, JSON.stringify(planning));
+        }
+        planningDbLoaded.current = true;
       })
-      .catch(() => {});
+      .catch(() => { planningDbLoaded.current = true; });
     return () => { cancelled = true; };
-  }, [clientId]);
+  }, [clientId, isAdmin]);
 
   useEffect(() => {
     if (planningLoadedFor !== clientId) return;
+    if (!planningDbLoaded.current) return;
     saveClientPlanning(clientId, { tkm, cplMeta, stages, simpleMode, invPlaSimple });
   }, [clientId, planningLoadedFor, tkm, cplMeta, stages, simpleMode, invPlaSimple]);
 
@@ -4644,6 +4653,8 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
   const googleConnection = googleAds.getConnection(id);
   const googleMetrics: GoogleAdsMetrics | null = apiGoogleMetrics ?? (googleConnection ? googleAds.getClientMetrics(id) : null);
 
+  const isAdmin = getAuthSession()?.role === 'Administrador';
+
   const [tab, setTab] = useState<Tab>('planejamento');
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
   const [statusDialogOpen, setStatusDialogOpen] = useState(false);
@@ -4680,31 +4691,41 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
     readSavedClientGoal(id, isNewClient ? ZERO_CLIENT_GOAL : DEFAULT_CLIENT_GOAL)
   );
   const [clientGoalLoadedFor, setClientGoalLoadedFor] = useState(id);
+  // Admin: localStorage wins immediately (pushes correct data to DB on first visit).
+  // Non-admin: must wait for DB load to prevent localStorage defaults from overwriting DB.
+  const goalDbLoaded = useRef(isAdmin);
 
   useEffect(() => {
+    goalDbLoaded.current = isAdmin;
     let cancelled = false;
     setClientGoal(readSavedClientGoal(id, isNewClient ? ZERO_CLIENT_GOAL : DEFAULT_CLIENT_GOAL));
     setClientGoalLoadedFor(id);
     fetch(`/api/clients/${id}/goal`)
       .then(r => r.json())
       .then((dbData: Partial<ClientGoalConfig> | null) => {
-        if (cancelled || !dbData?.type) return;
-        const option = GOAL_TYPE_OPTIONS.find(o => o.type === dbData.type);
-        if (!option) return;
-        const target = Number(dbData.target ?? 0);
-        const goal: ClientGoalConfig = {
-          type: option.type, label: option.label, format: option.format,
-          target, partial: autoPartial(target), realized: Number(dbData.realized ?? 0),
-        };
-        setClientGoal(goal);
-        window.localStorage.setItem(`clientGoal_${id}`, JSON.stringify(goal));
+        if (cancelled) return;
+        if (dbData?.type && !isAdmin) {
+          // Non-admin: DB is authoritative — load its data into state
+          const option = GOAL_TYPE_OPTIONS.find(o => o.type === dbData.type);
+          if (option) {
+            const target = Number(dbData.target ?? 0);
+            const goal: ClientGoalConfig = {
+              type: option.type, label: option.label, format: option.format,
+              target, partial: autoPartial(target), realized: Number(dbData.realized ?? 0),
+            };
+            setClientGoal(goal);
+            window.localStorage.setItem(`clientGoal_${id}`, JSON.stringify(goal));
+          }
+        }
+        goalDbLoaded.current = true;
       })
-      .catch(() => {});
+      .catch(() => { goalDbLoaded.current = true; });
     return () => { cancelled = true; };
-  }, [id, isNewClient]);
+  }, [id, isNewClient, isAdmin]);
 
   useEffect(() => {
     if (clientGoalLoadedFor !== id) return;
+    if (!goalDbLoaded.current) return;
     saveClientGoal(id, clientGoal);
   }, [id, clientGoal, clientGoalLoadedFor]);
 
@@ -4946,7 +4967,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
       {tab === 'planejamento' && (
         <div className="space-y-5">
           <ClientGoalSettings goal={clientGoal} onChange={setClientGoal} />
-          <FunnelTab clientId={id} clientName={client.name} goalConfig={clientGoal} />
+          <FunnelTab clientId={id} clientName={client.name} goalConfig={clientGoal} isAdmin={isAdmin} />
         </div>
       )}
 
