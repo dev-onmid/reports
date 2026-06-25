@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   AlertCircle,
   Building2,
@@ -1818,7 +1819,7 @@ function SpreadsheetImportPanel() {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type IntegrationId = 'meta-ads' | 'google-ads' | 'google-my-business' | 'website';
+type IntegrationId = 'meta-ads' | 'google-ads' | 'google-my-business' | 'website' | 'leadlovers';
 
 type Integration = {
   id: IntegrationId;
@@ -1857,9 +1858,20 @@ const BASE_INTEGRATIONS: Integration[] = [
     category: 'Presença Digital',
     logo: <LogoWebsite size="lg" />,
   },
+  {
+    id: 'leadlovers',
+    name: 'Leadlovers',
+    description: 'Envie contatos para o Leadlovers via webhook com cronograma inteligente.',
+    category: 'Automação',
+    logo: (
+      <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#1a1a2e] border border-[#00a8ff]/30">
+        <span className="text-sm font-extrabold text-[#00a8ff]">LL</span>
+      </div>
+    ),
+  },
 ];
 
-const CATEGORIES = ['Todos', 'Anúncios', 'Presença Digital'];
+const CATEGORIES = ['Todos', 'Anúncios', 'Presença Digital', 'Automação'];
 
 function IntegrationStatusBadge({ connected }: { connected: boolean }) {
   return connected ? (
@@ -1878,6 +1890,7 @@ function IntegrationStatusBadge({ connected }: { connected: boolean }) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function IntegracoesPage() {
+  const router = useRouter();
   const { connections: metaConns, loading: metaLoading, remove: removeMeta } = useMetaConnections();
   const { connections: googleConns, loading: googleLoading, remove: removeGoogle, reload: reloadGoogle } = useGoogleConnections();
   const { integration: googleAdsInfo, disconnect: disconnectGoogleAds } = useGoogleAds();
@@ -1963,6 +1976,10 @@ export default function IntegracoesPage() {
     }
     if (id === 'google-my-business') {
       openGoogleOAuth('gmb');
+      return;
+    }
+    if (id === 'leadlovers') {
+      router.push('/integracoes/leadlovers');
       return;
     }
   }

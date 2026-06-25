@@ -12,6 +12,10 @@
     {
       "path": "/api/otimizador/daily?secret=${CRON_SECRET}",
       "schedule": "0 10 * * *"
+    },
+    {
+      "path": "/api/leadlovers/worker?secret=${CRON_SECRET}",
+      "schedule": "0 9 * * 1-5"
     }
   ]
 }

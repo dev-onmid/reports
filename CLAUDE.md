@@ -182,6 +182,35 @@ Módulo de análise automática de performance — arquivos principais:
 
 ---
 
+## Integração Leadlovers
+
+Módulo de envio de contatos para o Leadlovers via webhook com cronograma inteligente — arquivos principais:
+
+| Arquivo | Papel |
+|---|---|
+| `src/lib/db/migration_leadlovers.sql` | 5 tabelas: config, campaigns, schedule_rules, contacts, dispatch_log |
+| `src/app/api/leadlovers/config/route.ts` | GET/POST/PUT (test) do webhook |
+| `src/app/api/leadlovers/contacts/route.ts` | GET/POST/DELETE contatos (parse JSON do xlsx feito no cliente) |
+| `src/app/api/leadlovers/campaigns/route.ts` | GET/POST campanhas (com rules inline via JOIN) |
+| `src/app/api/leadlovers/campaigns/[id]/route.ts` | GET/PATCH/DELETE campanha |
+| `src/app/api/leadlovers/campaigns/[id]/rules/route.ts` | GET/POST/DELETE regras de cronograma |
+| `src/app/api/leadlovers/campaigns/[id]/activate/route.ts` | POST — pré-computa `next_send_at` para cada contato |
+| `src/app/api/leadlovers/worker/route.ts` | POST — envia contatos com `next_send_at <= NOW()` (frontend poll + cron) |
+| `src/app/(dashboard)/integracoes/leadlovers/page.tsx` | UI com 4 abas: Upload, Webhook, Cronograma, Painel |
+
+### Decisões arquiteturais do Leadlovers
+
+- **xlsx parse no cliente**: a planilha é lida no browser com `XLSX.read()` e enviada como JSON para `/api/leadlovers/contacts`. Evita upload binário e mantém dentro do limite de 10s.
+- **Agendamento pré-computado**: ao ativar a campanha (`/activate`), o backend distribui contatos nos dias úteis com `next_send_at` já calculado. O worker não precisa de lógica de scheduling — só busca `WHERE next_send_at <= NOW()`.
+- **Apenas dias úteis**: `businessDaysBetween()` em `activate/route.ts` pula sábado (6) e domingo (0).
+- **Intervalo opcional**: se `interval_minutes` é `NULL`, todos os contatos do dia recebem o mesmo `next_send_at` (horário de envio). Se preenchido, cada contato é escalonado em +N minutos.
+- **Worker**: chamado pelo frontend (polling na aba Painel, 1x/min quando monitorando) e pelo Vercel cron `0 9 * * 1-5` (só dias úteis). Limite de 50 contatos por chamada para respeitar timeout de 10s.
+- **Não usa Supabase**: todas as tabelas são PostgreSQL via `server-db.ts`. O erro `supabaseUrl is required` na página `/integracoes` é pré-existente (env var faltando no dev), não relacionado a esta feature.
+- **Card na página de integrações**: Leadlovers aparece na categoria "Automação" e navega para `/integracoes/leadlovers` ao clicar. `IntegrationId` union type foi extendido.
+- **Cron Vercel adicionado**: `"0 9 * * 1-5"` em `vercel.json` para processar envios matinais sem depender do browser aberto.
+
+---
+
 ## Instruções para o Claude
 
 - Ao final de cada sessão, atualize este arquivo com decisões novas, tecnologias adicionadas ou mudanças importantes feitas hoje.
