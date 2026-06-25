@@ -6,7 +6,7 @@ import * as XLSX from 'xlsx';
 import {
   Upload, Webhook, Calendar, BarChart3, Plus, Trash2,
   CheckCircle2, XCircle, Clock, Play, Pause, RefreshCw,
-  ChevronLeft, AlertCircle, Loader2, Check, X,
+  ChevronLeft, AlertCircle, Loader2, Check, X, Pencil,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -452,6 +452,16 @@ function CronogramaTab({
   const [activating, setActivating] = useState(false);
   const [error, setError] = useState('');
 
+  // Edit campaign credentials
+  const [showEditCampaign, setShowEditCampaign] = useState(false);
+  const [editWebhook, setEditWebhook] = useState('');
+  const [editMachineCode, setEditMachineCode] = useState('');
+  const [editEmailSequenceCode, setEditEmailSequenceCode] = useState('');
+  const [editSequenceLevelCode, setEditSequenceLevelCode] = useState('1');
+  const [editAuthKey, setEditAuthKey] = useState('');
+  const [editName, setEditName] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
+
   const campaign = campaigns.find(c => c.id === selectedId);
 
   // New rule form state
@@ -476,6 +486,15 @@ function CronogramaTab({
     if (!selectedId) { setRules([]); return; }
     const c = campaigns.find(x => x.id === selectedId);
     setRules(c?.rules ?? []);
+    if (c) {
+      setEditName(c.name ?? '');
+      setEditWebhook(c.webhook_url ?? '');
+      setEditMachineCode(c.machine_code ?? '');
+      setEditEmailSequenceCode(c.email_sequence_code ?? '');
+      setEditSequenceLevelCode(c.sequence_level_code ?? '1');
+      setEditAuthKey(c.auth_key ?? '');
+    }
+    setShowEditCampaign(false);
   }, [selectedId, campaigns]);
 
   async function createCampaign() {
@@ -541,6 +560,47 @@ function CronogramaTab({
         headers: { 'x-onmid-user-id': userId ?? '' },
       });
       setRules(prev => prev.filter(r => r.id !== ruleId));
+      onRefresh();
+    } catch {}
+  }
+
+  async function saveCampaignEdit() {
+    if (!selectedId || !editWebhook.trim()) return;
+    setSavingEdit(true); setError('');
+    try {
+      const res = await fetch(`/api/leadlovers/campaigns/${selectedId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-onmid-user-id': userId ?? '' },
+        body: JSON.stringify({
+          name: editName.trim() || undefined,
+          webhook_url: editWebhook.trim(),
+          machine_code: editMachineCode.trim() || null,
+          email_sequence_code: editEmailSequenceCode.trim() || null,
+          sequence_level_code: editSequenceLevelCode.trim() || '1',
+          auth_key: editAuthKey.trim() || null,
+        }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error ?? 'Erro');
+      onRefresh();
+      setShowEditCampaign(false);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Erro ao salvar');
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
+  async function updateRuleSendTime(ruleId: string, sendTime: string) {
+    if (!selectedId || !ruleId) return;
+    try {
+      const res = await fetch(`/api/leadlovers/campaigns/${selectedId}/rules?rule_id=${ruleId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-onmid-user-id': userId ?? '' },
+        body: JSON.stringify({ send_time: sendTime }),
+      });
+      if (!res.ok) return;
+      const updated = await res.json();
+      setRules(prev => prev.map(r => r.id === ruleId ? { ...r, send_time: updated.send_time } : r));
       onRefresh();
     } catch {}
   }
@@ -643,7 +703,54 @@ function CronogramaTab({
           <div className="flex items-center gap-3">
             <p className="text-sm font-semibold">{campaign.name}</p>
             {campaignStatusBadge(campaign.status)}
+            <button
+              onClick={() => setShowEditCampaign(v => !v)}
+              className="ml-auto flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-card/60 transition-colors"
+            >
+              <Pencil className="h-3 w-3" />
+              {showEditCampaign ? 'Cancelar' : 'Editar credenciais'}
+            </button>
           </div>
+
+          {/* Edit campaign credentials */}
+          {showEditCampaign && (
+            <div className="rounded-xl border border-border bg-card/60 p-4 space-y-3">
+              <p className="text-sm font-semibold">Editar campanha</p>
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">Nome</p>
+                <Input value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Nome da campanha" />
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">URL do Webhook</p>
+                <Input value={editWebhook} onChange={(e) => setEditWebhook(e.target.value)} placeholder="https://llapi.leadlovers.com/webapi/lead?token=…" />
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">MachineCode</p>
+                  <Input value={editMachineCode} onChange={(e) => setEditMachineCode(e.target.value)} placeholder="ex: 777360" />
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">EmailSequenceCode</p>
+                  <Input value={editEmailSequenceCode} onChange={(e) => setEditEmailSequenceCode(e.target.value)} placeholder="ex: 1845595" />
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">SequenceLevelCode</p>
+                  <Input value={editSequenceLevelCode} onChange={(e) => setEditSequenceLevelCode(e.target.value)} placeholder="ex: 1" />
+                </div>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">Bearer Token</p>
+                <Input type="password" value={editAuthKey} onChange={(e) => setEditAuthKey(e.target.value)} placeholder="eyJ0eXAiOi… (deixe em branco para manter)" />
+              </div>
+              <div className="flex gap-2">
+                <Button onClick={saveCampaignEdit} disabled={savingEdit || !editWebhook.trim()}>
+                  {savingEdit ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                  Salvar alterações
+                </Button>
+                <Button variant="ghost" onClick={() => setShowEditCampaign(false)}>Cancelar</Button>
+              </div>
+            </div>
+          )}
 
           {/* Rules table */}
           <div className="rounded-xl border border-border overflow-hidden">
@@ -664,7 +771,14 @@ function CronogramaTab({
                     <td className="px-4 py-2.5 text-muted-foreground">
                       {rule.interval_minutes ? `${rule.interval_minutes} min` : 'Todos de uma vez'}
                     </td>
-                    <td className="px-4 py-2.5">{rule.send_time ?? '09:00'}</td>
+                    <td className="px-3 py-2">
+                      <input
+                        type="time"
+                        defaultValue={rule.send_time ?? '09:00'}
+                        onBlur={(e) => { if (rule.id && e.target.value !== (rule.send_time ?? '09:00')) updateRuleSendTime(rule.id, e.target.value); }}
+                        className="h-8 w-24 rounded-lg border border-border bg-background px-2 text-xs"
+                      />
+                    </td>
                     <td className="px-4 py-2.5">
                       {rule.id && campaign.status === 'rascunho' && (
                         <button onClick={() => deleteRule(rule.id!)} className="text-muted-foreground hover:text-red-400 transition-colors">
