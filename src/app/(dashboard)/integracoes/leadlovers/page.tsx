@@ -774,7 +774,7 @@ function CronogramaTab({
           {campaign.status === 'rascunho' && rules.length > 0 && (
             <Button
               onClick={activateCampaign}
-              disabled={activating || contactCount < totalByRules || totalByRules === 0}
+              disabled={activating || contactCount === 0 || totalByRules === 0}
               className="w-full h-12 text-base font-bold"
             >
               {activating ? <Loader2 className="h-5 w-5 animate-spin mr-2" /> : <Play className="h-5 w-5 mr-2" />}
