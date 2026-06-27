@@ -26,12 +26,14 @@ import { ClientAvatar } from '@/components/client-avatar';
 import { callerHeaders, getAuthSession } from '@/lib/auth-store';
 import type { Client } from '@/lib/mock-data';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
+import { OPTIMIZER_PERIODS } from '@/lib/optimizer';
 import type {
   OptimizerAnalysisResult,
   OptimizerAcaoAutomatica,
   OptimizerEstadoConta,
   OptimizerModo,
   OptimizerOutputV2,
+  OptimizerPeriodKey,
 } from '@/lib/optimizer';
 
 type LevelFilter = 'todos' | 'vermelho' | 'amarelo' | 'verde';
@@ -635,6 +637,8 @@ export default function OtimizadorPage() {
   const [loading, setLoading] = useState(true);
   const [runLoading, setRunLoading] = useState(false);
   const [runMessage, setRunMessage] = useState<string | null>(null);
+  const [manualClientId, setManualClientId] = useState('programados-hoje');
+  const [manualPeriod, setManualPeriod] = useState<OptimizerPeriodKey>('last_7d');
   const [configClientId, setConfigClientId] = useState<string | null>(null);
   const abortRef = useRef(false);
   const [actionFeedback, setActionFeedback] = useState<Record<number, string>>({});
@@ -753,16 +757,36 @@ export default function OtimizadorPage() {
     setRunMessage(null);
     abortRef.current = false;
     try {
-      const res = await fetch('/api/otimizador/weekly', {
+      const params = new URLSearchParams({
+        period: manualPeriod,
+        forceAi: '1',
+      });
+      if (manualClientId !== 'programados-hoje') {
+        params.set('clientId', manualClientId);
+      }
+
+      const res = await fetch(`/api/otimizador/weekly?${params.toString()}`, {
         method: 'POST',
         headers: { ...callerHeaders(), 'Content-Type': 'application/json' },
       });
-      const data = await res.json().catch(() => ({})) as { analyzed?: number; errors?: number; message?: string };
+      const data = await res.json().catch(() => ({})) as {
+        processados?: number;
+        ok_count?: number;
+        erros?: number;
+        periodo_label?: string;
+        error?: string;
+      };
       if (res.ok) {
-        setRunMessage(`Análise semanal concluída: ${data.analyzed ?? 0} cliente(s) analisados, ${data.errors ?? 0} erros.`);
+        const scope = manualClientId === 'programados-hoje'
+          ? 'grupo de hoje'
+          : clients.find((client) => client.id === manualClientId)?.name ?? 'conta selecionada';
+        setRunMessage(
+          `${scope}: ${data.ok_count ?? 0} análise(s) concluída(s) em ${data.periodo_label ?? 'período selecionado'}${data.erros ? `, ${data.erros} erro(s)` : ''}.`,
+        );
+        if (manualClientId !== 'programados-hoje') setClientFilter(manualClientId);
         await loadQueue();
       } else {
-        setRunMessage(`Erro: ${data.message ?? res.statusText}`);
+        setRunMessage(`Erro: ${data.error ?? res.statusText}`);
       }
     } catch (err) {
       setRunMessage(`Erro ao rodar análise: ${err instanceof Error ? err.message : String(err)}`);
@@ -834,16 +858,48 @@ export default function OtimizadorPage() {
       </header>
 
       {isAdmin && (
-        <section className="flex flex-col gap-3 rounded-[var(--radius)] border border-primary/30 bg-primary/5 p-4 md:flex-row md:items-center md:justify-between">
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-foreground">Análise semanal manual</p>
-            <p className="text-xs text-muted-foreground">Roda a análise de hoje agora, para todos os clientes com análise programada para hoje.</p>
-            {runMessage && <p className="mt-2 text-xs text-primary">{runMessage}</p>}
+        <section className="rounded-[var(--radius)] border border-primary/30 bg-primary/5 p-4">
+          <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr)_minmax(180px,0.65fr)_auto] lg:items-end">
+            <label className="space-y-1.5">
+              <span className="text-xs font-semibold text-muted-foreground">Conta para analisar</span>
+              <select
+                value={manualClientId}
+                onChange={(event) => setManualClientId(event.target.value)}
+                disabled={runLoading}
+                className="h-11 w-full rounded-[var(--radius)] border border-border bg-background px-3 text-sm text-foreground outline-none focus:border-primary"
+              >
+                <option value="programados-hoje">Todas programadas para hoje</option>
+                {clients.map((client) => (
+                  <option key={client.id} value={client.id}>{client.name}</option>
+                ))}
+              </select>
+            </label>
+
+            <label className="space-y-1.5">
+              <span className="text-xs font-semibold text-muted-foreground">Período da análise</span>
+              <select
+                value={manualPeriod}
+                onChange={(event) => setManualPeriod(event.target.value as OptimizerPeriodKey)}
+                disabled={runLoading}
+                className="h-11 w-full rounded-[var(--radius)] border border-border bg-background px-3 text-sm text-foreground outline-none focus:border-primary"
+              >
+                {OPTIMIZER_PERIODS.map((period) => (
+                  <option key={period.key} value={period.key}>{period.label}</option>
+                ))}
+              </select>
+            </label>
+
+            <Button onClick={runWeeklyNow} disabled={runLoading} className="h-11 lg:min-w-56">
+              {runLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+              {manualClientId === 'programados-hoje' ? 'Analisar grupo de hoje' : 'Analisar esta conta'}
+            </Button>
           </div>
-          <Button onClick={runWeeklyNow} disabled={runLoading}>
-            {runLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-            Rodar análise semanal agora
-          </Button>
+          <div className="mt-3 border-t border-primary/15 pt-3">
+            <p className="text-xs text-muted-foreground">
+              A análise individual ignora o dia do rodízio e usa somente a conta e o período escolhidos.
+            </p>
+            {runMessage && <p className="mt-1.5 text-xs font-medium text-primary">{runMessage}</p>}
+          </div>
         </section>
       )}
 

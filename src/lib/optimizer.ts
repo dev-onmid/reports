@@ -95,6 +95,7 @@ export type OptimizerPayloadV2 = {
     data_inicio: string;
     data_fim: string;
     dias: number;
+    label?: string;
   };
   opportunity_score: {
     score: number | null;

@@ -265,7 +265,7 @@ export async function GET(req: NextRequest) {
     const params: unknown[] = [lookbackHours];
     const filters = [
       `created_at >= NOW() - ($1::int * INTERVAL '1 hour')`,
-      `solicitacao = 'analise_completa'`,
+      `solicitacao IN ('analise_completa', 'analise_semanal')`,
       `resultado IS NOT NULL`,
     ];
     if (clientId) {
@@ -539,7 +539,7 @@ async function saveLogV2(params: {
         params.payload.cliente_nome,
         null,
         'meta_ads',
-        params.payload.semana_analise,
+        params.payload.periodo_analise.label ?? `${params.payload.periodo_analise.dias} dias`,
         params.payload.periodo_analise.dias,
         params.result.cruzamento_com_metas.gasto_total,
         params.result.cruzamento_com_metas.volume_conversoes_atual,
@@ -672,7 +672,7 @@ async function handleV2(body: AnalyzeBody, origin: string): Promise<Response> {
   };
 
   void logAiUsage({ source: 'otimizador-v2', model: OPTIMIZER_MODEL, inputTokens, outputTokens });
-  void saveLogV2({ payload, result, payloadHash });
+  await saveLogV2({ payload, result, payloadHash });
 
   // Executa ações automáticas (fire-and-forget)
   if (payload.modo_operacao === 'AUTOMATICO_PARCIAL' || payload.modo_operacao === 'AUTOMATICO_TOTAL') {

@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import {
+  OPTIMIZER_PERIODS,
   currentWeekLabel,
   segmentToOptimizerNiche,
   type OptimizerPayloadV2,
@@ -10,11 +11,18 @@ import {
   type OptimizerAdV2,
   type OptimizerObjective,
   type OptimizerModo,
+  type OptimizerPeriodKey,
 } from '@/lib/optimizer';
 
 export const maxDuration = 60;
 
 const BUDGET_MS = 52_000;
+
+type AnalysisPeriod = {
+  key: OptimizerPeriodKey;
+  label: string;
+  days: number;
+};
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -28,6 +36,12 @@ function todayDow(): number {
   // JS: 0=Sun,1=Mon,...,6=Sat → convert to 1=Mon,...,5=Fri
   const dow = new Date().getDay();
   return dow === 0 ? 7 : dow; // Sun=7 (never matches 1-5)
+}
+
+function analysisPeriodFromRequest(request: NextRequest): AnalysisPeriod {
+  const requested = request.nextUrl.searchParams.get('period');
+  return OPTIMIZER_PERIODS.find((period) => period.key === requested)
+    ?? OPTIMIZER_PERIODS.find((period) => period.key === 'last_7d')!;
 }
 
 function sumActions(actions: Array<{ action_type: string; value: string }>, types: string[]): number {
@@ -308,8 +322,9 @@ async function buildPayloadForClient(
   token: string,
   accountId: string,
   origin: string,
+  period: AnalysisPeriod,
 ): Promise<OptimizerPayloadV2 | null> {
-  const dateFrom = isoDate(7);
+  const dateFrom = isoDate(period.days);
   const dateTo = isoDate(1);
   const semana = currentWeekLabel();
 
@@ -410,7 +425,12 @@ async function buildPayloadForClient(
       max_conjuntos_ativos: client.max_conjuntos_ativos,
       min_dias_aprendizado: client.min_dias_aprendizado,
     },
-    periodo_analise: { data_inicio: dateFrom, data_fim: dateTo, dias: 7 },
+    periodo_analise: {
+      data_inicio: dateFrom,
+      data_fim: dateTo,
+      dias: period.days,
+      label: period.label,
+    },
     opportunity_score: opportunityScore,
     campanhas,
     historico_decisoes: historico,
@@ -423,6 +443,8 @@ async function buildPayloadForClient(
 async function runWeeklyOptimizer(request: NextRequest) {
   const origin = new URL(request.url).origin;
   const forceClientId = request.nextUrl.searchParams.get('clientId') ?? undefined;
+  const forceAi = request.nextUrl.searchParams.get('forceAi') === '1';
+  const period = analysisPeriodFromRequest(request);
   const startedAt = Date.now();
 
   const clients = await loadClientsForToday(undefined, forceClientId);
@@ -447,7 +469,14 @@ async function runWeeklyOptimizer(request: NextRequest) {
       const token = await resolveToken(conn.id);
       if (!token) throw new Error('Token não disponível');
 
-      const payload = await buildPayloadForClient(client, planningMap[client.id] ?? null, token, conn.account_id, origin);
+      const payload = await buildPayloadForClient(
+        client,
+        planningMap[client.id] ?? null,
+        token,
+        conn.account_id,
+        origin,
+        period,
+      );
       if (!payload) {
         results.push({ clientId: client.id, clientName: client.name, status: 'sem_campanhas_ativas' });
         continue;
@@ -456,7 +485,7 @@ async function runWeeklyOptimizer(request: NextRequest) {
       const analyzeRes = await fetch(new URL('/api/otimizador/analisar', origin).toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ payload_v2: payload, connection_id: conn.id }),
+        body: JSON.stringify({ payload_v2: payload, connection_id: conn.id, force_ai: forceAi }),
       });
 
       if (!analyzeRes.ok) throw new Error(`analisar HTTP ${analyzeRes.status}`);
@@ -469,6 +498,8 @@ async function runWeeklyOptimizer(request: NextRequest) {
   return Response.json({
     ok: true,
     semana: currentWeekLabel(),
+    periodo: period.key,
+    periodo_label: period.label,
     dow: todayDow(),
     processados: results.length,
     ok_count: results.filter((r) => r.status === 'ok').length,
