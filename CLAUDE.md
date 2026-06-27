@@ -156,29 +156,47 @@ Definidos em `vercel.json`:
 
 ---
 
-## Otimizador de Campanhas
+## Otimizador de Campanhas v2.0
 
 Módulo de análise automática de performance — arquivos principais:
 
 | Arquivo | Papel |
 |---|---|
-| `src/lib/optimizer.ts` | Tipos, payload builder, Camada 1, system prompt do Claude |
-| `src/app/api/otimizador/analisar/route.ts` | POST análise (Camada 1 → cache → IA), GET fila, PATCH log de decisão |
-| `src/app/api/otimizador/daily/route.ts` | Cron/manual — busca campanhas e dispara análises em lote |
-| `src/app/(dashboard)/otimizador/page.tsx` | UI da fila de decisões |
+| `src/lib/optimizer.ts` | Tipos v1+v2, payload builder, Camada 1, system prompts |
+| `src/lib/optimizer-whatsapp.ts` | Envio do relatório de análise via Evolution API (fire-and-forget) |
+| `src/app/api/otimizador/analisar/route.ts` | POST análise (v1 Camada 1→IA / v2 semanal), GET fila, PATCH log |
+| `src/app/api/otimizador/weekly/route.ts` | Cron semanal Mon-Fri com rodízio por `analise_dia_semana` |
+| `src/app/api/otimizador/executar/route.ts` | POST execução de ação automática na Meta API |
+| `src/app/api/otimizador/config/[clientId]/route.ts` | GET/POST config por cliente (modo, dia rodízio, limites) |
+| `src/app/api/otimizador/whatsapp-config/route.ts` | GET/POST config global de WhatsApp do otimizador |
+| `src/app/api/otimizador/whatsapp-groups/route.ts` | GET grupos Evolution disponíveis |
+| `src/app/(dashboard)/otimizador/page.tsx` | UI do painel v2 — lista, detail v1/v2, modal config, aprovações |
+| `src/app/(dashboard)/configuracoes/page.tsx` | Aba "Otimizador" — config WhatsApp global (admin) |
 
-### Decisões arquiteturais do Otimizador
+### Decisões arquiteturais do Otimizador v2
 
-- **`objetivo_campanha`** é o campo mais crítico do payload. Antes de qualquer análise, o Claude identifica o objetivo (`leads | trafego | vendas | engajamento | reconhecimento`) e adapta as métricas avaliadas. CPL só é problema em campanhas de `leads` ou `vendas`. Nunca mencionar CPL em `trafego`, `engajamento` ou `reconhecimento`.
-- **Meta**: objetivo vem de `campaign.objective` (campo `OUTCOME_LEADS`, `OUTCOME_TRAFFIC`, etc.) — normalizado por `normalizeMetaObjective()` em `campaigns/route.ts`.
-- **Google**: objetivo vem de `campaign.advertising_channel_type` no GAQL — normalizado por `normalizeGoogleChannelType()`. `SEARCH` → `trafego`, `SHOPPING/PERFORMANCE_MAX` → `vendas`, `DISPLAY/VIDEO` → `reconhecimento`.
-- **Campanhas pausadas são ignoradas** no daily route — filtro `['ACTIVE','ENABLED','IN_PROCESS','WITH_ISSUES']` aplicado antes de enviar para análise.
-- **Tom do prompt**: imperativo e direto, como gestor falando com gestor. Sem linguagem de relatório formal. Ex: "Pausa esse criativo agora — CTR de 0,4% com frequência baixa." (não "Recomenda-se a revisão do criativo.")
-- **Camada 1** (regras automáticas sem IA): CPL crítico e regra de aprendizado só disparam para `isLeadsOrSales`. `estimateCriticalLevel` também respeita o objetivo.
-- **Cache**: resultados de análise em `optimizer_ai_logs` (PostgreSQL). Hash do payload + drift < 5% → usa cache. Limite de 10 chamadas IA/cliente/dia.
-- **Fallback de métricas Google no Dashboard**: quando a API de métricas retorna `google: null`, o dashboard agrega spend/leads/impressions/clicks diretamente do estado `campaigns` (que usa endpoint separado que funciona). Ver `googleCampaignsTotals` em `dashboard/page.tsx`.
-- **IS metrics (Google)**: `search_impression_share`, `search_budget_lost_impression_share`, `search_absolute_top_impression_share` — disponíveis apenas no `FROM campaign` (GAQL), **não** no `FROM customer`. Nunca misturar IS com `segments.date` no `FROM customer` — quebra a query.
-- **MCC map**: `buildMccMap` cacheado por `connectionId` com TTL de 4h em `api-cache.ts`. Necessário para o header `login-customer-id` nas chamadas Google Ads.
+- **Uma análise por cliente por semana** — cadência semanal, não por campanha/dia. Custo ~$0.043/análise × 50 clientes/semana = ~$9/mês.
+- **Rodízio por dia útil** — `analise_dia_semana` (1=Seg...5=Sex) em `optimizer_client_config`. O cron `weekly/route.ts` filtra `WHERE analise_dia_semana = EXTRACT(DOW FROM NOW())`. Auto-atribuição ao dia menos carregado no config POST.
+- **4 modos de operação por cliente**: `DIAGNOSTICO_APENAS` | `RECOMENDACAO_COM_APROVACAO` | `AUTOMATICO_PARCIAL` | `AUTOMATICO_TOTAL`. Controlam se ações são sugeridas ou executadas automaticamente.
+- **`acoes_automaticas`** no output v2: status `EXECUTAR_AGORA` (auto-mode) ou `AGUARDAR_APROVACAO` (manual). Máximo 2 ações auto por ciclo. `sanitizeOptimizerOutputV2` downgrade para AGUARDAR_APROVACAO se modo não permite.
+- **Proteção de aprendizado**: `executar/route.ts` recusa PAUSAR se `dias_ativo < min_dias_aprendizado` (default 7). Retorna 422 com `bloqueado: true`.
+- **Resolução de token no executar**: tenta connection_id → fallback primeiro ativo em `meta_connections` → fallback `meta_integration` global. Permite aprovação manual sem connection_id explícito.
+- **WhatsApp pós-análise**: Evolution API (não Z-API). Instância + JID de grupo configurados em Configurações > Otimizador. Relatório enviado fire-and-forget via `sendOptimizerReport()` em `optimizer-whatsapp.ts`.
+- **DB para v2**: `conjunto_id` = `cliente_id` (análise da conta inteira). `semana_analise` = `"2026-W26"`. `estado_da_conta` = `SAUDAVEL | ATENCAO | CRISE`. `resumo_executivo` = texto 3-5 frases.
+- **GET /analisar**: lookback 200h (8 dias) para capturar análises semanais. Retorna `semana_analise`, `modo_operacao`, `estado_da_conta`, `resumo_executivo` além das colunas v1.
+- **UI detecta v2**: `isV2Result()` checa presença de `estado_da_conta` no resultado. v2 renderiza `V2DetailPanel`; v1 renderiza `V1DetailPanel` (backward compat).
+- **Cron**: GitHub Actions `0 10 * * 1-5` é o primário. Vercel cron como backup (Hobby só 1x/dia, mas horário coincide).
+
+### Decisões arquiteturais do Otimizador v1 (ainda em uso para backward compat)
+
+- **`objetivo_campanha`** é o campo mais crítico do payload. CPL só é avaliado em `leads` ou `vendas`.
+- **Meta**: objetivo via `normalizeMetaObjective()` em `campaigns/route.ts`. **Google**: via `normalizeGoogleChannelType()`.
+- **Campanhas pausadas são ignoradas** no daily route — filtro `['ACTIVE','ENABLED','IN_PROCESS','WITH_ISSUES']`.
+- **Tom do prompt**: imperativo e direto, como gestor falando com gestor.
+- **Camada 1** (regras sem IA): CPL crítico e aprendizado só disparam para `isLeadsOrSales`.
+- **Cache v1**: Hash do payload + drift < 5%. Limite 10 chamadas IA/cliente/dia.
+- **IS metrics (Google)**: apenas `FROM campaign` no GAQL — nunca misturar com `segments.date` no `FROM customer`.
+- **MCC map**: `buildMccMap` cacheado por `connectionId` com TTL de 4h em `api-cache.ts`.
 
 ---
 
@@ -193,7 +211,7 @@ Módulo de envio de contatos para o Leadlovers via webhook com cronograma inteli
 | `src/app/api/leadlovers/contacts/route.ts` | GET/POST/DELETE contatos (parse JSON do xlsx feito no cliente) |
 | `src/app/api/leadlovers/campaigns/route.ts` | GET/POST campanhas (com rules inline via JOIN) |
 | `src/app/api/leadlovers/campaigns/[id]/route.ts` | GET/PATCH/DELETE campanha |
-| `src/app/api/leadlovers/campaigns/[id]/rules/route.ts` | GET/POST/DELETE regras de cronograma |
+| `src/app/api/leadlovers/campaigns/[id]/rules/route.ts` | GET/POST/PATCH/DELETE regras de cronograma |
 | `src/app/api/leadlovers/campaigns/[id]/activate/route.ts` | POST — pré-computa `next_send_at` para cada contato |
 | `src/app/api/leadlovers/worker/route.ts` | POST — envia contatos com `next_send_at <= NOW()` (frontend poll + cron) |
 | `src/app/(dashboard)/integracoes/leadlovers/page.tsx` | UI com 4 abas: Upload, Webhook, Cronograma, Painel |
@@ -203,11 +221,17 @@ Módulo de envio de contatos para o Leadlovers via webhook com cronograma inteli
 - **xlsx parse no cliente**: a planilha é lida no browser com `XLSX.read()` e enviada como JSON para `/api/leadlovers/contacts`. Evita upload binário e mantém dentro do limite de 10s.
 - **Agendamento pré-computado**: ao ativar a campanha (`/activate`), o backend distribui contatos nos dias úteis com `next_send_at` já calculado. O worker não precisa de lógica de scheduling — só busca `WHERE next_send_at <= NOW()`.
 - **Apenas dias úteis**: `businessDaysBetween()` em `activate/route.ts` pula sábado (6) e domingo (0).
+- **Fuso horário**: `send_time` é interpretado como BRT (UTC-3). O activate usa `setUTCHours(sh + 3, sm)` para converter. Nunca usar `setHours` (usa fuso do servidor = UTC).
 - **Intervalo opcional**: se `interval_minutes` é `NULL`, todos os contatos do dia recebem o mesmo `next_send_at` (horário de envio). Se preenchido, cada contato é escalonado em +N minutos.
-- **Worker**: chamado pelo frontend (polling na aba Painel, 1x/min quando monitorando) e pelo Vercel cron `0 9 * * 1-5` (só dias úteis). Limite de 50 contatos por chamada para respeitar timeout de 10s.
-- **Não usa Supabase**: todas as tabelas são PostgreSQL via `server-db.ts`. O erro `supabaseUrl is required` na página `/integracoes` é pré-existente (env var faltando no dev), não relacionado a esta feature.
-- **Card na página de integrações**: Leadlovers aparece na categoria "Automação" e navega para `/integracoes/leadlovers` ao clicar. `IntegrationId` union type foi extendido.
-- **Cron Vercel adicionado**: `"0 9 * * 1-5"` em `vercel.json` para processar envios matinais sem depender do browser aberto.
+- **Reagendamento**: `POST /activate?reschedule=1` recalcula `next_send_at` dos pendentes mesmo com campanha ativa. Distribui só a partir de hoje pra frente. Se o horário de hoje já passou, `sendAt = now` (envia na próxima rodada). Botão "Reagendar pendentes" na aba Campanhas.
+- **Worker (GET)**: chamado pelo GitHub Actions a cada 5 min (`.github/workflows/leadlovers-worker.yml`). Envia lote de 5 por chamada — seguro dentro do limite 10s do Vercel (cada webhook ~0.5-1s). O GET autentica via `?secret=CRON_SECRET` e chama `processContacts()` diretamente (não cria `new Request()` — isso crashava silenciosamente no Next.js 16).
+- **Worker (POST)**: chamado pelo frontend (polling na aba Painel). Autentica via `x-onmid-user-id` (usuário) ou `Authorization: Bearer <CRON_SECRET>` (cron).
+- **`leadlovers_dispatch_log` criada no worker**: a tabela pode não existir se a migration não foi rodada. O worker faz `CREATE TABLE IF NOT EXISTS` na primeira chamada.
+- **Credenciais por campanha**: cada campanha tem `webhook_url`, `machine_code`, `email_sequence_code`, `sequence_level_code`, `auth_key` próprios — permite apontar para fluxos de email diferentes no Leadlovers.
+- **Editar campanha**: botão "Editar credenciais" na aba Campanhas. Inclui botão "Testar conexão" que usa os valores do form (chama `PUT /api/leadlovers/config`).
+- **Editar send_time de regra existente**: coluna HORÁRIO da tabela mostra `<input type="time">` editável. Salva via `PATCH /api/leadlovers/campaigns/[id]/rules?rule_id=...` (endpoint PATCH adicionado em `rules/route.ts`). Alterar o horário da regra **não** reagenda automaticamente — precisa clicar "Reagendar pendentes".
+- **Cron Vercel**: mantido como backup diário (`0 12 * * 1-5`) em `vercel.json`. Plano Hobby só permite 1x/dia. GitHub Actions é o primário.
+- **Não usa Supabase**: todas as tabelas são PostgreSQL via `server-db.ts`.
 
 ---
 

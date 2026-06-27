@@ -1,0 +1,36 @@
+name: Otimizador Semanal
+
+on:
+  schedule:
+    # Todo dia útil às 07h BRT (10h UTC)
+    - cron: '0 10 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      client_id:
+        description: 'ID do cliente (opcional — deixe vazio para rodar o dia inteiro)'
+        required: false
+        default: ''
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Disparar análise semanal
+        run: |
+          CLIENT_PARAM=""
+          if [ -n "${{ github.event.inputs.client_id }}" ]; then
+            CLIENT_PARAM="&clientId=${{ github.event.inputs.client_id }}"
+          fi
+
+          RESPONSE=$(curl -s -o /tmp/response.json -w "%{http_code}" \
+            -X GET \
+            "${{ secrets.APP_URL }}/api/otimizador/weekly?secret=${{ secrets.CRON_SECRET }}${CLIENT_PARAM}")
+
+          echo "HTTP status: $RESPONSE"
+          cat /tmp/response.json
+
+          if [ "$RESPONSE" != "200" ]; then
+            echo "Erro na análise semanal — status $RESPONSE"
+            exit 1
+          fi

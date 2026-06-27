@@ -1,5 +1,439 @@
 export const OPTIMIZER_MODEL = 'claude-sonnet-4-6';
 export const OPTIMIZER_PROMPT_VERSION = 'otimizador-v1.0';
+export const OPTIMIZER_PROMPT_VERSION_V2 = 'otimizador-v2.0';
+
+// ─── v2 types ────────────────────────────────────────────────────────────────
+
+export type OptimizerModo =
+  | 'DIAGNOSTICO_APENAS'
+  | 'RECOMENDACAO_COM_APROVACAO'
+  | 'AUTOMATICO_PARCIAL'
+  | 'AUTOMATICO_TOTAL';
+
+export type OptimizerEstadoConta = 'SAUDAVEL' | 'ATENCAO' | 'CRISE';
+
+export type OptimizerAcaoTipo = 'PAUSAR' | 'ATIVAR' | 'AJUSTAR_ORCAMENTO';
+export type OptimizerObjetoTipo = 'campaign' | 'adset' | 'ad';
+export type OptimizerStatusExecucao = 'EXECUTAR_AGORA' | 'AGUARDAR_APROVACAO';
+
+export type OptimizerAdV2 = {
+  id: string;
+  nome: string;
+  status: string;
+  gasto: number;
+  impressoes: number;
+  ctr: number;
+  cpl: number | null;
+  conversoes: number;
+  dias_ativo: number | null;
+  quality_ranking: string | null;
+  engagement_ranking: string | null;
+  conversion_ranking: string | null;
+};
+
+export type OptimizerAdsetV2 = {
+  id: string;
+  nome: string;
+  status: string;
+  objetivo_otimizacao: string;
+  tipo_publico: string;
+  orcamento_diario: number | null;
+  gasto: number;
+  impressoes: number;
+  alcance: number | null;
+  frequencia: number | null;
+  ctr: number;
+  cpl: number | null;
+  conversoes: number;
+  ctr_tendencia_4d: 'SUBINDO' | 'CAINDO' | 'ESTAVEL' | null;
+  dias_ativo: number | null;
+  anuncios: OptimizerAdV2[];
+};
+
+export type OptimizerCampaignV2 = {
+  id: string;
+  nome: string;
+  objetivo: string;
+  status: string;
+  orcamento_diario: number | null;
+  gasto: number;
+  impressoes: number;
+  cliques: number;
+  ctr: number;
+  cpl: number | null;
+  conversoes: number;
+  roas: number | null;
+  dias_rodando: number | null;
+  conjuntos: OptimizerAdsetV2[];
+};
+
+export type OptimizerPayloadV2 = {
+  cliente_id: string;
+  cliente_nome: string;
+  nicho: OptimizerNiche;
+  modo_operacao: OptimizerModo;
+  semana_analise: string;
+  acoes_pre_aprovadas: string[];
+  metas: {
+    objetivo_principal: OptimizerObjective;
+    cpl_ideal: number | null;
+    cpl_maximo: number | null;
+    roas_minimo: number | null;
+    orcamento_diario_total: number | null;
+    orcamento_mensal_total: number | null;
+    volume_leads_meta_mensal: number | null;
+    ticket_medio: number | null;
+  };
+  limites_globais: {
+    orcamento_diario_maximo_conta: number | null;
+    cpr_emergencia: number | null;
+    min_conjuntos_ativos: number;
+    max_conjuntos_ativos: number;
+    min_dias_aprendizado: number;
+  };
+  periodo_analise: {
+    data_inicio: string;
+    data_fim: string;
+    dias: number;
+  };
+  opportunity_score: {
+    score: number | null;
+    recomendacoes: Array<{ tipo: string; ganho_score: number; descricao: string }>;
+  } | null;
+  campanhas: OptimizerCampaignV2[];
+  historico_decisoes: Array<{ semana: string; acao_executada: string; resultado: string }>;
+  observacoes_gestor: string | null;
+};
+
+export type OptimizerAcaoAutomatica = {
+  acao: OptimizerAcaoTipo;
+  objeto_tipo: OptimizerObjetoTipo;
+  objeto_id: string;
+  objeto_nome: string;
+  parametros: Record<string, unknown>;
+  justificativa: string;
+  status_execucao: OptimizerStatusExecucao;
+};
+
+export type OptimizerOutputV2 = {
+  estado_da_conta: OptimizerEstadoConta;
+  resumo_executivo: string;
+  cruzamento_com_metas: {
+    cpl_atual: number | null;
+    cpl_ideal: number | null;
+    cpl_maximo: number | null;
+    status_cpl: 'DENTRO' | 'ATENCAO' | 'CRITICO' | 'NAO_APLICAVEL';
+    volume_conversoes_atual: number;
+    volume_meta_projetada: number | null;
+    status_volume: 'NO_RITMO' | 'ABAIXO' | 'CRITICO' | 'NAO_APLICAVEL';
+    gasto_total: number;
+    orcamento_periodo: number | null;
+    status_orcamento: 'OK' | 'ESTOURANDO' | 'SUBENTREGANDO';
+  };
+  conjuntos: Array<{
+    id: string;
+    nome: string;
+    classificacao: 'SAUDAVEL' | 'ATENCAO' | 'URGENTE';
+    diagnostico: string;
+    acao_recomendada: string;
+  }>;
+  anuncios: Array<{
+    id: string;
+    nome: string;
+    conjunto_nome: string;
+    problema: 'QUALIDADE' | 'ENGAJAMENTO' | 'CONVERSAO' | 'FADIGA' | 'OK';
+    diagnostico: string;
+    acao_recomendada: string;
+  }>;
+  recomendacoes: Array<{
+    titulo: string;
+    urgencia: 'FAZER_AGORA' | 'PROXIMA_SEMANA' | 'QUANDO_POSSIVEL';
+    impacto_estimado: string;
+    como_fazer: string;
+    risco: string;
+  }>;
+  acoes_automaticas: OptimizerAcaoAutomatica[];
+  confianca: OptimizerConfidence;
+  observacao: string | null;
+};
+
+export type OptimizerAnalysisResultV2 = OptimizerOutputV2 & {
+  recomendacao_id: string;
+  cliente_id: string;
+  semana_analise: string;
+  modo_operacao: OptimizerModo;
+  origem: 'ia' | 'cache' | 'fallback';
+  prompt_version: string;
+  modelo_usado: string | null;
+  tokens_usados: number;
+  custo_estimado_usd: number;
+};
+
+export function currentWeekLabel(): string {
+  const now = new Date();
+  const startOfYear = new Date(now.getFullYear(), 0, 1);
+  const week = Math.ceil(((now.getTime() - startOfYear.getTime()) / 86400000 + startOfYear.getDay() + 1) / 7);
+  return `${now.getFullYear()}-W${String(week).padStart(2, '0')}`;
+}
+
+export function buildOptimizerSystemPromptV2(): string {
+  return `Voce e o Otimizador do On_Reports, analista senior de trafego pago para agencias brasileiras.
+
+Recebe um JSON com dados completos de uma conta de anuncios (campanhas, conjuntos, anuncios, metas, limites e modo de operacao) e retorna um JSON estruturado com diagnostico, recomendacoes e plano de acoes.
+
+==================================================
+PASSO 0 OBRIGATORIO — LEIA ANTES DE QUALQUER ANALISE
+==================================================
+Leia os campos:
+- "modo_operacao": define o que voce pode marcar como EXECUTAR_AGORA.
+- "acoes_pre_aprovadas": lista das acoes que podem ser executadas automaticamente.
+- "limites_globais": nunca ultrapasse esses limites nas acoes.
+
+Regra de ouro das acoes_automaticas:
+- Somente marque status_execucao = "EXECUTAR_AGORA" se:
+  1. modo_operacao for "AUTOMATICO_PARCIAL" ou "AUTOMATICO_TOTAL"
+  2. A acao estiver na lista acoes_pre_aprovadas (AUTOMATICO_PARCIAL) OU modo for AUTOMATICO_TOTAL
+  3. O conjunto/anuncio tiver mais dias ativos que min_dias_aprendizado
+  4. No maximo 2 acoes EXECUTAR_AGORA por ciclo (mesmo em AUTOMATICO_TOTAL)
+- Em modo "DIAGNOSTICO_APENAS" ou "RECOMENDACAO_COM_APROVACAO": acoes_automaticas deve ser array vazio [].
+
+==================================================
+PASSO 1 — IDENTIFIQUE O OBJETIVO DA CAMPANHA
+==================================================
+Leia "metas.objetivo_principal". Isso define qual metrica e a principal:
+
+OBJETIVO = "leads": metrica principal CPL. CPL acima de cpl_maximo E CRITICO.
+OBJETIVO = "trafego": metrica principal CPC e CTR. NAO mencione CPL como problema.
+OBJETIVO = "vendas": metrica principal ROAS e CPA. Foque em retorno.
+OBJETIVO = "engajamento": metrica principal taxa de engajamento. NAO espere leads.
+OBJETIVO = "reconhecimento": metrica principal CPM, alcance e frequencia. Conversoes NAO sao esperadas.
+
+==================================================
+PASSO 2 — CRUZE METRICAS COM METAS
+==================================================
+Compare: CPL atual vs cpl_ideal e cpl_maximo, volume de conversoes vs meta projetada, gasto vs orcamento.
+Classifique a conta: SAUDAVEL (tudo dentro), ATENCAO (levemente fora), CRISE (muito fora ou CPL > cpr_emergencia).
+
+==================================================
+PASSO 3 — DIAGNOSTICO POR CONJUNTO
+==================================================
+Para cada conjunto em campanhas[].conjuntos[]:
+- SAUDAVEL: CTR tendencia SUBINDO ou ESTAVEL + CPL dentro + rankings medios ou acima
+- ATENCAO: CTR tendencia CAINDO OU um ranking Below Average OU CPL levemente acima
+- URGENTE: multiplos rankings Below Average OU frequencia alta + CTR caindo OU CPL > cpl_maximo
+Nao classifique conjuntos com menos de min_dias_aprendizado dias como URGENTE.
+
+==================================================
+PASSO 4 — DIAGNOSTICO POR ANUNCIO
+==================================================
+Apenas anuncios com problema (quality/engagement/conversion ranking = BELOW_AVERAGE):
+- Qual dimensao esta fraca e por que (fadiga, CTA fraco, publico errado)
+- Acao corretiva especifica
+
+==================================================
+PASSO 5 — RECOMENDACOES PRIORIZADAS
+==================================================
+Maximo 5 recomendacoes, ordenadas por impacto. Para cada uma: titulo, urgencia (FAZER_AGORA | PROXIMA_SEMANA | QUANDO_POSSIVEL), impacto_estimado, como_fazer, risco.
+Criterio FAZER_AGORA: CPL > cpl_maximo OU fadiga criativa confirmada OU fragmentacao 3+ conjuntos sobrepostos.
+
+==================================================
+PASSO 6 — ACOES AUTOMATICAS
+==================================================
+Respeite o PASSO 0. Se modo = DIAGNOSTICO_APENAS ou RECOMENDACAO_COM_APROVACAO: retorne [].
+Para modos automaticos: liste acoes concretas com objeto_id real, justificativa com numeros, parametros exatos (ex: novo_orcamento_diario em BRL).
+
+==================================================
+PASSO 7 — RESUMO EXECUTIVO
+==================================================
+3 a 5 frases diretas. Tom: gestor falando com socio. Diga o numero, diga o problema, diga o proximo passo. Sem enrolacao.
+
+==================================================
+REGRAS DE COMPORTAMENTO
+==================================================
+1. Responda SEMPRE em JSON valido, sem texto fora do JSON, sem markdown.
+2. Tom imperativo e direto. ERRADO: "Recomenda-se a revisao". CERTO: "Pausa esse criativo agora."
+3. Use numeros reais do payload. Nada de generico.
+4. Confianca: "alta" se dados claros, "media" se incerteza, "baixa" se faltam dados.
+5. Nunca mencione CPL como problema em campanhas de trafego, engajamento ou reconhecimento.
+6. Nunca recomende pausar um conjunto em fase de aprendizado (< min_dias_aprendizado dias).
+
+ESTRUTURA DO JSON DE SAIDA (retorne exatamente este schema):
+{
+  "estado_da_conta": "SAUDAVEL | ATENCAO | CRISE",
+  "resumo_executivo": "string 3-5 frases",
+  "cruzamento_com_metas": {
+    "cpl_atual": null,
+    "cpl_ideal": null,
+    "cpl_maximo": null,
+    "status_cpl": "DENTRO | ATENCAO | CRITICO | NAO_APLICAVEL",
+    "volume_conversoes_atual": 0,
+    "volume_meta_projetada": null,
+    "status_volume": "NO_RITMO | ABAIXO | CRITICO | NAO_APLICAVEL",
+    "gasto_total": 0,
+    "orcamento_periodo": null,
+    "status_orcamento": "OK | ESTOURANDO | SUBENTREGANDO"
+  },
+  "conjuntos": [
+    {
+      "id": "string",
+      "nome": "string",
+      "classificacao": "SAUDAVEL | ATENCAO | URGENTE",
+      "diagnostico": "string",
+      "acao_recomendada": "string"
+    }
+  ],
+  "anuncios": [
+    {
+      "id": "string",
+      "nome": "string",
+      "conjunto_nome": "string",
+      "problema": "QUALIDADE | ENGAJAMENTO | CONVERSAO | FADIGA | OK",
+      "diagnostico": "string",
+      "acao_recomendada": "string"
+    }
+  ],
+  "recomendacoes": [
+    {
+      "titulo": "string",
+      "urgencia": "FAZER_AGORA | PROXIMA_SEMANA | QUANDO_POSSIVEL",
+      "impacto_estimado": "string",
+      "como_fazer": "string",
+      "risco": "string"
+    }
+  ],
+  "acoes_automaticas": [
+    {
+      "acao": "PAUSAR | ATIVAR | AJUSTAR_ORCAMENTO",
+      "objeto_tipo": "campaign | adset | ad",
+      "objeto_id": "string",
+      "objeto_nome": "string",
+      "parametros": {},
+      "justificativa": "string com numeros reais",
+      "status_execucao": "EXECUTAR_AGORA | AGUARDAR_APROVACAO"
+    }
+  ],
+  "confianca": "alta | media | baixa",
+  "observacao": "string ou null"
+}`;
+}
+
+export function sanitizeOptimizerOutputV2(input: unknown, payload: OptimizerPayloadV2): OptimizerOutputV2 {
+  const obj = (input && typeof input === 'object') ? input as Record<string, unknown> : {};
+
+  const estado = (['SAUDAVEL', 'ATENCAO', 'CRISE'] as const).includes(obj.estado_da_conta as OptimizerEstadoConta)
+    ? obj.estado_da_conta as OptimizerEstadoConta
+    : 'ATENCAO';
+
+  const confianca = (['alta', 'media', 'baixa'] as const).includes(obj.confianca as OptimizerConfidence)
+    ? obj.confianca as OptimizerConfidence
+    : 'baixa';
+
+  const cruzamento = (obj.cruzamento_com_metas && typeof obj.cruzamento_com_metas === 'object')
+    ? obj.cruzamento_com_metas as Record<string, unknown>
+    : {};
+
+  const conjuntos = Array.isArray(obj.conjuntos)
+    ? (obj.conjuntos as Record<string, unknown>[]).slice(0, 20).map((c) => ({
+        id: String(c.id ?? ''),
+        nome: String(c.nome ?? ''),
+        classificacao: (['SAUDAVEL', 'ATENCAO', 'URGENTE'] as const).includes(c.classificacao as never)
+          ? c.classificacao as 'SAUDAVEL' | 'ATENCAO' | 'URGENTE'
+          : 'ATENCAO',
+        diagnostico: String(c.diagnostico ?? ''),
+        acao_recomendada: String(c.acao_recomendada ?? ''),
+      }))
+    : [];
+
+  const anuncios = Array.isArray(obj.anuncios)
+    ? (obj.anuncios as Record<string, unknown>[]).slice(0, 20).map((a) => ({
+        id: String(a.id ?? ''),
+        nome: String(a.nome ?? ''),
+        conjunto_nome: String(a.conjunto_nome ?? ''),
+        problema: (['QUALIDADE', 'ENGAJAMENTO', 'CONVERSAO', 'FADIGA', 'OK'] as const).includes(a.problema as never)
+          ? a.problema as 'QUALIDADE' | 'ENGAJAMENTO' | 'CONVERSAO' | 'FADIGA' | 'OK'
+          : 'OK',
+        diagnostico: String(a.diagnostico ?? ''),
+        acao_recomendada: String(a.acao_recomendada ?? ''),
+      }))
+    : [];
+
+  const recomendacoes = Array.isArray(obj.recomendacoes)
+    ? (obj.recomendacoes as Record<string, unknown>[]).slice(0, 5).map((r) => ({
+        titulo: String(r.titulo ?? ''),
+        urgencia: (['FAZER_AGORA', 'PROXIMA_SEMANA', 'QUANDO_POSSIVEL'] as const).includes(r.urgencia as never)
+          ? r.urgencia as 'FAZER_AGORA' | 'PROXIMA_SEMANA' | 'QUANDO_POSSIVEL'
+          : 'QUANDO_POSSIVEL',
+        impacto_estimado: String(r.impacto_estimado ?? ''),
+        como_fazer: String(r.como_fazer ?? ''),
+        risco: String(r.risco ?? ''),
+      }))
+    : [];
+
+  const acoesAutomaticas: OptimizerAcaoAutomatica[] = Array.isArray(obj.acoes_automaticas)
+    ? (obj.acoes_automaticas as Record<string, unknown>[]).slice(0, 5).map((a) => ({
+        acao: (['PAUSAR', 'ATIVAR', 'AJUSTAR_ORCAMENTO'] as const).includes(a.acao as never)
+          ? a.acao as OptimizerAcaoTipo
+          : 'PAUSAR',
+        objeto_tipo: (['campaign', 'adset', 'ad'] as const).includes(a.objeto_tipo as never)
+          ? a.objeto_tipo as OptimizerObjetoTipo
+          : 'adset',
+        objeto_id: String(a.objeto_id ?? ''),
+        objeto_nome: String(a.objeto_nome ?? ''),
+        parametros: (a.parametros && typeof a.parametros === 'object') ? a.parametros as Record<string, unknown> : {},
+        justificativa: String(a.justificativa ?? ''),
+        status_execucao: (['EXECUTAR_AGORA', 'AGUARDAR_APROVACAO'] as const).includes(a.status_execucao as never)
+          ? a.status_execucao as OptimizerStatusExecucao
+          : 'AGUARDAR_APROVACAO',
+      })).filter((a) => {
+        // Segurança extra: remove EXECUTAR_AGORA se modo não permite
+        const modo = payload.modo_operacao;
+        if (a.status_execucao === 'EXECUTAR_AGORA' && (modo === 'DIAGNOSTICO_APENAS' || modo === 'RECOMENDACAO_COM_APROVACAO')) {
+          return true; // mantém mas vai ser rebaixado abaixo
+        }
+        return true;
+      }).map((a) => {
+        const modo = payload.modo_operacao;
+        if (a.status_execucao === 'EXECUTAR_AGORA' && (modo === 'DIAGNOSTICO_APENAS' || modo === 'RECOMENDACAO_COM_APROVACAO')) {
+          return { ...a, status_execucao: 'AGUARDAR_APROVACAO' as const };
+        }
+        if (a.status_execucao === 'EXECUTAR_AGORA' && modo === 'AUTOMATICO_PARCIAL') {
+          if (!payload.acoes_pre_aprovadas.includes(a.acao.toLowerCase().replace('ajustar_orcamento', 'ajustar_orcamento_reduzir'))) {
+            return { ...a, status_execucao: 'AGUARDAR_APROVACAO' as const };
+          }
+        }
+        return a;
+      })
+    : [];
+
+  return {
+    estado_da_conta: estado,
+    resumo_executivo: String(obj.resumo_executivo ?? 'Análise concluída.'),
+    cruzamento_com_metas: {
+      cpl_atual: cruzamento.cpl_atual != null ? Number(cruzamento.cpl_atual) : null,
+      cpl_ideal: cruzamento.cpl_ideal != null ? Number(cruzamento.cpl_ideal) : null,
+      cpl_maximo: cruzamento.cpl_maximo != null ? Number(cruzamento.cpl_maximo) : null,
+      status_cpl: (['DENTRO', 'ATENCAO', 'CRITICO', 'NAO_APLICAVEL'] as const).includes(cruzamento.status_cpl as never)
+        ? cruzamento.status_cpl as 'DENTRO' | 'ATENCAO' | 'CRITICO' | 'NAO_APLICAVEL'
+        : 'NAO_APLICAVEL',
+      volume_conversoes_atual: Number(cruzamento.volume_conversoes_atual ?? 0),
+      volume_meta_projetada: cruzamento.volume_meta_projetada != null ? Number(cruzamento.volume_meta_projetada) : null,
+      status_volume: (['NO_RITMO', 'ABAIXO', 'CRITICO', 'NAO_APLICAVEL'] as const).includes(cruzamento.status_volume as never)
+        ? cruzamento.status_volume as 'NO_RITMO' | 'ABAIXO' | 'CRITICO' | 'NAO_APLICAVEL'
+        : 'NAO_APLICAVEL',
+      gasto_total: Number(cruzamento.gasto_total ?? 0),
+      orcamento_periodo: cruzamento.orcamento_periodo != null ? Number(cruzamento.orcamento_periodo) : null,
+      status_orcamento: (['OK', 'ESTOURANDO', 'SUBENTREGANDO'] as const).includes(cruzamento.status_orcamento as never)
+        ? cruzamento.status_orcamento as 'OK' | 'ESTOURANDO' | 'SUBENTREGANDO'
+        : 'OK',
+    },
+    conjuntos,
+    anuncios,
+    recomendacoes,
+    acoes_automaticas: acoesAutomaticas,
+    confianca,
+    observacao: obj.observacao != null ? String(obj.observacao) : null,
+  };
+}
 
 export type OptimizerCriticalLevel = 'vermelho' | 'amarelo' | 'verde';
 export type OptimizerConfidence = 'alta' | 'media' | 'baixa';

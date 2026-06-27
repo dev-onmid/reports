@@ -6,22 +6,31 @@ import { makeServerPool } from '@/lib/server-db';
 import {
   OPTIMIZER_MODEL,
   OPTIMIZER_PROMPT_VERSION,
+  OPTIMIZER_PROMPT_VERSION_V2,
   applyLayerOneRules,
   buildFallbackDiagnosis,
   buildGreenDiagnosis,
   buildOptimizerSystemPrompt,
+  buildOptimizerSystemPromptV2,
   estimateCriticalLevel,
   extractJsonObject,
   maxSnapshotDriftPercent,
   payloadNumericSnapshot,
   sanitizeOptimizerDiagnosis,
+  sanitizeOptimizerOutputV2,
+  currentWeekLabel,
   type OptimizerAnalysisResult,
+  type OptimizerAnalysisResultV2,
   type OptimizerPayload,
+  type OptimizerPayloadV2,
   type OptimizerRequestKind,
 } from '@/lib/optimizer';
+import { sendOptimizerReport } from '@/lib/optimizer-whatsapp';
 
 type AnalyzeBody = {
-  payload: OptimizerPayload;
+  payload?: OptimizerPayload;
+  payload_v2?: OptimizerPayloadV2;
+  connection_id?: string;
   force_ai?: boolean;
 };
 
@@ -107,6 +116,10 @@ type QueueRow = {
   cpl_cpa_atual: string | number | null;
   ctr_link: string | number | null;
   resultado: OptimizerAnalysisResult;
+  semana_analise: string | null;
+  modo_operacao: string | null;
+  estado_da_conta: string | null;
+  resumo_executivo: string | null;
   created_at: string;
 };
 
@@ -268,7 +281,9 @@ export async function GET(req: NextRequest) {
       `SELECT DISTINCT ON (cliente_id, conjunto_id, COALESCE(periodo_label, periodo_dias::text))
           id, cliente_id, cliente_nome, conjunto_id, campanha_nome, conta_plataforma,
           periodo_label, periodo_dias, origem, nivel_critico, gasto_total, conversoes,
-          cpl_cpa_atual, ctr_link, resultado, created_at
+          cpl_cpa_atual, ctr_link, resultado,
+          semana_analise, modo_operacao, estado_da_conta, resumo_executivo,
+          created_at
          FROM public.optimizer_ai_logs
         WHERE ${filters.join(' AND ')}
         ORDER BY cliente_id, conjunto_id, COALESCE(periodo_label, periodo_dias::text),
@@ -294,6 +309,10 @@ export async function GET(req: NextRequest) {
         cpl_cpa_atual: row.cpl_cpa_atual == null ? null : Number(row.cpl_cpa_atual),
         ctr_link: row.ctr_link == null ? null : Number(row.ctr_link),
         resultado: row.resultado,
+        semana_analise: row.semana_analise ?? null,
+        modo_operacao: row.modo_operacao ?? null,
+        estado_da_conta: row.estado_da_conta ?? null,
+        resumo_executivo: row.resumo_executivo ?? null,
         created_at: row.created_at,
       }))
       .sort((a, b) => {
@@ -491,8 +510,192 @@ function validatePayload(payload: OptimizerPayload | undefined): string | null {
   return null;
 }
 
+// ─── v2 handler ──────────────────────────────────────────────────────────────
+
+async function saveLogV2(params: {
+  payload: OptimizerPayloadV2;
+  result: OptimizerAnalysisResultV2;
+  payloadHash: string;
+  error?: string;
+}) {
+  const pool = makeServerPool();
+  try {
+    await ensureTables(pool);
+    await pool.query(
+      `INSERT INTO public.optimizer_ai_logs
+        (cliente_id, conjunto_id, solicitacao, origem, nivel_critico,
+         cliente_nome, campanha_nome, conta_plataforma, periodo_label, periodo_dias,
+         gasto_total, conversoes, cpl_cpa_atual, ctr_link,
+         payload_hash, resultado, prompt_version, modelo_usado, tokens_usados, custo_estimado_usd, erro,
+         semana_analise, modo_operacao, estado_da_conta, resumo_executivo,
+         acoes_automaticas_count, acoes_executadas_count)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)`,
+      [
+        params.payload.cliente_id,
+        params.payload.cliente_id, // conjunto_id = client (análise da conta inteira)
+        'analise_semanal',
+        params.result.origem,
+        params.result.estado_da_conta === 'CRISE' ? 'vermelho' : params.result.estado_da_conta === 'ATENCAO' ? 'amarelo' : 'verde',
+        params.payload.cliente_nome,
+        null,
+        'meta_ads',
+        params.payload.semana_analise,
+        params.payload.periodo_analise.dias,
+        params.result.cruzamento_com_metas.gasto_total,
+        params.result.cruzamento_com_metas.volume_conversoes_atual,
+        params.result.cruzamento_com_metas.cpl_atual,
+        null,
+        params.payloadHash,
+        JSON.stringify(params.result),
+        params.result.prompt_version,
+        params.result.modelo_usado,
+        params.result.tokens_usados,
+        params.result.custo_estimado_usd,
+        params.error ?? null,
+        params.payload.semana_analise,
+        params.payload.modo_operacao,
+        params.result.estado_da_conta,
+        params.result.resumo_executivo,
+        params.result.acoes_automaticas.length,
+        params.result.acoes_automaticas.filter((a) => a.status_execucao === 'EXECUTAR_AGORA').length,
+      ],
+    );
+  } catch (err) {
+    console.error('[analisar][saveLogV2]', err);
+  } finally {
+    await pool.end();
+  }
+}
+
+async function processAutoActions(
+  result: OptimizerAnalysisResultV2,
+  payload: OptimizerPayloadV2,
+  connectionId: string,
+  origin: string,
+  analiseId: string,
+) {
+  const toExecute = result.acoes_automaticas.filter((a) => a.status_execucao === 'EXECUTAR_AGORA');
+  for (const acao of toExecute.slice(0, 2)) { // max 2 por ciclo
+    try {
+      await fetch(new URL('/api/otimizador/executar', origin).toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          analise_id: analiseId,
+          client_id: payload.cliente_id,
+          connection_id: connectionId,
+          acao: acao.acao,
+          objeto_tipo: acao.objeto_tipo,
+          objeto_id: acao.objeto_id,
+          objeto_nome: acao.objeto_nome,
+          parametros: acao.parametros,
+          justificativa: acao.justificativa,
+          modo_operacao: payload.modo_operacao,
+          min_dias_aprendizado: payload.limites_globais.min_dias_aprendizado,
+        }),
+      });
+    } catch (err) {
+      console.error('[analisar][autoAction]', acao.objeto_id, err);
+    }
+  }
+}
+
+async function handleV2(body: AnalyzeBody, origin: string): Promise<Response> {
+  const payload = body.payload_v2!;
+  const connectionId = body.connection_id ?? '';
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return Response.json({ error: 'ANTHROPIC_API_KEY não configurada' }, { status: 500 });
+
+  const payloadHash = createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+  const analiseId = randomUUID();
+
+  // Cache semanal: se já analisou esta semana com drift < 10%, retorna cache
+  if (!body.force_ai) {
+    const pool = makeServerPool();
+    try {
+      await ensureTables(pool);
+      const { rows } = await pool.query<{ resultado: OptimizerAnalysisResultV2; payload_hash: string }>(
+        `SELECT resultado, payload_hash FROM public.optimizer_ai_logs
+          WHERE cliente_id = $1 AND semana_analise = $2 AND origem = 'ia' AND resultado IS NOT NULL
+          ORDER BY created_at DESC LIMIT 1`,
+        [payload.cliente_id, payload.semana_analise],
+      );
+      if (rows[0]?.payload_hash === payloadHash) {
+        return Response.json({ ...rows[0].resultado, origem: 'cache', tokens_usados: 0, custo_estimado_usd: 0 });
+      }
+    } catch { /* ignore */ } finally {
+      await pool.end();
+    }
+  }
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify({
+      model: OPTIMIZER_MODEL,
+      max_tokens: 3000,
+      system: buildOptimizerSystemPromptV2(),
+      messages: [{ role: 'user', content: JSON.stringify(payload) }],
+    }),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    return Response.json({ error: `Claude ${response.status}: ${errText}` }, { status: 502 });
+  }
+
+  const data = await response.json() as {
+    content?: Array<{ type: string; text?: string }>;
+    usage?: { input_tokens?: number; output_tokens?: number };
+  };
+  const text = data.content?.map((b) => b.type === 'text' ? b.text ?? '' : '').join('').trim() ?? '';
+  const inputTokens = Number(data.usage?.input_tokens ?? 0);
+  const outputTokens = Number(data.usage?.output_tokens ?? 0);
+  const tokens = inputTokens + outputTokens;
+  const cost = calcCostUsd(OPTIMIZER_MODEL, inputTokens, outputTokens);
+
+  let parsed: unknown;
+  try { parsed = extractJsonObject(text); } catch { parsed = {}; }
+
+  const output = sanitizeOptimizerOutputV2(parsed, payload);
+  const result: OptimizerAnalysisResultV2 = {
+    ...output,
+    recomendacao_id: analiseId,
+    cliente_id: payload.cliente_id,
+    semana_analise: payload.semana_analise,
+    modo_operacao: payload.modo_operacao,
+    origem: 'ia',
+    prompt_version: OPTIMIZER_PROMPT_VERSION_V2,
+    modelo_usado: OPTIMIZER_MODEL,
+    tokens_usados: tokens,
+    custo_estimado_usd: cost,
+  };
+
+  void logAiUsage({ source: 'otimizador-v2', model: OPTIMIZER_MODEL, inputTokens, outputTokens });
+  void saveLogV2({ payload, result, payloadHash });
+
+  // Executa ações automáticas (fire-and-forget)
+  if (payload.modo_operacao === 'AUTOMATICO_PARCIAL' || payload.modo_operacao === 'AUTOMATICO_TOTAL') {
+    void processAutoActions(result, payload, connectionId, origin, analiseId);
+  }
+
+  // Envia relatório WhatsApp (fire-and-forget)
+  void sendOptimizerReport(result, payload.cliente_nome);
+
+  return Response.json(result);
+}
+
+// ─── v1 handler (mantido para compatibilidade) ────────────────────────────────
+
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({})) as AnalyzeBody;
+
+  // Rota v2
+  if (body.payload_v2) {
+    const origin = new URL(req.url).origin;
+    return handleV2(body, origin);
+  }
+
   const rawPayload = body.payload;
   const invalid = validatePayload(rawPayload);
   if (invalid) return Response.json({ error: invalid }, { status: 400 });

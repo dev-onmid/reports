@@ -136,7 +136,24 @@ export default function ConfiguracoesPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'usuarios' | 'permissoes' | 'ia' | 'legal'>('usuarios');
+  const [activeTab, setActiveTab] = useState<'usuarios' | 'permissoes' | 'ia' | 'otimizador' | 'legal'>('usuarios');
+
+  // Otimizador WhatsApp config
+  type OtimizadorWaConfig = {
+    zapi_client_id: string | null;
+    group_jid: string | null;
+    ativo: boolean;
+    notificar_crise_apenas: boolean;
+    instances_disponiveis: { id: string; name: string; instance_id: string }[];
+  };
+  type WaGroup = { jid: string; nome: string; membros: number | null };
+  const [otimizadorWa, setOtimizadorWa] = useState<OtimizadorWaConfig>({
+    zapi_client_id: null, group_jid: null, ativo: false, notificar_crise_apenas: false, instances_disponiveis: [],
+  });
+  const [waGroups, setWaGroups] = useState<WaGroup[]>([]);
+  const [waGroupsLoading, setWaGroupsLoading] = useState(false);
+  const [otimizadorWaSaving, setOtimizadorWaSaving] = useState(false);
+  const [otimizadorWaSaved, setOtimizadorWaSaved] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [aiUsage, setAiUsage] = useState<AiUsageRow[]>([]);
   const [aiUsageLoading, setAiUsageLoading] = useState(false);
@@ -310,8 +327,18 @@ export default function ConfiguracoesPage() {
     { key: 'usuarios' as const, label: 'Usuários' },
     { key: 'permissoes' as const, label: 'Permissões' },
     { key: 'ia' as const, label: 'Uso IA' },
+    { key: 'otimizador' as const, label: 'Otimizador' },
     { key: 'legal' as const, label: 'Legal' },
   ];
+
+  // Load Otimizador WA config when tab is active
+  useEffect(() => {
+    if (activeTab !== 'otimizador') return;
+    void fetch('/api/otimizador/whatsapp-config')
+      .then((res) => res.ok ? res.json() as Promise<OtimizadorWaConfig> : null)
+      .then((data) => { if (data) setOtimizadorWa(data); })
+      .catch(() => {});
+  }, [activeTab]);
 
   return (
     <div className="space-y-6 pb-10">
@@ -858,6 +885,120 @@ export default function ConfiguracoesPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════════════════════════
+          TAB: OTIMIZADOR
+      ══════════════════════════════════ */}
+      {activeTab === 'otimizador' && (
+        <div className="space-y-6">
+          <div className="rounded-[var(--radius)] border border-border bg-card p-5 space-y-5">
+            <div>
+              <p className="text-sm font-semibold text-foreground">Relatórios via WhatsApp</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Após cada análise semanal, o sistema envia um resumo para o grupo configurado abaixo.</p>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label>Instância Evolution</Label>
+                <select
+                  value={otimizadorWa.zapi_client_id ?? ''}
+                  onChange={(e) => {
+                    setOtimizadorWa((prev) => ({ ...prev, zapi_client_id: e.target.value || null, group_jid: null }));
+                    setWaGroups([]);
+                  }}
+                  className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                >
+                  <option value="">Selecione uma instância</option>
+                  {otimizadorWa.instances_disponiveis.map((inst) => (
+                    <option key={inst.id} value={inst.id}>{inst.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>Grupo de destino</Label>
+                <div className="flex gap-2">
+                  <select
+                    value={otimizadorWa.group_jid ?? ''}
+                    onChange={(e) => setOtimizadorWa((prev) => ({ ...prev, group_jid: e.target.value || null }))}
+                    className="h-9 flex-1 rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                    disabled={waGroups.length === 0}
+                  >
+                    <option value="">{waGroups.length === 0 ? 'Carregue os grupos primeiro' : 'Selecione um grupo'}</option>
+                    {waGroups.map((g) => (
+                      <option key={g.jid} value={g.jid}>{g.nome}{g.membros ? ` (${g.membros})` : ''}</option>
+                    ))}
+                  </select>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!otimizadorWa.zapi_client_id || waGroupsLoading}
+                    onClick={async () => {
+                      if (!otimizadorWa.zapi_client_id) return;
+                      setWaGroupsLoading(true);
+                      try {
+                        const res = await fetch(`/api/otimizador/whatsapp-groups?zapiClientId=${otimizadorWa.zapi_client_id}`);
+                        if (res.ok) setWaGroups(await res.json() as WaGroup[]);
+                      } finally {
+                        setWaGroupsLoading(false);
+                      }
+                    }}
+                  >
+                    {waGroupsLoading ? '...' : 'Carregar'}
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-6">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={otimizadorWa.ativo}
+                  onChange={(e) => setOtimizadorWa((prev) => ({ ...prev, ativo: e.target.checked }))}
+                  className="h-4 w-4 rounded border-border accent-primary"
+                />
+                <span className="text-sm text-foreground">Ativar envio de relatórios</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={otimizadorWa.notificar_crise_apenas}
+                  onChange={(e) => setOtimizadorWa((prev) => ({ ...prev, notificar_crise_apenas: e.target.checked }))}
+                  className="h-4 w-4 rounded border-border accent-primary"
+                />
+                <span className="text-sm text-foreground">Notificar apenas quando estado = CRISE</span>
+              </label>
+            </div>
+
+            <div className="flex items-center gap-3 pt-1">
+              <Button
+                onClick={async () => {
+                  setOtimizadorWaSaving(true);
+                  setOtimizadorWaSaved(null);
+                  const res = await fetch('/api/otimizador/whatsapp-config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      zapi_client_id: otimizadorWa.zapi_client_id,
+                      group_jid: otimizadorWa.group_jid,
+                      ativo: otimizadorWa.ativo,
+                      notificar_crise_apenas: otimizadorWa.notificar_crise_apenas,
+                    }),
+                  });
+                  setOtimizadorWaSaving(false);
+                  setOtimizadorWaSaved(res.ok ? 'Configuração salva!' : 'Erro ao salvar.');
+                  setTimeout(() => setOtimizadorWaSaved(null), 3000);
+                }}
+                disabled={otimizadorWaSaving}
+              >
+                {otimizadorWaSaving ? 'Salvando...' : 'Salvar'}
+              </Button>
+              {otimizadorWaSaved && <span className="text-xs text-primary">{otimizadorWaSaved}</span>}
+            </div>
           </div>
         </div>
       )}
