@@ -699,6 +699,7 @@ export async function POST(req: NextRequest) {
   const rawPayload = body.payload;
   const invalid = validatePayload(rawPayload);
   if (invalid) return Response.json({ error: invalid }, { status: 400 });
+  if (!rawPayload) return Response.json({ error: 'payload obrigatorio.' }, { status: 400 });
 
   const preliminaryRule = applyLayerOneRules(rawPayload);
   const rawMemory = await loadOptimizerMemory(rawPayload);
