@@ -666,14 +666,26 @@ export default function OtimizadorPage() {
       }
       if (queueRes.ok) {
         const data = await queueRes.json() as { items: QueueItem[]; generated_at: string | null };
-        // Deduplica por cliente_id mantendo o mais recente
-        const seen = new Set<string>();
-        const deduped = data.items.filter((item) => {
-          const key = item.semana_analise ? item.cliente_id : `${item.cliente_id}-${item.conjunto_id}-${item.periodo_label}`;
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        });
+        // Deduplica: um card por cliente, priorizando v2 > v1, depois mais urgente > mais recente
+        const urgency = (item: QueueItem) => {
+          const estado = item.estado_da_conta;
+          if (estado === 'CRISE' || item.nivel_critico === 'vermelho') return 0;
+          if (estado === 'ATENCAO' || item.nivel_critico === 'amarelo') return 1;
+          return 2;
+        };
+        const byClient = new Map<string, QueueItem>();
+        for (const item of data.items) {
+          const existing = byClient.get(item.cliente_id);
+          if (!existing) { byClient.set(item.cliente_id, item); continue; }
+          // v2 sempre vence v1
+          const itemIsV2 = !!item.semana_analise;
+          const existingIsV2 = !!existing.semana_analise;
+          if (itemIsV2 && !existingIsV2) { byClient.set(item.cliente_id, item); continue; }
+          if (!itemIsV2 && existingIsV2) continue;
+          // mesmo tipo: mais urgente vence
+          if (urgency(item) < urgency(existing)) byClient.set(item.cliente_id, item);
+        }
+        const deduped = Array.from(byClient.values());
         setQueue(deduped);
         setGeneratedAt(data.generated_at);
         setSelectedId((cur) => deduped.some((item) => item.id === cur) ? cur : deduped[0]?.id ?? '');
