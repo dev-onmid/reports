@@ -688,7 +688,8 @@ export default function OtimizadorPage() {
         const deduped = Array.from(byClient.values());
         setQueue(deduped);
         setGeneratedAt(data.generated_at);
-        setSelectedId((cur) => deduped.some((item) => item.id === cur) ? cur : deduped[0]?.id ?? '');
+        const v2Only = deduped.filter((item) => !!item.semana_analise);
+        setSelectedId((cur) => v2Only.some((item) => item.id === cur) ? cur : v2Only[0]?.id ?? '');
       }
     } finally {
       setLoading(false);
