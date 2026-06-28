@@ -828,9 +828,16 @@ export default function OtimizadorPage() {
                 onSelect={(id) => setSelectedId(id)} onConfig={(cid) => setConfigClientId(cid)} />
               <TaskGroup title="Tudo certo" items={saudavelItems} selectedId={selectedId} isAdmin={isAdmin}
                 onSelect={(id) => setSelectedId(id)} onConfig={(cid) => setConfigClientId(cid)} />
-              {v1Items.length > 0 && (
-                <TaskGroup title="Análises avulsas (v1)" items={v1Items} selectedId={selectedId} isAdmin={isAdmin}
-                  onSelect={(id) => setSelectedId(id)} onConfig={(cid) => setConfigClientId(cid)} />
+              {v2Items.length === 0 && (
+                <div className="rounded-[var(--radius)] border border-dashed border-border p-6 text-center space-y-2">
+                  <p className="font-semibold text-foreground">Nenhuma análise semanal gerada ainda</p>
+                  <p className="text-sm text-muted-foreground">
+                    As análises v2 são geradas automaticamente seg–sex. Use o painel acima para rodar manualmente uma conta agora.
+                  </p>
+                  {v1Items.length > 0 && (
+                    <p className="text-xs text-muted-foreground">({v1Items.length} análise(s) antiga(s) ocultada(s) — rode uma nova para substituir)</p>
+                  )}
+                </div>
               )}
             </>
           )}
