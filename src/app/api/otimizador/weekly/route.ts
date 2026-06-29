@@ -94,17 +94,50 @@ type ClientRow = {
   min_dias_aprendizado: number;
 };
 
+// Dados de planejamento derivados do client_planning + client_goals (mesma fonte do dashboard)
 type PlanningRow = {
   client_id: string;
-  cpl_meta: number | null;
-  cpl_maximo: number | null;
+  cpl_meta: number | null;       // CPL ideal definido no planejamento
+  cpl_maximo: number | null;     // CPL máximo (1.6x o ideal — tolerância antes de crise)
   roas_minimo: number | null;
   orcamento_diario: number | null;
-  orcamento_mensal: number | null;
-  volume_leads_meta: number | null;
+  orcamento_mensal: number | null; // investimento planejado = topo do funil × CPL
+  volume_leads_meta: number | null; // meta de leads mensal = topo do funil
   ticket_medio: number | null;
-  objetivo: string | null;
+  objetivo: string | null;       // derivado do tipo da meta: leads | vendas
 };
+
+type FunnelStage = { conversion: number };
+
+// Replica computeFunnel/plannedFunnelFromGoal do painel do cliente (server-side)
+function computeLeadsGoal(
+  goalType: string,
+  goalTarget: number,
+  stages: FunnelStage[],
+  ticket: number,
+): { topVol: number; botVol: number } {
+  const n = stages.length;
+  if (n === 0 || goalTarget <= 0) return { topVol: 0, botVol: 0 };
+  const vols = new Array<number>(n).fill(0);
+
+  if (goalType === 'leads') {
+    vols[0] = Math.ceil(goalTarget);
+    for (let i = 1; i < n; i++) {
+      const rate = stages[i - 1].conversion / 100;
+      vols[i] = rate > 0 ? Math.ceil(vols[i - 1] * rate) : 0;
+    }
+  } else {
+    // revenue/enrollments: parte do fundo do funil (vendas) e sobe
+    vols[n - 1] = goalType === 'revenue'
+      ? (ticket > 0 ? Math.ceil(goalTarget / ticket) : 0)
+      : Math.ceil(goalTarget);
+    for (let i = n - 2; i >= 0; i--) {
+      const rate = stages[i].conversion / 100;
+      vols[i] = rate > 0 ? Math.ceil(vols[i + 1] / rate) : 0;
+    }
+  }
+  return { topVol: vols[0] ?? 0, botVol: vols[n - 1] ?? 0 };
+}
 
 type ConnectionRow = {
   id: string;
@@ -162,16 +195,58 @@ async function loadPlanning(clientIds: string[]): Promise<Record<string, Plannin
   if (clientIds.length === 0) return {};
   const pool = makeServerPool();
   try {
-    const { rows } = await pool.query<PlanningRow>(
-      `SELECT client_id, cpl_meta::float AS cpl_meta, cpl_maximo::float AS cpl_maximo,
-              roas_minimo::float AS roas_minimo, orcamento_diario::float AS orcamento_diario,
-              orcamento_mensal::float AS orcamento_mensal, volume_leads_meta::float AS volume_leads_meta,
-              ticket_medio::float AS ticket_medio, objetivo
-         FROM public.client_planning
-        WHERE client_id = ANY($1::text[])`,
-      [clientIds],
-    ).catch(() => ({ rows: [] as PlanningRow[] }));
-    return Object.fromEntries(rows.map((r) => [r.client_id, r]));
+    // Planejamento e metas vêm das MESMAS tabelas que alimentam o painel do cliente
+    const [planRes, goalRes] = await Promise.all([
+      pool.query<{ client_id: string; tkm: number | null; cpl_meta: number | null; stages: unknown }>(
+        `SELECT client_id, tkm::float AS tkm, cpl_meta::float AS cpl_meta, stages
+           FROM public.client_planning WHERE client_id = ANY($1::text[])`,
+        [clientIds],
+      ).then((r) => r.rows).catch(() => []),
+      pool.query<{ client_id: string; type: string; target: number | null }>(
+        `SELECT client_id, type, target::float AS target
+           FROM public.client_goals WHERE client_id = ANY($1::text[])`,
+        [clientIds],
+      ).then((r) => r.rows).catch(() => []),
+    ]);
+
+    const goalByClient = new Map(goalRes.map((g) => [g.client_id, g]));
+    const result: Record<string, PlanningRow> = {};
+
+    for (const plan of planRes) {
+      const goal = goalByClient.get(plan.client_id);
+      const tkm = plan.tkm ?? 0;
+      const cplMeta = plan.cpl_meta ?? null;
+      const stages: FunnelStage[] = Array.isArray(plan.stages)
+        ? (plan.stages as Array<{ conversion?: number }>).map((s) => ({ conversion: Number(s?.conversion ?? 0) }))
+        : [];
+
+      let volumeLeadsMeta: number | null = null;
+      let orcamentoMensal: number | null = null;
+      if (goal && goal.target && goal.target > 0 && stages.length > 0) {
+        const { topVol } = computeLeadsGoal(goal.type ?? 'revenue', goal.target, stages, tkm);
+        volumeLeadsMeta = topVol > 0 ? topVol : null;
+        if (volumeLeadsMeta && cplMeta) orcamentoMensal = volumeLeadsMeta * cplMeta;
+      }
+
+      // Objetivo de negócio: meta em leads → leads; faturamento/matrículas → vendas
+      const objetivo = goal?.type === 'leads' ? 'leads'
+        : goal?.type === 'revenue' || goal?.type === 'enrollments' ? 'vendas'
+        : null;
+
+      result[plan.client_id] = {
+        client_id: plan.client_id,
+        cpl_meta: cplMeta,
+        cpl_maximo: cplMeta ? Number((cplMeta * 1.6).toFixed(2)) : null,
+        roas_minimo: null,
+        orcamento_diario: orcamentoMensal ? Number((orcamentoMensal / 30).toFixed(2)) : null,
+        orcamento_mensal: orcamentoMensal,
+        volume_leads_meta: volumeLeadsMeta,
+        ticket_medio: tkm > 0 ? tkm : null,
+        objetivo,
+      };
+    }
+
+    return result;
   } finally {
     await pool.end();
   }
@@ -273,15 +348,110 @@ async function fetchCampaignsForClient(clientId: string, origin: string, periodK
   }>>;
 }
 
+// Busca conjuntos + anúncios de uma campanha direto na Meta (best-effort, com deadline)
+async function fetchConjuntosForCampaign(
+  campaignId: string,
+  token: string,
+  dateFrom: string,
+  dateTo: string,
+  deadline: number,
+): Promise<OptimizerCampaignV2['conjuntos']> {
+  if (Date.now() > deadline) return [];
+  const insightFields = `insights.time_range(${JSON.stringify({ since: dateFrom, until: dateTo })}){spend,impressions,reach,frequency,clicks,actions,ctr}`;
+  const url = new URL(`https://graph.facebook.com/v21.0/${campaignId}/adsets`);
+  url.searchParams.set('fields', `id,name,status,effective_status,optimization_goal,daily_budget,created_time,${insightFields}`);
+  url.searchParams.set('limit', '10');
+  url.searchParams.set('access_token', token);
+
+  const res = await fetch(url.toString()).catch(() => null);
+  if (!res?.ok) return [];
+  const data = await res.json() as { data?: Record<string, unknown>[] };
+
+  const conjuntos: OptimizerCampaignV2['conjuntos'] = [];
+  const activeAdsets = (data.data ?? []).filter((raw) => {
+    const status = String(raw.effective_status ?? raw.status ?? '').toUpperCase();
+    return ['ACTIVE', 'IN_PROCESS', 'WITH_ISSUES'].includes(status);
+  }).slice(0, 5);
+
+  for (const raw of activeAdsets) {
+    const insights = (raw.insights as { data?: Record<string, unknown>[] } | undefined)?.data?.[0] ?? {};
+    const actions = (insights.actions as Array<{ action_type: string; value: string }>) ?? [];
+    const conversoes = sumActions(actions, LEAD_ACTIONS);
+    const gasto = Number(insights.spend ?? 0);
+    const impressoes = Number(insights.impressions ?? 0);
+    const cliques = Number(insights.clicks ?? 0);
+    const ctr = Number(insights.ctr ?? (impressoes > 0 ? (cliques / impressoes) * 100 : 0));
+    const createdTime = String(raw.created_time ?? '');
+    const diasAtivo = createdTime ? Math.floor((Date.now() - new Date(createdTime).getTime()) / 86400000) : null;
+
+    // Anúncios com rankings (best-effort, só se houver tempo)
+    let anuncios: OptimizerCampaignV2['conjuntos'][number]['anuncios'] = [];
+    if (Date.now() < deadline) {
+      const adsUrl = new URL(`https://graph.facebook.com/v21.0/${String(raw.id)}/ads`);
+      adsUrl.searchParams.set('fields', `id,name,effective_status,quality_ranking,engagement_rate_ranking,conversion_rate_ranking,insights.time_range(${JSON.stringify({ since: dateFrom, until: dateTo })}){spend,impressions,clicks,actions,ctr}`);
+      adsUrl.searchParams.set('limit', '8');
+      adsUrl.searchParams.set('access_token', token);
+      const adsRes = await fetch(adsUrl.toString()).catch(() => null);
+      if (adsRes?.ok) {
+        const adsData = await adsRes.json() as { data?: Record<string, unknown>[] };
+        anuncios = (adsData.data ?? []).map((ad) => {
+          const ai = (ad.insights as { data?: Record<string, unknown>[] } | undefined)?.data?.[0] ?? {};
+          const adActions = (ai.actions as Array<{ action_type: string; value: string }>) ?? [];
+          const adConv = sumActions(adActions, LEAD_ACTIONS);
+          const adGasto = Number(ai.spend ?? 0);
+          const adImp = Number(ai.impressions ?? 0);
+          const adClicks = Number(ai.clicks ?? 0);
+          return {
+            id: String(ad.id),
+            nome: String(ad.name ?? ''),
+            status: String(ad.effective_status ?? ''),
+            gasto: adGasto,
+            impressoes: adImp,
+            ctr: Number(ai.ctr ?? (adImp > 0 ? (adClicks / adImp) * 100 : 0)),
+            cpl: adGasto > 0 && adConv > 0 ? adGasto / adConv : null,
+            conversoes: adConv,
+            dias_ativo: null,
+            quality_ranking: ad.quality_ranking ? String(ad.quality_ranking) : null,
+            engagement_ranking: ad.engagement_rate_ranking ? String(ad.engagement_rate_ranking) : null,
+            conversion_ranking: ad.conversion_rate_ranking ? String(ad.conversion_rate_ranking) : null,
+          };
+        });
+      }
+    }
+
+    conjuntos.push({
+      id: String(raw.id),
+      nome: String(raw.name ?? ''),
+      status: String(raw.effective_status ?? raw.status ?? ''),
+      objetivo_otimizacao: String(raw.optimization_goal ?? ''),
+      tipo_publico: 'outro',
+      orcamento_diario: raw.daily_budget ? Number(raw.daily_budget) / 100 : null,
+      gasto,
+      impressoes,
+      alcance: insights.reach ? Number(insights.reach) : null,
+      frequencia: insights.frequency ? Number(insights.frequency) : null,
+      ctr,
+      cpl: gasto > 0 && conversoes > 0 ? gasto / conversoes : null,
+      conversoes,
+      ctr_tendencia_4d: null,
+      dias_ativo: diasAtivo,
+      anuncios,
+    });
+  }
+
+  return conjuntos;
+}
+
 // ─── Main builder ─────────────────────────────────────────────────────────────
 
 async function buildPayloadForClient(
   client: ClientRow,
   planning: PlanningRow | null,
-  _token: string,
-  _accountId: string,
+  token: string,
+  accountId: string,
   origin: string,
   period: AnalysisPeriod,
+  fetchConjuntos: boolean,
 ): Promise<OptimizerPayloadV2 | null> {
   const semana = currentWeekLabel();
 
@@ -310,22 +480,36 @@ async function buildPayloadForClient(
 
   if (activeCampaigns.length === 0) return null;
 
-  const campanhas: OptimizerCampaignV2[] = activeCampaigns.slice(0, 5).map((camp) => ({
-    id: camp.id,
-    nome: camp.name,
-    objetivo: camp.objective ?? '',
-    status: camp.status,
-    orcamento_diario: camp.dailyBudget ?? null,
-    gasto: camp.spend,
-    impressoes: camp.impressions,
-    cliques: camp.clicks,
-    ctr: camp.ctr,
-    cpl: camp.cpl > 0 ? camp.cpl : null,
-    conversoes: camp.leads,
-    roas: null,
-    dias_rodando: null,
-    conjuntos: [],
-  }));
+  const topCampaigns = activeCampaigns.slice(0, 5);
+
+  // Conjuntos + anúncios das campanhas que gastaram (best-effort, com deadline de ~20s)
+  const conjuntosDeadline = Date.now() + 20_000;
+  const campanhas: OptimizerCampaignV2[] = [];
+  for (const camp of topCampaigns) {
+    let conjuntos: OptimizerCampaignV2['conjuntos'] = [];
+    // Só busca conjuntos na análise manual (1 cliente), para campanhas com gasto e dentro do tempo
+    if (fetchConjuntos && token && camp.spend > 0 && Date.now() < conjuntosDeadline) {
+      conjuntos = await fetchConjuntosForCampaign(camp.id, token, dateFrom, dateTo, conjuntosDeadline).catch(() => []);
+    }
+    campanhas.push({
+      id: camp.id,
+      nome: camp.name,
+      objetivo: camp.objective ?? '',
+      status: camp.status,
+      orcamento_diario: camp.dailyBudget ?? null,
+      gasto: camp.spend,
+      impressoes: camp.impressions,
+      cliques: camp.clicks,
+      ctr: camp.ctr,
+      cpl: camp.cpl > 0 ? camp.cpl : null,
+      conversoes: camp.leads,
+      roas: null,
+      dias_rodando: null,
+      conjuntos,
+    });
+  }
+
+  void accountId; // reservado para opportunity score futuro
 
   const historico = await loadDecisionHistory(client.id);
 
@@ -396,6 +580,9 @@ async function runWeeklyOptimizer(request: NextRequest) {
 
   const results: Array<{ clientId: string; clientName: string; status: string; error?: string }> = [];
 
+  // Análise granular (conjuntos/anúncios) só quando é 1 cliente (análise manual); cron mantém leve
+  const fetchConjuntos = clients.length === 1;
+
   for (const client of clients) {
     if (Date.now() - startedAt > BUDGET_MS) break;
 
@@ -406,13 +593,15 @@ async function runWeeklyOptimizer(request: NextRequest) {
     }
 
     try {
+      const token = await resolveToken(conn.id).catch(() => null);
       const payload = await buildPayloadForClient(
         client,
         planningMap[client.id] ?? null,
-        '',
-        '',
+        token ?? '',
+        conn.account_id,
         origin,
         period,
+        fetchConjuntos,
       );
       if (!payload) {
         results.push({ clientId: client.id, clientName: client.name, status: 'sem_campanhas_ativas' });
