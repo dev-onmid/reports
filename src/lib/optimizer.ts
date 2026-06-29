@@ -406,9 +406,15 @@ export function sanitizeOptimizerOutputV2(input: unknown, payload: OptimizerPayl
       })
     : [];
 
+  const resumoFallback = estado === 'CRISE'
+    ? 'Conta em estado crítico — verifique os dados imediatamente e tome ação.'
+    : estado === 'ATENCAO'
+      ? 'Conta requer atenção. Revise as campanhas ativas e os dados do período para identificar o problema.'
+      : 'Conta saudável. Acompanhe as métricas e mantenha o ritmo atual.';
+
   return {
     estado_da_conta: estado,
-    resumo_executivo: String(obj.resumo_executivo ?? 'Análise concluída.'),
+    resumo_executivo: (obj.resumo_executivo && String(obj.resumo_executivo).trim()) ? String(obj.resumo_executivo) : resumoFallback,
     cruzamento_com_metas: {
       cpl_atual: cruzamento.cpl_atual != null ? Number(cruzamento.cpl_atual) : null,
       cpl_ideal: cruzamento.cpl_ideal != null ? Number(cruzamento.cpl_ideal) : null,

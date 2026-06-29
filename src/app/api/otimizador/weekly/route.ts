@@ -435,6 +435,18 @@ async function buildPayloadForClient(
 
   const historico = await loadDecisionHistory(client.id);
 
+  const totalGasto = campanhas.reduce((sum, c) => sum + c.gasto, 0);
+  const semMetaConfigurada = !planning?.objetivo && !planning?.cpl_maximo && !planning?.orcamento_diario;
+
+  // Injeta contexto quando os dados são escassos para orientar a IA
+  const observacoes: string[] = [];
+  if (totalGasto === 0) {
+    observacoes.push(`ALERTA: A conta possui ${campanhas.length} campanha(s) ativas mas registrou R$ 0,00 em gasto no período de ${period.label}. Diagnostique o motivo da não-entrega (pagamento, aprovação, orçamento esgotado, erro de configuração) e oriente o gestor de forma direta sobre o que verificar agora no Gerenciador de Anúncios.`);
+  }
+  if (semMetaConfigurada) {
+    observacoes.push('CONTEXTO: Este cliente ainda não possui metas de CPL, orçamento ou objetivo configurados na plataforma. Faça uma análise baseada nos dados absolutos disponíveis e recomende configurar as metas para análises futuras mais precisas.');
+  }
+
   return {
     cliente_id: client.id,
     cliente_nome: client.name,
@@ -468,7 +480,7 @@ async function buildPayloadForClient(
     opportunity_score: opportunityScore,
     campanhas,
     historico_decisoes: historico,
-    observacoes_gestor: null,
+    observacoes_gestor: observacoes.length > 0 ? observacoes.join(' | ') : null,
   };
 }
 
