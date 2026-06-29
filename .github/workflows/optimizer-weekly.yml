@@ -1,5 +1,10 @@
 name: Otimizador Semanal
 
+# Dispara a análise semanal do otimizador todo dia útil de manhã.
+# Usa UM único secret OPTIMIZER_WEEKLY_URL com a URL COMPLETA já incluindo o secret:
+#   https://SEU-DOMINIO/api/otimizador/weekly?secret=SEU_CRON_SECRET
+# (mesmo padrão do LEADLOVERS_WORKER_URL, que já funciona)
+
 on:
   schedule:
     # Todo dia útil às 07h BRT (10h UTC)
@@ -7,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       client_id:
-        description: 'ID do cliente (opcional — deixe vazio para rodar o dia inteiro)'
+        description: 'ID do cliente (opcional — deixe vazio para rodar o grupo do dia)'
         required: false
         default: ''
 
@@ -18,19 +23,26 @@ jobs:
     steps:
       - name: Disparar análise semanal
         run: |
-          CLIENT_PARAM=""
-          if [ -n "${{ github.event.inputs.client_id }}" ]; then
-            CLIENT_PARAM="&clientId=${{ github.event.inputs.client_id }}"
+          echo "Disparando otimizador em $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+
+          URL="${{ secrets.OPTIMIZER_WEEKLY_URL }}"
+          if [ -z "$URL" ]; then
+            echo "::error::Secret OPTIMIZER_WEEKLY_URL não configurado no repositório."
+            exit 1
           fi
 
-          RESPONSE=$(curl -s -o /tmp/response.json -w "%{http_code}" \
-            -X GET \
-            "${{ secrets.APP_URL }}/api/otimizador/weekly?secret=${{ secrets.CRON_SECRET }}${CLIENT_PARAM}")
+          # Anexa clientId quando rodado manualmente com um ID específico
+          if [ -n "${{ github.event.inputs.client_id }}" ]; then
+            URL="${URL}&clientId=${{ github.event.inputs.client_id }}"
+          fi
 
-          echo "HTTP status: $RESPONSE"
-          cat /tmp/response.json
+          HTTP_CODE=$(curl -s -o /tmp/response.json -w "%{http_code}" -X GET "$URL")
+          echo "HTTP $HTTP_CODE"
+          echo "=== Resposta ==="
+          cat /tmp/response.json 2>/dev/null && echo "" || echo "(vazio)"
+          echo "================"
 
-          if [ "$RESPONSE" != "200" ]; then
-            echo "Erro na análise semanal — status $RESPONSE"
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::Otimizador retornou HTTP $HTTP_CODE"
             exit 1
           fi
