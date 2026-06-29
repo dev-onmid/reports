@@ -183,12 +183,15 @@ async function loadConnections(clientIds: string[]): Promise<Record<string, Conn
   if (clientIds.length === 0) return {};
   const pool = makeServerPool();
   try {
+    // Primary: client_account_links → meta_connections (same join used by /api/campaigns)
     const { rows } = await pool.query<ConnectionRow & { client_id: string }>(
-      `SELECT mcl.client_id, mc.id, mc.account_id, mc.app_id, mc.access_token, mc.token_expiry
-         FROM public.meta_connections mc
-         JOIN public.meta_client_links mcl ON mcl.connection_id = mc.id
-        WHERE mcl.client_id = ANY($1::text[])
-        ORDER BY mcl.client_id, mc.created_at DESC`,
+      `SELECT cal.client_id, mc.id, cal.account_id, mc.app_id, mc.access_token, mc.token_expiry
+         FROM public.client_account_links cal
+         JOIN public.meta_connections mc ON mc.id = cal.connection_id
+        WHERE cal.client_id = ANY($1::text[])
+          AND cal.platform = 'meta_ads'
+          AND mc.status = 'connected'
+        ORDER BY cal.client_id, mc.created_at DESC`,
       [clientIds],
     ).catch(() => ({ rows: [] as (ConnectionRow & { client_id: string })[] }));
 
@@ -196,6 +199,25 @@ async function loadConnections(clientIds: string[]): Promise<Record<string, Conn
     for (const row of rows) {
       if (!map[row.client_id]) map[row.client_id] = row;
     }
+
+    // Fallback: meta_ads_connections legacy table
+    const missing = clientIds.filter((id) => !map[id]);
+    if (missing.length > 0) {
+      const { rows: legacy } = await pool.query<{ client_id: string; connection_id: string; account_id: string }>(
+        `SELECT client_id, connection_id, account_id FROM public.meta_ads_connections WHERE client_id = ANY($1::text[])`,
+        [missing],
+      ).catch(() => ({ rows: [] as { client_id: string; connection_id: string; account_id: string }[] }));
+      for (const leg of legacy) {
+        if (map[leg.client_id]) continue;
+        // Look up the actual connection row
+        const { rows: connRows } = await pool.query<ConnectionRow>(
+          `SELECT id, $2 AS account_id, app_id, access_token, token_expiry FROM public.meta_connections WHERE id = $1 AND status = 'connected' LIMIT 1`,
+          [leg.connection_id, leg.account_id],
+        ).catch(() => ({ rows: [] as ConnectionRow[] }));
+        if (connRows[0]) map[leg.client_id] = connRows[0];
+      }
+    }
+
     return map;
   } finally {
     await pool.end();
