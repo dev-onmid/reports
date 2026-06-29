@@ -175,6 +175,7 @@ Módulo de análise automática de performance — arquivos principais:
 
 ### Decisões arquiteturais do Otimizador v2
 
+- **Análise manual é assíncrona (anti-504)** — o botão "Analisar esta conta" faz `POST /api/otimizador/weekly?...&async=1`, que agenda o trabalho com `after()` (de `next/server`) e responde **202 na hora**. A análise (busca de dados + IA) roda em segundo plano dentro do `maxDuration=60`; o resultado é gravado em `optimizer_ai_logs` pela rota `analisar`. A UI faz **polling** em `GET /api/otimizador/analisar?clientId=X&hours=1` até aparecer um resultado mais novo que o anterior (compara `created_at` do servidor — imune a clock skew). Antes era um request síncrono que somava busca (até 24s) + chamada IA aninhada (15-30s) e estourava o limite do Vercel → 504 com corpo vazio. O cron (GET) continua síncrono. Helpers no route: `parseRunOptions` → `executeWeekly(opts)` (retorna objeto puro) → `startInBackground(opts)`.
 - **Uma análise por cliente por semana** — cadência semanal, não por campanha/dia. Custo ~$0.043/análise × 50 clientes/semana = ~$9/mês.
 - **Rodízio por dia útil** — `analise_dia_semana` (1=Seg...5=Sex) em `optimizer_client_config`. O cron `weekly/route.ts` filtra `WHERE analise_dia_semana = EXTRACT(DOW FROM NOW())`. Auto-atribuição ao dia menos carregado no config POST.
 - **4 modos de operação por cliente**: `DIAGNOSTICO_APENAS` | `RECOMENDACAO_COM_APROVACAO` | `AUTOMATICO_PARCIAL` | `AUTOMATICO_TOTAL`. Controlam se ações são sugeridas ou executadas automaticamente.

@@ -1,4 +1,5 @@
 import type { NextRequest } from 'next/server';
+import { after } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import {
@@ -577,11 +578,23 @@ async function buildPayloadForClient(
 
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
-async function runWeeklyOptimizer(request: NextRequest) {
-  const origin = new URL(request.url).origin;
-  const forceClientId = request.nextUrl.searchParams.get('clientId') ?? undefined;
-  const forceAi = request.nextUrl.searchParams.get('forceAi') === '1';
-  const period = analysisPeriodFromRequest(request);
+type RunOptions = {
+  origin: string;
+  forceClientId?: string;
+  forceAi: boolean;
+  period: AnalysisPeriod;
+};
+
+function parseRunOptions(request: NextRequest): RunOptions {
+  return {
+    origin: new URL(request.url).origin,
+    forceClientId: request.nextUrl.searchParams.get('clientId') ?? undefined,
+    forceAi: request.nextUrl.searchParams.get('forceAi') === '1',
+    period: analysisPeriodFromRequest(request),
+  };
+}
+
+async function executeWeekly({ origin, forceClientId, forceAi, period }: RunOptions) {
   const startedAt = Date.now();
 
   const clients = await loadClientsForToday(undefined, forceClientId);
@@ -650,7 +663,7 @@ async function runWeeklyOptimizer(request: NextRequest) {
     await Promise.all(batch.map(processClient));
   }
 
-  return Response.json({
+  return {
     pulados_por_tempo: pulou,
     ok: true,
     semana: currentWeekLabel(),
@@ -661,7 +674,7 @@ async function runWeeklyOptimizer(request: NextRequest) {
     ok_count: results.filter((r) => r.status === 'ok').length,
     erros: results.filter((r) => r.status === 'erro').length,
     results,
-  });
+  };
 }
 
 export async function GET(request: NextRequest) {
@@ -669,7 +682,21 @@ export async function GET(request: NextRequest) {
   if (secret !== process.env.CRON_SECRET) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
-  return runWeeklyOptimizer(request);
+  return Response.json(await executeWeekly(parseRunOptions(request)));
+}
+
+// Dispara a análise em segundo plano (after) e responde na hora — evita 504 quando
+// a busca de dados + IA passa do limite de tempo do request síncrono. O resultado é
+// gravado em optimizer_ai_logs assim que pronto; a UI faz polling para exibi-lo.
+function startInBackground(opts: RunOptions): Response {
+  after(async () => {
+    try {
+      await executeWeekly(opts);
+    } catch (err) {
+      console.error('[weekly][background]', err);
+    }
+  });
+  return Response.json({ started: true, async: true }, { status: 202 });
 }
 
 export async function POST(request: NextRequest) {
@@ -697,5 +724,10 @@ export async function POST(request: NextRequest) {
     await pool.end();
   }
 
-  return runWeeklyOptimizer(request);
+  const opts = parseRunOptions(request);
+  // async=1: dispara em segundo plano e responde 202 imediatamente (sem risco de 504).
+  if (request.nextUrl.searchParams.get('async') === '1') {
+    return startInBackground(opts);
+  }
+  return Response.json(await executeWeekly(opts));
 }

@@ -728,41 +728,77 @@ export default function OtimizadorPage() {
     });
   }
 
+  // Busca um resultado de análise mais recente que o já existente (polling pós-disparo async).
+  // Compara contra o created_at anterior (ambos do servidor) — imune a diferença de relógio.
+  async function pollForFreshResult(clientId: string, priorTime: number): Promise<QueueItem | null> {
+    try {
+      const res = await fetch(`/api/otimizador/analisar?clientId=${encodeURIComponent(clientId)}&hours=1`);
+      if (!res.ok) return null;
+      const data = await res.json() as { items: QueueItem[] };
+      return data.items.find((it) =>
+        it.cliente_id === clientId
+        && !!it.semana_analise
+        && new Date(it.created_at).getTime() > priorTime,
+      ) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   async function runWeeklyNow() {
     setRunLoading(true);
     setRunMessage(null);
+    const isSingle = manualClientId !== 'programados-hoje';
+    // Marca de tempo da última análise já existente deste cliente (do servidor) — só aceitamos
+    // um resultado mais novo que este. Evita falsos positivos e dispensa o relógio do browser.
+    const prior = queue.find((it) => it.cliente_id === manualClientId && !!it.semana_analise);
+    const priorTime = prior ? new Date(prior.created_at).getTime() : 0;
     try {
-      const params = new URLSearchParams({ period: manualPeriod, forceAi: '1' });
-      if (manualClientId !== 'programados-hoje') params.set('clientId', manualClientId);
+      // Dispara em segundo plano (async=1): a rota responde 202 na hora e a análise
+      // roda no servidor sem prender o request — elimina o 504 por timeout.
+      const params = new URLSearchParams({ period: manualPeriod, forceAi: '1', async: '1' });
+      if (isSingle) params.set('clientId', manualClientId);
       const res = await fetch(`/api/otimizador/weekly?${params.toString()}`, {
         method: 'POST',
         headers: { ...callerHeaders(), 'Content-Type': 'application/json' },
       });
-      const data = await res.json().catch(() => ({})) as {
-        ok_count?: number; erros?: number; periodo_label?: string; error?: string;
-        results?: Array<{ clientId: string; clientName: string; status: string; error?: string }>;
-      };
-      if (res.ok) {
-        const scope = manualClientId === 'programados-hoje' ? 'grupo de hoje' : clients.find((c) => c.id === manualClientId)?.name ?? 'conta';
-        const singleResult = data.results?.find((r) => r.clientId === manualClientId);
-        const statusDetail = singleResult && singleResult.status !== 'ok'
-          ? ` (motivo: ${singleResult.status}${singleResult.error ? ' — ' + singleResult.error : ''})`
-          : '';
-        setRunMessage(`${scope}: ${data.ok_count ?? 0} análise(s) em ${data.periodo_label ?? 'período selecionado'}${data.erros ? `, ${data.erros} erro(s)` : ''}${statusDetail}.`);
-        if ((data.ok_count ?? 0) > 0) {
-          if (manualClientId !== 'programados-hoje') setSelectedId('');
-          await loadQueue();
-        }
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({})) as { error?: string };
+        setRunMessage(`Erro ao iniciar: ${data.error || res.statusText || `HTTP ${res.status}`}`);
+        setRunLoading(false);
+        return;
+      }
+
+      if (!isSingle) {
+        setRunMessage('Análise do grupo de hoje iniciada em segundo plano. Os resultados aparecem na lista em até ~1 minuto — clique em "Atualizar".');
+        setTimeout(() => void loadQueue(), 25_000);
+        setTimeout(() => void loadQueue(), 55_000);
+        setRunLoading(false);
+        return;
+      }
+
+      // Cliente único: faz polling até o resultado da semana aparecer no banco.
+      const clientName = clients.find((c) => c.id === manualClientId)?.name ?? 'conta';
+      setRunMessage(`Analisando ${clientName}… isso leva de 20 a 60 segundos.`);
+      const deadline = Date.now() + 90_000;
+      let fresh: QueueItem | null = null;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 4_000));
+        fresh = await pollForFreshResult(manualClientId, priorTime);
+        if (fresh) break;
+      }
+
+      if (fresh) {
+        await loadQueue();
+        setSelectedId(fresh.id);
+        setRunMessage(`Análise de ${clientName} concluída.`);
       } else {
-        const detail = data.error || res.statusText || `HTTP ${res.status}`;
-        const hint = res.status === 504 || res.status === 502
-          ? ' — a análise demorou demais (timeout). Tente novamente; se persistir, a conta pode ter muitas campanhas.'
-          : '';
-        setRunMessage(`Erro: ${detail}${hint}`);
+        setRunMessage(`A análise de ${clientName} continua rodando em segundo plano. Clique em "Atualizar" em alguns instantes para ver o resultado.`);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      setRunMessage(`Erro: ${msg || 'falha de rede ou timeout'}`);
+      setRunMessage(`Erro: ${msg || 'falha de rede'}`);
     } finally {
       setRunLoading(false);
     }
