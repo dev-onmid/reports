@@ -754,10 +754,15 @@ export default function OtimizadorPage() {
           await loadQueue();
         }
       } else {
-        setRunMessage(`Erro: ${data.error ?? res.statusText}`);
+        const detail = data.error || res.statusText || `HTTP ${res.status}`;
+        const hint = res.status === 504 || res.status === 502
+          ? ' — a análise demorou demais (timeout). Tente novamente; se persistir, a conta pode ter muitas campanhas.'
+          : '';
+        setRunMessage(`Erro: ${detail}${hint}`);
       }
     } catch (err) {
-      setRunMessage(`Erro: ${err instanceof Error ? err.message : String(err)}`);
+      const msg = err instanceof Error ? err.message : String(err);
+      setRunMessage(`Erro: ${msg || 'falha de rede ou timeout'}`);
     } finally {
       setRunLoading(false);
     }

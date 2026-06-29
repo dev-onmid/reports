@@ -48,6 +48,19 @@ function sumActions(actions: Array<{ action_type: string; value: string }>, type
     .reduce((sum, a) => sum + Number(a.value), 0);
 }
 
+// fetch com timeout — impede que um request travado da Meta/interno derrube a rota inteira (504 vazio)
+async function fetchWithTimeout(url: string, ms: number, init?: RequestInit): Promise<Response | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 const LEAD_ACTIONS = [
   'lead', 'onsite_conversion.lead_grouped', 'offsite_conversion.fb_pixel_lead',
   'offsite_conversion.lead', 'onsite_conversion.lead', 'onsite_web_lead',
@@ -339,8 +352,8 @@ async function fetchCampaignsForClient(clientId: string, origin: string, periodK
   url.searchParams.set('dateTo', dateTo);
   url.searchParams.set('sortBy', 'spend');
   url.searchParams.set('limit', '10');
-  const res = await fetch(url.toString(), { cache: 'no-store' });
-  if (!res.ok) return [];
+  const res = await fetchWithTimeout(url.toString(), 12_000, { cache: 'no-store' });
+  if (!res?.ok) return [];
   return res.json() as Promise<Array<{
     id: string; name: string; status: string; objective?: string;
     dailyBudget?: number; spend: number; impressions: number; clicks: number;
@@ -363,7 +376,7 @@ async function fetchConjuntosForCampaign(
   url.searchParams.set('limit', '10');
   url.searchParams.set('access_token', token);
 
-  const res = await fetch(url.toString()).catch(() => null);
+  const res = await fetchWithTimeout(url.toString(), 8_000);
   if (!res?.ok) return [];
   const data = await res.json() as { data?: Record<string, unknown>[] };
 
@@ -391,7 +404,7 @@ async function fetchConjuntosForCampaign(
       adsUrl.searchParams.set('fields', `id,name,effective_status,quality_ranking,engagement_rate_ranking,conversion_rate_ranking,insights.time_range(${JSON.stringify({ since: dateFrom, until: dateTo })}){spend,impressions,clicks,actions,ctr}`);
       adsUrl.searchParams.set('limit', '8');
       adsUrl.searchParams.set('access_token', token);
-      const adsRes = await fetch(adsUrl.toString()).catch(() => null);
+      const adsRes = await fetchWithTimeout(adsUrl.toString(), 8_000);
       if (adsRes?.ok) {
         const adsData = await adsRes.json() as { data?: Record<string, unknown>[] };
         anuncios = (adsData.data ?? []).map((ad) => {
@@ -581,17 +594,17 @@ async function runWeeklyOptimizer(request: NextRequest) {
   const results: Array<{ clientId: string; clientName: string; status: string; error?: string }> = [];
 
   // Análise granular (conjuntos/anúncios) só quando é 1 cliente (análise manual); cron mantém leve
-  const fetchConjuntos = clients.length === 1;
+  const isManual = clients.length === 1;
+  const fetchConjuntos = isManual;
+  // Concorrência: 1 cliente = sequencial; cron = paralelo p/ cobrir a base dentro do tempo
+  const CONCURRENCY = isManual ? 1 : 5;
 
-  for (const client of clients) {
-    if (Date.now() - startedAt > BUDGET_MS) break;
-
+  async function processClient(client: ClientRow): Promise<void> {
     const conn = connectionsMap[client.id];
     if (!conn) {
       results.push({ clientId: client.id, clientName: client.name, status: 'sem_conexao_meta' });
-      continue;
+      return;
     }
-
     try {
       const token = await resolveToken(conn.id).catch(() => null);
       const payload = await buildPayloadForClient(
@@ -605,23 +618,40 @@ async function runWeeklyOptimizer(request: NextRequest) {
       );
       if (!payload) {
         results.push({ clientId: client.id, clientName: client.name, status: 'sem_campanhas_ativas' });
-        continue;
+        return;
       }
 
-      const analyzeRes = await fetch(new URL('/api/otimizador/analisar', origin).toString(), {
+      const analyzeRes = await fetchWithTimeout(new URL('/api/otimizador/analisar', origin).toString(), 55_000, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ payload_v2: payload, connection_id: conn.id, force_ai: forceAi }),
       });
 
-      if (!analyzeRes.ok) throw new Error(`analisar HTTP ${analyzeRes.status}`);
+      if (!analyzeRes) throw new Error('analisar não respondeu (timeout da IA)');
+      if (!analyzeRes.ok) {
+        const errBody = await analyzeRes.text().catch(() => '');
+        throw new Error(`analisar HTTP ${analyzeRes.status}${errBody ? ': ' + errBody.slice(0, 200) : ''}`);
+      }
       results.push({ clientId: client.id, clientName: client.name, status: 'ok' });
     } catch (err) {
       results.push({ clientId: client.id, clientName: client.name, status: 'erro', error: String(err) });
     }
   }
 
+  // Processa em lotes paralelos, respeitando o orçamento de tempo
+  const queue = [...clients];
+  let pulou = 0;
+  while (queue.length > 0) {
+    if (Date.now() - startedAt > BUDGET_MS) {
+      pulou = queue.length;
+      break;
+    }
+    const batch = queue.splice(0, CONCURRENCY);
+    await Promise.all(batch.map(processClient));
+  }
+
   return Response.json({
+    pulados_por_tempo: pulou,
     ok: true,
     semana: currentWeekLabel(),
     periodo: period.key,
