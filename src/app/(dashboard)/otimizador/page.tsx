@@ -738,12 +738,21 @@ export default function OtimizadorPage() {
         method: 'POST',
         headers: { ...callerHeaders(), 'Content-Type': 'application/json' },
       });
-      const data = await res.json().catch(() => ({})) as { ok_count?: number; erros?: number; periodo_label?: string; error?: string };
+      const data = await res.json().catch(() => ({})) as {
+        ok_count?: number; erros?: number; periodo_label?: string; error?: string;
+        results?: Array<{ clientId: string; clientName: string; status: string; error?: string }>;
+      };
       if (res.ok) {
         const scope = manualClientId === 'programados-hoje' ? 'grupo de hoje' : clients.find((c) => c.id === manualClientId)?.name ?? 'conta';
-        setRunMessage(`${scope}: ${data.ok_count ?? 0} análise(s) em ${data.periodo_label ?? 'período selecionado'}${data.erros ? `, ${data.erros} erro(s)` : ''}.`);
-        if (manualClientId !== 'programados-hoje') setSelectedId('');
-        await loadQueue();
+        const singleResult = data.results?.find((r) => r.clientId === manualClientId);
+        const statusDetail = singleResult && singleResult.status !== 'ok'
+          ? ` (motivo: ${singleResult.status}${singleResult.error ? ' — ' + singleResult.error : ''})`
+          : '';
+        setRunMessage(`${scope}: ${data.ok_count ?? 0} análise(s) em ${data.periodo_label ?? 'período selecionado'}${data.erros ? `, ${data.erros} erro(s)` : ''}${statusDetail}.`);
+        if ((data.ok_count ?? 0) > 0) {
+          if (manualClientId !== 'programados-hoje') setSelectedId('');
+          await loadQueue();
+        }
       } else {
         setRunMessage(`Erro: ${data.error ?? res.statusText}`);
       }
