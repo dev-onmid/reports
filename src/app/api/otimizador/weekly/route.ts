@@ -183,38 +183,50 @@ async function loadConnections(clientIds: string[]): Promise<Record<string, Conn
   if (clientIds.length === 0) return {};
   const pool = makeServerPool();
   try {
-    // Primary: client_account_links → meta_connections (same join used by /api/campaigns)
-    const { rows } = await pool.query<ConnectionRow & { client_id: string }>(
-      `SELECT cal.client_id, mc.id, cal.account_id, mc.app_id, mc.access_token, mc.token_expiry
-         FROM public.client_account_links cal
-         JOIN public.meta_connections mc ON mc.id = cal.connection_id
-        WHERE cal.client_id = ANY($1::text[])
-          AND cal.platform = 'meta_ads'
-          AND mc.status = 'connected'
-        ORDER BY cal.client_id, mc.created_at DESC`,
-      [clientIds],
-    ).catch(() => ({ rows: [] as (ConnectionRow & { client_id: string })[] }));
+    const [calRows, legacyRows, allConns, globalIntegration] = await Promise.all([
+      // Modern: client_account_links → meta_connections
+      pool.query<{ client_id: string; connection_id: string; account_id: string }>(
+        `SELECT cal.client_id, cal.connection_id, cal.account_id
+           FROM public.client_account_links cal
+          WHERE cal.client_id = ANY($1::text[])
+            AND cal.platform = 'meta_ads'`,
+        [clientIds],
+      ).then((r) => r.rows).catch(() => [] as { client_id: string; connection_id: string; account_id: string }[]),
+      // Legacy: meta_ads_connections (account_ids array, no token)
+      pool.query<{ client_id: string; account_ids: string[] }>(
+        `SELECT client_id, account_ids FROM public.meta_ads_connections WHERE client_id = ANY($1::text[])`,
+        [clientIds],
+      ).then((r) => r.rows).catch(() => [] as { client_id: string; account_ids: string[] }[]),
+      // All connected meta_connections
+      pool.query<ConnectionRow>(
+        `SELECT id, app_id, access_token, token_expiry FROM public.meta_connections WHERE status = 'connected' ORDER BY connected_at DESC`,
+      ).then((r) => r.rows).catch(() => [] as ConnectionRow[]),
+      // Global legacy integration token
+      pool.query<{ access_token: string; token_expiry: string | null }>(
+        `SELECT access_token, token_expiry FROM public.meta_integration WHERE id = 'global' AND status = 'connected' LIMIT 1`,
+      ).then((r) => r.rows[0] ?? null).catch(() => null),
+    ]);
 
+    const connById = new Map(allConns.map((c) => [c.id, c]));
     const map: Record<string, ConnectionRow> = {};
-    for (const row of rows) {
-      if (!map[row.client_id]) map[row.client_id] = row;
+
+    // Modern path: pick connection via client_account_links
+    for (const link of calRows) {
+      if (map[link.client_id]) continue;
+      const conn = connById.get(link.connection_id);
+      if (conn) map[link.client_id] = { ...conn, account_id: link.account_id };
     }
 
-    // Fallback: meta_ads_connections legacy table
-    const missing = clientIds.filter((id) => !map[id]);
-    if (missing.length > 0) {
-      const { rows: legacy } = await pool.query<{ client_id: string; connection_id: string; account_id: string }>(
-        `SELECT client_id, connection_id, account_id FROM public.meta_ads_connections WHERE client_id = ANY($1::text[])`,
-        [missing],
-      ).catch(() => ({ rows: [] as { client_id: string; connection_id: string; account_id: string }[] }));
-      for (const leg of legacy) {
-        if (map[leg.client_id]) continue;
-        // Look up the actual connection row
-        const { rows: connRows } = await pool.query<ConnectionRow>(
-          `SELECT id, $2 AS account_id, app_id, access_token, token_expiry FROM public.meta_connections WHERE id = $1 AND status = 'connected' LIMIT 1`,
-          [leg.connection_id, leg.account_id],
-        ).catch(() => ({ rows: [] as ConnectionRow[] }));
-        if (connRows[0]) map[leg.client_id] = connRows[0];
+    // Legacy path: meta_ads_connections + first available meta_connections (or global integration)
+    const fallbackConn: ConnectionRow | null = allConns[0] ?? (globalIntegration
+      ? { id: 'legacy-global', app_id: '', access_token: globalIntegration.access_token, token_expiry: globalIntegration.token_expiry, account_id: '' }
+      : null);
+
+    for (const leg of legacyRows) {
+      if (map[leg.client_id]) continue;
+      const accountId = leg.account_ids?.[0];
+      if (accountId && fallbackConn) {
+        map[leg.client_id] = { ...fallbackConn, account_id: accountId };
       }
     }
 
