@@ -7,8 +7,6 @@ import {
   segmentToOptimizerNiche,
   type OptimizerPayloadV2,
   type OptimizerCampaignV2,
-  type OptimizerAdsetV2,
-  type OptimizerAdV2,
   type OptimizerObjective,
   type OptimizerModo,
   type OptimizerPeriodKey,
@@ -257,95 +255,22 @@ async function loadDecisionHistory(clientId: string): Promise<OptimizerPayloadV2
   }
 }
 
-// ─── Meta API fetchers ────────────────────────────────────────────────────────
-
-async function fetchAdsets(campaignId: string, token: string, dateFrom: string, dateTo: string): Promise<OptimizerAdsetV2[]> {
-  const insightFields = `insights.time_range(${JSON.stringify({ since: dateFrom, until: dateTo })}){spend,impressions,reach,frequency,clicks,actions,ctr}`;
-  const url = new URL(`https://graph.facebook.com/v21.0/${campaignId}/adsets`);
-  url.searchParams.set('fields', `id,name,status,effective_status,optimization_goal,targeting,daily_budget,created_time,${insightFields}`);
-  url.searchParams.set('limit', '20');
-  url.searchParams.set('access_token', token);
-
-  const res = await fetch(url.toString());
-  if (!res.ok) return [];
-  const data = await res.json() as { data?: Record<string, unknown>[] };
-
-  const adsets: OptimizerAdsetV2[] = [];
-  for (const raw of data.data ?? []) {
-    const insights = (raw.insights as { data?: Record<string, unknown>[] } | undefined)?.data?.[0] ?? {};
-    const actions = (insights.actions as Array<{ action_type: string; value: string }>) ?? [];
-    const conversoes = sumActions(actions, LEAD_ACTIONS);
-    const gasto = Number(insights.spend ?? 0);
-    const impressoes = Number(insights.impressions ?? 0);
-    const cliques = Number(insights.clicks ?? 0);
-    const ctr = Number(insights.ctr ?? (impressoes > 0 ? (cliques / impressoes) * 100 : 0));
-    const cpl = gasto > 0 && conversoes > 0 ? gasto / conversoes : null;
-    const createdTime = String(raw.created_time ?? '');
-    const diasAtivo = createdTime ? Math.floor((Date.now() - new Date(createdTime).getTime()) / 86400000) : null;
-
-    const status = String(raw.effective_status ?? raw.status ?? '');
-    if (!['ACTIVE', 'PAUSED', 'IN_PROCESS', 'WITH_ISSUES'].includes(status.toUpperCase())) continue;
-
-    adsets.push({
-      id: String(raw.id),
-      nome: String(raw.name ?? ''),
-      status,
-      objetivo_otimizacao: String(raw.optimization_goal ?? ''),
-      tipo_publico: 'outro',
-      orcamento_diario: raw.daily_budget ? Number(raw.daily_budget) / 100 : null,
-      gasto,
-      impressoes,
-      alcance: insights.reach ? Number(insights.reach) : null,
-      frequencia: insights.frequency ? Number(insights.frequency) : null,
-      ctr,
-      cpl,
-      conversoes,
-      ctr_tendencia_4d: null, // calculado abaixo se possível
-      dias_ativo: diasAtivo,
-      anuncios: [],
-    });
-  }
-
-  return adsets;
-}
-
-async function fetchAdsWithRankings(adsetId: string, token: string, dateFrom: string, dateTo: string): Promise<OptimizerAdV2[]> {
-  const insightFields = `insights.time_range(${JSON.stringify({ since: dateFrom, until: dateTo })}){spend,impressions,clicks,actions,ctr}`;
-  const url = new URL(`https://graph.facebook.com/v21.0/${adsetId}/ads`);
-  url.searchParams.set('fields', `id,name,status,effective_status,created_time,quality_ranking,engagement_rate_ranking,conversion_rate_ranking,${insightFields}`);
+// Busca campanhas via API interna (mesma que alimenta o dashboard)
+async function fetchCampaignsForClient(clientId: string, origin: string, periodKey: OptimizerPeriodKey, dateFrom: string, dateTo: string) {
+  const url = new URL('/api/campaigns', origin);
+  url.searchParams.set('clientIds', clientId);
+  url.searchParams.set('period', 'custom');
+  url.searchParams.set('dateFrom', dateFrom);
+  url.searchParams.set('dateTo', dateTo);
+  url.searchParams.set('sortBy', 'spend');
   url.searchParams.set('limit', '10');
-  url.searchParams.set('access_token', token);
-
-  const res = await fetch(url.toString());
+  const res = await fetch(url.toString(), { cache: 'no-store' });
   if (!res.ok) return [];
-  const data = await res.json() as { data?: Record<string, unknown>[] };
-
-  return (data.data ?? []).map((raw) => {
-    const insights = (raw.insights as { data?: Record<string, unknown>[] } | undefined)?.data?.[0] ?? {};
-    const actions = (insights.actions as Array<{ action_type: string; value: string }>) ?? [];
-    const conversoes = sumActions(actions, LEAD_ACTIONS);
-    const gasto = Number(insights.spend ?? 0);
-    const impressoes = Number(insights.impressions ?? 0);
-    const cliques = Number(insights.clicks ?? 0);
-    const ctr = Number(insights.ctr ?? (impressoes > 0 ? (cliques / impressoes) * 100 : 0));
-    const createdTime = String(raw.created_time ?? '');
-    const diasAtivo = createdTime ? Math.floor((Date.now() - new Date(createdTime).getTime()) / 86400000) : null;
-
-    return {
-      id: String(raw.id),
-      nome: String(raw.name ?? ''),
-      status: String(raw.effective_status ?? raw.status ?? ''),
-      gasto,
-      impressoes,
-      ctr,
-      cpl: gasto > 0 && conversoes > 0 ? gasto / conversoes : null,
-      conversoes,
-      dias_ativo: diasAtivo,
-      quality_ranking: raw.quality_ranking ? String(raw.quality_ranking) : null,
-      engagement_ranking: raw.engagement_rate_ranking ? String(raw.engagement_rate_ranking) : null,
-      conversion_ranking: raw.conversion_rate_ranking ? String(raw.conversion_rate_ranking) : null,
-    } satisfies OptimizerAdV2;
-  });
+  return res.json() as Promise<Array<{
+    id: string; name: string; status: string; objective?: string;
+    dailyBudget?: number; spend: number; impressions: number; clicks: number;
+    leads: number; ctr: number; cpl: number; platform: string;
+  }>>;
 }
 
 // ─── Main builder ─────────────────────────────────────────────────────────────
@@ -353,85 +278,54 @@ async function fetchAdsWithRankings(adsetId: string, token: string, dateFrom: st
 async function buildPayloadForClient(
   client: ClientRow,
   planning: PlanningRow | null,
-  token: string,
-  accountId: string,
+  _token: string,
+  _accountId: string,
   origin: string,
   period: AnalysisPeriod,
 ): Promise<OptimizerPayloadV2 | null> {
-  const dateFrom = isoDate(period.days);
-  const dateTo = isoDate(1);
   const semana = currentWeekLabel();
 
-  // Campanhas ativas
-  const campaignsUrl = new URL('/api/campaigns', origin);
-  campaignsUrl.searchParams.set('clientIds', client.id);
-  campaignsUrl.searchParams.set('period', 'custom');
-  campaignsUrl.searchParams.set('dateFrom', dateFrom);
-  campaignsUrl.searchParams.set('dateTo', dateTo);
-  campaignsUrl.searchParams.set('sortBy', 'spend');
-  campaignsUrl.searchParams.set('limit', '6');
+  // Tenta o período solicitado; se gasto = 0, expande para 30 dias
+  const FALLBACK_DAYS = 30;
+  let usedPeriod = period;
+  let dateFrom = isoDate(period.days);
+  let dateTo = isoDate(1);
 
-  const campaignsRes = await fetch(campaignsUrl.toString(), { cache: 'no-store' });
-  if (!campaignsRes.ok) return null;
-
-  const rawCampaigns = await campaignsRes.json() as Array<{
-    id: string; name: string; status: string; objective?: string;
-    dailyBudget?: number; spend: number; impressions: number; clicks: number;
-    leads: number; ctr: number; cpl: number; platform: string;
-  }>;
-
-  const activeCampaigns = rawCampaigns.filter((c) => {
+  let rawCampaigns = await fetchCampaignsForClient(client.id, origin, period.key, dateFrom, dateTo);
+  let activeCampaigns = rawCampaigns.filter((c) => {
     const s = (c.status ?? '').toUpperCase();
     return ['ACTIVE', 'ENABLED', 'IN_PROCESS', 'WITH_ISSUES'].includes(s) && c.platform === 'meta';
-  }).slice(0, 5);
+  });
+
+  // Fallback para 30 dias se não tiver dados no período solicitado
+  if (activeCampaigns.length > 0 && activeCampaigns.every((c) => c.spend === 0) && period.days < FALLBACK_DAYS) {
+    dateFrom = isoDate(FALLBACK_DAYS);
+    usedPeriod = { key: 'last_30d', label: 'Últimos 30 dias', days: FALLBACK_DAYS };
+    rawCampaigns = await fetchCampaignsForClient(client.id, origin, 'last_30d', dateFrom, dateTo);
+    activeCampaigns = rawCampaigns.filter((c) => {
+      const s = (c.status ?? '').toUpperCase();
+      return ['ACTIVE', 'ENABLED', 'IN_PROCESS', 'WITH_ISSUES'].includes(s) && c.platform === 'meta';
+    });
+  }
 
   if (activeCampaigns.length === 0) return null;
 
-  // Opportunity Score (best-effort)
-  const normalizedAccount = accountId.startsWith('act_') ? accountId : `act_${accountId}`;
-  const osUrl = new URL(`https://graph.facebook.com/v21.0/${normalizedAccount}/recommendations`);
-  osUrl.searchParams.set('fields', 'score,recommendations{recommendation_type,score_lift,message}');
-  osUrl.searchParams.set('access_token', token);
-  const osRes = await fetch(osUrl.toString()).catch(() => null);
-  let opportunityScore: OptimizerPayloadV2['opportunity_score'] = null;
-  if (osRes?.ok) {
-    const osData = await osRes.json() as { score?: number; recommendations?: { data?: Array<{ recommendation_type?: string; score_lift?: number; message?: string }> } };
-    opportunityScore = {
-      score: osData.score != null ? Number(osData.score) : null,
-      recomendacoes: (osData.recommendations?.data ?? []).map((r) => ({
-        tipo: r.recommendation_type ?? '',
-        ganho_score: Number(r.score_lift ?? 0),
-        descricao: r.message ?? '',
-      })),
-    };
-  }
-
-  // Conjuntos e anúncios
-  const campanhas: OptimizerCampaignV2[] = [];
-  for (const camp of activeCampaigns) {
-    const conjuntos = await fetchAdsets(camp.id, token, dateFrom, dateTo);
-
-    for (const conj of conjuntos.filter((c) => c.status.toUpperCase() === 'ACTIVE').slice(0, 4)) {
-      conj.anuncios = await fetchAdsWithRankings(conj.id, token, dateFrom, dateTo);
-    }
-
-    campanhas.push({
-      id: camp.id,
-      nome: camp.name,
-      objetivo: camp.objective ?? '',
-      status: camp.status,
-      orcamento_diario: camp.dailyBudget ?? null,
-      gasto: camp.spend,
-      impressoes: camp.impressions,
-      cliques: camp.clicks,
-      ctr: camp.ctr,
-      cpl: camp.cpl > 0 ? camp.cpl : null,
-      conversoes: camp.leads,
-      roas: null,
-      dias_rodando: null,
-      conjuntos,
-    });
-  }
+  const campanhas: OptimizerCampaignV2[] = activeCampaigns.slice(0, 5).map((camp) => ({
+    id: camp.id,
+    nome: camp.name,
+    objetivo: camp.objective ?? '',
+    status: camp.status,
+    orcamento_diario: camp.dailyBudget ?? null,
+    gasto: camp.spend,
+    impressoes: camp.impressions,
+    cliques: camp.clicks,
+    ctr: camp.ctr,
+    cpl: camp.cpl > 0 ? camp.cpl : null,
+    conversoes: camp.leads,
+    roas: null,
+    dias_rodando: null,
+    conjuntos: [],
+  }));
 
   const historico = await loadDecisionHistory(client.id);
 
@@ -474,10 +368,10 @@ async function buildPayloadForClient(
     periodo_analise: {
       data_inicio: dateFrom,
       data_fim: dateTo,
-      dias: period.days,
-      label: period.label,
+      dias: usedPeriod.days,
+      label: usedPeriod.label,
     },
-    opportunity_score: opportunityScore,
+    opportunity_score: null,
     campanhas,
     historico_decisoes: historico,
     observacoes_gestor: observacoes.length > 0 ? observacoes.join(' | ') : null,
@@ -512,14 +406,11 @@ async function runWeeklyOptimizer(request: NextRequest) {
     }
 
     try {
-      const token = await resolveToken(conn.id);
-      if (!token) throw new Error('Token não disponível');
-
       const payload = await buildPayloadForClient(
         client,
         planningMap[client.id] ?? null,
-        token,
-        conn.account_id,
+        '',
+        '',
         origin,
         period,
       );
