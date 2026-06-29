@@ -73,6 +73,7 @@ type ClientDiagnostic = {
   campanhas_7d?: number;
   campanhas_30d?: number;
   amostra?: Array<{ nome: string; status: string; gasto: number; leads: number; plataforma: string }>;
+  meta_direto?: { ok: boolean; status?: number; erro?: string; total?: number; com_gasto?: number; campanhas?: Array<{ nome: string; status: string; gasto: number }> };
   planejamento: { cpl_meta: number | null; volume_leads_meta: number | null; objetivo: string | null; tem_planejamento: boolean };
   veredito: string;
 };
@@ -939,10 +940,25 @@ export default function OtimizadorPage() {
                     </div>
                     {d.amostra && d.amostra.length > 0 && (
                       <div className="mt-2 border-t border-border/50 pt-2">
-                        <p className="mb-1 text-[11px] font-semibold text-muted-foreground">Campanhas com gasto (amostra 30d):</p>
+                        <p className="mb-1 text-[11px] font-semibold text-muted-foreground">Campanhas com gasto via /api/campaigns (amostra 30d):</p>
                         {d.amostra.map((c, j) => (
                           <p key={j} className="font-mono text-[11px] text-muted-foreground">
                             • {c.nome} — {c.status} — R$ {c.gasto.toFixed(2)} — {c.leads} leads
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                    {d.meta_direto && (
+                      <div className="mt-2 border-t border-border/50 pt-2">
+                        <p className="mb-1 text-[11px] font-semibold text-muted-foreground">
+                          Direto na Meta (30d, sem filtros):{' '}
+                          {d.meta_direto.ok
+                            ? `${d.meta_direto.total ?? 0} campanha(s), ${d.meta_direto.com_gasto ?? 0} com gasto`
+                            : `ERRO — ${d.meta_direto.erro ?? '?'}`}
+                        </p>
+                        {d.meta_direto.campanhas?.map((c, j) => (
+                          <p key={j} className="font-mono text-[11px] text-muted-foreground">
+                            • {c.nome} — {c.status} — R$ {c.gasto.toFixed(2)}
                           </p>
                         ))}
                       </div>

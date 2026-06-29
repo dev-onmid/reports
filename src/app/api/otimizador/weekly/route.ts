@@ -691,9 +691,33 @@ type ClientDiagnostic = {
   campanhas_7d?: number;
   campanhas_30d?: number;
   amostra?: Array<{ nome: string; status: string; gasto: number; leads: number; plataforma: string }>;
+  // Consulta direta à Meta (mesma conexão da dashboard) — sem nenhum filtro do Otimizador
+  meta_direto?: { ok: boolean; status?: number; erro?: string; total?: number; com_gasto?: number; campanhas?: Array<{ nome: string; status: string; gasto: number }> };
   planejamento: { cpl_meta: number | null; volume_leads_meta: number | null; objetivo: string | null; tem_planejamento: boolean };
   veredito: string;
 };
+
+// Consulta a Meta DIRETO (act_<id>/campaigns) com gasto no período — ignora /api/campaigns
+// e todos os filtros do Otimizador. Mostra a verdade: o que existe, status e gasto real.
+async function fetchMetaCampaignsRaw(accountId: string, token: string, since: string, until: string) {
+  const acct = accountId.startsWith('act_') ? accountId : `act_${accountId}`;
+  const url = new URL(`https://graph.facebook.com/v21.0/${acct}/campaigns`);
+  url.searchParams.set('fields', `name,effective_status,insights.time_range(${JSON.stringify({ since, until })}){spend}`);
+  url.searchParams.set('limit', '50');
+  url.searchParams.set('access_token', token);
+  const res = await fetchWithTimeout(url.toString(), 10_000);
+  if (!res) return { ok: false, erro: 'timeout/sem resposta da Meta' };
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    return { ok: false, status: res.status, erro: body.slice(0, 300) };
+  }
+  const data = await res.json() as { data?: Array<Record<string, unknown>> };
+  const campanhas = (data.data ?? []).map((c) => {
+    const ins = (c.insights as { data?: Array<{ spend?: string }> } | undefined)?.data?.[0];
+    return { nome: String(c.name ?? ''), status: String(c.effective_status ?? ''), gasto: Number(ins?.spend ?? 0) };
+  });
+  return { ok: true, total: campanhas.length, com_gasto: campanhas.filter((c) => c.gasto > 0).length, campanhas: campanhas.slice(0, 12) };
+}
 
 async function diagnoseClients(opts: RunOptions): Promise<ClientDiagnostic[]> {
   const clients = await loadClientsForToday(undefined, opts.forceClientId);
@@ -721,21 +745,36 @@ async function diagnoseClients(opts: RunOptions): Promise<ClientDiagnostic[]> {
       continue;
     }
     const token = await resolveToken(conn.id).catch(() => null);
-    const [d7, d30] = await Promise.all([
+    const [d7, d30, metaDireto] = await Promise.all([
       fetchCampaignsForClient(client.id, opts.origin, 'last_7d', isoDate(7), isoDate(1)).catch(() => []),
       fetchCampaignsForClient(client.id, opts.origin, 'last_30d', isoDate(30), isoDate(1)).catch(() => []),
+      token ? fetchMetaCampaignsRaw(conn.account_id, token, isoDate(30), isoDate(0)).catch(() => ({ ok: false, erro: 'falha na consulta direta' })) : Promise.resolve({ ok: false, erro: 'sem token' }),
     ]);
     const meta7 = d7.filter((c) => c.platform === 'meta');
     const meta30 = d30.filter((c) => c.platform === 'meta');
+    const direto = metaDireto as ClientDiagnostic['meta_direto'];
+
     let veredito: string;
-    if (!token) veredito = 'TOKEN NAO RESOLVIDO — a conexão existe mas não há access_token válido (reconectar Meta).';
-    else if (meta7.length === 0 && meta30.length === 0) veredito = `CONEXAO OK, MAS NENHUMA CAMPANHA META COM GASTO em 7d nem 30d (account_id=${conn.account_id}). Conta sem entrega no período OU account_id vinculado errado.`;
-    else if (meta7.length === 0) veredito = `SEM GASTO nos últimos 7 dias, mas ${meta30.length} campanha(s) com gasto em 30 dias. Analise com período "Últimos 30 dias".`;
-    else veredito = `DADOS OK — ${meta7.length} campanha(s) com gasto em 7d, ${meta30.length} em 30d.`;
+    if (!token) {
+      veredito = 'TOKEN NAO RESOLVIDO — a conexão existe mas não há access_token válido (reconectar Meta).';
+    } else if (direto && !direto.ok) {
+      veredito = `ERRO AO CONSULTAR A META DIRETO (HTTP ${direto.status ?? '?'}): ${direto.erro ?? 'desconhecido'}. account_id=${conn.account_id}.`;
+    } else if (direto && (direto.com_gasto ?? 0) > 0 && meta30.length === 0) {
+      veredito = `A META TEM ${direto.com_gasto} campanha(s) com gasto, mas o Otimizador (via /api/campaigns) recebeu 0 — algum filtro está derrubando (status ou gasto). Veja a lista direta abaixo.`;
+    } else if (direto && (direto.total ?? 0) === 0) {
+      veredito = `A conta Meta (act_${String(conn.account_id).replace(/^act_/, '')}) não tem NENHUMA campanha — account_id vinculado pode estar errado.`;
+    } else if (meta7.length === 0 && meta30.length === 0) {
+      veredito = `Nenhuma campanha com gasto em 7d nem 30d via /api/campaigns. Direto na Meta: ${direto?.total ?? 0} campanha(s), ${direto?.com_gasto ?? 0} com gasto.`;
+    } else if (meta7.length === 0) {
+      veredito = `SEM GASTO nos últimos 7 dias, mas ${meta30.length} campanha(s) com gasto em 30 dias. Analise com período "Últimos 30 dias".`;
+    } else {
+      veredito = `DADOS OK — ${meta7.length} campanha(s) com gasto em 7d, ${meta30.length} em 30d.`;
+    }
     out.push({
       cliente: client.name, conexao_resolvida: true, connection_id: conn.id, account_id: conn.account_id,
       token_ok: !!token, campanhas_7d: meta7.length, campanhas_30d: meta30.length,
       amostra: meta30.slice(0, 5).map((c) => ({ nome: c.name, status: c.status, gasto: c.spend, leads: c.leads, plataforma: c.platform })),
+      meta_direto: direto,
       planejamento, veredito,
     });
   }
