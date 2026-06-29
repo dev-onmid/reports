@@ -679,10 +679,76 @@ async function executeWeekly({ origin, forceClientId, forceAi, period }: RunOpti
   };
 }
 
+// ─── Diagnóstico (dry-run, sem IA, sem custo) ──────────────────────────────────
+// Mostra EXATAMENTE onde o dado morre para cada cliente: conexão, token, account_id e
+// quantas campanhas com gasto /api/campaigns retorna em 7d e 30d. Não chama o Claude.
+type ClientDiagnostic = {
+  cliente: string;
+  conexao_resolvida: boolean;
+  connection_id?: string;
+  account_id?: string;
+  token_ok?: boolean;
+  campanhas_7d?: number;
+  campanhas_30d?: number;
+  amostra?: Array<{ nome: string; status: string; gasto: number; leads: number; plataforma: string }>;
+  planejamento: { cpl_meta: number | null; volume_leads_meta: number | null; objetivo: string | null; tem_planejamento: boolean };
+  veredito: string;
+};
+
+async function diagnoseClients(opts: RunOptions): Promise<ClientDiagnostic[]> {
+  const clients = await loadClientsForToday(undefined, opts.forceClientId);
+  const clientIds = clients.map((c) => c.id);
+  const [planningMap, connectionsMap] = await Promise.all([
+    loadPlanning(clientIds),
+    loadConnections(clientIds),
+  ]);
+
+  const out: ClientDiagnostic[] = [];
+  for (const client of clients) {
+    const planning = planningMap[client.id] ?? null;
+    const planejamento = {
+      cpl_meta: planning?.cpl_meta ?? null,
+      volume_leads_meta: planning?.volume_leads_meta ?? null,
+      objetivo: planning?.objetivo ?? null,
+      tem_planejamento: !!planning,
+    };
+    const conn = connectionsMap[client.id];
+    if (!conn) {
+      out.push({
+        cliente: client.name, conexao_resolvida: false, planejamento,
+        veredito: 'SEM CONEXAO META — cliente não vinculado a nenhuma conta de anúncios (client_account_links / meta_ads_connections).',
+      });
+      continue;
+    }
+    const token = await resolveToken(conn.id).catch(() => null);
+    const [d7, d30] = await Promise.all([
+      fetchCampaignsForClient(client.id, opts.origin, 'last_7d', isoDate(7), isoDate(1)).catch(() => []),
+      fetchCampaignsForClient(client.id, opts.origin, 'last_30d', isoDate(30), isoDate(1)).catch(() => []),
+    ]);
+    const meta7 = d7.filter((c) => c.platform === 'meta');
+    const meta30 = d30.filter((c) => c.platform === 'meta');
+    let veredito: string;
+    if (!token) veredito = 'TOKEN NAO RESOLVIDO — a conexão existe mas não há access_token válido (reconectar Meta).';
+    else if (meta7.length === 0 && meta30.length === 0) veredito = `CONEXAO OK, MAS NENHUMA CAMPANHA META COM GASTO em 7d nem 30d (account_id=${conn.account_id}). Conta sem entrega no período OU account_id vinculado errado.`;
+    else if (meta7.length === 0) veredito = `SEM GASTO nos últimos 7 dias, mas ${meta30.length} campanha(s) com gasto em 30 dias. Analise com período "Últimos 30 dias".`;
+    else veredito = `DADOS OK — ${meta7.length} campanha(s) com gasto em 7d, ${meta30.length} em 30d.`;
+    out.push({
+      cliente: client.name, conexao_resolvida: true, connection_id: conn.id, account_id: conn.account_id,
+      token_ok: !!token, campanhas_7d: meta7.length, campanhas_30d: meta30.length,
+      amostra: meta30.slice(0, 5).map((c) => ({ nome: c.name, status: c.status, gasto: c.spend, leads: c.leads, plataforma: c.platform })),
+      planejamento, veredito,
+    });
+  }
+  return out;
+}
+
 export async function GET(request: NextRequest) {
   const secret = request.nextUrl.searchParams.get('secret');
   if (secret !== process.env.CRON_SECRET) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  if (request.nextUrl.searchParams.get('dryRun') === '1') {
+    return Response.json({ dry_run: true, diagnostics: await diagnoseClients(parseRunOptions(request)) });
   }
   return Response.json(await executeWeekly(parseRunOptions(request)));
 }
@@ -727,6 +793,10 @@ export async function POST(request: NextRequest) {
   }
 
   const opts = parseRunOptions(request);
+  // dryRun=1: diagnóstico sem IA — só mostra de onde vêm (ou não) os dados.
+  if (request.nextUrl.searchParams.get('dryRun') === '1') {
+    return Response.json({ dry_run: true, diagnostics: await diagnoseClients(opts) });
+  }
   // async=1: dispara em segundo plano e responde 202 imediatamente (sem risco de 504).
   if (request.nextUrl.searchParams.get('async') === '1') {
     return startInBackground(opts);

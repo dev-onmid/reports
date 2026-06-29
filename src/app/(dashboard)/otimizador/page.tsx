@@ -13,6 +13,7 @@ import {
   MousePointerClick,
   Play,
   RefreshCw,
+  Search,
   Settings2,
   ShieldAlert,
   Target,
@@ -61,6 +62,19 @@ type QueueItem = {
   estado_da_conta: string | null;
   resumo_executivo: string | null;
   created_at: string;
+};
+
+type ClientDiagnostic = {
+  cliente: string;
+  conexao_resolvida: boolean;
+  connection_id?: string;
+  account_id?: string;
+  token_ok?: boolean;
+  campanhas_7d?: number;
+  campanhas_30d?: number;
+  amostra?: Array<{ nome: string; status: string; gasto: number; leads: number; plataforma: string }>;
+  planejamento: { cpl_meta: number | null; volume_leads_meta: number | null; objetivo: string | null; tem_planejamento: boolean };
+  veredito: string;
 };
 
 type ClientConfig = {
@@ -647,6 +661,8 @@ export default function OtimizadorPage() {
   const [loading, setLoading] = useState(true);
   const [runLoading, setRunLoading] = useState(false);
   const [runMessage, setRunMessage] = useState<string | null>(null);
+  const [diagLoading, setDiagLoading] = useState(false);
+  const [diagResult, setDiagResult] = useState<ClientDiagnostic[] | null>(null);
   const [manualClientId, setManualClientId] = useState('programados-hoje');
   const [manualPeriod, setManualPeriod] = useState<OptimizerPeriodKey>('last_7d');
   const [configClientId, setConfigClientId] = useState<string | null>(null);
@@ -809,6 +825,32 @@ export default function OtimizadorPage() {
     }
   }
 
+  // Diagnóstico de dados — sem IA, sem custo. Mostra de onde vêm (ou não) os dados do cliente.
+  async function runDiagnostic() {
+    setDiagLoading(true);
+    setDiagResult(null);
+    setRunMessage(null);
+    try {
+      const params = new URLSearchParams({ period: manualPeriod, dryRun: '1' });
+      if (manualClientId !== 'programados-hoje') params.set('clientId', manualClientId);
+      const res = await fetch(`/api/otimizador/weekly?${params.toString()}`, {
+        method: 'POST',
+        headers: { ...callerHeaders(), 'Content-Type': 'application/json' },
+      });
+      const data = await res.json().catch(() => ({})) as { diagnostics?: ClientDiagnostic[]; error?: string };
+      if (!res.ok) {
+        setRunMessage(`Erro no diagnóstico: ${data.error || `HTTP ${res.status}`}`);
+        return;
+      }
+      setDiagResult(data.diagnostics ?? []);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setRunMessage(`Erro no diagnóstico: ${msg || 'falha de rede'}`);
+    } finally {
+      setDiagLoading(false);
+    }
+  }
+
   const configClient = configClientId ? clients.find((c) => c.id === configClientId) ?? null : null;
 
   return (
@@ -853,12 +895,63 @@ export default function OtimizadorPage() {
                 {OPTIMIZER_PERIODS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
               </select>
             </label>
-            <Button onClick={runWeeklyNow} disabled={runLoading} className="h-10">
-              {runLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-              {manualClientId === 'programados-hoje' ? 'Analisar grupo de hoje' : 'Analisar esta conta'}
-            </Button>
+            <div className="flex gap-2">
+              <Button onClick={runWeeklyNow} disabled={runLoading || diagLoading} className="h-10 flex-1">
+                {runLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                {manualClientId === 'programados-hoje' ? 'Analisar grupo de hoje' : 'Analisar esta conta'}
+              </Button>
+              <Button variant="outline" onClick={runDiagnostic} disabled={runLoading || diagLoading} className="h-10"
+                title="Mostra de onde vêm os dados desta conta — sem gastar tokens de IA">
+                {diagLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                Diagnosticar
+              </Button>
+            </div>
           </div>
           {runMessage && <p className="mt-2 text-xs font-medium text-primary">{runMessage}</p>}
+
+          {diagResult && (
+            <div className="mt-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-muted-foreground">Diagnóstico de dados (sem IA · sem custo)</span>
+                <button onClick={() => setDiagResult(null)} className="text-xs text-muted-foreground hover:text-foreground">fechar</button>
+              </div>
+              {diagResult.length === 0 && (
+                <p className="text-xs text-muted-foreground">Nenhum cliente para diagnosticar (verifique se está programado para hoje).</p>
+              )}
+              {diagResult.map((d, i) => {
+                const ok = /DADOS OK/.test(d.veredito);
+                const warn = /30 dias|período/.test(d.veredito);
+                const tone = ok ? 'border-primary/40 bg-primary/5' : warn ? 'border-amber-500/40 bg-amber-500/5' : 'border-red-500/40 bg-red-500/5';
+                return (
+                  <div key={i} className={`rounded-[var(--radius)] border ${tone} p-3 text-xs`}>
+                    <p className="font-semibold text-foreground">{d.cliente}</p>
+                    <p className="mt-1 text-muted-foreground">{d.veredito}</p>
+                    <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-0.5 font-mono text-[11px] text-muted-foreground sm:grid-cols-3">
+                      <span>conexão: {d.conexao_resolvida ? 'sim' : 'NÃO'}</span>
+                      <span>token: {d.token_ok ? 'ok' : '—'}</span>
+                      <span>account_id: {d.account_id ?? '—'}</span>
+                      <span>camp. 7d: {d.campanhas_7d ?? '—'}</span>
+                      <span>camp. 30d: {d.campanhas_30d ?? '—'}</span>
+                      <span>planejamento: {d.planejamento.tem_planejamento ? 'sim' : 'não'}</span>
+                      <span>CPL meta: {d.planejamento.cpl_meta ?? '—'}</span>
+                      <span>meta leads: {d.planejamento.volume_leads_meta ?? '—'}</span>
+                      <span>objetivo: {d.planejamento.objetivo ?? '—'}</span>
+                    </div>
+                    {d.amostra && d.amostra.length > 0 && (
+                      <div className="mt-2 border-t border-border/50 pt-2">
+                        <p className="mb-1 text-[11px] font-semibold text-muted-foreground">Campanhas com gasto (amostra 30d):</p>
+                        {d.amostra.map((c, j) => (
+                          <p key={j} className="font-mono text-[11px] text-muted-foreground">
+                            • {c.nome} — {c.status} — R$ {c.gasto.toFixed(2)} — {c.leads} leads
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </section>
       )}
 
