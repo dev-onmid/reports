@@ -412,23 +412,32 @@ export function sanitizeOptimizerOutputV2(input: unknown, payload: OptimizerPayl
       ? 'Conta requer atenção. Revise as campanhas ativas e os dados do período para identificar o problema.'
       : 'Conta saudável. Acompanhe as métricas e mantenha o ritmo atual.';
 
+  // Totais REAIS calculados a partir do payload (campanhas). Servem de fallback quando a IA
+  // omite/trunca os números — sem isto, uma resposta da IA cortada zera o gasto/CPL na tela
+  // mesmo com dados reais no payload (causa raiz do "R$ 0,00").
+  const campanhas = payload.campanhas ?? [];
+  const gastoReal = campanhas.reduce((s, c) => s + (Number(c.gasto) || 0), 0);
+  const convReal = campanhas.reduce((s, c) => s + (Number(c.conversoes) || 0), 0);
+  const cplReal = gastoReal > 0 && convReal > 0 ? gastoReal / convReal : null;
+  const metas = payload.metas;
+
   return {
     estado_da_conta: estado,
     resumo_executivo: (obj.resumo_executivo && String(obj.resumo_executivo).trim()) ? String(obj.resumo_executivo) : resumoFallback,
     cruzamento_com_metas: {
-      cpl_atual: cruzamento.cpl_atual != null ? Number(cruzamento.cpl_atual) : null,
-      cpl_ideal: cruzamento.cpl_ideal != null ? Number(cruzamento.cpl_ideal) : null,
-      cpl_maximo: cruzamento.cpl_maximo != null ? Number(cruzamento.cpl_maximo) : null,
+      cpl_atual: cruzamento.cpl_atual != null ? Number(cruzamento.cpl_atual) : cplReal,
+      cpl_ideal: cruzamento.cpl_ideal != null ? Number(cruzamento.cpl_ideal) : (metas?.cpl_ideal ?? null),
+      cpl_maximo: cruzamento.cpl_maximo != null ? Number(cruzamento.cpl_maximo) : (metas?.cpl_maximo ?? null),
       status_cpl: (['DENTRO', 'ATENCAO', 'CRITICO', 'NAO_APLICAVEL'] as const).includes(cruzamento.status_cpl as never)
         ? cruzamento.status_cpl as 'DENTRO' | 'ATENCAO' | 'CRITICO' | 'NAO_APLICAVEL'
         : 'NAO_APLICAVEL',
-      volume_conversoes_atual: Number(cruzamento.volume_conversoes_atual ?? 0),
-      volume_meta_projetada: cruzamento.volume_meta_projetada != null ? Number(cruzamento.volume_meta_projetada) : null,
+      volume_conversoes_atual: cruzamento.volume_conversoes_atual != null ? Number(cruzamento.volume_conversoes_atual) : convReal,
+      volume_meta_projetada: cruzamento.volume_meta_projetada != null ? Number(cruzamento.volume_meta_projetada) : (metas?.volume_leads_meta_mensal ?? null),
       status_volume: (['NO_RITMO', 'ABAIXO', 'CRITICO', 'NAO_APLICAVEL'] as const).includes(cruzamento.status_volume as never)
         ? cruzamento.status_volume as 'NO_RITMO' | 'ABAIXO' | 'CRITICO' | 'NAO_APLICAVEL'
         : 'NAO_APLICAVEL',
-      gasto_total: Number(cruzamento.gasto_total ?? 0),
-      orcamento_periodo: cruzamento.orcamento_periodo != null ? Number(cruzamento.orcamento_periodo) : null,
+      gasto_total: cruzamento.gasto_total != null ? Number(cruzamento.gasto_total) : gastoReal,
+      orcamento_periodo: cruzamento.orcamento_periodo != null ? Number(cruzamento.orcamento_periodo) : (metas?.orcamento_mensal_total ?? null),
       status_orcamento: (['OK', 'ESTOURANDO', 'SUBENTREGANDO'] as const).includes(cruzamento.status_orcamento as never)
         ? cruzamento.status_orcamento as 'OK' | 'ESTOURANDO' | 'SUBENTREGANDO'
         : 'OK',

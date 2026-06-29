@@ -682,12 +682,17 @@ export default function OtimizadorPage() {
           const existingIsV2 = !!existing.semana_analise;
           if (itemIsV2 && !existingIsV2) { byClient.set(item.cliente_id, item); continue; }
           if (!itemIsV2 && existingIsV2) continue;
-          // mesmo tipo: mais urgente vence
-          if (urgency(item) < urgency(existing)) byClient.set(item.cliente_id, item);
+          // mesmo tipo: mais RECENTE vence — garante que uma reanálise substitua a antiga na tela
+          if (new Date(item.created_at).getTime() > new Date(existing.created_at).getTime()) {
+            byClient.set(item.cliente_id, item);
+          }
         }
         const deduped = Array.from(byClient.values());
         setQueue(deduped);
-        setGeneratedAt(data.generated_at);
+        // "última em" = análise mais recente exibida (não a primeira da ordenação por urgência)
+        const latest = deduped.reduce<string | null>((acc, it) =>
+          !acc || new Date(it.created_at).getTime() > new Date(acc).getTime() ? it.created_at : acc, null);
+        setGeneratedAt(latest ?? data.generated_at);
         const v2Only = deduped.filter((item) => !!item.semana_analise);
         setSelectedId((cur) => v2Only.some((item) => item.id === cur) ? cur : v2Only[0]?.id ?? '');
       }

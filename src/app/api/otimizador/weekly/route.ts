@@ -481,8 +481,10 @@ async function buildPayloadForClient(
     return ['ACTIVE', 'ENABLED', 'IN_PROCESS', 'WITH_ISSUES'].includes(s) && c.platform === 'meta';
   });
 
-  // Fallback para 30 dias se não tiver dados no período solicitado
-  if (activeCampaigns.length > 0 && activeCampaigns.every((c) => c.spend === 0) && period.days < FALLBACK_DAYS) {
+  // Fallback para 30 dias quando o período solicitado não trouxe campanhas com entrega.
+  // `/api/campaigns` já descarta campanhas com gasto = 0, então "sem gasto no período" chega
+  // aqui como lista VAZIA — por isso o gatilho é length === 0 (antes era código morto).
+  if (activeCampaigns.length === 0 && period.days < FALLBACK_DAYS) {
     dateFrom = isoDate(FALLBACK_DAYS);
     usedPeriod = { key: 'last_30d', label: 'Últimos 30 dias', days: FALLBACK_DAYS };
     rawCampaigns = await fetchCampaignsForClient(client.id, origin, 'last_30d', dateFrom, dateTo);
