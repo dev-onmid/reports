@@ -591,20 +591,26 @@ function addInsightActions(target: Record<string, number>, rows: unknown): void 
 // objective itself is missing/unrecognized (categorizeMetaObjective default of 'trafego').
 function campaignKindFor(c: CampanhaDetalhada): CampaignKind {
   const m = c.metricas;
-  // What the campaign actually achieved outranks what its objective is labeled as in
-  // Ads Manager. A campaign set up as Alcance/Reconhecimento that still drove real
-  // purchases/conversations/leads (e.g. a "Send message" CTA bolted onto a Reach
-  // campaign) should be read by that real result, not filed under Alcance just
-  // because that's the declared objective — leads/vendas/conversas always win over
-  // alcance when there's an actual non-zero result to show for it.
-  if (m.compras > 0)  return 'vendas';
+  const objective = categorizeMetaObjective(c.tipo);
+
+  // When the declared objective is leads, mensagens or vendas, trust it — Meta
+  // reports cross-action aliases on every campaign (a LEAD_GENERATION campaign
+  // also fires messaging_conversation_started if the ad has a WhatsApp CTA, and
+  // a MESSAGES campaign can surface a stray lead action). Checking raw metric
+  // values first caused them to swap: form campaigns appeared as "conversas" and
+  // vice-versa. The objective is authoritative for these three categories.
+  if (objective === 'leads')     return 'leads';
+  if (objective === 'mensagens') return 'mensagens';
+  if (objective === 'vendas')    return 'vendas';
+
+  // For Alcance/Engajamento campaigns, what the campaign actually achieved takes
+  // priority over the declared objective — a Reach campaign with a "Send message"
+  // CTA that drove real purchases/conversations/leads should be filed under that
+  // real result, not under Alcance.
+  if (m.compras > 0)   return 'vendas';
   if (m.conversas > 0) return 'mensagens';
   if (m.leads > 0)     return 'leads';
 
-  const objective = categorizeMetaObjective(c.tipo);
-  if (objective === 'vendas')      return 'vendas';
-  if (objective === 'mensagens')   return 'mensagens';
-  if (objective === 'leads')       return 'leads';
   if (objective === 'engajamento') return 'engajamento';
   if (objective === 'alcance')     return 'alcance';
 
@@ -2159,8 +2165,14 @@ export function sMetaAdsResumo(meta: MetaAdsFull, idx: number, total: number): s
   const leadInvestment = sum(leadCampaigns, c => c.metricas.investimento);
   const messagingInvestment = sum(messagingCampaigns, c => c.metricas.investimento);
   const leadFormInvestment = sum(leadFormCampaigns, c => c.metricas.investimento);
-  const totalConversas = sum(messagingCampaigns, c => c.metricas.conversas);
-  const totalFormLeads = sum(leadFormCampaigns, c => c.metricas.leads);
+  // Sum conversas and form leads across ALL campaigns — a leads or alcance campaign
+  // with a WhatsApp CTA generates real conversations that belong in the total even
+  // though the declared objective isn't "Mensagens".
+  const totalConversas = sum(meta.campanhas, c => c.metricas.conversas);
+  const totalFormLeads = sum(meta.campanhas, c => c.metricas.leads);
+  // Cost per result is attributed to the investment of campaigns whose PRIMARY
+  // objective is that result type — cross-campaign conversas/leads don't inflate
+  // the denominator investment, keeping the unit cost meaningful.
   const custoConversa = totalConversas > 0 ? messagingInvestment / totalConversas : 0;
   const custoFormLead = totalFormLeads > 0 ? leadFormInvestment / totalFormLeads : 0;
 
