@@ -425,18 +425,22 @@ export function sanitizeOptimizerOutputV2(input: unknown, payload: OptimizerPayl
     estado_da_conta: estado,
     resumo_executivo: (obj.resumo_executivo && String(obj.resumo_executivo).trim()) ? String(obj.resumo_executivo) : resumoFallback,
     cruzamento_com_metas: {
-      cpl_atual: cruzamento.cpl_atual != null ? Number(cruzamento.cpl_atual) : cplReal,
+      // Gasto, conversões e CPL são FATOS já presentes no payload (soma das campanhas).
+      // Priorizamos SEMPRE o valor real calculado — a IA recebe um template com "0" nesses
+      // campos e frequentemente ecoa 0 (não null), então confiar nela zera a tela mesmo com
+      // dados reais. A IA só entra se o payload não trouxe nenhuma campanha com entrega.
+      cpl_atual: cplReal != null ? cplReal : (cruzamento.cpl_atual != null ? Number(cruzamento.cpl_atual) : null),
       cpl_ideal: cruzamento.cpl_ideal != null ? Number(cruzamento.cpl_ideal) : (metas?.cpl_ideal ?? null),
       cpl_maximo: cruzamento.cpl_maximo != null ? Number(cruzamento.cpl_maximo) : (metas?.cpl_maximo ?? null),
       status_cpl: (['DENTRO', 'ATENCAO', 'CRITICO', 'NAO_APLICAVEL'] as const).includes(cruzamento.status_cpl as never)
         ? cruzamento.status_cpl as 'DENTRO' | 'ATENCAO' | 'CRITICO' | 'NAO_APLICAVEL'
         : 'NAO_APLICAVEL',
-      volume_conversoes_atual: cruzamento.volume_conversoes_atual != null ? Number(cruzamento.volume_conversoes_atual) : convReal,
+      volume_conversoes_atual: convReal > 0 ? convReal : (cruzamento.volume_conversoes_atual != null ? Number(cruzamento.volume_conversoes_atual) : 0),
       volume_meta_projetada: cruzamento.volume_meta_projetada != null ? Number(cruzamento.volume_meta_projetada) : (metas?.volume_leads_meta_mensal ?? null),
       status_volume: (['NO_RITMO', 'ABAIXO', 'CRITICO', 'NAO_APLICAVEL'] as const).includes(cruzamento.status_volume as never)
         ? cruzamento.status_volume as 'NO_RITMO' | 'ABAIXO' | 'CRITICO' | 'NAO_APLICAVEL'
         : 'NAO_APLICAVEL',
-      gasto_total: cruzamento.gasto_total != null ? Number(cruzamento.gasto_total) : gastoReal,
+      gasto_total: gastoReal > 0 ? gastoReal : (cruzamento.gasto_total != null ? Number(cruzamento.gasto_total) : 0),
       orcamento_periodo: cruzamento.orcamento_periodo != null ? Number(cruzamento.orcamento_periodo) : (metas?.orcamento_mensal_total ?? null),
       status_orcamento: (['OK', 'ESTOURANDO', 'SUBENTREGANDO'] as const).includes(cruzamento.status_orcamento as never)
         ? cruzamento.status_orcamento as 'OK' | 'ESTOURANDO' | 'SUBENTREGANDO'
