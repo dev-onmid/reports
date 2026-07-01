@@ -114,19 +114,6 @@ const ACOES_PRE_APROVADAS_OPCOES = [
   { value: 'AJUSTAR_ORCAMENTO', label: 'Ajustar orçamento' },
 ];
 
-const URGENCIA_STYLE: Record<string, string> = {
-  FAZER_AGORA: 'text-red-300',
-  PROXIMA_SEMANA: 'text-amber-300',
-  QUANDO_POSSIVEL: 'text-emerald-300',
-};
-
-// Badge preenchido — leitura por cor, bate o olho e sabe a urgência
-const URGENCIA_BADGE: Record<string, string> = {
-  FAZER_AGORA: 'border-red-400/40 bg-red-400/10 text-red-300',
-  PROXIMA_SEMANA: 'border-amber-400/40 bg-amber-400/10 text-amber-300',
-  QUANDO_POSSIVEL: 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300',
-};
-
 // Veredito por nível (campanha/conjunto/anúncio) — verde OK, âmbar atenção, vermelho urgente
 const VERDICT_BADGE: Record<string, string> = {
   SAUDAVEL: 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300',
@@ -157,6 +144,12 @@ function VerdictBadge({ v }: { v: string }) {
   );
 }
 
+// Diz em que nível o ajuste se aplica — deixa claro que a ação é na campanha, no conjunto
+// ou no criativo específico, sem depender só da indentação da árvore.
+function LevelTag({ level }: { level: 'Campanha' | 'Conjunto' | 'Criativo' }) {
+  return <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/70">{level}</span>;
+}
+
 // Ícone (i) com o "porquê" (veredito) no hover — mantém a linha limpa
 function VerdictInfo({ text }: { text: string }) {
   if (!text) return null;
@@ -171,12 +164,6 @@ function VerdictInfo({ text }: { text: string }) {
     </Tooltip>
   );
 }
-
-const URGENCIA_LABEL: Record<string, string> = {
-  FAZER_AGORA: 'Fazer agora',
-  PROXIMA_SEMANA: 'Próx. semana',
-  QUANDO_POSSIVEL: 'Quando possível',
-};
 
 function isV2Result(resultado: QueueItem['resultado']): resultado is OptimizerOutputV2 {
   return 'estado_da_conta' in resultado && 'resumo_executivo' in resultado;
@@ -329,7 +316,10 @@ function TaskCard({
   onConfig: () => void;
 }) {
   const resultado = item.resultado as OptimizerOutputV2;
-  const topRec = resultado.recomendacoes?.[0];
+  // Prévia do card = ação da campanha mais crítica (URGENTE primeiro, depois ATENÇÃO)
+  const topCampAction = [...(resultado.analise_campanhas ?? [])]
+    .sort((a, b) => (a.classificacao === 'URGENTE' ? -1 : b.classificacao === 'URGENTE' ? 1 : a.classificacao === 'ATENCAO' ? -1 : 1))
+    .find((c) => c.acao)?.acao;
   const pendingActions = resultado.acoes_automaticas?.filter((a) => a.status_execucao === 'AGUARDAR_APROVACAO') ?? [];
 
   const estadoStyle: Record<string, string> = {
@@ -372,8 +362,8 @@ function TaskCard({
             )}
           </div>
           <p className="mt-1 font-semibold text-foreground truncate">{item.cliente_nome}</p>
-          {topRec && (
-            <p className="mt-0.5 text-sm text-muted-foreground line-clamp-2">{topRec.titulo}</p>
+          {topCampAction && (
+            <p className="mt-0.5 text-sm text-muted-foreground line-clamp-2">{topCampAction}</p>
           )}
         </div>
         {isAdmin && (
@@ -419,6 +409,13 @@ function DetailPanel({
   const isV2 = isV2Result(item.resultado);
   const resultado = item.resultado as OptimizerOutputV2;
   const resultadoV1 = item.resultado as OptimizerAnalysisResult;
+
+  // Árvore já expandida por padrão ao trocar de análise — bate o olho sem precisar clicar.
+  useEffect(() => {
+    const campanhas = resultado.analise_campanhas ?? [];
+    setOpenCamp(new Set(campanhas.map((c) => c.id)));
+    setOpenConj(new Set(campanhas.flatMap((c) => c.conjuntos.map((cj) => cj.id))));
+  }, [item.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pendingActions = isV2 ? (resultado.acoes_automaticas?.filter((a) => a.status_execucao === 'AGUARDAR_APROVACAO') ?? []) : [];
   const executedActions = isV2 ? (resultado.acoes_automaticas?.filter((a) => a.status_execucao === 'EXECUTAR_AGORA') ?? []) : [];
@@ -571,52 +568,6 @@ function DetailPanel({
           </div>
         )}
 
-        {/* Recomendações v2 — visão objetiva: badge + ação. Detalhe (como fazer / impacto /
-            risco) fica no tooltip do ícone (i), pra não poluir a leitura rápida. */}
-        {isV2 && resultado.recomendacoes && resultado.recomendacoes.length > 0 && (
-          <TooltipProvider delay={120}>
-            <div className="space-y-1.5">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">O que fazer</p>
-              {resultado.recomendacoes.map((rec, i) => (
-                <div key={i} className="flex items-center gap-3 rounded-[var(--radius)] border border-border bg-background px-3 py-2.5">
-                  <span className={cn(
-                    'shrink-0 w-[92px] rounded border px-1.5 py-1 text-center text-[10px] font-bold uppercase tracking-wide',
-                    URGENCIA_BADGE[rec.urgencia] ?? 'border-border text-muted-foreground',
-                  )}>
-                    {URGENCIA_LABEL[rec.urgencia] ?? rec.urgencia}
-                  </span>
-                  <span className="flex-1 min-w-0 truncate text-sm font-semibold text-foreground" title={rec.titulo}>
-                    {rec.titulo}
-                  </span>
-                  <Tooltip>
-                    <TooltipTrigger className="shrink-0 rounded-full p-0.5 text-muted-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:text-primary">
-                      <Info className="h-4 w-4" />
-                    </TooltipTrigger>
-                    <TooltipContent side="left" className="block max-w-sm items-start space-y-2 whitespace-normal p-3 text-left">
-                      <div>
-                        <p className="text-[10px] font-bold uppercase tracking-wide text-background/60">Como fazer</p>
-                        <p className="mt-0.5 text-xs leading-relaxed text-background">{rec.como_fazer}</p>
-                      </div>
-                      {rec.impacto_estimado && (
-                        <div>
-                          <p className="text-[10px] font-bold uppercase tracking-wide text-background/60">Impacto esperado</p>
-                          <p className="mt-0.5 text-xs leading-relaxed text-background">{rec.impacto_estimado}</p>
-                        </div>
-                      )}
-                      {rec.risco && (
-                        <div>
-                          <p className="text-[10px] font-bold uppercase tracking-wide text-background/60">Risco</p>
-                          <p className="mt-0.5 text-xs leading-relaxed text-background">{rec.risco}</p>
-                        </div>
-                      )}
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-              ))}
-            </div>
-          </TooltipProvider>
-        )}
-
         {/* Ações executadas automaticamente */}
         {executedActions.length > 0 && (
           <div className="space-y-1.5">
@@ -654,7 +605,10 @@ function DetailPanel({
                         : <span className="w-4 shrink-0" />}
                       <VerdictBadge v={camp.classificacao} />
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-semibold text-foreground">{camp.nome}</p>
+                        <div className="flex items-baseline gap-1.5">
+                          <LevelTag level="Campanha" />
+                          <p className="truncate text-sm font-semibold text-foreground">{camp.nome}</p>
+                        </div>
                         <p className="mt-0.5 text-[11px] text-muted-foreground">
                           {nodeMetrics(camp)}{hasConj ? ` · ${camp.conjuntos.length} conj.` : ''}
                         </p>
@@ -680,7 +634,10 @@ function DetailPanel({
                                   : <span className="w-3.5 shrink-0" />}
                                 <VerdictBadge v={conj.classificacao} />
                                 <div className="min-w-0 flex-1">
-                                  <p className="truncate text-xs font-semibold text-foreground">{conj.nome}</p>
+                                  <div className="flex items-baseline gap-1.5">
+                                    <LevelTag level="Conjunto" />
+                                    <p className="truncate text-xs font-semibold text-foreground">{conj.nome}</p>
+                                  </div>
                                   <p className="mt-0.5 text-[10px] text-muted-foreground">
                                     {nodeMetrics(conj)}{hasAds ? ` · ${conj.anuncios.length} criativos` : ''}
                                   </p>
@@ -695,7 +652,10 @@ function DetailPanel({
                                     <div key={ad.id} className="flex items-start gap-2 rounded border border-border/40 bg-background/60 p-2">
                                       <VerdictBadge v={ad.classificacao} />
                                       <div className="min-w-0 flex-1">
-                                        <p className="truncate text-[11px] font-semibold text-foreground">{ad.nome}</p>
+                                        <div className="flex items-baseline gap-1.5">
+                                          <LevelTag level="Criativo" />
+                                          <p className="truncate text-[11px] font-semibold text-foreground">{ad.nome}</p>
+                                        </div>
                                         <p className="mt-0.5 text-[10px] text-muted-foreground">{nodeMetrics(ad)}</p>
                                         {ad.acao && <p className="mt-0.5 text-[11px] font-medium text-primary">{ad.acao}</p>}
                                       </div>

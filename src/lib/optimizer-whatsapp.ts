@@ -50,10 +50,21 @@ function estadoEmoji(estado: string): string {
   return '✅';
 }
 
-function urgenciaEmoji(urgencia: string): string {
-  if (urgencia === 'FAZER_AGORA') return '🚨';
-  if (urgencia === 'PROXIMA_SEMANA') return '⏰';
-  return '📌';
+function verdictEmoji(v: string): string {
+  if (v === 'URGENTE') return '🚨';
+  if (v === 'ATENCAO') return '⏰';
+  return '✅';
+}
+
+// Destaques = top campanhas por severidade (URGENTE primeiro, depois ATENCAO), direto da
+// árvore campanha→conjunto→criativo — mesma fonte que a tela, sem IA gerar texto solto de novo.
+function topCampaignHighlights(result: OptimizerAnalysisResultV2, limit: number): Array<{ classificacao: string; nome: string; acao: string }> {
+  const ordem = { URGENTE: 0, ATENCAO: 1, SAUDAVEL: 2 } as const;
+  return [...result.analise_campanhas]
+    .filter((c) => c.acao)
+    .sort((a, b) => (ordem[a.classificacao] ?? 1) - (ordem[b.classificacao] ?? 1))
+    .slice(0, limit)
+    .map((c) => ({ classificacao: c.classificacao, nome: c.nome, acao: c.acao }));
 }
 
 function buildReportText(result: OptimizerAnalysisResultV2, clientName: string): string {
@@ -67,11 +78,11 @@ function buildReportText(result: OptimizerAnalysisResultV2, clientName: string):
     result.resumo_executivo,
   ];
 
-  const topRecs = result.recomendacoes.slice(0, 3);
-  if (topRecs.length > 0) {
-    lines.push('', '━━━ *Destaques* ━━━');
-    for (const rec of topRecs) {
-      lines.push(`${urgenciaEmoji(rec.urgencia)} ${rec.titulo}`);
+  const destaques = topCampaignHighlights(result, 3);
+  if (destaques.length > 0) {
+    lines.push('', '━━━ *Destaques por campanha* ━━━');
+    for (const d of destaques) {
+      lines.push(`${verdictEmoji(d.classificacao)} *${d.nome}*: ${d.acao}`);
     }
   }
 

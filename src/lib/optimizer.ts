@@ -186,28 +186,6 @@ export type OptimizerOutputV2 = {
     orcamento_periodo: number | null;
     status_orcamento: 'OK' | 'ESTOURANDO' | 'SUBENTREGANDO';
   };
-  conjuntos: Array<{
-    id: string;
-    nome: string;
-    classificacao: 'SAUDAVEL' | 'ATENCAO' | 'URGENTE';
-    diagnostico: string;
-    acao_recomendada: string;
-  }>;
-  anuncios: Array<{
-    id: string;
-    nome: string;
-    conjunto_nome: string;
-    problema: 'QUALIDADE' | 'ENGAJAMENTO' | 'CONVERSAO' | 'FADIGA' | 'OK';
-    diagnostico: string;
-    acao_recomendada: string;
-  }>;
-  recomendacoes: Array<{
-    titulo: string;
-    urgencia: 'FAZER_AGORA' | 'PROXIMA_SEMANA' | 'QUANDO_POSSIVEL';
-    impacto_estimado: string;
-    como_fazer: string;
-    risco: string;
-  }>;
   acoes_automaticas: OptimizerAcaoAutomatica[];
   confianca: OptimizerConfidence;
   observacao: string | null;
@@ -235,7 +213,7 @@ export function currentWeekLabel(): string {
 export function buildOptimizerSystemPromptV2(): string {
   return `Voce e o Otimizador do On_Reports, analista senior de trafego pago para agencias brasileiras.
 
-Recebe um JSON com dados completos de uma conta de anuncios (campanhas, conjuntos, anuncios, metas, limites e modo de operacao) e retorna um JSON estruturado com diagnostico, recomendacoes e plano de acoes.
+Recebe um JSON com dados completos de uma conta de anuncios (campanhas, conjuntos, anuncios, metas, limites e modo de operacao) e retorna um JSON estruturado com diagnostico granular por campanha/conjunto/anuncio e plano de acoes.
 
 ==================================================
 PASSO 0 OBRIGATORIO — LEIA ANTES DE QUALQUER ANALISE
@@ -292,10 +270,26 @@ Regras de classificacao:
 Campanha: classifique pelo pior conjunto relevante + alinhamento com o objetivo da conta.
 
 ==================================================
-PASSO 5 — RECOMENDACOES PRIORIZADAS
+PASSO 3.5 — CONTEXTO TEMPORAL E CAUTELA AO REATIVAR (regra critica)
 ==================================================
-Maximo 5 recomendacoes, ordenadas por impacto. Para cada uma: titulo, urgencia (FAZER_AGORA | PROXIMA_SEMANA | QUANDO_POSSIVEL), impacto_estimado, como_fazer, risco.
-Criterio FAZER_AGORA: CPL > cpl_maximo OU fadiga criativa confirmada OU fragmentacao 3+ conjuntos sobrepostos.
+Use "periodo_analise.data_fim" como referencia de HOJE. Nao confie na sua propria nocao de data.
+
+Antes de recomendar ATIVAR ou "reativar" qualquer campanha/conjunto/anuncio pausado:
+1. Leia o NOME do objeto. Se sugerir sazonalidade ou data especifica (ex: "Dia das Maes",
+   "Black Friday", "Natal", "Festa Junina", "Volta as Aulas", "Ano Novo", "Mes de [algo]",
+   numeros de mes/ano no nome), compare com data_fim. Se a janela sazonal do nome ja passou
+   em relacao a data_fim, o conteudo esta DESATUALIZADO — NUNCA recomende reativar. Recomende
+   arquivar/deletar ou usar como referencia para um criativo NOVO do periodo atual.
+2. "Pausado" NAO e sinonimo de "problema" nem de "oportunidade de reativar". So recomende
+   ATIVAR se AMBAS as condicoes forem verdadeiras: (a) a pausa parece nao intencional ou
+   por motivo tecnico (esgotou orcamento, saiu do aprendizado, pausou por engano) — nao por
+   decisao consciente do gestor (fim de campanha sazonal, teste encerrado); E (b) o conteudo
+   segue relevante para o periodo/oferta atual.
+3. Se nao houver evidencia suficiente para decidir, classifique como ATENCAO com acao tipo
+   "Verificar com o gestor por que foi pausado antes de decidir" — nunca assuma reativacao
+   por padrao so porque o objeto esta pausado e com metricas antigas.
+4. Nunca recomende ATIVAR mencionando "quebrar fadiga" para um anuncio pausado — fadiga se
+   resolve com criativo NOVO, nao reativando o mesmo anuncio antigo.
 
 ==================================================
 PASSO 6 — ACOES AUTOMATICAS
@@ -358,34 +352,6 @@ ESTRUTURA DO JSON DE SAIDA (retorne exatamente este schema):
     "orcamento_periodo": null,
     "status_orcamento": "OK | ESTOURANDO | SUBENTREGANDO"
   },
-  "conjuntos": [
-    {
-      "id": "string",
-      "nome": "string",
-      "classificacao": "SAUDAVEL | ATENCAO | URGENTE",
-      "diagnostico": "string",
-      "acao_recomendada": "string"
-    }
-  ],
-  "anuncios": [
-    {
-      "id": "string",
-      "nome": "string",
-      "conjunto_nome": "string",
-      "problema": "QUALIDADE | ENGAJAMENTO | CONVERSAO | FADIGA | OK",
-      "diagnostico": "string",
-      "acao_recomendada": "string"
-    }
-  ],
-  "recomendacoes": [
-    {
-      "titulo": "string",
-      "urgencia": "FAZER_AGORA | PROXIMA_SEMANA | QUANDO_POSSIVEL",
-      "impacto_estimado": "string",
-      "como_fazer": "string",
-      "risco": "string"
-    }
-  ],
   "acoes_automaticas": [
     {
       "acao": "PAUSAR | ATIVAR | AJUSTAR_ORCAMENTO",
@@ -507,43 +473,6 @@ export function sanitizeOptimizerOutputV2(input: unknown, payload: OptimizerPayl
     ? obj.cruzamento_com_metas as Record<string, unknown>
     : {};
 
-  const conjuntos = Array.isArray(obj.conjuntos)
-    ? (obj.conjuntos as Record<string, unknown>[]).slice(0, 20).map((c) => ({
-        id: String(c.id ?? ''),
-        nome: String(c.nome ?? ''),
-        classificacao: (['SAUDAVEL', 'ATENCAO', 'URGENTE'] as const).includes(c.classificacao as never)
-          ? c.classificacao as 'SAUDAVEL' | 'ATENCAO' | 'URGENTE'
-          : 'ATENCAO',
-        diagnostico: String(c.diagnostico ?? ''),
-        acao_recomendada: String(c.acao_recomendada ?? ''),
-      }))
-    : [];
-
-  const anuncios = Array.isArray(obj.anuncios)
-    ? (obj.anuncios as Record<string, unknown>[]).slice(0, 20).map((a) => ({
-        id: String(a.id ?? ''),
-        nome: String(a.nome ?? ''),
-        conjunto_nome: String(a.conjunto_nome ?? ''),
-        problema: (['QUALIDADE', 'ENGAJAMENTO', 'CONVERSAO', 'FADIGA', 'OK'] as const).includes(a.problema as never)
-          ? a.problema as 'QUALIDADE' | 'ENGAJAMENTO' | 'CONVERSAO' | 'FADIGA' | 'OK'
-          : 'OK',
-        diagnostico: String(a.diagnostico ?? ''),
-        acao_recomendada: String(a.acao_recomendada ?? ''),
-      }))
-    : [];
-
-  const recomendacoes = Array.isArray(obj.recomendacoes)
-    ? (obj.recomendacoes as Record<string, unknown>[]).slice(0, 5).map((r) => ({
-        titulo: String(r.titulo ?? ''),
-        urgencia: (['FAZER_AGORA', 'PROXIMA_SEMANA', 'QUANDO_POSSIVEL'] as const).includes(r.urgencia as never)
-          ? r.urgencia as 'FAZER_AGORA' | 'PROXIMA_SEMANA' | 'QUANDO_POSSIVEL'
-          : 'QUANDO_POSSIVEL',
-        impacto_estimado: String(r.impacto_estimado ?? ''),
-        como_fazer: String(r.como_fazer ?? ''),
-        risco: String(r.risco ?? ''),
-      }))
-    : [];
-
   const acoesAutomaticas: OptimizerAcaoAutomatica[] = Array.isArray(obj.acoes_automaticas)
     ? (obj.acoes_automaticas as Record<string, unknown>[]).slice(0, 5).map((a) => ({
         acao: (['PAUSAR', 'ATIVAR', 'AJUSTAR_ORCAMENTO'] as const).includes(a.acao as never)
@@ -621,9 +550,6 @@ export function sanitizeOptimizerOutputV2(input: unknown, payload: OptimizerPayl
         ? cruzamento.status_orcamento as 'OK' | 'ESTOURANDO' | 'SUBENTREGANDO'
         : 'OK',
     },
-    conjuntos,
-    anuncios,
-    recomendacoes,
     acoes_automaticas: acoesAutomaticas,
     confianca,
     observacao: obj.observacao != null ? String(obj.observacao) : null,
