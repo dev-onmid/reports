@@ -828,10 +828,10 @@ export async function fetchMetaData(
   // Categories with more spend get more representation in the final list (closer to how
   // much the client actually invested in that objective), but every active category gets
   // at least 1 slot — so a small Vendas push never gets fully omitted by a big Alcance one.
-  const PER_CATEGORY_CAP = 2;
+  const PER_CATEGORY_CAP = 6;
   const orderedCategories = [...byCategory.entries()]
     .sort((a, b) => b[1].reduce((s, x) => s + x.spend, 0) - a[1].reduce((s, x) => s + x.spend, 0));
-  const topByCategory = orderedCategories.flatMap(([cat, list]) => rankWithinCategory(cat, list).slice(0, PER_CATEGORY_CAP));
+  const topByCategory = orderedCategories.flatMap(([cat, list]) => rankWithinCategory(cat, list).slice(0, PER_CATEGORY_CAP)).slice(0, 6);
 
   const creatives: Creative[] = await Promise.all(topByCategory.map(async (ad) => {
     if (!ad.ad_id) return { nome: ad.ad_name, spend: ad.spend, resultado: ad.resultado, purchaseValue: ad.purchaseValue, campaign_name: ad.campaign_name, adset_name: ad.adset_name, objective: ad.objective, impressions: ad.impressions, reach: ad.reach, clicks: ad.clicks, ctr: ad.ctr, thumbnail_url: null, media_url: null };
@@ -3075,7 +3075,7 @@ export function sCriativos(creatives: Creative[], idx: number, total: number): s
     .replace(/(^|\s)\S/g, (m) => m.toUpperCase());
   const titleFor = (c: Creative) => {
     const clean = cleanText(c.nome) || cleanText(c.campaign_name) || c.nome || 'Criativo pago';
-    const title = titleCase(clean).slice(0, 58);
+    const title = titleCase(clean).slice(0, 40);
     return title.length < clean.length ? `${title}…` : title;
   };
   const compact = (n?: number): string => {
@@ -3160,7 +3160,6 @@ export function sCriativos(creatives: Creative[], idx: number, total: number): s
         metric(ICO_COIN, 'Invest.', moneyCompact(c.spend), accent),
         metric(ICO_USER, om.resultWord === 'leads' ? 'Leads' : 'Conversas', c.resultado > 0 ? compact(Math.round(c.resultado)) : '—', accent),
         metric(ICO_COIN, om.costLabel, cpl(c) > 0 ? moneyCompact(cpl(c)) : '—', accent),
-        metric(ICO_CURSOR, 'Cliques', compact(c.clicks), accent),
         metric(ICO_TREND, 'CTR', pct(c.ctr), accent),
       ];
     }
@@ -3205,33 +3204,28 @@ export function sCriativos(creatives: Creative[], idx: number, total: number): s
     return { label: 'Boa eficiência', icon: ICO_TREND, color: PRIMARY_TEXT, bg: '#ECFCE8', border: '#D7F8D0' };
   };
 
-  const card = (c: Creative, i: number, cat: ObjectiveCategory, group: Creative[], style: ReturnType<typeof styleForCategory>) => {
-    const status = statusFor(c, i, cat, group);
+  const card = (c: Creative, i: number, cat: ObjectiveCategory, _group: Creative[], style: ReturnType<typeof styleForCategory>) => {
     const isVideo = /video|reel|narrad/i.test(c.nome);
     const preview = c.thumbnail_url
       ? `<img src="${c.thumbnail_url}" style="width:100%;height:100%;object-fit:cover;display:block" />`
-      : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,${style.iconBg},#F8FAFC);color:#94A3B8;font-family:${INTER};font-size:12px;font-weight:800;text-align:center;padding:18px;box-sizing:border-box">Preview indisponível</div>`;
+      : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,${style.iconBg},#F8FAFC);color:#94A3B8;font-family:${INTER};font-size:10px;font-weight:800;text-align:center;padding:10px;box-sizing:border-box">Preview indisponível</div>`;
 
-    return `<div style="min-height:286px;background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 14px 34px rgba(15,23,42,.055);display:grid;grid-template-columns:42px 232px minmax(0,1fr);gap:18px;padding:16px;box-sizing:border-box;overflow:hidden">
-      <div style="width:38px;height:42px;border-radius:10px;background:${style.accent}14;border:1px solid ${style.accent}33;display:flex;align-items:center;justify-content:center">
-        <span style="font-family:${INTER};font-size:25px;font-weight:950;color:${style.accent};letter-spacing:-0.05em;line-height:1">${i + 1}º</span>
+    return `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:14px;box-shadow:0 8px 22px rgba(15,23,42,.05);display:grid;grid-template-columns:24px 110px minmax(0,1fr);gap:10px;padding:12px;box-sizing:border-box;overflow:hidden">
+      <div style="width:24px;height:28px;border-radius:7px;background:${style.accent}14;border:1px solid ${style.accent}33;display:flex;align-items:center;justify-content:center">
+        <span style="font-family:${INTER};font-size:16px;font-weight:950;color:${style.accent};letter-spacing:-0.05em;line-height:1">${i + 1}º</span>
       </div>
-      ${c.media_url ? `<a href="${c.media_url}" target="_blank" rel="noopener noreferrer" style="position:relative;display:block;width:232px;height:254px;border-radius:12px;background:${ROW};border:1px solid #E8EDF4;overflow:hidden;cursor:pointer">` : `<div style="position:relative;width:232px;height:254px;border-radius:12px;background:${ROW};border:1px solid #E8EDF4;overflow:hidden">`}
+      ${c.media_url ? `<a href="${c.media_url}" target="_blank" rel="noopener noreferrer" style="position:relative;display:block;width:110px;height:190px;border-radius:9px;background:${ROW};border:1px solid #E8EDF4;overflow:hidden;cursor:pointer">` : `<div style="position:relative;width:110px;height:190px;border-radius:9px;background:${ROW};border:1px solid #E8EDF4;overflow:hidden">`}
         ${preview}
-        ${isVideo ? `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none"><div style="width:46px;height:46px;border-radius:50%;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;border:2px solid rgba(255,255,255,.75)"><svg width="18" height="18" viewBox="0 0 24 24" fill="white" style="margin-left:3px">${ICO_PLAY}</svg></div></div>` : ''}
+        ${isVideo ? `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none"><div style="width:32px;height:32px;border-radius:50%;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;border:2px solid rgba(255,255,255,.75)"><svg width="12" height="12" viewBox="0 0 24 24" fill="white" style="margin-left:2px">${ICO_PLAY}</svg></div></div>` : ''}
       ${c.media_url ? '</a>' : '</div>'}
-      <div style="min-width:0;display:flex;flex-direction:column">
-        <h2 style="font-family:${INTER};font-size:21px;font-weight:950;color:#050816;letter-spacing:-0.04em;line-height:1.1;margin:4px 0 16px">${titleFor(c)}</h2>
-        <div style="display:flex;flex-direction:column;gap:9px;margin-bottom:15px">
+      <div style="min-width:0;display:flex;flex-direction:column;gap:7px">
+        <h2 style="font-family:${INTER};font-size:14px;font-weight:950;color:#050816;letter-spacing:-0.03em;line-height:1.15;margin:0">${titleFor(c)}</h2>
+        <div style="display:flex;flex-direction:column;gap:5px">
           ${originLine(ICO_CAMPAIGN, 'Campanha', c.campaign_name || 'Meta Ads')}
           ${originLine(ICO_SET, 'Conjunto', c.adset_name)}
         </div>
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:5px">
           ${metricsFor(c, cat, style.accent).join('')}
-        </div>
-        <div style="height:36px;margin-top:auto;border:1px solid ${status.border};border-radius:10px;background:${status.bg};display:flex;align-items:center;gap:10px;padding:0 16px;box-sizing:border-box">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${status.color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${status.icon}</svg>
-          <span style="font-family:${INTER};font-size:15px;font-weight:950;color:${status.color};line-height:1">${status.label}</span>
         </div>
       </div>
     </div>`;
@@ -3255,7 +3249,7 @@ export function sCriativos(creatives: Creative[], idx: number, total: number): s
         <p style="font-family:${INTER};font-size:16px;font-weight:900;color:#050816;margin:0">${om.label}</p>
         <p style="font-family:${INTER};font-size:12px;font-weight:600;color:#64748B;margin:0">— ${criterionFor(cat)}</p>
       </div>
-      <div style="display:grid;grid-template-columns:${group.length === 1 ? '1fr' : '1fr 1fr'};gap:14px 22px">
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px 14px">
         ${group.map((c, i) => card(c, i, cat, group, style)).join('')}
       </div>
     </div>`;
