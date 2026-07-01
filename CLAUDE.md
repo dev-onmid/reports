@@ -122,8 +122,14 @@ EVOLUTION_API_KEY=
 ## Cron jobs (Vercel)
 
 Definidos em `vercel.json`:
-- `POST /api/reports/cron-monthly` — dia 1 de cada mês, 08h UTC.
 - `POST /api/alerts/balance-cron` — diariamente, 10h UTC.
+
+## Relatórios automáticos mensais
+
+- **Cron via GitHub Actions** (`.github/workflows/reports-cron-monthly.yml`), não Vercel — roda **todo dia** às 11h UTC (08h BRT) e chama `GET /api/reports/cron-monthly?secret=...`.
+- **Motivo de não estar no `vercel.json`**: a rota filtra por `report_configs.send_day` (dia do mês configurável por cliente, ex: "Dia 1", "Dia 23"). O Vercel Hobby só permite 1x/dia por cron job, então um cron `"0 8 1 * *"` (só dia 1) nunca processava clientes com `send_day` diferente de 1 — por isso a tabela de Relatórios mostrava `RELATÓRIOS: 0` e `ENVIO: –` para quase todo mundo. Removido do `vercel.json` em 2026-07-01 e migrado para GitHub Actions (mesmo padrão do Otimizador/Leadlovers) para rodar diariamente sem custo extra e sem depender do cron-job.org externo (reservado para outra finalidade).
+- **Secret necessário no GitHub**: `REPORTS_CRON_URL` (repo Settings → Secrets → Actions) — URL completa incluindo `?secret=CRON_SECRET`, mesmo padrão de `OPTIMIZER_WEEKLY_URL` e `LEADLOVERS_WORKER_URL`.
+- A rota `src/app/api/reports/cron-monthly/route.ts` já filtra corretamente por `send_day = EXTRACT(DAY FROM NOW())` — só faltava ser chamada todo dia em vez de só no dia 1.
 
 ---
 
