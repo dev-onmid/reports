@@ -1,5 +1,4 @@
 import type { NextRequest } from 'next/server';
-import { after } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import {
@@ -792,20 +791,6 @@ export async function GET(request: NextRequest) {
   return Response.json(await executeWeekly(parseRunOptions(request)));
 }
 
-// Dispara a análise em segundo plano (after) e responde na hora — evita 504 quando
-// a busca de dados + IA passa do limite de tempo do request síncrono. O resultado é
-// gravado em optimizer_ai_logs assim que pronto; a UI faz polling para exibi-lo.
-function startInBackground(opts: RunOptions): Response {
-  after(async () => {
-    try {
-      await executeWeekly(opts);
-    } catch (err) {
-      console.error('[weekly][background]', err);
-    }
-  });
-  return Response.json({ started: true, async: true }, { status: 202 });
-}
-
 export async function POST(request: NextRequest) {
   const userId = request.headers.get('x-onmid-user-id') ?? '';
   const roleHint = request.headers.get('x-onmid-role') ?? '';
@@ -836,9 +821,6 @@ export async function POST(request: NextRequest) {
   if (request.nextUrl.searchParams.get('dryRun') === '1') {
     return Response.json({ dry_run: true, diagnostics: await diagnoseClients(opts) });
   }
-  // async=1: dispara em segundo plano e responde 202 imediatamente (sem risco de 504).
-  if (request.nextUrl.searchParams.get('async') === '1') {
-    return startInBackground(opts);
-  }
+  // Síncrono: roda a análise (busca + IA) e só responde quando gravou o resultado.
   return Response.json(await executeWeekly(opts));
 }

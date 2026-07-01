@@ -228,7 +228,14 @@ export async function GET(request: NextRequest) {
   }
   if (!conn) return Response.json({ error: 'Connection not found' }, { status: 404 });
 
-  const accessToken = await getFreshAccessToken(conn);
+  let accessToken: string;
+  try {
+    accessToken = await getFreshAccessToken(conn);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Erro ao renovar token Google';
+    console.error('[google/ads-accounts] refresh token failed', msg);
+    return Response.json({ error: `Token Google expirado ou inválido — reconecte a conta. (${msg})` }, { status: 401 });
+  }
   const developerToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? '1vR8GhAk4UMZoPaqo7Qq8Q';
 
   const listRes = await fetch('https://googleads.googleapis.com/v24/customers:listAccessibleCustomers', {

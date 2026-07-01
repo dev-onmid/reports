@@ -775,11 +775,14 @@ export default function OtimizadorPage() {
     // um resultado mais novo que este. Evita falsos positivos e dispensa o relógio do browser.
     const prior = queue.find((it) => it.cliente_id === manualClientId && !!it.semana_analise);
     const priorTime = prior ? new Date(prior.created_at).getTime() : 0;
+    const clientName = isSingle ? (clients.find((c) => c.id === manualClientId)?.name ?? 'conta') : 'grupo de hoje';
     try {
-      // Dispara em segundo plano (async=1): a rota responde 202 na hora e a análise
-      // roda no servidor sem prender o request — elimina o 504 por timeout.
-      const params = new URLSearchParams({ period: manualPeriod, forceAi: '1', async: '1' });
+      // Síncrono: o request só retorna quando a análise (busca + IA) terminou e foi gravada.
+      // Sem `after()`/segundo plano — se der erro, o gestor VÊ o erro em vez de silêncio.
+      // As rotas têm maxDuration=60; uma conta única cabe nesse tempo.
+      const params = new URLSearchParams({ period: manualPeriod, forceAi: '1' });
       if (isSingle) params.set('clientId', manualClientId);
+      setRunMessage(`Analisando ${clientName}… isso leva de 20 a 60 segundos. Não feche a página.`);
       const res = await fetch(`/api/otimizador/weekly?${params.toString()}`, {
         method: 'POST',
         headers: { ...callerHeaders(), 'Content-Type': 'application/json' },
@@ -787,40 +790,37 @@ export default function OtimizadorPage() {
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({})) as { error?: string };
-        setRunMessage(`Erro ao iniciar: ${data.error || res.statusText || `HTTP ${res.status}`}`);
-        setRunLoading(false);
+        setRunMessage(`Erro na análise: ${data.error || res.statusText || `HTTP ${res.status}`}`);
         return;
       }
 
-      if (!isSingle) {
-        setRunMessage('Análise do grupo de hoje iniciada em segundo plano. Os resultados aparecem na lista em até ~1 minuto — clique em "Atualizar".');
-        setTimeout(() => void loadQueue(), 25_000);
-        setTimeout(() => void loadQueue(), 55_000);
-        setRunLoading(false);
-        return;
-      }
+      const data = await res.json().catch(() => ({})) as {
+        ok_count?: number; erros?: number;
+        results?: Array<{ clientId: string; status: string; error?: string }>;
+      };
 
-      // Cliente único: faz polling até o resultado da semana aparecer no banco.
-      const clientName = clients.find((c) => c.id === manualClientId)?.name ?? 'conta';
-      setRunMessage(`Analisando ${clientName}… isso leva de 20 a 60 segundos.`);
-      const deadline = Date.now() + 90_000;
-      let fresh: QueueItem | null = null;
-      while (Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 4_000));
-        fresh = await pollForFreshResult(manualClientId, priorTime);
-        if (fresh) break;
-      }
+      // A análise já rodou e gravou no banco. Recarrega a fila para exibir.
+      await loadQueue();
 
-      if (fresh) {
-        await loadQueue();
-        setSelectedId(fresh.id);
+      if (isSingle) {
+        const outcome = data.results?.find((r) => r.clientId === manualClientId);
+        if (outcome && outcome.status !== 'ok') {
+          // Rodou mas não gerou análise (sem conexão, sem campanhas, erro de IA…)
+          const motivo = outcome.status === 'sem_conexao_meta' ? 'conta sem conexão Meta vinculada'
+            : outcome.status === 'sem_campanhas_ativas' ? 'nenhuma campanha ativa com gasto no período'
+            : outcome.error || outcome.status;
+          setRunMessage(`Análise de ${clientName} não gerou resultado: ${motivo}.`);
+          return;
+        }
+        const fresh = await pollForFreshResult(manualClientId, priorTime);
+        if (fresh) setSelectedId(fresh.id);
         setRunMessage(`Análise de ${clientName} concluída.`);
       } else {
-        setRunMessage(`A análise de ${clientName} continua rodando em segundo plano. Clique em "Atualizar" em alguns instantes para ver o resultado.`);
+        setRunMessage(`Análise do grupo concluída: ${data.ok_count ?? 0} ok, ${data.erros ?? 0} erro(s).`);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      setRunMessage(`Erro: ${msg || 'falha de rede'}`);
+      setRunMessage(`Erro: ${msg || 'falha de rede'} (a análise pode ter estourado o tempo — tente novamente).`);
     } finally {
       setRunLoading(false);
     }
