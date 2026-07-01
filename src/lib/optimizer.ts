@@ -1,4 +1,8 @@
 export const OPTIMIZER_MODEL = 'claude-sonnet-4-6';
+// v2 usa Haiku 4.5: a análise em árvore (payload grande + output 8k) com Sonnet passava
+// dos ~55s e estourava o timeout da IA. Haiku gera em ~10-20s, aguenta o schema de
+// classificação e barateia. A tarefa é extração/classificação guiada por regras — cabe no Haiku.
+export const OPTIMIZER_MODEL_V2 = 'claude-haiku-4-5-20251001';
 export const OPTIMIZER_PROMPT_VERSION = 'otimizador-v1.0';
 export const OPTIMIZER_PROMPT_VERSION_V2 = 'otimizador-v2.1';
 

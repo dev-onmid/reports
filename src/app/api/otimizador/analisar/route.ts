@@ -5,6 +5,7 @@ import { logAiUsage } from '@/lib/ai-usage-logger';
 import { makeServerPool } from '@/lib/server-db';
 import {
   OPTIMIZER_MODEL,
+  OPTIMIZER_MODEL_V2,
   OPTIMIZER_PROMPT_VERSION,
   OPTIMIZER_PROMPT_VERSION_V2,
   applyLayerOneRules,
@@ -638,7 +639,7 @@ async function handleV2(body: AnalyzeBody, origin: string): Promise<Response> {
       // 8192: a árvore analise_campanhas (campanha→conjunto→anúncio, todos classificados)
       // + cruzamento + recomendações + ações é grande; abaixo disso o JSON trunca em contas
       // com muitos conjuntos → parse falha → zera a tela. Vereditos curtos seguram o tamanho.
-      model: OPTIMIZER_MODEL,
+      model: OPTIMIZER_MODEL_V2,
       max_tokens: 8192,
       system: buildOptimizerSystemPromptV2(),
       messages: [{ role: 'user', content: JSON.stringify(payload) }],
@@ -658,7 +659,7 @@ async function handleV2(body: AnalyzeBody, origin: string): Promise<Response> {
   const inputTokens = Number(data.usage?.input_tokens ?? 0);
   const outputTokens = Number(data.usage?.output_tokens ?? 0);
   const tokens = inputTokens + outputTokens;
-  const cost = calcCostUsd(OPTIMIZER_MODEL, inputTokens, outputTokens);
+  const cost = calcCostUsd(OPTIMIZER_MODEL_V2, inputTokens, outputTokens);
 
   let parsed: unknown;
   try { parsed = extractJsonObject(text); } catch { parsed = {}; }
@@ -672,12 +673,12 @@ async function handleV2(body: AnalyzeBody, origin: string): Promise<Response> {
     modo_operacao: payload.modo_operacao,
     origem: 'ia',
     prompt_version: OPTIMIZER_PROMPT_VERSION_V2,
-    modelo_usado: OPTIMIZER_MODEL,
+    modelo_usado: OPTIMIZER_MODEL_V2,
     tokens_usados: tokens,
     custo_estimado_usd: cost,
   };
 
-  void logAiUsage({ source: 'otimizador-v2', model: OPTIMIZER_MODEL, inputTokens, outputTokens });
+  void logAiUsage({ source: 'otimizador-v2', model: OPTIMIZER_MODEL_V2, inputTokens, outputTokens });
   await saveLogV2({ payload, result, payloadHash });
 
   // Executa ações automáticas (fire-and-forget)
