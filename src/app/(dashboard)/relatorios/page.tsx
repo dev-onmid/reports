@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { ClientAvatar } from '@/components/client-avatar';
 import { useClients } from '@/lib/client-store';
+import { callerHeaders } from '@/lib/auth-store';
 import { cn } from '@/lib/utils';
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -130,7 +131,7 @@ export default function RelatoriosPage() {
   useEffect(() => {
     Promise.all([
       fetch('/api/reports/configs').then(r => r.ok ? r.json() : []),
-      fetch('/api/disparos/clients').then(r => r.ok ? r.json() : []),
+      fetch('/api/disparos/clients', { headers: callerHeaders() }).then(r => r.ok ? r.json() : []),
     ]).then(([cfgs, zapis]) => {
       setConfigs(cfgs as ReportConfig[]);
       setZapiClients(zapis as ZapiClient[]);
@@ -149,7 +150,7 @@ export default function RelatoriosPage() {
           .then(r => r.ok ? r.json() : [])
           .then((rows: { jid: string; nome: string }[]) =>
             Array.isArray(rows) ? rows.map(g => ({ phone: g.jid, name: g.nome })) : [])
-      : fetch(`/api/disparos/extract/chats?clientId=${configForm.zapiClientId}&type=groups`)
+      : fetch(`/api/disparos/extract/chats?clientId=${configForm.zapiClientId}&type=groups`, { headers: callerHeaders() })
           .then(r => r.ok ? r.json() : [])
           .then((rows: { phone: string; name: string }[]) => Array.isArray(rows) ? rows : []);
     request
