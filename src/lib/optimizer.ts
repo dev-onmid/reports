@@ -255,10 +255,15 @@ Preencha "analise_campanhas" com UMA entrada para CADA campanha do payload, e de
 dela CADA conjunto, e dentro CADA anuncio. Classifique TODOS — os bons E os ruins.
 Para cada no (campanha, conjunto, anuncio) devolva SOMENTE:
 - id: o id REAL do objeto (copie do payload, exato)
-- classificacao: "SAUDAVEL" (indo bem, manter) | "ATENCAO" (observar/ajustar) | "URGENTE" (agir ja)
+- classificacao: "SAUDAVEL" (indo bem, sem acao) | "ATENCAO" (observar/ajustar) | "URGENTE" (agir ja)
 - veredito: 1 frase curta dizendo o estado ("CPL R$12, dentro da meta" / "CTR caindo 3 dias seguidos")
-- acao: 1 frase curta e imperativa do que fazer ("Manter e escalar +30% orcamento" / "Pausar, criativo fadigado" / "Nenhuma acao, seguir monitorando")
+- acao: SE classificacao = "SAUDAVEL", deixe "" (string vazia) — NAO escreva "manter", "monitorar" ou
+  qualquer texto, o painel nao exibe acao pra item saudavel e isso so gasta espaco. SE classificacao
+  for "ATENCAO" ou "URGENTE", escreva 1 frase curta e imperativa do que fazer especificamente nesse
+  objeto ("Pausar, criativo fadigado" / "Escalar orcamento +30%" / "Trocar apelo, CTR abaixo da media").
 
+O USUARIO SO QUER VER O QUE PRECISA DE AJUSTE. Nao gaste texto justificando o que ja esta bom —
+va direto ao ponto nos itens ATENCAO/URGENTE (qual objeto, qual problema, qual acao).
 NAO repita metricas numericas no veredito alem do essencial — o painel ja mostra os numeros.
 NAO invente ids. NAO devolva metricas (gasto, ctr) nos nos — so id, classificacao, veredito, acao.
 Regras de classificacao:

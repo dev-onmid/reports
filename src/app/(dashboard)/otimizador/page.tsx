@@ -34,6 +34,9 @@ import { OPTIMIZER_PERIODS } from '@/lib/optimizer';
 import type {
   OptimizerAnalysisResult,
   OptimizerAcaoAutomatica,
+  OptimizerAnaliseAnuncio,
+  OptimizerAnaliseCampanha,
+  OptimizerAnaliseConjunto,
   OptimizerEstadoConta,
   OptimizerModo,
   OptimizerOutputV2,
@@ -131,6 +134,19 @@ function nodeMetrics(m: { gasto: number; conversoes: number; cpl: number | null 
   const parts = [formatCurrencyBRL(m.gasto), `${m.conversoes.toLocaleString('pt-BR')} conv`];
   if (m.cpl != null) parts.push(`CPL ${formatCurrencyBRL(m.cpl)}`);
   return parts.join(' · ');
+}
+
+// "Precisa de atenção" = o próprio nó não é saudável OU algum descendente não é — usado para
+// auto-expandir só os ramos com algo a ajustar. Campanha/conjunto 100% saudáveis ficam
+// fechados por padrão (1 linha, sem ruído); só abrem quem tem ação de verdade.
+function adNeedsAttention(ad: OptimizerAnaliseAnuncio): boolean {
+  return ad.classificacao !== 'SAUDAVEL';
+}
+function conjNeedsAttention(conj: OptimizerAnaliseConjunto): boolean {
+  return conj.classificacao !== 'SAUDAVEL' || conj.anuncios.some(adNeedsAttention);
+}
+function campNeedsAttention(camp: OptimizerAnaliseCampanha): boolean {
+  return camp.classificacao !== 'SAUDAVEL' || camp.conjuntos.some(conjNeedsAttention);
 }
 
 function VerdictBadge({ v }: { v: string }) {
@@ -410,11 +426,12 @@ function DetailPanel({
   const resultado = item.resultado as OptimizerOutputV2;
   const resultadoV1 = item.resultado as OptimizerAnalysisResult;
 
-  // Árvore já expandida por padrão ao trocar de análise — bate o olho sem precisar clicar.
+  // Auto-expande só os ramos com algo a ajustar — campanha/conjunto 100% saudáveis ficam
+  // fechados (1 linha, sem ruído) até o gestor clicar pra auditar.
   useEffect(() => {
     const campanhas = resultado.analise_campanhas ?? [];
-    setOpenCamp(new Set(campanhas.map((c) => c.id)));
-    setOpenConj(new Set(campanhas.flatMap((c) => c.conjuntos.map((cj) => cj.id))));
+    setOpenCamp(new Set(campanhas.filter(campNeedsAttention).map((c) => c.id)));
+    setOpenConj(new Set(campanhas.flatMap((c) => c.conjuntos.filter(conjNeedsAttention).map((cj) => cj.id))));
   }, [item.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pendingActions = isV2 ? (resultado.acoes_automaticas?.filter((a) => a.status_execucao === 'AGUARDAR_APROVACAO') ?? []) : [];
@@ -612,7 +629,7 @@ function DetailPanel({
                         <p className="mt-0.5 text-[11px] text-muted-foreground">
                           {nodeMetrics(camp)}{hasConj ? ` · ${camp.conjuntos.length} conj.` : ''}
                         </p>
-                        {camp.acao && <p className="mt-1 text-xs font-medium text-primary">{camp.acao}</p>}
+                        {camp.classificacao !== 'SAUDAVEL' && camp.acao && <p className="mt-1 text-xs font-medium text-primary">{camp.acao}</p>}
                       </div>
                       <VerdictInfo text={camp.veredito} />
                     </div>
@@ -641,7 +658,7 @@ function DetailPanel({
                                   <p className="mt-0.5 text-[10px] text-muted-foreground">
                                     {nodeMetrics(conj)}{hasAds ? ` · ${conj.anuncios.length} criativos` : ''}
                                   </p>
-                                  {conj.acao && <p className="mt-0.5 text-[11px] font-medium text-primary">{conj.acao}</p>}
+                                  {conj.classificacao !== 'SAUDAVEL' && conj.acao && <p className="mt-0.5 text-[11px] font-medium text-primary">{conj.acao}</p>}
                                 </div>
                                 <VerdictInfo text={conj.veredito} />
                               </div>
@@ -657,7 +674,7 @@ function DetailPanel({
                                           <p className="truncate text-[11px] font-semibold text-foreground">{ad.nome}</p>
                                         </div>
                                         <p className="mt-0.5 text-[10px] text-muted-foreground">{nodeMetrics(ad)}</p>
-                                        {ad.acao && <p className="mt-0.5 text-[11px] font-medium text-primary">{ad.acao}</p>}
+                                        {ad.classificacao !== 'SAUDAVEL' && ad.acao && <p className="mt-0.5 text-[11px] font-medium text-primary">{ad.acao}</p>}
                                       </div>
                                       <VerdictInfo text={ad.veredito} />
                                     </div>
