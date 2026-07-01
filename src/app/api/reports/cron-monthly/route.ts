@@ -6,7 +6,8 @@ export const maxDuration = 60;
 
 export async function GET(request: NextRequest) {
   const secret = request.nextUrl.searchParams.get('secret');
-  if (secret !== process.env.CRON_SECRET) {
+  const validSecrets = [process.env.CRON_SECRET, process.env.REPORTS_CRON_SECRET].filter(Boolean);
+  if (!secret || !validSecrets.includes(secret)) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
