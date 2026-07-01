@@ -9,6 +9,7 @@ import {
   ChevronDown,
   ChevronUp,
   CircleDollarSign,
+  Info,
   Loader2,
   MousePointerClick,
   Play,
@@ -24,6 +25,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { ClientAvatar } from '@/components/client-avatar';
 import { callerHeaders, getAuthSession } from '@/lib/auth-store';
 import type { Client } from '@/lib/mock-data';
@@ -116,6 +118,13 @@ const URGENCIA_STYLE: Record<string, string> = {
   FAZER_AGORA: 'text-red-300',
   PROXIMA_SEMANA: 'text-amber-300',
   QUANDO_POSSIVEL: 'text-emerald-300',
+};
+
+// Badge preenchido — leitura por cor, bate o olho e sabe a urgência
+const URGENCIA_BADGE: Record<string, string> = {
+  FAZER_AGORA: 'border-red-400/40 bg-red-400/10 text-red-300',
+  PROXIMA_SEMANA: 'border-amber-400/40 bg-amber-400/10 text-amber-300',
+  QUANDO_POSSIVEL: 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300',
 };
 
 const URGENCIA_LABEL: Record<string, string> = {
@@ -354,6 +363,7 @@ function DetailPanel({
   const [approvalFeedback, setApprovalFeedback] = useState<Record<number, string>>({});
   const [v1Feedback, setV1Feedback] = useState<Record<number, string>>({});
   const [showConjuntos, setShowConjuntos] = useState(false);
+  const [showResumo, setShowResumo] = useState(false);
 
   const isV2 = isV2Result(item.resultado);
   const resultado = item.resultado as OptimizerOutputV2;
@@ -437,9 +447,19 @@ function DetailPanel({
       </div>
 
       <div className="p-4 space-y-4">
-        {/* Resumo executivo */}
+        {/* Resumo executivo — colapsado em 2 linhas; contexto completo sob demanda */}
         {item.resumo_executivo && (
-          <p className="text-sm leading-relaxed text-muted-foreground">{item.resumo_executivo}</p>
+          <div>
+            <p className={cn('text-sm leading-relaxed text-muted-foreground', !showResumo && 'line-clamp-2')}>
+              {item.resumo_executivo}
+            </p>
+            <button
+              onClick={() => setShowResumo((s) => !s)}
+              className="mt-0.5 text-xs font-medium text-primary hover:underline"
+            >
+              {showResumo ? 'ver menos' : 'ver contexto'}
+            </button>
+          </div>
         )}
 
         {/* v1 fallback header */}
@@ -500,23 +520,50 @@ function DetailPanel({
           </div>
         )}
 
-        {/* Recomendações v2 */}
+        {/* Recomendações v2 — visão objetiva: badge + ação. Detalhe (como fazer / impacto /
+            risco) fica no tooltip do ícone (i), pra não poluir a leitura rápida. */}
         {isV2 && resultado.recomendacoes && resultado.recomendacoes.length > 0 && (
-          <div className="space-y-2">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">O que fazer</p>
-            {resultado.recomendacoes.map((rec, i) => (
-              <div key={i} className="rounded-[var(--radius)] border border-border bg-background p-3 space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className={cn('text-[10px] font-bold uppercase', URGENCIA_STYLE[rec.urgencia])}>
+          <TooltipProvider delay={120}>
+            <div className="space-y-1.5">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">O que fazer</p>
+              {resultado.recomendacoes.map((rec, i) => (
+                <div key={i} className="flex items-center gap-3 rounded-[var(--radius)] border border-border bg-background px-3 py-2.5">
+                  <span className={cn(
+                    'shrink-0 w-[92px] rounded border px-1.5 py-1 text-center text-[10px] font-bold uppercase tracking-wide',
+                    URGENCIA_BADGE[rec.urgencia] ?? 'border-border text-muted-foreground',
+                  )}>
                     {URGENCIA_LABEL[rec.urgencia] ?? rec.urgencia}
                   </span>
-                  <span className="text-sm font-semibold text-foreground">{rec.titulo}</span>
+                  <span className="flex-1 min-w-0 truncate text-sm font-semibold text-foreground" title={rec.titulo}>
+                    {rec.titulo}
+                  </span>
+                  <Tooltip>
+                    <TooltipTrigger className="shrink-0 rounded-full p-0.5 text-muted-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:text-primary">
+                      <Info className="h-4 w-4" />
+                    </TooltipTrigger>
+                    <TooltipContent side="left" className="block max-w-sm items-start space-y-2 whitespace-normal p-3 text-left">
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-wide text-background/60">Como fazer</p>
+                        <p className="mt-0.5 text-xs leading-relaxed text-background">{rec.como_fazer}</p>
+                      </div>
+                      {rec.impacto_estimado && (
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-wide text-background/60">Impacto esperado</p>
+                          <p className="mt-0.5 text-xs leading-relaxed text-background">{rec.impacto_estimado}</p>
+                        </div>
+                      )}
+                      {rec.risco && (
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-wide text-background/60">Risco</p>
+                          <p className="mt-0.5 text-xs leading-relaxed text-background">{rec.risco}</p>
+                        </div>
+                      )}
+                    </TooltipContent>
+                  </Tooltip>
                 </div>
-                <p className="text-sm text-muted-foreground">{rec.como_fazer}</p>
-                {rec.impacto_estimado && <p className="text-xs text-primary">{rec.impacto_estimado}</p>}
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          </TooltipProvider>
         )}
 
         {/* Ações executadas automaticamente */}
