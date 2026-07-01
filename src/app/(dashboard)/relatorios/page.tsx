@@ -30,7 +30,7 @@ type ReportConfig = {
   report_count: number; last_run_at: string | null; last_token: string | null; created_at: string;
 };
 
-type ZapiClient = { id: string; name: string };
+type ZapiClient = { id: string; name: string; provider: 'zapi' | 'evolution' };
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -137,16 +137,26 @@ export default function RelatoriosPage() {
     }).catch(() => {});
   }, []);
 
-  // Fetch WhatsApp groups when the chosen Z-API instance changes
+  // Fetch WhatsApp groups when the chosen instance changes — Evolution and
+  // Z-API instances live in the same `zapi_clients` table (see `provider`),
+  // but each needs its own groups endpoint.
   useEffect(() => {
     if (!configForm.zapiClientId) return;
+    const instance = zapiClients.find(z => z.id === configForm.zapiClientId);
     setLoadingZapiGroups(true);
-    fetch(`/api/disparos/extract/chats?clientId=${configForm.zapiClientId}&type=groups`)
-      .then(r => r.ok ? r.json() : [])
-      .then((rows: { phone: string; name: string }[]) => setZapiGroups(Array.isArray(rows) ? rows : []))
+    const request = instance?.provider === 'evolution'
+      ? fetch(`/api/otimizador/whatsapp-groups?zapiClientId=${configForm.zapiClientId}`)
+          .then(r => r.ok ? r.json() : [])
+          .then((rows: { jid: string; nome: string }[]) =>
+            Array.isArray(rows) ? rows.map(g => ({ phone: g.jid, name: g.nome })) : [])
+      : fetch(`/api/disparos/extract/chats?clientId=${configForm.zapiClientId}&type=groups`)
+          .then(r => r.ok ? r.json() : [])
+          .then((rows: { phone: string; name: string }[]) => Array.isArray(rows) ? rows : []);
+    request
+      .then(rows => setZapiGroups(rows))
       .catch(() => setZapiGroups([]))
       .finally(() => setLoadingZapiGroups(false));
-  }, [configForm.zapiClientId]);
+  }, [configForm.zapiClientId, zapiClients]);
 
   // Fetch connected assets when client changes
   useEffect(() => {
@@ -916,14 +926,18 @@ export default function RelatoriosPage() {
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-xs text-muted-foreground font-medium">Instância Z-API</label>
+                  <label className="text-xs text-muted-foreground font-medium">Instância WhatsApp</label>
                   <select
                     value={configForm.zapiClientId}
                     onChange={e => setConfigForm(f => ({ ...f, zapiClientId: e.target.value, whatsappGroup: '' }))}
                     className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50"
                   >
                     <option value="">Nenhuma (sem envio automático)</option>
-                    {zapiClients.map(z => <option key={z.id} value={z.id}>{z.name}</option>)}
+                    {zapiClients.map(z => (
+                      <option key={z.id} value={z.id}>
+                        {z.name} {z.provider === 'evolution' ? '(Evolution)' : '(Z-API)'}
+                      </option>
+                    ))}
                   </select>
                 </div>
                 <div className="space-y-1.5">

@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { sendText as sendWhatsapp } from '@/lib/zapi';
+import { sendEvolutionText } from '@/lib/evolution-api';
 
 export const maxDuration = 60;
 
@@ -18,7 +19,7 @@ export async function GET(request: NextRequest) {
   let configs: {
     id: string; client_id: string; client_name: string; template: 'performance' | 'delivery';
     whatsapp_group: string | null; zapi_client_id: string | null;
-    send_day: number; zapi_instance_id: string | null;
+    send_day: number; zapi_provider: 'zapi' | 'evolution' | null; zapi_instance_id: string | null;
     zapi_token: string | null; zapi_security_token: string | null;
   }[] = [];
 
@@ -27,6 +28,7 @@ export async function GET(request: NextRequest) {
       SELECT
         rc.id, rc.client_id, c.name AS client_name, rc.template,
         rc.whatsapp_group, rc.zapi_client_id, rc.send_day,
+        z.provider AS zapi_provider,
         z.instance_id AS zapi_instance_id,
         z.token AS zapi_token,
         z.security_token AS zapi_security_token
@@ -60,22 +62,28 @@ export async function GET(request: NextRequest) {
       const { public_token } = await runRes.json() as { public_token: string };
       const reportUrl = `${origin}/relatorio/${public_token}`;
 
-      // Send WhatsApp if configured
-      if (cfg.whatsapp_group && cfg.zapi_instance_id && cfg.zapi_token) {
+      // Send WhatsApp if configured (Evolution instance or Z-API instance)
+      const hasEvolution = cfg.whatsapp_group && cfg.zapi_provider === 'evolution' && cfg.zapi_instance_id;
+      const hasZapi = cfg.whatsapp_group && cfg.zapi_provider !== 'evolution' && cfg.zapi_instance_id && cfg.zapi_token;
+      if (hasEvolution || hasZapi) {
         const now = new Date();
         const month = now.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
         const label = cfg.template === 'delivery' ? 'Relatório de Delivery' : 'Relatório de Performance';
         const message = `📊 *${label} — ${cfg.client_name}*\n\nO relatório de *${month}* está pronto!\n\nAcesse aqui: ${reportUrl}`;
 
-        await sendWhatsapp(
-          {
-            instanceId: cfg.zapi_instance_id,
-            token: cfg.zapi_token,
-            clientToken: cfg.zapi_security_token ?? '',
-          },
-          cfg.whatsapp_group,
-          message,
-        ).catch(() => null);
+        const send = hasEvolution
+          ? sendEvolutionText(cfg.zapi_instance_id!, cfg.whatsapp_group!, message)
+          : sendWhatsapp(
+              {
+                instanceId: cfg.zapi_instance_id!,
+                token: cfg.zapi_token!,
+                clientToken: cfg.zapi_security_token ?? '',
+              },
+              cfg.whatsapp_group!,
+              message,
+            );
+
+        await send.catch(() => null);
 
         // Mark as sent
         const pool2 = makeServerPool();
