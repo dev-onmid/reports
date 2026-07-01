@@ -1243,6 +1243,43 @@ export default function RelatoriosPage() {
                   <p className="text-[10px] text-muted-foreground/50 pt-0.5">Nenhuma integração vinculada a este cliente.</p>
                 )}
               </div>
+              {/* Period shortcuts */}
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground font-medium">Período</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {(() => {
+                    const fmt = (d: Date) => d.toISOString().split('T')[0];
+                    const now = new Date();
+                    const y = now.getFullYear();
+                    const m = now.getMonth();
+                    const shortcuts = [
+                      { label: 'Mês passado', from: fmt(new Date(y, m - 1, 1)), to: fmt(new Date(y, m, 0)) },
+                      { label: 'Este mês', from: fmt(new Date(y, m, 1)), to: fmt(new Date(y, m + 1, 0)) },
+                      { label: 'Últimos 30d', from: fmt(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29)), to: fmt(now) },
+                      { label: 'Últimos 90d', from: fmt(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 89)), to: fmt(now) },
+                      { label: 'Este ano', from: fmt(new Date(y, 0, 1)), to: fmt(new Date(y, 11, 31)) },
+                    ];
+                    return shortcuts.map(s => {
+                      const active = genForm.from === s.from && genForm.to === s.to;
+                      return (
+                        <button
+                          key={s.label}
+                          type="button"
+                          onClick={() => setGenForm(f => ({ ...f, from: s.from, to: s.to }))}
+                          className={cn(
+                            'px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors',
+                            active
+                              ? 'bg-violet-600 border-violet-500 text-white'
+                              : 'bg-background border-border text-muted-foreground hover:border-violet-500/50 hover:text-foreground',
+                          )}
+                        >
+                          {s.label}
+                        </button>
+                      );
+                    });
+                  })()}
+                </div>
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <label className="text-xs text-muted-foreground font-medium">De</label>
