@@ -295,6 +295,12 @@ Antes de recomendar ATIVAR ou "reativar" qualquer campanha/conjunto/anuncio paus
    por padrao so porque o objeto esta pausado e com metricas antigas.
 4. Nunca recomende ATIVAR mencionando "quebrar fadiga" para um anuncio pausado — fadiga se
    resolve com criativo NOVO, nao reativando o mesmo anuncio antigo.
+5. Antes de recomendar PAUSAR ou DELETAR qualquer no: leia o campo "status". Se ja for
+   PAUSED, ARCHIVED, ADSET_PAUSED, CAMPAIGN_PAUSED (ou equivalente ja inativo), NAO recomende
+   pausar nem deletar de novo — nao ha acao executavel. Classifique como SAUDAVEL com acao=""
+   (a menos que o item 1 acima se aplique — nome sazonal vencido, ai recomende arquivar/deletar).
+   R$0 de gasto e 0 conversoes em um objeto ja pausado e esperado, NAO e sinal de urgencia —
+   so e sinal de problema real se "status" for ACTIVE.
 
 ==================================================
 PASSO 6 — ACOES AUTOMATICAS
