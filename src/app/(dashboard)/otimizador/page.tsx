@@ -127,6 +127,51 @@ const URGENCIA_BADGE: Record<string, string> = {
   QUANDO_POSSIVEL: 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300',
 };
 
+// Veredito por nível (campanha/conjunto/anúncio) — verde OK, âmbar atenção, vermelho urgente
+const VERDICT_BADGE: Record<string, string> = {
+  SAUDAVEL: 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300',
+  ATENCAO: 'border-amber-400/40 bg-amber-400/10 text-amber-300',
+  URGENTE: 'border-red-400/40 bg-red-400/10 text-red-300',
+};
+const VERDICT_LABEL: Record<string, string> = {
+  SAUDAVEL: 'OK',
+  ATENCAO: 'Atenção',
+  URGENTE: 'Urgente',
+};
+
+// Métricas compactas de um nó: "R$ 420 · 34 conv · CPL R$ 12,37"
+function nodeMetrics(m: { gasto: number; conversoes: number; cpl: number | null }): string {
+  const parts = [formatCurrencyBRL(m.gasto), `${m.conversoes.toLocaleString('pt-BR')} conv`];
+  if (m.cpl != null) parts.push(`CPL ${formatCurrencyBRL(m.cpl)}`);
+  return parts.join(' · ');
+}
+
+function VerdictBadge({ v }: { v: string }) {
+  return (
+    <span className={cn(
+      'shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide',
+      VERDICT_BADGE[v] ?? 'border-border text-muted-foreground',
+    )}>
+      {VERDICT_LABEL[v] ?? v}
+    </span>
+  );
+}
+
+// Ícone (i) com o "porquê" (veredito) no hover — mantém a linha limpa
+function VerdictInfo({ text }: { text: string }) {
+  if (!text) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger className="mt-0.5 shrink-0 rounded-full p-0.5 text-muted-foreground transition-colors hover:text-primary focus-visible:text-primary focus-visible:outline-none">
+        <Info className="h-3.5 w-3.5" />
+      </TooltipTrigger>
+      <TooltipContent side="left" className="block max-w-xs whitespace-normal p-2.5 text-left text-xs leading-relaxed text-background">
+        {text}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 const URGENCIA_LABEL: Record<string, string> = {
   FAZER_AGORA: 'Fazer agora',
   PROXIMA_SEMANA: 'Próx. semana',
@@ -362,8 +407,14 @@ function DetailPanel({
 }) {
   const [approvalFeedback, setApprovalFeedback] = useState<Record<number, string>>({});
   const [v1Feedback, setV1Feedback] = useState<Record<number, string>>({});
-  const [showConjuntos, setShowConjuntos] = useState(false);
   const [showResumo, setShowResumo] = useState(false);
+  const [openCamp, setOpenCamp] = useState<Set<string>>(new Set());
+  const [openConj, setOpenConj] = useState<Set<string>>(new Set());
+  const toggle = (set: Set<string>, setter: (s: Set<string>) => void, id: string) => {
+    const next = new Set(set);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    setter(next);
+  };
 
   const isV2 = isV2Result(item.resultado);
   const resultado = item.resultado as OptimizerOutputV2;
@@ -582,37 +633,87 @@ function DetailPanel({
           </div>
         )}
 
-        {/* Conjuntos (expansível) */}
-        {isV2 && resultado.conjuntos && resultado.conjuntos.length > 0 && (
-          <div>
-            <button
-              onClick={() => setShowConjuntos((s) => !s)}
-              className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
-            >
-              {showConjuntos ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-              Ver conjuntos de anúncios ({resultado.conjuntos.length})
-            </button>
-            {showConjuntos && (
-              <div className="mt-2 space-y-1.5">
-                {resultado.conjuntos.map((c, i) => (
-                  <div key={i} className="rounded-[var(--radius)] border border-border bg-background p-2.5">
-                    <div className="flex items-center gap-2">
-                      <span className={cn('text-[10px] font-bold uppercase rounded border px-1 py-0.5',
-                        c.classificacao === 'SAUDAVEL' ? 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300'
-                          : c.classificacao === 'URGENTE' ? 'border-red-400/40 bg-red-400/10 text-red-300'
-                            : 'border-amber-400/40 bg-amber-400/10 text-amber-300',
-                      )}>
-                        {c.classificacao === 'SAUDAVEL' ? 'OK' : c.classificacao === 'URGENTE' ? 'Urgente' : 'Atenção'}
-                      </span>
-                      <p className="text-sm font-semibold text-foreground truncate">{c.nome}</p>
+        {/* Análise por campanha — árvore campanha → conjunto → criativo. Métricas reais,
+            veredito da IA. Badge de cor pra bater o olho; "porquê" no tooltip do (i). */}
+        {isV2 && resultado.analise_campanhas && resultado.analise_campanhas.length > 0 && (
+          <TooltipProvider delay={120}>
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Análise por campanha</p>
+              {resultado.analise_campanhas.map((camp) => {
+                const campOpen = openCamp.has(camp.id);
+                const hasConj = camp.conjuntos.length > 0;
+                return (
+                  <div key={camp.id} className="overflow-hidden rounded-[var(--radius)] border border-border bg-background">
+                    <div
+                      role={hasConj ? 'button' : undefined}
+                      onClick={() => hasConj && toggle(openCamp, setOpenCamp, camp.id)}
+                      className={cn('flex items-start gap-2.5 p-3', hasConj && 'cursor-pointer hover:bg-muted/30')}
+                    >
+                      {hasConj
+                        ? (campOpen ? <ChevronUp className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" /> : <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />)
+                        : <span className="w-4 shrink-0" />}
+                      <VerdictBadge v={camp.classificacao} />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold text-foreground">{camp.nome}</p>
+                        <p className="mt-0.5 text-[11px] text-muted-foreground">
+                          {nodeMetrics(camp)}{hasConj ? ` · ${camp.conjuntos.length} conj.` : ''}
+                        </p>
+                        {camp.acao && <p className="mt-1 text-xs font-medium text-primary">{camp.acao}</p>}
+                      </div>
+                      <VerdictInfo text={camp.veredito} />
                     </div>
-                    <p className="mt-1 text-xs text-muted-foreground">{c.diagnostico}</p>
-                    {c.acao_recomendada && <p className="mt-0.5 text-xs text-primary">{c.acao_recomendada}</p>}
+
+                    {campOpen && hasConj && (
+                      <div className="space-y-1.5 border-t border-border/60 bg-muted/10 p-2 pl-6">
+                        {camp.conjuntos.map((conj) => {
+                          const conjOpen = openConj.has(conj.id);
+                          const hasAds = conj.anuncios.length > 0;
+                          return (
+                            <div key={conj.id} className="overflow-hidden rounded-[var(--radius)] border border-border/60 bg-background">
+                              <div
+                                role={hasAds ? 'button' : undefined}
+                                onClick={() => hasAds && toggle(openConj, setOpenConj, conj.id)}
+                                className={cn('flex items-start gap-2 p-2.5', hasAds && 'cursor-pointer hover:bg-muted/30')}
+                              >
+                                {hasAds
+                                  ? (conjOpen ? <ChevronUp className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" /> : <ChevronDown className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />)
+                                  : <span className="w-3.5 shrink-0" />}
+                                <VerdictBadge v={conj.classificacao} />
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-xs font-semibold text-foreground">{conj.nome}</p>
+                                  <p className="mt-0.5 text-[10px] text-muted-foreground">
+                                    {nodeMetrics(conj)}{hasAds ? ` · ${conj.anuncios.length} criativos` : ''}
+                                  </p>
+                                  {conj.acao && <p className="mt-0.5 text-[11px] font-medium text-primary">{conj.acao}</p>}
+                                </div>
+                                <VerdictInfo text={conj.veredito} />
+                              </div>
+
+                              {conjOpen && hasAds && (
+                                <div className="space-y-1 border-t border-border/50 p-1.5 pl-5">
+                                  {conj.anuncios.map((ad) => (
+                                    <div key={ad.id} className="flex items-start gap-2 rounded border border-border/40 bg-background/60 p-2">
+                                      <VerdictBadge v={ad.classificacao} />
+                                      <div className="min-w-0 flex-1">
+                                        <p className="truncate text-[11px] font-semibold text-foreground">{ad.nome}</p>
+                                        <p className="mt-0.5 text-[10px] text-muted-foreground">{nodeMetrics(ad)}</p>
+                                        {ad.acao && <p className="mt-0.5 text-[11px] font-medium text-primary">{ad.acao}</p>}
+                                      </div>
+                                      <VerdictInfo text={ad.veredito} />
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
+                );
+              })}
+            </div>
+          </TooltipProvider>
         )}
 
         {/* v1 ações */}

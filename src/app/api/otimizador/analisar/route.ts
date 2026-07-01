@@ -635,10 +635,11 @@ async function handleV2(body: AnalyzeBody, origin: string): Promise<Response> {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
     body: JSON.stringify({
-      // 4096: o schema v2 (cruzamento + conjuntos + anúncios + recomendações + ações) estoura
-      // 3000 tokens em contas maiores → JSON truncado → parse falha → zera tudo na tela.
+      // 8192: a árvore analise_campanhas (campanha→conjunto→anúncio, todos classificados)
+      // + cruzamento + recomendações + ações é grande; abaixo disso o JSON trunca em contas
+      // com muitos conjuntos → parse falha → zera a tela. Vereditos curtos seguram o tamanho.
       model: OPTIMIZER_MODEL,
-      max_tokens: 4096,
+      max_tokens: 8192,
       system: buildOptimizerSystemPromptV2(),
       messages: [{ role: 'user', content: JSON.stringify(payload) }],
     }),

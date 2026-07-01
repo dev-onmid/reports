@@ -380,13 +380,13 @@ async function fetchConjuntosForCampaign(
   if (!res?.ok) return [];
   const data = await res.json() as { data?: Record<string, unknown>[] };
 
-  const conjuntos: OptimizerCampaignV2['conjuntos'] = [];
   const activeAdsets = (data.data ?? []).filter((raw) => {
     const status = String(raw.effective_status ?? raw.status ?? '').toUpperCase();
     return ['ACTIVE', 'IN_PROCESS', 'WITH_ISSUES'].includes(status);
   }).slice(0, 5);
 
-  for (const raw of activeAdsets) {
+  // Busca os anúncios de TODOS os conjuntos em paralelo (uma promise por conjunto).
+  const conjuntos = await Promise.all(activeAdsets.map(async (raw): Promise<OptimizerCampaignV2['conjuntos'][number]> => {
     const insights = (raw.insights as { data?: Record<string, unknown>[] } | undefined)?.data?.[0] ?? {};
     const actions = (insights.actions as Array<{ action_type: string; value: string }>) ?? [];
     const conversoes = sumActions(actions, LEAD_ACTIONS);
@@ -432,7 +432,7 @@ async function fetchConjuntosForCampaign(
       }
     }
 
-    conjuntos.push({
+    return {
       id: String(raw.id),
       nome: String(raw.name ?? ''),
       status: String(raw.effective_status ?? raw.status ?? ''),
@@ -449,8 +449,8 @@ async function fetchConjuntosForCampaign(
       ctr_tendencia_4d: null,
       dias_ativo: diasAtivo,
       anuncios,
-    });
-  }
+    };
+  }));
 
   return conjuntos;
 }
@@ -497,32 +497,33 @@ async function buildPayloadForClient(
 
   const topCampaigns = activeCampaigns.slice(0, 5);
 
-  // Conjuntos + anúncios das campanhas que gastaram (best-effort, com deadline de ~20s)
-  const conjuntosDeadline = Date.now() + 20_000;
-  const campanhas: OptimizerCampaignV2[] = [];
-  for (const camp of topCampaigns) {
-    let conjuntos: OptimizerCampaignV2['conjuntos'] = [];
-    // Só busca conjuntos na análise manual (1 cliente), para campanhas com gasto e dentro do tempo
-    if (fetchConjuntos && token && camp.spend > 0 && Date.now() < conjuntosDeadline) {
-      conjuntos = await fetchConjuntosForCampaign(camp.id, token, dateFrom, dateTo, conjuntosDeadline).catch(() => []);
-    }
-    campanhas.push({
-      id: camp.id,
-      nome: camp.name,
-      objetivo: camp.objective ?? '',
-      status: camp.status,
-      orcamento_diario: camp.dailyBudget ?? null,
-      gasto: camp.spend,
-      impressoes: camp.impressions,
-      cliques: camp.clicks,
-      ctr: camp.ctr,
-      cpl: camp.cpl > 0 ? camp.cpl : null,
-      conversoes: camp.leads,
-      roas: null,
-      dias_rodando: null,
-      conjuntos,
-    });
-  }
+  // Conjuntos + anúncios das campanhas que gastaram. Busca em PARALELO (uma promise por
+  // campanha), com deadline compartilhado — evita a soma sequencial que estourava os 60s.
+  const conjuntosDeadline = Date.now() + 15_000;
+  const conjuntosPorCampanha = await Promise.all(
+    topCampaigns.map((camp) =>
+      (fetchConjuntos && token && camp.spend > 0)
+        ? fetchConjuntosForCampaign(camp.id, token, dateFrom, dateTo, conjuntosDeadline).catch(() => [])
+        : Promise.resolve([] as OptimizerCampaignV2['conjuntos']),
+    ),
+  );
+
+  const campanhas: OptimizerCampaignV2[] = topCampaigns.map((camp, i) => ({
+    id: camp.id,
+    nome: camp.name,
+    objetivo: camp.objective ?? '',
+    status: camp.status,
+    orcamento_diario: camp.dailyBudget ?? null,
+    gasto: camp.spend,
+    impressoes: camp.impressions,
+    cliques: camp.clicks,
+    ctr: camp.ctr,
+    cpl: camp.cpl > 0 ? camp.cpl : null,
+    conversoes: camp.leads,
+    roas: null,
+    dias_rodando: null,
+    conjuntos: conjuntosPorCampanha[i],
+  }));
 
   void accountId; // reservado para opportunity score futuro
 
@@ -607,13 +608,11 @@ async function executeWeekly({ origin, forceClientId, forceAi, period }: RunOpti
 
   const results: Array<{ clientId: string; clientName: string; status: string; error?: string }> = [];
 
-  // Conjuntos/anúncios: DESLIGADO. A busca granular (5 camp × 5 conj × 8 anúncios em chamadas
-  // sequenciais ao Graph API) somava ~20s+ à etapa de dados e, com a IA em seguida no mesmo
-  // request síncrono, estourava os 60s de maxDuration → HTTP 504. A análise de nível de campanha
-  // (que alimenta gasto/conversões/CPL e o resumo) cabe no tempo. Reintroduzir depois como passo
-  // separado leve, sob demanda, se necessário.
+  // Conjuntos/anúncios: LIGADO no manual, mas com busca PARALELA (Promise.all) — antes as
+  // chamadas ao Graph API eram sequenciais (5 camp × 5 conj × 8 anúncios em fila = ~20s+) e
+  // estouravam os 60s → 504. Paralelizado, a mesma coleta cai para ~4-5s e cabe no tempo.
   const isManual = clients.length === 1;
-  const fetchConjuntos = false;
+  const fetchConjuntos = isManual;
   // Concorrência: 1 cliente = sequencial; cron = paralelo p/ cobrir a base dentro do tempo
   const CONCURRENCY = isManual ? 1 : 5;
 

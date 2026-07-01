@@ -1,6 +1,6 @@
 export const OPTIMIZER_MODEL = 'claude-sonnet-4-6';
 export const OPTIMIZER_PROMPT_VERSION = 'otimizador-v1.0';
-export const OPTIMIZER_PROMPT_VERSION_V2 = 'otimizador-v2.0';
+export const OPTIMIZER_PROMPT_VERSION_V2 = 'otimizador-v2.1';
 
 // ─── v2 types ────────────────────────────────────────────────────────────────
 
@@ -116,9 +116,60 @@ export type OptimizerAcaoAutomatica = {
   status_execucao: OptimizerStatusExecucao;
 };
 
+export type OptimizerVerdict = 'SAUDAVEL' | 'ATENCAO' | 'URGENTE';
+
+// Nós da árvore de análise. MÉTRICAS vêm sempre do payload (verdade);
+// classificacao/veredito/acao vêm da IA. Nunca confiar em número ecoado pela IA.
+export type OptimizerAnaliseAnuncio = {
+  id: string;
+  nome: string;
+  gasto: number;
+  conversoes: number;
+  cpl: number | null;
+  ctr: number;
+  quality_ranking: string | null;
+  engagement_ranking: string | null;
+  conversion_ranking: string | null;
+  classificacao: OptimizerVerdict;
+  veredito: string;
+  acao: string;
+};
+
+export type OptimizerAnaliseConjunto = {
+  id: string;
+  nome: string;
+  gasto: number;
+  conversoes: number;
+  cpl: number | null;
+  ctr: number;
+  orcamento_diario: number | null;
+  dias_ativo: number | null;
+  classificacao: OptimizerVerdict;
+  veredito: string;
+  acao: string;
+  anuncios: OptimizerAnaliseAnuncio[];
+};
+
+export type OptimizerAnaliseCampanha = {
+  id: string;
+  nome: string;
+  objetivo: string;
+  gasto: number;
+  conversoes: number;
+  cpl: number | null;
+  ctr: number;
+  orcamento_diario: number | null;
+  classificacao: OptimizerVerdict;
+  veredito: string;
+  acao: string;
+  conjuntos: OptimizerAnaliseConjunto[];
+};
+
 export type OptimizerOutputV2 = {
   estado_da_conta: OptimizerEstadoConta;
   resumo_executivo: string;
+  // Árvore campanha→conjunto→criativo com veredito e ação em cada nível (bons e ruins)
+  analise_campanhas: OptimizerAnaliseCampanha[];
   cruzamento_com_metas: {
     cpl_atual: number | null;
     cpl_ideal: number | null;
@@ -216,20 +267,25 @@ Compare: CPL atual vs cpl_ideal e cpl_maximo, volume de conversoes vs meta proje
 Classifique a conta: SAUDAVEL (tudo dentro), ATENCAO (levemente fora), CRISE (muito fora ou CPL > cpr_emergencia).
 
 ==================================================
-PASSO 3 — DIAGNOSTICO POR CONJUNTO
+PASSO 3 — ARVORE DE ANALISE (campanha -> conjunto -> anuncio)
 ==================================================
-Para cada conjunto em campanhas[].conjuntos[]:
-- SAUDAVEL: CTR tendencia SUBINDO ou ESTAVEL + CPL dentro + rankings medios ou acima
-- ATENCAO: CTR tendencia CAINDO OU um ranking Below Average OU CPL levemente acima
-- URGENTE: multiplos rankings Below Average OU frequencia alta + CTR caindo OU CPL > cpl_maximo
-Nao classifique conjuntos com menos de min_dias_aprendizado dias como URGENTE.
+Preencha "analise_campanhas" com UMA entrada para CADA campanha do payload, e dentro
+dela CADA conjunto, e dentro CADA anuncio. Classifique TODOS — os bons E os ruins.
+Para cada no (campanha, conjunto, anuncio) devolva SOMENTE:
+- id: o id REAL do objeto (copie do payload, exato)
+- classificacao: "SAUDAVEL" (indo bem, manter) | "ATENCAO" (observar/ajustar) | "URGENTE" (agir ja)
+- veredito: 1 frase curta dizendo o estado ("CPL R$12, dentro da meta" / "CTR caindo 3 dias seguidos")
+- acao: 1 frase curta e imperativa do que fazer ("Manter e escalar +30% orcamento" / "Pausar, criativo fadigado" / "Nenhuma acao, seguir monitorando")
 
-==================================================
-PASSO 4 — DIAGNOSTICO POR ANUNCIO
-==================================================
-Apenas anuncios com problema (quality/engagement/conversion ranking = BELOW_AVERAGE):
-- Qual dimensao esta fraca e por que (fadiga, CTA fraco, publico errado)
-- Acao corretiva especifica
+NAO repita metricas numericas no veredito alem do essencial — o painel ja mostra os numeros.
+NAO invente ids. NAO devolva metricas (gasto, ctr) nos nos — so id, classificacao, veredito, acao.
+Regras de classificacao:
+- Conjunto/anuncio SAUDAVEL: CTR estavel/subindo + CPL dentro + rankings medios ou acima.
+- ATENCAO: CTR caindo OU 1 ranking Below Average OU CPL levemente acima.
+- URGENTE: multiplos rankings Below Average OU frequencia alta + CTR caindo OU CPL > cpl_maximo.
+- Nao classifique como URGENTE nada com menos de min_dias_aprendizado dias (esta aprendendo).
+- Para objetivo != leads, nao use CPL como criterio (siga o PASSO 1).
+Campanha: classifique pelo pior conjunto relevante + alinhamento com o objetivo da conta.
 
 ==================================================
 PASSO 5 — RECOMENDACOES PRIORIZADAS
@@ -262,6 +318,30 @@ ESTRUTURA DO JSON DE SAIDA (retorne exatamente este schema):
 {
   "estado_da_conta": "SAUDAVEL | ATENCAO | CRISE",
   "resumo_executivo": "string 3-5 frases",
+  "analise_campanhas": [
+    {
+      "id": "id_real_da_campanha",
+      "classificacao": "SAUDAVEL | ATENCAO | URGENTE",
+      "veredito": "1 frase curta",
+      "acao": "1 frase imperativa curta",
+      "conjuntos": [
+        {
+          "id": "id_real_do_conjunto",
+          "classificacao": "SAUDAVEL | ATENCAO | URGENTE",
+          "veredito": "1 frase curta",
+          "acao": "1 frase imperativa curta",
+          "anuncios": [
+            {
+              "id": "id_real_do_anuncio",
+              "classificacao": "SAUDAVEL | ATENCAO | URGENTE",
+              "veredito": "1 frase curta",
+              "acao": "1 frase imperativa curta"
+            }
+          ]
+        }
+      ]
+    }
+  ],
   "cruzamento_com_metas": {
     "cpl_atual": null,
     "cpl_ideal": null,
@@ -316,6 +396,96 @@ ESTRUTURA DO JSON DE SAIDA (retorne exatamente este schema):
   "confianca": "alta | media | baixa",
   "observacao": "string ou null"
 }`;
+}
+
+type IaVerdict = { classificacao: OptimizerVerdict; veredito: string; acao: string };
+
+function normVerdict(v: unknown): OptimizerVerdict {
+  return (['SAUDAVEL', 'ATENCAO', 'URGENTE'] as const).includes(v as never) ? v as OptimizerVerdict : 'ATENCAO';
+}
+
+// Achata a árvore de vereditos da IA em um mapa por id (aceita nesting variável e
+// nomes alternativos de campo). Só extraímos classificação/veredito/ação — nunca métricas.
+function collectIaVerdicts(iaCampanhas: unknown): Map<string, IaVerdict> {
+  const map = new Map<string, IaVerdict>();
+  const put = (id: unknown, o: Record<string, unknown>) => {
+    const key = String(id ?? '');
+    if (!key) return;
+    map.set(key, {
+      classificacao: normVerdict(o.classificacao),
+      veredito: String(o.veredito ?? o.diagnostico ?? ''),
+      acao: String(o.acao ?? o.acao_recomendada ?? ''),
+    });
+  };
+  if (!Array.isArray(iaCampanhas)) return map;
+  for (const c of iaCampanhas as Record<string, unknown>[]) {
+    if (!c || typeof c !== 'object') continue;
+    put(c.id, c);
+    const conjuntos = Array.isArray(c.conjuntos) ? c.conjuntos as Record<string, unknown>[] : [];
+    for (const cj of conjuntos) {
+      if (!cj || typeof cj !== 'object') continue;
+      put(cj.id, cj);
+      const anuncios = Array.isArray(cj.anuncios) ? cj.anuncios as Record<string, unknown>[] : [];
+      for (const ad of anuncios) if (ad && typeof ad === 'object') put(ad.id, ad);
+    }
+  }
+  return map;
+}
+
+// Monta a árvore campanha→conjunto→anúncio: métricas do PAYLOAD (verdade), veredito da IA.
+function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown): OptimizerAnaliseCampanha[] {
+  const verdicts = collectIaVerdicts(iaCampanhas);
+  const fallback: IaVerdict = { classificacao: 'ATENCAO', veredito: '', acao: '' };
+  const vOf = (id: string) => verdicts.get(id) ?? fallback;
+  return (payload.campanhas ?? []).map((camp) => {
+    const cv = vOf(camp.id);
+    return {
+      id: camp.id,
+      nome: camp.nome,
+      objetivo: camp.objetivo,
+      gasto: Number(camp.gasto) || 0,
+      conversoes: Number(camp.conversoes) || 0,
+      cpl: camp.cpl,
+      ctr: Number(camp.ctr) || 0,
+      orcamento_diario: camp.orcamento_diario,
+      classificacao: cv.classificacao,
+      veredito: cv.veredito,
+      acao: cv.acao,
+      conjuntos: (camp.conjuntos ?? []).map((cj) => {
+        const jv = vOf(cj.id);
+        return {
+          id: cj.id,
+          nome: cj.nome,
+          gasto: Number(cj.gasto) || 0,
+          conversoes: Number(cj.conversoes) || 0,
+          cpl: cj.cpl,
+          ctr: Number(cj.ctr) || 0,
+          orcamento_diario: cj.orcamento_diario,
+          dias_ativo: cj.dias_ativo,
+          classificacao: jv.classificacao,
+          veredito: jv.veredito,
+          acao: jv.acao,
+          anuncios: (cj.anuncios ?? []).map((ad) => {
+            const av = vOf(ad.id);
+            return {
+              id: ad.id,
+              nome: ad.nome,
+              gasto: Number(ad.gasto) || 0,
+              conversoes: Number(ad.conversoes) || 0,
+              cpl: ad.cpl,
+              ctr: Number(ad.ctr) || 0,
+              quality_ranking: ad.quality_ranking,
+              engagement_ranking: ad.engagement_ranking,
+              conversion_ranking: ad.conversion_ranking,
+              classificacao: av.classificacao,
+              veredito: av.veredito,
+              acao: av.acao,
+            };
+          }),
+        };
+      }),
+    };
+  });
 }
 
 export function sanitizeOptimizerOutputV2(input: unknown, payload: OptimizerPayloadV2): OptimizerOutputV2 {
@@ -424,6 +594,7 @@ export function sanitizeOptimizerOutputV2(input: unknown, payload: OptimizerPayl
   return {
     estado_da_conta: estado,
     resumo_executivo: (obj.resumo_executivo && String(obj.resumo_executivo).trim()) ? String(obj.resumo_executivo) : resumoFallback,
+    analise_campanhas: buildAnaliseCampanhas(payload, obj.analise_campanhas),
     cruzamento_com_metas: {
       // Gasto, conversões e CPL são FATOS já presentes no payload (soma das campanhas).
       // Priorizamos SEMPRE o valor real calculado — a IA recebe um template com "0" nesses
