@@ -607,9 +607,13 @@ async function executeWeekly({ origin, forceClientId, forceAi, period }: RunOpti
 
   const results: Array<{ clientId: string; clientName: string; status: string; error?: string }> = [];
 
-  // Análise granular (conjuntos/anúncios) só quando é 1 cliente (análise manual); cron mantém leve
+  // Conjuntos/anúncios: DESLIGADO. A busca granular (5 camp × 5 conj × 8 anúncios em chamadas
+  // sequenciais ao Graph API) somava ~20s+ à etapa de dados e, com a IA em seguida no mesmo
+  // request síncrono, estourava os 60s de maxDuration → HTTP 504. A análise de nível de campanha
+  // (que alimenta gasto/conversões/CPL e o resumo) cabe no tempo. Reintroduzir depois como passo
+  // separado leve, sob demanda, se necessário.
   const isManual = clients.length === 1;
-  const fetchConjuntos = isManual;
+  const fetchConjuntos = false;
   // Concorrência: 1 cliente = sequencial; cron = paralelo p/ cobrir a base dentro do tempo
   const CONCURRENCY = isManual ? 1 : 5;
 
