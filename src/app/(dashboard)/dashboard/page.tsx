@@ -4387,14 +4387,15 @@ function GoalProgressCard({
   );
 }
 
-function QuickMetricCard({ title, value, change, icon: Icon }: {
+function QuickMetricCard({ title, value, change, icon: Icon, inverseChange }: {
   title: string;
   value: string;
   change?: number | null;
   icon: React.ElementType;
+  inverseChange?: boolean;
 }) {
   const hasChange = change !== null && change !== undefined && Number.isFinite(change);
-  const positive = !hasChange || change >= 0;
+  const positive = !hasChange || (inverseChange ? change <= 0 : change >= 0);
   return (
     <PremiumPanel className="relative overflow-hidden p-4">
       <div className="flex items-start gap-3">
@@ -4413,14 +4414,16 @@ function QuickMetricCard({ title, value, change, icon: Icon }: {
   );
 }
 
-function MiniPlatformMetric({ label, value, sub, icon: Icon, logo, change }: {
+function MiniPlatformMetric({ label, value, sub, icon: Icon, logo, change, inverseChange }: {
   label: string;
   value: string;
   sub?: string;
   icon?: React.ElementType;
   logo?: ReactNode;
   change?: number | null;
+  inverseChange?: boolean;
 }) {
+  const isPositive = change != null && (inverseChange ? change <= 0 : change >= 0);
   return (
     <div className="rounded-[10px] border border-white/[0.07] bg-[#111a20]/80 p-3">
       <div className="mb-3 flex items-center gap-2">
@@ -4430,7 +4433,7 @@ function MiniPlatformMetric({ label, value, sub, icon: Icon, logo, change }: {
       <p className="font-heading text-xl leading-none text-[#f4f7f8]">{value}</p>
       {sub && <p className="mt-1 text-xs font-semibold text-[#78d957]">{sub}</p>}
       {change != null && (
-        <p className={cn('mt-1 text-[10px] font-bold', change >= 0 ? 'text-[#6cff2f]' : 'text-red-400')}>
+        <p className={cn('mt-1 text-[10px] font-bold', isPositive ? 'text-[#6cff2f]' : 'text-red-400')}>
           {change >= 0 ? '+' : ''}{change.toFixed(1)}%
         </p>
       )}
@@ -5704,7 +5707,7 @@ export default function GeneralDashboard() {
   const previousConversionRate = prevTotalLeads > 0 ? ((conversions || totalLeads) / Math.max(prevTotalLeads, 1)) * 100 : null;
   const quickMetrics = [
     { title: 'Investimento Total', value: premiumValue(totalSpend, 'currency'), change: pctChange(totalSpend, prevTotalSpend), icon: CreditCard },
-    { title: 'CPL Médio', value: totalCostPerLead > 0 ? premiumValue(totalCostPerLead, 'currency') : '—', change: pctChange(totalCostPerLead, prevCpl), icon: Tag },
+    { title: 'CPL Médio', value: totalCostPerLead > 0 ? premiumValue(totalCostPerLead, 'currency') : '—', change: pctChange(totalCostPerLead, prevCpl), icon: Tag, inverseChange: true },
     { title: 'Conversas', value: premiumValue(metaConversations || metaSiteLeads || 0), change: null, icon: MessageCircle },
     { title: 'Agendamentos', value: premiumValue(appointments), change: null, icon: Calendar },
     { title: 'ROI', value: roi > 0 ? premiumValue(roi, 'times') : '—', change: pctChange(roi, prevRoi), icon: TrendingUp },
@@ -5857,7 +5860,7 @@ export default function GeneralDashboard() {
                     <MiniPlatformMetric label="Alcance" value={metaReach > 0 ? premiumValue(metaReach) : '—'} icon={Users} change={pct(metaReach, prevMetaReach)} />
                     <MiniPlatformMetric label="CTR" value={metaCtr > 0 ? premiumValue(metaCtr, 'percent') : '—'} icon={MousePointerClick} change={pct(metaCtr, prevMetaCtr)} />
                     <MiniPlatformMetric label="Leads" value={premiumValue(metaLeads)} icon={UserPlus} change={pct(metaLeads, prevMetaLeads)} />
-                    <MiniPlatformMetric label="CPL" value={avgCpl > 0 ? premiumValue(avgCpl, 'currency') : '—'} icon={Tag} change={avgCpl > 0 && prevAvgCpl > 0 ? pct(avgCpl, prevAvgCpl) : null} />
+                    <MiniPlatformMetric label="CPL" value={avgCpl > 0 ? premiumValue(avgCpl, 'currency') : '—'} icon={Tag} change={avgCpl > 0 && prevAvgCpl > 0 ? pct(avgCpl, prevAvgCpl) : null} inverseChange />
                   </div>
                 </div>
                 <div className="rounded-[12px] border border-white/[0.08] bg-[#071014] p-3">
@@ -5866,7 +5869,7 @@ export default function GeneralDashboard() {
                     <MiniPlatformMetric label="Saldo Google Ads" value={googleBalance > 0 ? premiumValue(googleBalance, 'currency') : '—'} logo={<GoogleAdsMark className="h-4 w-4" />} sub="Saldo disponível" />
                     <MiniPlatformMetric label="Impressões" value={hasGoogleData ? premiumValue(googleImpressions) : '—'} icon={BarChart3} change={hasGoogleData ? pct(googleImpressions, prevGoogleImpressions) : null} />
                     <MiniPlatformMetric label="Cliques" value={hasGoogleData ? premiumValue(googleClicks) : '—'} icon={MousePointerClick} change={hasGoogleData ? pct(googleClicks, prevGoogleClicks) : null} />
-                    <MiniPlatformMetric label="CPC Médio" value={googleCpc > 0 ? premiumValue(googleCpc, 'currency') : '—'} icon={Tag} change={googleCpc > 0 && prevGoogleCpc > 0 ? pct(googleCpc, prevGoogleCpc) : null} />
+                    <MiniPlatformMetric label="CPC Médio" value={googleCpc > 0 ? premiumValue(googleCpc, 'currency') : '—'} icon={Tag} change={googleCpc > 0 && prevGoogleCpc > 0 ? pct(googleCpc, prevGoogleCpc) : null} inverseChange />
                     <MiniPlatformMetric label="Conversões" value={hasGoogleData ? premiumValue(googleConv) : '—'} icon={CheckCircle2} change={hasGoogleData ? pct(googleConv, prevGoogleConv) : null} />
                   </div>
                 </div>
