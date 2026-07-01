@@ -2170,11 +2170,15 @@ export function sMetaAdsResumo(meta: MetaAdsFull, idx: number, total: number): s
   // though the declared objective isn't "Mensagens".
   const totalConversas = sum(meta.campanhas, c => c.metricas.conversas);
   const totalFormLeads = sum(meta.campanhas, c => c.metricas.leads);
-  // Cost per result is attributed to the investment of campaigns whose PRIMARY
-  // objective is that result type — cross-campaign conversas/leads don't inflate
-  // the denominator investment, keeping the unit cost meaningful.
-  const custoConversa = totalConversas > 0 ? messagingInvestment / totalConversas : 0;
-  const custoFormLead = totalFormLeads > 0 ? leadFormInvestment / totalFormLeads : 0;
+  const totalResultados = totalConversas + totalFormLeads;
+  // CPL geral: total invested / all results (conversas + formulários combined).
+  // Individual unit costs use total investment too — when results come from mixed
+  // campaign types there is no clean per-type investment split, and using a subset
+  // (messagingInvestment / leadFormInvestment) produced "—" whenever no pure-type
+  // campaign existed.
+  const cplGeral     = totalResultados > 0 ? meta.investimento / totalResultados : 0;
+  const custoConversa = totalConversas  > 0 ? meta.investimento / totalConversas  : 0;
+  const custoFormLead = totalFormLeads  > 0 ? meta.investimento / totalFormLeads  : 0;
 
   const salesInvestment = sum(salesCampaigns, c => c.metricas.investimento);
   const totalCompras = sum(salesCampaigns, c => c.metricas.compras);
@@ -2219,6 +2223,7 @@ export function sMetaAdsResumo(meta: MetaAdsFull, idx: number, total: number): s
     bigKpi('CTR', pctC(ctr), ICO_PERCENT),
     bigKpi('CPM', brlC(cpm), ICO_CHART),
     bigKpi('CPC', brlC(cpc), ICO_CURSOR),
+    ...(totalResultados > 0 ? [bigKpi('CPL', brlC(cplGeral), ICO_TARGET)] : []),
   ];
 
   const segmentLine = (label: string, value: string) =>
