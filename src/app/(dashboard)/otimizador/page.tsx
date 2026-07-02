@@ -12,7 +12,9 @@ import {
   Info,
   Loader2,
   MousePointerClick,
+  Pencil,
   Play,
+  Plus,
   RefreshCw,
   Search,
   Settings2,
@@ -205,6 +207,40 @@ function ConfigModal({ clientId, clientName, onClose }: { clientId: string; clie
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
+  // Peculiaridades fixas armazenadas como texto único (1 linha = 1 item) — sem precisar de
+  // coluna nova no banco. A UI trata cada linha como um item independente: edita, remove ou
+  // adiciona sem mexer nos demais.
+  const observacaoItems = (config.observacoes_fixas ?? '').split('\n').map((s) => s.trim()).filter(Boolean);
+  const [newObservacao, setNewObservacao] = useState('');
+  const [editingObsIndex, setEditingObsIndex] = useState<number | null>(null);
+  const [editingObsText, setEditingObsText] = useState('');
+
+  function setObservacaoItems(next: string[]) {
+    setConfig((prev) => ({ ...prev, observacoes_fixas: next.length > 0 ? next.join('\n') : null }));
+  }
+  function addObservacao() {
+    const t = newObservacao.trim();
+    if (!t) return;
+    setObservacaoItems([...observacaoItems, t]);
+    setNewObservacao('');
+  }
+  function startEditObservacao(i: number) {
+    setEditingObsIndex(i);
+    setEditingObsText(observacaoItems[i]);
+  }
+  function saveEditObservacao(i: number) {
+    const t = editingObsText.trim();
+    if (!t) { removeObservacao(i); return; }
+    const next = [...observacaoItems];
+    next[i] = t;
+    setObservacaoItems(next);
+    setEditingObsIndex(null);
+  }
+  function removeObservacao(i: number) {
+    setObservacaoItems(observacaoItems.filter((_, idx) => idx !== i));
+    if (editingObsIndex === i) setEditingObsIndex(null);
+  }
+
   useEffect(() => {
     void (async () => {
       try {
@@ -303,23 +339,74 @@ function ConfigModal({ clientId, clientName, onClose }: { clientId: string; clie
                   className="h-10 w-full rounded-[var(--radius)] border border-border bg-background px-3 text-sm text-foreground outline-none focus:border-primary" />
               </div>
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <label className="text-xs font-semibold text-muted-foreground">Peculiaridades deste cliente</label>
+              <p className="text-[11px] text-muted-foreground">Contexto fixo que a IA considera em toda análise deste cliente, além de metas e performance. Cada item abaixo é uma peculiaridade — edite, remova ou adicione sem afetar as outras.</p>
+
+              {observacaoItems.length > 0 && (
+                <ul className="space-y-1.5">
+                  {observacaoItems.map((item, i) => (
+                    <li key={i} className="flex items-start gap-2 rounded-[var(--radius)] border border-border bg-background px-3 py-2">
+                      {editingObsIndex === i ? (
+                        <>
+                          <div className="relative flex-1">
+                            <textarea
+                              rows={2}
+                              autoFocus
+                              value={editingObsText}
+                              onChange={(e) => setEditingObsText(e.target.value)}
+                              className="w-full resize-none rounded border border-primary/50 bg-background px-2 py-1 pr-8 text-sm text-foreground outline-none"
+                            />
+                            <DictateButton
+                              className="absolute bottom-1 right-1 h-6 w-6"
+                              onTranscript={(text) => setEditingObsText((prev) => (prev ? `${prev} ${text}` : text))}
+                            />
+                          </div>
+                          <div className="flex shrink-0 flex-col gap-1.5 pt-1">
+                            <button type="button" onClick={() => saveEditObservacao(i)} title="Salvar" className="text-primary hover:text-primary/80">
+                              <Check className="h-4 w-4" />
+                            </button>
+                            <button type="button" onClick={() => setEditingObsIndex(null)} title="Cancelar" className="text-muted-foreground hover:text-foreground">
+                              <X className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <span className="flex-1 whitespace-pre-wrap text-sm text-foreground">{item}</span>
+                          <div className="flex shrink-0 gap-1.5 pt-0.5">
+                            <button type="button" onClick={() => startEditObservacao(i)} title="Editar" className="text-muted-foreground hover:text-primary">
+                              <Pencil className="h-3.5 w-3.5" />
+                            </button>
+                            <button type="button" onClick={() => removeObservacao(i)} title="Remover" className="text-muted-foreground hover:text-red-400">
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+
               <div className="relative">
                 <textarea
-                  rows={4}
-                  maxLength={2000}
-                  placeholder='Ex: "Campanhas com [BOT] no nome são fluxo automatizado, têm lógica própria — nunca sugerir mover orçamento delas pra outra campanha." A IA lê isso antes de cada análise, junto com metas e desempenho.'
-                  value={config.observacoes_fixas ?? ''}
-                  onChange={(e) => setConfig((prev) => ({ ...prev, observacoes_fixas: e.target.value }))}
+                  rows={2}
+                  maxLength={500}
+                  placeholder='Nova peculiaridade... ex: "Campanhas com [BOT] no nome são fluxo automatizado, têm lógica própria — nunca sugerir mover orçamento delas pra outra campanha."'
+                  value={newObservacao}
+                  onChange={(e) => setNewObservacao(e.target.value)}
                   className="w-full resize-none rounded-[var(--radius)] border border-border bg-background px-3 py-2 pr-10 text-sm text-foreground outline-none focus:border-primary"
                 />
                 <DictateButton
                   className="absolute bottom-2 right-2"
-                  onTranscript={(text) => setConfig((prev) => ({ ...prev, observacoes_fixas: prev.observacoes_fixas ? `${prev.observacoes_fixas} ${text}` : text }))}
+                  onTranscript={(text) => setNewObservacao((prev) => (prev ? `${prev} ${text}` : text))}
                 />
               </div>
-              <p className="text-[11px] text-muted-foreground">Contexto fixo que a IA considera em toda análise deste cliente, além de metas e performance.</p>
+              <Button type="button" variant="outline" size="sm" onClick={addObservacao} disabled={!newObservacao.trim()}>
+                <Plus className="h-3.5 w-3.5" />
+                Adicionar peculiaridade
+              </Button>
             </div>
             <div className="flex items-center justify-end gap-2 pt-2">
               {saved && <span className="text-xs text-primary">Configuração salva!</span>}

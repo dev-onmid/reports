@@ -299,12 +299,13 @@ const systemTools: Anthropic.Tool[] = [
   },
   {
     name: 'configure_optimizer_client',
-    description: 'Atualiza a configuração do Otimizador de um cliente: observações fixas/peculiaridades (o texto que a IA do Otimizador lê antes de cada análise), modo de operação, ou dia da semana da análise. Só altera os campos informados, o resto permanece como está.',
+    description: 'Atualiza a configuração do Otimizador de um cliente: modo de operação, dia da semana da análise, ou peculiaridades (a lista de observações que a IA do Otimizador lê antes de cada análise — no painel aparecem como itens separados, um por linha). Por padrão, observacoes_fixas ADICIONA um item novo à lista sem apagar os existentes; use substituir_tudo=true só se o usuário pedir explicitamente para trocar/limpar tudo.',
     input_schema: {
       type: 'object' as const,
       properties: {
         client_id: { type: 'string', description: 'ID do cliente' },
-        observacoes_fixas: { type: 'string', description: 'Peculiaridades fixas do cliente para a IA do Otimizador considerar (ex: "campanhas com [BOT] no nome são fluxo automatizado, nunca sugerir mover orçamento delas")' },
+        observacoes_fixas: { type: 'string', description: 'Texto da peculiaridade a adicionar (ex: "campanhas com [BOT] no nome são fluxo automatizado, nunca sugerir mover orçamento delas"). Vira um novo item na lista, não sobrescreve os demais — a menos que substituir_tudo=true.' },
+        substituir_tudo: { type: 'boolean', description: 'Se true, APAGA todos os itens existentes e deixa só o texto informado em observacoes_fixas. Só use se o usuário pedir explicitamente para substituir/limpar tudo.' },
         modo_operacao: { type: 'string', enum: ['DIAGNOSTICO_APENAS', 'RECOMENDACAO_COM_APROVACAO', 'AUTOMATICO_PARCIAL', 'AUTOMATICO_TOTAL'], description: 'Modo de operação do Otimizador' },
         analise_dia_semana: { type: 'number', description: 'Dia da semana da análise: 1=segunda...5=sexta' },
       },
@@ -980,8 +981,8 @@ async function execSystemTool(
     }
 
     if (name === 'configure_optimizer_client') {
-      const { client_id, observacoes_fixas, modo_operacao, analise_dia_semana } = input as {
-        client_id: string; observacoes_fixas?: string; modo_operacao?: string; analise_dia_semana?: number;
+      const { client_id, observacoes_fixas, substituir_tudo, modo_operacao, analise_dia_semana } = input as {
+        client_id: string; observacoes_fixas?: string; substituir_tudo?: boolean; modo_operacao?: string; analise_dia_semana?: number;
       };
       const { rows: clientRows } = await pool.query('SELECT name FROM public.clients WHERE id = $1', [client_id]);
       if (clientRows.length === 0) return `Cliente ${client_id} não encontrado.`;
@@ -997,6 +998,12 @@ async function execSystemTool(
         analise_dia_semana: 1, ativo: true, observacoes_fixas: null,
       };
       const dia = analise_dia_semana && analise_dia_semana >= 1 && analise_dia_semana <= 5 ? analise_dia_semana : existing.analise_dia_semana;
+      // Cada linha do campo é um item na UI — por padrão, soma uma linha nova em vez de sobrescrever.
+      const nextObservacoes = observacoes_fixas === undefined
+        ? existing.observacoes_fixas
+        : substituir_tudo || !existing.observacoes_fixas
+          ? observacoes_fixas
+          : `${existing.observacoes_fixas}\n${observacoes_fixas}`;
       await pool.query(
         `INSERT INTO public.optimizer_client_config
            (client_id, modo_operacao, acoes_pre_aprovadas, orcamento_diario_maximo, cpr_emergencia,
@@ -1008,10 +1015,10 @@ async function execSystemTool(
         [
           client_id, modo_operacao ?? existing.modo_operacao, existing.acoes_pre_aprovadas, existing.orcamento_diario_maximo,
           existing.cpr_emergencia, existing.min_conjuntos_ativos, existing.max_conjuntos_ativos, existing.min_dias_aprendizado,
-          dia, existing.ativo, observacoes_fixas !== undefined ? observacoes_fixas : existing.observacoes_fixas, 'Luna IA',
+          dia, existing.ativo, nextObservacoes, 'Luna IA',
         ]
       );
-      return `Configuração do Otimizador atualizada para ${clientRows[0].name}.${observacoes_fixas !== undefined ? ` Observação fixa: "${observacoes_fixas}".` : ''}${modo_operacao ? ` Modo: ${modo_operacao}.` : ''}`;
+      return `Configuração do Otimizador atualizada para ${clientRows[0].name}.${observacoes_fixas !== undefined ? (substituir_tudo ? ` Peculiaridades substituídas por: "${observacoes_fixas}".` : ` Nova peculiaridade adicionada: "${observacoes_fixas}".`) : ''}${modo_operacao ? ` Modo: ${modo_operacao}.` : ''}`;
     }
 
     if (name === 'add_client_vault_credential') {
