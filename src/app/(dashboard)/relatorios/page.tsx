@@ -14,6 +14,7 @@ import { ClientAvatar } from '@/components/client-avatar';
 import { useClients } from '@/lib/client-store';
 import { callerHeaders } from '@/lib/auth-store';
 import { cn } from '@/lib/utils';
+import { exportReportToPdf } from '@/lib/export-report-pdf';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -118,6 +119,8 @@ export default function RelatoriosPage() {
   const [page, setPage] = useState(1);
   const [selectedReportIds, setSelectedReportIds] = useState<string[]>([]);
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [downloadingToken, setDownloadingToken] = useState<string | null>(null);
+  const [sendingAllPending, setSendingAllPending] = useState(false);
 
   // Load reports
   useEffect(() => {
@@ -427,8 +430,41 @@ export default function RelatoriosPage() {
     await sendPublicLink(report.public_token, report.title || `Relatório — ${report.client_name}`);
   }
 
-  function downloadReport(token: string) {
-    window.open(`${reportPath(token)}?print=1`, '_blank', 'noopener,noreferrer');
+  async function downloadReport(token: string, clientName: string) {
+    setDownloadingToken(token);
+    try {
+      const safeName = clientName.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9]+/g, '-');
+      await exportReportToPdf(token, `relatorio-${safeName}-${token.slice(0, 8)}.pdf`);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Erro ao gerar o PDF. Tente novamente.');
+    } finally {
+      setDownloadingToken(null);
+    }
+  }
+
+  async function sendAllPendingReports() {
+    if (!confirm('Gerar e enviar o relatório de todos os clientes com automação ativa que ainda não receberam este mês?')) return;
+    setSendingAllPending(true);
+    try {
+      const res = await fetch('/api/reports/send-pending', { method: 'POST' });
+      const data = await res.json().catch(() => ({})) as { processed?: number; results?: { client: string; status: string }[]; error?: string };
+      if (!res.ok) {
+        alert(data.error ?? 'Erro ao disparar os relatórios pendentes.');
+        return;
+      }
+      if (!data.processed) {
+        alert('Nenhum relatório pendente este mês — todos já foram gerados.');
+      } else {
+        const summary = (data.results ?? []).map(r => `${r.client}: ${r.status}`).join('\n');
+        alert(`${data.processed} relatório(s) processado(s).\n\n${summary}`);
+      }
+      const rows = await fetch('/api/reports').then(r => r.ok ? r.json() : []) as DiagnosticReport[];
+      setDiagnostics(rows);
+      const cfgs = await fetch('/api/reports/configs').then(r => r.ok ? r.json() : []) as ReportConfig[];
+      setConfigs(cfgs);
+    } finally {
+      setSendingAllPending(false);
+    }
   }
 
   const activeClientIds = new Set(clients.map(c => c.id));
@@ -601,8 +637,17 @@ export default function RelatoriosPage() {
               <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
             </div>
             <button
+              onClick={sendAllPendingReports}
+              disabled={sendingAllPending}
+              title="Gera e envia o relatório de todos os clientes com automação ativa que ainda não receberam este mês — use como contingência se o disparo automático falhar"
+              className="ml-auto flex items-center gap-1.5 px-3 py-2 text-sm bg-violet-500/10 text-violet-300 border border-violet-400/30 rounded-lg hover:bg-violet-500/20 transition-colors disabled:opacity-50"
+            >
+              {sendingAllPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+              Disparar pendentes
+            </button>
+            <button
               onClick={() => { setSearch(''); setFilterClient(''); setFilterOrigin(''); setPage(1); }}
-              className="flex items-center gap-1.5 px-3 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors ml-auto"
+              className="flex items-center gap-1.5 px-3 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
             >
               <RefreshCw className="w-3.5 h-3.5" />
               Limpar
@@ -745,10 +790,13 @@ export default function RelatoriosPage() {
                               </button>
                               <button
                                 title="Baixar PDF"
-                                onClick={() => downloadReport(row.public_token!)}
-                                className="p-1.5 rounded-md text-muted-foreground hover:text-violet-400 hover:bg-violet-500/10 transition-colors"
+                                disabled={downloadingToken === row.public_token}
+                                onClick={() => downloadReport(row.public_token!, row.client_name)}
+                                className="p-1.5 rounded-md text-muted-foreground hover:text-violet-400 hover:bg-violet-500/10 transition-colors disabled:opacity-50"
                               >
-                                <Download className="w-4 h-4" />
+                                {downloadingToken === row.public_token
+                                  ? <Loader2 className="w-4 h-4 animate-spin" />
+                                  : <Download className="w-4 h-4" />}
                               </button>
                             </>
                           ) : (
@@ -1119,10 +1167,13 @@ export default function RelatoriosPage() {
                             </button>
                             <button
                               title="Baixar PDF"
-                              onClick={() => downloadReport(cfg.last_token!)}
-                              className="p-1.5 rounded-md text-muted-foreground hover:text-violet-400 hover:bg-violet-500/10 transition-colors"
+                              disabled={downloadingToken === cfg.last_token}
+                              onClick={() => downloadReport(cfg.last_token!, cfg.client_name)}
+                              className="p-1.5 rounded-md text-muted-foreground hover:text-violet-400 hover:bg-violet-500/10 transition-colors disabled:opacity-50"
                             >
-                              <Download className="w-4 h-4" />
+                              {downloadingToken === cfg.last_token
+                                ? <Loader2 className="w-4 h-4 animate-spin" />
+                                : <Download className="w-4 h-4" />}
                             </button>
                             {cfg.whatsapp_group && cfg.zapi_client_id && (
                               <button
