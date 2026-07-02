@@ -6,6 +6,7 @@ import {
   Play, Pause, Square, CheckCircle2, AlertCircle, Loader2, Wifi, WifiOff,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { DictateButton } from '@/components/ui/dictate-button';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -391,9 +392,12 @@ export function DisparosTab({ clientId }: { clientId: string }) {
 
           <label className="block space-y-1">
             <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Mensagem</span>
-            <textarea value={message} onChange={e => setMessage(e.target.value)} rows={4}
-              placeholder="Olá {{nome}}, tudo bem?"
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary resize-none" />
+            <div className="relative">
+              <textarea value={message} onChange={e => setMessage(e.target.value)} rows={4}
+                placeholder="Olá {{nome}}, tudo bem?"
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 pr-10 text-sm focus:outline-none focus:ring-1 focus:ring-primary resize-none" />
+              <DictateButton className="absolute bottom-2 right-2" onTranscript={(text) => setMessage(message ? `${message} ${text}` : text)} />
+            </div>
             <p className="text-[10px] text-muted-foreground">Variáveis: <code className="bg-muted px-1 rounded">{'{{nome}}'}</code> <code className="bg-muted px-1 rounded">{'{{telefone}}'}</code></p>
           </label>
 

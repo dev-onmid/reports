@@ -11,6 +11,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { ClientAvatar } from '@/components/client-avatar';
+import { DictateButton } from '@/components/ui/dictate-button';
 import { useClients } from '@/lib/client-store';
 import { callerHeaders } from '@/lib/auth-store';
 import { cn } from '@/lib/utils';
@@ -1372,13 +1373,16 @@ export default function RelatoriosPage() {
                 <label className="text-xs text-muted-foreground font-medium">
                   Contexto da agência <span className="text-muted-foreground/50">(opcional)</span>
                 </label>
-                <textarea
-                  value={genForm.agencyContext}
-                  onChange={e => setGenForm(f => ({ ...f, agencyContext: e.target.value }))}
-                  placeholder="Ex: trocamos criativo dia 15, cliente ficou fechado 1 semana em fevereiro..."
-                  rows={2}
-                  className="w-full px-3 py-2.5 text-sm bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50 resize-none placeholder:text-muted-foreground/40"
-                />
+                <div className="relative">
+                  <textarea
+                    value={genForm.agencyContext}
+                    onChange={e => setGenForm(f => ({ ...f, agencyContext: e.target.value }))}
+                    placeholder="Ex: trocamos criativo dia 15, cliente ficou fechado 1 semana em fevereiro..."
+                    rows={2}
+                    className="w-full px-3 py-2.5 pr-10 text-sm bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50 resize-none placeholder:text-muted-foreground/40"
+                  />
+                  <DictateButton className="absolute bottom-2 right-2" onTranscript={(text) => setGenForm(f => ({ ...f, agencyContext: f.agencyContext ? `${f.agencyContext} ${text}` : text }))} />
+                </div>
               </div>
 
               {/* Cover picker — optional for both templates; defaults to sequential rotation */}

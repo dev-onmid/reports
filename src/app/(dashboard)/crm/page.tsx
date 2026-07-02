@@ -21,6 +21,7 @@ import { DisparosTab } from './disparos-tab';
 import { CaptureLinksTab } from '../clientes/[id]/capture-links-tab';
 import { useClients } from '@/lib/client-store';
 import { ClientAvatar, fetchClientPicture } from '@/components/client-avatar';
+import { DictateButton } from '@/components/ui/dictate-button';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 import type { Client } from '@/lib/mock-data';
 import type { AttendanceAudit } from '@/lib/crm-attendance-audit';
@@ -853,8 +854,11 @@ function QuickEditModal({
           </div>
           <label className="space-y-1">
             <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Observação</span>
-            <textarea value={draft.observacao ?? ''} onChange={e => set('observacao', e.target.value || null)} rows={3}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary resize-none" />
+            <div className="relative">
+              <textarea value={draft.observacao ?? ''} onChange={e => set('observacao', e.target.value || null)} rows={3}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 pr-10 text-sm focus:outline-none focus:ring-1 focus:ring-primary resize-none" />
+              <DictateButton className="absolute bottom-2 right-2" onTranscript={(text) => set('observacao', draft.observacao ? `${draft.observacao} ${text}` : text)} />
+            </div>
           </label>
         </div>
         <div className="flex items-center justify-between gap-3 px-5 py-4 border-t border-border shrink-0">
@@ -1959,13 +1963,18 @@ function AiCriteriaModal({
                 <span className={cn('inline-flex rounded-full border px-2 py-1 text-[10px] font-bold', temperatureBadgeClass(temp))}>
                   {TEMPERATURE_LABEL[temp]}
                 </span>
-                <textarea
-                  value={source[temp] ?? ''}
-                  onChange={e => setCriterion(temp, e.target.value)}
-                  disabled={useDefault}
-                  rows={4}
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary disabled:opacity-70"
-                />
+                <div className="relative">
+                  <textarea
+                    value={source[temp] ?? ''}
+                    onChange={e => setCriterion(temp, e.target.value)}
+                    disabled={useDefault}
+                    rows={4}
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 pr-10 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary disabled:opacity-70"
+                  />
+                  {!useDefault && (
+                    <DictateButton className="absolute bottom-2 right-2" onTranscript={(text) => setCriterion(temp, source[temp] ? `${source[temp]} ${text}` : text)} />
+                  )}
+                </div>
               </label>
             ))
           )}

@@ -13,6 +13,7 @@ import {
 } from 'recharts';
 import { useClients } from '@/lib/client-store';
 import { cn } from '@/lib/utils';
+import { DictateButton } from '@/components/ui/dictate-button';
 
 type Redirect = {
   id: string;
@@ -523,8 +524,11 @@ export default function RastreamentoPage() {
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-muted-foreground">Mensagem de abertura</label>
-                <textarea value={form.message} onChange={e => setForm(p => ({ ...p, message: e.target.value }))}
-                  rows={2} className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary resize-none" />
+                <div className="relative">
+                  <textarea value={form.message} onChange={e => setForm(p => ({ ...p, message: e.target.value }))}
+                    rows={2} className="w-full rounded-lg border border-border bg-background px-3 py-2 pr-10 text-sm outline-none focus:border-primary resize-none" />
+                  <DictateButton className="absolute bottom-2 right-2" onTranscript={(text) => setForm(p => ({ ...p, message: p.message ? `${p.message} ${text}` : text }))} />
+                </div>
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-muted-foreground">

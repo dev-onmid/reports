@@ -6,6 +6,7 @@ import {
   MessageCircle, MousePointerClick, Plus, RefreshCw, Settings2, Trash2, Wand2, X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { DictateButton } from '@/components/ui/dictate-button';
 
 type RedirectLink = {
   id: string;
@@ -592,12 +593,15 @@ export function CaptureLinksTab({ clientId }: { clientId: string }) {
                 />
               </Field>
               <Field label="Mensagem inicial">
-                <textarea
-                  value={form.message}
-                  onChange={e => setForm(prev => ({ ...prev, message: e.target.value }))}
-                  rows={3}
-                  className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
-                />
+                <div className="relative">
+                  <textarea
+                    value={form.message}
+                    onChange={e => setForm(prev => ({ ...prev, message: e.target.value }))}
+                    rows={3}
+                    className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2 pr-10 text-sm outline-none focus:border-primary"
+                  />
+                  <DictateButton className="absolute bottom-2 right-2" onTranscript={(text) => setForm(prev => ({ ...prev, message: prev.message ? `${prev.message} ${text}` : text }))} />
+                </div>
               </Field>
               <Field label="Slug opcional">
                 <div className="flex items-center gap-2">

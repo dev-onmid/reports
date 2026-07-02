@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
+import { DictateButton } from '@/components/ui/dictate-button';
 import {
   Plus, Trash2, Check, RefreshCw, AlertCircle,
   CheckCircle2, MinusCircle, ToggleLeft, ToggleRight,
@@ -643,19 +644,25 @@ export default function MetaAutomacoesPage() {
                 <label className="text-xs font-medium text-muted-foreground">
                   {form.action === 'send_dm' ? 'Mensagem da DM' : 'Resposta ao comentário'}
                 </label>
-                <textarea value={form.reply_message} onChange={e => setForm(f => ({ ...f, reply_message: e.target.value }))}
-                  placeholder="Digite a mensagem de resposta..."
-                  rows={3}
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary resize-none" />
+                <div className="relative">
+                  <textarea value={form.reply_message} onChange={e => setForm(f => ({ ...f, reply_message: e.target.value }))}
+                    placeholder="Digite a mensagem de resposta..."
+                    rows={3}
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 pr-10 text-sm outline-none focus:ring-1 focus:ring-primary resize-none" />
+                  <DictateButton className="absolute bottom-2 right-2" onTranscript={(text) => setForm(f => ({ ...f, reply_message: f.reply_message ? `${f.reply_message} ${text}` : text }))} />
+                </div>
               </div>
 
               {needsDmMessage && (
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium text-muted-foreground">Mensagem da DM (diferente da resposta ao comentário)</label>
-                  <textarea value={form.dm_message} onChange={e => setForm(f => ({ ...f, dm_message: e.target.value }))}
-                    placeholder="Olá! Vi seu comentário, aqui estão mais detalhes..."
-                    rows={2}
-                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary resize-none" />
+                  <div className="relative">
+                    <textarea value={form.dm_message} onChange={e => setForm(f => ({ ...f, dm_message: e.target.value }))}
+                      placeholder="Olá! Vi seu comentário, aqui estão mais detalhes..."
+                      rows={2}
+                      className="w-full rounded-lg border border-border bg-background px-3 py-2 pr-10 text-sm outline-none focus:ring-1 focus:ring-primary resize-none" />
+                    <DictateButton className="absolute bottom-2 right-2" onTranscript={(text) => setForm(f => ({ ...f, dm_message: f.dm_message ? `${f.dm_message} ${text}` : text }))} />
+                  </div>
                 </div>
               )}
 

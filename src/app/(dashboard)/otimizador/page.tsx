@@ -25,6 +25,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { DictateButton } from '@/components/ui/dictate-button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { ClientAvatar } from '@/components/client-avatar';
 import { callerHeaders, getAuthSession } from '@/lib/auth-store';
@@ -304,14 +305,20 @@ function ConfigModal({ clientId, clientName, onClose }: { clientId: string; clie
             </div>
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-muted-foreground">Peculiaridades deste cliente</label>
-              <textarea
-                rows={4}
-                maxLength={2000}
-                placeholder='Ex: "Campanhas com [BOT] no nome são fluxo automatizado, têm lógica própria — nunca sugerir mover orçamento delas pra outra campanha." A IA lê isso antes de cada análise, junto com metas e desempenho.'
-                value={config.observacoes_fixas ?? ''}
-                onChange={(e) => setConfig((prev) => ({ ...prev, observacoes_fixas: e.target.value }))}
-                className="w-full resize-none rounded-[var(--radius)] border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary"
-              />
+              <div className="relative">
+                <textarea
+                  rows={4}
+                  maxLength={2000}
+                  placeholder='Ex: "Campanhas com [BOT] no nome são fluxo automatizado, têm lógica própria — nunca sugerir mover orçamento delas pra outra campanha." A IA lê isso antes de cada análise, junto com metas e desempenho.'
+                  value={config.observacoes_fixas ?? ''}
+                  onChange={(e) => setConfig((prev) => ({ ...prev, observacoes_fixas: e.target.value }))}
+                  className="w-full resize-none rounded-[var(--radius)] border border-border bg-background px-3 py-2 pr-10 text-sm text-foreground outline-none focus:border-primary"
+                />
+                <DictateButton
+                  className="absolute bottom-2 right-2"
+                  onTranscript={(text) => setConfig((prev) => ({ ...prev, observacoes_fixas: prev.observacoes_fixas ? `${prev.observacoes_fixas} ${text}` : text }))}
+                />
+              </div>
               <p className="text-[11px] text-muted-foreground">Contexto fixo que a IA considera em toda análise deste cliente, além de metas e performance.</p>
             </div>
             <div className="flex items-center justify-end gap-2 pt-2">

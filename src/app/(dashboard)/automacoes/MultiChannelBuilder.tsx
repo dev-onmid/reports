@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useState } from 'react';
+import { DictateButton } from '@/components/ui/dictate-button';
 import {
   ReactFlow,
   Background,
@@ -481,13 +482,16 @@ export default function MultiChannelBuilder({
                 </div>
                 <div>
                   <label className="mb-1 block text-xs text-slate-400">Mensagem</label>
-                  <textarea
-                    value={selectedData.message ?? ''}
-                    onChange={(e) => patch({ message: e.target.value })}
-                    rows={5}
-                    className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none"
-                    placeholder="Olá {nome}! Como posso ajudar?"
-                  />
+                  <div className="relative">
+                    <textarea
+                      value={selectedData.message ?? ''}
+                      onChange={(e) => patch({ message: e.target.value })}
+                      rows={5}
+                      className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 pr-10 text-xs text-white placeholder-slate-500 focus:outline-none"
+                      placeholder="Olá {nome}! Como posso ajudar?"
+                    />
+                    <DictateButton className="absolute bottom-2 right-2" onTranscript={(text) => patch({ message: (selectedData.message as string) ? `${selectedData.message} ${text}` : text })} />
+                  </div>
                 </div>
                 <p className="text-[10px] text-slate-500">Variáveis: {'{nome}'} {'{email}'}</p>
               </div>
@@ -507,13 +511,16 @@ export default function MultiChannelBuilder({
                 </div>
                 <div>
                   <label className="mb-1 block text-xs text-slate-400">Mensagem</label>
-                  <textarea
-                    value={selectedData.message ?? ''}
-                    onChange={(e) => patch({ message: e.target.value })}
-                    rows={5}
-                    className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none"
-                    placeholder="Olá {nome}! Vi que você entrou em contato."
-                  />
+                  <div className="relative">
+                    <textarea
+                      value={selectedData.message ?? ''}
+                      onChange={(e) => patch({ message: e.target.value })}
+                      rows={5}
+                      className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 pr-10 text-xs text-white placeholder-slate-500 focus:outline-none"
+                      placeholder="Olá {nome}! Vi que você entrou em contato."
+                    />
+                    <DictateButton className="absolute bottom-2 right-2" onTranscript={(text) => patch({ message: (selectedData.message as string) ? `${selectedData.message} ${text}` : text })} />
+                  </div>
                 </div>
                 <p className="text-[10px] text-slate-500">Variáveis: {'{nome}'} {'{email}'}</p>
               </div>

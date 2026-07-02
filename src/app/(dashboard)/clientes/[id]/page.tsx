@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { mockDashboardData, mockClients, type ClientStatus, type DashboardType } from '@/lib/mock-data';
 import { useClients } from '@/lib/client-store';
 import { getAuthSession, verifyUserCredentials } from '@/lib/auth-store';
+import { DictateButton } from '@/components/ui/dictate-button';
 import {
   type MetaAdsMetrics,
   useMetaAdsConnections,
@@ -1029,12 +1030,15 @@ function AIMapBuilderModal({ clientName, onApply, onClose }: {
           {tab === 'text' && (
             <div className="space-y-3">
               <p className="text-[11px] text-muted-foreground">Descreva o cliente, o negócio, contexto estratégico ou qualquer conteúdo que deve virar mapa mental.</p>
-              <textarea
-                value={text}
-                onChange={e => setText(e.target.value)}
-                placeholder={`Ex: Restaurante italiano em SP, foco em delivery e salão VIP, público 30-50 anos, forte presença no Instagram, quer aumentar recompra e lançar programa de fidelidade...`}
-                className="w-full h-36 rounded-xl border border-input bg-background px-3 py-2.5 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-primary text-foreground placeholder:text-muted-foreground"
-              />
+              <div className="relative">
+                <textarea
+                  value={text}
+                  onChange={e => setText(e.target.value)}
+                  placeholder={`Ex: Restaurante italiano em SP, foco em delivery e salão VIP, público 30-50 anos, forte presença no Instagram, quer aumentar recompra e lançar programa de fidelidade...`}
+                  className="w-full h-36 rounded-xl border border-input bg-background px-3 py-2.5 pr-10 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-primary text-foreground placeholder:text-muted-foreground"
+                />
+                <DictateButton className="absolute bottom-2 right-2" onTranscript={(t) => setText(text ? `${text} ${t}` : t)} />
+              </div>
               <button onClick={() => generate(text)} disabled={!text.trim() || loading}
                 className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary text-primary-foreground py-2.5 text-sm font-bold disabled:opacity-50 hover:bg-primary/90 transition-colors">
                 {loading ? <><RefreshCw className="h-4 w-4 animate-spin" /> Gerando mapa...</> : <><Sparkles className="h-4 w-4" /> Gerar mapa mental</>}
@@ -1827,7 +1831,10 @@ function ClientMindMapTab({ clientId, clientName }: { clientId: string; clientNa
               </div>
               <div>
                 <Label className="text-[10px] uppercase tracking-wider">Notas</Label>
-                <textarea value={editingNode.note} onChange={e => updateNode(editingNode.id, { note: e.target.value })} className="mt-1 min-h-16 w-full resize-none rounded-lg border border-input bg-background px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary" placeholder="Detalhes, hipóteses, tarefas..." />
+                <div className="relative">
+                  <textarea value={editingNode.note} onChange={e => updateNode(editingNode.id, { note: e.target.value })} className="mt-1 min-h-16 w-full resize-none rounded-lg border border-input bg-background px-2.5 py-1.5 pr-8 text-xs focus:outline-none focus:ring-1 focus:ring-primary" placeholder="Detalhes, hipóteses, tarefas..." />
+                  <DictateButton className="absolute bottom-1.5 right-1.5 h-6 w-6" onTranscript={(t) => updateNode(editingNode.id, { note: editingNode.note ? `${editingNode.note} ${t}` : t })} />
+                </div>
               </div>
               <div>
                 {editingNode.image ? (
