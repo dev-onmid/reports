@@ -2691,6 +2691,14 @@ export function sInstagramCalendar(posts: InstagramPost[], idx: number, total: n
   const firstDay = new Date(year, month, 1).getDay();
   const leadingBlanks = (firstDay + 6) % 7; // Monday-first calendar
 
+  // Slide is capped at 810px tall — a 5- or 6-row month (5-6 weeks) would push a fixed
+  // 100px cell past that budget and spill onto a blank extra page when printed, so the
+  // cell height (and what fits inside it) shrinks as the month needs more rows.
+  const numRows = Math.ceil((leadingBlanks + daysInMonth) / 7);
+  const cellHeight = numRows >= 6 ? 72 : numRows === 5 ? 88 : 100;
+  const thumbSize = numRows >= 6 ? 26 : numRows === 5 ? 30 : 34;
+  const clampLines = numRows >= 6 ? 2 : 3;
+
   type ContentKind = 'Reel' | 'Carrossel' | 'Story' | 'Feed' | 'Bastidores' | 'Oferta' | 'Prova social' | 'Institucional';
   const kindStyles: Record<ContentKind, { bg: string; border: string; color: string }> = {
     Reel:          { bg: '#EAFDE6', border: '#B9F7AE', color: PRIMARY_TEXT },
@@ -2765,20 +2773,20 @@ export function sInstagramCalendar(posts: InstagramPost[], idx: number, total: n
   const thumbBox = (post: InstagramPost) => {
     const s = kindStyles[displayKind(post)] ?? kindStyles.Feed;
     return post.thumbnailUrl
-      ? `<div style="width:34px;height:34px;border-radius:7px;overflow:hidden;flex-shrink:0;background:${s.bg};border:1px solid ${s.border}">
+      ? `<div style="width:${thumbSize}px;height:${thumbSize}px;border-radius:7px;overflow:hidden;flex-shrink:0;background:${s.bg};border:1px solid ${s.border}">
           <img src="${post.thumbnailUrl}" alt="" style="width:100%;height:100%;object-fit:cover;display:block" onerror="this.parentElement.style.background='${s.bg}';this.remove()" />
         </div>`
-      : `<div style="width:34px;height:34px;border-radius:7px;flex-shrink:0;background:${s.bg};border:1px solid ${s.border};display:flex;align-items:center;justify-content:center">
+      : `<div style="width:${thumbSize}px;height:${thumbSize}px;border-radius:7px;flex-shrink:0;background:${s.bg};border:1px solid ${s.border};display:flex;align-items:center;justify-content:center">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="${s.color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></svg>
         </div>`;
   };
 
   const dayCell = (day: number | null) => {
-    if (!day) return `<div style="height:100px;border:1px solid #EDF1F6;background:#F8FAFC;border-radius:12px;opacity:.6"></div>`;
+    if (!day) return `<div style="height:${cellHeight}px;border:1px solid #EDF1F6;background:#F8FAFC;border-radius:12px;opacity:.6"></div>`;
     const key = dayKey(new Date(year, month, day));
     const dayPosts = postsByDay.get(key) ?? [];
     if (!dayPosts.length) {
-      return `<div style="height:100px;border:1px solid #EDF1F6;background:#FFFFFF;border-radius:12px;padding:8px;box-sizing:border-box">
+      return `<div style="height:${cellHeight}px;border:1px solid #EDF1F6;background:#FFFFFF;border-radius:12px;padding:8px;box-sizing:border-box">
         <span style="font-family:${INTER};font-size:12px;font-weight:850;color:#94A3B8;line-height:1">${day}</span>
       </div>`;
     }
@@ -2786,7 +2794,7 @@ export function sInstagramCalendar(posts: InstagramPost[], idx: number, total: n
     const mainPermalink = main.permalink?.trim();
     const extraCount = dayPosts.length - 1;
     const extra = extraCount > 0 ? `<span style="font-family:${INTER};font-size:9px;font-weight:900;color:#94A3B8;flex-shrink:0">+${extraCount}</span>` : '';
-    const inner = `<div style="height:100px;border:1px solid #DDEFE1;background:#FBFFFA;border-radius:12px;padding:8px;box-sizing:border-box;display:flex;flex-direction:column;gap:5px;overflow:hidden">
+    const inner = `<div style="height:${cellHeight}px;border:1px solid #DDEFE1;background:#FBFFFA;border-radius:12px;padding:8px;box-sizing:border-box;display:flex;flex-direction:column;gap:5px;overflow:hidden">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:5px;flex-shrink:0">
         <span style="font-family:${INTER};font-size:12px;font-weight:850;color:${FG};line-height:1;flex-shrink:0">${day}</span>
         <div style="display:flex;align-items:center;gap:4px;min-width:0">
@@ -2797,12 +2805,12 @@ export function sInstagramCalendar(posts: InstagramPost[], idx: number, total: n
       <div style="display:flex;gap:6px;align-items:flex-start;min-width:0;flex:1">
         ${thumbBox(main)}
         <div style="min-width:0;flex:1;display:flex;flex-direction:column">
-          <p style="font-family:${INTER};font-size:9px;font-weight:650;color:#475569;line-height:1.22;margin:0;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden">${truncate(main.caption, 78) || 'sem legenda'}</p>
+          <p style="font-family:${INTER};font-size:9px;font-weight:650;color:#475569;line-height:1.22;margin:0;display:-webkit-box;-webkit-line-clamp:${clampLines};-webkit-box-orient:vertical;overflow:hidden">${truncate(main.caption, 78) || 'sem legenda'}</p>
         </div>
       </div>
     </div>`;
     if (!mainPermalink || mainPermalink === '#') return inner;
-    return `<a href="${escapeHtmlAttr(mainPermalink)}" target="_blank" rel="noopener noreferrer" style="display:block;height:100px;text-decoration:none;color:inherit">${inner}</a>`;
+    return `<a href="${escapeHtmlAttr(mainPermalink)}" target="_blank" rel="noopener noreferrer" style="display:block;height:${cellHeight}px;text-decoration:none;color:inherit">${inner}</a>`;
   };
 
   const calendarCells: Array<number | null> = [
@@ -2983,13 +2991,13 @@ export function sInstagramSpotlight(posts: InstagramPost[], idx: number, total: 
   // Same icon set + pill language as "Top conteúdos do mês" — same visual standard,
   // just sized up for a hero treatment around the centered, larger thumbnail.
   const heroMetric = (iconPath: string, label: string, value: string, highlight = false) =>
-    `<div style="height:72px;border:1px solid ${highlight ? '#DDF6D8' : '#E7ECF3'};border-radius:14px;background:${highlight ? 'linear-gradient(135deg,#F0FDEC,#FFFFFF)' : CARD};box-shadow:0 10px 24px rgba(15,23,42,.05);display:flex;align-items:center;gap:13px;padding:0 16px;box-sizing:border-box">
-      <div style="width:38px;height:38px;border-radius:10px;background:${highlight ? `${PRIMARY}22` : `${PRIMARY}15`};display:flex;align-items:center;justify-content:center;flex-shrink:0">
-        ${igIconSvg(iconPath, PRIMARY_TEXT, 19)}
+    `<div style="height:62px;border:1px solid ${highlight ? '#DDF6D8' : '#E7ECF3'};border-radius:14px;background:${highlight ? 'linear-gradient(135deg,#F0FDEC,#FFFFFF)' : CARD};box-shadow:0 10px 24px rgba(15,23,42,.05);display:flex;align-items:center;gap:13px;padding:0 16px;box-sizing:border-box">
+      <div style="width:36px;height:36px;border-radius:10px;background:${highlight ? `${PRIMARY}22` : `${PRIMARY}15`};display:flex;align-items:center;justify-content:center;flex-shrink:0">
+        ${igIconSvg(iconPath, PRIMARY_TEXT, 18)}
       </div>
       <div style="min-width:0">
         <p style="font-size:11px;font-weight:700;color:${MUTED};margin:0 0 2px;font-family:${INTER};line-height:1">${label}</p>
-        <p style="font-size:21px;font-weight:900;color:${highlight ? PRIMARY_TEXT : FG};margin:0;font-family:${INTER};line-height:1;letter-spacing:-0.02em">${value}</p>
+        <p style="font-size:19px;font-weight:900;color:${highlight ? PRIMARY_TEXT : FG};margin:0;font-family:${INTER};line-height:1;letter-spacing:-0.02em">${value}</p>
       </div>
     </div>`;
 
@@ -3007,18 +3015,18 @@ export function sInstagramSpotlight(posts: InstagramPost[], idx: number, total: 
   const body = `<div data-slide-index="${idx}" data-slide-total="${total}" style="width:1440px;min-height:810px;background:${BG};border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
   <div style="position:absolute;right:60px;top:-100px;width:560px;height:480px;border-radius:50%;background:linear-gradient(135deg,rgba(219,234,254,.55),rgba(255,255,255,.15));opacity:.7;pointer-events:none"></div>
 
-  <div style="position:relative;z-index:1;flex:1;padding:80px 48px 0;display:flex;flex-direction:column">
-    <div style="flex-shrink:0;margin-bottom:24px">
-      <h1 style="font-family:${INTER};font-size:52px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 8px;letter-spacing:-0.03em">${reportTitle('Melhor conteúdo do mês')}</h1>
+  <div style="position:relative;z-index:1;flex:1;padding:44px 48px 0;display:flex;flex-direction:column">
+    <div style="flex-shrink:0;margin-bottom:16px">
+      <h1 style="font-family:${INTER};font-size:44px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 6px;letter-spacing:-0.03em">${reportTitle('Melhor conteúdo do mês')}</h1>
       <p style="font-size:16px;font-weight:500;color:#163461;font-family:${INTER};margin:0">O post com melhor desempenho entre os publicados no período</p>
     </div>
 
-    <div style="display:flex;align-items:center;justify-content:center;gap:28px;flex-shrink:0;margin-bottom:24px">
-      <div style="display:flex;flex-direction:column;gap:14px;width:250px;flex-shrink:0">
+    <div style="display:flex;align-items:center;justify-content:center;gap:28px;flex-shrink:0;margin-bottom:16px">
+      <div style="display:flex;flex-direction:column;gap:10px;width:250px;flex-shrink:0">
         ${leftMetrics.join('')}
       </div>
 
-      <div style="position:relative;width:380px;height:440px;border-radius:22px;overflow:hidden;background:${ROW};box-shadow:0 20px 46px rgba(15,23,42,.16);flex-shrink:0">
+      <div style="position:relative;width:330px;height:380px;border-radius:22px;overflow:hidden;background:${ROW};box-shadow:0 20px 46px rgba(15,23,42,.16);flex-shrink:0">
         ${best.thumbnailUrl
           ? `<img src="${best.thumbnailUrl}" style="width:100%;height:100%;object-fit:cover" />`
           : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#E1306C22,#F7717122)"><svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="#E1306C" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${ICO_LAYERS}</svg></div>`}
@@ -3032,17 +3040,17 @@ export function sInstagramSpotlight(posts: InstagramPost[], idx: number, total: 
         </div>
       </div>
 
-      <div style="display:flex;flex-direction:column;gap:14px;width:250px;flex-shrink:0">
+      <div style="display:flex;flex-direction:column;gap:10px;width:250px;flex-shrink:0">
         ${rightMetrics.join('')}
       </div>
     </div>
 
-    <div style="display:flex;flex-direction:column;gap:16px;max-width:1000px;margin:0 auto;width:100%">
-      ${caption ? `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:16px;box-shadow:0 12px 28px rgba(15,23,42,.06);padding:20px 24px">
-        <p style="font-size:14px;color:#163461;font-family:${INTER};line-height:1.6;margin:0">"${caption}"</p>
+    <div style="display:flex;flex-direction:column;gap:10px;max-width:1000px;margin:0 auto;width:100%">
+      ${caption ? `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:16px;box-shadow:0 12px 28px rgba(15,23,42,.06);padding:14px 20px">
+        <p style="font-size:14px;color:#163461;font-family:${INTER};line-height:1.5;margin:0">"${caption}"</p>
       </div>` : ''}
 
-      <div data-conclusion="1" style="background:${CARD};border:1px solid #E7ECF3;border-radius:16px;box-shadow:0 12px 28px rgba(15,23,42,.06);display:flex;align-items:flex-start;gap:16px;padding:18px 24px">
+      <div data-conclusion="1" style="background:${CARD};border:1px solid #E7ECF3;border-radius:16px;box-shadow:0 12px 28px rgba(15,23,42,.06);display:flex;align-items:flex-start;gap:16px;padding:14px 20px">
         <div style="width:38px;height:38px;border-radius:50%;background:${PRIMARY}16;display:flex;align-items:center;justify-content:center;flex-shrink:0">
           ${igIconSvg(ICO_TREND, PRIMARY_TEXT, 17)}
         </div>
