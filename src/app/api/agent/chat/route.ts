@@ -248,7 +248,7 @@ const systemTools: Anthropic.Tool[] = [
   },
   {
     name: 'schedule_payment',
-    description: 'Agenda ou registra um pagamento PIX no sistema.',
+    description: 'Agenda ou registra um pagamento PIX novo no sistema (cria um lançamento). Para MUDAR a data de um pagamento que já existe, use reschedule_client_payment em vez desta.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -260,6 +260,72 @@ const systemTools: Anthropic.Tool[] = [
         status: { type: 'string', enum: ['pendente', 'agendado', 'pago'], description: 'Status inicial (padrão: agendado)' },
       },
       required: ['client_id', 'destination', 'amount', 'date'],
+    },
+  },
+  {
+    name: 'list_client_payments',
+    description: 'Lista os pagamentos (pendentes, agendados e recentes) de um cliente, com id, data, valor e status. Use ANTES de reschedule_client_payment para descobrir o payment_id certo, a menos que o usuário já tenha dito qual.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        client_id: { type: 'string', description: 'ID do cliente' },
+      },
+      required: ['client_id'],
+    },
+  },
+  {
+    name: 'reschedule_client_payment',
+    description: 'AÇÃO SENSÍVEL — muda a data de UM pagamento específico já existente (ajuste pontual, "só essa semana/mês"). NÃO altera o dia fixo de vencimento do cliente. Antes de chamar: descreva o que vai fazer (qual pagamento, data nova) e espere confirmação explícita do usuário em outra mensagem.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        payment_id: { type: 'string', description: 'ID do pagamento a reagendar (use list_client_payments se não souber)' },
+        new_date: { type: 'string', description: 'Nova data YYYY-MM-DD' },
+      },
+      required: ['payment_id', 'new_date'],
+    },
+  },
+  {
+    name: 'set_client_payment_due_day',
+    description: 'AÇÃO SENSÍVEL — define o dia fixo de vencimento do PIX/pagamento de um cliente PARA SEMPRE (muda o padrão recorrente, não um pagamento específico). Use quando o usuário disser algo como "definitivo", "sempre", "todo mês". Antes de chamar: confirme com o usuário se é mesmo uma mudança permanente (e não pontual) e espere a resposta em outra mensagem antes de executar.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        client_id: { type: 'string', description: 'ID do cliente' },
+        due_day: { type: 'number', description: 'Dia do mês de vencimento, 1 a 31' },
+      },
+      required: ['client_id', 'due_day'],
+    },
+  },
+  {
+    name: 'configure_optimizer_client',
+    description: 'Atualiza a configuração do Otimizador de um cliente: observações fixas/peculiaridades (o texto que a IA do Otimizador lê antes de cada análise), modo de operação, ou dia da semana da análise. Só altera os campos informados, o resto permanece como está.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        client_id: { type: 'string', description: 'ID do cliente' },
+        observacoes_fixas: { type: 'string', description: 'Peculiaridades fixas do cliente para a IA do Otimizador considerar (ex: "campanhas com [BOT] no nome são fluxo automatizado, nunca sugerir mover orçamento delas")' },
+        modo_operacao: { type: 'string', enum: ['DIAGNOSTICO_APENAS', 'RECOMENDACAO_COM_APROVACAO', 'AUTOMATICO_PARCIAL', 'AUTOMATICO_TOTAL'], description: 'Modo de operação do Otimizador' },
+        analise_dia_semana: { type: 'number', description: 'Dia da semana da análise: 1=segunda...5=sexta' },
+      },
+      required: ['client_id'],
+    },
+  },
+  {
+    name: 'add_client_vault_credential',
+    description: 'AÇÃO SENSÍVEL — guarda uma senha/credencial no Cofre de um cliente. Antes de chamar: repita em texto o título e para qual cliente (NUNCA repita a senha em texto puro na sua resposta) e espere confirmação explícita do usuário em outra mensagem antes de executar.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        client_id: { type: 'string', description: 'ID do cliente' },
+        title: { type: 'string', description: 'Título da credencial (ex: "Facebook Ads", "Painel Google")' },
+        login: { type: 'string', description: 'Usuário/login (opcional)' },
+        password: { type: 'string', description: 'Senha (opcional)' },
+        url: { type: 'string', description: 'URL do sistema (opcional)' },
+        category: { type: 'string', description: 'Categoria (opcional, padrão "Outros")' },
+        notes: { type: 'string', description: 'Observações (opcional)' },
+      },
+      required: ['client_id', 'title'],
     },
   },
   {
@@ -878,6 +944,98 @@ async function execSystemTool(
       return `Pagamento registrado: R$ ${Number(amount).toFixed(2)} via ${channel.toUpperCase()} para "${destination}" em ${date}. Status: ${status}. ID: ${payId}`;
     }
 
+    if (name === 'list_client_payments') {
+      const { client_id } = input as { client_id: string };
+      const { rows } = await pool.query(
+        `SELECT id, date, destination, amount, channel, status FROM public.payments
+          WHERE client_id = $1 ORDER BY date DESC LIMIT 20`,
+        [client_id]
+      );
+      if (rows.length === 0) return 'Nenhum pagamento encontrado para este cliente.';
+      return JSON.stringify(rows);
+    }
+
+    if (name === 'reschedule_client_payment') {
+      const { payment_id, new_date } = input as { payment_id: string; new_date: string };
+      const { rows } = await pool.query(
+        `UPDATE public.payments SET date = $1 WHERE id = $2
+         RETURNING id, client_name, destination, amount, date, status`,
+        [new_date, payment_id]
+      );
+      if (rows.length === 0) return `Pagamento ${payment_id} não encontrado.`;
+      const p = rows[0];
+      return `Pagamento de R$ ${Number(p.amount).toFixed(2)} (${p.destination}) do cliente ${p.client_name} reagendado para ${p.date}. Status: ${p.status}.`;
+    }
+
+    if (name === 'set_client_payment_due_day') {
+      const { client_id, due_day } = input as { client_id: string; due_day: number };
+      if (!Number.isInteger(due_day) || due_day < 1 || due_day > 31) return 'due_day deve ser um número inteiro entre 1 e 31.';
+      await pool.query('ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS dia_vencimento_pix INTEGER').catch(() => {});
+      const { rows } = await pool.query(
+        `UPDATE public.clients SET dia_vencimento_pix = $1 WHERE id = $2 RETURNING name`,
+        [due_day, client_id]
+      );
+      if (rows.length === 0) return `Cliente ${client_id} não encontrado.`;
+      return `Dia de vencimento fixo do cliente ${rows[0].name} definido como todo dia ${due_day} (mudança permanente, vale a partir de agora).`;
+    }
+
+    if (name === 'configure_optimizer_client') {
+      const { client_id, observacoes_fixas, modo_operacao, analise_dia_semana } = input as {
+        client_id: string; observacoes_fixas?: string; modo_operacao?: string; analise_dia_semana?: number;
+      };
+      const { rows: clientRows } = await pool.query('SELECT name FROM public.clients WHERE id = $1', [client_id]);
+      if (clientRows.length === 0) return `Cliente ${client_id} não encontrado.`;
+      const { rows: existingRows } = await pool.query(
+        `SELECT modo_operacao, acoes_pre_aprovadas, orcamento_diario_maximo, cpr_emergencia,
+                min_conjuntos_ativos, max_conjuntos_ativos, min_dias_aprendizado, analise_dia_semana, ativo, observacoes_fixas
+           FROM public.optimizer_client_config WHERE client_id = $1`,
+        [client_id]
+      );
+      const existing = existingRows[0] ?? {
+        modo_operacao: 'RECOMENDACAO_COM_APROVACAO', acoes_pre_aprovadas: [], orcamento_diario_maximo: null,
+        cpr_emergencia: null, min_conjuntos_ativos: 1, max_conjuntos_ativos: 20, min_dias_aprendizado: 7,
+        analise_dia_semana: 1, ativo: true, observacoes_fixas: null,
+      };
+      const dia = analise_dia_semana && analise_dia_semana >= 1 && analise_dia_semana <= 5 ? analise_dia_semana : existing.analise_dia_semana;
+      await pool.query(
+        `INSERT INTO public.optimizer_client_config
+           (client_id, modo_operacao, acoes_pre_aprovadas, orcamento_diario_maximo, cpr_emergencia,
+            min_conjuntos_ativos, max_conjuntos_ativos, min_dias_aprendizado, analise_dia_semana, ativo, observacoes_fixas, updated_at, updated_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW(),$12)
+         ON CONFLICT (client_id) DO UPDATE SET
+           modo_operacao = EXCLUDED.modo_operacao, analise_dia_semana = EXCLUDED.analise_dia_semana,
+           observacoes_fixas = EXCLUDED.observacoes_fixas, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
+        [
+          client_id, modo_operacao ?? existing.modo_operacao, existing.acoes_pre_aprovadas, existing.orcamento_diario_maximo,
+          existing.cpr_emergencia, existing.min_conjuntos_ativos, existing.max_conjuntos_ativos, existing.min_dias_aprendizado,
+          dia, existing.ativo, observacoes_fixas !== undefined ? observacoes_fixas : existing.observacoes_fixas, 'Luna IA',
+        ]
+      );
+      return `Configuração do Otimizador atualizada para ${clientRows[0].name}.${observacoes_fixas !== undefined ? ` Observação fixa: "${observacoes_fixas}".` : ''}${modo_operacao ? ` Modo: ${modo_operacao}.` : ''}`;
+    }
+
+    if (name === 'add_client_vault_credential') {
+      const { client_id, title, login, password, url, category, notes } = input as {
+        client_id: string; title: string; login?: string; password?: string; url?: string; category?: string; notes?: string;
+      };
+      const { rows: clientRows } = await pool.query('SELECT name FROM public.clients WHERE id = $1', [client_id]);
+      if (clientRows.length === 0) return `Cliente ${client_id} não encontrado.`;
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS public.client_vault (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(), client_id TEXT NOT NULL, title TEXT NOT NULL,
+          url TEXT, login TEXT, password_enc TEXT, category TEXT NOT NULL DEFAULT 'Outros', notes TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_client_vault_client ON public.client_vault (client_id);
+      `).catch(() => {});
+      await pool.query(
+        `INSERT INTO public.client_vault (client_id, title, url, login, password_enc, category, notes)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [client_id, title.trim(), url ?? null, login ?? null, password ?? null, category ?? 'Outros', notes ?? null]
+      );
+      return `Credencial "${title}" salva no Cofre de ${clientRows[0].name}.`;
+    }
+
     if (name === 'create_meta_campaign') {
       const {
         client_id, name: campName, objective, daily_budget,
@@ -1306,7 +1464,14 @@ export async function POST(req: NextRequest) {
 
 - Quando uma ferramenta retornar um relatório de operação (create_meta_campaign, generate_client_report, generate_report_pdf, send_report_pdf_whatsapp, create_user, create_webhook, create_disparo, schedule_payment, link_account), copie e exiba o conteúdo EXATO retornado pela ferramenta, sem resumir, parafrasear ou omitir linhas. O relatório já está formatado para o usuário.
 - Se a ferramenta retornar ✅ ou ❌ em alguma linha, preserve esses símbolos.
-- Nunca substitua um relatório de múltiplas linhas por uma única frase curta.`;
+- Nunca substitua um relatório de múltiplas linhas por uma única frase curta.
+
+## Confirmação obrigatória antes de ações sensíveis
+As ferramentas add_client_vault_credential, reschedule_client_payment, set_client_payment_due_day e create_user alteram dados sensíveis (senhas, pagamentos, acesso ao sistema). Para estas ferramentas:
+1. NUNCA as chame na mesma resposta em que o usuário pediu a ação. Primeiro responda em texto (sem tool_use) descrevendo exatamente o que você vai fazer — cliente, valores, datas — e pergunte "confirma?". NUNCA reescreva a senha em texto na sua confirmação.
+2. Se o usuário pedir para mudar "a data de pagamento" sem dizer se é só uma vez ou definitivo, pergunte explicitamente: "é só para este pagamento (ajuste pontual) ou quer mudar o dia fixo de vencimento pra sempre?" antes de decidir entre reschedule_client_payment e set_client_payment_due_day.
+3. Só chame a ferramenta depois que o usuário confirmar explicitamente ("sim", "confirma", "pode") em uma mensagem separada.
+4. Ferramentas de leitura e configure_optimizer_client/generate_report_pdf/send_report_pdf_whatsapp/update_meta_campaign_status NÃO precisam desta confirmação — execute direto como já faz hoje.`;
 
   // Build dynamic external tools
   const dynTools: Anthropic.Tool[] = externalTools.map((t) => {

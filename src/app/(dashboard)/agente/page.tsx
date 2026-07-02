@@ -74,6 +74,11 @@ const TOOL_LABELS: Record<string, string> = {
   generate_report_pdf: 'gerando PDF',
   send_report_pdf_whatsapp: 'gerando e enviando PDF',
   list_zapi_clients: 'buscando conexões WhatsApp',
+  list_client_payments: 'consultando pagamentos',
+  reschedule_client_payment: 'reagendando pagamento',
+  set_client_payment_due_day: 'atualizando dia de vencimento',
+  configure_optimizer_client: 'configurando Otimizador',
+  add_client_vault_credential: 'salvando credencial no Cofre',
 };
 
 function getToolLabel(name: string): string {
