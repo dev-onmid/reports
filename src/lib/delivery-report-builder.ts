@@ -582,35 +582,23 @@ function addInsightActions(target: Record<string, number>, rows: unknown): void 
   }
 }
 
-// The real Meta objective (from the API) is the source of truth, and leads/mensagens/
-// vendas always take priority over alcance — never the other way around. Agency naming
-// conventions like "[MEIO_FUNIL]"/"[TOPO_FUNIL]" describe funnel STAGE, not objective, and
-// "funil" alone used to be matched as an alcance signal before objective was even checked,
-// which silently downgraded real lead/message/sales campaigns to "alcance" any time their
-// name happened to contain that word. Name regexes now only kick in as a fallback when the
-// objective itself is missing/unrecognized (categorizeMetaObjective default of 'trafego').
+// The real Meta objective (from the API) is the ONLY thing that decides a campaign's
+// segment/kind — never the campaign name, and never what it happened to achieve. Name
+// regexes only kick in as a fallback when the objective itself is missing/unrecognized
+// (categorizeMetaObjective default of 'trafego').
 function campaignKindFor(c: CampanhaDetalhada): CampaignKind {
-  const m = c.metricas;
   const objective = categorizeMetaObjective(c.tipo);
 
-  // When the declared objective is leads, mensagens or vendas, trust it — Meta
-  // reports cross-action aliases on every campaign (a LEAD_GENERATION campaign
-  // also fires messaging_conversation_started if the ad has a WhatsApp CTA, and
-  // a MESSAGES campaign can surface a stray lead action). Checking raw metric
-  // values first caused them to swap: form campaigns appeared as "conversas" and
-  // vice-versa. The objective is authoritative for these three categories.
-  if (objective === 'leads')     return 'leads';
-  if (objective === 'mensagens') return 'mensagens';
-  if (objective === 'vendas')    return 'vendas';
-
-  // For Alcance/Engajamento campaigns, what the campaign actually achieved takes
-  // priority over the declared objective — a Reach campaign with a "Send message"
-  // CTA that drove real purchases/conversations/leads should be filed under that
-  // real result, not under Alcance.
-  if (m.compras > 0)   return 'vendas';
-  if (m.conversas > 0) return 'mensagens';
-  if (m.leads > 0)     return 'leads';
-
+  // The declared objective is the ONLY source of truth for which segment a campaign
+  // belongs to — never what it happened to achieve. A Reach-objective campaign that
+  // drove a bonus purchase (Meta cross-attributes a lot) must still be filed under
+  // Alcance, not Vendas — otherwise its card shows CPA/ROAS for an objective it was
+  // never optimized for, and its real alcance metrics (CPM, pessoas atingidas) vanish.
+  // A previous "what it achieved wins" override caused exactly the WhatsApp/Alcance
+  // campaigns misclassified as Vendas — do not reintroduce it.
+  if (objective === 'leads')       return 'leads';
+  if (objective === 'mensagens')   return 'mensagens';
+  if (objective === 'vendas')      return 'vendas';
   if (objective === 'engajamento') return 'engajamento';
   if (objective === 'alcance')     return 'alcance';
 
@@ -2165,11 +2153,11 @@ export function sMetaAdsResumo(meta: MetaAdsFull, idx: number, total: number): s
   const leadInvestment = sum(leadCampaigns, c => c.metricas.investimento);
   const messagingInvestment = sum(messagingCampaigns, c => c.metricas.investimento);
   const leadFormInvestment = sum(leadFormCampaigns, c => c.metricas.investimento);
-  // Sum conversas and form leads across ALL campaigns — a leads or alcance campaign
-  // with a WhatsApp CTA generates real conversations that belong in the total even
-  // though the declared objective isn't "Mensagens".
-  const totalConversas = sum(meta.campanhas, c => c.metricas.conversas);
-  const totalFormLeads = sum(meta.campanhas, c => c.metricas.leads);
+  // Scoped strictly to campaigns whose declared objective is Mensagens/Leads — a
+  // conversa/lead logged on an Alcance or Tráfego campaign is a bonus result of that
+  // OTHER objective, not something to fold into the Leads e conversas totals here.
+  const totalConversas = sum(messagingCampaigns, c => c.metricas.conversas);
+  const totalFormLeads = sum(leadFormCampaigns, c => c.metricas.leads);
   const totalResultados = totalConversas + totalFormLeads;
   // CPL geral: total invested / all results (conversas + formulários combined).
   // Individual unit costs use total investment too — when results come from mixed
@@ -3368,6 +3356,14 @@ export function sMetaAdsCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number
       row2 = [
         ...(isLeadsCampaign && m.conversas > 0 ? [metricItem(ICO_TARGET, 'Conversas iniciadas', num(Math.round(m.conversas)), style.accent, style.iconBg)] : []),
         metricItem(ICO_BARS, 'Frequência', m.frequencia > 0 ? m.frequencia.toFixed(2) : '—', style.accent, style.iconBg),
+        // Bonus/derived sale — this campaign's objective is Leads/Mensagens, not
+        // Vendas, so no "custo por compra" or ROAS here (that cost belongs to the
+        // objective the campaign was actually optimized for). Just the raw count
+        // and revenue, as a side note.
+        ...(m.compras > 0 ? [
+          metricItem(ICO_CART, 'Compras registradas', num(Math.round(m.compras)), style.accent, style.iconBg),
+          metricItem(ICO_RECEIPT, 'Valor de venda', m.valor_compras > 0 ? brl(m.valor_compras) : '—', style.accent, style.iconBg),
+        ] : []),
       ].join('');
     } else if (campIsSales) {
       const cpp = m.compras > 0 && m.investimento > 0 ? brlPrecise(m.investimento / m.compras) : '—';
