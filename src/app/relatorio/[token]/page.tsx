@@ -78,10 +78,13 @@ export default async function RelatorioPublicoPage({
         --report-text: #0F172A;
         --report-muted: #334155;
       }
+      @page { size: 1440px 810px; margin: 0; }
       @media print {
-        @page { size: landscape; margin: 0; }
         body { background: var(--report-canvas) !important; }
         [style*="page-break-after"] { break-after: page; }
+        * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
+        .onmid-report { padding: 0 !important; }
+        [style*="width:1440px"] { margin: 0 !important; }
       }
       * { box-sizing: border-box; }
       body { background: var(--report-canvas); }
