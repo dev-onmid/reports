@@ -587,20 +587,32 @@ function addInsightActions(target: Record<string, number>, rows: unknown): void 
 // regexes only kick in as a fallback when the objective itself is missing/unrecognized
 // (categorizeMetaObjective default of 'trafego').
 function campaignKindFor(c: CampanhaDetalhada): CampaignKind {
+  const m = c.metricas;
   const objective = categorizeMetaObjective(c.tipo);
 
-  // The declared objective is the ONLY source of truth for which segment a campaign
+  // The declared objective is the source of truth for which segment a campaign
   // belongs to — never what it happened to achieve. A Reach-objective campaign that
   // drove a bonus purchase (Meta cross-attributes a lot) must still be filed under
   // Alcance, not Vendas — otherwise its card shows CPA/ROAS for an objective it was
   // never optimized for, and its real alcance metrics (CPM, pessoas atingidas) vanish.
-  // A previous "what it achieved wins" override caused exactly the WhatsApp/Alcance
-  // campaigns misclassified as Vendas — do not reintroduce it.
-  if (objective === 'leads')       return 'leads';
-  if (objective === 'mensagens')   return 'mensagens';
-  if (objective === 'vendas')      return 'vendas';
-  if (objective === 'engajamento') return 'engajamento';
-  if (objective === 'alcance')     return 'alcance';
+  // A previous "what it achieved wins" override caused exactly that kind of Alcance/
+  // Vendas misclassification — do not reintroduce it for these unambiguous objectives.
+  if (objective === 'leads')     return 'leads';
+  if (objective === 'mensagens') return 'mensagens';
+  if (objective === 'vendas')    return 'vendas';
+  if (objective === 'alcance')   return 'alcance';
+
+  // 'engajamento' (Meta's OUTCOME_ENGAGEMENT) is genuinely ambiguous — unlike the
+  // categories above, the API reports the SAME objective string for click-to-WhatsApp/
+  // Messenger/Instagram-Direct message campaigns as it does for plain post/video
+  // engagement campaigns; there's no separate "Mensagens" objective in the ODAX model
+  // for these. So only here — never for Alcance/Tráfego/Vendas — the actual result
+  // (conversas iniciadas or lead) is used to tell them apart.
+  if (objective === 'engajamento') {
+    if (m.conversas > 0) return 'mensagens';
+    if (m.leads > 0)     return 'leads';
+    return 'engajamento';
+  }
 
   // objective came back 'trafego' (i.e. unrecognized) — only then fall back to the name.
   const name = c.nome.toLowerCase();
