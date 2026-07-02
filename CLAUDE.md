@@ -124,6 +124,21 @@ EVOLUTION_API_KEY=
 Definidos em `vercel.json`:
 - `POST /api/alerts/balance-cron` — diariamente, 10h UTC.
 
+## Alerta Webshare (proxy do WhatsApp)
+
+Monitora a conta Webshare (proxy residencial que roteia TODAS as instâncias Evolution — ponto único de falha: se a banda estoura ou a assinatura pausa por pagamento, todo o WhatsApp cai). Arquivos:
+
+| Arquivo | Papel |
+|---|---|
+| `src/lib/webshare.ts` | `getWebshareHealth()` (banda via `/api/v2/stats/aggregate/` → `bandwidth_total`; status via `/api/v2/subscription/` → `throttled`/`paused`/`renewals_enabled`/`end_date`) + `evaluateWebshareAlert()` |
+| `src/app/api/alerts/webshare-cron/route.ts` | GET secret-guarded — checa saúde, dispara WhatsApp (reusa grupo do Otimizador) + e-mail (Gmail conectado), dedupe via `system_settings['webshare_alert_last']` |
+| `.github/workflows/webshare-alert.yml` | Cron diário `0 11 * * *` (08h BRT) via GitHub Actions, chama a rota com `secrets.WEBSHARE_ALERT_URL` |
+
+- **Limite de banda** não vem cru na API → env `WEBSHARE_BANDWIDTH_LIMIT_GB` (default 250, plano atual). Threshold de aviso: `WEBSHARE_WARN_PCT` (default 80).
+- **Envio**: alerta em 80% (antes de cair, WhatsApp ainda funciona) + e-mail de backup (chega mesmo com proxy fora). Dia 1 do mês: lembrete de pagamento sempre (Matheus paga o Webshare todo dia 1).
+- **Dedupe**: não reenvia o mesmo nível de alerta diariamente — só se mudar de nível, passar ≥3 dias, ou for dia 1.
+- **Env obrigatórias**: `WEBSHARE_API_KEY` (painel Webshare → API), `WEBSHARE_ALERT_EMAIL` (destinatário), `CRON_SECRET` (já existe). GitHub secret: `WEBSHARE_ALERT_URL` (URL completa com `?secret=CRON_SECRET`).
+
 ## Relatórios automáticos mensais
 
 - **Cron via GitHub Actions** (`.github/workflows/reports-cron-monthly.yml`), não Vercel — roda **todo dia** às 11h UTC (08h BRT) e chama `GET /api/reports/cron-monthly?secret=...`.

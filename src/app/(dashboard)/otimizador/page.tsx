@@ -904,10 +904,10 @@ export default function OtimizadorPage() {
     try {
       // Síncrono: o request só retorna quando a análise (busca + IA) terminou e foi gravada.
       // Sem `after()`/segundo plano — se der erro, o gestor VÊ o erro em vez de silêncio.
-      // As rotas têm maxDuration=60; uma conta única cabe nesse tempo.
+      // As rotas têm maxDuration=300; contas grandes (muitas campanhas/criativos) cabem no tempo.
       const params = new URLSearchParams({ period: manualPeriod, forceAi: '1' });
       if (isSingle) params.set('clientId', manualClientId);
-      setRunMessage(`Analisando ${clientName}… isso leva de 20 a 60 segundos. Não feche a página.`);
+      setRunMessage(`Analisando ${clientName}… isso pode levar até 2 minutos. Não feche a página.`);
       const res = await fetch(`/api/otimizador/weekly?${params.toString()}`, {
         method: 'POST',
         headers: { ...callerHeaders(), 'Content-Type': 'application/json' },

@@ -12,9 +12,11 @@ import {
   type OptimizerPeriodKey,
 } from '@/lib/optimizer';
 
-export const maxDuration = 60;
+// 300s (mesmo teto do reports/run-once) — a análise manual síncrona soma busca de campanhas
+// (até 24s com fallback 30d) + conjuntos/anúncios (15s) + IA (até 90s); em 60s dava HTTP 504.
+export const maxDuration = 300;
 
-const BUDGET_MS = 52_000;
+const BUDGET_MS = 285_000;
 
 type AnalysisPeriod = {
   key: OptimizerPeriodKey;
@@ -638,7 +640,7 @@ async function executeWeekly({ origin, forceClientId, forceAi, period }: RunOpti
         return;
       }
 
-      const analyzeRes = await fetchWithTimeout(new URL('/api/otimizador/analisar', origin).toString(), 55_000, {
+      const analyzeRes = await fetchWithTimeout(new URL('/api/otimizador/analisar', origin).toString(), 90_000, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ payload_v2: payload, connection_id: conn.id, force_ai: forceAi }),

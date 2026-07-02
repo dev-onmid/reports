@@ -817,33 +817,50 @@ function ClientesTab() {
 
       {/* QR Code Modal */}
       {qrClient && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="font-bold text-base">Conectar WhatsApp</h3>
-                <p className="text-xs text-muted-foreground">{qrClient.name} · {qrClient.instance_id}</p>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+          onClick={() => { setQrClient(null); setQrData(null); }}
+        >
+          <div
+            className="w-full max-w-md rounded-[var(--radius)] border border-border bg-card p-6 shadow-2xl space-y-5"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="rounded-[var(--radius)] bg-primary/15 p-2 shrink-0">
+                  <QrCode className="h-5 w-5 text-primary" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="font-heading font-normal text-2xl leading-none tracking-wide text-foreground">Conectar WhatsApp</h3>
+                  <p className="text-xs text-muted-foreground mt-1 truncate">{qrClient.name} · {qrClient.instance_id}</p>
+                </div>
               </div>
-              <button onClick={() => { setQrClient(null); setQrData(null); }} className="text-muted-foreground hover:text-foreground">
+              <button onClick={() => { setQrClient(null); setQrData(null); }} className="text-muted-foreground hover:text-foreground shrink-0">
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="flex flex-col items-center gap-3">
+            <div className="flex flex-col items-center gap-4">
               {qrLoading ? (
-                <div className="flex h-48 w-48 items-center justify-center rounded-xl border border-border bg-muted/20">
-                  <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground/40" />
+                <div className="flex h-[288px] w-[288px] items-center justify-center rounded-[var(--radius)] border border-border bg-muted/20">
+                  <RefreshCw className="h-10 w-10 animate-spin text-primary/50" />
                 </div>
               ) : qrData?.base64 ? (
-                <img src={qrData.base64} alt="QR Code WhatsApp" className="h-48 w-48 rounded-xl border border-border object-contain" />
+                <div className="rounded-[var(--radius)] border-2 border-primary/60 bg-white p-3 shadow-[0_0_0_4px_rgba(85,245,47,0.12)]">
+                  <img src={qrData.base64} alt="QR Code WhatsApp" className="h-[264px] w-[264px] object-contain" />
+                </div>
               ) : (
-                <div className="flex h-48 w-48 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border px-4 text-center">
-                  <WifiOff className="h-8 w-8 text-muted-foreground/40" />
+                <div className="flex h-[288px] w-[288px] flex-col items-center justify-center gap-2 rounded-[var(--radius)] border border-dashed border-border px-4 text-center">
+                  <WifiOff className="h-10 w-10 text-muted-foreground/40" />
                   <p className="text-xs text-muted-foreground">{qrData?.error ?? 'QR não disponível'}</p>
                 </div>
               )}
-              {qrData?.base64 && <p className="text-center text-xs text-muted-foreground">Abra o WhatsApp → Menu → Dispositivos conectados → Conectar dispositivo</p>}
+              {qrData?.base64 && (
+                <p className="text-center text-xs text-muted-foreground leading-relaxed">
+                  Abra o <span className="text-foreground font-semibold">WhatsApp</span> → Aparelhos conectados → <span className="text-foreground font-semibold">Conectar aparelho</span>
+                </p>
+              )}
             </div>
-            <button onClick={refreshQr} disabled={qrLoading} className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-border py-2 text-sm font-semibold hover:bg-muted/50 disabled:opacity-50 transition-colors">
+            <button onClick={refreshQr} disabled={qrLoading} className="w-full flex items-center justify-center gap-2 rounded-lg bg-primary py-2.5 text-xs font-bold uppercase tracking-wider text-black hover:bg-primary/90 disabled:opacity-50 transition-colors">
               <RefreshCw className={cn('h-3.5 w-3.5', qrLoading && 'animate-spin')} />
               Atualizar QR
             </button>
@@ -853,7 +870,7 @@ function ClientesTab() {
 
       {/* Link instance ↔ CRM client */}
       {linkInst && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
           <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between">
               <div>
