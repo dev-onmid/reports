@@ -17,6 +17,11 @@ CREATE TABLE IF NOT EXISTS public.optimizer_client_config (
   updated_by            TEXT
 );
 
+-- Peculiaridades fixas do cliente (ex: "campanhas de bot têm lógica própria, nunca
+-- sugerir mover pra outra campanha") — texto livre, entra no payload da IA em toda análise.
+ALTER TABLE public.optimizer_client_config
+  ADD COLUMN IF NOT EXISTS observacoes_fixas TEXT;
+
 -- ─── 2. Log de execuções automáticas ────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS public.optimizer_execucoes_automaticas (
   id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),

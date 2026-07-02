@@ -107,6 +107,7 @@ type ClientRow = {
   min_conjuntos_ativos: number;
   max_conjuntos_ativos: number;
   min_dias_aprendizado: number;
+  observacoes_fixas: string | null;
 };
 
 // Dados de planejamento derivados do client_planning + client_goals (mesma fonte do dashboard)
@@ -175,7 +176,8 @@ async function loadClientsForToday(forcedDow?: number, forceClientId?: string): 
                 occ.orcamento_diario_maximo, occ.cpr_emergencia,
                 COALESCE(occ.min_conjuntos_ativos, 1) AS min_conjuntos_ativos,
                 COALESCE(occ.max_conjuntos_ativos, 20) AS max_conjuntos_ativos,
-                COALESCE(occ.min_dias_aprendizado, 7) AS min_dias_aprendizado
+                COALESCE(occ.min_dias_aprendizado, 7) AS min_dias_aprendizado,
+                occ.observacoes_fixas
            FROM public.clients c
            LEFT JOIN public.optimizer_client_config occ ON occ.client_id = c.id
           WHERE c.id = $1 AND c.status NOT IN ('Arquivado', 'Inativo')`,
@@ -191,7 +193,8 @@ async function loadClientsForToday(forcedDow?: number, forceClientId?: string): 
               occ.orcamento_diario_maximo, occ.cpr_emergencia,
               COALESCE(occ.min_conjuntos_ativos, 1) AS min_conjuntos_ativos,
               COALESCE(occ.max_conjuntos_ativos, 20) AS max_conjuntos_ativos,
-              COALESCE(occ.min_dias_aprendizado, 7) AS min_dias_aprendizado
+              COALESCE(occ.min_dias_aprendizado, 7) AS min_dias_aprendizado,
+              occ.observacoes_fixas
          FROM public.clients c
          LEFT JOIN public.optimizer_client_config occ ON occ.client_id = c.id
         WHERE c.status NOT IN ('Arquivado', 'Inativo')
@@ -577,6 +580,7 @@ async function buildPayloadForClient(
     campanhas,
     historico_decisoes: historico,
     observacoes_gestor: observacoes.length > 0 ? observacoes.join(' | ') : null,
+    observacoes_fixas: client.observacoes_fixas,
   };
 }
 

@@ -108,6 +108,9 @@ export type OptimizerPayloadV2 = {
   campanhas: OptimizerCampaignV2[];
   historico_decisoes: Array<{ semana: string; acao_executada: string; resultado: string }>;
   observacoes_gestor: string | null;
+  // Peculiaridades fixas cadastradas pelo gestor em Configurar (ex: "campanhas de bot têm
+  // lógica própria, nunca sugerir mover pra outra campanha") — persistem entre análises.
+  observacoes_fixas: string | null;
 };
 
 export type OptimizerAcaoAutomatica = {
@@ -222,6 +225,14 @@ Leia os campos:
 - "modo_operacao": define o que voce pode marcar como EXECUTAR_AGORA.
 - "acoes_pre_aprovadas": lista das acoes que podem ser executadas automaticamente.
 - "limites_globais": nunca ultrapasse esses limites nas acoes.
+- "observacoes_fixas": texto livre escrito pelo gestor humano com peculiaridades PERMANENTES
+  desse cliente especifico (ex: "campanhas com [BOT] no nome sao fluxo automatizado, tem
+  logica propria, NUNCA sugira mover orcamento delas pra outra campanha" ou "esse cliente
+  vende curso presencial E online, sao publicos diferentes, nao compare CPL entre eles").
+  Se existir, ESSA E A REGRA MAIS IMPORTANTE DE TODAS — vale mais que qualquer padrao generico
+  deste prompt. Releia antes de classificar cada campanha/conjunto e antes de escrever
+  qualquer acao. Se uma observacao fixa contradiz uma regra generica abaixo, a observacao
+  fixa vence. Se nao existir (null/vazio), ignore este passo e siga o resto do prompt normal.
 
 Regra de ouro das acoes_automaticas:
 - Somente marque status_execucao = "EXECUTAR_AGORA" se:
@@ -266,6 +277,23 @@ O USUARIO SO QUER VER O QUE PRECISA DE AJUSTE. Nao gaste texto justificando o qu
 va direto ao ponto nos itens ATENCAO/URGENTE (qual objeto, qual problema, qual acao).
 NAO repita metricas numericas no veredito alem do essencial — o painel ja mostra os numeros.
 NAO invente ids. NAO devolva metricas (gasto, ctr) nos nos — so id, classificacao, veredito, acao.
+
+LINGUAGEM DA ACAO — escreva como gestor experiente falando com outro gestor, nao como relatorio:
+- Nomeie a acao logo no inicio da frase com um destes verbos: "Pausar", "Ativar", "Escalar",
+  "Reduzir", "Deletar", "Arquivar", "Verificar", "Testar novo criativo". Nunca comece com
+  "Considerar", "Recomenda-se", "Seria interessante" ou qualquer coisa vaga.
+- Diga O QUE fazer e O PORQUE em ate 12 palavras. Errado: "criativo com atencao aos
+  rankings". Certo: "Pausar, ranking de conversao Below Average ha 5 dias".
+- Se o problema so faz sentido junto de um numero (ex: frequencia, dias parado, % acima
+  da meta), inclua o numero — mas so um, o mais decisivo. Nao empilhe 3 metricas na
+  mesma frase.
+- CONSOLIDACAO: se VARIOS anuncios do MESMO conjunto tem a MESMA causa raiz (ex: 5 criativos
+  pausados com R$0/0 conversoes, todos do mesmo motivo), NAO escreva a mesma frase 5 vezes —
+  classifique cada um individualmente (o painel precisa do dado por id), mas deixe a acao do
+  CONJUNTO consolidar: "Deletar os 5 anuncios pausados sem entrega (AD 05, 003, 811...);
+  manter so os 2 ativos com conversao". Nos anuncios individuais dentro desse caso, a acao
+  pode ser so a instrucao pontual e curta ("Deletar, pausado sem entrega") sem repetir a
+  explicacao inteira que ja esta no conjunto.
 Regras de classificacao:
 - Conjunto/anuncio SAUDAVEL: CTR estavel/subindo + CPL dentro + rankings medios ou acima.
 - ATENCAO: CTR caindo OU 1 ranking Below Average OU CPL levemente acima.

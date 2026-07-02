@@ -90,6 +90,7 @@ type ClientConfig = {
   acoes_pre_aprovadas: string[];
   min_dias_aprendizado: number;
   orcamento_diario_maximo_conta: number | null;
+  observacoes_fixas: string | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -197,6 +198,7 @@ function ConfigModal({ clientId, clientName, onClose }: { clientId: string; clie
   const [config, setConfig] = useState<ClientConfig>({
     cliente_id: clientId, modo_operacao: 'RECOMENDACAO_COM_APROVACAO',
     analise_dia_semana: 1, acoes_pre_aprovadas: [], min_dias_aprendizado: 7, orcamento_diario_maximo_conta: null,
+    observacoes_fixas: null,
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -299,6 +301,18 @@ function ConfigModal({ clientId, clientName, onClose }: { clientId: string; clie
                   onChange={(e) => setConfig((prev) => ({ ...prev, orcamento_diario_maximo_conta: e.target.value === '' ? null : Number(e.target.value) }))}
                   className="h-10 w-full rounded-[var(--radius)] border border-border bg-background px-3 text-sm text-foreground outline-none focus:border-primary" />
               </div>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-muted-foreground">Peculiaridades deste cliente</label>
+              <textarea
+                rows={4}
+                maxLength={2000}
+                placeholder='Ex: "Campanhas com [BOT] no nome são fluxo automatizado, têm lógica própria — nunca sugerir mover orçamento delas pra outra campanha." A IA lê isso antes de cada análise, junto com metas e desempenho.'
+                value={config.observacoes_fixas ?? ''}
+                onChange={(e) => setConfig((prev) => ({ ...prev, observacoes_fixas: e.target.value }))}
+                className="w-full resize-none rounded-[var(--radius)] border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary"
+              />
+              <p className="text-[11px] text-muted-foreground">Contexto fixo que a IA considera em toda análise deste cliente, além de metas e performance.</p>
             </div>
             <div className="flex items-center justify-end gap-2 pt-2">
               {saved && <span className="text-xs text-primary">Configuração salva!</span>}
@@ -601,97 +615,113 @@ function DetailPanel({
           </div>
         )}
 
-        {/* Análise por campanha — árvore campanha → conjunto → criativo. Métricas reais,
-            veredito da IA. Badge de cor pra bater o olho; "porquê" no tooltip do (i). */}
-        {isV2 && resultado.analise_campanhas && resultado.analise_campanhas.length > 0 && (
-          <TooltipProvider delay={120}>
-            <div className="space-y-2">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Análise por campanha</p>
-              {resultado.analise_campanhas.map((camp) => {
-                const campOpen = openCamp.has(camp.id);
-                const hasConj = camp.conjuntos.length > 0;
-                return (
-                  <div key={camp.id} className="overflow-hidden rounded-[var(--radius)] border border-border bg-background">
-                    <div
-                      role={hasConj ? 'button' : undefined}
-                      onClick={() => hasConj && toggle(openCamp, setOpenCamp, camp.id)}
-                      className={cn('flex items-start gap-2.5 p-3', hasConj && 'cursor-pointer hover:bg-muted/30')}
-                    >
-                      {hasConj
-                        ? (campOpen ? <ChevronUp className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" /> : <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />)
-                        : <span className="w-4 shrink-0" />}
-                      <VerdictBadge v={camp.classificacao} />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-baseline gap-1.5">
-                          <LevelTag level="Campanha" />
-                          <p className="truncate text-sm font-semibold text-foreground">{camp.nome}</p>
-                        </div>
-                        <p className="mt-0.5 text-[11px] text-muted-foreground">
-                          {nodeMetrics(camp)}{hasConj ? ` · ${camp.conjuntos.length} conj.` : ''}
-                        </p>
-                        {camp.classificacao !== 'SAUDAVEL' && camp.acao && <p className="mt-1 text-xs font-medium text-primary">{camp.acao}</p>}
-                      </div>
-                      <VerdictInfo text={camp.veredito} />
-                    </div>
-
-                    {campOpen && hasConj && (
-                      <div className="space-y-1.5 border-t border-border/60 bg-muted/10 p-2 pl-6">
-                        {camp.conjuntos.map((conj) => {
-                          const conjOpen = openConj.has(conj.id);
-                          const hasAds = conj.anuncios.length > 0;
-                          return (
-                            <div key={conj.id} className="overflow-hidden rounded-[var(--radius)] border border-border/60 bg-background">
-                              <div
-                                role={hasAds ? 'button' : undefined}
-                                onClick={() => hasAds && toggle(openConj, setOpenConj, conj.id)}
-                                className={cn('flex items-start gap-2 p-2.5', hasAds && 'cursor-pointer hover:bg-muted/30')}
-                              >
-                                {hasAds
-                                  ? (conjOpen ? <ChevronUp className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" /> : <ChevronDown className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />)
-                                  : <span className="w-3.5 shrink-0" />}
-                                <VerdictBadge v={conj.classificacao} />
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex items-baseline gap-1.5">
-                                    <LevelTag level="Conjunto" />
-                                    <p className="truncate text-xs font-semibold text-foreground">{conj.nome}</p>
-                                  </div>
-                                  <p className="mt-0.5 text-[10px] text-muted-foreground">
-                                    {nodeMetrics(conj)}{hasAds ? ` · ${conj.anuncios.length} criativos` : ''}
-                                  </p>
-                                  {conj.classificacao !== 'SAUDAVEL' && conj.acao && <p className="mt-0.5 text-[11px] font-medium text-primary">{conj.acao}</p>}
-                                </div>
-                                <VerdictInfo text={conj.veredito} />
-                              </div>
-
-                              {conjOpen && hasAds && (
-                                <div className="space-y-1 border-t border-border/50 p-1.5 pl-5">
-                                  {conj.anuncios.map((ad) => (
-                                    <div key={ad.id} className="flex items-start gap-2 rounded border border-border/40 bg-background/60 p-2">
-                                      <VerdictBadge v={ad.classificacao} />
-                                      <div className="min-w-0 flex-1">
-                                        <div className="flex items-baseline gap-1.5">
-                                          <LevelTag level="Criativo" />
-                                          <p className="truncate text-[11px] font-semibold text-foreground">{ad.nome}</p>
-                                        </div>
-                                        <p className="mt-0.5 text-[10px] text-muted-foreground">{nodeMetrics(ad)}</p>
-                                        {ad.classificacao !== 'SAUDAVEL' && ad.acao && <p className="mt-0.5 text-[11px] font-medium text-primary">{ad.acao}</p>}
-                                      </div>
-                                      <VerdictInfo text={ad.veredito} />
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
+        {/* Análise por campanha — árvore campanha → conjunto → criativo. Só mostra o que
+            precisa de ajuste: campanha/conjunto/criativo 100% OK não aparece, é ruído. */}
+        {isV2 && resultado.analise_campanhas && resultado.analise_campanhas.length > 0 && (() => {
+          const campanhasComAjuste = resultado.analise_campanhas.filter(campNeedsAttention);
+          const totalCamp = resultado.analise_campanhas.length;
+          const okCamp = totalCamp - campanhasComAjuste.length;
+          return (
+            <TooltipProvider delay={120}>
+              <div className="space-y-2">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  Análise por campanha
+                  {okCamp > 0 && <span className="ml-1.5 normal-case font-normal text-muted-foreground/70">· {okCamp} campanha{okCamp > 1 ? 's' : ''} ok, oculta{okCamp > 1 ? 's' : ''}</span>}
+                </p>
+                {campanhasComAjuste.length === 0 ? (
+                  <div className="rounded-[var(--radius)] border border-border bg-background p-4 text-center text-sm text-muted-foreground">
+                    Tudo certo por aqui — nenhuma campanha precisa de ajuste agora.
                   </div>
-                );
-              })}
-            </div>
-          </TooltipProvider>
-        )}
+                ) : campanhasComAjuste.map((camp) => {
+                  const campOpen = openCamp.has(camp.id);
+                  const conjuntosComAjuste = camp.conjuntos.filter(conjNeedsAttention);
+                  const okConj = camp.conjuntos.length - conjuntosComAjuste.length;
+                  const hasConj = conjuntosComAjuste.length > 0;
+                  return (
+                    <div key={camp.id} className="overflow-hidden rounded-[var(--radius)] border border-border bg-background">
+                      <div
+                        role={hasConj ? 'button' : undefined}
+                        onClick={() => hasConj && toggle(openCamp, setOpenCamp, camp.id)}
+                        className={cn('flex items-start gap-2.5 p-3', hasConj && 'cursor-pointer hover:bg-muted/30')}
+                      >
+                        {hasConj
+                          ? (campOpen ? <ChevronUp className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" /> : <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />)
+                          : <span className="w-4 shrink-0" />}
+                        <VerdictBadge v={camp.classificacao} />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-baseline gap-1.5">
+                            <LevelTag level="Campanha" />
+                            <p className="truncate text-sm font-semibold text-foreground">{camp.nome}</p>
+                          </div>
+                          <p className="mt-0.5 text-[11px] text-muted-foreground">
+                            {nodeMetrics(camp)}{hasConj ? ` · ${conjuntosComAjuste.length} conj. c/ ajuste${okConj > 0 ? ` (${okConj} ok)` : ''}` : ''}
+                          </p>
+                          {camp.classificacao !== 'SAUDAVEL' && camp.acao && <p className="mt-1 text-xs font-medium text-primary">{camp.acao}</p>}
+                        </div>
+                        <VerdictInfo text={camp.veredito} />
+                      </div>
+
+                      {campOpen && hasConj && (
+                        <div className="space-y-1.5 border-t border-border/60 bg-muted/10 p-2 pl-6">
+                          {conjuntosComAjuste.map((conj) => {
+                            const conjOpen = openConj.has(conj.id);
+                            const anunciosComAjuste = conj.anuncios.filter(adNeedsAttention);
+                            const okAd = conj.anuncios.length - anunciosComAjuste.length;
+                            const hasAds = anunciosComAjuste.length > 0;
+                            return (
+                              <div key={conj.id} className="overflow-hidden rounded-[var(--radius)] border border-border/60 bg-background">
+                                <div
+                                  role={hasAds ? 'button' : undefined}
+                                  onClick={() => hasAds && toggle(openConj, setOpenConj, conj.id)}
+                                  className={cn('flex items-start gap-2 p-2.5', hasAds && 'cursor-pointer hover:bg-muted/30')}
+                                >
+                                  {hasAds
+                                    ? (conjOpen ? <ChevronUp className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" /> : <ChevronDown className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />)
+                                    : <span className="w-3.5 shrink-0" />}
+                                  <VerdictBadge v={conj.classificacao} />
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex items-baseline gap-1.5">
+                                      <LevelTag level="Conjunto" />
+                                      <p className="truncate text-xs font-semibold text-foreground">{conj.nome}</p>
+                                    </div>
+                                    <p className="mt-0.5 text-[10px] text-muted-foreground">
+                                      {nodeMetrics(conj)}{hasAds ? ` · ${anunciosComAjuste.length} criativos c/ ajuste${okAd > 0 ? ` (${okAd} ok)` : ''}` : ''}
+                                    </p>
+                                    {conj.classificacao !== 'SAUDAVEL' && conj.acao && <p className="mt-0.5 text-[11px] font-medium text-primary">{conj.acao}</p>}
+                                  </div>
+                                  <VerdictInfo text={conj.veredito} />
+                                </div>
+
+                                {conjOpen && hasAds && (
+                                  <div className="space-y-1 border-t border-border/50 p-1.5 pl-5">
+                                    {anunciosComAjuste.map((ad) => (
+                                      <div key={ad.id} className="flex items-start gap-2 rounded border border-border/40 bg-background/60 p-2">
+                                        <VerdictBadge v={ad.classificacao} />
+                                        <div className="min-w-0 flex-1">
+                                          <div className="flex items-baseline gap-1.5">
+                                            <LevelTag level="Criativo" />
+                                            <p className="truncate text-[11px] font-semibold text-foreground">{ad.nome}</p>
+                                          </div>
+                                          <p className="mt-0.5 text-[10px] text-muted-foreground">{nodeMetrics(ad)}</p>
+                                          {ad.classificacao !== 'SAUDAVEL' && ad.acao && <p className="mt-0.5 text-[11px] font-medium text-primary">{ad.acao}</p>}
+                                        </div>
+                                        <VerdictInfo text={ad.veredito} />
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </TooltipProvider>
+          );
+        })()}
 
         {/* v1 ações */}
         {!isV2 && resultadoV1.acoes && (

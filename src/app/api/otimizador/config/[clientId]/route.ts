@@ -12,6 +12,7 @@ export type OptimizerClientConfig = {
   min_dias_aprendizado: number;
   analise_dia_semana: number;
   ativo: boolean;
+  observacoes_fixas: string | null;
   updated_at: string;
 };
 
@@ -45,7 +46,7 @@ export async function GET(
     const { rows } = await pool.query<OptimizerClientConfig>(
       `SELECT client_id, modo_operacao, acoes_pre_aprovadas, orcamento_diario_maximo,
               cpr_emergencia, min_conjuntos_ativos, max_conjuntos_ativos,
-              min_dias_aprendizado, analise_dia_semana, ativo, updated_at
+              min_dias_aprendizado, analise_dia_semana, ativo, observacoes_fixas, updated_at
          FROM public.optimizer_client_config
         WHERE client_id = $1`,
       [clientId],
@@ -64,6 +65,7 @@ export async function GET(
         min_dias_aprendizado: 7,
         analise_dia_semana: day,
         ativo: true,
+        observacoes_fixas: null,
         updated_at: new Date().toISOString(),
       } satisfies OptimizerClientConfig);
     }
@@ -97,8 +99,8 @@ export async function POST(
       `INSERT INTO public.optimizer_client_config
          (client_id, modo_operacao, acoes_pre_aprovadas, orcamento_diario_maximo,
           cpr_emergencia, min_conjuntos_ativos, max_conjuntos_ativos,
-          min_dias_aprendizado, analise_dia_semana, ativo, updated_at, updated_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW(),$11)
+          min_dias_aprendizado, analise_dia_semana, ativo, observacoes_fixas, updated_at, updated_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW(),$12)
        ON CONFLICT (client_id) DO UPDATE SET
          modo_operacao         = EXCLUDED.modo_operacao,
          acoes_pre_aprovadas   = EXCLUDED.acoes_pre_aprovadas,
@@ -109,6 +111,7 @@ export async function POST(
          min_dias_aprendizado  = EXCLUDED.min_dias_aprendizado,
          analise_dia_semana    = EXCLUDED.analise_dia_semana,
          ativo                 = EXCLUDED.ativo,
+         observacoes_fixas     = EXCLUDED.observacoes_fixas,
          updated_at            = NOW(),
          updated_by            = EXCLUDED.updated_by
        RETURNING *`,
@@ -123,6 +126,7 @@ export async function POST(
         body.min_dias_aprendizado ?? 7,
         dia >= 1 && dia <= 5 ? dia : currentDay,
         body.ativo ?? true,
+        (body.observacoes_fixas ?? '').trim().slice(0, 2000) || null,
         body.updated_by ?? null,
       ],
     );
