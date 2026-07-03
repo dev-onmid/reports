@@ -89,7 +89,7 @@ async function resolveToken(connectionId: string): Promise<string | null> {
     if (rows[0]) return getFreshMetaToken(rows[0] as Parameters<typeof getFreshMetaToken>[0]);
     return null;
   } finally {
-    await pool.end();
+    await pool.end().catch(() => {});
   }
 }
 
@@ -205,7 +205,7 @@ async function loadClientsForToday(forcedDow?: number, forceClientId?: string): 
     );
     return rows;
   } finally {
-    await pool.end();
+    await pool.end().catch(() => {});
   }
 }
 
@@ -266,7 +266,7 @@ async function loadPlanning(clientIds: string[]): Promise<Record<string, Plannin
 
     return result;
   } finally {
-    await pool.end();
+    await pool.end().catch(() => {});
   }
 }
 
@@ -323,7 +323,7 @@ async function loadConnections(clientIds: string[]): Promise<Record<string, Conn
 
     return map;
   } finally {
-    await pool.end();
+    await pool.end().catch(() => {});
   }
 }
 
@@ -344,7 +344,7 @@ async function loadDecisionHistory(clientId: string): Promise<OptimizerPayloadV2
     ).catch(() => ({ rows: [] as { semana_analise: string; acao_executada: string; resultado: string }[] }));
     return rows.map((r) => ({ semana: r.semana_analise, acao_executada: r.acao_executada, resultado: r.resultado }));
   } finally {
-    await pool.end();
+    await pool.end().catch(() => {});
   }
 }
 
@@ -794,10 +794,15 @@ export async function GET(request: NextRequest) {
   if (secret !== process.env.CRON_SECRET) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
-  if (request.nextUrl.searchParams.get('dryRun') === '1') {
-    return Response.json({ dry_run: true, diagnostics: await diagnoseClients(parseRunOptions(request)) });
+  try {
+    if (request.nextUrl.searchParams.get('dryRun') === '1') {
+      return Response.json({ dry_run: true, diagnostics: await diagnoseClients(parseRunOptions(request)) });
+    }
+    return Response.json(await executeWeekly(parseRunOptions(request)));
+  } catch (err) {
+    console.error('[otimizador/weekly GET] falha não tratada:', err);
+    return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
-  return Response.json(await executeWeekly(parseRunOptions(request)));
 }
 
 export async function POST(request: NextRequest) {
@@ -822,14 +827,21 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: 'Apenas administradores.' }, { status: 403 });
     }
   } finally {
-    await pool.end();
+    await pool.end().catch(() => {});
   }
 
   const opts = parseRunOptions(request);
-  // dryRun=1: diagnóstico sem IA — só mostra de onde vêm (ou não) os dados.
-  if (request.nextUrl.searchParams.get('dryRun') === '1') {
-    return Response.json({ dry_run: true, diagnostics: await diagnoseClients(opts) });
+  try {
+    // dryRun=1: diagnóstico sem IA — só mostra de onde vêm (ou não) os dados.
+    if (request.nextUrl.searchParams.get('dryRun') === '1') {
+      return Response.json({ dry_run: true, diagnostics: await diagnoseClients(opts) });
+    }
+    // Síncrono: roda a análise (busca + IA) e só responde quando gravou o resultado.
+    return Response.json(await executeWeekly(opts));
+  } catch (err) {
+    // Sem isso, uma falha aqui (ex: query sem .catch() em loadClientsForToday) vira um 500
+    // opaco do Next.js e a UI só consegue mostrar "Erro na análise: HTTP 500" sem contexto.
+    console.error('[otimizador/weekly POST] falha não tratada:', err);
+    return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
-  // Síncrono: roda a análise (busca + IA) e só responde quando gravou o resultado.
-  return Response.json(await executeWeekly(opts));
 }

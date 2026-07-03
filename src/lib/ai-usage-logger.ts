@@ -5,6 +5,7 @@ export type AiUsageSource =
   | 'luna_chat'
   | 'report_performance'
   | 'report_delivery'
+  | 'report_delivery_csv'
   | 'insights'
   | 'copy'
   | 'whatsapp'

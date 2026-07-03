@@ -227,11 +227,14 @@ export default function RelatoriosPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const data = await res.json().catch(() => ({ error: `Erro ${res.status} — tente novamente.` })) as { public_token?: string; id?: string; error?: string };
+      const data = await res.json().catch(() => ({ error: `Erro ${res.status} — tente novamente.` })) as { public_token?: string; id?: string; error?: string; avisos?: string[] };
       if (data.public_token) {
         setShowGenModal(false);
         // window.open must be called before any await to avoid popup blocker
         window.open(`/relatorio/${data.public_token}`, '_blank');
+        if (data.avisos?.length) {
+          alert(`Relatório gerado, mas algumas planilhas não puderam ser interpretadas:\n\n${data.avisos.join('\n')}`);
+        }
         const rows = await fetch('/api/reports').then(r => r.ok ? r.json() : []) as DiagnosticReport[];
         setDiagnostics(rows);
       } else {
@@ -1464,7 +1467,7 @@ export default function RelatoriosPage() {
                     Planilhas do cardápio digital <span className="text-muted-foreground/50">(opcional — CSV / XLSX, pode anexar várias)</span>
                   </label>
                   <p className="text-xs text-muted-foreground/60 leading-relaxed">
-                    Sem planilha, o relatório sai só com tráfego pago e Instagram. Para incluir base de clientes, produtos e pedidos por dia, anexe os arquivos do cardápio digital.
+                    Sem planilha, o relatório sai só com tráfego pago e Instagram. Anexe os arquivos do cardápio digital (Goomer, Anota Aí, iFood etc.) — a IA interpreta a estrutura de cada um automaticamente, não precisa nome ou coluna padronizados. Se algum arquivo não for reconhecido, um aviso aparece ao final.
                     Para exibir comparativo com mês anterior, nomeie os arquivos com prefixo{' '}
                     <code className="bg-muted px-1 py-0.5 rounded text-[10px] font-mono">ant-</code>
                     {' '}— ex: <code className="bg-muted px-1 py-0.5 rounded text-[10px] font-mono">ant-ativos.csv</code>

@@ -64,7 +64,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     });
     const { token, reportId } = await saveDeliveryReport({
       clientId: config.client_id, clientName: config.client_name,
-      from: period.from, to: period.to, data: reportData,
+      from: period.from, to: period.to, data: { html: reportData.html },
       generatedBy: 'auto', configId,
     });
     return Response.json({ ok: true, id: reportId, public_token: token });

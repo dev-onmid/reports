@@ -471,6 +471,273 @@ function parseAllFiles(files: { name: string; content: string }[], refDate: Date
   return out;
 }
 
+// ── Adaptive file interpretation (AI) ───────────────────────────────────────────
+// Cardápios digitais (Goomer, Anota Aí, iFood etc.) não têm formato padrão — cada
+// restaurante exporta com nomes de arquivo e colunas diferentes. Em vez de exigir que
+// o nome do arquivo contenha uma palavra-chave (detectType) e que as colunas usem
+// termos previstos, cada arquivo é lido uma vez e mandado pro Claude, que devolve
+// quais seções (clientes/produtos/pedidos_dia) ele consegue alimentar e qual coluna
+// (dentre as normalizadas por normalizeHeader) corresponde a cada campo. A agregação
+// em si (somas, contagens, faixas de inatividade) continua sendo feita aqui, de forma
+// determinística, a partir do mapeamento que a IA devolveu — a IA nunca faz conta.
+
+type ClienteSecao = {
+  tipo: 'clientes';
+  segmento: 'ativos' | 'inativos' | 'potenciais' | 'misto';
+  colunaValor: string | null;
+  colunaPedidos: string | null;
+  colunaUltimaData: string | null;
+  colunaStatus: string | null;
+  valoresStatus: { ativos?: string; inativos?: string; potenciais?: string } | null;
+};
+type ProdutoSecao = { tipo: 'produtos'; colunaNome: string; colunaQtd: string | null; colunaTotal: string | null };
+type PedidosDiaSecao = { tipo: 'pedidos_dia'; colunaData: string };
+type FileSection = ClienteSecao | ProdutoSecao | PedidosDiaSecao;
+
+type FileInterpretation = { filename: string; sections: FileSection[]; aviso?: string };
+
+const FAIXAS_INATIVIDADE = [
+  { label: '30–59 dias',   min: 30,  max: 59 },
+  { label: '60–89 dias',   min: 60,  max: 89 },
+  { label: '90–179 dias',  min: 90,  max: 179 },
+  { label: '180–364 dias', min: 180, max: 364 },
+  { label: '365+ dias',    min: 365, max: Infinity },
+];
+
+function parseDateFlexible(raw: string): Date | null {
+  const ds = (raw ?? '').trim();
+  if (!ds) return null;
+  let d: Date | null = null;
+  if (/^\d{2}\/\d{2}\/\d{4}/.test(ds)) { const [dd, mm, yyyy] = ds.split('/'); d = new Date(`${yyyy}-${mm}-${dd}`); }
+  else if (/^\d{4}-\d{2}-\d{2}/.test(ds)) { d = new Date(ds); }
+  return d && !isNaN(d.getTime()) ? d : null;
+}
+
+function isValidFileSection(s: unknown): s is FileSection {
+  if (!s || typeof s !== 'object') return false;
+  const o = s as Record<string, unknown>;
+  if (o.tipo === 'clientes') return typeof o.segmento === 'string' && ['ativos', 'inativos', 'potenciais', 'misto'].includes(o.segmento as string);
+  if (o.tipo === 'produtos') return typeof o.colunaNome === 'string' && o.colunaNome.length > 0;
+  if (o.tipo === 'pedidos_dia') return typeof o.colunaData === 'string' && o.colunaData.length > 0;
+  return false;
+}
+
+async function interpretDeliveryFile(file: { name: string; content: string }): Promise<FileInterpretation> {
+  const { headers, rows } = readTabular(file.content);
+  if (!headers.length) return { filename: file.name, sections: [], aviso: 'Planilha vazia ou em formato não reconhecido.' };
+
+  const sample = rows.slice(0, 8);
+  const schema = `{
+  "secoes": [
+    { "tipo": "clientes", "segmento": "ativos"|"inativos"|"potenciais"|"misto", "colunaValor": string|null, "colunaPedidos": string|null, "colunaUltimaData": string|null, "colunaStatus": string|null, "valoresStatus": {"ativos": string, "inativos": string, "potenciais": string} | null },
+    { "tipo": "produtos", "colunaNome": string, "colunaQtd": string|null, "colunaTotal": string|null },
+    { "tipo": "pedidos_dia", "colunaData": string }
+  ],
+  "aviso": string | null
+}`;
+  const prompt = `Arquivo: "${file.name}"
+Total de linhas de dados: ${rows.length}
+Colunas encontradas: ${JSON.stringify(headers)}
+Amostra de linhas (até 8): ${JSON.stringify(sample)}
+
+Identifique quais das seguintes informações esta planilha de delivery (exportada de plataformas como Goomer, Anota Aí, iFood etc, sem formato padrão) pode fornecer. Uma planilha pode conter mais de uma seção ao mesmo tempo (ex: pedidos com cliente, produto e data juntos).
+
+Tipos possíveis de seção:
+- "clientes": lista de clientes, com valor gasto e/ou nº de pedidos. Se houver coluna de status/situação com valores tipo ativo/inativo/potencial, use segmento "misto" e preencha colunaStatus + valoresStatus (o texto exato de cada valor, ex: "Ativo"). Caso contrário, decida o segmento pelo nome do arquivo e pelo conteúdo (potenciais = nunca compraram/sem pedidos; inativos = têm data de último pedido antiga; ativos = compraram recentemente).
+- "produtos": lista de produtos vendidos, com nome e, se houver, quantidade e valor total.
+- "pedidos_dia": linhas de pedidos com uma coluna de data, para calcular distribuição por dia da semana.
+
+Se não for possível identificar nada com confiança, devolva "secoes": [] e explique em "aviso" (frase curta, em português, para mostrar ao usuário).
+
+Regras: use exatamente o texto de uma das colunas listadas em "Colunas encontradas" em cada campo "coluna*" — nunca invente nomes de coluna. Responda APENAS com JSON válido, sem markdown, seguindo este schema:
+${schema}`;
+
+  try {
+    const msg = await anthropic.messages.create({
+      model:      'claude-haiku-4-5-20251001',
+      max_tokens: 1000,
+      system:     'Você interpreta planilhas de delivery de restaurantes com estrutura variada. Responda APENAS com JSON válido, sem markdown, sem texto extra.',
+      messages:   [{ role: 'user', content: prompt }],
+    });
+    void logAiUsage({ source: 'report_delivery_csv', model: 'claude-haiku-4-5-20251001', inputTokens: msg.usage.input_tokens, outputTokens: msg.usage.output_tokens });
+
+    const raw = msg.content[0].type === 'text' ? msg.content[0].text : '{}';
+    const parsed = JSON.parse(raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim()) as { secoes?: unknown[]; aviso?: string | null };
+    const secoes = (Array.isArray(parsed.secoes) ? parsed.secoes : []).filter(isValidFileSection);
+    return {
+      filename: file.name,
+      sections: secoes,
+      aviso: secoes.length ? undefined : (parsed.aviso ?? 'Não foi possível identificar o conteúdo desta planilha.'),
+    };
+  } catch (e) {
+    console.error(`[delivery] falha ao interpretar "${file.name}":`, e);
+    return { filename: file.name, sections: [], aviso: 'Erro ao interpretar esta planilha — tente novamente.' };
+  }
+}
+
+function matchStatusSegmento(
+  rawStatus: string, valoresStatus: ClienteSecao['valoresStatus'],
+): 'ativos' | 'inativos' | 'potenciais' | null {
+  if (!valoresStatus) return null;
+  const status = normalizeHeader(rawStatus);
+  if (!status) return null;
+  for (const seg of ['ativos', 'inativos', 'potenciais'] as const) {
+    const expected = valoresStatus[seg];
+    if (expected && (status.includes(normalizeHeader(expected)) || normalizeHeader(expected).includes(status))) return seg;
+  }
+  return null;
+}
+
+function aggregateClientesSection(
+  headers: string[], rows: string[][], section: ClienteSecao, refDate: Date,
+): {
+  buckets: Record<'ativos' | 'inativos' | 'potenciais', { count: number; fat: number; ped: number; uma: number; recorrentes: number }>;
+  faixas: Faixa[];
+} {
+  const valorIdx = section.colunaValor ? headers.indexOf(section.colunaValor) : -1;
+  const pedidosIdx = section.colunaPedidos ? headers.indexOf(section.colunaPedidos) : -1;
+  const dataIdx = section.colunaUltimaData ? headers.indexOf(section.colunaUltimaData) : -1;
+  const statusIdx = section.colunaStatus ? headers.indexOf(section.colunaStatus) : -1;
+
+  const buckets = {
+    ativos:     { count: 0, fat: 0, ped: 0, uma: 0, recorrentes: 0 },
+    inativos:   { count: 0, fat: 0, ped: 0, uma: 0, recorrentes: 0 },
+    potenciais: { count: 0, fat: 0, ped: 0, uma: 0, recorrentes: 0 },
+  };
+  const faixasCount = new Map<string, number>();
+
+  for (const row of rows) {
+    const seg = section.segmento === 'misto'
+      ? (statusIdx >= 0 ? matchStatusSegmento(row[statusIdx] ?? '', section.valoresStatus) : null)
+      : section.segmento;
+    if (!seg) continue;
+
+    const b = buckets[seg];
+    b.count++;
+    const fat = valorIdx >= 0 ? parseFloat2(row[valorIdx] ?? '') : 0;
+    const pedCount = pedidosIdx >= 0 ? (parseInt(row[pedidosIdx] ?? '0') || 0) : 0;
+    b.fat += fat;
+    if (pedidosIdx >= 0) {
+      b.ped += pedCount;
+      if (pedCount === 1) b.uma++;
+      else if (pedCount >= 2) b.recorrentes++;
+    }
+
+    if (seg === 'inativos' && dataIdx >= 0) {
+      const d = parseDateFlexible(row[dataIdx] ?? '');
+      if (d) {
+        const dias = Math.floor((refDate.getTime() - d.getTime()) / 86_400_000);
+        const faixa = FAIXAS_INATIVIDADE.find(f => dias >= f.min && dias <= f.max);
+        if (faixa) faixasCount.set(faixa.label, (faixasCount.get(faixa.label) ?? 0) + 1);
+      }
+    }
+  }
+
+  const faixas = FAIXAS_INATIVIDADE
+    .map(f => ({ label: f.label, count: faixasCount.get(f.label) ?? 0 }))
+    .filter(f => f.count > 0);
+
+  return { buckets, faixas };
+}
+
+function aggregateProdutosSection(headers: string[], rows: string[][], section: ProdutoSecao): Product[] {
+  const nameIdx = headers.indexOf(section.colunaNome);
+  if (nameIdx === -1) return [];
+  const qtdIdx = section.colunaQtd ? headers.indexOf(section.colunaQtd) : -1;
+  const totalIdx = section.colunaTotal ? headers.indexOf(section.colunaTotal) : -1;
+
+  return rows
+    .map(row => ({
+      nome:  String(row[nameIdx] ?? '').trim(),
+      // Sem coluna de quantidade, cada linha é um item de pedido — conta como 1 unidade.
+      qtd:   qtdIdx >= 0 ? (parseInt(String(row[qtdIdx] ?? '0').replace(/\D/g, '')) || 0) : 1,
+      total: totalIdx >= 0 ? parseFloat2(row[totalIdx] ?? '') : 0,
+    }))
+    .filter(p => p.nome && p.nome.length > 1);
+}
+
+function aggregatePedidosDiaSection(headers: string[], rows: string[][], section: PedidosDiaSecao): number[] | null {
+  const dataIdx = headers.indexOf(section.colunaData);
+  if (dataIdx === -1) return null;
+  const counts = [0, 0, 0, 0, 0, 0, 0];
+  for (const row of rows) {
+    const d = parseDateFlexible(row[dataIdx] ?? '');
+    if (d) counts[d.getDay()]++;
+  }
+  return counts;
+}
+
+async function parseAllFilesAdaptive(
+  files: { name: string; content: string }[], refDate: Date,
+): Promise<{ data: ParsedData; avisos: string[] }> {
+  const empty = (): ParsedData => ({
+    ativos: 0, inativos: 0, potenciais: 0, faturamento: 0, pedidos_ativos: 0, ticket: 0,
+    uma_compra: 0, recorrentes: 0, produtos: [], inativos_faixas: [], por_dia: [],
+  });
+  if (!files.length) return { data: empty(), avisos: [] };
+  if (process.env.SKIP_AI === 'true') return { data: parseAllFiles(files, refDate), avisos: [] };
+
+  const interpretations = await Promise.all(files.map(interpretDeliveryFile));
+
+  const out = empty();
+  const avisos: string[] = [];
+  const produtosMap = new Map<string, Product>();
+  const diaCounts = [0, 0, 0, 0, 0, 0, 0];
+  let hasDia = false;
+  const faixasMap = new Map<string, number>();
+
+  for (let idx = 0; idx < files.length; idx++) {
+    const file = files[idx];
+    const interp = interpretations[idx];
+    if (!interp.sections.length) {
+      avisos.push(`"${file.name}": ${interp.aviso ?? 'não foi possível identificar o conteúdo desta planilha.'}`);
+      continue;
+    }
+
+    const { headers, rows } = readTabular(file.content);
+    if (!headers.length) { avisos.push(`"${file.name}": planilha vazia ou ilegível.`); continue; }
+
+    for (const section of interp.sections) {
+      if (section.tipo === 'clientes') {
+        const { buckets, faixas } = aggregateClientesSection(headers, rows, section, refDate);
+        for (const seg of ['ativos', 'inativos', 'potenciais'] as const) {
+          const b = buckets[seg];
+          if (!b.count) continue;
+          out[seg] += b.count;
+          if (seg === 'ativos') {
+            out.faturamento += b.fat; out.pedidos_ativos += b.ped;
+            out.uma_compra += b.uma; out.recorrentes += b.recorrentes;
+          }
+        }
+        for (const f of faixas) faixasMap.set(f.label, (faixasMap.get(f.label) ?? 0) + f.count);
+      } else if (section.tipo === 'produtos') {
+        for (const p of aggregateProdutosSection(headers, rows, section)) {
+          const key = p.nome.toLowerCase();
+          const cur = produtosMap.get(key) ?? { nome: p.nome, qtd: 0, total: 0 };
+          cur.qtd += p.qtd; cur.total += p.total;
+          produtosMap.set(key, cur);
+        }
+      } else if (section.tipo === 'pedidos_dia') {
+        const counts = aggregatePedidosDiaSection(headers, rows, section);
+        if (counts) { hasDia = true; counts.forEach((c, i) => { diaCounts[i] += c; }); }
+      }
+    }
+  }
+
+  out.produtos = [...produtosMap.values()].sort((a, b) => b.qtd - a.qtd || b.total - a.total).slice(0, 10);
+  if (hasDia) {
+    const DIAS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+    const max = Math.max(...diaCounts);
+    if (max) out.por_dia = DIAS.map((dia, i) => ({ dia, pedidos: diaCounts[i], pct: (diaCounts[i] / max) * 100 }));
+  }
+  out.inativos_faixas = FAIXAS_INATIVIDADE
+    .map(f => ({ label: f.label, count: faixasMap.get(f.label) ?? 0 }))
+    .filter(f => f.count > 0);
+  if (out.pedidos_ativos > 0 && out.faturamento > 0) out.ticket = out.faturamento / out.pedidos_ativos;
+
+  return { data: out, avisos };
+}
+
 // ── DB / API fetchers ──────────────────────────────────────────────────────────
 
 export async function fetchBairros(clientId: string, from: string, to: string): Promise<Bairro[]> {
@@ -3831,7 +4098,7 @@ export async function buildDeliveryReport(opts: {
   accountIds?:    string[];
   coverId?:       string | null;
   metaLevel?:     MetaBreakdownLevel;
-}): Promise<{ html: string }> {
+}): Promise<{ html: string; avisos?: string[] }> {
   const { clientId, clientName, from, to, csvFiles = [], agencyContext = '', connectionId, accountIds = [], coverId, metaLevel = 'campaign' } = opts;
 
   const fromDate = new Date(from + 'T12:00:00');
@@ -3845,8 +4112,12 @@ export async function buildDeliveryReport(opts: {
   const { current: currentFiles, previous: prevFiles } = separateFiles(csvFiles);
   const hasPrev = prevFiles.length > 0;
 
-  const data    = parseAllFiles(currentFiles, toDate);
-  const prevData = hasPrev ? parseAllFiles(prevFiles, fromDate) : null;
+  const [{ data, avisos }, prevResult] = await Promise.all([
+    parseAllFilesAdaptive(currentFiles, toDate),
+    hasPrev ? parseAllFilesAdaptive(prevFiles, fromDate) : Promise.resolve(null),
+  ]);
+  const prevData = prevResult?.data ?? null;
+  if (prevResult?.avisos.length) avisos.push(...prevResult.avisos.map(a => `Período anterior — ${a}`));
 
   const prevPeriodo = hasPrev
     ? (() => {
@@ -3931,7 +4202,10 @@ export async function buildDeliveryReport(opts: {
   if (hasInstagramPosts)     slides.push(sInstagramPosts(igPosts, ++i, total));
   if (hasInstagramSpotlight) slides.push(sInstagramSpotlight(igPosts, ++i, total));
 
-  return { html: `${FONT_LINK}<div class="onmid-report" style="background:${CANVAS};padding:28px;font-family:${INTER}">${slides.join('')}</div>` };
+  return {
+    html: `${FONT_LINK}<div class="onmid-report" style="background:${CANVAS};padding:28px;font-family:${INTER}">${slides.join('')}</div>`,
+    avisos: avisos.length ? avisos : undefined,
+  };
 }
 
 // ── Save to DB ─────────────────────────────────────────────────────────────────

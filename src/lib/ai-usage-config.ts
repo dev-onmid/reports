@@ -16,6 +16,7 @@ export type AiEstimate = {
 export const ESTIMATES: Record<string, AiEstimate> = {
   report_performance: { model: 'claude-sonnet-4-6', inputTokens: 4000, outputTokens: 6000,  labelPt: 'Relatório Performance' },
   report_delivery:    { model: 'claude-sonnet-4-6', inputTokens: 2000, outputTokens: 2000,  labelPt: 'Relatório Delivery' },
+  report_delivery_csv: { model: 'claude-haiku-4-5-20251001', inputTokens: 600, outputTokens: 300, labelPt: 'Interpretação de planilha (Delivery)' },
   mindmap:            { model: 'claude-sonnet-4-6', inputTokens: 1000, outputTokens: 1500,  labelPt: 'Mapa Mental' },
   luna_chat:          { model: 'claude-sonnet-4-6', inputTokens: 2000, outputTokens: 1000,  labelPt: 'Luna (por mensagem)' },
   insights:           { model: 'claude-haiku-4-5-20251001', inputTokens: 500,  outputTokens: 700,  labelPt: 'Insights Dashboard' },

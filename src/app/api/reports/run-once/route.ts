@@ -63,8 +63,8 @@ export async function POST(request: NextRequest) {
         coverId,
         metaLevel,
       });
-      const { token, reportId } = await saveDeliveryReport({ clientId, clientName, from, to, data: reportData });
-      return Response.json({ ok: true, id: reportId, public_token: token });
+      const { token, reportId } = await saveDeliveryReport({ clientId, clientName, from, to, data: { html: reportData.html } });
+      return Response.json({ ok: true, id: reportId, public_token: token, avisos: reportData.avisos });
     }
 
     // ── Social template ─────────────────────────────────────────────────────────
