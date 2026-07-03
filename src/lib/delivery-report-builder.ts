@@ -2273,9 +2273,12 @@ export function sRegioes(bairros: Bairro[], idx: number, total: number): string 
   return auditSlide(body, 'sRegioes');
 }
 
-function sBase(d: ParsedData, idx: number, total: number): string {
+function sBase(d: ParsedData, idx: number, total: number, meta: MetaAdsFull | null): string {
   void idx;
   void total;
+  const cacNovo = meta && meta.investimento > 0 && d.uma_compra > 0
+    ? brlPrecise(meta.investimento / d.uma_compra)
+    : '—';
   const tot = d.ativos + d.inativos;
   const pct1 = (n: number) => tot ? (n / tot * 100).toFixed(1).replace('.', ',') : '0,0';
   const pA = pct1(d.ativos), pI = pct1(d.inativos);
@@ -2364,6 +2367,7 @@ function sBase(d: ParsedData, idx: number, total: number): string {
   const ICO_CART   = '<circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>';
   const ICO_USER1  = '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>';
   const ICO_USERS2 = ICO_USERS;
+  const ICO_COIN   = '<circle cx="12" cy="12" r="9"/><path d="M12 7v10M9 9.5c0-1.2 1.2-2 3-2s3 .8 3 2-1.2 2-3 2-3 .8-3 2 1.2 2 3 2 3-.8 3-2"/>';
 
   const subMetric = (ico: string, value: string, label: string) =>
     `<div style="display:flex;flex-direction:column;align-items:center;text-align:center;gap:10px;flex:1">
@@ -2440,6 +2444,8 @@ function sBase(d: ParsedData, idx: number, total: number): string {
             ${subMetric(ICO_USER1,  hasDistrib ? numOrDash(d.uma_compra)  : '—', 'Clientes com<br>1 pedido'    )}
             <div style="width:1px;background:${BORDER};align-self:stretch;margin:0 8px"></div>
             ${subMetric(ICO_USERS2, hasDistrib ? numOrDash(d.recorrentes) : '—', 'Clientes com mais<br>de 1 pedido'  )}
+            <div style="width:1px;background:${BORDER};align-self:stretch;margin:0 8px"></div>
+            ${subMetric(ICO_COIN,   cacNovo, 'Custo por<br>cliente novo'  )}
           </div>
         </div>
 
@@ -4327,7 +4333,7 @@ export async function buildDeliveryReport(opts: {
   if (hasVisao)       slides.push(sVisaoGeral(data, prevData, ++i, total, periodo, prevPeriodo));
   if (hasDia)         slides.push(sPorDia(data, ++i, total, periodo));
   if (hasRegiao)      slides.push(sRegioes(bairros, ++i, total));
-  if (hasBase)        slides.push(sBase(data, ++i, total));
+  if (hasBase)        slides.push(sBase(data, ++i, total, meta));
   if (hasInat)        slides.push(sInativos(data, ++i, total));
 
   // ── Bloco: tráfego pago (Meta Ads) ─────────────────────────────────────────
@@ -4403,7 +4409,7 @@ export function __devPreviewBase(): string {
     uma_compra: 156, recorrentes: 233,
     produtos: [], inativos_faixas: [], por_dia: [],
   };
-  return sBase(d, 5, 9);
+  return sBase(d, 5, 9, null);
 }
 
 // ── TEMP DEV PREVIEW — remove before shipping ───────────────────────────────
@@ -4576,7 +4582,7 @@ export function __devPreviewFullReport(): string {
   if (hasVisao)              slides.push(sVisaoGeral(data, prevData, ++i, total, periodo, prevPeriodo));
   if (hasDia)                slides.push(sPorDia(data, ++i, total, periodo));
   if (hasRegiao)             slides.push(sRegioes(bairros, ++i, total));
-  if (hasBase)               slides.push(sBase(data, ++i, total));
+  if (hasBase)               slides.push(sBase(data, ++i, total, meta));
   if (hasInat)               slides.push(sInativos(data, ++i, total));
   // ── Bloco: tráfego pago (Meta Ads) ─────────────────────────────────────────
   if (hasMeta)               slides.push(sMetaAdsResumo(meta, ++i, total));
