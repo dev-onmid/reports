@@ -483,12 +483,21 @@ function parseAllFiles(files: { name: string; content: string }[], refDate: Date
 
 type ClienteSecao = {
   tipo: 'clientes';
-  segmento: 'ativos' | 'inativos' | 'potenciais' | 'misto';
-  colunaValor: string | null;
+  // Identifica o cliente (nome/telefone/e-mail/id) — só necessário quando o arquivo tem
+  // uma linha por PEDIDO (não por cliente), para o sistema agrupar e contar pedidos por
+  // pessoa. Se o arquivo já tem uma linha por cliente, deixe null.
+  colunaCliente: string | null;
+  // Data do pedido — junto com colunaCliente, permite contar quantos pedidos cada
+  // cliente fez (1 pedido = cliente novo) e serve de data da última compra se não
+  // houver colunaUltimaCompra própria.
+  colunaDataPedido: string | null;
+  // Nº de pedidos já pré-contado por cliente (arquivos de uma linha por cliente).
   colunaPedidos: string | null;
-  colunaUltimaData: string | null;
-  colunaStatus: string | null;
-  valoresStatus: { ativos?: string; inativos?: string; potenciais?: string } | null;
+  colunaValor: string | null;
+  // Data explícita do último pedido (arquivos de uma linha por cliente).
+  colunaUltimaCompra: string | null;
+  // "Dias sem comprar" já calculado pela planilha (alternativa a colunaUltimaCompra).
+  colunaDiasSemComprar: string | null;
 };
 type ProdutoSecao = { tipo: 'produtos'; colunaNome: string; colunaQtd: string | null; colunaTotal: string | null };
 type PedidosDiaSecao = { tipo: 'pedidos_dia'; colunaData: string };
@@ -516,7 +525,10 @@ function parseDateFlexible(raw: string): Date | null {
 function isValidFileSection(s: unknown): s is FileSection {
   if (!s || typeof s !== 'object') return false;
   const o = s as Record<string, unknown>;
-  if (o.tipo === 'clientes') return typeof o.segmento === 'string' && ['ativos', 'inativos', 'potenciais', 'misto'].includes(o.segmento as string);
+  if (o.tipo === 'clientes') {
+    return ['colunaCliente', 'colunaDataPedido', 'colunaPedidos', 'colunaValor', 'colunaUltimaCompra', 'colunaDiasSemComprar']
+      .some(k => typeof o[k] === 'string' && (o[k] as string).length > 0);
+  }
   if (o.tipo === 'produtos') return typeof o.colunaNome === 'string' && o.colunaNome.length > 0;
   if (o.tipo === 'pedidos_dia') return typeof o.colunaData === 'string' && o.colunaData.length > 0;
   return false;
@@ -529,7 +541,7 @@ async function interpretDeliveryFile(file: { name: string; content: string }): P
   const sample = rows.slice(0, 8);
   const schema = `{
   "secoes": [
-    { "tipo": "clientes", "segmento": "ativos"|"inativos"|"potenciais"|"misto", "colunaValor": string|null, "colunaPedidos": string|null, "colunaUltimaData": string|null, "colunaStatus": string|null, "valoresStatus": {"ativos": string, "inativos": string, "potenciais": string} | null },
+    { "tipo": "clientes", "colunaCliente": string|null, "colunaDataPedido": string|null, "colunaPedidos": string|null, "colunaValor": string|null, "colunaUltimaCompra": string|null, "colunaDiasSemComprar": string|null },
     { "tipo": "produtos", "colunaNome": string, "colunaQtd": string|null, "colunaTotal": string|null },
     { "tipo": "pedidos_dia", "colunaData": string }
   ],
@@ -543,7 +555,11 @@ Amostra de linhas (até 8): ${JSON.stringify(sample)}
 Identifique quais das seguintes informações esta planilha de delivery (exportada de plataformas como Goomer, Anota Aí, iFood etc, sem formato padrão) pode fornecer. Uma planilha pode conter mais de uma seção ao mesmo tempo (ex: pedidos com cliente, produto e data juntos).
 
 Tipos possíveis de seção:
-- "clientes": lista de clientes, com valor gasto e/ou nº de pedidos. Se houver coluna de status/situação com valores tipo ativo/inativo/potencial, use segmento "misto" e preencha colunaStatus + valoresStatus (o texto exato de cada valor, ex: "Ativo"). Caso contrário, decida o segmento pelo nome do arquivo e pelo conteúdo (potenciais = nunca compraram/sem pedidos; inativos = têm data de último pedido antiga; ativos = compraram recentemente).
+- "clientes": dados de clientes/pedidos para calcular clientes ATIVOS x INATIVOS. Você só precisa apontar as colunas certas — as contas (agrupar, contar, comparar datas) são feitas pelo sistema depois, não por você. Duas situações possíveis:
+  · Se a planilha tem UMA LINHA POR PEDIDO (várias linhas podem ser do mesmo cliente): preencha "colunaCliente" (o que identifica o cliente — nome, telefone, e-mail ou código) e "colunaDataPedido" (data de cada pedido). O sistema agrupa por cliente e conta quantos pedidos cada um fez — cliente com exatamente 1 pedido no arquivo é considerado NOVO.
+  · Se a planilha tem UMA LINHA POR CLIENTE (já resumido): deixe "colunaCliente" null e preencha "colunaPedidos" (nº de pedidos daquele cliente), se existir essa coluna.
+  · Para saber se um cliente está INATIVO (mais de 30 dias sem pedir), preencha "colunaUltimaCompra" (data do último pedido) OU "colunaDiasSemComprar" (número de dias já calculado pela planilha) — o que existir. Sem nenhuma das duas, e sem colunaDataPedido, o sistema não classifica inatividade.
+  · "colunaValor": valor gasto, se existir (por pedido ou por cliente).
 - "produtos": lista de produtos vendidos, com nome e, se houver, quantidade e valor total.
 - "pedidos_dia": linhas de pedidos com uma coluna de data, para calcular distribuição por dia da semana.
 
@@ -575,69 +591,89 @@ ${schema}`;
   }
 }
 
-function matchStatusSegmento(
-  rawStatus: string, valoresStatus: ClienteSecao['valoresStatus'],
-): 'ativos' | 'inativos' | 'potenciais' | null {
-  if (!valoresStatus) return null;
-  const status = normalizeHeader(rawStatus);
-  if (!status) return null;
-  for (const seg of ['ativos', 'inativos', 'potenciais'] as const) {
-    const expected = valoresStatus[seg];
-    if (expected && (status.includes(normalizeHeader(expected)) || normalizeHeader(expected).includes(status))) return seg;
-  }
-  return null;
-}
+// Um cliente é NOVO quando fez exatamente 1 pedido no arquivo, e RECORRENTE com 2+.
+// Um cliente é INATIVO quando a última compra (explícita ou derivada da data de pedido
+// mais recente) passou de 30 dias em relação a refDate — mesmo limiar de FAIXAS_INATIVIDADE.
+// Nenhuma dessas contas é feita pela IA: ela só aponta as colunas, a regra é determinística.
+const DIAS_INATIVIDADE = 30;
+
+type ClienteResumo = { pedidos: number; valor: number; ultimaCompra: Date | null; diasSemComprar: number | null };
 
 function aggregateClientesSection(
   headers: string[], rows: string[][], section: ClienteSecao, refDate: Date,
 ): {
-  buckets: Record<'ativos' | 'inativos' | 'potenciais', { count: number; fat: number; ped: number; uma: number; recorrentes: number }>;
+  ativos: { count: number; fat: number; ped: number; uma: number; recorrentes: number };
+  inativosCount: number;
   faixas: Faixa[];
 } {
-  const valorIdx = section.colunaValor ? headers.indexOf(section.colunaValor) : -1;
+  const clienteIdx = section.colunaCliente ? headers.indexOf(section.colunaCliente) : -1;
+  const dataPedidoIdx = section.colunaDataPedido ? headers.indexOf(section.colunaDataPedido) : -1;
   const pedidosIdx = section.colunaPedidos ? headers.indexOf(section.colunaPedidos) : -1;
-  const dataIdx = section.colunaUltimaData ? headers.indexOf(section.colunaUltimaData) : -1;
-  const statusIdx = section.colunaStatus ? headers.indexOf(section.colunaStatus) : -1;
+  const valorIdx = section.colunaValor ? headers.indexOf(section.colunaValor) : -1;
+  const ultimaCompraIdx = section.colunaUltimaCompra ? headers.indexOf(section.colunaUltimaCompra) : -1;
+  const diasSemComprarIdx = section.colunaDiasSemComprar ? headers.indexOf(section.colunaDiasSemComprar) : -1;
 
-  const buckets = {
-    ativos:     { count: 0, fat: 0, ped: 0, uma: 0, recorrentes: 0 },
-    inativos:   { count: 0, fat: 0, ped: 0, uma: 0, recorrentes: 0 },
-    potenciais: { count: 0, fat: 0, ped: 0, uma: 0, recorrentes: 0 },
-  };
+  const resumos: ClienteResumo[] = [];
+
+  if (clienteIdx >= 0) {
+    // Uma linha por pedido — agrupa por cliente pra contar quantos pedidos cada um fez.
+    const grupos = new Map<string, { pedidos: number; valor: number; datas: Date[] }>();
+    for (const row of rows) {
+      const chave = normalizeHeader(row[clienteIdx] ?? '');
+      if (!chave) continue;
+      const g = grupos.get(chave) ?? { pedidos: 0, valor: 0, datas: [] };
+      g.pedidos++;
+      if (valorIdx >= 0) g.valor += parseFloat2(row[valorIdx] ?? '');
+      if (dataPedidoIdx >= 0) {
+        const d = parseDateFlexible(row[dataPedidoIdx] ?? '');
+        if (d) g.datas.push(d);
+      }
+      grupos.set(chave, g);
+    }
+    for (const g of grupos.values()) {
+      const ultimaCompra = g.datas.length ? new Date(Math.max(...g.datas.map(d => d.getTime()))) : null;
+      resumos.push({ pedidos: g.pedidos, valor: g.valor, ultimaCompra, diasSemComprar: null });
+    }
+  } else {
+    // Já é uma linha por cliente.
+    for (const row of rows) {
+      const pedidos = pedidosIdx >= 0 ? (parseInt(row[pedidosIdx] ?? '0') || 0) : 1;
+      const valor = valorIdx >= 0 ? parseFloat2(row[valorIdx] ?? '') : 0;
+      const ultimaCompra = ultimaCompraIdx >= 0 ? parseDateFlexible(row[ultimaCompraIdx] ?? '') : null;
+      const diasSemComprarRaw = diasSemComprarIdx >= 0
+        ? (row[diasSemComprarIdx] ?? '').replace(/\D/g, '')
+        : '';
+      resumos.push({
+        pedidos, valor, ultimaCompra,
+        diasSemComprar: diasSemComprarRaw ? parseInt(diasSemComprarRaw, 10) : null,
+      });
+    }
+  }
+
+  const ativos = { count: 0, fat: 0, ped: 0, uma: 0, recorrentes: 0 };
+  let inativosCount = 0;
   const faixasCount = new Map<string, number>();
 
-  for (const row of rows) {
-    const seg = section.segmento === 'misto'
-      ? (statusIdx >= 0 ? matchStatusSegmento(row[statusIdx] ?? '', section.valoresStatus) : null)
-      : section.segmento;
-    if (!seg) continue;
-
-    const b = buckets[seg];
-    b.count++;
-    const fat = valorIdx >= 0 ? parseFloat2(row[valorIdx] ?? '') : 0;
-    const pedCount = pedidosIdx >= 0 ? (parseInt(row[pedidosIdx] ?? '0') || 0) : 0;
-    b.fat += fat;
-    if (pedidosIdx >= 0) {
-      b.ped += pedCount;
-      if (pedCount === 1) b.uma++;
-      else if (pedCount >= 2) b.recorrentes++;
+  for (const r of resumos) {
+    const dias = r.diasSemComprar ?? (r.ultimaCompra ? Math.floor((refDate.getTime() - r.ultimaCompra.getTime()) / 86_400_000) : null);
+    if (dias !== null && dias >= DIAS_INATIVIDADE) {
+      inativosCount++;
+      const faixa = FAIXAS_INATIVIDADE.find(f => dias >= f.min && dias <= f.max);
+      if (faixa) faixasCount.set(faixa.label, (faixasCount.get(faixa.label) ?? 0) + 1);
+      continue;
     }
-
-    if (seg === 'inativos' && dataIdx >= 0) {
-      const d = parseDateFlexible(row[dataIdx] ?? '');
-      if (d) {
-        const dias = Math.floor((refDate.getTime() - d.getTime()) / 86_400_000);
-        const faixa = FAIXAS_INATIVIDADE.find(f => dias >= f.min && dias <= f.max);
-        if (faixa) faixasCount.set(faixa.label, (faixasCount.get(faixa.label) ?? 0) + 1);
-      }
-    }
+    ativos.count++;
+    ativos.fat += r.valor;
+    ativos.ped += r.pedidos;
+    if (r.pedidos === 1) ativos.uma++;
+    else if (r.pedidos >= 2) ativos.recorrentes++;
   }
 
   const faixas = FAIXAS_INATIVIDADE
     .map(f => ({ label: f.label, count: faixasCount.get(f.label) ?? 0 }))
     .filter(f => f.count > 0);
 
-  return { buckets, faixas };
+  return { ativos, inativosCount, faixas };
 }
 
 function aggregateProdutosSection(headers: string[], rows: string[][], section: ProdutoSecao): Product[] {
@@ -699,16 +735,11 @@ async function parseAllFilesAdaptive(
 
     for (const section of interp.sections) {
       if (section.tipo === 'clientes') {
-        const { buckets, faixas } = aggregateClientesSection(headers, rows, section, refDate);
-        for (const seg of ['ativos', 'inativos', 'potenciais'] as const) {
-          const b = buckets[seg];
-          if (!b.count) continue;
-          out[seg] += b.count;
-          if (seg === 'ativos') {
-            out.faturamento += b.fat; out.pedidos_ativos += b.ped;
-            out.uma_compra += b.uma; out.recorrentes += b.recorrentes;
-          }
-        }
+        const { ativos, inativosCount, faixas } = aggregateClientesSection(headers, rows, section, refDate);
+        out.ativos += ativos.count;
+        out.faturamento += ativos.fat; out.pedidos_ativos += ativos.ped;
+        out.uma_compra += ativos.uma; out.recorrentes += ativos.recorrentes;
+        out.inativos += inativosCount;
         for (const f of faixas) faixasMap.set(f.label, (faixasMap.get(f.label) ?? 0) + f.count);
       } else if (section.tipo === 'produtos') {
         for (const p of aggregateProdutosSection(headers, rows, section)) {
@@ -2140,9 +2171,9 @@ export function sRegioes(bairros: Bairro[], idx: number, total: number): string 
 function sBase(d: ParsedData, idx: number, total: number): string {
   void idx;
   void total;
-  const tot = d.ativos + d.inativos + d.potenciais;
+  const tot = d.ativos + d.inativos;
   const pct1 = (n: number) => tot ? (n / tot * 100).toFixed(1).replace('.', ',') : '0,0';
-  const pA = pct1(d.ativos), pI = pct1(d.inativos), pP = pct1(d.potenciais);
+  const pA = pct1(d.ativos), pI = pct1(d.inativos);
   const pIraw = tot ? d.inativos / tot * 100 : 0;
 
   const totalAtivos = d.uma_compra + d.recorrentes;
@@ -2158,14 +2189,12 @@ function sBase(d: ParsedData, idx: number, total: number): string {
 
   const ICO_USERS = '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>';
   const ICO_USER_X = '<path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="17" y1="8" x2="22" y2="13"/><line x1="22" y1="8" x2="17" y2="13"/>';
-  const ICO_USER_STAR = '<path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><polygon points="19 7.5 20.1 9.9 22.7 10.2 20.8 12 21.3 14.5 19 13.2 16.7 14.5 17.2 12 15.3 10.2 17.9 9.9"/>';
 
   const donutWrap = (() => {
     if (!tot) return '';
     const slices = [
       { value: d.ativos,     color: PRIMARY,    textColor: '#0a4d00' },
       { value: d.inativos,   color: '#f87171',  textColor: '#ffffff' },
-      { value: d.potenciais, color: '#4ade80',  textColor: '#14532d' },
     ];
     let angle = 0;
     const paths: string[] = [];
@@ -2214,7 +2243,6 @@ function sBase(d: ParsedData, idx: number, total: number): string {
   const legendRows = [
     { label: 'Clientes ativos',       count: d.ativos,     pct: pA, dotColor: PRIMARY,   numColor: PRIMARY_TEXT },
     { label: 'Clientes inativos',     count: d.inativos,   pct: pI, dotColor: '#f87171', numColor: '#dc2626'    },
-    { label: 'Clientes em potencial', count: d.potenciais, pct: pP, dotColor: '#4ade80', numColor: '#16a34a'    },
   ].map(l => `
     <div style="display:flex;flex-direction:column;gap:6px">
       <div style="display:flex;align-items:center;gap:10px">
@@ -2279,10 +2307,9 @@ function sBase(d: ParsedData, idx: number, total: number): string {
         <h1 style="font-family:${INTER};font-size:46px;font-weight:900;color:${FG};line-height:1.08;margin:0 0 10px;letter-spacing:-0.03em">${reportTitle('Base de clientes e<br>clientes ativos')}</h1>
         <p style="font-size:15px;font-weight:500;color:#163461;font-family:${INTER};margin:0;line-height:1.4">Onde está a maior oportunidade de relacionamento</p>
       </div>
-      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;align-items:stretch">
+      <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:stretch">
         ${topCard('Clientes ativos',       numOrDash(d.ativos),     ICO_USERS,    PRIMARY,   PRIMARY_TEXT)}
         ${topCard('Clientes inativos',     numOrDash(d.inativos),   ICO_USER_X,   '#f87171', '#dc2626'   )}
-        ${topCard('Clientes em potencial', numOrDash(d.potenciais), ICO_USER_STAR,'#4ade80', '#16a34a'   )}
       </div>
     </div>
 
@@ -2357,15 +2384,11 @@ function sInativos(d: ParsedData, idx: number, total: number): string {
   ).join('');
 
   const body = `
-${sectionHeader(thesis, `${numOrDash(d.inativos)} inativos · ${numOrDash(d.potenciais)} potenciais — distribuição por tempo de ausência`)}
+${sectionHeader(thesis, `${numOrDash(d.inativos)} inativos — distribuição por tempo de ausência`)}
 <div style="display:grid;grid-template-columns:1fr 340px;gap:32px;flex:1">
   <div>
     <p style="font-size:10px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 14px">Inatividade por Faixa de Tempo</p>
     ${bars}
-    ${d.potenciais > 0 ? `<div style="margin-top:14px;padding:12px 14px;background:${BLUE}0F;border:1px solid ${BLUE}30">
-      <p style="font-size:10px;font-weight:700;color:${BLUE};text-transform:uppercase;letter-spacing:0.1em;font-family:${INTER};margin:0 0 4px">Em Potencial — nunca compraram</p>
-      <p style="font-size:28px;font-family:${BEBAS};color:${FG};margin:0;line-height:1">${num(d.potenciais)} <span style="font-size:12px;color:${MUTED};font-family:${INTER};font-weight:400">clientes cadastrados sem pedido</span></p>
-    </div>` : ''}
   </div>
   <div style="display:flex;flex-direction:column;gap:10px">
     ${insight('Prioridade de reativação', `Foco em ${maior.label} — ${num(maior.count)} clientes. Ainda têm memória do produto. Uma oferta personalizada tem 25–40% de taxa de retorno.`, PRIMARY)}
@@ -4058,7 +4081,7 @@ async function fetchDiagnosis(
   const summary = {
     cliente: clientName, periodo,
     faturamento: d.faturamento, pedidos: d.pedidos_ativos, ticket: Math.round(d.ticket),
-    ativos: d.ativos, inativos: d.inativos, potenciais: d.potenciais,
+    ativos: d.ativos, inativos: d.inativos,
     uma_compra: d.uma_compra, recorrentes: d.recorrentes,
     top_produtos: d.produtos.filter(p => p.qtd > 0).slice(0, 5).map(p => `${p.nome} (${p.qtd}x)`),
     top_bairros: bairros.slice(0, 3).map(b => `${b.bairro} (${b.pedidos} ped)`),
@@ -4160,7 +4183,7 @@ export async function buildDeliveryReport(opts: {
 
   const hasVisao             = data.faturamento > 0 || data.pedidos_ativos > 0;
   const hasDia               = data.por_dia.length > 0;
-  const hasBase              = data.ativos > 0 || data.inativos > 0 || data.potenciais > 0;
+  const hasBase              = data.ativos > 0 || data.inativos > 0;
   const hasInat              = data.inativos_faixas.length > 0;
   const hasRegiao            = bairros.length > 0;
   const hasMeta              = meta !== null;
