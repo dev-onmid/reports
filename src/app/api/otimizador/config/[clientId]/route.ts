@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
+import { ensureOptimizerClientConfigTable } from '@/lib/optimizer';
 
 export type OptimizerClientConfig = {
   client_id: string;
@@ -43,6 +44,7 @@ export async function GET(
   const { clientId } = await params;
   const pool = makeServerPool();
   try {
+    await ensureOptimizerClientConfigTable(pool);
     const { rows } = await pool.query<OptimizerClientConfig>(
       `SELECT client_id, modo_operacao, acoes_pre_aprovadas, orcamento_diario_maximo,
               cpr_emergencia, min_conjuntos_ativos, max_conjuntos_ativos,
@@ -85,6 +87,7 @@ export async function POST(
 
   const pool = makeServerPool();
   try {
+    await ensureOptimizerClientConfigTable(pool);
     const { rows: existing } = await pool.query<{ analise_dia_semana: number }>(
       `SELECT analise_dia_semana FROM public.optimizer_client_config WHERE client_id = $1`,
       [clientId],

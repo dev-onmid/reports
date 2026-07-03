@@ -1,3 +1,29 @@
+import type { Pool } from 'pg';
+
+// Self-heal: em prod o schema de optimizer_client_config pode ter ficado atrás da
+// migration_optimizer_v2.sql (ex: coluna observacoes_fixas adicionada no código mas nunca
+// aplicada no banco via migração manual). Chamar antes de qualquer query que toque a tabela.
+export async function ensureOptimizerClientConfigTable(pool: Pool): Promise<void> {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS public.optimizer_client_config (
+      client_id             TEXT PRIMARY KEY,
+      modo_operacao         TEXT NOT NULL DEFAULT 'RECOMENDACAO_COM_APROVACAO',
+      acoes_pre_aprovadas   TEXT[] NOT NULL DEFAULT '{}',
+      orcamento_diario_maximo NUMERIC,
+      cpr_emergencia        NUMERIC,
+      min_conjuntos_ativos  INTEGER NOT NULL DEFAULT 1,
+      max_conjuntos_ativos  INTEGER NOT NULL DEFAULT 20,
+      min_dias_aprendizado  INTEGER NOT NULL DEFAULT 7,
+      analise_dia_semana    INTEGER NOT NULL DEFAULT 1,
+      ativo                 BOOLEAN NOT NULL DEFAULT true,
+      updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_by            TEXT
+    );
+    ALTER TABLE public.optimizer_client_config
+      ADD COLUMN IF NOT EXISTS observacoes_fixas TEXT;
+  `).catch(() => {});
+}
+
 export const OPTIMIZER_MODEL = 'claude-sonnet-4-6';
 // v2 usa Haiku 4.5: a análise em árvore (payload grande + output 8k) com Sonnet passava
 // dos ~55s e estourava o timeout da IA. Haiku gera em ~10-20s, aguenta o schema de

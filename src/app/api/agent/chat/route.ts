@@ -8,6 +8,7 @@ import { sendText, sendDocument } from '@/lib/zapi';
 import { generateReportPdf } from '@/lib/report-pdf';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import { resolveMetaPeriod, resolveGaqlPeriod, applyMetaDateToUrl } from '@/lib/period-utils';
+import { ensureOptimizerClientConfigTable } from '@/lib/optimizer';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -986,6 +987,7 @@ async function execSystemTool(
       };
       const { rows: clientRows } = await pool.query('SELECT name FROM public.clients WHERE id = $1', [client_id]);
       if (clientRows.length === 0) return `Cliente ${client_id} não encontrado.`;
+      await ensureOptimizerClientConfigTable(pool);
       const { rows: existingRows } = await pool.query(
         `SELECT modo_operacao, acoes_pre_aprovadas, orcamento_diario_maximo, cpr_emergencia,
                 min_conjuntos_ativos, max_conjuntos_ativos, min_dias_aprendizado, analise_dia_semana, ativo, observacoes_fixas

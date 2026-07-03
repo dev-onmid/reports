@@ -5,6 +5,7 @@ import {
   OPTIMIZER_PERIODS,
   currentWeekLabel,
   segmentToOptimizerNiche,
+  ensureOptimizerClientConfigTable,
   type OptimizerPayloadV2,
   type OptimizerCampaignV2,
   type OptimizerObjective,
@@ -167,6 +168,7 @@ async function loadClientsForToday(forcedDow?: number, forceClientId?: string): 
   const dow = forcedDow ?? todayDow();
   const pool = makeServerPool();
   try {
+    await ensureOptimizerClientConfigTable(pool);
     if (forceClientId) {
       const { rows } = await pool.query<ClientRow>(
         `SELECT c.id, c.name, c.segment,

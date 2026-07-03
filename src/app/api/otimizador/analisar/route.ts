@@ -191,7 +191,13 @@ async function ensureTables(pool: ReturnType<typeof makeServerPool>) {
       ADD COLUMN IF NOT EXISTS gasto_total NUMERIC,
       ADD COLUMN IF NOT EXISTS conversoes NUMERIC,
       ADD COLUMN IF NOT EXISTS cpl_cpa_atual NUMERIC,
-      ADD COLUMN IF NOT EXISTS ctr_link NUMERIC
+      ADD COLUMN IF NOT EXISTS ctr_link NUMERIC,
+      ADD COLUMN IF NOT EXISTS semana_analise TEXT,
+      ADD COLUMN IF NOT EXISTS modo_operacao TEXT,
+      ADD COLUMN IF NOT EXISTS estado_da_conta TEXT,
+      ADD COLUMN IF NOT EXISTS resumo_executivo TEXT,
+      ADD COLUMN IF NOT EXISTS acoes_automaticas_count INTEGER DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS acoes_executadas_count INTEGER DEFAULT 0
   `).catch(() => {});
 }
 
