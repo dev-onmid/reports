@@ -61,24 +61,49 @@ export async function exportReportToPdf(token: string, filename: string): Promis
     await proxyCrossOriginImages(doc, win.location.origin);
     if (win.document.fonts?.ready) await win.document.fonts.ready;
 
+    // O html2canvas posiciona o baseline de fontes um pouco diferente do navegador e, em
+    // números grandes com line-height:1 + overflow:hidden (os cards de KPI/métrica), corta
+    // o fundo do dígito. Relaxamos o line-height apertado direto no iframe (que é oculto e
+    // descartado no fim) ANTES de medir a altura — assim a medição já considera o ajuste e
+    // não sobra nem falta espaço. O relatório real não é tocado.
+    doc.querySelectorAll<HTMLElement>('[style*="line-height:1"]').forEach((el) => {
+      const lh = el.style.lineHeight.trim();
+      if (lh === '1' || lh === '1.0') el.style.lineHeight = '1.2';
+    });
+
     const slides = Array.from(doc.querySelectorAll<HTMLElement>('[style*="width:1440px"]'));
     if (!slides.length) throw new Error('Nenhum slide encontrado no relatório');
 
-    const pdf = new jsPDF({ unit: 'px', format: [SLIDE_W, SLIDE_H], orientation: 'landscape', compress: true });
+    let pdf: import('jspdf').jsPDF | null = null;
 
     for (let i = 0; i < slides.length; i++) {
+      // Cada slide é desenhado com min-height:810px mas pode crescer um pouco além disso
+      // (texto mais longo, mais cards). Capturamos e paginamos na ALTURA REAL do slide —
+      // nunca forçando 810 — pra não espremer nem cortar o conteúdo que passa da linha.
+      const realH = Math.ceil(slides[i].getBoundingClientRect().height);
+      const pageH = Math.max(SLIDE_H, realH);
+      const bg = win.getComputedStyle(slides[i]).backgroundColor;
+
       const canvas = await html2canvas(slides[i], {
         scale: 2,
         useCORS: true,
-        backgroundColor: '#FFFFFF',
+        backgroundColor: bg && bg !== 'rgba(0, 0, 0, 0)' ? bg : '#FFFFFF',
+        width: SLIDE_W,
+        height: pageH,
         windowWidth: SLIDE_W,
+        windowHeight: pageH,
       });
       const imgData = canvas.toDataURL('image/jpeg', 0.92);
-      if (i > 0) pdf.addPage([SLIDE_W, SLIDE_H], 'landscape');
-      pdf.addImage(imgData, 'JPEG', 0, 0, SLIDE_W, SLIDE_H);
+
+      if (!pdf) {
+        pdf = new jsPDF({ unit: 'px', format: [SLIDE_W, pageH], orientation: 'landscape', compress: true });
+      } else {
+        pdf.addPage([SLIDE_W, pageH], 'landscape');
+      }
+      pdf.addImage(imgData, 'JPEG', 0, 0, SLIDE_W, pageH);
     }
 
-    pdf.save(filename);
+    pdf?.save(filename);
   } finally {
     document.body.removeChild(iframe);
   }
