@@ -513,13 +513,24 @@ const FAIXAS_INATIVIDADE = [
   { label: '365+ dias',    min: 365, max: Infinity },
 ];
 
+// Extrai só os dígitos da data via grupos de captura em vez de "split('/')" — muitas
+// exportações reais colam informação extra depois do ano ("02/06/2026 12:40:25" com
+// hora, ou "08/03/2026(Há 117 dias)" com dias-atrás calculado), e um split ingênuo
+// jogava esse texto extra dentro do ano, quebrando o Date silenciosamente.
 function parseDateFlexible(raw: string): Date | null {
   const ds = (raw ?? '').trim();
   if (!ds) return null;
-  let d: Date | null = null;
-  if (/^\d{2}\/\d{2}\/\d{4}/.test(ds)) { const [dd, mm, yyyy] = ds.split('/'); d = new Date(`${yyyy}-${mm}-${dd}`); }
-  else if (/^\d{4}-\d{2}-\d{2}/.test(ds)) { d = new Date(ds); }
-  return d && !isNaN(d.getTime()) ? d : null;
+  const br = ds.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if (br) {
+    const d = new Date(`${br[3]}-${br[2]}-${br[1]}`);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  const iso = ds.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) {
+    const d = new Date(`${iso[1]}-${iso[2]}-${iso[3]}`);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  return null;
 }
 
 function isValidFileSection(s: unknown): s is FileSection {
@@ -555,9 +566,10 @@ Amostra de linhas (até 8): ${JSON.stringify(sample)}
 Identifique quais das seguintes informações esta planilha de delivery (exportada de plataformas como Goomer, Anota Aí, iFood etc, sem formato padrão) pode fornecer. Uma planilha pode conter mais de uma seção ao mesmo tempo (ex: pedidos com cliente, produto e data juntos).
 
 Tipos possíveis de seção:
-- "clientes": dados de clientes/pedidos para calcular clientes ATIVOS x INATIVOS. Você só precisa apontar as colunas certas — as contas (agrupar, contar, comparar datas) são feitas pelo sistema depois, não por você. Duas situações possíveis:
-  · Se a planilha tem UMA LINHA POR PEDIDO (várias linhas podem ser do mesmo cliente): preencha "colunaCliente" (o que identifica o cliente — nome, telefone, e-mail ou código) e "colunaDataPedido" (data de cada pedido). O sistema agrupa por cliente e conta quantos pedidos cada um fez — cliente com exatamente 1 pedido no arquivo é considerado NOVO.
-  · Se a planilha tem UMA LINHA POR CLIENTE (já resumido): deixe "colunaCliente" null e preencha "colunaPedidos" (nº de pedidos daquele cliente), se existir essa coluna.
+- "clientes": dados de clientes/pedidos para calcular clientes ATIVOS x INATIVOS. Você só precisa apontar as colunas certas — as contas (agrupar, contar, comparar datas) são feitas pelo sistema depois, não por você.
+  · SEMPRE que existir uma coluna que identifique o cliente (nome, telefone, e-mail ou código), preencha "colunaCliente" com ela — mesmo em planilhas já resumidas por cliente. É assim que o sistema cruza esta planilha com outras anexadas junto (ex: uma lista de pedidos do mês + um cadastro completo de clientes são a MESMA pessoa aparecendo nos dois arquivos, e precisam ser reconhecidas como tal, não contadas em dobro).
+  · Se a planilha tem UMA LINHA POR PEDIDO (várias linhas podem ser do mesmo cliente): preencha também "colunaDataPedido" (data de cada pedido). O sistema agrupa por cliente e conta quantos pedidos cada um fez — cliente com exatamente 1 pedido no arquivo é considerado NOVO.
+  · Se a planilha tem UMA LINHA POR CLIENTE (já resumido): preencha "colunaPedidos" (nº de pedidos, total histórico, daquele cliente), se existir essa coluna.
   · Para saber se um cliente está INATIVO (mais de 30 dias sem pedir), preencha "colunaUltimaCompra" (data do último pedido) OU "colunaDiasSemComprar" (número de dias já calculado pela planilha) — o que existir. Sem nenhuma das duas, e sem colunaDataPedido, o sistema não classifica inatividade.
   · "colunaValor": valor gasto, se existir (por pedido ou por cliente).
 - "produtos": lista de produtos vendidos, com nome e, se houver, quantidade e valor total.
@@ -611,17 +623,26 @@ type ClienteResumo = {
   totalPedidos:     number;      // pedidos em toda a base (não só no período) — decide novo/ativo
   pedidosNoPeriodo: number;      // pedidos com data dentro do período do relatório
   valorNoPeriodo:   number;      // valor desses pedidos do período
+  // true quando pedidosNoPeriodo/valorNoPeriodo vieram de datas de pedido reais (arquivo
+  // com uma linha por pedido). false quando é uma estimativa tudo-ou-nada — um cadastro
+  // resumido por cliente só diz a ÚLTIMA compra, então "cliente comprou dentro do
+  // período" vira "assume que TODOS os pedidos históricos daquele cliente foram no
+  // período", o que superestima muito quem tem pedidos antigos. No cruzamento entre
+  // planilhas, a fonte precisa sempre tem prioridade sobre a estimativa.
+  periodoPreciso:   boolean;
   ultimoPedido:     Date | null; // pedido mais recente — decide inatividade e se o único pedido é "novo"
   diasSemComprar:   number | null;
 };
 
-function aggregateClientesSection(
+// Extrai um resumo por cliente de UMA seção/arquivo, com uma chave de cruzamento (nome/
+// telefone/e-mail normalizado) quando disponível. Não classifica nada aqui — quando o
+// usuário anexa, por exemplo, a lista de pedidos do mês E o cadastro completo de clientes
+// juntos, os MESMOS clientes aparecem nos dois arquivos (um com os pedidos do período, o
+// outro com o total histórico) e precisam ser cruzados pela chave antes de decidir
+// novo/ativo/inativo — nunca somados como se fossem clientes diferentes.
+function buildClienteResumos(
   headers: string[], rows: string[][], section: ClienteSecao, periodFrom: Date, periodTo: Date,
-): {
-  ativos: { count: number; fat: number; ped: number; uma: number; recorrentes: number };
-  inativosCount: number;
-  faixas: Faixa[];
-} {
+): { chave: string | null; resumo: ClienteResumo }[] {
   const clienteIdx = section.colunaCliente ? headers.indexOf(section.colunaCliente) : -1;
   const dataPedidoIdx = section.colunaDataPedido ? headers.indexOf(section.colunaDataPedido) : -1;
   const pedidosIdx = section.colunaPedidos ? headers.indexOf(section.colunaPedidos) : -1;
@@ -630,31 +651,32 @@ function aggregateClientesSection(
   const diasSemComprarIdx = section.colunaDiasSemComprar ? headers.indexOf(section.colunaDiasSemComprar) : -1;
 
   const dentroDoPeriodo = (d: Date) => d >= periodFrom && d <= periodTo;
-  const resumos: ClienteResumo[] = [];
+  const entries: { chave: string | null; resumo: ClienteResumo }[] = [];
 
-  if (clienteIdx >= 0) {
-    // Uma linha por pedido — agrupa por cliente pra contar o total de pedidos e
-    // separadamente quantos deles caem dentro do período analisado.
+  if (dataPedidoIdx >= 0 && clienteIdx >= 0) {
+    // Uma linha por pedido — agrupa por cliente pra contar o total de pedidos (neste
+    // arquivo) e separadamente quantos deles caem dentro do período analisado.
     const grupos = new Map<string, { total: number; noPeriodo: number; valorPeriodo: number; ultimaData: Date | null }>();
     for (const row of rows) {
       const chave = normalizeHeader(row[clienteIdx] ?? '');
       if (!chave) continue;
       const g = grupos.get(chave) ?? { total: 0, noPeriodo: 0, valorPeriodo: 0, ultimaData: null };
       g.total++;
-      const dataPedido = dataPedidoIdx >= 0 ? parseDateFlexible(row[dataPedidoIdx] ?? '') : null;
+      const dataPedido = parseDateFlexible(row[dataPedidoIdx] ?? '');
       if (dataPedido && (!g.ultimaData || dataPedido > g.ultimaData)) g.ultimaData = dataPedido;
-      // Sem coluna de data, não dá pra saber se o pedido é do período — conta como se fosse
-      // (mesma suposição de antes, só se aplica quando a planilha não tem data nenhuma).
-      if (!dataPedido ? !dataPedidoIdx : dentroDoPeriodo(dataPedido)) {
+      if (dataPedido && dentroDoPeriodo(dataPedido)) {
         g.noPeriodo++;
         if (valorIdx >= 0) g.valorPeriodo += parseFloat2(row[valorIdx] ?? '');
       }
       grupos.set(chave, g);
     }
-    for (const g of grupos.values()) {
-      resumos.push({
-        totalPedidos: g.total, pedidosNoPeriodo: g.noPeriodo, valorNoPeriodo: g.valorPeriodo,
-        ultimoPedido: g.ultimaData, diasSemComprar: null,
+    for (const [chave, g] of grupos) {
+      entries.push({
+        chave,
+        resumo: {
+          totalPedidos: g.total, pedidosNoPeriodo: g.noPeriodo, valorNoPeriodo: g.valorPeriodo,
+          periodoPreciso: true, ultimoPedido: g.ultimaData, diasSemComprar: null,
+        },
       });
     }
   } else {
@@ -668,21 +690,70 @@ function aggregateClientesSection(
       const diasSemComprarRaw = diasSemComprarIdx >= 0
         ? (row[diasSemComprarIdx] ?? '').replace(/\D/g, '')
         : '';
-      resumos.push({
-        totalPedidos,
-        pedidosNoPeriodo: foraDoPeriodo ? 0 : totalPedidos,
-        valorNoPeriodo: foraDoPeriodo ? 0 : valor,
-        ultimoPedido,
-        diasSemComprar: diasSemComprarRaw ? parseInt(diasSemComprarRaw, 10) : null,
+      entries.push({
+        chave: clienteIdx >= 0 ? (normalizeHeader(row[clienteIdx] ?? '') || null) : null,
+        resumo: {
+          totalPedidos,
+          pedidosNoPeriodo: foraDoPeriodo ? 0 : totalPedidos,
+          valorNoPeriodo: foraDoPeriodo ? 0 : valor,
+          periodoPreciso: false,
+          ultimoPedido,
+          diasSemComprar: diasSemComprarRaw ? parseInt(diasSemComprarRaw, 10) : null,
+        },
       });
     }
   }
+
+  return entries;
+}
+
+// Junta os resumos de TODAS as seções/arquivos de clientes de uma vez (cruzando pela
+// chave quando ela existe em mais de uma planilha) e só então classifica cada cliente
+// como novo/ativo/inativo — evita contar a mesma pessoa duas vezes quando o pedido do
+// mês e o cadastro completo do cliente vêm em arquivos separados.
+function classifyClienteResumos(
+  entries: { chave: string | null; resumo: ClienteResumo }[], periodFrom: Date, periodTo: Date,
+): {
+  ativos: { count: number; fat: number; ped: number; uma: number; recorrentes: number };
+  inativosCount: number;
+  faixas: Faixa[];
+} {
+  const dentroDoPeriodo = (d: Date) => d >= periodFrom && d <= periodTo;
+
+  const merged: ClienteResumo[] = [];
+  const byKey = new Map<string, ClienteResumo>();
+  for (const { chave, resumo } of entries) {
+    if (!chave) { merged.push(resumo); continue; }
+    const existing = byKey.get(chave);
+    if (!existing) { byKey.set(chave, { ...resumo }); continue; }
+    existing.totalPedidos = Math.max(existing.totalPedidos, resumo.totalPedidos);
+    // A fonte precisa (datas de pedido reais) sempre vence a estimativa tudo-ou-nada —
+    // nunca soma/máximo entre as duas, ou a estimativa infla o resultado com o
+    // histórico inteiro do cliente contado como se fosse tudo do período.
+    if (resumo.periodoPreciso && !existing.periodoPreciso) {
+      existing.pedidosNoPeriodo = resumo.pedidosNoPeriodo;
+      existing.valorNoPeriodo = resumo.valorNoPeriodo;
+      existing.periodoPreciso = true;
+    } else if (existing.periodoPreciso === resumo.periodoPreciso) {
+      existing.pedidosNoPeriodo = Math.max(existing.pedidosNoPeriodo, resumo.pedidosNoPeriodo);
+      existing.valorNoPeriodo = Math.max(existing.valorNoPeriodo, resumo.valorNoPeriodo);
+    }
+    if (resumo.ultimoPedido && (!existing.ultimoPedido || resumo.ultimoPedido > existing.ultimoPedido)) {
+      existing.ultimoPedido = resumo.ultimoPedido;
+    }
+    existing.diasSemComprar = existing.diasSemComprar ?? resumo.diasSemComprar;
+  }
+  merged.push(...byKey.values());
 
   const ativos = { count: 0, fat: 0, ped: 0, uma: 0, recorrentes: 0 };
   let inativosCount = 0;
   const faixasCount = new Map<string, number>();
 
-  for (const r of resumos) {
+  for (const r of merged) {
+    // Nunca fez pedido algum (cadastro sem compra, o antigo "cliente em potencial") —
+    // não é novo, ativo, nem inativo, porque nunca esteve em atividade nenhuma.
+    if (r.totalPedidos <= 0) continue;
+
     const dias = r.diasSemComprar ?? (r.ultimoPedido ? Math.floor((periodTo.getTime() - r.ultimoPedido.getTime()) / 86_400_000) : null);
     if (dias !== null && dias >= DIAS_INATIVIDADE) {
       inativosCount++;
@@ -750,7 +821,10 @@ async function parseAllFilesAdaptive(
   const produtosMap = new Map<string, Product>();
   const diaCounts = [0, 0, 0, 0, 0, 0, 0];
   let hasDia = false;
-  const faixasMap = new Map<string, number>();
+  // Junta os resumos de clientes de TODOS os arquivos antes de classificar — se o pedido
+  // do mês e o cadastro completo do cliente vierem em planilhas separadas, cruzar pela
+  // chave evita contar a mesma pessoa duas vezes (ver classifyClienteResumos).
+  const clienteEntries: { chave: string | null; resumo: ClienteResumo }[] = [];
 
   for (let idx = 0; idx < files.length; idx++) {
     const file = files[idx];
@@ -765,12 +839,7 @@ async function parseAllFilesAdaptive(
 
     for (const section of interp.sections) {
       if (section.tipo === 'clientes') {
-        const { ativos, inativosCount, faixas } = aggregateClientesSection(headers, rows, section, periodFrom, periodTo);
-        out.ativos += ativos.count;
-        out.faturamento += ativos.fat; out.pedidos_ativos += ativos.ped;
-        out.uma_compra += ativos.uma; out.recorrentes += ativos.recorrentes;
-        out.inativos += inativosCount;
-        for (const f of faixas) faixasMap.set(f.label, (faixasMap.get(f.label) ?? 0) + f.count);
+        clienteEntries.push(...buildClienteResumos(headers, rows, section, periodFrom, periodTo));
       } else if (section.tipo === 'produtos') {
         for (const p of aggregateProdutosSection(headers, rows, section)) {
           const key = p.nome.toLowerCase();
@@ -785,15 +854,21 @@ async function parseAllFilesAdaptive(
     }
   }
 
+  if (clienteEntries.length) {
+    const { ativos, inativosCount, faixas } = classifyClienteResumos(clienteEntries, periodFrom, periodTo);
+    out.ativos = ativos.count;
+    out.faturamento = ativos.fat; out.pedidos_ativos = ativos.ped;
+    out.uma_compra = ativos.uma; out.recorrentes = ativos.recorrentes;
+    out.inativos = inativosCount;
+    out.inativos_faixas = faixas;
+  }
+
   out.produtos = [...produtosMap.values()].sort((a, b) => b.qtd - a.qtd || b.total - a.total).slice(0, 10);
   if (hasDia) {
     const DIAS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
     const max = Math.max(...diaCounts);
     if (max) out.por_dia = DIAS.map((dia, i) => ({ dia, pedidos: diaCounts[i], pct: (diaCounts[i] / max) * 100 }));
   }
-  out.inativos_faixas = FAIXAS_INATIVIDADE
-    .map(f => ({ label: f.label, count: faixasMap.get(f.label) ?? 0 }))
-    .filter(f => f.count > 0);
   if (out.pedidos_ativos > 0 && out.faturamento > 0) out.ticket = out.faturamento / out.pedidos_ativos;
 
   return { data: out, avisos };
