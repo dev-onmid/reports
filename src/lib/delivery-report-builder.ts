@@ -1193,7 +1193,7 @@ type InstagramPageEntry = {
     followers_count?: number;
   };
 };
-type ClientMetaLink = { connection_id: string | null; account_id: string | null };
+type ClientMetaLink = { connection_id: string | null; account_id: string | null; platform?: string };
 
 function normalizeMetaAccountId(accountId: string | null | undefined): string {
   return String(accountId ?? '').trim().replace(/^act_/, '');
@@ -1322,20 +1322,28 @@ export async function fetchInstagramData(
   const pool = makeServerPool();
   let conn: { id: string; app_id: string; access_token: string; token_expiry: string | null } | null = null;
   let linkedAccountIds: string[] = [];
+  let directInstagramLink: ClientMetaLink | null = null;
   try {
     const { rows: links } = await pool.query(
-      `SELECT connection_id, account_id
+      `SELECT connection_id, account_id, platform
          FROM public.client_account_links
         WHERE client_id = $1
-          AND platform IN ('meta_ads','meta')
+          AND platform IN ('meta_ads','meta','instagram')
         ORDER BY created_at ASC`,
       [clientId],
     ).catch(() => ({ rows: [] as ClientMetaLink[] }));
 
-    const scopedLinks = (links as ClientMetaLink[]).filter(link => link.connection_id || link.account_id);
+    const allLinks = links as ClientMetaLink[];
+    // A client linked directly to an Instagram account (via the Instagram picker on the
+    // clients list, independent of any Meta Ads account) — resolved deterministically
+    // below instead of guessed from ad creatives/promote_pages.
+    directInstagramLink = allLinks.find(link => link.platform === 'instagram' && link.account_id) ?? null;
+
+    const scopedLinks = allLinks.filter(link => link.platform !== 'instagram' && (link.connection_id || link.account_id));
     const preferredConnectionId =
       connectionId ??
       scopedLinks.find(link => link.connection_id)?.connection_id ??
+      directInstagramLink?.connection_id ??
       null;
 
     if (!preferredConnectionId) return null;
@@ -1357,11 +1365,20 @@ export async function fetchInstagramData(
 
   const token = await getFreshMetaToken(conn);
 
-  // 1) Deterministic: the page this account's OWN ads actually run as (no guessing).
+  // 0) Deterministic: the client was linked directly to this Instagram account (no Meta
+  // Ads relationship needed) — match it against the token user's own pages.
   let page: InstagramPageEntry | undefined;
-  for (const accountId of linkedAccountIds) {
-    const resolved = await fetchInstagramPageByAccountAds(accountId, token);
-    if (resolved?.instagram_business_account) { page = resolved; break; }
+  if (directInstagramLink?.account_id) {
+    const userPages = await fetchInstagramUserPages(token);
+    page = userPages.find(p => p.instagram_business_account?.id === directInstagramLink!.account_id);
+  }
+
+  // 1) Deterministic: the page this account's OWN ads actually run as (no guessing).
+  if (!page) {
+    for (const accountId of linkedAccountIds) {
+      const resolved = await fetchInstagramPageByAccountAds(accountId, token);
+      if (resolved?.instagram_business_account) { page = resolved; break; }
+    }
   }
 
   // 2) Fallback only if the account has no ads yet to read a page from: the old

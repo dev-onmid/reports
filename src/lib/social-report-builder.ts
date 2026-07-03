@@ -62,9 +62,10 @@ export async function buildSocialReport(input: {
   const prevPeriodo  = `${MONTHS[prevFromDate.getMonth()]}/${prevFromDate.getFullYear()}`;
 
   const [instagramFull, rotationSeed] = await Promise.all([
-    connectionId && accountIds?.length
-      ? fetchInstagramData(clientId, connectionId, accountIds, periodFrom, periodTo)
-      : Promise.resolve(null),
+    // Called unconditionally — fetchInstagramData resolves a directly-linked Instagram
+    // account (client_account_links platform='instagram') on its own even without a
+    // Meta Ads connection/account for this client.
+    fetchInstagramData(clientId, connectionId ?? null, accountIds ?? [], periodFrom, periodTo),
     fetchReportRotationSeed(),
   ]);
   const cover = resolveReportCover(coverId, rotationSeed);

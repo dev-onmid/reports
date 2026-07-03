@@ -577,9 +577,10 @@ export async function buildOmniReport(input: {
       ? fetchMetaData(connectionId, accountIds, periodFrom, periodTo, metaLevel)
       : Promise.resolve({ meta: null, creatives: [] }),
     fetchGoogleAdsDetailed(googleConnectionId, googleAccountIds ?? [], periodFrom, periodTo),
-    connectionId && accountIds?.length
-      ? fetchInstagramData(clientId, connectionId, accountIds, periodFrom, periodTo)
-      : Promise.resolve(null),
+    // Called unconditionally — fetchInstagramData resolves a directly-linked Instagram
+    // account (client_account_links platform='instagram') on its own even without a
+    // Meta Ads connection/account for this client.
+    fetchInstagramData(clientId, connectionId ?? null, accountIds ?? [], periodFrom, periodTo),
     fetchBairros(clientId, periodFrom, periodTo),
     fetchReportRotationSeed(),
   ]);
