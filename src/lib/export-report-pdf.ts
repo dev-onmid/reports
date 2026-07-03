@@ -61,14 +61,17 @@ export async function exportReportToPdf(token: string, filename: string): Promis
     await proxyCrossOriginImages(doc, win.location.origin);
     if (win.document.fonts?.ready) await win.document.fonts.ready;
 
-    // O html2canvas posiciona o baseline de fontes um pouco diferente do navegador e, em
-    // números grandes com line-height:1 + overflow:hidden (os cards de KPI/métrica), corta
-    // o fundo do dígito. Relaxamos o line-height apertado direto no iframe (que é oculto e
-    // descartado no fim) ANTES de medir a altura — assim a medição já considera o ajuste e
-    // não sobra nem falta espaço. O relatório real não é tocado.
-    doc.querySelectorAll<HTMLElement>('[style*="line-height:1"]').forEach((el) => {
-      const lh = el.style.lineHeight.trim();
-      if (lh === '1' || lh === '1.0') el.style.lineHeight = '1.2';
+    // O html2canvas corta o fundo dos glifos (números de KPI, valores das métricas) quando
+    // o elemento de texto tem overflow:hidden — mexer no line-height NÃO resolve, só tirar
+    // o clipe resolve. Liberamos o overflow apenas nos textos de UMA LINHA (white-space:
+    // nowrap + overflow:hidden) — que são valores/labels curtos e não vazam do card. Isso é
+    // feito no iframe oculto (descartado no fim), antes de medir a altura; o relatório real
+    // não é tocado. Contêineres de slide usam overflow:hidden sem nowrap e ficam intactos.
+    doc.querySelectorAll<HTMLElement>('[style*="overflow:hidden"]').forEach((el) => {
+      if (el.style.whiteSpace === 'nowrap' && el.style.overflow === 'hidden') {
+        el.style.overflow = 'visible';
+        el.style.textOverflow = 'clip';
+      }
     });
 
     const slides = Array.from(doc.querySelectorAll<HTMLElement>('[style*="width:1440px"]'));
