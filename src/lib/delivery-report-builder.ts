@@ -593,14 +593,30 @@ ${schema}`;
 
 // Um cliente é NOVO quando fez exatamente 1 pedido no arquivo, e RECORRENTE com 2+.
 // Um cliente é INATIVO quando a última compra (explícita ou derivada da data de pedido
-// mais recente) passou de 30 dias em relação a refDate — mesmo limiar de FAIXAS_INATIVIDADE.
+// mais recente) passou de 30 dias em relação a periodTo — mesmo limiar de FAIXAS_INATIVIDADE.
 // Nenhuma dessas contas é feita pela IA: ela só aponta as colunas, a regra é determinística.
+//
+// Três categorias, decididas nesta ordem (mutuamente exclusivas):
+//   1) INATIVO  — mais de 30 dias sem pedir, não importa quantos pedidos já fez.
+//   2) NOVO     — só 1 pedido em toda a base, E esse pedido caiu dentro do período do
+//                 relatório (um cliente cujo único pedido é de um mês anterior não é
+//                 "novo" neste relatório — só ainda não virou inativo).
+//   3) ATIVO    — todo o resto: 2+ pedidos e não inativo, mesmo que nenhum desses
+//                 pedidos tenha caído dentro do período analisado.
+// O faturamento/pedidos somados em "ativos.fat"/"ativos.ped" (usados na Visão Geral do
+// mês) contam só os pedidos cuja data cai dentro do período — nunca o histórico inteiro.
 const DIAS_INATIVIDADE = 30;
 
-type ClienteResumo = { pedidos: number; valor: number; ultimaCompra: Date | null; diasSemComprar: number | null };
+type ClienteResumo = {
+  totalPedidos:     number;      // pedidos em toda a base (não só no período) — decide novo/ativo
+  pedidosNoPeriodo: number;      // pedidos com data dentro do período do relatório
+  valorNoPeriodo:   number;      // valor desses pedidos do período
+  ultimoPedido:     Date | null; // pedido mais recente — decide inatividade e se o único pedido é "novo"
+  diasSemComprar:   number | null;
+};
 
 function aggregateClientesSection(
-  headers: string[], rows: string[][], section: ClienteSecao, refDate: Date,
+  headers: string[], rows: string[][], section: ClienteSecao, periodFrom: Date, periodTo: Date,
 ): {
   ativos: { count: number; fat: number; ped: number; uma: number; recorrentes: number };
   inativosCount: number;
@@ -613,38 +629,50 @@ function aggregateClientesSection(
   const ultimaCompraIdx = section.colunaUltimaCompra ? headers.indexOf(section.colunaUltimaCompra) : -1;
   const diasSemComprarIdx = section.colunaDiasSemComprar ? headers.indexOf(section.colunaDiasSemComprar) : -1;
 
+  const dentroDoPeriodo = (d: Date) => d >= periodFrom && d <= periodTo;
   const resumos: ClienteResumo[] = [];
 
   if (clienteIdx >= 0) {
-    // Uma linha por pedido — agrupa por cliente pra contar quantos pedidos cada um fez.
-    const grupos = new Map<string, { pedidos: number; valor: number; datas: Date[] }>();
+    // Uma linha por pedido — agrupa por cliente pra contar o total de pedidos e
+    // separadamente quantos deles caem dentro do período analisado.
+    const grupos = new Map<string, { total: number; noPeriodo: number; valorPeriodo: number; ultimaData: Date | null }>();
     for (const row of rows) {
       const chave = normalizeHeader(row[clienteIdx] ?? '');
       if (!chave) continue;
-      const g = grupos.get(chave) ?? { pedidos: 0, valor: 0, datas: [] };
-      g.pedidos++;
-      if (valorIdx >= 0) g.valor += parseFloat2(row[valorIdx] ?? '');
-      if (dataPedidoIdx >= 0) {
-        const d = parseDateFlexible(row[dataPedidoIdx] ?? '');
-        if (d) g.datas.push(d);
+      const g = grupos.get(chave) ?? { total: 0, noPeriodo: 0, valorPeriodo: 0, ultimaData: null };
+      g.total++;
+      const dataPedido = dataPedidoIdx >= 0 ? parseDateFlexible(row[dataPedidoIdx] ?? '') : null;
+      if (dataPedido && (!g.ultimaData || dataPedido > g.ultimaData)) g.ultimaData = dataPedido;
+      // Sem coluna de data, não dá pra saber se o pedido é do período — conta como se fosse
+      // (mesma suposição de antes, só se aplica quando a planilha não tem data nenhuma).
+      if (!dataPedido ? !dataPedidoIdx : dentroDoPeriodo(dataPedido)) {
+        g.noPeriodo++;
+        if (valorIdx >= 0) g.valorPeriodo += parseFloat2(row[valorIdx] ?? '');
       }
       grupos.set(chave, g);
     }
     for (const g of grupos.values()) {
-      const ultimaCompra = g.datas.length ? new Date(Math.max(...g.datas.map(d => d.getTime()))) : null;
-      resumos.push({ pedidos: g.pedidos, valor: g.valor, ultimaCompra, diasSemComprar: null });
+      resumos.push({
+        totalPedidos: g.total, pedidosNoPeriodo: g.noPeriodo, valorNoPeriodo: g.valorPeriodo,
+        ultimoPedido: g.ultimaData, diasSemComprar: null,
+      });
     }
   } else {
-    // Já é uma linha por cliente.
+    // Já é uma linha por cliente — colunaPedidos é o total histórico. Se a data do último
+    // pedido está claramente fora do período, o cliente não gerou pedido/receita neste mês.
     for (const row of rows) {
-      const pedidos = pedidosIdx >= 0 ? (parseInt(row[pedidosIdx] ?? '0') || 0) : 1;
+      const totalPedidos = pedidosIdx >= 0 ? (parseInt(row[pedidosIdx] ?? '0') || 0) : 1;
       const valor = valorIdx >= 0 ? parseFloat2(row[valorIdx] ?? '') : 0;
-      const ultimaCompra = ultimaCompraIdx >= 0 ? parseDateFlexible(row[ultimaCompraIdx] ?? '') : null;
+      const ultimoPedido = ultimaCompraIdx >= 0 ? parseDateFlexible(row[ultimaCompraIdx] ?? '') : null;
+      const foraDoPeriodo = ultimoPedido !== null && !dentroDoPeriodo(ultimoPedido);
       const diasSemComprarRaw = diasSemComprarIdx >= 0
         ? (row[diasSemComprarIdx] ?? '').replace(/\D/g, '')
         : '';
       resumos.push({
-        pedidos, valor, ultimaCompra,
+        totalPedidos,
+        pedidosNoPeriodo: foraDoPeriodo ? 0 : totalPedidos,
+        valorNoPeriodo: foraDoPeriodo ? 0 : valor,
+        ultimoPedido,
         diasSemComprar: diasSemComprarRaw ? parseInt(diasSemComprarRaw, 10) : null,
       });
     }
@@ -655,18 +683,20 @@ function aggregateClientesSection(
   const faixasCount = new Map<string, number>();
 
   for (const r of resumos) {
-    const dias = r.diasSemComprar ?? (r.ultimaCompra ? Math.floor((refDate.getTime() - r.ultimaCompra.getTime()) / 86_400_000) : null);
+    const dias = r.diasSemComprar ?? (r.ultimoPedido ? Math.floor((periodTo.getTime() - r.ultimoPedido.getTime()) / 86_400_000) : null);
     if (dias !== null && dias >= DIAS_INATIVIDADE) {
       inativosCount++;
       const faixa = FAIXAS_INATIVIDADE.find(f => dias >= f.min && dias <= f.max);
       if (faixa) faixasCount.set(faixa.label, (faixasCount.get(faixa.label) ?? 0) + 1);
       continue;
     }
+
+    const isNovo = r.totalPedidos === 1 && r.ultimoPedido !== null && dentroDoPeriodo(r.ultimoPedido);
     ativos.count++;
-    ativos.fat += r.valor;
-    ativos.ped += r.pedidos;
-    if (r.pedidos === 1) ativos.uma++;
-    else if (r.pedidos >= 2) ativos.recorrentes++;
+    ativos.fat += r.valorNoPeriodo;
+    ativos.ped += r.pedidosNoPeriodo;
+    if (isNovo) ativos.uma++;
+    else ativos.recorrentes++;
   }
 
   const faixas = FAIXAS_INATIVIDADE
@@ -704,14 +734,14 @@ function aggregatePedidosDiaSection(headers: string[], rows: string[][], section
 }
 
 async function parseAllFilesAdaptive(
-  files: { name: string; content: string }[], refDate: Date,
+  files: { name: string; content: string }[], periodFrom: Date, periodTo: Date,
 ): Promise<{ data: ParsedData; avisos: string[] }> {
   const empty = (): ParsedData => ({
     ativos: 0, inativos: 0, potenciais: 0, faturamento: 0, pedidos_ativos: 0, ticket: 0,
     uma_compra: 0, recorrentes: 0, produtos: [], inativos_faixas: [], por_dia: [],
   });
   if (!files.length) return { data: empty(), avisos: [] };
-  if (process.env.SKIP_AI === 'true') return { data: parseAllFiles(files, refDate), avisos: [] };
+  if (process.env.SKIP_AI === 'true') return { data: parseAllFiles(files, periodTo), avisos: [] };
 
   const interpretations = await Promise.all(files.map(interpretDeliveryFile));
 
@@ -735,7 +765,7 @@ async function parseAllFilesAdaptive(
 
     for (const section of interp.sections) {
       if (section.tipo === 'clientes') {
-        const { ativos, inativosCount, faixas } = aggregateClientesSection(headers, rows, section, refDate);
+        const { ativos, inativosCount, faixas } = aggregateClientesSection(headers, rows, section, periodFrom, periodTo);
         out.ativos += ativos.count;
         out.faturamento += ativos.fat; out.pedidos_ativos += ativos.ped;
         out.uma_compra += ativos.uma; out.recorrentes += ativos.recorrentes;
@@ -4152,18 +4182,20 @@ export async function buildDeliveryReport(opts: {
   const { current: currentFiles, previous: prevFiles } = separateFiles(csvFiles);
   const hasPrev = prevFiles.length > 0;
 
+  // O arquivo "ant-" representa o mês anterior ao período atual (mesmo cálculo do label
+  // prevPeriodo abaixo) — usado como limite pra separar pedidos daquele mês dos demais.
+  const prevFromDate = new Date(fromDate.getFullYear(), fromDate.getMonth() - 1, 1);
+  const prevToDate = new Date(fromDate.getFullYear(), fromDate.getMonth(), 0, 23, 59, 59);
+
   const [{ data, avisos }, prevResult] = await Promise.all([
-    parseAllFilesAdaptive(currentFiles, toDate),
-    hasPrev ? parseAllFilesAdaptive(prevFiles, fromDate) : Promise.resolve(null),
+    parseAllFilesAdaptive(currentFiles, fromDate, toDate),
+    hasPrev ? parseAllFilesAdaptive(prevFiles, prevFromDate, prevToDate) : Promise.resolve(null),
   ]);
   const prevData = prevResult?.data ?? null;
   if (prevResult?.avisos.length) avisos.push(...prevResult.avisos.map(a => `Período anterior — ${a}`));
 
   const prevPeriodo = hasPrev
-    ? (() => {
-        const pm = new Date(fromDate.getFullYear(), fromDate.getMonth() - 1, 1);
-        return `${MONTHS[pm.getMonth()]}/${pm.getFullYear()}`;
-      })()
+    ? `${MONTHS[prevFromDate.getMonth()]}/${prevFromDate.getFullYear()}`
     : '';
 
   const [bairros, { meta, creatives }, instagramFull, rotationSeed] = await Promise.all([
