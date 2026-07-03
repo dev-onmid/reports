@@ -268,24 +268,38 @@ export function normalizeHeader(value: unknown): string {
     .trim();
 }
 
-export function readTabular(content: string): { headers: string[]; rows: string[][] } {
+export type TabularSheet = { sheetName: string; headers: string[]; rows: string[][] };
+
+// Lê TODAS as abas de um xlsx (ou a única "aba" de um CSV). Sistemas diferentes espalham
+// a informação em abas distintas — ex: um relatório de vendas com "Categorias" numa aba e
+// "Produtos" noutra, ou um financeiro com receita numa aba separada da contagem de pedidos.
+export function readTabularSheets(content: string): TabularSheet[] {
   if (content.startsWith('data:')) {
     const b64 = content.includes(';base64,') ? content.split(';base64,')[1] : content;
     try {
       const wb = XLSX.read(b64, { type: 'base64' });
-      const sheet = wb.Sheets[wb.SheetNames[0]];
-      const rawRows = XLSX.utils.sheet_to_json<(string | number | boolean | null)[]>(sheet, { header: 1, defval: '', raw: false });
-      const [headerRow, ...bodyRows] = rawRows.filter(row => row.some(cell => String(cell ?? '').trim()));
-      if (!headerRow) return { headers: [], rows: [] };
-      return {
-        headers: headerRow.map(normalizeHeader),
-        rows: bodyRows.map(row => headerRow.map((_, index) => String(row[index] ?? '').trim())),
-      };
+      return wb.SheetNames.map((sheetName): TabularSheet => {
+        const sheet = wb.Sheets[sheetName];
+        const rawRows = XLSX.utils.sheet_to_json<(string | number | boolean | null)[]>(sheet, { header: 1, defval: '', raw: false });
+        const [headerRow, ...bodyRows] = rawRows.filter(row => row.some(cell => String(cell ?? '').trim()));
+        if (!headerRow) return { sheetName, headers: [], rows: [] };
+        return {
+          sheetName,
+          headers: headerRow.map(normalizeHeader),
+          rows: bodyRows.map(row => headerRow.map((_, index) => String(row[index] ?? '').trim())),
+        };
+      }).filter(s => s.headers.length);
     } catch {
-      return { headers: [], rows: [] };
+      return [];
     }
   }
-  return splitCsv(content);
+  const csv = splitCsv(content);
+  return csv.headers.length ? [{ sheetName: '', headers: csv.headers, rows: csv.rows }] : [];
+}
+
+export function readTabular(content: string): { headers: string[]; rows: string[][] } {
+  const [first] = readTabularSheets(content);
+  return first ? { headers: first.headers, rows: first.rows } : { headers: [], rows: [] };
 }
 
 export function parseFloat2(value: unknown): number {
@@ -483,6 +497,8 @@ function parseAllFiles(files: { name: string; content: string }[], refDate: Date
 
 type ClienteSecao = {
   tipo: 'clientes';
+  // Aba (planilha) do arquivo onde estão esses dados. null = primeira/única aba.
+  aba?: string | null;
   // Identifica o cliente (nome ou código). Usado pra agrupar pedidos por pessoa e pra
   // cruzar a mesma pessoa entre planilhas diferentes.
   colunaCliente: string | null;
@@ -502,9 +518,11 @@ type ClienteSecao = {
   // "Dias sem comprar" já calculado pela planilha (alternativa a colunaUltimaCompra).
   colunaDiasSemComprar: string | null;
 };
-type ProdutoSecao = { tipo: 'produtos'; colunaNome: string; colunaQtd: string | null; colunaTotal: string | null };
-type PedidosDiaSecao = { tipo: 'pedidos_dia'; colunaData: string };
-type FileSection = ClienteSecao | ProdutoSecao | PedidosDiaSecao;
+type ProdutoSecao = { tipo: 'produtos'; aba?: string | null; colunaNome: string; colunaQtd: string | null; colunaTotal: string | null };
+// Arquivo de nível de PEDIDO (uma linha por pedido), sem precisar identificar o cliente —
+// é a fonte mais confiável de faturamento, nº de pedidos e distribuição por dia da semana.
+type PedidosSecao = { tipo: 'pedidos'; aba?: string | null; colunaData: string; colunaValor: string | null; colunaStatus: string | null };
+type FileSection = ClienteSecao | ProdutoSecao | PedidosSecao;
 
 type FileInterpretation = { filename: string; sections: FileSection[]; aviso?: string };
 
@@ -611,7 +629,9 @@ function normalizeClientKey(raw: string, kind: 'telefone' | 'email' | 'nome'): s
     return e.includes('@') ? `email:${e}` : null;
   }
   const nome = normalizeHeader(v).replace(/\s+/g, ' ');
-  return nome.length > 1 ? `nome:${nome}` : null;
+  if (nome.length <= 1) return null;
+  if (/^(total|totais|subtotal|geral)$/.test(nome)) return null; // linha de rodapé, não é cliente
+  return `nome:${nome}`;
 }
 
 function isValidFileSection(s: unknown): s is FileSection {
@@ -622,50 +642,56 @@ function isValidFileSection(s: unknown): s is FileSection {
       .some(k => typeof o[k] === 'string' && (o[k] as string).length > 0);
   }
   if (o.tipo === 'produtos') return typeof o.colunaNome === 'string' && o.colunaNome.length > 0;
-  if (o.tipo === 'pedidos_dia') return typeof o.colunaData === 'string' && o.colunaData.length > 0;
+  if (o.tipo === 'pedidos') return typeof o.colunaData === 'string' && o.colunaData.length > 0;
   return false;
 }
 
 async function interpretDeliveryFile(file: { name: string; content: string }): Promise<FileInterpretation> {
-  const { headers, rows } = readTabular(file.content);
-  if (!headers.length) return { filename: file.name, sections: [], aviso: 'Planilha vazia ou em formato não reconhecido.' };
+  const sheets = readTabularSheets(file.content);
+  if (!sheets.length) return { filename: file.name, sections: [], aviso: 'Planilha vazia ou em formato não reconhecido.' };
 
-  const sample = rows.slice(0, 8);
+  // Descreve cada aba (nome + colunas + amostra) — a IA escolhe a aba certa por seção.
+  const abasDesc = sheets.map(s => `Aba "${s.sheetName}" (${s.rows.length} linhas)
+  Colunas: ${JSON.stringify(s.headers)}
+  Amostra: ${JSON.stringify(s.rows.slice(0, 6))}`).join('\n\n');
+
   const schema = `{
   "secoes": [
-    { "tipo": "clientes", "colunaCliente": string|null, "colunaTelefone": string|null, "colunaEmail": string|null, "colunaDataPedido": string|null, "colunaPedidos": string|null, "colunaValor": string|null, "colunaUltimaCompra": string|null, "colunaDiasSemComprar": string|null },
-    { "tipo": "produtos", "colunaNome": string, "colunaQtd": string|null, "colunaTotal": string|null },
-    { "tipo": "pedidos_dia", "colunaData": string }
+    { "tipo": "clientes", "aba": string|null, "colunaCliente": string|null, "colunaTelefone": string|null, "colunaEmail": string|null, "colunaDataPedido": string|null, "colunaPedidos": string|null, "colunaValor": string|null, "colunaUltimaCompra": string|null, "colunaDiasSemComprar": string|null },
+    { "tipo": "produtos", "aba": string|null, "colunaNome": string, "colunaQtd": string|null, "colunaTotal": string|null },
+    { "tipo": "pedidos", "aba": string|null, "colunaData": string, "colunaValor": string|null, "colunaStatus": string|null }
   ],
   "aviso": string | null
 }`;
   const prompt = `Arquivo: "${file.name}"
-Total de linhas de dados: ${rows.length}
-Colunas encontradas: ${JSON.stringify(headers)}
-Amostra de linhas (até 8): ${JSON.stringify(sample)}
+Este arquivo tem ${sheets.length} aba(s):
 
-Identifique quais das seguintes informações esta planilha de delivery (exportada de plataformas como Goomer, Anota Aí, iFood etc, sem formato padrão) pode fornecer. Uma planilha pode conter mais de uma seção ao mesmo tempo (ex: pedidos com cliente, produto e data juntos).
+${abasDesc}
+
+Identifique quais das seguintes informações esta planilha de delivery (exportada de sistemas variados como Goomer, Anota Aí, iFood, Saipos, Menew etc, sem formato padrão) pode fornecer. Um arquivo pode ter mais de uma seção, inclusive em abas diferentes. Em cada seção, preencha "aba" com o nome EXATO da aba de onde vêm aquelas colunas (use null se houver só uma aba).
 
 Tipos possíveis de seção:
-- "clientes": dados de clientes/pedidos para calcular clientes ATIVOS x INATIVOS. Você só precisa apontar as colunas certas — as contas (agrupar, contar, comparar datas) são feitas pelo sistema depois, não por você.
-  · SEMPRE que existir uma coluna que identifique o cliente (nome ou código), preencha "colunaCliente" com ela — mesmo em planilhas já resumidas por cliente. É assim que o sistema cruza esta planilha com outras anexadas junto (ex: uma lista de pedidos do mês + um cadastro completo de clientes são a MESMA pessoa aparecendo nos dois arquivos, e precisam ser reconhecidas como tal, não contadas em dobro).
-  · Se existirem colunas de TELEFONE e/ou E-MAIL, preencha "colunaTelefone" e "colunaEmail" — são identificadores mais confiáveis que o nome pra cruzar a mesma pessoa entre planilhas de sistemas diferentes (uma pode escrever o nome de um jeito e a outra de outro).
-  · Se a planilha tem UMA LINHA POR PEDIDO (várias linhas podem ser do mesmo cliente): preencha também "colunaDataPedido" (data de cada pedido). O sistema agrupa por cliente e conta quantos pedidos cada um fez — cliente com exatamente 1 pedido no arquivo é considerado NOVO.
-  · Se a planilha tem UMA LINHA POR CLIENTE (já resumido): preencha "colunaPedidos" (nº de pedidos, total histórico, daquele cliente), se existir essa coluna.
-  · Para saber se um cliente está INATIVO (mais de 30 dias sem pedir), preencha "colunaUltimaCompra" (data do último pedido) OU "colunaDiasSemComprar" (número de dias já calculado pela planilha) — o que existir. Sem nenhuma das duas, e sem colunaDataPedido, o sistema não classifica inatividade.
-  · "colunaValor": valor gasto, se existir (por pedido ou por cliente).
-- "produtos": lista de produtos vendidos, com nome e, se houver, quantidade e valor total.
-- "pedidos_dia": linhas de pedidos com uma coluna de data, para calcular distribuição por dia da semana.
+- "clientes": dados por cliente para calcular clientes ATIVOS x INATIVOS. Você só aponta as colunas — as contas (agrupar, contar, comparar datas) são feitas pelo sistema.
+  · SEMPRE que existir uma coluna que identifique o cliente (nome ou código), preencha "colunaCliente" — mesmo em planilhas já resumidas por cliente. É assim que o sistema cruza esta planilha com outras anexadas junto (ex: pedidos do mês + cadastro completo = a MESMA pessoa nos dois arquivos, não pode contar em dobro).
+  · Se existirem TELEFONE e/ou E-MAIL, preencha "colunaTelefone" e "colunaEmail" — identificadores mais confiáveis que o nome pro cruzamento.
+  · Uma linha por PEDIDO (várias linhas do mesmo cliente): preencha "colunaDataPedido". Cliente com exatamente 1 pedido é NOVO.
+  · Uma linha por CLIENTE (resumido): preencha "colunaPedidos" (total histórico do cliente).
+  · Inatividade: preencha "colunaUltimaCompra" (data do último pedido) OU "colunaDiasSemComprar" (dias já calculados) — o que existir.
+  · "colunaValor": valor gasto, se existir.
+- "pedidos": arquivo de nível de PEDIDO (uma linha por pedido), geralmente SEM identificar o cliente — é a melhor fonte de FATURAMENTO e nº de pedidos. Preencha "colunaData" (data do pedido), "colunaValor" (valor total do pedido, se existir) e "colunaStatus" (situação do pedido tipo Finalizado/Cancelado, se existir — o sistema descarta cancelados). Use este tipo quando a planilha lista pedidos individuais com valor, mesmo sem nome de cliente.
+- "produtos": lista de itens/produtos vendidos, com nome e, se houver, quantidade e valor total. Se houver abas por dia da semana, use a aba de total geral (ex: "Geral").
 
-Se não for possível identificar nada com confiança, devolva "secoes": [] e explique em "aviso" (frase curta, em português, para mostrar ao usuário).
+Importante: se o MESMO arquivo tem tanto uma lista de pedidos com valor quanto colunas de cliente, você pode devolver as duas seções ("pedidos" para o faturamento e "clientes" para ativos/inativos).
 
-Regras: use exatamente o texto de uma das colunas listadas em "Colunas encontradas" em cada campo "coluna*" — nunca invente nomes de coluna. Responda APENAS com JSON válido, sem markdown, seguindo este schema:
+Se não der pra identificar nada com confiança, devolva "secoes": [] e explique em "aviso" (frase curta, em português).
+
+Regras: use exatamente o texto de uma coluna listada na aba correspondente em cada campo "coluna*" — nunca invente nomes. Responda APENAS com JSON válido, sem markdown, seguindo este schema:
 ${schema}`;
 
   try {
     const msg = await anthropic.messages.create({
       model:      'claude-haiku-4-5-20251001',
-      max_tokens: 1000,
+      max_tokens: 1200,
       system:     'Você interpreta planilhas de delivery de restaurantes com estrutura variada. Responda APENAS com JSON válido, sem markdown, sem texto extra.',
       messages:   [{ role: 'user', content: prompt }],
     });
@@ -726,7 +752,7 @@ type ClienteEntry = { keys: string[]; resumo: ClienteResumo };
 // qualquer identificador em comum antes de decidir novo/ativo/inativo — nunca somados
 // como se fossem clientes diferentes.
 function buildClienteResumos(
-  headers: string[], rows: string[][], section: ClienteSecao, periodFrom: Date, periodTo: Date,
+  headers: string[], rows: string[][], section: ClienteSecao, fromISO: string, toISO: string,
 ): ClienteEntry[] {
   const clienteIdx = section.colunaCliente ? headers.indexOf(section.colunaCliente) : -1;
   const telefoneIdx = section.colunaTelefone ? headers.indexOf(section.colunaTelefone) : -1;
@@ -747,7 +773,9 @@ function buildClienteResumos(
   };
   const hasIdentifier = telefoneIdx >= 0 || emailIdx >= 0 || clienteIdx >= 0;
 
-  const dentroDoPeriodo = (d: Date) => d >= periodFrom && d <= periodTo;
+  // Compara por DATA (sem hora) — evita erro de fuso na borda do período (pedido do dia 1º
+  // sendo descartado por 3h de diferença entre horário local e UTC).
+  const dentroDoPeriodo = (d: Date) => { const s = d.toISOString().slice(0, 10); return s >= fromISO && s <= toISO; };
 
   // Lê "última compra"/"dias sem comprar" tolerando data absoluta, relativa ("há 2 meses")
   // ou número puro de dias, na coluna que a IA tiver apontado.
@@ -800,12 +828,16 @@ function buildClienteResumos(
     // Já é uma linha por cliente — colunaPedidos é o total histórico. Se a data do último
     // pedido está claramente fora do período, o cliente não gerou pedido/receita neste mês.
     for (const row of rows) {
+      const ks = rowKeys(row);
+      // Arquivo com coluna de identificação mas linha sem nenhum identificador → é rodapé
+      // (ex: "Total") ou linha vazia, não um cliente real.
+      if (hasIdentifier && !ks.length) continue;
       const totalPedidos = pedidosIdx >= 0 ? (parseInt(row[pedidosIdx] ?? '0') || 0) : 1;
       const valor = valorIdx >= 0 ? parseFloat2(row[valorIdx] ?? '') : 0;
       const { ultimoPedido, diasSemComprar } = lerInatividade(row);
       const foraDoPeriodo = ultimoPedido !== null && !dentroDoPeriodo(ultimoPedido);
       entries.push({
-        keys: rowKeys(row),
+        keys: ks,
         resumo: {
           totalPedidos,
           pedidosNoPeriodo: foraDoPeriodo ? 0 : totalPedidos,
@@ -848,13 +880,14 @@ function mergeResumo(alvo: ClienteResumo, novo: ClienteResumo): void {
 // por telefone num arquivo) e o cadastro do cliente (identificado por nome noutro) se
 // reconhecem mesmo quando cada planilha usa um identificador diferente.
 function classifyClienteResumos(
-  entries: ClienteEntry[], periodFrom: Date, periodTo: Date,
+  entries: ClienteEntry[], fromISO: string, toISO: string,
 ): {
   ativos: { count: number; fat: number; ped: number; uma: number; recorrentes: number };
   inativosCount: number;
   faixas: Faixa[];
 } {
-  const dentroDoPeriodo = (d: Date) => d >= periodFrom && d <= periodTo;
+  const dentroDoPeriodo = (d: Date) => { const s = d.toISOString().slice(0, 10); return s >= fromISO && s <= toISO; };
+  const refMs = Date.parse(`${toISO}T12:00:00Z`); // referência da inatividade = fim do período
 
   // Union-find sobre as chaves.
   const parent = new Map<string, string>();
@@ -892,7 +925,7 @@ function classifyClienteResumos(
     // não é novo, ativo, nem inativo, porque nunca esteve em atividade nenhuma.
     if (r.totalPedidos <= 0) continue;
 
-    const dias = r.diasSemComprar ?? (r.ultimoPedido ? Math.floor((periodTo.getTime() - r.ultimoPedido.getTime()) / 86_400_000) : null);
+    const dias = r.diasSemComprar ?? (r.ultimoPedido ? Math.floor((refMs - r.ultimoPedido.getTime()) / 86_400_000) : null);
     if (dias !== null && dias >= DIAS_INATIVIDADE) {
       inativosCount++;
       const faixa = FAIXAS_INATIVIDADE.find(f => dias >= f.min && dias <= f.max);
@@ -928,40 +961,62 @@ function aggregateProdutosSection(headers: string[], rows: string[][], section: 
       qtd:   qtdIdx >= 0 ? (parseInt(String(row[qtdIdx] ?? '0').replace(/\D/g, '')) || 0) : 1,
       total: totalIdx >= 0 ? parseFloat2(row[totalIdx] ?? '') : 0,
     }))
-    .filter(p => p.nome && p.nome.length > 1);
+    // Descarta linhas de resumo/rodapé ("Total", "Subtotal", "Totais", "Geral") que
+    // muitas exportações colocam no fim da planilha de produtos.
+    .filter(p => p.nome && p.nome.length > 1 && !/^(total|totais|subtotal|geral|total geral)$/.test(normalizeHeader(p.nome)));
 }
 
-function aggregatePedidosDiaSection(headers: string[], rows: string[][], section: PedidosDiaSecao): number[] | null {
+// Arquivo de nível de pedido → faturamento, nº de pedidos e distribuição por dia da
+// semana, contando SÓ os pedidos com data dentro do período e ignorando cancelados.
+function aggregatePedidosSection(
+  headers: string[], rows: string[][], section: PedidosSecao, fromISO: string, toISO: string,
+): { faturamento: number; count: number; diaCounts: number[] } {
   const dataIdx = headers.indexOf(section.colunaData);
-  if (dataIdx === -1) return null;
-  const counts = [0, 0, 0, 0, 0, 0, 0];
+  const valorIdx = section.colunaValor ? headers.indexOf(section.colunaValor) : -1;
+  const statusIdx = section.colunaStatus ? headers.indexOf(section.colunaStatus) : -1;
+  const diaCounts = [0, 0, 0, 0, 0, 0, 0];
+  let faturamento = 0, count = 0;
+  if (dataIdx === -1) return { faturamento, count, diaCounts };
+
   for (const row of rows) {
+    if (statusIdx >= 0) {
+      const st = normalizeHeader(row[statusIdx] ?? '');
+      if (/cancel|recus|estorn|devolv|reembols|nao ?aprovad/.test(st)) continue;
+    }
     const d = parseDateFlexible(row[dataIdx] ?? '');
-    if (d) counts[d.getDay()]++;
+    if (!d) continue;
+    const iso = d.toISOString().slice(0, 10);
+    if (iso < fromISO || iso > toISO) continue;
+    count++;
+    diaCounts[d.getUTCDay()]++;
+    if (valorIdx >= 0) faturamento += parseFloat2(row[valorIdx] ?? '');
   }
-  return counts;
+  return { faturamento, count, diaCounts };
 }
 
 async function parseAllFilesAdaptive(
-  files: { name: string; content: string }[], periodFrom: Date, periodTo: Date,
+  files: { name: string; content: string }[], fromISO: string, toISO: string,
 ): Promise<{ data: ParsedData; avisos: string[] }> {
   const empty = (): ParsedData => ({
     ativos: 0, inativos: 0, potenciais: 0, faturamento: 0, pedidos_ativos: 0, ticket: 0,
     uma_compra: 0, recorrentes: 0, produtos: [], inativos_faixas: [], por_dia: [],
   });
   if (!files.length) return { data: empty(), avisos: [] };
-  if (process.env.SKIP_AI === 'true') return { data: parseAllFiles(files, periodTo), avisos: [] };
+  if (process.env.SKIP_AI === 'true') return { data: parseAllFiles(files, new Date(`${toISO}T12:00:00Z`)), avisos: [] };
 
   const interpretations = await Promise.all(files.map(interpretDeliveryFile));
 
   const out = empty();
   const avisos: string[] = [];
   const produtosMap = new Map<string, Product>();
-  const diaCounts = [0, 0, 0, 0, 0, 0, 0];
-  let hasDia = false;
-  // Junta os resumos de clientes de TODOS os arquivos antes de classificar — se o pedido
-  // do mês e o cadastro completo do cliente vierem em planilhas separadas, cruzar pela
-  // chave evita contar a mesma pessoa duas vezes (ver classifyClienteResumos).
+  // Duas fontes possíveis de faturamento/nº de pedidos/dia-da-semana:
+  //   • pedidos: arquivo de nível de pedido (mais confiável — valor real por pedido).
+  //   • clientes: derivado dos pedidos-no-período de um arquivo de clientes com datas.
+  // A fonte "pedidos" tem prioridade; a de clientes só entra se não houver arquivo de
+  // pedidos, pra não somar o mesmo faturamento vindo de duas exportações do mesmo dado.
+  const zero7 = () => [0, 0, 0, 0, 0, 0, 0];
+  const pedidosSrc = { faturamento: 0, count: 0, diaCounts: zero7(), has: false };   // arquivo nível-pedido
+  const clienteOrdersSrc = { faturamento: 0, count: 0, diaCounts: zero7(), has: false }; // pedidos derivados de arquivo de clientes com datas
   const clienteEntries: ClienteEntry[] = [];
 
   for (let idx = 0; idx < files.length; idx++) {
@@ -972,12 +1027,31 @@ async function parseAllFilesAdaptive(
       continue;
     }
 
-    const { headers, rows } = readTabular(file.content);
-    if (!headers.length) { avisos.push(`"${file.name}": planilha vazia ou ilegível.`); continue; }
+    const sheets = readTabularSheets(file.content);
+    if (!sheets.length) { avisos.push(`"${file.name}": planilha vazia ou ilegível.`); continue; }
+    // Resolve a aba de cada seção pelo nome; se não bater, usa a primeira.
+    const sheetFor = (aba?: string | null) =>
+      (aba && sheets.find(s => s.sheetName === aba)) || sheets[0];
 
     for (const section of interp.sections) {
+      const { headers, rows } = sheetFor(section.aba);
       if (section.tipo === 'clientes') {
-        clienteEntries.push(...buildClienteResumos(headers, rows, section, periodFrom, periodTo));
+        clienteEntries.push(...buildClienteResumos(headers, rows, section, fromISO, toISO));
+        // Se o arquivo de clientes tem uma linha por pedido (com data), ele também é uma
+        // fonte de faturamento/pedidos-por-dia — mesma lógica de nível-pedido.
+        if (section.colunaDataPedido) {
+          const { faturamento, count, diaCounts } = aggregatePedidosSection(
+            headers, rows,
+            { tipo: 'pedidos', colunaData: section.colunaDataPedido, colunaValor: section.colunaValor, colunaStatus: null },
+            fromISO, toISO,
+          );
+          if (count > 0) {
+            clienteOrdersSrc.has = true;
+            clienteOrdersSrc.faturamento += faturamento;
+            clienteOrdersSrc.count += count;
+            diaCounts.forEach((c, i) => { clienteOrdersSrc.diaCounts[i] += c; });
+          }
+        }
       } else if (section.tipo === 'produtos') {
         for (const p of aggregateProdutosSection(headers, rows, section)) {
           const key = p.nome.toLowerCase();
@@ -985,27 +1059,46 @@ async function parseAllFilesAdaptive(
           cur.qtd += p.qtd; cur.total += p.total;
           produtosMap.set(key, cur);
         }
-      } else if (section.tipo === 'pedidos_dia') {
-        const counts = aggregatePedidosDiaSection(headers, rows, section);
-        if (counts) { hasDia = true; counts.forEach((c, i) => { diaCounts[i] += c; }); }
+      } else if (section.tipo === 'pedidos') {
+        const { faturamento, count, diaCounts } = aggregatePedidosSection(headers, rows, section, fromISO, toISO);
+        if (count > 0) {
+          pedidosSrc.has = true;
+          pedidosSrc.faturamento += faturamento;
+          pedidosSrc.count += count;
+          diaCounts.forEach((c, i) => { pedidosSrc.diaCounts[i] += c; });
+        }
       }
     }
   }
 
   if (clienteEntries.length) {
-    const { ativos, inativosCount, faixas } = classifyClienteResumos(clienteEntries, periodFrom, periodTo);
+    const { ativos, inativosCount, faixas } = classifyClienteResumos(clienteEntries, fromISO, toISO);
     out.ativos = ativos.count;
-    out.faturamento = ativos.fat; out.pedidos_ativos = ativos.ped;
     out.uma_compra = ativos.uma; out.recorrentes = ativos.recorrentes;
     out.inativos = inativosCount;
     out.inativos_faixas = faixas;
   }
 
+  // Faturamento/nº de pedidos/dia-da-semana: prioriza o arquivo dedicado de pedidos;
+  // senão, os pedidos derivados do arquivo de clientes com datas. Nunca soma os dois
+  // (seriam o mesmo dado exportado de formas diferentes).
+  const money = pedidosSrc.has ? pedidosSrc
+    : clienteOrdersSrc.has ? clienteOrdersSrc
+    : { faturamento: 0, count: 0, diaCounts: zero7() };
+  out.faturamento = money.faturamento;
+  out.pedidos_ativos = money.count;
+  // Fallback de faturamento: soma do valor dos produtos (ex: relatório de vendas por
+  // categoria) quando não houve arquivo de pedidos nem de clientes com valor.
+  if (out.faturamento === 0) {
+    const totalProdutos = [...produtosMap.values()].reduce((s, p) => s + p.total, 0);
+    if (totalProdutos > 0) out.faturamento = totalProdutos;
+  }
+
   out.produtos = [...produtosMap.values()].sort((a, b) => b.qtd - a.qtd || b.total - a.total).slice(0, 10);
-  if (hasDia) {
+  const maxDia = Math.max(...money.diaCounts);
+  if (maxDia > 0) {
     const DIAS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
-    const max = Math.max(...diaCounts);
-    if (max) out.por_dia = DIAS.map((dia, i) => ({ dia, pedidos: diaCounts[i], pct: (diaCounts[i] / max) * 100 }));
+    out.por_dia = DIAS.map((dia, i) => ({ dia, pedidos: money.diaCounts[i], pct: (money.diaCounts[i] / maxDia) * 100 }));
   }
   if (out.pedidos_ativos > 0 && out.faturamento > 0) out.ticket = out.faturamento / out.pedidos_ativos;
 
@@ -4404,11 +4497,12 @@ export async function buildDeliveryReport(opts: {
   // O arquivo "ant-" representa o mês anterior ao período atual (mesmo cálculo do label
   // prevPeriodo abaixo) — usado como limite pra separar pedidos daquele mês dos demais.
   const prevFromDate = new Date(fromDate.getFullYear(), fromDate.getMonth() - 1, 1);
-  const prevToDate = new Date(fromDate.getFullYear(), fromDate.getMonth(), 0, 23, 59, 59);
+  const prevToDate = new Date(fromDate.getFullYear(), fromDate.getMonth(), 0);
+  const isoOf = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
   const [{ data, avisos }, prevResult] = await Promise.all([
-    parseAllFilesAdaptive(currentFiles, fromDate, toDate),
-    hasPrev ? parseAllFilesAdaptive(prevFiles, prevFromDate, prevToDate) : Promise.resolve(null),
+    parseAllFilesAdaptive(currentFiles, from, to),
+    hasPrev ? parseAllFilesAdaptive(prevFiles, isoOf(prevFromDate), isoOf(prevToDate)) : Promise.resolve(null),
   ]);
   const prevData = prevResult?.data ?? null;
   if (prevResult?.avisos.length) avisos.push(...prevResult.avisos.map(a => `Período anterior — ${a}`));
