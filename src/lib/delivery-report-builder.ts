@@ -483,10 +483,13 @@ function parseAllFiles(files: { name: string; content: string }[], refDate: Date
 
 type ClienteSecao = {
   tipo: 'clientes';
-  // Identifica o cliente (nome/telefone/e-mail/id) — só necessário quando o arquivo tem
-  // uma linha por PEDIDO (não por cliente), para o sistema agrupar e contar pedidos por
-  // pessoa. Se o arquivo já tem uma linha por cliente, deixe null.
+  // Identifica o cliente (nome ou código). Usado pra agrupar pedidos por pessoa e pra
+  // cruzar a mesma pessoa entre planilhas diferentes.
   colunaCliente: string | null;
+  // Telefone e e-mail — identificadores mais confiáveis que o nome pro cruzamento entre
+  // arquivos (um sistema pode escrever o nome diferente do outro). Preencha se existirem.
+  colunaTelefone: string | null;
+  colunaEmail: string | null;
   // Data do pedido — junto com colunaCliente, permite contar quantos pedidos cada
   // cliente fez (1 pedido = cliente novo) e serve de data da última compra se não
   // houver colunaUltimaCompra própria.
@@ -513,31 +516,109 @@ const FAIXAS_INATIVIDADE = [
   { label: '365+ dias',    min: 365, max: Infinity },
 ];
 
-// Extrai só os dígitos da data via grupos de captura em vez de "split('/')" — muitas
-// exportações reais colam informação extra depois do ano ("02/06/2026 12:40:25" com
-// hora, ou "08/03/2026(Há 117 dias)" com dias-atrás calculado), e um split ingênuo
-// jogava esse texto extra dentro do ano, quebrando o Date silenciosamente.
+const MESES_TEXTO: Record<string, number> = {
+  jan: 1, fev: 2, mar: 3, abr: 4, mai: 5, jun: 6, jul: 7, ago: 8, set: 9, out: 10, nov: 11, dez: 12,
+  feb: 2, apr: 4, may: 5, aug: 8, sep: 9, oct: 10, dec: 12, // variações em inglês
+};
+
+function makeUtcDate(y: number, m: number, d: number): Date | null {
+  if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+  const yyyy = y < 100 ? 2000 + y : y; // ano de 2 dígitos → 20xx
+  const date = new Date(Date.UTC(yyyy, m - 1, d, 12, 0, 0));
+  return isNaN(date.getTime()) ? null : date;
+}
+
+// Interpreta datas de origens variadas — cada cardápio digital exporta de um jeito.
+// Tolera lixo depois da data (hora "12:40:25", "(Há 117 dias)"), aceita separadores /,
+// -, . e ano de 2 ou 4 dígitos, formato ISO, número serial do Excel e mês por extenso
+// (pt/en). Em datas com barra que são ambíguas (dd/mm vs mm/dd), usa o dia > 12 pra
+// desambiguar e, no empate, assume dd/mm (padrão brasileiro).
 function parseDateFlexible(raw: string): Date | null {
   const ds = (raw ?? '').trim();
   if (!ds) return null;
-  const br = ds.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
-  if (br) {
-    const d = new Date(`${br[3]}-${br[2]}-${br[1]}`);
-    return isNaN(d.getTime()) ? null : d;
+
+  // ISO: 2026-06-02 (ou 2026/06/02)
+  const iso = ds.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (iso) return makeUtcDate(+iso[1], +iso[2], +iso[3]);
+
+  // dd/mm/yyyy, dd-mm-yy, d.m.yyyy — separador e nº de dígitos flexíveis
+  const dmy = ds.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})/);
+  if (dmy) {
+    let dd = +dmy[1], mm = +dmy[2];
+    const yy = +dmy[3];
+    // Desambigua dd/mm vs mm/dd: se o "dia" é > 12 mas o "mês" ≤ 12, está trocado (US).
+    if (dd > 12 && mm <= 12) { /* dd/mm ok */ }
+    else if (mm > 12 && dd <= 12) { const t = dd; dd = mm; mm = t; }
+    return makeUtcDate(yy, mm, dd);
   }
-  const iso = ds.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (iso) {
-    const d = new Date(`${iso[1]}-${iso[2]}-${iso[3]}`);
-    return isNaN(d.getTime()) ? null : d;
+
+  // yyyymmdd colado (ex: 20260602)
+  const compact = ds.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (compact) return makeUtcDate(+compact[1], +compact[2], +compact[3]);
+
+  // "5 de junho de 2026", "5 jun 2026", "jun 5, 2026", "5-jun-26"
+  const texto = ds.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const dMonY = texto.match(/(\d{1,2})\s*(?:de\s*)?[-/ ]?\s*([a-z]{3,})[-/ ]?\s*(?:de\s*)?(\d{2,4})/);
+  if (dMonY && MESES_TEXTO[dMonY[2].slice(0, 3)]) return makeUtcDate(+dMonY[3], MESES_TEXTO[dMonY[2].slice(0, 3)], +dMonY[1]);
+  const monDY = texto.match(/([a-z]{3,})\s*[-/ ]?\s*(\d{1,2})\s*,?\s*(\d{2,4})/);
+  if (monDY && MESES_TEXTO[monDY[1].slice(0, 3)]) return makeUtcDate(+monDY[3], MESES_TEXTO[monDY[1].slice(0, 3)], +monDY[2]);
+
+  // Número serial do Excel (dias desde 1899-12-30). Faixa ~2015–2035 pra evitar
+  // confundir com um contador qualquer.
+  const serial = ds.match(/^\d{5}(\.\d+)?$/);
+  if (serial) {
+    const n = parseFloat(ds);
+    if (n >= 42000 && n <= 50000) {
+      const d = new Date(Date.UTC(1899, 11, 30, 12, 0, 0) + Math.round(n) * 86_400_000);
+      return isNaN(d.getTime()) ? null : d;
+    }
   }
+
   return null;
+}
+
+// "Última compra" às vezes vem relativa em vez de data absoluta ("há 2 meses", "há 45
+// dias", "3 semanas atrás"). Converte pra número de dias, que alimenta a mesma regra de
+// inatividade. Retorna null se não reconhecer.
+function parseRelativeDays(raw: string): number | null {
+  const s = (raw ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+  if (!s) return null;
+  const m = s.match(/(\d+)\s*(dia|semana|mes|ano)/);
+  if (!m) return null;
+  const n = parseInt(m[1], 10);
+  if (!Number.isFinite(n)) return null;
+  const unidade = m[2];
+  if (unidade === 'dia') return n;
+  if (unidade === 'semana') return n * 7;
+  if (unidade === 'mes') return n * 30;
+  if (unidade === 'ano') return n * 365;
+  return null;
+}
+
+// Normaliza um identificador de cliente pra servir de chave de cruzamento entre planilhas
+// diferentes. Telefone → últimos 8 dígitos (descarta DDI/DDD e o "9" da frente, que
+// aparecem ou não dependendo da exportação). E-mail → minúsculo. Nome → sem acento/caixa.
+function normalizeClientKey(raw: string, kind: 'telefone' | 'email' | 'nome'): string | null {
+  const v = (raw ?? '').trim();
+  if (!v || v === '-') return null;
+  if (kind === 'telefone') {
+    const digits = v.replace(/\D/g, '');
+    if (digits.length < 8) return null;
+    return `tel:${digits.slice(-8)}`;
+  }
+  if (kind === 'email') {
+    const e = v.toLowerCase().trim();
+    return e.includes('@') ? `email:${e}` : null;
+  }
+  const nome = normalizeHeader(v).replace(/\s+/g, ' ');
+  return nome.length > 1 ? `nome:${nome}` : null;
 }
 
 function isValidFileSection(s: unknown): s is FileSection {
   if (!s || typeof s !== 'object') return false;
   const o = s as Record<string, unknown>;
   if (o.tipo === 'clientes') {
-    return ['colunaCliente', 'colunaDataPedido', 'colunaPedidos', 'colunaValor', 'colunaUltimaCompra', 'colunaDiasSemComprar']
+    return ['colunaCliente', 'colunaTelefone', 'colunaEmail', 'colunaDataPedido', 'colunaPedidos', 'colunaValor', 'colunaUltimaCompra', 'colunaDiasSemComprar']
       .some(k => typeof o[k] === 'string' && (o[k] as string).length > 0);
   }
   if (o.tipo === 'produtos') return typeof o.colunaNome === 'string' && o.colunaNome.length > 0;
@@ -552,7 +633,7 @@ async function interpretDeliveryFile(file: { name: string; content: string }): P
   const sample = rows.slice(0, 8);
   const schema = `{
   "secoes": [
-    { "tipo": "clientes", "colunaCliente": string|null, "colunaDataPedido": string|null, "colunaPedidos": string|null, "colunaValor": string|null, "colunaUltimaCompra": string|null, "colunaDiasSemComprar": string|null },
+    { "tipo": "clientes", "colunaCliente": string|null, "colunaTelefone": string|null, "colunaEmail": string|null, "colunaDataPedido": string|null, "colunaPedidos": string|null, "colunaValor": string|null, "colunaUltimaCompra": string|null, "colunaDiasSemComprar": string|null },
     { "tipo": "produtos", "colunaNome": string, "colunaQtd": string|null, "colunaTotal": string|null },
     { "tipo": "pedidos_dia", "colunaData": string }
   ],
@@ -567,7 +648,8 @@ Identifique quais das seguintes informações esta planilha de delivery (exporta
 
 Tipos possíveis de seção:
 - "clientes": dados de clientes/pedidos para calcular clientes ATIVOS x INATIVOS. Você só precisa apontar as colunas certas — as contas (agrupar, contar, comparar datas) são feitas pelo sistema depois, não por você.
-  · SEMPRE que existir uma coluna que identifique o cliente (nome, telefone, e-mail ou código), preencha "colunaCliente" com ela — mesmo em planilhas já resumidas por cliente. É assim que o sistema cruza esta planilha com outras anexadas junto (ex: uma lista de pedidos do mês + um cadastro completo de clientes são a MESMA pessoa aparecendo nos dois arquivos, e precisam ser reconhecidas como tal, não contadas em dobro).
+  · SEMPRE que existir uma coluna que identifique o cliente (nome ou código), preencha "colunaCliente" com ela — mesmo em planilhas já resumidas por cliente. É assim que o sistema cruza esta planilha com outras anexadas junto (ex: uma lista de pedidos do mês + um cadastro completo de clientes são a MESMA pessoa aparecendo nos dois arquivos, e precisam ser reconhecidas como tal, não contadas em dobro).
+  · Se existirem colunas de TELEFONE e/ou E-MAIL, preencha "colunaTelefone" e "colunaEmail" — são identificadores mais confiáveis que o nome pra cruzar a mesma pessoa entre planilhas de sistemas diferentes (uma pode escrever o nome de um jeito e a outra de outro).
   · Se a planilha tem UMA LINHA POR PEDIDO (várias linhas podem ser do mesmo cliente): preencha também "colunaDataPedido" (data de cada pedido). O sistema agrupa por cliente e conta quantos pedidos cada um fez — cliente com exatamente 1 pedido no arquivo é considerado NOVO.
   · Se a planilha tem UMA LINHA POR CLIENTE (já resumido): preencha "colunaPedidos" (nº de pedidos, total histórico, daquele cliente), se existir essa coluna.
   · Para saber se um cliente está INATIVO (mais de 30 dias sem pedir), preencha "colunaUltimaCompra" (data do último pedido) OU "colunaDiasSemComprar" (número de dias já calculado pela planilha) — o que existir. Sem nenhuma das duas, e sem colunaDataPedido, o sistema não classifica inatividade.
@@ -634,33 +716,68 @@ type ClienteResumo = {
   diasSemComprar:   number | null;
 };
 
-// Extrai um resumo por cliente de UMA seção/arquivo, com uma chave de cruzamento (nome/
-// telefone/e-mail normalizado) quando disponível. Não classifica nada aqui — quando o
-// usuário anexa, por exemplo, a lista de pedidos do mês E o cadastro completo de clientes
-// juntos, os MESMOS clientes aparecem nos dois arquivos (um com os pedidos do período, o
-// outro com o total histórico) e precisam ser cruzados pela chave antes de decidir
-// novo/ativo/inativo — nunca somados como se fossem clientes diferentes.
+type ClienteEntry = { keys: string[]; resumo: ClienteResumo };
+
+// Extrai um resumo por cliente de UMA seção/arquivo, carregando TODAS as chaves de
+// cruzamento disponíveis (telefone, e-mail e nome normalizados). Não classifica nada
+// aqui — quando o usuário anexa, por exemplo, a lista de pedidos do mês E o cadastro
+// completo de clientes juntos, os MESMOS clientes aparecem nos dois arquivos (um com os
+// pedidos do período, o outro com o total histórico) e precisam ser cruzados por
+// qualquer identificador em comum antes de decidir novo/ativo/inativo — nunca somados
+// como se fossem clientes diferentes.
 function buildClienteResumos(
   headers: string[], rows: string[][], section: ClienteSecao, periodFrom: Date, periodTo: Date,
-): { chave: string | null; resumo: ClienteResumo }[] {
+): ClienteEntry[] {
   const clienteIdx = section.colunaCliente ? headers.indexOf(section.colunaCliente) : -1;
+  const telefoneIdx = section.colunaTelefone ? headers.indexOf(section.colunaTelefone) : -1;
+  const emailIdx = section.colunaEmail ? headers.indexOf(section.colunaEmail) : -1;
   const dataPedidoIdx = section.colunaDataPedido ? headers.indexOf(section.colunaDataPedido) : -1;
   const pedidosIdx = section.colunaPedidos ? headers.indexOf(section.colunaPedidos) : -1;
   const valorIdx = section.colunaValor ? headers.indexOf(section.colunaValor) : -1;
   const ultimaCompraIdx = section.colunaUltimaCompra ? headers.indexOf(section.colunaUltimaCompra) : -1;
   const diasSemComprarIdx = section.colunaDiasSemComprar ? headers.indexOf(section.colunaDiasSemComprar) : -1;
 
-  const dentroDoPeriodo = (d: Date) => d >= periodFrom && d <= periodTo;
-  const entries: { chave: string | null; resumo: ClienteResumo }[] = [];
+  // Ordem: telefone/e-mail primeiro (mais confiáveis), nome como último recurso.
+  const rowKeys = (row: string[]): string[] => {
+    const ks: string[] = [];
+    if (telefoneIdx >= 0) { const k = normalizeClientKey(row[telefoneIdx] ?? '', 'telefone'); if (k) ks.push(k); }
+    if (emailIdx >= 0)    { const k = normalizeClientKey(row[emailIdx] ?? '', 'email');       if (k) ks.push(k); }
+    if (clienteIdx >= 0)  { const k = normalizeClientKey(row[clienteIdx] ?? '', 'nome');       if (k) ks.push(k); }
+    return ks;
+  };
+  const hasIdentifier = telefoneIdx >= 0 || emailIdx >= 0 || clienteIdx >= 0;
 
-  if (dataPedidoIdx >= 0 && clienteIdx >= 0) {
-    // Uma linha por pedido — agrupa por cliente pra contar o total de pedidos (neste
-    // arquivo) e separadamente quantos deles caem dentro do período analisado.
-    const grupos = new Map<string, { total: number; noPeriodo: number; valorPeriodo: number; ultimaData: Date | null }>();
+  const dentroDoPeriodo = (d: Date) => d >= periodFrom && d <= periodTo;
+
+  // Lê "última compra"/"dias sem comprar" tolerando data absoluta, relativa ("há 2 meses")
+  // ou número puro de dias, na coluna que a IA tiver apontado.
+  const lerInatividade = (row: string[]): { ultimoPedido: Date | null; diasSemComprar: number | null } => {
+    const ultRaw = ultimaCompraIdx >= 0 ? (row[ultimaCompraIdx] ?? '') : '';
+    const ultimoPedido = ultRaw ? parseDateFlexible(ultRaw) : null;
+    let diasSemComprar: number | null = null;
+    if (diasSemComprarIdx >= 0) {
+      const dRaw = row[diasSemComprarIdx] ?? '';
+      diasSemComprar = /[a-zA-Z]/.test(dRaw)
+        ? parseRelativeDays(dRaw)
+        : (dRaw.replace(/\D/g, '') ? parseInt(dRaw.replace(/\D/g, ''), 10) : null);
+    }
+    // Se a "última compra" não era data absoluta, tenta interpretá-la como relativa.
+    if (diasSemComprar === null && !ultimoPedido && ultRaw) diasSemComprar = parseRelativeDays(ultRaw);
+    return { ultimoPedido, diasSemComprar };
+  };
+
+  const entries: ClienteEntry[] = [];
+
+  if (dataPedidoIdx >= 0 && hasIdentifier) {
+    // Uma linha por pedido — agrupa por cliente (pelo identificador mais forte da linha)
+    // pra contar o total de pedidos neste arquivo e quantos caem dentro do período.
+    const grupos = new Map<string, { total: number; noPeriodo: number; valorPeriodo: number; ultimaData: Date | null; keys: Set<string> }>();
     for (const row of rows) {
-      const chave = normalizeHeader(row[clienteIdx] ?? '');
-      if (!chave) continue;
-      const g = grupos.get(chave) ?? { total: 0, noPeriodo: 0, valorPeriodo: 0, ultimaData: null };
+      const ks = rowKeys(row);
+      if (!ks.length) continue;
+      const pk = ks[0];
+      const g = grupos.get(pk) ?? { total: 0, noPeriodo: 0, valorPeriodo: 0, ultimaData: null, keys: new Set<string>() };
+      ks.forEach(k => g.keys.add(k));
       g.total++;
       const dataPedido = parseDateFlexible(row[dataPedidoIdx] ?? '');
       if (dataPedido && (!g.ultimaData || dataPedido > g.ultimaData)) g.ultimaData = dataPedido;
@@ -668,11 +785,11 @@ function buildClienteResumos(
         g.noPeriodo++;
         if (valorIdx >= 0) g.valorPeriodo += parseFloat2(row[valorIdx] ?? '');
       }
-      grupos.set(chave, g);
+      grupos.set(pk, g);
     }
-    for (const [chave, g] of grupos) {
+    for (const g of grupos.values()) {
       entries.push({
-        chave,
+        keys: [...g.keys],
         resumo: {
           totalPedidos: g.total, pedidosNoPeriodo: g.noPeriodo, valorNoPeriodo: g.valorPeriodo,
           periodoPreciso: true, ultimoPedido: g.ultimaData, diasSemComprar: null,
@@ -685,20 +802,17 @@ function buildClienteResumos(
     for (const row of rows) {
       const totalPedidos = pedidosIdx >= 0 ? (parseInt(row[pedidosIdx] ?? '0') || 0) : 1;
       const valor = valorIdx >= 0 ? parseFloat2(row[valorIdx] ?? '') : 0;
-      const ultimoPedido = ultimaCompraIdx >= 0 ? parseDateFlexible(row[ultimaCompraIdx] ?? '') : null;
+      const { ultimoPedido, diasSemComprar } = lerInatividade(row);
       const foraDoPeriodo = ultimoPedido !== null && !dentroDoPeriodo(ultimoPedido);
-      const diasSemComprarRaw = diasSemComprarIdx >= 0
-        ? (row[diasSemComprarIdx] ?? '').replace(/\D/g, '')
-        : '';
       entries.push({
-        chave: clienteIdx >= 0 ? (normalizeHeader(row[clienteIdx] ?? '') || null) : null,
+        keys: rowKeys(row),
         resumo: {
           totalPedidos,
           pedidosNoPeriodo: foraDoPeriodo ? 0 : totalPedidos,
           valorNoPeriodo: foraDoPeriodo ? 0 : valor,
           periodoPreciso: false,
           ultimoPedido,
-          diasSemComprar: diasSemComprarRaw ? parseInt(diasSemComprarRaw, 10) : null,
+          diasSemComprar,
         },
       });
     }
@@ -707,12 +821,34 @@ function buildClienteResumos(
   return entries;
 }
 
-// Junta os resumos de TODAS as seções/arquivos de clientes de uma vez (cruzando pela
-// chave quando ela existe em mais de uma planilha) e só então classifica cada cliente
-// como novo/ativo/inativo — evita contar a mesma pessoa duas vezes quando o pedido do
-// mês e o cadastro completo do cliente vêm em arquivos separados.
+// Funde dois resumos do mesmo cliente (vindos de arquivos diferentes) num só.
+function mergeResumo(alvo: ClienteResumo, novo: ClienteResumo): void {
+  alvo.totalPedidos = Math.max(alvo.totalPedidos, novo.totalPedidos);
+  // A fonte precisa (datas de pedido reais) sempre vence a estimativa tudo-ou-nada —
+  // nunca soma/máximo entre as duas, ou a estimativa infla o resultado com o histórico
+  // inteiro do cliente contado como se fosse tudo do período.
+  if (novo.periodoPreciso && !alvo.periodoPreciso) {
+    alvo.pedidosNoPeriodo = novo.pedidosNoPeriodo;
+    alvo.valorNoPeriodo = novo.valorNoPeriodo;
+    alvo.periodoPreciso = true;
+  } else if (alvo.periodoPreciso === novo.periodoPreciso) {
+    alvo.pedidosNoPeriodo = Math.max(alvo.pedidosNoPeriodo, novo.pedidosNoPeriodo);
+    alvo.valorNoPeriodo = Math.max(alvo.valorNoPeriodo, novo.valorNoPeriodo);
+  }
+  if (novo.ultimoPedido && (!alvo.ultimoPedido || novo.ultimoPedido > alvo.ultimoPedido)) {
+    alvo.ultimoPedido = novo.ultimoPedido;
+  }
+  alvo.diasSemComprar = alvo.diasSemComprar ?? novo.diasSemComprar;
+}
+
+// Junta os resumos de TODAS as seções/arquivos de clientes de uma vez e só então
+// classifica cada cliente como novo/ativo/inativo. O cruzamento usa union-find sobre
+// TODAS as chaves de cada entrada (telefone/e-mail/nome): duas entradas viram a mesma
+// pessoa se compartilham QUALQUER identificador — então o pedido do mês (identificado
+// por telefone num arquivo) e o cadastro do cliente (identificado por nome noutro) se
+// reconhecem mesmo quando cada planilha usa um identificador diferente.
 function classifyClienteResumos(
-  entries: { chave: string | null; resumo: ClienteResumo }[], periodFrom: Date, periodTo: Date,
+  entries: ClienteEntry[], periodFrom: Date, periodTo: Date,
 ): {
   ativos: { count: number; fat: number; ped: number; uma: number; recorrentes: number };
   inativosCount: number;
@@ -720,30 +856,32 @@ function classifyClienteResumos(
 } {
   const dentroDoPeriodo = (d: Date) => d >= periodFrom && d <= periodTo;
 
-  const merged: ClienteResumo[] = [];
-  const byKey = new Map<string, ClienteResumo>();
-  for (const { chave, resumo } of entries) {
-    if (!chave) { merged.push(resumo); continue; }
-    const existing = byKey.get(chave);
-    if (!existing) { byKey.set(chave, { ...resumo }); continue; }
-    existing.totalPedidos = Math.max(existing.totalPedidos, resumo.totalPedidos);
-    // A fonte precisa (datas de pedido reais) sempre vence a estimativa tudo-ou-nada —
-    // nunca soma/máximo entre as duas, ou a estimativa infla o resultado com o
-    // histórico inteiro do cliente contado como se fosse tudo do período.
-    if (resumo.periodoPreciso && !existing.periodoPreciso) {
-      existing.pedidosNoPeriodo = resumo.pedidosNoPeriodo;
-      existing.valorNoPeriodo = resumo.valorNoPeriodo;
-      existing.periodoPreciso = true;
-    } else if (existing.periodoPreciso === resumo.periodoPreciso) {
-      existing.pedidosNoPeriodo = Math.max(existing.pedidosNoPeriodo, resumo.pedidosNoPeriodo);
-      existing.valorNoPeriodo = Math.max(existing.valorNoPeriodo, resumo.valorNoPeriodo);
-    }
-    if (resumo.ultimoPedido && (!existing.ultimoPedido || resumo.ultimoPedido > existing.ultimoPedido)) {
-      existing.ultimoPedido = resumo.ultimoPedido;
-    }
-    existing.diasSemComprar = existing.diasSemComprar ?? resumo.diasSemComprar;
+  // Union-find sobre as chaves.
+  const parent = new Map<string, string>();
+  const find = (x: string): string => {
+    let r = x;
+    while (parent.get(r) !== r) r = parent.get(r)!;
+    let cur = x;
+    while (parent.get(cur) !== r) { const next = parent.get(cur)!; parent.set(cur, r); cur = next; }
+    return r;
+  };
+  const ensure = (k: string) => { if (!parent.has(k)) parent.set(k, k); };
+  const union = (a: string, b: string) => { ensure(a); ensure(b); parent.set(find(a), find(b)); };
+  for (const e of entries) {
+    e.keys.forEach(ensure);
+    for (let i = 1; i < e.keys.length; i++) union(e.keys[0], e.keys[i]);
   }
-  merged.push(...byKey.values());
+
+  const merged: ClienteResumo[] = [];
+  const byRoot = new Map<string, ClienteResumo>();
+  for (const e of entries) {
+    if (!e.keys.length) { merged.push({ ...e.resumo }); continue; }
+    const root = find(e.keys[0]);
+    const existing = byRoot.get(root);
+    if (!existing) { byRoot.set(root, { ...e.resumo }); continue; }
+    mergeResumo(existing, e.resumo);
+  }
+  merged.push(...byRoot.values());
 
   const ativos = { count: 0, fat: 0, ped: 0, uma: 0, recorrentes: 0 };
   let inativosCount = 0;
@@ -824,7 +962,7 @@ async function parseAllFilesAdaptive(
   // Junta os resumos de clientes de TODOS os arquivos antes de classificar — se o pedido
   // do mês e o cadastro completo do cliente vierem em planilhas separadas, cruzar pela
   // chave evita contar a mesma pessoa duas vezes (ver classifyClienteResumos).
-  const clienteEntries: { chave: string | null; resumo: ClienteResumo }[] = [];
+  const clienteEntries: ClienteEntry[] = [];
 
   for (let idx = 0; idx < files.length; idx++) {
     const file = files[idx];
