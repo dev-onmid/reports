@@ -29,7 +29,7 @@ type ReportConfig = {
   id: string; client_id: string; client_name: string; name: string;
   whatsapp_group: string | null; zapi_client_id: string | null;
   zapi_name: string | null; send_day: number; active: boolean;
-  template: 'performance' | 'delivery';
+  template: 'performance' | 'delivery' | 'social';
   report_count: number; last_run_at: string | null; last_token: string | null; created_at: string;
 };
 
@@ -90,7 +90,7 @@ export default function RelatoriosPage() {
   // Geração avulsa
   const [showGenModal, setShowGenModal] = useState(false);
   const [genForm, setGenForm] = useState({ clientId: '', from: '', to: '', agencyContext: '' });
-  const [genTemplate, setGenTemplate] = useState<'performance' | 'delivery'>('performance');
+  const [genTemplate, setGenTemplate] = useState<'performance' | 'delivery' | 'social'>('performance');
   const [genCsvFiles, setGenCsvFiles] = useState<{ name: string; content: string }[]>([]);
   const [genCoverId, setGenCoverId] = useState<string | null>(null);
   const [genMetaLevel, setGenMetaLevel] = useState<'campaign' | 'adset'>('campaign');
@@ -102,7 +102,7 @@ export default function RelatoriosPage() {
   const [zapiClients, setZapiClients] = useState<ZapiClient[]>([]);
   const [showConfigForm, setShowConfigForm] = useState(false);
   const [editingConfig, setEditingConfig] = useState<ReportConfig | null>(null);
-  const [configForm, setConfigForm] = useState<{ clientIds: string[]; name: string; whatsappGroup: string; zapiClientId: string; sendDay: number; template: 'performance' | 'delivery' }>({ clientIds: [], name: '', whatsappGroup: '', zapiClientId: '', sendDay: 1, template: 'performance' });
+  const [configForm, setConfigForm] = useState<{ clientIds: string[]; name: string; whatsappGroup: string; zapiClientId: string; sendDay: number; template: 'performance' | 'delivery' | 'social' }>({ clientIds: [], name: '', whatsappGroup: '', zapiClientId: '', sendDay: 1, template: 'performance' });
   const [savingConfig, setSavingConfig] = useState(false);
   const [runningId, setRunningId] = useState<string | null>(null);
   const [sendingId, setSendingId] = useState<string | null>(null);
@@ -958,11 +958,12 @@ export default function RelatoriosPage() {
                   <label className="text-xs text-muted-foreground font-medium">Template</label>
                   <select
                     value={configForm.template}
-                    onChange={e => setConfigForm(f => ({ ...f, template: e.target.value as 'performance' | 'delivery' }))}
+                    onChange={e => setConfigForm(f => ({ ...f, template: e.target.value as 'performance' | 'delivery' | 'social' }))}
                     className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50"
                   >
                     <option value="performance">Performance</option>
                     <option value="delivery">Delivery</option>
+                    <option value="social">Social</option>
                   </select>
                 </div>
                 <div className="space-y-1.5">
@@ -1112,9 +1113,11 @@ export default function RelatoriosPage() {
                         'inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border',
                         cfg.template === 'delivery'
                           ? 'bg-emerald-500/15 text-emerald-300 border-emerald-400/30'
-                          : 'bg-violet-500/15 text-violet-300 border-violet-400/30',
+                          : cfg.template === 'social'
+                            ? 'bg-pink-500/15 text-pink-300 border-pink-400/30'
+                            : 'bg-violet-500/15 text-violet-300 border-violet-400/30',
                       )}>
-                        {cfg.template === 'delivery' ? 'Delivery' : 'Performance'}
+                        {cfg.template === 'delivery' ? 'Delivery' : cfg.template === 'social' ? 'Social' : 'Performance'}
                       </span>
                     </td>
                     <td className="px-5 py-3.5">
@@ -1234,7 +1237,7 @@ export default function RelatoriosPage() {
             {/* Template selector */}
             <div className="space-y-1.5">
               <label className="text-xs text-muted-foreground font-medium">Template</label>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-3">
                 {([
                   {
                     key: 'performance' as const,
@@ -1250,26 +1253,32 @@ export default function RelatoriosPage() {
                     color: 'emerald',
                     icon: <FileText className="w-5 h-5" />,
                   },
+                  {
+                    key: 'social' as const,
+                    title: 'Social',
+                    desc: 'Calendário de posts + métricas de Instagram',
+                    color: 'pink',
+                    icon: <Users className="w-5 h-5" />,
+                  },
                 ]).map(tpl => {
                   const active = genTemplate === tpl.key;
+                  const colorClasses: Record<string, { border: string; iconBg: string }> = {
+                    violet:  { border: 'border-violet-500 bg-violet-500/10',   iconBg: 'bg-violet-500/20 text-violet-400' },
+                    emerald: { border: 'border-emerald-500 bg-emerald-500/10', iconBg: 'bg-emerald-500/20 text-emerald-400' },
+                    pink:    { border: 'border-pink-500 bg-pink-500/10',       iconBg: 'bg-pink-500/20 text-pink-400' },
+                  };
                   return (
                     <button
                       key={tpl.key}
                       onClick={() => setGenTemplate(tpl.key)}
                       className={cn(
                         'flex flex-col gap-2 p-4 rounded-xl border-2 text-left transition-all',
-                        active
-                          ? tpl.color === 'violet'
-                            ? 'border-violet-500 bg-violet-500/10'
-                            : 'border-emerald-500 bg-emerald-500/10'
-                          : 'border-border bg-background hover:border-border/80',
+                        active ? colorClasses[tpl.color].border : 'border-border bg-background hover:border-border/80',
                       )}
                     >
                       <div className={cn(
                         'w-9 h-9 rounded-lg flex items-center justify-center',
-                        active
-                          ? tpl.color === 'violet' ? 'bg-violet-500/20 text-violet-400' : 'bg-emerald-500/20 text-emerald-400'
-                          : 'bg-muted text-muted-foreground',
+                        active ? colorClasses[tpl.color].iconBg : 'bg-muted text-muted-foreground',
                       )}>
                         {tpl.icon}
                       </div>
@@ -1417,34 +1426,36 @@ export default function RelatoriosPage() {
                 </div>
               </div>
 
-              {/* Meta Ads breakdown level — campaign vs ad set */}
-              <div className="space-y-1.5">
-                <label className="text-xs text-muted-foreground font-medium">
-                  Detalhamento Meta Ads <span className="text-muted-foreground/50">(nível dos cards de campanha)</span>
-                </label>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setGenMetaLevel('campaign')}
-                    className={cn(
-                      'flex-1 px-3 py-2 text-sm rounded-lg border-2 transition-colors',
-                      genMetaLevel === 'campaign' ? 'border-violet-500 text-violet-300 bg-violet-500/10' : 'border-border text-muted-foreground hover:border-violet-500/40',
-                    )}
-                  >
-                    Campanha
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setGenMetaLevel('adset')}
-                    className={cn(
-                      'flex-1 px-3 py-2 text-sm rounded-lg border-2 transition-colors',
-                      genMetaLevel === 'adset' ? 'border-violet-500 text-violet-300 bg-violet-500/10' : 'border-border text-muted-foreground hover:border-violet-500/40',
-                    )}
-                  >
-                    Conjunto de anúncios
-                  </button>
+              {/* Meta Ads breakdown level — campaign vs ad set (not applicable to Social) */}
+              {genTemplate !== 'social' && (
+                <div className="space-y-1.5">
+                  <label className="text-xs text-muted-foreground font-medium">
+                    Detalhamento Meta Ads <span className="text-muted-foreground/50">(nível dos cards de campanha)</span>
+                  </label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setGenMetaLevel('campaign')}
+                      className={cn(
+                        'flex-1 px-3 py-2 text-sm rounded-lg border-2 transition-colors',
+                        genMetaLevel === 'campaign' ? 'border-violet-500 text-violet-300 bg-violet-500/10' : 'border-border text-muted-foreground hover:border-violet-500/40',
+                      )}
+                    >
+                      Campanha
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setGenMetaLevel('adset')}
+                      className={cn(
+                        'flex-1 px-3 py-2 text-sm rounded-lg border-2 transition-colors',
+                        genMetaLevel === 'adset' ? 'border-violet-500 text-violet-300 bg-violet-500/10' : 'border-border text-muted-foreground hover:border-violet-500/40',
+                      )}
+                    >
+                      Conjunto de anúncios
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* CSV upload — only for Delivery */}
               {genTemplate === 'delivery' && (

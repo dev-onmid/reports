@@ -1415,12 +1415,14 @@ export function sCapa(
   d: ParsedData, meta: MetaAdsFull | null, clientName: string,
   periodo: string, prevPeriodo: string, diag: DiagJson, total: number,
   cover: ReportCover,
+  titleText = 'Relatório de Performance',
+  apoioText = 'Análise de faturamento, pedidos, tráfego, base de clientes, produtos e oportunidades para o próximo ciclo.',
 ): string {
   void d;
   void meta;
   void diag;
 
-  const apoio = `Análise de faturamento, pedidos, tráfego, base de clientes, produtos e oportunidades para o próximo ciclo.`;
+  const apoio = apoioText;
 
   // The cover art is a full-bleed background photo/illustration (left side is a flat
   // color reserved for this text block) — on dark covers the title/labels switch to
@@ -1454,7 +1456,7 @@ export function sCapa(
   <div style="position:relative;z-index:1;flex:1;padding:82px 48px 68px;display:grid;grid-template-columns:650px 1fr;column-gap:40px">
     <div style="display:flex;flex-direction:column;min-width:0">
       <h1 style="font-family:${INTER};font-size:52px;font-weight:900;letter-spacing:-0.045em;color:${titleColor};line-height:1.04;margin:0 0 20px">
-        ${reportTitle('Relatório de Performance')} —<br>${clientName}
+        ${reportTitle(titleText)} —<br>${clientName}
       </h1>
       <p style="font-family:${INTER};font-size:20px;font-weight:500;color:${bodyColor};line-height:1.48;margin:0 0 34px;max-width:590px">${apoio}</p>
 

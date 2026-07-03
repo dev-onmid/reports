@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { buildOmniReport, saveOmniReport } from '@/lib/report-builder';
 import { buildDeliveryReport, saveDeliveryReport } from '@/lib/delivery-report-builder';
+import { buildSocialReport, saveSocialReport } from '@/lib/social-report-builder';
 
 export const maxDuration = 60;
 
@@ -19,7 +20,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   const pool = makeServerPool();
   let config: {
-    client_id: string; client_name: string; template: 'performance' | 'delivery';
+    client_id: string; client_name: string; template: 'performance' | 'delivery' | 'social';
     meta_connection_id: string | null; meta_account_ids: string[];
     google_connection_id: string | null; google_account_ids: string[];
   } | null = null;
@@ -62,6 +63,22 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       accountIds: config.meta_account_ids,
     });
     const { token, reportId } = await saveDeliveryReport({
+      clientId: config.client_id, clientName: config.client_name,
+      from: period.from, to: period.to, data: reportData,
+      generatedBy: 'auto', configId,
+    });
+    return Response.json({ ok: true, id: reportId, public_token: token });
+  }
+
+  // ── Social template ─────────────────────────────────────────────────────────
+  if (config.template === 'social') {
+    const reportData = await buildSocialReport({
+      clientId: config.client_id, clientName: config.client_name,
+      periodFrom: period.from, periodTo: period.to,
+      connectionId: config.meta_connection_id,
+      accountIds: config.meta_account_ids,
+    });
+    const { token, reportId } = await saveSocialReport({
       clientId: config.client_id, clientName: config.client_name,
       from: period.from, to: period.to, data: reportData,
       generatedBy: 'auto', configId,

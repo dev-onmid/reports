@@ -60,7 +60,7 @@ export async function POST(request: NextRequest) {
     whatsappGroup?: string;
     zapiClientId?: string;
     sendDay?: number;
-    template?: 'performance' | 'delivery';
+    template?: 'performance' | 'delivery' | 'social';
   };
   const pool = makeServerPool();
   try {

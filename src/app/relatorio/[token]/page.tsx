@@ -64,10 +64,13 @@ export default async function RelatorioPublicoPage({
   // ── New narrative templates (HTML output from Claude) ──────────────────────
   if (
     report.template_slug === 'onmid-narrative-performance' ||
-    report.template_slug === 'onmid-narrative-delivery'
+    report.template_slug === 'onmid-narrative-delivery' ||
+    report.template_slug === 'onmid-narrative-social'
   ) {
     const data = report.report_data as { html: string };
     const isDelivery = report.template_slug === 'onmid-narrative-delivery';
+    const isSocial = report.template_slug === 'onmid-narrative-social';
+    const titleLabel = isSocial ? 'de Redes Sociais' : isDelivery ? 'Delivery' : 'de Performance';
     const printCss = `
       :root {
         --report-canvas: #EEF1F5;
@@ -107,7 +110,7 @@ export default async function RelatorioPublicoPage({
     `;
     return (
       <>
-        <title>{`Relatório ${isDelivery ? 'Delivery' : 'de Performance'} — ${report.client_name}`}</title>
+        <title>{`Relatório ${titleLabel} — ${report.client_name}`}</title>
         <style dangerouslySetInnerHTML={{ __html: printCss }} />
         {printScript}
         <div style={{ background: '#EEF1F5', minHeight: '100vh', overflowX: 'auto' }}>

@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { buildOmniReport, saveOmniReport } from '@/lib/report-builder';
 import { buildDeliveryReport, saveDeliveryReport, type MetaBreakdownLevel } from '@/lib/delivery-report-builder';
+import { buildSocialReport, saveSocialReport } from '@/lib/social-report-builder';
 
 export const maxDuration = 300;
 
@@ -63,6 +64,20 @@ export async function POST(request: NextRequest) {
         metaLevel,
       });
       const { token, reportId } = await saveDeliveryReport({ clientId, clientName, from, to, data: reportData });
+      return Response.json({ ok: true, id: reportId, public_token: token });
+    }
+
+    // ── Social template ─────────────────────────────────────────────────────────
+    // Instagram-only slides — reuses the same fetch/slide builders as Delivery,
+    // but skips Meta Ads/Google Ads/CRM entirely.
+    if (template === 'social') {
+      const reportData = await buildSocialReport({
+        clientId, clientName, periodFrom: from, periodTo: to,
+        connectionId: metaConnectionId,
+        accountIds: metaAccountIds,
+        coverId,
+      });
+      const { token, reportId } = await saveSocialReport({ clientId, clientName, from, to, data: reportData });
       return Response.json({ ok: true, id: reportId, public_token: token });
     }
 

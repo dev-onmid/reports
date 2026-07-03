@@ -9,7 +9,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     zapiClientId?: string;
     sendDay?: number;
     active?: boolean;
-    template?: 'performance' | 'delivery';
+    template?: 'performance' | 'delivery' | 'social';
   };
   const pool = makeServerPool();
   try {
