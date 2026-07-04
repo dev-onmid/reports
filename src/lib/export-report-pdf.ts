@@ -77,36 +77,45 @@ export async function exportReportToPdf(token: string, filename: string): Promis
     const slides = Array.from(doc.querySelectorAll<HTMLElement>('[style*="width:1440px"]'));
     if (!slides.length) throw new Error('Nenhum slide encontrado no relatório');
 
-    let pdf: import('jspdf').jsPDF | null = null;
+    // TODAS as páginas do PDF têm o mesmo tamanho — o 16:9 de projeto (1440×810). Se um
+    // slide crescer além de 810 (texto mais longo, mais cards), ele é capturado inteiro e
+    // encaixado na página com "contain" (reduz proporcional, centralizado) em vez de virar
+    // uma página maior. Assim não corta, não espreme e não fica com dimensões diferentes.
+    const pdf = new jsPDF({ unit: 'px', format: [SLIDE_W, SLIDE_H], orientation: 'landscape', compress: true });
 
     for (let i = 0; i < slides.length; i++) {
-      // Cada slide é desenhado com min-height:810px mas pode crescer um pouco além disso
-      // (texto mais longo, mais cards). Capturamos e paginamos na ALTURA REAL do slide —
-      // nunca forçando 810 — pra não espremer nem cortar o conteúdo que passa da linha.
-      const realH = Math.ceil(slides[i].getBoundingClientRect().height);
-      const pageH = Math.max(SLIDE_H, realH);
+      const realH = Math.max(SLIDE_H, Math.ceil(slides[i].getBoundingClientRect().height));
       const bg = win.getComputedStyle(slides[i]).backgroundColor;
+      const rgb = (bg.match(/\d+/g) ?? ['255', '255', '255']).map(Number);
 
       const canvas = await html2canvas(slides[i], {
         scale: 2,
         useCORS: true,
         backgroundColor: bg && bg !== 'rgba(0, 0, 0, 0)' ? bg : '#FFFFFF',
         width: SLIDE_W,
-        height: pageH,
+        height: realH,
         windowWidth: SLIDE_W,
-        windowHeight: pageH,
+        windowHeight: realH,
       });
       const imgData = canvas.toDataURL('image/jpeg', 0.92);
 
-      if (!pdf) {
-        pdf = new jsPDF({ unit: 'px', format: [SLIDE_W, pageH], orientation: 'landscape', compress: true });
-      } else {
-        pdf.addPage([SLIDE_W, pageH], 'landscape');
-      }
-      pdf.addImage(imgData, 'JPEG', 0, 0, SLIDE_W, pageH);
+      if (i > 0) pdf.addPage([SLIDE_W, SLIDE_H], 'landscape');
+
+      // Preenche a página inteira com o fundo do slide (evita barras brancas/emenda quando
+      // o slide encaixado deixa uma sobra nas laterais).
+      pdf.setFillColor(rgb[0] ?? 255, rgb[1] ?? 255, rgb[2] ?? 255);
+      pdf.rect(0, 0, SLIDE_W, SLIDE_H, 'F');
+
+      // contain: escala pra caber em 1440×810 mantendo a proporção; centraliza.
+      const scale = Math.min(SLIDE_W / SLIDE_W, SLIDE_H / realH);
+      const drawW = SLIDE_W * scale;
+      const drawH = realH * scale;
+      const x = (SLIDE_W - drawW) / 2;
+      const y = (SLIDE_H - drawH) / 2;
+      pdf.addImage(imgData, 'JPEG', x, y, drawW, drawH);
     }
 
-    pdf?.save(filename);
+    pdf.save(filename);
   } finally {
     document.body.removeChild(iframe);
   }
