@@ -24,13 +24,38 @@ export async function ensureOptimizerClientConfigTable(pool: Pool): Promise<void
   `).catch(() => {});
 }
 
+// Self-heal do workflow por recomendação (migration_optimizer_v3.sql). Chamar antes de
+// qualquer query que toque optimizer_recomendacao_status ou as colunas connection_id/account_id.
+export async function ensureOptimizerRecStatusTable(pool: Pool): Promise<void> {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS public.optimizer_recomendacao_status (
+      rec_id        TEXT PRIMARY KEY,
+      analise_id    UUID,
+      cliente_id    TEXT NOT NULL,
+      objeto_id     TEXT,
+      status        TEXT NOT NULL DEFAULT 'pendente',
+      autor_id      TEXT,
+      autor_nome    TEXT,
+      motivo        TEXT,
+      undo_payload  JSONB,
+      atribuido_a   TEXT,
+      updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS optimizer_rec_status_cliente_idx
+      ON public.optimizer_recomendacao_status (cliente_id, status);
+    ALTER TABLE public.optimizer_ai_logs
+      ADD COLUMN IF NOT EXISTS connection_id TEXT,
+      ADD COLUMN IF NOT EXISTS account_id    TEXT;
+  `).catch(() => {});
+}
+
 export const OPTIMIZER_MODEL = 'claude-sonnet-4-6';
 // v2 usa Haiku 4.5: a análise em árvore (payload grande + output 8k) com Sonnet passava
 // dos ~55s e estourava o timeout da IA. Haiku gera em ~10-20s, aguenta o schema de
 // classificação e barateia. A tarefa é extração/classificação guiada por regras — cabe no Haiku.
 export const OPTIMIZER_MODEL_V2 = 'claude-haiku-4-5-20251001';
 export const OPTIMIZER_PROMPT_VERSION = 'otimizador-v1.0';
-export const OPTIMIZER_PROMPT_VERSION_V2 = 'otimizador-v2.1';
+export const OPTIMIZER_PROMPT_VERSION_V2 = 'otimizador-v2.2';
 
 // ─── v2 types ────────────────────────────────────────────────────────────────
 
@@ -45,6 +70,11 @@ export type OptimizerEstadoConta = 'SAUDAVEL' | 'ATENCAO' | 'CRISE';
 export type OptimizerAcaoTipo = 'PAUSAR' | 'ATIVAR' | 'AJUSTAR_ORCAMENTO';
 export type OptimizerObjetoTipo = 'campaign' | 'adset' | 'ad';
 export type OptimizerStatusExecucao = 'EXECUTAR_AGORA' | 'AGUARDAR_APROVACAO';
+// Tipo de ação sugerida por nó da árvore. Os 3 primeiros viram ação estruturada aplicável
+// (pausar/ativar/ajustar orçamento via API). TROCAR_CRIATIVO/VERIFICAR_MANUAL = manual (sem
+// botão Aplicar). NENHUMA = nó sem ação (saudável).
+export type OptimizerNodeAcaoTipo =
+  | 'PAUSAR' | 'ATIVAR' | 'AJUSTAR_ORCAMENTO' | 'TROCAR_CRIATIVO' | 'VERIFICAR_MANUAL' | 'NENHUMA';
 
 export type OptimizerAdV2 = {
   id: string;
@@ -166,6 +196,12 @@ export type OptimizerAnaliseAnuncio = {
   classificacao: OptimizerVerdict;
   veredito: string;
   acao: string;
+  // Campos que destravam o "Aplicar" de 1 clique mesmo no modo de aprovação (preenchidos pela IA).
+  acao_tipo: OptimizerNodeAcaoTipo;
+  acao_parametros: Record<string, unknown>;
+  confianca_item: OptimizerConfidence;
+  depende_de: string | null;   // id de outro objeto (mesma análise) do qual esta ação depende
+  padrao: string | null;       // chave canônica do problema, p/ agrupar entre contas (ação em lote)
 };
 
 export type OptimizerAnaliseConjunto = {
@@ -180,6 +216,11 @@ export type OptimizerAnaliseConjunto = {
   classificacao: OptimizerVerdict;
   veredito: string;
   acao: string;
+  acao_tipo: OptimizerNodeAcaoTipo;
+  acao_parametros: Record<string, unknown>;
+  confianca_item: OptimizerConfidence;
+  depende_de: string | null;
+  padrao: string | null;
   anuncios: OptimizerAnaliseAnuncio[];
 };
 
@@ -195,6 +236,11 @@ export type OptimizerAnaliseCampanha = {
   classificacao: OptimizerVerdict;
   veredito: string;
   acao: string;
+  acao_tipo: OptimizerNodeAcaoTipo;
+  acao_parametros: Record<string, unknown>;
+  confianca_item: OptimizerConfidence;
+  depende_de: string | null;
+  padrao: string | null;
   conjuntos: OptimizerAnaliseConjunto[];
 };
 
@@ -231,6 +277,196 @@ export type OptimizerAnalysisResultV2 = OptimizerOutputV2 & {
   tokens_usados: number;
   custo_estimado_usd: number;
 };
+
+// ─── Recomendação achatada (unidade da fila de decisão) ───────────────────────
+// Uma linha por nó ATENÇÃO/URGENTE com ação. Métricas vêm SEMPRE do payload/árvore
+// (verdade) — nunca de número ecoado pela IA. Ver buildRecomendacoes().
+export type OptimizerRecomendacaoSeveridade = 'urgente' | 'atencao' | 'ok';
+
+export type OptimizerRecomendacao = {
+  rec_id: string;              // estável: `${analise_id}:${objeto_tipo}:${objeto_id}`
+  analise_id: string;
+  cliente_id: string;
+  cliente_nome: string;
+  canal: 'meta' | 'google';
+  nivel: OptimizerObjetoTipo;  // campaign | adset | ad
+  objeto_id: string;
+  objeto_nome: string;
+  campanha_nome: string;
+  severidade: OptimizerRecomendacaoSeveridade;
+  titulo: string;
+  texto_recomendacao: string;
+  metricas_chave: Array<{ rotulo: string; valor: string }>;
+  fatos: Array<{ rotulo: string; valor: string }>;
+  acao_estruturada: {
+    tipo: OptimizerAcaoTipo;
+    objeto_tipo: OptimizerObjetoTipo;
+    objeto_id: string;
+    objeto_nome: string;
+    parametros: Record<string, unknown>;
+  } | null;
+  aplicavel: boolean;
+  confianca: OptimizerConfidence;
+  depende_de: string | null;   // rec_id de outra recomendação da mesma análise
+  padrao: string | null;
+  connection_id: string | null;
+  account_id: string | null;
+};
+
+function normNodeAcaoTipo(v: unknown): OptimizerNodeAcaoTipo {
+  return (['PAUSAR', 'ATIVAR', 'AJUSTAR_ORCAMENTO', 'TROCAR_CRIATIVO', 'VERIFICAR_MANUAL', 'NENHUMA'] as const)
+    .includes(v as never) ? v as OptimizerNodeAcaoTipo : 'NENHUMA';
+}
+
+function normConfidence(v: unknown): OptimizerConfidence {
+  return (['alta', 'media', 'baixa'] as const).includes(v as never) ? v as OptimizerConfidence : 'media';
+}
+
+export function buildRecomendacoes(
+  result: OptimizerOutputV2,
+  meta: { analise_id: string; cliente_id: string; cliente_nome: string; canal: 'meta' | 'google'; connection_id: string | null; account_id: string | null },
+): OptimizerRecomendacao[] {
+  const money = (v: number | null | undefined) =>
+    v == null || !Number.isFinite(v) ? '—' : new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v as number);
+  const num = (v: number | null | undefined) =>
+    v == null || !Number.isFinite(v) ? '—' : (v as number).toLocaleString('pt-BR');
+  const pct = (v: number | null | undefined) =>
+    v == null || !Number.isFinite(v) ? '—' : `${(v as number).toFixed(2)}%`;
+
+  const acaoAutoByObj = new Map<string, OptimizerAcaoAutomatica>();
+  for (const a of result.acoes_automaticas ?? []) acaoAutoByObj.set(a.objeto_id, a);
+
+  type Raw = { objeto_id: string; depObjId: string | null; rec: OptimizerRecomendacao };
+  const raws: Raw[] = [];
+
+  const push = (o: {
+    objeto_tipo: OptimizerObjetoTipo;
+    objeto_id: string; objeto_nome: string; campanha_nome: string;
+    classificacao: OptimizerVerdict; veredito: string; acao: string;
+    acao_tipo: OptimizerNodeAcaoTipo; acao_parametros: Record<string, unknown>;
+    confianca_item: OptimizerConfidence; depende_de: string | null; padrao: string | null;
+    metricas_chave: Array<{ rotulo: string; valor: string }>;
+    fatos: Array<{ rotulo: string; valor: string }>;
+  }) => {
+    if (o.classificacao === 'SAUDAVEL') return;
+    if (!o.acao?.trim()) return;
+
+    const auto = acaoAutoByObj.get(o.objeto_id);
+    const structTipo: OptimizerAcaoTipo | null =
+      (o.acao_tipo === 'PAUSAR' || o.acao_tipo === 'ATIVAR' || o.acao_tipo === 'AJUSTAR_ORCAMENTO')
+        ? o.acao_tipo
+        : (auto ? auto.acao : null);
+    const parametros = { ...(o.acao_parametros ?? {}), ...(auto?.parametros ?? {}) };
+    const aplicavel = structTipo != null && (structTipo !== 'AJUSTAR_ORCAMENTO' || o.objeto_tipo === 'adset');
+
+    raws.push({
+      objeto_id: o.objeto_id,
+      depObjId: o.depende_de,
+      rec: {
+        rec_id: `${meta.analise_id}:${o.objeto_tipo}:${o.objeto_id}`,
+        analise_id: meta.analise_id,
+        cliente_id: meta.cliente_id,
+        cliente_nome: meta.cliente_nome,
+        canal: meta.canal,
+        nivel: o.objeto_tipo,
+        objeto_id: o.objeto_id,
+        objeto_nome: o.objeto_nome,
+        campanha_nome: o.campanha_nome,
+        severidade: o.classificacao === 'URGENTE' ? 'urgente' : 'atencao',
+        titulo: o.veredito?.trim() || o.acao,
+        texto_recomendacao: o.acao,
+        metricas_chave: o.metricas_chave.filter((m) => m.valor && m.valor !== '—').slice(0, 3),
+        fatos: o.fatos,
+        acao_estruturada: structTipo
+          ? { tipo: structTipo, objeto_tipo: o.objeto_tipo, objeto_id: o.objeto_id, objeto_nome: o.objeto_nome, parametros }
+          : null,
+        aplicavel,
+        confianca: o.confianca_item,
+        depende_de: null,
+        padrao: o.padrao,
+        connection_id: meta.connection_id,
+        account_id: meta.account_id,
+      },
+    });
+  };
+
+  for (const camp of result.analise_campanhas ?? []) {
+    push({
+      objeto_tipo: 'campaign', objeto_id: camp.id, objeto_nome: camp.nome, campanha_nome: camp.nome,
+      classificacao: camp.classificacao, veredito: camp.veredito, acao: camp.acao,
+      acao_tipo: camp.acao_tipo, acao_parametros: camp.acao_parametros, confianca_item: camp.confianca_item,
+      depende_de: camp.depende_de, padrao: camp.padrao,
+      metricas_chave: [
+        { rotulo: 'Gasto', valor: money(camp.gasto) },
+        { rotulo: 'Conversões', valor: num(camp.conversoes) },
+        { rotulo: 'CPL', valor: money(camp.cpl) },
+      ],
+      fatos: [
+        { rotulo: 'Gasto', valor: money(camp.gasto) },
+        { rotulo: 'Conversões', valor: num(camp.conversoes) },
+        { rotulo: 'CPL', valor: money(camp.cpl) },
+        { rotulo: 'CTR', valor: pct(camp.ctr) },
+        { rotulo: 'Orçamento diário', valor: money(camp.orcamento_diario) },
+      ],
+    });
+    for (const conj of camp.conjuntos ?? []) {
+      push({
+        objeto_tipo: 'adset', objeto_id: conj.id, objeto_nome: conj.nome, campanha_nome: camp.nome,
+        classificacao: conj.classificacao, veredito: conj.veredito, acao: conj.acao,
+        acao_tipo: conj.acao_tipo, acao_parametros: conj.acao_parametros, confianca_item: conj.confianca_item,
+        depende_de: conj.depende_de, padrao: conj.padrao,
+        metricas_chave: [
+          { rotulo: 'Gasto', valor: money(conj.gasto) },
+          { rotulo: 'Conversões', valor: num(conj.conversoes) },
+          { rotulo: 'CPL', valor: money(conj.cpl) },
+        ],
+        fatos: [
+          { rotulo: 'Gasto', valor: money(conj.gasto) },
+          { rotulo: 'Conversões', valor: num(conj.conversoes) },
+          { rotulo: 'CPL', valor: money(conj.cpl) },
+          { rotulo: 'CTR', valor: pct(conj.ctr) },
+          { rotulo: 'Orçamento diário', valor: money(conj.orcamento_diario) },
+          { rotulo: 'Dias ativo', valor: conj.dias_ativo != null ? String(conj.dias_ativo) : '—' },
+        ],
+      });
+      for (const ad of conj.anuncios ?? []) {
+        push({
+          objeto_tipo: 'ad', objeto_id: ad.id, objeto_nome: ad.nome, campanha_nome: camp.nome,
+          classificacao: ad.classificacao, veredito: ad.veredito, acao: ad.acao,
+          acao_tipo: ad.acao_tipo, acao_parametros: ad.acao_parametros, confianca_item: ad.confianca_item,
+          depende_de: ad.depende_de, padrao: ad.padrao,
+          metricas_chave: [
+            { rotulo: 'Gasto', valor: money(ad.gasto) },
+            { rotulo: 'Conversões', valor: num(ad.conversoes) },
+            { rotulo: 'CPL', valor: money(ad.cpl) },
+          ],
+          fatos: [
+            { rotulo: 'Gasto', valor: money(ad.gasto) },
+            { rotulo: 'Conversões', valor: num(ad.conversoes) },
+            { rotulo: 'CPL', valor: money(ad.cpl) },
+            { rotulo: 'CTR', valor: pct(ad.ctr) },
+            { rotulo: 'Ranking de qualidade', valor: ad.quality_ranking ?? '—' },
+            { rotulo: 'Ranking de engajamento', valor: ad.engagement_ranking ?? '—' },
+            { rotulo: 'Ranking de conversão', valor: ad.conversion_ranking ?? '—' },
+          ],
+        });
+      }
+    }
+  }
+
+  // 2ª passada: resolve depende_de (id de objeto → rec_id) dentro da mesma análise.
+  const recIdByObj = new Map<string, string>();
+  for (const r of raws) recIdByObj.set(r.objeto_id, r.rec.rec_id);
+  for (const r of raws) {
+    if (r.depObjId && recIdByObj.has(r.depObjId)) r.rec.depende_de = recIdByObj.get(r.depObjId) ?? null;
+  }
+
+  // Ordena por severidade (urgente > atenção) e depois por gasto (fato 0 = Gasto).
+  const sevRank = { urgente: 0, atencao: 1, ok: 2 } as const;
+  return raws
+    .map((r) => r.rec)
+    .sort((a, b) => sevRank[a.severidade] - sevRank[b.severidade]);
+}
 
 export function currentWeekLabel(): string {
   const now = new Date();
@@ -329,6 +565,33 @@ Regras de classificacao:
 Campanha: classifique pelo pior conjunto relevante + alinhamento com o objetivo da conta.
 
 ==================================================
+PASSO 3.4 — CAMPOS ESTRUTURADOS POR NO (OBRIGATORIOS em todo no ATENCAO/URGENTE)
+==================================================
+Alem de classificacao/veredito/acao, preencha em CADA no (campanha, conjunto, anuncio):
+- "acao_tipo": o TIPO executavel da acao. Um destes:
+    "PAUSAR"            -> desligar o objeto (criativo fadigado, conjunto ruim etc.)
+    "ATIVAR"            -> religar objeto pausado (SO se o PASSO 3.5 permitir)
+    "AJUSTAR_ORCAMENTO" -> mudar orcamento diario (SO em conjunto/adset)
+    "TROCAR_CRIATIVO"   -> exige criativo novo (nao ha botao automatico; e trabalho manual)
+    "VERIFICAR_MANUAL"  -> precisa checagem humana antes de decidir (ex: por que foi pausado)
+    "NENHUMA"           -> use SEMPRE quando classificacao = "SAUDAVEL"
+  Escolha o tipo que corresponde EXATAMENTE ao texto de "acao". Se a acao fala "Pausar",
+  acao_tipo = "PAUSAR". Se fala "Escalar/Reduzir orcamento", = "AJUSTAR_ORCAMENTO".
+- "acao_parametros": objeto com os parametros da acao. Para AJUSTAR_ORCAMENTO inclua
+    {"novo_orcamento_diario": <valor em BRL>}. Para os demais tipos, {}.
+- "confianca_item": "alta" | "media" | "baixa" — sua confianca NAQUELA acao especifica,
+    considerando volume de dados e dias ativos. Use "baixa" quando faltam dados ou o objeto
+    esta em aprendizado; isso faz o painel exigir revisao humana antes de aplicar.
+- "depende_de": id de OUTRO objeto (desta mesma analise) que precisa ser resolvido ANTES
+    desta acao (ex: so reduzir orcamento da campanha depois de pausar o conjunto ruim). Se
+    nao houver dependencia, null.
+- "padrao": chave canonica curta em snake_case do problema, para agrupar o MESMO caso entre
+    varias contas (ex: "criativo_fadiga_ranking_conversao", "conjunto_cpl_acima_maximo",
+    "orcamento_subentrega"). Use a MESMA string sempre que o padrao se repetir. Se for um caso
+    unico/especifico, null.
+Em nos SAUDAVEL: acao_tipo="NENHUMA", acao_parametros={}, confianca_item="alta", depende_de=null, padrao=null.
+
+==================================================
 PASSO 3.5 — CONTEXTO TEMPORAL E CAUTELA AO REATIVAR (regra critica)
 ==================================================
 Use "periodo_analise.data_fim" como referencia de HOJE. Nao confie na sua propria nocao de data.
@@ -387,18 +650,33 @@ ESTRUTURA DO JSON DE SAIDA (retorne exatamente este schema):
       "classificacao": "SAUDAVEL | ATENCAO | URGENTE",
       "veredito": "1 frase curta",
       "acao": "1 frase imperativa curta",
+      "acao_tipo": "PAUSAR | ATIVAR | AJUSTAR_ORCAMENTO | TROCAR_CRIATIVO | VERIFICAR_MANUAL | NENHUMA",
+      "acao_parametros": {},
+      "confianca_item": "alta | media | baixa",
+      "depende_de": null,
+      "padrao": null,
       "conjuntos": [
         {
           "id": "id_real_do_conjunto",
           "classificacao": "SAUDAVEL | ATENCAO | URGENTE",
           "veredito": "1 frase curta",
           "acao": "1 frase imperativa curta",
+          "acao_tipo": "PAUSAR | ATIVAR | AJUSTAR_ORCAMENTO | TROCAR_CRIATIVO | VERIFICAR_MANUAL | NENHUMA",
+          "acao_parametros": {},
+          "confianca_item": "alta | media | baixa",
+          "depende_de": null,
+          "padrao": null,
           "anuncios": [
             {
               "id": "id_real_do_anuncio",
               "classificacao": "SAUDAVEL | ATENCAO | URGENTE",
               "veredito": "1 frase curta",
-              "acao": "1 frase imperativa curta"
+              "acao": "1 frase imperativa curta",
+              "acao_tipo": "PAUSAR | ATIVAR | AJUSTAR_ORCAMENTO | TROCAR_CRIATIVO | VERIFICAR_MANUAL | NENHUMA",
+              "acao_parametros": {},
+              "confianca_item": "alta | media | baixa",
+              "depende_de": null,
+              "padrao": null
             }
           ]
         }
@@ -433,7 +711,16 @@ ESTRUTURA DO JSON DE SAIDA (retorne exatamente este schema):
 }`;
 }
 
-type IaVerdict = { classificacao: OptimizerVerdict; veredito: string; acao: string };
+type IaVerdict = {
+  classificacao: OptimizerVerdict;
+  veredito: string;
+  acao: string;
+  acao_tipo: OptimizerNodeAcaoTipo;
+  acao_parametros: Record<string, unknown>;
+  confianca_item: OptimizerConfidence;
+  depende_de: string | null;
+  padrao: string | null;
+};
 
 function normVerdict(v: unknown): OptimizerVerdict {
   return (['SAUDAVEL', 'ATENCAO', 'URGENTE'] as const).includes(v as never) ? v as OptimizerVerdict : 'ATENCAO';
@@ -450,6 +737,11 @@ function collectIaVerdicts(iaCampanhas: unknown): Map<string, IaVerdict> {
       classificacao: normVerdict(o.classificacao),
       veredito: String(o.veredito ?? o.diagnostico ?? ''),
       acao: String(o.acao ?? o.acao_recomendada ?? ''),
+      acao_tipo: normNodeAcaoTipo(o.acao_tipo),
+      acao_parametros: (o.acao_parametros && typeof o.acao_parametros === 'object') ? o.acao_parametros as Record<string, unknown> : {},
+      confianca_item: normConfidence(o.confianca_item),
+      depende_de: o.depende_de != null && String(o.depende_de).trim() ? String(o.depende_de) : null,
+      padrao: o.padrao != null && String(o.padrao).trim() ? String(o.padrao) : null,
     });
   };
   if (!Array.isArray(iaCampanhas)) return map;
@@ -470,7 +762,10 @@ function collectIaVerdicts(iaCampanhas: unknown): Map<string, IaVerdict> {
 // Monta a árvore campanha→conjunto→anúncio: métricas do PAYLOAD (verdade), veredito da IA.
 function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown): OptimizerAnaliseCampanha[] {
   const verdicts = collectIaVerdicts(iaCampanhas);
-  const fallback: IaVerdict = { classificacao: 'ATENCAO', veredito: '', acao: '' };
+  const fallback: IaVerdict = {
+    classificacao: 'ATENCAO', veredito: '', acao: '',
+    acao_tipo: 'NENHUMA', acao_parametros: {}, confianca_item: 'media', depende_de: null, padrao: null,
+  };
   const vOf = (id: string) => verdicts.get(id) ?? fallback;
   return (payload.campanhas ?? []).map((camp) => {
     const cv = vOf(camp.id);
@@ -486,6 +781,11 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
       classificacao: cv.classificacao,
       veredito: cv.veredito,
       acao: cv.acao,
+      acao_tipo: cv.acao_tipo,
+      acao_parametros: cv.acao_parametros,
+      confianca_item: cv.confianca_item,
+      depende_de: cv.depende_de,
+      padrao: cv.padrao,
       conjuntos: (camp.conjuntos ?? []).map((cj) => {
         const jv = vOf(cj.id);
         return {
@@ -500,6 +800,11 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
           classificacao: jv.classificacao,
           veredito: jv.veredito,
           acao: jv.acao,
+          acao_tipo: jv.acao_tipo,
+          acao_parametros: jv.acao_parametros,
+          confianca_item: jv.confianca_item,
+          depende_de: jv.depende_de,
+          padrao: jv.padrao,
           anuncios: (cj.anuncios ?? []).map((ad) => {
             const av = vOf(ad.id);
             return {
@@ -515,6 +820,11 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
               classificacao: av.classificacao,
               veredito: av.veredito,
               acao: av.acao,
+              acao_tipo: av.acao_tipo,
+              acao_parametros: av.acao_parametros,
+              confianca_item: av.confianca_item,
+              depende_de: av.depende_de,
+              padrao: av.padrao,
             };
           }),
         };

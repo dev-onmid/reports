@@ -649,7 +649,7 @@ async function executeWeekly({ origin, forceClientId, forceAi, period }: RunOpti
       const analyzeRes = await fetchWithTimeout(new URL('/api/otimizador/analisar', origin).toString(), 90_000, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ payload_v2: payload, connection_id: conn.id, force_ai: forceAi }),
+        body: JSON.stringify({ payload_v2: payload, connection_id: conn.id, account_id: conn.account_id, force_ai: forceAi }),
       });
 
       if (!analyzeRes) throw new Error('analisar não respondeu (timeout da IA)');

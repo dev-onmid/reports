@@ -3,13 +3,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
+  ArrowRight,
   BadgeCheck,
   CalendarClock,
   Check,
+  CheckCircle2,
   ChevronDown,
   ChevronUp,
-  CircleDollarSign,
-  Info,
+  ExternalLink,
   Loader2,
   MousePointerClick,
   Pencil,
@@ -18,58 +19,38 @@ import {
   RefreshCw,
   Search,
   Settings2,
-  ShieldAlert,
-  Target,
+  SlidersHorizontal,
   ThumbsDown,
-  TrendingUp,
+  Undo2,
+  UserRound,
   WandSparkles,
   X,
-  Zap,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DictateButton } from '@/components/ui/dictate-button';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { ClientAvatar } from '@/components/client-avatar';
 import { callerHeaders, getAuthSession } from '@/lib/auth-store';
 import type { Client } from '@/lib/mock-data';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 import { OPTIMIZER_PERIODS } from '@/lib/optimizer';
 import type {
-  OptimizerAnalysisResult,
-  OptimizerAcaoAutomatica,
-  OptimizerAnaliseAnuncio,
-  OptimizerAnaliseCampanha,
-  OptimizerAnaliseConjunto,
-  OptimizerEstadoConta,
   OptimizerModo,
-  OptimizerOutputV2,
   OptimizerPeriodKey,
+  OptimizerRecomendacao,
 } from '@/lib/optimizer';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-type QueueItem = {
-  id: string;
+// Recomendação da fila (server já achatou via buildRecomendacoes) + status do workflow.
+type FilaRec = OptimizerRecomendacao & { status: string; atribuido_a: string | null };
+
+// Resumo por conta para o seletor.
+type FilaConta = {
   cliente_id: string;
   cliente_nome: string;
-  conjunto_id: string;
-  campanha_nome: string;
-  conta_plataforma: string;
-  periodo_label: string;
-  periodo_dias: number;
-  origem: OptimizerAnalysisResult['origem'];
-  nivel_critico: OptimizerAnalysisResult['nivel_critico'];
-  gasto_total: number;
-  conversoes: number;
-  cpl_cpa_atual: number | null;
-  ctr_link: number | null;
-  resultado: OptimizerAnalysisResult | OptimizerOutputV2;
-  semana_analise: string | null;
-  modo_operacao: string | null;
-  estado_da_conta: string | null;
-  resumo_executivo: string | null;
-  created_at: string;
+  pior_severidade: 'urgente' | 'atencao' | 'ok';
+  pendencias: number;
 };
 
 type ClientDiagnostic = {
@@ -121,72 +102,39 @@ const ACOES_PRE_APROVADAS_OPCOES = [
   { value: 'AJUSTAR_ORCAMENTO', label: 'Ajustar orçamento' },
 ];
 
-// Veredito por nível (campanha/conjunto/anúncio) — verde OK, âmbar atenção, vermelho urgente
-const VERDICT_BADGE: Record<string, string> = {
-  SAUDAVEL: 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300',
-  ATENCAO: 'border-amber-400/40 bg-amber-400/10 text-amber-300',
-  URGENTE: 'border-red-400/40 bg-red-400/10 text-red-300',
+// Severidade — cor reservada SÓ para gravidade (nunca no texto da recomendação).
+type Severidade = 'urgente' | 'atencao' | 'ok';
+const SEV: Record<Severidade, { badge: string; dot: string; label: string }> = {
+  urgente: { badge: 'border-red-400/40 bg-red-400/10 text-red-300', dot: 'bg-red-400', label: 'Urgente' },
+  atencao: { badge: 'border-amber-400/40 bg-amber-400/10 text-amber-300', dot: 'bg-amber-400', label: 'Atenção' },
+  ok: { badge: 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300', dot: 'bg-emerald-400', label: 'Ok' },
 };
-const VERDICT_LABEL: Record<string, string> = {
-  SAUDAVEL: 'OK',
-  ATENCAO: 'Atenção',
-  URGENTE: 'Urgente',
-};
+const SEV_RANK: Record<Severidade, number> = { urgente: 0, atencao: 1, ok: 2 };
+const NIVEL_LABEL: Record<string, string> = { campaign: 'Campanha', adset: 'Conjunto', ad: 'Criativo' };
 
-// Métricas compactas de um nó: "R$ 420 · 34 conv · CPL R$ 12,37"
-function nodeMetrics(m: { gasto: number; conversoes: number; cpl: number | null }): string {
-  const parts = [formatCurrencyBRL(m.gasto), `${m.conversoes.toLocaleString('pt-BR')} conv`];
-  if (m.cpl != null) parts.push(`CPL ${formatCurrencyBRL(m.cpl)}`);
-  return parts.join(' · ');
-}
-
-// "Precisa de atenção" = o próprio nó não é saudável OU algum descendente não é — usado para
-// auto-expandir só os ramos com algo a ajustar. Campanha/conjunto 100% saudáveis ficam
-// fechados por padrão (1 linha, sem ruído); só abrem quem tem ação de verdade.
-function adNeedsAttention(ad: OptimizerAnaliseAnuncio): boolean {
-  return ad.classificacao !== 'SAUDAVEL';
-}
-function conjNeedsAttention(conj: OptimizerAnaliseConjunto): boolean {
-  return conj.classificacao !== 'SAUDAVEL' || conj.anuncios.some(adNeedsAttention);
-}
-function campNeedsAttention(camp: OptimizerAnaliseCampanha): boolean {
-  return camp.classificacao !== 'SAUDAVEL' || camp.conjuntos.some(conjNeedsAttention);
-}
-
-function VerdictBadge({ v }: { v: string }) {
+// Ícone oficial do canal (Meta / Google Ads) — puramente informativo.
+function ChannelIcon({ canal }: { canal: 'meta' | 'google' }) {
+  const src = canal === 'google' ? '/brand/google-ads-logo.png' : '/brand/meta-ads-logo.webp';
+  const label = canal === 'google' ? 'Google Ads' : 'Meta Ads';
   return (
-    <span className={cn(
-      'shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide',
-      VERDICT_BADGE[v] ?? 'border-border text-muted-foreground',
-    )}>
-      {VERDICT_LABEL[v] ?? v}
+    <span title={label} className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-[var(--radius)] border border-border bg-background">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={src} alt={label} className="max-h-3.5 max-w-3.5 object-contain" />
     </span>
   );
 }
 
-// Diz em que nível o ajuste se aplica — deixa claro que a ação é na campanha, no conjunto
-// ou no criativo específico, sem depender só da indentação da árvore.
-function LevelTag({ level }: { level: 'Campanha' | 'Conjunto' | 'Criativo' }) {
-  return <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/70">{level}</span>;
-}
-
-// Ícone (i) com o "porquê" (veredito) no hover — mantém a linha limpa
-function VerdictInfo({ text }: { text: string }) {
-  if (!text) return null;
-  return (
-    <Tooltip>
-      <TooltipTrigger className="mt-0.5 shrink-0 rounded-full p-0.5 text-muted-foreground transition-colors hover:text-primary focus-visible:text-primary focus-visible:outline-none">
-        <Info className="h-3.5 w-3.5" />
-      </TooltipTrigger>
-      <TooltipContent side="left" className="block max-w-xs whitespace-normal p-2.5 text-left text-xs leading-relaxed text-background">
-        {text}
-      </TooltipContent>
-    </Tooltip>
-  );
-}
-
-function isV2Result(resultado: QueueItem['resultado']): resultado is OptimizerOutputV2 {
-  return 'estado_da_conta' in resultado && 'resumo_executivo' in resultado;
+// Link direto para o objeto no Gerenciador de Anúncios nativo.
+function adManagerUrl(rec: FilaRec): string | null {
+  if (rec.canal === 'google') {
+    return 'https://ads.google.com/aw/campaigns';
+  }
+  if (!rec.account_id) return null;
+  const act = String(rec.account_id).replace(/^act_/, '');
+  const sel = rec.nivel === 'campaign' ? `&selected_campaign_ids=${rec.objeto_id}`
+    : rec.nivel === 'adset' ? `&selected_adset_ids=${rec.objeto_id}`
+    : rec.nivel === 'ad' ? `&selected_ad_ids=${rec.objeto_id}` : '';
+  return `https://business.facebook.com/adsmanager/manage/campaigns?act=${act}${sel}`;
 }
 
 function formatDateTime(value: string | null): string {
@@ -424,478 +372,296 @@ function ConfigModal({ clientId, clientName, onClose }: { clientId: string; clie
 }
 
 // ---------------------------------------------------------------------------
-// Task Card (v2 only)
+// Toast de confirmação (com Desfazer)
 // ---------------------------------------------------------------------------
-function TaskCard({
-  item,
-  isSelected,
-  isAdmin,
-  onClick,
-  onConfig,
-}: {
-  item: QueueItem;
-  isSelected: boolean;
-  isAdmin: boolean;
-  onClick: () => void;
-  onConfig: () => void;
+type ToastState = { text: string; erro?: boolean; undo?: { rec_id: string; cliente_id: string } } | null;
+
+function ConfirmToast({ toast, onUndo, onClose }: { toast: ToastState; onUndo: () => void; onClose: () => void }) {
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(onClose, 7000);
+    return () => clearTimeout(t);
+  }, [toast, onClose]);
+  if (!toast) return null;
+  return (
+    <div className="fixed bottom-5 left-1/2 z-50 -translate-x-1/2">
+      <div className="flex items-center gap-3 rounded-[var(--radius)] border border-border bg-card px-4 py-3 shadow-xl">
+        {toast.erro
+          ? <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
+          : <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" />}
+        <span className="text-sm text-foreground">{toast.text}</span>
+        {toast.undo && (
+          <button onClick={onUndo} className="flex items-center gap-1 text-sm font-semibold text-primary hover:underline">
+            <Undo2 className="h-3.5 w-3.5" /> Desfazer
+          </button>
+        )}
+        <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Seletor de conta (dropdown)
+// ---------------------------------------------------------------------------
+function AccountSelector({ contas, value, total, onChange }: {
+  contas: FilaConta[];
+  value: string;          // '' = fila por prioridade (todas)
+  total: number;          // total de pendências (todas as contas)
+  onChange: (clienteId: string) => void;
 }) {
-  const resultado = item.resultado as OptimizerOutputV2;
-  // Prévia do card = ação da campanha mais crítica (URGENTE primeiro, depois ATENÇÃO)
-  const topCampAction = [...(resultado.analise_campanhas ?? [])]
-    .sort((a, b) => (a.classificacao === 'URGENTE' ? -1 : b.classificacao === 'URGENTE' ? 1 : a.classificacao === 'ATENCAO' ? -1 : 1))
-    .find((c) => c.acao)?.acao;
-  const pendingActions = resultado.acoes_automaticas?.filter((a) => a.status_execucao === 'AGUARDAR_APROVACAO') ?? [];
+  const [open, setOpen] = useState(false);
+  const sel = value ? contas.find((c) => c.cliente_id === value) : null;
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between gap-2 rounded-[var(--radius)] border border-border bg-card px-3 py-2 text-left hover:border-primary/40"
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          {sel
+            ? <span className={cn('h-2 w-2 shrink-0 rounded-full', SEV[sel.pior_severidade].dot)} />
+            : <MousePointerClick className="h-4 w-4 shrink-0 text-muted-foreground" />}
+          <span className="truncate text-sm font-medium text-foreground">
+            {sel ? sel.cliente_nome : 'Fila por prioridade — todas as contas'}
+          </span>
+          <span className="shrink-0 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">
+            {sel ? sel.pendencias : total}
+          </span>
+        </span>
+        <ChevronDown className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute z-20 mt-1 max-h-80 w-full overflow-auto rounded-[var(--radius)] border border-border bg-card shadow-xl">
+            <button
+              onClick={() => { onChange(''); setOpen(false); }}
+              className={cn('flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-surface-soft', !value && 'bg-surface-soft')}
+            >
+              <MousePointerClick className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="text-sm font-medium text-foreground">Fila por prioridade (padrão)</span>
+              <span className="ml-auto rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">{total}</span>
+            </button>
+            <div className="border-t border-border" />
+            {contas.map((c) => (
+              <button
+                key={c.cliente_id}
+                onClick={() => { onChange(c.cliente_id); setOpen(false); }}
+                className={cn('flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-surface-soft', value === c.cliente_id && 'bg-surface-soft')}
+              >
+                <span className={cn('h-2 w-2 shrink-0 rounded-full', SEV[c.pior_severidade].dot)} />
+                <span className="truncate text-sm text-foreground">{c.cliente_nome}</span>
+                <span className="ml-auto shrink-0 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">{c.pendencias}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
-  const estadoStyle: Record<string, string> = {
-    SAUDAVEL: 'border-emerald-400/30 bg-emerald-400/8',
-    ATENCAO: 'border-amber-400/30 bg-amber-400/8',
-    CRISE: 'border-red-400/30 bg-red-400/8',
-  };
-  const estadoBadge: Record<string, string> = {
-    SAUDAVEL: 'border-emerald-400/40 bg-emerald-400/15 text-emerald-300',
-    ATENCAO: 'border-amber-400/40 bg-amber-400/15 text-amber-300',
-    CRISE: 'border-red-400/40 bg-red-400/15 text-red-300',
-  };
-  const estadoLabel: Record<string, string> = { SAUDAVEL: 'Saudável', ATENCAO: 'Atenção', CRISE: 'Crise' };
+// ---------------------------------------------------------------------------
+// Card de decisão (a recomendação atual)
+// ---------------------------------------------------------------------------
+function DecisionCard({ rec, allRecs, busy, onApply, onIgnore, onHuman, onJump }: {
+  rec: FilaRec;
+  allRecs: FilaRec[];
+  busy: boolean;
+  onApply: (rec: FilaRec, params: { novo_orcamento_diario?: number }, batch: FilaRec[]) => void;
+  onIgnore: (rec: FilaRec) => void;
+  onHuman: (rec: FilaRec) => void;
+  onJump: (recId: string) => void;
+}) {
+  const [why, setWhy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [budget, setBudget] = useState('');
+  const [batchOn, setBatchOn] = useState(false);
 
-  const estado = item.estado_da_conta ?? 'SAUDAVEL';
+  // Reset ao trocar de recomendação.
+  useEffect(() => {
+    setWhy(false); setEditing(false); setBatchOn(false);
+    setBudget(String(rec.acao_estruturada?.parametros?.novo_orcamento_diario ?? ''));
+  }, [rec.rec_id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const sev = SEV[rec.severidade];
+  const lowConf = !rec.aplicavel || rec.confianca === 'baixa';
+  const emAnalise = rec.status === 'em_analise_humana';
+  const isAjuste = rec.acao_estruturada?.tipo === 'AJUSTAR_ORCAMENTO';
+  const link = adManagerUrl(rec);
+
+  // Ação em lote: mesmo padrão, em OUTRAS contas, aplicável.
+  const samePadrao = rec.padrao
+    ? allRecs.filter((r) => r.padrao === rec.padrao && r.cliente_id !== rec.cliente_id && r.aplicavel && r.rec_id !== rec.rec_id)
+    : [];
+  const depRec = rec.depende_de ? allRecs.find((r) => r.rec_id === rec.depende_de) ?? null : null;
+
+  function handleApply() {
+    const params: { novo_orcamento_diario?: number } = {};
+    if (isAjuste && budget.trim()) params.novo_orcamento_diario = Number(budget);
+    onApply(rec, params, batchOn ? samePadrao : []);
+  }
 
   return (
-    <div
-      className={cn(
-        'group rounded-[var(--radius)] border transition-all cursor-pointer',
-        estadoStyle[estado],
-        isSelected ? 'ring-1 ring-primary' : 'hover:border-primary/40',
-      )}
-      onClick={onClick}
-    >
-      <div className="flex items-start gap-3 p-3">
-        <ClientAvatar clientId={item.cliente_id} name={item.cliente_nome} size="sm" />
+    <div className="relative overflow-hidden rounded-[var(--radius)] border border-border bg-card">
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5" style={{ backgroundColor: rec.severidade === 'urgente' ? '#f87171' : rec.severidade === 'atencao' ? '#fbbf24' : '#34d399' }} />
+
+      {/* 2.1 Identificação */}
+      <div className="flex items-start gap-3 border-b border-border p-4">
+        <ClientAvatar clientId={rec.cliente_id} name={rec.cliente_nome} size="sm" />
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className={cn('rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase', estadoBadge[estado])}>
-              {estadoLabel[estado] ?? estado}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-semibold text-foreground">{rec.cliente_nome}</span>
+            <ChannelIcon canal={rec.canal} />
+            <span className="truncate text-xs text-muted-foreground">
+              {NIVEL_LABEL[rec.nivel] ?? rec.nivel} · {rec.campanha_nome}
             </span>
-            {item.semana_analise && (
-              <span className="text-[10px] text-muted-foreground">{item.semana_analise}</span>
-            )}
-            {pendingActions.length > 0 && (
-              <span className="rounded border border-amber-400/40 bg-amber-400/10 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300">
-                {pendingActions.length} aguardando aprovação
-              </span>
-            )}
           </div>
-          <p className="mt-1 font-semibold text-foreground truncate">{item.cliente_nome}</p>
-          {topCampAction && (
-            <p className="mt-0.5 text-sm text-muted-foreground line-clamp-2">{topCampAction}</p>
+        </div>
+        <span className={cn('shrink-0 rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide', sev.badge)}>
+          {sev.label}
+        </span>
+      </div>
+
+      <div className="space-y-4 p-4">
+        {/* 2.2 Título + métricas-chave */}
+        <div>
+          <p className="text-base font-semibold text-foreground">{rec.titulo}</p>
+          {rec.metricas_chave.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1">
+              {rec.metricas_chave.map((m, i) => (
+                <span key={i} className="text-xs text-muted-foreground">
+                  {m.rotulo}: <span className="font-semibold text-foreground">{m.valor}</span>
+                </span>
+              ))}
+            </div>
           )}
         </div>
-        {isAdmin && (
-          <button
-            onClick={(e) => { e.stopPropagation(); onConfig(); }}
-            className="shrink-0 rounded p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground transition-opacity"
-          >
-            <Settings2 className="h-3.5 w-3.5" />
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
 
-// ---------------------------------------------------------------------------
-// Detail Panel (v2)
-// ---------------------------------------------------------------------------
-function DetailPanel({
-  item,
-  isAdmin,
-  onConfig,
-  onApprove,
-  onReject,
-}: {
-  item: QueueItem;
-  isAdmin: boolean;
-  onConfig: () => void;
-  onApprove: (acao: OptimizerAcaoAutomatica, index: number) => Promise<void>;
-  onReject: (index: number) => void;
-}) {
-  const [approvalFeedback, setApprovalFeedback] = useState<Record<number, string>>({});
-  const [v1Feedback, setV1Feedback] = useState<Record<number, string>>({});
-  const [showResumo, setShowResumo] = useState(false);
-  const [openCamp, setOpenCamp] = useState<Set<string>>(new Set());
-  const [openConj, setOpenConj] = useState<Set<string>>(new Set());
-  const toggle = (set: Set<string>, setter: (s: Set<string>) => void, id: string) => {
-    const next = new Set(set);
-    if (next.has(id)) next.delete(id); else next.add(id);
-    setter(next);
-  };
+        {/* 2.3 Texto da recomendação (cor neutra, nunca verde) */}
+        <p className="rounded-[var(--radius)] border border-border bg-background p-3 text-sm text-foreground">
+          {rec.texto_recomendacao}
+        </p>
 
-  const isV2 = isV2Result(item.resultado);
-  const resultado = item.resultado as OptimizerOutputV2;
-  const resultadoV1 = item.resultado as OptimizerAnalysisResult;
-
-  // Auto-expande só os ramos com algo a ajustar — campanha/conjunto 100% saudáveis ficam
-  // fechados (1 linha, sem ruído) até o gestor clicar pra auditar.
-  useEffect(() => {
-    const campanhas = resultado.analise_campanhas ?? [];
-    setOpenCamp(new Set(campanhas.filter(campNeedsAttention).map((c) => c.id)));
-    setOpenConj(new Set(campanhas.flatMap((c) => c.conjuntos.filter(conjNeedsAttention).map((cj) => cj.id))));
-  }, [item.id]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const pendingActions = isV2 ? (resultado.acoes_automaticas?.filter((a) => a.status_execucao === 'AGUARDAR_APROVACAO') ?? []) : [];
-  const executedActions = isV2 ? (resultado.acoes_automaticas?.filter((a) => a.status_execucao === 'EXECUTAR_AGORA') ?? []) : [];
-
-  const estadoStyle: Record<string, string> = {
-    SAUDAVEL: 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300',
-    ATENCAO: 'border-amber-400/40 bg-amber-400/10 text-amber-300',
-    CRISE: 'border-red-400/40 bg-red-400/10 text-red-300',
-  };
-  const estadoLabel: Record<string, string> = { SAUDAVEL: 'Saudável', ATENCAO: 'Atenção', CRISE: 'Crise' };
-  const estado = item.estado_da_conta ?? '';
-
-  async function handleApprove(acao: OptimizerAcaoAutomatica, index: number) {
-    setApprovalFeedback((prev) => ({ ...prev, [index]: 'Executando...' }));
-    await onApprove(acao, index);
-    setApprovalFeedback((prev) => ({ ...prev, [index]: 'Executado' }));
-  }
-
-  const session = getAuthSession();
-
-  async function logDecisionV1(index: number, decisao: 'aceito' | 'recusado' | 'manual', actionText: string) {
-    setV1Feedback((prev) => ({ ...prev, [index]: 'Salvando...' }));
-    try {
-      const res = await fetch('/api/otimizador/analisar', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          gestor_id: session?.userId ?? 'desconhecido',
-          cliente_id: item.cliente_id,
-          conjunto_id: item.conjunto_id,
-          recomendacao_id: resultadoV1.recomendacao_id ?? item.id,
-          decisao,
-          acao_executada: actionText,
-          resultado_da_acao: decisao === 'aceito' ? 'pendente' : decisao === 'manual' ? 'sucesso' : undefined,
-        }),
-      });
-      setV1Feedback((prev) => ({ ...prev, [index]: res.ok ? 'Registrado' : 'Erro' }));
-    } catch {
-      setV1Feedback((prev) => ({ ...prev, [index]: 'Erro' }));
-    }
-  }
-
-  return (
-    <div className="rounded-[var(--radius)] border border-border bg-card">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-3 border-b border-border p-4">
-        <div className="flex items-start gap-3 min-w-0">
-          <ClientAvatar clientId={item.cliente_id} name={item.cliente_nome} size="sm" />
-          <div className="min-w-0">
-            <p className="font-semibold text-foreground">{item.cliente_nome}</p>
-            <div className="mt-1 flex flex-wrap gap-1.5">
-              {estado && (
-                <span className={cn('rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase', estadoStyle[estado])}>
-                  {estadoLabel[estado] ?? estado}
-                </span>
-              )}
-              {item.semana_analise && (
-                <span className="rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                  {item.semana_analise}
-                </span>
-              )}
-              {item.modo_operacao && (
-                <span className="rounded border border-purple-400/40 bg-purple-400/10 px-1.5 py-0.5 text-[10px] text-purple-300">
-                  {MODO_LABELS[item.modo_operacao as OptimizerModo] ?? item.modo_operacao}
-                </span>
-              )}
-            </div>
+        {emAnalise && (
+          <div className="flex items-center gap-2 rounded-[var(--radius)] border border-secondary/30 bg-secondary/10 p-2.5 text-xs text-secondary">
+            <UserRound className="h-3.5 w-3.5 shrink-0" /> Em análise humana{rec.atribuido_a ? ` · ${rec.atribuido_a}` : ''}
           </div>
+        )}
+
+        {/* Edição inline dos parâmetros (só faz sentido p/ orçamento) */}
+        {editing && isAjuste && (
+          <div className="flex items-end gap-2 rounded-[var(--radius)] border border-primary/30 bg-primary/5 p-3">
+            <label className="flex-1 space-y-1">
+              <span className="text-xs font-semibold text-muted-foreground">Novo orçamento diário (R$)</span>
+              <input
+                type="number" min={1} value={budget}
+                onChange={(e) => setBudget(e.target.value)}
+                className="h-9 w-full rounded-[var(--radius)] border border-border bg-background px-3 text-sm text-foreground outline-none focus:border-primary"
+              />
+            </label>
+            <Button size="sm" variant="outline" onClick={() => setEditing(false)}>Concluir</Button>
+          </div>
+        )}
+
+        {/* 2.4 Botões de ação */}
+        <div className="flex flex-wrap gap-2">
+          <Button variant="ghost" size="sm" onClick={() => onIgnore(rec)} disabled={busy}>
+            <ThumbsDown className="h-3.5 w-3.5" /> Ignorar
+          </Button>
+          {isAjuste && !lowConf && (
+            <Button variant="outline" size="sm" onClick={() => setEditing((e) => !e)} disabled={busy}>
+              <SlidersHorizontal className="h-3.5 w-3.5" /> Editar
+            </Button>
+          )}
+          {lowConf ? (
+            <Button size="sm" onClick={() => onHuman(rec)} disabled={busy || emAnalise}>
+              <UserRound className="h-3.5 w-3.5" /> Enviar para análise de um humano
+            </Button>
+          ) : (
+            <Button size="sm" onClick={handleApply} disabled={busy}>
+              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+              {batchOn && samePadrao.length > 0 ? `Aplicar em ${samePadrao.length + 1} contas` : 'Aplicar'}
+            </Button>
+          )}
         </div>
-        {isAdmin && (
-          <button onClick={onConfig}
-            className="shrink-0 flex items-center gap-1.5 rounded border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:border-primary hover:text-primary">
-            <Settings2 className="h-3.5 w-3.5" />
-            Configurar
+
+        {/* 3. Toggle "Por que essa recomendação?" */}
+        <div>
+          <button onClick={() => setWhy((w) => !w)} className="flex items-center gap-1 text-xs font-medium text-primary hover:underline">
+            {why ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+            Por que essa recomendação?
           </button>
-        )}
-      </div>
+          {why && (
+            <div className="mt-2 space-y-3 rounded-[var(--radius)] border border-border bg-background p-3">
+              {/* Fatos crus, sem interpretação */}
+              <div className="space-y-1">
+                {rec.fatos.map((f, i) => (
+                  <div key={i} className="flex items-center justify-between gap-3 text-xs">
+                    <span className="text-muted-foreground">{f.rotulo}</span>
+                    <span className="font-mono text-foreground">{f.valor}</span>
+                  </div>
+                ))}
+                <div className="flex items-center justify-between gap-3 border-t border-border/60 pt-1 text-xs">
+                  <span className="text-muted-foreground">Confiança da análise</span>
+                  <span className="font-mono text-foreground">{rec.confianca}</span>
+                </div>
+              </div>
 
-      <div className="p-4 space-y-4">
-        {/* Resumo executivo — colapsado em 2 linhas; contexto completo sob demanda */}
-        {item.resumo_executivo && (
-          <div>
-            <p className={cn('text-sm leading-relaxed text-muted-foreground', !showResumo && 'line-clamp-2')}>
-              {item.resumo_executivo}
-            </p>
-            <button
-              onClick={() => setShowResumo((s) => !s)}
-              className="mt-0.5 text-xs font-medium text-primary hover:underline"
-            >
-              {showResumo ? 'ver menos' : 'ver contexto'}
-            </button>
-          </div>
-        )}
+              {/* Aviso de dependência */}
+              {depRec && (
+                <div className="flex items-start gap-2 rounded-[var(--radius)] border border-amber-400/30 bg-amber-400/10 p-2.5 text-xs text-amber-200">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>
+                    Depende de resolver antes: <span className="font-semibold">{depRec.objeto_nome}</span>.{' '}
+                    <button onClick={() => onJump(depRec.rec_id)} className="inline-flex items-center gap-0.5 font-semibold text-primary hover:underline">
+                      Ir para esse item <ArrowRight className="h-3 w-3" />
+                    </button>
+                  </span>
+                </div>
+              )}
 
-        {/* v1 fallback header */}
-        {!isV2 && (
-          <div>
-            <p className="font-semibold text-foreground">{resultadoV1.titulo_problema}</p>
-            <p className="mt-1 text-sm text-muted-foreground">{resultadoV1.o_que_esta_acontecendo}</p>
-          </div>
-        )}
+              {/* Ação em lote */}
+              {samePadrao.length > 0 && !lowConf && (
+                <label className="flex cursor-pointer items-start gap-2 rounded-[var(--radius)] border border-border p-2.5 text-xs text-foreground">
+                  <input type="checkbox" checked={batchOn} onChange={(e) => setBatchOn(e.target.checked)} className="mt-0.5 accent-primary" />
+                  <span>Aplicar a mesma ação em <span className="font-semibold">{samePadrao.length}</span> outra(s) conta(s) com este mesmo padrão. Ao clicar em <span className="font-semibold">Aplicar</span>, a ação é replicada em todas.</span>
+                </label>
+              )}
 
-        {/* Métricas rápidas */}
-        {isV2 && resultado.cruzamento_com_metas && (
-          <div className="grid grid-cols-3 gap-2">
-            <div className="rounded-[var(--radius)] border border-border bg-background p-3">
-              <CircleDollarSign className="h-4 w-4 text-primary" />
-              <span className="mt-1.5 block text-xs text-muted-foreground">Gasto</span>
-              <span className="font-semibold text-foreground text-sm">{formatCurrencyBRL(resultado.cruzamento_com_metas.gasto_total)}</span>
+              {/* Abrir no Gerenciador */}
+              {link && (
+                <a href={link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline">
+                  <ExternalLink className="h-3.5 w-3.5" /> Abrir no Gerenciador de Anúncios
+                </a>
+              )}
             </div>
-            <div className="rounded-[var(--radius)] border border-border bg-background p-3">
-              <Target className="h-4 w-4 text-primary" />
-              <span className="mt-1.5 block text-xs text-muted-foreground">Conversões</span>
-              <span className="font-semibold text-foreground text-sm">{resultado.cruzamento_com_metas.volume_conversoes_atual.toLocaleString('pt-BR')}</span>
-            </div>
-            <div className="rounded-[var(--radius)] border border-border bg-background p-3">
-              <TrendingUp className="h-4 w-4 text-primary" />
-              <span className="mt-1.5 block text-xs text-muted-foreground">CPL</span>
-              <span className="font-semibold text-foreground text-sm">
-                {resultado.cruzamento_com_metas.cpl_atual != null ? formatCurrencyBRL(resultado.cruzamento_com_metas.cpl_atual) : '—'}
-              </span>
-            </div>
-          </div>
-        )}
-
-        {/* Ações aguardando aprovação */}
-        {pendingActions.length > 0 && (
-          <div className="rounded-[var(--radius)] border border-amber-400/30 bg-amber-400/5 p-3 space-y-3">
-            <p className="text-xs font-semibold text-amber-300 uppercase tracking-wide">Aguardando sua aprovação</p>
-            {pendingActions.map((acao, i) => (
-              <div key={i} className="space-y-2">
-                <div className="flex items-start gap-2">
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-foreground">{acao.acao} — {acao.objeto_nome}</p>
-                    <p className="text-xs text-muted-foreground">{acao.justificativa}</p>
-                    {approvalFeedback[i] && <p className="text-xs text-primary mt-0.5">{approvalFeedback[i]}</p>}
-                  </div>
-                </div>
-                <div className="flex gap-2 pl-6">
-                  <Button size="xs" onClick={() => handleApprove(acao, i)} disabled={!!approvalFeedback[i]}>
-                    <Check className="h-3.5 w-3.5" /> Aprovar e executar
-                  </Button>
-                  <Button size="xs" variant="ghost" onClick={() => onReject(i)} disabled={!!approvalFeedback[i]}>
-                    <ThumbsDown className="h-3.5 w-3.5" /> Recusar
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Ações executadas automaticamente */}
-        {executedActions.length > 0 && (
-          <div className="space-y-1.5">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Executado automaticamente</p>
-            {executedActions.map((acao, i) => (
-              <div key={i} className="flex items-start gap-2 rounded-[var(--radius)] border border-border bg-background p-2.5">
-                <Zap className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
-                <div>
-                  <p className="text-sm font-semibold text-foreground">{acao.acao} — {acao.objeto_nome}</p>
-                  <p className="text-xs text-muted-foreground">{acao.justificativa}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Análise por campanha — árvore campanha → conjunto → criativo. Só mostra o que
-            precisa de ajuste: campanha/conjunto/criativo 100% OK não aparece, é ruído. */}
-        {isV2 && resultado.analise_campanhas && resultado.analise_campanhas.length > 0 && (() => {
-          const campanhasComAjuste = resultado.analise_campanhas.filter(campNeedsAttention);
-          const totalCamp = resultado.analise_campanhas.length;
-          const okCamp = totalCamp - campanhasComAjuste.length;
-          return (
-            <TooltipProvider delay={120}>
-              <div className="space-y-2">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                  Análise por campanha
-                  {okCamp > 0 && <span className="ml-1.5 normal-case font-normal text-muted-foreground/70">· {okCamp} campanha{okCamp > 1 ? 's' : ''} ok, oculta{okCamp > 1 ? 's' : ''}</span>}
-                </p>
-                {campanhasComAjuste.length === 0 ? (
-                  <div className="rounded-[var(--radius)] border border-border bg-background p-4 text-center text-sm text-muted-foreground">
-                    Tudo certo por aqui — nenhuma campanha precisa de ajuste agora.
-                  </div>
-                ) : campanhasComAjuste.map((camp) => {
-                  const campOpen = openCamp.has(camp.id);
-                  const conjuntosComAjuste = camp.conjuntos.filter(conjNeedsAttention);
-                  const okConj = camp.conjuntos.length - conjuntosComAjuste.length;
-                  const hasConj = conjuntosComAjuste.length > 0;
-                  return (
-                    <div key={camp.id} className="overflow-hidden rounded-[var(--radius)] border border-border bg-background">
-                      <div
-                        role={hasConj ? 'button' : undefined}
-                        onClick={() => hasConj && toggle(openCamp, setOpenCamp, camp.id)}
-                        className={cn('flex items-start gap-2.5 p-3', hasConj && 'cursor-pointer hover:bg-muted/30')}
-                      >
-                        {hasConj
-                          ? (campOpen ? <ChevronUp className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" /> : <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />)
-                          : <span className="w-4 shrink-0" />}
-                        <VerdictBadge v={camp.classificacao} />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-baseline gap-1.5">
-                            <LevelTag level="Campanha" />
-                            <p className="truncate text-sm font-semibold text-foreground">{camp.nome}</p>
-                          </div>
-                          <p className="mt-0.5 text-[11px] text-muted-foreground">
-                            {nodeMetrics(camp)}{hasConj ? ` · ${conjuntosComAjuste.length} conj. c/ ajuste${okConj > 0 ? ` (${okConj} ok)` : ''}` : ''}
-                          </p>
-                          {camp.classificacao !== 'SAUDAVEL' && camp.acao && <p className="mt-1 text-xs font-medium text-primary">{camp.acao}</p>}
-                        </div>
-                        <VerdictInfo text={camp.veredito} />
-                      </div>
-
-                      {campOpen && hasConj && (
-                        <div className="space-y-1.5 border-t border-border/60 bg-muted/10 p-2 pl-6">
-                          {conjuntosComAjuste.map((conj) => {
-                            const conjOpen = openConj.has(conj.id);
-                            const anunciosComAjuste = conj.anuncios.filter(adNeedsAttention);
-                            const okAd = conj.anuncios.length - anunciosComAjuste.length;
-                            const hasAds = anunciosComAjuste.length > 0;
-                            return (
-                              <div key={conj.id} className="overflow-hidden rounded-[var(--radius)] border border-border/60 bg-background">
-                                <div
-                                  role={hasAds ? 'button' : undefined}
-                                  onClick={() => hasAds && toggle(openConj, setOpenConj, conj.id)}
-                                  className={cn('flex items-start gap-2 p-2.5', hasAds && 'cursor-pointer hover:bg-muted/30')}
-                                >
-                                  {hasAds
-                                    ? (conjOpen ? <ChevronUp className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" /> : <ChevronDown className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />)
-                                    : <span className="w-3.5 shrink-0" />}
-                                  <VerdictBadge v={conj.classificacao} />
-                                  <div className="min-w-0 flex-1">
-                                    <div className="flex items-baseline gap-1.5">
-                                      <LevelTag level="Conjunto" />
-                                      <p className="truncate text-xs font-semibold text-foreground">{conj.nome}</p>
-                                    </div>
-                                    <p className="mt-0.5 text-[10px] text-muted-foreground">
-                                      {nodeMetrics(conj)}{hasAds ? ` · ${anunciosComAjuste.length} criativos c/ ajuste${okAd > 0 ? ` (${okAd} ok)` : ''}` : ''}
-                                    </p>
-                                    {conj.classificacao !== 'SAUDAVEL' && conj.acao && <p className="mt-0.5 text-[11px] font-medium text-primary">{conj.acao}</p>}
-                                  </div>
-                                  <VerdictInfo text={conj.veredito} />
-                                </div>
-
-                                {conjOpen && hasAds && (
-                                  <div className="space-y-1 border-t border-border/50 p-1.5 pl-5">
-                                    {anunciosComAjuste.map((ad) => (
-                                      <div key={ad.id} className="flex items-start gap-2 rounded border border-border/40 bg-background/60 p-2">
-                                        <VerdictBadge v={ad.classificacao} />
-                                        <div className="min-w-0 flex-1">
-                                          <div className="flex items-baseline gap-1.5">
-                                            <LevelTag level="Criativo" />
-                                            <p className="truncate text-[11px] font-semibold text-foreground">{ad.nome}</p>
-                                          </div>
-                                          <p className="mt-0.5 text-[10px] text-muted-foreground">{nodeMetrics(ad)}</p>
-                                          {ad.classificacao !== 'SAUDAVEL' && ad.acao && <p className="mt-0.5 text-[11px] font-medium text-primary">{ad.acao}</p>}
-                                        </div>
-                                        <VerdictInfo text={ad.veredito} />
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </TooltipProvider>
-          );
-        })()}
-
-        {/* v1 ações */}
-        {!isV2 && resultadoV1.acoes && (
-          <div className="space-y-2">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Ações recomendadas</p>
-            {resultadoV1.acoes.map((action, index) => (
-              <div key={index} className="rounded-[var(--radius)] border border-border bg-background p-3">
-                <div className="flex items-start gap-2">
-                  <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-primary text-xs font-bold text-primary-foreground">
-                    {action.prioridade}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-foreground">{action.acao}</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">{action.por_que}</p>
-                    <div className="mt-2 flex gap-2 flex-wrap">
-                      {action.executavel_pelo_sistema
-                        ? <span className="text-xs text-emerald-300 flex items-center gap-1"><BadgeCheck className="h-3 w-3" /> Executável</span>
-                        : <span className="text-xs text-amber-300 flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> Manual</span>}
-                      {v1Feedback[index] && <span className="text-xs text-primary">{v1Feedback[index]}</span>}
-                    </div>
-                    <div className="mt-2 flex gap-2">
-                      <Button size="xs" onClick={() => logDecisionV1(index, 'aceito', action.acao)}>
-                        <Check className="h-3.5 w-3.5" /> Vou fazer
-                      </Button>
-                      <Button size="xs" variant="outline" onClick={() => logDecisionV1(index, 'manual', action.acao)}>
-                        Marcar feita
-                      </Button>
-                      <Button size="xs" variant="ghost" onClick={() => logDecisionV1(index, 'recusado', action.acao)}>
-                        <ThumbsDown className="h-3.5 w-3.5" /> Recusar
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {resultado.observacao && (
-          <div className="rounded-[var(--radius)] border border-amber-400/30 bg-amber-400/10 p-3 text-sm text-amber-100">
-            {(resultado as OptimizerOutputV2).observacao}
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Task Group
+// Lista "Depois desta"
 // ---------------------------------------------------------------------------
-function TaskGroup({
-  title,
-  items,
-  selectedId,
-  isAdmin,
-  onSelect,
-  onConfig,
-}: {
-  title: string;
-  items: QueueItem[];
-  selectedId: string;
-  isAdmin: boolean;
-  onSelect: (id: string) => void;
-  onConfig: (clientId: string) => void;
-}) {
-  if (items.length === 0) return null;
+function NextUpList({ recs, onJump }: { recs: FilaRec[]; onJump: (recId: string) => void }) {
+  if (recs.length === 0) return null;
   return (
-    <div className="space-y-2">
-      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">{title} ({items.length})</p>
-      {items.map((item) => (
-        <TaskCard
-          key={item.id}
-          item={item}
-          isSelected={item.id === selectedId}
-          isAdmin={isAdmin}
-          onClick={() => onSelect(item.id)}
-          onConfig={() => onConfig(item.cliente_id)}
-        />
-      ))}
+    <div className="rounded-[var(--radius)] border border-border bg-card p-4">
+      <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Depois desta</p>
+      <ul className="mt-2 space-y-1.5">
+        {recs.map((r) => (
+          <li key={r.rec_id}>
+            <button onClick={() => onJump(r.rec_id)} className="flex w-full items-center gap-2 text-left text-sm text-muted-foreground hover:text-foreground">
+              <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', SEV[r.severidade].dot)} />
+              <span className="truncate">{r.cliente_nome} — {r.titulo}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -905,10 +671,16 @@ function TaskGroup({
 // ---------------------------------------------------------------------------
 export default function OtimizadorPage() {
   const [clients, setClients] = useState<Client[]>([]);
-  const [queue, setQueue] = useState<QueueItem[]>([]);
+  const [recs, setRecs] = useState<FilaRec[]>([]);
+  const [contas, setContas] = useState<FilaConta[]>([]);
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState('');
+  const [contaFiltro, setContaFiltro] = useState('');
+  const [cursor, setCursor] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [toast, setToast] = useState<ToastState>(null);
+
+  // Admin: análise manual
   const [runLoading, setRunLoading] = useState(false);
   const [runMessage, setRunMessage] = useState<string | null>(null);
   const [diagLoading, setDiagLoading] = useState(false);
@@ -916,103 +688,158 @@ export default function OtimizadorPage() {
   const [manualClientId, setManualClientId] = useState('programados-hoje');
   const [manualPeriod, setManualPeriod] = useState<OptimizerPeriodKey>('last_7d');
   const [configClientId, setConfigClientId] = useState<string | null>(null);
+
   const session = getAuthSession();
   const isAdmin = session?.role === 'Administrador';
 
-  async function loadQueue() {
+  async function loadFila() {
     setLoading(true);
     try {
-      const [clientsRes, queueRes] = await Promise.all([
+      const [clientsRes, filaRes] = await Promise.all([
         fetch('/api/clients'),
-        fetch('/api/otimizador/analisar?hours=200'),
+        fetch('/api/otimizador/fila?hours=200'),
       ]);
       if (clientsRes.ok) {
         const data = await clientsRes.json() as Client[];
         setClients(data.filter((c) => c.status !== 'Arquivado' && c.status !== 'Inativo'));
       }
-      if (queueRes.ok) {
-        const data = await queueRes.json() as { items: QueueItem[]; generated_at: string | null };
-        // Deduplica: um card por cliente, priorizando v2 > v1, depois mais urgente > mais recente
-        const urgency = (item: QueueItem) => {
-          const estado = item.estado_da_conta;
-          if (estado === 'CRISE' || item.nivel_critico === 'vermelho') return 0;
-          if (estado === 'ATENCAO' || item.nivel_critico === 'amarelo') return 1;
-          return 2;
-        };
-        const byClient = new Map<string, QueueItem>();
-        for (const item of data.items) {
-          const existing = byClient.get(item.cliente_id);
-          if (!existing) { byClient.set(item.cliente_id, item); continue; }
-          // v2 sempre vence v1
-          const itemIsV2 = !!item.semana_analise;
-          const existingIsV2 = !!existing.semana_analise;
-          if (itemIsV2 && !existingIsV2) { byClient.set(item.cliente_id, item); continue; }
-          if (!itemIsV2 && existingIsV2) continue;
-          // mesmo tipo: mais RECENTE vence — garante que uma reanálise substitua a antiga na tela
-          if (new Date(item.created_at).getTime() > new Date(existing.created_at).getTime()) {
-            byClient.set(item.cliente_id, item);
-          }
-        }
-        const deduped = Array.from(byClient.values());
-        setQueue(deduped);
-        // "última em" = análise mais recente exibida (não a primeira da ordenação por urgência)
-        const latest = deduped.reduce<string | null>((acc, it) =>
-          !acc || new Date(it.created_at).getTime() > new Date(acc).getTime() ? it.created_at : acc, null);
-        setGeneratedAt(latest ?? data.generated_at);
-        const v2Only = deduped.filter((item) => !!item.semana_analise);
-        setSelectedId((cur) => v2Only.some((item) => item.id === cur) ? cur : v2Only[0]?.id ?? '');
+      if (filaRes.ok) {
+        const data = await filaRes.json() as { recs: FilaRec[]; contas: FilaConta[]; generated_at: string | null };
+        setRecs(data.recs ?? []);
+        setContas(data.contas ?? []);
+        setGeneratedAt(data.generated_at);
       }
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => { void loadQueue(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void loadFila(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const selected = useMemo(() => queue.find((item) => item.id === selectedId) ?? null, [queue, selectedId]);
+  const filtered = useMemo(
+    () => (contaFiltro ? recs.filter((r) => r.cliente_id === contaFiltro) : recs),
+    [recs, contaFiltro],
+  );
 
-  // Separate v2 (weekly) from v1 (legacy)
-  const v2Items = useMemo(() => queue.filter((item) => !!item.semana_analise), [queue]);
-  const v1Items = useMemo(() => queue.filter((item) => !item.semana_analise), [queue]);
+  // Mantém o cursor dentro dos limites quando a fila encolhe.
+  useEffect(() => {
+    setCursor((c) => Math.min(c, Math.max(0, filtered.length - 1)));
+  }, [filtered.length]);
 
-  const criseItems = useMemo(() => v2Items.filter((i) => i.estado_da_conta === 'CRISE' || i.nivel_critico === 'vermelho'), [v2Items]);
-  const atencaoItems = useMemo(() => v2Items.filter((i) => i.estado_da_conta === 'ATENCAO' && i.nivel_critico !== 'vermelho'), [v2Items]);
-  const saudavelItems = useMemo(() => v2Items.filter((i) => i.estado_da_conta === 'SAUDAVEL' && i.nivel_critico !== 'vermelho'), [v2Items]);
+  const current = filtered[cursor] ?? null;
+  const total = filtered.length;
+  const posicao = total === 0 ? 0 : Math.min(cursor + 1, total);
+  const nextUp = filtered.slice(cursor + 1, cursor + 4);
 
-  async function approveAutoAction(acao: OptimizerAcaoAutomatica, _index: number) {
-    if (!selected) return;
-    await fetch('/api/otimizador/executar', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...callerHeaders() },
-      body: JSON.stringify({
-        analise_id: selected.id,
-        client_id: selected.cliente_id,
-        connection_id: selected.conjunto_id,
-        acao: acao.acao,
-        objeto_tipo: acao.objeto_tipo,
-        objeto_id: acao.objeto_id,
-        objeto_nome: acao.objeto_nome,
-        parametros: acao.parametros,
-        justificativa: acao.justificativa,
-        modo_operacao: selected.modo_operacao ?? 'RECOMENDACAO_COM_APROVACAO',
-      }),
-    });
+  function removeRecs(ids: string[]) {
+    setRecs((prev) => prev.filter((r) => !ids.includes(r.rec_id)));
   }
 
-  // Busca um resultado de análise mais recente que o já existente (polling pós-disparo async).
-  // Compara contra o created_at anterior (ambos do servidor) — imune a diferença de relógio.
-  async function pollForFreshResult(clientId: string, priorTime: number): Promise<QueueItem | null> {
+  function jumpTo(recId: string) {
+    const idx = filtered.findIndex((r) => r.rec_id === recId);
+    if (idx >= 0) setCursor(idx);
+  }
+
+  const autor = { autor_id: session?.userId ?? undefined, autor_nome: session?.name ?? undefined };
+
+  async function doApply(rec: FilaRec, params: { novo_orcamento_diario?: number }, batch: FilaRec[]) {
+    const acao = rec.acao_estruturada;
+    if (!acao) return;
+    setBusy(true);
     try {
-      const res = await fetch(`/api/otimizador/analisar?clientId=${encodeURIComponent(clientId)}&hours=1`);
-      if (!res.ok) return null;
-      const data = await res.json() as { items: QueueItem[] };
-      return data.items.find((it) =>
-        it.cliente_id === clientId
-        && !!it.semana_analise
-        && new Date(it.created_at).getTime() > priorTime,
-      ) ?? null;
+      if (batch.length > 0) {
+        const itens = [rec, ...batch].map((r) => ({
+          rec_id: r.rec_id, analise_id: r.analise_id, canal: r.canal, cliente_id: r.cliente_id,
+          connection_id: r.connection_id ?? '', account_id: r.account_id ?? undefined,
+          acao: r.acao_estruturada!.tipo, objeto_tipo: r.acao_estruturada!.objeto_tipo, objeto_id: r.acao_estruturada!.objeto_id,
+          objeto_nome: r.objeto_nome, justificativa: r.texto_recomendacao,
+          parametros: r.rec_id === rec.rec_id ? { ...r.acao_estruturada!.parametros, ...params } : r.acao_estruturada!.parametros,
+        }));
+        const res = await fetch('/api/otimizador/lote', {
+          method: 'POST', headers: { 'Content-Type': 'application/json', ...callerHeaders() },
+          body: JSON.stringify({ itens, ...autor }),
+        });
+        const data = await res.json().catch(() => ({})) as { ok_count?: number; results?: Array<{ rec_id: string; ok: boolean }> };
+        const okIds = (data.results ?? []).filter((r) => r.ok).map((r) => r.rec_id);
+        removeRecs(okIds.length ? okIds : [rec.rec_id]);
+        setToast({ text: `Aplicado em ${data.ok_count ?? okIds.length} conta(s).` });
+      } else {
+        const res = await fetch('/api/otimizador/executar', {
+          method: 'POST', headers: { 'Content-Type': 'application/json', ...callerHeaders() },
+          body: JSON.stringify({
+            rec_id: rec.rec_id, analise_id: rec.analise_id, canal: rec.canal, client_id: rec.cliente_id,
+            connection_id: rec.connection_id ?? '', account_id: rec.account_id ?? undefined,
+            acao: acao.tipo, objeto_tipo: acao.objeto_tipo, objeto_id: acao.objeto_id, objeto_nome: rec.objeto_nome,
+            parametros: { ...acao.parametros, ...params }, justificativa: rec.texto_recomendacao, ...autor,
+          }),
+        });
+        const data = await res.json().catch(() => ({})) as { ok?: boolean; error?: string; pode_desfazer?: boolean };
+        if (!res.ok || !data.ok) {
+          setToast({ text: `Não foi possível aplicar: ${data.error ?? res.statusText}`, erro: true });
+          return;
+        }
+        removeRecs([rec.rec_id]);
+        const label = acao.tipo === 'PAUSAR' ? 'Pausado' : acao.tipo === 'ATIVAR' ? 'Ativado' : 'Orçamento ajustado';
+        setToast({
+          text: `${label}. Você pode reverter agora.`,
+          undo: data.pode_desfazer ? { rec_id: rec.rec_id, cliente_id: rec.cliente_id } : undefined,
+        });
+      }
     } catch {
-      return null;
+      setToast({ text: 'Erro de rede ao aplicar.', erro: true });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doIgnore(rec: FilaRec) {
+    setBusy(true);
+    try {
+      await fetch('/api/otimizador/ignorar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...callerHeaders() },
+        body: JSON.stringify({ rec_id: rec.rec_id, analise_id: rec.analise_id, cliente_id: rec.cliente_id, objeto_id: rec.objeto_id, ...autor }),
+      });
+      removeRecs([rec.rec_id]);
+      setToast({ text: 'Recomendação ignorada.' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doHuman(rec: FilaRec) {
+    setBusy(true);
+    try {
+      await fetch('/api/otimizador/analise-humana', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...callerHeaders() },
+        body: JSON.stringify({ rec_id: rec.rec_id, analise_id: rec.analise_id, cliente_id: rec.cliente_id, objeto_id: rec.objeto_id, atribuido_a: session?.userId, ...autor }),
+      });
+      removeRecs([rec.rec_id]);
+      setToast({ text: 'Enviado para análise de um humano.' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doUndo() {
+    const u = toast?.undo;
+    if (!u) return;
+    setToast(null);
+    await fetch('/api/otimizador/desfazer', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...callerHeaders() },
+      body: JSON.stringify({ rec_id: u.rec_id, cliente_id: u.cliente_id, ...autor }),
+    });
+    await loadFila();
+  }
+
+  // Confirma que existe análise mais nova que a anterior (polling pós-disparo).
+  async function pollForFreshResult(clientId: string, priorTime: number): Promise<boolean> {
+    try {
+      const res = await fetch(`/api/otimizador/fila?clientId=${encodeURIComponent(clientId)}&hours=1`);
+      if (!res.ok) return false;
+      const data = await res.json() as { generated_at: string | null };
+      return !!data.generated_at && new Date(data.generated_at).getTime() > priorTime;
+    } catch {
+      return false;
     }
   }
 
@@ -1020,15 +847,9 @@ export default function OtimizadorPage() {
     setRunLoading(true);
     setRunMessage(null);
     const isSingle = manualClientId !== 'programados-hoje';
-    // Marca de tempo da última análise já existente deste cliente (do servidor) — só aceitamos
-    // um resultado mais novo que este. Evita falsos positivos e dispensa o relógio do browser.
-    const prior = queue.find((it) => it.cliente_id === manualClientId && !!it.semana_analise);
-    const priorTime = prior ? new Date(prior.created_at).getTime() : 0;
+    const priorTime = generatedAt ? new Date(generatedAt).getTime() : 0;
     const clientName = isSingle ? (clients.find((c) => c.id === manualClientId)?.name ?? 'conta') : 'grupo de hoje';
     try {
-      // Síncrono: o request só retorna quando a análise (busca + IA) terminou e foi gravada.
-      // Sem `after()`/segundo plano — se der erro, o gestor VÊ o erro em vez de silêncio.
-      // As rotas têm maxDuration=300; contas grandes (muitas campanhas/criativos) cabem no tempo.
       const params = new URLSearchParams({ period: manualPeriod, forceAi: '1' });
       if (isSingle) params.set('clientId', manualClientId);
       setRunMessage(`Analisando ${clientName}… isso pode levar até 2 minutos. Não feche a página.`);
@@ -1036,33 +857,28 @@ export default function OtimizadorPage() {
         method: 'POST',
         headers: { ...callerHeaders(), 'Content-Type': 'application/json' },
       });
-
       if (!res.ok) {
         const data = await res.json().catch(() => ({})) as { error?: string };
         setRunMessage(`Erro na análise: ${data.error || res.statusText || `HTTP ${res.status}`}`);
         return;
       }
-
       const data = await res.json().catch(() => ({})) as {
         ok_count?: number; erros?: number;
         results?: Array<{ clientId: string; status: string; error?: string }>;
       };
-
-      // A análise já rodou e gravou no banco. Recarrega a fila para exibir.
-      await loadQueue();
-
+      await loadFila();
       if (isSingle) {
         const outcome = data.results?.find((r) => r.clientId === manualClientId);
         if (outcome && outcome.status !== 'ok') {
-          // Rodou mas não gerou análise (sem conexão, sem campanhas, erro de IA…)
           const motivo = outcome.status === 'sem_conexao_meta' ? 'conta sem conexão Meta vinculada'
             : outcome.status === 'sem_campanhas_ativas' ? 'nenhuma campanha ativa com gasto no período'
             : outcome.error || outcome.status;
           setRunMessage(`Análise de ${clientName} não gerou resultado: ${motivo}.`);
           return;
         }
-        const fresh = await pollForFreshResult(manualClientId, priorTime);
-        if (fresh) setSelectedId(fresh.id);
+        await pollForFreshResult(manualClientId, priorTime);
+        setContaFiltro(manualClientId);
+        setCursor(0);
         setRunMessage(`Análise de ${clientName} concluída.`);
       } else {
         setRunMessage(`Análise do grupo concluída: ${data.ok_count ?? 0} ok, ${data.erros ?? 0} erro(s).`);
@@ -1075,7 +891,6 @@ export default function OtimizadorPage() {
     }
   }
 
-  // Diagnóstico de dados — sem IA, sem custo. Mostra de onde vêm (ou não) os dados do cliente.
   async function runDiagnostic() {
     setDiagLoading(true);
     setDiagResult(null);
@@ -1104,26 +919,32 @@ export default function OtimizadorPage() {
   const configClient = configClientId ? clients.find((c) => c.id === configClientId) ?? null : null;
 
   return (
-    <div className="mx-auto max-w-7xl space-y-5 p-4 sm:p-6">
+    <div className="mx-auto max-w-4xl space-y-5 p-4 sm:p-6">
       {configClientId && configClient && (
         <ConfigModal clientId={configClientId} clientName={configClient.name} onClose={() => setConfigClientId(null)} />
       )}
+      <ConfirmToast toast={toast} onUndo={doUndo} onClose={() => setToast(null)} />
 
-      {/* Header */}
+      {/* 1. Título + progresso */}
       <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="flex items-center gap-2 text-sm font-semibold text-primary">
-            <WandSparkles className="h-4 w-4" /> Otimizador v2.0
+            <WandSparkles className="h-4 w-4" /> Otimizador
           </div>
-          <h1 className="mt-1 text-2xl font-bold text-foreground">O que fazer agora</h1>
-          <p className="mt-0.5 text-sm text-muted-foreground">
-            Análises semanais por cliente · última em {formatDateTime(generatedAt)}
-          </p>
+          <h1 className="mt-1 font-heading text-4xl text-foreground">O que fazer agora</h1>
+          <p className="mt-0.5 text-sm text-muted-foreground">Última análise em {formatDateTime(generatedAt)}</p>
         </div>
-        <Button variant="outline" onClick={loadQueue} disabled={loading}>
-          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-          Atualizar
-        </Button>
+        <div className="flex items-center gap-2">
+          {isAdmin && (
+            <Button variant="outline" onClick={() => setConfigClientId(contaFiltro || current?.cliente_id || null)} disabled={!contaFiltro && !current}>
+              <Settings2 className="h-4 w-4" /> Configurar
+            </Button>
+          )}
+          <Button variant="outline" onClick={loadFila} disabled={loading}>
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            Atualizar
+          </Button>
+        </div>
       </header>
 
       {/* Admin: análise manual */}
@@ -1187,31 +1008,6 @@ export default function OtimizadorPage() {
                       <span>meta leads: {d.planejamento.volume_leads_meta ?? '—'}</span>
                       <span>objetivo: {d.planejamento.objetivo ?? '—'}</span>
                     </div>
-                    {d.amostra && d.amostra.length > 0 && (
-                      <div className="mt-2 border-t border-border/50 pt-2">
-                        <p className="mb-1 text-[11px] font-semibold text-muted-foreground">Campanhas com gasto via /api/campaigns (amostra 30d):</p>
-                        {d.amostra.map((c, j) => (
-                          <p key={j} className="font-mono text-[11px] text-muted-foreground">
-                            • {c.nome} — {c.status} — R$ {c.gasto.toFixed(2)} — {c.leads} leads
-                          </p>
-                        ))}
-                      </div>
-                    )}
-                    {d.meta_direto && (
-                      <div className="mt-2 border-t border-border/50 pt-2">
-                        <p className="mb-1 text-[11px] font-semibold text-muted-foreground">
-                          Direto na Meta (30d, sem filtros):{' '}
-                          {d.meta_direto.ok
-                            ? `${d.meta_direto.total ?? 0} campanha(s), ${d.meta_direto.com_gasto ?? 0} com gasto`
-                            : `ERRO — ${d.meta_direto.erro ?? '?'}`}
-                        </p>
-                        {d.meta_direto.campanhas?.map((c, j) => (
-                          <p key={j} className="font-mono text-[11px] text-muted-foreground">
-                            • {c.nome} — {c.status} — R$ {c.gasto.toFixed(2)}
-                          </p>
-                        ))}
-                      </div>
-                    )}
                   </div>
                 );
               })}
@@ -1220,61 +1016,55 @@ export default function OtimizadorPage() {
         </section>
       )}
 
-      {/* Layout principal */}
-      <main className="grid gap-5 xl:grid-cols-[380px_1fr]">
-        {/* Lista de tarefas */}
-        <section className="space-y-5">
-          {loading ? (
-            <div className="flex h-48 items-center justify-center text-sm text-muted-foreground">
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Carregando análises...
+      {/* Seletor + progresso */}
+      {!loading && recs.length > 0 && (
+        <section className="space-y-3">
+          <AccountSelector contas={contas} value={contaFiltro} total={recs.length} onChange={(id) => { setContaFiltro(id); setCursor(0); }} />
+          <div className="flex items-center gap-3">
+            <span className="shrink-0 text-xs font-semibold text-muted-foreground">{posicao} de {total}</span>
+            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface-soft">
+              <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${total ? (posicao / total) * 100 : 0}%` }} />
             </div>
-          ) : v2Items.length === 0 && v1Items.length === 0 ? (
-            <div className="flex h-48 flex-col items-center justify-center gap-2 rounded-[var(--radius)] border border-border bg-card p-6 text-center">
-              <CalendarClock className="h-8 w-8 text-muted-foreground" />
-              <p className="font-semibold text-foreground">Nenhuma análise recente</p>
-              <p className="text-sm text-muted-foreground">Rode a análise manualmente acima ou aguarde o cron de segunda a sexta às 10h UTC.</p>
-            </div>
-          ) : (
-            <>
-              <TaskGroup title="Crise — fazer agora" items={criseItems} selectedId={selectedId} isAdmin={isAdmin}
-                onSelect={(id) => setSelectedId(id)} onConfig={(cid) => setConfigClientId(cid)} />
-              <TaskGroup title="Atenção" items={atencaoItems} selectedId={selectedId} isAdmin={isAdmin}
-                onSelect={(id) => setSelectedId(id)} onConfig={(cid) => setConfigClientId(cid)} />
-              <TaskGroup title="Tudo certo" items={saudavelItems} selectedId={selectedId} isAdmin={isAdmin}
-                onSelect={(id) => setSelectedId(id)} onConfig={(cid) => setConfigClientId(cid)} />
-              {v2Items.length === 0 && (
-                <div className="rounded-[var(--radius)] border border-dashed border-border p-6 text-center space-y-2">
-                  <p className="font-semibold text-foreground">Nenhuma análise semanal gerada ainda</p>
-                  <p className="text-sm text-muted-foreground">
-                    As análises v2 são geradas automaticamente seg–sex. Use o painel acima para rodar manualmente uma conta agora.
-                  </p>
-                  {v1Items.length > 0 && (
-                    <p className="text-xs text-muted-foreground">({v1Items.length} análise(s) antiga(s) ocultada(s) — rode uma nova para substituir)</p>
-                  )}
-                </div>
-              )}
-            </>
-          )}
+          </div>
         </section>
+      )}
 
-        {/* Painel de detalhe */}
-        <aside>
-          {!selected ? (
-            <div className="flex h-48 flex-col items-center justify-center gap-2 rounded-[var(--radius)] border border-border bg-card p-6 text-center">
-              <ShieldAlert className="h-8 w-8 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">Selecione um cliente para ver os detalhes e recomendações.</p>
-            </div>
-          ) : (
-            <DetailPanel
-              item={selected}
-              isAdmin={isAdmin}
-              onConfig={() => setConfigClientId(selected.cliente_id)}
-              onApprove={approveAutoAction}
-              onReject={() => {}}
+      {/* Card de decisão */}
+      <main className="space-y-4">
+        {loading ? (
+          <div className="flex h-48 items-center justify-center text-sm text-muted-foreground">
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Carregando fila...
+          </div>
+        ) : recs.length === 0 ? (
+          <div className="flex h-48 flex-col items-center justify-center gap-2 rounded-[var(--radius)] border border-border bg-card p-6 text-center">
+            <CalendarClock className="h-8 w-8 text-muted-foreground" />
+            <p className="font-semibold text-foreground">Nenhuma decisão pendente</p>
+            <p className="text-sm text-muted-foreground">
+              {isAdmin ? 'Rode uma análise acima ou aguarde o cron seg–sex às 10h UTC.' : 'Volte mais tarde — as análises rodam de segunda a sexta.'}
+            </p>
+          </div>
+        ) : !current ? (
+          <div className="flex h-48 flex-col items-center justify-center gap-2 rounded-[var(--radius)] border border-primary/30 bg-primary/5 p-6 text-center">
+            <BadgeCheck className="h-8 w-8 text-primary" />
+            <p className="font-semibold text-foreground">Tudo resolvido por aqui!</p>
+            <p className="text-sm text-muted-foreground">Nenhuma pendência nesta seleção.</p>
+          </div>
+        ) : (
+          <>
+            <DecisionCard
+              rec={current}
+              allRecs={recs}
+              busy={busy}
+              onApply={doApply}
+              onIgnore={doIgnore}
+              onHuman={doHuman}
+              onJump={jumpTo}
             />
-          )}
-        </aside>
+            <NextUpList recs={nextUp} onJump={jumpTo} />
+          </>
+        )}
       </main>
     </div>
   );
 }
+

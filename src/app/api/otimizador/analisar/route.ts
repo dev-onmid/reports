@@ -19,6 +19,7 @@ import {
   payloadNumericSnapshot,
   sanitizeOptimizerDiagnosis,
   sanitizeOptimizerOutputV2,
+  ensureOptimizerRecStatusTable,
   currentWeekLabel,
   type OptimizerAnalysisResult,
   type OptimizerAnalysisResultV2,
@@ -36,6 +37,7 @@ type AnalyzeBody = {
   payload?: OptimizerPayload;
   payload_v2?: OptimizerPayloadV2;
   connection_id?: string;
+  account_id?: string;
   force_ai?: boolean;
 };
 
@@ -199,6 +201,7 @@ async function ensureTables(pool: ReturnType<typeof makeServerPool>) {
       ADD COLUMN IF NOT EXISTS acoes_automaticas_count INTEGER DEFAULT 0,
       ADD COLUMN IF NOT EXISTS acoes_executadas_count INTEGER DEFAULT 0
   `).catch(() => {});
+  await ensureOptimizerRecStatusTable(pool);
 }
 
 function hashPayload(payload: OptimizerPayload): string {
@@ -527,6 +530,8 @@ async function saveLogV2(params: {
   payload: OptimizerPayloadV2;
   result: OptimizerAnalysisResultV2;
   payloadHash: string;
+  connectionId?: string;
+  accountId?: string;
   error?: string;
 }) {
   const pool = makeServerPool();
@@ -539,8 +544,8 @@ async function saveLogV2(params: {
          gasto_total, conversoes, cpl_cpa_atual, ctr_link,
          payload_hash, resultado, prompt_version, modelo_usado, tokens_usados, custo_estimado_usd, erro,
          semana_analise, modo_operacao, estado_da_conta, resumo_executivo,
-         acoes_automaticas_count, acoes_executadas_count)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)`,
+         acoes_automaticas_count, acoes_executadas_count, connection_id, account_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)`,
       [
         params.payload.cliente_id,
         params.payload.cliente_id, // conjunto_id = client (análise da conta inteira)
@@ -569,6 +574,8 @@ async function saveLogV2(params: {
         params.result.resumo_executivo,
         params.result.acoes_automaticas.length,
         params.result.acoes_automaticas.filter((a) => a.status_execucao === 'EXECUTAR_AGORA').length,
+        params.connectionId ?? null,
+        params.accountId ?? null,
       ],
     );
   } catch (err) {
@@ -686,7 +693,7 @@ async function handleV2(body: AnalyzeBody, origin: string): Promise<Response> {
   };
 
   void logAiUsage({ source: 'otimizador-v2', model: OPTIMIZER_MODEL_V2, inputTokens, outputTokens });
-  await saveLogV2({ payload, result, payloadHash });
+  await saveLogV2({ payload, result, payloadHash, connectionId, accountId: body.account_id });
 
   // Executa ações automáticas (fire-and-forget)
   if (payload.modo_operacao === 'AUTOMATICO_PARCIAL' || payload.modo_operacao === 'AUTOMATICO_TOTAL') {
