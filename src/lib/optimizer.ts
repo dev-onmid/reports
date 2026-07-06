@@ -55,7 +55,7 @@ export const OPTIMIZER_MODEL = 'claude-sonnet-4-6';
 // classificação e barateia. A tarefa é extração/classificação guiada por regras — cabe no Haiku.
 export const OPTIMIZER_MODEL_V2 = 'claude-haiku-4-5-20251001';
 export const OPTIMIZER_PROMPT_VERSION = 'otimizador-v1.0';
-export const OPTIMIZER_PROMPT_VERSION_V2 = 'otimizador-v2.3';
+export const OPTIMIZER_PROMPT_VERSION_V2 = 'otimizador-v2.4';
 
 // ─── v2 types ────────────────────────────────────────────────────────────────
 
@@ -407,11 +407,16 @@ export function buildRecomendacoes(
     metricas_chave: Array<{ rotulo: string; valor: string }>;
     fatos: Array<{ rotulo: string; valor: string }>;
   }) => {
-    if (o.classificacao === 'SAUDAVEL') return;
     if (!o.acao?.trim()) return;
 
     const auto = acaoAutoByObj.get(o.objeto_id);
     const tipoEfetivo = inferAcaoTipo(o.acao, o.acao_tipo);
+    // Item SAUDÁVEL só entra na fila se carregar uma ação de CRESCIMENTO (escalar orçamento
+    // ou reativar) — é uma oportunidade de melhorar o resultado do objetivo, não um problema.
+    // Saudável sem ação de crescimento = nada a fazer, fica fora da fila.
+    const ehOportunidade = o.classificacao === 'SAUDAVEL';
+    if (ehOportunidade && tipoEfetivo !== 'AJUSTAR_ORCAMENTO' && tipoEfetivo !== 'ATIVAR') return;
+
     const structTipo: OptimizerAcaoTipo | null =
       (tipoEfetivo === 'PAUSAR' || tipoEfetivo === 'ATIVAR' || tipoEfetivo === 'AJUSTAR_ORCAMENTO')
         ? tipoEfetivo
@@ -432,7 +437,7 @@ export function buildRecomendacoes(
         objeto_id: o.objeto_id,
         objeto_nome: o.objeto_nome,
         campanha_nome: o.campanha_nome,
-        severidade: o.classificacao === 'URGENTE' ? 'urgente' : 'atencao',
+        severidade: o.classificacao === 'URGENTE' ? 'urgente' : o.classificacao === 'ATENCAO' ? 'atencao' : 'ok',
         titulo: tituloAmigavel(tipoEfetivo, o.objeto_tipo, o.classificacao, o.objetivo?.curto ?? null),
         objetivo: o.objetivo?.label ?? null,
         texto_recomendacao: o.acao,
@@ -621,13 +626,25 @@ Para cada no (campanha, conjunto, anuncio) devolva SOMENTE:
 - id: o id REAL do objeto (copie do payload, exato)
 - classificacao: "SAUDAVEL" (indo bem, sem acao) | "ATENCAO" (observar/ajustar) | "URGENTE" (agir ja)
 - veredito: 1 frase curta dizendo o estado ("CPL R$12, dentro da meta" / "CTR caindo 3 dias seguidos")
-- acao: SE classificacao = "SAUDAVEL", deixe "" (string vazia) — NAO escreva "manter", "monitorar" ou
-  qualquer texto, o painel nao exibe acao pra item saudavel e isso so gasta espaco. SE classificacao
-  for "ATENCAO" ou "URGENTE", escreva 1 frase curta e imperativa do que fazer especificamente nesse
-  objeto ("Pausar, criativo fadigado" / "Escalar orcamento +30%" / "Trocar apelo, CTR abaixo da media").
+- acao: SE classificacao = "ATENCAO" ou "URGENTE", escreva 1 frase curta e imperativa do que fazer
+  especificamente nesse objeto ("Pausar, criativo fadigado" / "Trocar apelo, CTR abaixo da media").
+  SE classificacao = "SAUDAVEL", HA DUAS SITUACOES:
+    (a) OPORTUNIDADE DE ESCALA — o item entrega o resultado do objetivo BEM e BARATO (custo por
+        resultado abaixo/na meta) E tem espaco pra crescer (frequencia baixa, orcamento nao
+        estourado, ainda nao saturado). Nesse caso ESCREVA a acao de crescimento com acao_tipo
+        "AJUSTAR_ORCAMENTO" e acao_parametros {"novo_orcamento_diario": <valor maior>}, ou
+        "ATIVAR" se for reativar algo bom que foi pausado sem motivo. Ex: "Escalar orcamento de
+        R$50 pra R$70/dia: traz conversa a R$3, bem abaixo da meta, e da pra investir mais".
+        Escalar o que ja funciona e a forma mais direta de MELHORAR O RESULTADO DO OBJETIVO.
+    (b) NADA A FAZER — vai bem mas sem espaco claro pra escalar (ou nao ha dado suficiente).
+        Ai sim deixe acao = "" e acao_tipo = "NENHUMA".
+  SEMPRE que a conta parecer "saudavel" no geral, PROCURE ATIVAMENTE onde da pra investir mais e
+  crescer o resultado — quase nunca uma conta com verba rodando esta 100% otimizada. Nao devolva
+  a conta inteira como "tudo certo" sem ter olhado se ha um conjunto/campanha campea pra escalar.
 
-O USUARIO SO QUER VER O QUE PRECISA DE AJUSTE. Nao gaste texto justificando o que ja esta bom —
-va direto ao ponto nos itens ATENCAO/URGENTE (qual objeto, qual problema, qual acao).
+O USUARIO QUER VER O QUE PRECISA DE ACAO: os PROBLEMAS (ATENCAO/URGENTE) E as OPORTUNIDADES de
+escala (SAUDAVEL que da pra crescer). Va direto ao ponto (qual objeto, qual acao). Nao gaste
+texto justificando o que esta bom E sem espaco pra crescer — esse fica com acao vazia.
 NAO repita metricas numericas no veredito alem do essencial — o painel ja mostra os numeros.
 NAO invente ids. NAO devolva metricas (gasto, ctr) nos nos — so id, classificacao, veredito, acao.
 

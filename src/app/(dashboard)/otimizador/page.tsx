@@ -108,7 +108,7 @@ type Severidade = 'urgente' | 'atencao' | 'ok';
 const SEV: Record<Severidade, { badge: string; dot: string; label: string }> = {
   urgente: { badge: 'border-red-400/40 bg-red-400/10 text-red-300', dot: 'bg-red-400', label: 'Urgente' },
   atencao: { badge: 'border-amber-400/40 bg-amber-400/10 text-amber-300', dot: 'bg-amber-400', label: 'Atenção' },
-  ok: { badge: 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300', dot: 'bg-emerald-400', label: 'Ok' },
+  ok: { badge: 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300', dot: 'bg-emerald-400', label: 'Oportunidade' },
 };
 const SEV_RANK: Record<Severidade, number> = { urgente: 0, atencao: 1, ok: 2 };
 const NIVEL_LABEL: Record<string, string> = { campaign: 'Campanha', adset: 'Conjunto', ad: 'Criativo' };
@@ -1078,10 +1078,26 @@ export default function OtimizadorPage() {
             </p>
           </div>
         ) : !current ? (
-          <div className="flex h-48 flex-col items-center justify-center gap-2 rounded-[var(--radius)] border border-primary/30 bg-primary/5 p-6 text-center">
+          <div className="flex flex-col items-center justify-center gap-2 rounded-[var(--radius)] border border-primary/30 bg-primary/5 p-6 text-center">
             <BadgeCheck className="h-8 w-8 text-primary" />
-            <p className="font-semibold text-foreground">Tudo resolvido por aqui!</p>
-            <p className="text-sm text-muted-foreground">Nenhuma pendência nesta seleção.</p>
+            {contaFiltro ? (
+              <>
+                <p className="font-semibold text-foreground">Nada pendente para este cliente</p>
+                <p className="max-w-md text-sm text-muted-foreground">
+                  A última análise não apontou problemas nem oportunidades de escala neste período.
+                  Vale conferir no <span className="font-semibold text-foreground">Diagnosticar</span> se
+                  a conta tem campanhas ativas com gasto — sem dados, não há o que otimizar.
+                </p>
+                <Button variant="outline" size="sm" className="mt-1" onClick={() => { setContaFiltro(''); setCursor(0); }}>
+                  Ver todos os clientes ({recs.length})
+                </Button>
+              </>
+            ) : (
+              <>
+                <p className="font-semibold text-foreground">Tudo resolvido por aqui!</p>
+                <p className="text-sm text-muted-foreground">Nenhuma pendência na fila agora.</p>
+              </>
+            )}
           </div>
         ) : (
           <>
