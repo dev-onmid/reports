@@ -55,7 +55,7 @@ export const OPTIMIZER_MODEL = 'claude-sonnet-4-6';
 // classificação e barateia. A tarefa é extração/classificação guiada por regras — cabe no Haiku.
 export const OPTIMIZER_MODEL_V2 = 'claude-haiku-4-5-20251001';
 export const OPTIMIZER_PROMPT_VERSION = 'otimizador-v1.0';
-export const OPTIMIZER_PROMPT_VERSION_V2 = 'otimizador-v2.2';
+export const OPTIMIZER_PROMPT_VERSION_V2 = 'otimizador-v2.3';
 
 // ─── v2 types ────────────────────────────────────────────────────────────────
 
@@ -311,6 +311,12 @@ export type OptimizerRecomendacao = {
   padrao: string | null;
   connection_id: string | null;
   account_id: string | null;
+  // Veredito técnico da IA ("R$2,69 gasto, 111 impressões, 0% CTR...") — vai para o painel
+  // "Por que essa recomendação?", NUNCA para o título. O título é sempre linguagem natural.
+  leitura: string;
+  // Objetivo da campanha em linguagem de negócio ("Conversas no WhatsApp", "Geração de leads").
+  // Todo o raciocínio da recomendação existe para MELHORAR o resultado deste objetivo.
+  objetivo: string | null;
 };
 
 function normNodeAcaoTipo(v: unknown): OptimizerNodeAcaoTipo {
@@ -320,6 +326,58 @@ function normNodeAcaoTipo(v: unknown): OptimizerNodeAcaoTipo {
 
 function normConfidence(v: unknown): OptimizerConfidence {
   return (['alta', 'media', 'baixa'] as const).includes(v as never) ? v as OptimizerConfidence : 'media';
+}
+
+// Análises antigas (prompt < v2.2) não trazem acao_tipo — inferimos do verbo inicial da ação
+// em texto livre ("Pausar, criativo fadigado" → PAUSAR). Assim o botão Aplicar funciona
+// também para análises geradas antes do redesign, sem esperar a próxima rodada de IA.
+function inferAcaoTipo(acao: string, declarado: OptimizerNodeAcaoTipo): OptimizerNodeAcaoTipo {
+  if (declarado !== 'NENHUMA') return declarado;
+  const t = (acao ?? '').trim().toLowerCase();
+  if (!t) return 'NENHUMA';
+  if (/^pausar|^pausa\b/.test(t)) return 'PAUSAR';
+  if (/^(ativar|reativar)/.test(t)) return 'ATIVAR';
+  if (/^(escalar|aumentar|reduzir)/.test(t) && /or[çc]amento|%|\br\$/.test(t)) return 'AJUSTAR_ORCAMENTO';
+  if (/^(escalar|aumentar|reduzir) or[çc]amento/.test(t)) return 'AJUSTAR_ORCAMENTO';
+  if (/(trocar|testar|subir|criar).*(criativo|angulo|ângulo|apelo)|criativo novo/.test(t)) return 'TROCAR_CRIATIVO';
+  if (/^(verificar|checar|conferir|revisar|deletar|excluir|arquivar)/.test(t)) return 'VERIFICAR_MANUAL';
+  return 'NENHUMA';
+}
+
+// Traduz o objetivo bruto da campanha (Meta/Google) para linguagem de negócio + o "alvo curto"
+// que a campanha existe para maximizar. É a bússola de toda recomendação: sempre melhorar isto.
+type ObjetivoInfo = { label: string; curto: string; metrica: string; custo: string };
+function objetivoInfo(raw: string | null | undefined): ObjetivoInfo | null {
+  const t = (raw ?? '').toLowerCase();
+  if (!t) return null;
+  if (/whats|messag|conversa|mensag|inbox/.test(t)) return { label: 'Conversas no WhatsApp', curto: 'conversas', metrica: 'Conversas', custo: 'Custo por conversa' };
+  if (/lead|formul/.test(t)) return { label: 'Geração de leads', curto: 'leads', metrica: 'Leads', custo: 'Custo por lead' };
+  if (/sales|vend|purchase|convers[aã]o|compra|checkout/.test(t)) return { label: 'Vendas', curto: 'vendas', metrica: 'Vendas', custo: 'Custo por venda' };
+  if (/traffic|tr[aá]fego|link_click|clique/.test(t)) return { label: 'Tráfego no site', curto: 'cliques no link', metrica: 'Cliques', custo: 'Custo por clique' };
+  if (/engag|engaj/.test(t)) return { label: 'Engajamento', curto: 'engajamento', metrica: 'Engajamentos', custo: 'Custo por engajamento' };
+  if (/awareness|reconhec|alcance|reach|brand/.test(t)) return { label: 'Reconhecimento de marca', curto: 'alcance', metrica: 'Alcance', custo: 'CPM' };
+  if (/app|install/.test(t)) return { label: 'Instalações do app', curto: 'instalações', metrica: 'Instalações', custo: 'Custo por instalação' };
+  return { label: (raw ?? '').slice(0, 40), curto: 'resultado', metrica: 'Conversões', custo: 'CPL' };
+}
+
+// Título do card em linguagem natural, SEMPRE ancorado no resultado do objetivo — qualquer
+// funcionário entende do que se trata sem ler métrica. O dado técnico (veredito da IA) vai
+// para `leitura`, dentro do painel "por quê".
+function tituloAmigavel(tipo: OptimizerNodeAcaoTipo, nivel: OptimizerObjetoTipo, sev: OptimizerVerdict, alvo: string | null): string {
+  const nome = nivel === 'campaign' ? 'campanha' : nivel === 'adset' ? 'conjunto de anúncios' : 'criativo';
+  const artigo = nivel === 'campaign' ? 'Uma' : 'Um';
+  const semAlvo = alvo && alvo !== 'resultado' ? `gerar ${alvo}` : 'trazer resultado';
+  const maisAlvo = alvo && alvo !== 'resultado' ? `mais ${alvo}` : 'mais resultado';
+  switch (tipo) {
+    case 'PAUSAR': return `${artigo} ${nome} está gastando sem ${semAlvo}`;
+    case 'ATIVAR': return `${artigo} ${nome} pausado pode voltar a ${semAlvo}`;
+    case 'AJUSTAR_ORCAMENTO': return `Dá para ajustar o orçamento e buscar ${maisAlvo}`;
+    case 'TROCAR_CRIATIVO': return `Este criativo cansou e está trazendo menos ${alvo && alvo !== 'resultado' ? alvo : 'resultado'}`;
+    default:
+      return sev === 'URGENTE'
+        ? `${artigo} ${nome} precisa de uma decisão para não perder ${maisAlvo}`
+        : `${artigo} ${nome} pode render ${maisAlvo} com um ajuste`;
+  }
 }
 
 export function buildRecomendacoes(
@@ -342,6 +400,7 @@ export function buildRecomendacoes(
   const push = (o: {
     objeto_tipo: OptimizerObjetoTipo;
     objeto_id: string; objeto_nome: string; campanha_nome: string;
+    objetivo: ObjetivoInfo | null;
     classificacao: OptimizerVerdict; veredito: string; acao: string;
     acao_tipo: OptimizerNodeAcaoTipo; acao_parametros: Record<string, unknown>;
     confianca_item: OptimizerConfidence; depende_de: string | null; padrao: string | null;
@@ -352,9 +411,10 @@ export function buildRecomendacoes(
     if (!o.acao?.trim()) return;
 
     const auto = acaoAutoByObj.get(o.objeto_id);
+    const tipoEfetivo = inferAcaoTipo(o.acao, o.acao_tipo);
     const structTipo: OptimizerAcaoTipo | null =
-      (o.acao_tipo === 'PAUSAR' || o.acao_tipo === 'ATIVAR' || o.acao_tipo === 'AJUSTAR_ORCAMENTO')
-        ? o.acao_tipo
+      (tipoEfetivo === 'PAUSAR' || tipoEfetivo === 'ATIVAR' || tipoEfetivo === 'AJUSTAR_ORCAMENTO')
+        ? tipoEfetivo
         : (auto ? auto.acao : null);
     const parametros = { ...(o.acao_parametros ?? {}), ...(auto?.parametros ?? {}) };
     const aplicavel = structTipo != null && (structTipo !== 'AJUSTAR_ORCAMENTO' || o.objeto_tipo === 'adset');
@@ -373,7 +433,8 @@ export function buildRecomendacoes(
         objeto_nome: o.objeto_nome,
         campanha_nome: o.campanha_nome,
         severidade: o.classificacao === 'URGENTE' ? 'urgente' : 'atencao',
-        titulo: o.veredito?.trim() || o.acao,
+        titulo: tituloAmigavel(tipoEfetivo, o.objeto_tipo, o.classificacao, o.objetivo?.curto ?? null),
+        objetivo: o.objetivo?.label ?? null,
         texto_recomendacao: o.acao,
         metricas_chave: o.metricas_chave.filter((m) => m.valor && m.valor !== '—').slice(0, 3),
         fatos: o.fatos,
@@ -386,25 +447,32 @@ export function buildRecomendacoes(
         padrao: o.padrao,
         connection_id: meta.connection_id,
         account_id: meta.account_id,
+        leitura: o.veredito?.trim() ?? '',
       },
     });
   };
 
   for (const camp of result.analise_campanhas ?? []) {
+    // Objetivo herdado por toda a árvore da campanha — é a bússola da recomendação e
+    // renomeia a métrica de resultado (ex: "Conversas" p/ WhatsApp, "Leads" p/ formulário).
+    const obj = objetivoInfo(camp.objetivo);
+    const mConv = obj?.metrica ?? 'Conversões';
+    const mCusto = obj?.custo ?? 'CPL';
     push({
       objeto_tipo: 'campaign', objeto_id: camp.id, objeto_nome: camp.nome, campanha_nome: camp.nome,
+      objetivo: obj,
       classificacao: camp.classificacao, veredito: camp.veredito, acao: camp.acao,
       acao_tipo: camp.acao_tipo, acao_parametros: camp.acao_parametros, confianca_item: camp.confianca_item,
       depende_de: camp.depende_de, padrao: camp.padrao,
       metricas_chave: [
         { rotulo: 'Gasto', valor: money(camp.gasto) },
-        { rotulo: 'Conversões', valor: num(camp.conversoes) },
-        { rotulo: 'CPL', valor: money(camp.cpl) },
+        { rotulo: mConv, valor: num(camp.conversoes) },
+        { rotulo: mCusto, valor: money(camp.cpl) },
       ],
       fatos: [
         { rotulo: 'Gasto', valor: money(camp.gasto) },
-        { rotulo: 'Conversões', valor: num(camp.conversoes) },
-        { rotulo: 'CPL', valor: money(camp.cpl) },
+        { rotulo: mConv, valor: num(camp.conversoes) },
+        { rotulo: mCusto, valor: money(camp.cpl) },
         { rotulo: 'CTR', valor: pct(camp.ctr) },
         { rotulo: 'Orçamento diário', valor: money(camp.orcamento_diario) },
       ],
@@ -412,18 +480,19 @@ export function buildRecomendacoes(
     for (const conj of camp.conjuntos ?? []) {
       push({
         objeto_tipo: 'adset', objeto_id: conj.id, objeto_nome: conj.nome, campanha_nome: camp.nome,
+        objetivo: obj,
         classificacao: conj.classificacao, veredito: conj.veredito, acao: conj.acao,
         acao_tipo: conj.acao_tipo, acao_parametros: conj.acao_parametros, confianca_item: conj.confianca_item,
         depende_de: conj.depende_de, padrao: conj.padrao,
         metricas_chave: [
           { rotulo: 'Gasto', valor: money(conj.gasto) },
-          { rotulo: 'Conversões', valor: num(conj.conversoes) },
-          { rotulo: 'CPL', valor: money(conj.cpl) },
+          { rotulo: mConv, valor: num(conj.conversoes) },
+          { rotulo: mCusto, valor: money(conj.cpl) },
         ],
         fatos: [
           { rotulo: 'Gasto', valor: money(conj.gasto) },
-          { rotulo: 'Conversões', valor: num(conj.conversoes) },
-          { rotulo: 'CPL', valor: money(conj.cpl) },
+          { rotulo: mConv, valor: num(conj.conversoes) },
+          { rotulo: mCusto, valor: money(conj.cpl) },
           { rotulo: 'CTR', valor: pct(conj.ctr) },
           { rotulo: 'Orçamento diário', valor: money(conj.orcamento_diario) },
           { rotulo: 'Dias ativo', valor: conj.dias_ativo != null ? String(conj.dias_ativo) : '—' },
@@ -432,18 +501,19 @@ export function buildRecomendacoes(
       for (const ad of conj.anuncios ?? []) {
         push({
           objeto_tipo: 'ad', objeto_id: ad.id, objeto_nome: ad.nome, campanha_nome: camp.nome,
+          objetivo: obj,
           classificacao: ad.classificacao, veredito: ad.veredito, acao: ad.acao,
           acao_tipo: ad.acao_tipo, acao_parametros: ad.acao_parametros, confianca_item: ad.confianca_item,
           depende_de: ad.depende_de, padrao: ad.padrao,
           metricas_chave: [
             { rotulo: 'Gasto', valor: money(ad.gasto) },
-            { rotulo: 'Conversões', valor: num(ad.conversoes) },
-            { rotulo: 'CPL', valor: money(ad.cpl) },
+            { rotulo: mConv, valor: num(ad.conversoes) },
+            { rotulo: mCusto, valor: money(ad.cpl) },
           ],
           fatos: [
             { rotulo: 'Gasto', valor: money(ad.gasto) },
-            { rotulo: 'Conversões', valor: num(ad.conversoes) },
-            { rotulo: 'CPL', valor: money(ad.cpl) },
+            { rotulo: mConv, valor: num(ad.conversoes) },
+            { rotulo: mCusto, valor: money(ad.cpl) },
             { rotulo: 'CTR', valor: pct(ad.ctr) },
             { rotulo: 'Ranking de qualidade', valor: ad.quality_ranking ?? '—' },
             { rotulo: 'Ranking de engajamento', valor: ad.engagement_ranking ?? '—' },
@@ -503,6 +573,27 @@ Regra de ouro das acoes_automaticas:
   3. O conjunto/anuncio tiver mais dias ativos que min_dias_aprendizado
   4. No maximo 2 acoes EXECUTAR_AGORA por ciclo (mesmo em AUTOMATICO_TOTAL)
 - Em modo "DIAGNOSTICO_APENAS" ou "RECOMENDACAO_COM_APROVACAO": acoes_automaticas deve ser array vazio [].
+
+==================================================
+NORTE DE TODA RECOMENDACAO (leia antes de tudo)
+==================================================
+CADA campanha existe para ENTREGAR UM RESULTADO ESPECIFICO — o objetivo dela. Toda analise,
+todo veredito e toda acao que voce escrever tem UM proposito unico: fazer esse resultado
+CRESCER (mais volume) e/ou ficar MAIS BARATO (menor custo por resultado). Nunca recomende algo
+que nao mova o ponteiro do objetivo.
+
+Traduza o objetivo para o resultado concreto que precisa melhorar e mire nele:
+- Objetivo de MENSAGENS/WhatsApp -> o resultado e CONVERSAS INICIADAS. Sua meta: MAIS conversas
+  a um custo por conversa menor. Nao fale de "leads" nem de compras aqui.
+- Objetivo de LEADS/formulario -> o resultado e LEADS. Sua meta: MAIS leads, CPL menor.
+- Objetivo de VENDAS/conversao -> o resultado e VENDAS/receita. Sua meta: MAIS vendas, ROAS maior.
+- Objetivo de TRAFEGO -> o resultado e CLIQUES no link. Sua meta: MAIS cliques, CPC menor. (Nao cobre lead/venda.)
+- Objetivo de ENGAJAMENTO -> o resultado e INTERACOES. Objetivo de RECONHECIMENTO -> ALCANCE/frequencia sadia.
+Quando for pausar algo, e porque ele consome verba SEM entregar esse resultado (tirando dinheiro
+do que entrega). Quando for escalar, e porque aquilo entrega o resultado barato e cabe mais verba.
+Quando for trocar criativo, e porque o resultado caiu e um criativo novo pode recupera-lo. Escreva
+a acao e o veredito sempre conectando ao resultado do objetivo (ex: "Pausar: R$X sem nenhuma
+conversa em 3 dias; a verba rende mais nos conjuntos que estao trazendo conversa").
 
 ==================================================
 PASSO 1 — IDENTIFIQUE O OBJETIVO DA CAMPANHA

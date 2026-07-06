@@ -20,6 +20,7 @@ import {
   Search,
   Settings2,
   SlidersHorizontal,
+  Target,
   ThumbsDown,
   Undo2,
   UserRound,
@@ -112,14 +113,15 @@ const SEV: Record<Severidade, { badge: string; dot: string; label: string }> = {
 const SEV_RANK: Record<Severidade, number> = { urgente: 0, atencao: 1, ok: 2 };
 const NIVEL_LABEL: Record<string, string> = { campaign: 'Campanha', adset: 'Conjunto', ad: 'Criativo' };
 
-// Ícone oficial do canal (Meta / Google Ads) — puramente informativo.
-function ChannelIcon({ canal }: { canal: 'meta' | 'google' }) {
+// Selo do canal (Meta / Google Ads) — logo oficial + nome por extenso, inequívoco.
+function ChannelBadge({ canal }: { canal: 'meta' | 'google' }) {
   const src = canal === 'google' ? '/brand/google-ads-logo.png' : '/brand/meta-ads-logo.webp';
   const label = canal === 'google' ? 'Google Ads' : 'Meta Ads';
   return (
-    <span title={label} className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-[var(--radius)] border border-border bg-background">
+    <span className="inline-flex shrink-0 items-center gap-1.5 rounded-[var(--radius)] border border-border bg-background px-2 py-1">
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={src} alt={label} className="max-h-3.5 max-w-3.5 object-contain" />
+      <img src={src} alt={label} className="h-4 w-4 object-contain" />
+      <span className="text-xs font-semibold text-foreground">{label}</span>
     </span>
   );
 }
@@ -414,22 +416,28 @@ function AccountSelector({ contas, value, total, onChange }: {
   const sel = value ? contas.find((c) => c.cliente_id === value) : null;
   return (
     <div className="relative">
+      <p className="mb-1.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+        Cliente — clique para trocar
+      </p>
       <button
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center justify-between gap-2 rounded-[var(--radius)] border border-border bg-card px-3 py-2 text-left hover:border-primary/40"
+        className="flex w-full items-center justify-between gap-2 rounded-[var(--radius)] border border-border bg-card px-3 py-2.5 text-left hover:border-primary/40"
       >
         <span className="flex min-w-0 items-center gap-2">
           {sel
             ? <span className={cn('h-2 w-2 shrink-0 rounded-full', SEV[sel.pior_severidade].dot)} />
             : <MousePointerClick className="h-4 w-4 shrink-0 text-muted-foreground" />}
           <span className="truncate text-sm font-medium text-foreground">
-            {sel ? sel.cliente_nome : 'Fila por prioridade — todas as contas'}
+            {sel ? sel.cliente_nome : 'Todos os clientes — do mais urgente ao menos urgente'}
           </span>
           <span className="shrink-0 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">
-            {sel ? sel.pendencias : total}
+            {sel ? sel.pendencias : total} pendência{(sel ? sel.pendencias : total) === 1 ? '' : 's'}
           </span>
         </span>
-        <ChevronDown className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform', open && 'rotate-180')} />
+        <span className="flex shrink-0 items-center gap-1 text-xs font-semibold text-primary">
+          Trocar
+          <ChevronDown className={cn('h-4 w-4 transition-transform', open && 'rotate-180')} />
+        </span>
       </button>
       {open && (
         <>
@@ -498,6 +506,11 @@ function DecisionCard({ rec, allRecs, busy, onApply, onIgnore, onHuman, onJump }
   const depRec = rec.depende_de ? allRecs.find((r) => r.rec_id === rec.depende_de) ?? null : null;
 
   function handleApply() {
+    // Ajuste de orçamento sem valor definido → abre a edição em vez de mandar um valor vazio.
+    if (isAjuste && !budget.trim()) {
+      setEditing(true);
+      return;
+    }
     const params: { novo_orcamento_diario?: number } = {};
     if (isAjuste && budget.trim()) params.novo_orcamento_diario = Number(budget);
     onApply(rec, params, batchOn ? samePadrao : []);
@@ -512,26 +525,32 @@ function DecisionCard({ rec, allRecs, busy, onApply, onIgnore, onHuman, onJump }
         <ClientAvatar clientId={rec.cliente_id} name={rec.cliente_nome} size="sm" />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-semibold text-foreground">{rec.cliente_nome}</span>
-            <ChannelIcon canal={rec.canal} />
-            <span className="truncate text-xs text-muted-foreground">
-              {NIVEL_LABEL[rec.nivel] ?? rec.nivel} · {rec.campanha_nome}
-            </span>
+            <span className="text-base font-semibold text-foreground">{rec.cliente_nome}</span>
+            <ChannelBadge canal={rec.canal} />
           </div>
+          <p className="mt-1 truncate text-xs text-muted-foreground">
+            <span className="font-semibold uppercase tracking-wide">{NIVEL_LABEL[rec.nivel] ?? rec.nivel}</span>
+            {' '}· {rec.campanha_nome}
+          </p>
+          {rec.objetivo && (
+            <p className="mt-1.5 inline-flex items-center gap-1.5 rounded-[var(--radius)] border border-secondary/30 bg-secondary/10 px-2 py-0.5 text-[11px] text-secondary">
+              <Target className="h-3 w-3" /> Objetivo: {rec.objetivo}
+            </p>
+          )}
         </div>
-        <span className={cn('shrink-0 rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide', sev.badge)}>
+        <span className={cn('shrink-0 rounded border px-2 py-1 text-[11px] font-bold uppercase tracking-wide', sev.badge)}>
           {sev.label}
         </span>
       </div>
 
       <div className="space-y-4 p-4">
-        {/* 2.2 Título + métricas-chave */}
+        {/* 2.2 Título em linguagem natural + métricas-chave */}
         <div>
-          <p className="text-base font-semibold text-foreground">{rec.titulo}</p>
+          <p className="text-xl font-semibold text-foreground">{rec.titulo}</p>
           {rec.metricas_chave.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1">
+            <div className="mt-3 flex flex-wrap gap-2">
               {rec.metricas_chave.map((m, i) => (
-                <span key={i} className="text-xs text-muted-foreground">
+                <span key={i} className="rounded-[var(--radius)] border border-border bg-background px-2.5 py-1.5 text-xs text-muted-foreground">
                   {m.rotulo}: <span className="font-semibold text-foreground">{m.valor}</span>
                 </span>
               ))}
@@ -539,10 +558,11 @@ function DecisionCard({ rec, allRecs, busy, onApply, onIgnore, onHuman, onJump }
           )}
         </div>
 
-        {/* 2.3 Texto da recomendação (cor neutra, nunca verde) */}
-        <p className="rounded-[var(--radius)] border border-border bg-background p-3 text-sm text-foreground">
-          {rec.texto_recomendacao}
-        </p>
+        {/* 2.3 O que fazer (cor neutra, nunca verde) */}
+        <div className="rounded-[var(--radius)] border border-border bg-background p-3">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">O que fazer</p>
+          <p className="mt-1 text-sm leading-relaxed text-foreground">{rec.texto_recomendacao}</p>
+        </div>
 
         {emAnalise && (
           <div className="flex items-center gap-2 rounded-[var(--radius)] border border-secondary/30 bg-secondary/10 p-2.5 text-xs text-secondary">
@@ -566,25 +586,33 @@ function DecisionCard({ rec, allRecs, busy, onApply, onIgnore, onHuman, onJump }
         )}
 
         {/* 2.4 Botões de ação */}
-        <div className="flex flex-wrap gap-2">
-          <Button variant="ghost" size="sm" onClick={() => onIgnore(rec)} disabled={busy}>
-            <ThumbsDown className="h-3.5 w-3.5" /> Ignorar
-          </Button>
-          {isAjuste && !lowConf && (
-            <Button variant="outline" size="sm" onClick={() => setEditing((e) => !e)} disabled={busy}>
-              <SlidersHorizontal className="h-3.5 w-3.5" /> Editar
+        <div className="space-y-1.5">
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => onIgnore(rec)} disabled={busy}>
+              <ThumbsDown className="h-4 w-4" /> Ignorar
             </Button>
-          )}
-          {lowConf ? (
-            <Button size="sm" onClick={() => onHuman(rec)} disabled={busy || emAnalise}>
-              <UserRound className="h-3.5 w-3.5" /> Enviar para análise de um humano
-            </Button>
-          ) : (
-            <Button size="sm" onClick={handleApply} disabled={busy}>
-              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-              {batchOn && samePadrao.length > 0 ? `Aplicar em ${samePadrao.length + 1} contas` : 'Aplicar'}
-            </Button>
-          )}
+            {isAjuste && !lowConf && (
+              <Button variant="outline" onClick={() => setEditing((e) => !e)} disabled={busy}>
+                <SlidersHorizontal className="h-4 w-4" /> Editar valor
+              </Button>
+            )}
+            {lowConf ? (
+              <Button onClick={() => onHuman(rec)} disabled={busy || emAnalise} className="flex-1 sm:flex-none">
+                <UserRound className="h-4 w-4" /> Enviar para análise de um humano
+              </Button>
+            ) : (
+              <Button onClick={handleApply} disabled={busy} className="flex-1 sm:flex-none">
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                {batchOn && samePadrao.length > 0 ? `Aplicar em ${samePadrao.length + 1} contas` : 'Aplicar agora'}
+              </Button>
+            )}
+          </div>
+          {/* Legenda: o que cada botão faz, sem precisar adivinhar */}
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            {lowConf
+              ? 'Esta recomendação precisa de um olhar técnico antes de mexer na conta. Enviar para análise não altera nada — só encaminha para um gestor decidir. Ignorar tira da fila sem fazer nada.'
+              : 'Aplicar executa a ação direto na conta de anúncio (dá para desfazer em seguida). Ignorar só tira da fila — nada muda na conta.'}
+          </p>
         </div>
 
         {/* 3. Toggle "Por que essa recomendação?" */}
@@ -595,6 +623,12 @@ function DecisionCard({ rec, allRecs, busy, onApply, onIgnore, onHuman, onJump }
           </button>
           {why && (
             <div className="mt-2 space-y-3 rounded-[var(--radius)] border border-border bg-background p-3">
+              {/* Leitura técnica da análise (o veredito cru da IA) */}
+              {rec.leitura && (
+                <p className="border-b border-border/60 pb-2 text-xs leading-relaxed text-muted-foreground">
+                  {rec.leitura}
+                </p>
+              )}
               {/* Fatos crus, sem interpretação */}
               <div className="space-y-1">
                 {rec.fatos.map((f, i) => (
