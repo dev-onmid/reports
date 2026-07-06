@@ -406,14 +406,19 @@ function ConfirmToast({ toast, onUndo, onClose }: { toast: ToastState; onUndo: (
 // ---------------------------------------------------------------------------
 // Seletor de conta (dropdown)
 // ---------------------------------------------------------------------------
-function AccountSelector({ contas, value, total, onChange }: {
+function AccountSelector({ contas, value, total, selectedLabel, onChange }: {
   contas: FilaConta[];
   value: string;          // '' = fila por prioridade (todas)
   total: number;          // total de pendências (todas as contas)
+  selectedLabel: string | null; // nome do cliente filtrado mesmo se tiver 0 pendências
   onChange: (clienteId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const sel = value ? contas.find((c) => c.cliente_id === value) : null;
+  // Nome exibido: conta com pendências → nome + contagem; conta filtrada sem pendências →
+  // nome (fallback) + 0; sem filtro → "Todos os clientes".
+  const nomeAtual = sel ? sel.cliente_nome : value ? (selectedLabel ?? 'Cliente selecionado') : 'Todos os clientes — do mais urgente ao menos urgente';
+  const countAtual = sel ? sel.pendencias : value ? 0 : total;
   return (
     <div className="relative">
       <p className="mb-1.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
@@ -426,12 +431,12 @@ function AccountSelector({ contas, value, total, onChange }: {
         <span className="flex min-w-0 items-center gap-2">
           {sel
             ? <span className={cn('h-2 w-2 shrink-0 rounded-full', SEV[sel.pior_severidade].dot)} />
-            : <MousePointerClick className="h-4 w-4 shrink-0 text-muted-foreground" />}
-          <span className="truncate text-sm font-medium text-foreground">
-            {sel ? sel.cliente_nome : 'Todos os clientes — do mais urgente ao menos urgente'}
-          </span>
+            : value
+              ? <span className="h-2 w-2 shrink-0 rounded-full bg-muted-foreground/40" />
+              : <MousePointerClick className="h-4 w-4 shrink-0 text-muted-foreground" />}
+          <span className="truncate text-sm font-medium text-foreground">{nomeAtual}</span>
           <span className="shrink-0 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">
-            {sel ? sel.pendencias : total} pendência{(sel ? sel.pendencias : total) === 1 ? '' : 's'}
+            {countAtual} pendência{countAtual === 1 ? '' : 's'}
           </span>
         </span>
         <span className="flex shrink-0 items-center gap-1 text-xs font-semibold text-primary">
@@ -865,6 +870,36 @@ export default function OtimizadorPage() {
     await loadFila();
   }
 
+  // Resumo auditável do que a IA realmente analisou — prova que rodou e sobre quantos objetos.
+  async function fetchAnalysisResumo(clientId: string): Promise<string> {
+    try {
+      const res = await fetch(`/api/otimizador/analisar?clientId=${encodeURIComponent(clientId)}&hours=2`);
+      if (!res.ok) return '';
+      const data = await res.json() as {
+        items?: Array<{ resultado?: { analise_campanhas?: Array<{
+          acao?: string;
+          conjuntos?: Array<{ acao?: string; anuncios?: Array<{ acao?: string }> }>;
+        }> } }>;
+      };
+      const camps = data.items?.[0]?.resultado?.analise_campanhas ?? [];
+      if (camps.length === 0) {
+        return 'Atenção: a IA não recebeu nenhuma campanha nesta análise — provável falha ao puxar os dados.';
+      }
+      let conj = 0, ad = 0, acoes = 0;
+      for (const c of camps) {
+        if (c.acao?.trim()) acoes++;
+        for (const cj of c.conjuntos ?? []) {
+          conj++;
+          if (cj.acao?.trim()) acoes++;
+          for (const a of cj.anuncios ?? []) { ad++; if (a.acao?.trim()) acoes++; }
+        }
+      }
+      return `Analisou ${camps.length} campanha(s), ${conj} conjunto(s) e ${ad} anúncio(s) — ${acoes} com recomendação de ação.`;
+    } catch {
+      return '';
+    }
+  }
+
   // Confirma que existe análise mais nova que a anterior (polling pós-disparo).
   async function pollForFreshResult(clientId: string, priorTime: number): Promise<boolean> {
     try {
@@ -913,7 +948,8 @@ export default function OtimizadorPage() {
         await pollForFreshResult(manualClientId, priorTime);
         setContaFiltro(manualClientId);
         setCursor(0);
-        setRunMessage(`Análise de ${clientName} concluída.`);
+        const resumo = await fetchAnalysisResumo(manualClientId);
+        setRunMessage(`Análise de ${clientName} concluída. ${resumo}`.trim());
       } else {
         setRunMessage(`Análise do grupo concluída: ${data.ok_count ?? 0} ok, ${data.erros ?? 0} erro(s).`);
       }
@@ -1053,7 +1089,13 @@ export default function OtimizadorPage() {
       {/* Seletor + progresso */}
       {!loading && recs.length > 0 && (
         <section className="space-y-3">
-          <AccountSelector contas={contas} value={contaFiltro} total={recs.length} onChange={(id) => { setContaFiltro(id); setCursor(0); }} />
+          <AccountSelector
+            contas={contas}
+            value={contaFiltro}
+            total={recs.length}
+            selectedLabel={clients.find((c) => c.id === contaFiltro)?.name ?? null}
+            onChange={(id) => { setContaFiltro(id); setCursor(0); }}
+          />
           <div className="flex items-center gap-3">
             <span className="shrink-0 text-xs font-semibold text-muted-foreground">{posicao} de {total}</span>
             <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface-soft">
