@@ -139,6 +139,25 @@ Monitora a conta Webshare (proxy residencial que roteia TODAS as instâncias Evo
 - **Dedupe**: não reenvia o mesmo nível de alerta diariamente — só se mudar de nível, passar ≥3 dias, ou for dia 1.
 - **Env obrigatórias**: `WEBSHARE_API_KEY` (painel Webshare → API), `WEBSHARE_ALERT_EMAIL` (destinatário), `CRON_SECRET` (já existe). GitHub secret: `WEBSHARE_ALERT_URL` (URL completa com `?secret=CRON_SECRET`).
 
+## Alertas de instâncias Evolution desconectadas
+
+Monitora o status de todas as instâncias na VPS Evolution e alerta quando alguma desconecta. Três camadas de alerta com redundância (se WhatsApp cair, banner + email ainda chegam).
+
+| Arquivo | Papel |
+|---|---|
+| `src/lib/evolution-instance-alerts.ts` | `fetchDisconnectedInstances()` (chama VPS diretamente), `sendInstanceAlerts()` (dedup + WhatsApp + Gmail), `buildWhatsAppMessage()`, `buildEmailHtml()` |
+| `src/app/api/alerts/evolution-status/route.ts` | GET — chamado pelo banner do dashboard a cada 5 min; retorna lista de instâncias desconectadas |
+| `src/app/api/alerts/evolution-cron/route.ts` | GET secret-guarded — chama `sendInstanceAlerts()` com dedup por `(instance, status, alert_date)` |
+| `src/components/layout/evolution-alert-banner.tsx` | Banner vermelho no topo do dashboard, polling a cada 5 min, dismiss com re-show após 30 min |
+| `.github/workflows/evolution-alert.yml` | Cron `0 10 * * 1-5` (07h BRT) e `0 17 * * 1-5` (14h BRT) via GitHub Actions |
+
+- **Dedup**: tabela `evolution_alert_log (instance TEXT, status TEXT, alert_date DATE, UNIQUE(instance, status, alert_date))` — não repete o mesmo alerta de mesma instância+status no mesmo dia.
+- **Destino WhatsApp**: reutiliza instância `numero_matheus_4398835555` + grupo da tabela `optimizer_whatsapp_config`.
+- **Destino Email**: Gmail conectado + env `WEBSHARE_ALERT_EMAIL` (mesma do Webshare).
+- **Razões de desconexão interpretadas**: 401 → sessão revogada (reconectar QR); 403 → bloqueio; `device_removed` → aparelho removido; `connecting` → reconectando.
+- **Banner**: aparece em qualquer página do dashboard. Botão de refresh manual + fechar temporariamente.
+- **Secret necessário no GitHub**: `EVOLUTION_ALERT_URL` (URL completa: `/api/alerts/evolution-cron?secret=CRON_SECRET`).
+
 ## Relatórios automáticos mensais
 
 - **Cron via GitHub Actions** (`.github/workflows/reports-cron-monthly.yml`), não Vercel — roda **todo dia** às 11h UTC (08h BRT) e chama `GET /api/reports/cron-monthly?secret=...`.
@@ -183,15 +202,16 @@ Módulo de análise automática de performance — arquivos principais:
 
 | Arquivo | Papel |
 |---|---|
-| `src/lib/optimizer.ts` | Tipos v1+v2, payload builder, Camada 1, system prompts |
+| `src/lib/optimizer.ts` | Tipos v1+v2, payload builder, Camada 1, system prompts, `buildRecomendacoes`, `pareceMultiAcao` |
 | `src/lib/optimizer-whatsapp.ts` | Envio do relatório de análise via Evolution API (fire-and-forget) |
-| `src/app/api/otimizador/analisar/route.ts` | POST análise (v1 Camada 1→IA / v2 semanal), GET fila, PATCH log |
+| `src/app/api/otimizador/analisar/route.ts` | POST análise (v1 Camada 1→IA / v2 semanal), PATCH log |
+| `src/app/api/otimizador/fila/route.ts` | GET fila global de decisões — cada análise em try/catch isolado (falha em uma não derruba fila toda) |
 | `src/app/api/otimizador/weekly/route.ts` | Cron semanal Mon-Fri com rodízio por `analise_dia_semana` |
 | `src/app/api/otimizador/executar/route.ts` | POST execução de ação automática na Meta API |
 | `src/app/api/otimizador/config/[clientId]/route.ts` | GET/POST config por cliente (modo, dia rodízio, limites) |
 | `src/app/api/otimizador/whatsapp-config/route.ts` | GET/POST config global de WhatsApp do otimizador |
 | `src/app/api/otimizador/whatsapp-groups/route.ts` | GET grupos Evolution disponíveis |
-| `src/app/(dashboard)/otimizador/page.tsx` | UI do painel v2 — lista, detail v1/v2, modal config, aprovações |
+| `src/app/(dashboard)/otimizador/page.tsx` | UI — fila de decisão com `DecisionCard` (1 card visível por vez), modal config, aprovações |
 | `src/app/(dashboard)/configuracoes/page.tsx` | Aba "Otimizador" — config WhatsApp global (admin) |
 
 ### Decisões arquiteturais do Otimizador v2
@@ -207,6 +227,10 @@ Módulo de análise automática de performance — arquivos principais:
 - **DB para v2**: `conjunto_id` = `cliente_id` (análise da conta inteira). `semana_analise` = `"2026-W26"`. `estado_da_conta` = `SAUDAVEL | ATENCAO | CRISE`. `resumo_executivo` = texto 3-5 frases.
 - **GET /analisar**: lookback 200h (8 dias) para capturar análises semanais. Retorna `semana_analise`, `modo_operacao`, `estado_da_conta`, `resumo_executivo` além das colunas v1.
 - **UI detecta v2**: `isV2Result()` checa presença de `estado_da_conta` no resultado. v2 renderiza `V2DetailPanel`; v1 renderiza `V1DetailPanel` (backward compat).
+- **Fila de decisão (`/api/otimizador/fila`)**: rota separada da `/analisar`. Cada análise é montada em try/catch próprio — uma análise com dado corrompido (ex: `motivos=undefined` em registros antigos) some da fila com log de aviso, nunca derruba a fila global. `buildRecomendacoes` usa `Array.isArray(o.motivos)` antes de acessar `.length` (bug que zerава a fila global foi corrigido em 24c8a85).
+- **Granularidade 1-nó-1-ação** (prompt V2.8+): regra no PASSO 3.4 — 1 nó = 1 objeto = 1 ação. Múltiplos objetos geram nós separados com `depende_de`. Trava de código `pareceMultiAcao` (detecta 2+ verbos de ação no texto) força `confianca_item="baixa"` + `acao_tipo=VERIFICAR_MANUAL` mesmo se IA ignorar a regra.
+- **Campo `motivos: string[]`**: cada nó tem 2-4 tópicos já interpretados (fato + comparação, ex: "Custava R$9,20 — meta é R$20"). Fallback determinístico a partir de `fatos` para análises antigas sem o campo.
+- **`DecisionCard` (UI)**: mostra 1 card por vez (a próxima decisão da fila). Título como pergunta direta, motivos como lista de tópicos. Botões dinâmicos: "Reativar/Pausar/Ajustar agora" + "Não fazer nada". Rodapé mostra quantas decisões restam para a mesma campanha.
 - **Cron**: GitHub Actions `0 10 * * 1-5` é o primário. Vercel cron como backup (Hobby só 1x/dia, mas horário coincide).
 
 ### Decisões arquiteturais do Otimizador v1 (ainda em uso para backward compat)
