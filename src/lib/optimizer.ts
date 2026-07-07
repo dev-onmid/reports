@@ -55,7 +55,7 @@ export const OPTIMIZER_MODEL = 'claude-sonnet-4-6';
 // classificação e barateia. A tarefa é extração/classificação guiada por regras — cabe no Haiku.
 export const OPTIMIZER_MODEL_V2 = 'claude-haiku-4-5-20251001';
 export const OPTIMIZER_PROMPT_VERSION = 'otimizador-v1.0';
-export const OPTIMIZER_PROMPT_VERSION_V2 = 'otimizador-v2.8';
+export const OPTIMIZER_PROMPT_VERSION_V2 = 'otimizador-v2.9';
 
 // ─── v2 types ────────────────────────────────────────────────────────────────
 
@@ -298,6 +298,9 @@ export type OptimizerRecomendacao = {
   objeto_id: string;
   objeto_nome: string;
   campanha_nome: string;
+  // Nome do conjunto pai (para nivel adset é o próprio objeto; para campaign é null) —
+  // permite ao card mostrar a hierarquia Campanha › Conjunto › Criativo pelo NOME.
+  conjunto_nome: string | null;
   severidade: OptimizerRecomendacaoSeveridade;
   titulo: string;
   texto_recomendacao: string;
@@ -415,6 +418,7 @@ export function buildRecomendacoes(
   const push = (o: {
     objeto_tipo: OptimizerObjetoTipo;
     objeto_id: string; objeto_nome: string; campanha_nome: string;
+    conjunto_nome: string | null;
     objetivo: ObjetivoInfo | null;
     gasto: number; conversoes: number;
     classificacao: OptimizerVerdict; veredito: string; acao: string;
@@ -458,6 +462,7 @@ export function buildRecomendacoes(
         objeto_id: o.objeto_id,
         objeto_nome: o.objeto_nome,
         campanha_nome: o.campanha_nome,
+        conjunto_nome: o.conjunto_nome,
         severidade: o.classificacao === 'URGENTE' ? 'urgente' : o.classificacao === 'ATENCAO' ? 'atencao' : 'ok',
         titulo: tituloAmigavel(tipoEfetivo, o.objeto_tipo, o.classificacao, o.objetivo?.curto ?? null),
         objetivo: o.objetivo?.label ?? null,
@@ -493,6 +498,7 @@ export function buildRecomendacoes(
     const mCusto = obj?.custo ?? 'CPL';
     push({
       objeto_tipo: 'campaign', objeto_id: camp.id, objeto_nome: camp.nome, campanha_nome: camp.nome,
+      conjunto_nome: null,
       objetivo: obj, gasto: Number(camp.gasto) || 0, conversoes: Number(camp.conversoes) || 0,
       classificacao: camp.classificacao, veredito: camp.veredito, acao: camp.acao,
       acao_tipo: camp.acao_tipo, acao_parametros: camp.acao_parametros, confianca_item: camp.confianca_item,
@@ -513,6 +519,7 @@ export function buildRecomendacoes(
     for (const conj of camp.conjuntos ?? []) {
       push({
         objeto_tipo: 'adset', objeto_id: conj.id, objeto_nome: conj.nome, campanha_nome: camp.nome,
+        conjunto_nome: conj.nome,
         objetivo: obj, gasto: Number(conj.gasto) || 0, conversoes: Number(conj.conversoes) || 0,
         classificacao: conj.classificacao, veredito: conj.veredito, acao: conj.acao,
         acao_tipo: conj.acao_tipo, acao_parametros: conj.acao_parametros, confianca_item: conj.confianca_item,
@@ -534,6 +541,7 @@ export function buildRecomendacoes(
       for (const ad of conj.anuncios ?? []) {
         push({
           objeto_tipo: 'ad', objeto_id: ad.id, objeto_nome: ad.nome, campanha_nome: camp.nome,
+          conjunto_nome: conj.nome,
           objetivo: obj, gasto: Number(ad.gasto) || 0, conversoes: Number(ad.conversoes) || 0,
           classificacao: ad.classificacao, veredito: ad.veredito, acao: ad.acao,
           acao_tipo: ad.acao_tipo, acao_parametros: ad.acao_parametros, confianca_item: ad.confianca_item,
@@ -629,20 +637,52 @@ a acao e o veredito sempre conectando ao resultado do objetivo (ex: "Pausar: R$X
 conversa em 3 dias; a verba rende mais nos conjuntos que estao trazendo conversa").
 
 ==================================================
-PASSO 1 — IDENTIFIQUE O OBJETIVO DA CAMPANHA
+PASSO 1 — A BUSSOLA E O OBJETIVO DE CADA CAMPANHA (nunca o da conta)
 ==================================================
-Leia "metas.objetivo_principal". Isso define qual metrica e a principal:
+Cada campanha do payload traz seu proprio campo "objetivo" (ex: OUTCOME_LEADS, OUTCOME_SALES,
+OUTCOME_ENGAGEMENT). E ESSE campo — campanha a campanha — que define a metrica de julgamento:
 
-OBJETIVO = "leads": metrica principal CPL. CPL acima de cpl_maximo E CRITICO.
-OBJETIVO = "trafego": metrica principal CPC e CTR. NAO mencione CPL como problema.
-OBJETIVO = "vendas": metrica principal ROAS e CPA. Foque em retorno.
-OBJETIVO = "engajamento": metrica principal taxa de engajamento. NAO espere leads.
-OBJETIVO = "reconhecimento": metrica principal CPM, alcance e frequencia. Conversoes NAO sao esperadas.
+- Campanha de MENSAGENS/WhatsApp -> julgue por CUSTO POR CONVERSA INICIADA vs cpl_ideal/cpl_maximo
+  do planejamento. Conversa iniciada CONTA como o "lead" do planejamento.
+- Campanha de LEADS/formulario -> julgue por CPL vs cpl_ideal/cpl_maximo.
+- Campanha de VENDAS/conversao (pixel de compra) -> julgue por CPA e ROAS. Referencia de
+  viabilidade: o CPA precisa fazer sentido frente ao ticket_medio.
+- Campanha de TRAFEGO -> CPC e CTR. NAO mencione CPL como problema.
+- Campanha de ENGAJAMENTO puro -> taxa de engajamento. NAO espere leads.
+- Campanha de RECONHECIMENTO -> CPM, alcance e frequencia. Conversoes NAO sao esperadas.
+
+ATENCAO — WhatsApp na Meta: campanhas de conversa quase sempre vem com objetivo
+"OUTCOME_ENGAGEMENT". Se os conjuntos otimizam para CONVERSATIONS / REPLIES / mensagens,
+trate a campanha como CAMPANHA DE CONVERSAS (regra de MENSAGENS acima), NUNCA como
+"engajamento" generico.
+
+O QUE O BLOCO "metas" (PLANEJAMENTO MENSAL) SIGNIFICA — E O QUE ELE NAO SIGNIFICA:
+- "metas" vem do planejamento comercial do cliente (funil do mes). Dele voce USA: cpl_ideal e
+  cpl_maximo (custo-alvo por lead — vale para formulario, cadastro E conversa iniciada),
+  volume_leads_meta_mensal e orcamento.
+- "objetivo_principal" e "ticket_medio" descrevem o NEGOCIO (como o cliente mede o mes), NAO
+  como julgar campanhas. Cliente com meta de faturamento (objetivo_principal="vendas")
+  NORMALMENTE alcanca essa meta CAPTANDO leads/conversas via trafego — o fechamento da venda
+  acontece FORA do anuncio (comercial, reuniao, follow-up).
+- PROIBIDO: apontar como problema que "a campanha rastreia conversas/leads mas o objetivo da
+  conta e vendas"; chamar conversa/lead de "resultado intermediario" como se fosse defeito;
+  usar ticket_medio ou meta de faturamento para julgar CPL de campanha de leads/conversas.
+  Qualidade/qualificacao do lead e assunto de reuniao com o cliente — NAO e diagnostico de
+  trafego e NUNCA deve virar motivo, veredito ou acao.
+- So cobre venda direta (CPA/ROAS) de campanha cujo PROPRIO objetivo e vendas/conversao.
+
+ORDEM DE ANALISE DO GESTOR (siga esta ordem dentro de cada campanha):
+1º CRIATIVO (anuncios): qualidade da peca, CTR, rankings, fadiga.
+2º SEGMENTACAO (conjuntos): publico, frequencia, saturacao, orcamento.
+3º CAMPANHA: estrutura, canibalizacao, estrategia.
+Antes de recomendar pausar/mexer na CAMPANHA inteira, verifique se o problema se resolve mais
+barato no nivel do criativo ou do conjunto — gestor bom troca a peca antes de derrubar a campanha.
 
 ==================================================
 PASSO 2 — CRUZE METRICAS COM METAS
 ==================================================
-Compare: CPL atual vs cpl_ideal e cpl_maximo, volume de conversoes vs meta projetada, gasto vs orcamento.
+Compare: CPL atual vs cpl_ideal e cpl_maximo (somando apenas campanhas cujo resultado e
+lead/conversa), volume de conversoes vs meta projetada, gasto vs orcamento.
 Classifique a conta: SAUDAVEL (tudo dentro), ATENCAO (levemente fora), CRISE (muito fora ou CPL > cpr_emergencia).
 
 ==================================================
@@ -718,8 +758,9 @@ Regras de classificacao:
 - ATENCAO: CTR caindo OU 1 ranking Below Average OU CPL levemente acima.
 - URGENTE: multiplos rankings Below Average OU frequencia alta + CTR caindo OU CPL > cpl_maximo.
 - Nao classifique como URGENTE nada com menos de min_dias_aprendizado dias (esta aprendendo).
-- Para objetivo != leads, nao use CPL como criterio (siga o PASSO 1).
-Campanha: classifique pelo pior conjunto relevante + alinhamento com o objetivo da conta.
+- CPL/custo por conversa como criterio SO em campanha cujo proprio objetivo e leads/conversas
+  (siga o PASSO 1). Campanha de vendas julga por CPA/ROAS; trafego por CPC/CTR.
+Campanha: classifique pelo pior conjunto relevante + entrega do SEU proprio objetivo.
 
 ==================================================
 TESTE JUSTO — GASTO MINIMO ANTES DE JULGAR "SEM RESULTADO" (regra critica)
@@ -1086,6 +1127,16 @@ function collectIaVerdicts(iaCampanhas: unknown): Map<string, IaVerdict> {
   return map;
 }
 
+// WhatsApp na Meta: campanhas de conversa vêm como OUTCOME_ENGAGEMENT, mas os conjuntos
+// otimizam para CONVERSATIONS/REPLIES. Sem isto, objetivoInfo rotula "Engajamento" e o card
+// fala em "perder engajamento" numa campanha cujo resultado real são conversas iniciadas.
+function objetivoEfetivoCampanha(camp: OptimizerCampaignV2): string {
+  if (/engag/i.test(camp.objetivo) && (camp.conjuntos ?? []).some((c) => /conversation|messag|replies/i.test(c.objetivo_otimizacao ?? ''))) {
+    return 'CONVERSAS_WHATSAPP';
+  }
+  return camp.objetivo;
+}
+
 // Monta a árvore campanha→conjunto→anúncio: métricas do PAYLOAD (verdade), veredito da IA.
 function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown): OptimizerAnaliseCampanha[] {
   const verdicts = collectIaVerdicts(iaCampanhas);
@@ -1099,7 +1150,7 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
     return {
       id: camp.id,
       nome: camp.nome,
-      objetivo: camp.objetivo,
+      objetivo: objetivoEfetivoCampanha(camp),
       gasto: Number(camp.gasto) || 0,
       conversoes: Number(camp.conversoes) || 0,
       cpl: camp.cpl,

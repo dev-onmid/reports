@@ -467,6 +467,12 @@ const VERBO_ACAO: Record<string, string> = {
   AJUSTAR_ORCAMENTO: 'Ajustar agora',
 };
 
+const NIVEL_LABEL: Record<string, string> = {
+  campaign: 'Campanha',
+  adset: 'Conjunto',
+  ad: 'Criativo',
+};
+
 function DecisionCard({ rec, allRecs, posicao, total, busy, onApply, onIgnore, onHuman, onJump }: {
   rec: FilaRec;
   allRecs: FilaRec[];
@@ -536,6 +542,24 @@ function DecisionCard({ rec, allRecs, posicao, total, busy, onApply, onIgnore, o
         </div>
 
         <div className="space-y-4 p-4">
+          {/* Identificação por NOME: nível + objetivo + campanha › conjunto › criativo.
+              Sem isto o gestor não sabe DO QUE o card está falando sem abrir o Gerenciador. */}
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs text-muted-foreground">
+            <span className="shrink-0 rounded border border-border bg-background px-1.5 py-0.5 font-bold uppercase tracking-wide">
+              {NIVEL_LABEL[rec.nivel] ?? rec.nivel}
+            </span>
+            {rec.objetivo && (
+              <span className="shrink-0 rounded border border-border bg-background px-1.5 py-0.5">
+                Objetivo: {rec.objetivo}
+              </span>
+            )}
+            <span className="min-w-0 flex-1 basis-full truncate sm:basis-auto" title={[rec.campanha_nome, rec.nivel !== 'campaign' ? rec.conjunto_nome : null, rec.nivel === 'ad' ? rec.objeto_nome : null].filter(Boolean).join(' › ')}>
+              <span className="font-medium text-foreground">{rec.campanha_nome}</span>
+              {rec.nivel !== 'campaign' && rec.conjunto_nome && <> › {rec.conjunto_nome}</>}
+              {rec.nivel === 'ad' && <> › <span className="font-medium text-foreground">{rec.objeto_nome}</span></>}
+            </span>
+          </div>
+
           {/* Título como pergunta direta — o elemento mais forte da tela */}
           <p className="text-xl font-medium leading-snug text-foreground">{rec.titulo}</p>
 
