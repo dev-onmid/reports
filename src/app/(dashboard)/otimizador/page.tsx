@@ -876,14 +876,24 @@ export default function OtimizadorPage() {
       const res = await fetch(`/api/otimizador/analisar?clientId=${encodeURIComponent(clientId)}&hours=2`);
       if (!res.ok) return '';
       const data = await res.json() as {
-        items?: Array<{ resultado?: { analise_campanhas?: Array<{
-          acao?: string;
-          conjuntos?: Array<{ acao?: string; anuncios?: Array<{ acao?: string }> }>;
-        }> } }>;
+        items?: Array<{
+          erro?: string | null;
+          resultado?: { analise_campanhas?: Array<{
+            acao?: string;
+            conjuntos?: Array<{ acao?: string; anuncios?: Array<{ acao?: string }> }>;
+          }> };
+        }>;
       };
-      const camps = data.items?.[0]?.resultado?.analise_campanhas ?? [];
+      const item = data.items?.[0];
+      const camps = item?.resultado?.analise_campanhas ?? [];
       if (camps.length === 0) {
         return 'Atenção: a IA não recebeu nenhuma campanha nesta análise — provável falha ao puxar os dados.';
+      }
+      // Se o parse da resposta da IA falhou ou veio truncado, todo nó cai num valor padrão sem
+      // ação — o que pareceria "conta perfeita" na fila. Aqui isso vira um alerta explícito,
+      // nunca um silêncio disfarçado de "0 recomendações".
+      if (item?.erro) {
+        return `⚠️ Análise com problema: ${item.erro} Os ${camps.length} objeto(s) analisados podem não refletir a conta real — rode de novo antes de confiar no resultado.`;
       }
       let conj = 0, ad = 0, acoes = 0;
       for (const c of camps) {
