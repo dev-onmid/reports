@@ -55,7 +55,7 @@ export const OPTIMIZER_MODEL = 'claude-sonnet-4-6';
 // classificação e barateia. A tarefa é extração/classificação guiada por regras — cabe no Haiku.
 export const OPTIMIZER_MODEL_V2 = 'claude-haiku-4-5-20251001';
 export const OPTIMIZER_PROMPT_VERSION = 'otimizador-v1.0';
-export const OPTIMIZER_PROMPT_VERSION_V2 = 'otimizador-v2.4';
+export const OPTIMIZER_PROMPT_VERSION_V2 = 'otimizador-v2.5';
 
 // ─── v2 types ────────────────────────────────────────────────────────────────
 
@@ -340,7 +340,7 @@ function inferAcaoTipo(acao: string, declarado: OptimizerNodeAcaoTipo): Optimize
   if (/^(escalar|aumentar|reduzir)/.test(t) && /or[çc]amento|%|\br\$/.test(t)) return 'AJUSTAR_ORCAMENTO';
   if (/^(escalar|aumentar|reduzir) or[çc]amento/.test(t)) return 'AJUSTAR_ORCAMENTO';
   if (/(trocar|testar|subir|criar).*(criativo|angulo|ângulo|apelo)|criativo novo/.test(t)) return 'TROCAR_CRIATIVO';
-  if (/^(verificar|checar|conferir|revisar|deletar|excluir|arquivar)/.test(t)) return 'VERIFICAR_MANUAL';
+  if (/^(verificar|checar|conferir|revisar|deletar|excluir|arquivar|aguardar)/.test(t)) return 'VERIFICAR_MANUAL';
   return 'NENHUMA';
 }
 
@@ -394,6 +394,13 @@ export function buildRecomendacoes(
   const acaoAutoByObj = new Map<string, OptimizerAcaoAutomatica>();
   for (const a of result.acoes_automaticas ?? []) acaoAutoByObj.set(a.objeto_id, a);
 
+  // TESTE JUSTO: só dá pra dizer que um item "falhou" (0 resultado) depois de ter gasto o
+  // suficiente pra ter tido chance. Referência = ~2x o custo-alvo por resultado (CPL/CPA meta);
+  // sem meta, um piso baixo. Abaixo disso, gasto ínfimo com 0 resultado é ESPERADO, não problema.
+  const cm = result.cruzamento_com_metas;
+  const cplRef = (cm?.cpl_maximo ?? cm?.cpl_ideal ?? null);
+  const gastoMinimoParaJulgar = cplRef && cplRef > 0 ? cplRef * 2 : 25;
+
   type Raw = { objeto_id: string; depObjId: string | null; rec: OptimizerRecomendacao };
   const raws: Raw[] = [];
 
@@ -401,6 +408,7 @@ export function buildRecomendacoes(
     objeto_tipo: OptimizerObjetoTipo;
     objeto_id: string; objeto_nome: string; campanha_nome: string;
     objetivo: ObjetivoInfo | null;
+    gasto: number; conversoes: number;
     classificacao: OptimizerVerdict; veredito: string; acao: string;
     acao_tipo: OptimizerNodeAcaoTipo; acao_parametros: Record<string, unknown>;
     confianca_item: OptimizerConfidence; depende_de: string | null; padrao: string | null;
@@ -411,6 +419,10 @@ export function buildRecomendacoes(
 
     const auto = acaoAutoByObj.get(o.objeto_id);
     const tipoEfetivo = inferAcaoTipo(o.acao, o.acao_tipo);
+
+    // Trava anti-ruído: não recomendar PAUSAR "sem resultado" quando o item mal gastou —
+    // R$3 com 0 lead numa meta de R$20 não é falha, é falta de entrega. Elimina os falsos urgentes.
+    if (tipoEfetivo === 'PAUSAR' && o.conversoes === 0 && o.gasto < gastoMinimoParaJulgar) return;
     // Item SAUDÁVEL só entra na fila se carregar uma ação de CRESCIMENTO (escalar orçamento
     // ou reativar) — é uma oportunidade de melhorar o resultado do objetivo, não um problema.
     // Saudável sem ação de crescimento = nada a fazer, fica fora da fila.
@@ -465,7 +477,7 @@ export function buildRecomendacoes(
     const mCusto = obj?.custo ?? 'CPL';
     push({
       objeto_tipo: 'campaign', objeto_id: camp.id, objeto_nome: camp.nome, campanha_nome: camp.nome,
-      objetivo: obj,
+      objetivo: obj, gasto: Number(camp.gasto) || 0, conversoes: Number(camp.conversoes) || 0,
       classificacao: camp.classificacao, veredito: camp.veredito, acao: camp.acao,
       acao_tipo: camp.acao_tipo, acao_parametros: camp.acao_parametros, confianca_item: camp.confianca_item,
       depende_de: camp.depende_de, padrao: camp.padrao,
@@ -485,7 +497,7 @@ export function buildRecomendacoes(
     for (const conj of camp.conjuntos ?? []) {
       push({
         objeto_tipo: 'adset', objeto_id: conj.id, objeto_nome: conj.nome, campanha_nome: camp.nome,
-        objetivo: obj,
+        objetivo: obj, gasto: Number(conj.gasto) || 0, conversoes: Number(conj.conversoes) || 0,
         classificacao: conj.classificacao, veredito: conj.veredito, acao: conj.acao,
         acao_tipo: conj.acao_tipo, acao_parametros: conj.acao_parametros, confianca_item: conj.confianca_item,
         depende_de: conj.depende_de, padrao: conj.padrao,
@@ -506,7 +518,7 @@ export function buildRecomendacoes(
       for (const ad of conj.anuncios ?? []) {
         push({
           objeto_tipo: 'ad', objeto_id: ad.id, objeto_nome: ad.nome, campanha_nome: camp.nome,
-          objetivo: obj,
+          objetivo: obj, gasto: Number(ad.gasto) || 0, conversoes: Number(ad.conversoes) || 0,
           classificacao: ad.classificacao, veredito: ad.veredito, acao: ad.acao,
           acao_tipo: ad.acao_tipo, acao_parametros: ad.acao_parametros, confianca_item: ad.confianca_item,
           depende_de: ad.depende_de, padrao: ad.padrao,
@@ -671,6 +683,38 @@ Regras de classificacao:
 - Nao classifique como URGENTE nada com menos de min_dias_aprendizado dias (esta aprendendo).
 - Para objetivo != leads, nao use CPL como criterio (siga o PASSO 1).
 Campanha: classifique pelo pior conjunto relevante + alinhamento com o objetivo da conta.
+
+==================================================
+TESTE JUSTO — GASTO MINIMO ANTES DE JULGAR "SEM RESULTADO" (regra critica)
+==================================================
+"0 conversao" SO e sinal de problema se o objeto teve VERBA SUFICIENTE pra ter tido chance
+real de converter. Gasto de R$3, R$5, R$10 com 0 resultado nao e "criativo ruim" nem "conjunto
+morto" — e AUSENCIA DE DADO. Julgar isso como URGENTE ou mandar pausar e alarme falso.
+- Referencia de gasto minimo pra julgar 0 conversao como falha real: ~2x o cpl_maximo (ou
+  cpl_ideal se nao houver maximo) da campanha. Sem meta de CPL definida, use um piso de
+  aproximadamente R$25-30 de gasto acumulado no objeto.
+- Abaixo desse piso: classifique NO MAXIMO como ATENCAO (nunca URGENTE), a acao deve ser
+  "Verificar" ou "Aguardar mais dados" (acao_tipo="VERIFICAR_MANUAL"), NUNCA "Pausar" por
+  falta de resultado. Se houver outro motivo real pra pausar (ranking Below Average claro,
+  frequencia alta, etc.) mesmo com pouco gasto, ai sim pode indicar pausar — mas pelo motivo
+  real, nunca so por "0 conversao com gasto baixo".
+- So recomende "Pausar por falta de resultado" quando o gasto acumulado no objeto JA passou
+  desse piso minimo E ainda assim nao converteu nada (ou converteu bem menos que o esperado
+  pro gasto). Cite o gasto real na acao pra deixar isso auditavel (ex: "Pausar: R$47 gastos,
+  0 conversao, 2x o piso de teste sem nenhum resultado").
+- confianca_item: marque "baixa" sempre que a decisao se apoiar em volume de dados pequeno
+  (poucos dias ativo, gasto perto do piso, poucas impressoes). Confianca baixa faz o painel
+  pedir revisao humana antes de aplicar a acao — e o comportamento correto quando o dado e fraco.
+
+ACOES ESPECIFICAS, NAO GENERICAS:
+- "Pausar" sozinho, sem motivo tecnico, e uma acao fraca. Toda acao de pausar/reduzir deve
+  dizer O PORQUE tecnico (ranking, frequencia, tendencia, CPL vs meta) — nunca so "gasta sem
+  resultado" quando o motivo real e outro (publico errado, criativo cansado, fora do momento).
+- Antes de mandar "Pausar" um criativo/conjunto caro, pense se existe alternativa mais util:
+  "Testar novo criativo" (fadiga/ranking ruim mas publico bom), "Reduzir orcamento pela metade"
+  (ainda merece rodar, so com menos risco), "Trocar publico" (CTR ok mas conversao fraca —
+  pode ser o publico, nao o anuncio), antes de simplesmente desligar. So recomende pausar puro
+  quando nao houver ajuste mais barato que valha a pena tentar primeiro.
 
 ==================================================
 PASSO 3.4 — CAMPOS ESTRUTURADOS POR NO (OBRIGATORIOS em todo no ATENCAO/URGENTE)
