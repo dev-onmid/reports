@@ -683,6 +683,7 @@ export default function OtimizadorPage() {
   const [recs, setRecs] = useState<FilaRec[]>([]);
   const [contas, setContas] = useState<FilaConta[]>([]);
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
+  const [filaError, setFilaError] = useState<string | null>(null);
   const [contaFiltro, setContaFiltro] = useState('');
   const [cursor, setCursor] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -717,7 +718,13 @@ export default function OtimizadorPage() {
         setRecs(data.recs ?? []);
         setContas(data.contas ?? []);
         setGeneratedAt(data.generated_at);
+        setFilaError(null);
+      } else {
+        // Nunca deixe uma fila que falhou parecer "conta saudável / sem pendências".
+        setFilaError(`A fila não pôde ser carregada (HTTP ${filaRes.status}). Tente Atualizar; se persistir, avise o suporte.`);
       }
+    } catch {
+      setFilaError('Falha de rede ao carregar a fila. Tente Atualizar.');
     } finally {
       setLoading(false);
     }
@@ -1089,6 +1096,12 @@ export default function OtimizadorPage() {
         {loading ? (
           <div className="flex h-48 items-center justify-center text-sm text-muted-foreground">
             <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Carregando fila...
+          </div>
+        ) : filaError ? (
+          <div className="flex h-48 flex-col items-center justify-center gap-2 rounded-[var(--radius)] border border-destructive/30 bg-destructive/10 p-6 text-center">
+            <AlertTriangle className="h-8 w-8 text-destructive" />
+            <p className="font-semibold text-foreground">Não foi possível carregar a fila</p>
+            <p className="max-w-md text-sm text-muted-foreground">{filaError}</p>
           </div>
         ) : recs.length === 0 ? (
           <div className="flex h-48 flex-col items-center justify-center gap-2 rounded-[var(--radius)] border border-border bg-card p-6 text-center">

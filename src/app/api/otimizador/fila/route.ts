@@ -66,19 +66,25 @@ export async function GET(req: NextRequest) {
       return Response.json({ recs: [], contas: [], generated_at: null });
     }
 
-    // Achata todas as recomendações.
+    // Achata todas as recomendações. Cada análise em seu próprio try/catch: uma análise
+    // problemática (ex: formato antigo faltando um campo) NUNCA pode derrubar a fila inteira
+    // de todos os clientes — no máximo some da fila e é logada.
     const allRecs: OptimizerRecomendacao[] = [];
     for (const log of logs) {
-      const canal: 'meta' | 'google' = log.conta_plataforma === 'google_ads' ? 'google' : 'meta';
-      const recs = buildRecomendacoes(log.resultado, {
-        analise_id: log.id,
-        cliente_id: log.cliente_id,
-        cliente_nome: log.cliente_nome ?? log.cliente_id,
-        canal,
-        connection_id: log.connection_id,
-        account_id: log.account_id,
-      });
-      allRecs.push(...recs);
+      try {
+        const canal: 'meta' | 'google' = log.conta_plataforma === 'google_ads' ? 'google' : 'meta';
+        const recs = buildRecomendacoes(log.resultado, {
+          analise_id: log.id,
+          cliente_id: log.cliente_id,
+          cliente_nome: log.cliente_nome ?? log.cliente_id,
+          canal,
+          connection_id: log.connection_id,
+          account_id: log.account_id,
+        });
+        allRecs.push(...recs);
+      } catch (err) {
+        console.error('[otimizador/fila] falha ao montar recomendações do cliente', log.cliente_id, err);
+      }
     }
 
     // Cruza com o workflow persistido.

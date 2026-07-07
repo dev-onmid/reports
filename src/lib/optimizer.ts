@@ -463,8 +463,12 @@ export function buildRecomendacoes(
         objetivo: o.objetivo?.label ?? null,
         texto_recomendacao: o.acao,
         // Fallback: análises antigas (ou omissão da IA) sem `motivos` reaproveitam os fatos
-        // determinísticos (rótulo: valor) já calculados a partir do payload real.
-        motivos: o.motivos.length > 0 ? o.motivos : o.fatos.slice(0, 4).map((f) => `${f.rotulo}: ${f.valor}`),
+        // determinísticos (rótulo: valor). GUARDA: análises salvas ANTES deste campo existir têm
+        // motivos=undefined — sem o Array.isArray, `.length` quebrava a rota /fila INTEIRA (não só
+        // deste cliente), zerando a fila global com "Última análise em —". Ver hotfix.
+        motivos: (Array.isArray(o.motivos) && o.motivos.length > 0)
+          ? o.motivos
+          : o.fatos.slice(0, 4).map((f) => `${f.rotulo}: ${f.valor}`),
         metricas_chave: o.metricas_chave.filter((m) => m.valor && m.valor !== '—').slice(0, 3),
         fatos: o.fatos,
         acao_estruturada: structTipo
