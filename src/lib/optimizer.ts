@@ -55,7 +55,7 @@ export const OPTIMIZER_MODEL = 'claude-sonnet-4-6';
 // classificação e barateia. A tarefa é extração/classificação guiada por regras — cabe no Haiku.
 export const OPTIMIZER_MODEL_V2 = 'claude-haiku-4-5-20251001';
 export const OPTIMIZER_PROMPT_VERSION = 'otimizador-v1.0';
-export const OPTIMIZER_PROMPT_VERSION_V2 = 'otimizador-v2.7';
+export const OPTIMIZER_PROMPT_VERSION_V2 = 'otimizador-v2.8';
 
 // ─── v2 types ────────────────────────────────────────────────────────────────
 
@@ -202,6 +202,9 @@ export type OptimizerAnaliseAnuncio = {
   confianca_item: OptimizerConfidence;
   depende_de: string | null;   // id de outro objeto (mesma análise) do qual esta ação depende
   padrao: string | null;       // chave canônica do problema, p/ agrupar entre contas (ação em lote)
+  // Motivos em tópicos, já interpretados (fato + comparação), para exibir direto no card
+  // principal — sem precisar abrir painel. Ex: "Custava R$9,20 por conversa — a meta é R$20".
+  motivos: string[];
 };
 
 export type OptimizerAnaliseConjunto = {
@@ -221,6 +224,7 @@ export type OptimizerAnaliseConjunto = {
   confianca_item: OptimizerConfidence;
   depende_de: string | null;
   padrao: string | null;
+  motivos: string[];
   anuncios: OptimizerAnaliseAnuncio[];
 };
 
@@ -241,6 +245,7 @@ export type OptimizerAnaliseCampanha = {
   confianca_item: OptimizerConfidence;
   depende_de: string | null;
   padrao: string | null;
+  motivos: string[];
   conjuntos: OptimizerAnaliseConjunto[];
 };
 
@@ -296,6 +301,9 @@ export type OptimizerRecomendacao = {
   severidade: OptimizerRecomendacaoSeveridade;
   titulo: string;
   texto_recomendacao: string;
+  // Motivos em tópicos já interpretados (2-4 itens), exibidos direto no card principal —
+  // não exige abrir painel. Fallback determinístico a partir de `fatos` quando a IA não trouxe.
+  motivos: string[];
   metricas_chave: Array<{ rotulo: string; valor: string }>;
   fatos: Array<{ rotulo: string; valor: string }>;
   acao_estruturada: {
@@ -412,6 +420,7 @@ export function buildRecomendacoes(
     classificacao: OptimizerVerdict; veredito: string; acao: string;
     acao_tipo: OptimizerNodeAcaoTipo; acao_parametros: Record<string, unknown>;
     confianca_item: OptimizerConfidence; depende_de: string | null; padrao: string | null;
+    motivos: string[];
     metricas_chave: Array<{ rotulo: string; valor: string }>;
     fatos: Array<{ rotulo: string; valor: string }>;
   }) => {
@@ -453,6 +462,9 @@ export function buildRecomendacoes(
         titulo: tituloAmigavel(tipoEfetivo, o.objeto_tipo, o.classificacao, o.objetivo?.curto ?? null),
         objetivo: o.objetivo?.label ?? null,
         texto_recomendacao: o.acao,
+        // Fallback: análises antigas (ou omissão da IA) sem `motivos` reaproveitam os fatos
+        // determinísticos (rótulo: valor) já calculados a partir do payload real.
+        motivos: o.motivos.length > 0 ? o.motivos : o.fatos.slice(0, 4).map((f) => `${f.rotulo}: ${f.valor}`),
         metricas_chave: o.metricas_chave.filter((m) => m.valor && m.valor !== '—').slice(0, 3),
         fatos: o.fatos,
         acao_estruturada: structTipo
@@ -480,7 +492,7 @@ export function buildRecomendacoes(
       objetivo: obj, gasto: Number(camp.gasto) || 0, conversoes: Number(camp.conversoes) || 0,
       classificacao: camp.classificacao, veredito: camp.veredito, acao: camp.acao,
       acao_tipo: camp.acao_tipo, acao_parametros: camp.acao_parametros, confianca_item: camp.confianca_item,
-      depende_de: camp.depende_de, padrao: camp.padrao,
+      depende_de: camp.depende_de, padrao: camp.padrao, motivos: camp.motivos,
       metricas_chave: [
         { rotulo: 'Gasto', valor: money(camp.gasto) },
         { rotulo: mConv, valor: num(camp.conversoes) },
@@ -500,7 +512,7 @@ export function buildRecomendacoes(
         objetivo: obj, gasto: Number(conj.gasto) || 0, conversoes: Number(conj.conversoes) || 0,
         classificacao: conj.classificacao, veredito: conj.veredito, acao: conj.acao,
         acao_tipo: conj.acao_tipo, acao_parametros: conj.acao_parametros, confianca_item: conj.confianca_item,
-        depende_de: conj.depende_de, padrao: conj.padrao,
+        depende_de: conj.depende_de, padrao: conj.padrao, motivos: conj.motivos,
         metricas_chave: [
           { rotulo: 'Gasto', valor: money(conj.gasto) },
           { rotulo: mConv, valor: num(conj.conversoes) },
@@ -521,7 +533,7 @@ export function buildRecomendacoes(
           objetivo: obj, gasto: Number(ad.gasto) || 0, conversoes: Number(ad.conversoes) || 0,
           classificacao: ad.classificacao, veredito: ad.veredito, acao: ad.acao,
           acao_tipo: ad.acao_tipo, acao_parametros: ad.acao_parametros, confianca_item: ad.confianca_item,
-          depende_de: ad.depende_de, padrao: ad.padrao,
+          depende_de: ad.depende_de, padrao: ad.padrao, motivos: ad.motivos,
           metricas_chave: [
             { rotulo: 'Gasto', valor: money(ad.gasto) },
             { rotulo: mConv, valor: num(ad.conversoes) },
@@ -762,7 +774,53 @@ Alem de classificacao/veredito/acao, preencha em CADA no (campanha, conjunto, an
     varias contas (ex: "criativo_fadiga_ranking_conversao", "conjunto_cpl_acima_maximo",
     "orcamento_subentrega"). Use a MESMA string sempre que o padrao se repetir. Se for um caso
     unico/especifico, null.
-Em nos SAUDAVEL sem oportunidade de crescer: acao_tipo="NENHUMA", acao_parametros={}, confianca_item="alta", depende_de=null, padrao=null.
+- "motivos": array de 2 a 4 strings curtas, cada uma um FATO ja com o julgamento embutido
+    (numero + comparacao), nunca so o numero cru. Cada item vira uma linha no card, visivel
+    direto (sem o usuario precisar abrir painel nenhum). Escreva como quem ja fez a conta:
+    - ERRADO: "CPL: R$9,20" (falta o julgamento — bom ou ruim?).
+    - CERTO: "Custava R$9,20 por conversa — a meta e R$20" (fato + comparacao interpretada).
+    - CERTO: "Parou de rodar ha 6 dias, sem motivo cadastrado".
+    - CERTO: "Conteudo ainda faz sentido — nao e campanha sazonal vencida".
+    Em nos SAUDAVEL sem acao (acao=""), motivos = [].
+Em nos SAUDAVEL sem oportunidade de crescer: acao_tipo="NENHUMA", acao_parametros={}, confianca_item="alta", depende_de=null, padrao=null, motivos=[].
+
+==================================================
+REGRA DE GRANULARIDADE — 1 OBJETO, 1 ACAO POR NO (regra critica)
+==================================================
+Cada no em analise_campanhas[] (seja campanha, conjunto ou anuncio) representa UM UNICO objeto
+e DEVE descrever UMA UNICA acao executavel — um acao_tipo, um conjunto de acao_parametros. NUNCA
+combine multiplas acoes sobre multiplos objetos diferentes em um so no, mesmo que pareçam parte
+de uma mesma estrategia (ex: "reativar o anuncio X, pausar o conjunto Y e reduzir o orcamento do
+conjunto Z" NUNCA vai num unico "acao" de campanha). O campo "acao" descreve so UMA acao — nunca
+uma lista separada por virgula, ponto-e-virgula ou " e ".
+
+Se voce identificar que VARIOS objetos da mesma campanha precisam de acao, gere um NO SEPARADO
+de recomendacao para CADA objeto — cada um no seu proprio nivel na arvore (o anuncio recebe sua
+propria entrada em "anuncios", o conjunto sua propria entrada em "conjuntos", etc.), usando
+"depende_de" para expressar relacao de ORDEM entre eles quando a sequencia importar (ex: so
+reduzir orcamento da campanha depois que o conjunto ruim foi pausado). Se nao houver ordem
+obrigatoria entre eles, depende_de fica null em ambos — sao decisoes independentes, cada uma
+com seu proprio card na fila.
+
+ERRADO (um no bundlando 3 acoes sobre 3 objetos):
+{ "id": "camp_500", "classificacao": "URGENTE",
+  "acao": "Reativar o anuncio Dra 05, pausar o conjunto Publico Frio e reduzir o orcamento do conjunto Remarketing",
+  "acao_tipo": "ATIVAR", "acao_parametros": {} }
+  -> ERRADO porque mistura 3 objetos (1 anuncio + 2 conjuntos) e 3 verbos numa unica "acao".
+
+CERTO (3 nos separados, cada um com seu proprio objeto e uma unica acao):
+anuncio: { "id": "ad_dra05", "classificacao": "URGENTE",
+  "acao": "Reativar: custava R$9,20 por conversa, bem abaixo da meta de R$20; parou sem motivo cadastrado",
+  "acao_tipo": "ATIVAR", "acao_parametros": {}, "depende_de": null }
+conjunto: { "id": "adset_frio", "classificacao": "ATENCAO",
+  "acao": "Pausar: publico frio nao converte ha 12 dias, verba rende mais no publico quente",
+  "acao_tipo": "PAUSAR", "acao_parametros": {}, "depende_de": null }
+conjunto: { "id": "adset_remkt", "classificacao": "ATENCAO",
+  "acao": "Reduzir orcamento de R$80 pra R$40/dia apos pausar o publico frio, pra nao dobrar o gasto total",
+  "acao_tipo": "AJUSTAR_ORCAMENTO", "acao_parametros": { "novo_orcamento_diario": 40 }, "depende_de": "adset_frio" }
+  -> CERTO: 3 decisoes independentes na fila; a reducao de orcamento so faz sentido depois da
+     pausa do publico frio, por isso depende_de aponta pra ela. A reativacao do anuncio nao
+     depende de nada, pode ser decidida a qualquer momento.
 
 ==================================================
 PASSO 3.5 — CONTEXTO TEMPORAL E CAUTELA AO REATIVAR (regra critica)
@@ -828,6 +886,7 @@ ESTRUTURA DO JSON DE SAIDA (retorne exatamente este schema):
       "confianca_item": "alta | media | baixa",
       "depende_de": null,
       "padrao": null,
+      "motivos": ["motivo curto ja interpretado", "motivo curto ja interpretado"],
       "conjuntos": [
         {
           "id": "id_real_do_conjunto",
@@ -839,6 +898,7 @@ ESTRUTURA DO JSON DE SAIDA (retorne exatamente este schema):
           "confianca_item": "alta | media | baixa",
           "depende_de": null,
           "padrao": null,
+          "motivos": ["motivo curto ja interpretado", "motivo curto ja interpretado"],
           "anuncios": [
             {
               "id": "id_real_do_anuncio",
@@ -849,7 +909,8 @@ ESTRUTURA DO JSON DE SAIDA (retorne exatamente este schema):
               "acao_parametros": {},
               "confianca_item": "alta | media | baixa",
               "depende_de": null,
-              "padrao": null
+              "padrao": null,
+              "motivos": ["motivo curto ja interpretado", "motivo curto ja interpretado"]
             }
           ]
         }
@@ -955,10 +1016,28 @@ type IaVerdict = {
   confianca_item: OptimizerConfidence;
   depende_de: string | null;
   padrao: string | null;
+  motivos: string[];
 };
 
 function normVerdict(v: unknown): OptimizerVerdict {
   return (['SAUDAVEL', 'ATENCAO', 'URGENTE'] as const).includes(v as never) ? v as OptimizerVerdict : 'ATENCAO';
+}
+
+function normMotivos(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return v.map((m) => String(m ?? '').trim()).filter(Boolean).slice(0, 4);
+}
+
+// Verbos de ação típicos, para detectar card "multi-ação" (bundlando vários objetos/ações
+// num único nó — bug real já visto em produção: "reativar X, pausar Y e reduzir Z"). Heurística
+// determinística de segurança, independente do prompt seguir a regra de granularidade ou não —
+// mesmo padrão de proteção do piso de gasto mínimo (ver gastoMinimoParaJulgar em buildRecomendacoes).
+const VERBOS_ACAO = ['pausar', 'ativar', 'reativar', 'reduzir', 'aumentar', 'escalar', 'trocar', 'consolidar', 'deletar', 'excluir', 'arquivar'];
+function pareceMultiAcao(acao: string): boolean {
+  const t = (acao ?? '').toLowerCase();
+  if (!t) return false;
+  const verbosEncontrados = VERBOS_ACAO.filter((v) => new RegExp(`\\b${v}\\w*`).test(t));
+  return verbosEncontrados.length > 1;
 }
 
 // Achata a árvore de vereditos da IA em um mapa por id (aceita nesting variável e
@@ -968,15 +1047,24 @@ function collectIaVerdicts(iaCampanhas: unknown): Map<string, IaVerdict> {
   const put = (id: unknown, o: Record<string, unknown>) => {
     const key = String(id ?? '');
     if (!key) return;
+    const acaoTexto = String(o.acao ?? o.acao_recomendada ?? '');
+    // Trava anti-conflação: se o texto da ação parece bundlar vários objetos/verbos num nó só,
+    // não confia na execução automática — rebaixa confiança e força revisão humana. Isso vale
+    // mesmo se a IA ignorar a regra de granularidade do PASSO 3.4 (dupla proteção).
+    const multiAcaoDetectada = pareceMultiAcao(acaoTexto);
+    if (multiAcaoDetectada) {
+      console.warn('[otimizador][anti-conflacao] possível card multi-ação detectado:', key, '-', acaoTexto);
+    }
     map.set(key, {
       classificacao: normVerdict(o.classificacao),
       veredito: String(o.veredito ?? o.diagnostico ?? ''),
-      acao: String(o.acao ?? o.acao_recomendada ?? ''),
-      acao_tipo: normNodeAcaoTipo(o.acao_tipo),
+      acao: acaoTexto,
+      acao_tipo: multiAcaoDetectada ? 'VERIFICAR_MANUAL' : normNodeAcaoTipo(o.acao_tipo),
       acao_parametros: (o.acao_parametros && typeof o.acao_parametros === 'object') ? o.acao_parametros as Record<string, unknown> : {},
-      confianca_item: normConfidence(o.confianca_item),
+      confianca_item: multiAcaoDetectada ? 'baixa' : normConfidence(o.confianca_item),
       depende_de: o.depende_de != null && String(o.depende_de).trim() ? String(o.depende_de) : null,
       padrao: o.padrao != null && String(o.padrao).trim() ? String(o.padrao) : null,
+      motivos: normMotivos(o.motivos),
     });
   };
   if (!Array.isArray(iaCampanhas)) return map;
@@ -999,7 +1087,7 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
   const verdicts = collectIaVerdicts(iaCampanhas);
   const fallback: IaVerdict = {
     classificacao: 'ATENCAO', veredito: '', acao: '',
-    acao_tipo: 'NENHUMA', acao_parametros: {}, confianca_item: 'media', depende_de: null, padrao: null,
+    acao_tipo: 'NENHUMA', acao_parametros: {}, confianca_item: 'media', depende_de: null, padrao: null, motivos: [],
   };
   const vOf = (id: string) => verdicts.get(id) ?? fallback;
   return (payload.campanhas ?? []).map((camp) => {
@@ -1021,6 +1109,7 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
       confianca_item: cv.confianca_item,
       depende_de: cv.depende_de,
       padrao: cv.padrao,
+      motivos: cv.motivos,
       conjuntos: (camp.conjuntos ?? []).map((cj) => {
         const jv = vOf(cj.id);
         return {
@@ -1040,6 +1129,7 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
           confianca_item: jv.confianca_item,
           depende_de: jv.depende_de,
           padrao: jv.padrao,
+          motivos: jv.motivos,
           anuncios: (cj.anuncios ?? []).map((ad) => {
             const av = vOf(ad.id);
             return {
@@ -1060,6 +1150,7 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
               confianca_item: av.confianca_item,
               depende_de: av.depende_de,
               padrao: av.padrao,
+              motivos: av.motivos,
             };
           }),
         };

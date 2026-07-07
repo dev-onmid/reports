@@ -19,9 +19,6 @@ import {
   RefreshCw,
   Search,
   Settings2,
-  SlidersHorizontal,
-  Target,
-  ThumbsDown,
   Undo2,
   UserRound,
   WandSparkles,
@@ -29,7 +26,6 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DictateButton } from '@/components/ui/dictate-button';
-import { ClientAvatar } from '@/components/client-avatar';
 import { callerHeaders, getAuthSession } from '@/lib/auth-store';
 import type { Client } from '@/lib/mock-data';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
@@ -111,20 +107,6 @@ const SEV: Record<Severidade, { badge: string; dot: string; label: string }> = {
   ok: { badge: 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300', dot: 'bg-emerald-400', label: 'Oportunidade' },
 };
 const SEV_RANK: Record<Severidade, number> = { urgente: 0, atencao: 1, ok: 2 };
-const NIVEL_LABEL: Record<string, string> = { campaign: 'Campanha', adset: 'Conjunto', ad: 'Criativo' };
-
-// Selo do canal (Meta / Google Ads) — logo oficial + nome por extenso, inequívoco.
-function ChannelBadge({ canal }: { canal: 'meta' | 'google' }) {
-  const src = canal === 'google' ? '/brand/google-ads-logo.png' : '/brand/meta-ads-logo.webp';
-  const label = canal === 'google' ? 'Google Ads' : 'Meta Ads';
-  return (
-    <span className="inline-flex shrink-0 items-center gap-1.5 rounded-[var(--radius)] border border-border bg-background px-2 py-1">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={src} alt={label} className="h-4 w-4 object-contain" />
-      <span className="text-xs font-semibold text-foreground">{label}</span>
-    </span>
-  );
-}
 
 // Link direto para o objeto no Gerenciador de Anúncios nativo.
 function adManagerUrl(rec: FilaRec): string | null {
@@ -478,9 +460,18 @@ function AccountSelector({ contas, value, total, selectedLabel, onChange }: {
 // ---------------------------------------------------------------------------
 // Card de decisão (a recomendação atual)
 // ---------------------------------------------------------------------------
-function DecisionCard({ rec, allRecs, busy, onApply, onIgnore, onHuman, onJump }: {
+// Verbo dinâmico do botão principal — nunca um "Aplicar" genérico quando dá pra ser específico.
+const VERBO_ACAO: Record<string, string> = {
+  PAUSAR: 'Pausar agora',
+  ATIVAR: 'Reativar agora',
+  AJUSTAR_ORCAMENTO: 'Ajustar agora',
+};
+
+function DecisionCard({ rec, allRecs, posicao, total, busy, onApply, onIgnore, onHuman, onJump }: {
   rec: FilaRec;
   allRecs: FilaRec[];
+  posicao: number;
+  total: number;
   busy: boolean;
   onApply: (rec: FilaRec, params: { novo_orcamento_diario?: number }, batch: FilaRec[]) => void;
   onIgnore: (rec: FilaRec) => void;
@@ -503,12 +494,18 @@ function DecisionCard({ rec, allRecs, busy, onApply, onIgnore, onHuman, onJump }
   const emAnalise = rec.status === 'em_analise_humana';
   const isAjuste = rec.acao_estruturada?.tipo === 'AJUSTAR_ORCAMENTO';
   const link = adManagerUrl(rec);
+  const verbo = rec.acao_estruturada ? (VERBO_ACAO[rec.acao_estruturada.tipo] ?? 'Aplicar agora') : 'Aplicar agora';
 
   // Ação em lote: mesmo padrão, em OUTRAS contas, aplicável.
   const samePadrao = rec.padrao
     ? allRecs.filter((r) => r.padrao === rec.padrao && r.cliente_id !== rec.cliente_id && r.aplicavel && r.rec_id !== rec.rec_id)
     : [];
   const depRec = rec.depende_de ? allRecs.find((r) => r.rec_id === rec.depende_de) ?? null : null;
+  // Outras decisões pendentes da MESMA campanha — vira o rodapé "essa campanha tem mais N
+  // decisões depois desta", sem renderizar o conteúdo delas (só aparecem quando chegar a vez).
+  const outrasDaCampanha = allRecs.filter((r) =>
+    r.rec_id !== rec.rec_id && r.cliente_id === rec.cliente_id && r.campanha_nome === rec.campanha_nome,
+  ).length;
 
   function handleApply() {
     // Ajuste de orçamento sem valor definido → abre a edição em vez de mandar um valor vazio.
@@ -522,185 +519,158 @@ function DecisionCard({ rec, allRecs, busy, onApply, onIgnore, onHuman, onJump }
   }
 
   return (
-    <div className="relative overflow-hidden rounded-[var(--radius)] border border-border bg-card">
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5" style={{ backgroundColor: rec.severidade === 'urgente' ? '#f87171' : rec.severidade === 'atencao' ? '#fbbf24' : '#34d399' }} />
+    <div className="space-y-2">
+      <div className="relative overflow-hidden rounded-[var(--radius)] border border-border bg-card">
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5" style={{ backgroundColor: rec.severidade === 'urgente' ? '#f87171' : rec.severidade === 'atencao' ? '#fbbf24' : '#34d399' }} />
 
-      {/* 2.1 Identificação */}
-      <div className="flex items-start gap-3 border-b border-border p-4">
-        <ClientAvatar clientId={rec.cliente_id} name={rec.cliente_nome} size="sm" />
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-base font-semibold text-foreground">{rec.cliente_nome}</span>
-            <ChannelBadge canal={rec.canal} />
+        {/* Linha de contexto: cliente · posição na fila · severidade */}
+        <div className="flex items-center justify-between gap-3 border-b border-border p-4">
+          <div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
+            <span className="truncate font-semibold text-foreground">{rec.cliente_nome}</span>
+            <span aria-hidden>·</span>
+            <span className="shrink-0">{posicao} de {total}</span>
           </div>
-          <p className="mt-1 truncate text-xs text-muted-foreground">
-            <span className="font-semibold uppercase tracking-wide">{NIVEL_LABEL[rec.nivel] ?? rec.nivel}</span>
-            {' '}· {rec.campanha_nome}
-          </p>
-          {rec.objetivo && (
-            <p className="mt-1.5 inline-flex items-center gap-1.5 rounded-[var(--radius)] border border-secondary/30 bg-secondary/10 px-2 py-0.5 text-[11px] text-secondary">
-              <Target className="h-3 w-3" /> Objetivo: {rec.objetivo}
-            </p>
-          )}
+          <span className={cn('shrink-0 rounded border px-2 py-1 text-[11px] font-bold uppercase tracking-wide', sev.badge)}>
+            {sev.label}
+          </span>
         </div>
-        <span className={cn('shrink-0 rounded border px-2 py-1 text-[11px] font-bold uppercase tracking-wide', sev.badge)}>
-          {sev.label}
-        </span>
-      </div>
 
-      <div className="space-y-4 p-4">
-        {/* 2.2 Título em linguagem natural + métricas-chave */}
-        <div>
-          <p className="text-xl font-semibold text-foreground">{rec.titulo}</p>
-          {rec.metricas_chave.length > 0 && (
-            <div className="mt-3 flex flex-wrap gap-2">
-              {rec.metricas_chave.map((m, i) => (
-                <span key={i} className="rounded-[var(--radius)] border border-border bg-background px-2.5 py-1.5 text-xs text-muted-foreground">
-                  {m.rotulo}: <span className="font-semibold text-foreground">{m.valor}</span>
-                </span>
+        <div className="space-y-4 p-4">
+          {/* Título como pergunta direta — o elemento mais forte da tela */}
+          <p className="text-xl font-medium leading-snug text-foreground">{rec.titulo}</p>
+
+          {/* Motivos em tópicos, já interpretados — sem precisar abrir painel */}
+          {rec.motivos.length > 0 && (
+            <div className="overflow-hidden rounded-[var(--radius)] border border-border">
+              {rec.motivos.map((m, i) => (
+                <div
+                  key={i}
+                  className={cn('flex items-start gap-2.5 p-3', i < rec.motivos.length - 1 && 'border-b border-border/60')}
+                >
+                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/60" />
+                  <span className="text-sm leading-relaxed text-foreground">{m}</span>
+                </div>
               ))}
             </div>
           )}
-        </div>
 
-        {/* 2.3 O que fazer (cor neutra, nunca verde) */}
-        <div className="rounded-[var(--radius)] border border-border bg-background p-3">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">O que fazer</p>
-          <p className="mt-1 text-sm leading-relaxed text-foreground">{rec.texto_recomendacao}</p>
-        </div>
+          {emAnalise && (
+            <div className="flex items-center gap-2 rounded-[var(--radius)] border border-secondary/30 bg-secondary/10 p-2.5 text-xs text-secondary">
+              <UserRound className="h-3.5 w-3.5 shrink-0" /> Em análise humana{rec.atribuido_a ? ` · ${rec.atribuido_a}` : ''}
+            </div>
+          )}
 
-        {emAnalise && (
-          <div className="flex items-center gap-2 rounded-[var(--radius)] border border-secondary/30 bg-secondary/10 p-2.5 text-xs text-secondary">
-            <UserRound className="h-3.5 w-3.5 shrink-0" /> Em análise humana{rec.atribuido_a ? ` · ${rec.atribuido_a}` : ''}
-          </div>
-        )}
+          {/* Edição inline dos parâmetros (só faz sentido p/ orçamento) */}
+          {editing && isAjuste && (
+            <div className="flex items-end gap-2 rounded-[var(--radius)] border border-primary/30 bg-primary/5 p-3">
+              <label className="flex-1 space-y-1">
+                <span className="text-xs font-semibold text-muted-foreground">Novo orçamento diário (R$)</span>
+                <input
+                  type="number" min={1} value={budget}
+                  onChange={(e) => setBudget(e.target.value)}
+                  className="h-9 w-full rounded-[var(--radius)] border border-border bg-background px-3 text-sm text-foreground outline-none focus:border-primary"
+                />
+              </label>
+              <Button size="sm" variant="outline" onClick={() => setEditing(false)}>Concluir</Button>
+            </div>
+          )}
 
-        {/* Edição inline dos parâmetros (só faz sentido p/ orçamento) */}
-        {editing && isAjuste && (
-          <div className="flex items-end gap-2 rounded-[var(--radius)] border border-primary/30 bg-primary/5 p-3">
-            <label className="flex-1 space-y-1">
-              <span className="text-xs font-semibold text-muted-foreground">Novo orçamento diário (R$)</span>
-              <input
-                type="number" min={1} value={budget}
-                onChange={(e) => setBudget(e.target.value)}
-                className="h-9 w-full rounded-[var(--radius)] border border-border bg-background px-3 text-sm text-foreground outline-none focus:border-primary"
-              />
-            </label>
-            <Button size="sm" variant="outline" onClick={() => setEditing(false)}>Concluir</Button>
-          </div>
-        )}
-
-        {/* 2.4 Botões de ação */}
-        <div className="space-y-1.5">
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={() => onIgnore(rec)} disabled={busy}>
-              <ThumbsDown className="h-4 w-4" /> Ignorar
+          {/* Dois botões com hierarquia clara: neutro à esquerda, ação em destaque à direita */}
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => onIgnore(rec)} disabled={busy} className="flex-1 sm:flex-none">
+              <X className="h-4 w-4" /> Não fazer nada
             </Button>
-            {isAjuste && !lowConf && (
-              <Button variant="outline" onClick={() => setEditing((e) => !e)} disabled={busy}>
-                <SlidersHorizontal className="h-4 w-4" /> Editar valor
-              </Button>
-            )}
             {lowConf ? (
-              <Button onClick={() => onHuman(rec)} disabled={busy || emAnalise} className="flex-1 sm:flex-none">
-                <UserRound className="h-4 w-4" /> Enviar para análise de um humano
+              <Button onClick={() => onHuman(rec)} disabled={busy || emAnalise} className="flex-1">
+                <UserRound className="h-4 w-4" /> Enviar para um humano
               </Button>
             ) : (
-              <Button onClick={handleApply} disabled={busy} className="flex-1 sm:flex-none">
+              <Button onClick={handleApply} disabled={busy} className="flex-1">
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                {batchOn && samePadrao.length > 0 ? `Aplicar em ${samePadrao.length + 1} contas` : 'Aplicar agora'}
+                {batchOn && samePadrao.length > 0 ? `Aplicar em ${samePadrao.length + 1} contas` : verbo}
               </Button>
             )}
           </div>
-          {/* Legenda: o que cada botão faz, sem precisar adivinhar */}
-          <p className="text-[11px] leading-relaxed text-muted-foreground">
-            {lowConf
-              ? 'Esta recomendação precisa de um olhar técnico antes de mexer na conta. Enviar para análise não altera nada — só encaminha para um gestor decidir. Ignorar tira da fila sem fazer nada.'
-              : 'Aplicar executa a ação direto na conta de anúncio (dá para desfazer em seguida). Ignorar só tira da fila — nada muda na conta.'}
-          </p>
-        </div>
 
-        {/* 3. Toggle "Por que essa recomendação?" */}
-        <div>
-          <button onClick={() => setWhy((w) => !w)} className="flex items-center gap-1 text-xs font-medium text-primary hover:underline">
-            {why ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-            Por que essa recomendação?
-          </button>
-          {why && (
-            <div className="mt-2 space-y-3 rounded-[var(--radius)] border border-border bg-background p-3">
-              {/* Leitura técnica da análise (o veredito cru da IA) */}
-              {rec.leitura && (
-                <p className="border-b border-border/60 pb-2 text-xs leading-relaxed text-muted-foreground">
-                  {rec.leitura}
-                </p>
-              )}
-              {/* Fatos crus, sem interpretação */}
-              <div className="space-y-1">
-                {rec.fatos.map((f, i) => (
-                  <div key={i} className="flex items-center justify-between gap-3 text-xs">
-                    <span className="text-muted-foreground">{f.rotulo}</span>
-                    <span className="font-mono text-foreground">{f.valor}</span>
-                  </div>
-                ))}
-                <div className="flex items-center justify-between gap-3 border-t border-border/60 pt-1 text-xs">
-                  <span className="text-muted-foreground">Confiança da análise</span>
-                  <span className="font-mono text-foreground">{rec.confianca}</span>
-                </div>
-              </div>
-
-              {/* Aviso de dependência */}
-              {depRec && (
-                <div className="flex items-start gap-2 rounded-[var(--radius)] border border-amber-400/30 bg-amber-400/10 p-2.5 text-xs text-amber-200">
-                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                  <span>
-                    Depende de resolver antes: <span className="font-semibold">{depRec.objeto_nome}</span>.{' '}
-                    <button onClick={() => onJump(depRec.rec_id)} className="inline-flex items-center gap-0.5 font-semibold text-primary hover:underline">
-                      Ir para esse item <ArrowRight className="h-3 w-3" />
-                    </button>
-                  </span>
-                </div>
-              )}
-
-              {/* Ação em lote */}
-              {samePadrao.length > 0 && !lowConf && (
-                <label className="flex cursor-pointer items-start gap-2 rounded-[var(--radius)] border border-border p-2.5 text-xs text-foreground">
-                  <input type="checkbox" checked={batchOn} onChange={(e) => setBatchOn(e.target.checked)} className="mt-0.5 accent-primary" />
-                  <span>Aplicar a mesma ação em <span className="font-semibold">{samePadrao.length}</span> outra(s) conta(s) com este mesmo padrão. Ao clicar em <span className="font-semibold">Aplicar</span>, a ação é replicada em todas.</span>
-                </label>
-              )}
-
-              {/* Abrir no Gerenciador */}
-              {link && (
-                <a href={link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline">
-                  <ExternalLink className="h-3.5 w-3.5" /> Abrir no Gerenciador de Anúncios
-                </a>
+          {/* Ações secundárias como links de texto, não botões */}
+          {((isAjuste && !lowConf) || (!lowConf && !emAnalise)) && (
+            <div className="flex items-center justify-between gap-3 text-xs">
+              <span>
+                {isAjuste && !lowConf && (
+                  <button onClick={() => setEditing((e) => !e)} className="font-medium text-primary hover:underline">
+                    Editar valor antes de aplicar
+                  </button>
+                )}
+              </span>
+              {!lowConf && !emAnalise && (
+                <button onClick={() => onHuman(rec)} className="font-medium text-primary hover:underline">
+                  Enviar para um humano
+                </button>
               )}
             </div>
           )}
+
+          {/* Toggle "Por que essa recomendação?" — dados técnicos crus, para quem quiser auditar */}
+          <div>
+            <button onClick={() => setWhy((w) => !w)} className="flex items-center gap-1 text-xs font-medium text-primary hover:underline">
+              {why ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+              Por que essa recomendação?
+            </button>
+            {why && (
+              <div className="mt-2 space-y-3 rounded-[var(--radius)] border border-border bg-background p-3">
+                {/* Fatos crus, sem interpretação */}
+                <div className="space-y-1">
+                  {rec.fatos.map((f, i) => (
+                    <div key={i} className="flex items-center justify-between gap-3 text-xs">
+                      <span className="text-muted-foreground">{f.rotulo}</span>
+                      <span className="font-mono text-foreground">{f.valor}</span>
+                    </div>
+                  ))}
+                  <div className="flex items-center justify-between gap-3 border-t border-border/60 pt-1 text-xs">
+                    <span className="text-muted-foreground">Confiança da análise</span>
+                    <span className="font-mono text-foreground">{rec.confianca}</span>
+                  </div>
+                </div>
+
+                {/* Aviso de dependência */}
+                {depRec && (
+                  <div className="flex items-start gap-2 rounded-[var(--radius)] border border-amber-400/30 bg-amber-400/10 p-2.5 text-xs text-amber-200">
+                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    <span>
+                      Depende de resolver antes: <span className="font-semibold">{depRec.objeto_nome}</span>.{' '}
+                      <button onClick={() => onJump(depRec.rec_id)} className="inline-flex items-center gap-0.5 font-semibold text-primary hover:underline">
+                        Ir para esse item <ArrowRight className="h-3 w-3" />
+                      </button>
+                    </span>
+                  </div>
+                )}
+
+                {/* Ação em lote */}
+                {samePadrao.length > 0 && !lowConf && (
+                  <label className="flex cursor-pointer items-start gap-2 rounded-[var(--radius)] border border-border p-2.5 text-xs text-foreground">
+                    <input type="checkbox" checked={batchOn} onChange={(e) => setBatchOn(e.target.checked)} className="mt-0.5 accent-primary" />
+                    <span>Aplicar a mesma ação em <span className="font-semibold">{samePadrao.length}</span> outra(s) conta(s) com este mesmo padrão. Ao clicar em <span className="font-semibold">{verbo}</span>, a ação é replicada em todas.</span>
+                  </label>
+                )}
+
+                {/* Abrir no Gerenciador */}
+                {link && (
+                  <a href={link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline">
+                    <ExternalLink className="h-3.5 w-3.5" /> Abrir no Gerenciador de Anúncios
+                  </a>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
-    </div>
-  );
-}
 
-// ---------------------------------------------------------------------------
-// Lista "Depois desta"
-// ---------------------------------------------------------------------------
-function NextUpList({ recs, onJump }: { recs: FilaRec[]; onJump: (recId: string) => void }) {
-  if (recs.length === 0) return null;
-  return (
-    <div className="rounded-[var(--radius)] border border-border bg-card p-4">
-      <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Depois desta</p>
-      <ul className="mt-2 space-y-1.5">
-        {recs.map((r) => (
-          <li key={r.rec_id}>
-            <button onClick={() => onJump(r.rec_id)} className="flex w-full items-center gap-2 text-left text-sm text-muted-foreground hover:text-foreground">
-              <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', SEV[r.severidade].dot)} />
-              <span className="truncate">{r.cliente_nome} — {r.titulo}</span>
-            </button>
-          </li>
-        ))}
-      </ul>
+      {/* Rodapé: outras decisões pendentes da mesma campanha, sem renderizar o conteúdo delas */}
+      {outrasDaCampanha > 0 && (
+        <p className="px-1 text-xs text-muted-foreground">
+          Essa campanha tem mais {outrasDaCampanha} decis{outrasDaCampanha > 1 ? 'ões' : 'ão'} depois desta.
+        </p>
+      )}
     </div>
   );
 }
@@ -768,7 +738,6 @@ export default function OtimizadorPage() {
   const current = filtered[cursor] ?? null;
   const total = filtered.length;
   const posicao = total === 0 ? 0 : Math.min(cursor + 1, total);
-  const nextUp = filtered.slice(cursor + 1, cursor + 4);
 
   function removeRecs(ids: string[]) {
     setRecs((prev) => prev.filter((r) => !ids.includes(r.rec_id)));
@@ -1152,18 +1121,17 @@ export default function OtimizadorPage() {
             )}
           </div>
         ) : (
-          <>
-            <DecisionCard
-              rec={current}
-              allRecs={recs}
-              busy={busy}
-              onApply={doApply}
-              onIgnore={doIgnore}
-              onHuman={doHuman}
-              onJump={jumpTo}
-            />
-            <NextUpList recs={nextUp} onJump={jumpTo} />
-          </>
+          <DecisionCard
+            rec={current}
+            allRecs={recs}
+            posicao={posicao}
+            total={total}
+            busy={busy}
+            onApply={doApply}
+            onIgnore={doIgnore}
+            onHuman={doHuman}
+            onJump={jumpTo}
+          />
         )}
       </main>
     </div>
