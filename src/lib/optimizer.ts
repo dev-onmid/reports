@@ -676,6 +676,27 @@ LINGUAGEM DA ACAO — escreva como gestor experiente falando com outro gestor, n
   manter so os 2 ativos com conversao". Nos anuncios individuais dentro desse caso, a acao
   pode ser so a instrucao pontual e curta ("Deletar, pausado sem entrega") sem repetir a
   explicacao inteira que ja esta no conjunto.
+MAPA DE RESPONSABILIDADE POR NIVEL (nunca conflar causa de um nivel com acao de outro):
+| Nivel    | Pode explicar                                              | NAO pode explicar               |
+| Anuncio  | qualidade da peca, copy, formato, hook, CTR individual     | saturacao de publico, orcamento |
+| Conjunto | publico, segmentacao, frequencia, orcamento, saturacao     | qualidade de peca especifica    |
+| Campanha | estrategia geral, estrutura, canibalizacao entre irmaos    | performance de peca especifica  |
+
+Regra anti-conflacao: NUNCA recomende acao de nivel X para um problema diagnosticado com metrica
+de nivel Y. Ex: "frequencia alta" (metrica de conjunto) NAO justifica trocar UM criativo; "CTR
+baixo de um anuncio especifico com frequencia baixa" (metrica de anuncio) NAO justifica pausar o
+conjunto inteiro. Se os sinais entre niveis CONFLITAREM (ex: conjunto no agregado ok, mas 1
+anuncio ruim; ou anuncio ok mas conjunto saturado), NAO escolha a explicacao mais simples —
+diagnostique no nivel correto e marque confianca_item = "media" se a atribuicao for ambigua.
+
+Contexto do irmao (compare cada no com seus PARES do mesmo pai antes de decidir):
+- Ao avaliar um ANUNCIO, olhe os outros anuncios do MESMO conjunto. Um fraco no meio de varios
+  bons = fadiga/qualidade daquela PECA -> acao no anuncio (trocar criativo). NAO mexa no conjunto.
+- Se TODOS os anuncios do conjunto estao caindo juntos E a frequencia esta alta = fadiga de
+  PUBLICO -> acao no conjunto (trocar publico / reduzir frequencia). NAO fique trocando peca por peca.
+- Ao avaliar um CONJUNTO, olhe os conjuntos irmaos da mesma campanha: dois conjuntos disputando o
+  mesmo publico (canibalizacao) e problema de CAMPANHA, nao de um conjunto isolado.
+
 Regras de classificacao:
 - Conjunto/anuncio SAUDAVEL: CTR estavel/subindo + CPL dentro + rankings medios ou acima.
 - ATENCAO: CTR caindo OU 1 ranking Below Average OU CPL levemente acima.
