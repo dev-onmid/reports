@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { AlertTriangle, X, RefreshCw, Wifi } from 'lucide-react';
+import { getAuthSession } from '@/lib/auth-store';
 import type { DisconnectedAlert } from '@/lib/evolution-instance-alerts';
 
 const POLL_INTERVAL = 5 * 60 * 1000; // 5 min
@@ -54,6 +55,8 @@ export function EvolutionAlertBanner() {
     setLoading(false);
   }
 
+  const session = getAuthSession();
+  if (session?.role !== 'Administrador') return null;
   if (alerts.length === 0 || dismissed) return null;
 
   return (
