@@ -55,7 +55,7 @@ export const OPTIMIZER_MODEL = 'claude-sonnet-4-6';
 // classificação e barateia. A tarefa é extração/classificação guiada por regras — cabe no Haiku.
 export const OPTIMIZER_MODEL_V2 = 'claude-haiku-4-5-20251001';
 export const OPTIMIZER_PROMPT_VERSION = 'otimizador-v1.0';
-export const OPTIMIZER_PROMPT_VERSION_V2 = 'otimizador-v2.5';
+export const OPTIMIZER_PROMPT_VERSION_V2 = 'otimizador-v2.6';
 
 // ─── v2 types ────────────────────────────────────────────────────────────────
 
@@ -202,6 +202,9 @@ export type OptimizerAnaliseAnuncio = {
   confianca_item: OptimizerConfidence;
   depende_de: string | null;   // id de outro objeto (mesma análise) do qual esta ação depende
   padrao: string | null;       // chave canônica do problema, p/ agrupar entre contas (ação em lote)
+  // Checklist literal e executável — o que uma pessoa sem conhecimento técnico faria, na ordem,
+  // dentro do Gerenciador de Anúncios. Cada item cita o campo/valor exato, nunca "otimizar" vago.
+  passos: string[];
 };
 
 export type OptimizerAnaliseConjunto = {
@@ -221,6 +224,7 @@ export type OptimizerAnaliseConjunto = {
   confianca_item: OptimizerConfidence;
   depende_de: string | null;
   padrao: string | null;
+  passos: string[];
   anuncios: OptimizerAnaliseAnuncio[];
 };
 
@@ -241,6 +245,7 @@ export type OptimizerAnaliseCampanha = {
   confianca_item: OptimizerConfidence;
   depende_de: string | null;
   padrao: string | null;
+  passos: string[];
   conjuntos: OptimizerAnaliseConjunto[];
 };
 
@@ -296,6 +301,9 @@ export type OptimizerRecomendacao = {
   severidade: OptimizerRecomendacaoSeveridade;
   titulo: string;
   texto_recomendacao: string;
+  // Checklist literal e executável (2-6 passos) — o que fazer, na ordem, com campo/valor exato.
+  // Vazio quando a ação é 100% automática e o "Aplicar" já faz tudo sozinho.
+  passos: string[];
   metricas_chave: Array<{ rotulo: string; valor: string }>;
   fatos: Array<{ rotulo: string; valor: string }>;
   acao_estruturada: {
@@ -380,6 +388,58 @@ function tituloAmigavel(tipo: OptimizerNodeAcaoTipo, nivel: OptimizerObjetoTipo,
   }
 }
 
+// Passo a passo literal quando a IA não preencheu "passos" (análises antigas ou omissão) — sempre
+// garante um checklist executável, nunca deixa a recomendação sem instrução concreta.
+function passosFallback(
+  tipo: OptimizerNodeAcaoTipo,
+  nivel: OptimizerObjetoTipo,
+  nome: string,
+  parametros: Record<string, unknown>,
+  canal: 'meta' | 'google',
+): string[] {
+  const gerenciador = canal === 'google' ? 'Google Ads' : 'Gerenciador de Anúncios (Meta)';
+  const nomeNivel = nivel === 'campaign' ? 'campanha' : nivel === 'adset' ? 'conjunto de anúncios' : 'anúncio';
+  switch (tipo) {
+    case 'PAUSAR':
+      return [
+        `Abrir o ${gerenciador} e localizar ${nomeNivel === 'anúncio' ? 'o anúncio' : `a ${nomeNivel}`} "${nome}"`,
+        `Clicar no menu de status ao lado do nome e selecionar "Pausar"`,
+        `Confirmar — o gasto para imediatamente, sem afetar os demais itens ativos`,
+      ];
+    case 'ATIVAR':
+      return [
+        `Abrir o ${gerenciador} e localizar ${nomeNivel === 'anúncio' ? 'o anúncio' : `a ${nomeNivel}`} "${nome}"`,
+        `Clicar no menu de status e selecionar "Ativar"`,
+        `Acompanhar as métricas nas próximas 48h antes de qualquer novo ajuste`,
+      ];
+    case 'AJUSTAR_ORCAMENTO': {
+      const novo = parametros?.novo_orcamento_diario;
+      const valor = typeof novo === 'number' ? `R$ ${novo.toFixed(2).replace('.', ',')}` : 'o novo valor sugerido';
+      return [
+        `Abrir o ${gerenciador} e entrar em "${nome}"`,
+        `Clicar em Editar → Orçamento e agendamento`,
+        `Trocar o orçamento diário atual por ${valor}`,
+        `Salvar — a mudança vale a partir do próximo ciclo de veiculação`,
+      ];
+    }
+    case 'TROCAR_CRIATIVO':
+      return [
+        `Abrir "${nome}" no ${gerenciador} e conferir o anúncio ativo há mais tempo`,
+        `Criar uma nova peça (vídeo ou imagem) com ângulo/gancho diferente do atual`,
+        `Subir o novo anúncio dentro do mesmo conjunto, mantendo o antigo pausado (não excluir ainda)`,
+        `Comparar os dois após alguns dias de veiculação antes de decidir qual manter`,
+      ];
+    case 'VERIFICAR_MANUAL':
+      return [
+        `Abrir "${nome}" no ${gerenciador} e conferir o histórico de alterações do item`,
+        `Checar se a pausa/baixo desempenho foi uma decisão manual anterior ou uma falha técnica`,
+        `Decidir com o gestor responsável antes de aplicar qualquer mudança`,
+      ];
+    default:
+      return [];
+  }
+}
+
 export function buildRecomendacoes(
   result: OptimizerOutputV2,
   meta: { analise_id: string; cliente_id: string; cliente_nome: string; canal: 'meta' | 'google'; connection_id: string | null; account_id: string | null },
@@ -412,6 +472,7 @@ export function buildRecomendacoes(
     classificacao: OptimizerVerdict; veredito: string; acao: string;
     acao_tipo: OptimizerNodeAcaoTipo; acao_parametros: Record<string, unknown>;
     confianca_item: OptimizerConfidence; depende_de: string | null; padrao: string | null;
+    passos: string[];
     metricas_chave: Array<{ rotulo: string; valor: string }>;
     fatos: Array<{ rotulo: string; valor: string }>;
   }) => {
@@ -435,6 +496,9 @@ export function buildRecomendacoes(
         : (auto ? auto.acao : null);
     const parametros = { ...(o.acao_parametros ?? {}), ...(auto?.parametros ?? {}) };
     const aplicavel = structTipo != null && (structTipo !== 'AJUSTAR_ORCAMENTO' || o.objeto_tipo === 'adset');
+    const passos = o.passos.length > 0
+      ? o.passos
+      : passosFallback(tipoEfetivo, o.objeto_tipo, o.objeto_nome, parametros, meta.canal);
 
     raws.push({
       objeto_id: o.objeto_id,
@@ -453,6 +517,7 @@ export function buildRecomendacoes(
         titulo: tituloAmigavel(tipoEfetivo, o.objeto_tipo, o.classificacao, o.objetivo?.curto ?? null),
         objetivo: o.objetivo?.label ?? null,
         texto_recomendacao: o.acao,
+        passos,
         metricas_chave: o.metricas_chave.filter((m) => m.valor && m.valor !== '—').slice(0, 3),
         fatos: o.fatos,
         acao_estruturada: structTipo
@@ -480,7 +545,7 @@ export function buildRecomendacoes(
       objetivo: obj, gasto: Number(camp.gasto) || 0, conversoes: Number(camp.conversoes) || 0,
       classificacao: camp.classificacao, veredito: camp.veredito, acao: camp.acao,
       acao_tipo: camp.acao_tipo, acao_parametros: camp.acao_parametros, confianca_item: camp.confianca_item,
-      depende_de: camp.depende_de, padrao: camp.padrao,
+      depende_de: camp.depende_de, padrao: camp.padrao, passos: camp.passos,
       metricas_chave: [
         { rotulo: 'Gasto', valor: money(camp.gasto) },
         { rotulo: mConv, valor: num(camp.conversoes) },
@@ -500,7 +565,7 @@ export function buildRecomendacoes(
         objetivo: obj, gasto: Number(conj.gasto) || 0, conversoes: Number(conj.conversoes) || 0,
         classificacao: conj.classificacao, veredito: conj.veredito, acao: conj.acao,
         acao_tipo: conj.acao_tipo, acao_parametros: conj.acao_parametros, confianca_item: conj.confianca_item,
-        depende_de: conj.depende_de, padrao: conj.padrao,
+        depende_de: conj.depende_de, padrao: conj.padrao, passos: conj.passos,
         metricas_chave: [
           { rotulo: 'Gasto', valor: money(conj.gasto) },
           { rotulo: mConv, valor: num(conj.conversoes) },
@@ -521,7 +586,7 @@ export function buildRecomendacoes(
           objetivo: obj, gasto: Number(ad.gasto) || 0, conversoes: Number(ad.conversoes) || 0,
           classificacao: ad.classificacao, veredito: ad.veredito, acao: ad.acao,
           acao_tipo: ad.acao_tipo, acao_parametros: ad.acao_parametros, confianca_item: ad.confianca_item,
-          depende_de: ad.depende_de, padrao: ad.padrao,
+          depende_de: ad.depende_de, padrao: ad.padrao, passos: ad.passos,
           metricas_chave: [
             { rotulo: 'Gasto', valor: money(ad.gasto) },
             { rotulo: mConv, valor: num(ad.conversoes) },
@@ -741,7 +806,22 @@ Alem de classificacao/veredito/acao, preencha em CADA no (campanha, conjunto, an
     varias contas (ex: "criativo_fadiga_ranking_conversao", "conjunto_cpl_acima_maximo",
     "orcamento_subentrega"). Use a MESMA string sempre que o padrao se repetir. Se for um caso
     unico/especifico, null.
-Em nos SAUDAVEL: acao_tipo="NENHUMA", acao_parametros={}, confianca_item="alta", depende_de=null, padrao=null.
+- "passos": array de 2 a 5 strings — o CHECKLIST LITERAL de como executar a acao, na ordem,
+    como se estivesse guiando alguem SEM NENHUM conhecimento de trafego pago dentro do
+    Gerenciador de Anuncios (Meta) ou Google Ads. PROIBIDO ser vago ("otimizar", "ajustar",
+    "melhorar" sem dizer o QUE mexer). Cada passo cita o elemento exato da tela e o valor exato:
+    - ERRADO: "Pausar o anuncio" (falta onde/como).
+    - CERTO: ["Abrir o anuncio 'Video Depoimento V2' no Gerenciador de Anuncios",
+              "Clicar no menu de status ao lado do nome e selecionar Pausar",
+              "Confirmar — o gasto para na hora"].
+    - Para AJUSTAR_ORCAMENTO, o passo do valor deve citar o numero exato: "Trocar o orcamento
+      diario de R$50 para R$70 em Editar > Orcamento e agendamento".
+    - Para TROCAR_CRIATIVO, diga o que testar de diferente (angulo/gancho/formato), nao so
+      "criar novo criativo".
+    - Para VERIFICAR_MANUAL, diga exatamente o que checar antes de decidir (ex: "conferir se a
+      campanha foi pausada manualmente pelo gestor ou por esgotar orcamento").
+    Em nos SAUDAVEL sem acao (acao=""): passos = [].
+Em nos SAUDAVEL sem oportunidade de crescer: acao_tipo="NENHUMA", acao_parametros={}, confianca_item="alta", depende_de=null, padrao=null, passos=[].
 
 ==================================================
 PASSO 3.5 — CONTEXTO TEMPORAL E CAUTELA AO REATIVAR (regra critica)
@@ -807,6 +887,7 @@ ESTRUTURA DO JSON DE SAIDA (retorne exatamente este schema):
       "confianca_item": "alta | media | baixa",
       "depende_de": null,
       "padrao": null,
+      "passos": ["passo 1 literal", "passo 2 literal"],
       "conjuntos": [
         {
           "id": "id_real_do_conjunto",
@@ -818,6 +899,7 @@ ESTRUTURA DO JSON DE SAIDA (retorne exatamente este schema):
           "confianca_item": "alta | media | baixa",
           "depende_de": null,
           "padrao": null,
+          "passos": ["passo 1 literal", "passo 2 literal"],
           "anuncios": [
             {
               "id": "id_real_do_anuncio",
@@ -828,7 +910,8 @@ ESTRUTURA DO JSON DE SAIDA (retorne exatamente este schema):
               "acao_parametros": {},
               "confianca_item": "alta | media | baixa",
               "depende_de": null,
-              "padrao": null
+              "padrao": null,
+              "passos": ["passo 1 literal", "passo 2 literal"]
             }
           ]
         }
@@ -872,7 +955,13 @@ type IaVerdict = {
   confianca_item: OptimizerConfidence;
   depende_de: string | null;
   padrao: string | null;
+  passos: string[];
 };
+
+function normPassos(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return v.map((p) => String(p ?? '').trim()).filter(Boolean).slice(0, 6);
+}
 
 function normVerdict(v: unknown): OptimizerVerdict {
   return (['SAUDAVEL', 'ATENCAO', 'URGENTE'] as const).includes(v as never) ? v as OptimizerVerdict : 'ATENCAO';
@@ -894,6 +983,7 @@ function collectIaVerdicts(iaCampanhas: unknown): Map<string, IaVerdict> {
       confianca_item: normConfidence(o.confianca_item),
       depende_de: o.depende_de != null && String(o.depende_de).trim() ? String(o.depende_de) : null,
       padrao: o.padrao != null && String(o.padrao).trim() ? String(o.padrao) : null,
+      passos: normPassos(o.passos),
     });
   };
   if (!Array.isArray(iaCampanhas)) return map;
@@ -916,7 +1006,7 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
   const verdicts = collectIaVerdicts(iaCampanhas);
   const fallback: IaVerdict = {
     classificacao: 'ATENCAO', veredito: '', acao: '',
-    acao_tipo: 'NENHUMA', acao_parametros: {}, confianca_item: 'media', depende_de: null, padrao: null,
+    acao_tipo: 'NENHUMA', acao_parametros: {}, confianca_item: 'media', depende_de: null, padrao: null, passos: [],
   };
   const vOf = (id: string) => verdicts.get(id) ?? fallback;
   return (payload.campanhas ?? []).map((camp) => {
@@ -938,6 +1028,7 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
       confianca_item: cv.confianca_item,
       depende_de: cv.depende_de,
       padrao: cv.padrao,
+      passos: cv.passos,
       conjuntos: (camp.conjuntos ?? []).map((cj) => {
         const jv = vOf(cj.id);
         return {
@@ -957,6 +1048,7 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
           confianca_item: jv.confianca_item,
           depende_de: jv.depende_de,
           padrao: jv.padrao,
+          passos: jv.passos,
           anuncios: (cj.anuncios ?? []).map((ad) => {
             const av = vOf(ad.id);
             return {
@@ -977,6 +1069,7 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
               confianca_item: av.confianca_item,
               depende_de: av.depende_de,
               padrao: av.padrao,
+              passos: av.passos,
             };
           }),
         };

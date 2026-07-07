@@ -563,10 +563,22 @@ function DecisionCard({ rec, allRecs, busy, onApply, onIgnore, onHuman, onJump }
           )}
         </div>
 
-        {/* 2.3 O que fazer (cor neutra, nunca verde) */}
+        {/* 2.3 O que fazer (cor neutra, nunca verde) — resumo + checklist literal e executável */}
         <div className="rounded-[var(--radius)] border border-border bg-background p-3">
           <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">O que fazer</p>
           <p className="mt-1 text-sm leading-relaxed text-foreground">{rec.texto_recomendacao}</p>
+          {rec.passos.length > 0 && (
+            <ol className="mt-3 space-y-2 border-t border-border/60 pt-3">
+              {rec.passos.map((passo, i) => (
+                <li key={i} className="flex items-start gap-2 text-sm text-foreground">
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-primary/40 text-[11px] font-bold text-primary">
+                    {i + 1}
+                  </span>
+                  <span className="leading-relaxed">{passo}</span>
+                </li>
+              ))}
+            </ol>
+          )}
         </div>
 
         {emAnalise && (
