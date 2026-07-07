@@ -860,7 +860,69 @@ ESTRUTURA DO JSON DE SAIDA (retorne exatamente este schema):
   ],
   "confianca": "alta | media | baixa",
   "observacao": "string ou null"
-}`;
+}
+
+==================================================
+EXEMPLOS COMPLETOS (few-shot) — estude o raciocinio, nao copie os numeros
+==================================================
+Os dois exemplos abaixo mostram o payload de ENTRADA (resumido, so os campos que importam pro
+diagnostico) e a SAIDA JSON correta. Aprenda o RACIOCINIO: em que nivel esta a causa, em que
+nivel vai a acao, e quando NAO alarmar. Os numeros sao ficticios.
+
+--- EXEMPLO A: conflito entre niveis (conjunto saudavel, 1 anuncio ruim dentro) ---
+ENTRADA (resumo):
+{ "metas": { "objetivo_principal": "leads", "cpl_ideal": 20, "cpl_maximo": 30 },
+  "periodo_analise": { "data_fim": "2026-07-06", "dias": 14 },
+  "campanhas": [ { "id": "camp_100", "nome": "Leads - Consulta Odonto", "objetivo": "OUTCOME_LEADS",
+    "status": "ACTIVE", "gasto": 820, "conversoes": 41, "cpl": 20.0, "ctr": 1.4,
+    "conjuntos": [ { "id": "adset_200", "nome": "Publico Amplo 25-45", "status": "ACTIVE",
+      "frequencia": 1.6, "gasto": 820, "conversoes": 41, "cpl": 20.0, "ctr": 1.4, "dias_ativo": 21,
+      "ctr_tendencia_4d": "ESTAVEL", "anuncios": [
+        { "id": "ad_301", "nome": "AD Video Depoimento", "gasto": 540, "conversoes": 34, "cpl": 15.9, "ctr": 2.1, "dias_ativo": 21, "quality_ranking": "ABOVE_AVERAGE", "engagement_ranking": "ABOVE_AVERAGE", "conversion_ranking": "AVERAGE" },
+        { "id": "ad_302", "nome": "AD Imagem Promo", "gasto": 280, "conversoes": 7, "cpl": 40.0, "ctr": 0.5, "dias_ativo": 21, "quality_ranking": "BELOW_AVERAGE", "engagement_ranking": "BELOW_AVERAGE", "conversion_ranking": "BELOW_AVERAGE" } ] } ] } ] }
+POR QUE: o conjunto no agregado esta SAUDAVEL (frequencia 1,6 baixa, CPL R$20 na meta) — o video
+carrega o resultado. O problema esta ISOLADO no anuncio ad_302 (CTR 0,5%, 3 rankings Below Average,
+frequencia baixa = culpa da PECA, nao do publico). Pausar o conjunto mataria o video que vai bem.
+Acao no nivel certo: trocar o criativo do ad_302; conjunto fica intacto.
+SAIDA:
+{ "estado_da_conta": "ATENCAO",
+  "resumo_executivo": "Conta entregando leads a R$20, na meta. O conjunto vai bem no agregado (frequencia baixa, publico saudavel), mas o anuncio 'AD Imagem Promo' puxa o custo pra cima (CPL R$40, CTR 0,5%, rankings baixos) enquanto o video segura o resultado. Trocar so essa peca, sem mexer no conjunto.",
+  "analise_campanhas": [ { "id": "camp_100", "classificacao": "ATENCAO", "veredito": "CPL medio na meta; 1 anuncio fraco dentro de um conjunto bom", "acao": "Renovar a peca fraca do conjunto; estrutura ok", "acao_tipo": "VERIFICAR_MANUAL", "acao_parametros": {}, "confianca_item": "alta", "depende_de": null, "padrao": null,
+    "conjuntos": [ { "id": "adset_200", "classificacao": "SAUDAVEL", "veredito": "Frequencia 1,6 e CPL R$20 na meta; publico saudavel", "acao": "", "acao_tipo": "NENHUMA", "acao_parametros": {}, "confianca_item": "alta", "depende_de": null, "padrao": null,
+      "anuncios": [
+        { "id": "ad_301", "classificacao": "SAUDAVEL", "veredito": "CTR 2,1% e CPL R$16, melhor peca do conjunto", "acao": "", "acao_tipo": "NENHUMA", "acao_parametros": {}, "confianca_item": "alta", "depende_de": null, "padrao": null },
+        { "id": "ad_302", "classificacao": "URGENTE", "veredito": "CTR 0,5% e 3 rankings Below Average com frequencia baixa; e a peca, nao o publico", "acao": "Trocar criativo: peca com CTR 0,5% e rankings baixos, sem sinal de saturacao de publico", "acao_tipo": "TROCAR_CRIATIVO", "acao_parametros": {}, "confianca_item": "alta", "depende_de": null, "padrao": "criativo_fraco_ranking_below_average" } ] } ] } ],
+  "cruzamento_com_metas": { "status_cpl": "DENTRO", "status_volume": "NO_RITMO", "status_orcamento": "OK" },
+  "acoes_automaticas": [], "confianca": "alta", "observacao": null }
+
+--- EXEMPLO B: nome sazonal vencido (nao reativar) + dependencia entre nos ---
+ENTRADA (resumo): hoje = 2026-07-06.
+{ "metas": { "objetivo_principal": "leads", "cpl_ideal": 20, "cpl_maximo": 30 },
+  "periodo_analise": { "data_fim": "2026-07-06", "dias": 30 },
+  "observacoes_gestor": "camp_BF teve CPL historico de R$6 quando rodou em nov/2025",
+  "campanhas": [
+    { "id": "camp_BF", "nome": "Black Friday 2025 - Ofertas", "objetivo": "OUTCOME_LEADS", "status": "PAUSED",
+      "gasto": 0, "conversoes": 0, "cpl": null, "ctr": 0,
+      "conjuntos": [ { "id": "adset_BF1", "nome": "Compradores BF", "status": "ADSET_PAUSED", "gasto": 0, "conversoes": 0, "cpl": null, "ctr": 0, "dias_ativo": null, "anuncios": [] } ] },
+    { "id": "camp_JUL", "nome": "Aquecimento Julho - Leads", "objetivo": "OUTCOME_LEADS", "status": "ACTIVE",
+      "orcamento_diario": 50, "gasto": 640, "conversoes": 45, "cpl": 14.2, "ctr": 1.8,
+      "conjuntos": [ { "id": "adset_JUL1", "nome": "Lookalike Leads 1%", "status": "ACTIVE", "frequencia": 1.5, "orcamento_diario": 50, "gasto": 640, "conversoes": 45, "cpl": 14.2, "ctr": 1.8, "dias_ativo": 18, "ctr_tendencia_4d": "SUBINDO", "anuncios": [] } ] } ] }
+POR QUE: camp_BF tem CPL historico otimo (R$6) e da vontade de religar — MAS o nome e de Black
+Friday (nov/2025) e hoje e julho/2026: conteudo/oferta vencidos. NUNCA reativar; arquivar. Como
+esta PAUSED com R$0/0, isso e esperado, nao urgencia. camp_JUL vai bem e barato (CPL R$14 < meta
+R$20, frequencia 1,5, CTR subindo) = oportunidade de escalar. Mas escalar SO depois de arquivar a
+camp_BF: se ela religar sozinha, disputa o mesmo publico de leads no leilao. Por isso a escalada
+de adset_JUL1 tem depende_de = "camp_BF".
+SAIDA:
+{ "estado_da_conta": "ATENCAO",
+  "resumo_executivo": "camp_BF (Black Friday 2025) esta pausada e fora de epoca — arquivar, nunca reativar mesmo com CPL historico bom. camp_JUL entrega lead a R$14, abaixo da meta de R$20, com frequencia baixa e CTR subindo: da pra escalar de R$50 pra R$65/dia, mas so depois de arquivar a BF pra nao competir no leilao pelo mesmo publico.",
+  "analise_campanhas": [
+    { "id": "camp_BF", "classificacao": "ATENCAO", "veredito": "Campanha de Black Friday (nov/2025) pausada, fora de epoca", "acao": "Arquivar: oferta de Black Friday vencida; nao reativar apesar do CPL historico bom", "acao_tipo": "VERIFICAR_MANUAL", "acao_parametros": {}, "confianca_item": "alta", "depende_de": null, "padrao": "campanha_sazonal_vencida",
+      "conjuntos": [ { "id": "adset_BF1", "classificacao": "SAUDAVEL", "veredito": "Pausado com R$0/0, coerente com a campanha parada", "acao": "", "acao_tipo": "NENHUMA", "acao_parametros": {}, "confianca_item": "alta", "depende_de": null, "padrao": null, "anuncios": [] } ] },
+    { "id": "camp_JUL", "classificacao": "SAUDAVEL", "veredito": "CPL R$14 abaixo da meta, CTR subindo; campeao pra escalar", "acao": "Escalar orcamento de R$50 pra R$65/dia apos arquivar a campanha de Black Friday", "acao_tipo": "AJUSTAR_ORCAMENTO", "acao_parametros": { "novo_orcamento_diario": 65 }, "confianca_item": "media", "depende_de": "camp_BF", "padrao": "oportunidade_escala_cpl_abaixo_meta",
+      "conjuntos": [ { "id": "adset_JUL1", "classificacao": "SAUDAVEL", "veredito": "Lookalike a R$14/lead, frequencia 1,5, CTR subindo", "acao": "Escalar orcamento de R$50 pra R$65/dia; ainda tem folga sem saturar", "acao_tipo": "AJUSTAR_ORCAMENTO", "acao_parametros": { "novo_orcamento_diario": 65 }, "confianca_item": "media", "depende_de": "camp_BF", "padrao": "oportunidade_escala_cpl_abaixo_meta", "anuncios": [] } ] } ],
+  "cruzamento_com_metas": { "status_cpl": "DENTRO", "status_volume": "NO_RITMO", "status_orcamento": "OK" },
+  "acoes_automaticas": [], "confianca": "media", "observacao": "Arquivar a camp_BF nao e acao automatizavel (nao e pausar/ativar/orcamento) — vai como VERIFICAR_MANUAL pro gestor." }`;
 }
 
 type IaVerdict = {
