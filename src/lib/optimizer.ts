@@ -1130,11 +1130,17 @@ function collectIaVerdicts(iaCampanhas: unknown): Map<string, IaVerdict> {
 // WhatsApp na Meta: campanhas de conversa vêm como OUTCOME_ENGAGEMENT, mas os conjuntos
 // otimizam para CONVERSATIONS/REPLIES. Sem isto, objetivoInfo rotula "Engajamento" e o card
 // fala em "perder engajamento" numa campanha cujo resultado real são conversas iniciadas.
+// ATENÇÃO à grafia: /api/campaigns traduz OUTCOME_ENGAGEMENT para "engajamento" (com J) —
+// o teste precisa cobrir as DUAS grafias (bug real: /engag/ nunca casava com a string pt).
 function objetivoEfetivoCampanha(camp: OptimizerCampaignV2): string {
-  if (/engag/i.test(camp.objetivo) && (camp.conjuntos ?? []).some((c) => /conversation|messag|replies/i.test(c.objetivo_otimizacao ?? ''))) {
-    return 'CONVERSAS_WHATSAPP';
-  }
-  return camp.objetivo;
+  if (!/engag|engaj/i.test(camp.objetivo)) return camp.objetivo;
+  const conjuntosOtimizamConversa = (camp.conjuntos ?? [])
+    .some((c) => /conversation|messag|replies/i.test(c.objetivo_otimizacao ?? ''));
+  // Fallback pelo NOME: análises do cron não baixam conjuntos (fetchConjuntos=false), então
+  // o sinal de otimização não existe — o padrão de nomenclatura da agência ([WPP], whats, zap)
+  // é o melhor indício disponível de que a campanha de "engajamento" é de conversas.
+  const nomeIndicaWhatsApp = /wpp|whats|\bzap\b/i.test(camp.nome ?? '');
+  return (conjuntosOtimizamConversa || nomeIndicaWhatsApp) ? 'CONVERSAS_WHATSAPP' : camp.objetivo;
 }
 
 // Monta a árvore campanha→conjunto→anúncio: métricas do PAYLOAD (verdade), veredito da IA.

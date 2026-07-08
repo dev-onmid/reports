@@ -657,8 +657,10 @@ async function handleV2(body: AnalyzeBody, origin: string): Promise<Response> {
       // 8192 truncava a resposta a meio do JSON → parse falhava → todo nó caía no fallback
       // (classificacao=ATENCAO, acao='') → a fila filtra nó sem acao → parecia "tudo certo"
       // quando na verdade a IA nunca terminou de responder. Ver detecção de truncamento abaixo.
+      // 32000: com 16k a resposta ainda truncava em contas grandes (ex: 54 nós → cobria 33 e
+      // o banner avisava "resposta incompleta"). Haiku 4.5 suporta até 64k de saída.
       model: OPTIMIZER_MODEL_V2,
-      max_tokens: 16000,
+      max_tokens: 32000,
       system: buildOptimizerSystemPromptV2(),
       messages: [{ role: 'user', content: JSON.stringify(payload) }],
     }),
