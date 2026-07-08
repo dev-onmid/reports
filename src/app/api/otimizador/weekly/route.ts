@@ -646,7 +646,9 @@ async function executeWeekly({ origin, forceClientId, forceAi, period }: RunOpti
         return;
       }
 
-      const analyzeRes = await fetchWithTimeout(new URL('/api/otimizador/analisar', origin).toString(), 90_000, {
+      // 115s: com max_tokens 32k a IA pode passar de 90s em contas grandes; a rota analisar
+      // tem maxDuration=120 — esperar menos que isso gera "timeout" falso com análise salva.
+      const analyzeRes = await fetchWithTimeout(new URL('/api/otimizador/analisar', origin).toString(), 115_000, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ payload_v2: payload, connection_id: conn.id, account_id: conn.account_id, force_ai: forceAi }),
