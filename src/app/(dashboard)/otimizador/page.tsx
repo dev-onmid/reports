@@ -520,19 +520,55 @@ function AccountSelector({ contas, value, onChange }: {
 // ---------------------------------------------------------------------------
 // Resumo geral da conta
 // ---------------------------------------------------------------------------
-const ESTADO_LABEL: Record<string, { label: string; tone: string }> = {
-  SAUDAVEL: { label: 'Saudável', tone: 'text-emerald-300' },
-  ATENCAO: { label: 'Atenção', tone: 'text-amber-300' },
-  CRISE: { label: 'Crise', tone: 'text-red-300' },
+const ESTADO_LABEL: Record<string, { label: string; tone: string; ring: string }> = {
+  SAUDAVEL: { label: 'Saudável', tone: 'text-emerald-300', ring: '#34d399' },
+  ATENCAO: { label: 'Atenção crítica', tone: 'text-amber-300', ring: '#fbbf24' },
+  CRISE: { label: 'Crise', tone: 'text-red-300', ring: '#f87171' },
 };
 
-function AccountSummaryHeader({ resumo, generatedAt, proximaAnalise }: {
+// Score 0-100 do gauge — a API NÃO devolve um número (só estado_da_conta: SAUDAVEL/ATENCAO/
+// CRISE). Isto é uma HEURÍSTICA client-side, transparente: parte de uma base por estado e
+// ajusta pela proporção de itens "pausar" (penaliza) vs "escalar" (bonifica) na árvore. Se no
+// futuro a IA passar a devolver um score próprio, trocar esta função pelo valor real do backend.
+function computeAccountScore(estadoDaConta: string | null, nodes: TreeNode[]): number {
+  const base = estadoDaConta === 'SAUDAVEL' ? 80 : estadoDaConta === 'ATENCAO' ? 55 : estadoDaConta === 'CRISE' ? 25 : 50;
+  const total = nodes.length || 1;
+  const pausar = nodes.filter((n) => categoriaDoNode(n) === 'pausar').length;
+  const escalar = nodes.filter((n) => categoriaDoNode(n) === 'escalar').length;
+  const penalidade = Math.round((pausar / total) * 30);
+  const bonus = Math.round((escalar / total) * 10);
+  return Math.max(0, Math.min(100, base - penalidade + bonus));
+}
+
+// Anel de progresso (SVG) — mostra o score 0-100 calculado acima.
+function ScoreGauge({ score, ring }: { score: number; ring: string }) {
+  const r = 34;
+  const circ = 2 * Math.PI * r;
+  const offset = circ * (1 - score / 100);
+  return (
+    <div className="relative h-24 w-24 shrink-0">
+      <svg viewBox="0 0 80 80" className="h-24 w-24 -rotate-90">
+        <circle cx="40" cy="40" r={r} fill="none" stroke="currentColor" strokeWidth="8" className="text-border" />
+        <circle cx="40" cy="40" r={r} fill="none" stroke={ring} strokeWidth="8" strokeLinecap="round"
+          strokeDasharray={circ} strokeDashoffset={offset} style={{ transition: 'stroke-dashoffset 0.4s ease' }} />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className="font-heading text-2xl text-foreground">{score}</span>
+        <span className="text-[9px] text-muted-foreground">/100</span>
+      </div>
+    </div>
+  );
+}
+
+function AccountSummaryHeader({ resumo, nodes, generatedAt, proximaAnalise }: {
   resumo: ArvoreResumo | null;
+  nodes: TreeNode[];
   generatedAt: string | null;
   proximaAnalise: string | null;
 }) {
   if (!resumo) return null;
-  const estado = ESTADO_LABEL[resumo.estado_da_conta ?? ''] ?? { label: '—', tone: 'text-muted-foreground' };
+  const estado = ESTADO_LABEL[resumo.estado_da_conta ?? ''] ?? { label: '—', tone: 'text-muted-foreground', ring: '#8b8b8b' };
+  const score = computeAccountScore(resumo.estado_da_conta, nodes);
   const cm = resumo.cruzamento_com_metas;
   const stats: Array<{ label: string; value: string }> = [
     { label: 'Verba gasta', value: formatCurrencyBRL(cm?.gasto_total ?? 0) },
@@ -545,20 +581,26 @@ function AccountSummaryHeader({ resumo, generatedAt, proximaAnalise }: {
   ];
   return (
     <section className="space-y-3 rounded-[var(--radius)] border border-border bg-card p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <span className={cn('text-sm font-bold uppercase tracking-wide', estado.tone)}>{estado.label}</span>
-          {resumo.semana_analise && <span className="text-xs text-muted-foreground">· semana {resumo.semana_analise}</span>}
-        </div>
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-          <span>Última análise: {formatDateTime(generatedAt)}</span>
-          {proximaAnalise && <span>Próxima automática: {proximaAnalise}</span>}
+      <div className="flex flex-wrap items-start gap-4">
+        <ScoreGauge score={score} ring={estado.ring} />
+        <div className="min-w-0 flex-1 space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className={cn('text-sm font-bold uppercase tracking-wide', estado.tone)}>{estado.label}</span>
+              <span className="text-xs text-muted-foreground">Performance {score >= 70 ? 'acima' : score >= 45 ? 'próxima' : 'abaixo'} do ideal</span>
+              {resumo.semana_analise && <span className="text-xs text-muted-foreground">· semana {resumo.semana_analise}</span>}
+            </div>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+              <span>Última análise: {formatDateTime(generatedAt)}</span>
+              {proximaAnalise && <span>Próxima automática: {proximaAnalise}</span>}
+            </div>
+          </div>
+          {resumo.resumo_executivo && <p className="text-sm leading-relaxed text-foreground">{resumo.resumo_executivo}</p>}
         </div>
       </div>
-      {resumo.resumo_executivo && <p className="text-sm leading-relaxed text-foreground">{resumo.resumo_executivo}</p>}
-      <div className="grid grid-cols-2 gap-3 border-t border-border pt-3 sm:grid-cols-4 lg:grid-cols-7">
+      <div className="grid grid-cols-2 gap-2 border-t border-border pt-3 sm:grid-cols-4 lg:grid-cols-7">
         {stats.map((s) => (
-          <div key={s.label}>
+          <div key={s.label} className="rounded-[var(--radius)] border border-border/60 bg-background p-2.5">
             <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{s.label}</p>
             <p className="mt-0.5 font-heading text-lg text-foreground">{s.value}</p>
           </div>
@@ -580,27 +622,48 @@ function QuickDecisionCards({ nodes, active, onSelect }: {
   const counts: Record<Categoria, number> = { pausar: 0, revisar: 0, manter: 0, escalar: 0, investigar: 0, sem_diagnostico: 0 };
   for (const n of nodes) counts[categoriaDoNode(n)]++;
 
+  const grid4: Array<Exclude<Categoria, 'sem_diagnostico' | 'investigar'>> = ['pausar', 'revisar', 'manter', 'escalar'];
+  const investigarMeta = CATEGORIA_META.investigar;
+  const investigarActive = active === 'investigar';
+
   return (
-    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-      {(Object.keys(CATEGORIA_META) as Array<Exclude<Categoria, 'sem_diagnostico'>>).map((cat) => {
-        const meta = CATEGORIA_META[cat];
-        const Icon = meta.icon;
-        const isActive = active === cat;
-        return (
-          <button
-            key={cat}
-            onClick={() => onSelect(isActive ? null : cat)}
-            className={cn(
-              'flex flex-col items-start gap-1 rounded-[var(--radius)] border p-3 text-left transition-colors',
-              isActive ? meta.tone : 'border-border bg-card hover:border-primary/30',
-            )}
-          >
-            <Icon className={cn('h-4 w-4', isActive ? '' : 'text-muted-foreground')} />
-            <span className="font-heading text-2xl text-foreground">{counts[cat]}</span>
-            <span className="text-xs font-medium text-muted-foreground">{meta.label}</span>
-          </button>
-        );
-      })}
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-2 gap-2 sm:col-span-2">
+        {grid4.map((cat) => {
+          const meta = CATEGORIA_META[cat];
+          const Icon = meta.icon;
+          const isActive = active === cat;
+          return (
+            <button
+              key={cat}
+              onClick={() => onSelect(isActive ? null : cat)}
+              className={cn(
+                'flex flex-col items-start gap-1 rounded-[var(--radius)] border p-3 text-left transition-colors',
+                isActive ? meta.tone : 'border-border bg-card hover:border-primary/30',
+              )}
+            >
+              <Icon className={cn('h-4 w-4', isActive ? '' : 'text-muted-foreground')} />
+              <span className="font-heading text-2xl text-foreground">{counts[cat]}</span>
+              <span className="text-xs font-medium text-muted-foreground">{meta.label}</span>
+            </button>
+          );
+        })}
+      </div>
+      {/* Investigar — card destacado, estilo de alerta, mesmo tratamento de "ação urgente" que o Pausar */}
+      <button
+        onClick={() => onSelect(investigarActive ? null : 'investigar')}
+        className={cn(
+          'flex flex-col items-start justify-between gap-2 rounded-[var(--radius)] border p-4 text-left transition-colors',
+          investigarActive ? investigarMeta.tone : 'border-secondary/40 bg-secondary/5 hover:border-secondary/60',
+        )}
+      >
+        <span className="rounded border border-secondary/40 bg-secondary/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-secondary">
+          Precisa de atenção
+        </span>
+        <Eye className="h-5 w-5 text-secondary" />
+        <span className="font-heading text-3xl text-foreground">{counts.investigar}</span>
+        <span className="text-xs font-medium text-muted-foreground">{investigarMeta.label} — ambiguidade ou pouco dado, revisar antes de decidir</span>
+      </button>
     </div>
   );
 }
@@ -650,14 +713,26 @@ function FilterChips({ nivel, onNivel, apenasComAcao, onApenasComAcao }: {
 }
 
 // ---------------------------------------------------------------------------
-// Árvore de campanhas
+// Árvore de campanhas (tabela) — hierarquia via indentação, colunas fixas.
 // ---------------------------------------------------------------------------
 function nodeToneClass(n: TreeNode): string {
   if (n.status === 'ignorado' || n.status === 'aplicado') return 'opacity-40';
   return '';
 }
 
-function TreeNodeRow({ node, depth, selectedId, onSelect, filtroNivel, filtroCategoria, apenasComAcao }: {
+// Status por severidade — distinto da coluna "Ação recomendada" (categoria/verbo). Aqui é só
+// a leitura de saúde do nó (bom/atenção/crítico), igual em qualquer nível da árvore.
+const STATUS_SEVERIDADE: Record<Severidade, { label: string; tone: string }> = {
+  urgente: { label: 'Crítica', tone: 'border-red-400/40 bg-red-400/10 text-red-300' },
+  atencao: { label: 'Atenção', tone: 'border-amber-400/40 bg-amber-400/10 text-amber-300' },
+  ok: { label: 'Bom', tone: 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300' },
+};
+
+function ctrDoNode(n: TreeNode): string {
+  return n.fatos.find((f) => f.rotulo === 'CTR')?.valor ?? '—';
+}
+
+function TreeTableRow({ node, depth, selectedId, onSelect, filtroNivel, filtroCategoria, apenasComAcao }: {
   node: TreeNode;
   depth: number;
   selectedId: string | null;
@@ -668,12 +743,8 @@ function TreeNodeRow({ node, depth, selectedId, onSelect, filtroNivel, filtroCat
 }) {
   const [open, setOpen] = useState(depth === 0);
   const hasChildren = node.filhos.length > 0;
-  const sev = SEV[node.severidade];
   const cat = categoriaDoNode(node);
-  const matchesFilter =
-    (filtroNivel === 'todos' || node.nivel === filtroNivel) &&
-    (!filtroCategoria || cat === filtroCategoria) &&
-    (!apenasComAcao || node.texto_recomendacao.trim().length > 0);
+  const statusSev = STATUS_SEVERIDADE[node.severidade];
 
   // Um nó aparece se ele mesmo casa com o filtro OU algum descendente casa (pra manter contexto
   // hierárquico visível — filtrar só criativos não deve esconder a campanha-pai).
@@ -691,46 +762,50 @@ function TreeNodeRow({ node, depth, selectedId, onSelect, filtroNivel, filtroCat
   const gasto = node.metricas_chave.find((m) => m.rotulo === 'Gasto');
 
   return (
-    <div>
-      <div
+    <>
+      <tr
         className={cn(
-          'flex cursor-pointer items-center gap-2 border-b border-border/60 py-2 pr-2 hover:bg-surface-soft',
+          'cursor-pointer border-b border-border/60 hover:bg-surface-soft',
           selectedId === node.rec_id && 'bg-primary/5',
           nodeToneClass(node),
         )}
-        style={{ paddingLeft: 8 + depth * 20 }}
         onClick={() => onSelect(node)}
       >
-        {hasChildren ? (
-          <button onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} className="shrink-0 text-muted-foreground hover:text-foreground">
-            <ChevronRight className={cn('h-3.5 w-3.5 transition-transform', open && 'rotate-90')} />
-          </button>
-        ) : <span className="w-3.5 shrink-0" />}
-        <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', sev.dot)} />
-        <span className="min-w-0 flex-1 truncate text-sm text-foreground" title={node.objeto_nome}>
-          {node.nivel !== 'campaign' && <span className="mr-1 text-[10px] font-semibold uppercase text-muted-foreground">{NIVEL_LABEL[node.nivel]}</span>}
-          {node.objeto_nome}
-        </span>
-        <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">{gasto?.valor ?? '—'}</span>
-        <span className="hidden shrink-0 text-xs text-muted-foreground md:inline">{metricaResultado?.valor ?? '—'}</span>
-        <span className="hidden shrink-0 text-xs text-muted-foreground md:inline">{metricaCusto?.valor ?? '—'}</span>
-        <span className={cn('shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold', categoriaMeta(cat).tone)}>
-          {categoriaMeta(cat).label}
-        </span>
-      </div>
-      {open && hasChildren && (
-        <div>
-          {(node.filhos as TreeNode[]).map((child) => (
-            <TreeNodeRow key={child.rec_id} node={child} depth={depth + 1} selectedId={selectedId} onSelect={onSelect}
-              filtroNivel={filtroNivel} filtroCategoria={filtroCategoria} apenasComAcao={apenasComAcao} />
-          ))}
-        </div>
-      )}
-    </div>
+        <td className="py-2 pr-2">
+          <div className="flex items-center gap-2" style={{ paddingLeft: depth * 20 }}>
+            {hasChildren ? (
+              <button onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} className="shrink-0 text-muted-foreground hover:text-foreground">
+                <ChevronRight className={cn('h-3.5 w-3.5 transition-transform', open && 'rotate-90')} />
+              </button>
+            ) : <span className="w-3.5 shrink-0" />}
+            <span className="min-w-0 truncate text-sm text-foreground" title={node.objeto_nome}>
+              {node.nivel !== 'campaign' && <span className="mr-1 text-[10px] font-semibold uppercase text-muted-foreground">{NIVEL_LABEL[node.nivel]}</span>}
+              {node.objeto_nome}
+            </span>
+          </div>
+        </td>
+        <td className="py-2 pr-2">
+          <span className={cn('inline-block shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold', statusSev.tone)}>{statusSev.label}</span>
+        </td>
+        <td className="py-2 pr-2 text-right text-xs text-muted-foreground">{gasto?.valor ?? '—'}</td>
+        <td className="py-2 pr-2 text-right text-xs text-muted-foreground">{metricaResultado?.valor ?? '—'}</td>
+        <td className="py-2 pr-2 text-right text-xs text-muted-foreground">{metricaCusto?.valor ?? '—'}</td>
+        <td className="py-2 pr-2 text-right text-xs text-muted-foreground">{ctrDoNode(node)}</td>
+        <td className="py-2 pr-2 text-right">
+          <span className={cn('inline-block shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold', categoriaMeta(cat).tone)}>
+            {categoriaMeta(cat).label}
+          </span>
+        </td>
+      </tr>
+      {open && hasChildren && (node.filhos as TreeNode[]).map((child) => (
+        <TreeTableRow key={child.rec_id} node={child} depth={depth + 1} selectedId={selectedId} onSelect={onSelect}
+          filtroNivel={filtroNivel} filtroCategoria={filtroCategoria} apenasComAcao={apenasComAcao} />
+      ))}
+    </>
   );
 }
 
-function CampaignTree({ nodes, selectedId, onSelect, filtroNivel, filtroCategoria, apenasComAcao }: {
+function CampaignTable({ nodes, selectedId, onSelect, filtroNivel, filtroCategoria, apenasComAcao }: {
   nodes: TreeNode[];
   selectedId: string | null;
   onSelect: (n: TreeNode) => void;
@@ -738,19 +813,91 @@ function CampaignTree({ nodes, selectedId, onSelect, filtroNivel, filtroCategori
   filtroCategoria: Categoria | null;
   apenasComAcao: boolean;
 }) {
+  const [verTodas, setVerTodas] = useState(false);
+  const LIMITE = 5;
+  const visiveis = verTodas ? nodes : nodes.slice(0, LIMITE);
+  const restantes = nodes.length - visiveis.length;
+
   return (
     <div className="rounded-[var(--radius)] border border-border bg-card">
-      <div className="flex items-center gap-2 border-b border-border p-3 text-xs font-semibold text-muted-foreground">
-        <Layers className="h-3.5 w-3.5" /> Árvore de campanhas
+      <div className="flex items-center justify-between gap-2 border-b border-border p-3 text-xs font-semibold text-muted-foreground">
+        <span className="flex items-center gap-2"><Layers className="h-3.5 w-3.5" /> Árvore de campanhas</span>
+        <span className="font-normal normal-case text-muted-foreground">{nodes.length} campanha{nodes.length === 1 ? '' : 's'}</span>
       </div>
-      <div className="max-h-[70vh] overflow-y-auto">
-        {nodes.map((n) => (
-          <TreeNodeRow key={n.rec_id} node={n} depth={0} selectedId={selectedId} onSelect={onSelect}
-            filtroNivel={filtroNivel} filtroCategoria={filtroCategoria} apenasComAcao={apenasComAcao} />
-        ))}
+      <div className="max-h-[60vh] overflow-auto">
+        <table className="w-full border-collapse text-left">
+          <thead className="sticky top-0 z-10 bg-card">
+            <tr className="border-b border-border text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+              <th className="py-2 pl-3 pr-2 font-bold">Campanha / Conjunto / Criativo</th>
+              <th className="py-2 pr-2 font-bold">Status</th>
+              <th className="py-2 pr-2 text-right font-bold">Gasto</th>
+              <th className="py-2 pr-2 text-right font-bold">Conversas</th>
+              <th className="py-2 pr-2 text-right font-bold">Custo por conv.</th>
+              <th className="py-2 pr-2 text-right font-bold">CTR</th>
+              <th className="py-2 pr-2 text-right font-bold">Ação recomendada</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visiveis.map((n) => (
+              <TreeTableRow key={n.rec_id} node={n} depth={0} selectedId={selectedId} onSelect={onSelect}
+                filtroNivel={filtroNivel} filtroCategoria={filtroCategoria} apenasComAcao={apenasComAcao} />
+            ))}
+          </tbody>
+        </table>
         {nodes.length === 0 && <p className="p-4 text-sm text-muted-foreground">Nenhuma campanha nesta análise.</p>}
       </div>
+      {restantes > 0 && (
+        <button onClick={() => setVerTodas(true)} className="w-full border-t border-border p-2.5 text-center text-xs font-medium text-primary hover:underline">
+          Ver mais campanhas ({restantes})
+        </button>
+      )}
+      {verTodas && nodes.length > LIMITE && (
+        <button onClick={() => setVerTodas(false)} className="w-full border-t border-border p-2.5 text-center text-xs font-medium text-muted-foreground hover:underline">
+          Ver menos
+        </button>
+      )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Insights automáticos — 3 colunas no rodapé. Derivados dos MESMOS dados da árvore (nenhum
+// texto novo é gerado aqui, só selecionamos e citamos motivos/ações que a IA já escreveu).
+// ---------------------------------------------------------------------------
+function InsightsFooter({ nodes }: { nodes: TreeNode[] }) {
+  // "O que está funcionando": itens escalar (saudável + motivo real de crescimento) — são os
+  // únicos nós SAUDAVEL que carregam motivos (SAUDAVEL sem ação tem motivos=[] por regra do prompt).
+  const funcionando = nodes.filter((n) => categoriaDoNode(n) === 'escalar' && n.motivos.length > 0).slice(0, 3);
+  // Oportunidades de escala: mesma categoria, foco na ação recomendada.
+  const oportunidades = nodes.filter((n) => categoriaDoNode(n) === 'escalar').slice(0, 3);
+  // Monitorar de perto: ATENÇÃO (ainda não é urgente, mas está no limite) — vale acompanhar
+  // antes que vire um "pausar agora".
+  const monitorar = nodes.filter((n) => n.severidade === 'atencao' && n.texto_recomendacao.trim()).slice(0, 3);
+
+  const cols: Array<{ title: string; icon: typeof BadgeCheck; items: TreeNode[]; empty: string }> = [
+    { title: 'Insights automáticos da análise', icon: BadgeCheck, items: funcionando, empty: 'Nenhum destaque de performance nesta análise.' },
+    { title: 'Oportunidades de escala', icon: Rocket, items: oportunidades, empty: 'Nenhuma oportunidade de escala identificada agora.' },
+    { title: 'Monitorar de perto', icon: Eye, items: monitorar, empty: 'Nada em zona de atenção no momento.' },
+  ];
+
+  return (
+    <section className="grid gap-4 rounded-[var(--radius)] border border-border bg-card p-4 sm:grid-cols-3">
+      {cols.map((col) => (
+        <div key={col.title} className="space-y-2">
+          <p className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+            <col.icon className="h-3.5 w-3.5 text-primary" /> {col.title}
+          </p>
+          <ul className="space-y-1.5">
+            {col.items.length === 0 && <li className="text-xs text-muted-foreground">{col.empty}</li>}
+            {col.items.map((n) => (
+              <li key={n.rec_id} className="text-xs leading-relaxed text-muted-foreground">
+                <span className="font-medium text-foreground">{n.objeto_nome}:</span> {n.motivos[0] ?? n.texto_recomendacao}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </section>
   );
 }
 
@@ -1117,6 +1264,18 @@ export default function OtimizadorPage() {
   const flatNodes = useMemo(() => flattenTree(treeNodes), [treeNodes]);
   const selectedNode = useMemo(() => flatNodes.find((n) => n.rec_id === selectedId) ?? null, [flatNodes, selectedId]);
 
+  // Seleciona automaticamente o item de maior prioridade ao carregar uma nova árvore — o painel
+  // de detalhe nunca fica vazio à toa quando já existe algo urgente pra decidir.
+  useEffect(() => {
+    if (selectedId || flatNodes.length === 0) return;
+    const porPrioridade = [...flatNodes].sort((a, b) => {
+      const rank = (n: TreeNode) => (categoriaDoNode(n) === 'pausar' ? 0 : n.severidade === 'urgente' ? 1 : n.severidade === 'atencao' ? 2 : 3);
+      return rank(a) - rank(b);
+    });
+    const top = porPrioridade.find((n) => n.texto_recomendacao.trim()) ?? null;
+    if (top) setSelectedId(top.rec_id);
+  }, [flatNodes]); // eslint-disable-line react-hooks/exhaustive-deps
+
   function jumpTo(recId: string) {
     setSelectedId(recId);
   }
@@ -1333,44 +1492,44 @@ export default function OtimizadorPage() {
       <ConfirmToast toast={toast} onUndo={doUndo} onClose={() => setToast(null)} />
 
       {/* Header */}
-      <header className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <div className="flex items-center gap-2 text-sm font-semibold text-primary">
-            <WandSparkles className="h-4 w-4" /> Otimizador de Campanhas
-          </div>
-          <h1 className="mt-1 font-heading text-4xl text-foreground">Central de decisão</h1>
-          <p className="mt-0.5 text-sm text-muted-foreground">Onde a verba está performando, onde está sendo desperdiçada e qual é a próxima melhor decisão.</p>
+      <header className="space-y-1">
+        <div className="flex items-center gap-2 text-sm font-semibold text-primary">
+          <WandSparkles className="h-4 w-4" /> Otimizador de Campanhas
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <AccountSelector contas={contas} value={contaFiltro} onChange={setContaFiltro} />
-          {isAdmin && (
-            <Button variant="outline" onClick={() => setConfigClientId(contaFiltro || null)} disabled={!contaFiltro}>
-              <Settings2 className="h-4 w-4" /> Configurar
-            </Button>
-          )}
-          <Button onClick={runAnalysisNow} disabled={runLoading || diagLoading || !contaFiltro}>
-            {runLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-            {temAnalise ? 'Atualizar análise' : 'Fazer análise'}
-          </Button>
-        </div>
+        <h1 className="font-heading text-4xl text-foreground">Otimizador de Campanhas</h1>
+        <p className="text-sm text-muted-foreground">Análises inteligentes e recomendações para melhorar seus resultados.</p>
       </header>
 
-      {/* Admin: período + diagnóstico técnico */}
-      {isAdmin && (
-        <section className="flex flex-wrap items-end gap-3 rounded-[var(--radius)] border border-primary/30 bg-primary/5 p-4">
-          <label className="space-y-1.5">
-            <span className="text-xs font-semibold text-muted-foreground">Período</span>
-            <select value={manualPeriod} onChange={(e) => setManualPeriod(e.target.value as OptimizerPeriodKey)} disabled={runLoading}
-              className="h-10 rounded-[var(--radius)] border border-border bg-background px-3 text-sm text-foreground outline-none focus:border-primary">
-              {OPTIMIZER_PERIODS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
-            </select>
-          </label>
-          <Button variant="outline" onClick={runDiagnostic} disabled={runLoading || diagLoading || !contaFiltro} className="h-10"
-            title="Mostra de onde vêm os dados desta conta — sem gastar tokens de IA">
-            {diagLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-            Diagnosticar
-          </Button>
-          {runMessage && <p className="w-full text-xs font-medium text-primary">{runMessage}</p>}
+      {/* Cliente + Período + ação principal, tudo na mesma barra */}
+      <section className="flex flex-wrap items-end gap-3 rounded-[var(--radius)] border border-primary/30 bg-primary/5 p-4">
+        <div className="space-y-1.5">
+          <span className="text-xs font-semibold text-muted-foreground">Cliente</span>
+          <AccountSelector contas={contas} value={contaFiltro} onChange={setContaFiltro} />
+        </div>
+        <label className="space-y-1.5">
+          <span className="text-xs font-semibold text-muted-foreground">Período</span>
+          <select value={manualPeriod} onChange={(e) => setManualPeriod(e.target.value as OptimizerPeriodKey)} disabled={runLoading}
+            className="h-10 rounded-[var(--radius)] border border-border bg-background px-3 text-sm text-foreground outline-none focus:border-primary">
+            {OPTIMIZER_PERIODS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
+          </select>
+        </label>
+        <Button onClick={runAnalysisNow} disabled={runLoading || diagLoading || !contaFiltro} className="h-10">
+          {runLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+          {temAnalise ? 'Atualizar análise' : 'Fazer análise'}
+        </Button>
+        {isAdmin && (
+          <>
+            <Button variant="outline" onClick={() => setConfigClientId(contaFiltro || null)} disabled={!contaFiltro} className="h-10">
+              <Settings2 className="h-4 w-4" /> Configurar
+            </Button>
+            <Button variant="outline" onClick={runDiagnostic} disabled={runLoading || diagLoading || !contaFiltro} className="h-10"
+              title="Mostra de onde vêm os dados desta conta — sem gastar tokens de IA">
+              {diagLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+              Diagnosticar
+            </Button>
+          </>
+        )}
+        {runMessage && <p className="w-full text-xs font-medium text-primary">{runMessage}</p>}
           {diagResult && (
             <div className="mt-1 w-full space-y-2">
               <div className="flex items-center justify-between">
@@ -1403,7 +1562,6 @@ export default function OtimizadorPage() {
             </div>
           )}
         </section>
-      )}
 
       {loading ? (
         <div className="flex h-48 items-center justify-center text-sm text-muted-foreground">
@@ -1417,7 +1575,7 @@ export default function OtimizadorPage() {
         </div>
       ) : (
         <>
-          <AccountSummaryHeader resumo={resumo} generatedAt={generatedAt} proximaAnalise={null} />
+          <AccountSummaryHeader resumo={resumo} nodes={flatNodes} generatedAt={generatedAt} proximaAnalise={null} />
 
           {treeLoading ? (
             <div className="flex h-48 items-center justify-center text-sm text-muted-foreground">
@@ -1436,17 +1594,9 @@ export default function OtimizadorPage() {
             </div>
           ) : (
             <>
-              <QuickDecisionCards nodes={flatNodes} active={categoriaFiltro} onSelect={setCategoriaFiltro} />
-              <FilterChips nivel={nivelFiltro} onNivel={setNivelFiltro} apenasComAcao={apenasComAcao} onApenasComAcao={setApenasComAcao} />
-              <div className="grid gap-4 lg:grid-cols-[1.6fr_1fr]">
-                <CampaignTree
-                  nodes={treeNodes}
-                  selectedId={selectedId}
-                  onSelect={(n) => setSelectedId(n.rec_id)}
-                  filtroNivel={nivelFiltro}
-                  filtroCategoria={categoriaFiltro}
-                  apenasComAcao={apenasComAcao}
-                />
+              {/* Cards de decisão rápida + painel de detalhe do item de maior prioridade lado a lado */}
+              <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
+                <QuickDecisionCards nodes={flatNodes} active={categoriaFiltro} onSelect={setCategoriaFiltro} />
                 {selectedNode ? (
                   <DetailPanel node={selectedNode} allNodes={flatNodes} busy={busy} onApply={doApply} onIgnore={doIgnore} onHuman={doHuman} onJump={jumpTo} />
                 ) : (
@@ -1456,6 +1606,17 @@ export default function OtimizadorPage() {
                   </div>
                 )}
               </div>
+
+              <FilterChips nivel={nivelFiltro} onNivel={setNivelFiltro} apenasComAcao={apenasComAcao} onApenasComAcao={setApenasComAcao} />
+              <CampaignTable
+                nodes={treeNodes}
+                selectedId={selectedId}
+                onSelect={(n) => setSelectedId(n.rec_id)}
+                filtroNivel={nivelFiltro}
+                filtroCategoria={categoriaFiltro}
+                apenasComAcao={apenasComAcao}
+              />
+              <InsightsFooter nodes={flatNodes} />
             </>
           )}
         </>
