@@ -155,9 +155,16 @@ const VERBO_ACAO: Record<string, string> = { PAUSAR: 'Pausar agora', ATIVAR: 'Re
 // 5 categorias de decisão rápida — computadas a partir de acao_tipo + severidade de cada nó.
 // "Investigar" hoje só cobre VERIFICAR_MANUAL (ambiguidade/aprendizado) — funil/técnico real
 // (WhatsApp, pixel, LP) ainda não é um sinal que a IA recebe, ver CLAUDE.md.
-type Categoria = 'pausar' | 'revisar' | 'manter' | 'escalar' | 'investigar';
+type Categoria = 'pausar' | 'revisar' | 'manter' | 'escalar' | 'investigar' | 'sem_diagnostico';
+// Nós ATENCAO/URGENTE sem texto_recomendacao são "buraco de dado" (fallback quando a resposta
+// da IA não cobriu aquele objeto — ex: truncamento por limite de tokens em contas grandes),
+// NÃO uma recomendação real de revisar. Contá-los como "Revisar" infla o card com nós que não
+// têm diagnóstico nenhum. Ver `diagnosticos` no resumo da conta — só conta texto_recomendacao
+// não-vazio; os cards de decisão precisam bater com esse número.
 function categoriaDoNode(n: { severidade: Severidade; acao_estruturada: { tipo: string } | null; texto_recomendacao: string }): Categoria {
   const tipo = n.acao_estruturada?.tipo;
+  const temDiagnostico = n.texto_recomendacao.trim().length > 0;
+  if (n.severidade !== 'ok' && !temDiagnostico) return 'sem_diagnostico';
   if (tipo === 'PAUSAR') return 'pausar';
   if (n.severidade === 'ok' && (tipo === 'AJUSTAR_ORCAMENTO' || tipo === 'ATIVAR')) return 'escalar';
   if (n.severidade === 'ok') return 'manter';
@@ -165,13 +172,19 @@ function categoriaDoNode(n: { severidade: Severidade; acao_estruturada: { tipo: 
   return 'revisar';
 }
 
-const CATEGORIA_META: Record<Categoria, { label: string; icon: typeof PauseCircle; tone: string }> = {
+// Só as 5 categorias acionáveis viram card/filtro clicável — "sem_diagnostico" aparece na árvore
+// com um rótulo neutro, mas nunca conta nos cards nem é alvo de filtro (ver QuickDecisionCards).
+const CATEGORIA_META: Record<Exclude<Categoria, 'sem_diagnostico'>, { label: string; icon: typeof PauseCircle; tone: string }> = {
   pausar: { label: 'Pausar agora', icon: PauseCircle, tone: 'border-red-400/40 bg-red-400/5 text-red-300' },
   revisar: { label: 'Revisar', icon: Search, tone: 'border-amber-400/40 bg-amber-400/5 text-amber-300' },
   manter: { label: 'Manter', icon: MinusCircle, tone: 'border-emerald-400/40 bg-emerald-400/5 text-emerald-300' },
   escalar: { label: 'Escalar', icon: Rocket, tone: 'border-primary/40 bg-primary/5 text-primary' },
   investigar: { label: 'Investigar', icon: Eye, tone: 'border-secondary/40 bg-secondary/5 text-secondary' },
 };
+const SEM_DIAGNOSTICO_META = { label: 'Sem diagnóstico', icon: MinusCircle, tone: 'border-border text-muted-foreground' };
+function categoriaMeta(cat: Categoria) {
+  return cat === 'sem_diagnostico' ? SEM_DIAGNOSTICO_META : CATEGORIA_META[cat];
+}
 
 // Link direto para o objeto no Gerenciador de Anúncios nativo.
 function adManagerUrl(rec: { canal: string; account_id: string | null; nivel: string; objeto_id: string }): string | null {
@@ -563,12 +576,13 @@ function QuickDecisionCards({ nodes, active, onSelect }: {
   active: Categoria | null;
   onSelect: (cat: Categoria | null) => void;
 }) {
-  const counts: Record<Categoria, number> = { pausar: 0, revisar: 0, manter: 0, escalar: 0, investigar: 0 };
+  // "sem_diagnostico" não vira card — ver categoriaDoNode. Só as 5 categorias acionáveis contam.
+  const counts: Record<Categoria, number> = { pausar: 0, revisar: 0, manter: 0, escalar: 0, investigar: 0, sem_diagnostico: 0 };
   for (const n of nodes) counts[categoriaDoNode(n)]++;
 
   return (
     <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-      {(Object.keys(CATEGORIA_META) as Categoria[]).map((cat) => {
+      {(Object.keys(CATEGORIA_META) as Array<Exclude<Categoria, 'sem_diagnostico'>>).map((cat) => {
         const meta = CATEGORIA_META[cat];
         const Icon = meta.icon;
         const isActive = active === cat;
@@ -700,8 +714,8 @@ function TreeNodeRow({ node, depth, selectedId, onSelect, filtroNivel, filtroCat
         <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">{gasto?.valor ?? '—'}</span>
         <span className="hidden shrink-0 text-xs text-muted-foreground md:inline">{metricaResultado?.valor ?? '—'}</span>
         <span className="hidden shrink-0 text-xs text-muted-foreground md:inline">{metricaCusto?.valor ?? '—'}</span>
-        <span className={cn('shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold', CATEGORIA_META[cat].tone)}>
-          {CATEGORIA_META[cat].label}
+        <span className={cn('shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold', categoriaMeta(cat).tone)}>
+          {categoriaMeta(cat).label}
         </span>
       </div>
       {open && hasChildren && (
