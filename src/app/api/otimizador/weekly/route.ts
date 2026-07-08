@@ -6,6 +6,7 @@ import {
   currentWeekLabel,
   segmentToOptimizerNiche,
   ensureOptimizerClientConfigTable,
+  ensureOptimizerManualNotesTable,
   type OptimizerPayloadV2,
   type OptimizerCampaignV2,
   type OptimizerObjective,
@@ -350,6 +351,34 @@ async function loadDecisionHistory(clientId: string): Promise<OptimizerPayloadV2
   }
 }
 
+// Observações manuais registradas pelo gestor (tela do Otimizador) nos últimos 45 dias — fecha
+// o ciclo humano→IA: se o gestor já disse "cliente pediu manter ativo", a próxima análise não
+// pode voltar a sugerir pausar o mesmo objeto sem saber disso.
+async function loadManualNotesContext(clientId: string): Promise<string | null> {
+  const pool = makeServerPool();
+  try {
+    await ensureOptimizerManualNotesTable(pool);
+    const { rows } = await pool.query<{ nivel: string; objeto_nome: string | null; texto: string; autor_nome: string | null; created_at: string }>(
+      `SELECT nivel, objeto_nome, texto, autor_nome, created_at
+         FROM public.optimizer_manual_notes
+        WHERE cliente_id = $1 AND ativo = true
+          AND created_at >= NOW() - INTERVAL '45 days'
+        ORDER BY created_at DESC
+        LIMIT 20`,
+      [clientId],
+    ).catch(() => ({ rows: [] as { nivel: string; objeto_nome: string | null; texto: string; autor_nome: string | null; created_at: string }[] }));
+    if (rows.length === 0) return null;
+    const linhas = rows.map((r) => {
+      const alvo = r.objeto_nome ? ` em "${r.objeto_nome}"` : '';
+      const quando = new Date(r.created_at).toLocaleDateString('pt-BR');
+      return `- [${r.nivel}${alvo}, ${quando}${r.autor_nome ? `, ${r.autor_nome}` : ''}]: ${r.texto}`;
+    });
+    return `OBSERVAÇÕES MANUAIS do gestor humano (considere antes de repetir uma sugestão já tratada):\n${linhas.join('\n')}`;
+  } finally {
+    await pool.end().catch(() => {});
+  }
+}
+
 // Busca campanhas via API interna (mesma que alimenta o dashboard)
 async function fetchCampaignsForClient(clientId: string, origin: string, periodKey: OptimizerPeriodKey, dateFrom: string, dateTo: string) {
   const url = new URL('/api/campaigns', origin);
@@ -535,12 +564,14 @@ async function buildPayloadForClient(
   void accountId; // reservado para opportunity score futuro
 
   const historico = await loadDecisionHistory(client.id);
+  const notasManuais = await loadManualNotesContext(client.id);
 
   const totalGasto = campanhas.reduce((sum, c) => sum + c.gasto, 0);
   const semMetaConfigurada = !planning?.objetivo && !planning?.cpl_maximo && !planning?.orcamento_diario;
 
   // Injeta contexto quando os dados são escassos para orientar a IA
   const observacoes: string[] = [];
+  if (notasManuais) observacoes.push(notasManuais);
   if (totalGasto === 0) {
     observacoes.push(`ALERTA: A conta possui ${campanhas.length} campanha(s) ativas mas registrou R$ 0,00 em gasto no período de ${period.label}. Diagnostique o motivo da não-entrega (pagamento, aprovação, orçamento esgotado, erro de configuração) e oriente o gestor de forma direta sobre o que verificar agora no Gerenciador de Anúncios.`);
   }

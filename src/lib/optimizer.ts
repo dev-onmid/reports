@@ -49,6 +49,29 @@ export async function ensureOptimizerRecStatusTable(pool: Pool): Promise<void> {
   `).catch(() => {});
 }
 
+// Observações manuais do gestor por nível (cliente/campanha/conjunto/criativo) — registro
+// humano, plural e com autor/timestamp. Diferente de `observacoes_fixas` (1 texto único por
+// cliente, editado só em Configurações, injetado como regra permanente): aqui são N notas
+// pontuais por objeto, que também alimentam o próximo prompt (ver loadManualNotesContext).
+export async function ensureOptimizerManualNotesTable(pool: Pool): Promise<void> {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS public.optimizer_manual_notes (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      cliente_id TEXT NOT NULL,
+      nivel TEXT NOT NULL,
+      objeto_id TEXT,
+      objeto_nome TEXT,
+      autor_id TEXT,
+      autor_nome TEXT,
+      texto TEXT NOT NULL,
+      ativo BOOLEAN NOT NULL DEFAULT true,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS optimizer_manual_notes_cliente_idx
+      ON public.optimizer_manual_notes (cliente_id, ativo, created_at DESC);
+  `).catch(() => {});
+}
+
 export const OPTIMIZER_MODEL = 'claude-sonnet-4-6';
 // v2 usa Haiku 4.5: a análise em árvore (payload grande + output 8k) com Sonnet passava
 // dos ~55s e estourava o timeout da IA. Haiku gera em ~10-20s, aguenta o schema de
@@ -384,11 +407,30 @@ function tituloAmigavel(tipo: OptimizerNodeAcaoTipo, nivel: OptimizerObjetoTipo,
     case 'ATIVAR': return `${artigo} ${nome} pausado pode voltar a ${semAlvo}`;
     case 'AJUSTAR_ORCAMENTO': return `Dá para ajustar o orçamento e buscar ${maisAlvo}`;
     case 'TROCAR_CRIATIVO': return `Este criativo cansou e está trazendo menos ${alvo && alvo !== 'resultado' ? alvo : 'resultado'}`;
+    case 'NENHUMA':
+      // SAUDAVEL + NENHUMA = de fato nada a fazer (a rota "escalar" já saiu como
+      // AJUSTAR_ORCAMENTO/ATIVAR antes de chegar aqui). Título precisa dizer "sem ação", nunca
+      // sugerir ajuste que não existe.
+      return sev === 'SAUDAVEL'
+        ? `${artigo === 'Uma' ? 'Está' : 'Está'} indo bem — sem ação necessária`
+        : `${artigo} ${nome} ainda sem diagnóstico definitivo`;
     default:
       return sev === 'URGENTE'
         ? `${artigo} ${nome} precisa de uma decisão para não perder ${maisAlvo}`
         : `${artigo} ${nome} pode render ${maisAlvo} com um ajuste`;
   }
+}
+
+// Formatadores puros — hoisted p/ módulo pra reuso entre buildRecomendacoes (fila achatada,
+// filtrada) e buildCampaignTree (árvore completa, sem filtro).
+function fmtMoney(v: number | null | undefined): string {
+  return v == null || !Number.isFinite(v) ? '—' : new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v as number);
+}
+function fmtNum(v: number | null | undefined): string {
+  return v == null || !Number.isFinite(v) ? '—' : (v as number).toLocaleString('pt-BR');
+}
+function fmtPct(v: number | null | undefined): string {
+  return v == null || !Number.isFinite(v) ? '—' : `${(v as number).toFixed(2)}%`;
 }
 
 export function buildRecomendacoes(
@@ -577,6 +619,194 @@ export function buildRecomendacoes(
   return raws
     .map((r) => r.rec)
     .sort((a, b) => sevRank[a.severidade] - sevRank[b.severidade]);
+}
+
+// Nó da árvore para a tela do Otimizador — mesmo shape de OptimizerRecomendacao (reaproveita
+// adManagerUrl, VERBO_ACAO etc. no client) + `filhos` para a hierarquia campanha→conjunto→criativo.
+export type OptimizerTreeNode = OptimizerRecomendacao & { filhos: OptimizerTreeNode[] };
+
+// Diferente de buildRecomendacoes (fila achatada, só ATENCAO/URGENTE + oportunidades de escala),
+// esta função devolve a ÁRVORE INTEIRA — inclusive nós SAUDAVEL sem ação ("nada a fazer") — para
+// a visão "Campanha > Conjunto > Criativo" onde o gestor precisa ver o que está bem também, não
+// só os problemas. Reaproveita os mesmos helpers de título/objetivo/gasto-mínimo do módulo.
+export function buildCampaignTree(
+  result: OptimizerOutputV2,
+  meta: { analise_id: string; cliente_id: string; cliente_nome: string; canal: 'meta' | 'google'; connection_id: string | null; account_id: string | null },
+): OptimizerTreeNode[] {
+  const cm = result.cruzamento_com_metas;
+  const cplRef = (cm?.cpl_maximo ?? cm?.cpl_ideal ?? null);
+  const gastoMinimoParaJulgar = cplRef && cplRef > 0 ? cplRef * 2 : 25;
+
+  const acaoAutoByObj = new Map<string, OptimizerAcaoAutomatica>();
+  for (const a of result.acoes_automaticas ?? []) acaoAutoByObj.set(a.objeto_id, a);
+
+  function buildNode(o: {
+    objeto_tipo: OptimizerObjetoTipo;
+    objeto_id: string; objeto_nome: string; campanha_nome: string;
+    conjunto_nome: string | null;
+    objetivo: ObjetivoInfo | null;
+    gasto: number; conversoes: number;
+    classificacao: OptimizerVerdict; veredito: string; acao: string;
+    acao_tipo: OptimizerNodeAcaoTipo; acao_parametros: Record<string, unknown>;
+    confianca_item: OptimizerConfidence; depende_de: string | null; padrao: string | null;
+    motivos: string[];
+    metricas_chave: Array<{ rotulo: string; valor: string }>;
+    fatos: Array<{ rotulo: string; valor: string }>;
+    filhos: OptimizerTreeNode[];
+  }): OptimizerTreeNode {
+    const auto = acaoAutoByObj.get(o.objeto_id);
+    let tipoEfetivo = o.acao?.trim() ? inferAcaoTipo(o.acao, o.acao_tipo) : 'NENHUMA';
+    let acaoTexto = o.acao;
+    let confianca = o.confianca_item;
+
+    // Mesma trava anti-ruído do buildRecomendacoes, mas aqui NÃO descartamos o nó (a árvore
+    // sempre mostra todo mundo) — só rebaixamos a ação pra algo honesto ("aguardar dados").
+    if (tipoEfetivo === 'PAUSAR' && o.conversoes === 0 && o.gasto < gastoMinimoParaJulgar) {
+      tipoEfetivo = 'VERIFICAR_MANUAL';
+      acaoTexto = 'Aguardar mais dados: gasto ainda abaixo do piso mínimo pra julgar resultado com segurança';
+      confianca = 'baixa';
+    }
+
+    const structTipo: OptimizerAcaoTipo | null =
+      (tipoEfetivo === 'PAUSAR' || tipoEfetivo === 'ATIVAR' || tipoEfetivo === 'AJUSTAR_ORCAMENTO')
+        ? tipoEfetivo
+        : (auto ? auto.acao : null);
+    const parametros = { ...(o.acao_parametros ?? {}), ...(auto?.parametros ?? {}) };
+    const aplicavel = structTipo != null && (structTipo !== 'AJUSTAR_ORCAMENTO' || o.objeto_tipo === 'adset');
+
+    return {
+      rec_id: `${meta.analise_id}:${o.objeto_tipo}:${o.objeto_id}`,
+      analise_id: meta.analise_id,
+      cliente_id: meta.cliente_id,
+      cliente_nome: meta.cliente_nome,
+      canal: meta.canal,
+      nivel: o.objeto_tipo,
+      objeto_id: o.objeto_id,
+      objeto_nome: o.objeto_nome,
+      campanha_nome: o.campanha_nome,
+      conjunto_nome: o.conjunto_nome,
+      severidade: o.classificacao === 'URGENTE' ? 'urgente' : o.classificacao === 'ATENCAO' ? 'atencao' : 'ok',
+      titulo: tituloAmigavel(tipoEfetivo, o.objeto_tipo, o.classificacao, o.objetivo?.curto ?? null),
+      objetivo: o.objetivo?.label ?? null,
+      texto_recomendacao: acaoTexto,
+      motivos: (Array.isArray(o.motivos) && o.motivos.length > 0)
+        ? o.motivos
+        : o.fatos.slice(0, 4).map((f) => `${f.rotulo}: ${f.valor}`),
+      metricas_chave: o.metricas_chave.filter((m) => m.valor && m.valor !== '—').slice(0, 3),
+      fatos: o.fatos,
+      acao_estruturada: structTipo
+        ? { tipo: structTipo, objeto_tipo: o.objeto_tipo, objeto_id: o.objeto_id, objeto_nome: o.objeto_nome, parametros }
+        : null,
+      aplicavel,
+      confianca,
+      depende_de: o.depende_de,
+      padrao: o.padrao,
+      connection_id: meta.connection_id,
+      account_id: meta.account_id,
+      leitura: o.veredito?.trim() ?? '',
+      filhos: o.filhos,
+    };
+  }
+
+  const tree: OptimizerTreeNode[] = [];
+  const byObjId = new Map<string, OptimizerTreeNode>();
+
+  for (const camp of result.analise_campanhas ?? []) {
+    const obj = objetivoInfo(camp.objetivo);
+    const mConv = obj?.metrica ?? 'Conversões';
+    const mCusto = obj?.custo ?? 'CPL';
+
+    const conjuntosNodes: OptimizerTreeNode[] = (camp.conjuntos ?? []).map((conj) => {
+      const anunciosNodes: OptimizerTreeNode[] = (conj.anuncios ?? []).map((ad) => {
+        const adNode = buildNode({
+          objeto_tipo: 'ad', objeto_id: ad.id, objeto_nome: ad.nome, campanha_nome: camp.nome,
+          conjunto_nome: conj.nome,
+          objetivo: obj, gasto: Number(ad.gasto) || 0, conversoes: Number(ad.conversoes) || 0,
+          classificacao: ad.classificacao, veredito: ad.veredito, acao: ad.acao,
+          acao_tipo: ad.acao_tipo, acao_parametros: ad.acao_parametros, confianca_item: ad.confianca_item,
+          depende_de: ad.depende_de, padrao: ad.padrao, motivos: ad.motivos,
+          metricas_chave: [
+            { rotulo: 'Gasto', valor: fmtMoney(ad.gasto) },
+            { rotulo: mConv, valor: fmtNum(ad.conversoes) },
+            { rotulo: mCusto, valor: fmtMoney(ad.cpl) },
+          ],
+          fatos: [
+            { rotulo: 'Gasto', valor: fmtMoney(ad.gasto) },
+            { rotulo: mConv, valor: fmtNum(ad.conversoes) },
+            { rotulo: mCusto, valor: fmtMoney(ad.cpl) },
+            { rotulo: 'CTR', valor: fmtPct(ad.ctr) },
+            { rotulo: 'Ranking de qualidade', valor: ad.quality_ranking ?? '—' },
+            { rotulo: 'Ranking de engajamento', valor: ad.engagement_ranking ?? '—' },
+            { rotulo: 'Ranking de conversão', valor: ad.conversion_ranking ?? '—' },
+          ],
+          filhos: [],
+        });
+        byObjId.set(ad.id, adNode);
+        return adNode;
+      });
+
+      const conjNode = buildNode({
+        objeto_tipo: 'adset', objeto_id: conj.id, objeto_nome: conj.nome, campanha_nome: camp.nome,
+        conjunto_nome: conj.nome,
+        objetivo: obj, gasto: Number(conj.gasto) || 0, conversoes: Number(conj.conversoes) || 0,
+        classificacao: conj.classificacao, veredito: conj.veredito, acao: conj.acao,
+        acao_tipo: conj.acao_tipo, acao_parametros: conj.acao_parametros, confianca_item: conj.confianca_item,
+        depende_de: conj.depende_de, padrao: conj.padrao, motivos: conj.motivos,
+        metricas_chave: [
+          { rotulo: 'Gasto', valor: fmtMoney(conj.gasto) },
+          { rotulo: mConv, valor: fmtNum(conj.conversoes) },
+          { rotulo: mCusto, valor: fmtMoney(conj.cpl) },
+        ],
+        fatos: [
+          { rotulo: 'Gasto', valor: fmtMoney(conj.gasto) },
+          { rotulo: mConv, valor: fmtNum(conj.conversoes) },
+          { rotulo: mCusto, valor: fmtMoney(conj.cpl) },
+          { rotulo: 'CTR', valor: fmtPct(conj.ctr) },
+          { rotulo: 'Orçamento diário', valor: fmtMoney(conj.orcamento_diario) },
+          { rotulo: 'Dias ativo', valor: conj.dias_ativo != null ? String(conj.dias_ativo) : '—' },
+        ],
+        filhos: anunciosNodes,
+      });
+      byObjId.set(conj.id, conjNode);
+      return conjNode;
+    });
+
+    const campNode = buildNode({
+      objeto_tipo: 'campaign', objeto_id: camp.id, objeto_nome: camp.nome, campanha_nome: camp.nome,
+      conjunto_nome: null,
+      objetivo: obj, gasto: Number(camp.gasto) || 0, conversoes: Number(camp.conversoes) || 0,
+      classificacao: camp.classificacao, veredito: camp.veredito, acao: camp.acao,
+      acao_tipo: camp.acao_tipo, acao_parametros: camp.acao_parametros, confianca_item: camp.confianca_item,
+      depende_de: camp.depende_de, padrao: camp.padrao, motivos: camp.motivos,
+      metricas_chave: [
+        { rotulo: 'Gasto', valor: fmtMoney(camp.gasto) },
+        { rotulo: mConv, valor: fmtNum(camp.conversoes) },
+        { rotulo: mCusto, valor: fmtMoney(camp.cpl) },
+      ],
+      fatos: [
+        { rotulo: 'Gasto', valor: fmtMoney(camp.gasto) },
+        { rotulo: mConv, valor: fmtNum(camp.conversoes) },
+        { rotulo: mCusto, valor: fmtMoney(camp.cpl) },
+        { rotulo: 'CTR', valor: fmtPct(camp.ctr) },
+        { rotulo: 'Orçamento diário', valor: fmtMoney(camp.orcamento_diario) },
+      ],
+      filhos: conjuntosNodes,
+    });
+    byObjId.set(camp.id, campNode);
+    tree.push(campNode);
+  }
+
+  // Resolve depende_de (id de objeto → rec_id) dentro da mesma análise, em todos os níveis.
+  function resolveDeps(nodes: OptimizerTreeNode[]) {
+    for (const n of nodes) {
+      if (n.depende_de && byObjId.has(n.depende_de)) n.depende_de = byObjId.get(n.depende_de)!.rec_id;
+      else if (n.depende_de) n.depende_de = null;
+      resolveDeps(n.filhos);
+    }
+  }
+  resolveDeps(tree);
+
+  return tree;
 }
 
 export function currentWeekLabel(): string {
