@@ -1516,6 +1516,29 @@ function aplicarPisoHookRate(ad: OptimizerAnaliseAnuncio, cplMaximo: number | nu
   };
 }
 
+// Trava determinística: a regra de custo é sempre "quanto menor, melhor" — CPL real dentro da
+// meta máxima NUNCA pode virar "crítico" só por causa do custo. A IA às vezes confunde baixo
+// volume de conversões com resultado ruim e classifica URGENTE mesmo com CPL bom; isto rebaixa
+// pra ATENCAO quando há gasto/conversões suficientes pra confiar no número (mesmo piso usado em
+// buildCampaignTree: cplRef * 2, ou 25 sem meta). Só ATENUA por causa de custo bom — não elimina
+// a classificação: outros problemas reais (hook rate ruim etc.) continuam valendo via seus
+// próprios pisos, aplicados depois desta função (ver aplicarPisoHookRate).
+function limitarSeveridadePorCplBom(
+  classificacao: OptimizerVerdict,
+  cpl: number | null,
+  conversoes: number,
+  gasto: number,
+  cplIdeal: number | null,
+  cplMaximo: number | null,
+): OptimizerVerdict {
+  if (classificacao !== 'URGENTE') return classificacao;
+  if (cpl == null || conversoes <= 0) return classificacao;
+  const cplRef = cplMaximo ?? cplIdeal;
+  if (!cplRef || cplRef <= 0) return classificacao;
+  if (gasto < cplRef * 2) return classificacao;
+  return cpl <= cplRef ? 'ATENCAO' : classificacao;
+}
+
 // Monta a árvore campanha→conjunto→anúncio: métricas do PAYLOAD (verdade), veredito da IA.
 function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown): OptimizerAnaliseCampanha[] {
   const verdicts = collectIaVerdicts(iaCampanhas);
@@ -1525,8 +1548,10 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
   };
   const vOf = (id: string) => verdicts.get(id) ?? fallback;
   const cplMaximo = payload.metas?.cpl_maximo ?? null;
+  const cplIdeal = payload.metas?.cpl_ideal ?? null;
   return (payload.campanhas ?? []).map((camp) => {
     const cv = vOf(camp.id);
+    const campClassificacao = limitarSeveridadePorCplBom(cv.classificacao, camp.cpl, Number(camp.conversoes) || 0, Number(camp.gasto) || 0, cplIdeal, cplMaximo);
     return {
       id: camp.id,
       nome: camp.nome,
@@ -1537,7 +1562,7 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
       cpl: camp.cpl,
       ctr: Number(camp.ctr) || 0,
       orcamento_diario: camp.orcamento_diario,
-      classificacao: cv.classificacao,
+      classificacao: campClassificacao,
       veredito: cv.veredito,
       acao: cv.acao,
       acao_tipo: cv.acao_tipo,
@@ -1548,6 +1573,7 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
       motivos: cv.motivos,
       conjuntos: (camp.conjuntos ?? []).map((cj) => {
         const jv = vOf(cj.id);
+        const cjClassificacao = limitarSeveridadePorCplBom(jv.classificacao, cj.cpl, Number(cj.conversoes) || 0, Number(cj.gasto) || 0, cplIdeal, cplMaximo);
         return {
           id: cj.id,
           nome: cj.nome,
@@ -1558,7 +1584,7 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
           ctr: Number(cj.ctr) || 0,
           orcamento_diario: cj.orcamento_diario,
           dias_ativo: cj.dias_ativo,
-          classificacao: jv.classificacao,
+          classificacao: cjClassificacao,
           veredito: jv.veredito,
           acao: jv.acao,
           acao_tipo: jv.acao_tipo,
@@ -1569,6 +1595,7 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
           motivos: jv.motivos,
           anuncios: (cj.anuncios ?? []).map((ad) => {
             const av = vOf(ad.id);
+            const adClassificacao = limitarSeveridadePorCplBom(av.classificacao, ad.cpl, Number(ad.conversoes) || 0, Number(ad.gasto) || 0, cplIdeal, cplMaximo);
             return aplicarPisoHookRate({
               id: ad.id,
               nome: ad.nome,
@@ -1586,7 +1613,7 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
               video_p50_rate: ad.video_p50_rate,
               video_p75_rate: ad.video_p75_rate,
               imagem_url: ad.imagem_url,
-              classificacao: av.classificacao,
+              classificacao: adClassificacao,
               veredito: av.veredito,
               acao: av.acao,
               acao_tipo: av.acao_tipo,
@@ -1669,6 +1696,23 @@ export function sanitizeOptimizerOutputV2(input: unknown, payload: OptimizerPayl
   const cplReal = gastoReal > 0 && convReal > 0 ? gastoReal / convReal : null;
   const metas = payload.metas;
 
+  // status_cpl é SEMPRE calculado aqui, nunca ecoado da IA — regra fixa "quanto menor o custo,
+  // melhor": cpl_atual dentro do cpl_ideal é DENTRO, acima do ideal mas até o máximo é ATENCAO,
+  // acima do máximo é CRITICO. Antes confiava em `cruzamento.status_cpl` (texto livre da IA), que
+  // podia dizer "CRITICO" com um cpl_atual/cpl_maximo do lado mostrando exatamente o contrário.
+  const cplAtualFinal = cplReal != null ? cplReal : (cruzamento.cpl_atual != null ? Number(cruzamento.cpl_atual) : null);
+  const cplIdealFinal = cruzamento.cpl_ideal != null ? Number(cruzamento.cpl_ideal) : (metas?.cpl_ideal ?? null);
+  const cplMaximoFinal = cruzamento.cpl_maximo != null ? Number(cruzamento.cpl_maximo) : (metas?.cpl_maximo ?? null);
+  const cplTetoFinal = cplMaximoFinal ?? cplIdealFinal;
+  const statusCplFinal: 'DENTRO' | 'ATENCAO' | 'CRITICO' | 'NAO_APLICAVEL' =
+    cplAtualFinal == null || cplTetoFinal == null || cplTetoFinal <= 0
+      ? 'NAO_APLICAVEL'
+      : cplAtualFinal <= (cplIdealFinal ?? cplTetoFinal)
+        ? 'DENTRO'
+        : cplAtualFinal <= cplTetoFinal
+          ? 'ATENCAO'
+          : 'CRITICO';
+
   return {
     estado_da_conta: estado,
     resumo_executivo: (obj.resumo_executivo && String(obj.resumo_executivo).trim()) ? String(obj.resumo_executivo) : resumoFallback,
@@ -1678,12 +1722,10 @@ export function sanitizeOptimizerOutputV2(input: unknown, payload: OptimizerPayl
       // Priorizamos SEMPRE o valor real calculado — a IA recebe um template com "0" nesses
       // campos e frequentemente ecoa 0 (não null), então confiar nela zera a tela mesmo com
       // dados reais. A IA só entra se o payload não trouxe nenhuma campanha com entrega.
-      cpl_atual: cplReal != null ? cplReal : (cruzamento.cpl_atual != null ? Number(cruzamento.cpl_atual) : null),
-      cpl_ideal: cruzamento.cpl_ideal != null ? Number(cruzamento.cpl_ideal) : (metas?.cpl_ideal ?? null),
-      cpl_maximo: cruzamento.cpl_maximo != null ? Number(cruzamento.cpl_maximo) : (metas?.cpl_maximo ?? null),
-      status_cpl: (['DENTRO', 'ATENCAO', 'CRITICO', 'NAO_APLICAVEL'] as const).includes(cruzamento.status_cpl as never)
-        ? cruzamento.status_cpl as 'DENTRO' | 'ATENCAO' | 'CRITICO' | 'NAO_APLICAVEL'
-        : 'NAO_APLICAVEL',
+      cpl_atual: cplAtualFinal,
+      cpl_ideal: cplIdealFinal,
+      cpl_maximo: cplMaximoFinal,
+      status_cpl: statusCplFinal,
       volume_conversoes_atual: convReal > 0 ? convReal : (cruzamento.volume_conversoes_atual != null ? Number(cruzamento.volume_conversoes_atual) : 0),
       volume_meta_projetada: cruzamento.volume_meta_projetada != null ? Number(cruzamento.volume_meta_projetada) : (metas?.volume_leads_meta_mensal ?? null),
       status_volume: (['NO_RITMO', 'ABAIXO', 'CRITICO', 'NAO_APLICAVEL'] as const).includes(cruzamento.status_volume as never)

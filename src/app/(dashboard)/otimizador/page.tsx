@@ -1066,6 +1066,91 @@ function collectAllIds(nodes: TreeNode[]): string[] {
   return ids;
 }
 
+// Agrupa campanhas (nível raiz) pelo objetivo (node.objetivo já vem em linguagem de negócio —
+// "Geração de leads", "Conversas no WhatsApp", "Vendas", "Engajamento"...). O otimizador não pode
+// ser só sobre leads: uma conta de e-commerce (vendas) ou institucional (engajamento) precisa de
+// árvore, coluna e rótulo próprios, não emprestados do vocabulário de lead. Ordena por gasto total
+// desc — o objetivo que mais consome verba aparece primeiro.
+function agruparPorObjetivo(nodes: TreeNode[]): Array<{ objetivo: string; nodes: TreeNode[]; gastoTotal: number }> {
+  const groups = new Map<string, TreeNode[]>();
+  for (const n of nodes) {
+    const key = n.objetivo?.trim() || 'Outro objetivo';
+    const list = groups.get(key);
+    if (list) list.push(n); else groups.set(key, [n]);
+  }
+  // Valor vem formatado em pt-BR ("R$ 1.234,56") — remove separador de milhar antes de trocar
+  // a vírgula decimal por ponto, senão "1.234,56" vira "1.23456" e o total sai errado.
+  const gastoDoNode = (n: TreeNode) => {
+    const raw = n.fatos.find((f) => f.rotulo === 'Gasto')?.valor ?? '';
+    return Number(raw.replace(/[^\d,.-]/g, '').replace(/\./g, '').replace(',', '.')) || 0;
+  };
+  return Array.from(groups.entries())
+    .map(([objetivo, list]) => ({ objetivo, nodes: list, gastoTotal: list.reduce((s, n) => s + gastoDoNode(n), 0) }))
+    .sort((a, b) => b.gastoTotal - a.gastoTotal);
+}
+
+// Rótulos de coluna do grupo (ex: "Conversas"/"Custo por conversa") — lidos do primeiro nó com
+// métrica, já que todo nó da árvore de uma mesma campanha herda o mesmo objetivo (ver
+// buildCampaignTree em optimizer.ts). Fallback genérico só pra grupo sem nenhum fato ainda.
+function rotulosDoGrupo(nodes: TreeNode[]): { resultado: string; custo: string } {
+  for (const n of nodes) {
+    const custo = n.metricas_chave.find((m) => /custo|cpl|cpa/i.test(m.rotulo));
+    const resultado = n.metricas_chave.find((m) => m.rotulo !== 'Gasto' && m !== custo);
+    if (custo || resultado) return { resultado: resultado?.rotulo ?? 'Resultado', custo: custo?.rotulo ?? 'Custo por resultado' };
+  }
+  return { resultado: 'Resultado', custo: 'Custo por resultado' };
+}
+
+function ObjetivoSection({ objetivo, nodes, selectedId, onSelect, onQuickPause, filtroNivel, filtroCategoria, apenasComAcao, openIds, onToggle, open, onToggleGroup }: {
+  objetivo: string;
+  nodes: TreeNode[];
+  selectedId: string | null;
+  onSelect: (n: TreeNode) => void;
+  onQuickPause: (n: TreeNode) => void;
+  filtroNivel: NivelFiltro;
+  filtroCategoria: Categoria | null;
+  apenasComAcao: boolean;
+  openIds: Set<string>;
+  onToggle: (id: string) => void;
+  open: boolean;
+  onToggleGroup: () => void;
+}) {
+  const rotulos = rotulosDoGrupo(nodes);
+  return (
+    <div className="border-b border-border last:border-b-0">
+      <button onClick={onToggleGroup} className="flex w-full items-center gap-2 bg-surface-soft px-3 py-2 text-left hover:bg-surface-soft/80">
+        <ChevronRight className={cn('h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} />
+        <span className="text-xs font-bold uppercase tracking-wide text-foreground">{objetivo}</span>
+        <span className="text-xs text-muted-foreground">{nodes.length} campanha{nodes.length === 1 ? '' : 's'}</span>
+      </button>
+      {open && (
+        <table className="w-full border-collapse text-left">
+          <thead>
+            <tr className="border-b border-border text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+              <th className="py-2 pl-3 pr-2 font-bold">Campanha / Conjunto / Criativo</th>
+              <th className="py-2 pr-2 font-bold">Nível</th>
+              <th className="py-2 pr-2 font-bold">Entrega</th>
+              <th className="py-2 pr-2 font-bold">Saúde</th>
+              <th className="py-2 pr-2 text-right font-bold">Gasto</th>
+              <th className="py-2 pr-2 text-right font-bold">{rotulos.resultado}</th>
+              <th className="py-2 pr-2 text-right font-bold">{rotulos.custo}</th>
+              <th className="py-2 pr-2 text-right font-bold">CTR</th>
+              <th className="py-2 pr-2 text-right font-bold">Retenção</th>
+              <th className="py-2 pr-2 text-right font-bold">Ação recomendada</th>
+            </tr>
+          </thead>
+          <tbody>
+            {nodes.map((n) => (
+              <TreeTableRow key={n.rec_id} node={n} depth={0} selectedId={selectedId} onSelect={onSelect} onQuickPause={onQuickPause}
+                filtroNivel={filtroNivel} filtroCategoria={filtroCategoria} apenasComAcao={apenasComAcao} openIds={openIds} onToggle={onToggle} />
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
 function CampaignTable({ nodes, selectedId, onSelect, onQuickPause, filtroNivel, filtroCategoria, apenasComAcao }: {
   nodes: TreeNode[];
   selectedId: string | null;
@@ -1075,17 +1160,14 @@ function CampaignTable({ nodes, selectedId, onSelect, onQuickPause, filtroNivel,
   filtroCategoria: Categoria | null;
   apenasComAcao: boolean;
 }) {
-  const [verTodas, setVerTodas] = useState(false);
   // Por padrão só as campanhas (nível raiz) vêm abertas — igual ao comportamento anterior por linha.
   const [openIds, setOpenIds] = useState<Set<string>>(() => new Set(nodes.map((n) => n.rec_id)));
+  const [closedGroups, setClosedGroups] = useState<Set<string>>(new Set());
   const rootIdsKey = nodes.map((n) => n.rec_id).join(',');
   useEffect(() => {
     setOpenIds(new Set(nodes.map((n) => n.rec_id)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rootIdsKey]);
-  const LIMITE = 5;
-  const visiveis = verTodas ? nodes : nodes.slice(0, LIMITE);
-  const restantes = nodes.length - visiveis.length;
 
   const toggleOne = (id: string) => {
     setOpenIds((prev) => {
@@ -1094,6 +1176,15 @@ function CampaignTable({ nodes, selectedId, onSelect, onQuickPause, filtroNivel,
       return next;
     });
   };
+  const toggleGroup = (objetivo: string) => {
+    setClosedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(objetivo)) next.delete(objetivo); else next.add(objetivo);
+      return next;
+    });
+  };
+
+  const grupos = agruparPorObjetivo(nodes);
 
   return (
     <div className="overflow-hidden rounded-[var(--radius)] border border-border bg-card/90">
@@ -1109,41 +1200,26 @@ function CampaignTable({ nodes, selectedId, onSelect, onQuickPause, filtroNivel,
           <span className="font-normal normal-case text-muted-foreground">{nodes.length} campanha{nodes.length === 1 ? '' : 's'}</span>
         </div>
       </div>
-      <div className="min-h-[360px] max-h-[calc(100vh-430px)] overflow-auto">
-        <table className="w-full border-collapse text-left">
-          <thead className="sticky top-0 z-10 bg-card">
-            <tr className="border-b border-border text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
-              <th className="py-2 pl-3 pr-2 font-bold">Campanha / Conjunto / Criativo</th>
-              <th className="py-2 pr-2 font-bold">Nível</th>
-              <th className="py-2 pr-2 font-bold">Entrega</th>
-              <th className="py-2 pr-2 font-bold">Saúde</th>
-              <th className="py-2 pr-2 text-right font-bold">Gasto</th>
-              <th className="py-2 pr-2 text-right font-bold">Conversas</th>
-              <th className="py-2 pr-2 text-right font-bold">Custo por conv.</th>
-              <th className="py-2 pr-2 text-right font-bold">CTR</th>
-              <th className="py-2 pr-2 text-right font-bold">Retenção</th>
-              <th className="py-2 pr-2 text-right font-bold">Ação recomendada</th>
-            </tr>
-          </thead>
-          <tbody>
-            {visiveis.map((n) => (
-              <TreeTableRow key={n.rec_id} node={n} depth={0} selectedId={selectedId} onSelect={onSelect} onQuickPause={onQuickPause}
-                filtroNivel={filtroNivel} filtroCategoria={filtroCategoria} apenasComAcao={apenasComAcao} openIds={openIds} onToggle={toggleOne} />
-            ))}
-          </tbody>
-        </table>
+      <div className="max-h-[calc(100vh-430px)] min-h-[360px] overflow-auto">
+        {grupos.map((g) => (
+          <ObjetivoSection
+            key={g.objetivo}
+            objetivo={g.objetivo}
+            nodes={g.nodes}
+            selectedId={selectedId}
+            onSelect={onSelect}
+            onQuickPause={onQuickPause}
+            filtroNivel={filtroNivel}
+            filtroCategoria={filtroCategoria}
+            apenasComAcao={apenasComAcao}
+            openIds={openIds}
+            onToggle={toggleOne}
+            open={!closedGroups.has(g.objetivo)}
+            onToggleGroup={() => toggleGroup(g.objetivo)}
+          />
+        ))}
         {nodes.length === 0 && <p className="p-4 text-sm text-muted-foreground">Nenhuma campanha nesta análise.</p>}
       </div>
-      {restantes > 0 && (
-        <button onClick={() => setVerTodas(true)} className="w-full border-t border-border p-2.5 text-center text-xs font-medium text-primary hover:underline">
-          Ver mais campanhas ({restantes})
-        </button>
-      )}
-      {verTodas && nodes.length > LIMITE && (
-        <button onClick={() => setVerTodas(false)} className="w-full border-t border-border p-2.5 text-center text-xs font-medium text-muted-foreground hover:underline">
-          Ver menos
-        </button>
-      )}
     </div>
   );
 }

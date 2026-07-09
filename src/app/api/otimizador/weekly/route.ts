@@ -399,6 +399,42 @@ async function fetchCampaignsForClient(clientId: string, origin: string, periodK
   }>>;
 }
 
+// video_id pode vir em 3 lugares do creative, dependendo de como o anúncio foi criado.
+// Mesma extração usada pelo preview nítido do dashboard (/api/meta/top-creatives).
+function extractVideoId(creative: Record<string, unknown>): string | null {
+  if (typeof creative.video_id === 'string' && creative.video_id) return creative.video_id;
+  const storySpec = (creative.object_story_spec as Record<string, unknown> | undefined) ?? {};
+  const videoData = (storySpec.video_data as Record<string, unknown> | undefined) ?? {};
+  if (typeof videoData.video_id === 'string' && videoData.video_id) return videoData.video_id;
+  const assetFeed = (creative.asset_feed_spec as Record<string, unknown> | undefined) ?? {};
+  const feedVideos = (assetFeed.videos as Array<Record<string, unknown>> | undefined) ?? [];
+  const feedVideoId = feedVideos.find((v) => typeof v.video_id === 'string')?.video_id;
+  return typeof feedVideoId === 'string' ? feedVideoId : null;
+}
+
+// Mesma prioridade de resolução de imagem do /api/meta/top-creatives: asset_feed (original
+// Advantage+) > thumbnail de vídeo em alta resolução (via videoThumbsById) > image_url do
+// anúncio estático > thumbnail_url por último (baixa resolução e expira via `oe=`).
+function resolveCreativeImageUrl(
+  creative: Record<string, unknown>,
+  videoThumbsById: Map<string, string>,
+): string | null {
+  const assetFeed = (creative.asset_feed_spec as Record<string, unknown> | undefined) ?? {};
+  const assetFeedImages = (assetFeed.images as Array<Record<string, string>> | undefined) ?? [];
+  const assetFeedImageUrl = assetFeedImages[0]?.url ?? null;
+  if (assetFeedImageUrl) return assetFeedImageUrl;
+
+  const videoId = extractVideoId(creative);
+  const videoThumb = videoId ? videoThumbsById.get(videoId) : null;
+  if (videoThumb) return videoThumb;
+
+  const imageUrl = creative.image_url as string | undefined;
+  if (imageUrl) return imageUrl;
+
+  const thumbnailUrl = creative.thumbnail_url as string | undefined;
+  return thumbnailUrl ?? null;
+}
+
 // Busca conjuntos + anúncios de uma campanha direto na Meta (best-effort, com deadline)
 async function fetchConjuntosForCampaign(
   campaignId: string,
@@ -438,10 +474,10 @@ async function fetchConjuntosForCampaign(
     // Anúncios com rankings (best-effort, só se houver tempo)
     let anuncios: OptimizerCampaignV2['conjuntos'][number]['anuncios'] = [];
     if (Date.now() < deadline) {
-      // thumbnail_width/height força a Meta a renderizar o thumbnail_url num tamanho maior —
-      // sem isto, ads sem image_url (a maioria dos anúncios de vídeo) só tinham a miniatura
-      // default (~64px), que ficava borrada ao ampliar no preview de hover da árvore.
-      const baseAdsFields = `id,name,effective_status,quality_ranking,engagement_rate_ranking,conversion_rate_ranking,creative.thumbnail_width(640).thumbnail_height(640){image_url,thumbnail_url}`;
+      // Mesmos campos usados pelo preview nítido do dashboard (/api/meta/top-creatives) —
+      // creative.thumbnail_url sozinho é baixa resolução e carrega `oe=` (expira). image_url,
+      // asset_feed_spec e o vídeo original (via segunda chamada abaixo) dão a imagem de verdade.
+      const baseAdsFields = `id,name,effective_status,quality_ranking,engagement_rate_ranking,conversion_rate_ranking,creative{image_url,thumbnail_url,video_id,object_story_spec,asset_feed_spec}`;
       const insightsBase = `spend,impressions,clicks,actions,ctr`;
       const insightsComVideo = `${insightsBase},video_3_sec_watched_actions,video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions`;
 
@@ -467,7 +503,31 @@ async function fetchConjuntosForCampaign(
 
       if (adsRes?.ok) {
         const adsData = await adsRes.json() as { data?: Record<string, unknown>[] };
-        anuncios = (adsData.data ?? []).map((ad) => {
+        const ads = adsData.data ?? [];
+
+        // Vídeo tem sua própria imagem de capa (picture, estável, sem expiry) e uma lista de
+        // frames em várias resoluções — pega o de maior altura. Uma chamada em lote pra todos
+        // os vídeos deste conjunto, em vez de 1 chamada por anúncio.
+        const videoIds = [...new Set(
+          ads.map((ad) => extractVideoId((ad.creative as Record<string, unknown>) ?? {})).filter((id): id is string => !!id),
+        )];
+        const videoThumbsById = new Map<string, string>();
+        if (videoIds.length > 0 && Date.now() < deadline) {
+          const vRes = await fetchWithTimeout(
+            `https://graph.facebook.com/v21.0/?ids=${videoIds.join(',')}&fields=picture,thumbnails{uri,height}&access_token=${token}`,
+            6_000,
+          );
+          if (vRes?.ok) {
+            const vData = await vRes.json() as Record<string, { picture?: string; thumbnails?: { data?: Array<{ uri: string; height?: number }> } }>;
+            for (const [id, v] of Object.entries(vData)) {
+              const bestFrame = (v.thumbnails?.data ?? []).sort((a, b) => (b.height ?? 0) - (a.height ?? 0))[0]?.uri;
+              const best = bestFrame ?? v.picture;
+              if (best) videoThumbsById.set(id, best);
+            }
+          }
+        }
+
+        anuncios = ads.map((ad) => {
           const ai = (ad.insights as { data?: Record<string, unknown>[] } | undefined)?.data?.[0] ?? {};
           const adActions = (ai.actions as Array<{ action_type: string; value: string }>) ?? [];
           const adConv = countMetaResults(adActions);
@@ -485,8 +545,7 @@ async function fetchConjuntosForCampaign(
           const p75 = firstActionValue(ai.video_p75_watched_actions);
           const ehVideo = hook3s != null;
           const videoRate = (n: number | null) => (ehVideo && adImp > 0 && n != null) ? Number(((n / adImp) * 100).toFixed(1)) : null;
-          const creative = ad.creative as { image_url?: string; thumbnail_url?: string } | undefined;
-          const imagemUrl = creative?.image_url ?? creative?.thumbnail_url ?? null;
+          const imagemUrl = resolveCreativeImageUrl((ad.creative as Record<string, unknown>) ?? {}, videoThumbsById);
 
           return {
             id: String(ad.id),
