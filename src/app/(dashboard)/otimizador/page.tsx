@@ -5,7 +5,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
-  ArrowRight,
   BadgeCheck,
   Ban,
   CalendarClock,
@@ -147,7 +146,6 @@ const SEV: Record<Severidade, { badge: string; dot: string; label: string }> = {
   ok: { badge: 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300', dot: 'bg-emerald-400', label: 'Oportunidade' },
 };
 const NIVEL_LABEL: Record<string, string> = { campaign: 'Campanha', adset: 'Conjunto', ad: 'Criativo' };
-const VERBO_ACAO: Record<string, string> = { PAUSAR: 'Pausar agora', ATIVAR: 'Reativar agora', AJUSTAR_ORCAMENTO: 'Ajustar agora' };
 
 // 5 categorias de decisão rápida — computadas a partir de acao_tipo + severidade de cada nó.
 // "Investigar" hoje só cobre VERIFICAR_MANUAL (ambiguidade/aprendizado) — funil/técnico real
@@ -1153,54 +1151,37 @@ function CampaignTable({ nodes, selectedId, onSelect, onQuickPause, filtroNivel,
 // ---------------------------------------------------------------------------
 // Painel lateral de detalhe
 // ---------------------------------------------------------------------------
-function DetailPanel({ node, allNodes, busy, onApply, onApplyChildren, onIgnore, onHuman, onJump }: {
+function DetailPanel({ node, busy, onApply, onJump }: {
   node: TreeNode;
-  allNodes: TreeNode[];
   busy: boolean;
-  onApply: (rec: FilaRec, params: { novo_orcamento_diario?: number }, batch: FilaRec[]) => void;
-  onApplyChildren: (children: FilaRec[]) => void;
-  onIgnore: (rec: FilaRec) => void;
-  onHuman: (rec: FilaRec) => void;
+  onApply: (rec: FilaRec, params: { novo_orcamento_diario?: number }) => void;
   onJump: (recId: string) => void;
 }) {
   const [why, setWhy] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const [budget, setBudget] = useState('');
-  const [batchOn, setBatchOn] = useState(false);
 
   useEffect(() => {
-    setWhy(false); setEditing(false); setBatchOn(false);
-    setBudget(String(node.acao_estruturada?.parametros?.novo_orcamento_diario ?? ''));
-  }, [node.rec_id]); // eslint-disable-line react-hooks/exhaustive-deps
+    setWhy(false);
+  }, [node.rec_id]);
 
   const cat = categoriaDoNode(node);
-  const hasAction = !!node.acao_estruturada;
-  const actionExecutable = hasAction && node.aplicavel;
-  const confidenceLow = node.confianca === 'baixa';
-  const isMaintainOnly = cat === 'manter' && !hasAction;
   const emAnalise = node.status === 'em_analise_humana';
-  const isAjuste = node.acao_estruturada?.tipo === 'AJUSTAR_ORCAMENTO';
   const link = adManagerUrl(node);
-  const verbo = node.acao_estruturada ? (VERBO_ACAO[node.acao_estruturada.tipo] ?? 'Aplicar agora') : 'Aplicar agora';
   const semAcao = !node.texto_recomendacao.trim() && cat === 'sem_diagnostico';
   const entrega = deliveryDisplay(node.status_entrega);
 
-  // Toggle manual Ativar/Desativar — só oferecido quando a IA não sugeriu uma ação estruturada
-  // pra este nó específico (ex: VERIFICAR_MANUAL/"aguardar dados"), como controle padrão de
-  // fallback. Não aparece pra "Arquivado"/status desconhecido, onde ligar/desligar não se aplica.
-  const podeAlternarManual = !hasAction && !isMaintainOnly && (entrega.label === 'Ativo' || entrega.label === 'Pausado');
+  // Único controle de execução do painel: liga/desliga o objeto direto, independente da
+  // categoria/ação sugerida pela IA. Só desabilita quando o status não é Ativo nem Pausado
+  // (ex: Arquivado) — ligar/desligar não se aplica nesses casos.
+  const podeAlternar = entrega.label === 'Ativo' || entrega.label === 'Pausado';
   function handleManualToggle() {
     const tipo: 'PAUSAR' | 'ATIVAR' = entrega.label === 'Ativo' ? 'PAUSAR' : 'ATIVAR';
-    onApply({ ...node, acao_estruturada: { tipo, objeto_tipo: node.nivel, objeto_id: node.objeto_id, objeto_nome: node.objeto_nome, parametros: {} } }, {}, []);
+    onApply({ ...node, acao_estruturada: { tipo, objeto_tipo: node.nivel, objeto_id: node.objeto_id, objeto_nome: node.objeto_nome, parametros: {} } }, {});
   }
 
   // Decisão guiada: quando um CONJUNTO/CAMPANHA é selecionado, os criativos fracos dentro dele
   // viram "itens afetados" — o gestor pausa os criativos, não o objeto inteiro (o cerne do pedido).
   const afetados = (node.nivel === 'adset' || node.nivel === 'campaign') ? criativosAfetados(node) : [];
   const temAfetados = afetados.length > 0;
-  // "Enviar para um humano" já é o botão principal neste caso (sem ação estruturada nem
-  // toggle manual disponível) — esconde o botão duplicado da linha de ações padrão.
-  const primaryJaEhHumano = !temAfetados && !actionExecutable && !isMaintainOnly && !podeAlternarManual;
   const prioridade = prioridadeDoNode(node);
   const impacto = impactoDoNode(node);
   const risco = riscoDoNode(node);
@@ -1211,19 +1192,7 @@ function DetailPanel({ node, allNodes, busy, onApply, onApplyChildren, onIgnore,
     ? `Pausar ${afetados.length} criativo${afetados.length > 1 ? 's' : ''} fraco${afetados.length > 1 ? 's' : ''} dentro deste ${nomeNivelFilho}`
     : node.titulo;
 
-  const samePadrao = node.padrao
-    ? allNodes.filter((r) => r.padrao === node.padrao && r.cliente_id !== node.cliente_id && r.aplicavel && r.rec_id !== node.rec_id)
-    : [];
-  const depRec = node.depende_de ? allNodes.find((r) => r.rec_id === node.depende_de) ?? null : null;
-
   const critico = node.severidade === 'urgente' || cat === 'pausar';
-
-  function handleApply() {
-    if (isAjuste && !budget.trim()) { setEditing(true); return; }
-    const params: { novo_orcamento_diario?: number } = {};
-    if (isAjuste && budget.trim()) params.novo_orcamento_diario = Number(budget);
-    onApply(node, params, batchOn ? samePadrao : []);
-  }
 
   const miniCards = [
     { icon: Layers, label: 'Nível do problema', value: NIVEL_LABEL[node.nivel], tone: 'text-foreground' },
@@ -1339,7 +1308,7 @@ function DetailPanel({ node, allNodes, busy, onApply, onApplyChildren, onIgnore,
               ) : (
                 <li className="flex items-start gap-2 text-sm text-foreground">
                   <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" />
-                  {node.texto_recomendacao.trim() || (isMaintainOnly ? 'Manter ativo e apenas acompanhar na próxima análise.' : 'Revisar este item antes de executar qualquer mudança.')}
+                  {node.texto_recomendacao.trim() || 'Revisar este item antes de executar qualquer mudança.'}
                 </li>
               )}
             </ul>
@@ -1373,87 +1342,24 @@ function DetailPanel({ node, allNodes, busy, onApply, onApplyChildren, onIgnore,
           </div>
         )}
 
-        {editing && isAjuste && (
-          <div className="flex items-end gap-2 rounded-[var(--radius)] border border-primary/30 bg-primary/5 p-3">
-            <label className="flex-1 space-y-1">
-              <span className="text-xs font-semibold text-muted-foreground">Novo orçamento diário (R$)</span>
-              <input type="number" min={1} value={budget} onChange={(e) => setBudget(e.target.value)}
-                className="h-9 w-full rounded-[var(--radius)] border border-border bg-background px-3 text-sm text-foreground outline-none focus:border-primary" />
-            </label>
-            <Button size="sm" variant="outline" onClick={() => setEditing(false)}>Concluir</Button>
-          </div>
-        )}
-
-        {/* Botão principal da ação exata */}
-        {!semAcao && (
-          <div className="space-y-2 border-t border-border pt-3">
-            {temAfetados ? (
-              <Button onClick={() => onApplyChildren(afetados)} disabled={busy} className="h-11 w-full bg-red-500 text-white hover:bg-red-600">
-                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <PauseCircle className="h-4 w-4" />}
-                Pausar {afetados.length} criativo{afetados.length > 1 ? 's' : ''} agora
-              </Button>
-            ) : actionExecutable ? (
-              <Button onClick={handleApply} disabled={busy} className={cn('h-11 w-full', cat === 'pausar' && 'bg-red-500 text-white hover:bg-red-600')}>
-                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : cat === 'pausar' ? <PauseCircle className="h-4 w-4" /> : <Check className="h-4 w-4" />}
-                {batchOn && samePadrao.length > 0 ? `Aplicar em ${samePadrao.length + 1} contas` : verbo}
-              </Button>
-            ) : isMaintainOnly ? (
-              <Button onClick={() => onIgnore(node)} disabled={busy} className="h-11 w-full">
-                <CheckCircle2 className="h-4 w-4" /> Manter ativo
-              </Button>
-            ) : podeAlternarManual ? (
-              <Button onClick={handleManualToggle} disabled={busy} className={cn('h-11 w-full', entrega.label === 'Ativo' && 'bg-red-500 text-white hover:bg-red-600')}>
-                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : entrega.label === 'Ativo' ? <PauseCircle className="h-4 w-4" /> : <PlayCircle className="h-4 w-4" />}
-                {entrega.label === 'Ativo' ? 'Desativar agora' : 'Ativar agora'}
-              </Button>
-            ) : (
-              <Button onClick={() => onHuman(node)} disabled={busy || emAnalise} className="h-11 w-full">
-                <UserRound className="h-4 w-4" /> Enviar para um humano
-              </Button>
-            )}
-            {confidenceLow && actionExecutable && (
-              <p className="rounded border border-amber-400/30 bg-amber-400/10 px-2 py-1.5 text-xs text-amber-200">
-                Confiança baixa: a ação está disponível, mas vale conferir o contexto antes de aplicar.
-              </p>
-            )}
-            {/* Botões padrão — sempre disponíveis, independente da ação sugerida acima */}
-            <div className={cn('grid gap-2', primaryJaEhHumano ? 'grid-cols-2' : 'grid-cols-3')}>
-              {link ? (
-                <a href={link} target="_blank" rel="noopener noreferrer" className="inline-flex h-9 items-center justify-center gap-1.5 rounded-[var(--radius)] border border-border bg-background text-xs font-medium text-foreground hover:border-primary/40">
-                  <ExternalLink className="h-3.5 w-3.5" /> Gerenciador
-                </a>
-              ) : <span />}
-              <Button variant="outline" onClick={() => onIgnore(node)} disabled={busy} className="h-9 text-xs">
-                <Check className="h-3.5 w-3.5" /> Revisado
-              </Button>
-              {!primaryJaEhHumano && (
-                <Button variant="outline" onClick={() => onHuman(node)} disabled={busy || emAnalise} className="h-9 text-xs">
-                  <UserRound className="h-3.5 w-3.5" /> Humano
-                </Button>
-              )}
-            </div>
-            {isAjuste && actionExecutable && (
-              <button onClick={() => setEditing((e) => !e)} className="text-xs font-medium text-primary hover:underline">Editar valor antes de aplicar</button>
-            )}
-            {samePadrao.length > 0 && actionExecutable && !temAfetados && (
-              <label className="flex cursor-pointer items-start gap-2 rounded-[var(--radius)] border border-border p-2.5 text-xs text-foreground">
-                <input type="checkbox" checked={batchOn} onChange={(e) => setBatchOn(e.target.checked)} className="mt-0.5 accent-primary" />
-                <span>Aplicar a mesma ação em <span className="font-semibold">{samePadrao.length}</span> outra(s) conta(s) com este mesmo padrão.</span>
-              </label>
-            )}
-            {depRec && (
-              <div className="flex items-start gap-2 rounded-[var(--radius)] border border-amber-400/30 bg-amber-400/10 p-2.5 text-xs text-amber-200">
-                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                <span>
-                  Depende de resolver antes: <span className="font-semibold">{depRec.objeto_nome}</span>.{' '}
-                  <button onClick={() => onJump(depRec.rec_id)} className="inline-flex items-center gap-0.5 font-semibold text-primary hover:underline">
-                    Ir para esse item <ArrowRight className="h-3 w-3" />
-                  </button>
-                </span>
-              </div>
-            )}
-          </div>
-        )}
+        {/* Controles — sempre os mesmos dois, em qualquer situação: ver no Gerenciador e
+            ligar/desligar o objeto direto. Nada de botões condicionais por categoria/IA. */}
+        <div className="grid grid-cols-2 gap-2 border-t border-border pt-3">
+          {link ? (
+            <a href={link} target="_blank" rel="noopener noreferrer" className="inline-flex h-11 items-center justify-center gap-1.5 rounded-[var(--radius)] border border-border bg-background text-sm font-medium text-foreground hover:border-primary/40">
+              <ExternalLink className="h-4 w-4" /> Gerenciador
+            </a>
+          ) : <span />}
+          <Button
+            onClick={handleManualToggle}
+            disabled={busy || !podeAlternar}
+            title={podeAlternar ? undefined : `Status "${entrega.label}" não permite ligar/desligar por aqui`}
+            className={cn('h-11 w-full', podeAlternar && entrega.label === 'Ativo' && 'bg-red-500 text-white hover:bg-red-600')}
+          >
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : entrega.label === 'Ativo' ? <PauseCircle className="h-4 w-4" /> : <PlayCircle className="h-4 w-4" />}
+            {entrega.label === 'Ativo' ? 'Desativar' : 'Ativar'}
+          </Button>
+        </div>
 
         {semAcao && (
           <p className="rounded-[var(--radius)] border border-border bg-background p-3 text-sm text-muted-foreground">
@@ -1627,112 +1533,30 @@ export default function OtimizadorPage() {
     setTreeNodes((prev) => walk(prev));
   }
 
-  async function doApply(rec: FilaRec, params: { novo_orcamento_diario?: number }, batch: FilaRec[]) {
+  async function doApply(rec: FilaRec, params: { novo_orcamento_diario?: number }) {
     const acao = rec.acao_estruturada;
     if (!acao) return;
     setBusy(true);
     try {
-      if (batch.length > 0) {
-        const itens = [rec, ...batch].map((r) => ({
-          rec_id: r.rec_id, analise_id: r.analise_id, canal: r.canal, cliente_id: r.cliente_id,
-          connection_id: r.connection_id ?? '', account_id: r.account_id ?? undefined,
-          acao: r.acao_estruturada!.tipo, objeto_tipo: r.acao_estruturada!.objeto_tipo, objeto_id: r.acao_estruturada!.objeto_id,
-          objeto_nome: r.objeto_nome, justificativa: r.texto_recomendacao,
-          parametros: r.rec_id === rec.rec_id ? { ...r.acao_estruturada!.parametros, ...params } : r.acao_estruturada!.parametros,
-        }));
-        const res = await fetch('/api/otimizador/lote', {
-          method: 'POST', headers: { 'Content-Type': 'application/json', ...callerHeaders() },
-          body: JSON.stringify({ itens, ...autor }),
-        });
-        const data = await res.json().catch(() => ({})) as { ok_count?: number; results?: Array<{ rec_id: string; ok: boolean }> };
-        const okIds = (data.results ?? []).filter((r) => r.ok).map((r) => r.rec_id);
-        removeFromTree(okIds.length ? okIds : [rec.rec_id], 'aplicado');
-        setToast({ text: `Aplicado em ${data.ok_count ?? okIds.length} conta(s).` });
-      } else {
-        const res = await fetch('/api/otimizador/executar', {
-          method: 'POST', headers: { 'Content-Type': 'application/json', ...callerHeaders() },
-          body: JSON.stringify({
-            rec_id: rec.rec_id, analise_id: rec.analise_id, canal: rec.canal, client_id: rec.cliente_id,
-            connection_id: rec.connection_id ?? '', account_id: rec.account_id ?? undefined,
-            acao: acao.tipo, objeto_tipo: acao.objeto_tipo, objeto_id: acao.objeto_id, objeto_nome: rec.objeto_nome,
-            parametros: { ...acao.parametros, ...params }, justificativa: rec.texto_recomendacao, ...autor,
-          }),
-        });
-        const data = await res.json().catch(() => ({})) as { ok?: boolean; error?: string; pode_desfazer?: boolean };
-        if (!res.ok || !data.ok) {
-          setToast({ text: `Não foi possível aplicar: ${data.error ?? res.statusText}`, erro: true });
-          return;
-        }
-        removeFromTree([rec.rec_id], 'aplicado', acao.tipo === 'PAUSAR' ? 'PAUSED' : acao.tipo === 'ATIVAR' ? 'ACTIVE' : undefined);
-        const label = acao.tipo === 'PAUSAR' ? 'Pausado' : acao.tipo === 'ATIVAR' ? 'Ativado' : 'Orçamento ajustado';
-        setToast({ text: `${label}. Você pode reverter agora.`, undo: data.pode_desfazer ? { rec_id: rec.rec_id, cliente_id: rec.cliente_id } : undefined });
+      const res = await fetch('/api/otimizador/executar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...callerHeaders() },
+        body: JSON.stringify({
+          rec_id: rec.rec_id, analise_id: rec.analise_id, canal: rec.canal, client_id: rec.cliente_id,
+          connection_id: rec.connection_id ?? '', account_id: rec.account_id ?? undefined,
+          acao: acao.tipo, objeto_tipo: acao.objeto_tipo, objeto_id: acao.objeto_id, objeto_nome: rec.objeto_nome,
+          parametros: { ...acao.parametros, ...params }, justificativa: rec.texto_recomendacao, ...autor,
+        }),
+      });
+      const data = await res.json().catch(() => ({})) as { ok?: boolean; error?: string; pode_desfazer?: boolean };
+      if (!res.ok || !data.ok) {
+        setToast({ text: `Não foi possível aplicar: ${data.error ?? res.statusText}`, erro: true });
+        return;
       }
+      removeFromTree([rec.rec_id], 'aplicado', acao.tipo === 'PAUSAR' ? 'PAUSED' : acao.tipo === 'ATIVAR' ? 'ACTIVE' : undefined);
+      const label = acao.tipo === 'PAUSAR' ? 'Pausado' : acao.tipo === 'ATIVAR' ? 'Ativado' : 'Orçamento ajustado';
+      setToast({ text: `${label}. Você pode reverter agora.`, undo: data.pode_desfazer ? { rec_id: rec.rec_id, cliente_id: rec.cliente_id } : undefined });
     } catch {
       setToast({ text: 'Erro de rede ao aplicar.', erro: true });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  // Pausa em lote os criativos afetados de um conjunto/campanha (botão "Pausar N criativos
-  // agora" do painel). Reusa a rota /lote — cada criativo já tem acao_estruturada PAUSAR.
-  async function doApplyChildren(children: FilaRec[]) {
-    const aplicaveis = children.filter((c) => c.acao_estruturada && c.aplicavel);
-    if (aplicaveis.length === 0) {
-      setToast({ text: 'Nenhum criativo aplicável para pausar automaticamente.', erro: true });
-      return;
-    }
-    setBusy(true);
-    try {
-      const itens = aplicaveis.map((r) => ({
-        rec_id: r.rec_id, analise_id: r.analise_id, canal: r.canal, cliente_id: r.cliente_id,
-        connection_id: r.connection_id ?? '', account_id: r.account_id ?? undefined,
-        acao: r.acao_estruturada!.tipo, objeto_tipo: r.acao_estruturada!.objeto_tipo, objeto_id: r.acao_estruturada!.objeto_id,
-        objeto_nome: r.objeto_nome, justificativa: r.texto_recomendacao, parametros: r.acao_estruturada!.parametros,
-      }));
-      const res = await fetch('/api/otimizador/lote', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', ...callerHeaders() },
-        body: JSON.stringify({ itens, ...autor }),
-      });
-      const data = await res.json().catch(() => ({})) as { ok_count?: number; results?: Array<{ rec_id: string; ok: boolean }> };
-      const okIds = (data.results ?? []).filter((r) => r.ok).map((r) => r.rec_id);
-      removeFromTree(okIds, 'aplicado', 'PAUSED');
-      setToast({ text: `${data.ok_count ?? okIds.length} criativo(s) pausado(s).` });
-    } catch {
-      setToast({ text: 'Erro de rede ao pausar os criativos.', erro: true });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function doIgnore(rec: FilaRec) {
-    setBusy(true);
-    try {
-      await fetch('/api/otimizador/ignorar', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', ...callerHeaders() },
-        body: JSON.stringify({ rec_id: rec.rec_id, analise_id: rec.analise_id, cliente_id: rec.cliente_id, objeto_id: rec.objeto_id, ...autor }),
-      });
-      removeFromTree([rec.rec_id], 'ignorado');
-      setToast({ text: 'Marcado como revisado.' });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function doHuman(rec: FilaRec) {
-    setBusy(true);
-    try {
-      await fetch('/api/otimizador/analise-humana', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', ...callerHeaders() },
-        body: JSON.stringify({ rec_id: rec.rec_id, analise_id: rec.analise_id, cliente_id: rec.cliente_id, objeto_id: rec.objeto_id, atribuido_a: session?.userId, ...autor }),
-      });
-      setTreeNodes((prev) => {
-        function walk(nodes: TreeNode[]): TreeNode[] {
-          return nodes.map((n) => n.rec_id === rec.rec_id ? { ...n, status: 'em_analise_humana' } : { ...n, filhos: walk(n.filhos as TreeNode[]) });
-        }
-        return walk(prev);
-      });
-      setToast({ text: 'Enviado para análise de um humano.' });
     } finally {
       setBusy(false);
     }
@@ -1741,7 +1565,7 @@ export default function OtimizadorPage() {
   function handleQuickPause(node: TreeNode) {
     if (busy) return;
     if (node.acao_estruturada?.tipo === 'PAUSAR' && node.aplicavel) {
-      void doApply(node, {}, []);
+      void doApply(node, {});
       return;
     }
     setSelectedId(node.rec_id);
@@ -2033,7 +1857,7 @@ export default function OtimizadorPage() {
                   />
                 </div>
                 {selectedNode ? (
-                  <DetailPanel node={selectedNode} allNodes={flatNodes} busy={busy} onApply={doApply} onApplyChildren={doApplyChildren} onIgnore={doIgnore} onHuman={doHuman} onJump={jumpTo} />
+                  <DetailPanel node={selectedNode} busy={busy} onApply={doApply} onJump={jumpTo} />
                 ) : (
                   <div className="flex min-h-72 flex-col items-center justify-center gap-2 rounded-[var(--radius)] border border-dashed border-border bg-card/70 p-6 text-center">
                     <MousePointerClick className="h-6 w-6 text-muted-foreground" />
