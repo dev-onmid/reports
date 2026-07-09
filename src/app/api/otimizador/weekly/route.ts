@@ -14,6 +14,7 @@ import {
   type OptimizerModo,
   type OptimizerPeriodKey,
 } from '@/lib/optimizer';
+import { optimizerDateRangeForDays } from '@/lib/optimizer-period-range';
 
 // 300s (mesmo teto do reports/run-once) — a análise manual síncrona soma busca de campanhas
 // (até 24s com fallback 30d) + conjuntos/anúncios (15s) + IA (até 90s); em 60s dava HTTP 504.
@@ -28,12 +29,6 @@ type AnalysisPeriod = {
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function isoDate(daysAgo: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() - daysAgo);
-  return d.toISOString().split('T')[0];
-}
 
 function todayDow(): number {
   // JS: 0=Sun,1=Mon,...,6=Sat → convert to 1=Mon,...,5=Fri
@@ -496,8 +491,7 @@ async function buildPayloadForClient(
   // Tenta o período solicitado; se gasto = 0, expande para 30 dias
   const FALLBACK_DAYS = 30;
   let usedPeriod = period;
-  let dateFrom = isoDate(period.days);
-  let dateTo = isoDate(1);
+  let { dateFrom, dateTo } = optimizerDateRangeForDays(period.days);
 
   let rawCampaigns = await fetchCampaignsForClient(client.id, origin, period.key, dateFrom, dateTo);
   let activeCampaigns = rawCampaigns.filter((c) => {
@@ -509,7 +503,7 @@ async function buildPayloadForClient(
   // `/api/campaigns` já descarta campanhas com gasto = 0, então "sem gasto no período" chega
   // aqui como lista VAZIA — por isso o gatilho é length === 0 (antes era código morto).
   if (activeCampaigns.length === 0 && period.days < FALLBACK_DAYS) {
-    dateFrom = isoDate(FALLBACK_DAYS);
+    ({ dateFrom, dateTo } = optimizerDateRangeForDays(FALLBACK_DAYS));
     usedPeriod = { key: 'last_30d', label: 'Últimos 30 dias', days: FALLBACK_DAYS };
     rawCampaigns = await fetchCampaignsForClient(client.id, origin, 'last_30d', dateFrom, dateTo);
     activeCampaigns = rawCampaigns.filter((c) => {
@@ -777,10 +771,12 @@ async function diagnoseClients(opts: RunOptions): Promise<ClientDiagnostic[]> {
       continue;
     }
     const token = await resolveToken(conn.id).catch(() => null);
+    const last7 = optimizerDateRangeForDays(7);
+    const last30 = optimizerDateRangeForDays(30);
     const [d7, d30, metaDireto] = await Promise.all([
-      fetchCampaignsForClient(client.id, opts.origin, 'last_7d', isoDate(7), isoDate(1)).catch(() => []),
-      fetchCampaignsForClient(client.id, opts.origin, 'last_30d', isoDate(30), isoDate(1)).catch(() => []),
-      token ? fetchMetaCampaignsRaw(conn.account_id, token, isoDate(30), isoDate(0)).catch(() => ({ ok: false, erro: 'falha na consulta direta' })) : Promise.resolve({ ok: false, erro: 'sem token' }),
+      fetchCampaignsForClient(client.id, opts.origin, 'last_7d', last7.dateFrom, last7.dateTo).catch(() => []),
+      fetchCampaignsForClient(client.id, opts.origin, 'last_30d', last30.dateFrom, last30.dateTo).catch(() => []),
+      token ? fetchMetaCampaignsRaw(conn.account_id, token, last30.dateFrom, last30.dateTo).catch(() => ({ ok: false, erro: 'falha na consulta direta' })) : Promise.resolve({ ok: false, erro: 'sem token' }),
     ]);
     const meta7 = d7.filter((c) => c.platform === 'meta');
     const meta30 = d30.filter((c) => c.platform === 'meta');

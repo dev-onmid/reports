@@ -1,9 +1,11 @@
+import {
+  addDaysToIsoDate,
+  optimizerDateDaysAgo,
+  todayInOptimizerTimeZone,
+} from '@/lib/optimizer-period-range';
+
 function validDate(s: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(Date.parse(s));
-}
-
-function fmt(d: Date): string {
-  return d.toISOString().split('T')[0];
 }
 
 // Resolves any period to an explicit { since, until } date range.
@@ -15,32 +17,32 @@ function resolveMetaDateRange(period: string, dateFrom = '', dateTo = ''): { sin
     return { since: dateFrom, until: dateTo };
   }
 
-  const now = new Date();
-  const todayStr = fmt(now);
-
-  const daysAgo = (n: number) => {
-    const d = new Date(now);
-    d.setDate(d.getDate() - n);
-    return fmt(d);
-  };
+  const todayStr = todayInOptimizerTimeZone();
+  const daysAgo = (n: number) => optimizerDateDaysAgo(n);
 
   switch (period) {
     case 'yesterday':
       return { since: daysAgo(1), until: daysAgo(1) };
+    case 'last_3d':
+      return { since: daysAgo(3), until: daysAgo(1) };
     case 'last_7d':
       return { since: daysAgo(7), until: daysAgo(1) };
     case 'last_14d':
       return { since: daysAgo(14), until: daysAgo(1) };
+    case 'last_21d':
+      return { since: daysAgo(21), until: daysAgo(1) };
     case 'last_30d':
       return { since: daysAgo(30), until: daysAgo(1) };
+    case 'last_90d':
+      return { since: daysAgo(90), until: daysAgo(1) };
     case 'this_month': {
-      const from = new Date(now.getFullYear(), now.getMonth(), 1);
-      return { since: fmt(from), until: todayStr };
+      return { since: `${todayStr.slice(0, 8)}01`, until: todayStr };
     }
     case 'last_month': {
-      const from = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      const to = new Date(now.getFullYear(), now.getMonth(), 0);
-      return { since: fmt(from), until: fmt(to) };
+      const currentMonthStart = `${todayStr.slice(0, 8)}01`;
+      const previousMonthLastDay = addDaysToIsoDate(currentMonthStart, -1);
+      const previousMonthStart = `${previousMonthLastDay.slice(0, 8)}01`;
+      return { since: previousMonthStart, until: previousMonthLastDay };
     }
     default:
       return { since: daysAgo(30), until: daysAgo(1) };
@@ -58,6 +60,10 @@ export function resolveMetaPeriod(period: string, dateFrom = '', dateTo = ''): s
 export function resolveGaqlPeriod(period: string, dateFrom = '', dateTo = ''): string {
   if (period === 'custom' && validDate(dateFrom) && validDate(dateTo)) {
     return `segments.date BETWEEN '${dateFrom}' AND '${dateTo}'`;
+  }
+  if (period === 'last_3d' || period === 'last_21d' || period === 'last_90d') {
+    const { since, until } = resolveMetaDateRange(period);
+    return `segments.date BETWEEN '${since}' AND '${until}'`;
   }
   const map: Record<string, string> = {
     yesterday: 'YESTERDAY',

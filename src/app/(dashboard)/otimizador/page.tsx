@@ -62,6 +62,10 @@ type FilaConta = {
   pendencias: number;
 };
 
+type AccountOption = FilaConta & {
+  tem_analise: boolean;
+};
+
 type ArvoreResumo = {
   estado_da_conta: string | null;
   resumo_executivo: string | null;
@@ -468,12 +472,18 @@ function ConfirmToast({ toast, onUndo, onClose }: { toast: ToastState; onUndo: (
 // Seletor de conta (dropdown)
 // ---------------------------------------------------------------------------
 function AccountSelector({ contas, value, onChange }: {
-  contas: FilaConta[];
+  contas: AccountOption[];
   value: string;
   onChange: (clienteId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
   const sel = value ? contas.find((c) => c.cliente_id === value) : null;
+  const filteredContas = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return contas;
+    return contas.filter((c) => c.cliente_nome.toLowerCase().includes(q));
+  }, [contas, query]);
   return (
     <div className="relative">
       <button
@@ -482,12 +492,12 @@ function AccountSelector({ contas, value, onChange }: {
       >
         <span className="flex min-w-0 items-center gap-2">
           {sel
-            ? <span className={cn('h-2 w-2 shrink-0 rounded-full', SEV[sel.pior_severidade].dot)} />
+            ? <span className={cn('h-2 w-2 shrink-0 rounded-full', sel.tem_analise ? SEV[sel.pior_severidade].dot : 'bg-muted-foreground/60')} />
             : <MousePointerClick className="h-4 w-4 shrink-0 text-muted-foreground" />}
           <span className="truncate text-sm font-medium text-foreground">{sel ? sel.cliente_nome : 'Selecionar cliente'}</span>
           {sel && (
             <span className="shrink-0 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">
-              {sel.pendencias} pendência{sel.pendencias === 1 ? '' : 's'}
+              {sel.tem_analise ? `${sel.pendencias} pendência${sel.pendencias === 1 ? '' : 's'}` : 'Sem análise'}
             </span>
           )}
         </span>
@@ -497,18 +507,31 @@ function AccountSelector({ contas, value, onChange }: {
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
           <div className="absolute z-20 mt-1 max-h-80 w-full overflow-auto rounded-[var(--radius)] border border-border bg-card shadow-xl">
-            {contas.map((c) => (
+            <div className="sticky top-0 z-10 border-b border-border bg-card p-2">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Buscar cliente..."
+                  className="h-9 w-full rounded-[var(--radius)] border border-border bg-background px-8 text-sm text-foreground outline-none focus:border-primary"
+                />
+              </div>
+            </div>
+            {filteredContas.map((c) => (
               <button
                 key={c.cliente_id}
-                onClick={() => { onChange(c.cliente_id); setOpen(false); }}
+                onClick={() => { onChange(c.cliente_id); setOpen(false); setQuery(''); }}
                 className={cn('flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-surface-soft', value === c.cliente_id && 'bg-surface-soft')}
               >
-                <span className={cn('h-2 w-2 shrink-0 rounded-full', SEV[c.pior_severidade].dot)} />
+                <span className={cn('h-2 w-2 shrink-0 rounded-full', c.tem_analise ? SEV[c.pior_severidade].dot : 'bg-muted-foreground/60')} />
                 <span className="truncate text-sm text-foreground">{c.cliente_nome}</span>
-                <span className="ml-auto shrink-0 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">{c.pendencias}</span>
+                <span className="ml-auto shrink-0 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                  {c.tem_analise ? c.pendencias : 'novo'}
+                </span>
               </button>
             ))}
-            {contas.length === 0 && <p className="p-3 text-xs text-muted-foreground">Nenhuma conta com análise recente.</p>}
+            {filteredContas.length === 0 && <p className="p-3 text-xs text-muted-foreground">Nenhum cliente encontrado.</p>}
           </div>
         </>
       )}
@@ -1197,15 +1220,25 @@ export default function OtimizadorPage() {
         fetch('/api/clients'),
         fetch('/api/otimizador/fila?hours=200'),
       ]);
+      let activeClients: Client[] = [];
+      let filaContas: FilaConta[] = [];
+
       if (clientsRes.ok) {
         const data = await clientsRes.json() as Client[];
-        setClients(data.filter((c) => c.status !== 'Arquivado' && c.status !== 'Inativo'));
+        activeClients = data.filter((c) => c.status !== 'Arquivado' && c.status !== 'Inativo');
       }
       if (filaRes.ok) {
         const data = await filaRes.json() as { contas: FilaConta[] };
-        setContas(data.contas ?? []);
-        setContaFiltro((prev) => prev || data.contas?.[0]?.cliente_id || '');
+        filaContas = data.contas ?? [];
       }
+
+      setClients(activeClients);
+      setContas(filaContas);
+      setContaFiltro((prev) => {
+        const validIds = new Set([...filaContas.map((c) => c.cliente_id), ...activeClients.map((c) => c.id)]);
+        if (prev && validIds.has(prev)) return prev;
+        return filaContas[0]?.cliente_id ?? activeClients[0]?.id ?? '';
+      });
     } finally {
       setLoading(false);
     }
@@ -1239,6 +1272,26 @@ export default function OtimizadorPage() {
 
   const flatNodes = useMemo(() => flattenTree(treeNodes), [treeNodes]);
   const selectedNode = useMemo(() => flatNodes.find((n) => n.rec_id === selectedId) ?? null, [flatNodes, selectedId]);
+  const accountOptions = useMemo<AccountOption[]>(() => {
+    const byId = new Map<string, AccountOption>();
+    for (const conta of contas) {
+      byId.set(conta.cliente_id, { ...conta, tem_analise: true });
+    }
+    for (const client of clients) {
+      if (byId.has(client.id)) continue;
+      byId.set(client.id, {
+        cliente_id: client.id,
+        cliente_nome: client.name,
+        pior_severidade: 'ok',
+        pendencias: 0,
+        tem_analise: false,
+      });
+    }
+    return Array.from(byId.values()).sort((a, b) => {
+      if (a.tem_analise !== b.tem_analise) return a.tem_analise ? -1 : 1;
+      return a.cliente_nome.localeCompare(b.cliente_nome, 'pt-BR');
+    });
+  }, [clients, contas]);
 
   // Seleciona automaticamente o item de maior prioridade ao carregar uma nova árvore — o painel
   // de detalhe nunca fica vazio à toa quando já existe algo urgente pra decidir.
@@ -1487,7 +1540,7 @@ export default function OtimizadorPage() {
         <div className="grid items-end gap-3 lg:grid-cols-[minmax(220px,300px)_180px_minmax(380px,1fr)]">
           <div className="space-y-1.5">
             <span className="text-xs font-semibold text-muted-foreground">Cliente</span>
-            <AccountSelector contas={contas} value={contaFiltro} onChange={setContaFiltro} />
+            <AccountSelector contas={accountOptions} value={contaFiltro} onChange={setContaFiltro} />
           </div>
           <label className="space-y-1.5">
             <span className="text-xs font-semibold text-muted-foreground">Período</span>
