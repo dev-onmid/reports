@@ -25,6 +25,7 @@ import {
   PauseCircle,
   Pencil,
   Play,
+  PlayCircle,
   Plus,
   Rocket,
   Search,
@@ -1156,10 +1157,22 @@ function DetailPanel({ node, allNodes, busy, onApply, onApplyChildren, onIgnore,
   const semAcao = !node.texto_recomendacao.trim() && cat === 'sem_diagnostico';
   const entrega = deliveryDisplay(node.status_entrega);
 
+  // Toggle manual Ativar/Desativar — só oferecido quando a IA não sugeriu uma ação estruturada
+  // pra este nó específico (ex: VERIFICAR_MANUAL/"aguardar dados"), como controle padrão de
+  // fallback. Não aparece pra "Arquivado"/status desconhecido, onde ligar/desligar não se aplica.
+  const podeAlternarManual = !hasAction && !isMaintainOnly && (entrega.label === 'Ativo' || entrega.label === 'Pausado');
+  function handleManualToggle() {
+    const tipo: 'PAUSAR' | 'ATIVAR' = entrega.label === 'Ativo' ? 'PAUSAR' : 'ATIVAR';
+    onApply({ ...node, acao_estruturada: { tipo, objeto_tipo: node.nivel, objeto_id: node.objeto_id, objeto_nome: node.objeto_nome, parametros: {} } }, {}, []);
+  }
+
   // Decisão guiada: quando um CONJUNTO/CAMPANHA é selecionado, os criativos fracos dentro dele
   // viram "itens afetados" — o gestor pausa os criativos, não o objeto inteiro (o cerne do pedido).
   const afetados = (node.nivel === 'adset' || node.nivel === 'campaign') ? criativosAfetados(node) : [];
   const temAfetados = afetados.length > 0;
+  // "Enviar para um humano" já é o botão principal neste caso (sem ação estruturada nem
+  // toggle manual disponível) — esconde o botão duplicado da linha de ações padrão.
+  const primaryJaEhHumano = !temAfetados && !actionExecutable && !isMaintainOnly && !podeAlternarManual;
   const prioridade = prioridadeDoNode(node);
   const impacto = impactoDoNode(node);
   const risco = riscoDoNode(node);
@@ -1360,6 +1373,11 @@ function DetailPanel({ node, allNodes, busy, onApply, onApplyChildren, onIgnore,
               <Button onClick={() => onIgnore(node)} disabled={busy} className="h-11 w-full">
                 <CheckCircle2 className="h-4 w-4" /> Manter ativo
               </Button>
+            ) : podeAlternarManual ? (
+              <Button onClick={handleManualToggle} disabled={busy} className={cn('h-11 w-full', entrega.label === 'Ativo' && 'bg-red-500 text-white hover:bg-red-600')}>
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : entrega.label === 'Ativo' ? <PauseCircle className="h-4 w-4" /> : <PlayCircle className="h-4 w-4" />}
+                {entrega.label === 'Ativo' ? 'Desativar agora' : 'Ativar agora'}
+              </Button>
             ) : (
               <Button onClick={() => onHuman(node)} disabled={busy || emAnalise} className="h-11 w-full">
                 <UserRound className="h-4 w-4" /> Enviar para um humano
@@ -1370,21 +1388,24 @@ function DetailPanel({ node, allNodes, busy, onApply, onApplyChildren, onIgnore,
                 Confiança baixa: a ação está disponível, mas vale conferir o contexto antes de aplicar.
               </p>
             )}
-            <div className="grid grid-cols-2 gap-2">
+            {/* Botões padrão — sempre disponíveis, independente da ação sugerida acima */}
+            <div className={cn('grid gap-2', primaryJaEhHumano ? 'grid-cols-2' : 'grid-cols-3')}>
               {link ? (
                 <a href={link} target="_blank" rel="noopener noreferrer" className="inline-flex h-9 items-center justify-center gap-1.5 rounded-[var(--radius)] border border-border bg-background text-xs font-medium text-foreground hover:border-primary/40">
-                  <ExternalLink className="h-3.5 w-3.5" /> Ver no Gerenciador
+                  <ExternalLink className="h-3.5 w-3.5" /> Gerenciador
                 </a>
               ) : <span />}
               <Button variant="outline" onClick={() => onIgnore(node)} disabled={busy} className="h-9 text-xs">
-                <Check className="h-3.5 w-3.5" /> Marcar como revisado
+                <Check className="h-3.5 w-3.5" /> Revisado
               </Button>
+              {!primaryJaEhHumano && (
+                <Button variant="outline" onClick={() => onHuman(node)} disabled={busy || emAnalise} className="h-9 text-xs">
+                  <UserRound className="h-3.5 w-3.5" /> Humano
+                </Button>
+              )}
             </div>
             {isAjuste && actionExecutable && (
               <button onClick={() => setEditing((e) => !e)} className="text-xs font-medium text-primary hover:underline">Editar valor antes de aplicar</button>
-            )}
-            {!emAnalise && (
-              <button onClick={() => onHuman(node)} className="block text-xs font-medium text-primary hover:underline">Enviar para um humano</button>
             )}
             {samePadrao.length > 0 && actionExecutable && !temAfetados && (
               <label className="flex cursor-pointer items-start gap-2 rounded-[var(--radius)] border border-border p-2.5 text-xs text-foreground">
