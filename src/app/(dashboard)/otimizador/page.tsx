@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable react-hooks/set-state-in-effect */
+
 import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
@@ -22,7 +24,6 @@ import {
   Pencil,
   Play,
   Plus,
-  RefreshCw,
   Rocket,
   Search,
   Settings2,
@@ -147,8 +148,6 @@ const SEV: Record<Severidade, { badge: string; dot: string; label: string }> = {
   atencao: { badge: 'border-amber-400/40 bg-amber-400/10 text-amber-300', dot: 'bg-amber-400', label: 'Atenção' },
   ok: { badge: 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300', dot: 'bg-emerald-400', label: 'Oportunidade' },
 };
-const SEV_RANK: Record<Severidade, number> = { urgente: 0, atencao: 1, ok: 2 };
-
 const NIVEL_LABEL: Record<string, string> = { campaign: 'Campanha', adset: 'Conjunto', ad: 'Criativo' };
 const VERBO_ACAO: Record<string, string> = { PAUSAR: 'Pausar agora', ATIVAR: 'Reativar agora', AJUSTAR_ORCAMENTO: 'Ajustar agora' };
 
@@ -479,7 +478,7 @@ function AccountSelector({ contas, value, onChange }: {
     <div className="relative">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center justify-between gap-2 rounded-[var(--radius)] border border-border bg-card px-3 py-2.5 text-left hover:border-primary/40 sm:w-80"
+        className="flex w-full items-center justify-between gap-2 rounded-[var(--radius)] border border-border bg-card px-3 py-2.5 text-left hover:border-primary/40"
       >
         <span className="flex min-w-0 items-center gap-2">
           {sel
@@ -497,7 +496,7 @@ function AccountSelector({ contas, value, onChange }: {
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute z-20 mt-1 max-h-80 w-full overflow-auto rounded-[var(--radius)] border border-border bg-card shadow-xl sm:w-80">
+          <div className="absolute z-20 mt-1 max-h-80 w-full overflow-auto rounded-[var(--radius)] border border-border bg-card shadow-xl">
             {contas.map((c) => (
               <button
                 key={c.cliente_id}
@@ -546,14 +545,14 @@ function ScoreGauge({ score, ring }: { score: number; ring: string }) {
   const circ = 2 * Math.PI * r;
   const offset = circ * (1 - score / 100);
   return (
-    <div className="relative h-24 w-24 shrink-0">
-      <svg viewBox="0 0 80 80" className="h-24 w-24 -rotate-90">
-        <circle cx="40" cy="40" r={r} fill="none" stroke="currentColor" strokeWidth="8" className="text-border" />
+    <div className="relative h-20 w-20 shrink-0">
+      <svg viewBox="0 0 80 80" className="h-20 w-20 -rotate-90">
+        <circle cx="40" cy="40" r={r} fill="none" stroke="currentColor" strokeWidth="8" className="text-border/70" />
         <circle cx="40" cy="40" r={r} fill="none" stroke={ring} strokeWidth="8" strokeLinecap="round"
           strokeDasharray={circ} strokeDashoffset={offset} style={{ transition: 'stroke-dashoffset 0.4s ease' }} />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="font-heading text-2xl text-foreground">{score}</span>
+        <span className="text-2xl font-bold text-foreground">{score}</span>
         <span className="text-[9px] text-muted-foreground">/100</span>
       </div>
     </div>
@@ -580,31 +579,31 @@ function AccountSummaryHeader({ resumo, nodes, generatedAt, proximaAnalise }: {
     { label: 'Diagnósticos', value: String(resumo.diagnosticos) },
   ];
   return (
-    <section className="space-y-3 rounded-[var(--radius)] border border-border bg-card p-4">
-      <div className="flex flex-wrap items-start gap-4">
+    <section className="overflow-hidden rounded-[var(--radius)] border border-border bg-card/90">
+      <div className="grid gap-0 lg:grid-cols-[minmax(360px,1.25fr)_minmax(560px,1.75fr)]">
+        <div className="flex items-start gap-4 border-b border-border p-4 lg:border-b-0 lg:border-r">
         <ScoreGauge score={score} ring={estado.ring} />
-        <div className="min-w-0 flex-1 space-y-2">
-          <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="min-w-0 flex-1 space-y-2">
             <div className="flex items-center gap-2">
               <span className={cn('text-sm font-bold uppercase tracking-wide', estado.tone)}>{estado.label}</span>
               <span className="text-xs text-muted-foreground">Performance {score >= 70 ? 'acima' : score >= 45 ? 'próxima' : 'abaixo'} do ideal</span>
               {resumo.semana_analise && <span className="text-xs text-muted-foreground">· semana {resumo.semana_analise}</span>}
             </div>
+            {resumo.resumo_executivo && <p className="line-clamp-3 text-sm leading-relaxed text-foreground">{resumo.resumo_executivo}</p>}
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
               <span>Última análise: {formatDateTime(generatedAt)}</span>
               {proximaAnalise && <span>Próxima automática: {proximaAnalise}</span>}
             </div>
           </div>
-          {resumo.resumo_executivo && <p className="text-sm leading-relaxed text-foreground">{resumo.resumo_executivo}</p>}
         </div>
-      </div>
-      <div className="grid grid-cols-2 gap-2 border-t border-border pt-3 sm:grid-cols-4 lg:grid-cols-7">
-        {stats.map((s) => (
-          <div key={s.label} className="rounded-[var(--radius)] border border-border/60 bg-background p-2.5">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{s.label}</p>
-            <p className="mt-0.5 font-heading text-lg text-foreground">{s.value}</p>
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7">
+          {stats.map((s, index) => (
+            <div key={s.label} className={cn('min-h-20 p-4', index > 0 && 'border-l border-border/70', index > 1 && 'max-sm:border-t')}>
+              <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{s.label}</p>
+              <p className="mt-1 text-lg font-bold text-foreground">{s.value}</p>
+            </div>
+          ))}
           </div>
-        ))}
       </div>
     </section>
   );
@@ -623,12 +622,10 @@ function QuickDecisionCards({ nodes, active, onSelect }: {
   for (const n of nodes) counts[categoriaDoNode(n)]++;
 
   const grid4: Array<Exclude<Categoria, 'sem_diagnostico' | 'investigar'>> = ['pausar', 'revisar', 'manter', 'escalar'];
-  const investigarMeta = CATEGORIA_META.investigar;
-  const investigarActive = active === 'investigar';
 
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-      <div className="grid grid-cols-2 gap-2 sm:col-span-2">
+    <div className="space-y-2">
+      <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
         {grid4.map((cat) => {
           const meta = CATEGORIA_META[cat];
           const Icon = meta.icon;
@@ -638,32 +635,45 @@ function QuickDecisionCards({ nodes, active, onSelect }: {
               key={cat}
               onClick={() => onSelect(isActive ? null : cat)}
               className={cn(
-                'flex flex-col items-start gap-1 rounded-[var(--radius)] border p-3 text-left transition-colors',
-                isActive ? meta.tone : 'border-border bg-card hover:border-primary/30',
+                'group flex min-h-24 items-center justify-between gap-3 overflow-hidden rounded-[var(--radius)] border p-3 text-left transition-colors',
+                isActive ? meta.tone : 'border-border bg-card/90 hover:border-primary/30',
               )}
             >
-              <Icon className={cn('h-4 w-4', isActive ? '' : 'text-muted-foreground')} />
-              <span className="font-heading text-2xl text-foreground">{counts[cat]}</span>
-              <span className="text-xs font-medium text-muted-foreground">{meta.label}</span>
+              <span className="min-w-0">
+                <span className="block text-3xl font-bold leading-none text-foreground">{counts[cat]}</span>
+                <span className="mt-1 block text-sm font-semibold text-foreground">{meta.label}</span>
+                <span className="mt-1 block truncate text-[11px] text-muted-foreground">
+                  {cat === 'pausar' ? 'Impacto alto de desperdício'
+                    : cat === 'revisar' ? 'Precisam de ajustes'
+                      : cat === 'manter' ? 'Performando bem'
+                        : 'Oportunidades de crescimento'}
+                </span>
+              </span>
+              <span className={cn(
+                'flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius)] border',
+                isActive ? 'border-current bg-background/50' : 'border-border bg-background text-muted-foreground group-hover:text-primary',
+              )}>
+                <Icon className="h-5 w-5" />
+              </span>
             </button>
           );
         })}
       </div>
-      {/* Investigar — card destacado, estilo de alerta, mesmo tratamento de "ação urgente" que o Pausar */}
-      <button
-        onClick={() => onSelect(investigarActive ? null : 'investigar')}
-        className={cn(
-          'flex flex-col items-start justify-between gap-2 rounded-[var(--radius)] border p-4 text-left transition-colors',
-          investigarActive ? investigarMeta.tone : 'border-secondary/40 bg-secondary/5 hover:border-secondary/60',
-        )}
-      >
-        <span className="rounded border border-secondary/40 bg-secondary/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-secondary">
-          Precisa de atenção
-        </span>
-        <Eye className="h-5 w-5 text-secondary" />
-        <span className="font-heading text-3xl text-foreground">{counts.investigar}</span>
-        <span className="text-xs font-medium text-muted-foreground">{investigarMeta.label} — ambiguidade ou pouco dado, revisar antes de decidir</span>
-      </button>
+      {counts.investigar > 0 && (
+        <button
+          onClick={() => onSelect(active === 'investigar' ? null : 'investigar')}
+          className={cn(
+            'flex w-full items-center justify-between gap-3 rounded-[var(--radius)] border px-3 py-2 text-left text-xs transition-colors',
+            active === 'investigar' ? CATEGORIA_META.investigar.tone : 'border-secondary/30 bg-secondary/5 text-muted-foreground hover:border-secondary/50',
+          )}
+        >
+          <span className="flex min-w-0 items-center gap-2">
+            <Eye className="h-3.5 w-3.5 shrink-0 text-secondary" />
+            <span className="truncate"><span className="font-semibold text-foreground">{counts.investigar}</span> item(ns) para investigar antes de decidir</span>
+          </span>
+          <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+        </button>
+      )}
     </div>
   );
 }
@@ -819,12 +829,12 @@ function CampaignTable({ nodes, selectedId, onSelect, filtroNivel, filtroCategor
   const restantes = nodes.length - visiveis.length;
 
   return (
-    <div className="rounded-[var(--radius)] border border-border bg-card">
-      <div className="flex items-center justify-between gap-2 border-b border-border p-3 text-xs font-semibold text-muted-foreground">
+    <div className="overflow-hidden rounded-[var(--radius)] border border-border bg-card/90">
+      <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2.5 text-xs font-semibold text-muted-foreground">
         <span className="flex items-center gap-2"><Layers className="h-3.5 w-3.5" /> Árvore de campanhas</span>
         <span className="font-normal normal-case text-muted-foreground">{nodes.length} campanha{nodes.length === 1 ? '' : 's'}</span>
       </div>
-      <div className="max-h-[60vh] overflow-auto">
+      <div className="min-h-[360px] max-h-[calc(100vh-430px)] overflow-auto">
         <table className="w-full border-collapse text-left">
           <thead className="sticky top-0 z-10 bg-card">
             <tr className="border-b border-border text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
@@ -1015,7 +1025,6 @@ function DetailPanel({ node, allNodes, busy, onApply, onIgnore, onHuman, onJump 
   }, [node.rec_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const sev = SEV[node.severidade];
-  const cat = categoriaDoNode(node);
   const lowConf = !node.aplicavel || node.confianca === 'baixa';
   const emAnalise = node.status === 'em_analise_humana';
   const isAjuste = node.acao_estruturada?.tipo === 'AJUSTAR_ORCAMENTO';
@@ -1036,10 +1045,10 @@ function DetailPanel({ node, allNodes, busy, onApply, onIgnore, onHuman, onJump 
   }
 
   return (
-    <div className="sticky top-4 space-y-3 rounded-[var(--radius)] border border-border bg-card">
+    <div className="sticky top-3 max-h-[calc(100vh-96px)] overflow-auto rounded-[var(--radius)] border border-border bg-card/95">
       <div className="relative overflow-hidden rounded-t-[var(--radius)]">
         <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5" style={{ backgroundColor: node.severidade === 'urgente' ? '#f87171' : node.severidade === 'atencao' ? '#fbbf24' : '#34d399' }} />
-        <div className="flex items-center justify-between gap-3 border-b border-border p-4">
+        <div className="flex items-center justify-between gap-3 border-b border-border p-3">
           <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
             <span className="shrink-0 rounded border border-border bg-background px-1.5 py-0.5 font-bold uppercase tracking-wide">{NIVEL_LABEL[node.nivel]}</span>
             {node.objetivo && <span className="truncate">Objetivo: {node.objetivo}</span>}
@@ -1048,14 +1057,14 @@ function DetailPanel({ node, allNodes, busy, onApply, onIgnore, onHuman, onJump 
         </div>
       </div>
 
-      <div className="space-y-4 px-4 pb-4">
+      <div className="space-y-3 px-3 pb-3 pt-3">
         <div className="text-xs text-muted-foreground" title={[node.campanha_nome, node.nivel !== 'campaign' ? node.conjunto_nome : null, node.nivel === 'ad' ? node.objeto_nome : null].filter(Boolean).join(' › ')}>
           <span className="font-medium text-foreground">{node.campanha_nome}</span>
           {node.nivel !== 'campaign' && node.conjunto_nome && <> › {node.conjunto_nome}</>}
           {node.nivel === 'ad' && <> › <span className="font-medium text-foreground">{node.objeto_nome}</span></>}
         </div>
 
-        <p className="text-lg font-medium leading-snug text-foreground">{node.titulo}</p>
+        <p className="text-lg font-semibold leading-snug text-foreground">{node.titulo}</p>
 
         {semAcao ? (
           <p className="text-sm text-muted-foreground">Sem diagnóstico específico neste nó — os números estão dentro do esperado.</p>
@@ -1235,7 +1244,7 @@ export default function OtimizadorPage() {
     }
   }
 
-  useEffect(() => { void loadOverview(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void loadOverview(); }, []);
 
   async function loadTree(clientId: string) {
     if (!clientId) { setTreeNodes([]); setResumo(null); setGeneratedAt(null); return; }
@@ -1259,7 +1268,7 @@ export default function OtimizadorPage() {
     }
   }
 
-  useEffect(() => { void loadTree(contaFiltro); }, [contaFiltro]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void loadTree(contaFiltro); }, [contaFiltro]);
 
   const flatNodes = useMemo(() => flattenTree(treeNodes), [treeNodes]);
   const selectedNode = useMemo(() => flatNodes.find((n) => n.rec_id === selectedId) ?? null, [flatNodes, selectedId]);
@@ -1485,51 +1494,61 @@ export default function OtimizadorPage() {
   const temAnalise = !loading && !!contaFiltro && (treeNodes.length > 0 || !!resumo);
 
   return (
-    <div className="space-y-5 p-4 sm:p-6">
+    <div className="mx-auto flex w-full max-w-[1800px] flex-col gap-3 p-3 sm:p-4 xl:p-5">
       {configClientId && configClient && (
         <ConfigModal clientId={configClientId} clientName={configClient.name} onClose={() => setConfigClientId(null)} />
       )}
       <ConfirmToast toast={toast} onUndo={doUndo} onClose={() => setToast(null)} />
 
       {/* Header */}
-      <header className="space-y-1">
-        <div className="flex items-center gap-2 text-sm font-semibold text-primary">
-          <WandSparkles className="h-4 w-4" /> Otimizador de Campanhas
+      <header className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+        <div className="min-w-0 space-y-1">
+          <div className="flex items-center gap-2 text-sm font-semibold text-primary">
+            <WandSparkles className="h-4 w-4" /> Otimizador de Campanhas
+          </div>
+          <h1 className="text-2xl font-bold tracking-normal text-foreground sm:text-3xl">Otimizador de Campanhas</h1>
+          <p className="text-sm text-muted-foreground">Análises inteligentes e recomendações para melhorar seus resultados.</p>
         </div>
-        <h1 className="font-heading text-4xl text-foreground">Otimizador de Campanhas</h1>
-        <p className="text-sm text-muted-foreground">Análises inteligentes e recomendações para melhorar seus resultados.</p>
+        <div className="hidden items-center gap-2 text-xs text-muted-foreground xl:flex">
+          <CalendarClock className="h-4 w-4" />
+          <span>Análise automática diária + revisão manual quando precisar.</span>
+        </div>
       </header>
 
       {/* Cliente + Período + ação principal, tudo na mesma barra */}
-      <section className="flex flex-wrap items-end gap-3 rounded-[var(--radius)] border border-primary/30 bg-primary/5 p-4">
-        <div className="space-y-1.5">
-          <span className="text-xs font-semibold text-muted-foreground">Cliente</span>
-          <AccountSelector contas={contas} value={contaFiltro} onChange={setContaFiltro} />
+      <section className="rounded-[var(--radius)] border border-primary/25 bg-primary/5 p-3">
+        <div className="grid items-end gap-3 lg:grid-cols-[minmax(220px,300px)_180px_minmax(380px,1fr)]">
+          <div className="space-y-1.5">
+            <span className="text-xs font-semibold text-muted-foreground">Cliente</span>
+            <AccountSelector contas={contas} value={contaFiltro} onChange={setContaFiltro} />
+          </div>
+          <label className="space-y-1.5">
+            <span className="text-xs font-semibold text-muted-foreground">Período</span>
+            <select value={manualPeriod} onChange={(e) => setManualPeriod(e.target.value as OptimizerPeriodKey)} disabled={runLoading}
+              className="h-10 w-full rounded-[var(--radius)] border border-border bg-background px-3 text-sm text-foreground outline-none focus:border-primary">
+              {OPTIMIZER_PERIODS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
+            </select>
+          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button onClick={runAnalysisNow} disabled={runLoading || diagLoading || !contaFiltro} size="sm" className="h-10 px-2.5 text-xs">
+              {runLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+              {temAnalise ? 'Atualizar análise' : 'Fazer análise'}
+            </Button>
+            {isAdmin && (
+              <>
+                <Button variant="outline" size="sm" onClick={() => setConfigClientId(contaFiltro || null)} disabled={!contaFiltro} className="h-10 px-2.5 text-xs">
+                  <Settings2 className="h-4 w-4" /> Configurar
+                </Button>
+                <Button variant="outline" size="sm" onClick={runDiagnostic} disabled={runLoading || diagLoading || !contaFiltro} className="h-10 px-2.5 text-xs"
+                  title="Mostra de onde vêm os dados desta conta — sem gastar tokens de IA">
+                  {diagLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                  Diagnosticar
+                </Button>
+              </>
+            )}
+          </div>
         </div>
-        <label className="space-y-1.5">
-          <span className="text-xs font-semibold text-muted-foreground">Período</span>
-          <select value={manualPeriod} onChange={(e) => setManualPeriod(e.target.value as OptimizerPeriodKey)} disabled={runLoading}
-            className="h-10 rounded-[var(--radius)] border border-border bg-background px-3 text-sm text-foreground outline-none focus:border-primary">
-            {OPTIMIZER_PERIODS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
-          </select>
-        </label>
-        <Button onClick={runAnalysisNow} disabled={runLoading || diagLoading || !contaFiltro} className="h-10">
-          {runLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-          {temAnalise ? 'Atualizar análise' : 'Fazer análise'}
-        </Button>
-        {isAdmin && (
-          <>
-            <Button variant="outline" onClick={() => setConfigClientId(contaFiltro || null)} disabled={!contaFiltro} className="h-10">
-              <Settings2 className="h-4 w-4" /> Configurar
-            </Button>
-            <Button variant="outline" onClick={runDiagnostic} disabled={runLoading || diagLoading || !contaFiltro} className="h-10"
-              title="Mostra de onde vêm os dados desta conta — sem gastar tokens de IA">
-              {diagLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-              Diagnosticar
-            </Button>
-          </>
-        )}
-        {runMessage && <p className="w-full text-xs font-medium text-primary">{runMessage}</p>}
+        {runMessage && <p className="mt-3 text-xs font-medium text-primary">{runMessage}</p>}
           {diagResult && (
             <div className="mt-1 w-full space-y-2">
               <div className="flex items-center justify-between">
@@ -1594,28 +1613,28 @@ export default function OtimizadorPage() {
             </div>
           ) : (
             <>
-              {/* Cards de decisão rápida + painel de detalhe do item de maior prioridade lado a lado */}
-              <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
-                <QuickDecisionCards nodes={flatNodes} active={categoriaFiltro} onSelect={setCategoriaFiltro} />
+              <div className="grid items-start gap-3 xl:grid-cols-[minmax(0,1fr)_420px] 2xl:grid-cols-[minmax(0,1fr)_460px]">
+                <div className="min-w-0 space-y-3">
+                  <QuickDecisionCards nodes={flatNodes} active={categoriaFiltro} onSelect={setCategoriaFiltro} />
+                  <FilterChips nivel={nivelFiltro} onNivel={setNivelFiltro} apenasComAcao={apenasComAcao} onApenasComAcao={setApenasComAcao} />
+                  <CampaignTable
+                    nodes={treeNodes}
+                    selectedId={selectedId}
+                    onSelect={(n) => setSelectedId(n.rec_id)}
+                    filtroNivel={nivelFiltro}
+                    filtroCategoria={categoriaFiltro}
+                    apenasComAcao={apenasComAcao}
+                  />
+                </div>
                 {selectedNode ? (
                   <DetailPanel node={selectedNode} allNodes={flatNodes} busy={busy} onApply={doApply} onIgnore={doIgnore} onHuman={doHuman} onJump={jumpTo} />
                 ) : (
-                  <div className="flex h-48 flex-col items-center justify-center gap-2 rounded-[var(--radius)] border border-dashed border-border p-6 text-center">
+                  <div className="flex min-h-72 flex-col items-center justify-center gap-2 rounded-[var(--radius)] border border-dashed border-border bg-card/70 p-6 text-center">
                     <MousePointerClick className="h-6 w-6 text-muted-foreground" />
                     <p className="text-sm text-muted-foreground">Clique em uma campanha, conjunto ou criativo na árvore para ver o diagnóstico completo.</p>
                   </div>
                 )}
               </div>
-
-              <FilterChips nivel={nivelFiltro} onNivel={setNivelFiltro} apenasComAcao={apenasComAcao} onApenasComAcao={setApenasComAcao} />
-              <CampaignTable
-                nodes={treeNodes}
-                selectedId={selectedId}
-                onSelect={(n) => setSelectedId(n.rec_id)}
-                filtroNivel={nivelFiltro}
-                filtroCategoria={categoriaFiltro}
-                apenasComAcao={apenasComAcao}
-              />
               <InsightsFooter nodes={flatNodes} />
             </>
           )}
