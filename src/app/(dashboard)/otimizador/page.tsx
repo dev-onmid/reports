@@ -551,7 +551,7 @@ function AccountSelector({ contas, value, onChange }: {
           <span className="truncate text-sm font-medium text-foreground">{sel ? sel.cliente_nome : 'Selecionar cliente'}</span>
           {sel && (
             <span className="shrink-0 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">
-              {sel.tem_analise ? `${sel.pendencias} pendência${sel.pendencias === 1 ? '' : 's'}` : 'Sem análise'}
+              {!sel.tem_analise ? 'Sem análise' : sel.pendencias === 0 ? 'Tudo certo' : `${sel.pendencias} pendência${sel.pendencias === 1 ? '' : 's'}`}
             </span>
           )}
         </span>
@@ -581,7 +581,7 @@ function AccountSelector({ contas, value, onChange }: {
                 <span className={cn('h-2 w-2 shrink-0 rounded-full', c.tem_analise ? SEV[c.pior_severidade].dot : 'bg-muted-foreground/60')} />
                 <span className="truncate text-sm text-foreground">{c.cliente_nome}</span>
                 <span className="ml-auto shrink-0 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                  {c.tem_analise ? c.pendencias : 'novo'}
+                  {!c.tem_analise ? 'novo' : c.pendencias === 0 ? 'ok' : c.pendencias}
                 </span>
               </button>
             ))}
@@ -1598,6 +1598,7 @@ export default function OtimizadorPage() {
       return a.cliente_nome.localeCompare(b.cliente_nome, 'pt-BR');
     });
   }, [clients, contas]);
+  const contaAtual = accountOptions.find((a) => a.cliente_id === contaFiltro) ?? null;
 
   // Seleciona automaticamente o item de maior prioridade ao carregar uma nova árvore — o painel
   // de detalhe nunca fica vazio à toa quando já existe algo urgente pra decidir.
@@ -1833,6 +1834,35 @@ export default function OtimizadorPage() {
     }
   }
 
+  // Revisão em lote: gestor bateu o olho na conta inteira e não achou nada que precise de
+  // ação — marca todas as pendências como revisadas de uma vez (dot volta a "tudo certo" até
+  // a próxima análise semanal gerar pendências novas).
+  async function reviewAllPending() {
+    if (!contaFiltro) return;
+    const conta = accountOptions.find((a) => a.cliente_id === contaFiltro);
+    if (!conta || conta.pendencias === 0) return;
+    if (!window.confirm(`Marcar as ${conta.pendencias} pendência${conta.pendencias === 1 ? '' : 's'} de ${conta.cliente_nome} como revisadas? Elas só voltam a aparecer na próxima análise semanal.`)) return;
+    setRunLoading(true);
+    setRunMessage(null);
+    try {
+      const res = await fetch('/api/otimizador/revisar-tudo', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...callerHeaders() },
+        body: JSON.stringify({ cliente_id: contaFiltro, ...autor }),
+      });
+      const data = await res.json().catch(() => ({})) as { ok?: boolean; revisados?: number; error?: string };
+      if (!res.ok || !data.ok) {
+        setRunMessage(`Erro ao marcar como revisado: ${data.error ?? res.statusText}`);
+        return;
+      }
+      setRunMessage(`${data.revisados ?? 0} pendência(s) marcada(s) como revisada(s).`);
+      await Promise.all([loadOverview(), loadTree(contaFiltro)]);
+    } catch (err) {
+      setRunMessage(`Erro de rede ao marcar como revisado: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setRunLoading(false);
+    }
+  }
+
   async function runDiagnostic() {
     if (!contaFiltro) return;
     setDiagLoading(true);
@@ -1902,6 +1932,13 @@ export default function OtimizadorPage() {
               {runLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
               {temAnalise ? 'Atualizar análise' : 'Fazer análise'}
             </Button>
+            {contaAtual && contaAtual.pendencias > 0 && (
+              <Button variant="outline" size="sm" onClick={reviewAllPending} disabled={runLoading || diagLoading} className="h-10 px-2.5 text-xs"
+                title="Marca todas as pendências desta conta como revisadas — voltam só na próxima análise semanal">
+                {runLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                Marcar tudo como revisado
+              </Button>
+            )}
             {isAdmin && (
               <>
                 <Button variant="outline" size="sm" onClick={() => setConfigClientId(contaFiltro || null)} disabled={!contaFiltro} className="h-10 px-2.5 text-xs">

@@ -107,16 +107,19 @@ export async function GET(req: NextRequest) {
       .filter((r) => r.status !== 'ignorado' && r.status !== 'aplicado')
       .sort((a, b) => SEV_RANK[a.rec.severidade] - SEV_RANK[b.rec.severidade]);
 
-    // Resumo por conta para o seletor: pior severidade pendente + contagem.
+    // Resumo por conta para o seletor: pior severidade pendente + contagem. Semeado por TODA
+    // conta com análise recente (não só quem tem pendência) — sem isto, um cliente 100%
+    // revisado (0 pendências) some do mapa e a UI o confunde com "novo" (nunca analisado).
+    // pior_severidade 'ok' aqui significa literalmente "tudo certo, nada pendente".
     const contasMap = new Map<string, { cliente_id: string; cliente_nome: string; pior_severidade: OptimizerRecomendacaoSeveridade; pendencias: number }>();
+    for (const log of logs) {
+      contasMap.set(log.cliente_id, { cliente_id: log.cliente_id, cliente_nome: log.cliente_nome ?? log.cliente_id, pior_severidade: 'ok', pendencias: 0 });
+    }
     for (const { rec } of visible) {
       const cur = contasMap.get(rec.cliente_id);
-      if (!cur) {
-        contasMap.set(rec.cliente_id, { cliente_id: rec.cliente_id, cliente_nome: rec.cliente_nome, pior_severidade: rec.severidade, pendencias: 1 });
-      } else {
-        cur.pendencias += 1;
-        if (SEV_RANK[rec.severidade] < SEV_RANK[cur.pior_severidade]) cur.pior_severidade = rec.severidade;
-      }
+      if (!cur) continue;
+      cur.pendencias += 1;
+      if (SEV_RANK[rec.severidade] < SEV_RANK[cur.pior_severidade]) cur.pior_severidade = rec.severidade;
     }
     const contas = Array.from(contasMap.values()).sort(
       (a, b) => SEV_RANK[a.pior_severidade] - SEV_RANK[b.pior_severidade] || a.cliente_nome.localeCompare(b.cliente_nome),
