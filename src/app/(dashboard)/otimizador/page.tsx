@@ -20,7 +20,6 @@ import {
   Image as ImageIcon,
   Layers,
   Loader2,
-  MessageSquarePlus,
   MinusCircle,
   MousePointerClick,
   PauseCircle,
@@ -88,18 +87,6 @@ type ArvoreResumo = {
   conjuntos: number;
   criativos: number;
   diagnosticos: number;
-};
-
-type ManualNote = {
-  id: string;
-  cliente_id: string;
-  nivel: string;
-  objeto_id: string | null;
-  objeto_nome: string | null;
-  autor_id: string | null;
-  autor_nome: string | null;
-  texto: string;
-  created_at: string;
 };
 
 type ClientDiagnostic = {
@@ -725,30 +712,25 @@ function QuickDecisionCards({ nodes, active, onSelect }: {
           const meta = CATEGORIA_META[cat];
           const Icon = meta.icon;
           const isActive = active === cat;
+          const descricao = cat === 'pausar' ? 'Impacto alto de desperdício'
+            : cat === 'revisar' ? 'Precisam de ajustes'
+              : cat === 'manter' ? 'Performando bem'
+                : 'Oportunidades de crescimento';
           return (
             <button
               key={cat}
               onClick={() => onSelect(isActive ? null : cat)}
+              title={descricao}
               className={cn(
-                'group flex min-h-24 items-center justify-between gap-3 overflow-hidden rounded-[var(--radius)] border p-3 text-left transition-colors',
-                isActive ? meta.tone : 'border-border bg-card/90 hover:border-primary/30',
+                'group flex items-center gap-2 rounded-[var(--radius)] border px-3 py-2 text-left transition-all',
+                meta.tone,
+                isActive ? 'ring-1 ring-current' : 'opacity-75 hover:opacity-100',
               )}
             >
+              <Icon className="h-4 w-4 shrink-0" />
               <span className="min-w-0">
-                <span className="block text-3xl font-bold leading-none text-foreground">{counts[cat]}</span>
-                <span className="mt-1 block text-sm font-semibold text-foreground">{meta.label}</span>
-                <span className="mt-1 block truncate text-[11px] text-muted-foreground">
-                  {cat === 'pausar' ? 'Impacto alto de desperdício'
-                    : cat === 'revisar' ? 'Precisam de ajustes'
-                      : cat === 'manter' ? 'Performando bem'
-                        : 'Oportunidades de crescimento'}
-                </span>
-              </span>
-              <span className={cn(
-                'flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius)] border',
-                isActive ? 'border-current bg-background/50' : 'border-border bg-background text-muted-foreground group-hover:text-primary',
-              )}>
-                <Icon className="h-5 w-5" />
+                <span className="block text-lg font-bold leading-none">{counts[cat]}</span>
+                <span className="block truncate text-[11px] font-medium leading-tight">{meta.label}</span>
               </span>
             </button>
           );
@@ -1090,97 +1072,6 @@ function CampaignTable({ nodes, selectedId, onSelect, onQuickPause, filtroNivel,
 }
 
 // ---------------------------------------------------------------------------
-// Observação manual
-// ---------------------------------------------------------------------------
-function ManualNotesBox({ clienteId, nivel, objetoId, objetoNome }: {
-  clienteId: string;
-  nivel: string;
-  objetoId: string | null;
-  objetoNome: string | null;
-}) {
-  const [notes, setNotes] = useState<ManualNote[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [text, setText] = useState('');
-  const [saving, setSaving] = useState(false);
-  const session = getAuthSession();
-
-  async function load() {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/otimizador/notes?clientId=${encodeURIComponent(clienteId)}`);
-      if (res.ok) {
-        const data = await res.json() as { notes: ManualNote[] };
-        setNotes(data.notes.filter((n) => n.nivel === nivel && (n.objeto_id ?? null) === objetoId));
-      }
-    } finally { setLoading(false); }
-  }
-
-  useEffect(() => { void load(); }, [clienteId, nivel, objetoId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  async function save() {
-    const t = text.trim();
-    if (!t) return;
-    setSaving(true);
-    try {
-      await fetch('/api/otimizador/notes', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          cliente_id: clienteId, nivel, objeto_id: objetoId, objeto_nome: objetoNome,
-          texto: t, autor_id: session?.userId, autor_nome: session?.name,
-        }),
-      });
-      setText('');
-      await load();
-    } finally { setSaving(false); }
-  }
-
-  async function remove(id: string) {
-    setNotes((prev) => prev.filter((n) => n.id !== id));
-    await fetch(`/api/otimizador/notes?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
-  }
-
-  return (
-    <div className="space-y-2 rounded-[var(--radius)] border border-border bg-background p-3">
-      <p className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
-        <MessageSquarePlus className="h-3.5 w-3.5" /> Observação manual
-      </p>
-      {loading ? (
-        <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-      ) : notes.length === 0 ? (
-        <p className="text-xs text-muted-foreground">Nenhuma observação registrada. Sabe algo que a IA não sabe? Registre aqui.</p>
-      ) : (
-        <ul className="space-y-1.5">
-          {notes.map((n) => (
-            <li key={n.id} className="flex items-start gap-2 rounded border border-border/60 bg-card p-2 text-xs">
-              <span className="flex-1 text-foreground">{n.texto}</span>
-              <span className="shrink-0 text-[10px] text-muted-foreground">
-                {n.autor_nome ?? 'Alguém'} · {new Date(n.created_at).toLocaleDateString('pt-BR')}
-              </span>
-              <button onClick={() => remove(n.id)} className="shrink-0 text-muted-foreground hover:text-red-400"><X className="h-3 w-3" /></button>
-            </li>
-          ))}
-        </ul>
-      )}
-      <div className="relative">
-        <textarea
-          rows={2}
-          maxLength={500}
-          placeholder='ex: "Cliente pediu para manter essa campanha ativa"'
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          className="w-full resize-none rounded border border-border bg-card px-2 py-1.5 pr-9 text-xs text-foreground outline-none focus:border-primary"
-        />
-        <DictateButton className="absolute bottom-1.5 right-1.5 h-6 w-6" onTranscript={(t) => setText((prev) => (prev ? `${prev} ${t}` : t))} />
-      </div>
-      <Button type="button" size="sm" variant="outline" onClick={save} disabled={saving || !text.trim()}>
-        {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
-        Adicionar observação
-      </Button>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Painel lateral de detalhe
 // ---------------------------------------------------------------------------
 function DetailPanel({ node, allNodes, busy, onApply, onApplyChildren, onIgnore, onHuman, onJump }: {
@@ -1493,8 +1384,6 @@ function DetailPanel({ node, allNodes, busy, onApply, onApplyChildren, onIgnore,
             </div>
           )}
         </div>
-
-        <ManualNotesBox clienteId={node.cliente_id} nivel={node.nivel} objetoId={node.objeto_id} objetoNome={node.objeto_nome} />
       </div>
     </div>
   );
