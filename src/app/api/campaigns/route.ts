@@ -3,6 +3,7 @@ import { google } from 'googleapis';
 import { makeServerPool } from '@/lib/server-db';
 import { resolveMetaPeriod, resolveGaqlPeriod, applyMetaDateToUrl } from '@/lib/period-utils';
 import { getFreshMetaToken } from '@/lib/meta-token';
+import { countMetaResults } from '@/lib/meta-results';
 
 type SortKey = 'spend' | 'leads' | 'impressions' | 'clicks' | 'cpl' | 'ctr';
 
@@ -137,20 +138,6 @@ function accountMatches(a: string, b: string) {
   return normalizeMetaAccountId(a) === normalizeMetaAccountId(b);
 }
 
-const META_RESULT_ACTIONS = [
-  'lead',
-  'onsite_conversion.lead_grouped',
-  'offsite_conversion.fb_pixel_lead',
-  'offsite_conversion.lead',
-  'onsite_conversion.lead',
-  'onsite_web_lead',
-  'onsite_web_app_lead',
-  'onsite_conversion.messaging_conversation_started_7d',
-  'onsite_conversion.total_messaging_connection',
-  'messaging_conversation_started_7d',
-  'total_messaging_connection',
-  'onsite_conversion.messaging_first_reply',
-];
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function safeRows(pool: ReturnType<typeof makeServerPool>, query: string, params: unknown[] = []): Promise<any[]> {
@@ -299,9 +286,10 @@ export async function GET(request: NextRequest) {
             if (spend <= 0) continue;
             const impressions = parseInt(row.impressions || '0', 10);
             const clicks = parseInt(row.clicks || '0', 10);
-            const leads = ((row.actions ?? []) as { action_type: string; value: string }[])
-              .filter(a => META_RESULT_ACTIONS.includes(a.action_type))
-              .reduce((sum, a) => sum + parseInt(a.value || '0', 10), 0);
+            // Resultados canônicos: conta 1 por família (ver countMetaResults). Antes somava
+            // uma lista inteira de action_types, o que triplicava conversas de WhatsApp (a mesma
+            // conversa vinha em 3 action_types) e dobrava leads de formulário.
+            const leads = countMetaResults((row.actions ?? []) as { action_type: string; value: string }[]);
             campaigns.push({
               id: row.campaign_id,
               name: row.campaign_name ?? `Campanha ${row.campaign_id}`,

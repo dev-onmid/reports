@@ -1,0 +1,16 @@
+name: Evolution Instance Alert
+
+on:
+  schedule:
+    # 07h BRT (10h UTC) e 14h BRT (17h UTC) — dias úteis
+    - cron: '0 10 * * 1-5'
+    - cron: '0 17 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  alert:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Evolution instances
+        run: |
+          curl -s -f "${{ secrets.EVOLUTION_ALERT_URL }}" | jq .

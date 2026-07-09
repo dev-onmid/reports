@@ -19,6 +19,7 @@ import {
   payloadNumericSnapshot,
   sanitizeOptimizerDiagnosis,
   sanitizeOptimizerOutputV2,
+  ensureOptimizerRecStatusTable,
   currentWeekLabel,
   type OptimizerAnalysisResult,
   type OptimizerAnalysisResultV2,
@@ -36,6 +37,7 @@ type AnalyzeBody = {
   payload?: OptimizerPayload;
   payload_v2?: OptimizerPayloadV2;
   connection_id?: string;
+  account_id?: string;
   force_ai?: boolean;
 };
 
@@ -125,6 +127,7 @@ type QueueRow = {
   modo_operacao: string | null;
   estado_da_conta: string | null;
   resumo_executivo: string | null;
+  erro: string | null;
   created_at: string;
 };
 
@@ -199,6 +202,7 @@ async function ensureTables(pool: ReturnType<typeof makeServerPool>) {
       ADD COLUMN IF NOT EXISTS acoes_automaticas_count INTEGER DEFAULT 0,
       ADD COLUMN IF NOT EXISTS acoes_executadas_count INTEGER DEFAULT 0
   `).catch(() => {});
+  await ensureOptimizerRecStatusTable(pool);
 }
 
 function hashPayload(payload: OptimizerPayload): string {
@@ -293,7 +297,7 @@ export async function GET(req: NextRequest) {
           id, cliente_id, cliente_nome, conjunto_id, campanha_nome, conta_plataforma,
           periodo_label, periodo_dias, origem, nivel_critico, gasto_total, conversoes,
           cpl_cpa_atual, ctr_link, resultado,
-          semana_analise, modo_operacao, estado_da_conta, resumo_executivo,
+          semana_analise, modo_operacao, estado_da_conta, resumo_executivo, erro,
           created_at
          FROM public.optimizer_ai_logs
         WHERE ${filters.join(' AND ')}
@@ -324,6 +328,7 @@ export async function GET(req: NextRequest) {
         modo_operacao: row.modo_operacao ?? null,
         estado_da_conta: row.estado_da_conta ?? null,
         resumo_executivo: row.resumo_executivo ?? null,
+        erro: row.erro ?? null,
         created_at: row.created_at,
       }))
       .sort((a, b) => {
@@ -527,6 +532,8 @@ async function saveLogV2(params: {
   payload: OptimizerPayloadV2;
   result: OptimizerAnalysisResultV2;
   payloadHash: string;
+  connectionId?: string;
+  accountId?: string;
   error?: string;
 }) {
   const pool = makeServerPool();
@@ -539,8 +546,8 @@ async function saveLogV2(params: {
          gasto_total, conversoes, cpl_cpa_atual, ctr_link,
          payload_hash, resultado, prompt_version, modelo_usado, tokens_usados, custo_estimado_usd, erro,
          semana_analise, modo_operacao, estado_da_conta, resumo_executivo,
-         acoes_automaticas_count, acoes_executadas_count)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)`,
+         acoes_automaticas_count, acoes_executadas_count, connection_id, account_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)`,
       [
         params.payload.cliente_id,
         params.payload.cliente_id, // conjunto_id = client (análise da conta inteira)
@@ -569,6 +576,8 @@ async function saveLogV2(params: {
         params.result.resumo_executivo,
         params.result.acoes_automaticas.length,
         params.result.acoes_automaticas.filter((a) => a.status_execucao === 'EXECUTAR_AGORA').length,
+        params.connectionId ?? null,
+        params.accountId ?? null,
       ],
     );
   } catch (err) {
@@ -643,11 +652,15 @@ async function handleV2(body: AnalyzeBody, origin: string): Promise<Response> {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
     body: JSON.stringify({
-      // 8192: a árvore analise_campanhas (campanha→conjunto→anúncio, todos classificados)
-      // + cruzamento + recomendações + ações é grande; abaixo disso o JSON trunca em contas
-      // com muitos conjuntos → parse falha → zera a tela. Vereditos curtos seguram o tamanho.
+      // 16000: a árvore analise_campanhas (campanha→conjunto→anúncio, todos classificados)
+      // + cruzamento + recomendações + ações é grande; em contas com muitos anúncios (30+),
+      // 8192 truncava a resposta a meio do JSON → parse falhava → todo nó caía no fallback
+      // (classificacao=ATENCAO, acao='') → a fila filtra nó sem acao → parecia "tudo certo"
+      // quando na verdade a IA nunca terminou de responder. Ver detecção de truncamento abaixo.
+      // 32000: com 16k a resposta ainda truncava em contas grandes (ex: 54 nós → cobria 33 e
+      // o banner avisava "resposta incompleta"). Haiku 4.5 suporta até 64k de saída.
       model: OPTIMIZER_MODEL_V2,
-      max_tokens: 8192,
+      max_tokens: 32000,
       system: buildOptimizerSystemPromptV2(),
       messages: [{ role: 'user', content: JSON.stringify(payload) }],
     }),
@@ -669,7 +682,30 @@ async function handleV2(body: AnalyzeBody, origin: string): Promise<Response> {
   const cost = calcCostUsd(OPTIMIZER_MODEL_V2, inputTokens, outputTokens);
 
   let parsed: unknown;
-  try { parsed = extractJsonObject(text); } catch { parsed = {}; }
+  let parseError: string | undefined;
+  try {
+    parsed = extractJsonObject(text);
+  } catch (err) {
+    parsed = {};
+    // Antes este erro era engolido em silêncio: parsed virava {}, todo nó caía no fallback
+    // (acao='') e a fila filtrava tudo por "sem ação" — indistinguível de "conta saudável".
+    parseError = `Falha ao interpretar JSON da IA: ${err instanceof Error ? err.message : String(err)}`;
+  }
+
+  // Detecção de truncamento: se a IA não terminou de escrever o JSON (estourou max_tokens no
+  // meio da árvore), o parse pode até funcionar parcialmente mas devolver menos nós do que o
+  // payload enviou. Compara a contagem real para nunca deixar isso passar como "tudo certo".
+  const countTreeNodes = (arr: Array<{ conjuntos?: Array<{ anuncios?: unknown[] }> }>): number =>
+    arr.reduce((s, c) => s + 1 + (c.conjuntos ?? []).reduce((s2, cj) => s2 + 1 + (cj.anuncios ?? []).length, 0), 0);
+  const totalPayloadNodes = countTreeNodes(payload.campanhas ?? []);
+  const parsedCampanhas = Array.isArray((parsed as Record<string, unknown>)?.analise_campanhas)
+    ? (parsed as { analise_campanhas: Array<{ conjuntos?: Array<{ anuncios?: unknown[] }> }> }).analise_campanhas
+    : [];
+  const totalParsedNodes = countTreeNodes(parsedCampanhas);
+  const truncamentoDetectado = !parseError && totalPayloadNodes > 0 && totalParsedNodes < totalPayloadNodes;
+  const analiseError = parseError ?? (truncamentoDetectado
+    ? `Resposta da IA incompleta: cobriu ${totalParsedNodes} de ${totalPayloadNodes} objetos da árvore (possível truncamento por limite de tokens).`
+    : undefined);
 
   const output = sanitizeOptimizerOutputV2(parsed, payload);
   const result: OptimizerAnalysisResultV2 = {
@@ -686,7 +722,7 @@ async function handleV2(body: AnalyzeBody, origin: string): Promise<Response> {
   };
 
   void logAiUsage({ source: 'otimizador-v2', model: OPTIMIZER_MODEL_V2, inputTokens, outputTokens });
-  await saveLogV2({ payload, result, payloadHash });
+  await saveLogV2({ payload, result, payloadHash, connectionId, accountId: body.account_id, error: analiseError });
 
   // Executa ações automáticas (fire-and-forget)
   if (payload.modo_operacao === 'AUTOMATICO_PARCIAL' || payload.modo_operacao === 'AUTOMATICO_TOTAL') {

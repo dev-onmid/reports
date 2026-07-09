@@ -1,17 +1,20 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { getFreshMetaToken } from '@/lib/meta-token';
+import { countMetaResults } from '@/lib/meta-results';
 import {
   OPTIMIZER_PERIODS,
   currentWeekLabel,
   segmentToOptimizerNiche,
   ensureOptimizerClientConfigTable,
+  ensureOptimizerManualNotesTable,
   type OptimizerPayloadV2,
   type OptimizerCampaignV2,
   type OptimizerObjective,
   type OptimizerModo,
   type OptimizerPeriodKey,
 } from '@/lib/optimizer';
+import { optimizerDateRangeForDays } from '@/lib/optimizer-period-range';
 
 // 300s (mesmo teto do reports/run-once) — a análise manual síncrona soma busca de campanhas
 // (até 24s com fallback 30d) + conjuntos/anúncios (15s) + IA (até 90s); em 60s dava HTTP 504.
@@ -27,12 +30,6 @@ type AnalysisPeriod = {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function isoDate(daysAgo: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() - daysAgo);
-  return d.toISOString().split('T')[0];
-}
-
 function todayDow(): number {
   // JS: 0=Sun,1=Mon,...,6=Sat → convert to 1=Mon,...,5=Fri
   const dow = new Date().getDay();
@@ -43,12 +40,6 @@ function analysisPeriodFromRequest(request: NextRequest): AnalysisPeriod {
   const requested = request.nextUrl.searchParams.get('period');
   return OPTIMIZER_PERIODS.find((period) => period.key === requested)
     ?? OPTIMIZER_PERIODS.find((period) => period.key === 'last_7d')!;
-}
-
-function sumActions(actions: Array<{ action_type: string; value: string }>, types: string[]): number {
-  return actions
-    .filter((a) => types.includes(a.action_type))
-    .reduce((sum, a) => sum + Number(a.value), 0);
 }
 
 // fetch com timeout — impede que um request travado da Meta/interno derrube a rota inteira (504 vazio)
@@ -64,12 +55,14 @@ async function fetchWithTimeout(url: string, ms: number, init?: RequestInit): Pr
   }
 }
 
-const LEAD_ACTIONS = [
-  'lead', 'onsite_conversion.lead_grouped', 'offsite_conversion.fb_pixel_lead',
-  'offsite_conversion.lead', 'onsite_conversion.lead', 'onsite_web_lead',
-  'onsite_conversion.messaging_conversation_started_7d', 'onsite_conversion.total_messaging_connection',
-  'messaging_conversation_started_7d', 'total_messaging_connection',
-];
+// Extrai o número do primeiro item de um campo "*_watched_actions" da Meta Insights API
+// (formato [{action_type: "video_view", value: "8500"}]). Ausente/vazio = não é vídeo.
+function firstActionValue(arr: unknown): number | null {
+  if (!Array.isArray(arr) || arr.length === 0) return null;
+  const v = Number((arr[0] as { value?: string } | undefined)?.value ?? NaN);
+  return Number.isFinite(v) ? v : null;
+}
+
 
 // ─── Token resolver ───────────────────────────────────────────────────────────
 
@@ -350,6 +343,34 @@ async function loadDecisionHistory(clientId: string): Promise<OptimizerPayloadV2
   }
 }
 
+// Observações manuais registradas pelo gestor (tela do Otimizador) nos últimos 45 dias — fecha
+// o ciclo humano→IA: se o gestor já disse "cliente pediu manter ativo", a próxima análise não
+// pode voltar a sugerir pausar o mesmo objeto sem saber disso.
+async function loadManualNotesContext(clientId: string): Promise<string | null> {
+  const pool = makeServerPool();
+  try {
+    await ensureOptimizerManualNotesTable(pool);
+    const { rows } = await pool.query<{ nivel: string; objeto_nome: string | null; texto: string; autor_nome: string | null; created_at: string }>(
+      `SELECT nivel, objeto_nome, texto, autor_nome, created_at
+         FROM public.optimizer_manual_notes
+        WHERE cliente_id = $1 AND ativo = true
+          AND created_at >= NOW() - INTERVAL '45 days'
+        ORDER BY created_at DESC
+        LIMIT 20`,
+      [clientId],
+    ).catch(() => ({ rows: [] as { nivel: string; objeto_nome: string | null; texto: string; autor_nome: string | null; created_at: string }[] }));
+    if (rows.length === 0) return null;
+    const linhas = rows.map((r) => {
+      const alvo = r.objeto_nome ? ` em "${r.objeto_nome}"` : '';
+      const quando = new Date(r.created_at).toLocaleDateString('pt-BR');
+      return `- [${r.nivel}${alvo}, ${quando}${r.autor_nome ? `, ${r.autor_nome}` : ''}]: ${r.texto}`;
+    });
+    return `OBSERVAÇÕES MANUAIS do gestor humano (considere antes de repetir uma sugestão já tratada):\n${linhas.join('\n')}`;
+  } finally {
+    await pool.end().catch(() => {});
+  }
+}
+
 // Busca campanhas via API interna (mesma que alimenta o dashboard)
 async function fetchCampaignsForClient(clientId: string, origin: string, periodKey: OptimizerPeriodKey, dateFrom: string, dateTo: string) {
   const url = new URL('/api/campaigns', origin);
@@ -396,7 +417,7 @@ async function fetchConjuntosForCampaign(
   const conjuntos = await Promise.all(activeAdsets.map(async (raw): Promise<OptimizerCampaignV2['conjuntos'][number]> => {
     const insights = (raw.insights as { data?: Record<string, unknown>[] } | undefined)?.data?.[0] ?? {};
     const actions = (insights.actions as Array<{ action_type: string; value: string }>) ?? [];
-    const conversoes = sumActions(actions, LEAD_ACTIONS);
+    const conversoes = countMetaResults(actions);
     const gasto = Number(insights.spend ?? 0);
     const impressoes = Number(insights.impressions ?? 0);
     const cliques = Number(insights.clicks ?? 0);
@@ -407,20 +428,51 @@ async function fetchConjuntosForCampaign(
     // Anúncios com rankings (best-effort, só se houver tempo)
     let anuncios: OptimizerCampaignV2['conjuntos'][number]['anuncios'] = [];
     if (Date.now() < deadline) {
+      const baseAdsFields = `id,name,effective_status,quality_ranking,engagement_rate_ranking,conversion_rate_ranking`;
+      const insightsBase = `spend,impressions,clicks,actions,ctr`;
+      const insightsComVideo = `${insightsBase},video_3_sec_watched_actions,video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions`;
+
       const adsUrl = new URL(`https://graph.facebook.com/v21.0/${String(raw.id)}/ads`);
-      adsUrl.searchParams.set('fields', `id,name,effective_status,quality_ranking,engagement_rate_ranking,conversion_rate_ranking,insights.time_range(${JSON.stringify({ since: dateFrom, until: dateTo })}){spend,impressions,clicks,actions,ctr}`);
+      adsUrl.searchParams.set('fields', `${baseAdsFields},insights.time_range(${JSON.stringify({ since: dateFrom, until: dateTo })}){${insightsComVideo}}`);
       adsUrl.searchParams.set('limit', '8');
       adsUrl.searchParams.set('access_token', token);
-      const adsRes = await fetchWithTimeout(adsUrl.toString(), 8_000);
+      let adsRes = await fetchWithTimeout(adsUrl.toString(), 8_000);
+
+      // Se os campos de retenção de vídeo derrubarem o request inteiro (conta/versão da API
+      // que não aceita), os criativos NÃO PODEM sumir da árvore por causa disso — refaz sem
+      // os campos de vídeo antes de desistir. Sem este fallback, um 400 aqui zera "Criativos"
+      // e some com a árvore inteira (visto em produção com o payload de vídeo).
+      if (!adsRes?.ok) {
+        const errBody = await adsRes?.text().catch(() => '');
+        console.error('[otimizador/weekly] /ads falhou com campos de video, tentando fallback', raw.id, adsRes?.status, errBody?.slice(0, 300));
+        const fallbackUrl = new URL(`https://graph.facebook.com/v21.0/${String(raw.id)}/ads`);
+        fallbackUrl.searchParams.set('fields', `${baseAdsFields},insights.time_range(${JSON.stringify({ since: dateFrom, until: dateTo })}){${insightsBase}}`);
+        fallbackUrl.searchParams.set('limit', '8');
+        fallbackUrl.searchParams.set('access_token', token);
+        adsRes = await fetchWithTimeout(fallbackUrl.toString(), 8_000);
+      }
+
       if (adsRes?.ok) {
         const adsData = await adsRes.json() as { data?: Record<string, unknown>[] };
         anuncios = (adsData.data ?? []).map((ad) => {
           const ai = (ad.insights as { data?: Record<string, unknown>[] } | undefined)?.data?.[0] ?? {};
           const adActions = (ai.actions as Array<{ action_type: string; value: string }>) ?? [];
-          const adConv = sumActions(adActions, LEAD_ACTIONS);
+          const adConv = countMetaResults(adActions);
           const adGasto = Number(ai.spend ?? 0);
           const adImp = Number(ai.impressions ?? 0);
           const adClicks = Number(ai.clicks ?? 0);
+
+          // Retenção de vídeo (Meta Insights API — video_3_sec/p25/p50/p75_watched_actions).
+          // Só existem em criativos de vídeo; imagem/carrossel não traz esses campos (arrays
+          // vazios ou ausentes). Taxas normalizadas por impressões, decrescentes por construção
+          // (quem assiste p75 já passou por p50, p25 e pelos 3s iniciais).
+          const hook3s = firstActionValue(ai.video_3_sec_watched_actions);
+          const p25 = firstActionValue(ai.video_p25_watched_actions);
+          const p50 = firstActionValue(ai.video_p50_watched_actions);
+          const p75 = firstActionValue(ai.video_p75_watched_actions);
+          const ehVideo = hook3s != null;
+          const videoRate = (n: number | null) => (ehVideo && adImp > 0 && n != null) ? Number(((n / adImp) * 100).toFixed(1)) : null;
+
           return {
             id: String(ad.id),
             nome: String(ad.name ?? ''),
@@ -434,6 +486,11 @@ async function fetchConjuntosForCampaign(
             quality_ranking: ad.quality_ranking ? String(ad.quality_ranking) : null,
             engagement_ranking: ad.engagement_rate_ranking ? String(ad.engagement_rate_ranking) : null,
             conversion_ranking: ad.conversion_rate_ranking ? String(ad.conversion_rate_ranking) : null,
+            eh_video: ehVideo,
+            video_hook_rate: videoRate(hook3s),
+            video_p25_rate: videoRate(p25),
+            video_p50_rate: videoRate(p50),
+            video_p75_rate: videoRate(p75),
           };
         });
       }
@@ -478,8 +535,7 @@ async function buildPayloadForClient(
   // Tenta o período solicitado; se gasto = 0, expande para 30 dias
   const FALLBACK_DAYS = 30;
   let usedPeriod = period;
-  let dateFrom = isoDate(period.days);
-  let dateTo = isoDate(1);
+  let { dateFrom, dateTo } = optimizerDateRangeForDays(period.days);
 
   let rawCampaigns = await fetchCampaignsForClient(client.id, origin, period.key, dateFrom, dateTo);
   let activeCampaigns = rawCampaigns.filter((c) => {
@@ -491,7 +547,7 @@ async function buildPayloadForClient(
   // `/api/campaigns` já descarta campanhas com gasto = 0, então "sem gasto no período" chega
   // aqui como lista VAZIA — por isso o gatilho é length === 0 (antes era código morto).
   if (activeCampaigns.length === 0 && period.days < FALLBACK_DAYS) {
-    dateFrom = isoDate(FALLBACK_DAYS);
+    ({ dateFrom, dateTo } = optimizerDateRangeForDays(FALLBACK_DAYS));
     usedPeriod = { key: 'last_30d', label: 'Últimos 30 dias', days: FALLBACK_DAYS };
     rawCampaigns = await fetchCampaignsForClient(client.id, origin, 'last_30d', dateFrom, dateTo);
     activeCampaigns = rawCampaigns.filter((c) => {
@@ -535,12 +591,14 @@ async function buildPayloadForClient(
   void accountId; // reservado para opportunity score futuro
 
   const historico = await loadDecisionHistory(client.id);
+  const notasManuais = await loadManualNotesContext(client.id);
 
   const totalGasto = campanhas.reduce((sum, c) => sum + c.gasto, 0);
   const semMetaConfigurada = !planning?.objetivo && !planning?.cpl_maximo && !planning?.orcamento_diario;
 
   // Injeta contexto quando os dados são escassos para orientar a IA
   const observacoes: string[] = [];
+  if (notasManuais) observacoes.push(notasManuais);
   if (totalGasto === 0) {
     observacoes.push(`ALERTA: A conta possui ${campanhas.length} campanha(s) ativas mas registrou R$ 0,00 em gasto no período de ${period.label}. Diagnostique o motivo da não-entrega (pagamento, aprovação, orçamento esgotado, erro de configuração) e oriente o gestor de forma direta sobre o que verificar agora no Gerenciador de Anúncios.`);
   }
@@ -646,10 +704,12 @@ async function executeWeekly({ origin, forceClientId, forceAi, period }: RunOpti
         return;
       }
 
-      const analyzeRes = await fetchWithTimeout(new URL('/api/otimizador/analisar', origin).toString(), 90_000, {
+      // 115s: com max_tokens 32k a IA pode passar de 90s em contas grandes; a rota analisar
+      // tem maxDuration=120 — esperar menos que isso gera "timeout" falso com análise salva.
+      const analyzeRes = await fetchWithTimeout(new URL('/api/otimizador/analisar', origin).toString(), 115_000, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ payload_v2: payload, connection_id: conn.id, force_ai: forceAi }),
+        body: JSON.stringify({ payload_v2: payload, connection_id: conn.id, account_id: conn.account_id, force_ai: forceAi }),
       });
 
       if (!analyzeRes) throw new Error('analisar não respondeu (timeout da IA)');
@@ -755,10 +815,12 @@ async function diagnoseClients(opts: RunOptions): Promise<ClientDiagnostic[]> {
       continue;
     }
     const token = await resolveToken(conn.id).catch(() => null);
+    const last7 = optimizerDateRangeForDays(7);
+    const last30 = optimizerDateRangeForDays(30);
     const [d7, d30, metaDireto] = await Promise.all([
-      fetchCampaignsForClient(client.id, opts.origin, 'last_7d', isoDate(7), isoDate(1)).catch(() => []),
-      fetchCampaignsForClient(client.id, opts.origin, 'last_30d', isoDate(30), isoDate(1)).catch(() => []),
-      token ? fetchMetaCampaignsRaw(conn.account_id, token, isoDate(30), isoDate(0)).catch(() => ({ ok: false, erro: 'falha na consulta direta' })) : Promise.resolve({ ok: false, erro: 'sem token' }),
+      fetchCampaignsForClient(client.id, opts.origin, 'last_7d', last7.dateFrom, last7.dateTo).catch(() => []),
+      fetchCampaignsForClient(client.id, opts.origin, 'last_30d', last30.dateFrom, last30.dateTo).catch(() => []),
+      token ? fetchMetaCampaignsRaw(conn.account_id, token, last30.dateFrom, last30.dateTo).catch(() => ({ ok: false, erro: 'falha na consulta direta' })) : Promise.resolve({ ok: false, erro: 'sem token' }),
     ]);
     const meta7 = d7.filter((c) => c.platform === 'meta');
     const meta30 = d30.filter((c) => c.platform === 'meta');

@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import { resolveMetaPeriod } from '@/lib/period-utils';
+import { countMetaResults } from '@/lib/meta-results';
 
 export type MetaAdWithMetrics = {
   id: string;
@@ -18,21 +19,6 @@ export type MetaAdWithMetrics = {
   ctr: number;
   cpl: number;
 };
-
-const META_RESULT_ACTIONS = [
-  'lead',
-  'onsite_conversion.lead_grouped',
-  'offsite_conversion.fb_pixel_lead',
-  'offsite_conversion.lead',
-  'onsite_conversion.lead',
-  'onsite_web_lead',
-  'onsite_web_app_lead',
-  'onsite_conversion.messaging_conversation_started_7d',
-  'onsite_conversion.total_messaging_connection',
-  'messaging_conversation_started_7d',
-  'total_messaging_connection',
-  'onsite_conversion.messaging_first_reply',
-];
 
 export async function GET(
   req: NextRequest,
@@ -93,9 +79,7 @@ export async function GET(
     const spend = parseFloat(insightRow.spend ?? '0');
     const impressions = parseInt(insightRow.impressions ?? '0', 10);
     const clicks = parseInt(insightRow.clicks ?? '0', 10);
-    const leads = ((insightRow.actions ?? []) as { action_type: string; value: string }[])
-      .filter(a => META_RESULT_ACTIONS.includes(a.action_type))
-      .reduce((sum, a) => sum + parseInt(a.value || '0', 10), 0);
+    const leads = countMetaResults((insightRow.actions ?? []) as { action_type: string; value: string }[]);
 
     return {
       id: ad.id,

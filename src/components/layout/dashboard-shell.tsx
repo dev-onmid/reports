@@ -6,6 +6,7 @@ import { Sidebar } from '@/components/layout/sidebar';
 import { HeaderWrapper } from '@/components/layout/header-wrapper';
 import { MainWrapper } from '@/components/layout/main-wrapper';
 import { HolidayPaymentAlert } from '@/components/layout/holiday-payment-alert';
+import { EvolutionAlertBanner } from '@/components/layout/evolution-alert-banner';
 import { AuthGuard } from '@/components/layout/auth-guard';
 import { PaymentProviderWrapper } from '@/components/layout/payment-provider-wrapper';
 import { Button } from '@/components/ui/button';
@@ -41,6 +42,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
 
           <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
             <HeaderWrapper onOpenSidebar={() => setMobileSidebarOpen(true)} />
+            <EvolutionAlertBanner />
             <MainWrapper
               mobileNavButton={
                 <Button

@@ -24,13 +24,61 @@ export async function ensureOptimizerClientConfigTable(pool: Pool): Promise<void
   `).catch(() => {});
 }
 
+// Self-heal do workflow por recomendação (migration_optimizer_v3.sql). Chamar antes de
+// qualquer query que toque optimizer_recomendacao_status ou as colunas connection_id/account_id.
+export async function ensureOptimizerRecStatusTable(pool: Pool): Promise<void> {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS public.optimizer_recomendacao_status (
+      rec_id        TEXT PRIMARY KEY,
+      analise_id    UUID,
+      cliente_id    TEXT NOT NULL,
+      objeto_id     TEXT,
+      status        TEXT NOT NULL DEFAULT 'pendente',
+      autor_id      TEXT,
+      autor_nome    TEXT,
+      motivo        TEXT,
+      undo_payload  JSONB,
+      atribuido_a   TEXT,
+      updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS optimizer_rec_status_cliente_idx
+      ON public.optimizer_recomendacao_status (cliente_id, status);
+    ALTER TABLE public.optimizer_ai_logs
+      ADD COLUMN IF NOT EXISTS connection_id TEXT,
+      ADD COLUMN IF NOT EXISTS account_id    TEXT;
+  `).catch(() => {});
+}
+
+// Observações manuais do gestor por nível (cliente/campanha/conjunto/criativo) — registro
+// humano, plural e com autor/timestamp. Diferente de `observacoes_fixas` (1 texto único por
+// cliente, editado só em Configurações, injetado como regra permanente): aqui são N notas
+// pontuais por objeto, que também alimentam o próximo prompt (ver loadManualNotesContext).
+export async function ensureOptimizerManualNotesTable(pool: Pool): Promise<void> {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS public.optimizer_manual_notes (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      cliente_id TEXT NOT NULL,
+      nivel TEXT NOT NULL,
+      objeto_id TEXT,
+      objeto_nome TEXT,
+      autor_id TEXT,
+      autor_nome TEXT,
+      texto TEXT NOT NULL,
+      ativo BOOLEAN NOT NULL DEFAULT true,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS optimizer_manual_notes_cliente_idx
+      ON public.optimizer_manual_notes (cliente_id, ativo, created_at DESC);
+  `).catch(() => {});
+}
+
 export const OPTIMIZER_MODEL = 'claude-sonnet-4-6';
 // v2 usa Haiku 4.5: a análise em árvore (payload grande + output 8k) com Sonnet passava
 // dos ~55s e estourava o timeout da IA. Haiku gera em ~10-20s, aguenta o schema de
 // classificação e barateia. A tarefa é extração/classificação guiada por regras — cabe no Haiku.
 export const OPTIMIZER_MODEL_V2 = 'claude-haiku-4-5-20251001';
 export const OPTIMIZER_PROMPT_VERSION = 'otimizador-v1.0';
-export const OPTIMIZER_PROMPT_VERSION_V2 = 'otimizador-v2.1';
+export const OPTIMIZER_PROMPT_VERSION_V2 = 'otimizador-v3.0';
 
 // ─── v2 types ────────────────────────────────────────────────────────────────
 
@@ -45,6 +93,11 @@ export type OptimizerEstadoConta = 'SAUDAVEL' | 'ATENCAO' | 'CRISE';
 export type OptimizerAcaoTipo = 'PAUSAR' | 'ATIVAR' | 'AJUSTAR_ORCAMENTO';
 export type OptimizerObjetoTipo = 'campaign' | 'adset' | 'ad';
 export type OptimizerStatusExecucao = 'EXECUTAR_AGORA' | 'AGUARDAR_APROVACAO';
+// Tipo de ação sugerida por nó da árvore. Os 3 primeiros viram ação estruturada aplicável
+// (pausar/ativar/ajustar orçamento via API). TROCAR_CRIATIVO/VERIFICAR_MANUAL = manual (sem
+// botão Aplicar). NENHUMA = nó sem ação (saudável).
+export type OptimizerNodeAcaoTipo =
+  | 'PAUSAR' | 'ATIVAR' | 'AJUSTAR_ORCAMENTO' | 'TROCAR_CRIATIVO' | 'VERIFICAR_MANUAL' | 'NENHUMA';
 
 export type OptimizerAdV2 = {
   id: string;
@@ -59,6 +112,14 @@ export type OptimizerAdV2 = {
   quality_ranking: string | null;
   engagement_ranking: string | null;
   conversion_ranking: string | null;
+  // Retenção de vídeo — só existe em anúncios de vídeo (eh_video=true). Estática/carrossel
+  // vem eh_video=false com as 4 taxas null. Todas as taxas são % de impressões (hook_rate =
+  // views de 3s / impressões), garantindo curva decrescente hook >= p25 >= p50 >= p75.
+  eh_video: boolean;
+  video_hook_rate: number | null;
+  video_p25_rate: number | null;
+  video_p50_rate: number | null;
+  video_p75_rate: number | null;
 };
 
 export type OptimizerAdsetV2 = {
@@ -156,6 +217,7 @@ export type OptimizerVerdict = 'SAUDAVEL' | 'ATENCAO' | 'URGENTE';
 export type OptimizerAnaliseAnuncio = {
   id: string;
   nome: string;
+  status_entrega: string | null;
   gasto: number;
   conversoes: number;
   cpl: number | null;
@@ -163,14 +225,30 @@ export type OptimizerAnaliseAnuncio = {
   quality_ranking: string | null;
   engagement_ranking: string | null;
   conversion_ranking: string | null;
+  // Retenção de vídeo — vem do payload (verdade), nunca da IA. Ver OptimizerAdV2.
+  eh_video: boolean;
+  video_hook_rate: number | null;
+  video_p25_rate: number | null;
+  video_p50_rate: number | null;
+  video_p75_rate: number | null;
   classificacao: OptimizerVerdict;
   veredito: string;
   acao: string;
+  // Campos que destravam o "Aplicar" de 1 clique mesmo no modo de aprovação (preenchidos pela IA).
+  acao_tipo: OptimizerNodeAcaoTipo;
+  acao_parametros: Record<string, unknown>;
+  confianca_item: OptimizerConfidence;
+  depende_de: string | null;   // id de outro objeto (mesma análise) do qual esta ação depende
+  padrao: string | null;       // chave canônica do problema, p/ agrupar entre contas (ação em lote)
+  // Motivos em tópicos, já interpretados (fato + comparação), para exibir direto no card
+  // principal — sem precisar abrir painel. Ex: "Custava R$9,20 por conversa — a meta é R$20".
+  motivos: string[];
 };
 
 export type OptimizerAnaliseConjunto = {
   id: string;
   nome: string;
+  status_entrega: string | null;
   gasto: number;
   conversoes: number;
   cpl: number | null;
@@ -180,12 +258,19 @@ export type OptimizerAnaliseConjunto = {
   classificacao: OptimizerVerdict;
   veredito: string;
   acao: string;
+  acao_tipo: OptimizerNodeAcaoTipo;
+  acao_parametros: Record<string, unknown>;
+  confianca_item: OptimizerConfidence;
+  depende_de: string | null;
+  padrao: string | null;
+  motivos: string[];
   anuncios: OptimizerAnaliseAnuncio[];
 };
 
 export type OptimizerAnaliseCampanha = {
   id: string;
   nome: string;
+  status_entrega: string | null;
   objetivo: string;
   gasto: number;
   conversoes: number;
@@ -195,6 +280,12 @@ export type OptimizerAnaliseCampanha = {
   classificacao: OptimizerVerdict;
   veredito: string;
   acao: string;
+  acao_tipo: OptimizerNodeAcaoTipo;
+  acao_parametros: Record<string, unknown>;
+  confianca_item: OptimizerConfidence;
+  depende_de: string | null;
+  padrao: string | null;
+  motivos: string[];
   conjuntos: OptimizerAnaliseConjunto[];
 };
 
@@ -231,6 +322,542 @@ export type OptimizerAnalysisResultV2 = OptimizerOutputV2 & {
   tokens_usados: number;
   custo_estimado_usd: number;
 };
+
+// ─── Recomendação achatada (unidade da fila de decisão) ───────────────────────
+// Uma linha por nó ATENÇÃO/URGENTE com ação. Métricas vêm SEMPRE do payload/árvore
+// (verdade) — nunca de número ecoado pela IA. Ver buildRecomendacoes().
+export type OptimizerRecomendacaoSeveridade = 'urgente' | 'atencao' | 'ok';
+
+export type OptimizerRecomendacao = {
+  rec_id: string;              // estável: `${analise_id}:${objeto_tipo}:${objeto_id}`
+  analise_id: string;
+  cliente_id: string;
+  cliente_nome: string;
+  canal: 'meta' | 'google';
+  nivel: OptimizerObjetoTipo;  // campaign | adset | ad
+  objeto_id: string;
+  objeto_nome: string;
+  status_entrega: string | null;
+  campanha_nome: string;
+  // Nome do conjunto pai (para nivel adset é o próprio objeto; para campaign é null) —
+  // permite ao card mostrar a hierarquia Campanha › Conjunto › Criativo pelo NOME.
+  conjunto_nome: string | null;
+  severidade: OptimizerRecomendacaoSeveridade;
+  titulo: string;
+  texto_recomendacao: string;
+  // Motivos em tópicos já interpretados (2-4 itens), exibidos direto no card principal —
+  // não exige abrir painel. Fallback determinístico a partir de `fatos` quando a IA não trouxe.
+  motivos: string[];
+  metricas_chave: Array<{ rotulo: string; valor: string }>;
+  fatos: Array<{ rotulo: string; valor: string }>;
+  acao_estruturada: {
+    tipo: OptimizerAcaoTipo;
+    objeto_tipo: OptimizerObjetoTipo;
+    objeto_id: string;
+    objeto_nome: string;
+    parametros: Record<string, unknown>;
+  } | null;
+  aplicavel: boolean;
+  confianca: OptimizerConfidence;
+  depende_de: string | null;   // rec_id de outra recomendação da mesma análise
+  padrao: string | null;
+  connection_id: string | null;
+  account_id: string | null;
+  // Veredito técnico da IA ("R$2,69 gasto, 111 impressões, 0% CTR...") — vai para o painel
+  // "Por que essa recomendação?", NUNCA para o título. O título é sempre linguagem natural.
+  leitura: string;
+  // Objetivo da campanha em linguagem de negócio ("Conversas no WhatsApp", "Geração de leads").
+  // Todo o raciocínio da recomendação existe para MELHORAR o resultado deste objetivo.
+  objetivo: string | null;
+  // Retenção de vídeo — só preenchido em nível "ad" (nivel='ad'). Campanha/conjunto ficam null:
+  // retenção só existe de fato no criativo, e uma média mascararia o criativo ruim escondido
+  // atrás de um bom (ver CLAUDE.md). A UI agrega por contagem de filhos, não por média.
+  retencao_video: {
+    eh_video: boolean;
+    hook_rate: number | null;
+    p25_rate: number | null;
+    p50_rate: number | null;
+    p75_rate: number | null;
+  } | null;
+};
+
+function normNodeAcaoTipo(v: unknown): OptimizerNodeAcaoTipo {
+  return (['PAUSAR', 'ATIVAR', 'AJUSTAR_ORCAMENTO', 'TROCAR_CRIATIVO', 'VERIFICAR_MANUAL', 'NENHUMA'] as const)
+    .includes(v as never) ? v as OptimizerNodeAcaoTipo : 'NENHUMA';
+}
+
+function normConfidence(v: unknown): OptimizerConfidence {
+  return (['alta', 'media', 'baixa'] as const).includes(v as never) ? v as OptimizerConfidence : 'media';
+}
+
+// Análises antigas (prompt < v2.2) não trazem acao_tipo — inferimos do verbo inicial da ação
+// em texto livre ("Pausar, criativo fadigado" → PAUSAR). Assim o botão Aplicar funciona
+// também para análises geradas antes do redesign, sem esperar a próxima rodada de IA.
+function inferAcaoTipo(acao: string, declarado: OptimizerNodeAcaoTipo): OptimizerNodeAcaoTipo {
+  if (declarado !== 'NENHUMA') return declarado;
+  const t = (acao ?? '').trim().toLowerCase();
+  if (!t) return 'NENHUMA';
+  if (/^pausar|^pausa\b/.test(t)) return 'PAUSAR';
+  if (/^(ativar|reativar)/.test(t)) return 'ATIVAR';
+  if (/^(escalar|aumentar|reduzir)/.test(t) && /or[çc]amento|%|\br\$/.test(t)) return 'AJUSTAR_ORCAMENTO';
+  if (/^(escalar|aumentar|reduzir) or[çc]amento/.test(t)) return 'AJUSTAR_ORCAMENTO';
+  if (/(trocar|testar|subir|criar).*(criativo|angulo|ângulo|apelo)|criativo novo/.test(t)) return 'TROCAR_CRIATIVO';
+  if (/^(verificar|checar|conferir|revisar|deletar|excluir|arquivar|aguardar)/.test(t)) return 'VERIFICAR_MANUAL';
+  return 'NENHUMA';
+}
+
+// Traduz o objetivo bruto da campanha (Meta/Google) para linguagem de negócio + o "alvo curto"
+// que a campanha existe para maximizar. É a bússola de toda recomendação: sempre melhorar isto.
+type ObjetivoInfo = { label: string; curto: string; metrica: string; custo: string };
+function objetivoInfo(raw: string | null | undefined): ObjetivoInfo | null {
+  const t = (raw ?? '').toLowerCase();
+  if (!t) return null;
+  if (/whats|messag|conversa|mensag|inbox/.test(t)) return { label: 'Conversas no WhatsApp', curto: 'conversas', metrica: 'Conversas', custo: 'Custo por conversa' };
+  if (/lead|formul/.test(t)) return { label: 'Geração de leads', curto: 'leads', metrica: 'Leads', custo: 'Custo por lead' };
+  if (/sales|vend|purchase|convers[aã]o|compra|checkout/.test(t)) return { label: 'Vendas', curto: 'vendas', metrica: 'Vendas', custo: 'Custo por venda' };
+  if (/traffic|tr[aá]fego|link_click|clique/.test(t)) return { label: 'Tráfego no site', curto: 'cliques no link', metrica: 'Cliques', custo: 'Custo por clique' };
+  if (/engag|engaj/.test(t)) return { label: 'Engajamento', curto: 'engajamento', metrica: 'Engajamentos', custo: 'Custo por engajamento' };
+  if (/awareness|reconhec|alcance|reach|brand/.test(t)) return { label: 'Reconhecimento de marca', curto: 'alcance', metrica: 'Alcance', custo: 'CPM' };
+  if (/app|install/.test(t)) return { label: 'Instalações do app', curto: 'instalações', metrica: 'Instalações', custo: 'Custo por instalação' };
+  return { label: (raw ?? '').slice(0, 40), curto: 'resultado', metrica: 'Conversões', custo: 'CPL' };
+}
+
+// Título do card em linguagem natural, SEMPRE ancorado no resultado do objetivo — qualquer
+// funcionário entende do que se trata sem ler métrica. O dado técnico (veredito da IA) vai
+// para `leitura`, dentro do painel "por quê".
+function tituloAmigavel(tipo: OptimizerNodeAcaoTipo, nivel: OptimizerObjetoTipo, sev: OptimizerVerdict, alvo: string | null): string {
+  const nome = nivel === 'campaign' ? 'campanha' : nivel === 'adset' ? 'conjunto de anúncios' : 'criativo';
+  const artigo = nivel === 'campaign' ? 'Uma' : 'Um';
+  const semAlvo = alvo && alvo !== 'resultado' ? `gerar ${alvo}` : 'trazer resultado';
+  const maisAlvo = alvo && alvo !== 'resultado' ? `mais ${alvo}` : 'mais resultado';
+  switch (tipo) {
+    case 'PAUSAR': return `${artigo} ${nome} está gastando sem ${semAlvo}`;
+    case 'ATIVAR': return `${artigo} ${nome} pausado pode voltar a ${semAlvo}`;
+    case 'AJUSTAR_ORCAMENTO': return `Dá para ajustar o orçamento e buscar ${maisAlvo}`;
+    case 'TROCAR_CRIATIVO': return `Este criativo cansou e está trazendo menos ${alvo && alvo !== 'resultado' ? alvo : 'resultado'}`;
+    case 'NENHUMA':
+      // SAUDAVEL + NENHUMA = de fato nada a fazer (a rota "escalar" já saiu como
+      // AJUSTAR_ORCAMENTO/ATIVAR antes de chegar aqui). Título precisa dizer "sem ação", nunca
+      // sugerir ajuste que não existe.
+      return sev === 'SAUDAVEL'
+        ? `${artigo === 'Uma' ? 'Está' : 'Está'} indo bem — sem ação necessária`
+        : `${artigo} ${nome} ainda sem diagnóstico definitivo`;
+    default:
+      return sev === 'URGENTE'
+        ? `${artigo} ${nome} precisa de uma decisão para não perder ${maisAlvo}`
+        : `${artigo} ${nome} pode render ${maisAlvo} com um ajuste`;
+  }
+}
+
+// Formatadores puros — hoisted p/ módulo pra reuso entre buildRecomendacoes (fila achatada,
+// filtrada) e buildCampaignTree (árvore completa, sem filtro).
+function fmtMoney(v: number | null | undefined): string {
+  return v == null || !Number.isFinite(v) ? '—' : new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v as number);
+}
+function fmtNum(v: number | null | undefined): string {
+  return v == null || !Number.isFinite(v) ? '—' : (v as number).toLocaleString('pt-BR');
+}
+function fmtPct(v: number | null | undefined): string {
+  return v == null || !Number.isFinite(v) ? '—' : `${(v as number).toFixed(2)}%`;
+}
+
+export function buildRecomendacoes(
+  result: OptimizerOutputV2,
+  meta: { analise_id: string; cliente_id: string; cliente_nome: string; canal: 'meta' | 'google'; connection_id: string | null; account_id: string | null },
+): OptimizerRecomendacao[] {
+  const money = (v: number | null | undefined) =>
+    v == null || !Number.isFinite(v) ? '—' : new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v as number);
+  const num = (v: number | null | undefined) =>
+    v == null || !Number.isFinite(v) ? '—' : (v as number).toLocaleString('pt-BR');
+  const pct = (v: number | null | undefined) =>
+    v == null || !Number.isFinite(v) ? '—' : `${(v as number).toFixed(2)}%`;
+
+  const acaoAutoByObj = new Map<string, OptimizerAcaoAutomatica>();
+  for (const a of result.acoes_automaticas ?? []) acaoAutoByObj.set(a.objeto_id, a);
+
+  // TESTE JUSTO: só dá pra dizer que um item "falhou" (0 resultado) depois de ter gasto o
+  // suficiente pra ter tido chance. Referência = ~2x o custo-alvo por resultado (CPL/CPA meta);
+  // sem meta, um piso baixo. Abaixo disso, gasto ínfimo com 0 resultado é ESPERADO, não problema.
+  const cm = result.cruzamento_com_metas;
+  const cplRef = (cm?.cpl_maximo ?? cm?.cpl_ideal ?? null);
+  const gastoMinimoParaJulgar = cplRef && cplRef > 0 ? cplRef * 2 : 25;
+
+  type Raw = { objeto_id: string; depObjId: string | null; rec: OptimizerRecomendacao };
+  const raws: Raw[] = [];
+
+  const push = (o: {
+    objeto_tipo: OptimizerObjetoTipo;
+    objeto_id: string; objeto_nome: string; campanha_nome: string;
+    status_entrega: string | null;
+    conjunto_nome: string | null;
+    objetivo: ObjetivoInfo | null;
+    gasto: number; conversoes: number;
+    classificacao: OptimizerVerdict; veredito: string; acao: string;
+    acao_tipo: OptimizerNodeAcaoTipo; acao_parametros: Record<string, unknown>;
+    confianca_item: OptimizerConfidence; depende_de: string | null; padrao: string | null;
+    motivos: string[];
+    metricas_chave: Array<{ rotulo: string; valor: string }>;
+    fatos: Array<{ rotulo: string; valor: string }>;
+    retencao_video?: OptimizerRecomendacao['retencao_video'];
+  }) => {
+    if (!o.acao?.trim()) return;
+
+    const auto = acaoAutoByObj.get(o.objeto_id);
+    const tipoEfetivo = inferAcaoTipo(o.acao, o.acao_tipo);
+
+    // Trava anti-ruído: não recomendar PAUSAR "sem resultado" quando o item mal gastou —
+    // R$3 com 0 lead numa meta de R$20 não é falha, é falta de entrega. Elimina os falsos urgentes.
+    if (tipoEfetivo === 'PAUSAR' && o.conversoes === 0 && o.gasto < gastoMinimoParaJulgar) return;
+    // Item SAUDÁVEL só entra na fila se carregar uma ação de CRESCIMENTO (escalar orçamento
+    // ou reativar) — é uma oportunidade de melhorar o resultado do objetivo, não um problema.
+    // Saudável sem ação de crescimento = nada a fazer, fica fora da fila.
+    const ehOportunidade = o.classificacao === 'SAUDAVEL';
+    if (ehOportunidade && tipoEfetivo !== 'AJUSTAR_ORCAMENTO' && tipoEfetivo !== 'ATIVAR') return;
+
+    const structTipo: OptimizerAcaoTipo | null =
+      (tipoEfetivo === 'PAUSAR' || tipoEfetivo === 'ATIVAR' || tipoEfetivo === 'AJUSTAR_ORCAMENTO')
+        ? tipoEfetivo
+        : (auto ? auto.acao : null);
+    const parametros = { ...(o.acao_parametros ?? {}), ...(auto?.parametros ?? {}) };
+    const aplicavel = structTipo != null && (structTipo !== 'AJUSTAR_ORCAMENTO' || o.objeto_tipo === 'adset');
+
+    raws.push({
+      objeto_id: o.objeto_id,
+      depObjId: o.depende_de,
+      rec: {
+        rec_id: `${meta.analise_id}:${o.objeto_tipo}:${o.objeto_id}`,
+        analise_id: meta.analise_id,
+        cliente_id: meta.cliente_id,
+        cliente_nome: meta.cliente_nome,
+        canal: meta.canal,
+        nivel: o.objeto_tipo,
+        objeto_id: o.objeto_id,
+        objeto_nome: o.objeto_nome,
+        status_entrega: o.status_entrega,
+        campanha_nome: o.campanha_nome,
+        conjunto_nome: o.conjunto_nome,
+        severidade: o.classificacao === 'URGENTE' ? 'urgente' : o.classificacao === 'ATENCAO' ? 'atencao' : 'ok',
+        titulo: tituloAmigavel(tipoEfetivo, o.objeto_tipo, o.classificacao, o.objetivo?.curto ?? null),
+        objetivo: o.objetivo?.label ?? null,
+        texto_recomendacao: o.acao,
+        // Fallback: análises antigas (ou omissão da IA) sem `motivos` reaproveitam os fatos
+        // determinísticos (rótulo: valor). GUARDA: análises salvas ANTES deste campo existir têm
+        // motivos=undefined — sem o Array.isArray, `.length` quebrava a rota /fila INTEIRA (não só
+        // deste cliente), zerando a fila global com "Última análise em —". Ver hotfix.
+        motivos: (Array.isArray(o.motivos) && o.motivos.length > 0)
+          ? o.motivos
+          : o.fatos.slice(0, 4).map((f) => `${f.rotulo}: ${f.valor}`),
+        metricas_chave: o.metricas_chave.filter((m) => m.valor && m.valor !== '—').slice(0, 3),
+        fatos: o.fatos,
+        acao_estruturada: structTipo
+          ? { tipo: structTipo, objeto_tipo: o.objeto_tipo, objeto_id: o.objeto_id, objeto_nome: o.objeto_nome, parametros }
+          : null,
+        aplicavel,
+        confianca: o.confianca_item,
+        depende_de: null,
+        padrao: o.padrao,
+        connection_id: meta.connection_id,
+        account_id: meta.account_id,
+        leitura: o.veredito?.trim() ?? '',
+        retencao_video: o.retencao_video ?? null,
+      },
+    });
+  };
+
+  for (const camp of result.analise_campanhas ?? []) {
+    // Objetivo herdado por toda a árvore da campanha — é a bússola da recomendação e
+    // renomeia a métrica de resultado (ex: "Conversas" p/ WhatsApp, "Leads" p/ formulário).
+    const obj = objetivoInfo(camp.objetivo);
+    const mConv = obj?.metrica ?? 'Conversões';
+    const mCusto = obj?.custo ?? 'CPL';
+    push({
+      objeto_tipo: 'campaign', objeto_id: camp.id, objeto_nome: camp.nome, status_entrega: camp.status_entrega ?? null, campanha_nome: camp.nome,
+      conjunto_nome: null,
+      objetivo: obj, gasto: Number(camp.gasto) || 0, conversoes: Number(camp.conversoes) || 0,
+      classificacao: camp.classificacao, veredito: camp.veredito, acao: camp.acao,
+      acao_tipo: camp.acao_tipo, acao_parametros: camp.acao_parametros, confianca_item: camp.confianca_item,
+      depende_de: camp.depende_de, padrao: camp.padrao, motivos: camp.motivos,
+      metricas_chave: [
+        { rotulo: 'Gasto', valor: money(camp.gasto) },
+        { rotulo: mConv, valor: num(camp.conversoes) },
+        { rotulo: mCusto, valor: money(camp.cpl) },
+      ],
+      fatos: [
+        { rotulo: 'Gasto', valor: money(camp.gasto) },
+        { rotulo: mConv, valor: num(camp.conversoes) },
+        { rotulo: mCusto, valor: money(camp.cpl) },
+        { rotulo: 'CTR', valor: pct(camp.ctr) },
+        { rotulo: 'Orçamento diário', valor: money(camp.orcamento_diario) },
+      ],
+    });
+    for (const conj of camp.conjuntos ?? []) {
+      push({
+        objeto_tipo: 'adset', objeto_id: conj.id, objeto_nome: conj.nome, status_entrega: conj.status_entrega ?? null, campanha_nome: camp.nome,
+        conjunto_nome: conj.nome,
+        objetivo: obj, gasto: Number(conj.gasto) || 0, conversoes: Number(conj.conversoes) || 0,
+        classificacao: conj.classificacao, veredito: conj.veredito, acao: conj.acao,
+        acao_tipo: conj.acao_tipo, acao_parametros: conj.acao_parametros, confianca_item: conj.confianca_item,
+        depende_de: conj.depende_de, padrao: conj.padrao, motivos: conj.motivos,
+        metricas_chave: [
+          { rotulo: 'Gasto', valor: money(conj.gasto) },
+          { rotulo: mConv, valor: num(conj.conversoes) },
+          { rotulo: mCusto, valor: money(conj.cpl) },
+        ],
+        fatos: [
+          { rotulo: 'Gasto', valor: money(conj.gasto) },
+          { rotulo: mConv, valor: num(conj.conversoes) },
+          { rotulo: mCusto, valor: money(conj.cpl) },
+          { rotulo: 'CTR', valor: pct(conj.ctr) },
+          { rotulo: 'Orçamento diário', valor: money(conj.orcamento_diario) },
+          { rotulo: 'Dias ativo', valor: conj.dias_ativo != null ? String(conj.dias_ativo) : '—' },
+        ],
+      });
+      for (const ad of conj.anuncios ?? []) {
+        push({
+          objeto_tipo: 'ad', objeto_id: ad.id, objeto_nome: ad.nome, status_entrega: ad.status_entrega ?? null, campanha_nome: camp.nome,
+          conjunto_nome: conj.nome,
+          objetivo: obj, gasto: Number(ad.gasto) || 0, conversoes: Number(ad.conversoes) || 0,
+          classificacao: ad.classificacao, veredito: ad.veredito, acao: ad.acao,
+          acao_tipo: ad.acao_tipo, acao_parametros: ad.acao_parametros, confianca_item: ad.confianca_item,
+          depende_de: ad.depende_de, padrao: ad.padrao, motivos: ad.motivos,
+          metricas_chave: [
+            { rotulo: 'Gasto', valor: money(ad.gasto) },
+            { rotulo: mConv, valor: num(ad.conversoes) },
+            { rotulo: mCusto, valor: money(ad.cpl) },
+          ],
+          fatos: [
+            { rotulo: 'Gasto', valor: money(ad.gasto) },
+            { rotulo: mConv, valor: num(ad.conversoes) },
+            { rotulo: mCusto, valor: money(ad.cpl) },
+            { rotulo: 'CTR', valor: pct(ad.ctr) },
+            { rotulo: 'Ranking de qualidade', valor: ad.quality_ranking ?? '—' },
+            { rotulo: 'Ranking de engajamento', valor: ad.engagement_ranking ?? '—' },
+            { rotulo: 'Ranking de conversão', valor: ad.conversion_ranking ?? '—' },
+          ],
+          retencao_video: {
+            eh_video: ad.eh_video,
+            hook_rate: ad.video_hook_rate,
+            p25_rate: ad.video_p25_rate,
+            p50_rate: ad.video_p50_rate,
+            p75_rate: ad.video_p75_rate,
+          },
+        });
+      }
+    }
+  }
+
+  // 2ª passada: resolve depende_de (id de objeto → rec_id) dentro da mesma análise.
+  const recIdByObj = new Map<string, string>();
+  for (const r of raws) recIdByObj.set(r.objeto_id, r.rec.rec_id);
+  for (const r of raws) {
+    if (r.depObjId && recIdByObj.has(r.depObjId)) r.rec.depende_de = recIdByObj.get(r.depObjId) ?? null;
+  }
+
+  // Ordena por severidade (urgente > atenção) e depois por gasto (fato 0 = Gasto).
+  const sevRank = { urgente: 0, atencao: 1, ok: 2 } as const;
+  return raws
+    .map((r) => r.rec)
+    .sort((a, b) => sevRank[a.severidade] - sevRank[b.severidade]);
+}
+
+// Nó da árvore para a tela do Otimizador — mesmo shape de OptimizerRecomendacao (reaproveita
+// adManagerUrl, VERBO_ACAO etc. no client) + `filhos` para a hierarquia campanha→conjunto→criativo.
+export type OptimizerTreeNode = OptimizerRecomendacao & { filhos: OptimizerTreeNode[] };
+
+// Diferente de buildRecomendacoes (fila achatada, só ATENCAO/URGENTE + oportunidades de escala),
+// esta função devolve a ÁRVORE INTEIRA — inclusive nós SAUDAVEL sem ação ("nada a fazer") — para
+// a visão "Campanha > Conjunto > Criativo" onde o gestor precisa ver o que está bem também, não
+// só os problemas. Reaproveita os mesmos helpers de título/objetivo/gasto-mínimo do módulo.
+export function buildCampaignTree(
+  result: OptimizerOutputV2,
+  meta: { analise_id: string; cliente_id: string; cliente_nome: string; canal: 'meta' | 'google'; connection_id: string | null; account_id: string | null },
+): OptimizerTreeNode[] {
+  const cm = result.cruzamento_com_metas;
+  const cplRef = (cm?.cpl_maximo ?? cm?.cpl_ideal ?? null);
+  const gastoMinimoParaJulgar = cplRef && cplRef > 0 ? cplRef * 2 : 25;
+
+  const acaoAutoByObj = new Map<string, OptimizerAcaoAutomatica>();
+  for (const a of result.acoes_automaticas ?? []) acaoAutoByObj.set(a.objeto_id, a);
+
+  function buildNode(o: {
+    objeto_tipo: OptimizerObjetoTipo;
+    objeto_id: string; objeto_nome: string; campanha_nome: string;
+    status_entrega: string | null;
+    conjunto_nome: string | null;
+    objetivo: ObjetivoInfo | null;
+    gasto: number; conversoes: number;
+    classificacao: OptimizerVerdict; veredito: string; acao: string;
+    acao_tipo: OptimizerNodeAcaoTipo; acao_parametros: Record<string, unknown>;
+    confianca_item: OptimizerConfidence; depende_de: string | null; padrao: string | null;
+    motivos: string[];
+    metricas_chave: Array<{ rotulo: string; valor: string }>;
+    fatos: Array<{ rotulo: string; valor: string }>;
+    filhos: OptimizerTreeNode[];
+    retencao_video?: OptimizerRecomendacao['retencao_video'];
+  }): OptimizerTreeNode {
+    const auto = acaoAutoByObj.get(o.objeto_id);
+    let tipoEfetivo = o.acao?.trim() ? inferAcaoTipo(o.acao, o.acao_tipo) : 'NENHUMA';
+    let acaoTexto = o.acao;
+    let confianca = o.confianca_item;
+
+    // Mesma trava anti-ruído do buildRecomendacoes, mas aqui NÃO descartamos o nó (a árvore
+    // sempre mostra todo mundo) — só rebaixamos a ação pra algo honesto ("aguardar dados").
+    if (tipoEfetivo === 'PAUSAR' && o.conversoes === 0 && o.gasto < gastoMinimoParaJulgar) {
+      tipoEfetivo = 'VERIFICAR_MANUAL';
+      acaoTexto = 'Aguardar mais dados: gasto ainda abaixo do piso mínimo pra julgar resultado com segurança';
+      confianca = 'baixa';
+    }
+
+    const structTipo: OptimizerAcaoTipo | null =
+      (tipoEfetivo === 'PAUSAR' || tipoEfetivo === 'ATIVAR' || tipoEfetivo === 'AJUSTAR_ORCAMENTO')
+        ? tipoEfetivo
+        : (auto ? auto.acao : null);
+    const parametros = { ...(o.acao_parametros ?? {}), ...(auto?.parametros ?? {}) };
+    const aplicavel = structTipo != null && (structTipo !== 'AJUSTAR_ORCAMENTO' || o.objeto_tipo === 'adset');
+
+    return {
+      rec_id: `${meta.analise_id}:${o.objeto_tipo}:${o.objeto_id}`,
+      analise_id: meta.analise_id,
+      cliente_id: meta.cliente_id,
+      cliente_nome: meta.cliente_nome,
+      canal: meta.canal,
+      nivel: o.objeto_tipo,
+      objeto_id: o.objeto_id,
+      objeto_nome: o.objeto_nome,
+      status_entrega: o.status_entrega,
+      campanha_nome: o.campanha_nome,
+      conjunto_nome: o.conjunto_nome,
+      severidade: o.classificacao === 'URGENTE' ? 'urgente' : o.classificacao === 'ATENCAO' ? 'atencao' : 'ok',
+      titulo: tituloAmigavel(tipoEfetivo, o.objeto_tipo, o.classificacao, o.objetivo?.curto ?? null),
+      objetivo: o.objetivo?.label ?? null,
+      texto_recomendacao: acaoTexto,
+      motivos: (Array.isArray(o.motivos) && o.motivos.length > 0)
+        ? o.motivos
+        : o.fatos.slice(0, 4).map((f) => `${f.rotulo}: ${f.valor}`),
+      metricas_chave: o.metricas_chave.filter((m) => m.valor && m.valor !== '—').slice(0, 3),
+      fatos: o.fatos,
+      acao_estruturada: structTipo
+        ? { tipo: structTipo, objeto_tipo: o.objeto_tipo, objeto_id: o.objeto_id, objeto_nome: o.objeto_nome, parametros }
+        : null,
+      aplicavel,
+      confianca,
+      depende_de: o.depende_de,
+      padrao: o.padrao,
+      connection_id: meta.connection_id,
+      account_id: meta.account_id,
+      leitura: o.veredito?.trim() ?? '',
+      filhos: o.filhos,
+      retencao_video: o.retencao_video ?? null,
+    };
+  }
+
+  const tree: OptimizerTreeNode[] = [];
+  const byObjId = new Map<string, OptimizerTreeNode>();
+
+  for (const camp of result.analise_campanhas ?? []) {
+    const obj = objetivoInfo(camp.objetivo);
+    const mConv = obj?.metrica ?? 'Conversões';
+    const mCusto = obj?.custo ?? 'CPL';
+
+    const conjuntosNodes: OptimizerTreeNode[] = (camp.conjuntos ?? []).map((conj) => {
+      const anunciosNodes: OptimizerTreeNode[] = (conj.anuncios ?? []).map((ad) => {
+        const adNode = buildNode({
+          objeto_tipo: 'ad', objeto_id: ad.id, objeto_nome: ad.nome, status_entrega: ad.status_entrega ?? null, campanha_nome: camp.nome,
+          conjunto_nome: conj.nome,
+          objetivo: obj, gasto: Number(ad.gasto) || 0, conversoes: Number(ad.conversoes) || 0,
+          classificacao: ad.classificacao, veredito: ad.veredito, acao: ad.acao,
+          acao_tipo: ad.acao_tipo, acao_parametros: ad.acao_parametros, confianca_item: ad.confianca_item,
+          depende_de: ad.depende_de, padrao: ad.padrao, motivos: ad.motivos,
+          metricas_chave: [
+            { rotulo: 'Gasto', valor: fmtMoney(ad.gasto) },
+            { rotulo: mConv, valor: fmtNum(ad.conversoes) },
+            { rotulo: mCusto, valor: fmtMoney(ad.cpl) },
+          ],
+          fatos: [
+            { rotulo: 'Gasto', valor: fmtMoney(ad.gasto) },
+            { rotulo: mConv, valor: fmtNum(ad.conversoes) },
+            { rotulo: mCusto, valor: fmtMoney(ad.cpl) },
+            { rotulo: 'CTR', valor: fmtPct(ad.ctr) },
+            { rotulo: 'Ranking de qualidade', valor: ad.quality_ranking ?? '—' },
+            { rotulo: 'Ranking de engajamento', valor: ad.engagement_ranking ?? '—' },
+            { rotulo: 'Ranking de conversão', valor: ad.conversion_ranking ?? '—' },
+          ],
+          filhos: [],
+          retencao_video: {
+            eh_video: ad.eh_video,
+            hook_rate: ad.video_hook_rate,
+            p25_rate: ad.video_p25_rate,
+            p50_rate: ad.video_p50_rate,
+            p75_rate: ad.video_p75_rate,
+          },
+        });
+        byObjId.set(ad.id, adNode);
+        return adNode;
+      });
+
+      const conjNode = buildNode({
+        objeto_tipo: 'adset', objeto_id: conj.id, objeto_nome: conj.nome, status_entrega: conj.status_entrega ?? null, campanha_nome: camp.nome,
+        conjunto_nome: conj.nome,
+        objetivo: obj, gasto: Number(conj.gasto) || 0, conversoes: Number(conj.conversoes) || 0,
+        classificacao: conj.classificacao, veredito: conj.veredito, acao: conj.acao,
+        acao_tipo: conj.acao_tipo, acao_parametros: conj.acao_parametros, confianca_item: conj.confianca_item,
+        depende_de: conj.depende_de, padrao: conj.padrao, motivos: conj.motivos,
+        metricas_chave: [
+          { rotulo: 'Gasto', valor: fmtMoney(conj.gasto) },
+          { rotulo: mConv, valor: fmtNum(conj.conversoes) },
+          { rotulo: mCusto, valor: fmtMoney(conj.cpl) },
+        ],
+        fatos: [
+          { rotulo: 'Gasto', valor: fmtMoney(conj.gasto) },
+          { rotulo: mConv, valor: fmtNum(conj.conversoes) },
+          { rotulo: mCusto, valor: fmtMoney(conj.cpl) },
+          { rotulo: 'CTR', valor: fmtPct(conj.ctr) },
+          { rotulo: 'Orçamento diário', valor: fmtMoney(conj.orcamento_diario) },
+          { rotulo: 'Dias ativo', valor: conj.dias_ativo != null ? String(conj.dias_ativo) : '—' },
+        ],
+        filhos: anunciosNodes,
+      });
+      byObjId.set(conj.id, conjNode);
+      return conjNode;
+    });
+
+    const campNode = buildNode({
+      objeto_tipo: 'campaign', objeto_id: camp.id, objeto_nome: camp.nome, status_entrega: camp.status_entrega ?? null, campanha_nome: camp.nome,
+      conjunto_nome: null,
+      objetivo: obj, gasto: Number(camp.gasto) || 0, conversoes: Number(camp.conversoes) || 0,
+      classificacao: camp.classificacao, veredito: camp.veredito, acao: camp.acao,
+      acao_tipo: camp.acao_tipo, acao_parametros: camp.acao_parametros, confianca_item: camp.confianca_item,
+      depende_de: camp.depende_de, padrao: camp.padrao, motivos: camp.motivos,
+      metricas_chave: [
+        { rotulo: 'Gasto', valor: fmtMoney(camp.gasto) },
+        { rotulo: mConv, valor: fmtNum(camp.conversoes) },
+        { rotulo: mCusto, valor: fmtMoney(camp.cpl) },
+      ],
+      fatos: [
+        { rotulo: 'Gasto', valor: fmtMoney(camp.gasto) },
+        { rotulo: mConv, valor: fmtNum(camp.conversoes) },
+        { rotulo: mCusto, valor: fmtMoney(camp.cpl) },
+        { rotulo: 'CTR', valor: fmtPct(camp.ctr) },
+        { rotulo: 'Orçamento diário', valor: fmtMoney(camp.orcamento_diario) },
+      ],
+      filhos: conjuntosNodes,
+    });
+    byObjId.set(camp.id, campNode);
+    tree.push(campNode);
+  }
+
+  // Resolve depende_de (id de objeto → rec_id) dentro da mesma análise, em todos os níveis.
+  function resolveDeps(nodes: OptimizerTreeNode[]) {
+    for (const n of nodes) {
+      if (n.depende_de && byObjId.has(n.depende_de)) n.depende_de = byObjId.get(n.depende_de)!.rec_id;
+      else if (n.depende_de) n.depende_de = null;
+      resolveDeps(n.filhos);
+    }
+  }
+  resolveDeps(tree);
+
+  return tree;
+}
 
 export function currentWeekLabel(): string {
   const now = new Date();
@@ -269,20 +896,113 @@ Regra de ouro das acoes_automaticas:
 - Em modo "DIAGNOSTICO_APENAS" ou "RECOMENDACAO_COM_APROVACAO": acoes_automaticas deve ser array vazio [].
 
 ==================================================
-PASSO 1 — IDENTIFIQUE O OBJETIVO DA CAMPANHA
+NORTE DE TODA RECOMENDACAO (leia antes de tudo)
 ==================================================
-Leia "metas.objetivo_principal". Isso define qual metrica e a principal:
+CADA campanha existe para ENTREGAR UM RESULTADO ESPECIFICO — o objetivo dela. Toda analise,
+todo veredito e toda acao que voce escrever tem UM proposito unico: fazer esse resultado
+CRESCER (mais volume) e/ou ficar MAIS BARATO (menor custo por resultado). Nunca recomende algo
+que nao mova o ponteiro do objetivo.
 
-OBJETIVO = "leads": metrica principal CPL. CPL acima de cpl_maximo E CRITICO.
-OBJETIVO = "trafego": metrica principal CPC e CTR. NAO mencione CPL como problema.
-OBJETIVO = "vendas": metrica principal ROAS e CPA. Foque em retorno.
-OBJETIVO = "engajamento": metrica principal taxa de engajamento. NAO espere leads.
-OBJETIVO = "reconhecimento": metrica principal CPM, alcance e frequencia. Conversoes NAO sao esperadas.
+Traduza o objetivo para o resultado concreto que precisa melhorar e mire nele:
+- Objetivo de MENSAGENS/WhatsApp -> o resultado e CONVERSAS INICIADAS. Sua meta: MAIS conversas
+  a um custo por conversa menor. Nao fale de "leads" nem de compras aqui.
+- Objetivo de LEADS/formulario -> o resultado e LEADS. Sua meta: MAIS leads, CPL menor.
+- Objetivo de VENDAS/conversao -> o resultado e VENDAS/receita. Sua meta: MAIS vendas, ROAS maior.
+- Objetivo de TRAFEGO -> o resultado e CLIQUES no link. Sua meta: MAIS cliques, CPC menor. (Nao cobre lead/venda.)
+- Objetivo de ENGAJAMENTO -> o resultado e INTERACOES. Objetivo de RECONHECIMENTO -> ALCANCE/frequencia sadia.
+Quando for pausar algo, e porque ele consome verba SEM entregar esse resultado (tirando dinheiro
+do que entrega). Quando for escalar, e porque aquilo entrega o resultado barato e cabe mais verba.
+Quando for trocar criativo, e porque o resultado caiu e um criativo novo pode recupera-lo. Escreva
+a acao e o veredito sempre conectando ao resultado do objetivo (ex: "Pausar: R$X sem nenhuma
+conversa em 3 dias; a verba rende mais nos conjuntos que estao trazendo conversa").
+
+==================================================
+PASSO 1 — A BUSSOLA E O OBJETIVO DE CADA CAMPANHA (nunca o da conta)
+==================================================
+Cada campanha do payload traz seu proprio campo "objetivo" (ex: OUTCOME_LEADS, OUTCOME_SALES,
+OUTCOME_ENGAGEMENT). E ESSE campo — campanha a campanha — que define a metrica de julgamento:
+
+- Campanha de MENSAGENS/WhatsApp -> julgue por CUSTO POR CONVERSA INICIADA vs cpl_ideal/cpl_maximo
+  do planejamento. Conversa iniciada CONTA como o "lead" do planejamento.
+- Campanha de LEADS/formulario -> julgue por CPL vs cpl_ideal/cpl_maximo.
+- Campanha de VENDAS/conversao (pixel de compra) -> julgue por CPA e ROAS. Referencia de
+  viabilidade: o CPA precisa fazer sentido frente ao ticket_medio.
+- Campanha de TRAFEGO -> CPC e CTR. NAO mencione CPL como problema.
+- Campanha de ENGAJAMENTO puro -> taxa de engajamento. NAO espere leads.
+- Campanha de RECONHECIMENTO -> CPM, alcance e frequencia. Conversoes NAO sao esperadas.
+
+ATENCAO — WhatsApp na Meta: campanhas de conversa quase sempre vem com objetivo
+"OUTCOME_ENGAGEMENT". Se os conjuntos otimizam para CONVERSATIONS / REPLIES / mensagens,
+trate a campanha como CAMPANHA DE CONVERSAS (regra de MENSAGENS acima), NUNCA como
+"engajamento" generico.
+
+O QUE O BLOCO "metas" (PLANEJAMENTO MENSAL) SIGNIFICA — E O QUE ELE NAO SIGNIFICA:
+- "metas" vem do planejamento comercial do cliente (funil do mes). Dele voce USA: cpl_ideal e
+  cpl_maximo (custo-alvo por lead — vale para formulario, cadastro E conversa iniciada),
+  volume_leads_meta_mensal e orcamento.
+- "objetivo_principal" e "ticket_medio" descrevem o NEGOCIO (como o cliente mede o mes), NAO
+  como julgar campanhas. Cliente com meta de faturamento (objetivo_principal="vendas")
+  NORMALMENTE alcanca essa meta CAPTANDO leads/conversas via trafego — o fechamento da venda
+  acontece FORA do anuncio (comercial, reuniao, follow-up).
+- PROIBIDO: apontar como problema que "a campanha rastreia conversas/leads mas o objetivo da
+  conta e vendas"; chamar conversa/lead de "resultado intermediario" como se fosse defeito;
+  usar ticket_medio ou meta de faturamento para julgar CPL de campanha de leads/conversas.
+  Qualidade/qualificacao do lead e assunto de reuniao com o cliente — NAO e diagnostico de
+  trafego e NUNCA deve virar motivo, veredito ou acao.
+- So cobre venda direta (CPA/ROAS) de campanha cujo PROPRIO objetivo e vendas/conversao.
+
+ORDEM DE ANALISE DO GESTOR (siga esta ordem dentro de cada campanha):
+1º CRIATIVO (anuncios): qualidade da peca, CTR, rankings, fadiga.
+2º SEGMENTACAO (conjuntos): publico, frequencia, saturacao, orcamento.
+3º CAMPANHA: estrutura, canibalizacao, estrategia.
+Antes de recomendar pausar/mexer na CAMPANHA inteira, verifique se o problema se resolve mais
+barato no nivel do criativo ou do conjunto — gestor bom troca a peca antes de derrubar a campanha.
+
+==================================================
+HIERARQUIA DE JULGAMENTO DO CRIATIVO (ORDEM OBRIGATORIA)
+==================================================
+Cada anuncio no payload traz "eh_video" e, quando true, "video_hook_rate", "video_p25_rate",
+"video_p50_rate", "video_p75_rate" (percentuais sobre impressoes — retencao nos 3s, 25%, 50% e
+75% do video). Ao avaliar um ANUNCIO (nivel = ad), siga esta ordem — uma camada ruim EXPLICA e
+PRECEDE os sinais das camadas seguintes; nunca pule direto pro CPL sem passar pelas de cima:
+
+1. HOOK RATE (video_hook_rate) — SO se eh_video=true.
+   < 25%: o problema E A PECA (abertura/gancho fraco), MESMO que CPL esteja dentro da meta ou
+   CTR esteja ok. Classifique no MINIMO ATENCAO. A acao e sobre o CRIATIVO (revisar/trocar o
+   gancho dos 3 primeiros segundos) — NUNCA proponha trocar publico ou mexer em orcamento por
+   causa de hook baixo, isso e responsabilidade de outro nivel (ver MAPA DE RESPONSABILIDADE).
+   25-45%: hook mediano — olhe os quartis abaixo antes de concluir.
+   >= 45%: hook bom — avance pra proxima camada, hook nao e a causa aqui.
+2. RETENCAO POR QUARTIL (video_p25_rate, video_p50_rate, video_p75_rate) — queda abrupta logo
+   apos o hook (ex: hook 50%, p25 8%) indica que a ABERTURA prende mas o MEIO do video perde a
+   pessoa (a promessa do gancho nao se sustenta). Queda gradual entre os quartis e natural, NAO
+   e problema.
+3. CTR — SO trate CTR como causa raiz quando hook e retencao (camadas 1-2) ja estao OK. Hook bom
+   + CTR baixo = a peca prende atencao mas a mensagem/CTA nao convence a clicar — aponte problema
+   de OFERTA, COPY ou CHAMADA PRA ACAO, NUNCA "criativo fraco" ou "hook" (ja validados OK acima).
+4. CPM — trate como CONSEQUENCIA do leilao/qualidade de publico, nunca como meta isolada a
+   perseguir. CPM alto com hook e CTR bons normalmente e concorrencia de leilao (sazonalidade,
+   nicho disputado), nao culpa da peca — nao recomende trocar criativo por CPM alto sozinho.
+5. TAXA DE CONVERSAO pos-clique (clique -> lead/formulario/conversa) — se CTR esta bom mas
+   poucos cliques viram resultado, o problema esta FORA do anuncio (pagina de destino,
+   formulario, velocidade de resposta no WhatsApp) — NAO recomende trocar criativo por isso, e
+   fora do escopo do anuncio (mencione como observacao, sem virar acao de pausar/trocar peca).
+6. CPL/CPA FINAL — e a CONSEQUENCIA acumulada das camadas 1-5, nunca o primeiro motivo citado
+   no veredito ou na acao de um criativo. Se o CPL esta ruim, a acao correta sempre aponta qual
+   das camadas acima e a causa raiz (hook? retencao? CTR/oferta? CPM/leilao? conversao
+   pos-clique?) — nunca feche o diagnostico so em "CPL acima da meta" sem dizer POR QUE.
+
+Anuncios SEM video (eh_video=false — imagem estatica, carrossel): pule as camadas 1 e 2, comece
+direto na camada 3 (CTR). NUNCA invente ou estime hook rate pra peca estatica; os campos vem
+null e devem ser ignorados na analise desse anuncio.
+Esta hierarquia vale SO pra nivel ANUNCIO. Conjunto e campanha nao tem retencao de video propria
+(e uma metrica de peca, nao de publico/estrutura) — julgue-os pelas regras normais deste prompt.
 
 ==================================================
 PASSO 2 — CRUZE METRICAS COM METAS
 ==================================================
-Compare: CPL atual vs cpl_ideal e cpl_maximo, volume de conversoes vs meta projetada, gasto vs orcamento.
+Compare: CPL atual vs cpl_ideal e cpl_maximo (somando apenas campanhas cujo resultado e
+lead/conversa), volume de conversoes vs meta projetada, gasto vs orcamento.
 Classifique a conta: SAUDAVEL (tudo dentro), ATENCAO (levemente fora), CRISE (muito fora ou CPL > cpr_emergencia).
 
 ==================================================
@@ -294,13 +1014,25 @@ Para cada no (campanha, conjunto, anuncio) devolva SOMENTE:
 - id: o id REAL do objeto (copie do payload, exato)
 - classificacao: "SAUDAVEL" (indo bem, sem acao) | "ATENCAO" (observar/ajustar) | "URGENTE" (agir ja)
 - veredito: 1 frase curta dizendo o estado ("CPL R$12, dentro da meta" / "CTR caindo 3 dias seguidos")
-- acao: SE classificacao = "SAUDAVEL", deixe "" (string vazia) — NAO escreva "manter", "monitorar" ou
-  qualquer texto, o painel nao exibe acao pra item saudavel e isso so gasta espaco. SE classificacao
-  for "ATENCAO" ou "URGENTE", escreva 1 frase curta e imperativa do que fazer especificamente nesse
-  objeto ("Pausar, criativo fadigado" / "Escalar orcamento +30%" / "Trocar apelo, CTR abaixo da media").
+- acao: SE classificacao = "ATENCAO" ou "URGENTE", escreva 1 frase curta e imperativa do que fazer
+  especificamente nesse objeto ("Pausar, criativo fadigado" / "Trocar apelo, CTR abaixo da media").
+  SE classificacao = "SAUDAVEL", HA DUAS SITUACOES:
+    (a) OPORTUNIDADE DE ESCALA — o item entrega o resultado do objetivo BEM e BARATO (custo por
+        resultado abaixo/na meta) E tem espaco pra crescer (frequencia baixa, orcamento nao
+        estourado, ainda nao saturado). Nesse caso ESCREVA a acao de crescimento com acao_tipo
+        "AJUSTAR_ORCAMENTO" e acao_parametros {"novo_orcamento_diario": <valor maior>}, ou
+        "ATIVAR" se for reativar algo bom que foi pausado sem motivo. Ex: "Escalar orcamento de
+        R$50 pra R$70/dia: traz conversa a R$3, bem abaixo da meta, e da pra investir mais".
+        Escalar o que ja funciona e a forma mais direta de MELHORAR O RESULTADO DO OBJETIVO.
+    (b) NADA A FAZER — vai bem mas sem espaco claro pra escalar (ou nao ha dado suficiente).
+        Ai sim deixe acao = "" e acao_tipo = "NENHUMA".
+  SEMPRE que a conta parecer "saudavel" no geral, PROCURE ATIVAMENTE onde da pra investir mais e
+  crescer o resultado — quase nunca uma conta com verba rodando esta 100% otimizada. Nao devolva
+  a conta inteira como "tudo certo" sem ter olhado se ha um conjunto/campanha campea pra escalar.
 
-O USUARIO SO QUER VER O QUE PRECISA DE AJUSTE. Nao gaste texto justificando o que ja esta bom —
-va direto ao ponto nos itens ATENCAO/URGENTE (qual objeto, qual problema, qual acao).
+O USUARIO QUER VER O QUE PRECISA DE ACAO: os PROBLEMAS (ATENCAO/URGENTE) E as OPORTUNIDADES de
+escala (SAUDAVEL que da pra crescer). Va direto ao ponto (qual objeto, qual acao). Nao gaste
+texto justificando o que esta bom E sem espaco pra crescer — esse fica com acao vazia.
 NAO repita metricas numericas no veredito alem do essencial — o painel ja mostra os numeros.
 NAO invente ids. NAO devolva metricas (gasto, ctr) nos nos — so id, classificacao, veredito, acao.
 
@@ -320,13 +1052,147 @@ LINGUAGEM DA ACAO — escreva como gestor experiente falando com outro gestor, n
   manter so os 2 ativos com conversao". Nos anuncios individuais dentro desse caso, a acao
   pode ser so a instrucao pontual e curta ("Deletar, pausado sem entrega") sem repetir a
   explicacao inteira que ja esta no conjunto.
+MAPA DE RESPONSABILIDADE POR NIVEL (nunca conflar causa de um nivel com acao de outro):
+| Nivel    | Pode explicar                                              | NAO pode explicar               |
+| Anuncio  | qualidade da peca, copy, formato, hook, CTR individual     | saturacao de publico, orcamento |
+| Conjunto | publico, segmentacao, frequencia, orcamento, saturacao     | qualidade de peca especifica    |
+| Campanha | estrategia geral, estrutura, canibalizacao entre irmaos    | performance de peca especifica  |
+
+Regra anti-conflacao: NUNCA recomende acao de nivel X para um problema diagnosticado com metrica
+de nivel Y. Ex: "frequencia alta" (metrica de conjunto) NAO justifica trocar UM criativo; "CTR
+baixo de um anuncio especifico com frequencia baixa" (metrica de anuncio) NAO justifica pausar o
+conjunto inteiro. Se os sinais entre niveis CONFLITAREM (ex: conjunto no agregado ok, mas 1
+anuncio ruim; ou anuncio ok mas conjunto saturado), NAO escolha a explicacao mais simples —
+diagnostique no nivel correto e marque confianca_item = "media" se a atribuicao for ambigua.
+
+Contexto do irmao (compare cada no com seus PARES do mesmo pai antes de decidir):
+- Ao avaliar um ANUNCIO, olhe os outros anuncios do MESMO conjunto. Um fraco no meio de varios
+  bons = fadiga/qualidade daquela PECA -> acao no anuncio (trocar criativo). NAO mexa no conjunto.
+- Se TODOS os anuncios do conjunto estao caindo juntos E a frequencia esta alta = fadiga de
+  PUBLICO -> acao no conjunto (trocar publico / reduzir frequencia). NAO fique trocando peca por peca.
+- Ao avaliar um CONJUNTO, olhe os conjuntos irmaos da mesma campanha: dois conjuntos disputando o
+  mesmo publico (canibalizacao) e problema de CAMPANHA, nao de um conjunto isolado.
+
 Regras de classificacao:
-- Conjunto/anuncio SAUDAVEL: CTR estavel/subindo + CPL dentro + rankings medios ou acima.
-- ATENCAO: CTR caindo OU 1 ranking Below Average OU CPL levemente acima.
-- URGENTE: multiplos rankings Below Average OU frequencia alta + CTR caindo OU CPL > cpl_maximo.
+- Anuncio de VIDEO (eh_video=true): aplique primeiro a HIERARQUIA DE JULGAMENTO DO CRIATIVO
+  acima (hook -> quartil -> CTR -> CPM -> conversao -> CPL). hook_rate < 25% JA classifica no
+  minimo ATENCAO, independente do restante.
+- Anuncio SAUDAVEL (video com hook ok, ou estatico): CTR estavel/subindo + CPL dentro + rankings
+  medios ou acima.
+- ATENCAO: hook_rate 25-45% OU CTR caindo OU 1 ranking Below Average OU CPL levemente acima.
+- URGENTE: hook_rate < 25% com CPL tambem acima do maximo, OU multiplos rankings Below Average,
+  OU frequencia alta + CTR caindo, OU CPL > cpl_maximo.
+- Conjunto/campanha: mesmas regras de CTR/ranking/CPL de sempre — retencao de video NAO se aplica
+  a esses niveis (ver HIERARQUIA DE JULGAMENTO DO CRIATIVO acima).
 - Nao classifique como URGENTE nada com menos de min_dias_aprendizado dias (esta aprendendo).
-- Para objetivo != leads, nao use CPL como criterio (siga o PASSO 1).
-Campanha: classifique pelo pior conjunto relevante + alinhamento com o objetivo da conta.
+- CPL/custo por conversa como criterio SO em campanha cujo proprio objetivo e leads/conversas
+  (siga o PASSO 1). Campanha de vendas julga por CPA/ROAS; trafego por CPC/CTR.
+Campanha: classifique pelo pior conjunto relevante + entrega do SEU proprio objetivo.
+
+==================================================
+TESTE JUSTO — GASTO MINIMO ANTES DE JULGAR "SEM RESULTADO" (regra critica)
+==================================================
+"0 conversao" SO e sinal de problema se o objeto teve VERBA SUFICIENTE pra ter tido chance
+real de converter. Gasto de R$3, R$5, R$10 com 0 resultado nao e "criativo ruim" nem "conjunto
+morto" — e AUSENCIA DE DADO. Julgar isso como URGENTE ou mandar pausar e alarme falso.
+- Referencia de gasto minimo pra julgar 0 conversao como falha real: ~2x o cpl_maximo (ou
+  cpl_ideal se nao houver maximo) da campanha. Sem meta de CPL definida, use um piso de
+  aproximadamente R$25-30 de gasto acumulado no objeto.
+- Abaixo desse piso: classifique NO MAXIMO como ATENCAO (nunca URGENTE), a acao deve ser
+  "Verificar" ou "Aguardar mais dados" (acao_tipo="VERIFICAR_MANUAL"), NUNCA "Pausar" por
+  falta de resultado. Se houver outro motivo real pra pausar (ranking Below Average claro,
+  frequencia alta, etc.) mesmo com pouco gasto, ai sim pode indicar pausar — mas pelo motivo
+  real, nunca so por "0 conversao com gasto baixo".
+- So recomende "Pausar por falta de resultado" quando o gasto acumulado no objeto JA passou
+  desse piso minimo E ainda assim nao converteu nada (ou converteu bem menos que o esperado
+  pro gasto). Cite o gasto real na acao pra deixar isso auditavel (ex: "Pausar: R$47 gastos,
+  0 conversao, 2x o piso de teste sem nenhum resultado").
+- confianca_item: marque "baixa" sempre que a decisao se apoiar em volume de dados pequeno
+  (poucos dias ativo, gasto perto do piso, poucas impressoes). Confianca baixa faz o painel
+  pedir revisao humana antes de aplicar a acao — e o comportamento correto quando o dado e fraco.
+
+ACOES ESPECIFICAS, NAO GENERICAS:
+- "Pausar" sozinho, sem motivo tecnico, e uma acao fraca. Toda acao de pausar/reduzir deve
+  dizer O PORQUE tecnico (ranking, frequencia, tendencia, CPL vs meta) — nunca so "gasta sem
+  resultado" quando o motivo real e outro (publico errado, criativo cansado, fora do momento).
+- Antes de mandar "Pausar" um criativo/conjunto caro, pense se existe alternativa mais util:
+  "Testar novo criativo" (fadiga/ranking ruim mas publico bom), "Reduzir orcamento pela metade"
+  (ainda merece rodar, so com menos risco), "Trocar publico" (CTR ok mas conversao fraca —
+  pode ser o publico, nao o anuncio), antes de simplesmente desligar. So recomende pausar puro
+  quando nao houver ajuste mais barato que valha a pena tentar primeiro.
+
+==================================================
+PASSO 3.4 — CAMPOS ESTRUTURADOS POR NO (OBRIGATORIOS em todo no ATENCAO/URGENTE)
+==================================================
+Alem de classificacao/veredito/acao, preencha em CADA no (campanha, conjunto, anuncio):
+- "acao_tipo": o TIPO executavel da acao. Um destes:
+    "PAUSAR"            -> desligar o objeto (criativo fadigado, conjunto ruim etc.)
+    "ATIVAR"            -> religar objeto pausado (SO se o PASSO 3.5 permitir)
+    "AJUSTAR_ORCAMENTO" -> mudar orcamento diario (SO em conjunto/adset)
+    "TROCAR_CRIATIVO"   -> exige criativo novo (nao ha botao automatico; e trabalho manual)
+    "VERIFICAR_MANUAL"  -> precisa checagem humana antes de decidir (ex: por que foi pausado)
+    "NENHUMA"           -> use SEMPRE quando classificacao = "SAUDAVEL"
+  Escolha o tipo que corresponde EXATAMENTE ao texto de "acao". Se a acao fala "Pausar",
+  acao_tipo = "PAUSAR". Se fala "Escalar/Reduzir orcamento", = "AJUSTAR_ORCAMENTO".
+- "acao_parametros": objeto com os parametros da acao. Para AJUSTAR_ORCAMENTO inclua
+    {"novo_orcamento_diario": <valor em BRL>}. Para os demais tipos, {}.
+- "confianca_item": "alta" | "media" | "baixa" — sua confianca NAQUELA acao especifica,
+    considerando volume de dados e dias ativos. Use "baixa" quando faltam dados ou o objeto
+    esta em aprendizado; isso faz o painel exigir revisao humana antes de aplicar.
+- "depende_de": id de OUTRO objeto (desta mesma analise) que precisa ser resolvido ANTES
+    desta acao (ex: so reduzir orcamento da campanha depois de pausar o conjunto ruim). Se
+    nao houver dependencia, null.
+- "padrao": chave canonica curta em snake_case do problema, para agrupar o MESMO caso entre
+    varias contas (ex: "criativo_fadiga_ranking_conversao", "conjunto_cpl_acima_maximo",
+    "orcamento_subentrega"). Use a MESMA string sempre que o padrao se repetir. Se for um caso
+    unico/especifico, null.
+- "motivos": array de 2 a 4 strings curtas, cada uma um FATO ja com o julgamento embutido
+    (numero + comparacao), nunca so o numero cru. Cada item vira uma linha no card, visivel
+    direto (sem o usuario precisar abrir painel nenhum). Escreva como quem ja fez a conta:
+    - ERRADO: "CPL: R$9,20" (falta o julgamento — bom ou ruim?).
+    - CERTO: "Custava R$9,20 por conversa — a meta e R$20" (fato + comparacao interpretada).
+    - CERTO: "Parou de rodar ha 6 dias, sem motivo cadastrado".
+    - CERTO: "Conteudo ainda faz sentido — nao e campanha sazonal vencida".
+    Em nos SAUDAVEL sem acao (acao=""), motivos = [].
+Em nos SAUDAVEL sem oportunidade de crescer: acao_tipo="NENHUMA", acao_parametros={}, confianca_item="alta", depende_de=null, padrao=null, motivos=[].
+
+==================================================
+REGRA DE GRANULARIDADE — 1 OBJETO, 1 ACAO POR NO (regra critica)
+==================================================
+Cada no em analise_campanhas[] (seja campanha, conjunto ou anuncio) representa UM UNICO objeto
+e DEVE descrever UMA UNICA acao executavel — um acao_tipo, um conjunto de acao_parametros. NUNCA
+combine multiplas acoes sobre multiplos objetos diferentes em um so no, mesmo que pareçam parte
+de uma mesma estrategia (ex: "reativar o anuncio X, pausar o conjunto Y e reduzir o orcamento do
+conjunto Z" NUNCA vai num unico "acao" de campanha). O campo "acao" descreve so UMA acao — nunca
+uma lista separada por virgula, ponto-e-virgula ou " e ".
+
+Se voce identificar que VARIOS objetos da mesma campanha precisam de acao, gere um NO SEPARADO
+de recomendacao para CADA objeto — cada um no seu proprio nivel na arvore (o anuncio recebe sua
+propria entrada em "anuncios", o conjunto sua propria entrada em "conjuntos", etc.), usando
+"depende_de" para expressar relacao de ORDEM entre eles quando a sequencia importar (ex: so
+reduzir orcamento da campanha depois que o conjunto ruim foi pausado). Se nao houver ordem
+obrigatoria entre eles, depende_de fica null em ambos — sao decisoes independentes, cada uma
+com seu proprio card na fila.
+
+ERRADO (um no bundlando 3 acoes sobre 3 objetos):
+{ "id": "camp_500", "classificacao": "URGENTE",
+  "acao": "Reativar o anuncio Dra 05, pausar o conjunto Publico Frio e reduzir o orcamento do conjunto Remarketing",
+  "acao_tipo": "ATIVAR", "acao_parametros": {} }
+  -> ERRADO porque mistura 3 objetos (1 anuncio + 2 conjuntos) e 3 verbos numa unica "acao".
+
+CERTO (3 nos separados, cada um com seu proprio objeto e uma unica acao):
+anuncio: { "id": "ad_dra05", "classificacao": "URGENTE",
+  "acao": "Reativar: custava R$9,20 por conversa, bem abaixo da meta de R$20; parou sem motivo cadastrado",
+  "acao_tipo": "ATIVAR", "acao_parametros": {}, "depende_de": null }
+conjunto: { "id": "adset_frio", "classificacao": "ATENCAO",
+  "acao": "Pausar: publico frio nao converte ha 12 dias, verba rende mais no publico quente",
+  "acao_tipo": "PAUSAR", "acao_parametros": {}, "depende_de": null }
+conjunto: { "id": "adset_remkt", "classificacao": "ATENCAO",
+  "acao": "Reduzir orcamento de R$80 pra R$40/dia apos pausar o publico frio, pra nao dobrar o gasto total",
+  "acao_tipo": "AJUSTAR_ORCAMENTO", "acao_parametros": { "novo_orcamento_diario": 40 }, "depende_de": "adset_frio" }
+  -> CERTO: 3 decisoes independentes na fila; a reducao de orcamento so faz sentido depois da
+     pausa do publico frio, por isso depende_de aponta pra ela. A reativacao do anuncio nao
+     depende de nada, pode ser decidida a qualquer momento.
 
 ==================================================
 PASSO 3.5 — CONTEXTO TEMPORAL E CAUTELA AO REATIVAR (regra critica)
@@ -387,18 +1253,36 @@ ESTRUTURA DO JSON DE SAIDA (retorne exatamente este schema):
       "classificacao": "SAUDAVEL | ATENCAO | URGENTE",
       "veredito": "1 frase curta",
       "acao": "1 frase imperativa curta",
+      "acao_tipo": "PAUSAR | ATIVAR | AJUSTAR_ORCAMENTO | TROCAR_CRIATIVO | VERIFICAR_MANUAL | NENHUMA",
+      "acao_parametros": {},
+      "confianca_item": "alta | media | baixa",
+      "depende_de": null,
+      "padrao": null,
+      "motivos": ["motivo curto ja interpretado", "motivo curto ja interpretado"],
       "conjuntos": [
         {
           "id": "id_real_do_conjunto",
           "classificacao": "SAUDAVEL | ATENCAO | URGENTE",
           "veredito": "1 frase curta",
           "acao": "1 frase imperativa curta",
+          "acao_tipo": "PAUSAR | ATIVAR | AJUSTAR_ORCAMENTO | TROCAR_CRIATIVO | VERIFICAR_MANUAL | NENHUMA",
+          "acao_parametros": {},
+          "confianca_item": "alta | media | baixa",
+          "depende_de": null,
+          "padrao": null,
+          "motivos": ["motivo curto ja interpretado", "motivo curto ja interpretado"],
           "anuncios": [
             {
               "id": "id_real_do_anuncio",
               "classificacao": "SAUDAVEL | ATENCAO | URGENTE",
               "veredito": "1 frase curta",
-              "acao": "1 frase imperativa curta"
+              "acao": "1 frase imperativa curta",
+              "acao_tipo": "PAUSAR | ATIVAR | AJUSTAR_ORCAMENTO | TROCAR_CRIATIVO | VERIFICAR_MANUAL | NENHUMA",
+              "acao_parametros": {},
+              "confianca_item": "alta | media | baixa",
+              "depende_de": null,
+              "padrao": null,
+              "motivos": ["motivo curto ja interpretado", "motivo curto ja interpretado"]
             }
           ]
         }
@@ -430,13 +1314,102 @@ ESTRUTURA DO JSON DE SAIDA (retorne exatamente este schema):
   ],
   "confianca": "alta | media | baixa",
   "observacao": "string ou null"
-}`;
 }
 
-type IaVerdict = { classificacao: OptimizerVerdict; veredito: string; acao: string };
+==================================================
+EXEMPLOS COMPLETOS (few-shot) — estude o raciocinio, nao copie os numeros
+==================================================
+Os dois exemplos abaixo mostram o payload de ENTRADA (resumido, so os campos que importam pro
+diagnostico) e a SAIDA JSON correta. Aprenda o RACIOCINIO: em que nivel esta a causa, em que
+nivel vai a acao, e quando NAO alarmar. Os numeros sao ficticios.
+
+--- EXEMPLO A: conflito entre niveis (conjunto saudavel, 1 anuncio ruim dentro) ---
+ENTRADA (resumo):
+{ "metas": { "objetivo_principal": "leads", "cpl_ideal": 20, "cpl_maximo": 30 },
+  "periodo_analise": { "data_fim": "2026-07-06", "dias": 14 },
+  "campanhas": [ { "id": "camp_100", "nome": "Leads - Consulta Odonto", "objetivo": "OUTCOME_LEADS",
+    "status": "ACTIVE", "gasto": 820, "conversoes": 41, "cpl": 20.0, "ctr": 1.4,
+    "conjuntos": [ { "id": "adset_200", "nome": "Publico Amplo 25-45", "status": "ACTIVE",
+      "frequencia": 1.6, "gasto": 820, "conversoes": 41, "cpl": 20.0, "ctr": 1.4, "dias_ativo": 21,
+      "ctr_tendencia_4d": "ESTAVEL", "anuncios": [
+        { "id": "ad_301", "nome": "AD Video Depoimento", "gasto": 540, "conversoes": 34, "cpl": 15.9, "ctr": 2.1, "dias_ativo": 21, "quality_ranking": "ABOVE_AVERAGE", "engagement_ranking": "ABOVE_AVERAGE", "conversion_ranking": "AVERAGE" },
+        { "id": "ad_302", "nome": "AD Imagem Promo", "gasto": 280, "conversoes": 7, "cpl": 40.0, "ctr": 0.5, "dias_ativo": 21, "quality_ranking": "BELOW_AVERAGE", "engagement_ranking": "BELOW_AVERAGE", "conversion_ranking": "BELOW_AVERAGE" } ] } ] } ] }
+POR QUE: o conjunto no agregado esta SAUDAVEL (frequencia 1,6 baixa, CPL R$20 na meta) — o video
+carrega o resultado. O problema esta ISOLADO no anuncio ad_302 (CTR 0,5%, 3 rankings Below Average,
+frequencia baixa = culpa da PECA, nao do publico). Pausar o conjunto mataria o video que vai bem.
+Acao no nivel certo: trocar o criativo do ad_302; conjunto fica intacto.
+SAIDA:
+{ "estado_da_conta": "ATENCAO",
+  "resumo_executivo": "Conta entregando leads a R$20, na meta. O conjunto vai bem no agregado (frequencia baixa, publico saudavel), mas o anuncio 'AD Imagem Promo' puxa o custo pra cima (CPL R$40, CTR 0,5%, rankings baixos) enquanto o video segura o resultado. Trocar so essa peca, sem mexer no conjunto.",
+  "analise_campanhas": [ { "id": "camp_100", "classificacao": "ATENCAO", "veredito": "CPL medio na meta; 1 anuncio fraco dentro de um conjunto bom", "acao": "Renovar a peca fraca do conjunto; estrutura ok", "acao_tipo": "VERIFICAR_MANUAL", "acao_parametros": {}, "confianca_item": "alta", "depende_de": null, "padrao": null,
+    "conjuntos": [ { "id": "adset_200", "classificacao": "SAUDAVEL", "veredito": "Frequencia 1,6 e CPL R$20 na meta; publico saudavel", "acao": "", "acao_tipo": "NENHUMA", "acao_parametros": {}, "confianca_item": "alta", "depende_de": null, "padrao": null,
+      "anuncios": [
+        { "id": "ad_301", "classificacao": "SAUDAVEL", "veredito": "CTR 2,1% e CPL R$16, melhor peca do conjunto", "acao": "", "acao_tipo": "NENHUMA", "acao_parametros": {}, "confianca_item": "alta", "depende_de": null, "padrao": null },
+        { "id": "ad_302", "classificacao": "URGENTE", "veredito": "CTR 0,5% e 3 rankings Below Average com frequencia baixa; e a peca, nao o publico", "acao": "Trocar criativo: peca com CTR 0,5% e rankings baixos, sem sinal de saturacao de publico", "acao_tipo": "TROCAR_CRIATIVO", "acao_parametros": {}, "confianca_item": "alta", "depende_de": null, "padrao": "criativo_fraco_ranking_below_average" } ] } ] } ],
+  "cruzamento_com_metas": { "status_cpl": "DENTRO", "status_volume": "NO_RITMO", "status_orcamento": "OK" },
+  "acoes_automaticas": [], "confianca": "alta", "observacao": null }
+
+--- EXEMPLO B: nome sazonal vencido (nao reativar) + dependencia entre nos ---
+ENTRADA (resumo): hoje = 2026-07-06.
+{ "metas": { "objetivo_principal": "leads", "cpl_ideal": 20, "cpl_maximo": 30 },
+  "periodo_analise": { "data_fim": "2026-07-06", "dias": 30 },
+  "observacoes_gestor": "camp_BF teve CPL historico de R$6 quando rodou em nov/2025",
+  "campanhas": [
+    { "id": "camp_BF", "nome": "Black Friday 2025 - Ofertas", "objetivo": "OUTCOME_LEADS", "status": "PAUSED",
+      "gasto": 0, "conversoes": 0, "cpl": null, "ctr": 0,
+      "conjuntos": [ { "id": "adset_BF1", "nome": "Compradores BF", "status": "ADSET_PAUSED", "gasto": 0, "conversoes": 0, "cpl": null, "ctr": 0, "dias_ativo": null, "anuncios": [] } ] },
+    { "id": "camp_JUL", "nome": "Aquecimento Julho - Leads", "objetivo": "OUTCOME_LEADS", "status": "ACTIVE",
+      "orcamento_diario": 50, "gasto": 640, "conversoes": 45, "cpl": 14.2, "ctr": 1.8,
+      "conjuntos": [ { "id": "adset_JUL1", "nome": "Lookalike Leads 1%", "status": "ACTIVE", "frequencia": 1.5, "orcamento_diario": 50, "gasto": 640, "conversoes": 45, "cpl": 14.2, "ctr": 1.8, "dias_ativo": 18, "ctr_tendencia_4d": "SUBINDO", "anuncios": [] } ] } ] }
+POR QUE: camp_BF tem CPL historico otimo (R$6) e da vontade de religar — MAS o nome e de Black
+Friday (nov/2025) e hoje e julho/2026: conteudo/oferta vencidos. NUNCA reativar; arquivar. Como
+esta PAUSED com R$0/0, isso e esperado, nao urgencia. camp_JUL vai bem e barato (CPL R$14 < meta
+R$20, frequencia 1,5, CTR subindo) = oportunidade de escalar. Mas escalar SO depois de arquivar a
+camp_BF: se ela religar sozinha, disputa o mesmo publico de leads no leilao. Por isso a escalada
+de adset_JUL1 tem depende_de = "camp_BF".
+SAIDA:
+{ "estado_da_conta": "ATENCAO",
+  "resumo_executivo": "camp_BF (Black Friday 2025) esta pausada e fora de epoca — arquivar, nunca reativar mesmo com CPL historico bom. camp_JUL entrega lead a R$14, abaixo da meta de R$20, com frequencia baixa e CTR subindo: da pra escalar de R$50 pra R$65/dia, mas so depois de arquivar a BF pra nao competir no leilao pelo mesmo publico.",
+  "analise_campanhas": [
+    { "id": "camp_BF", "classificacao": "ATENCAO", "veredito": "Campanha de Black Friday (nov/2025) pausada, fora de epoca", "acao": "Arquivar: oferta de Black Friday vencida; nao reativar apesar do CPL historico bom", "acao_tipo": "VERIFICAR_MANUAL", "acao_parametros": {}, "confianca_item": "alta", "depende_de": null, "padrao": "campanha_sazonal_vencida",
+      "conjuntos": [ { "id": "adset_BF1", "classificacao": "SAUDAVEL", "veredito": "Pausado com R$0/0, coerente com a campanha parada", "acao": "", "acao_tipo": "NENHUMA", "acao_parametros": {}, "confianca_item": "alta", "depende_de": null, "padrao": null, "anuncios": [] } ] },
+    { "id": "camp_JUL", "classificacao": "SAUDAVEL", "veredito": "CPL R$14 abaixo da meta, CTR subindo; campeao pra escalar", "acao": "Escalar orcamento de R$50 pra R$65/dia apos arquivar a campanha de Black Friday", "acao_tipo": "AJUSTAR_ORCAMENTO", "acao_parametros": { "novo_orcamento_diario": 65 }, "confianca_item": "media", "depende_de": "camp_BF", "padrao": "oportunidade_escala_cpl_abaixo_meta",
+      "conjuntos": [ { "id": "adset_JUL1", "classificacao": "SAUDAVEL", "veredito": "Lookalike a R$14/lead, frequencia 1,5, CTR subindo", "acao": "Escalar orcamento de R$50 pra R$65/dia; ainda tem folga sem saturar", "acao_tipo": "AJUSTAR_ORCAMENTO", "acao_parametros": { "novo_orcamento_diario": 65 }, "confianca_item": "media", "depende_de": "camp_BF", "padrao": "oportunidade_escala_cpl_abaixo_meta", "anuncios": [] } ] } ],
+  "cruzamento_com_metas": { "status_cpl": "DENTRO", "status_volume": "NO_RITMO", "status_orcamento": "OK" },
+  "acoes_automaticas": [], "confianca": "media", "observacao": "Arquivar a camp_BF nao e acao automatizavel (nao e pausar/ativar/orcamento) — vai como VERIFICAR_MANUAL pro gestor." }`;
+}
+
+type IaVerdict = {
+  classificacao: OptimizerVerdict;
+  veredito: string;
+  acao: string;
+  acao_tipo: OptimizerNodeAcaoTipo;
+  acao_parametros: Record<string, unknown>;
+  confianca_item: OptimizerConfidence;
+  depende_de: string | null;
+  padrao: string | null;
+  motivos: string[];
+};
 
 function normVerdict(v: unknown): OptimizerVerdict {
   return (['SAUDAVEL', 'ATENCAO', 'URGENTE'] as const).includes(v as never) ? v as OptimizerVerdict : 'ATENCAO';
+}
+
+function normMotivos(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return v.map((m) => String(m ?? '').trim()).filter(Boolean).slice(0, 4);
+}
+
+// Verbos de ação típicos, para detectar card "multi-ação" (bundlando vários objetos/ações
+// num único nó — bug real já visto em produção: "reativar X, pausar Y e reduzir Z"). Heurística
+// determinística de segurança, independente do prompt seguir a regra de granularidade ou não —
+// mesmo padrão de proteção do piso de gasto mínimo (ver gastoMinimoParaJulgar em buildRecomendacoes).
+const VERBOS_ACAO = ['pausar', 'ativar', 'reativar', 'reduzir', 'aumentar', 'escalar', 'trocar', 'consolidar', 'deletar', 'excluir', 'arquivar'];
+function pareceMultiAcao(acao: string): boolean {
+  const t = (acao ?? '').toLowerCase();
+  if (!t) return false;
+  const verbosEncontrados = VERBOS_ACAO.filter((v) => new RegExp(`\\b${v}\\w*`).test(t));
+  return verbosEncontrados.length > 1;
 }
 
 // Achata a árvore de vereditos da IA em um mapa por id (aceita nesting variável e
@@ -446,10 +1419,24 @@ function collectIaVerdicts(iaCampanhas: unknown): Map<string, IaVerdict> {
   const put = (id: unknown, o: Record<string, unknown>) => {
     const key = String(id ?? '');
     if (!key) return;
+    const acaoTexto = String(o.acao ?? o.acao_recomendada ?? '');
+    // Trava anti-conflação: se o texto da ação parece bundlar vários objetos/verbos num nó só,
+    // não confia na execução automática — rebaixa confiança e força revisão humana. Isso vale
+    // mesmo se a IA ignorar a regra de granularidade do PASSO 3.4 (dupla proteção).
+    const multiAcaoDetectada = pareceMultiAcao(acaoTexto);
+    if (multiAcaoDetectada) {
+      console.warn('[otimizador][anti-conflacao] possível card multi-ação detectado:', key, '-', acaoTexto);
+    }
     map.set(key, {
       classificacao: normVerdict(o.classificacao),
       veredito: String(o.veredito ?? o.diagnostico ?? ''),
-      acao: String(o.acao ?? o.acao_recomendada ?? ''),
+      acao: acaoTexto,
+      acao_tipo: multiAcaoDetectada ? 'VERIFICAR_MANUAL' : normNodeAcaoTipo(o.acao_tipo),
+      acao_parametros: (o.acao_parametros && typeof o.acao_parametros === 'object') ? o.acao_parametros as Record<string, unknown> : {},
+      confianca_item: multiAcaoDetectada ? 'baixa' : normConfidence(o.confianca_item),
+      depende_de: o.depende_de != null && String(o.depende_de).trim() ? String(o.depende_de) : null,
+      padrao: o.padrao != null && String(o.padrao).trim() ? String(o.padrao) : null,
+      motivos: normMotivos(o.motivos),
     });
   };
   if (!Array.isArray(iaCampanhas)) return map;
@@ -467,17 +1454,71 @@ function collectIaVerdicts(iaCampanhas: unknown): Map<string, IaVerdict> {
   return map;
 }
 
+// WhatsApp na Meta: campanhas de conversa vêm como OUTCOME_ENGAGEMENT, mas os conjuntos
+// otimizam para CONVERSATIONS/REPLIES. Sem isto, objetivoInfo rotula "Engajamento" e o card
+// fala em "perder engajamento" numa campanha cujo resultado real são conversas iniciadas.
+// ATENÇÃO à grafia: /api/campaigns traduz OUTCOME_ENGAGEMENT para "engajamento" (com J) —
+// o teste precisa cobrir as DUAS grafias (bug real: /engag/ nunca casava com a string pt).
+function objetivoEfetivoCampanha(camp: OptimizerCampaignV2): string {
+  if (!/engag|engaj/i.test(camp.objetivo)) return camp.objetivo;
+  const conjuntosOtimizamConversa = (camp.conjuntos ?? [])
+    .some((c) => /conversation|messag|replies/i.test(c.objetivo_otimizacao ?? ''));
+  // Fallback pelo NOME: análises do cron não baixam conjuntos (fetchConjuntos=false), então
+  // o sinal de otimização não existe — o padrão de nomenclatura da agência ([WPP], whats, zap)
+  // é o melhor indício disponível de que a campanha de "engajamento" é de conversas.
+  const nomeIndicaWhatsApp = /wpp|whats|\bzap\b/i.test(camp.nome ?? '');
+  return (conjuntosOtimizamConversa || nomeIndicaWhatsApp) ? 'CONVERSAS_WHATSAPP' : camp.objetivo;
+}
+
+// Piso de hook rate (retenção nos 3s) abaixo do qual o problema É a peça, independente do
+// que a IA concluiu — trava determinística (mesmo espírito de pareceMultiAcao), pois a IA
+// pode ignorar a hierarquia do prompt. Ver hierarquia: hook > quartil > CTR > CPM > conversão > CPL.
+const HOOK_RATE_CRITICO = 25;
+
+// Se o hook rate do criativo está abaixo do piso, força classificação mínima ATENCAO (ou
+// URGENTE se o CPL também já estourou o máximo) e injeta o motivo de retenção NA FRENTE dos
+// demais — sem apagar o diagnóstico da IA quando ele já existe. Só escreve ação/tipo sintéticos
+// quando a IA não tinha marcado nenhuma ação pro criativo (SAUDAVEL sem oportunidade de escala).
+function aplicarPisoHookRate(ad: OptimizerAnaliseAnuncio, cplMaximo: number | null): OptimizerAnaliseAnuncio {
+  if (!ad.eh_video || ad.video_hook_rate == null || ad.video_hook_rate >= HOOK_RATE_CRITICO) return ad;
+
+  const hook = ad.video_hook_rate;
+  const cplEstourado = cplMaximo != null && ad.cpl != null && ad.cpl > cplMaximo;
+  const severidadeMinima: OptimizerVerdict = cplEstourado ? 'URGENTE' : 'ATENCAO';
+  const rank: Record<OptimizerVerdict, number> = { SAUDAVEL: 0, ATENCAO: 1, URGENTE: 2 };
+  const classificacaoFinal = rank[ad.classificacao] >= rank[severidadeMinima] ? ad.classificacao : severidadeMinima;
+
+  const fracao = hook < 10 ? 'quase todo mundo' : hook < 20 ? 'a grande maioria' : 'boa parte das pessoas';
+  const hookMotivo = `Retenção nos 3s: ${hook.toFixed(0)}% — ${fracao} descarta o vídeo antes da mensagem começar`;
+
+  const jaTemAcao = ad.acao?.trim().length > 0;
+  return {
+    ...ad,
+    classificacao: classificacaoFinal,
+    acao: jaTemAcao ? ad.acao : `Revisar criativo: hook rate de ${hook.toFixed(0)}%, abaixo do piso de ${HOOK_RATE_CRITICO}%`,
+    acao_tipo: jaTemAcao ? ad.acao_tipo : 'VERIFICAR_MANUAL',
+    confianca_item: jaTemAcao ? ad.confianca_item : 'media',
+    padrao: jaTemAcao ? ad.padrao : 'criativo_hook_baixo',
+    motivos: [hookMotivo, ...ad.motivos.filter((m) => !/retenç|hook/i.test(m))].slice(0, 4),
+  };
+}
+
 // Monta a árvore campanha→conjunto→anúncio: métricas do PAYLOAD (verdade), veredito da IA.
 function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown): OptimizerAnaliseCampanha[] {
   const verdicts = collectIaVerdicts(iaCampanhas);
-  const fallback: IaVerdict = { classificacao: 'ATENCAO', veredito: '', acao: '' };
+  const fallback: IaVerdict = {
+    classificacao: 'ATENCAO', veredito: '', acao: '',
+    acao_tipo: 'NENHUMA', acao_parametros: {}, confianca_item: 'media', depende_de: null, padrao: null, motivos: [],
+  };
   const vOf = (id: string) => verdicts.get(id) ?? fallback;
+  const cplMaximo = payload.metas?.cpl_maximo ?? null;
   return (payload.campanhas ?? []).map((camp) => {
     const cv = vOf(camp.id);
     return {
       id: camp.id,
       nome: camp.nome,
-      objetivo: camp.objetivo,
+      status_entrega: camp.status ?? null,
+      objetivo: objetivoEfetivoCampanha(camp),
       gasto: Number(camp.gasto) || 0,
       conversoes: Number(camp.conversoes) || 0,
       cpl: camp.cpl,
@@ -486,11 +1527,18 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
       classificacao: cv.classificacao,
       veredito: cv.veredito,
       acao: cv.acao,
+      acao_tipo: cv.acao_tipo,
+      acao_parametros: cv.acao_parametros,
+      confianca_item: cv.confianca_item,
+      depende_de: cv.depende_de,
+      padrao: cv.padrao,
+      motivos: cv.motivos,
       conjuntos: (camp.conjuntos ?? []).map((cj) => {
         const jv = vOf(cj.id);
         return {
           id: cj.id,
           nome: cj.nome,
+          status_entrega: cj.status ?? null,
           gasto: Number(cj.gasto) || 0,
           conversoes: Number(cj.conversoes) || 0,
           cpl: cj.cpl,
@@ -500,11 +1548,18 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
           classificacao: jv.classificacao,
           veredito: jv.veredito,
           acao: jv.acao,
+          acao_tipo: jv.acao_tipo,
+          acao_parametros: jv.acao_parametros,
+          confianca_item: jv.confianca_item,
+          depende_de: jv.depende_de,
+          padrao: jv.padrao,
+          motivos: jv.motivos,
           anuncios: (cj.anuncios ?? []).map((ad) => {
             const av = vOf(ad.id);
-            return {
+            return aplicarPisoHookRate({
               id: ad.id,
               nome: ad.nome,
+              status_entrega: ad.status ?? null,
               gasto: Number(ad.gasto) || 0,
               conversoes: Number(ad.conversoes) || 0,
               cpl: ad.cpl,
@@ -512,10 +1567,21 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
               quality_ranking: ad.quality_ranking,
               engagement_ranking: ad.engagement_ranking,
               conversion_ranking: ad.conversion_ranking,
+              eh_video: ad.eh_video,
+              video_hook_rate: ad.video_hook_rate,
+              video_p25_rate: ad.video_p25_rate,
+              video_p50_rate: ad.video_p50_rate,
+              video_p75_rate: ad.video_p75_rate,
               classificacao: av.classificacao,
               veredito: av.veredito,
               acao: av.acao,
-            };
+              acao_tipo: av.acao_tipo,
+              acao_parametros: av.acao_parametros,
+              confianca_item: av.confianca_item,
+              depende_de: av.depende_de,
+              padrao: av.padrao,
+              motivos: av.motivos,
+            }, cplMaximo);
           }),
         };
       }),

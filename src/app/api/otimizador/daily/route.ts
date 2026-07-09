@@ -7,6 +7,7 @@ import {
   type OptimizerClientInput,
   type OptimizerPeriodKey,
 } from '@/lib/optimizer';
+import { optimizerDateRangeForPeriod } from '@/lib/optimizer-period-range';
 
 export const maxDuration = 60;
 
@@ -21,18 +22,8 @@ type PlanningRow = {
 
 const BUDGET_MS = 52_000;
 
-function isoDate(daysAgo: number): string {
-  const date = new Date();
-  date.setDate(date.getDate() - daysAgo);
-  return date.toISOString().split('T')[0];
-}
-
 function rangeForPeriod(period: OptimizerPeriodKey): { dateFrom: string; dateTo: string } {
-  const days = OPTIMIZER_PERIODS.find((item) => item.key === period)?.days ?? 7;
-  return {
-    dateFrom: isoDate(days),
-    dateTo: isoDate(1),
-  };
+  return optimizerDateRangeForPeriod(period);
 }
 
 async function loadClients(limit: number, clientId?: string): Promise<ClientRow[]> {
