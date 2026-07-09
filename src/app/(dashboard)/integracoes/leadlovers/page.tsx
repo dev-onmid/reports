@@ -104,11 +104,6 @@ function calcTotalByRules(rules: ScheduleRule[]): number {
   return rules.reduce((sum, r) => sum + businessDayCount(r.date_from, r.date_to) * r.qty_per_day, 0);
 }
 
-function fmtDate(iso: string | undefined) {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleDateString('pt-BR');
-}
-
 // ─── Tab components ───────────────────────────────────────────────────────────
 
 // ── Tab 1: Upload ─────────────────────────────────────────────────────────────
@@ -631,6 +626,24 @@ function CronogramaTab({
     } catch {}
   }
 
+  // Editar De/Até de uma regra existente — mesmo padrão do Horário. Igual lá, mudar a data
+  // NÃO reagenda os contatos pendentes sozinho: precisa clicar "Reagendar pendentes" depois
+  // (ver botão na tela) pra redistribuir de fato com a nova janela.
+  async function updateRuleDate(ruleId: string, field: 'date_from' | 'date_to', value: string) {
+    if (!selectedId || !ruleId || !value) return;
+    try {
+      const res = await fetch(`/api/leadlovers/campaigns/${selectedId}/rules?rule_id=${ruleId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-onmid-user-id': userId ?? '' },
+        body: JSON.stringify({ [field]: value }),
+      });
+      if (!res.ok) return;
+      const updated = await res.json();
+      setRules(prev => prev.map(r => r.id === ruleId ? { ...r, date_from: updated.date_from, date_to: updated.date_to } : r));
+      onRefresh();
+    } catch {}
+  }
+
   async function activateCampaign(reschedule = false) {
     if (!selectedId) return;
     if (reschedule && !confirm('Reagendar todos os contatos pendentes a partir de hoje, usando os horários atuais das regras?')) return;
@@ -818,8 +831,22 @@ function CronogramaTab({
               <tbody>
                 {rules.map((rule, i) => (
                   <tr key={rule.id ?? i} className="border-b border-border/50 hover:bg-card/40">
-                    <td className="px-4 py-2.5">{fmtDate(rule.date_from)}</td>
-                    <td className="px-4 py-2.5">{fmtDate(rule.date_to)}</td>
+                    <td className="px-3 py-2">
+                      <input
+                        type="date"
+                        defaultValue={rule.date_from?.slice(0, 10)}
+                        onBlur={(e) => { if (rule.id && e.target.value !== rule.date_from?.slice(0, 10)) updateRuleDate(rule.id, 'date_from', e.target.value); }}
+                        className="h-8 w-full rounded-lg border border-border bg-background px-2 text-xs"
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <input
+                        type="date"
+                        defaultValue={rule.date_to?.slice(0, 10)}
+                        onBlur={(e) => { if (rule.id && e.target.value !== rule.date_to?.slice(0, 10)) updateRuleDate(rule.id, 'date_to', e.target.value); }}
+                        className="h-8 w-full rounded-lg border border-border bg-background px-2 text-xs"
+                      />
+                    </td>
                     <td className="px-4 py-2.5 font-medium">{rule.qty_per_day}</td>
                     <td className="px-4 py-2.5 text-muted-foreground">
                       {rule.interval_minutes ? `${rule.interval_minutes} min` : 'Todos de uma vez'}
