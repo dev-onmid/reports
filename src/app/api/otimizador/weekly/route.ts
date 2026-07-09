@@ -14,7 +14,7 @@ import {
   type OptimizerModo,
   type OptimizerPeriodKey,
 } from '@/lib/optimizer';
-import { optimizerDateRangeForDays } from '@/lib/optimizer-period-range';
+import { optimizerDateRangeForDays, optimizerDateRangeForPeriod } from '@/lib/optimizer-period-range';
 
 // 300s (mesmo teto do reports/run-once) — a análise manual síncrona soma busca de campanhas
 // (até 24s com fallback 30d) + conjuntos/anúncios (15s) + IA (até 90s); em 60s dava HTTP 504.
@@ -61,6 +61,16 @@ function firstActionValue(arr: unknown): number | null {
   if (!Array.isArray(arr) || arr.length === 0) return null;
   const v = Number((arr[0] as { value?: string } | undefined)?.value ?? NaN);
   return Number.isFinite(v) ? v : null;
+}
+
+// Dias reais entre duas datas ISO (inclusivo) — usado no lugar de um "days" fixo pois
+// this_month/last_month têm duração variável (28-31 dias) por serem meses de calendário.
+function isoDateDiffDays(from: string, to: string): number {
+  const [fy, fm, fd] = from.split('-').map(Number);
+  const [ty, tm, td] = to.split('-').map(Number);
+  const a = Date.UTC(fy, fm - 1, fd);
+  const b = Date.UTC(ty, tm - 1, td);
+  return Math.round((b - a) / 86400000) + 1;
 }
 
 
@@ -535,7 +545,9 @@ async function buildPayloadForClient(
   // Tenta o período solicitado; se gasto = 0, expande para 30 dias
   const FALLBACK_DAYS = 30;
   let usedPeriod = period;
-  let { dateFrom, dateTo } = optimizerDateRangeForDays(period.days);
+  // this_month/last_month usam datas de calendário reais (dia 1 ao último dia do mês), não
+  // uma janela de N dias fixos — por isso passa a KEY, não period.days, pro cálculo do range.
+  let { dateFrom, dateTo } = optimizerDateRangeForPeriod(period.key);
 
   let rawCampaigns = await fetchCampaignsForClient(client.id, origin, period.key, dateFrom, dateTo);
   let activeCampaigns = rawCampaigns.filter((c) => {
@@ -546,7 +558,9 @@ async function buildPayloadForClient(
   // Fallback para 30 dias quando o período solicitado não trouxe campanhas com entrega.
   // `/api/campaigns` já descarta campanhas com gasto = 0, então "sem gasto no período" chega
   // aqui como lista VAZIA — por isso o gatilho é length === 0 (antes era código morto).
-  if (activeCampaigns.length === 0 && period.days < FALLBACK_DAYS) {
+  // Usa a duração REAL do intervalo (não period.days) — "este mês" no dia 2 é um intervalo
+  // curtíssimo na prática, mesmo com days=30 nominal, e também merece o fallback.
+  if (activeCampaigns.length === 0 && isoDateDiffDays(dateFrom, dateTo) < FALLBACK_DAYS) {
     ({ dateFrom, dateTo } = optimizerDateRangeForDays(FALLBACK_DAYS));
     usedPeriod = { key: 'last_30d', label: 'Últimos 30 dias', days: FALLBACK_DAYS };
     rawCampaigns = await fetchCampaignsForClient(client.id, origin, 'last_30d', dateFrom, dateTo);
@@ -633,7 +647,7 @@ async function buildPayloadForClient(
     periodo_analise: {
       data_inicio: dateFrom,
       data_fim: dateTo,
-      dias: usedPeriod.days,
+      dias: isoDateDiffDays(dateFrom, dateTo),
       label: usedPeriod.label,
     },
     opportunity_score: null,

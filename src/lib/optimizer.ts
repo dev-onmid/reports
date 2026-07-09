@@ -1691,7 +1691,7 @@ export type OptimizerCriticalLevel = 'vermelho' | 'amarelo' | 'verde';
 export type OptimizerConfidence = 'alta' | 'media' | 'baixa';
 export type OptimizerPlatform = 'meta_ads' | 'google_ads';
 export type OptimizerRequestKind = 'analise_completa' | 'sugestao_criativo' | 'diagnostico_rapido';
-export type OptimizerPeriodKey = 'yesterday' | 'last_3d' | 'last_7d' | 'last_21d' | 'last_30d' | 'last_90d';
+export type OptimizerPeriodKey = 'yesterday' | 'last_3d' | 'last_7d' | 'this_month' | 'last_month' | 'last_21d' | 'last_30d' | 'last_90d';
 export type OptimizerNiche =
   | 'odontologia'
   | 'estetica'
@@ -1833,10 +1833,15 @@ export type OptimizerClientInput = {
   segment?: string;
 };
 
+// "days" em this_month/last_month é uma aproximação (30) só para os usos legados que tratam
+// período como janela fixa (limite de fallback, rótulo de duração) — a data real (calendário)
+// vem de optimizerDateRangeForPeriod em optimizer-period-range.ts, não deste número.
 export const OPTIMIZER_PERIODS: Array<{ key: OptimizerPeriodKey; label: string; days: number }> = [
   { key: 'yesterday', label: 'Ontem', days: 1 },
   { key: 'last_3d', label: 'Últimos 3 dias', days: 3 },
   { key: 'last_7d', label: 'Últimos 7 dias', days: 7 },
+  { key: 'this_month', label: 'Este mês', days: 30 },
+  { key: 'last_month', label: 'Mês passado', days: 30 },
   { key: 'last_21d', label: 'Últimos 21 dias', days: 21 },
   { key: 'last_30d', label: 'Últimos 30 dias', days: 30 },
   { key: 'last_90d', label: 'Últimos 3 meses', days: 90 },
