@@ -580,9 +580,9 @@ function AccountSummaryHeader({ resumo, nodes, generatedAt, proximaAnalise }: {
   ];
   return (
     <section className="overflow-hidden rounded-[var(--radius)] border border-border bg-card/90">
-      <div className="grid gap-0 lg:grid-cols-[minmax(360px,1.25fr)_minmax(560px,1.75fr)]">
+      <div className="grid items-start gap-0 lg:grid-cols-[minmax(420px,1fr)_minmax(620px,1.65fr)]">
         <div className="flex items-start gap-4 border-b border-border p-4 lg:border-b-0 lg:border-r">
-        <ScoreGauge score={score} ring={estado.ring} />
+          <ScoreGauge score={score} ring={estado.ring} />
           <div className="min-w-0 flex-1 space-y-2">
             <div className="flex items-center gap-2">
               <span className={cn('text-sm font-bold uppercase tracking-wide', estado.tone)}>{estado.label}</span>
@@ -596,14 +596,22 @@ function AccountSummaryHeader({ resumo, nodes, generatedAt, proximaAnalise }: {
             </div>
           </div>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7">
+        <div className="grid self-start border-t border-border/70 sm:grid-cols-4 lg:border-t-0 xl:grid-cols-7">
           {stats.map((s, index) => (
-            <div key={s.label} className={cn('min-h-20 p-4', index > 0 && 'border-l border-border/70', index > 1 && 'max-sm:border-t')}>
-              <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{s.label}</p>
-              <p className="mt-1 text-lg font-bold text-foreground">{s.value}</p>
+            <div
+              key={s.label}
+              className={cn(
+                'min-h-[78px] px-4 py-3',
+                index > 0 && 'border-l border-border/70',
+                index > 1 && 'max-sm:border-t',
+                index > 3 && 'max-xl:border-t xl:border-t-0',
+              )}
+            >
+              <p className="text-[10px] font-bold uppercase leading-tight tracking-wide text-muted-foreground">{s.label}</p>
+              <p className="mt-2 whitespace-nowrap text-xl font-bold leading-none text-foreground">{s.value}</p>
             </div>
           ))}
-          </div>
+        </div>
       </div>
     </section>
   );
@@ -867,47 +875,6 @@ function CampaignTable({ nodes, selectedId, onSelect, filtroNivel, filtroCategor
         </button>
       )}
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Insights automáticos — 3 colunas no rodapé. Derivados dos MESMOS dados da árvore (nenhum
-// texto novo é gerado aqui, só selecionamos e citamos motivos/ações que a IA já escreveu).
-// ---------------------------------------------------------------------------
-function InsightsFooter({ nodes }: { nodes: TreeNode[] }) {
-  // "O que está funcionando": itens escalar (saudável + motivo real de crescimento) — são os
-  // únicos nós SAUDAVEL que carregam motivos (SAUDAVEL sem ação tem motivos=[] por regra do prompt).
-  const funcionando = nodes.filter((n) => categoriaDoNode(n) === 'escalar' && n.motivos.length > 0).slice(0, 3);
-  // Oportunidades de escala: mesma categoria, foco na ação recomendada.
-  const oportunidades = nodes.filter((n) => categoriaDoNode(n) === 'escalar').slice(0, 3);
-  // Monitorar de perto: ATENÇÃO (ainda não é urgente, mas está no limite) — vale acompanhar
-  // antes que vire um "pausar agora".
-  const monitorar = nodes.filter((n) => n.severidade === 'atencao' && n.texto_recomendacao.trim()).slice(0, 3);
-
-  const cols: Array<{ title: string; icon: typeof BadgeCheck; items: TreeNode[]; empty: string }> = [
-    { title: 'Insights automáticos da análise', icon: BadgeCheck, items: funcionando, empty: 'Nenhum destaque de performance nesta análise.' },
-    { title: 'Oportunidades de escala', icon: Rocket, items: oportunidades, empty: 'Nenhuma oportunidade de escala identificada agora.' },
-    { title: 'Monitorar de perto', icon: Eye, items: monitorar, empty: 'Nada em zona de atenção no momento.' },
-  ];
-
-  return (
-    <section className="grid gap-4 rounded-[var(--radius)] border border-border bg-card p-4 sm:grid-cols-3">
-      {cols.map((col) => (
-        <div key={col.title} className="space-y-2">
-          <p className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-            <col.icon className="h-3.5 w-3.5 text-primary" /> {col.title}
-          </p>
-          <ul className="space-y-1.5">
-            {col.items.length === 0 && <li className="text-xs text-muted-foreground">{col.empty}</li>}
-            {col.items.map((n) => (
-              <li key={n.rec_id} className="text-xs leading-relaxed text-muted-foreground">
-                <span className="font-medium text-foreground">{n.objeto_nome}:</span> {n.motivos[0] ?? n.texto_recomendacao}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
-    </section>
   );
 }
 
@@ -1635,7 +1602,6 @@ export default function OtimizadorPage() {
                   </div>
                 )}
               </div>
-              <InsightsFooter nodes={flatNodes} />
             </>
           )}
         </>
