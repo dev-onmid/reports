@@ -438,7 +438,7 @@ async function fetchConjuntosForCampaign(
     // Anúncios com rankings (best-effort, só se houver tempo)
     let anuncios: OptimizerCampaignV2['conjuntos'][number]['anuncios'] = [];
     if (Date.now() < deadline) {
-      const baseAdsFields = `id,name,effective_status,quality_ranking,engagement_rate_ranking,conversion_rate_ranking`;
+      const baseAdsFields = `id,name,effective_status,quality_ranking,engagement_rate_ranking,conversion_rate_ranking,creative{image_url,thumbnail_url}`;
       const insightsBase = `spend,impressions,clicks,actions,ctr`;
       const insightsComVideo = `${insightsBase},video_3_sec_watched_actions,video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions`;
 
@@ -482,6 +482,8 @@ async function fetchConjuntosForCampaign(
           const p75 = firstActionValue(ai.video_p75_watched_actions);
           const ehVideo = hook3s != null;
           const videoRate = (n: number | null) => (ehVideo && adImp > 0 && n != null) ? Number(((n / adImp) * 100).toFixed(1)) : null;
+          const creative = ad.creative as { image_url?: string; thumbnail_url?: string } | undefined;
+          const imagemUrl = creative?.image_url ?? creative?.thumbnail_url ?? null;
 
           return {
             id: String(ad.id),
@@ -501,6 +503,7 @@ async function fetchConjuntosForCampaign(
             video_p25_rate: videoRate(p25),
             video_p50_rate: videoRate(p50),
             video_p75_rate: videoRate(p75),
+            imagem_url: imagemUrl,
           };
         });
       }

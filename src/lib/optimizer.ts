@@ -120,6 +120,9 @@ export type OptimizerAdV2 = {
   video_p25_rate: number | null;
   video_p50_rate: number | null;
   video_p75_rate: number | null;
+  // Thumbnail do criativo (image_url ou thumbnail_url do anúncio na Meta) — usado só pra
+  // preview visual na árvore, nunca entra no payload enviado à IA.
+  imagem_url: string | null;
 };
 
 export type OptimizerAdsetV2 = {
@@ -231,6 +234,8 @@ export type OptimizerAnaliseAnuncio = {
   video_p25_rate: number | null;
   video_p50_rate: number | null;
   video_p75_rate: number | null;
+  // Thumbnail do criativo — vem do payload (verdade), nunca da IA. Ver OptimizerAdV2.
+  imagem_url: string | null;
   classificacao: OptimizerVerdict;
   veredito: string;
   acao: string;
@@ -379,6 +384,8 @@ export type OptimizerRecomendacao = {
     p50_rate: number | null;
     p75_rate: number | null;
   } | null;
+  // Thumbnail do criativo — só preenchido em nível "ad" (vem do payload/Meta, nunca da IA).
+  imagem_url: string | null;
 };
 
 function normNodeAcaoTipo(v: unknown): OptimizerNodeAcaoTipo {
@@ -499,6 +506,7 @@ export function buildRecomendacoes(
     metricas_chave: Array<{ rotulo: string; valor: string }>;
     fatos: Array<{ rotulo: string; valor: string }>;
     retencao_video?: OptimizerRecomendacao['retencao_video'];
+    imagem_url?: string | null;
   }) => {
     if (!o.acao?.trim()) return;
 
@@ -560,6 +568,7 @@ export function buildRecomendacoes(
         account_id: meta.account_id,
         leitura: o.veredito?.trim() ?? '',
         retencao_video: o.retencao_video ?? null,
+        imagem_url: o.imagem_url ?? null,
       },
     });
   };
@@ -641,6 +650,7 @@ export function buildRecomendacoes(
             p50_rate: ad.video_p50_rate,
             p75_rate: ad.video_p75_rate,
           },
+          imagem_url: ad.imagem_url,
         });
       }
     }
@@ -694,6 +704,7 @@ export function buildCampaignTree(
     fatos: Array<{ rotulo: string; valor: string }>;
     filhos: OptimizerTreeNode[];
     retencao_video?: OptimizerRecomendacao['retencao_video'];
+    imagem_url?: string | null;
   }): OptimizerTreeNode {
     const auto = acaoAutoByObj.get(o.objeto_id);
     let tipoEfetivo = o.acao?.trim() ? inferAcaoTipo(o.acao, o.acao_tipo) : 'NENHUMA';
@@ -748,6 +759,7 @@ export function buildCampaignTree(
       leitura: o.veredito?.trim() ?? '',
       filhos: o.filhos,
       retencao_video: o.retencao_video ?? null,
+      imagem_url: o.imagem_url ?? null,
     };
   }
 
@@ -790,6 +802,7 @@ export function buildCampaignTree(
             p50_rate: ad.video_p50_rate,
             p75_rate: ad.video_p75_rate,
           },
+          imagem_url: ad.imagem_url,
         });
         byObjId.set(ad.id, adNode);
         return adNode;
@@ -1572,6 +1585,7 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
               video_p25_rate: ad.video_p25_rate,
               video_p50_rate: ad.video_p50_rate,
               video_p75_rate: ad.video_p75_rate,
+              imagem_url: ad.imagem_url,
               classificacao: av.classificacao,
               veredito: av.veredito,
               acao: av.acao,

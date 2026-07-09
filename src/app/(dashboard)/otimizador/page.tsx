@@ -909,10 +909,20 @@ function RetencaoCell({ node }: { node: TreeNode }) {
   );
 }
 
-// Thumbnail do criativo — a análise ainda não guarda a imagem do anúncio, então é um
-// placeholder (quadrado com ícone). Quando o backend passar `image_url` no nó `ad`, trocar
-// o ícone por <img src=...>. Cor da borda segue a categoria do nó (vermelho = pausar).
-function CreativeThumb({ tone }: { tone: string }) {
+// Thumbnail do criativo — mostra a imagem real do anúncio (node.imagem_url, vinda da Meta)
+// quando disponível; cai pro placeholder de ícone em vídeo/carrossel sem imagem estática ou
+// em análises antigas sem o campo. Cor da borda segue a categoria do nó (vermelho = pausar).
+function CreativeThumb({ tone, imageUrl, alt }: { tone: string; imageUrl?: string | null; alt: string }) {
+  if (imageUrl) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={imageUrl}
+        alt={alt}
+        className={cn('h-7 w-7 shrink-0 rounded border object-cover bg-background', tone)}
+      />
+    );
+  }
   return (
     <span className={cn('flex h-7 w-7 shrink-0 items-center justify-center rounded border bg-background', tone)}>
       <ImageIcon className="h-3.5 w-3.5 opacity-70" />
@@ -972,7 +982,7 @@ function TreeTableRow({ node, depth, selectedId, onSelect, onQuickPause, filtroN
                 <ChevronRight className={cn('h-3.5 w-3.5 transition-transform', open && 'rotate-90')} />
               </button>
             ) : <span className="w-3.5 shrink-0" />}
-            {isAd && <CreativeThumb tone={mostraPausaRapida ? 'border-red-400/40' : 'border-border'} />}
+            {isAd && <CreativeThumb tone={mostraPausaRapida ? 'border-red-400/40' : 'border-border'} imageUrl={node.imagem_url} alt={node.objeto_nome} />}
             <span className="min-w-0 truncate text-sm text-foreground" title={node.objeto_nome}>{node.objeto_nome}</span>
           </div>
         </td>
@@ -1306,7 +1316,7 @@ function DetailPanel({ node, allNodes, busy, onApply, onApplyChildren, onIgnore,
                   onClick={() => onJump(a.rec_id)}
                   className={cn('flex w-full items-center gap-2 p-2 text-left hover:bg-surface-soft', i < afetados.length - 1 && 'border-b border-border/60')}
                 >
-                  <CreativeThumb tone="border-red-400/40" />
+                  <CreativeThumb tone="border-red-400/40" imageUrl={a.imagem_url} alt={a.objeto_nome} />
                   <span className="min-w-0 flex-1 truncate text-xs text-foreground" title={a.objeto_nome}>{a.objeto_nome}</span>
                   <span className="shrink-0 text-[11px] text-muted-foreground">{fatoValor(a, /gasto/i)}</span>
                   <span className="shrink-0 text-[11px] text-muted-foreground">{fatoValor(a, /convers|lead/i)}</span>
@@ -1922,9 +1932,9 @@ export default function OtimizadorPage() {
             </div>
           ) : (
             <>
+              <QuickDecisionCards nodes={flatNodes} active={categoriaFiltro} onSelect={setCategoriaFiltro} />
               <div className="grid items-start gap-3 xl:grid-cols-[minmax(0,1fr)_420px] 2xl:grid-cols-[minmax(0,1fr)_460px]">
                 <div className="min-w-0 space-y-3">
-                  <QuickDecisionCards nodes={flatNodes} active={categoriaFiltro} onSelect={setCategoriaFiltro} />
                   <FilterChips nivel={nivelFiltro} onNivel={setNivelFiltro} apenasComAcao={apenasComAcao} onApenasComAcao={setApenasComAcao} />
                   <CampaignTable
                     nodes={treeNodes}
