@@ -645,6 +645,7 @@ function AccountSummaryHeader({ resumo, nodes, generatedAt, proximaAnalise }: {
   const estado = ESTADO_LABEL[resumo.estado_da_conta ?? ''] ?? { label: '—', tone: 'text-muted-foreground', ring: '#8b8b8b' };
   const score = computeAccountScore(resumo.estado_da_conta, nodes);
   const cm = resumo.cruzamento_com_metas;
+  // 2 linhas de 3 — Diagnósticos sai daqui e vira badge no card do score (ver abaixo).
   const stats: Array<{ label: string; value: string }> = [
     { label: 'Verba gasta', value: formatCurrencyBRL(cm?.gasto_total ?? 0) },
     { label: 'Conversões', value: String(cm?.volume_conversoes_atual ?? 0) },
@@ -652,34 +653,35 @@ function AccountSummaryHeader({ resumo, nodes, generatedAt, proximaAnalise }: {
     { label: 'Campanhas', value: String(resumo.campanhas) },
     { label: 'Conjuntos', value: String(resumo.conjuntos) },
     { label: 'Criativos', value: String(resumo.criativos) },
-    { label: 'Diagnósticos', value: String(resumo.diagnosticos) },
   ];
   return (
-    <div className="grid items-start gap-3 lg:grid-cols-[minmax(420px,1fr)_minmax(620px,1.65fr)]">
+    <div className="grid items-stretch gap-3 lg:grid-cols-[minmax(420px,1fr)_minmax(500px,1.3fr)]">
       <section className="flex items-start gap-4 rounded-[var(--radius)] border border-border bg-card/90 p-4">
         <ScoreGauge score={score} ring={estado.ring} />
-        <div className="min-w-0 flex-1 space-y-2">
-          <div className="flex items-center gap-2">
-            <span className={cn('text-sm font-bold uppercase tracking-wide', estado.tone)}>{estado.label}</span>
-            <span className="text-xs text-muted-foreground">Performance {score >= 70 ? 'acima' : score >= 45 ? 'próxima' : 'abaixo'} do ideal</span>
-            {resumo.semana_analise && <span className="text-xs text-muted-foreground">· semana {resumo.semana_analise}</span>}
+        <div className="flex min-w-0 flex-1 flex-col justify-between gap-2">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <span className={cn('text-sm font-bold uppercase tracking-wide', estado.tone)}>{estado.label}</span>
+              <span className="text-xs text-muted-foreground">Performance {score >= 70 ? 'acima' : score >= 45 ? 'próxima' : 'abaixo'} do ideal</span>
+              {resumo.semana_analise && <span className="text-xs text-muted-foreground">· semana {resumo.semana_analise}</span>}
+            </div>
+            {resumo.resumo_executivo && <p className="line-clamp-3 text-sm leading-relaxed text-foreground">{resumo.resumo_executivo}</p>}
           </div>
-          {resumo.resumo_executivo && <p className="line-clamp-3 text-sm leading-relaxed text-foreground">{resumo.resumo_executivo}</p>}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
             <span>Última análise: {formatDateTime(generatedAt)}</span>
             {proximaAnalise && <span>Próxima automática: {proximaAnalise}</span>}
+            <span className="rounded border border-border/70 bg-background px-1.5 py-0.5 font-semibold text-foreground">{resumo.diagnosticos} diagnósticos</span>
           </div>
         </div>
       </section>
-      <section className="grid self-start overflow-hidden rounded-[var(--radius)] border border-border bg-card/90 sm:grid-cols-4 xl:grid-cols-7">
+      <section className="grid grid-cols-3 overflow-hidden rounded-[var(--radius)] border border-border bg-card/90">
         {stats.map((s, index) => (
           <div
             key={s.label}
             className={cn(
               'min-h-[78px] px-4 py-3',
-              index > 0 && 'border-l border-border/70',
-              index > 1 && 'max-sm:border-t max-sm:border-border/70',
-              index > 3 && 'max-xl:border-t max-xl:border-border/70 xl:border-t-0',
+              index % 3 !== 0 && 'border-l border-border/70',
+              index > 2 && 'border-t border-border/70',
             )}
           >
             <p className="text-[10px] font-bold uppercase leading-tight tracking-wide text-muted-foreground">{s.label}</p>
