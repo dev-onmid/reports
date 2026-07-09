@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { getFreshMetaToken } from '@/lib/meta-token';
+import { countMetaResults } from '@/lib/meta-results';
 import {
   OPTIMIZER_PERIODS,
   currentWeekLabel,
@@ -46,12 +47,6 @@ function analysisPeriodFromRequest(request: NextRequest): AnalysisPeriod {
     ?? OPTIMIZER_PERIODS.find((period) => period.key === 'last_7d')!;
 }
 
-function sumActions(actions: Array<{ action_type: string; value: string }>, types: string[]): number {
-  return actions
-    .filter((a) => types.includes(a.action_type))
-    .reduce((sum, a) => sum + Number(a.value), 0);
-}
-
 // fetch com timeout — impede que um request travado da Meta/interno derrube a rota inteira (504 vazio)
 async function fetchWithTimeout(url: string, ms: number, init?: RequestInit): Promise<Response | null> {
   const controller = new AbortController();
@@ -65,12 +60,6 @@ async function fetchWithTimeout(url: string, ms: number, init?: RequestInit): Pr
   }
 }
 
-const LEAD_ACTIONS = [
-  'lead', 'onsite_conversion.lead_grouped', 'offsite_conversion.fb_pixel_lead',
-  'offsite_conversion.lead', 'onsite_conversion.lead', 'onsite_web_lead',
-  'onsite_conversion.messaging_conversation_started_7d', 'onsite_conversion.total_messaging_connection',
-  'messaging_conversation_started_7d', 'total_messaging_connection',
-];
 
 // ─── Token resolver ───────────────────────────────────────────────────────────
 
@@ -425,7 +414,7 @@ async function fetchConjuntosForCampaign(
   const conjuntos = await Promise.all(activeAdsets.map(async (raw): Promise<OptimizerCampaignV2['conjuntos'][number]> => {
     const insights = (raw.insights as { data?: Record<string, unknown>[] } | undefined)?.data?.[0] ?? {};
     const actions = (insights.actions as Array<{ action_type: string; value: string }>) ?? [];
-    const conversoes = sumActions(actions, LEAD_ACTIONS);
+    const conversoes = countMetaResults(actions);
     const gasto = Number(insights.spend ?? 0);
     const impressoes = Number(insights.impressions ?? 0);
     const cliques = Number(insights.clicks ?? 0);
@@ -446,7 +435,7 @@ async function fetchConjuntosForCampaign(
         anuncios = (adsData.data ?? []).map((ad) => {
           const ai = (ad.insights as { data?: Record<string, unknown>[] } | undefined)?.data?.[0] ?? {};
           const adActions = (ai.actions as Array<{ action_type: string; value: string }>) ?? [];
-          const adConv = sumActions(adActions, LEAD_ACTIONS);
+          const adConv = countMetaResults(adActions);
           const adGasto = Number(ai.spend ?? 0);
           const adImp = Number(ai.impressions ?? 0);
           const adClicks = Number(ai.clicks ?? 0);
