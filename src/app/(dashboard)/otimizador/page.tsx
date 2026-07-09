@@ -920,7 +920,7 @@ function CreativeThumb({ tone }: { tone: string }) {
   );
 }
 
-function TreeTableRow({ node, depth, selectedId, onSelect, onQuickPause, filtroNivel, filtroCategoria, apenasComAcao }: {
+function TreeTableRow({ node, depth, selectedId, onSelect, onQuickPause, filtroNivel, filtroCategoria, apenasComAcao, openIds, onToggle }: {
   node: TreeNode;
   depth: number;
   selectedId: string | null;
@@ -929,8 +929,10 @@ function TreeTableRow({ node, depth, selectedId, onSelect, onQuickPause, filtroN
   filtroNivel: NivelFiltro;
   filtroCategoria: Categoria | null;
   apenasComAcao: boolean;
+  openIds: Set<string>;
+  onToggle: (id: string) => void;
 }) {
-  const [open, setOpen] = useState(depth === 0);
+  const open = openIds.has(node.rec_id);
   const hasChildren = node.filhos.length > 0;
   const cat = categoriaDoNode(node);
   const status = statusDisplay(node);
@@ -966,7 +968,7 @@ function TreeTableRow({ node, depth, selectedId, onSelect, onQuickPause, filtroN
         <td className="py-2 pr-2">
           <div className="flex items-center gap-2" style={{ paddingLeft: depth * 20 }}>
             {hasChildren ? (
-              <button onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} className="shrink-0 text-muted-foreground hover:text-foreground">
+              <button onClick={(e) => { e.stopPropagation(); onToggle(node.rec_id); }} className="shrink-0 text-muted-foreground hover:text-foreground">
                 <ChevronRight className={cn('h-3.5 w-3.5 transition-transform', open && 'rotate-90')} />
               </button>
             ) : <span className="w-3.5 shrink-0" />}
@@ -1008,10 +1010,23 @@ function TreeTableRow({ node, depth, selectedId, onSelect, onQuickPause, filtroN
       </tr>
       {open && hasChildren && (node.filhos as TreeNode[]).map((child) => (
         <TreeTableRow key={child.rec_id} node={child} depth={depth + 1} selectedId={selectedId} onSelect={onSelect} onQuickPause={onQuickPause}
-          filtroNivel={filtroNivel} filtroCategoria={filtroCategoria} apenasComAcao={apenasComAcao} />
+          filtroNivel={filtroNivel} filtroCategoria={filtroCategoria} apenasComAcao={apenasComAcao} openIds={openIds} onToggle={onToggle} />
       ))}
     </>
   );
+}
+
+// Todos os rec_id da árvore (recursivo) — usado por "Expandir tudo".
+function collectAllIds(nodes: TreeNode[]): string[] {
+  const ids: string[] = [];
+  const walk = (list: TreeNode[]) => {
+    for (const n of list) {
+      if (n.filhos.length > 0) ids.push(n.rec_id);
+      walk(n.filhos as TreeNode[]);
+    }
+  };
+  walk(nodes);
+  return ids;
 }
 
 function CampaignTable({ nodes, selectedId, onSelect, onQuickPause, filtroNivel, filtroCategoria, apenasComAcao }: {
@@ -1024,15 +1039,38 @@ function CampaignTable({ nodes, selectedId, onSelect, onQuickPause, filtroNivel,
   apenasComAcao: boolean;
 }) {
   const [verTodas, setVerTodas] = useState(false);
+  // Por padrão só as campanhas (nível raiz) vêm abertas — igual ao comportamento anterior por linha.
+  const [openIds, setOpenIds] = useState<Set<string>>(() => new Set(nodes.map((n) => n.rec_id)));
+  const rootIdsKey = nodes.map((n) => n.rec_id).join(',');
+  useEffect(() => {
+    setOpenIds(new Set(nodes.map((n) => n.rec_id)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rootIdsKey]);
   const LIMITE = 5;
   const visiveis = verTodas ? nodes : nodes.slice(0, LIMITE);
   const restantes = nodes.length - visiveis.length;
+
+  const toggleOne = (id: string) => {
+    setOpenIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
 
   return (
     <div className="overflow-hidden rounded-[var(--radius)] border border-border bg-card/90">
       <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2.5 text-xs font-semibold text-muted-foreground">
         <span className="flex items-center gap-2"><Layers className="h-3.5 w-3.5" /> Árvore de campanhas</span>
-        <span className="font-normal normal-case text-muted-foreground">{nodes.length} campanha{nodes.length === 1 ? '' : 's'}</span>
+        <div className="flex items-center gap-3">
+          <button onClick={() => setOpenIds(new Set(collectAllIds(nodes)))} className="font-normal normal-case text-muted-foreground hover:text-foreground hover:underline">
+            Expandir tudo
+          </button>
+          <button onClick={() => setOpenIds(new Set())} className="font-normal normal-case text-muted-foreground hover:text-foreground hover:underline">
+            Recolher tudo
+          </button>
+          <span className="font-normal normal-case text-muted-foreground">{nodes.length} campanha{nodes.length === 1 ? '' : 's'}</span>
+        </div>
       </div>
       <div className="min-h-[360px] max-h-[calc(100vh-430px)] overflow-auto">
         <table className="w-full border-collapse text-left">
@@ -1053,7 +1091,7 @@ function CampaignTable({ nodes, selectedId, onSelect, onQuickPause, filtroNivel,
           <tbody>
             {visiveis.map((n) => (
               <TreeTableRow key={n.rec_id} node={n} depth={0} selectedId={selectedId} onSelect={onSelect} onQuickPause={onQuickPause}
-                filtroNivel={filtroNivel} filtroCategoria={filtroCategoria} apenasComAcao={apenasComAcao} />
+                filtroNivel={filtroNivel} filtroCategoria={filtroCategoria} apenasComAcao={apenasComAcao} openIds={openIds} onToggle={toggleOne} />
             ))}
           </tbody>
         </table>
