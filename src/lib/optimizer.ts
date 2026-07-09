@@ -78,7 +78,7 @@ export const OPTIMIZER_MODEL = 'claude-sonnet-4-6';
 // classificação e barateia. A tarefa é extração/classificação guiada por regras — cabe no Haiku.
 export const OPTIMIZER_MODEL_V2 = 'claude-haiku-4-5-20251001';
 export const OPTIMIZER_PROMPT_VERSION = 'otimizador-v1.0';
-export const OPTIMIZER_PROMPT_VERSION_V2 = 'otimizador-v2.9';
+export const OPTIMIZER_PROMPT_VERSION_V2 = 'otimizador-v3.0';
 
 // ─── v2 types ────────────────────────────────────────────────────────────────
 
@@ -112,6 +112,14 @@ export type OptimizerAdV2 = {
   quality_ranking: string | null;
   engagement_ranking: string | null;
   conversion_ranking: string | null;
+  // Retenção de vídeo — só existe em anúncios de vídeo (eh_video=true). Estática/carrossel
+  // vem eh_video=false com as 4 taxas null. Todas as taxas são % de impressões (hook_rate =
+  // views de 3s / impressões), garantindo curva decrescente hook >= p25 >= p50 >= p75.
+  eh_video: boolean;
+  video_hook_rate: number | null;
+  video_p25_rate: number | null;
+  video_p50_rate: number | null;
+  video_p75_rate: number | null;
 };
 
 export type OptimizerAdsetV2 = {
@@ -217,6 +225,12 @@ export type OptimizerAnaliseAnuncio = {
   quality_ranking: string | null;
   engagement_ranking: string | null;
   conversion_ranking: string | null;
+  // Retenção de vídeo — vem do payload (verdade), nunca da IA. Ver OptimizerAdV2.
+  eh_video: boolean;
+  video_hook_rate: number | null;
+  video_p25_rate: number | null;
+  video_p50_rate: number | null;
+  video_p75_rate: number | null;
   classificacao: OptimizerVerdict;
   veredito: string;
   acao: string;
@@ -355,6 +369,16 @@ export type OptimizerRecomendacao = {
   // Objetivo da campanha em linguagem de negócio ("Conversas no WhatsApp", "Geração de leads").
   // Todo o raciocínio da recomendação existe para MELHORAR o resultado deste objetivo.
   objetivo: string | null;
+  // Retenção de vídeo — só preenchido em nível "ad" (nivel='ad'). Campanha/conjunto ficam null:
+  // retenção só existe de fato no criativo, e uma média mascararia o criativo ruim escondido
+  // atrás de um bom (ver CLAUDE.md). A UI agrega por contagem de filhos, não por média.
+  retencao_video: {
+    eh_video: boolean;
+    hook_rate: number | null;
+    p25_rate: number | null;
+    p50_rate: number | null;
+    p75_rate: number | null;
+  } | null;
 };
 
 function normNodeAcaoTipo(v: unknown): OptimizerNodeAcaoTipo {
@@ -474,6 +498,7 @@ export function buildRecomendacoes(
     motivos: string[];
     metricas_chave: Array<{ rotulo: string; valor: string }>;
     fatos: Array<{ rotulo: string; valor: string }>;
+    retencao_video?: OptimizerRecomendacao['retencao_video'];
   }) => {
     if (!o.acao?.trim()) return;
 
@@ -534,6 +559,7 @@ export function buildRecomendacoes(
         connection_id: meta.connection_id,
         account_id: meta.account_id,
         leitura: o.veredito?.trim() ?? '',
+        retencao_video: o.retencao_video ?? null,
       },
     });
   };
@@ -608,6 +634,13 @@ export function buildRecomendacoes(
             { rotulo: 'Ranking de engajamento', valor: ad.engagement_ranking ?? '—' },
             { rotulo: 'Ranking de conversão', valor: ad.conversion_ranking ?? '—' },
           ],
+          retencao_video: {
+            eh_video: ad.eh_video,
+            hook_rate: ad.video_hook_rate,
+            p25_rate: ad.video_p25_rate,
+            p50_rate: ad.video_p50_rate,
+            p75_rate: ad.video_p75_rate,
+          },
         });
       }
     }
@@ -660,6 +693,7 @@ export function buildCampaignTree(
     metricas_chave: Array<{ rotulo: string; valor: string }>;
     fatos: Array<{ rotulo: string; valor: string }>;
     filhos: OptimizerTreeNode[];
+    retencao_video?: OptimizerRecomendacao['retencao_video'];
   }): OptimizerTreeNode {
     const auto = acaoAutoByObj.get(o.objeto_id);
     let tipoEfetivo = o.acao?.trim() ? inferAcaoTipo(o.acao, o.acao_tipo) : 'NENHUMA';
@@ -713,6 +747,7 @@ export function buildCampaignTree(
       account_id: meta.account_id,
       leitura: o.veredito?.trim() ?? '',
       filhos: o.filhos,
+      retencao_video: o.retencao_video ?? null,
     };
   }
 
@@ -748,6 +783,13 @@ export function buildCampaignTree(
             { rotulo: 'Ranking de conversão', valor: ad.conversion_ranking ?? '—' },
           ],
           filhos: [],
+          retencao_video: {
+            eh_video: ad.eh_video,
+            hook_rate: ad.video_hook_rate,
+            p25_rate: ad.video_p25_rate,
+            p50_rate: ad.video_p50_rate,
+            p75_rate: ad.video_p75_rate,
+          },
         });
         byObjId.set(ad.id, adNode);
         return adNode;
@@ -917,6 +959,46 @@ Antes de recomendar pausar/mexer na CAMPANHA inteira, verifique se o problema se
 barato no nivel do criativo ou do conjunto — gestor bom troca a peca antes de derrubar a campanha.
 
 ==================================================
+HIERARQUIA DE JULGAMENTO DO CRIATIVO (ORDEM OBRIGATORIA)
+==================================================
+Cada anuncio no payload traz "eh_video" e, quando true, "video_hook_rate", "video_p25_rate",
+"video_p50_rate", "video_p75_rate" (percentuais sobre impressoes — retencao nos 3s, 25%, 50% e
+75% do video). Ao avaliar um ANUNCIO (nivel = ad), siga esta ordem — uma camada ruim EXPLICA e
+PRECEDE os sinais das camadas seguintes; nunca pule direto pro CPL sem passar pelas de cima:
+
+1. HOOK RATE (video_hook_rate) — SO se eh_video=true.
+   < 25%: o problema E A PECA (abertura/gancho fraco), MESMO que CPL esteja dentro da meta ou
+   CTR esteja ok. Classifique no MINIMO ATENCAO. A acao e sobre o CRIATIVO (revisar/trocar o
+   gancho dos 3 primeiros segundos) — NUNCA proponha trocar publico ou mexer em orcamento por
+   causa de hook baixo, isso e responsabilidade de outro nivel (ver MAPA DE RESPONSABILIDADE).
+   25-45%: hook mediano — olhe os quartis abaixo antes de concluir.
+   >= 45%: hook bom — avance pra proxima camada, hook nao e a causa aqui.
+2. RETENCAO POR QUARTIL (video_p25_rate, video_p50_rate, video_p75_rate) — queda abrupta logo
+   apos o hook (ex: hook 50%, p25 8%) indica que a ABERTURA prende mas o MEIO do video perde a
+   pessoa (a promessa do gancho nao se sustenta). Queda gradual entre os quartis e natural, NAO
+   e problema.
+3. CTR — SO trate CTR como causa raiz quando hook e retencao (camadas 1-2) ja estao OK. Hook bom
+   + CTR baixo = a peca prende atencao mas a mensagem/CTA nao convence a clicar — aponte problema
+   de OFERTA, COPY ou CHAMADA PRA ACAO, NUNCA "criativo fraco" ou "hook" (ja validados OK acima).
+4. CPM — trate como CONSEQUENCIA do leilao/qualidade de publico, nunca como meta isolada a
+   perseguir. CPM alto com hook e CTR bons normalmente e concorrencia de leilao (sazonalidade,
+   nicho disputado), nao culpa da peca — nao recomende trocar criativo por CPM alto sozinho.
+5. TAXA DE CONVERSAO pos-clique (clique -> lead/formulario/conversa) — se CTR esta bom mas
+   poucos cliques viram resultado, o problema esta FORA do anuncio (pagina de destino,
+   formulario, velocidade de resposta no WhatsApp) — NAO recomende trocar criativo por isso, e
+   fora do escopo do anuncio (mencione como observacao, sem virar acao de pausar/trocar peca).
+6. CPL/CPA FINAL — e a CONSEQUENCIA acumulada das camadas 1-5, nunca o primeiro motivo citado
+   no veredito ou na acao de um criativo. Se o CPL esta ruim, a acao correta sempre aponta qual
+   das camadas acima e a causa raiz (hook? retencao? CTR/oferta? CPM/leilao? conversao
+   pos-clique?) — nunca feche o diagnostico so em "CPL acima da meta" sem dizer POR QUE.
+
+Anuncios SEM video (eh_video=false — imagem estatica, carrossel): pule as camadas 1 e 2, comece
+direto na camada 3 (CTR). NUNCA invente ou estime hook rate pra peca estatica; os campos vem
+null e devem ser ignorados na analise desse anuncio.
+Esta hierarquia vale SO pra nivel ANUNCIO. Conjunto e campanha nao tem retencao de video propria
+(e uma metrica de peca, nao de publico/estrutura) — julgue-os pelas regras normais deste prompt.
+
+==================================================
 PASSO 2 — CRUZE METRICAS COM METAS
 ==================================================
 Compare: CPL atual vs cpl_ideal e cpl_maximo (somando apenas campanhas cujo resultado e
@@ -992,9 +1074,16 @@ Contexto do irmao (compare cada no com seus PARES do mesmo pai antes de decidir)
   mesmo publico (canibalizacao) e problema de CAMPANHA, nao de um conjunto isolado.
 
 Regras de classificacao:
-- Conjunto/anuncio SAUDAVEL: CTR estavel/subindo + CPL dentro + rankings medios ou acima.
-- ATENCAO: CTR caindo OU 1 ranking Below Average OU CPL levemente acima.
-- URGENTE: multiplos rankings Below Average OU frequencia alta + CTR caindo OU CPL > cpl_maximo.
+- Anuncio de VIDEO (eh_video=true): aplique primeiro a HIERARQUIA DE JULGAMENTO DO CRIATIVO
+  acima (hook -> quartil -> CTR -> CPM -> conversao -> CPL). hook_rate < 25% JA classifica no
+  minimo ATENCAO, independente do restante.
+- Anuncio SAUDAVEL (video com hook ok, ou estatico): CTR estavel/subindo + CPL dentro + rankings
+  medios ou acima.
+- ATENCAO: hook_rate 25-45% OU CTR caindo OU 1 ranking Below Average OU CPL levemente acima.
+- URGENTE: hook_rate < 25% com CPL tambem acima do maximo, OU multiplos rankings Below Average,
+  OU frequencia alta + CTR caindo, OU CPL > cpl_maximo.
+- Conjunto/campanha: mesmas regras de CTR/ranking/CPL de sempre — retencao de video NAO se aplica
+  a esses niveis (ver HIERARQUIA DE JULGAMENTO DO CRIATIVO acima).
 - Nao classifique como URGENTE nada com menos de min_dias_aprendizado dias (esta aprendendo).
 - CPL/custo por conversa como criterio SO em campanha cujo proprio objetivo e leads/conversas
   (siga o PASSO 1). Campanha de vendas julga por CPA/ROAS; trafego por CPC/CTR.
@@ -1381,6 +1470,39 @@ function objetivoEfetivoCampanha(camp: OptimizerCampaignV2): string {
   return (conjuntosOtimizamConversa || nomeIndicaWhatsApp) ? 'CONVERSAS_WHATSAPP' : camp.objetivo;
 }
 
+// Piso de hook rate (retenção nos 3s) abaixo do qual o problema É a peça, independente do
+// que a IA concluiu — trava determinística (mesmo espírito de pareceMultiAcao), pois a IA
+// pode ignorar a hierarquia do prompt. Ver hierarquia: hook > quartil > CTR > CPM > conversão > CPL.
+const HOOK_RATE_CRITICO = 25;
+
+// Se o hook rate do criativo está abaixo do piso, força classificação mínima ATENCAO (ou
+// URGENTE se o CPL também já estourou o máximo) e injeta o motivo de retenção NA FRENTE dos
+// demais — sem apagar o diagnóstico da IA quando ele já existe. Só escreve ação/tipo sintéticos
+// quando a IA não tinha marcado nenhuma ação pro criativo (SAUDAVEL sem oportunidade de escala).
+function aplicarPisoHookRate(ad: OptimizerAnaliseAnuncio, cplMaximo: number | null): OptimizerAnaliseAnuncio {
+  if (!ad.eh_video || ad.video_hook_rate == null || ad.video_hook_rate >= HOOK_RATE_CRITICO) return ad;
+
+  const hook = ad.video_hook_rate;
+  const cplEstourado = cplMaximo != null && ad.cpl != null && ad.cpl > cplMaximo;
+  const severidadeMinima: OptimizerVerdict = cplEstourado ? 'URGENTE' : 'ATENCAO';
+  const rank: Record<OptimizerVerdict, number> = { SAUDAVEL: 0, ATENCAO: 1, URGENTE: 2 };
+  const classificacaoFinal = rank[ad.classificacao] >= rank[severidadeMinima] ? ad.classificacao : severidadeMinima;
+
+  const fracao = hook < 10 ? 'quase todo mundo' : hook < 20 ? 'a grande maioria' : 'boa parte das pessoas';
+  const hookMotivo = `Retenção nos 3s: ${hook.toFixed(0)}% — ${fracao} descarta o vídeo antes da mensagem começar`;
+
+  const jaTemAcao = ad.acao?.trim().length > 0;
+  return {
+    ...ad,
+    classificacao: classificacaoFinal,
+    acao: jaTemAcao ? ad.acao : `Revisar criativo: hook rate de ${hook.toFixed(0)}%, abaixo do piso de ${HOOK_RATE_CRITICO}%`,
+    acao_tipo: jaTemAcao ? ad.acao_tipo : 'VERIFICAR_MANUAL',
+    confianca_item: jaTemAcao ? ad.confianca_item : 'media',
+    padrao: jaTemAcao ? ad.padrao : 'criativo_hook_baixo',
+    motivos: [hookMotivo, ...ad.motivos.filter((m) => !/retenç|hook/i.test(m))].slice(0, 4),
+  };
+}
+
 // Monta a árvore campanha→conjunto→anúncio: métricas do PAYLOAD (verdade), veredito da IA.
 function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown): OptimizerAnaliseCampanha[] {
   const verdicts = collectIaVerdicts(iaCampanhas);
@@ -1389,6 +1511,7 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
     acao_tipo: 'NENHUMA', acao_parametros: {}, confianca_item: 'media', depende_de: null, padrao: null, motivos: [],
   };
   const vOf = (id: string) => verdicts.get(id) ?? fallback;
+  const cplMaximo = payload.metas?.cpl_maximo ?? null;
   return (payload.campanhas ?? []).map((camp) => {
     const cv = vOf(camp.id);
     return {
@@ -1433,7 +1556,7 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
           motivos: jv.motivos,
           anuncios: (cj.anuncios ?? []).map((ad) => {
             const av = vOf(ad.id);
-            return {
+            return aplicarPisoHookRate({
               id: ad.id,
               nome: ad.nome,
               status_entrega: ad.status ?? null,
@@ -1444,6 +1567,11 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
               quality_ranking: ad.quality_ranking,
               engagement_ranking: ad.engagement_ranking,
               conversion_ranking: ad.conversion_ranking,
+              eh_video: ad.eh_video,
+              video_hook_rate: ad.video_hook_rate,
+              video_p25_rate: ad.video_p25_rate,
+              video_p50_rate: ad.video_p50_rate,
+              video_p75_rate: ad.video_p75_rate,
               classificacao: av.classificacao,
               veredito: av.veredito,
               acao: av.acao,
@@ -1453,7 +1581,7 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
               depende_de: av.depende_de,
               padrao: av.padrao,
               motivos: av.motivos,
-            };
+            }, cplMaximo);
           }),
         };
       }),

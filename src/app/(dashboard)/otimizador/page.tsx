@@ -863,6 +863,70 @@ function ctrDoNode(n: TreeNode): string {
   return n.fatos.find((f) => f.rotulo === 'CTR')?.valor ?? '—';
 }
 
+// Limiares de hook rate (retenção nos 3s) — mesma régua do backend (HOOK_RATE_CRITICO em
+// optimizer.ts): abaixo de 25% o problema é a peça; 45%+ é hook bom.
+const HOOK_RATE_CRITICO = 25;
+const HOOK_RATE_BOM = 45;
+
+function hookBarTone(hook: number): string {
+  if (hook >= HOOK_RATE_BOM) return 'bg-emerald-400';
+  if (hook >= HOOK_RATE_CRITICO) return 'bg-amber-400';
+  return 'bg-red-400';
+}
+
+// Retenção de vídeo só existe de fato no criativo (nível "ad") — conjunto/campanha agregam por
+// CONTAGEM de filhos com hook baixo, nunca por média: uma média esconderia o criativo ruim
+// escondido atrás de um bom, exatamente o que o gestor precisa caçar.
+function videoRetencaoResumo(node: TreeNode): { low: number; total: number } | null {
+  let low = 0;
+  let total = 0;
+  const walk = (nodes: TreeNode[]) => {
+    for (const n of nodes) {
+      if (n.nivel === 'ad' && n.retencao_video?.eh_video && n.retencao_video.hook_rate != null) {
+        total++;
+        if (n.retencao_video.hook_rate < HOOK_RATE_CRITICO) low++;
+      }
+      walk(n.filhos as TreeNode[]);
+    }
+  };
+  walk(node.filhos as TreeNode[]);
+  return total > 0 ? { low, total } : null;
+}
+
+// Coluna "Retenção": no criativo, mini-curva de 4 barras (hook/p25/p50/p75) coloridas pelo
+// hook rate; em imagem/carrossel (eh_video=false) mostra N/A — não afeta saúde desse item. Em
+// conjunto/campanha, badge de contagem (nunca média, ver videoRetencaoResumo).
+function RetencaoCell({ node }: { node: TreeNode }) {
+  if (node.nivel === 'ad') {
+    const rv = node.retencao_video;
+    if (!rv || !rv.eh_video || rv.hook_rate == null) {
+      return <span className="text-xs text-muted-foreground">N/A</span>;
+    }
+    const bars = [rv.hook_rate, rv.p25_rate, rv.p50_rate, rv.p75_rate];
+    const tone = hookBarTone(rv.hook_rate);
+    const fmt = (v: number | null) => (v == null ? '—' : `${v.toFixed(0)}%`);
+    const title = `Hook (3s): ${fmt(rv.hook_rate)} | P25: ${fmt(rv.p25_rate)} | P50: ${fmt(rv.p50_rate)} | P75: ${fmt(rv.p75_rate)}`;
+    return (
+      <div className="flex items-center justify-end gap-1.5" title={title}>
+        <div className="flex h-4 items-end gap-0.5">
+          {bars.map((v, i) => (
+            <span key={i} className={cn('w-1 rounded-sm', tone)} style={{ height: `${Math.max(15, Math.min(100, v ?? 0))}%` }} />
+          ))}
+        </div>
+        <span className="text-xs tabular-nums text-muted-foreground">{fmt(rv.hook_rate)}</span>
+      </div>
+    );
+  }
+
+  const resumo = videoRetencaoResumo(node);
+  if (!resumo) return <span className="text-xs text-muted-foreground">—</span>;
+  return (
+    <span className={cn('text-xs font-medium', resumo.low > 0 ? 'text-red-300' : 'text-emerald-300')}>
+      {resumo.low > 0 ? `${resumo.low}/${resumo.total} c/ hook baixo` : `${resumo.total}/${resumo.total} ok`}
+    </span>
+  );
+}
+
 // Thumbnail do criativo — a análise ainda não guarda a imagem do anúncio, então é um
 // placeholder (quadrado com ícone). Quando o backend passar `image_url` no nó `ad`, trocar
 // o ícone por <img src=...>. Cor da borda segue a categoria do nó (vermelho = pausar).
@@ -943,6 +1007,7 @@ function TreeTableRow({ node, depth, selectedId, onSelect, onQuickPause, filtroN
         <td className="py-2 pr-2 text-right text-xs text-muted-foreground">{metricaResultado?.valor ?? '—'}</td>
         <td className="py-2 pr-2 text-right text-xs text-muted-foreground">{metricaCusto?.valor ?? '—'}</td>
         <td className="py-2 pr-2 text-right text-xs text-muted-foreground">{ctrDoNode(node)}</td>
+        <td className="py-2 pr-2 text-right"><RetencaoCell node={node} /></td>
         <td className="py-2 pr-2 text-right">
           {mostraPausaRapida ? (
             <button
@@ -999,6 +1064,7 @@ function CampaignTable({ nodes, selectedId, onSelect, onQuickPause, filtroNivel,
               <th className="py-2 pr-2 text-right font-bold">Conversas</th>
               <th className="py-2 pr-2 text-right font-bold">Custo por conv.</th>
               <th className="py-2 pr-2 text-right font-bold">CTR</th>
+              <th className="py-2 pr-2 text-right font-bold">Retenção</th>
               <th className="py-2 pr-2 text-right font-bold">Ação recomendada</th>
             </tr>
           </thead>

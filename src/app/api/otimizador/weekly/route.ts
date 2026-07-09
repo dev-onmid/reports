@@ -55,6 +55,14 @@ async function fetchWithTimeout(url: string, ms: number, init?: RequestInit): Pr
   }
 }
 
+// Extrai o número do primeiro item de um campo "*_watched_actions" da Meta Insights API
+// (formato [{action_type: "video_view", value: "8500"}]). Ausente/vazio = não é vídeo.
+function firstActionValue(arr: unknown): number | null {
+  if (!Array.isArray(arr) || arr.length === 0) return null;
+  const v = Number((arr[0] as { value?: string } | undefined)?.value ?? NaN);
+  return Number.isFinite(v) ? v : null;
+}
+
 
 // ─── Token resolver ───────────────────────────────────────────────────────────
 
@@ -421,7 +429,7 @@ async function fetchConjuntosForCampaign(
     let anuncios: OptimizerCampaignV2['conjuntos'][number]['anuncios'] = [];
     if (Date.now() < deadline) {
       const adsUrl = new URL(`https://graph.facebook.com/v21.0/${String(raw.id)}/ads`);
-      adsUrl.searchParams.set('fields', `id,name,effective_status,quality_ranking,engagement_rate_ranking,conversion_rate_ranking,insights.time_range(${JSON.stringify({ since: dateFrom, until: dateTo })}){spend,impressions,clicks,actions,ctr}`);
+      adsUrl.searchParams.set('fields', `id,name,effective_status,quality_ranking,engagement_rate_ranking,conversion_rate_ranking,insights.time_range(${JSON.stringify({ since: dateFrom, until: dateTo })}){spend,impressions,clicks,actions,ctr,video_3_sec_watched_actions,video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions}`);
       adsUrl.searchParams.set('limit', '8');
       adsUrl.searchParams.set('access_token', token);
       const adsRes = await fetchWithTimeout(adsUrl.toString(), 8_000);
@@ -434,6 +442,18 @@ async function fetchConjuntosForCampaign(
           const adGasto = Number(ai.spend ?? 0);
           const adImp = Number(ai.impressions ?? 0);
           const adClicks = Number(ai.clicks ?? 0);
+
+          // Retenção de vídeo (Meta Insights API — video_3_sec/p25/p50/p75_watched_actions).
+          // Só existem em criativos de vídeo; imagem/carrossel não traz esses campos (arrays
+          // vazios ou ausentes). Taxas normalizadas por impressões, decrescentes por construção
+          // (quem assiste p75 já passou por p50, p25 e pelos 3s iniciais).
+          const hook3s = firstActionValue(ai.video_3_sec_watched_actions);
+          const p25 = firstActionValue(ai.video_p25_watched_actions);
+          const p50 = firstActionValue(ai.video_p50_watched_actions);
+          const p75 = firstActionValue(ai.video_p75_watched_actions);
+          const ehVideo = hook3s != null;
+          const videoRate = (n: number | null) => (ehVideo && adImp > 0 && n != null) ? Number(((n / adImp) * 100).toFixed(1)) : null;
+
           return {
             id: String(ad.id),
             nome: String(ad.name ?? ''),
@@ -447,6 +467,11 @@ async function fetchConjuntosForCampaign(
             quality_ranking: ad.quality_ranking ? String(ad.quality_ranking) : null,
             engagement_ranking: ad.engagement_rate_ranking ? String(ad.engagement_rate_ranking) : null,
             conversion_ranking: ad.conversion_rate_ranking ? String(ad.conversion_rate_ranking) : null,
+            eh_video: ehVideo,
+            video_hook_rate: videoRate(hook3s),
+            video_p25_rate: videoRate(p25),
+            video_p50_rate: videoRate(p50),
+            video_p75_rate: videoRate(p75),
           };
         });
       }
