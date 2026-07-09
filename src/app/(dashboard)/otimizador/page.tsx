@@ -7,26 +7,34 @@ import {
   AlertTriangle,
   ArrowRight,
   BadgeCheck,
+  Ban,
   CalendarClock,
   Check,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
   ChevronUp,
-  Eye,
   ExternalLink,
+  Eye,
+  Flag,
+  Image as ImageIcon,
   Layers,
+  ListChecks,
   Loader2,
   MessageSquarePlus,
   MinusCircle,
   MousePointerClick,
   PauseCircle,
   Pencil,
+  PiggyBank,
   Play,
   Plus,
   Rocket,
   Search,
   Settings2,
+  ShieldCheck,
+  Target,
+  TrendingUp,
   Undo2,
   UserRound,
   WandSparkles,
@@ -177,16 +185,76 @@ function categoriaDoNode(n: { severidade: Severidade; acao_estruturada: { tipo: 
 
 // Só as 5 categorias acionáveis viram card/filtro clicável — "sem_diagnostico" aparece na árvore
 // com um rótulo neutro, mas nunca conta nos cards nem é alvo de filtro (ver QuickDecisionCards).
+// Paleta por categoria (ref. "DEPOIS"): vermelho=pausar, amarelo=revisar, verde=manter,
+// AZUL=escalar (não verde — verde é reservado a "manter/positivo"), roxo=investigar.
 const CATEGORIA_META: Record<Exclude<Categoria, 'sem_diagnostico'>, { label: string; icon: typeof PauseCircle; tone: string }> = {
   pausar: { label: 'Pausar agora', icon: PauseCircle, tone: 'border-red-400/40 bg-red-400/5 text-red-300' },
   revisar: { label: 'Revisar', icon: Search, tone: 'border-amber-400/40 bg-amber-400/5 text-amber-300' },
   manter: { label: 'Manter', icon: MinusCircle, tone: 'border-emerald-400/40 bg-emerald-400/5 text-emerald-300' },
-  escalar: { label: 'Escalar', icon: Rocket, tone: 'border-primary/40 bg-primary/5 text-primary' },
+  escalar: { label: 'Escalar', icon: Rocket, tone: 'border-sky-400/40 bg-sky-400/5 text-sky-300' },
   investigar: { label: 'Investigar', icon: Eye, tone: 'border-secondary/40 bg-secondary/5 text-secondary' },
 };
 const SEM_DIAGNOSTICO_META = { label: 'Sem diagnóstico', icon: MinusCircle, tone: 'border-border text-muted-foreground' };
 function categoriaMeta(cat: Categoria) {
   return cat === 'sem_diagnostico' ? SEM_DIAGNOSTICO_META : CATEGORIA_META[cat];
+}
+
+// Badge do NÍVEL na árvore/painel (Campanha/Conjunto/Criativo). Roxo editorial p/ o nível,
+// distinto das cores de severidade/ação, pra o gestor bater o olho e saber a hierarquia.
+const NIVEL_BADGE: Record<string, string> = {
+  campaign: 'border-secondary/40 bg-secondary/10 text-secondary',
+  adset: 'border-sky-400/30 bg-sky-400/10 text-sky-300',
+  ad: 'border-border bg-background text-muted-foreground',
+};
+
+// ─── Campos derivados da recomendação (painel "decisão guiada") ────────────────
+// A IA ainda não devolve priority/impact/risk/doNotDo estruturados. Derivamos de forma
+// determinística do que já existe (severidade, ação, confiança, filhos) — quando o backend
+// passar a mandar esses campos, é só trocar estas funções pela leitura direta.
+function prioridadeDoNode(n: { severidade: Severidade }): { label: string; tone: string } {
+  if (n.severidade === 'urgente') return { label: 'Alta', tone: 'text-red-300' };
+  if (n.severidade === 'atencao') return { label: 'Média', tone: 'text-amber-300' };
+  return { label: 'Baixa', tone: 'text-emerald-300' };
+}
+
+function impactoDoNode(n: { acao_estruturada: { tipo: string } | null; texto_recomendacao: string }): string {
+  const t = n.acao_estruturada?.tipo;
+  if (t === 'PAUSAR') return 'Reduzir desperdício';
+  if (t === 'AJUSTAR_ORCAMENTO') return 'Aumentar resultado';
+  if (t === 'ATIVAR') return 'Recuperar resultado';
+  if (/criativo|apelo|angulo|ângulo/i.test(n.texto_recomendacao)) return 'Recuperar CTR';
+  return 'Melhorar eficiência';
+}
+
+function riscoDoNode(n: OptimizerRecomendacao): { label: string; tone: string } {
+  // Confiança baixa ou dado insuficiente → risco alto de agir errado.
+  if (n.confianca === 'baixa' || !n.aplicavel) return { label: 'Alto', tone: 'text-red-300' };
+  // Pausar algo que gastou sem entregar = risco baixo (não há resultado a perder).
+  const conv = Number(n.metricas_chave.find((m) => /convers|lead/i.test(m.rotulo))?.valor?.replace(/\D/g, '') ?? '0');
+  if (n.acao_estruturada?.tipo === 'PAUSAR' && conv === 0) return { label: 'Baixo', tone: 'text-emerald-300' };
+  if (n.acao_estruturada?.tipo === 'AJUSTAR_ORCAMENTO') return { label: 'Médio', tone: 'text-amber-300' };
+  return { label: 'Médio', tone: 'text-amber-300' };
+}
+
+// Descendentes `ad` que devem ser pausados (gasto sem resultado) — alimenta "itens afetados"
+// e o título "Pausar N criativos fracos dentro deste conjunto".
+function criativosAfetados(node: TreeNode): TreeNode[] {
+  const out: TreeNode[] = [];
+  const walk = (nodes: TreeNode[]) => {
+    for (const n of nodes) {
+      if (n.nivel === 'ad' && categoriaDoNode(n) === 'pausar') out.push(n);
+      walk(n.filhos as TreeNode[]);
+    }
+  };
+  walk(node.filhos as TreeNode[]);
+  return out;
+}
+
+// Extrai um valor de fato/métrica por rótulo (Gasto, CTR etc.) — helper de exibição.
+function fatoValor(n: OptimizerTreeNode, rotuloRegex: RegExp): string {
+  return n.fatos.find((f) => rotuloRegex.test(f.rotulo))?.valor
+    ?? n.metricas_chave.find((m) => rotuloRegex.test(m.rotulo))?.valor
+    ?? '—';
 }
 
 // Link direto para o objeto no Gerenciador de Anúncios nativo.
@@ -769,15 +837,36 @@ const STATUS_SEVERIDADE: Record<Severidade, { label: string; tone: string }> = {
   ok: { label: 'Bom', tone: 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300' },
 };
 
+// Status de exibição: criativo marcado pra pausar sem conversão vira "Gasto sem resultado"
+// (linguagem da referência), o resto usa a leitura de severidade padrão.
+function statusDisplay(node: TreeNode): { label: string; tone: string } {
+  if (node.nivel === 'ad' && categoriaDoNode(node) === 'pausar') {
+    return { label: 'Gasto sem resultado', tone: 'border-red-400/40 bg-red-400/10 text-red-300' };
+  }
+  return STATUS_SEVERIDADE[node.severidade];
+}
+
 function ctrDoNode(n: TreeNode): string {
   return n.fatos.find((f) => f.rotulo === 'CTR')?.valor ?? '—';
 }
 
-function TreeTableRow({ node, depth, selectedId, onSelect, filtroNivel, filtroCategoria, apenasComAcao }: {
+// Thumbnail do criativo — a análise ainda não guarda a imagem do anúncio, então é um
+// placeholder (quadrado com ícone). Quando o backend passar `image_url` no nó `ad`, trocar
+// o ícone por <img src=...>. Cor da borda segue a categoria do nó (vermelho = pausar).
+function CreativeThumb({ tone }: { tone: string }) {
+  return (
+    <span className={cn('flex h-7 w-7 shrink-0 items-center justify-center rounded border bg-background', tone)}>
+      <ImageIcon className="h-3.5 w-3.5 opacity-70" />
+    </span>
+  );
+}
+
+function TreeTableRow({ node, depth, selectedId, onSelect, onQuickPause, filtroNivel, filtroCategoria, apenasComAcao }: {
   node: TreeNode;
   depth: number;
   selectedId: string | null;
   onSelect: (n: TreeNode) => void;
+  onQuickPause: (n: TreeNode) => void;
   filtroNivel: NivelFiltro;
   filtroCategoria: Categoria | null;
   apenasComAcao: boolean;
@@ -785,7 +874,9 @@ function TreeTableRow({ node, depth, selectedId, onSelect, filtroNivel, filtroCa
   const [open, setOpen] = useState(depth === 0);
   const hasChildren = node.filhos.length > 0;
   const cat = categoriaDoNode(node);
-  const statusSev = STATUS_SEVERIDADE[node.severidade];
+  const status = statusDisplay(node);
+  const isAd = node.nivel === 'ad';
+  const mostraPausaRapida = isAd && cat === 'pausar';
 
   // Um nó aparece se ele mesmo casa com o filtro OU algum descendente casa (pra manter contexto
   // hierárquico visível — filtrar só criativos não deve esconder a campanha-pai).
@@ -819,37 +910,51 @@ function TreeTableRow({ node, depth, selectedId, onSelect, filtroNivel, filtroCa
                 <ChevronRight className={cn('h-3.5 w-3.5 transition-transform', open && 'rotate-90')} />
               </button>
             ) : <span className="w-3.5 shrink-0" />}
-            <span className="min-w-0 truncate text-sm text-foreground" title={node.objeto_nome}>
-              {node.nivel !== 'campaign' && <span className="mr-1 text-[10px] font-semibold uppercase text-muted-foreground">{NIVEL_LABEL[node.nivel]}</span>}
-              {node.objeto_nome}
-            </span>
+            {isAd && <CreativeThumb tone={mostraPausaRapida ? 'border-red-400/40' : 'border-border'} />}
+            <span className="min-w-0 truncate text-sm text-foreground" title={node.objeto_nome}>{node.objeto_nome}</span>
           </div>
         </td>
         <td className="py-2 pr-2">
-          <span className={cn('inline-block shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold', statusSev.tone)}>{statusSev.label}</span>
+          <span className={cn('inline-block shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold', NIVEL_BADGE[node.nivel])}>
+            {NIVEL_LABEL[node.nivel]}
+          </span>
+        </td>
+        <td className="py-2 pr-2">
+          <span className={cn('inline-block shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold', status.tone)}>{status.label}</span>
         </td>
         <td className="py-2 pr-2 text-right text-xs text-muted-foreground">{gasto?.valor ?? '—'}</td>
         <td className="py-2 pr-2 text-right text-xs text-muted-foreground">{metricaResultado?.valor ?? '—'}</td>
         <td className="py-2 pr-2 text-right text-xs text-muted-foreground">{metricaCusto?.valor ?? '—'}</td>
         <td className="py-2 pr-2 text-right text-xs text-muted-foreground">{ctrDoNode(node)}</td>
         <td className="py-2 pr-2 text-right">
-          <span className={cn('inline-block shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold', categoriaMeta(cat).tone)}>
-            {categoriaMeta(cat).label}
-          </span>
+          {mostraPausaRapida ? (
+            <button
+              onClick={(e) => { e.stopPropagation(); onQuickPause(node); }}
+              title="Pausar este criativo"
+              className="inline-flex h-6 w-6 items-center justify-center rounded border border-red-400/50 bg-red-400/10 text-red-300 hover:bg-red-400/20"
+            >
+              <PauseCircle className="h-3.5 w-3.5" />
+            </button>
+          ) : (
+            <span className={cn('inline-block shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold', categoriaMeta(cat).tone)}>
+              {categoriaMeta(cat).label}
+            </span>
+          )}
         </td>
       </tr>
       {open && hasChildren && (node.filhos as TreeNode[]).map((child) => (
-        <TreeTableRow key={child.rec_id} node={child} depth={depth + 1} selectedId={selectedId} onSelect={onSelect}
+        <TreeTableRow key={child.rec_id} node={child} depth={depth + 1} selectedId={selectedId} onSelect={onSelect} onQuickPause={onQuickPause}
           filtroNivel={filtroNivel} filtroCategoria={filtroCategoria} apenasComAcao={apenasComAcao} />
       ))}
     </>
   );
 }
 
-function CampaignTable({ nodes, selectedId, onSelect, filtroNivel, filtroCategoria, apenasComAcao }: {
+function CampaignTable({ nodes, selectedId, onSelect, onQuickPause, filtroNivel, filtroCategoria, apenasComAcao }: {
   nodes: TreeNode[];
   selectedId: string | null;
   onSelect: (n: TreeNode) => void;
+  onQuickPause: (n: TreeNode) => void;
   filtroNivel: NivelFiltro;
   filtroCategoria: Categoria | null;
   apenasComAcao: boolean;
@@ -870,6 +975,7 @@ function CampaignTable({ nodes, selectedId, onSelect, filtroNivel, filtroCategor
           <thead className="sticky top-0 z-10 bg-card">
             <tr className="border-b border-border text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
               <th className="py-2 pl-3 pr-2 font-bold">Campanha / Conjunto / Criativo</th>
+              <th className="py-2 pr-2 font-bold">Nível</th>
               <th className="py-2 pr-2 font-bold">Status</th>
               <th className="py-2 pr-2 text-right font-bold">Gasto</th>
               <th className="py-2 pr-2 text-right font-bold">Conversas</th>
@@ -880,7 +986,7 @@ function CampaignTable({ nodes, selectedId, onSelect, filtroNivel, filtroCategor
           </thead>
           <tbody>
             {visiveis.map((n) => (
-              <TreeTableRow key={n.rec_id} node={n} depth={0} selectedId={selectedId} onSelect={onSelect}
+              <TreeTableRow key={n.rec_id} node={n} depth={0} selectedId={selectedId} onSelect={onSelect} onQuickPause={onQuickPause}
                 filtroNivel={filtroNivel} filtroCategoria={filtroCategoria} apenasComAcao={apenasComAcao} />
             ))}
           </tbody>
@@ -995,11 +1101,12 @@ function ManualNotesBox({ clienteId, nivel, objetoId, objetoNome }: {
 // ---------------------------------------------------------------------------
 // Painel lateral de detalhe
 // ---------------------------------------------------------------------------
-function DetailPanel({ node, allNodes, busy, onApply, onIgnore, onHuman, onJump }: {
+function DetailPanel({ node, allNodes, busy, onApply, onApplyChildren, onIgnore, onHuman, onJump }: {
   node: TreeNode;
   allNodes: TreeNode[];
   busy: boolean;
   onApply: (rec: FilaRec, params: { novo_orcamento_diario?: number }, batch: FilaRec[]) => void;
+  onApplyChildren: (children: FilaRec[]) => void;
   onIgnore: (rec: FilaRec) => void;
   onHuman: (rec: FilaRec) => void;
   onJump: (recId: string) => void;
@@ -1014,18 +1121,34 @@ function DetailPanel({ node, allNodes, busy, onApply, onIgnore, onHuman, onJump 
     setBudget(String(node.acao_estruturada?.parametros?.novo_orcamento_diario ?? ''));
   }, [node.rec_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const sev = SEV[node.severidade];
+  const cat = categoriaDoNode(node);
   const lowConf = !node.aplicavel || node.confianca === 'baixa';
   const emAnalise = node.status === 'em_analise_humana';
   const isAjuste = node.acao_estruturada?.tipo === 'AJUSTAR_ORCAMENTO';
   const link = adManagerUrl(node);
   const verbo = node.acao_estruturada ? (VERBO_ACAO[node.acao_estruturada.tipo] ?? 'Aplicar agora') : 'Aplicar agora';
-  const semAcao = !node.texto_recomendacao.trim();
+  const semAcao = !node.texto_recomendacao.trim() && cat === 'sem_diagnostico';
+
+  // Decisão guiada: quando um CONJUNTO/CAMPANHA é selecionado, os criativos fracos dentro dele
+  // viram "itens afetados" — o gestor pausa os criativos, não o objeto inteiro (o cerne do pedido).
+  const afetados = (node.nivel === 'adset' || node.nivel === 'campaign') ? criativosAfetados(node) : [];
+  const temAfetados = afetados.length > 0;
+  const prioridade = prioridadeDoNode(node);
+  const impacto = impactoDoNode(node);
+  const risco = riscoDoNode(node);
+
+  // Título "decisão clara": específico sobre o que será pausado, nunca genérico.
+  const nomeNivelFilho = node.nivel === 'campaign' ? 'conjunto/campanha' : 'conjunto';
+  const tituloGuiado = temAfetados
+    ? `Pausar ${afetados.length} criativo${afetados.length > 1 ? 's' : ''} fraco${afetados.length > 1 ? 's' : ''} dentro deste ${nomeNivelFilho}`
+    : node.titulo;
 
   const samePadrao = node.padrao
     ? allNodes.filter((r) => r.padrao === node.padrao && r.cliente_id !== node.cliente_id && r.aplicavel && r.rec_id !== node.rec_id)
     : [];
   const depRec = node.depende_de ? allNodes.find((r) => r.rec_id === node.depende_de) ?? null : null;
+
+  const critico = node.severidade === 'urgente' || cat === 'pausar';
 
   function handleApply() {
     if (isAjuste && !budget.trim()) { setEditing(true); return; }
@@ -1034,50 +1157,132 @@ function DetailPanel({ node, allNodes, busy, onApply, onIgnore, onHuman, onJump 
     onApply(node, params, batchOn ? samePadrao : []);
   }
 
+  const miniCards = [
+    { icon: Layers, label: 'Nível do problema', value: NIVEL_LABEL[node.nivel], tone: 'text-foreground' },
+    { icon: Flag, label: 'Prioridade', value: prioridade.label, tone: prioridade.tone },
+    { icon: TrendingUp, label: 'Impacto esperado', value: impacto, tone: 'text-foreground' },
+    { icon: ShieldCheck, label: 'Risco', value: risco.label, tone: risco.tone },
+  ];
+
   return (
     <div className="sticky top-3 max-h-[calc(100vh-96px)] overflow-auto rounded-[var(--radius)] border border-border bg-card/95">
-      <div className="relative overflow-hidden rounded-t-[var(--radius)]">
+      {/* Cabeçalho da recomendação principal */}
+      <div className={cn('relative overflow-hidden rounded-t-[var(--radius)] border-b p-3', critico ? 'border-red-400/30 bg-red-500/5' : 'border-border')}>
         <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5" style={{ backgroundColor: node.severidade === 'urgente' ? '#f87171' : node.severidade === 'atencao' ? '#fbbf24' : '#34d399' }} />
-        <div className="flex items-center justify-between gap-3 border-b border-border p-3">
-          <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-            <span className="shrink-0 rounded border border-border bg-background px-1.5 py-0.5 font-bold uppercase tracking-wide">{NIVEL_LABEL[node.nivel]}</span>
-            {node.objetivo && <span className="truncate">Objetivo: {node.objetivo}</span>}
-          </div>
-          <span className={cn('shrink-0 rounded border px-2 py-1 text-[11px] font-bold uppercase tracking-wide', sev.badge)}>{sev.label}</span>
+        <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Recomendação principal</p>
+        <div className="mt-1.5 flex items-start gap-2.5">
+          <span className={cn('mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius)] border', critico ? 'border-red-400/40 bg-red-400/10 text-red-300' : 'border-border bg-background text-muted-foreground')}>
+            {cat === 'pausar' ? <PauseCircle className="h-5 w-5" /> : cat === 'escalar' ? <Rocket className="h-5 w-5" /> : cat === 'revisar' ? <Search className="h-5 w-5" /> : <Target className="h-5 w-5" />}
+          </span>
+          <p className={cn('text-base font-bold leading-snug', critico ? 'text-red-200' : 'text-foreground')}>{tituloGuiado}</p>
         </div>
       </div>
 
       <div className="space-y-3 px-3 pb-3 pt-3">
-        <div className="text-xs text-muted-foreground" title={[node.campanha_nome, node.nivel !== 'campaign' ? node.conjunto_nome : null, node.nivel === 'ad' ? node.objeto_nome : null].filter(Boolean).join(' › ')}>
-          <span className="font-medium text-foreground">{node.campanha_nome}</span>
-          {node.nivel !== 'campaign' && node.conjunto_nome && <> › {node.conjunto_nome}</>}
-          {node.nivel === 'ad' && <> › <span className="font-medium text-foreground">{node.objeto_nome}</span></>}
+        {/* 4 mini-cards: nível / prioridade / impacto / risco */}
+        <div className="grid grid-cols-2 gap-2">
+          {miniCards.map((c) => (
+            <div key={c.label} className="rounded-[var(--radius)] border border-border/70 bg-background p-2">
+              <p className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide text-muted-foreground">
+                <c.icon className="h-3 w-3" /> {c.label}
+              </p>
+              <p className={cn('mt-1 text-sm font-semibold leading-none', c.tone)}>{c.value}</p>
+            </div>
+          ))}
         </div>
 
-        <p className="text-lg font-semibold leading-snug text-foreground">{node.titulo}</p>
-
-        {semAcao ? (
-          <p className="text-sm text-muted-foreground">Sem diagnóstico específico neste nó — os números estão dentro do esperado.</p>
-        ) : (
-          <>
-            <div>
-              <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">O que fazer agora</p>
-              <p className="text-sm text-foreground">{node.texto_recomendacao}</p>
+        {/* Caminho: onde está o problema */}
+        <div>
+          <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Caminho — onde está o problema</p>
+          <div className="space-y-1">
+            <div className="flex items-center gap-1.5 text-xs">
+              <span className={cn('shrink-0 rounded border px-1 py-0.5 text-[9px] font-semibold', NIVEL_BADGE.campaign)}>Campanha</span>
+              <span className="truncate text-foreground" title={node.campanha_nome}>{node.campanha_nome}</span>
             </div>
-            {node.motivos.length > 0 && (
-              <div>
-                <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Por que isso importa</p>
-                <div className="overflow-hidden rounded-[var(--radius)] border border-border">
-                  {node.motivos.map((m, i) => (
-                    <div key={i} className={cn('flex items-start gap-2.5 p-2.5', i < node.motivos.length - 1 && 'border-b border-border/60')}>
-                      <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/60" />
-                      <span className="text-sm leading-relaxed text-foreground">{m}</span>
-                    </div>
-                  ))}
-                </div>
+            {node.nivel !== 'campaign' && node.conjunto_nome && (
+              <div className="flex items-center gap-1.5 text-xs" style={{ paddingLeft: 8 }}>
+                <span className={cn('shrink-0 rounded border px-1 py-0.5 text-[9px] font-semibold', NIVEL_BADGE.adset)}>Conjunto</span>
+                <span className="truncate text-foreground" title={node.conjunto_nome}>{node.conjunto_nome}</span>
               </div>
             )}
-          </>
+            {node.nivel === 'ad' && (
+              <div className="flex items-center gap-1.5 text-xs" style={{ paddingLeft: 16 }}>
+                <span className={cn('shrink-0 rounded border px-1 py-0.5 text-[9px] font-semibold', NIVEL_BADGE.ad)}>Criativo</span>
+                <span className="truncate text-foreground" title={node.objeto_nome}>{node.objeto_nome}</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* O problema */}
+        {(node.motivos.length > 0 || node.texto_recomendacao.trim()) && (
+          <div>
+            <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">O problema</p>
+            {node.motivos.length > 0 ? (
+              <ul className="space-y-1.5">
+                {node.motivos.map((m, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm leading-relaxed text-foreground">
+                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/60" />
+                    <span>{m}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-foreground">{node.texto_recomendacao}</p>
+            )}
+            {/* mini métricas do nó */}
+            <div className="mt-2 grid grid-cols-3 gap-2">
+              {[
+                { label: 'Gasto', value: fatoValor(node, /gasto/i) },
+                { label: 'Conversas', value: fatoValor(node, /convers|lead/i) },
+                { label: 'Custo por conv.', value: fatoValor(node, /custo|cpl|cpa/i) },
+              ].map((m) => (
+                <div key={m.label} className="rounded-[var(--radius)] border border-border/70 bg-background p-2 text-center">
+                  <p className="text-[9px] font-bold uppercase tracking-wide text-muted-foreground">{m.label}</p>
+                  <p className="mt-0.5 text-sm font-semibold text-foreground">{m.value}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Ação recomendada — o que fazer / o que não fazer */}
+        {!semAcao && (
+          <div className="space-y-2">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Ação recomendada</p>
+            <ul className="space-y-1.5">
+              {temAfetados ? (
+                <>
+                  <li className="flex items-start gap-2 text-sm text-foreground"><Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" /> Pausar os {afetados.length} criativos listados abaixo.</li>
+                  <li className="flex items-start gap-2 text-sm text-foreground"><Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" /> Manter os criativos que já geram resultado.</li>
+                  <li className="flex items-start gap-2 text-sm text-muted-foreground"><Ban className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-400" /> Não pausar o {nomeNivelFilho} inteiro no momento.</li>
+                </>
+              ) : (
+                <li className="flex items-start gap-2 text-sm text-foreground"><Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" /> {node.texto_recomendacao}</li>
+              )}
+            </ul>
+          </div>
+        )}
+
+        {/* Itens afetados */}
+        {temAfetados && (
+          <div>
+            <p className="mb-1.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Itens afetados ({afetados.length})</p>
+            <div className="overflow-hidden rounded-[var(--radius)] border border-border">
+              {afetados.map((a, i) => (
+                <button
+                  key={a.rec_id}
+                  onClick={() => onJump(a.rec_id)}
+                  className={cn('flex w-full items-center gap-2 p-2 text-left hover:bg-surface-soft', i < afetados.length - 1 && 'border-b border-border/60')}
+                >
+                  <CreativeThumb tone="border-red-400/40" />
+                  <span className="min-w-0 flex-1 truncate text-xs text-foreground" title={a.objeto_nome}>{a.objeto_nome}</span>
+                  <span className="shrink-0 text-[11px] text-muted-foreground">{fatoValor(a, /gasto/i)}</span>
+                  <span className="shrink-0 text-[11px] text-muted-foreground">{fatoValor(a, /convers|lead/i)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
         )}
 
         {emAnalise && (
@@ -1097,81 +1302,85 @@ function DetailPanel({ node, allNodes, busy, onApply, onIgnore, onHuman, onJump 
           </div>
         )}
 
+        {/* Botão principal da ação exata */}
         {!semAcao && (
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => onIgnore(node)} disabled={busy} className="flex-1 sm:flex-none">
-              <X className="h-4 w-4" /> Não fazer nada
-            </Button>
-            {lowConf ? (
-              <Button onClick={() => onHuman(node)} disabled={busy || emAnalise} className="flex-1">
+          <div className="space-y-2 border-t border-border pt-3">
+            {temAfetados ? (
+              <Button onClick={() => onApplyChildren(afetados)} disabled={busy} className="h-11 w-full bg-red-500 text-white hover:bg-red-600">
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <PauseCircle className="h-4 w-4" />}
+                Pausar {afetados.length} criativo{afetados.length > 1 ? 's' : ''} agora
+              </Button>
+            ) : lowConf ? (
+              <Button onClick={() => onHuman(node)} disabled={busy || emAnalise} className="h-11 w-full">
                 <UserRound className="h-4 w-4" /> Enviar para um humano
               </Button>
             ) : (
-              <Button onClick={handleApply} disabled={busy} className="flex-1">
-                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+              <Button onClick={handleApply} disabled={busy} className={cn('h-11 w-full', cat === 'pausar' && 'bg-red-500 text-white hover:bg-red-600')}>
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : cat === 'pausar' ? <PauseCircle className="h-4 w-4" /> : <Check className="h-4 w-4" />}
                 {batchOn && samePadrao.length > 0 ? `Aplicar em ${samePadrao.length + 1} contas` : verbo}
               </Button>
             )}
-          </div>
-        )}
-
-        {!semAcao && ((isAjuste && !lowConf) || (!lowConf && !emAnalise)) && (
-          <div className="flex items-center justify-between gap-3 text-xs">
-            <span>
-              {isAjuste && !lowConf && (
-                <button onClick={() => setEditing((e) => !e)} className="font-medium text-primary hover:underline">Editar valor antes de aplicar</button>
-              )}
-            </span>
-            {!lowConf && !emAnalise && (
-              <button onClick={() => onHuman(node)} className="font-medium text-primary hover:underline">Enviar para um humano</button>
+            <div className="grid grid-cols-2 gap-2">
+              {link ? (
+                <a href={link} target="_blank" rel="noopener noreferrer" className="inline-flex h-9 items-center justify-center gap-1.5 rounded-[var(--radius)] border border-border bg-background text-xs font-medium text-foreground hover:border-primary/40">
+                  <ExternalLink className="h-3.5 w-3.5" /> Ver no Gerenciador
+                </a>
+              ) : <span />}
+              <Button variant="outline" onClick={() => onIgnore(node)} disabled={busy} className="h-9 text-xs">
+                <Check className="h-3.5 w-3.5" /> Marcar como revisado
+              </Button>
+            </div>
+            {isAjuste && !lowConf && (
+              <button onClick={() => setEditing((e) => !e)} className="text-xs font-medium text-primary hover:underline">Editar valor antes de aplicar</button>
+            )}
+            {!emAnalise && (
+              <button onClick={() => onHuman(node)} className="block text-xs font-medium text-primary hover:underline">Enviar para um humano</button>
+            )}
+            {samePadrao.length > 0 && !lowConf && !temAfetados && (
+              <label className="flex cursor-pointer items-start gap-2 rounded-[var(--radius)] border border-border p-2.5 text-xs text-foreground">
+                <input type="checkbox" checked={batchOn} onChange={(e) => setBatchOn(e.target.checked)} className="mt-0.5 accent-primary" />
+                <span>Aplicar a mesma ação em <span className="font-semibold">{samePadrao.length}</span> outra(s) conta(s) com este mesmo padrão.</span>
+              </label>
+            )}
+            {depRec && (
+              <div className="flex items-start gap-2 rounded-[var(--radius)] border border-amber-400/30 bg-amber-400/10 p-2.5 text-xs text-amber-200">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  Depende de resolver antes: <span className="font-semibold">{depRec.objeto_nome}</span>.{' '}
+                  <button onClick={() => onJump(depRec.rec_id)} className="inline-flex items-center gap-0.5 font-semibold text-primary hover:underline">
+                    Ir para esse item <ArrowRight className="h-3 w-3" />
+                  </button>
+                </span>
+              </div>
             )}
           </div>
         )}
 
+        {semAcao && (
+          <p className="rounded-[var(--radius)] border border-border bg-background p-3 text-sm text-muted-foreground">
+            Sem diagnóstico específico neste nó — os números estão dentro do esperado.
+          </p>
+        )}
+
+        {/* Auditoria técnica */}
         <div>
           <button onClick={() => setWhy((w) => !w)} className="flex items-center gap-1 text-xs font-medium text-primary hover:underline">
             {why ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-            Por que essa recomendação?
+            Por que essa recomendação? (dados técnicos)
           </button>
           {why && (
-            <div className="mt-2 space-y-3 rounded-[var(--radius)] border border-border bg-background p-3">
-              <div className="space-y-1">
-                {node.fatos.map((f, i) => (
-                  <div key={i} className="flex items-center justify-between gap-3 text-xs">
-                    <span className="text-muted-foreground">{f.rotulo}</span>
-                    <span className="font-mono text-foreground">{f.valor}</span>
-                  </div>
-                ))}
-                <div className="flex items-center justify-between gap-3 border-t border-border/60 pt-1 text-xs">
-                  <span className="text-muted-foreground">Confiança da análise</span>
-                  <span className="font-mono text-foreground">{node.confianca}</span>
+            <div className="mt-2 space-y-1 rounded-[var(--radius)] border border-border bg-background p-3">
+              {node.fatos.map((f, i) => (
+                <div key={i} className="flex items-center justify-between gap-3 text-xs">
+                  <span className="text-muted-foreground">{f.rotulo}</span>
+                  <span className="font-mono text-foreground">{f.valor}</span>
                 </div>
-                {node.leitura && (
-                  <p className="border-t border-border/60 pt-1.5 text-xs italic text-muted-foreground">{node.leitura}</p>
-                )}
+              ))}
+              <div className="flex items-center justify-between gap-3 border-t border-border/60 pt-1 text-xs">
+                <span className="text-muted-foreground">Confiança da análise</span>
+                <span className="font-mono text-foreground">{node.confianca}</span>
               </div>
-              {depRec && (
-                <div className="flex items-start gap-2 rounded-[var(--radius)] border border-amber-400/30 bg-amber-400/10 p-2.5 text-xs text-amber-200">
-                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                  <span>
-                    Depende de resolver antes: <span className="font-semibold">{depRec.objeto_nome}</span>.{' '}
-                    <button onClick={() => onJump(depRec.rec_id)} className="inline-flex items-center gap-0.5 font-semibold text-primary hover:underline">
-                      Ir para esse item <ArrowRight className="h-3 w-3" />
-                    </button>
-                  </span>
-                </div>
-              )}
-              {samePadrao.length > 0 && !lowConf && (
-                <label className="flex cursor-pointer items-start gap-2 rounded-[var(--radius)] border border-border p-2.5 text-xs text-foreground">
-                  <input type="checkbox" checked={batchOn} onChange={(e) => setBatchOn(e.target.checked)} className="mt-0.5 accent-primary" />
-                  <span>Aplicar a mesma ação em <span className="font-semibold">{samePadrao.length}</span> outra(s) conta(s) com este mesmo padrão.</span>
-                </label>
-              )}
-              {link && (
-                <a href={link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline">
-                  <ExternalLink className="h-3.5 w-3.5" /> Abrir no Gerenciador de Anúncios
-                </a>
-              )}
+              {node.leitura && <p className="border-t border-border/60 pt-1.5 text-xs italic text-muted-foreground">{node.leitura}</p>}
             </div>
           )}
         </div>
@@ -1179,6 +1388,60 @@ function DetailPanel({ node, allNodes, busy, onApply, onIgnore, onHuman, onJump 
         <ManualNotesBox clienteId={node.cliente_id} nivel={node.nivel} objetoId={node.objeto_id} objetoNome={node.objeto_nome} />
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Rodapé: resumo do impacto estimado (verde) + observação da análise (roxo)
+// ---------------------------------------------------------------------------
+// Parseia "R$ 1.234,56" → 1234.56 (pt-BR) para somar gastos exibidos nos nós.
+function parseBRL(v: string | undefined): number {
+  if (!v) return 0;
+  const n = Number(v.replace(/[^\d,.-]/g, '').replace(/\./g, '').replace(',', '.'));
+  return Number.isFinite(n) ? n : 0;
+}
+
+function ImpactSummaryFooter({ nodes }: { nodes: TreeNode[] }) {
+  // Desperdício recuperável = soma do gasto dos itens marcados "pausar" (dinheiro indo embora
+  // sem resultado). Conversas potenciais e efeito no CPL são estimativas grosseiras a partir do
+  // que já está no nó — deixadas explícitas como "até" pra não passar por número exato.
+  const paraPausar = nodes.filter((n) => categoriaDoNode(n) === 'pausar');
+  const desperdicio = paraPausar.reduce((s, n) => s + parseBRL(n.metricas_chave.find((m) => m.rotulo === 'Gasto')?.valor), 0);
+  const itens = paraPausar.length;
+  const escalaveis = nodes.filter((n) => categoriaDoNode(n) === 'escalar').length;
+
+  return (
+    <section className="grid gap-3 lg:grid-cols-[1.4fr_1fr]">
+      <div className="rounded-[var(--radius)] border border-emerald-500/30 bg-emerald-500/[0.06] p-4">
+        <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-emerald-300">
+          <PiggyBank className="h-4 w-4" /> Resumo do impacto estimado
+        </p>
+        <p className="mt-1 text-sm text-muted-foreground">Ao aplicar as recomendações de <span className="font-semibold text-foreground">Pausar agora</span>, você deixa de desperdiçar até:</p>
+        <div className="mt-3 grid grid-cols-3 gap-3">
+          <div>
+            <p className="text-xl font-bold leading-none text-emerald-300">{formatCurrencyBRL(desperdicio)}</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">de desperdício</p>
+          </div>
+          <div>
+            <p className="text-xl font-bold leading-none text-foreground">{itens}</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">item(ns) para pausar</p>
+          </div>
+          <div>
+            <p className="text-xl font-bold leading-none text-sky-300">{escalaveis}</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">oportunidade(s) de escalar</p>
+          </div>
+        </div>
+      </div>
+      <div className="rounded-[var(--radius)] border border-secondary/30 bg-secondary/[0.06] p-4">
+        <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-secondary">
+          <Pencil className="h-4 w-4" /> Observação da análise
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground">Registre um contexto humano sobre esta conta — a IA considera na próxima análise.</p>
+        <div className="mt-2">
+          {nodes[0] && <ManualNotesBox clienteId={nodes[0].cliente_id} nivel="cliente" objetoId={null} objetoNome={null} />}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -1360,6 +1623,37 @@ export default function OtimizadorPage() {
       }
     } catch {
       setToast({ text: 'Erro de rede ao aplicar.', erro: true });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Pausa em lote os criativos afetados de um conjunto/campanha (botão "Pausar N criativos
+  // agora" do painel). Reusa a rota /lote — cada criativo já tem acao_estruturada PAUSAR.
+  async function doApplyChildren(children: FilaRec[]) {
+    const aplicaveis = children.filter((c) => c.acao_estruturada && c.aplicavel);
+    if (aplicaveis.length === 0) {
+      setToast({ text: 'Nenhum criativo aplicável para pausar automaticamente.', erro: true });
+      return;
+    }
+    setBusy(true);
+    try {
+      const itens = aplicaveis.map((r) => ({
+        rec_id: r.rec_id, analise_id: r.analise_id, canal: r.canal, cliente_id: r.cliente_id,
+        connection_id: r.connection_id ?? '', account_id: r.account_id ?? undefined,
+        acao: r.acao_estruturada!.tipo, objeto_tipo: r.acao_estruturada!.objeto_tipo, objeto_id: r.acao_estruturada!.objeto_id,
+        objeto_nome: r.objeto_nome, justificativa: r.texto_recomendacao, parametros: r.acao_estruturada!.parametros,
+      }));
+      const res = await fetch('/api/otimizador/lote', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...callerHeaders() },
+        body: JSON.stringify({ itens, ...autor }),
+      });
+      const data = await res.json().catch(() => ({})) as { ok_count?: number; results?: Array<{ rec_id: string; ok: boolean }> };
+      const okIds = (data.results ?? []).filter((r) => r.ok).map((r) => r.rec_id);
+      removeFromTree(okIds, 'aplicado');
+      setToast({ text: `${data.ok_count ?? okIds.length} criativo(s) pausado(s).` });
+    } catch {
+      setToast({ text: 'Erro de rede ao pausar os criativos.', erro: true });
     } finally {
       setBusy(false);
     }
@@ -1641,13 +1935,14 @@ export default function OtimizadorPage() {
                     nodes={treeNodes}
                     selectedId={selectedId}
                     onSelect={(n) => setSelectedId(n.rec_id)}
+                    onQuickPause={(n) => setSelectedId(n.rec_id)}
                     filtroNivel={nivelFiltro}
                     filtroCategoria={categoriaFiltro}
                     apenasComAcao={apenasComAcao}
                   />
                 </div>
                 {selectedNode ? (
-                  <DetailPanel node={selectedNode} allNodes={flatNodes} busy={busy} onApply={doApply} onIgnore={doIgnore} onHuman={doHuman} onJump={jumpTo} />
+                  <DetailPanel node={selectedNode} allNodes={flatNodes} busy={busy} onApply={doApply} onApplyChildren={doApplyChildren} onIgnore={doIgnore} onHuman={doHuman} onJump={jumpTo} />
                 ) : (
                   <div className="flex min-h-72 flex-col items-center justify-center gap-2 rounded-[var(--radius)] border border-dashed border-border bg-card/70 p-6 text-center">
                     <MousePointerClick className="h-6 w-6 text-muted-foreground" />
@@ -1655,6 +1950,7 @@ export default function OtimizadorPage() {
                   </div>
                 )}
               </div>
+              <ImpactSummaryFooter nodes={flatNodes} />
             </>
           )}
         </>
