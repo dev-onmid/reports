@@ -19,14 +19,12 @@ import {
   Flag,
   Image as ImageIcon,
   Layers,
-  ListChecks,
   Loader2,
   MessageSquarePlus,
   MinusCircle,
   MousePointerClick,
   PauseCircle,
   Pencil,
-  PiggyBank,
   Play,
   Plus,
   Rocket,
@@ -837,6 +835,21 @@ const STATUS_SEVERIDADE: Record<Severidade, { label: string; tone: string }> = {
   ok: { label: 'Bom', tone: 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300' },
 };
 
+function deliveryDisplay(raw: string | null | undefined): { label: string; tone: string } {
+  const status = String(raw ?? '').trim().toUpperCase();
+  if (['ACTIVE', 'ENABLED', 'IN_PROCESS', 'WITH_ISSUES'].includes(status)) {
+    return { label: 'Ativo', tone: 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300' };
+  }
+  if (['PAUSED', 'DISABLED'].includes(status)) {
+    return { label: 'Pausado', tone: 'border-amber-400/40 bg-amber-400/10 text-amber-300' };
+  }
+  if (['ARCHIVED', 'DELETED', 'REMOVED'].includes(status)) {
+    return { label: 'Arquivado', tone: 'border-border bg-background text-muted-foreground' };
+  }
+  if (!status) return { label: 'Não informado', tone: 'border-border bg-background text-muted-foreground' };
+  return { label: status.replaceAll('_', ' '), tone: 'border-sky-400/30 bg-sky-400/10 text-sky-300' };
+}
+
 // Status de exibição: criativo marcado pra pausar sem conversão vira "Gasto sem resultado"
 // (linguagem da referência), o resto usa a leitura de severidade padrão.
 function statusDisplay(node: TreeNode): { label: string; tone: string } {
@@ -875,6 +888,7 @@ function TreeTableRow({ node, depth, selectedId, onSelect, onQuickPause, filtroN
   const hasChildren = node.filhos.length > 0;
   const cat = categoriaDoNode(node);
   const status = statusDisplay(node);
+  const entrega = deliveryDisplay(node.status_entrega);
   const isAd = node.nivel === 'ad';
   const mostraPausaRapida = isAd && cat === 'pausar';
 
@@ -918,6 +932,9 @@ function TreeTableRow({ node, depth, selectedId, onSelect, onQuickPause, filtroN
           <span className={cn('inline-block shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold', NIVEL_BADGE[node.nivel])}>
             {NIVEL_LABEL[node.nivel]}
           </span>
+        </td>
+        <td className="py-2 pr-2">
+          <span className={cn('inline-block shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold', entrega.tone)}>{entrega.label}</span>
         </td>
         <td className="py-2 pr-2">
           <span className={cn('inline-block shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold', status.tone)}>{status.label}</span>
@@ -976,7 +993,8 @@ function CampaignTable({ nodes, selectedId, onSelect, onQuickPause, filtroNivel,
             <tr className="border-b border-border text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
               <th className="py-2 pl-3 pr-2 font-bold">Campanha / Conjunto / Criativo</th>
               <th className="py-2 pr-2 font-bold">Nível</th>
-              <th className="py-2 pr-2 font-bold">Status</th>
+              <th className="py-2 pr-2 font-bold">Entrega</th>
+              <th className="py-2 pr-2 font-bold">Saúde</th>
               <th className="py-2 pr-2 text-right font-bold">Gasto</th>
               <th className="py-2 pr-2 text-right font-bold">Conversas</th>
               <th className="py-2 pr-2 text-right font-bold">Custo por conv.</th>
@@ -1122,12 +1140,16 @@ function DetailPanel({ node, allNodes, busy, onApply, onApplyChildren, onIgnore,
   }, [node.rec_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const cat = categoriaDoNode(node);
-  const lowConf = !node.aplicavel || node.confianca === 'baixa';
+  const hasAction = !!node.acao_estruturada;
+  const actionExecutable = hasAction && node.aplicavel;
+  const confidenceLow = node.confianca === 'baixa';
+  const isMaintainOnly = cat === 'manter' && !hasAction;
   const emAnalise = node.status === 'em_analise_humana';
   const isAjuste = node.acao_estruturada?.tipo === 'AJUSTAR_ORCAMENTO';
   const link = adManagerUrl(node);
   const verbo = node.acao_estruturada ? (VERBO_ACAO[node.acao_estruturada.tipo] ?? 'Aplicar agora') : 'Aplicar agora';
   const semAcao = !node.texto_recomendacao.trim() && cat === 'sem_diagnostico';
+  const entrega = deliveryDisplay(node.status_entrega);
 
   // Decisão guiada: quando um CONJUNTO/CAMPANHA é selecionado, os criativos fracos dentro dele
   // viram "itens afetados" — o gestor pausa os criativos, não o objeto inteiro (o cerne do pedido).
@@ -1174,19 +1196,30 @@ function DetailPanel({ node, allNodes, busy, onApply, onApplyChildren, onIgnore,
           <span className={cn('mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius)] border', critico ? 'border-red-400/40 bg-red-400/10 text-red-300' : 'border-border bg-background text-muted-foreground')}>
             {cat === 'pausar' ? <PauseCircle className="h-5 w-5" /> : cat === 'escalar' ? <Rocket className="h-5 w-5" /> : cat === 'revisar' ? <Search className="h-5 w-5" /> : <Target className="h-5 w-5" />}
           </span>
-          <p className={cn('text-base font-bold leading-snug', critico ? 'text-red-200' : 'text-foreground')}>{tituloGuiado}</p>
+          <div className="min-w-0 flex-1">
+            <p className={cn('text-base font-bold leading-snug', critico ? 'text-red-200' : 'text-foreground')}>{tituloGuiado}</p>
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <span className={cn('rounded border px-1.5 py-0.5 text-[10px] font-semibold', NIVEL_BADGE[node.nivel])}>{NIVEL_LABEL[node.nivel]}</span>
+              <span className={cn('rounded border px-1.5 py-0.5 text-[10px] font-semibold', entrega.tone)}>Entrega: {entrega.label}</span>
+              {node.status !== 'pendente' && (
+                <span className="rounded border border-border bg-background px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                  {node.status === 'aplicado' ? 'Aplicado' : node.status === 'ignorado' ? 'Revisado' : 'Em análise'}
+                </span>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
       <div className="space-y-3 px-3 pb-3 pt-3">
         {/* 4 mini-cards: nível / prioridade / impacto / risco */}
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 items-start gap-2">
           {miniCards.map((c) => (
-            <div key={c.label} className="rounded-[var(--radius)] border border-border/70 bg-background p-2">
+            <div key={c.label} className="min-h-[58px] rounded-[var(--radius)] border border-border/70 bg-background p-2">
               <p className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide text-muted-foreground">
                 <c.icon className="h-3 w-3" /> {c.label}
               </p>
-              <p className={cn('mt-1 text-sm font-semibold leading-none', c.tone)}>{c.value}</p>
+              <p className={cn('mt-1 text-sm font-semibold leading-tight', c.tone)}>{c.value}</p>
             </div>
           ))}
         </div>
@@ -1258,7 +1291,10 @@ function DetailPanel({ node, allNodes, busy, onApply, onApplyChildren, onIgnore,
                   <li className="flex items-start gap-2 text-sm text-muted-foreground"><Ban className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-400" /> Não pausar o {nomeNivelFilho} inteiro no momento.</li>
                 </>
               ) : (
-                <li className="flex items-start gap-2 text-sm text-foreground"><Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" /> {node.texto_recomendacao}</li>
+                <li className="flex items-start gap-2 text-sm text-foreground">
+                  <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" />
+                  {node.texto_recomendacao.trim() || (isMaintainOnly ? 'Manter ativo e apenas acompanhar na próxima análise.' : 'Revisar este item antes de executar qualquer mudança.')}
+                </li>
               )}
             </ul>
           </div>
@@ -1310,15 +1346,24 @@ function DetailPanel({ node, allNodes, busy, onApply, onApplyChildren, onIgnore,
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <PauseCircle className="h-4 w-4" />}
                 Pausar {afetados.length} criativo{afetados.length > 1 ? 's' : ''} agora
               </Button>
-            ) : lowConf ? (
-              <Button onClick={() => onHuman(node)} disabled={busy || emAnalise} className="h-11 w-full">
-                <UserRound className="h-4 w-4" /> Enviar para um humano
-              </Button>
-            ) : (
+            ) : actionExecutable ? (
               <Button onClick={handleApply} disabled={busy} className={cn('h-11 w-full', cat === 'pausar' && 'bg-red-500 text-white hover:bg-red-600')}>
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : cat === 'pausar' ? <PauseCircle className="h-4 w-4" /> : <Check className="h-4 w-4" />}
                 {batchOn && samePadrao.length > 0 ? `Aplicar em ${samePadrao.length + 1} contas` : verbo}
               </Button>
+            ) : isMaintainOnly ? (
+              <Button onClick={() => onIgnore(node)} disabled={busy} className="h-11 w-full">
+                <CheckCircle2 className="h-4 w-4" /> Manter ativo
+              </Button>
+            ) : (
+              <Button onClick={() => onHuman(node)} disabled={busy || emAnalise} className="h-11 w-full">
+                <UserRound className="h-4 w-4" /> Enviar para um humano
+              </Button>
+            )}
+            {confidenceLow && actionExecutable && (
+              <p className="rounded border border-amber-400/30 bg-amber-400/10 px-2 py-1.5 text-xs text-amber-200">
+                Confiança baixa: a ação está disponível, mas vale conferir o contexto antes de aplicar.
+              </p>
             )}
             <div className="grid grid-cols-2 gap-2">
               {link ? (
@@ -1330,13 +1375,13 @@ function DetailPanel({ node, allNodes, busy, onApply, onApplyChildren, onIgnore,
                 <Check className="h-3.5 w-3.5" /> Marcar como revisado
               </Button>
             </div>
-            {isAjuste && !lowConf && (
+            {isAjuste && actionExecutable && (
               <button onClick={() => setEditing((e) => !e)} className="text-xs font-medium text-primary hover:underline">Editar valor antes de aplicar</button>
             )}
             {!emAnalise && (
               <button onClick={() => onHuman(node)} className="block text-xs font-medium text-primary hover:underline">Enviar para um humano</button>
             )}
-            {samePadrao.length > 0 && !lowConf && !temAfetados && (
+            {samePadrao.length > 0 && actionExecutable && !temAfetados && (
               <label className="flex cursor-pointer items-start gap-2 rounded-[var(--radius)] border border-border p-2.5 text-xs text-foreground">
                 <input type="checkbox" checked={batchOn} onChange={(e) => setBatchOn(e.target.checked)} className="mt-0.5 accent-primary" />
                 <span>Aplicar a mesma ação em <span className="font-semibold">{samePadrao.length}</span> outra(s) conta(s) com este mesmo padrão.</span>
@@ -1388,60 +1433,6 @@ function DetailPanel({ node, allNodes, busy, onApply, onApplyChildren, onIgnore,
         <ManualNotesBox clienteId={node.cliente_id} nivel={node.nivel} objetoId={node.objeto_id} objetoNome={node.objeto_nome} />
       </div>
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Rodapé: resumo do impacto estimado (verde) + observação da análise (roxo)
-// ---------------------------------------------------------------------------
-// Parseia "R$ 1.234,56" → 1234.56 (pt-BR) para somar gastos exibidos nos nós.
-function parseBRL(v: string | undefined): number {
-  if (!v) return 0;
-  const n = Number(v.replace(/[^\d,.-]/g, '').replace(/\./g, '').replace(',', '.'));
-  return Number.isFinite(n) ? n : 0;
-}
-
-function ImpactSummaryFooter({ nodes }: { nodes: TreeNode[] }) {
-  // Desperdício recuperável = soma do gasto dos itens marcados "pausar" (dinheiro indo embora
-  // sem resultado). Conversas potenciais e efeito no CPL são estimativas grosseiras a partir do
-  // que já está no nó — deixadas explícitas como "até" pra não passar por número exato.
-  const paraPausar = nodes.filter((n) => categoriaDoNode(n) === 'pausar');
-  const desperdicio = paraPausar.reduce((s, n) => s + parseBRL(n.metricas_chave.find((m) => m.rotulo === 'Gasto')?.valor), 0);
-  const itens = paraPausar.length;
-  const escalaveis = nodes.filter((n) => categoriaDoNode(n) === 'escalar').length;
-
-  return (
-    <section className="grid gap-3 lg:grid-cols-[1.4fr_1fr]">
-      <div className="rounded-[var(--radius)] border border-emerald-500/30 bg-emerald-500/[0.06] p-4">
-        <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-emerald-300">
-          <PiggyBank className="h-4 w-4" /> Resumo do impacto estimado
-        </p>
-        <p className="mt-1 text-sm text-muted-foreground">Ao aplicar as recomendações de <span className="font-semibold text-foreground">Pausar agora</span>, você deixa de desperdiçar até:</p>
-        <div className="mt-3 grid grid-cols-3 gap-3">
-          <div>
-            <p className="text-xl font-bold leading-none text-emerald-300">{formatCurrencyBRL(desperdicio)}</p>
-            <p className="mt-1 text-[11px] text-muted-foreground">de desperdício</p>
-          </div>
-          <div>
-            <p className="text-xl font-bold leading-none text-foreground">{itens}</p>
-            <p className="mt-1 text-[11px] text-muted-foreground">item(ns) para pausar</p>
-          </div>
-          <div>
-            <p className="text-xl font-bold leading-none text-sky-300">{escalaveis}</p>
-            <p className="mt-1 text-[11px] text-muted-foreground">oportunidade(s) de escalar</p>
-          </div>
-        </div>
-      </div>
-      <div className="rounded-[var(--radius)] border border-secondary/30 bg-secondary/[0.06] p-4">
-        <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-secondary">
-          <Pencil className="h-4 w-4" /> Observação da análise
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">Registre um contexto humano sobre esta conta — a IA considera na próxima análise.</p>
-        <div className="mt-2">
-          {nodes[0] && <ManualNotesBox clienteId={nodes[0].cliente_id} nivel="cliente" objetoId={null} objetoNome={null} />}
-        </div>
-      </div>
-    </section>
   );
 }
 
@@ -1574,9 +1565,11 @@ export default function OtimizadorPage() {
 
   const autor = { autor_id: session?.userId ?? undefined, autor_nome: session?.name ?? undefined };
 
-  function removeFromTree(ids: string[], newStatus: string) {
+  function removeFromTree(ids: string[], newStatus: string, statusEntrega?: string) {
     function walk(nodes: TreeNode[]): TreeNode[] {
-      return nodes.map((n) => ids.includes(n.rec_id) ? { ...n, status: newStatus } : { ...n, filhos: walk(n.filhos as TreeNode[]) });
+      return nodes.map((n) => ids.includes(n.rec_id)
+        ? { ...n, status: newStatus, status_entrega: statusEntrega ?? n.status_entrega }
+        : { ...n, filhos: walk(n.filhos as TreeNode[]) });
     }
     setTreeNodes((prev) => walk(prev));
   }
@@ -1617,7 +1610,7 @@ export default function OtimizadorPage() {
           setToast({ text: `Não foi possível aplicar: ${data.error ?? res.statusText}`, erro: true });
           return;
         }
-        removeFromTree([rec.rec_id], 'aplicado');
+        removeFromTree([rec.rec_id], 'aplicado', acao.tipo === 'PAUSAR' ? 'PAUSED' : acao.tipo === 'ATIVAR' ? 'ACTIVE' : undefined);
         const label = acao.tipo === 'PAUSAR' ? 'Pausado' : acao.tipo === 'ATIVAR' ? 'Ativado' : 'Orçamento ajustado';
         setToast({ text: `${label}. Você pode reverter agora.`, undo: data.pode_desfazer ? { rec_id: rec.rec_id, cliente_id: rec.cliente_id } : undefined });
       }
@@ -1650,7 +1643,7 @@ export default function OtimizadorPage() {
       });
       const data = await res.json().catch(() => ({})) as { ok_count?: number; results?: Array<{ rec_id: string; ok: boolean }> };
       const okIds = (data.results ?? []).filter((r) => r.ok).map((r) => r.rec_id);
-      removeFromTree(okIds, 'aplicado');
+      removeFromTree(okIds, 'aplicado', 'PAUSED');
       setToast({ text: `${data.ok_count ?? okIds.length} criativo(s) pausado(s).` });
     } catch {
       setToast({ text: 'Erro de rede ao pausar os criativos.', erro: true });
@@ -1667,7 +1660,7 @@ export default function OtimizadorPage() {
         body: JSON.stringify({ rec_id: rec.rec_id, analise_id: rec.analise_id, cliente_id: rec.cliente_id, objeto_id: rec.objeto_id, ...autor }),
       });
       removeFromTree([rec.rec_id], 'ignorado');
-      setToast({ text: 'Recomendação ignorada.' });
+      setToast({ text: 'Marcado como revisado.' });
     } finally {
       setBusy(false);
     }
@@ -1690,6 +1683,15 @@ export default function OtimizadorPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function handleQuickPause(node: TreeNode) {
+    if (busy) return;
+    if (node.acao_estruturada?.tipo === 'PAUSAR' && node.aplicavel) {
+      void doApply(node, {}, []);
+      return;
+    }
+    setSelectedId(node.rec_id);
   }
 
   async function doUndo() {
@@ -1935,7 +1937,7 @@ export default function OtimizadorPage() {
                     nodes={treeNodes}
                     selectedId={selectedId}
                     onSelect={(n) => setSelectedId(n.rec_id)}
-                    onQuickPause={(n) => setSelectedId(n.rec_id)}
+                    onQuickPause={handleQuickPause}
                     filtroNivel={nivelFiltro}
                     filtroCategoria={categoriaFiltro}
                     apenasComAcao={apenasComAcao}
@@ -1950,7 +1952,6 @@ export default function OtimizadorPage() {
                   </div>
                 )}
               </div>
-              <ImpactSummaryFooter nodes={flatNodes} />
             </>
           )}
         </>

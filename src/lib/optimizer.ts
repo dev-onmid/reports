@@ -209,6 +209,7 @@ export type OptimizerVerdict = 'SAUDAVEL' | 'ATENCAO' | 'URGENTE';
 export type OptimizerAnaliseAnuncio = {
   id: string;
   nome: string;
+  status_entrega: string | null;
   gasto: number;
   conversoes: number;
   cpl: number | null;
@@ -233,6 +234,7 @@ export type OptimizerAnaliseAnuncio = {
 export type OptimizerAnaliseConjunto = {
   id: string;
   nome: string;
+  status_entrega: string | null;
   gasto: number;
   conversoes: number;
   cpl: number | null;
@@ -254,6 +256,7 @@ export type OptimizerAnaliseConjunto = {
 export type OptimizerAnaliseCampanha = {
   id: string;
   nome: string;
+  status_entrega: string | null;
   objetivo: string;
   gasto: number;
   conversoes: number;
@@ -320,6 +323,7 @@ export type OptimizerRecomendacao = {
   nivel: OptimizerObjetoTipo;  // campaign | adset | ad
   objeto_id: string;
   objeto_nome: string;
+  status_entrega: string | null;
   campanha_nome: string;
   // Nome do conjunto pai (para nivel adset é o próprio objeto; para campaign é null) —
   // permite ao card mostrar a hierarquia Campanha › Conjunto › Criativo pelo NOME.
@@ -460,6 +464,7 @@ export function buildRecomendacoes(
   const push = (o: {
     objeto_tipo: OptimizerObjetoTipo;
     objeto_id: string; objeto_nome: string; campanha_nome: string;
+    status_entrega: string | null;
     conjunto_nome: string | null;
     objetivo: ObjetivoInfo | null;
     gasto: number; conversoes: number;
@@ -503,6 +508,7 @@ export function buildRecomendacoes(
         nivel: o.objeto_tipo,
         objeto_id: o.objeto_id,
         objeto_nome: o.objeto_nome,
+        status_entrega: o.status_entrega,
         campanha_nome: o.campanha_nome,
         conjunto_nome: o.conjunto_nome,
         severidade: o.classificacao === 'URGENTE' ? 'urgente' : o.classificacao === 'ATENCAO' ? 'atencao' : 'ok',
@@ -539,7 +545,7 @@ export function buildRecomendacoes(
     const mConv = obj?.metrica ?? 'Conversões';
     const mCusto = obj?.custo ?? 'CPL';
     push({
-      objeto_tipo: 'campaign', objeto_id: camp.id, objeto_nome: camp.nome, campanha_nome: camp.nome,
+      objeto_tipo: 'campaign', objeto_id: camp.id, objeto_nome: camp.nome, status_entrega: camp.status_entrega ?? null, campanha_nome: camp.nome,
       conjunto_nome: null,
       objetivo: obj, gasto: Number(camp.gasto) || 0, conversoes: Number(camp.conversoes) || 0,
       classificacao: camp.classificacao, veredito: camp.veredito, acao: camp.acao,
@@ -560,7 +566,7 @@ export function buildRecomendacoes(
     });
     for (const conj of camp.conjuntos ?? []) {
       push({
-        objeto_tipo: 'adset', objeto_id: conj.id, objeto_nome: conj.nome, campanha_nome: camp.nome,
+        objeto_tipo: 'adset', objeto_id: conj.id, objeto_nome: conj.nome, status_entrega: conj.status_entrega ?? null, campanha_nome: camp.nome,
         conjunto_nome: conj.nome,
         objetivo: obj, gasto: Number(conj.gasto) || 0, conversoes: Number(conj.conversoes) || 0,
         classificacao: conj.classificacao, veredito: conj.veredito, acao: conj.acao,
@@ -582,7 +588,7 @@ export function buildRecomendacoes(
       });
       for (const ad of conj.anuncios ?? []) {
         push({
-          objeto_tipo: 'ad', objeto_id: ad.id, objeto_nome: ad.nome, campanha_nome: camp.nome,
+          objeto_tipo: 'ad', objeto_id: ad.id, objeto_nome: ad.nome, status_entrega: ad.status_entrega ?? null, campanha_nome: camp.nome,
           conjunto_nome: conj.nome,
           objetivo: obj, gasto: Number(ad.gasto) || 0, conversoes: Number(ad.conversoes) || 0,
           classificacao: ad.classificacao, veredito: ad.veredito, acao: ad.acao,
@@ -643,6 +649,7 @@ export function buildCampaignTree(
   function buildNode(o: {
     objeto_tipo: OptimizerObjetoTipo;
     objeto_id: string; objeto_nome: string; campanha_nome: string;
+    status_entrega: string | null;
     conjunto_nome: string | null;
     objetivo: ObjetivoInfo | null;
     gasto: number; conversoes: number;
@@ -683,6 +690,7 @@ export function buildCampaignTree(
       nivel: o.objeto_tipo,
       objeto_id: o.objeto_id,
       objeto_nome: o.objeto_nome,
+      status_entrega: o.status_entrega,
       campanha_nome: o.campanha_nome,
       conjunto_nome: o.conjunto_nome,
       severidade: o.classificacao === 'URGENTE' ? 'urgente' : o.classificacao === 'ATENCAO' ? 'atencao' : 'ok',
@@ -719,7 +727,7 @@ export function buildCampaignTree(
     const conjuntosNodes: OptimizerTreeNode[] = (camp.conjuntos ?? []).map((conj) => {
       const anunciosNodes: OptimizerTreeNode[] = (conj.anuncios ?? []).map((ad) => {
         const adNode = buildNode({
-          objeto_tipo: 'ad', objeto_id: ad.id, objeto_nome: ad.nome, campanha_nome: camp.nome,
+          objeto_tipo: 'ad', objeto_id: ad.id, objeto_nome: ad.nome, status_entrega: ad.status_entrega ?? null, campanha_nome: camp.nome,
           conjunto_nome: conj.nome,
           objetivo: obj, gasto: Number(ad.gasto) || 0, conversoes: Number(ad.conversoes) || 0,
           classificacao: ad.classificacao, veredito: ad.veredito, acao: ad.acao,
@@ -746,7 +754,7 @@ export function buildCampaignTree(
       });
 
       const conjNode = buildNode({
-        objeto_tipo: 'adset', objeto_id: conj.id, objeto_nome: conj.nome, campanha_nome: camp.nome,
+        objeto_tipo: 'adset', objeto_id: conj.id, objeto_nome: conj.nome, status_entrega: conj.status_entrega ?? null, campanha_nome: camp.nome,
         conjunto_nome: conj.nome,
         objetivo: obj, gasto: Number(conj.gasto) || 0, conversoes: Number(conj.conversoes) || 0,
         classificacao: conj.classificacao, veredito: conj.veredito, acao: conj.acao,
@@ -772,7 +780,7 @@ export function buildCampaignTree(
     });
 
     const campNode = buildNode({
-      objeto_tipo: 'campaign', objeto_id: camp.id, objeto_nome: camp.nome, campanha_nome: camp.nome,
+      objeto_tipo: 'campaign', objeto_id: camp.id, objeto_nome: camp.nome, status_entrega: camp.status_entrega ?? null, campanha_nome: camp.nome,
       conjunto_nome: null,
       objetivo: obj, gasto: Number(camp.gasto) || 0, conversoes: Number(camp.conversoes) || 0,
       classificacao: camp.classificacao, veredito: camp.veredito, acao: camp.acao,
@@ -1386,6 +1394,7 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
     return {
       id: camp.id,
       nome: camp.nome,
+      status_entrega: camp.status ?? null,
       objetivo: objetivoEfetivoCampanha(camp),
       gasto: Number(camp.gasto) || 0,
       conversoes: Number(camp.conversoes) || 0,
@@ -1406,6 +1415,7 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
         return {
           id: cj.id,
           nome: cj.nome,
+          status_entrega: cj.status ?? null,
           gasto: Number(cj.gasto) || 0,
           conversoes: Number(cj.conversoes) || 0,
           cpl: cj.cpl,
@@ -1426,6 +1436,7 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
             return {
               id: ad.id,
               nome: ad.nome,
+              status_entrega: ad.status ?? null,
               gasto: Number(ad.gasto) || 0,
               conversoes: Number(ad.conversoes) || 0,
               cpl: ad.cpl,
