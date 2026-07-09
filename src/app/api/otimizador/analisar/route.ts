@@ -30,8 +30,10 @@ import {
 import { sendOptimizerReport } from '@/lib/optimizer-whatsapp';
 
 // A chamada à IA (Claude) pode levar 15-30s (payloads grandes chegam a 60s+) — sem isto,
-// estoura no limite padrão e retorna 504 vazio. O weekly aguarda até 90s por esta rota.
-export const maxDuration = 120;
+// estoura no limite padrão e retorna 504 vazio. Contas grandes (ex: 70+ nós entre
+// campanhas/conjuntos/criativos) com max_tokens 32k podem passar de 120s gerando a árvore
+// completa — o weekly aguarda até 175s por esta rota.
+export const maxDuration = 180;
 
 type AnalyzeBody = {
   payload?: OptimizerPayload;
