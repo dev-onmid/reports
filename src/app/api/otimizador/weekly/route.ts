@@ -428,11 +428,30 @@ async function fetchConjuntosForCampaign(
     // Anúncios com rankings (best-effort, só se houver tempo)
     let anuncios: OptimizerCampaignV2['conjuntos'][number]['anuncios'] = [];
     if (Date.now() < deadline) {
+      const baseAdsFields = `id,name,effective_status,quality_ranking,engagement_rate_ranking,conversion_rate_ranking`;
+      const insightsBase = `spend,impressions,clicks,actions,ctr`;
+      const insightsComVideo = `${insightsBase},video_3_sec_watched_actions,video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions`;
+
       const adsUrl = new URL(`https://graph.facebook.com/v21.0/${String(raw.id)}/ads`);
-      adsUrl.searchParams.set('fields', `id,name,effective_status,quality_ranking,engagement_rate_ranking,conversion_rate_ranking,insights.time_range(${JSON.stringify({ since: dateFrom, until: dateTo })}){spend,impressions,clicks,actions,ctr,video_3_sec_watched_actions,video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions}`);
+      adsUrl.searchParams.set('fields', `${baseAdsFields},insights.time_range(${JSON.stringify({ since: dateFrom, until: dateTo })}){${insightsComVideo}}`);
       adsUrl.searchParams.set('limit', '8');
       adsUrl.searchParams.set('access_token', token);
-      const adsRes = await fetchWithTimeout(adsUrl.toString(), 8_000);
+      let adsRes = await fetchWithTimeout(adsUrl.toString(), 8_000);
+
+      // Se os campos de retenção de vídeo derrubarem o request inteiro (conta/versão da API
+      // que não aceita), os criativos NÃO PODEM sumir da árvore por causa disso — refaz sem
+      // os campos de vídeo antes de desistir. Sem este fallback, um 400 aqui zera "Criativos"
+      // e some com a árvore inteira (visto em produção com o payload de vídeo).
+      if (!adsRes?.ok) {
+        const errBody = await adsRes?.text().catch(() => '');
+        console.error('[otimizador/weekly] /ads falhou com campos de video, tentando fallback', raw.id, adsRes?.status, errBody?.slice(0, 300));
+        const fallbackUrl = new URL(`https://graph.facebook.com/v21.0/${String(raw.id)}/ads`);
+        fallbackUrl.searchParams.set('fields', `${baseAdsFields},insights.time_range(${JSON.stringify({ since: dateFrom, until: dateTo })}){${insightsBase}}`);
+        fallbackUrl.searchParams.set('limit', '8');
+        fallbackUrl.searchParams.set('access_token', token);
+        adsRes = await fetchWithTimeout(fallbackUrl.toString(), 8_000);
+      }
+
       if (adsRes?.ok) {
         const adsData = await adsRes.json() as { data?: Record<string, unknown>[] };
         anuncios = (adsData.data ?? []).map((ad) => {
