@@ -438,7 +438,10 @@ async function fetchConjuntosForCampaign(
     // Anúncios com rankings (best-effort, só se houver tempo)
     let anuncios: OptimizerCampaignV2['conjuntos'][number]['anuncios'] = [];
     if (Date.now() < deadline) {
-      const baseAdsFields = `id,name,effective_status,quality_ranking,engagement_rate_ranking,conversion_rate_ranking,creative{image_url,thumbnail_url}`;
+      // thumbnail_width/height força a Meta a renderizar o thumbnail_url num tamanho maior —
+      // sem isto, ads sem image_url (a maioria dos anúncios de vídeo) só tinham a miniatura
+      // default (~64px), que ficava borrada ao ampliar no preview de hover da árvore.
+      const baseAdsFields = `id,name,effective_status,quality_ranking,engagement_rate_ranking,conversion_rate_ranking,creative.thumbnail_width(640).thumbnail_height(640){image_url,thumbnail_url}`;
       const insightsBase = `spend,impressions,clicks,actions,ctr`;
       const insightsComVideo = `${insightsBase},video_3_sec_watched_actions,video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions`;
 
