@@ -4,11 +4,11 @@ import { RESULT_ACTIONS, NEW_CONTACT_ACTIONS, PURCHASE_ACTIONS, sumActions } fro
 import {
   fetchBairros, fetchMetaData, fetchInstagramData,
   sCapa, sVisaoGeral, sRegioes, sPaidTrafficResumo, sMetaAdsResumo, sMetaAdsCampanhas, sCriativos,
-  sGoogleAdsResumo, sGoogleAdsCampanhas,
+  sGoogleAdsResumo, sGoogleAdsCampanhas, sGoogleAdsPalavrasChave,
   sInstagram, sInstagramCalendar, sInstagramPosts, sInstagramSpotlight,
   monthsBetweenInclusive, FONT_LINK, CANVAS, INTER,
   resolveReportCover, fetchReportRotationSeed,
-  type ParsedData, type DiagJson, type GoogleAdsFull, type CampanhaGoogleDetalhada, type MetaBreakdownLevel,
+  type ParsedData, type DiagJson, type GoogleAdsFull, type CampanhaGoogleDetalhada, type PalavraChaveGoogle, type MetaBreakdownLevel,
 } from './delivery-report-builder';
 
 // ── Persist ───────────────────────────────────────────────────────────────────
@@ -369,6 +369,9 @@ export async function fetchGoogleAdsDetailed(
 
   const devToken = GOOGLE_ADS_DEVELOPER_TOKEN;
   const campanhas: CampanhaGoogleDetalhada[] = [];
+  // Palavras-chave agregadas por texto+correspondência (a mesma keyword pode existir
+  // em vários grupos de anúncios/campanhas — somamos as métricas de todas as ocorrências).
+  const keywordAgg = new Map<string, PalavraChaveGoogle>();
   const pendingAccounts = new Set(accountIds.map((accountId) => accountId.replace(/\D/g, '')).filter(Boolean));
 
   for (const candidate of candidates) {
@@ -377,6 +380,7 @@ export async function fetchGoogleAdsDetailed(
     const loginCustomerByAccount = await buildGoogleLoginCustomerMap(accountList, candidate.accessToken, devToken);
 
     await Promise.allSettled(accountList.map(async (customerId) => {
+      const loginCustomerId = loginCustomerByAccount[customerId];
       const data = await googleAdsSearchWithFallback(
         customerId,
         `SELECT campaign.name, campaign.advertising_channel_type, campaign.status, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value
@@ -385,7 +389,7 @@ export async function fetchGoogleAdsDetailed(
                     LIMIT 50`,
         candidate.accessToken,
         devToken,
-        loginCustomerByAccount[customerId],
+        loginCustomerId,
       );
       if (!data) return;
       pendingAccounts.delete(customerId);
@@ -407,10 +411,53 @@ export async function fetchGoogleAdsDetailed(
           metricas,
         });
       }
+
+      // Top palavras-chave (keyword_view) — só campanhas de Pesquisa têm keywords.
+      // segments.date fica só no WHERE para agregar o período inteiro por keyword.
+      const kwData = await googleAdsSearchWithFallback(
+        customerId,
+        `SELECT ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value
+                    FROM keyword_view
+                    WHERE segments.date BETWEEN '${from}' AND '${to}' AND campaign.status = 'ENABLED' AND ad_group_criterion.status = 'ENABLED'
+                    ORDER BY metrics.conversions DESC
+                    LIMIT 100`,
+        candidate.accessToken,
+        devToken,
+        loginCustomerId,
+      );
+      for (const row of (kwData?.results ?? [])) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const r = row as any;
+        const texto = String(r.adGroupCriterion?.keyword?.text ?? '').trim();
+        if (!texto) continue;
+        const correspondencia = String(r.adGroupCriterion?.keyword?.matchType ?? '');
+        const m = (r.metrics ?? {}) as Record<string, number>;
+        const key = `${texto.toLowerCase()}|${correspondencia}`;
+        const acc = keywordAgg.get(key) ?? {
+          texto, correspondencia,
+          investimento: 0, impressoes: 0, cliques: 0, conversoes: 0, valorConversoes: 0,
+        };
+        acc.investimento    += googleMetricNumber(m.costMicros) / 1_000_000;
+        acc.impressoes      += googleMetricNumber(m.impressions);
+        acc.cliques         += googleMetricNumber(m.clicks);
+        acc.conversoes      += googleMetricNumber(m.conversions);
+        acc.valorConversoes += googleMetricNumber(m.conversionsValue);
+        keywordAgg.set(key, acc);
+      }
     }));
   }
 
   if (!campanhas.length) return null;
+
+  // Top por conversões (desempate por cliques → investimento); só keywords com atividade.
+  const palavrasChave = [...keywordAgg.values()]
+    .filter((k) => k.impressoes > 0 || k.cliques > 0 || k.conversoes > 0)
+    .sort((a, b) =>
+      b.conversoes - a.conversoes ||
+      b.cliques - a.cliques ||
+      b.investimento - a.investimento,
+    )
+    .slice(0, 10);
 
   const totals = campanhas.reduce((acc, c) => ({
     investimento:    acc.investimento    + c.metricas.investimento,
@@ -423,6 +470,7 @@ export async function fetchGoogleAdsDetailed(
   return {
     ...totals,
     campanhas: campanhas.sort((a, b) => b.metricas.investimento - a.metricas.investimento).slice(0, 8),
+    palavrasChave,
   };
 }
 
@@ -609,6 +657,7 @@ export async function buildOmniReport(input: {
   const hasInstagramSpotlight = hasInstagramPosts;
   const hasDestaques          = hasMeta && meta!.campanhas.length > 0;
   const hasGoogleDestaques    = hasGoogle && googleDetailed!.campanhas.length > 0;
+  const hasGooglePalavras     = hasGoogle && googleDetailed!.palavrasChave.length > 0;
   const hasCriativos          = creatives.length > 0;
   const destaquePages         = hasDestaques ? Math.ceil(meta!.campanhas.length / 4) : 0;
   const googleDestaquePages   = hasGoogleDestaques ? Math.ceil(googleDetailed!.campanhas.length / 4) : 0;
@@ -625,6 +674,7 @@ export async function buildOmniReport(input: {
     + (hasInstagramSpotlight ? 1 : 0)
     + destaquePages
     + googleDestaquePages
+    + (hasGooglePalavras ? 1 : 0)
     + (hasCriativos   ? 1 : 0);
 
   const slides: string[] = [];
@@ -651,6 +701,7 @@ export async function buildOmniReport(input: {
       slides.push(sGoogleAdsCampanhas(googleDetailed!, ++i, total, periodo, googleDetailed!.campanhas.slice(start, start + 4)));
     }
   }
+  if (hasGooglePalavras) slides.push(sGoogleAdsPalavrasChave(googleDetailed!, ++i, total, periodo));
 
   if (hasInstagram)   slides.push(sInstagram(instagram!, ++i, total, periodo));
   if (hasInstagramPosts) {

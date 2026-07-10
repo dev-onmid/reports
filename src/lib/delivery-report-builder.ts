@@ -174,6 +174,16 @@ export type CampanhaGoogleDetalhada = {
   };
 };
 
+export type PalavraChaveGoogle = {
+  texto: string;
+  correspondencia: string; // EXACT | PHRASE | BROAD
+  investimento: number;
+  impressoes: number;
+  cliques: number;
+  conversoes: number;
+  valorConversoes: number;
+};
+
 export type GoogleAdsFull = {
   investimento: number;
   impressoes: number;
@@ -181,6 +191,7 @@ export type GoogleAdsFull = {
   conversoes: number;
   valorConversoes: number;
   campanhas: CampanhaGoogleDetalhada[];
+  palavrasChave: PalavraChaveGoogle[];
 };
 
 export type Creative = {
@@ -4405,6 +4416,110 @@ export function sGoogleAdsCampanhas(google: GoogleAdsFull, idx: number, total: n
   ${richFooter()}
 </div>`;
   return auditSlide(body, 'sGoogleAdsCampanhas');
+}
+
+// ── Google Ads — Top palavras-chave ───────────────────────────────────────────
+
+const GOOGLE_MATCH_LABEL: Record<string, string> = {
+  EXACT: 'Exata',
+  PHRASE: 'Frase',
+  BROAD: 'Ampla',
+  BROAD_MATCH_MODIFIER: 'Ampla mod.',
+};
+
+export function sGoogleAdsPalavrasChave(
+  google: GoogleAdsFull, idx: number, total: number, periodo = 'Maio/2026', palavras = google.palavrasChave,
+): string {
+  const month = periodo.split('/')[0]?.toLowerCase() || periodo.toLowerCase();
+
+  const brlC = (n: number) => n > 0 ? brl(n) : '—';
+  const cpcC = (n: number) => n > 0 ? brlPrecise(n) : '—';
+
+  // Ordenado a montante por conversões; garantimos aqui também caso venha custom.
+  const rows = [...palavras].sort((a, b) =>
+    b.conversoes - a.conversoes || b.cliques - a.cliques || b.investimento - a.investimento,
+  );
+
+  const totConv = rows.reduce((s, k) => s + k.conversoes, 0);
+  const topKw = rows[0];
+  const topCpc = topKw && topKw.cliques > 0 ? topKw.investimento / topKw.cliques : 0;
+
+  const GRID = 'minmax(0,2.6fr) .95fr .95fr 1fr 1fr 1.25fr';
+  const cell = (content: string, align = 'right', extra = '') =>
+    `<div style="font-family:${INTER};font-size:15px;font-weight:800;color:${FG};text-align:${align};min-width:0;${extra}">${content}</div>`;
+
+  const headerCell = (label: string, align = 'right', accent = false) =>
+    `<div style="font-family:${INTER};font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:${accent ? GOOGLE_BLUE : MUTED};text-align:${align}">${label}</div>`;
+
+  const matchBadge = (raw: string) => {
+    const label = GOOGLE_MATCH_LABEL[(raw || '').toUpperCase()] ?? 'Correspond.';
+    return `<span style="display:inline-block;font-family:${INTER};font-size:10px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;color:${GOOGLE_BLUE};background:${GOOGLE_BLUE}14;border-radius:999px;padding:2px 8px;line-height:1.4;white-space:nowrap">${label}</span>`;
+  };
+
+  const rowBlock = (k: PalavraChaveGoogle, rank: number) => {
+    const cpc = k.cliques > 0 ? k.investimento / k.cliques : 0;
+    const custoConv = k.conversoes > 0 ? k.investimento / k.conversoes : 0;
+    const isTop = rank === 0 && k.conversoes > 0;
+    const bg = isTop ? `${GOOGLE_BLUE}0D` : (rank % 2 === 1 ? '#FBFCFE' : CARD);
+    return `<div style="display:grid;grid-template-columns:${GRID};gap:14px;align-items:center;padding:15px 22px;background:${bg};${isTop ? `border-left:4px solid ${GOOGLE_BLUE};` : 'border-left:4px solid transparent;'}border-bottom:1px solid #EEF2F7">
+      <div style="display:flex;align-items:center;gap:12px;min-width:0">
+        <span style="font-family:${INTER};font-size:13px;font-weight:900;color:${isTop ? GOOGLE_BLUE : MUTED};width:20px;flex-shrink:0;text-align:right">${rank + 1}</span>
+        <div style="min-width:0">
+          <p style="font-family:${INTER};font-size:16px;font-weight:800;color:${FG};margin:0 0 5px;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${k.texto}</p>
+          ${matchBadge(k.correspondencia)}
+        </div>
+      </div>
+      ${cell(numOrDash(k.impressoes))}
+      ${cell(numOrDash(k.cliques))}
+      ${cell(cpcC(cpc))}
+      ${cell(numOrDash(k.conversoes), 'right', `color:${k.conversoes > 0 ? GOOGLE_BLUE : MUTED};font-weight:900`)}
+      ${cell(brlC(custoConv))}
+    </div>`;
+  };
+
+  const table = rows.length > 0
+    ? `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 12px 28px rgba(15,23,42,.055);overflow:hidden">
+        <div style="display:grid;grid-template-columns:${GRID};gap:14px;align-items:center;padding:16px 22px;background:#F4F8FF;border-bottom:1px solid #E1EBFA">
+          ${headerCell('Palavra-chave', 'left')}
+          ${headerCell('Impressões')}
+          ${headerCell('Cliques')}
+          ${headerCell('CPC')}
+          ${headerCell('Conversões', 'right', true)}
+          ${headerCell('Custo / conv.')}
+        </div>
+        ${rows.map((k, i) => rowBlock(k, i)).join('')}
+      </div>`
+    : `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;padding:40px;text-align:center;font-family:${INTER};font-size:16px;font-weight:600;color:${MUTED}">Nenhuma palavra-chave com atividade no período.</div>`;
+
+  const insight = topKw && topKw.conversoes > 0
+    ? `A palavra-chave que mais converteu foi <strong>“${topKw.texto}”</strong>, com ${numOrDash(topKw.conversoes)} ${topKw.conversoes === 1 ? 'conversão' : 'conversões'} a um CPC de ${cpcC(topCpc)}. No total, as ${rows.length === 1 ? 'palavras-chave desta lista geraram' : `${rows.length} principais palavras-chave geraram`} ${numOrDash(totConv)} ${totConv === 1 ? 'conversão' : 'conversões'} — priorize as de menor CPC e maior conversão no próximo ciclo.`
+    : `As palavras-chave de Pesquisa registraram cliques no período, mas ainda sem conversões atribuídas. Vale revisar correspondências, negativas e a página de destino para transformar esse tráfego em resultado.`;
+
+  const body = `<div data-slide-index="${idx}" data-slide-total="${total}" style="width:1440px;min-height:810px;background:${BG};border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
+  <div style="position:absolute;right:80px;top:-120px;width:560px;height:500px;border-radius:50%;background:linear-gradient(135deg,rgba(219,234,254,.5),${GOOGLE_BLUE}14,rgba(255,255,255,.1));opacity:.75;pointer-events:none"></div>
+
+  <div style="position:relative;z-index:1;flex:1;padding:52px 48px 0;display:flex;flex-direction:column;gap:20px">
+    <div style="flex-shrink:0">
+      <h1 style="font-family:${INTER};font-size:52px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 8px;letter-spacing:-0.03em">${reportTitle('Top palavras-chave')}</h1>
+      <p style="font-size:16px;font-weight:500;color:#163461;font-family:${INTER};margin:0">Palavras-chave que mais converteram em ${month}, com o custo por clique de cada uma</p>
+    </div>
+
+    <div style="flex-shrink:0">${table}</div>
+
+    <div data-conclusion="1" style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 10px 26px rgba(15,23,42,.06);display:flex;align-items:flex-start;gap:16px;padding:20px 26px">
+      <div style="width:40px;height:40px;border-radius:50%;background:${GOOGLE_BLUE}16;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${GOOGLE_BLUE}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      </div>
+      <div style="border-left:2px solid ${GOOGLE_BLUE};padding-left:18px">
+        <p style="font-size:15px;font-weight:800;color:${FG};font-family:${INTER};margin:0 0 4px">Leitura</p>
+        <p style="font-size:14px;font-weight:500;color:#163461;font-family:${INTER};line-height:1.5;margin:0">${insight}</p>
+      </div>
+    </div>
+  </div>
+
+  ${richFooter()}
+</div>`;
+  return auditSlide(body, 'sGoogleAdsPalavrasChave');
 }
 
 // ── Diagnosis (Claude — expanded JSON) ────────────────────────────────────────

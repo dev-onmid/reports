@@ -165,6 +165,13 @@ Monitora o status de todas as instâncias na VPS Evolution e alerta quando algum
 - **Secret necessário no GitHub**: `REPORTS_CRON_URL` (repo Settings → Secrets → Actions) — URL completa incluindo `?secret=CRON_SECRET`, mesmo padrão de `OPTIMIZER_WEEKLY_URL` e `LEADLOVERS_WORKER_URL`.
 - A rota `src/app/api/reports/cron-monthly/route.ts` já filtra corretamente por `send_day = EXTRACT(DAY FROM NOW())` — só faltava ser chamada todo dia em vez de só no dia 1.
 
+### Slide "Top palavras-chave" (Google Ads)
+
+- O relatório de performance (`buildOmniReport` em `src/lib/report-builder.ts`) monta os slides de Google a partir de `fetchGoogleAdsDetailed`, que agora traz também `palavrasChave: PalavraChaveGoogle[]` (tipo em `delivery-report-builder.ts`).
+- **Fonte**: GAQL `keyword_view` (palavras-chave compradas, não `search_term_view`). `segments.date` só no `WHERE` para agregar o período; agregação por `texto+match_type` no código (a mesma keyword aparece em vários grupos). Top 10 ordenado por **conversões** (desempate: cliques → investimento).
+- **Slide** `sGoogleAdsPalavrasChave` (tabela: palavra-chave + badge de correspondência, impressões, cliques, **CPC**, **conversões**, custo/conv.) renderizado após `sGoogleAdsCampanhas`. Só aparece se `googleDetailed.palavrasChave.length > 0` (contas só-PMax/Display/Shopping não têm keyword → slide some sem quebrar).
+- ⚠️ Não verificável no preview local (sem DB/OAuth Google) — validar com cliente Google de Pesquisa real.
+
 ---
 
 ## Regras e convenções
