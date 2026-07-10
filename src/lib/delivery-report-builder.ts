@@ -4453,7 +4453,7 @@ export function sGoogleAdsPalavrasChave(
 
   const matchBadge = (raw: string) => {
     const label = GOOGLE_MATCH_LABEL[(raw || '').toUpperCase()] ?? 'Correspond.';
-    return `<span style="display:inline-block;font-family:${INTER};font-size:10px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;color:${GOOGLE_BLUE};background:${GOOGLE_BLUE}14;border-radius:999px;padding:2px 8px;line-height:1.4;white-space:nowrap">${label}</span>`;
+    return `<span style="flex-shrink:0;font-family:${INTER};font-size:10px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;color:${GOOGLE_BLUE};background:${GOOGLE_BLUE}14;border-radius:999px;padding:2px 8px;line-height:1.4;white-space:nowrap">${label}</span>`;
   };
 
   const rowBlock = (k: PalavraChaveGoogle, rank: number) => {
@@ -4461,13 +4461,11 @@ export function sGoogleAdsPalavrasChave(
     const custoConv = k.conversoes > 0 ? k.investimento / k.conversoes : 0;
     const isTop = rank === 0 && k.conversoes > 0;
     const bg = isTop ? `${GOOGLE_BLUE}0D` : (rank % 2 === 1 ? '#FBFCFE' : CARD);
-    return `<div style="display:grid;grid-template-columns:${GRID};gap:14px;align-items:center;padding:15px 22px;background:${bg};${isTop ? `border-left:4px solid ${GOOGLE_BLUE};` : 'border-left:4px solid transparent;'}border-bottom:1px solid #EEF2F7">
-      <div style="display:flex;align-items:center;gap:12px;min-width:0">
-        <span style="font-family:${INTER};font-size:13px;font-weight:900;color:${isTop ? GOOGLE_BLUE : MUTED};width:20px;flex-shrink:0;text-align:right">${rank + 1}</span>
-        <div style="min-width:0">
-          <p style="font-family:${INTER};font-size:16px;font-weight:800;color:${FG};margin:0 0 5px;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${k.texto}</p>
-          ${matchBadge(k.correspondencia)}
-        </div>
+    return `<div style="display:grid;grid-template-columns:${GRID};gap:14px;align-items:center;padding:11px 22px;background:${bg};${isTop ? `border-left:4px solid ${GOOGLE_BLUE};` : 'border-left:4px solid transparent;'}border-bottom:1px solid #EEF2F7">
+      <div style="display:flex;align-items:center;gap:11px;min-width:0">
+        <span style="font-family:${INTER};font-size:13px;font-weight:900;color:${isTop ? GOOGLE_BLUE : MUTED};width:18px;flex-shrink:0;text-align:right">${rank + 1}</span>
+        <span style="font-family:${INTER};font-size:15px;font-weight:800;color:${FG};line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0">${k.texto}</span>
+        ${matchBadge(k.correspondencia)}
       </div>
       ${cell(numOrDash(k.impressoes))}
       ${cell(numOrDash(k.cliques))}
@@ -4479,7 +4477,7 @@ export function sGoogleAdsPalavrasChave(
 
   const table = rows.length > 0
     ? `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 12px 28px rgba(15,23,42,.055);overflow:hidden">
-        <div style="display:grid;grid-template-columns:${GRID};gap:14px;align-items:center;padding:16px 22px;background:#F4F8FF;border-bottom:1px solid #E1EBFA">
+        <div style="display:grid;grid-template-columns:${GRID};gap:14px;align-items:center;padding:13px 22px;background:#F4F8FF;border-bottom:1px solid #E1EBFA">
           ${headerCell('Palavra-chave', 'left')}
           ${headerCell('Impressões')}
           ${headerCell('Cliques')}
