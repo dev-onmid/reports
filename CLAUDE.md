@@ -211,8 +211,19 @@ Módulo de análise automática de performance — arquivos principais:
 | `src/app/api/otimizador/config/[clientId]/route.ts` | GET/POST config por cliente (modo, dia rodízio, limites) |
 | `src/app/api/otimizador/whatsapp-config/route.ts` | GET/POST config global de WhatsApp do otimizador |
 | `src/app/api/otimizador/whatsapp-groups/route.ts` | GET grupos Evolution disponíveis |
-| `src/app/(dashboard)/otimizador/page.tsx` | UI — fila de decisão com `DecisionCard` (1 card visível por vez), modal config, aprovações |
+| `src/app/(dashboard)/otimizador/page.tsx` | UI — **orquestrador fino** (estado + fetch/polling + handlers); ~470 linhas (era 1.950). Toda a UI vive em `src/components/otimizador/*` |
+| `src/lib/optimizer-ui.ts` | Camada de UI compartilhada — tipos de tela, constantes (SEV/CATEGORIA_META/NÍVEL/ESTADO) e helpers PUROS (`categoriaDoNode`, `computeAccountScore`, `agruparPorObjetivo`, `resumoDoObjetivo`, `deliveryDisplay`, `parseNumeroBR`…). Sem JSX |
+| `src/components/otimizador/*` | `account-rail` (troca instantânea), `account-health-hero`, `decision-strip`, `campaign-tree`, `decision-panel`, `config-modal`, `creative-thumb`, `confirm-toast`, `objective-highlight-card` |
+| `src/app/(dashboard)/otimizador/apresentacao/page.tsx` | Modo apresentação — visão read-only, limpa (hero + cards por objetivo + ganhos/alertas), reusa `/api/otimizador/arvore` (zero backend novo). Link "Apresentação" na tela principal |
 | `src/app/(dashboard)/configuracoes/page.tsx` | Aba "Otimizador" — config WhatsApp global (admin) |
+
+### Decisões arquiteturais da reforma de UI (2026-07)
+
+- **Rebuild por componentes.** `page.tsx` (era um monólito de 1.950 linhas) virou orquestrador; toda a UI foi extraída pra `src/components/otimizador/*` e os helpers puros pra `src/lib/optimizer-ui.ts`. A lógica de dados/rotas (`buildCampaignTree`/`buildRecomendacoes`/`objetivoInfo` no servidor) NÃO mudou — foi refatoração de apresentação.
+- **`AccountRail`** substitui o dropdown de conta: chips sempre visíveis com dot de saúde + busca + scroll → troca instantânea (dor "trocar de cliente na Meta/Google é lento").
+- **Colunas por objetivo com UNIÃO entre nós** (`rotulosDoGrupo`): antes o cabeçalho quebrava quando o 1º nó vinha sem métrica. Accordion dos objetivos persiste em `localStorage`. `CreativeThumb` cai pro placeholder no `onError` (URLs da Meta expiram).
+- **Modo apresentação** (`/otimizador/apresentacao?clientId=`): read-only, sem botões/jargão, pra reunião/PDF. Usa `useSearchParams` dentro de `<Suspense>`.
+- **Google Ads na análise (aditivo — Meta intocado).** `weekly/route.ts` ganhou `loadGoogleConnections` (`client_account_links` platform `google_ads` → `google_connections`), `resolveGoogleToken`, `fetchGoogleAdGroups` (GAQL `ad_group`+`ad_group_ad`, `segments.date` só no WHERE pra agregar) e `buildGooglePayloadForClient` (mesmo shape `OptimizerPayloadV2`; Google sem retenção de vídeo/imagem → `eh_video=false`, taxas/`imagem_url` null). `processClient` roda análise Google SEPARADA após a Meta. `analisar/route.ts` ganhou `canal?: 'meta'|'google'` (+`login_customer_id`): `saveLogV2` grava `conta_plataforma='google_ads'` e `processAutoActions` executa via Google. O objetivo Google já cai nos boards certos (`normalizeGoogleChannelType` → `objetivoInfo`). **Conta MISTA Meta+Google:** `arvore/route.ts` aceita `?canal=meta|google` (filtra por `conta_plataforma`) e devolve `canais` (quais têm análise recente); a UI (`page.tsx`) mostra um toggle Meta/Google só quando há os dois e recarrega a árvore no canal escolhido. Cliente só-Google e cliente misto já funcionam ponta a ponta. ⚠️ Não verificável no preview local (sem DB/OAuth Google) — validar com cliente Google real via `?dryRun=1`→`?forceAi=1`.
 
 ### Decisões arquiteturais do Otimizador v2
 

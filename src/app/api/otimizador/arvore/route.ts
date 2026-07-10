@@ -47,6 +47,16 @@ export async function GET(req: NextRequest) {
   const lookbackHours = Math.min(Math.max(Number(req.nextUrl.searchParams.get('hours') ?? 200), 1), 336);
   if (!clientId) return Response.json({ error: 'clientId obrigatório.' }, { status: 400 });
 
+  // Filtro de canal — conta MISTA (Meta + Google) tem 2 análises separadas (uma por
+  // conta_plataforma). Sem `canal`, pega a mais recente de qualquer canal (comportamento antigo).
+  // 'meta' = qualquer coisa que NÃO seja google_ads (logs antigos vêm null e são Meta).
+  const canalParam = (req.nextUrl.searchParams.get('canal') ?? '').toLowerCase();
+  const canalFilter = canalParam === 'google'
+    ? `AND conta_plataforma = 'google_ads'`
+    : canalParam === 'meta'
+      ? `AND conta_plataforma IS DISTINCT FROM 'google_ads'`
+      : '';
+
   const pool = makeServerPool();
   try {
     await ensureOptimizerRecStatusTable(pool);
@@ -59,14 +69,27 @@ export async function GET(req: NextRequest) {
           AND solicitacao = 'analise_semanal'
           AND resultado IS NOT NULL
           AND created_at >= NOW() - ($2::int * INTERVAL '1 hour')
+          ${canalFilter}
         ORDER BY created_at DESC
         LIMIT 1`,
       [clientId, lookbackHours],
     );
 
+    // Canais com análise recente — a UI só mostra o toggle Meta/Google quando há os dois.
+    const { rows: canalRows } = await pool.query<{ conta_plataforma: string | null }>(
+      `SELECT DISTINCT conta_plataforma
+         FROM public.optimizer_ai_logs
+        WHERE cliente_id = $1
+          AND solicitacao = 'analise_semanal'
+          AND resultado IS NOT NULL
+          AND created_at >= NOW() - ($2::int * INTERVAL '1 hour')`,
+      [clientId, lookbackHours],
+    );
+    const canais = Array.from(new Set(canalRows.map((r) => (r.conta_plataforma === 'google_ads' ? 'google' : 'meta'))));
+
     const log = rows[0];
     if (!log) {
-      return Response.json({ campanhas: [], resumo: null, generated_at: null });
+      return Response.json({ campanhas: [], resumo: null, generated_at: null, canal: canalParam || null, canais });
     }
 
     const canal: 'meta' | 'google' = log.conta_plataforma === 'google_ads' ? 'google' : 'meta';
@@ -107,6 +130,8 @@ export async function GET(req: NextRequest) {
         ...counts,
       },
       generated_at: log.created_at,
+      canal,
+      canais,
     });
   } finally {
     await pool.end();

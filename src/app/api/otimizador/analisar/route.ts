@@ -40,6 +40,11 @@ type AnalyzeBody = {
   payload_v2?: OptimizerPayloadV2;
   connection_id?: string;
   account_id?: string;
+  // Canal da análise. Default 'meta' (retrocompat — chamadas antigas não mandam este campo).
+  // 'google' faz o log ser gravado com conta_plataforma='google_ads' e as ações automáticas
+  // serem executadas via Google Ads (com login_customer_id do MCC).
+  canal?: 'meta' | 'google';
+  login_customer_id?: string;
   force_ai?: boolean;
 };
 
@@ -536,6 +541,7 @@ async function saveLogV2(params: {
   payloadHash: string;
   connectionId?: string;
   accountId?: string;
+  canal?: 'meta' | 'google';
   error?: string;
 }) {
   const pool = makeServerPool();
@@ -558,7 +564,7 @@ async function saveLogV2(params: {
         params.result.estado_da_conta === 'CRISE' ? 'vermelho' : params.result.estado_da_conta === 'ATENCAO' ? 'amarelo' : 'verde',
         params.payload.cliente_nome,
         null,
-        'meta_ads',
+        params.canal === 'google' ? 'google_ads' : 'meta_ads',
         params.payload.periodo_analise.label ?? `${params.payload.periodo_analise.dias} dias`,
         params.payload.periodo_analise.dias,
         params.result.cruzamento_com_metas.gasto_total,
@@ -595,6 +601,7 @@ async function processAutoActions(
   connectionId: string,
   origin: string,
   analiseId: string,
+  exec: { canal?: 'meta' | 'google'; accountId?: string; loginCustomerId?: string } = {},
 ) {
   const toExecute = result.acoes_automaticas.filter((a) => a.status_execucao === 'EXECUTAR_AGORA');
   for (const acao of toExecute.slice(0, 2)) { // max 2 por ciclo
@@ -604,8 +611,11 @@ async function processAutoActions(
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           analise_id: analiseId,
+          canal: exec.canal ?? 'meta',
           client_id: payload.cliente_id,
           connection_id: connectionId,
+          account_id: exec.accountId,
+          login_customer_id: exec.loginCustomerId,
           acao: acao.acao,
           objeto_tipo: acao.objeto_tipo,
           objeto_id: acao.objeto_id,
@@ -724,11 +734,13 @@ async function handleV2(body: AnalyzeBody, origin: string): Promise<Response> {
   };
 
   void logAiUsage({ source: 'otimizador-v2', model: OPTIMIZER_MODEL_V2, inputTokens, outputTokens });
-  await saveLogV2({ payload, result, payloadHash, connectionId, accountId: body.account_id, error: analiseError });
+  await saveLogV2({ payload, result, payloadHash, connectionId, accountId: body.account_id, canal: body.canal, error: analiseError });
 
   // Executa ações automáticas (fire-and-forget)
   if (payload.modo_operacao === 'AUTOMATICO_PARCIAL' || payload.modo_operacao === 'AUTOMATICO_TOTAL') {
-    void processAutoActions(result, payload, connectionId, origin, analiseId);
+    void processAutoActions(result, payload, connectionId, origin, analiseId, {
+      canal: body.canal, accountId: body.account_id, loginCustomerId: body.login_customer_id,
+    });
   }
 
   // Envia relatório WhatsApp (fire-and-forget)

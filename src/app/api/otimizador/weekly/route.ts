@@ -1,4 +1,5 @@
 import type { NextRequest } from 'next/server';
+import { google } from 'googleapis';
 import { makeServerPool } from '@/lib/server-db';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import { countMetaResults } from '@/lib/meta-results';
@@ -396,6 +397,7 @@ async function fetchCampaignsForClient(clientId: string, origin: string, periodK
     id: string; name: string; status: string; objective?: string;
     dailyBudget?: number; spend: number; impressions: number; clicks: number;
     leads: number; ctr: number; cpl: number; platform: string;
+    accountId?: string; loginCustomerId?: string;
   }>>;
 }
 
@@ -723,6 +725,311 @@ async function buildPayloadForClient(
   };
 }
 
+// ─── Google Ads (path aditivo — Meta intocado) ─────────────────────────────────
+// Espelha o path Meta (buildPayloadForClient) mas puxando ad groups + ads via GAQL. O Google
+// não expõe retenção de vídeo nem imagem de criativo via GAQL simples → eh_video=false, taxas e
+// imagem_url null (o prompt já trata `eh_video=false`). O objetivo já vem NORMALIZADO por
+// /api/campaigns (normalizeGoogleChannelType), então cai nos boards certos sem mudança extra.
+
+const GADS_DEV_TOKEN = process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? '1vR8GhAk4UMZoPaqo7Qq8Q';
+
+function normalizeGoogleCustomerId(accountId: string): string {
+  return String(accountId ?? '').replace(/\D/g, '');
+}
+
+function gadsHeaders(accessToken: string, loginCustomerId?: string): Record<string, string> {
+  const h: Record<string, string> = {
+    Authorization: `Bearer ${accessToken}`,
+    'developer-token': GADS_DEV_TOKEN,
+    'Content-Type': 'application/json',
+  };
+  if (loginCustomerId) h['login-customer-id'] = normalizeGoogleCustomerId(loginCustomerId);
+  return h;
+}
+
+async function gadsSearch(
+  customerId: string,
+  query: string,
+  accessToken: string,
+  loginCustomerId: string | undefined,
+  ms: number,
+): Promise<{ results?: Record<string, unknown>[] } | null> {
+  const cid = normalizeGoogleCustomerId(customerId);
+  if (!cid) return null;
+  const res = await fetchWithTimeout(
+    `https://googleads.googleapis.com/v24/customers/${cid}/googleAds:search`,
+    ms,
+    { method: 'POST', headers: gadsHeaders(accessToken, loginCustomerId), body: JSON.stringify({ query }) },
+  );
+  if (!res?.ok) return null;
+  return res.json() as Promise<{ results?: Record<string, unknown>[] }>;
+}
+
+async function resolveGoogleToken(connectionId: string): Promise<string | null> {
+  const pool = makeServerPool();
+  try {
+    const { rows } = await pool.query<{ access_token: string; refresh_token: string; token_expiry: string | null }>(
+      `SELECT access_token, refresh_token, token_expiry FROM public.google_connections WHERE id = $1`,
+      [connectionId],
+    );
+    const conn = rows[0];
+    if (!conn) return null;
+    if (conn.token_expiry && new Date(conn.token_expiry).getTime() > Date.now() + 5 * 60 * 1000) {
+      return conn.access_token;
+    }
+    const oauth2 = new google.auth.OAuth2(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET);
+    oauth2.setCredentials({ refresh_token: conn.refresh_token });
+    const { credentials } = await oauth2.refreshAccessToken();
+    return credentials.access_token ?? null;
+  } catch {
+    return null;
+  } finally {
+    await pool.end().catch(() => {});
+  }
+}
+
+type GoogleConnRow = { connectionId: string; accountId: string };
+
+async function loadGoogleConnections(clientIds: string[]): Promise<Record<string, GoogleConnRow>> {
+  if (clientIds.length === 0) return {};
+  const pool = makeServerPool();
+  try {
+    const { rows } = await pool.query<{ client_id: string; connection_id: string; account_id: string }>(
+      `SELECT client_id, connection_id, account_id
+         FROM public.client_account_links
+        WHERE client_id = ANY($1::text[]) AND platform = 'google_ads'`,
+      [clientIds],
+    ).catch(() => ({ rows: [] as { client_id: string; connection_id: string; account_id: string }[] }));
+    const map: Record<string, GoogleConnRow> = {};
+    for (const r of rows) {
+      if (!map[r.client_id] && r.connection_id && r.account_id) {
+        map[r.client_id] = { connectionId: r.connection_id, accountId: r.account_id };
+      }
+    }
+    return map;
+  } finally {
+    await pool.end().catch(() => {});
+  }
+}
+
+function gadsNum(metrics: Record<string, unknown>, key: string): number {
+  return Number(metrics[key] ?? 0);
+}
+
+// Busca ad groups + ads de uma campanha Google via GAQL. `segments.date` só no WHERE (não no
+// SELECT) → o Google agrega as métricas no intervalo em UMA linha por objeto (sem linhas por dia).
+async function fetchGoogleAdGroups(
+  customerId: string,
+  campaignId: string,
+  token: string,
+  loginCustomerId: string | undefined,
+  dateFrom: string,
+  dateTo: string,
+  deadline: number,
+): Promise<OptimizerCampaignV2['conjuntos']> {
+  if (Date.now() > deadline) return [];
+  const dateFilter = `segments.date BETWEEN '${dateFrom}' AND '${dateTo}'`;
+  const agData = await gadsSearch(
+    customerId,
+    `SELECT ad_group.id, ad_group.name, ad_group.status,
+            metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions
+       FROM ad_group
+      WHERE campaign.id = ${campaignId} AND ${dateFilter}
+        AND ad_group.status != 'REMOVED'
+      ORDER BY metrics.cost_micros DESC
+      LIMIT 5`,
+    token, loginCustomerId, 8_000,
+  );
+  const agRows = agData?.results ?? [];
+
+  return Promise.all(agRows.map(async (row): Promise<OptimizerCampaignV2['conjuntos'][number]> => {
+    const ag = (row.adGroup as Record<string, unknown>) ?? {};
+    const m = (row.metrics as Record<string, unknown>) ?? {};
+    const gasto = gadsNum(m, 'costMicros') / 1_000_000;
+    const impressoes = gadsNum(m, 'impressions');
+    const cliques = gadsNum(m, 'clicks');
+    const conversoes = Math.round(gadsNum(m, 'conversions'));
+    const ctr = impressoes > 0 ? (cliques / impressoes) * 100 : 0;
+    const agId = String(ag.id ?? '');
+
+    let anuncios: OptimizerCampaignV2['conjuntos'][number]['anuncios'] = [];
+    if (Date.now() < deadline && agId) {
+      const adData = await gadsSearch(
+        customerId,
+        `SELECT ad_group_ad.ad.id, ad_group_ad.ad.name, ad_group_ad.status,
+                metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions
+           FROM ad_group_ad
+          WHERE ad_group.id = ${agId} AND ${dateFilter}
+            AND ad_group_ad.status != 'REMOVED'
+          ORDER BY metrics.cost_micros DESC
+          LIMIT 8`,
+        token, loginCustomerId, 8_000,
+      );
+      anuncios = (adData?.results ?? []).map((r) => {
+        const adWrap = (r.adGroupAd as Record<string, unknown>) ?? {};
+        const ad = (adWrap.ad as Record<string, unknown>) ?? {};
+        const am = (r.metrics as Record<string, unknown>) ?? {};
+        const adGasto = gadsNum(am, 'costMicros') / 1_000_000;
+        const adImp = gadsNum(am, 'impressions');
+        const adClk = gadsNum(am, 'clicks');
+        const adConv = Math.round(gadsNum(am, 'conversions'));
+        return {
+          id: String(ad.id ?? ''),
+          nome: String(ad.name ?? ad.id ?? 'Anúncio'),
+          status: String(adWrap.status ?? ''),
+          gasto: adGasto,
+          impressoes: adImp,
+          ctr: adImp > 0 ? (adClk / adImp) * 100 : 0,
+          cpl: adGasto > 0 && adConv > 0 ? adGasto / adConv : null,
+          conversoes: adConv,
+          dias_ativo: null,
+          quality_ranking: null,
+          engagement_ranking: null,
+          conversion_ranking: null,
+          eh_video: false,
+          video_hook_rate: null,
+          video_p25_rate: null,
+          video_p50_rate: null,
+          video_p75_rate: null,
+          imagem_url: null,
+        };
+      });
+    }
+
+    return {
+      id: agId,
+      nome: String(ag.name ?? 'Grupo de anúncios'),
+      status: String(ag.status ?? ''),
+      objetivo_otimizacao: '',
+      tipo_publico: 'outro',
+      orcamento_diario: null,
+      gasto,
+      impressoes,
+      alcance: null,
+      frequencia: null,
+      ctr,
+      cpl: gasto > 0 && conversoes > 0 ? gasto / conversoes : null,
+      conversoes,
+      ctr_tendencia_4d: null,
+      dias_ativo: null,
+      anuncios,
+    };
+  }));
+}
+
+async function buildGooglePayloadForClient(
+  client: ClientRow,
+  planning: PlanningRow | null,
+  token: string,
+  gConn: GoogleConnRow,
+  origin: string,
+  period: AnalysisPeriod,
+  fetchConjuntos: boolean,
+): Promise<{ payload: OptimizerPayloadV2 | null; loginCustomerId?: string }> {
+  const semana = currentWeekLabel();
+  const FALLBACK_DAYS = 30;
+  let usedPeriod = period;
+  let { dateFrom, dateTo } = optimizerDateRangeForPeriod(period.key);
+
+  const isGoogleActive = (c: { status: string; platform: string }) =>
+    ['ACTIVE', 'ENABLED'].includes((c.status ?? '').toUpperCase()) && c.platform === 'google';
+
+  let rawCampaigns = await fetchCampaignsForClient(client.id, origin, period.key, dateFrom, dateTo);
+  let activeCampaigns = rawCampaigns.filter(isGoogleActive);
+
+  if (activeCampaigns.length === 0 && isoDateDiffDays(dateFrom, dateTo) < FALLBACK_DAYS) {
+    ({ dateFrom, dateTo } = optimizerDateRangeForDays(FALLBACK_DAYS));
+    usedPeriod = { key: 'last_30d', label: 'Últimos 30 dias', days: FALLBACK_DAYS };
+    rawCampaigns = await fetchCampaignsForClient(client.id, origin, 'last_30d', dateFrom, dateTo);
+    activeCampaigns = rawCampaigns.filter(isGoogleActive);
+  }
+
+  if (activeCampaigns.length === 0) return { payload: null };
+
+  const topCampaigns = activeCampaigns.slice(0, 5);
+  const loginCustomerId = topCampaigns.find((c) => c.loginCustomerId)?.loginCustomerId;
+  const customerId = gConn.accountId;
+
+  const conjuntosDeadline = Date.now() + 15_000;
+  const conjuntosPorCampanha = await Promise.all(
+    topCampaigns.map((camp) =>
+      (fetchConjuntos && token && camp.spend > 0)
+        ? fetchGoogleAdGroups(customerId, camp.id, token, loginCustomerId, dateFrom, dateTo, conjuntosDeadline).catch(() => [])
+        : Promise.resolve([] as OptimizerCampaignV2['conjuntos']),
+    ),
+  );
+
+  const campanhas: OptimizerCampaignV2[] = topCampaigns.map((camp, i) => ({
+    id: camp.id,
+    nome: camp.name,
+    objetivo: camp.objective ?? '',
+    status: camp.status,
+    orcamento_diario: camp.dailyBudget ?? null,
+    gasto: camp.spend,
+    impressoes: camp.impressions,
+    cliques: camp.clicks,
+    ctr: camp.ctr,
+    cpl: camp.cpl > 0 ? camp.cpl : null,
+    conversoes: camp.leads,
+    roas: null,
+    dias_rodando: null,
+    conjuntos: conjuntosPorCampanha[i],
+  }));
+
+  const historico = await loadDecisionHistory(client.id);
+  const notasManuais = await loadManualNotesContext(client.id);
+  const totalGasto = campanhas.reduce((sum, c) => sum + c.gasto, 0);
+  const semMetaConfigurada = !planning?.objetivo && !planning?.cpl_maximo && !planning?.orcamento_diario;
+
+  const observacoes: string[] = [];
+  if (notasManuais) observacoes.push(notasManuais);
+  if (totalGasto === 0) {
+    observacoes.push(`ALERTA: A conta Google Ads possui ${campanhas.length} campanha(s) ativas mas registrou R$ 0,00 em gasto no período de ${period.label}. Diagnostique o motivo (pagamento, aprovação, orçamento) e oriente o gestor sobre o que verificar agora no Google Ads.`);
+  }
+  if (semMetaConfigurada) {
+    observacoes.push('CONTEXTO: Este cliente ainda não possui metas de CPL, orçamento ou objetivo configurados. Analise com base nos dados absolutos e recomende configurar as metas.');
+  }
+
+  const payload: OptimizerPayloadV2 = {
+    cliente_id: client.id,
+    cliente_nome: client.name,
+    nicho: segmentToOptimizerNiche(client.segment ?? undefined),
+    modo_operacao: client.modo_operacao,
+    semana_analise: semana,
+    acoes_pre_aprovadas: client.acoes_pre_aprovadas ?? [],
+    metas: {
+      objetivo_principal: (planning?.objetivo as OptimizerObjective) ?? null,
+      cpl_ideal: planning?.cpl_meta ?? null,
+      cpl_maximo: planning?.cpl_maximo ?? null,
+      roas_minimo: planning?.roas_minimo ?? null,
+      orcamento_diario_total: planning?.orcamento_diario ?? null,
+      orcamento_mensal_total: planning?.orcamento_mensal ?? null,
+      volume_leads_meta_mensal: planning?.volume_leads_meta ?? null,
+      ticket_medio: planning?.ticket_medio ?? null,
+    },
+    limites_globais: {
+      orcamento_diario_maximo_conta: client.orcamento_diario_maximo,
+      cpr_emergencia: client.cpr_emergencia,
+      min_conjuntos_ativos: client.min_conjuntos_ativos,
+      max_conjuntos_ativos: client.max_conjuntos_ativos,
+      min_dias_aprendizado: client.min_dias_aprendizado,
+    },
+    periodo_analise: {
+      data_inicio: dateFrom,
+      data_fim: dateTo,
+      dias: isoDateDiffDays(dateFrom, dateTo),
+      label: usedPeriod.label,
+    },
+    opportunity_score: null,
+    campanhas,
+    historico_decisoes: historico,
+    observacoes_gestor: observacoes.length > 0 ? observacoes.join(' | ') : null,
+    observacoes_fixas: client.observacoes_fixas,
+  };
+
+  return { payload, loginCustomerId };
+}
+
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
 type RunOptions = {
@@ -746,9 +1053,10 @@ async function executeWeekly({ origin, forceClientId, forceAi, period }: RunOpti
 
   const clients = await loadClientsForToday(undefined, forceClientId);
   const clientIds = clients.map((c) => c.id);
-  const [planningMap, connectionsMap] = await Promise.all([
+  const [planningMap, connectionsMap, googleConnMap] = await Promise.all([
     loadPlanning(clientIds),
     loadConnections(clientIds),
+    loadGoogleConnections(clientIds),
   ]);
 
   const results: Array<{ clientId: string; clientName: string; status: string; error?: string }> = [];
@@ -761,45 +1069,69 @@ async function executeWeekly({ origin, forceClientId, forceAi, period }: RunOpti
   // Concorrência: 1 cliente = sequencial; cron = paralelo p/ cobrir a base dentro do tempo
   const CONCURRENCY = isManual ? 1 : 5;
 
+  // 175s: com max_tokens 32k a IA pode passar de 120s em contas grandes (70+ nós entre
+  // campanhas/conjuntos/criativos); a rota analisar tem maxDuration=180 — esperar menos que
+  // isso gera "timeout" falso com análise salva.
+  async function callAnalisar(body: Record<string, unknown>): Promise<void> {
+    const analyzeRes = await fetchWithTimeout(new URL('/api/otimizador/analisar', origin).toString(), 175_000, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!analyzeRes) throw new Error('analisar não respondeu (timeout da IA)');
+    if (!analyzeRes.ok) {
+      const errBody = await analyzeRes.text().catch(() => '');
+      throw new Error(`analisar HTTP ${analyzeRes.status}${errBody ? ': ' + errBody.slice(0, 200) : ''}`);
+    }
+  }
+
   async function processClient(client: ClientRow): Promise<void> {
-    const conn = connectionsMap[client.id];
-    if (!conn) {
+    const metaConn = connectionsMap[client.id];
+    const gConn = googleConnMap[client.id];
+    if (!metaConn && !gConn) {
       results.push({ clientId: client.id, clientName: client.name, status: 'sem_conexao_meta' });
       return;
     }
-    try {
-      const token = await resolveToken(conn.id).catch(() => null);
-      const payload = await buildPayloadForClient(
-        client,
-        planningMap[client.id] ?? null,
-        token ?? '',
-        conn.account_id,
-        origin,
-        period,
-        fetchConjuntos,
-      );
-      if (!payload) {
-        results.push({ clientId: client.id, clientName: client.name, status: 'sem_campanhas_ativas' });
-        return;
-      }
 
-      // 175s: com max_tokens 32k a IA pode passar de 120s em contas grandes (70+ nós entre
-      // campanhas/conjuntos/criativos); a rota analisar tem maxDuration=180 — esperar menos
-      // que isso gera "timeout" falso com análise salva.
-      const analyzeRes = await fetchWithTimeout(new URL('/api/otimizador/analisar', origin).toString(), 175_000, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ payload_v2: payload, connection_id: conn.id, account_id: conn.account_id, force_ai: forceAi }),
-      });
-
-      if (!analyzeRes) throw new Error('analisar não respondeu (timeout da IA)');
-      if (!analyzeRes.ok) {
-        const errBody = await analyzeRes.text().catch(() => '');
-        throw new Error(`analisar HTTP ${analyzeRes.status}${errBody ? ': ' + errBody.slice(0, 200) : ''}`);
+    // Meta (path original — intocado)
+    if (metaConn) {
+      try {
+        const token = await resolveToken(metaConn.id).catch(() => null);
+        const payload = await buildPayloadForClient(
+          client, planningMap[client.id] ?? null, token ?? '', metaConn.account_id, origin, period, fetchConjuntos,
+        );
+        if (!payload) {
+          results.push({ clientId: client.id, clientName: client.name, status: 'sem_campanhas_ativas' });
+        } else {
+          await callAnalisar({ payload_v2: payload, connection_id: metaConn.id, account_id: metaConn.account_id, canal: 'meta', force_ai: forceAi });
+          results.push({ clientId: client.id, clientName: client.name, status: 'ok' });
+        }
+      } catch (err) {
+        results.push({ clientId: client.id, clientName: client.name, status: 'erro', error: `[meta] ${String(err)}` });
       }
-      results.push({ clientId: client.id, clientName: client.name, status: 'ok' });
-    } catch (err) {
-      results.push({ clientId: client.id, clientName: client.name, status: 'erro', error: String(err) });
+    }
+
+    // Google Ads (análise separada por plataforma — conta_plataforma='google_ads' no log)
+    if (gConn) {
+      try {
+        const gToken = await resolveGoogleToken(gConn.connectionId).catch(() => null);
+        if (!gToken) {
+          results.push({ clientId: client.id, clientName: client.name, status: 'erro', error: '[google] token não resolvido' });
+        } else {
+          const { payload, loginCustomerId } = await buildGooglePayloadForClient(
+            client, planningMap[client.id] ?? null, gToken, gConn, origin, period, fetchConjuntos,
+          );
+          if (!payload) {
+            // Só reporta "sem campanhas" se a Meta também não cobriu (senão o resultado Meta já vale).
+            if (!metaConn) results.push({ clientId: client.id, clientName: client.name, status: 'sem_campanhas_ativas' });
+          } else {
+            await callAnalisar({ payload_v2: payload, connection_id: gConn.connectionId, account_id: gConn.accountId, login_customer_id: loginCustomerId, canal: 'google', force_ai: forceAi });
+            results.push({ clientId: client.id, clientName: client.name, status: 'ok' });
+          }
+        }
+      } catch (err) {
+        results.push({ clientId: client.id, clientName: client.name, status: 'erro', error: `[google] ${String(err)}` });
+      }
     }
   }
 
