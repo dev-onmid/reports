@@ -247,6 +247,15 @@ function NovoClienteWizard() {
     router.push(`/clientes/${clientId}`);
   }
 
+  // Pula a configuração de anúncios/pixel/eventos: marca o onboarding como concluído
+  // e libera o cliente (CRM/funil já funcionam sem conta de anúncio — o funil nasce ao
+  // abrir o CRM). O que faltar aqui fica editável depois nas abas do cliente.
+  function handleSkip() {
+    if (!clientId) return;
+    markOnboardingComplete(clientId);
+    router.push(`/clientes/${clientId}`);
+  }
+
   // ── Resume: ao voltar com ?id=, pula pro primeiro passo incompleto ──────────
   useEffect(() => {
     if (!existingId || resumeChecked) return;
@@ -360,11 +369,14 @@ function NovoClienteWizard() {
               ))}
             </div>
           )}
-          <div className="flex justify-between pt-2">
+          <div className="flex items-center justify-between pt-2">
             <Button variant="outline" onClick={() => setStep(1)}>Voltar</Button>
-            <Button onClick={() => void handleSaveAccounts()} disabled={selectedAccountIds.size === 0 || savingAccounts}>
-              {savingAccounts ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : null} Avançar
-            </Button>
+            <div className="flex items-center gap-3">
+              <button type="button" onClick={handleSkip} className="text-xs text-muted-foreground hover:underline">Pular e configurar depois</button>
+              <Button onClick={() => void handleSaveAccounts()} disabled={selectedAccountIds.size === 0 || savingAccounts}>
+                {savingAccounts ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : null} Avançar
+              </Button>
+            </div>
           </div>
         </div>
       )}
@@ -408,9 +420,12 @@ function NovoClienteWizard() {
               <span className="font-mono break-all">{testResult.msg}</span>
             </div>
           )}
-          <div className="flex justify-between pt-2">
+          <div className="flex items-center justify-between pt-2">
             <Button variant="outline" onClick={() => setStep(2)}>Voltar</Button>
-            <Button onClick={() => setStep(4)} disabled={!pixelFieldsFilled}>Avançar</Button>
+            <div className="flex items-center gap-3">
+              <button type="button" onClick={handleSkip} className="text-xs text-muted-foreground hover:underline">Pular e configurar depois</button>
+              <Button onClick={() => setStep(4)} disabled={!pixelFieldsFilled}>Avançar</Button>
+            </div>
           </div>
         </div>
       )}
@@ -448,9 +463,12 @@ function NovoClienteWizard() {
             </Button>
           </div>
           <p className="text-[11px] text-muted-foreground">Dica: a venda (&quot;Purchase&quot;) já é enviada automaticamente quando o negócio é marcado como fechado no CRM — esse mapeamento aqui é só para outras etapas do funil que você queira reportar pra Meta.</p>
-          <div className="flex justify-between pt-2">
+          <div className="flex items-center justify-between pt-2">
             <Button variant="outline" onClick={() => setStep(3)}>Voltar</Button>
-            <Button onClick={handleFinish} disabled={eventos.length === 0}>Concluir cadastro</Button>
+            <div className="flex items-center gap-3">
+              <button type="button" onClick={handleSkip} className="text-xs text-muted-foreground hover:underline">Pular e configurar depois</button>
+              <Button onClick={handleFinish} disabled={eventos.length === 0}>Concluir cadastro</Button>
+            </div>
           </div>
         </div>
       )}
