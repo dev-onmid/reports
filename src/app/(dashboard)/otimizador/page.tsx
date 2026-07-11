@@ -9,6 +9,7 @@ import {
   BadgeCheck,
   CalendarClock,
   CheckCircle2,
+  LayoutGrid,
   Loader2,
   MousePointerClick,
   Play,
@@ -101,9 +102,12 @@ export default function OtimizadorPage() {
 
       setClients(activeClients);
       setContas(filaContas);
+      // Abre a conta vinda por ?clientId= (ex: clique na Sala de guerra) na primeira carga.
+      const urlClientId = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('clientId') : null;
       setContaFiltro((prev) => {
         const validIds = new Set([...filaContas.map((c) => c.cliente_id), ...activeClients.map((c) => c.id)]);
         if (prev && validIds.has(prev)) return prev;
+        if (urlClientId && validIds.has(urlClientId)) return urlClientId;
         return filaContas[0]?.cliente_id ?? activeClients[0]?.id ?? '';
       });
     } finally {
@@ -396,10 +400,13 @@ export default function OtimizadorPage() {
           <h1 className="text-2xl font-bold tracking-normal text-foreground sm:text-3xl">Otimizador de Campanhas</h1>
           <p className="text-sm text-muted-foreground">Análises inteligentes e recomendações para melhorar seus resultados.</p>
         </div>
-        <div className="hidden items-center gap-2 text-xs text-muted-foreground xl:flex">
-          <CalendarClock className="h-4 w-4" />
-          <span>Análise automática diária + revisão manual quando precisar.</span>
-        </div>
+        <Link
+          href="/otimizador/visao-geral"
+          className="inline-flex h-10 shrink-0 items-center gap-1.5 self-start rounded-[var(--radius)] border border-border bg-card px-3 text-sm font-medium text-foreground hover:border-primary/40 xl:self-auto"
+          title="Ver todas as contas num olhar (visão de supervisão)"
+        >
+          <LayoutGrid className="h-4 w-4" /> Sala de guerra
+        </Link>
       </header>
 
       {/* Rail de contas + Período + ação principal */}
