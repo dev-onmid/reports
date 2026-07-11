@@ -10,6 +10,7 @@ import {
   CalendarClock,
   CheckCircle2,
   LayoutGrid,
+  ListChecks,
   Loader2,
   MousePointerClick,
   Play,
@@ -424,6 +425,15 @@ export default function OtimizadorPage() {
             {runLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
             {temAnalise ? 'Atualizar análise' : 'Fazer análise'}
           </Button>
+          {temAnalise && contaAtual && contaAtual.pendencias > 0 && (
+            <Link
+              href={`/otimizador/briefing?clientId=${encodeURIComponent(contaFiltro)}`}
+              className="inline-flex h-10 items-center gap-1.5 rounded-[var(--radius)] bg-primary px-2.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90"
+              title="Rodar o briefing guiado desta conta — decisão por decisão"
+            >
+              <ListChecks className="h-4 w-4" /> Briefing
+            </Link>
+          )}
           {temAnalise && (
             <Link
               href={`/otimizador/apresentacao?clientId=${encodeURIComponent(contaFiltro)}`}

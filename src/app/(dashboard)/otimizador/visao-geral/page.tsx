@@ -4,7 +4,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, ArrowRight, CheckCircle2, Loader2, ShieldAlert, WandSparkles } from 'lucide-react';
+import { AlertTriangle, ArrowRight, CheckCircle2, ListChecks, Loader2, ShieldAlert, WandSparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Client } from '@/lib/mock-data';
 import { SEV, type FilaConta, type Severidade } from '@/lib/optimizer-ui';
@@ -115,6 +115,14 @@ export default function VisaoGeralPage() {
             <p className="text-lg font-bold leading-none text-foreground">{totalPendencias}</p>
             <p className="text-[11px] text-muted-foreground">decisões</p>
           </div>
+          {totalPendencias > 0 && (
+            <Link
+              href="/otimizador/briefing"
+              className="inline-flex items-center gap-1.5 self-stretch rounded-[var(--radius)] bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90"
+            >
+              <ListChecks className="h-4 w-4" /> Começar briefing
+            </Link>
+          )}
         </div>
       </header>
 
