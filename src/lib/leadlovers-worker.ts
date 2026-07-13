@@ -1,4 +1,5 @@
 import { makeServerPool } from '@/lib/server-db';
+import { effectiveField } from '@/lib/leadlovers-fields';
 
 type Pool = ReturnType<typeof makeServerPool>;
 
@@ -102,15 +103,18 @@ export async function dispatchBatch(
   const results: DispatchResult['results'] = [];
 
   for (const contact of due) {
+    // usa a coluna; se estiver vazia (contatos importados antes da normalização),
+    // cai pro extra_data pelas variações de cabeçalho
+    const empresa = effectiveField(contact, 'empresa');
     const payload: Record<string, unknown> = {
-      Name:  contact.nome     ?? '',
-      Email: contact.email    ?? '',
-      Phone: contact.telefone ?? '',
+      Name:  effectiveField(contact, 'nome'),
+      Email: effectiveField(contact, 'email'),
+      Phone: effectiveField(contact, 'telefone'),
     };
     if (contact.machine_code)        payload.MachineCode        = contact.machine_code;
     if (contact.email_sequence_code) payload.EmailSequenceCode  = contact.email_sequence_code;
     if (contact.sequence_level_code) payload.SequenceLevelCode  = contact.sequence_level_code;
-    if (contact.empresa)             payload.Company            = contact.empresa;
+    if (empresa)                     payload.Company            = empresa;
     if (contact.extra_data && typeof contact.extra_data === 'object') {
       Object.assign(payload, contact.extra_data);
     }
