@@ -6,7 +6,7 @@ import * as XLSX from 'xlsx';
 import {
   Upload, Webhook, Calendar, BarChart3, Plus, Trash2,
   CheckCircle2, XCircle, Clock, Play, Pause, RefreshCw,
-  ChevronLeft, AlertCircle, Loader2, Check, X, Pencil,
+  ChevronLeft, AlertCircle, Loader2, Check, X, Pencil, Copy,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -494,6 +494,23 @@ function CronogramaTab({
     setShowEditCampaign(false);
   }, [selectedId, campaigns]);
 
+  // Preenche o formulário de nova campanha com as credenciais de uma campanha
+  // existente (webhook, machine code, sequência, chave) — evita redigitar tudo
+  // quando o fluxo no Leadlovers já foi configurado antes.
+  function applyTemplate(source: Campaign) {
+    setNewMachineCode(source.machine_code ?? '');
+    setWebhookUrl(source.webhook_url ?? '');
+    setNewEmailSequenceCode(source.email_sequence_code ?? '');
+    setNewSequenceLevelCode(source.sequence_level_code ?? '1');
+    setNewAuthKey(source.auth_key ?? '');
+  }
+
+  function duplicateCampaign(source: Campaign) {
+    setNewCampaignName(`${source.name} (cópia)`);
+    applyTemplate(source);
+    setShowNewForm(true);
+  }
+
   async function createCampaign() {
     if (!newCampaignName.trim() || !webhookUrl.trim()) return;
     setCreatingCampaign(true); setError('');
@@ -692,6 +709,25 @@ function CronogramaTab({
       {showNewForm && (
         <div className="rounded-xl border border-border bg-card/60 p-4 space-y-3">
           <p className="text-sm font-semibold">Nova campanha</p>
+          {campaigns.length > 0 && (
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Copiar credenciais de uma campanha existente (opcional)</p>
+              <select
+                defaultValue=""
+                onChange={(e) => {
+                  const source = campaigns.find(c => c.id === e.target.value);
+                  if (source) applyTemplate(source);
+                  e.target.value = '';
+                }}
+                className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm"
+              >
+                <option value="">Selecione uma campanha para reaproveitar…</option>
+                {campaigns.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
           <Input
             placeholder="Nome da campanha (ex: Fluxo Dia dos Pais)"
             value={newCampaignName}
@@ -746,8 +782,16 @@ function CronogramaTab({
             <p className="text-sm font-semibold">{campaign.name}</p>
             {campaignStatusBadge(campaign.status)}
             <button
-              onClick={() => setShowEditCampaign(v => !v)}
+              onClick={() => duplicateCampaign(campaign)}
               className="ml-auto flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-card/60 transition-colors"
+              title="Cria uma nova campanha reaproveitando webhook, machine code, sequência e chave desta"
+            >
+              <Copy className="h-3 w-3" />
+              Duplicar
+            </button>
+            <button
+              onClick={() => setShowEditCampaign(v => !v)}
+              className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-card/60 transition-colors"
             >
               <Pencil className="h-3 w-3" />
               {showEditCampaign ? 'Cancelar' : 'Editar credenciais'}
@@ -1047,6 +1091,16 @@ function PainelTab({
   const [monitorResult, setMonitorResult] = useState<{ sent: number; errors: number } | null>(null);
   const monitorRef = useRef(false);
 
+  // Manual contact management — add/edit/remove one at a time within a campaign,
+  // independent of the bulk xlsx upload flow.
+  const [addingContact, setAddingContact] = useState(false);
+  const [newContact, setNewContact] = useState({ nome: '', email: '', telefone: '', empresa: '' });
+  const [savingContact, setSavingContact] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editContact, setEditContact] = useState({ nome: '', email: '', telefone: '', empresa: '' });
+  const [savingEditId, setSavingEditId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
   const campaign = campaigns.find(c => c.id === selectedId);
 
   // Load contacts for selected campaign
@@ -1067,6 +1121,78 @@ function PainelTab({
   useEffect(() => {
     loadContacts();
   }, [loadContacts]);
+
+  async function addContact() {
+    if (!selectedId || !userId) return;
+    if (!newContact.nome.trim() && !newContact.email.trim() && !newContact.telefone.trim()) return;
+    setSavingContact(true);
+    try {
+      const res = await fetch('/api/leadlovers/contacts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-onmid-user-id': userId },
+        body: JSON.stringify({ contacts: [newContact], campaign_id: selectedId }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error ?? 'Erro ao adicionar');
+      setNewContact({ nome: '', email: '', telefone: '', empresa: '' });
+      setAddingContact(false);
+      await loadContacts();
+      onRefresh();
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Erro ao adicionar contato');
+    } finally {
+      setSavingContact(false);
+    }
+  }
+
+  function startEditContact(c: ContactRecord) {
+    setEditingId(c.id);
+    setEditContact({
+      nome: String(c.nome ?? ''),
+      email: String(c.email ?? ''),
+      telefone: String(c.telefone ?? ''),
+      empresa: String(c.empresa ?? ''),
+    });
+  }
+
+  async function saveEditContact(id: string) {
+    if (!userId) return;
+    setSavingEditId(id);
+    try {
+      const res = await fetch(`/api/leadlovers/contacts/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-onmid-user-id': userId },
+        body: JSON.stringify(editContact),
+      });
+      if (!res.ok) throw new Error((await res.json()).error ?? 'Erro ao salvar');
+      setEditingId(null);
+      await loadContacts();
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Erro ao salvar contato');
+    } finally {
+      setSavingEditId(null);
+    }
+  }
+
+  async function removeContact(c: ContactRecord) {
+    if (!userId) return;
+    const label = c.nome ? String(c.nome) : (c.email ? String(c.email) : 'este contato');
+    const warn = c.status === 'enviado' ? ' Este contato já foi enviado — o histórico de envio dele também será perdido.' : '';
+    if (!confirm(`Remover ${label}?${warn}`)) return;
+    setDeletingId(c.id);
+    try {
+      const res = await fetch(`/api/leadlovers/contacts/${c.id}`, {
+        method: 'DELETE',
+        headers: { 'x-onmid-user-id': userId },
+      });
+      if (!res.ok) throw new Error((await res.json()).error ?? 'Erro ao remover');
+      await loadContacts();
+      onRefresh();
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Erro ao remover contato');
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   // Monitoring loop — calls worker and updates contacts
   useEffect(() => {
@@ -1206,6 +1332,101 @@ function PainelTab({
               </button>
             </div>
           )}
+
+          {/* Manual contact management */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-sm font-semibold">Contatos da campanha ({contacts.length})</p>
+              <Button size="sm" variant="outline" onClick={() => setAddingContact(v => !v)}>
+                <Plus className="h-3.5 w-3.5" />
+                {addingContact ? 'Cancelar' : 'Adicionar contato'}
+              </Button>
+            </div>
+
+            {addingContact && (
+              <div className="mb-3 grid grid-cols-1 gap-2 rounded-xl border border-border bg-card/60 p-3 sm:grid-cols-5">
+                <Input placeholder="Nome" value={newContact.nome} onChange={(e) => setNewContact(v => ({ ...v, nome: e.target.value }))} />
+                <Input placeholder="Email" value={newContact.email} onChange={(e) => setNewContact(v => ({ ...v, email: e.target.value }))} />
+                <Input placeholder="Telefone" value={newContact.telefone} onChange={(e) => setNewContact(v => ({ ...v, telefone: e.target.value }))} />
+                <Input placeholder="Empresa" value={newContact.empresa} onChange={(e) => setNewContact(v => ({ ...v, empresa: e.target.value }))} />
+                <Button onClick={addContact} disabled={savingContact}>
+                  {savingContact ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                  Salvar
+                </Button>
+              </div>
+            )}
+
+            <div className="rounded-xl border border-border overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-card/60">
+                    {['Status', 'Nome', 'Email', 'Telefone', 'Empresa', ''].map(h => (
+                      <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {contacts.map(c => {
+                    const editing = editingId === c.id;
+                    return (
+                      <tr key={c.id} className="border-b border-border/50 hover:bg-card/40">
+                        <td className="px-4 py-2">{statusBadge(c.status)}</td>
+                        {editing ? (
+                          <>
+                            <td className="px-2 py-1.5">
+                              <input className="h-8 w-full rounded-lg border border-border bg-background px-2 text-xs" value={editContact.nome} onChange={(e) => setEditContact(v => ({ ...v, nome: e.target.value }))} />
+                            </td>
+                            <td className="px-2 py-1.5">
+                              <input className="h-8 w-full rounded-lg border border-border bg-background px-2 text-xs" value={editContact.email} onChange={(e) => setEditContact(v => ({ ...v, email: e.target.value }))} />
+                            </td>
+                            <td className="px-2 py-1.5">
+                              <input className="h-8 w-full rounded-lg border border-border bg-background px-2 text-xs" value={editContact.telefone} onChange={(e) => setEditContact(v => ({ ...v, telefone: e.target.value }))} />
+                            </td>
+                            <td className="px-2 py-1.5">
+                              <input className="h-8 w-full rounded-lg border border-border bg-background px-2 text-xs" value={editContact.empresa} onChange={(e) => setEditContact(v => ({ ...v, empresa: e.target.value }))} />
+                            </td>
+                            <td className="px-3 py-2">
+                              <div className="flex items-center gap-2">
+                                <button onClick={() => saveEditContact(c.id)} disabled={savingEditId === c.id} className="text-green-400 hover:text-green-300">
+                                  {savingEditId === c.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                                </button>
+                                <button onClick={() => setEditingId(null)} className="text-muted-foreground hover:text-foreground">
+                                  <X className="h-4 w-4" />
+                                </button>
+                              </div>
+                            </td>
+                          </>
+                        ) : (
+                          <>
+                            <td className="px-4 py-2">{c.nome ? String(c.nome) : <span className="text-muted-foreground">—</span>}</td>
+                            <td className="px-4 py-2 text-muted-foreground">{c.email ? String(c.email) : '—'}</td>
+                            <td className="px-4 py-2 text-muted-foreground">{c.telefone ? String(c.telefone) : '—'}</td>
+                            <td className="px-4 py-2 text-muted-foreground">{c.empresa ? String(c.empresa) : '—'}</td>
+                            <td className="px-3 py-2">
+                              <div className="flex items-center gap-2">
+                                <button onClick={() => startEditContact(c)} className="text-muted-foreground hover:text-foreground">
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </button>
+                                <button onClick={() => removeContact(c)} disabled={deletingId === c.id} className="text-muted-foreground hover:text-red-400">
+                                  {deletingId === c.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                                </button>
+                              </div>
+                            </td>
+                          </>
+                        )}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {contacts.length === 0 && (
+                <p className="px-4 py-6 text-center text-sm text-muted-foreground">Nenhum contato nesta campanha ainda.</p>
+              )}
+            </div>
+            {contacts.length >= 200 && (
+              <p className="mt-2 text-xs text-muted-foreground">Exibindo os 200 primeiros contatos carregados.</p>
+            )}
+          </div>
 
           {/* Day-by-day history */}
           {history.length > 0 && (

@@ -281,6 +281,7 @@ Módulo de envio de contatos para o Leadlovers via webhook com cronograma inteli
 | `src/app/api/leadlovers/campaigns/[id]/rules/route.ts` | GET/POST/PATCH/DELETE regras de cronograma |
 | `src/app/api/leadlovers/campaigns/[id]/activate/route.ts` | POST — pré-computa `next_send_at` para cada contato |
 | `src/app/api/leadlovers/worker/route.ts` | POST — envia contatos com `next_send_at <= NOW()` (frontend poll + cron) |
+| `src/app/api/leadlovers/contacts/[id]/route.ts` | PATCH/DELETE de um contato individual (nome/email/telefone/empresa) |
 | `src/app/(dashboard)/integracoes/leadlovers/page.tsx` | UI com 4 abas: Upload, Webhook, Cronograma, Painel |
 
 ### Decisões arquiteturais do Leadlovers
@@ -299,6 +300,8 @@ Módulo de envio de contatos para o Leadlovers via webhook com cronograma inteli
 - **Editar send_time de regra existente**: coluna HORÁRIO da tabela mostra `<input type="time">` editável. Salva via `PATCH /api/leadlovers/campaigns/[id]/rules?rule_id=...` (endpoint PATCH adicionado em `rules/route.ts`). Alterar o horário da regra **não** reagenda automaticamente — precisa clicar "Reagendar pendentes".
 - **Cron Vercel**: mantido como backup diário (`0 12 * * 1-5`) em `vercel.json`. Plano Hobby só permite 1x/dia. GitHub Actions é o primário.
 - **Não usa Supabase**: todas as tabelas são PostgreSQL via `server-db.ts`.
+- **Reaproveitar credenciais de campanha (2026-07-13)**: aba Campanhas ganhou botão "Duplicar" (abre "Nova campanha" pré-preenchida com webhook/machine code/email sequence/sequence level/auth key da campanha selecionada, nome sugerido "{nome} (cópia)") e, dentro do próprio formulário "Nova campanha", um select "Copiar credenciais de uma campanha existente" — mesma função, mas utilizável mesmo sem estar com uma campanha selecionada. Nenhuma mudança de backend: reusa o `POST /api/leadlovers/campaigns` existente, só preenche o form no cliente.
+- **Manipulação individual de contatos**: aba Painel ganhou gestão completa por contato (além do upload em massa via xlsx) — botão "Adicionar contato" (form inline, reusa `POST /api/leadlovers/contacts` com array de 1), edição inline (lápis → PATCH `/api/leadlovers/contacts/[id]`) e exclusão individual (lixeira → DELETE `/api/leadlovers/contacts/[id]`, com aviso extra no `confirm()` se o contato já foi enviado, pois `leadlovers_dispatch_log` tem `ON DELETE CASCADE` e perde o histórico de disparo dele). Endpoint novo `contacts/[id]/route.ts` — o `DELETE /api/leadlovers/contacts` (bulk, por `campaign_id`) só apagava pendentes; o individual não tem essa restrição de status, é intencional (o usuário pode querer remover um contato mesmo já enviado).
 
 ---
 
