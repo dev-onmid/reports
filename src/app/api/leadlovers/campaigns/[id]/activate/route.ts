@@ -33,8 +33,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const scope = await getCallerScope(req, pool);
     if (!scope.userId) return Response.json({ error: 'Não autorizado' }, { status: 401 });
 
+    const url = new URL(req.url);
     // ?reschedule=1 → recalcula next_send_at dos pendentes mesmo se já estiver ativa
-    const reschedule = new URL(req.url).searchParams.get('reschedule') === '1';
+    const reschedule = url.searchParams.get('reschedule') === '1';
+    // ?mode=now → dispara tudo de uma vez: seta next_send_at = NOW() em todos os
+    // pendentes, sem cronograma nem dias úteis. O drain fica por conta do
+    // dispatch-day de hoje (loop no frontend) + worker automático.
+    const modeNow = url.searchParams.get('mode') === 'now';
 
     // Fetch campaign + ownership check
     const { rows: [campaign] } = await pool.query(
@@ -42,8 +47,26 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       [id, scope.unrestricted, scope.userId],
     );
     if (!campaign) return Response.json({ error: 'Campanha não encontrada' }, { status: 404 });
-    if (campaign.status === 'ativa' && !reschedule) {
+    if (campaign.status === 'ativa' && !reschedule && !modeNow) {
       return Response.json({ error: 'Campanha já está ativa' }, { status: 400 });
+    }
+
+    if (modeNow) {
+      const { rowCount } = await pool.query(
+        `UPDATE public.leadlovers_contacts
+            SET next_send_at = NOW()
+          WHERE campaign_id = $1 AND status = 'pendente'`,
+        [id],
+      );
+      const scheduled = rowCount ?? 0;
+      if (scheduled === 0) return Response.json({ error: 'Nenhum contato pendente na campanha' }, { status: 400 });
+      await pool.query(
+        `UPDATE public.leadlovers_campaigns
+            SET status = 'ativa', total_contacts = GREATEST(total_contacts, $2), updated_at = NOW()
+          WHERE id = $1`,
+        [id, scheduled],
+      );
+      return Response.json({ activated: true, scheduled, unscheduled: 0, mode: 'now' });
     }
 
     // Fetch rules

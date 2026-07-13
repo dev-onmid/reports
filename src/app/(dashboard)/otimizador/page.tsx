@@ -2,1476 +2,53 @@
 
 /* eslint-disable react-hooks/set-state-in-effect */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import {
   AlertTriangle,
   BadgeCheck,
-  Ban,
   CalendarClock,
-  Check,
   CheckCircle2,
-  ChevronDown,
-  ChevronRight,
-  ChevronUp,
-  ExternalLink,
-  Eye,
-  Flag,
-  Image as ImageIcon,
-  Layers,
+  LayoutGrid,
+  ListChecks,
   Loader2,
-  MinusCircle,
   MousePointerClick,
-  PauseCircle,
-  Pencil,
   Play,
-  PlayCircle,
-  Plus,
-  Rocket,
+  Presentation,
   Search,
   Settings2,
-  ShieldCheck,
-  Target,
-  TrendingUp,
-  Undo2,
-  UserRound,
   WandSparkles,
-  X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { DictateButton } from '@/components/ui/dictate-button';
 import { callerHeaders, getAuthSession } from '@/lib/auth-store';
+import { cn } from '@/lib/utils';
 import type { Client } from '@/lib/mock-data';
-import { cn, formatCurrencyBRL } from '@/lib/utils';
 import { OPTIMIZER_PERIODS } from '@/lib/optimizer';
-import type {
-  OptimizerModo,
-  OptimizerPeriodKey,
-  OptimizerRecomendacao,
-  OptimizerTreeNode,
-} from '@/lib/optimizer';
+import type { OptimizerPeriodKey } from '@/lib/optimizer';
+import {
+  categoriaDoNode,
+  flattenTree,
+  type AccountOption,
+  type ArvoreResumo,
+  type Categoria,
+  type ClientDiagnostic,
+  type FilaConta,
+  type FilaRec,
+  type NivelFiltro,
+  type ToastState,
+  type TreeNode,
+} from '@/lib/optimizer-ui';
+import { AccountRail } from '@/components/otimizador/account-rail';
+import { AccountHealthHero } from '@/components/otimizador/account-health-hero';
+import { CampaignTable } from '@/components/otimizador/campaign-tree';
+import { ConfigModal } from '@/components/otimizador/config-modal';
+import { ConfirmToast } from '@/components/otimizador/confirm-toast';
+import { DecisionPanel } from '@/components/otimizador/decision-panel';
+import { FilterChips, QuickDecisionCards } from '@/components/otimizador/decision-strip';
 
 // ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-// Recomendação da fila (server já achatou via buildRecomendacoes) + status do workflow.
-type FilaRec = OptimizerRecomendacao & { status: string; atribuido_a: string | null };
-
-// Nó da árvore (server já monta hierarquia completa via buildCampaignTree) + status do workflow.
-type TreeNode = OptimizerTreeNode & { status: string; atribuido_a: string | null };
-
-// Resumo por conta para o seletor.
-type FilaConta = {
-  cliente_id: string;
-  cliente_nome: string;
-  pior_severidade: 'urgente' | 'atencao' | 'ok';
-  pendencias: number;
-};
-
-type AccountOption = FilaConta & {
-  tem_analise: boolean;
-};
-
-type ArvoreResumo = {
-  estado_da_conta: string | null;
-  resumo_executivo: string | null;
-  semana_analise: string | null;
-  modo_operacao: string | null;
-  cruzamento_com_metas: {
-    cpl_atual: number | null;
-    gasto_total: number;
-    volume_conversoes_atual: number;
-    orcamento_periodo: number | null;
-    status_orcamento: string;
-  };
-  campanhas: number;
-  conjuntos: number;
-  criativos: number;
-  diagnosticos: number;
-};
-
-type ClientDiagnostic = {
-  cliente: string;
-  conexao_resolvida: boolean;
-  connection_id?: string;
-  account_id?: string;
-  token_ok?: boolean;
-  campanhas_7d?: number;
-  campanhas_30d?: number;
-  amostra?: Array<{ nome: string; status: string; gasto: number; leads: number; plataforma: string }>;
-  meta_direto?: { ok: boolean; status?: number; erro?: string; total?: number; com_gasto?: number; campanhas?: Array<{ nome: string; status: string; gasto: number }> };
-  planejamento: { cpl_meta: number | null; volume_leads_meta: number | null; objetivo: string | null; tem_planejamento: boolean };
-  veredito: string;
-};
-
-type ClientConfig = {
-  cliente_id: string;
-  modo_operacao: OptimizerModo;
-  analise_dia_semana: number;
-  acoes_pre_aprovadas: string[];
-  min_dias_aprendizado: number;
-  orcamento_diario_maximo_conta: number | null;
-  observacoes_fixas: string | null;
-};
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-const DOW_LABELS: Record<number, string> = { 1: 'Segunda-feira', 2: 'Terça-feira', 3: 'Quarta-feira', 4: 'Quinta-feira', 5: 'Sexta-feira' };
-
-const MODO_LABELS: Record<OptimizerModo, string> = {
-  DIAGNOSTICO_APENAS: 'Diagnóstico apenas',
-  RECOMENDACAO_COM_APROVACAO: 'Recomendação com aprovação',
-  AUTOMATICO_PARCIAL: 'Automático parcial',
-  AUTOMATICO_TOTAL: 'Automático total',
-};
-
-const MODO_DESC: Record<OptimizerModo, string> = {
-  DIAGNOSTICO_APENAS: 'Só analisa e reporta. Nenhuma ação é executada.',
-  RECOMENDACAO_COM_APROVACAO: 'Sugere ações que você aprova individualmente.',
-  AUTOMATICO_PARCIAL: 'Executa apenas as ações pré-aprovadas automaticamente.',
-  AUTOMATICO_TOTAL: 'Executa todas as ações recomendadas automaticamente.',
-};
-
-const ACOES_PRE_APROVADAS_OPCOES = [
-  { value: 'PAUSAR', label: 'Pausar conjuntos/anúncios' },
-  { value: 'ATIVAR', label: 'Ativar conjuntos/anúncios' },
-  { value: 'AJUSTAR_ORCAMENTO', label: 'Ajustar orçamento' },
-];
-
-// Severidade — cor reservada SÓ para gravidade (nunca no texto da recomendação).
-type Severidade = 'urgente' | 'atencao' | 'ok';
-const SEV: Record<Severidade, { badge: string; dot: string; label: string }> = {
-  urgente: { badge: 'border-red-400/40 bg-red-400/10 text-red-300', dot: 'bg-red-400', label: 'Urgente' },
-  atencao: { badge: 'border-amber-400/40 bg-amber-400/10 text-amber-300', dot: 'bg-amber-400', label: 'Atenção' },
-  ok: { badge: 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300', dot: 'bg-emerald-400', label: 'Oportunidade' },
-};
-const NIVEL_LABEL: Record<string, string> = { campaign: 'Campanha', adset: 'Conjunto', ad: 'Criativo' };
-
-// 5 categorias de decisão rápida — computadas a partir de acao_tipo + severidade de cada nó.
-// "Investigar" hoje só cobre VERIFICAR_MANUAL (ambiguidade/aprendizado) — funil/técnico real
-// (WhatsApp, pixel, LP) ainda não é um sinal que a IA recebe, ver CLAUDE.md.
-type Categoria = 'pausar' | 'revisar' | 'manter' | 'escalar' | 'investigar' | 'sem_diagnostico';
-// Nós ATENCAO/URGENTE sem texto_recomendacao são "buraco de dado" (fallback quando a resposta
-// da IA não cobriu aquele objeto — ex: truncamento por limite de tokens em contas grandes),
-// NÃO uma recomendação real de revisar. Contá-los como "Revisar" infla o card com nós que não
-// têm diagnóstico nenhum. Ver `diagnosticos` no resumo da conta — só conta texto_recomendacao
-// não-vazio; os cards de decisão precisam bater com esse número.
-function categoriaDoNode(n: { severidade: Severidade; acao_estruturada: { tipo: string } | null; texto_recomendacao: string }): Categoria {
-  const tipo = n.acao_estruturada?.tipo;
-  const temDiagnostico = n.texto_recomendacao.trim().length > 0;
-  if (n.severidade !== 'ok' && !temDiagnostico) return 'sem_diagnostico';
-  if (tipo === 'PAUSAR') return 'pausar';
-  if (n.severidade === 'ok' && (tipo === 'AJUSTAR_ORCAMENTO' || tipo === 'ATIVAR')) return 'escalar';
-  if (n.severidade === 'ok') return 'manter';
-  if (/aguardar mais dados|verificar/i.test(n.texto_recomendacao)) return 'investigar';
-  return 'revisar';
-}
-
-// Só as 5 categorias acionáveis viram card/filtro clicável — "sem_diagnostico" aparece na árvore
-// com um rótulo neutro, mas nunca conta nos cards nem é alvo de filtro (ver QuickDecisionCards).
-// Paleta por categoria (ref. "DEPOIS"): vermelho=pausar, amarelo=revisar, verde=manter,
-// AZUL=escalar (não verde — verde é reservado a "manter/positivo"), roxo=investigar.
-const CATEGORIA_META: Record<Exclude<Categoria, 'sem_diagnostico'>, { label: string; icon: typeof PauseCircle; tone: string }> = {
-  pausar: { label: 'Pausar agora', icon: PauseCircle, tone: 'border-red-400/40 bg-red-400/5 text-red-300' },
-  revisar: { label: 'Revisar', icon: Search, tone: 'border-amber-400/40 bg-amber-400/5 text-amber-300' },
-  manter: { label: 'Manter', icon: MinusCircle, tone: 'border-emerald-400/40 bg-emerald-400/5 text-emerald-300' },
-  escalar: { label: 'Escalar', icon: Rocket, tone: 'border-sky-400/40 bg-sky-400/5 text-sky-300' },
-  investigar: { label: 'Investigar', icon: Eye, tone: 'border-secondary/40 bg-secondary/5 text-secondary' },
-};
-const SEM_DIAGNOSTICO_META = { label: 'Sem diagnóstico', icon: MinusCircle, tone: 'border-border text-muted-foreground' };
-function categoriaMeta(cat: Categoria) {
-  return cat === 'sem_diagnostico' ? SEM_DIAGNOSTICO_META : CATEGORIA_META[cat];
-}
-
-// Badge do NÍVEL na árvore/painel (Campanha/Conjunto/Criativo). Roxo editorial p/ o nível,
-// distinto das cores de severidade/ação, pra o gestor bater o olho e saber a hierarquia.
-const NIVEL_BADGE: Record<string, string> = {
-  campaign: 'border-secondary/40 bg-secondary/10 text-secondary',
-  adset: 'border-sky-400/30 bg-sky-400/10 text-sky-300',
-  ad: 'border-border bg-background text-muted-foreground',
-};
-
-// ─── Campos derivados da recomendação (painel "decisão guiada") ────────────────
-// A IA ainda não devolve priority/impact/risk/doNotDo estruturados. Derivamos de forma
-// determinística do que já existe (severidade, ação, confiança, filhos) — quando o backend
-// passar a mandar esses campos, é só trocar estas funções pela leitura direta.
-function prioridadeDoNode(n: { severidade: Severidade }): { label: string; tone: string } {
-  if (n.severidade === 'urgente') return { label: 'Alta', tone: 'text-red-300' };
-  if (n.severidade === 'atencao') return { label: 'Média', tone: 'text-amber-300' };
-  return { label: 'Baixa', tone: 'text-emerald-300' };
-}
-
-function impactoDoNode(n: { acao_estruturada: { tipo: string } | null; texto_recomendacao: string }): string {
-  const t = n.acao_estruturada?.tipo;
-  if (t === 'PAUSAR') return 'Reduzir desperdício';
-  if (t === 'AJUSTAR_ORCAMENTO') return 'Aumentar resultado';
-  if (t === 'ATIVAR') return 'Recuperar resultado';
-  if (/criativo|apelo|angulo|ângulo/i.test(n.texto_recomendacao)) return 'Recuperar CTR';
-  return 'Melhorar eficiência';
-}
-
-function riscoDoNode(n: OptimizerRecomendacao): { label: string; tone: string } {
-  // Confiança baixa ou dado insuficiente → risco alto de agir errado.
-  if (n.confianca === 'baixa' || !n.aplicavel) return { label: 'Alto', tone: 'text-red-300' };
-  // Pausar algo que gastou sem entregar = risco baixo (não há resultado a perder).
-  const conv = Number(n.metricas_chave.find((m) => /convers|lead/i.test(m.rotulo))?.valor?.replace(/\D/g, '') ?? '0');
-  if (n.acao_estruturada?.tipo === 'PAUSAR' && conv === 0) return { label: 'Baixo', tone: 'text-emerald-300' };
-  if (n.acao_estruturada?.tipo === 'AJUSTAR_ORCAMENTO') return { label: 'Médio', tone: 'text-amber-300' };
-  return { label: 'Médio', tone: 'text-amber-300' };
-}
-
-// Descendentes `ad` que devem ser pausados (gasto sem resultado) — alimenta "itens afetados"
-// e o título "Pausar N criativos fracos dentro deste conjunto".
-function criativosAfetados(node: TreeNode): TreeNode[] {
-  const out: TreeNode[] = [];
-  const walk = (nodes: TreeNode[]) => {
-    for (const n of nodes) {
-      if (n.nivel === 'ad' && categoriaDoNode(n) === 'pausar') out.push(n);
-      walk(n.filhos as TreeNode[]);
-    }
-  };
-  walk(node.filhos as TreeNode[]);
-  return out;
-}
-
-// Extrai um valor de fato/métrica por rótulo (Gasto, CTR etc.) — helper de exibição.
-function fatoValor(n: OptimizerTreeNode, rotuloRegex: RegExp): string {
-  return n.fatos.find((f) => rotuloRegex.test(f.rotulo))?.valor
-    ?? n.metricas_chave.find((m) => rotuloRegex.test(m.rotulo))?.valor
-    ?? '—';
-}
-
-// Link direto para o objeto no Gerenciador de Anúncios nativo.
-function adManagerUrl(rec: { canal: string; account_id: string | null; nivel: string; objeto_id: string }): string | null {
-  if (rec.canal === 'google') return 'https://ads.google.com/aw/campaigns';
-  if (!rec.account_id) return null;
-  const act = String(rec.account_id).replace(/^act_/, '');
-  const sel = rec.nivel === 'campaign' ? `&selected_campaign_ids=${rec.objeto_id}`
-    : rec.nivel === 'adset' ? `&selected_adset_ids=${rec.objeto_id}`
-    : rec.nivel === 'ad' ? `&selected_ad_ids=${rec.objeto_id}` : '';
-  return `https://business.facebook.com/adsmanager/manage/campaigns?act=${act}${sel}`;
-}
-
-function formatDateTime(value: string | null): string {
-  if (!value) return '—';
-  return new Date(value).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-}
-
-// Achata a árvore em lista plana (com nível) — usado pelos cards de decisão rápida e filtros.
-function flattenTree(nodes: TreeNode[]): TreeNode[] {
-  const out: TreeNode[] = [];
-  for (const n of nodes) { out.push(n); out.push(...flattenTree(n.filhos as TreeNode[])); }
-  return out;
-}
-
-// ---------------------------------------------------------------------------
-// Config Modal
-// ---------------------------------------------------------------------------
-function ConfigModal({ clientId, clientName, onClose }: { clientId: string; clientName: string; onClose: () => void }) {
-  const [config, setConfig] = useState<ClientConfig>({
-    cliente_id: clientId, modo_operacao: 'RECOMENDACAO_COM_APROVACAO',
-    analise_dia_semana: 1, acoes_pre_aprovadas: [], min_dias_aprendizado: 7, orcamento_diario_maximo_conta: null,
-    observacoes_fixas: null,
-  });
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-
-  const observacaoItems = (config.observacoes_fixas ?? '').split('\n').map((s) => s.trim()).filter(Boolean);
-  const [newObservacao, setNewObservacao] = useState('');
-  const [editingObsIndex, setEditingObsIndex] = useState<number | null>(null);
-  const [editingObsText, setEditingObsText] = useState('');
-
-  function setObservacaoItems(next: string[]) {
-    setConfig((prev) => ({ ...prev, observacoes_fixas: next.length > 0 ? next.join('\n') : null }));
-  }
-  function addObservacao() {
-    const t = newObservacao.trim();
-    if (!t) return;
-    setObservacaoItems([...observacaoItems, t]);
-    setNewObservacao('');
-  }
-  function startEditObservacao(i: number) {
-    setEditingObsIndex(i);
-    setEditingObsText(observacaoItems[i]);
-  }
-  function saveEditObservacao(i: number) {
-    const t = editingObsText.trim();
-    if (!t) { removeObservacao(i); return; }
-    const next = [...observacaoItems];
-    next[i] = t;
-    setObservacaoItems(next);
-    setEditingObsIndex(null);
-  }
-  function removeObservacao(i: number) {
-    setObservacaoItems(observacaoItems.filter((_, idx) => idx !== i));
-    if (editingObsIndex === i) setEditingObsIndex(null);
-  }
-
-  useEffect(() => {
-    void (async () => {
-      try {
-        const res = await fetch(`/api/otimizador/config/${encodeURIComponent(clientId)}`);
-        if (res.ok) setConfig(await res.json() as ClientConfig);
-      } finally { setLoading(false); }
-    })();
-  }, [clientId]);
-
-  async function save() {
-    setSaving(true); setSaved(false);
-    try {
-      await fetch(`/api/otimizador/config/${encodeURIComponent(clientId)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...callerHeaders() },
-        body: JSON.stringify(config),
-      });
-      setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
-    } finally { setSaving(false); }
-  }
-
-  function toggleAcao(value: string) {
-    setConfig((prev) => ({
-      ...prev,
-      acoes_pre_aprovadas: prev.acoes_pre_aprovadas.includes(value)
-        ? prev.acoes_pre_aprovadas.filter((v) => v !== value)
-        : [...prev.acoes_pre_aprovadas, value],
-    }));
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
-      <div className="w-full max-w-lg rounded-[var(--radius)] border border-border bg-card shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-border p-4">
-          <div>
-            <h2 className="font-semibold text-foreground">Config do Otimizador</h2>
-            <p className="text-sm text-muted-foreground">{clientName}</p>
-          </div>
-          <button onClick={onClose} className="rounded p-1 text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
-        </div>
-        {loading ? (
-          <div className="flex h-48 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
-        ) : (
-          <div className="space-y-5 p-4">
-            <div className="space-y-2">
-              <label className="text-xs font-semibold text-muted-foreground">Modo de operação</label>
-              <div className="space-y-2">
-                {(Object.keys(MODO_LABELS) as OptimizerModo[]).map((modo) => (
-                  <label key={modo} className="flex cursor-pointer items-start gap-3">
-                    <input type="radio" name="modo" value={modo} checked={config.modo_operacao === modo}
-                      onChange={() => setConfig((prev) => ({ ...prev, modo_operacao: modo }))} className="mt-0.5 accent-primary" />
-                    <div>
-                      <p className="text-sm font-medium text-foreground">{MODO_LABELS[modo]}</p>
-                      <p className="text-xs text-muted-foreground">{MODO_DESC[modo]}</p>
-                    </div>
-                  </label>
-                ))}
-              </div>
-            </div>
-            <div className="space-y-2">
-              <label className="text-xs font-semibold text-muted-foreground">Dia da semana da análise</label>
-              <select value={config.analise_dia_semana}
-                onChange={(e) => setConfig((prev) => ({ ...prev, analise_dia_semana: Number(e.target.value) }))}
-                className="h-10 w-full rounded-[var(--radius)] border border-border bg-background px-3 text-sm text-foreground outline-none focus:border-primary">
-                {Object.entries(DOW_LABELS).map(([day, label]) => (
-                  <option key={day} value={Number(day)}>{label}</option>
-                ))}
-              </select>
-            </div>
-            {(config.modo_operacao === 'AUTOMATICO_PARCIAL' || config.modo_operacao === 'AUTOMATICO_TOTAL') && (
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-muted-foreground">Ações pré-aprovadas</label>
-                <div className="space-y-1.5">
-                  {ACOES_PRE_APROVADAS_OPCOES.map((op) => (
-                    <label key={op.value} className="flex cursor-pointer items-center gap-2">
-                      <input type="checkbox" checked={config.acoes_pre_aprovadas.includes(op.value)}
-                        onChange={() => toggleAcao(op.value)} className="accent-primary" />
-                      <span className="text-sm text-foreground">{op.label}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-muted-foreground">Mín. dias para pausar</label>
-                <input type="number" min={1} max={90} value={config.min_dias_aprendizado}
-                  onChange={(e) => setConfig((prev) => ({ ...prev, min_dias_aprendizado: Number(e.target.value) }))}
-                  className="h-10 w-full rounded-[var(--radius)] border border-border bg-background px-3 text-sm text-foreground outline-none focus:border-primary" />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-muted-foreground">Orçamento máx. diário (R$)</label>
-                <input type="number" min={0} placeholder="Sem limite" value={config.orcamento_diario_maximo_conta ?? ''}
-                  onChange={(e) => setConfig((prev) => ({ ...prev, orcamento_diario_maximo_conta: e.target.value === '' ? null : Number(e.target.value) }))}
-                  className="h-10 w-full rounded-[var(--radius)] border border-border bg-background px-3 text-sm text-foreground outline-none focus:border-primary" />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <label className="text-xs font-semibold text-muted-foreground">Peculiaridades deste cliente</label>
-              <p className="text-[11px] text-muted-foreground">Contexto fixo que a IA considera em toda análise deste cliente, além de metas e performance. Cada item abaixo é uma peculiaridade — edite, remova ou adicione sem afetar as outras.</p>
-
-              {observacaoItems.length > 0 && (
-                <ul className="space-y-1.5">
-                  {observacaoItems.map((item, i) => (
-                    <li key={i} className="flex items-start gap-2 rounded-[var(--radius)] border border-border bg-background px-3 py-2">
-                      {editingObsIndex === i ? (
-                        <>
-                          <div className="relative flex-1">
-                            <textarea
-                              rows={2}
-                              autoFocus
-                              value={editingObsText}
-                              onChange={(e) => setEditingObsText(e.target.value)}
-                              className="w-full resize-none rounded border border-primary/50 bg-background px-2 py-1 pr-8 text-sm text-foreground outline-none"
-                            />
-                            <DictateButton
-                              className="absolute bottom-1 right-1 h-6 w-6"
-                              onTranscript={(text) => setEditingObsText((prev) => (prev ? `${prev} ${text}` : text))}
-                            />
-                          </div>
-                          <div className="flex shrink-0 flex-col gap-1.5 pt-1">
-                            <button type="button" onClick={() => saveEditObservacao(i)} title="Salvar" className="text-primary hover:text-primary/80">
-                              <Check className="h-4 w-4" />
-                            </button>
-                            <button type="button" onClick={() => setEditingObsIndex(null)} title="Cancelar" className="text-muted-foreground hover:text-foreground">
-                              <X className="h-4 w-4" />
-                            </button>
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <span className="flex-1 whitespace-pre-wrap text-sm text-foreground">{item}</span>
-                          <div className="flex shrink-0 gap-1.5 pt-0.5">
-                            <button type="button" onClick={() => startEditObservacao(i)} title="Editar" className="text-muted-foreground hover:text-primary">
-                              <Pencil className="h-3.5 w-3.5" />
-                            </button>
-                            <button type="button" onClick={() => removeObservacao(i)} title="Remover" className="text-muted-foreground hover:text-red-400">
-                              <X className="h-3.5 w-3.5" />
-                            </button>
-                          </div>
-                        </>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
-
-              <div className="relative">
-                <textarea
-                  rows={2}
-                  maxLength={500}
-                  placeholder='Nova peculiaridade... ex: "Campanhas com [BOT] no nome são fluxo automatizado, têm lógica própria — nunca sugerir mover orçamento delas pra outra campanha."'
-                  value={newObservacao}
-                  onChange={(e) => setNewObservacao(e.target.value)}
-                  className="w-full resize-none rounded-[var(--radius)] border border-border bg-background px-3 py-2 pr-10 text-sm text-foreground outline-none focus:border-primary"
-                />
-                <DictateButton
-                  className="absolute bottom-2 right-2"
-                  onTranscript={(text) => setNewObservacao((prev) => (prev ? `${prev} ${text}` : text))}
-                />
-              </div>
-              <Button type="button" variant="outline" size="sm" onClick={addObservacao} disabled={!newObservacao.trim()}>
-                <Plus className="h-3.5 w-3.5" />
-                Adicionar peculiaridade
-              </Button>
-            </div>
-            <div className="flex items-center justify-end gap-2 pt-2">
-              {saved && <span className="text-xs text-primary">Configuração salva!</span>}
-              <Button variant="outline" onClick={onClose}>Cancelar</Button>
-              <Button onClick={save} disabled={saving}>
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                Salvar
-              </Button>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Toast de confirmação (com Desfazer)
-// ---------------------------------------------------------------------------
-type ToastState = { text: string; erro?: boolean; undo?: { rec_id: string; cliente_id: string } } | null;
-
-function ConfirmToast({ toast, onUndo, onClose }: { toast: ToastState; onUndo: () => void; onClose: () => void }) {
-  useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(onClose, 7000);
-    return () => clearTimeout(t);
-  }, [toast, onClose]);
-  if (!toast) return null;
-  return (
-    <div className="fixed bottom-5 left-1/2 z-50 -translate-x-1/2">
-      <div className="flex items-center gap-3 rounded-[var(--radius)] border border-border bg-card px-4 py-3 shadow-xl">
-        {toast.erro
-          ? <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
-          : <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" />}
-        <span className="text-sm text-foreground">{toast.text}</span>
-        {toast.undo && (
-          <button onClick={onUndo} className="flex items-center gap-1 text-sm font-semibold text-primary hover:underline">
-            <Undo2 className="h-3.5 w-3.5" /> Desfazer
-          </button>
-        )}
-        <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Seletor de conta (dropdown)
-// ---------------------------------------------------------------------------
-function AccountSelector({ contas, value, onChange }: {
-  contas: AccountOption[];
-  value: string;
-  onChange: (clienteId: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState('');
-  const sel = value ? contas.find((c) => c.cliente_id === value) : null;
-  const filteredContas = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return contas;
-    return contas.filter((c) => c.cliente_nome.toLowerCase().includes(q));
-  }, [contas, query]);
-  return (
-    <div className="relative">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center justify-between gap-2 rounded-[var(--radius)] border border-border bg-card px-3 py-2.5 text-left hover:border-primary/40"
-      >
-        <span className="flex min-w-0 items-center gap-2">
-          {sel
-            ? <span className={cn('h-2 w-2 shrink-0 rounded-full', sel.tem_analise ? SEV[sel.pior_severidade].dot : 'bg-muted-foreground/60')} />
-            : <MousePointerClick className="h-4 w-4 shrink-0 text-muted-foreground" />}
-          <span className="truncate text-sm font-medium text-foreground">{sel ? sel.cliente_nome : 'Selecionar cliente'}</span>
-          {sel && (
-            <span className="shrink-0 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">
-              {!sel.tem_analise ? 'Sem análise' : sel.pendencias === 0 ? 'Tudo certo' : `${sel.pendencias} pendência${sel.pendencias === 1 ? '' : 's'}`}
-            </span>
-          )}
-        </span>
-        <ChevronDown className={cn('h-4 w-4 shrink-0 text-primary transition-transform', open && 'rotate-180')} />
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute z-20 mt-1 max-h-80 w-full overflow-auto rounded-[var(--radius)] border border-border bg-card shadow-xl">
-            <div className="sticky top-0 z-10 border-b border-border bg-card p-2">
-              <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                <input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Buscar cliente..."
-                  className="h-9 w-full rounded-[var(--radius)] border border-border bg-background px-8 text-sm text-foreground outline-none focus:border-primary"
-                />
-              </div>
-            </div>
-            {filteredContas.map((c) => (
-              <button
-                key={c.cliente_id}
-                onClick={() => { onChange(c.cliente_id); setOpen(false); setQuery(''); }}
-                className={cn('flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-surface-soft', value === c.cliente_id && 'bg-surface-soft')}
-              >
-                <span className={cn('h-2 w-2 shrink-0 rounded-full', c.tem_analise ? SEV[c.pior_severidade].dot : 'bg-muted-foreground/60')} />
-                <span className="truncate text-sm text-foreground">{c.cliente_nome}</span>
-                <span className="ml-auto shrink-0 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                  {!c.tem_analise ? 'novo' : c.pendencias === 0 ? 'ok' : c.pendencias}
-                </span>
-              </button>
-            ))}
-            {filteredContas.length === 0 && <p className="p-3 text-xs text-muted-foreground">Nenhum cliente encontrado.</p>}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Resumo geral da conta
-// ---------------------------------------------------------------------------
-const ESTADO_LABEL: Record<string, { label: string; tone: string; ring: string }> = {
-  SAUDAVEL: { label: 'Saudável', tone: 'text-emerald-300', ring: '#34d399' },
-  ATENCAO: { label: 'Atenção crítica', tone: 'text-amber-300', ring: '#fbbf24' },
-  CRISE: { label: 'Crise', tone: 'text-red-300', ring: '#f87171' },
-};
-
-// Score 0-100 do gauge — a API NÃO devolve um número (só estado_da_conta: SAUDAVEL/ATENCAO/
-// CRISE). Isto é uma HEURÍSTICA client-side, transparente: parte de uma base por estado e
-// ajusta pela proporção de itens "pausar" (penaliza) vs "escalar" (bonifica) na árvore. Se no
-// futuro a IA passar a devolver um score próprio, trocar esta função pelo valor real do backend.
-function computeAccountScore(estadoDaConta: string | null, nodes: TreeNode[]): number {
-  const base = estadoDaConta === 'SAUDAVEL' ? 80 : estadoDaConta === 'ATENCAO' ? 55 : estadoDaConta === 'CRISE' ? 25 : 50;
-  const total = nodes.length || 1;
-  const pausar = nodes.filter((n) => categoriaDoNode(n) === 'pausar').length;
-  const escalar = nodes.filter((n) => categoriaDoNode(n) === 'escalar').length;
-  const penalidade = Math.round((pausar / total) * 30);
-  const bonus = Math.round((escalar / total) * 10);
-  return Math.max(0, Math.min(100, base - penalidade + bonus));
-}
-
-// Anel de progresso (SVG) — mostra o score 0-100 calculado acima.
-function ScoreGauge({ score, ring }: { score: number; ring: string }) {
-  const r = 34;
-  const circ = 2 * Math.PI * r;
-  const offset = circ * (1 - score / 100);
-  return (
-    <div className="relative h-20 w-20 shrink-0">
-      <svg viewBox="0 0 80 80" className="h-20 w-20 -rotate-90">
-        <circle cx="40" cy="40" r={r} fill="none" stroke="currentColor" strokeWidth="8" className="text-border/70" />
-        <circle cx="40" cy="40" r={r} fill="none" stroke={ring} strokeWidth="8" strokeLinecap="round"
-          strokeDasharray={circ} strokeDashoffset={offset} style={{ transition: 'stroke-dashoffset 0.4s ease' }} />
-      </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-2xl font-bold text-foreground">{score}</span>
-        <span className="text-[9px] text-muted-foreground">/100</span>
-      </div>
-    </div>
-  );
-}
-
-function AccountSummaryHeader({ resumo, nodes, generatedAt, proximaAnalise }: {
-  resumo: ArvoreResumo | null;
-  nodes: TreeNode[];
-  generatedAt: string | null;
-  proximaAnalise: string | null;
-}) {
-  if (!resumo) return null;
-  const estado = ESTADO_LABEL[resumo.estado_da_conta ?? ''] ?? { label: '—', tone: 'text-muted-foreground', ring: '#8b8b8b' };
-  const score = computeAccountScore(resumo.estado_da_conta, nodes);
-  const cm = resumo.cruzamento_com_metas;
-  // 2 linhas de 3 — Diagnósticos sai daqui e vira badge no card do score (ver abaixo).
-  const stats: Array<{ label: string; value: string }> = [
-    { label: 'Verba gasta', value: formatCurrencyBRL(cm?.gasto_total ?? 0) },
-    { label: 'Conversões', value: String(cm?.volume_conversoes_atual ?? 0) },
-    { label: 'Custo por conversão', value: cm?.cpl_atual != null ? formatCurrencyBRL(cm.cpl_atual) : '—' },
-    { label: 'Campanhas', value: String(resumo.campanhas) },
-    { label: 'Conjuntos', value: String(resumo.conjuntos) },
-    { label: 'Criativos', value: String(resumo.criativos) },
-  ];
-  return (
-    <div className="grid items-stretch gap-3 lg:grid-cols-[minmax(420px,1fr)_minmax(500px,1.3fr)]">
-      <section className="flex items-start gap-4 rounded-[var(--radius)] border border-border bg-card/90 p-4">
-        <ScoreGauge score={score} ring={estado.ring} />
-        <div className="flex min-w-0 flex-1 flex-col justify-between gap-2">
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <span className={cn('text-sm font-bold uppercase tracking-wide', estado.tone)}>{estado.label}</span>
-              <span className="text-xs text-muted-foreground">Performance {score >= 70 ? 'acima' : score >= 45 ? 'próxima' : 'abaixo'} do ideal</span>
-              {resumo.semana_analise && <span className="text-xs text-muted-foreground">· semana {resumo.semana_analise}</span>}
-            </div>
-            {resumo.resumo_executivo && <p className="line-clamp-3 text-sm leading-relaxed text-foreground">{resumo.resumo_executivo}</p>}
-          </div>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-            <span>Última análise: {formatDateTime(generatedAt)}</span>
-            {proximaAnalise && <span>Próxima automática: {proximaAnalise}</span>}
-            <span className="rounded border border-border/70 bg-background px-1.5 py-0.5 font-semibold text-foreground">{resumo.diagnosticos} diagnósticos</span>
-          </div>
-        </div>
-      </section>
-      <section className="grid grid-cols-3 overflow-hidden rounded-[var(--radius)] border border-border bg-card/90">
-        {stats.map((s, index) => (
-          <div
-            key={s.label}
-            className={cn(
-              'min-h-[78px] px-4 py-3',
-              index % 3 !== 0 && 'border-l border-border/70',
-              index > 2 && 'border-t border-border/70',
-            )}
-          >
-            <p className="text-[10px] font-bold uppercase leading-tight tracking-wide text-muted-foreground">{s.label}</p>
-            <p className="mt-2 whitespace-nowrap text-xl font-bold leading-none text-foreground">{s.value}</p>
-          </div>
-        ))}
-      </section>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Cards de decisão rápida
-// ---------------------------------------------------------------------------
-function QuickDecisionCards({ nodes, active, onSelect }: {
-  nodes: TreeNode[];
-  active: Categoria | null;
-  onSelect: (cat: Categoria | null) => void;
-}) {
-  // "sem_diagnostico" não vira card — ver categoriaDoNode. Só as 5 categorias acionáveis contam.
-  const counts: Record<Categoria, number> = { pausar: 0, revisar: 0, manter: 0, escalar: 0, investigar: 0, sem_diagnostico: 0 };
-  for (const n of nodes) counts[categoriaDoNode(n)]++;
-
-  const grid4: Array<Exclude<Categoria, 'sem_diagnostico' | 'investigar'>> = ['pausar', 'revisar', 'manter', 'escalar'];
-
-  return (
-    <div className="space-y-2">
-      <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
-        {grid4.map((cat) => {
-          const meta = CATEGORIA_META[cat];
-          const Icon = meta.icon;
-          const isActive = active === cat;
-          const descricao = cat === 'pausar' ? 'Impacto alto de desperdício'
-            : cat === 'revisar' ? 'Precisam de ajustes'
-              : cat === 'manter' ? 'Performando bem'
-                : 'Oportunidades de crescimento';
-          return (
-            <button
-              key={cat}
-              onClick={() => onSelect(isActive ? null : cat)}
-              title={descricao}
-              className={cn(
-                'group flex items-center gap-2 rounded-[var(--radius)] border px-3 py-2 text-left transition-all',
-                meta.tone,
-                isActive ? 'ring-1 ring-current' : 'opacity-75 hover:opacity-100',
-              )}
-            >
-              <Icon className="h-4 w-4 shrink-0" />
-              <span className="min-w-0">
-                <span className="block text-lg font-bold leading-none">{counts[cat]}</span>
-                <span className="block truncate text-[11px] font-medium leading-tight">{meta.label}</span>
-              </span>
-            </button>
-          );
-        })}
-      </div>
-      {counts.investigar > 0 && (
-        <button
-          onClick={() => onSelect(active === 'investigar' ? null : 'investigar')}
-          className={cn(
-            'flex w-full items-center justify-between gap-3 rounded-[var(--radius)] border px-3 py-2 text-left text-xs transition-colors',
-            active === 'investigar' ? CATEGORIA_META.investigar.tone : 'border-secondary/30 bg-secondary/5 text-muted-foreground hover:border-secondary/50',
-          )}
-        >
-          <span className="flex min-w-0 items-center gap-2">
-            <Eye className="h-3.5 w-3.5 shrink-0 text-secondary" />
-            <span className="truncate"><span className="font-semibold text-foreground">{counts.investigar}</span> item(ns) para investigar antes de decidir</span>
-          </span>
-          <ChevronRight className="h-3.5 w-3.5 shrink-0" />
-        </button>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Filtros
-// ---------------------------------------------------------------------------
-type NivelFiltro = 'todos' | 'campaign' | 'adset' | 'ad';
-
-function FilterChips({ nivel, onNivel, apenasComAcao, onApenasComAcao }: {
-  nivel: NivelFiltro;
-  onNivel: (n: NivelFiltro) => void;
-  apenasComAcao: boolean;
-  onApenasComAcao: (v: boolean) => void;
-}) {
-  const opcoes: Array<{ value: NivelFiltro; label: string }> = [
-    { value: 'todos', label: 'Todos os níveis' },
-    { value: 'campaign', label: 'Campanhas' },
-    { value: 'adset', label: 'Conjuntos' },
-    { value: 'ad', label: 'Criativos' },
-  ];
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      {opcoes.map((o) => (
-        <button
-          key={o.value}
-          onClick={() => onNivel(o.value)}
-          className={cn(
-            'rounded-full border px-3 py-1 text-xs font-medium transition-colors',
-            nivel === o.value ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-primary/30',
-          )}
-        >
-          {o.label}
-        </button>
-      ))}
-      <button
-        onClick={() => onApenasComAcao(!apenasComAcao)}
-        className={cn(
-          'rounded-full border px-3 py-1 text-xs font-medium transition-colors',
-          apenasComAcao ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-primary/30',
-        )}
-      >
-        Só com diagnóstico
-      </button>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Árvore de campanhas (tabela) — hierarquia via indentação, colunas fixas.
-// ---------------------------------------------------------------------------
-function nodeToneClass(n: TreeNode): string {
-  if (n.status === 'ignorado' || n.status === 'aplicado') return 'opacity-40';
-  return '';
-}
-
-// Status por severidade — distinto da coluna "Ação recomendada" (categoria/verbo). Aqui é só
-// a leitura de saúde do nó (bom/atenção/crítico), igual em qualquer nível da árvore.
-const STATUS_SEVERIDADE: Record<Severidade, { label: string; tone: string }> = {
-  urgente: { label: 'Crítica', tone: 'border-red-400/40 bg-red-400/10 text-red-300' },
-  atencao: { label: 'Atenção', tone: 'border-amber-400/40 bg-amber-400/10 text-amber-300' },
-  ok: { label: 'Bom', tone: 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300' },
-};
-
-function deliveryDisplay(raw: string | null | undefined): { label: string; tone: string } {
-  const status = String(raw ?? '').trim().toUpperCase();
-  if (['ACTIVE', 'ENABLED', 'IN_PROCESS', 'WITH_ISSUES'].includes(status)) {
-    return { label: 'Ativo', tone: 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300' };
-  }
-  if (['PAUSED', 'DISABLED'].includes(status)) {
-    return { label: 'Pausado', tone: 'border-amber-400/40 bg-amber-400/10 text-amber-300' };
-  }
-  if (['ARCHIVED', 'DELETED', 'REMOVED'].includes(status)) {
-    return { label: 'Arquivado', tone: 'border-border bg-background text-muted-foreground' };
-  }
-  if (!status) return { label: 'Não informado', tone: 'border-border bg-background text-muted-foreground' };
-  return { label: status.replaceAll('_', ' '), tone: 'border-sky-400/30 bg-sky-400/10 text-sky-300' };
-}
-
-// Status de exibição: criativo marcado pra pausar sem conversão vira "Gasto sem resultado"
-// (linguagem da referência), o resto usa a leitura de severidade padrão.
-function statusDisplay(node: TreeNode): { label: string; tone: string } {
-  if (node.nivel === 'ad' && categoriaDoNode(node) === 'pausar') {
-    return { label: 'Gasto sem resultado', tone: 'border-red-400/40 bg-red-400/10 text-red-300' };
-  }
-  return STATUS_SEVERIDADE[node.severidade];
-}
-
-function ctrDoNode(n: TreeNode): string {
-  return n.fatos.find((f) => f.rotulo === 'CTR')?.valor ?? '—';
-}
-
-// Limiares de hook rate (retenção nos 3s) — mesma régua do backend (HOOK_RATE_CRITICO em
-// optimizer.ts): abaixo de 25% o problema é a peça; 45%+ é hook bom.
-const HOOK_RATE_CRITICO = 25;
-const HOOK_RATE_BOM = 45;
-
-function hookBarTone(hook: number): string {
-  if (hook >= HOOK_RATE_BOM) return 'bg-emerald-400';
-  if (hook >= HOOK_RATE_CRITICO) return 'bg-amber-400';
-  return 'bg-red-400';
-}
-
-// Retenção de vídeo só existe de fato no criativo (nível "ad") — conjunto/campanha agregam por
-// CONTAGEM de filhos com hook baixo, nunca por média: uma média esconderia o criativo ruim
-// escondido atrás de um bom, exatamente o que o gestor precisa caçar.
-function videoRetencaoResumo(node: TreeNode): { low: number; total: number } | null {
-  let low = 0;
-  let total = 0;
-  const walk = (nodes: TreeNode[]) => {
-    for (const n of nodes) {
-      if (n.nivel === 'ad' && n.retencao_video?.eh_video && n.retencao_video.hook_rate != null) {
-        total++;
-        if (n.retencao_video.hook_rate < HOOK_RATE_CRITICO) low++;
-      }
-      walk(n.filhos as TreeNode[]);
-    }
-  };
-  walk(node.filhos as TreeNode[]);
-  return total > 0 ? { low, total } : null;
-}
-
-// Coluna "Retenção": no criativo, mini-curva de 4 barras (hook/p25/p50/p75) coloridas pelo
-// hook rate; em imagem/carrossel (eh_video=false) mostra N/A — não afeta saúde desse item. Em
-// conjunto/campanha, badge de contagem (nunca média, ver videoRetencaoResumo).
-function RetencaoCell({ node }: { node: TreeNode }) {
-  if (node.nivel === 'ad') {
-    const rv = node.retencao_video;
-    if (!rv || !rv.eh_video || rv.hook_rate == null) {
-      return <span className="text-xs text-muted-foreground">N/A</span>;
-    }
-    const bars = [rv.hook_rate, rv.p25_rate, rv.p50_rate, rv.p75_rate];
-    const tone = hookBarTone(rv.hook_rate);
-    const fmt = (v: number | null) => (v == null ? '—' : `${v.toFixed(0)}%`);
-    const title = `Hook (3s): ${fmt(rv.hook_rate)} | P25: ${fmt(rv.p25_rate)} | P50: ${fmt(rv.p50_rate)} | P75: ${fmt(rv.p75_rate)}`;
-    return (
-      <div className="flex items-center justify-end gap-1.5" title={title}>
-        <div className="flex h-4 items-end gap-0.5">
-          {bars.map((v, i) => (
-            <span key={i} className={cn('w-1 rounded-sm', tone)} style={{ height: `${Math.max(15, Math.min(100, v ?? 0))}%` }} />
-          ))}
-        </div>
-        <span className="text-xs tabular-nums text-muted-foreground">{fmt(rv.hook_rate)}</span>
-      </div>
-    );
-  }
-
-  const resumo = videoRetencaoResumo(node);
-  if (!resumo) return <span className="text-xs text-muted-foreground">—</span>;
-  return (
-    <span className={cn('text-xs font-medium', resumo.low > 0 ? 'text-red-300' : 'text-emerald-300')}>
-      {resumo.low > 0 ? `${resumo.low}/${resumo.total} c/ hook baixo` : `${resumo.total}/${resumo.total} ok`}
-    </span>
-  );
-}
-
-// Thumbnail do criativo — mostra a imagem real do anúncio (node.imagem_url, vinda da Meta)
-// quando disponível; cai pro placeholder de ícone em vídeo/carrossel sem imagem estática ou
-// em análises antigas sem o campo. Cor da borda segue a categoria do nó (vermelho = pausar).
-// Passar o mouse por cima amplia num preview flutuante (`position: fixed`, calculado a partir
-// do bounding rect no hover) — escapa do `overflow-auto` da tabela sem precisar de portal.
-function CreativeThumb({ tone, imageUrl, alt }: { tone: string; imageUrl?: string | null; alt: string }) {
-  const [hoverPos, setHoverPos] = useState<{ top: number; left: number } | null>(null);
-  const ref = useRef<HTMLSpanElement>(null);
-  const ZOOM = 220;
-
-  if (!imageUrl) {
-    return (
-      <span className={cn('flex h-7 w-7 shrink-0 items-center justify-center rounded border bg-background', tone)}>
-        <ImageIcon className="h-3.5 w-3.5 opacity-70" />
-      </span>
-    );
-  }
-
-  function handleEnter() {
-    const r = ref.current?.getBoundingClientRect();
-    if (!r) return;
-    const left = Math.min(r.right + 8, window.innerWidth - ZOOM - 12);
-    const top = Math.min(Math.max(8, r.top - ZOOM / 2 + r.height / 2), window.innerHeight - ZOOM - 12);
-    setHoverPos({ top, left });
-  }
-
-  return (
-    <span
-      ref={ref}
-      onMouseEnter={handleEnter}
-      onMouseLeave={() => setHoverPos(null)}
-      className="relative inline-block shrink-0"
-    >
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={imageUrl} alt={alt} className={cn('h-7 w-7 rounded border object-cover bg-background', tone)} />
-      {hoverPos && (
-        <div
-          className="pointer-events-none fixed z-50 rounded-[var(--radius)] border border-border bg-card p-1.5 shadow-xl"
-          style={{ top: hoverPos.top, left: hoverPos.left }}
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={imageUrl} alt={alt} className="rounded object-contain" style={{ width: ZOOM, height: ZOOM }} />
-          <p className="mt-1 max-w-[220px] truncate text-[10px] text-muted-foreground" title={alt}>{alt}</p>
-        </div>
-      )}
-    </span>
-  );
-}
-
-function TreeTableRow({ node, depth, selectedId, onSelect, onQuickPause, filtroNivel, filtroCategoria, apenasComAcao, openIds, onToggle }: {
-  node: TreeNode;
-  depth: number;
-  selectedId: string | null;
-  onSelect: (n: TreeNode) => void;
-  onQuickPause: (n: TreeNode) => void;
-  filtroNivel: NivelFiltro;
-  filtroCategoria: Categoria | null;
-  apenasComAcao: boolean;
-  openIds: Set<string>;
-  onToggle: (id: string) => void;
-}) {
-  const open = openIds.has(node.rec_id);
-  const hasChildren = node.filhos.length > 0;
-  const cat = categoriaDoNode(node);
-  const status = statusDisplay(node);
-  const entrega = deliveryDisplay(node.status_entrega);
-  const isAd = node.nivel === 'ad';
-  const mostraPausaRapida = isAd && cat === 'pausar';
-
-  // Um nó aparece se ele mesmo casa com o filtro OU algum descendente casa (pra manter contexto
-  // hierárquico visível — filtrar só criativos não deve esconder a campanha-pai).
-  function subtreeMatches(n: TreeNode): boolean {
-    const own = (filtroNivel === 'todos' || n.nivel === filtroNivel) &&
-      (!filtroCategoria || categoriaDoNode(n) === filtroCategoria) &&
-      (!apenasComAcao || n.texto_recomendacao.trim().length > 0);
-    if (own) return true;
-    return (n.filhos as TreeNode[]).some(subtreeMatches);
-  }
-  if (!subtreeMatches(node)) return null;
-
-  const metricaCusto = node.metricas_chave.find((m) => /custo|cpl|cpa/i.test(m.rotulo));
-  const metricaResultado = node.metricas_chave.find((m) => m.rotulo !== 'Gasto' && m !== metricaCusto);
-  const gasto = node.metricas_chave.find((m) => m.rotulo === 'Gasto');
-
-  return (
-    <>
-      <tr
-        className={cn(
-          'cursor-pointer border-b border-border/60 hover:bg-surface-soft',
-          selectedId === node.rec_id && 'bg-primary/5',
-          nodeToneClass(node),
-        )}
-        onClick={() => onSelect(node)}
-      >
-        <td className="py-2 pr-2">
-          <div className="flex items-center gap-2" style={{ paddingLeft: depth * 20 }}>
-            {hasChildren ? (
-              <button onClick={(e) => { e.stopPropagation(); onToggle(node.rec_id); }} className="shrink-0 text-muted-foreground hover:text-foreground">
-                <ChevronRight className={cn('h-3.5 w-3.5 transition-transform', open && 'rotate-90')} />
-              </button>
-            ) : <span className="w-3.5 shrink-0" />}
-            {isAd && <CreativeThumb tone={mostraPausaRapida ? 'border-red-400/40' : 'border-border'} imageUrl={node.imagem_url} alt={node.objeto_nome} />}
-            <span className="min-w-0 truncate text-sm text-foreground" title={node.objeto_nome}>{node.objeto_nome}</span>
-          </div>
-        </td>
-        <td className="py-2 pr-2">
-          <span className={cn('inline-block shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold', NIVEL_BADGE[node.nivel])}>
-            {NIVEL_LABEL[node.nivel]}
-          </span>
-        </td>
-        <td className="py-2 pr-2">
-          <span className={cn('inline-block shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold', entrega.tone)}>{entrega.label}</span>
-        </td>
-        <td className="py-2 pr-2">
-          <span className={cn('inline-block shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold', status.tone)}>{status.label}</span>
-        </td>
-        <td className="py-2 pr-2 text-right text-xs text-muted-foreground">{gasto?.valor ?? '—'}</td>
-        <td className="py-2 pr-2 text-right text-xs text-muted-foreground">{metricaResultado?.valor ?? '—'}</td>
-        <td className="py-2 pr-2 text-right text-xs text-muted-foreground">{metricaCusto?.valor ?? '—'}</td>
-        <td className="py-2 pr-2 text-right text-xs text-muted-foreground">{ctrDoNode(node)}</td>
-        <td className="py-2 pr-2 text-right"><RetencaoCell node={node} /></td>
-        <td className="py-2 pr-2 text-right">
-          {mostraPausaRapida ? (
-            <button
-              onClick={(e) => { e.stopPropagation(); onQuickPause(node); }}
-              title="Pausar este criativo"
-              className="inline-flex h-6 w-6 items-center justify-center rounded border border-red-400/50 bg-red-400/10 text-red-300 hover:bg-red-400/20"
-            >
-              <PauseCircle className="h-3.5 w-3.5" />
-            </button>
-          ) : (
-            <span className={cn('inline-block shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold', categoriaMeta(cat).tone)}>
-              {categoriaMeta(cat).label}
-            </span>
-          )}
-        </td>
-      </tr>
-      {open && hasChildren && (node.filhos as TreeNode[]).map((child) => (
-        <TreeTableRow key={child.rec_id} node={child} depth={depth + 1} selectedId={selectedId} onSelect={onSelect} onQuickPause={onQuickPause}
-          filtroNivel={filtroNivel} filtroCategoria={filtroCategoria} apenasComAcao={apenasComAcao} openIds={openIds} onToggle={onToggle} />
-      ))}
-    </>
-  );
-}
-
-// Todos os rec_id da árvore (recursivo) — usado por "Expandir tudo".
-function collectAllIds(nodes: TreeNode[]): string[] {
-  const ids: string[] = [];
-  const walk = (list: TreeNode[]) => {
-    for (const n of list) {
-      if (n.filhos.length > 0) ids.push(n.rec_id);
-      walk(n.filhos as TreeNode[]);
-    }
-  };
-  walk(nodes);
-  return ids;
-}
-
-// Agrupa campanhas (nível raiz) pelo objetivo (node.objetivo já vem em linguagem de negócio —
-// "Geração de leads", "Conversas no WhatsApp", "Vendas", "Engajamento"...). O otimizador não pode
-// ser só sobre leads: uma conta de e-commerce (vendas) ou institucional (engajamento) precisa de
-// árvore, coluna e rótulo próprios, não emprestados do vocabulário de lead. Ordena por gasto total
-// desc — o objetivo que mais consome verba aparece primeiro.
-function agruparPorObjetivo(nodes: TreeNode[]): Array<{ objetivo: string; nodes: TreeNode[]; gastoTotal: number }> {
-  const groups = new Map<string, TreeNode[]>();
-  for (const n of nodes) {
-    const key = n.objetivo?.trim() || 'Outro objetivo';
-    const list = groups.get(key);
-    if (list) list.push(n); else groups.set(key, [n]);
-  }
-  // Valor vem formatado em pt-BR ("R$ 1.234,56") — remove separador de milhar antes de trocar
-  // a vírgula decimal por ponto, senão "1.234,56" vira "1.23456" e o total sai errado.
-  const gastoDoNode = (n: TreeNode) => {
-    const raw = n.fatos.find((f) => f.rotulo === 'Gasto')?.valor ?? '';
-    return Number(raw.replace(/[^\d,.-]/g, '').replace(/\./g, '').replace(',', '.')) || 0;
-  };
-  return Array.from(groups.entries())
-    .map(([objetivo, list]) => ({ objetivo, nodes: list, gastoTotal: list.reduce((s, n) => s + gastoDoNode(n), 0) }))
-    .sort((a, b) => b.gastoTotal - a.gastoTotal);
-}
-
-// Rótulos de coluna do grupo (ex: "Conversas"/"Custo por conversa") — lidos do primeiro nó com
-// métrica, já que todo nó da árvore de uma mesma campanha herda o mesmo objetivo (ver
-// buildCampaignTree em optimizer.ts). Fallback genérico só pra grupo sem nenhum fato ainda.
-function rotulosDoGrupo(nodes: TreeNode[]): { resultado: string; custo: string } {
-  for (const n of nodes) {
-    const custo = n.metricas_chave.find((m) => /custo|cpl|cpa/i.test(m.rotulo));
-    const resultado = n.metricas_chave.find((m) => m.rotulo !== 'Gasto' && m !== custo);
-    if (custo || resultado) return { resultado: resultado?.rotulo ?? 'Resultado', custo: custo?.rotulo ?? 'Custo por resultado' };
-  }
-  return { resultado: 'Resultado', custo: 'Custo por resultado' };
-}
-
-function ObjetivoSection({ objetivo, nodes, selectedId, onSelect, onQuickPause, filtroNivel, filtroCategoria, apenasComAcao, openIds, onToggle, open, onToggleGroup }: {
-  objetivo: string;
-  nodes: TreeNode[];
-  selectedId: string | null;
-  onSelect: (n: TreeNode) => void;
-  onQuickPause: (n: TreeNode) => void;
-  filtroNivel: NivelFiltro;
-  filtroCategoria: Categoria | null;
-  apenasComAcao: boolean;
-  openIds: Set<string>;
-  onToggle: (id: string) => void;
-  open: boolean;
-  onToggleGroup: () => void;
-}) {
-  const rotulos = rotulosDoGrupo(nodes);
-  return (
-    <div className="border-b border-border last:border-b-0">
-      <button onClick={onToggleGroup} className="flex w-full items-center gap-2 bg-surface-soft px-3 py-2 text-left hover:bg-surface-soft/80">
-        <ChevronRight className={cn('h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} />
-        <span className="text-xs font-bold uppercase tracking-wide text-foreground">{objetivo}</span>
-        <span className="text-xs text-muted-foreground">{nodes.length} campanha{nodes.length === 1 ? '' : 's'}</span>
-      </button>
-      {open && (
-        <table className="w-full border-collapse text-left">
-          <thead>
-            <tr className="border-b border-border text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
-              <th className="py-2 pl-3 pr-2 font-bold">Campanha / Conjunto / Criativo</th>
-              <th className="py-2 pr-2 font-bold">Nível</th>
-              <th className="py-2 pr-2 font-bold">Entrega</th>
-              <th className="py-2 pr-2 font-bold">Saúde</th>
-              <th className="py-2 pr-2 text-right font-bold">Gasto</th>
-              <th className="py-2 pr-2 text-right font-bold">{rotulos.resultado}</th>
-              <th className="py-2 pr-2 text-right font-bold">{rotulos.custo}</th>
-              <th className="py-2 pr-2 text-right font-bold">CTR</th>
-              <th className="py-2 pr-2 text-right font-bold">Retenção</th>
-              <th className="py-2 pr-2 text-right font-bold">Ação recomendada</th>
-            </tr>
-          </thead>
-          <tbody>
-            {nodes.map((n) => (
-              <TreeTableRow key={n.rec_id} node={n} depth={0} selectedId={selectedId} onSelect={onSelect} onQuickPause={onQuickPause}
-                filtroNivel={filtroNivel} filtroCategoria={filtroCategoria} apenasComAcao={apenasComAcao} openIds={openIds} onToggle={onToggle} />
-            ))}
-          </tbody>
-        </table>
-      )}
-    </div>
-  );
-}
-
-function CampaignTable({ nodes, selectedId, onSelect, onQuickPause, filtroNivel, filtroCategoria, apenasComAcao }: {
-  nodes: TreeNode[];
-  selectedId: string | null;
-  onSelect: (n: TreeNode) => void;
-  onQuickPause: (n: TreeNode) => void;
-  filtroNivel: NivelFiltro;
-  filtroCategoria: Categoria | null;
-  apenasComAcao: boolean;
-}) {
-  // Por padrão só as campanhas (nível raiz) vêm abertas — igual ao comportamento anterior por linha.
-  const [openIds, setOpenIds] = useState<Set<string>>(() => new Set(nodes.map((n) => n.rec_id)));
-  const [closedGroups, setClosedGroups] = useState<Set<string>>(new Set());
-  const rootIdsKey = nodes.map((n) => n.rec_id).join(',');
-  useEffect(() => {
-    setOpenIds(new Set(nodes.map((n) => n.rec_id)));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rootIdsKey]);
-
-  const toggleOne = (id: string) => {
-    setOpenIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  };
-  const toggleGroup = (objetivo: string) => {
-    setClosedGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(objetivo)) next.delete(objetivo); else next.add(objetivo);
-      return next;
-    });
-  };
-
-  const grupos = agruparPorObjetivo(nodes);
-
-  return (
-    <div className="overflow-hidden rounded-[var(--radius)] border border-border bg-card/90">
-      <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2.5 text-xs font-semibold text-muted-foreground">
-        <span className="flex items-center gap-2"><Layers className="h-3.5 w-3.5" /> Árvore de campanhas</span>
-        <div className="flex items-center gap-3">
-          <button onClick={() => setOpenIds(new Set(collectAllIds(nodes)))} className="font-normal normal-case text-muted-foreground hover:text-foreground hover:underline">
-            Expandir tudo
-          </button>
-          <button onClick={() => setOpenIds(new Set())} className="font-normal normal-case text-muted-foreground hover:text-foreground hover:underline">
-            Recolher tudo
-          </button>
-          <span className="font-normal normal-case text-muted-foreground">{nodes.length} campanha{nodes.length === 1 ? '' : 's'}</span>
-        </div>
-      </div>
-      <div className="max-h-[calc(100vh-430px)] min-h-[360px] overflow-auto">
-        {grupos.map((g) => (
-          <ObjetivoSection
-            key={g.objetivo}
-            objetivo={g.objetivo}
-            nodes={g.nodes}
-            selectedId={selectedId}
-            onSelect={onSelect}
-            onQuickPause={onQuickPause}
-            filtroNivel={filtroNivel}
-            filtroCategoria={filtroCategoria}
-            apenasComAcao={apenasComAcao}
-            openIds={openIds}
-            onToggle={toggleOne}
-            open={!closedGroups.has(g.objetivo)}
-            onToggleGroup={() => toggleGroup(g.objetivo)}
-          />
-        ))}
-        {nodes.length === 0 && <p className="p-4 text-sm text-muted-foreground">Nenhuma campanha nesta análise.</p>}
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Painel lateral de detalhe
-// ---------------------------------------------------------------------------
-function DetailPanel({ node, busy, onApply, onJump }: {
-  node: TreeNode;
-  busy: boolean;
-  onApply: (rec: FilaRec, params: { novo_orcamento_diario?: number }) => void;
-  onJump: (recId: string) => void;
-}) {
-  const [why, setWhy] = useState(false);
-
-  useEffect(() => {
-    setWhy(false);
-  }, [node.rec_id]);
-
-  const cat = categoriaDoNode(node);
-  const emAnalise = node.status === 'em_analise_humana';
-  const link = adManagerUrl(node);
-  const semAcao = !node.texto_recomendacao.trim() && cat === 'sem_diagnostico';
-  const entrega = deliveryDisplay(node.status_entrega);
-
-  // Único controle de execução do painel: liga/desliga o objeto direto, independente da
-  // categoria/ação sugerida pela IA. Só desabilita quando o status não é Ativo nem Pausado
-  // (ex: Arquivado) — ligar/desligar não se aplica nesses casos.
-  const podeAlternar = entrega.label === 'Ativo' || entrega.label === 'Pausado';
-  function handleManualToggle() {
-    const tipo: 'PAUSAR' | 'ATIVAR' = entrega.label === 'Ativo' ? 'PAUSAR' : 'ATIVAR';
-    onApply({ ...node, acao_estruturada: { tipo, objeto_tipo: node.nivel, objeto_id: node.objeto_id, objeto_nome: node.objeto_nome, parametros: {} } }, {});
-  }
-
-  // Decisão guiada: quando um CONJUNTO/CAMPANHA é selecionado, os criativos fracos dentro dele
-  // viram "itens afetados" — o gestor pausa os criativos, não o objeto inteiro (o cerne do pedido).
-  const afetados = (node.nivel === 'adset' || node.nivel === 'campaign') ? criativosAfetados(node) : [];
-  const temAfetados = afetados.length > 0;
-  const prioridade = prioridadeDoNode(node);
-  const impacto = impactoDoNode(node);
-  const risco = riscoDoNode(node);
-
-  // Título "decisão clara": específico sobre o que será pausado, nunca genérico.
-  const nomeNivelFilho = node.nivel === 'campaign' ? 'conjunto/campanha' : 'conjunto';
-  const tituloGuiado = temAfetados
-    ? `Pausar ${afetados.length} criativo${afetados.length > 1 ? 's' : ''} fraco${afetados.length > 1 ? 's' : ''} dentro deste ${nomeNivelFilho}`
-    : node.titulo;
-
-  const critico = node.severidade === 'urgente' || cat === 'pausar';
-
-  const miniCards = [
-    { icon: Layers, label: 'Nível do problema', value: NIVEL_LABEL[node.nivel], tone: 'text-foreground' },
-    { icon: Flag, label: 'Prioridade', value: prioridade.label, tone: prioridade.tone },
-    { icon: TrendingUp, label: 'Impacto esperado', value: impacto, tone: 'text-foreground' },
-    { icon: ShieldCheck, label: 'Risco', value: risco.label, tone: risco.tone },
-  ];
-
-  return (
-    <div className="sticky top-3 max-h-[calc(100vh-96px)] overflow-auto rounded-[var(--radius)] border border-border bg-card/95">
-      {/* Cabeçalho da recomendação principal */}
-      <div className={cn('relative overflow-hidden rounded-t-[var(--radius)] border-b p-3', critico ? 'border-red-400/30 bg-red-500/5' : 'border-border')}>
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5" style={{ backgroundColor: node.severidade === 'urgente' ? '#f87171' : node.severidade === 'atencao' ? '#fbbf24' : '#34d399' }} />
-        <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Recomendação principal</p>
-        <div className="mt-1.5 flex items-start gap-2.5">
-          <span className={cn('mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius)] border', critico ? 'border-red-400/40 bg-red-400/10 text-red-300' : 'border-border bg-background text-muted-foreground')}>
-            {cat === 'pausar' ? <PauseCircle className="h-5 w-5" /> : cat === 'escalar' ? <Rocket className="h-5 w-5" /> : cat === 'revisar' ? <Search className="h-5 w-5" /> : <Target className="h-5 w-5" />}
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className={cn('text-base font-bold leading-snug', critico ? 'text-red-200' : 'text-foreground')}>{tituloGuiado}</p>
-            <div className="mt-2 flex flex-wrap items-center gap-1.5">
-              <span className={cn('rounded border px-1.5 py-0.5 text-[10px] font-semibold', NIVEL_BADGE[node.nivel])}>{NIVEL_LABEL[node.nivel]}</span>
-              <span className={cn('rounded border px-1.5 py-0.5 text-[10px] font-semibold', entrega.tone)}>Entrega: {entrega.label}</span>
-              {node.status !== 'pendente' && (
-                <span className="rounded border border-border bg-background px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
-                  {node.status === 'aplicado' ? 'Aplicado' : node.status === 'ignorado' ? 'Revisado' : 'Em análise'}
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="space-y-3 px-3 pb-3 pt-3">
-        {/* 4 mini-cards: nível / prioridade / impacto / risco */}
-        <div className="grid grid-cols-2 items-start gap-2">
-          {miniCards.map((c) => (
-            <div key={c.label} className="min-h-[58px] rounded-[var(--radius)] border border-border/70 bg-background p-2">
-              <p className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide text-muted-foreground">
-                <c.icon className="h-3 w-3" /> {c.label}
-              </p>
-              <p className={cn('mt-1 text-sm font-semibold leading-tight', c.tone)}>{c.value}</p>
-            </div>
-          ))}
-        </div>
-
-        {/* Caminho: onde está o problema */}
-        <div>
-          <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Caminho — onde está o problema</p>
-          <div className="space-y-1">
-            <div className="flex items-center gap-1.5 text-xs">
-              <span className={cn('shrink-0 rounded border px-1 py-0.5 text-[9px] font-semibold', NIVEL_BADGE.campaign)}>Campanha</span>
-              <span className="truncate text-foreground" title={node.campanha_nome}>{node.campanha_nome}</span>
-            </div>
-            {node.nivel !== 'campaign' && node.conjunto_nome && (
-              <div className="flex items-center gap-1.5 text-xs" style={{ paddingLeft: 8 }}>
-                <span className={cn('shrink-0 rounded border px-1 py-0.5 text-[9px] font-semibold', NIVEL_BADGE.adset)}>Conjunto</span>
-                <span className="truncate text-foreground" title={node.conjunto_nome}>{node.conjunto_nome}</span>
-              </div>
-            )}
-            {node.nivel === 'ad' && (
-              <div className="flex items-center gap-1.5 text-xs" style={{ paddingLeft: 16 }}>
-                <span className={cn('shrink-0 rounded border px-1 py-0.5 text-[9px] font-semibold', NIVEL_BADGE.ad)}>Criativo</span>
-                <span className="truncate text-foreground" title={node.objeto_nome}>{node.objeto_nome}</span>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* O problema */}
-        {(node.motivos.length > 0 || node.texto_recomendacao.trim()) && (
-          <div>
-            <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">O problema</p>
-            {node.motivos.length > 0 ? (
-              <ul className="space-y-1.5">
-                {node.motivos.map((m, i) => (
-                  <li key={i} className="flex items-start gap-2 text-sm leading-relaxed text-foreground">
-                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/60" />
-                    <span>{m}</span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="text-sm text-foreground">{node.texto_recomendacao}</p>
-            )}
-            {/* mini métricas do nó */}
-            <div className="mt-2 grid grid-cols-3 gap-2">
-              {[
-                { label: 'Gasto', value: fatoValor(node, /gasto/i) },
-                { label: 'Conversas', value: fatoValor(node, /convers|lead/i) },
-                { label: 'Custo por conv.', value: fatoValor(node, /custo|cpl|cpa/i) },
-              ].map((m) => (
-                <div key={m.label} className="rounded-[var(--radius)] border border-border/70 bg-background p-2 text-center">
-                  <p className="text-[9px] font-bold uppercase tracking-wide text-muted-foreground">{m.label}</p>
-                  <p className="mt-0.5 text-sm font-semibold text-foreground">{m.value}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Ação recomendada — o que fazer / o que não fazer */}
-        {!semAcao && (
-          <div className="space-y-2">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Ação recomendada</p>
-            <ul className="space-y-1.5">
-              {temAfetados ? (
-                <>
-                  <li className="flex items-start gap-2 text-sm text-foreground"><Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" /> Pausar os {afetados.length} criativos listados abaixo.</li>
-                  <li className="flex items-start gap-2 text-sm text-foreground"><Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" /> Manter os criativos que já geram resultado.</li>
-                  <li className="flex items-start gap-2 text-sm text-muted-foreground"><Ban className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-400" /> Não pausar o {nomeNivelFilho} inteiro no momento.</li>
-                </>
-              ) : (
-                <li className="flex items-start gap-2 text-sm text-foreground">
-                  <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" />
-                  {node.texto_recomendacao.trim() || 'Revisar este item antes de executar qualquer mudança.'}
-                </li>
-              )}
-            </ul>
-          </div>
-        )}
-
-        {/* Itens afetados */}
-        {temAfetados && (
-          <div>
-            <p className="mb-1.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Itens afetados ({afetados.length})</p>
-            <div className="overflow-hidden rounded-[var(--radius)] border border-border">
-              {afetados.map((a, i) => (
-                <button
-                  key={a.rec_id}
-                  onClick={() => onJump(a.rec_id)}
-                  className={cn('flex w-full items-center gap-2 p-2 text-left hover:bg-surface-soft', i < afetados.length - 1 && 'border-b border-border/60')}
-                >
-                  <CreativeThumb tone="border-red-400/40" imageUrl={a.imagem_url} alt={a.objeto_nome} />
-                  <span className="min-w-0 flex-1 truncate text-xs text-foreground" title={a.objeto_nome}>{a.objeto_nome}</span>
-                  <span className="shrink-0 text-[11px] text-muted-foreground">{fatoValor(a, /gasto/i)}</span>
-                  <span className="shrink-0 text-[11px] text-muted-foreground">{fatoValor(a, /convers|lead/i)}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {emAnalise && (
-          <div className="flex items-center gap-2 rounded-[var(--radius)] border border-secondary/30 bg-secondary/10 p-2.5 text-xs text-secondary">
-            <UserRound className="h-3.5 w-3.5 shrink-0" /> Em análise humana{node.atribuido_a ? ` · ${node.atribuido_a}` : ''}
-          </div>
-        )}
-
-        {/* Controles — sempre os mesmos dois, em qualquer situação: ver no Gerenciador e
-            ligar/desligar o objeto direto. Nada de botões condicionais por categoria/IA. */}
-        <div className="grid grid-cols-2 gap-2 border-t border-border pt-3">
-          {link ? (
-            <a href={link} target="_blank" rel="noopener noreferrer" className="inline-flex h-11 items-center justify-center gap-1.5 rounded-[var(--radius)] border border-border bg-background text-sm font-medium text-foreground hover:border-primary/40">
-              <ExternalLink className="h-4 w-4" /> Gerenciador
-            </a>
-          ) : <span />}
-          <Button
-            onClick={handleManualToggle}
-            disabled={busy || !podeAlternar}
-            title={podeAlternar ? undefined : `Status "${entrega.label}" não permite ligar/desligar por aqui`}
-            className={cn('h-11 w-full', podeAlternar && entrega.label === 'Ativo' && 'bg-red-500 text-white hover:bg-red-600')}
-          >
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : entrega.label === 'Ativo' ? <PauseCircle className="h-4 w-4" /> : <PlayCircle className="h-4 w-4" />}
-            {entrega.label === 'Ativo' ? 'Desativar' : 'Ativar'}
-          </Button>
-        </div>
-
-        {semAcao && (
-          <p className="rounded-[var(--radius)] border border-border bg-background p-3 text-sm text-muted-foreground">
-            Sem diagnóstico específico neste nó — os números estão dentro do esperado.
-          </p>
-        )}
-
-        {/* Auditoria técnica */}
-        <div>
-          <button onClick={() => setWhy((w) => !w)} className="flex items-center gap-1 text-xs font-medium text-primary hover:underline">
-            {why ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-            Por que essa recomendação? (dados técnicos)
-          </button>
-          {why && (
-            <div className="mt-2 space-y-1 rounded-[var(--radius)] border border-border bg-background p-3">
-              {node.fatos.map((f, i) => (
-                <div key={i} className="flex items-center justify-between gap-3 text-xs">
-                  <span className="text-muted-foreground">{f.rotulo}</span>
-                  <span className="font-mono text-foreground">{f.valor}</span>
-                </div>
-              ))}
-              <div className="flex items-center justify-between gap-3 border-t border-border/60 pt-1 text-xs">
-                <span className="text-muted-foreground">Confiança da análise</span>
-                <span className="font-mono text-foreground">{node.confianca}</span>
-              </div>
-              {node.leitura && <p className="border-t border-border/60 pt-1.5 text-xs italic text-muted-foreground">{node.leitura}</p>}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Main Page
+// Main Page — orquestrador: estado + fetch/polling + handlers. Toda a UI vive
+// em src/components/otimizador/* e os helpers puros em src/lib/optimizer-ui.ts.
 // ---------------------------------------------------------------------------
 export default function OtimizadorPage() {
   const [clients, setClients] = useState<Client[]>([]);
@@ -1489,6 +66,10 @@ export default function OtimizadorPage() {
   const [categoriaFiltro, setCategoriaFiltro] = useState<Categoria | null>(null);
   const [nivelFiltro, setNivelFiltro] = useState<NivelFiltro>('todos');
   const [apenasComAcao, setApenasComAcao] = useState(false);
+  // Canal exibido (conta mista Meta+Google tem análise separada por plataforma). `canais` = quais
+  // têm análise recente; o toggle só aparece quando há os dois.
+  const [canal, setCanal] = useState<'meta' | 'google' | null>(null);
+  const [canais, setCanais] = useState<string[]>([]);
 
   // Admin: análise manual
   const [runLoading, setRunLoading] = useState(false);
@@ -1522,9 +103,12 @@ export default function OtimizadorPage() {
 
       setClients(activeClients);
       setContas(filaContas);
+      // Abre a conta vinda por ?clientId= (ex: clique na Sala de guerra) na primeira carga.
+      const urlClientId = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('clientId') : null;
       setContaFiltro((prev) => {
         const validIds = new Set([...filaContas.map((c) => c.cliente_id), ...activeClients.map((c) => c.id)]);
         if (prev && validIds.has(prev)) return prev;
+        if (urlClientId && validIds.has(urlClientId)) return urlClientId;
         return filaContas[0]?.cliente_id ?? activeClients[0]?.id ?? '';
       });
     } finally {
@@ -1534,20 +118,23 @@ export default function OtimizadorPage() {
 
   useEffect(() => { void loadOverview(); }, []);
 
-  async function loadTree(clientId: string) {
-    if (!clientId) { setTreeNodes([]); setResumo(null); setGeneratedAt(null); return; }
+  async function loadTree(clientId: string, canalArg?: 'meta' | 'google' | null) {
+    if (!clientId) { setTreeNodes([]); setResumo(null); setGeneratedAt(null); setCanais([]); return; }
     setTreeLoading(true);
     setTreeError(null);
     try {
-      const res = await fetch(`/api/otimizador/arvore?clientId=${encodeURIComponent(clientId)}&hours=200`);
+      const canalQs = canalArg ? `&canal=${canalArg}` : '';
+      const res = await fetch(`/api/otimizador/arvore?clientId=${encodeURIComponent(clientId)}&hours=200${canalQs}`);
       if (!res.ok) {
         setTreeError(`Não foi possível carregar a árvore (HTTP ${res.status}).`);
         return;
       }
-      const data = await res.json() as { campanhas: TreeNode[]; resumo: ArvoreResumo | null; generated_at: string | null };
+      const data = await res.json() as { campanhas: TreeNode[]; resumo: ArvoreResumo | null; generated_at: string | null; canal?: 'meta' | 'google' | null; canais?: string[] };
       setTreeNodes(data.campanhas ?? []);
       setResumo(data.resumo);
       setGeneratedAt(data.generated_at);
+      setCanais(data.canais ?? []);
+      if (data.canal === 'meta' || data.canal === 'google') setCanal(data.canal);
       setSelectedId(null);
     } catch {
       setTreeError('Falha de rede ao carregar a árvore.');
@@ -1556,7 +143,14 @@ export default function OtimizadorPage() {
     }
   }
 
-  useEffect(() => { void loadTree(contaFiltro); }, [contaFiltro]);
+  // Troca de conta reseta o canal (pega a análise mais recente de qualquer plataforma).
+  useEffect(() => { setCanal(null); void loadTree(contaFiltro, null); }, [contaFiltro]);
+
+  function switchCanal(c: 'meta' | 'google') {
+    if (c === canal) return;
+    setCanal(c);
+    void loadTree(contaFiltro, c);
+  }
 
   const flatNodes = useMemo(() => flattenTree(treeNodes), [treeNodes]);
   const selectedNode = useMemo(() => flatNodes.find((n) => n.rec_id === selectedId) ?? null, [flatNodes, selectedId]);
@@ -1807,85 +401,101 @@ export default function OtimizadorPage() {
           <h1 className="text-2xl font-bold tracking-normal text-foreground sm:text-3xl">Otimizador de Campanhas</h1>
           <p className="text-sm text-muted-foreground">Análises inteligentes e recomendações para melhorar seus resultados.</p>
         </div>
-        <div className="hidden items-center gap-2 text-xs text-muted-foreground xl:flex">
-          <CalendarClock className="h-4 w-4" />
-          <span>Análise automática diária + revisão manual quando precisar.</span>
-        </div>
+        <Link
+          href="/otimizador/visao-geral"
+          className="inline-flex h-10 shrink-0 items-center gap-1.5 self-start rounded-[var(--radius)] border border-border bg-card px-3 text-sm font-medium text-foreground hover:border-primary/40 xl:self-auto"
+          title="Ver todas as contas num olhar (visão de supervisão)"
+        >
+          <LayoutGrid className="h-4 w-4" /> Sala de guerra
+        </Link>
       </header>
 
-      {/* Cliente + Período + ação principal, tudo na mesma barra */}
-      <section className="rounded-[var(--radius)] border border-primary/25 bg-primary/5 p-3">
-        <div className="grid items-end gap-3 lg:grid-cols-[minmax(220px,300px)_180px_minmax(380px,1fr)]">
-          <div className="space-y-1.5">
-            <span className="text-xs font-semibold text-muted-foreground">Cliente</span>
-            <AccountSelector contas={accountOptions} value={contaFiltro} onChange={setContaFiltro} />
-          </div>
+      {/* Rail de contas + Período + ação principal */}
+      <section className="space-y-3 rounded-[var(--radius)] border border-primary/25 bg-primary/5 p-3">
+        <AccountRail contas={accountOptions} value={contaFiltro} onChange={setContaFiltro} />
+        <div className="flex flex-wrap items-end gap-2">
           <label className="space-y-1.5">
             <span className="text-xs font-semibold text-muted-foreground">Período</span>
             <select value={manualPeriod} onChange={(e) => setManualPeriod(e.target.value as OptimizerPeriodKey)} disabled={runLoading}
-              className="h-10 w-full rounded-[var(--radius)] border border-border bg-background px-3 text-sm text-foreground outline-none focus:border-primary">
+              className="h-10 w-44 rounded-[var(--radius)] border border-border bg-background px-3 text-sm text-foreground outline-none focus:border-primary">
               {OPTIMIZER_PERIODS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
             </select>
           </label>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button onClick={runAnalysisNow} disabled={runLoading || diagLoading || !contaFiltro} size="sm" className="h-10 px-2.5 text-xs">
-              {runLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-              {temAnalise ? 'Atualizar análise' : 'Fazer análise'}
-            </Button>
-            {contaAtual && contaAtual.pendencias > 0 && (
-              <Button variant="outline" size="sm" onClick={reviewAllPending} disabled={runLoading || diagLoading} className="h-10 px-2.5 text-xs"
-                title="Marca todas as pendências desta conta como revisadas — voltam só na próxima análise semanal">
-                {runLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                Marcar tudo como revisado
-              </Button>
-            )}
-            {isAdmin && (
-              <>
-                <Button variant="outline" size="sm" onClick={() => setConfigClientId(contaFiltro || null)} disabled={!contaFiltro} className="h-10 px-2.5 text-xs">
-                  <Settings2 className="h-4 w-4" /> Configurar
-                </Button>
-                <Button variant="outline" size="sm" onClick={runDiagnostic} disabled={runLoading || diagLoading || !contaFiltro} className="h-10 px-2.5 text-xs"
-                  title="Mostra de onde vêm os dados desta conta — sem gastar tokens de IA">
-                  {diagLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-                  Diagnosticar
-                </Button>
-              </>
-            )}
-          </div>
-        </div>
-        {runMessage && <p className="mt-3 text-xs font-medium text-primary">{runMessage}</p>}
-          {diagResult && (
-            <div className="mt-1 w-full space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-muted-foreground">Diagnóstico de dados (sem IA · sem custo)</span>
-                <button onClick={() => setDiagResult(null)} className="text-xs text-muted-foreground hover:text-foreground">fechar</button>
-              </div>
-              {diagResult.length === 0 && <p className="text-xs text-muted-foreground">Nenhum cliente para diagnosticar.</p>}
-              {diagResult.map((d, i) => {
-                const ok = /DADOS OK/.test(d.veredito);
-                const warn = /30 dias|período/.test(d.veredito);
-                const tone = ok ? 'border-primary/40 bg-primary/5' : warn ? 'border-amber-500/40 bg-amber-500/5' : 'border-red-500/40 bg-red-500/5';
-                return (
-                  <div key={i} className={`rounded-[var(--radius)] border ${tone} p-3 text-xs`}>
-                    <p className="font-semibold text-foreground">{d.cliente}</p>
-                    <p className="mt-1 text-muted-foreground">{d.veredito}</p>
-                    <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-0.5 font-mono text-[11px] text-muted-foreground sm:grid-cols-3">
-                      <span>conexão: {d.conexao_resolvida ? 'sim' : 'NÃO'}</span>
-                      <span>token: {d.token_ok ? 'ok' : '—'}</span>
-                      <span>account_id: {d.account_id ?? '—'}</span>
-                      <span>camp. 7d: {d.campanhas_7d ?? '—'}</span>
-                      <span>camp. 30d: {d.campanhas_30d ?? '—'}</span>
-                      <span>planejamento: {d.planejamento.tem_planejamento ? 'sim' : 'não'}</span>
-                      <span>CPL meta: {d.planejamento.cpl_meta ?? '—'}</span>
-                      <span>meta leads: {d.planejamento.volume_leads_meta ?? '—'}</span>
-                      <span>objetivo: {d.planejamento.objetivo ?? '—'}</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+          <Button onClick={runAnalysisNow} disabled={runLoading || diagLoading || !contaFiltro} size="sm" className="h-10 px-2.5 text-xs">
+            {runLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+            {temAnalise ? 'Atualizar análise' : 'Fazer análise'}
+          </Button>
+          {temAnalise && contaAtual && contaAtual.pendencias > 0 && (
+            <Link
+              href={`/otimizador/briefing?clientId=${encodeURIComponent(contaFiltro)}`}
+              className="inline-flex h-10 items-center gap-1.5 rounded-[var(--radius)] bg-primary px-2.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90"
+              title="Rodar o briefing guiado desta conta — decisão por decisão"
+            >
+              <ListChecks className="h-4 w-4" /> Briefing
+            </Link>
           )}
-        </section>
+          {temAnalise && (
+            <Link
+              href={`/otimizador/apresentacao?clientId=${encodeURIComponent(contaFiltro)}`}
+              className="inline-flex h-10 items-center gap-1.5 rounded-[var(--radius)] border border-border bg-background px-2.5 text-xs font-medium text-foreground hover:border-primary/40"
+              title="Abrir a visão limpa de apresentação (pra mostrar ao cliente)"
+            >
+              <Presentation className="h-4 w-4" /> Apresentação
+            </Link>
+          )}
+          {contaAtual && contaAtual.pendencias > 0 && (
+            <Button variant="outline" size="sm" onClick={reviewAllPending} disabled={runLoading || diagLoading} className="h-10 px-2.5 text-xs"
+              title="Marca todas as pendências desta conta como revisadas — voltam só na próxima análise semanal">
+              {runLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+              Marcar tudo como revisado
+            </Button>
+          )}
+          {isAdmin && (
+            <>
+              <Button variant="outline" size="sm" onClick={() => setConfigClientId(contaFiltro || null)} disabled={!contaFiltro} className="h-10 px-2.5 text-xs">
+                <Settings2 className="h-4 w-4" /> Configurar
+              </Button>
+              <Button variant="outline" size="sm" onClick={runDiagnostic} disabled={runLoading || diagLoading || !contaFiltro} className="h-10 px-2.5 text-xs"
+                title="Mostra de onde vêm os dados desta conta — sem gastar tokens de IA">
+                {diagLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                Diagnosticar
+              </Button>
+            </>
+          )}
+        </div>
+        {runMessage && <p className="text-xs font-medium text-primary">{runMessage}</p>}
+        {diagResult && (
+          <div className="w-full space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-muted-foreground">Diagnóstico de dados (sem IA · sem custo)</span>
+              <button onClick={() => setDiagResult(null)} className="text-xs text-muted-foreground hover:text-foreground">fechar</button>
+            </div>
+            {diagResult.length === 0 && <p className="text-xs text-muted-foreground">Nenhum cliente para diagnosticar.</p>}
+            {diagResult.map((d, i) => {
+              const ok = /DADOS OK/.test(d.veredito);
+              const warn = /30 dias|período/.test(d.veredito);
+              const tone = ok ? 'border-primary/40 bg-primary/5' : warn ? 'border-amber-500/40 bg-amber-500/5' : 'border-red-500/40 bg-red-500/5';
+              return (
+                <div key={i} className={`rounded-[var(--radius)] border ${tone} p-3 text-xs`}>
+                  <p className="font-semibold text-foreground">{d.cliente}</p>
+                  <p className="mt-1 text-muted-foreground">{d.veredito}</p>
+                  <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-0.5 font-mono text-[11px] text-muted-foreground sm:grid-cols-3">
+                    <span>conexão: {d.conexao_resolvida ? 'sim' : 'NÃO'}</span>
+                    <span>token: {d.token_ok ? 'ok' : '—'}</span>
+                    <span>account_id: {d.account_id ?? '—'}</span>
+                    <span>camp. 7d: {d.campanhas_7d ?? '—'}</span>
+                    <span>camp. 30d: {d.campanhas_30d ?? '—'}</span>
+                    <span>planejamento: {d.planejamento.tem_planejamento ? 'sim' : 'não'}</span>
+                    <span>CPL meta: {d.planejamento.cpl_meta ?? '—'}</span>
+                    <span>meta leads: {d.planejamento.volume_leads_meta ?? '—'}</span>
+                    <span>objetivo: {d.planejamento.objetivo ?? '—'}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
 
       {loading ? (
         <div className="flex h-48 items-center justify-center text-sm text-muted-foreground">
@@ -1899,7 +509,7 @@ export default function OtimizadorPage() {
         </div>
       ) : (
         <>
-          <AccountSummaryHeader resumo={resumo} nodes={flatNodes} generatedAt={generatedAt} proximaAnalise={null} />
+          <AccountHealthHero resumo={resumo} nodes={flatNodes} generatedAt={generatedAt} proximaAnalise={null} />
 
           {treeLoading ? (
             <div className="flex h-48 items-center justify-center text-sm text-muted-foreground">
@@ -1921,7 +531,25 @@ export default function OtimizadorPage() {
               <QuickDecisionCards nodes={flatNodes} active={categoriaFiltro} onSelect={setCategoriaFiltro} />
               <div className="grid items-start gap-3 xl:grid-cols-[minmax(0,1fr)_420px] 2xl:grid-cols-[minmax(0,1fr)_460px]">
                 <div className="min-w-0 space-y-3">
-                  <FilterChips nivel={nivelFiltro} onNivel={setNivelFiltro} apenasComAcao={apenasComAcao} onApenasComAcao={setApenasComAcao} />
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <FilterChips nivel={nivelFiltro} onNivel={setNivelFiltro} apenasComAcao={apenasComAcao} onApenasComAcao={setApenasComAcao} />
+                    {canais.length > 1 && (
+                      <div className="flex items-center gap-0.5 rounded-full border border-border p-0.5" title="Este cliente tem análise de Meta e Google — alterne entre elas">
+                        {(['meta', 'google'] as const).map((c) => (
+                          <button
+                            key={c}
+                            onClick={() => switchCanal(c)}
+                            className={cn(
+                              'rounded-full px-3 py-1 text-xs font-semibold transition-colors',
+                              canal === c ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground',
+                            )}
+                          >
+                            {c === 'meta' ? 'Meta Ads' : 'Google Ads'}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                   <CampaignTable
                     nodes={treeNodes}
                     selectedId={selectedId}
@@ -1933,7 +561,7 @@ export default function OtimizadorPage() {
                   />
                 </div>
                 {selectedNode ? (
-                  <DetailPanel node={selectedNode} busy={busy} onApply={doApply} onJump={jumpTo} />
+                  <DecisionPanel node={selectedNode} busy={busy} onApply={doApply} onJump={jumpTo} />
                 ) : (
                   <div className="flex min-h-72 flex-col items-center justify-center gap-2 rounded-[var(--radius)] border border-dashed border-border bg-card/70 p-6 text-center">
                     <MousePointerClick className="h-6 w-6 text-muted-foreground" />

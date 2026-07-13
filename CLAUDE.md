@@ -165,6 +165,13 @@ Monitora o status de todas as instâncias na VPS Evolution e alerta quando algum
 - **Secret necessário no GitHub**: `REPORTS_CRON_URL` (repo Settings → Secrets → Actions) — URL completa incluindo `?secret=CRON_SECRET`, mesmo padrão de `OPTIMIZER_WEEKLY_URL` e `LEADLOVERS_WORKER_URL`.
 - A rota `src/app/api/reports/cron-monthly/route.ts` já filtra corretamente por `send_day = EXTRACT(DAY FROM NOW())` — só faltava ser chamada todo dia em vez de só no dia 1.
 
+### Slide "Top palavras-chave" (Google Ads)
+
+- O relatório de performance (`buildOmniReport` em `src/lib/report-builder.ts`) monta os slides de Google a partir de `fetchGoogleAdsDetailed`, que agora traz também `palavrasChave: PalavraChaveGoogle[]` (tipo em `delivery-report-builder.ts`).
+- **Fonte**: GAQL `keyword_view` (palavras-chave compradas, não `search_term_view`). `segments.date` só no `WHERE` para agregar o período; agregação por `texto+match_type` no código (a mesma keyword aparece em vários grupos). Top 10 ordenado por **conversões** (desempate: cliques → investimento).
+- **Slide** `sGoogleAdsPalavrasChave` (tabela: palavra-chave + badge de correspondência, impressões, cliques, **CPC**, **conversões**, custo/conv.) renderizado após `sGoogleAdsCampanhas`. Só aparece se `googleDetailed.palavrasChave.length > 0` (contas só-PMax/Display/Shopping não têm keyword → slide some sem quebrar).
+- ⚠️ Não verificável no preview local (sem DB/OAuth Google) — validar com cliente Google de Pesquisa real.
+
 ---
 
 ## Regras e convenções
@@ -211,8 +218,19 @@ Módulo de análise automática de performance — arquivos principais:
 | `src/app/api/otimizador/config/[clientId]/route.ts` | GET/POST config por cliente (modo, dia rodízio, limites) |
 | `src/app/api/otimizador/whatsapp-config/route.ts` | GET/POST config global de WhatsApp do otimizador |
 | `src/app/api/otimizador/whatsapp-groups/route.ts` | GET grupos Evolution disponíveis |
-| `src/app/(dashboard)/otimizador/page.tsx` | UI — fila de decisão com `DecisionCard` (1 card visível por vez), modal config, aprovações |
+| `src/app/(dashboard)/otimizador/page.tsx` | UI — **orquestrador fino** (estado + fetch/polling + handlers); ~470 linhas (era 1.950). Toda a UI vive em `src/components/otimizador/*` |
+| `src/lib/optimizer-ui.ts` | Camada de UI compartilhada — tipos de tela, constantes (SEV/CATEGORIA_META/NÍVEL/ESTADO) e helpers PUROS (`categoriaDoNode`, `computeAccountScore`, `agruparPorObjetivo`, `resumoDoObjetivo`, `deliveryDisplay`, `parseNumeroBR`…). Sem JSX |
+| `src/components/otimizador/*` | `account-rail` (troca instantânea), `account-health-hero`, `decision-strip`, `campaign-tree`, `decision-panel`, `config-modal`, `creative-thumb`, `confirm-toast`, `objective-highlight-card` |
+| `src/app/(dashboard)/otimizador/apresentacao/page.tsx` | Modo apresentação — visão read-only, limpa (hero + cards por objetivo + ganhos/alertas), reusa `/api/otimizador/arvore` (zero backend novo). Link "Apresentação" na tela principal |
 | `src/app/(dashboard)/configuracoes/page.tsx` | Aba "Otimizador" — config WhatsApp global (admin) |
+
+### Decisões arquiteturais da reforma de UI (2026-07)
+
+- **Rebuild por componentes.** `page.tsx` (era um monólito de 1.950 linhas) virou orquestrador; toda a UI foi extraída pra `src/components/otimizador/*` e os helpers puros pra `src/lib/optimizer-ui.ts`. A lógica de dados/rotas (`buildCampaignTree`/`buildRecomendacoes`/`objetivoInfo` no servidor) NÃO mudou — foi refatoração de apresentação.
+- **`AccountRail`** substitui o dropdown de conta: chips sempre visíveis com dot de saúde + busca + scroll → troca instantânea (dor "trocar de cliente na Meta/Google é lento").
+- **Colunas por objetivo com UNIÃO entre nós** (`rotulosDoGrupo`): antes o cabeçalho quebrava quando o 1º nó vinha sem métrica. Accordion dos objetivos persiste em `localStorage`. `CreativeThumb` cai pro placeholder no `onError` (URLs da Meta expiram).
+- **Modo apresentação** (`/otimizador/apresentacao?clientId=`): read-only, sem botões/jargão, pra reunião/PDF. Usa `useSearchParams` dentro de `<Suspense>`.
+- **Google Ads na análise (aditivo — Meta intocado).** `weekly/route.ts` ganhou `loadGoogleConnections` (`client_account_links` platform `google_ads` → `google_connections`), `resolveGoogleToken`, `fetchGoogleAdGroups` (GAQL `ad_group`+`ad_group_ad`, `segments.date` só no WHERE pra agregar) e `buildGooglePayloadForClient` (mesmo shape `OptimizerPayloadV2`; Google sem retenção de vídeo/imagem → `eh_video=false`, taxas/`imagem_url` null). `processClient` roda análise Google SEPARADA após a Meta. `analisar/route.ts` ganhou `canal?: 'meta'|'google'` (+`login_customer_id`): `saveLogV2` grava `conta_plataforma='google_ads'` e `processAutoActions` executa via Google. O objetivo Google já cai nos boards certos (`normalizeGoogleChannelType` → `objetivoInfo`). **Conta MISTA Meta+Google:** `arvore/route.ts` aceita `?canal=meta|google` (filtra por `conta_plataforma`) e devolve `canais` (quais têm análise recente); a UI (`page.tsx`) mostra um toggle Meta/Google só quando há os dois e recarrega a árvore no canal escolhido. Cliente só-Google e cliente misto já funcionam ponta a ponta. ⚠️ Não verificável no preview local (sem DB/OAuth Google) — validar com cliente Google real via `?dryRun=1`→`?forceAi=1`.
 
 ### Decisões arquiteturais do Otimizador v2
 
@@ -261,9 +279,15 @@ Módulo de envio de contatos para o Leadlovers via webhook com cronograma inteli
 | `src/app/api/leadlovers/campaigns/route.ts` | GET/POST campanhas (com rules inline via JOIN) |
 | `src/app/api/leadlovers/campaigns/[id]/route.ts` | GET/PATCH/DELETE campanha |
 | `src/app/api/leadlovers/campaigns/[id]/rules/route.ts` | GET/POST/PATCH/DELETE regras de cronograma |
-| `src/app/api/leadlovers/campaigns/[id]/activate/route.ts` | POST — pré-computa `next_send_at` para cada contato |
-| `src/app/api/leadlovers/worker/route.ts` | POST — envia contatos com `next_send_at <= NOW()` (frontend poll + cron) |
-| `src/app/(dashboard)/integracoes/leadlovers/page.tsx` | UI com 4 abas: Upload, Webhook, Cronograma, Painel |
+| `src/app/api/leadlovers/campaigns/[id]/activate/route.ts` | POST — pré-computa `next_send_at` por contato (regras) OU `?mode=now` (tudo pra NOW()) |
+| `src/app/api/leadlovers/worker/route.ts` | POST/GET — envia contatos due (fino: delega pra `dispatchBatch`) |
+| `src/lib/leadlovers-worker.ts` | `dispatchBatch()` compartilhado — faz o POST no webhook + grava log/contadores; parametrizado por `selection: {mode:'due'} \| {mode:'day', day}` |
+| `src/app/api/leadlovers/contacts/[id]/route.ts` | PATCH/DELETE de um contato individual (nome/email/telefone/empresa) |
+| `src/app/api/leadlovers/connections/route.ts` | GET (lista, opcional `?client_id=`) / POST — credenciais reaproveitáveis vinculadas a um cliente |
+| `src/app/api/leadlovers/connections/[id]/route.ts` | DELETE de uma conexão |
+| `src/app/api/leadlovers/campaigns/[id]/schedule/route.ts` | GET — cronograma dia-a-dia (total/enviado/pendente/erro por `DATE(next_send_at)` em America/Sao_Paulo) |
+| `src/app/api/leadlovers/campaigns/[id]/dispatch-day/route.ts` | POST `{date}` — dispara AGORA todos os pendentes daquele dia, ignorando `send_time`/`next_send_at <= NOW()` ("antecipar") |
+| `src/app/(dashboard)/integracoes/leadlovers/page.tsx` | UI com 2 abas: **Campanhas** (lista + wizard de criação + gerenciar) e **Painel** (acompanhar + testar webhook no rodapé) |
 
 ### Decisões arquiteturais do Leadlovers
 
@@ -281,6 +305,31 @@ Módulo de envio de contatos para o Leadlovers via webhook com cronograma inteli
 - **Editar send_time de regra existente**: coluna HORÁRIO da tabela mostra `<input type="time">` editável. Salva via `PATCH /api/leadlovers/campaigns/[id]/rules?rule_id=...` (endpoint PATCH adicionado em `rules/route.ts`). Alterar o horário da regra **não** reagenda automaticamente — precisa clicar "Reagendar pendentes".
 - **Cron Vercel**: mantido como backup diário (`0 12 * * 1-5`) em `vercel.json`. Plano Hobby só permite 1x/dia. GitHub Actions é o primário.
 - **Não usa Supabase**: todas as tabelas são PostgreSQL via `server-db.ts`.
+- **Manipulação individual de contatos (2026-07-13)**: aba Painel ganhou gestão completa por contato (além do upload em massa via xlsx) — botão "Adicionar contato" (form inline, reusa `POST /api/leadlovers/contacts` com array de 1), edição inline (lápis → PATCH `/api/leadlovers/contacts/[id]`) e exclusão individual (lixeira → DELETE `/api/leadlovers/contacts/[id]`, com aviso extra no `confirm()` se o contato já foi enviado, pois `leadlovers_dispatch_log` tem `ON DELETE CASCADE` e perde o histórico de disparo dele). Endpoint novo `contacts/[id]/route.ts` — o `DELETE /api/leadlovers/contacts` (bulk, por `campaign_id`) só apagava pendentes; o individual não tem essa restrição de status, é intencional (o usuário pode querer remover um contato mesmo já enviado).
+
+### Credenciais por cliente + cronograma dia-a-dia (2026-07-13)
+
+Redesenho grande: antes cada campanha guardava suas próprias credenciais cruas, sem nenhum vínculo com o cadastro de clientes do app. Agora:
+
+- **`leadlovers_connections`** (nova tabela, análoga a `meta_connections`/`google_connections`): `id, owner_id, client_id, name, webhook_url, machine_code, email_sequence_code, sequence_level_code, auth_key`. Vinculada a `clients.id` (TEXT, sem FK — mesmo padrão solto de `client_account_links.client_id`, não `meta_client_links`). Um cliente pode ter várias conexões nomeadas (ex: fluxos diferentes no Leadlovers).
+- **`leadlovers_campaigns` ganhou `client_id` e `connection_id`** (FK `ON DELETE SET NULL`). Ao criar a campanha, as credenciais são **copiadas** (snapshot) da conexão pra dentro da campanha — o worker (`dispatchBatch`) continua lendo direto de `leadlovers_campaigns`, sem JOIN extra e sem quebrar se a conexão for editada/apagada depois.
+- **Fluxo de criação** (`POST /api/leadlovers/campaigns`): agora exige `client_id` + (`connection_id` de uma conexão existente **OU** `new_connection {...}` pra criar e já linkar uma nova). Campanhas antigas (pré-migração) continuam funcionando com `client_id`/`connection_id` `NULL` — GET faz `LEFT JOIN clients`/`LEFT JOIN leadlovers_connections`, então só deixam de mostrar "Cliente: X • Conexão: Y" no header.
+- **Cronograma dia-a-dia + disparo manual ("antecipar")**: depois de ativar (`/activate`, que já distribuía `next_send_at` por contato), a tabela "Disparos por dia" (`GET .../schedule`, agrupa por `DATE(next_send_at AT TIME ZONE 'America/Sao_Paulo')`) mostra total/enviados/pendentes/erros por data e um botão "Disparar agora" por linha. O botão chama `POST .../dispatch-day {date}` em loop (a cada resposta, se `remaining > 0` chama de novo) até zerar os pendentes daquele dia — cobre tanto **antecipar um dia futuro** quanto **zerar pendências que sobraram** de um dia já passado, sem precisar esperar o `send_time` da regra nem ligar o "Envio automático".
+- **`dispatchBatch` (lib compartilhada)** extraído de `worker/route.ts`: mesma função atende o worker normal (`selection: {mode:'due'}`, `next_send_at <= NOW()`, só campanha `ativa`) e o disparo manual (`selection: {mode:'day', day}`, ignora o horário, aceita campanha `ativa` OU `pausada` — clique manual é decisão explícita do usuário, pausar não deve bloquear). **Cuidado ao mexer aqui**: o filtro de status da campanha é condicional ao `mode` de propósito — nunca deixar `'pausada'` vazar pro modo `'due'`, senão o cron/monitor automático volta a disparar campanha pausada.
+- **`dispatch-day` roda síncrono com `maxDuration = 60`** (mesmo padrão do `otimizador/weekly`: função longa em vez de fila assíncrona com `after()` — esse padrão de `after()` citado em notas antigas não existe mais no código atual, foi abandonado). Loop interno em lotes de 8 contatos, orçamento de ~50s; se um dia tiver uma leva grande demais pra caber numa chamada, devolve `remaining > 0` e o frontend continua chamando.
+- ⚠️ Não verificável no preview local (sem DB) — testado no browser com `window.fetch` mockado simulando `clients`/`connections`/`campaigns`/`contacts`/`schedule`/`dispatch-day`; validar o fluxo completo com dados reais em produção.
+
+### Redesign da UI: 2 abas + wizard (2026-07-13)
+
+Reforma total da tela (a versão anterior — 4 abas Upload/Webhook/Cronograma/Painel — estava confusa: upload solto sem saber pra onde ia, Campanhas e Painel sobrepostos, Testar Webhook em destaque à toa, sem excluir campanha). `page.tsx` foi reescrito. Decisões validadas com o usuário via perguntas antes de codar:
+
+- **Duas abas só: Campanhas e Painel** (linha divisória clara pra não sobrepor). **Campanhas** = criar (wizard) + gerenciar (pausar/retomar, excluir, duplicar, editar credencial). **Painel** = acompanhar (stats, progresso, envio automático, "Disparos por dia" com "Disparar agora", gestão de contatos, alertas de erro). Abas Upload e "Testar Webhook" sumiram do topo.
+- **Wizard `NewCampaignWizard` — 3 passos: Cliente → Contatos → Disparo.** (1) Cliente: escolhe o cliente; se já tem credencial vinculada, ela vem automática, senão cadastra na hora (form `+ Nova credencial`). (2) Contatos: upload xlsx (parse no cliente via `parseSheet`) — a base vai anexada na criação, não é mais aba separada. (3) Disparo: nome + escolha "Tudo de uma vez" (⚡ `activate?mode=now`) OU "Distribuir por dia" (input qty/dia + data início + horário + intervalo, com preview "N ÷ X/dia = Y dias úteis, de … até …" calculado por `nthBusinessDay`). Ao concluir: cria campanha → sobe contatos → (se por dia) cria a regra + activate, (se tudo agora) `activate?mode=now` → cai direto no Painel da campanha. No modo "tudo agora", o Painel auto-dispara o dia de hoje (`autoDispatchDate` → `dispatchDay(today)`).
+- **`activate?mode=now`** (novo no `activate/route.ts`): seta `next_send_at = NOW()` em todos os pendentes e `status='ativa'`, sem cronograma nem dias úteis. O drain fica com o `dispatch-day` de hoje (loop no frontend) + worker automático. Evita o edge case de "hoje é fim de semana → nada agendado" que o caminho por regras teria.
+- **Duplicar campanha**: abre o wizard já com o `client_id` da origem pré-selecionado (credencial vem automática) e você escolhe **contatos novos** — não herda mais os contatos da original (era a reclamação).
+- **Excluir campanha**: `DELETE /campaigns/[id]` (já existia) agora exposto no card, com `confirm()` avisando que contatos + histórico vão junto.
+- **Testar webhook**: virou um bloco colapsável discreto no rodapé do Painel (`WebhookTester`), não mais uma aba de destaque.
+- ⚠️ Verificado no browser com `window.fetch` mockado (wizard completo Cliente→Contatos→Disparo com 120 contatos → distribuição 50/50/20 por dia → "Disparar agora" → card na aba Campanhas → excluir). Como `/api/clients` precisa de DB, no preview local os clientes só carregam forçando um remount (o mock não existe no mount inicial). Validar com dados reais em produção.
 
 ---
 
