@@ -143,7 +143,7 @@ function parseSheet(file: File): Promise<{ rows: ContactRow[]; headers: string[]
         if (json.length === 0) { reject(new Error('Planilha vazia ou sem linhas válidas')); return; }
         resolve({ rows: json as ContactRow[], headers: Object.keys(json[0]) });
       } catch {
-        reject(new Error('Não foi possível ler o arquivo. Verifique se é .xlsx ou .xls'));
+        reject(new Error('Não foi possível ler o arquivo. Verifique se é .xlsx, .xls ou .csv'));
       }
     };
     reader.onerror = () => reject(new Error('Erro ao ler o arquivo'));
@@ -379,9 +379,9 @@ function NewCampaignWizard({
             <p className="text-base font-semibold">
               {rows.length > 0 ? `${rows.length} contatos carregados` : 'Arraste a planilha aqui'}
             </p>
-            <p className="mt-1 text-sm text-muted-foreground">ou clique para selecionar — .xlsx / .xls</p>
+            <p className="mt-1 text-sm text-muted-foreground">ou clique para selecionar — .xlsx / .xls / .csv</p>
             <p className="mt-2 text-xs text-muted-foreground">Colunas: <span className="text-foreground">Nome, Email, Telefone, Empresa</span> (outros campos aceitos)</p>
-            <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) loadFile(f); }} />
+            <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) loadFile(f); }} />
           </div>
 
           {rows.length > 0 && (
