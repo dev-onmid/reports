@@ -11,6 +11,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { getAuthSession } from '@/lib/auth-store';
+import { effectiveField } from '@/lib/leadlovers-fields';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -763,7 +764,7 @@ function PainelTab({
     if (!sel || !userId) { setContacts([]); return; }
     setLoadingContacts(true);
     try {
-      const res = await fetch(`/api/leadlovers/contacts?campaign_id=${sel}&limit=200`, { headers: authHeaders(userId) });
+      const res = await fetch(`/api/leadlovers/contacts?campaign_id=${sel}&limit=1000`, { headers: authHeaders(userId) });
       const d = await res.json();
       setContacts(d.contacts ?? []);
     } catch {} finally { setLoadingContacts(false); }
@@ -855,7 +856,7 @@ function PainelTab({
 
   async function removeContact(c: ContactRecord) {
     if (!userId) return;
-    const label = c.nome ? String(c.nome) : (c.email ? String(c.email) : 'este contato');
+    const label = effectiveField(c, 'nome') || effectiveField(c, 'email') || 'este contato';
     const warn = c.status === 'enviado' ? ' Ele já foi enviado — o histórico de envio também será perdido.' : '';
     if (!confirm(`Remover ${label}?${warn}`)) return;
     setDeletingId(c.id);
@@ -922,8 +923,8 @@ function PainelTab({
                 <p className="text-xs text-muted-foreground">{monitoring ? 'Processando a fila a cada minuto' : 'Liga para enviar os agendados automaticamente'}</p>
                 {monitorResult && <p className="text-xs text-muted-foreground mt-0.5">Último lote: <span className="text-green-400">{monitorResult.sent} enviados</span>{monitorResult.errors > 0 && <span className="text-red-400 ml-1">{monitorResult.errors} erros</span>}</p>}
               </div>
-              <button onClick={() => setMonitoring(m => !m)} className={`relative h-6 w-11 rounded-full transition-colors ${monitoring ? 'bg-primary' : 'bg-muted'}`}>
-                <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${monitoring ? 'translate-x-5.5' : 'translate-x-0.5'}`} />
+              <button onClick={() => setMonitoring(m => !m)} className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${monitoring ? 'bg-primary' : 'bg-muted'}`}>
+                <span className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${monitoring ? 'translate-x-5' : 'translate-x-0'}`} />
               </button>
             </div>
           )}
@@ -1006,13 +1007,13 @@ function PainelTab({
                           </>
                         ) : (
                           <>
-                            <td className="px-4 py-2">{c.nome ? String(c.nome) : <span className="text-muted-foreground">—</span>}</td>
-                            <td className="px-4 py-2 text-muted-foreground">{c.email ? String(c.email) : '—'}</td>
-                            <td className="px-4 py-2 text-muted-foreground">{c.telefone ? String(c.telefone) : '—'}</td>
-                            <td className="px-4 py-2 text-muted-foreground">{c.empresa ? String(c.empresa) : '—'}</td>
+                            <td className="px-4 py-2">{effectiveField(c, 'nome') || <span className="text-muted-foreground">—</span>}</td>
+                            <td className="px-4 py-2 text-muted-foreground">{effectiveField(c, 'email') || '—'}</td>
+                            <td className="px-4 py-2 text-muted-foreground">{effectiveField(c, 'telefone') || '—'}</td>
+                            <td className="px-4 py-2 text-muted-foreground">{effectiveField(c, 'empresa') || '—'}</td>
                             <td className="px-3 py-2">
                               <div className="flex items-center gap-2">
-                                <button onClick={() => { setEditingId(c.id); setEditContact({ nome: String(c.nome ?? ''), email: String(c.email ?? ''), telefone: String(c.telefone ?? ''), empresa: String(c.empresa ?? '') }); }} className="text-muted-foreground hover:text-foreground"><Pencil className="h-3.5 w-3.5" /></button>
+                                <button onClick={() => { setEditingId(c.id); setEditContact({ nome: effectiveField(c, 'nome'), email: effectiveField(c, 'email'), telefone: effectiveField(c, 'telefone'), empresa: effectiveField(c, 'empresa') }); }} className="text-muted-foreground hover:text-foreground"><Pencil className="h-3.5 w-3.5" /></button>
                                 <button onClick={() => removeContact(c)} disabled={deletingId === c.id} className="text-muted-foreground hover:text-red-400">{deletingId === c.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}</button>
                               </div>
                             </td>
@@ -1025,7 +1026,7 @@ function PainelTab({
               </table>
               {contacts.length === 0 && <p className="px-4 py-6 text-center text-sm text-muted-foreground">Nenhum contato nesta campanha.</p>}
             </div>
-            {contacts.length >= 200 && <p className="mt-2 text-xs text-muted-foreground">Exibindo os 200 primeiros contatos.</p>}
+            {contacts.length >= 1000 && <p className="mt-2 text-xs text-muted-foreground">Exibindo os 1000 primeiros contatos.</p>}
           </div>
 
           {errorContacts.length > 0 && (
@@ -1037,9 +1038,9 @@ function PainelTab({
                   <tbody>
                     {errorContacts.map(c => (
                       <tr key={c.id} className="border-b border-red-500/10">
-                        <td className="px-4 py-2.5">{c.nome ? String(c.nome) : '—'}</td>
-                        <td className="px-4 py-2.5 text-muted-foreground">{c.email ? String(c.email) : '—'}</td>
-                        <td className="px-4 py-2.5 text-muted-foreground">{c.telefone ? String(c.telefone) : '—'}</td>
+                        <td className="px-4 py-2.5">{effectiveField(c, 'nome') || '—'}</td>
+                        <td className="px-4 py-2.5 text-muted-foreground">{effectiveField(c, 'email') || '—'}</td>
+                        <td className="px-4 py-2.5 text-muted-foreground">{effectiveField(c, 'telefone') || '—'}</td>
                         <td className="px-4 py-2.5 text-red-400 text-xs">{c.error_msg ?? 'Erro desconhecido'}</td>
                       </tr>
                     ))}

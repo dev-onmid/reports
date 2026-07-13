@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { getCallerScope } from '@/lib/disparos-access';
+import { normalizeContact } from '@/lib/leadlovers-fields';
 
 async function ensureTables(pool: ReturnType<typeof makeServerPool>) {
   await pool.query(`
@@ -94,16 +95,16 @@ export async function POST(req: NextRequest) {
 
     const inserted: unknown[] = [];
     for (let i = 0; i < body.contacts.length; i++) {
-      const c = body.contacts[i];
-      const { nome, email, telefone, empresa, ...rest } = c;
-      const extra = Object.keys(rest).length > 0 ? JSON.stringify(rest) : '{}';
+      // Normaliza cabeçalhos em qualquer caixa/variação (Nome/EMAIL/Celular…) pras
+      // colunas certas; o que sobra vai pra extra_data.
+      const { nome, email, telefone, empresa, extra } = normalizeContact(body.contacts[i] as Record<string, unknown>);
+      const extraJson = Object.keys(extra).length > 0 ? JSON.stringify(extra) : '{}';
       const { rows: [row] } = await pool.query(
         `INSERT INTO public.leadlovers_contacts
            (owner_id, campaign_id, nome, email, telefone, empresa, extra_data, position)
          VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
          RETURNING *`,
-        [scope.userId, body.campaign_id ?? null, nome ?? null, email ?? null,
-         telefone ?? null, empresa ?? null, extra, i],
+        [scope.userId, body.campaign_id ?? null, nome, email, telefone, empresa, extraJson, i],
       );
       inserted.push(row);
     }
