@@ -6,7 +6,7 @@ import * as XLSX from 'xlsx';
 import {
   Upload, Webhook, Calendar, BarChart3, Plus, Trash2,
   CheckCircle2, XCircle, Clock, Play, Pause, RefreshCw,
-  ChevronLeft, AlertCircle, Loader2, Check, X, Pencil, Copy,
+  ChevronLeft, AlertCircle, Loader2, Check, X, Pencil, Copy, Zap,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -33,6 +33,19 @@ type ScheduleRule = {
   send_time: string;
 };
 
+type Client = { id: string; name: string };
+
+type Connection = {
+  id: string;
+  client_id: string;
+  name: string;
+  webhook_url: string;
+  machine_code?: string;
+  email_sequence_code?: string;
+  sequence_level_code?: string;
+  auth_key?: string;
+};
+
 type Campaign = {
   id: string;
   name: string;
@@ -41,6 +54,10 @@ type Campaign = {
   email_sequence_code?: string;
   sequence_level_code?: string;
   auth_key?: string;
+  client_id?: string;
+  client_name?: string;
+  connection_id?: string;
+  connection_name?: string;
   status: 'rascunho' | 'ativa' | 'pausada' | 'concluida';
   total_contacts: number;
   total_sent: number;
@@ -53,6 +70,14 @@ type DispatchLog = {
   date: string;
   sent: number;
   errors: number;
+};
+
+type ScheduleDay = {
+  date: string;
+  total: number;
+  pendente: number;
+  enviado: number;
+  erro: number;
 };
 
 
@@ -425,22 +450,38 @@ function WebhookTab() {
 // ── Tab 3: Cronograma ──────────────────────────────────────────────────────────
 function CronogramaTab({
   campaigns,
+  clients,
   onRefresh,
 }: {
   campaigns: Campaign[];
+  clients: Client[];
   onRefresh: () => void;
 }) {
   const userId = getAuthSession()?.userId ?? null;
 
   const [selectedId, setSelectedId] = useState<string>('');
   const [newCampaignName, setNewCampaignName] = useState('');
-  const [webhookUrl, setWebhookUrl] = useState('');
-  const [newMachineCode, setNewMachineCode] = useState('');
-  const [newEmailSequenceCode, setNewEmailSequenceCode] = useState('');
-  const [newSequenceLevelCode, setNewSequenceLevelCode] = useState('1');
-  const [newAuthKey, setNewAuthKey] = useState('');
   const [creatingCampaign, setCreatingCampaign] = useState(false);
   const [showNewForm, setShowNewForm] = useState(false);
+
+  // Cliente + conexão (credenciais reaproveitáveis) da nova campanha
+  const [newClientId, setNewClientId] = useState('');
+  const [connections, setConnections] = useState<Connection[]>([]);
+  const [loadingConnections, setLoadingConnections] = useState(false);
+  const [connectionId, setConnectionId] = useState(''); // '' = nenhuma ainda, '__new__' = criar nova
+  const [newConnName, setNewConnName] = useState('');
+  const [newConnWebhook, setNewConnWebhook] = useState('');
+  const [newConnMachineCode, setNewConnMachineCode] = useState('');
+  const [newConnEmailSeq, setNewConnEmailSeq] = useState('');
+  const [newConnSeqLevel, setNewConnSeqLevel] = useState('1');
+  const [newConnAuthKey, setNewConnAuthKey] = useState('');
+  const pendingConnectionSelectRef = useRef<string | null>(null);
+
+  // Anexar contatos logo após criar a campanha (opcional, mas é o caminho principal)
+  const [justCreatedCampaignId, setJustCreatedCampaignId] = useState<string | null>(null);
+  const [attachRows, setAttachRows] = useState<ContactRow[]>([]);
+  const [attachSaving, setAttachSaving] = useState(false);
+  const attachFileRef = useRef<HTMLInputElement>(null);
 
   const [rules, setRules] = useState<ScheduleRule[]>([]);
   const [savingRule, setSavingRule] = useState(false);
@@ -494,55 +535,141 @@ function CronogramaTab({
     setShowEditCampaign(false);
   }, [selectedId, campaigns]);
 
-  // Preenche o formulário de nova campanha com as credenciais de uma campanha
-  // existente (webhook, machine code, sequência, chave) — evita redigitar tudo
-  // quando o fluxo no Leadlovers já foi configurado antes.
-  function applyTemplate(source: Campaign) {
-    setNewMachineCode(source.machine_code ?? '');
-    setWebhookUrl(source.webhook_url ?? '');
-    setNewEmailSequenceCode(source.email_sequence_code ?? '');
-    setNewSequenceLevelCode(source.sequence_level_code ?? '1');
-    setNewAuthKey(source.auth_key ?? '');
+  // Busca as conexões salvas do cliente escolhido — cada uma já traz webhook,
+  // machine code, sequência e chave prontos, sem precisar redigitar.
+  useEffect(() => {
+    if (!newClientId || !userId) { setConnections([]); setConnectionId(''); return; }
+    setLoadingConnections(true);
+    fetch(`/api/leadlovers/connections?client_id=${newClientId}`, { headers: { 'x-onmid-user-id': userId } })
+      .then(r => r.json())
+      .then((d: Connection[]) => {
+        setConnections(d);
+        const pending = pendingConnectionSelectRef.current;
+        if (pending && d.some(c => c.id === pending)) {
+          setConnectionId(pending);
+        } else {
+          setConnectionId(d.length > 0 ? d[0].id : '__new__');
+        }
+        pendingConnectionSelectRef.current = null;
+      })
+      .catch(() => setConnections([]))
+      .finally(() => setLoadingConnections(false));
+  }, [newClientId, userId]);
+
+  function resetNewCampaignForm() {
+    setNewCampaignName('');
+    setNewClientId('');
+    setConnections([]);
+    setConnectionId('');
+    setNewConnName(''); setNewConnWebhook(''); setNewConnMachineCode('');
+    setNewConnEmailSeq(''); setNewConnSeqLevel('1'); setNewConnAuthKey('');
   }
 
+  // Duplicar campanha: reaproveita cliente + conexão da campanha de origem (mesmo
+  // vínculo, credenciais sempre em dia). Campanhas antigas sem client_id/connection_id
+  // (de antes dessa migração) caem no fallback: preenche como se fosse criar uma
+  // conexão nova, com os campos crus que a campanha ainda guarda.
   function duplicateCampaign(source: Campaign) {
     setNewCampaignName(`${source.name} (cópia)`);
-    applyTemplate(source);
     setShowNewForm(true);
+    setJustCreatedCampaignId(null);
+    if (source.client_id) {
+      pendingConnectionSelectRef.current = source.connection_id ?? null;
+      setNewClientId(source.client_id);
+    } else {
+      setNewClientId('');
+      setConnections([]);
+      setConnectionId('__new__');
+      setNewConnName(source.name);
+      setNewConnWebhook(source.webhook_url ?? '');
+      setNewConnMachineCode(source.machine_code ?? '');
+      setNewConnEmailSeq(source.email_sequence_code ?? '');
+      setNewConnSeqLevel(source.sequence_level_code ?? '1');
+      setNewConnAuthKey(source.auth_key ?? '');
+    }
   }
 
   async function createCampaign() {
-    if (!newCampaignName.trim() || !webhookUrl.trim()) return;
+    if (!newCampaignName.trim() || !newClientId || !connectionId) return;
+    if (connectionId === '__new__' && (!newConnName.trim() || !newConnWebhook.trim())) return;
     setCreatingCampaign(true); setError('');
     try {
+      const body: Record<string, unknown> = { name: newCampaignName.trim(), client_id: newClientId };
+      if (connectionId === '__new__') {
+        body.new_connection = {
+          name: newConnName.trim(),
+          webhook_url: newConnWebhook.trim(),
+          machine_code: newConnMachineCode.trim() || undefined,
+          email_sequence_code: newConnEmailSeq.trim() || undefined,
+          sequence_level_code: newConnSeqLevel.trim() || '1',
+          auth_key: newConnAuthKey.trim() || undefined,
+        };
+      } else {
+        body.connection_id = connectionId;
+      }
       const res = await fetch('/api/leadlovers/campaigns', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-onmid-user-id': userId ?? '' },
-        body: JSON.stringify({
-          name: newCampaignName.trim(),
-          webhook_url: webhookUrl.trim(),
-          machine_code: newMachineCode.trim() || undefined,
-          email_sequence_code: newEmailSequenceCode.trim() || undefined,
-          sequence_level_code: newSequenceLevelCode.trim() || '1',
-          auth_key: newAuthKey.trim() || undefined,
-        }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error((await res.json()).error ?? 'Erro');
       const c = await res.json();
       onRefresh();
-      setSelectedId(c.id);
       setShowNewForm(false);
-      setNewCampaignName('');
-      setWebhookUrl('');
-      setNewMachineCode('');
-      setNewEmailSequenceCode('');
-      setNewSequenceLevelCode('1');
-      setNewAuthKey('');
+      resetNewCampaignForm();
+      setJustCreatedCampaignId(c.id); // próximo passo: anexar contatos (opcional)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Erro');
     } finally {
       setCreatingCampaign(false);
     }
+  }
+
+  function parseAttachFile(file: File) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target!.result as ArrayBuffer);
+        const wb = XLSX.read(data, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const json = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: '' });
+        if (json.length === 0) { setError('Planilha vazia ou sem linhas válidas'); return; }
+        setAttachRows(json as ContactRow[]);
+        setError('');
+      } catch {
+        setError('Não foi possível ler o arquivo. Verifique se é .xlsx ou .xls');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  async function saveAttachedContacts() {
+    if (!justCreatedCampaignId || !attachRows.length) return;
+    setAttachSaving(true); setError('');
+    try {
+      const res = await fetch('/api/leadlovers/contacts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-onmid-user-id': userId ?? '' },
+        body: JSON.stringify({ contacts: attachRows, campaign_id: justCreatedCampaignId }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error ?? 'Erro ao salvar contatos');
+      const d = await res.json();
+      onRefresh();
+      setSelectedId(justCreatedCampaignId);
+      setJustCreatedCampaignId(null);
+      setAttachRows([]);
+      alert(`Campanha criada e ${d.inserted} contatos anexados!`);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Erro');
+    } finally {
+      setAttachSaving(false);
+    }
+  }
+
+  function skipAttach() {
+    if (justCreatedCampaignId) setSelectedId(justCreatedCampaignId);
+    setJustCreatedCampaignId(null);
+    setAttachRows([]);
   }
 
   async function addRule() {
@@ -673,6 +800,7 @@ function CronogramaTab({
       const d = await res.json();
       if (!res.ok) throw new Error(d.error ?? 'Erro ao ativar');
       onRefresh();
+      await loadSchedule();
       alert(reschedule
         ? `Reagendado! ${d.scheduled} contatos pendentes redistribuídos a partir de hoje.`
         : `Campanha ativada! ${d.scheduled} contatos agendados.`);
@@ -680,6 +808,48 @@ function CronogramaTab({
       setError(err instanceof Error ? err.message : 'Erro');
     } finally {
       setActivating(false);
+    }
+  }
+
+  // Tabela dia-a-dia do cronograma (só existe depois de ativar) + disparo manual
+  // ("antecipar"): clica na data, dispara tudo que é pendente daquele dia agora,
+  // sem esperar o horário programado nem precisar ligar o monitor automático.
+  const [scheduleDays, setScheduleDays] = useState<ScheduleDay[]>([]);
+  const [dispatchingDay, setDispatchingDay] = useState<string | null>(null);
+
+  const loadSchedule = useCallback(async () => {
+    if (!selectedId || !userId) { setScheduleDays([]); return; }
+    try {
+      const res = await fetch(`/api/leadlovers/campaigns/${selectedId}/schedule`, {
+        headers: { 'x-onmid-user-id': userId },
+      });
+      if (res.ok) setScheduleDays(await res.json());
+    } catch {}
+  }, [selectedId, userId]);
+
+  useEffect(() => { loadSchedule(); }, [loadSchedule]);
+
+  async function dispatchDay(date: string) {
+    if (!selectedId || !userId) return;
+    setDispatchingDay(date);
+    try {
+      let remaining = 1;
+      while (remaining > 0) {
+        const res = await fetch(`/api/leadlovers/campaigns/${selectedId}/dispatch-day`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-onmid-user-id': userId },
+          body: JSON.stringify({ date }),
+        });
+        if (!res.ok) throw new Error((await res.json()).error ?? 'Erro ao disparar');
+        const d = await res.json();
+        remaining = d.remaining ?? 0;
+        await loadSchedule();
+        onRefresh();
+      }
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Erro ao disparar o dia');
+    } finally {
+      setDispatchingDay(null);
     }
   }
 
@@ -705,66 +875,119 @@ function CronogramaTab({
         </Button>
       </div>
 
-      {/* New campaign form */}
+      {/* New campaign form — cliente primeiro, credenciais vêm da conexão do cliente */}
       {showNewForm && (
         <div className="rounded-xl border border-border bg-card/60 p-4 space-y-3">
           <p className="text-sm font-semibold">Nova campanha</p>
-          {campaigns.length > 0 && (
+
+          <div>
+            <p className="text-xs text-muted-foreground mb-1">Cliente</p>
+            <select
+              value={newClientId}
+              onChange={(e) => { pendingConnectionSelectRef.current = null; setNewClientId(e.target.value); }}
+              className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm"
+            >
+              <option value="">Selecione o cliente…</option>
+              {clients.map(cl => <option key={cl.id} value={cl.id}>{cl.name}</option>)}
+            </select>
+          </div>
+
+          {newClientId && (
             <div>
-              <p className="text-xs text-muted-foreground mb-1">Copiar credenciais de uma campanha existente (opcional)</p>
+              <p className="text-xs text-muted-foreground mb-1">Conexão (credenciais do Leadlovers)</p>
               <select
-                defaultValue=""
-                onChange={(e) => {
-                  const source = campaigns.find(c => c.id === e.target.value);
-                  if (source) applyTemplate(source);
-                  e.target.value = '';
-                }}
-                className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm"
+                value={connectionId}
+                onChange={(e) => setConnectionId(e.target.value)}
+                disabled={loadingConnections}
+                className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm disabled:opacity-50"
               >
-                <option value="">Selecione uma campanha para reaproveitar…</option>
-                {campaigns.map(c => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
+                {connections.map(cn => (
+                  <option key={cn.id} value={cn.id}>{cn.name}</option>
                 ))}
+                <option value="__new__">+ Nova conexão…</option>
               </select>
+              {connections.length === 0 && !loadingConnections && (
+                <p className="mt-1 text-xs text-muted-foreground">Esse cliente ainda não tem conexão salva — preencha as credenciais abaixo.</p>
+              )}
             </div>
           )}
+
+          {newClientId && connectionId === '__new__' && (
+            <div className="space-y-3 rounded-lg border border-border/60 p-3">
+              <Input placeholder="Nome da conexão (ex: Fluxo Dia dos Pais)" value={newConnName} onChange={(e) => setNewConnName(e.target.value)} />
+              <Input placeholder="URL do Webhook (https://llapi.leadlovers.com/webapi/lead?token=…)" value={newConnWebhook} onChange={(e) => setNewConnWebhook(e.target.value)} />
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">MachineCode</p>
+                  <Input placeholder="ex: 777360" value={newConnMachineCode} onChange={(e) => setNewConnMachineCode(e.target.value)} />
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">EmailSequenceCode</p>
+                  <Input placeholder="ex: 1845595" value={newConnEmailSeq} onChange={(e) => setNewConnEmailSeq(e.target.value)} />
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">SequenceLevelCode</p>
+                  <Input placeholder="ex: 1" value={newConnSeqLevel} onChange={(e) => setNewConnSeqLevel(e.target.value)} />
+                </div>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">Bearer Token (opcional)</p>
+                <Input placeholder="eyJ0eXAiOi…" type="password" value={newConnAuthKey} onChange={(e) => setNewConnAuthKey(e.target.value)} />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Fica salva no cliente — da próxima vez você só escolhe ela na lista, sem redigitar nada.
+              </p>
+            </div>
+          )}
+
           <Input
-            placeholder="Nome da campanha (ex: Fluxo Dia dos Pais)"
+            placeholder="Nome da campanha (ex: Fluxo Dia dos Pais — Julho)"
             value={newCampaignName}
             onChange={(e) => setNewCampaignName(e.target.value)}
           />
-          <Input
-            placeholder="URL do Webhook (https://llapi.leadlovers.com/webapi/lead?token=…)"
-            value={webhookUrl}
-            onChange={(e) => setWebhookUrl(e.target.value)}
-          />
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <p className="text-xs text-muted-foreground mb-1">MachineCode</p>
-              <Input placeholder="ex: 777360" value={newMachineCode} onChange={(e) => setNewMachineCode(e.target.value)} />
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground mb-1">EmailSequenceCode</p>
-              <Input placeholder="ex: 1845595" value={newEmailSequenceCode} onChange={(e) => setNewEmailSequenceCode(e.target.value)} />
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground mb-1">SequenceLevelCode</p>
-              <Input placeholder="ex: 1" value={newSequenceLevelCode} onChange={(e) => setNewSequenceLevelCode(e.target.value)} />
-            </div>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground mb-1">Bearer Token (opcional)</p>
-            <Input placeholder="eyJ0eXAiOi…" type="password" value={newAuthKey} onChange={(e) => setNewAuthKey(e.target.value)} />
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Cada campanha aponta para um fluxo diferente no Leadlovers — mude a URL e o MachineCode para o fluxo desejado.
-          </p>
+
           <div className="flex gap-2">
-            <Button onClick={createCampaign} disabled={creatingCampaign || !newCampaignName.trim() || !webhookUrl.trim()}>
+            <Button
+              onClick={createCampaign}
+              disabled={
+                creatingCampaign || !newCampaignName.trim() || !newClientId || !connectionId ||
+                (connectionId === '__new__' && (!newConnName.trim() || !newConnWebhook.trim()))
+              }
+            >
               {creatingCampaign ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
               Criar campanha
             </Button>
-            <Button variant="ghost" onClick={() => setShowNewForm(false)}>Cancelar</Button>
+            <Button variant="ghost" onClick={() => { setShowNewForm(false); resetNewCampaignForm(); }}>Cancelar</Button>
+          </div>
+        </div>
+      )}
+
+      {/* Passo opcional logo após criar: anexar a base de contatos já nessa campanha */}
+      {justCreatedCampaignId && (
+        <div className="rounded-xl border border-primary/40 bg-primary/5 p-4 space-y-3">
+          <p className="text-sm font-semibold">Campanha criada — anexar contatos agora?</p>
+          <div
+            onClick={() => attachFileRef.current?.click()}
+            className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-border bg-card/40 px-6 py-8 text-center hover:border-primary/40 hover:bg-primary/5 transition-colors"
+          >
+            <Upload className="mb-2 h-8 w-8 text-muted-foreground" />
+            <p className="text-sm font-medium">
+              {attachRows.length > 0 ? `${attachRows.length} contatos carregados` : 'Arraste ou clique pra selecionar a planilha (.xlsx / .xls)'}
+            </p>
+            <input
+              ref={attachFileRef}
+              type="file"
+              accept=".xlsx,.xls"
+              className="hidden"
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) parseAttachFile(f); }}
+            />
+          </div>
+          <div className="flex gap-2">
+            <Button onClick={saveAttachedContacts} disabled={attachSaving || attachRows.length === 0}>
+              {attachSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+              {attachRows.length > 0 ? `Salvar ${attachRows.length} contatos` : 'Salvar contatos'}
+            </Button>
+            <Button variant="ghost" onClick={skipAttach}>Pular por enquanto</Button>
           </div>
         </div>
       )}
@@ -784,7 +1007,7 @@ function CronogramaTab({
             <button
               onClick={() => duplicateCampaign(campaign)}
               className="ml-auto flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-card/60 transition-colors"
-              title="Cria uma nova campanha reaproveitando webhook, machine code, sequência e chave desta"
+              title="Cria uma nova campanha reaproveitando o cliente e a conexão desta"
             >
               <Copy className="h-3 w-3" />
               Duplicar
@@ -797,6 +1020,12 @@ function CronogramaTab({
               {showEditCampaign ? 'Cancelar' : 'Editar credenciais'}
             </button>
           </div>
+          {(campaign.client_name || campaign.connection_name) && (
+            <p className="-mt-3 text-xs text-muted-foreground">
+              {campaign.client_name && <>Cliente: <span className="text-foreground">{campaign.client_name}</span></>}
+              {campaign.connection_name && <> • Conexão: <span className="text-foreground">{campaign.connection_name}</span></>}
+            </p>
+          )}
 
           {/* Edit campaign credentials */}
           {showEditCampaign && (
@@ -1007,6 +1236,51 @@ function CronogramaTab({
               </p>
             </div>
           </div>
+
+          {/* Disparos por dia — só existe depois de ativar (next_send_at já distribuído).
+              Antecipar um dia futuro ou zerar pendências de um dia: clica e dispara tudo
+              de uma vez, sem esperar o horário programado nem ligar o monitor automático. */}
+          {scheduleDays.length > 0 && (
+            <div>
+              <p className="text-sm font-semibold mb-3">Disparos por dia</p>
+              <div className="max-h-96 overflow-y-auto rounded-xl border border-border">
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-card">
+                    <tr className="border-b border-border bg-card/60">
+                      {['Data', 'Total', 'Enviados', 'Pendentes', 'Erros', ''].map(h => (
+                        <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {scheduleDays.map(d => (
+                      <tr key={d.date} className="border-b border-border/50 hover:bg-card/40">
+                        <td className="px-4 py-2.5">{new Date(d.date + 'T12:00:00').toLocaleDateString('pt-BR')}</td>
+                        <td className="px-4 py-2.5 text-muted-foreground">{d.total}</td>
+                        <td className="px-4 py-2.5 text-green-400 font-medium">{d.enviado}</td>
+                        <td className="px-4 py-2.5 text-yellow-400 font-medium">{d.pendente}</td>
+                        <td className="px-4 py-2.5 text-red-400 font-medium">{d.erro}</td>
+                        <td className="px-3 py-2">
+                          <button
+                            onClick={() => dispatchDay(d.date)}
+                            disabled={d.pendente === 0 || dispatchingDay !== null || !['ativa', 'pausada'].includes(campaign.status)}
+                            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-card/60 disabled:opacity-40 transition-colors"
+                            title="Dispara agora todos os pendentes desse dia, ignorando o horário programado — funciona pra antecipar um dia futuro ou zerar pendências"
+                          >
+                            {dispatchingDay === d.date
+                              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              : <Zap className="h-3.5 w-3.5" />
+                            }
+                            {dispatchingDay === d.date ? 'Disparando…' : 'Disparar agora'}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* Activate */}
           {campaign.status === 'rascunho' && rules.length > 0 && (
@@ -1506,6 +1780,7 @@ export default function LeadloversPage() {
 
   const [tab, setTab] = useState<Tab>('upload');
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
 
   const loadData = useCallback(async () => {
@@ -1519,6 +1794,10 @@ export default function LeadloversPage() {
   }, [userId]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  useEffect(() => {
+    fetch('/api/clients').then(r => r.ok ? r.json() : []).then(setClients).catch(() => {});
+  }, []);
 
   return (
     <div className="min-h-screen bg-background">
@@ -1581,7 +1860,7 @@ export default function LeadloversPage() {
               <WebhookTab />
             )}
             {tab === 'cronograma' && (
-              <CronogramaTab campaigns={campaigns} onRefresh={loadData} />
+              <CronogramaTab campaigns={campaigns} clients={clients} onRefresh={loadData} />
             )}
             {tab === 'painel' && (
               <PainelTab campaigns={campaigns} onRefresh={loadData} />
