@@ -1098,7 +1098,7 @@ async function executeWeekly({ origin, forceClientId, forceAi, period }: RunOpti
     loadBenchmarksMap(),
   ]);
 
-  const results: Array<{ clientId: string; clientName: string; status: string; error?: string }> = [];
+  const results: Array<{ clientId: string; clientName: string; status: string; error?: string; canais_ok?: ('meta' | 'google')[] }> = [];
 
   // Conjuntos/anúncios: LIGADO no manual, mas com busca PARALELA (Promise.all) — antes as
   // chamadas ao Graph API eram sequenciais (5 camp × 5 conj × 8 anúncios em fila = ~20s+) e
@@ -1132,7 +1132,11 @@ async function executeWeekly({ origin, forceClientId, forceAi, period }: RunOpti
       return;
     }
 
-    // Meta (path original — intocado)
+    // Roda cada canal conectado e coleta o desfecho de cada um. Consolida em UM resultado por
+    // cliente no fim — senão, numa conta Meta+Google, a tela pegava o 1º resultado (Meta) e
+    // mostrava a falha da Meta mesmo quando o Google tinha analisado com sucesso.
+    const outcomes: Array<{ canal: 'meta' | 'google'; status: 'ok' | 'sem_campanhas_ativas' | 'erro'; error?: string }> = [];
+
     if (metaConn) {
       try {
         const token = await resolveToken(metaConn.id).catch(() => null);
@@ -1140,38 +1144,50 @@ async function executeWeekly({ origin, forceClientId, forceAi, period }: RunOpti
           client, planningMap[client.id] ?? null, token ?? '', metaConn.account_id, origin, period, fetchConjuntos, benchmarks,
         );
         if (!payload) {
-          results.push({ clientId: client.id, clientName: client.name, status: 'sem_campanhas_ativas' });
+          outcomes.push({ canal: 'meta', status: 'sem_campanhas_ativas' });
         } else {
           await callAnalisar({ payload_v2: payload, connection_id: metaConn.id, account_id: metaConn.account_id, canal: 'meta', force_ai: forceAi });
-          results.push({ clientId: client.id, clientName: client.name, status: 'ok' });
+          outcomes.push({ canal: 'meta', status: 'ok' });
         }
       } catch (err) {
-        results.push({ clientId: client.id, clientName: client.name, status: 'erro', error: `[meta] ${String(err)}` });
+        outcomes.push({ canal: 'meta', status: 'erro', error: `[meta] ${String(err)}` });
       }
     }
 
-    // Google Ads (análise separada por plataforma — conta_plataforma='google_ads' no log)
     if (gConn) {
       try {
         const gToken = await resolveGoogleToken(gConn.connectionId).catch(() => null);
         if (!gToken) {
-          results.push({ clientId: client.id, clientName: client.name, status: 'erro', error: '[google] token não resolvido' });
+          outcomes.push({ canal: 'google', status: 'erro', error: '[google] token não resolvido' });
         } else {
           const { payload, loginCustomerId } = await buildGooglePayloadForClient(
             client, planningMap[client.id] ?? null, gToken, gConn, origin, period, fetchConjuntos, benchmarks,
           );
           if (!payload) {
-            // Só reporta "sem campanhas" se a Meta também não cobriu (senão o resultado Meta já vale).
-            if (!metaConn) results.push({ clientId: client.id, clientName: client.name, status: 'sem_campanhas_ativas' });
+            outcomes.push({ canal: 'google', status: 'sem_campanhas_ativas' });
           } else {
             await callAnalisar({ payload_v2: payload, connection_id: gConn.connectionId, account_id: gConn.accountId, login_customer_id: loginCustomerId, canal: 'google', force_ai: forceAi });
-            results.push({ clientId: client.id, clientName: client.name, status: 'ok' });
+            outcomes.push({ canal: 'google', status: 'ok' });
           }
         }
       } catch (err) {
-        results.push({ clientId: client.id, clientName: client.name, status: 'erro', error: `[google] ${String(err)}` });
+        outcomes.push({ canal: 'google', status: 'erro', error: `[google] ${String(err)}` });
       }
     }
+
+    // Consolidação: 'ok' se QUALQUER canal analisou; senão o erro mais informativo; senão
+    // "sem campanhas" em todos os canais conectados. `canais_ok` diz o que de fato rodou.
+    const okCanais = outcomes.filter((o) => o.status === 'ok').map((o) => o.canal);
+    if (okCanais.length > 0) {
+      results.push({ clientId: client.id, clientName: client.name, status: 'ok', canais_ok: okCanais });
+      return;
+    }
+    const erro = outcomes.find((o) => o.status === 'erro');
+    if (erro) {
+      results.push({ clientId: client.id, clientName: client.name, status: 'erro', error: erro.error });
+      return;
+    }
+    results.push({ clientId: client.id, clientName: client.name, status: 'sem_campanhas_ativas' });
   }
 
   // Processa em lotes paralelos, respeitando o orçamento de tempo
