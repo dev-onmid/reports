@@ -5,7 +5,6 @@ import {
   ChevronRight,
   FileText,
   Heart,
-  Layers,
   Megaphone,
   MessageCircle,
   MousePointerClick,
@@ -15,7 +14,6 @@ import {
 } from 'lucide-react';
 import { CreativeThumb } from '@/components/otimizador/creative-thumb';
 import {
-  PREMIUM,
   SEV_HEX,
   agruparPorObjetivo,
   categoriaDoNode,
@@ -33,15 +31,15 @@ import {
 } from '@/lib/optimizer-ui';
 
 const VS_META_TONE: Record<'success' | 'danger' | 'neutral', string> = {
-  success: PREMIUM.emerald,
-  danger: PREMIUM.red,
-  neutral: PREMIUM.txt3,
+  success: 'var(--text-success)',
+  danger: 'var(--text-danger)',
+  neutral: 'var(--text-muted)',
 };
 
 const NIVEL_TAG: Record<string, { label: string; color: string; bg: string }> = {
-  campaign: { label: 'CAMPANHA', color: PREMIUM.purple, bg: 'rgba(123,44,255,0.15)' },
-  adset: { label: 'CONJUNTO', color: PREMIUM.blue, bg: 'rgba(56,189,248,0.14)' },
-  ad: { label: 'CRIATIVO', color: PREMIUM.txt2, bg: 'rgba(255,255,255,0.06)' },
+  campaign: { label: 'CAMPANHA', color: 'var(--text-pro)', bg: 'var(--bg-pro)' },
+  adset: { label: 'CONJUNTO', color: 'var(--text-accent)', bg: 'var(--bg-accent)' },
+  ad: { label: 'CRIATIVO', color: 'var(--text-secondary)', bg: 'var(--surface-1)' },
 };
 
 function objIcon(objetivo: string): LucideIcon {
@@ -62,7 +60,7 @@ function piorSeveridade(nodes: TreeNode[]): Severidade {
   return pior;
 }
 
-const hexToColor: Record<string, string> = { 'bg-emerald-400': PREMIUM.emerald, 'bg-amber-400': PREMIUM.amber, 'bg-red-400': PREMIUM.red };
+const hexToColor: Record<string, string> = { 'bg-emerald-400': 'var(--text-success)', 'bg-amber-400': 'var(--text-warning)', 'bg-red-400': 'var(--text-danger)' };
 
 // Mini-curva de retenção (hook/p25/p50/p75) no criativo; contagem no conjunto/campanha.
 function RetencaoInline({ node }: { node: TreeNode }) {
@@ -70,14 +68,14 @@ function RetencaoInline({ node }: { node: TreeNode }) {
     const rv = node.retencao_video;
     if (!rv || !rv.eh_video || rv.hook_rate == null) return null;
     const bars = [rv.hook_rate, rv.p25_rate, rv.p50_rate, rv.p75_rate];
-    const cor = hexToColor[hookBarTone(rv.hook_rate)] ?? PREMIUM.txt3;
+    const cor = hexToColor[hookBarTone(rv.hook_rate)] ?? 'var(--text-muted)';
     const fadigado = rv.hook_rate < 25;
     return (
       <span className="flex items-end gap-[2px]" style={{ height: 12 }} title={`Hook ${rv.hook_rate.toFixed(0)}%`}>
         {bars.map((v, i) => (
           <span key={i} style={{ width: 3, height: `${Math.max(12, Math.min(100, v ?? 0))}%`, background: cor, borderRadius: 1 }} />
         ))}
-        <span style={{ fontSize: 10, color: fadigado ? PREMIUM.red : PREMIUM.txt3, marginLeft: 5 }}>
+        <span style={{ fontSize: 10, color: fadigado ? 'var(--text-danger)' : 'var(--text-muted)', marginLeft: 5 }}>
           hook {rv.hook_rate.toFixed(0)}%{fadigado ? ' · cansou' : ''}
         </span>
       </span>
@@ -85,7 +83,7 @@ function RetencaoInline({ node }: { node: TreeNode }) {
   }
   const resumo = videoRetencaoResumo(node);
   if (!resumo || resumo.low === 0) return null;
-  return <span style={{ fontSize: 10, color: PREMIUM.red }}>{resumo.low}/{resumo.total} c/ hook baixo</span>;
+  return <span style={{ fontSize: 10, color: 'var(--text-danger)' }}>{resumo.low}/{resumo.total} c/ hook baixo</span>;
 }
 
 function acaoDoNode(node: TreeNode): { label: string; kind: 'pausar' | 'escalar' | 'muted' } | null {
@@ -133,56 +131,58 @@ function TreeRow({ node, depth, selectedId, onSelect, onQuickPause, filtroNivel,
 
   const metricaCusto = node.metricas_chave.find((m) => /custo|cpl|cpa/i.test(m.rotulo));
   const metricaResultado = node.metricas_chave.find((m) => m.rotulo !== 'Gasto' && m !== metricaCusto);
-  const custoColor = node.severidade === 'urgente' ? PREMIUM.red : node.severidade === 'ok' ? PREMIUM.emerald : PREMIUM.txt;
+  const custoColor = node.severidade === 'urgente' ? 'var(--text-danger)' : node.severidade === 'ok' ? 'var(--text-success)' : 'var(--text-primary)';
   const vsMeta = vsMetaLabel(metricaCusto?.valor, cplIdeal, cplMaximo);
 
   return (
     <>
       <div
         onClick={() => onSelect(node)}
+        className={selected ? '' : 'hover:bg-[var(--surface-1)]'}
         style={{
-          display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',
-          padding: `10px 16px 10px ${16 + depth * 18}px`,
-          borderBottom: `0.5px solid ${PREMIUM.borderSoft}`,
-          background: selected ? 'rgba(85,245,47,0.06)' : cat === 'pausar' ? 'rgba(248,113,113,0.04)' : 'transparent',
+          position: 'relative', display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',
+          padding: `9px 12px 9px ${12 + depth * 18}px`,
+          borderBottom: `0.5px solid var(--border)`,
+          background: selected ? 'var(--bg-accent)' : 'transparent',
           opacity: inativo ? 0.45 : 1,
         }}
       >
+        {selected && <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: 'var(--fill-accent)' }} />}
         {hasChildren ? (
-          <button onClick={(e) => { e.stopPropagation(); onToggle(node.rec_id); }} style={{ color: PREMIUM.txt2, width: 12, flex: 'none' }}>
+          <button onClick={(e) => { e.stopPropagation(); onToggle(node.rec_id); }} style={{ color: 'var(--text-secondary)', width: 12, flex: 'none' }}>
             <ChevronRight size={13} style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
           </button>
         ) : <span style={{ width: 12, flex: 'none' }} />}
 
         {isAd
           ? <CreativeThumb tone={cat === 'pausar' ? 'border-red-400/40' : 'border-border'} imageUrl={node.imagem_url} alt={node.objeto_nome} />
-          : <span style={{ padding: '2px 8px', borderRadius: 6, background: tag.bg, color: tag.color, fontSize: 10, fontWeight: 600, flex: 'none' }}>{tag.label}</span>}
+          : <span style={{ padding: '2px 6px', borderRadius: 10, background: tag.bg, color: tag.color, fontSize: 9, fontWeight: 600, flex: 'none' }}>{tag.label}</span>}
 
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ width: 6, height: 6, borderRadius: '50%', background: sevColor, flex: 'none' }} />
-            <span style={{ fontSize: node.nivel === 'campaign' ? 14 : 13, fontWeight: node.nivel === 'campaign' ? 600 : 400, color: PREMIUM.txt, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={node.objeto_nome}>
+            <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={node.objeto_nome}>
               {node.objeto_nome}
             </span>
-            {entrega.label === 'Pausado' && <span style={{ fontSize: 10, color: PREMIUM.txt3, border: `1px solid ${PREMIUM.border}`, borderRadius: 4, padding: '0 5px' }}>pausado</span>}
+            {entrega.label === 'Pausado' && <span style={{ fontSize: 10, color: 'var(--text-muted)', border: `0.5px solid var(--border)`, borderRadius: 4, padding: '0 5px' }}>pausado</span>}
           </div>
-          <div style={{ marginTop: 3 }}><RetencaoInline node={node} /></div>
+          <div style={{ marginTop: 1 }}><RetencaoInline node={node} /></div>
         </div>
 
-        <div style={{ width: 52, textAlign: 'right', fontSize: 13, color: PREMIUM.txt, flex: 'none' }}>{metricaResultado?.valor ?? '—'}</div>
-        <div style={{ width: 72, textAlign: 'right', fontSize: 13, fontWeight: 500, color: custoColor, flex: 'none' }}>{metricaCusto?.valor ?? '—'}</div>
-        <div style={{ width: 80, textAlign: 'right', fontSize: 11, color: vsMeta ? VS_META_TONE[vsMeta.tone] : PREMIUM.txt3, flex: 'none' }}>{vsMeta?.text ?? '—'}</div>
+        <div style={{ width: 52, textAlign: 'right', fontSize: 12, color: 'var(--text-primary)', flex: 'none' }}>{metricaResultado?.valor ?? '—'}</div>
+        <div style={{ width: 72, textAlign: 'right', fontSize: 12, fontWeight: 500, color: custoColor, flex: 'none' }}>{metricaCusto?.valor ?? '—'}</div>
+        <div style={{ width: 70, textAlign: 'right', fontSize: 10, color: vsMeta ? VS_META_TONE[vsMeta.tone] : 'var(--text-muted)', flex: 'none' }}>{vsMeta?.text ?? '—'}</div>
         <div style={{ width: 84, textAlign: 'right', flex: 'none' }}>
           {acao?.kind === 'pausar' ? (
             <button
               onClick={(e) => { e.stopPropagation(); onQuickPause(node); }}
-              style={{ padding: '6px 12px', background: PREMIUM.red, borderRadius: 8, color: PREMIUM.bg, fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}
+              style={{ padding: '3px 9px', background: 'var(--bg-danger)', borderRadius: 6, color: 'var(--text-danger)', fontSize: 10, fontWeight: 500, border: 'none', whiteSpace: 'nowrap' }}
             >Pausar</button>
           ) : acao?.kind === 'escalar' ? (
-            <span style={{ padding: '6px 12px', border: `1px solid rgba(85,245,47,0.4)`, borderRadius: 8, color: PREMIUM.green, fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>↑ Escalar</span>
+            <span style={{ padding: '3px 9px', background: 'var(--bg-success)', borderRadius: 6, color: 'var(--text-success)', fontSize: 10, fontWeight: 500, whiteSpace: 'nowrap' }}>↑ Escalar</span>
           ) : acao ? (
-            <span style={{ fontSize: 12, color: PREMIUM.txt3 }}>{acao.label}</span>
-          ) : <span style={{ fontSize: 12, color: PREMIUM.txt3 }}>—</span>}
+            <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>{acao.label}</span>
+          ) : <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>—</span>}
         </div>
       </div>
 
@@ -218,25 +218,25 @@ function ObjetivoBoard({ objetivo, nodes, open, onToggleGroup, ...rowProps }: {
   const sevLabel = pior === 'urgente' ? 'Crítico' : pior === 'atencao' ? 'Atenção' : 'Saudável';
 
   return (
-    <div style={{ background: PREMIUM.surf, border: `1px solid ${pior === 'urgente' ? 'rgba(248,113,113,0.25)' : PREMIUM.border}`, borderRadius: 14, overflow: 'hidden' }}>
-      <button onClick={onToggleGroup} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '13px 18px', width: '100%', textAlign: 'left', borderBottom: open ? `1px solid ${PREMIUM.borderSoft}` : 'none' }}>
-        <ChevronRight size={14} style={{ color: PREMIUM.txt2, transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s', flex: 'none' }} />
-        <span style={{ display: 'flex', width: 30, height: 30, borderRadius: 8, background: `${sevColor}1f`, color: sevColor, alignItems: 'center', justifyContent: 'center', flex: 'none' }}>
-          <Icon size={16} />
+    <div style={{ background: 'var(--surface-1)', border: `0.5px solid ${pior === 'urgente' ? 'var(--text-danger)' : 'var(--border)'}`, borderRadius: 12, overflow: 'hidden' }}>
+      <button onClick={onToggleGroup} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', width: '100%', textAlign: 'left', borderBottom: open ? `0.5px solid var(--border)` : 'none' }}>
+        <ChevronRight size={13} style={{ color: 'var(--text-secondary)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s', flex: 'none' }} />
+        <span style={{ display: 'flex', width: 24, height: 24, borderRadius: 6, background: `${sevColor}1f`, color: sevColor, alignItems: 'center', justifyContent: 'center', flex: 'none' }}>
+          <Icon size={13} />
         </span>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 15, fontWeight: 600, color: PREMIUM.txt }}>{objetivo}</div>
-          <div style={{ fontSize: 12, color: PREMIUM.txt3 }}>{nodes.length} campanha{nodes.length === 1 ? '' : 's'} · {rotulos.resultado} · {rotulos.custo}</div>
+          <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)' }}>{objetivo}</div>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{nodes.length} campanha{nodes.length === 1 ? '' : 's'} · {rotulos.resultado} · {rotulos.custo}</div>
         </div>
-        <span style={{ padding: '3px 10px', borderRadius: 20, background: `${sevColor}1f`, color: sevColor, fontSize: 12, fontWeight: 600, flex: 'none' }}>{sevLabel}</span>
+        <span style={{ padding: '2px 8px', borderRadius: 20, background: `${sevColor}1f`, color: sevColor, fontSize: 10, fontWeight: 600, flex: 'none' }}>{sevLabel}</span>
       </button>
       {open && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '7px 16px', borderBottom: `1px solid ${PREMIUM.borderSoft}`, fontSize: 10, letterSpacing: '0.04em', textTransform: 'uppercase', color: PREMIUM.txt3 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 12px', borderBottom: `0.5px solid var(--border)`, fontSize: 10, color: 'var(--text-muted)', fontWeight: 400 }}>
           <span style={{ width: 12, flex: 'none' }} />
-          <span style={{ flex: 1, minWidth: 0 }}>Campanha · conjunto · criativo</span>
+          <span style={{ flex: 1, minWidth: 0 }}>Campanha</span>
           <span style={{ width: 52, textAlign: 'right', flex: 'none' }}>{rotulos.resultado}</span>
           <span style={{ width: 72, textAlign: 'right', flex: 'none' }}>{rotulos.custo}</span>
-          <span style={{ width: 80, textAlign: 'right', flex: 'none' }}>vs. meta</span>
+          <span style={{ width: 70, textAlign: 'right', flex: 'none' }}>vs. meta</span>
           <span style={{ width: 84, textAlign: 'right', flex: 'none' }}>Ação</span>
         </div>
       )}
@@ -290,15 +290,10 @@ export function CampaignTable({ nodes, selectedId, onSelect, onQuickPause, filtr
   const grupos = useMemo(() => agruparPorObjetivo(nodes), [nodes]);
 
   return (
-    <div className="space-y-3">
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '0 2px' }}>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 600, color: PREMIUM.txt2 }}>
-          <Layers size={14} /> Campanhas por objetivo
-        </span>
-        <div style={{ display: 'flex', gap: 14, fontSize: 12, color: PREMIUM.txt3 }}>
-          <button onClick={() => setOpenIds(new Set(collectAllIds(nodes)))} style={{ color: PREMIUM.txt3 }}>Expandir tudo</button>
-          <button onClick={() => setOpenIds(new Set())} style={{ color: PREMIUM.txt3 }}>Recolher tudo</button>
-        </div>
+    <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, padding: '0 4px', fontSize: 10, color: 'var(--text-muted)' }}>
+        <button onClick={() => setOpenIds(new Set(collectAllIds(nodes)))} style={{ color: 'var(--text-muted)' }}>Expandir tudo</button>
+        <button onClick={() => setOpenIds(new Set())} style={{ color: 'var(--text-muted)' }}>Recolher tudo</button>
       </div>
       {grupos.map((g) => (
         <ObjetivoBoard
@@ -319,7 +314,7 @@ export function CampaignTable({ nodes, selectedId, onSelect, onQuickPause, filtr
           cplMaximo={cplMaximo}
         />
       ))}
-      {nodes.length === 0 && <p style={{ padding: 16, fontSize: 14, color: PREMIUM.txt3 }}>Nenhuma campanha nesta análise.</p>}
+      {nodes.length === 0 && <p style={{ padding: 16, fontSize: 12, color: 'var(--text-muted)' }}>Nenhuma campanha nesta análise.</p>}
     </div>
   );
 }

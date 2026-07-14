@@ -26,6 +26,7 @@ import type { Client } from '@/lib/mock-data';
 import { OPTIMIZER_PERIODS } from '@/lib/optimizer';
 import type { OptimizerPeriodKey } from '@/lib/optimizer';
 import {
+  OTIMIZADOR_VARS,
   categoriaDoNode,
   flattenTree,
   type AccountOption,
@@ -417,7 +418,7 @@ export default function OtimizadorPage() {
   const temAnalise = !loading && !!contaFiltro && (treeNodes.length > 0 || !!resumo);
 
   return (
-    <div className="mx-auto flex w-full max-w-[1800px] flex-col gap-3 py-4">
+    <div className="mx-auto flex w-full max-w-[1800px] flex-col gap-2.5 py-3.5" style={OTIMIZADOR_VARS}>
       {configClientId && configClient && (
         <ConfigModal clientId={configClientId} clientName={configClient.name} onClose={() => setConfigClientId(null)} />
       )}
@@ -566,40 +567,66 @@ export default function OtimizadorPage() {
           ) : (
             <>
               <QuickDecisionCards nodes={flatNodes} active={categoriaFiltro} onSelect={setCategoriaFiltro} />
-              <div className="min-w-0 space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <FilterChips nivel={nivelFiltro} onNivel={setNivelFiltro} apenasComAcao={apenasComAcao} onApenasComAcao={setApenasComAcao} />
-                  {canais.length > 1 && (
-                    <div className="flex items-center gap-0.5 rounded-full border border-border p-0.5" title="Este cliente tem análise de Meta e Google — alterne entre elas">
-                      {(['meta', 'google'] as const).map((c) => (
-                        <button
-                          key={c}
-                          onClick={() => switchCanal(c)}
-                          className={cn(
-                            'rounded-full px-3 py-1 text-xs font-semibold transition-colors',
-                            canal === c ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground',
-                          )}
-                        >
-                          {c === 'meta' ? 'Meta Ads' : 'Google Ads'}
-                        </button>
-                      ))}
+              {/* Master-detail: campanhas e recomendação sempre 50/50, mesma largura, sem exceção. */}
+              <div className="grid items-start gap-3" style={{ gridTemplateColumns: '1fr 1fr' }}>
+                <div
+                  className="min-w-0 overflow-hidden"
+                  style={{ background: 'var(--surface-2)', border: '0.5px solid var(--border)', borderRadius: 12 }}
+                >
+                  <div
+                    className="flex flex-wrap items-center justify-between gap-2"
+                    style={{ padding: '8px 12px', borderBottom: '0.5px solid var(--border)' }}
+                  >
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500 }}>
+                      Campanhas{canal ? ` · ${canal === 'meta' ? 'Meta Ads' : 'Google Ads'}` : ''}
+                    </span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <FilterChips nivel={nivelFiltro} onNivel={setNivelFiltro} apenasComAcao={apenasComAcao} onApenasComAcao={setApenasComAcao} />
+                      {canais.length > 1 && (
+                        <div className="flex items-center gap-0.5 rounded-full border border-border p-0.5" title="Este cliente tem análise de Meta e Google — alterne entre elas">
+                          {(['meta', 'google'] as const).map((c) => (
+                            <button
+                              key={c}
+                              onClick={() => switchCanal(c)}
+                              className={cn(
+                                'rounded-full px-3 py-1 text-xs font-semibold transition-colors',
+                                canal === c ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground',
+                              )}
+                            >
+                              {c === 'meta' ? 'Meta Ads' : 'Google Ads'}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <CampaignTable
+                    nodes={treeNodes}
+                    selectedId={selectedId}
+                    onSelect={(n) => setSelectedId(n.rec_id)}
+                    onQuickPause={handleQuickPause}
+                    filtroNivel={nivelFiltro}
+                    filtroCategoria={categoriaFiltro}
+                    apenasComAcao={apenasComAcao}
+                    cplIdeal={resumo?.cruzamento_com_metas?.cpl_ideal ?? null}
+                    cplMaximo={resumo?.cruzamento_com_metas?.cpl_maximo ?? null}
+                  />
+                </div>
+                <div
+                  className="min-w-0 overflow-hidden"
+                  style={{ background: 'var(--surface-2)', border: '0.5px solid var(--border)', borderRadius: 12 }}
+                >
+                  <div style={{ padding: '8px 12px', borderBottom: '0.5px solid var(--border)', fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500 }}>
+                    Recomendação principal
+                  </div>
+                  {selectedNode ? (
+                    <DecisionPanel node={selectedNode} busy={busy} onApply={doApply} onJump={jumpTo} />
+                  ) : (
+                    <div className="flex min-h-40 flex-col items-center justify-center gap-1 p-6 text-center">
+                      <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>Clique em uma campanha, conjunto ou criativo na lista para ver o diagnóstico completo.</p>
                     </div>
                   )}
                 </div>
-                <CampaignTable
-                  nodes={treeNodes}
-                  selectedId={selectedId}
-                  onSelect={(n) => setSelectedId(n.rec_id)}
-                  onQuickPause={handleQuickPause}
-                  filtroNivel={nivelFiltro}
-                  filtroCategoria={categoriaFiltro}
-                  apenasComAcao={apenasComAcao}
-                  cplIdeal={resumo?.cruzamento_com_metas?.cpl_ideal ?? null}
-                  cplMaximo={resumo?.cruzamento_com_metas?.cpl_maximo ?? null}
-                />
-                {selectedNode && (
-                  <DecisionPanel node={selectedNode} busy={busy} onApply={doApply} onJump={jumpTo} />
-                )}
               </div>
             </>
           )}

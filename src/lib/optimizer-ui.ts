@@ -45,6 +45,37 @@ export const SEV_HEX: Record<'urgente' | 'atencao' | 'ok', string> = {
   ok: PREMIUM.emerald,
 };
 
+// ─── Escopo de CSS variables do Otimizador ───────────────────────────────────
+// A paleta PREMIUM é hex fixo de propósito (não segue o toggle claro/escuro do resto do app),
+// mas o wireframe aprovado pede "nenhum valor de cor hardcoded — usar exclusivamente CSS
+// variables". Resolvemos as duas coisas: as variáveis abaixo são declaradas UMA vez, no
+// container raiz da tela (`<div style={OTIMIZADOR_VARS}>`), e todo componente filho consome
+// via `var(--nome)` — sem literal de cor espalhado pelos componentes, mas sem acoplar ao tema.
+export const OTIMIZADOR_VARS: Record<string, string> = {
+  '--surface-0': PREMIUM.bg,
+  '--surface-1': PREMIUM.surf,
+  '--surface-2': PREMIUM.surf2,
+  '--border': PREMIUM.border,
+  '--border-soft': PREMIUM.borderSoft,
+  '--border-strong': 'rgba(255,255,255,0.18)',
+  '--text-primary': PREMIUM.txt,
+  '--text-secondary': PREMIUM.txt2,
+  '--text-muted': PREMIUM.txt3,
+  '--text-accent': PREMIUM.green,
+  '--text-success': PREMIUM.emerald,
+  '--text-warning': PREMIUM.amber,
+  '--text-danger': PREMIUM.red,
+  '--text-pro': PREMIUM.purple,
+  '--fill-accent': PREMIUM.green,
+  '--on-accent': PREMIUM.bg,
+  '--bg-accent': 'rgba(85,245,47,0.12)',
+  '--bg-success': 'rgba(52,211,153,0.12)',
+  '--bg-warning': 'rgba(251,191,36,0.12)',
+  '--bg-danger': 'rgba(248,113,113,0.12)',
+  '--bg-pro': 'rgba(183,148,255,0.14)',
+  '--border-success': 'rgba(52,211,153,0.4)',
+};
+
 // ─── Tipos de tela ─────────────────────────────────────────────────────────
 
 // Recomendação da fila (server já achatou via buildRecomendacoes) + status do workflow.
