@@ -16,6 +16,35 @@ import type {
   OptimizerTreeNode,
 } from '@/lib/optimizer';
 
+// ─── Paleta dark premium ─────────────────────────────────────────────────────
+// O redesign do Otimizador commita num visual escuro único (aprovado): superfícies em camadas,
+// bordas suaves, acento verde ONMID. Hex fixo de propósito (não segue o toggle de tema) — um só
+// lugar pra hero/boards/árvore/painel compartilharem e não divergir.
+export const PREMIUM = {
+  bg: '#0a0a0b',
+  surf: '#141416',
+  surf2: '#0f0f11',
+  surfHover: 'rgba(255,255,255,0.03)',
+  border: 'rgba(255,255,255,0.08)',
+  borderSoft: 'rgba(255,255,255,0.05)',
+  txt: '#fafafa',
+  txt2: '#a1a1aa',
+  txt3: '#71717a',
+  green: '#55f52f',
+  emerald: '#34d399',
+  amber: '#fbbf24',
+  red: '#f87171',
+  blue: '#7dd3fc',
+  purple: '#b794ff',
+} as const;
+
+// Cor por severidade na paleta premium.
+export const SEV_HEX: Record<'urgente' | 'atencao' | 'ok', string> = {
+  urgente: PREMIUM.red,
+  atencao: PREMIUM.amber,
+  ok: PREMIUM.emerald,
+};
+
 // ─── Tipos de tela ─────────────────────────────────────────────────────────
 
 // Recomendação da fila (server já achatou via buildRecomendacoes) + status do workflow.

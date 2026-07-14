@@ -1,63 +1,97 @@
 "use client";
 
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronRight, Layers, PauseCircle } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import {
+  ChevronRight,
+  FileText,
+  Heart,
+  Layers,
+  Megaphone,
+  MessageCircle,
+  MousePointerClick,
+  ShoppingBag,
+  Target,
+  type LucideIcon,
+} from 'lucide-react';
 import { CreativeThumb } from '@/components/otimizador/creative-thumb';
 import {
-  NIVEL_BADGE,
-  NIVEL_LABEL,
+  PREMIUM,
+  SEV_HEX,
   agruparPorObjetivo,
   categoriaDoNode,
-  categoriaMeta,
   collectAllIds,
-  ctrDoNode,
   deliveryDisplay,
+  flattenTree,
   hookBarTone,
-  nodeToneClass,
   rotulosDoGrupo,
-  statusDisplay,
   videoRetencaoResumo,
   type Categoria,
   type NivelFiltro,
+  type Severidade,
   type TreeNode,
 } from '@/lib/optimizer-ui';
 
-// Coluna "Retenção": no criativo, mini-curva de 4 barras (hook/p25/p50/p75) coloridas pelo hook
-// rate; em imagem/carrossel (eh_video=false) mostra N/A. Em conjunto/campanha, badge de contagem
-// (nunca média, ver videoRetencaoResumo).
-function RetencaoCell({ node }: { node: TreeNode }) {
-  if (node.nivel === 'ad') {
-    const rv = node.retencao_video;
-    if (!rv || !rv.eh_video || rv.hook_rate == null) {
-      return <span className="text-xs text-muted-foreground">N/A</span>;
-    }
-    const bars = [rv.hook_rate, rv.p25_rate, rv.p50_rate, rv.p75_rate];
-    const tone = hookBarTone(rv.hook_rate);
-    const fmt = (v: number | null) => (v == null ? '—' : `${v.toFixed(0)}%`);
-    const title = `Hook (3s): ${fmt(rv.hook_rate)} | P25: ${fmt(rv.p25_rate)} | P50: ${fmt(rv.p50_rate)} | P75: ${fmt(rv.p75_rate)}`;
-    return (
-      <div className="flex items-center justify-end gap-1.5" title={title}>
-        <div className="flex h-4 items-end gap-0.5">
-          {bars.map((v, i) => (
-            <span key={i} className={cn('w-1 rounded-sm', tone)} style={{ height: `${Math.max(15, Math.min(100, v ?? 0))}%` }} />
-          ))}
-        </div>
-        <span className="text-xs tabular-nums text-muted-foreground">{fmt(rv.hook_rate)}</span>
-      </div>
-    );
-  }
+const NIVEL_TAG: Record<string, { label: string; color: string; bg: string }> = {
+  campaign: { label: 'CAMPANHA', color: PREMIUM.purple, bg: 'rgba(123,44,255,0.15)' },
+  adset: { label: 'CONJUNTO', color: PREMIUM.blue, bg: 'rgba(56,189,248,0.14)' },
+  ad: { label: 'CRIATIVO', color: PREMIUM.txt2, bg: 'rgba(255,255,255,0.06)' },
+};
 
-  const resumo = videoRetencaoResumo(node);
-  if (!resumo) return <span className="text-xs text-muted-foreground">—</span>;
-  return (
-    <span className={cn('text-xs font-medium', resumo.low > 0 ? 'text-red-300' : 'text-emerald-300')}>
-      {resumo.low > 0 ? `${resumo.low}/${resumo.total} c/ hook baixo` : `${resumo.total}/${resumo.total} ok`}
-    </span>
-  );
+function objIcon(objetivo: string): LucideIcon {
+  const t = (objetivo ?? '').toLowerCase();
+  if (/whats|conversa|mensag/.test(t)) return MessageCircle;
+  if (/lead|formul/.test(t)) return FileText;
+  if (/venda|compra|cardáp|cardap/.test(t)) return ShoppingBag;
+  if (/tráfego|trafego|clique|site/.test(t)) return MousePointerClick;
+  if (/engaj/.test(t)) return Heart;
+  if (/reconhec|alcance|marca/.test(t)) return Megaphone;
+  return Target;
 }
 
-function TreeTableRow({ node, depth, selectedId, onSelect, onQuickPause, filtroNivel, filtroCategoria, apenasComAcao, openIds, onToggle }: {
+function piorSeveridade(nodes: TreeNode[]): Severidade {
+  const rank = (s: Severidade) => (s === 'urgente' ? 0 : s === 'atencao' ? 1 : 2);
+  let pior: Severidade = 'ok';
+  for (const n of flattenTree(nodes)) if (rank(n.severidade) < rank(pior)) pior = n.severidade;
+  return pior;
+}
+
+const hexToColor: Record<string, string> = { 'bg-emerald-400': PREMIUM.emerald, 'bg-amber-400': PREMIUM.amber, 'bg-red-400': PREMIUM.red };
+
+// Mini-curva de retenção (hook/p25/p50/p75) no criativo; contagem no conjunto/campanha.
+function RetencaoInline({ node }: { node: TreeNode }) {
+  if (node.nivel === 'ad') {
+    const rv = node.retencao_video;
+    if (!rv || !rv.eh_video || rv.hook_rate == null) return null;
+    const bars = [rv.hook_rate, rv.p25_rate, rv.p50_rate, rv.p75_rate];
+    const cor = hexToColor[hookBarTone(rv.hook_rate)] ?? PREMIUM.txt3;
+    const fadigado = rv.hook_rate < 25;
+    return (
+      <span className="flex items-end gap-[2px]" style={{ height: 12 }} title={`Hook ${rv.hook_rate.toFixed(0)}%`}>
+        {bars.map((v, i) => (
+          <span key={i} style={{ width: 3, height: `${Math.max(12, Math.min(100, v ?? 0))}%`, background: cor, borderRadius: 1 }} />
+        ))}
+        <span style={{ fontSize: 10, color: fadigado ? PREMIUM.red : PREMIUM.txt3, marginLeft: 5 }}>
+          hook {rv.hook_rate.toFixed(0)}%{fadigado ? ' · cansou' : ''}
+        </span>
+      </span>
+    );
+  }
+  const resumo = videoRetencaoResumo(node);
+  if (!resumo || resumo.low === 0) return null;
+  return <span style={{ fontSize: 10, color: PREMIUM.red }}>{resumo.low}/{resumo.total} c/ hook baixo</span>;
+}
+
+function acaoDoNode(node: TreeNode): { label: string; kind: 'pausar' | 'escalar' | 'muted' } | null {
+  const cat = categoriaDoNode(node);
+  if (cat === 'pausar') return { label: 'Pausar', kind: 'pausar' };
+  if (cat === 'escalar') return { label: 'Escalar', kind: 'escalar' };
+  if (cat === 'revisar') return { label: 'Revisar', kind: 'muted' };
+  if (cat === 'investigar') return { label: 'Verificar', kind: 'muted' };
+  if (cat === 'manter') return { label: 'Manter', kind: 'muted' };
+  return null;
+}
+
+function TreeRow({ node, depth, selectedId, onSelect, onQuickPause, filtroNivel, filtroCategoria, apenasComAcao, openIds, onToggle }: {
   node: TreeNode;
   depth: number;
   selectedId: string | null;
@@ -69,93 +103,91 @@ function TreeTableRow({ node, depth, selectedId, onSelect, onQuickPause, filtroN
   openIds: Set<string>;
   onToggle: (id: string) => void;
 }) {
-  const open = openIds.has(node.rec_id);
-  const hasChildren = node.filhos.length > 0;
-  const cat = categoriaDoNode(node);
-  const status = statusDisplay(node);
-  const entrega = deliveryDisplay(node.status_entrega);
-  const isAd = node.nivel === 'ad';
-  const mostraPausaRapida = isAd && cat === 'pausar';
-
-  // Um nó aparece se ele mesmo casa com o filtro OU algum descendente casa (pra manter contexto
-  // hierárquico visível — filtrar só criativos não deve esconder a campanha-pai).
   function subtreeMatches(n: TreeNode): boolean {
-    const own = (filtroNivel === 'todos' || n.nivel === filtroNivel) &&
-      (!filtroCategoria || categoriaDoNode(n) === filtroCategoria) &&
-      (!apenasComAcao || n.texto_recomendacao.trim().length > 0);
-    if (own) return true;
-    return (n.filhos as TreeNode[]).some(subtreeMatches);
+    const own = (filtroNivel === 'todos' || n.nivel === filtroNivel)
+      && (!filtroCategoria || categoriaDoNode(n) === filtroCategoria)
+      && (!apenasComAcao || n.texto_recomendacao.trim().length > 0);
+    return own || (n.filhos as TreeNode[]).some(subtreeMatches);
   }
   if (!subtreeMatches(node)) return null;
 
+  const open = openIds.has(node.rec_id);
+  const hasChildren = node.filhos.length > 0;
+  const isAd = node.nivel === 'ad';
+  const cat = categoriaDoNode(node);
+  const acao = acaoDoNode(node);
+  const tag = NIVEL_TAG[node.nivel];
+  const selected = selectedId === node.rec_id;
+  const inativo = node.status === 'ignorado' || node.status === 'aplicado';
+  const entrega = deliveryDisplay(node.status_entrega);
+  const sevColor = SEV_HEX[node.severidade];
+
   const metricaCusto = node.metricas_chave.find((m) => /custo|cpl|cpa/i.test(m.rotulo));
   const metricaResultado = node.metricas_chave.find((m) => m.rotulo !== 'Gasto' && m !== metricaCusto);
-  const gasto = node.metricas_chave.find((m) => m.rotulo === 'Gasto');
+  const custoColor = node.severidade === 'urgente' ? PREMIUM.red : node.severidade === 'ok' ? PREMIUM.emerald : PREMIUM.txt;
 
   return (
     <>
-      <tr
-        className={cn(
-          'cursor-pointer border-b border-border/60 hover:bg-surface-soft',
-          selectedId === node.rec_id && 'bg-primary/5',
-          nodeToneClass(node),
-        )}
+      <div
         onClick={() => onSelect(node)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer',
+          padding: `11px 16px 11px ${16 + depth * 18}px`,
+          borderBottom: `1px solid ${PREMIUM.borderSoft}`,
+          background: selected ? 'rgba(85,245,47,0.06)' : cat === 'pausar' ? 'rgba(248,113,113,0.04)' : 'transparent',
+          opacity: inativo ? 0.45 : 1,
+        }}
       >
-        <td className="py-2 pr-2">
-          <div className="flex items-center gap-2" style={{ paddingLeft: depth * 20 }}>
-            {hasChildren ? (
-              <button onClick={(e) => { e.stopPropagation(); onToggle(node.rec_id); }} className="shrink-0 text-muted-foreground hover:text-foreground">
-                <ChevronRight className={cn('h-3.5 w-3.5 transition-transform', open && 'rotate-90')} />
-              </button>
-            ) : <span className="w-3.5 shrink-0" />}
-            {isAd && <CreativeThumb tone={mostraPausaRapida ? 'border-red-400/40' : 'border-border'} imageUrl={node.imagem_url} alt={node.objeto_nome} />}
-            <span className="min-w-0 truncate text-sm text-foreground" title={node.objeto_nome}>{node.objeto_nome}</span>
+        {hasChildren ? (
+          <button onClick={(e) => { e.stopPropagation(); onToggle(node.rec_id); }} style={{ color: PREMIUM.txt2, width: 12, flex: 'none' }}>
+            <ChevronRight size={13} style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
+          </button>
+        ) : <span style={{ width: 12, flex: 'none' }} />}
+
+        {isAd
+          ? <CreativeThumb tone={cat === 'pausar' ? 'border-red-400/40' : 'border-border'} imageUrl={node.imagem_url} alt={node.objeto_nome} />
+          : <span style={{ padding: '2px 8px', borderRadius: 6, background: tag.bg, color: tag.color, fontSize: 10, fontWeight: 600, flex: 'none' }}>{tag.label}</span>}
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: sevColor, flex: 'none' }} />
+            <span style={{ fontSize: node.nivel === 'campaign' ? 14 : 13, fontWeight: node.nivel === 'campaign' ? 600 : 400, color: PREMIUM.txt, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={node.objeto_nome}>
+              {node.objeto_nome}
+            </span>
+            {entrega.label === 'Pausado' && <span style={{ fontSize: 10, color: PREMIUM.txt3, border: `1px solid ${PREMIUM.border}`, borderRadius: 4, padding: '0 5px' }}>pausado</span>}
           </div>
-        </td>
-        <td className="py-2 pr-2">
-          <span className={cn('inline-block shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold', NIVEL_BADGE[node.nivel])}>
-            {NIVEL_LABEL[node.nivel]}
-          </span>
-        </td>
-        <td className="py-2 pr-2">
-          <span className={cn('inline-block shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold', entrega.tone)}>{entrega.label}</span>
-        </td>
-        <td className="py-2 pr-2">
-          <span className={cn('inline-block shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold', status.tone)}>{status.label}</span>
-        </td>
-        <td className="py-2 pr-2 text-right text-xs text-muted-foreground">{gasto?.valor ?? '—'}</td>
-        <td className="py-2 pr-2 text-right text-xs text-muted-foreground">{metricaResultado?.valor ?? '—'}</td>
-        <td className="py-2 pr-2 text-right text-xs text-muted-foreground">{metricaCusto?.valor ?? '—'}</td>
-        <td className="py-2 pr-2 text-right text-xs text-muted-foreground">{ctrDoNode(node)}</td>
-        <td className="py-2 pr-2 text-right"><RetencaoCell node={node} /></td>
-        <td className="py-2 pr-2 text-right">
-          {mostraPausaRapida ? (
+          <div style={{ marginTop: 3 }}><RetencaoInline node={node} /></div>
+        </div>
+
+        <div style={{ width: 52, textAlign: 'right', fontSize: 13, color: PREMIUM.txt, flex: 'none' }}>{metricaResultado?.valor ?? '—'}</div>
+        <div style={{ width: 72, textAlign: 'right', fontSize: 13, fontWeight: 500, color: custoColor, flex: 'none' }}>{metricaCusto?.valor ?? '—'}</div>
+        <div style={{ width: 84, textAlign: 'right', flex: 'none' }}>
+          {acao?.kind === 'pausar' ? (
             <button
               onClick={(e) => { e.stopPropagation(); onQuickPause(node); }}
-              title="Pausar este criativo"
-              className="inline-flex h-6 w-6 items-center justify-center rounded border border-red-400/50 bg-red-400/10 text-red-300 hover:bg-red-400/20"
-            >
-              <PauseCircle className="h-3.5 w-3.5" />
-            </button>
-          ) : (
-            <span className={cn('inline-block shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold', categoriaMeta(cat).tone)}>
-              {categoriaMeta(cat).label}
-            </span>
-          )}
-        </td>
-      </tr>
+              style={{ padding: '6px 12px', background: PREMIUM.red, borderRadius: 8, color: PREMIUM.bg, fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}
+            >Pausar</button>
+          ) : acao?.kind === 'escalar' ? (
+            <span style={{ padding: '6px 12px', border: `1px solid rgba(85,245,47,0.4)`, borderRadius: 8, color: PREMIUM.green, fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>↑ Escalar</span>
+          ) : acao ? (
+            <span style={{ fontSize: 12, color: PREMIUM.txt3 }}>{acao.label}</span>
+          ) : <span style={{ fontSize: 12, color: PREMIUM.txt3 }}>—</span>}
+        </div>
+      </div>
+
       {open && hasChildren && (node.filhos as TreeNode[]).map((child) => (
-        <TreeTableRow key={child.rec_id} node={child} depth={depth + 1} selectedId={selectedId} onSelect={onSelect} onQuickPause={onQuickPause}
+        <TreeRow key={child.rec_id} node={child} depth={depth + 1} selectedId={selectedId} onSelect={onSelect} onQuickPause={onQuickPause}
           filtroNivel={filtroNivel} filtroCategoria={filtroCategoria} apenasComAcao={apenasComAcao} openIds={openIds} onToggle={onToggle} />
       ))}
     </>
   );
 }
 
-function ObjetivoSection({ objetivo, nodes, selectedId, onSelect, onQuickPause, filtroNivel, filtroCategoria, apenasComAcao, openIds, onToggle, open, onToggleGroup }: {
+function ObjetivoBoard({ objetivo, nodes, open, onToggleGroup, ...rowProps }: {
   objetivo: string;
   nodes: TreeNode[];
+  open: boolean;
+  onToggleGroup: () => void;
   selectedId: string | null;
   onSelect: (n: TreeNode) => void;
   onQuickPause: (n: TreeNode) => void;
@@ -164,55 +196,40 @@ function ObjetivoSection({ objetivo, nodes, selectedId, onSelect, onQuickPause, 
   apenasComAcao: boolean;
   openIds: Set<string>;
   onToggle: (id: string) => void;
-  open: boolean;
-  onToggleGroup: () => void;
 }) {
   const rotulos = rotulosDoGrupo(nodes);
+  const pior = piorSeveridade(nodes);
+  const sevColor = SEV_HEX[pior];
+  const Icon = objIcon(objetivo);
+  const sevLabel = pior === 'urgente' ? 'Crítico' : pior === 'atencao' ? 'Atenção' : 'Saudável';
+
   return (
-    <div className="border-b border-border last:border-b-0">
-      <button onClick={onToggleGroup} className="flex w-full items-center gap-2 bg-surface-soft px-3 py-2 text-left hover:bg-surface-soft/80">
-        <ChevronRight className={cn('h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} />
-        <span className="text-xs font-bold uppercase tracking-wide text-foreground">{objetivo}</span>
-        <span className="text-xs text-muted-foreground">{nodes.length} campanha{nodes.length === 1 ? '' : 's'}</span>
+    <div style={{ background: PREMIUM.surf, border: `1px solid ${pior === 'urgente' ? 'rgba(248,113,113,0.25)' : PREMIUM.border}`, borderRadius: 14, overflow: 'hidden' }}>
+      <button onClick={onToggleGroup} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '13px 18px', width: '100%', textAlign: 'left', borderBottom: open ? `1px solid ${PREMIUM.borderSoft}` : 'none' }}>
+        <ChevronRight size={14} style={{ color: PREMIUM.txt2, transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s', flex: 'none' }} />
+        <span style={{ display: 'flex', width: 30, height: 30, borderRadius: 8, background: `${sevColor}1f`, color: sevColor, alignItems: 'center', justifyContent: 'center', flex: 'none' }}>
+          <Icon size={16} />
+        </span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 15, fontWeight: 600, color: PREMIUM.txt }}>{objetivo}</div>
+          <div style={{ fontSize: 12, color: PREMIUM.txt3 }}>{nodes.length} campanha{nodes.length === 1 ? '' : 's'} · {rotulos.resultado} · {rotulos.custo}</div>
+        </div>
+        <span style={{ padding: '3px 10px', borderRadius: 20, background: `${sevColor}1f`, color: sevColor, fontSize: 12, fontWeight: 600, flex: 'none' }}>{sevLabel}</span>
       </button>
-      {open && (
-        <table className="w-full border-collapse text-left">
-          <thead>
-            <tr className="border-b border-border text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
-              <th className="py-2 pl-3 pr-2 font-bold">Campanha / Conjunto / Criativo</th>
-              <th className="py-2 pr-2 font-bold">Nível</th>
-              <th className="py-2 pr-2 font-bold">Entrega</th>
-              <th className="py-2 pr-2 font-bold">Saúde</th>
-              <th className="py-2 pr-2 text-right font-bold">Gasto</th>
-              <th className="py-2 pr-2 text-right font-bold">{rotulos.resultado}</th>
-              <th className="py-2 pr-2 text-right font-bold">{rotulos.custo}</th>
-              <th className="py-2 pr-2 text-right font-bold">CTR</th>
-              <th className="py-2 pr-2 text-right font-bold">Retenção</th>
-              <th className="py-2 pr-2 text-right font-bold">Ação recomendada</th>
-            </tr>
-          </thead>
-          <tbody>
-            {nodes.map((n) => (
-              <TreeTableRow key={n.rec_id} node={n} depth={0} selectedId={selectedId} onSelect={onSelect} onQuickPause={onQuickPause}
-                filtroNivel={filtroNivel} filtroCategoria={filtroCategoria} apenasComAcao={apenasComAcao} openIds={openIds} onToggle={onToggle} />
-            ))}
-          </tbody>
-        </table>
-      )}
+      {open && nodes.map((n) => (
+        <TreeRow key={n.rec_id} node={n} depth={0} {...rowProps} />
+      ))}
     </div>
   );
 }
 
 const CLOSED_GROUPS_KEY = 'otimizador:closedGroups';
-
 function loadClosedGroups(): Set<string> {
   if (typeof window === 'undefined') return new Set();
   try {
     const raw = window.localStorage.getItem(CLOSED_GROUPS_KEY);
     return new Set(raw ? (JSON.parse(raw) as string[]) : []);
-  } catch {
-    return new Set();
-  }
+  } catch { return new Set(); }
 }
 
 export function CampaignTable({ nodes, selectedId, onSelect, onQuickPause, filtroNivel, filtroCategoria, apenasComAcao }: {
@@ -224,9 +241,7 @@ export function CampaignTable({ nodes, selectedId, onSelect, onQuickPause, filtr
   filtroCategoria: Categoria | null;
   apenasComAcao: boolean;
 }) {
-  // Por padrão só as campanhas (nível raiz) vêm abertas — igual ao comportamento anterior por linha.
   const [openIds, setOpenIds] = useState<Set<string>>(() => new Set(nodes.map((n) => n.rec_id)));
-  // Estado de accordion dos objetivos persiste em localStorage — não reseta ao recarregar/trocar conta.
   const [closedGroups, setClosedGroups] = useState<Set<string>>(loadClosedGroups);
   const rootIdsKey = nodes.map((n) => n.rec_id).join(',');
   useEffect(() => {
@@ -234,58 +249,49 @@ export function CampaignTable({ nodes, selectedId, onSelect, onQuickPause, filtr
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rootIdsKey]);
 
-  const toggleOne = (id: string) => {
-    setOpenIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  };
-  const toggleGroup = (objetivo: string) => {
-    setClosedGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(objetivo)) next.delete(objetivo); else next.add(objetivo);
-      try { window.localStorage.setItem(CLOSED_GROUPS_KEY, JSON.stringify([...next])); } catch { /* ignore */ }
-      return next;
-    });
-  };
+  const toggleOne = (id: string) => setOpenIds((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const toggleGroup = (objetivo: string) => setClosedGroups((prev) => {
+    const next = new Set(prev);
+    if (next.has(objetivo)) next.delete(objetivo); else next.add(objetivo);
+    try { window.localStorage.setItem(CLOSED_GROUPS_KEY, JSON.stringify([...next])); } catch { /* ignore */ }
+    return next;
+  });
 
   const grupos = useMemo(() => agruparPorObjetivo(nodes), [nodes]);
 
   return (
-    <div className="overflow-hidden rounded-[var(--radius)] border border-border bg-card/90">
-      <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2.5 text-xs font-semibold text-muted-foreground">
-        <span className="flex items-center gap-2"><Layers className="h-3.5 w-3.5" /> Árvore de campanhas</span>
-        <div className="flex items-center gap-3">
-          <button onClick={() => setOpenIds(new Set(collectAllIds(nodes)))} className="font-normal normal-case text-muted-foreground hover:text-foreground hover:underline">
-            Expandir tudo
-          </button>
-          <button onClick={() => setOpenIds(new Set())} className="font-normal normal-case text-muted-foreground hover:text-foreground hover:underline">
-            Recolher tudo
-          </button>
-          <span className="font-normal normal-case text-muted-foreground">{nodes.length} campanha{nodes.length === 1 ? '' : 's'}</span>
+    <div className="space-y-3">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '0 2px' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 600, color: PREMIUM.txt2 }}>
+          <Layers size={14} /> Campanhas por objetivo
+        </span>
+        <div style={{ display: 'flex', gap: 14, fontSize: 12, color: PREMIUM.txt3 }}>
+          <button onClick={() => setOpenIds(new Set(collectAllIds(nodes)))} style={{ color: PREMIUM.txt3 }}>Expandir tudo</button>
+          <button onClick={() => setOpenIds(new Set())} style={{ color: PREMIUM.txt3 }}>Recolher tudo</button>
         </div>
       </div>
-      <div className="max-h-[calc(100vh-430px)] min-h-[360px] overflow-auto">
-        {grupos.map((g) => (
-          <ObjetivoSection
-            key={g.objetivo}
-            objetivo={g.objetivo}
-            nodes={g.nodes}
-            selectedId={selectedId}
-            onSelect={onSelect}
-            onQuickPause={onQuickPause}
-            filtroNivel={filtroNivel}
-            filtroCategoria={filtroCategoria}
-            apenasComAcao={apenasComAcao}
-            openIds={openIds}
-            onToggle={toggleOne}
-            open={!closedGroups.has(g.objetivo)}
-            onToggleGroup={() => toggleGroup(g.objetivo)}
-          />
-        ))}
-        {nodes.length === 0 && <p className="p-4 text-sm text-muted-foreground">Nenhuma campanha nesta análise.</p>}
-      </div>
+      {grupos.map((g) => (
+        <ObjetivoBoard
+          key={g.objetivo}
+          objetivo={g.objetivo}
+          nodes={g.nodes}
+          open={!closedGroups.has(g.objetivo)}
+          onToggleGroup={() => toggleGroup(g.objetivo)}
+          selectedId={selectedId}
+          onSelect={onSelect}
+          onQuickPause={onQuickPause}
+          filtroNivel={filtroNivel}
+          filtroCategoria={filtroCategoria}
+          apenasComAcao={apenasComAcao}
+          openIds={openIds}
+          onToggle={toggleOne}
+        />
+      ))}
+      {nodes.length === 0 && <p style={{ padding: 16, fontSize: 14, color: PREMIUM.txt3 }}>Nenhuma campanha nesta análise.</p>}
     </div>
   );
 }
