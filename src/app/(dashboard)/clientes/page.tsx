@@ -58,6 +58,7 @@ export default function ClientesPage() {
   const [segmentFilter, setSegmentFilter]               = useState('');
   const [categories, setCategories]                     = useState<{ id: string; name: string; is_default: boolean }[]>([]);
   const [gestorFilter, setGestorFilter]           = useState('');
+  const [viewMode, setViewMode]                   = useState<'list' | 'grid'>('grid');
   const [sortOrder, setSortOrder]                 = useState<'az' | 'za'>('az');
   const [menuId, setMenuId]                       = useState<string | null>(null);
   const [clientBalances, setClientBalances]        = useState<Record<string, { meta: number | null; google: number | null }>>({});
@@ -436,17 +437,31 @@ export default function ClientesPage() {
 
         {/* View toggles */}
         <div className="flex items-center rounded-lg border border-border bg-card">
-          <button className="flex h-9 w-9 items-center justify-center rounded-l-lg text-muted-foreground/50" title="Lista compacta">
+          <button
+            onClick={() => setViewMode('list')}
+            className={cn(
+              'flex h-9 w-9 items-center justify-center rounded-l-lg transition-colors',
+              viewMode === 'list' ? 'bg-primary/10 text-primary' : 'text-muted-foreground/50 hover:text-foreground'
+            )}
+            title="Lista compacta"
+          >
             <LayoutList className="h-4 w-4" />
           </button>
-          <button className="flex h-9 w-9 items-center justify-center rounded-r-lg bg-primary/10 text-primary" title="Cards compactos">
+          <button
+            onClick={() => setViewMode('grid')}
+            className={cn(
+              'flex h-9 w-9 items-center justify-center rounded-r-lg transition-colors',
+              viewMode === 'grid' ? 'bg-primary/10 text-primary' : 'text-muted-foreground/50 hover:text-foreground'
+            )}
+            title="Cards compactos"
+          >
             <LayoutGrid className="h-4 w-4" />
           </button>
         </div>
       </div>
 
       {/* ── CLIENT LIST ── */}
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+      <div className={cn('grid grid-cols-1 gap-3', viewMode === 'grid' && 'xl:grid-cols-2')}>
         {displayedClients.map(cliente => {
           const finance = getFinancialInfo(cliente.id, cliente.ads_billing_mode);
 
