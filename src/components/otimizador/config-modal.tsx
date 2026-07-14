@@ -17,7 +17,7 @@ import {
 export function ConfigModal({ clientId, clientName, onClose }: { clientId: string; clientName: string; onClose: () => void }) {
   const [config, setConfig] = useState<ClientConfig>({
     cliente_id: clientId, modo_operacao: 'RECOMENDACAO_COM_APROVACAO',
-    analise_dia_semana: 1, acoes_pre_aprovadas: [], min_dias_aprendizado: 7, orcamento_diario_maximo_conta: null,
+    analise_dia_semana: 1, acoes_pre_aprovadas: [], min_dias_aprendizado: 7, orcamento_diario_maximo: null,
     observacoes_fixas: null,
   });
   const [loading, setLoading] = useState(true);
@@ -148,8 +148,8 @@ export function ConfigModal({ clientId, clientName, onClose }: { clientId: strin
               </div>
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-muted-foreground">Orçamento máx. diário (R$)</label>
-                <input type="number" min={0} placeholder="Sem limite" value={config.orcamento_diario_maximo_conta ?? ''}
-                  onChange={(e) => setConfig((prev) => ({ ...prev, orcamento_diario_maximo_conta: e.target.value === '' ? null : Number(e.target.value) }))}
+                <input type="number" min={0} placeholder="Sem limite" value={config.orcamento_diario_maximo ?? ''}
+                  onChange={(e) => setConfig((prev) => ({ ...prev, orcamento_diario_maximo: e.target.value === '' ? null : Number(e.target.value) }))}
                   className="h-10 w-full rounded-[var(--radius)] border border-border bg-background px-3 text-sm text-foreground outline-none focus:border-primary" />
               </div>
             </div>
