@@ -16,6 +16,7 @@ import {
   type OptimizerPeriodKey,
 } from '@/lib/optimizer';
 import { optimizerDateRangeForDays, optimizerDateRangeForPeriod } from '@/lib/optimizer-period-range';
+import { benchmarkParaNicho } from '@/lib/optimizer-benchmarks';
 
 // 300s (mesmo teto do reports/run-once) — a análise manual síncrona soma busca de campanhas
 // (até 24s com fallback 30d) + conjuntos/anúncios (15s) + IA (até 90s); em 60s dava HTTP 504.
@@ -398,6 +399,7 @@ async function fetchCampaignsForClient(clientId: string, origin: string, periodK
     dailyBudget?: number; spend: number; impressions: number; clicks: number;
     leads: number; ctr: number; cpl: number; platform: string;
     accountId?: string; loginCustomerId?: string;
+    searchImprShare?: number; searchBudgetLostIS?: number; searchAbsTopIS?: number;
   }>>;
 }
 
@@ -675,7 +677,12 @@ async function buildPayloadForClient(
   const notasManuais = await loadManualNotesContext(client.id);
 
   const totalGasto = campanhas.reduce((sum, c) => sum + c.gasto, 0);
-  const semMetaConfigurada = !planning?.objetivo && !planning?.cpl_maximo && !planning?.orcamento_diario;
+  // Régua de custo: meta do cliente SEMPRE tem prioridade; sem meta, cai no benchmark do nicho.
+  const nicho = segmentToOptimizerNiche(client.segment ?? undefined);
+  const temMetaCpl = planning?.cpl_meta != null || planning?.cpl_maximo != null;
+  const bench = temMetaCpl ? null : benchmarkParaNicho(nicho);
+  const cplIdeal = planning?.cpl_meta ?? bench?.cpl_ideal ?? null;
+  const cplMaximo = planning?.cpl_maximo ?? bench?.cpl_maximo ?? null;
 
   // Injeta contexto quando os dados são escassos para orientar a IA
   const observacoes: string[] = [];
@@ -683,21 +690,21 @@ async function buildPayloadForClient(
   if (totalGasto === 0) {
     observacoes.push(`ALERTA: A conta possui ${campanhas.length} campanha(s) ativas mas registrou R$ 0,00 em gasto no período de ${period.label}. Diagnostique o motivo da não-entrega (pagamento, aprovação, orçamento esgotado, erro de configuração) e oriente o gestor de forma direta sobre o que verificar agora no Gerenciador de Anúncios.`);
   }
-  if (semMetaConfigurada) {
-    observacoes.push('CONTEXTO: Este cliente ainda não possui metas de CPL, orçamento ou objetivo configurados na plataforma. Faça uma análise baseada nos dados absolutos disponíveis e recomende configurar as metas para análises futuras mais precisas.');
+  if (bench) {
+    observacoes.push(`SEM META CADASTRADA: usei o benchmark do nicho "${nicho}" como régua de referência — custo-alvo ~R$${bench.cpl_ideal} por lead/conversa e teto ~R$${bench.cpl_maximo}. Trate como estimativa de MERCADO (não meta do cliente); recomende cadastrar a meta real do cliente pra afinar as próximas análises.`);
   }
 
   return {
     cliente_id: client.id,
     cliente_nome: client.name,
-    nicho: segmentToOptimizerNiche(client.segment ?? undefined),
+    nicho,
     modo_operacao: client.modo_operacao,
     semana_analise: semana,
     acoes_pre_aprovadas: client.acoes_pre_aprovadas ?? [],
     metas: {
       objetivo_principal: (planning?.objetivo as OptimizerObjective) ?? null,
-      cpl_ideal: planning?.cpl_meta ?? null,
-      cpl_maximo: planning?.cpl_maximo ?? null,
+      cpl_ideal: cplIdeal,
+      cpl_maximo: cplMaximo,
       roas_minimo: planning?.roas_minimo ?? null,
       orcamento_diario_total: planning?.orcamento_diario ?? null,
       orcamento_mensal_total: planning?.orcamento_mensal ?? null,
@@ -979,28 +986,47 @@ async function buildGooglePayloadForClient(
   const historico = await loadDecisionHistory(client.id);
   const notasManuais = await loadManualNotesContext(client.id);
   const totalGasto = campanhas.reduce((sum, c) => sum + c.gasto, 0);
-  const semMetaConfigurada = !planning?.objetivo && !planning?.cpl_maximo && !planning?.orcamento_diario;
+  const nicho = segmentToOptimizerNiche(client.segment ?? undefined);
+  const temMetaCpl = planning?.cpl_meta != null || planning?.cpl_maximo != null;
+  const bench = temMetaCpl ? null : benchmarkParaNicho(nicho);
+  const cplIdeal = planning?.cpl_meta ?? bench?.cpl_ideal ?? null;
+  const cplMaximo = planning?.cpl_maximo ?? bench?.cpl_maximo ?? null;
 
   const observacoes: string[] = [];
   if (notasManuais) observacoes.push(notasManuais);
   if (totalGasto === 0) {
     observacoes.push(`ALERTA: A conta Google Ads possui ${campanhas.length} campanha(s) ativas mas registrou R$ 0,00 em gasto no período de ${period.label}. Diagnostique o motivo (pagamento, aprovação, orçamento) e oriente o gestor sobre o que verificar agora no Google Ads.`);
   }
-  if (semMetaConfigurada) {
-    observacoes.push('CONTEXTO: Este cliente ainda não possui metas de CPL, orçamento ou objetivo configurados. Analise com base nos dados absolutos e recomende configurar as metas.');
+  if (bench) {
+    observacoes.push(`SEM META CADASTRADA: usei o benchmark do nicho "${nicho}" como régua de referência — custo-alvo ~R$${bench.cpl_ideal} por lead/conversa e teto ~R$${bench.cpl_maximo}. Trate como estimativa de MERCADO (não meta do cliente); recomende cadastrar a meta real do cliente.`);
+  }
+  // Sinais próprios do Google Ads (parcela de impressões — só existem em campanhas de Pesquisa).
+  // Perda por ORÇAMENTO = demanda não capturada → sinal forte de ESCALAR. Impression share baixa
+  // = espaço pra ganhar presença. Injetados como contexto; o cérebro decide o que fazer.
+  const sinaisGoogle: string[] = [];
+  for (const c of topCampaigns) {
+    if (c.searchBudgetLostIS != null && c.searchBudgetLostIS >= 10) {
+      sinaisGoogle.push(`"${c.name}": perdeu ${c.searchBudgetLostIS.toFixed(0)}% das impressões por ORÇAMENTO (demanda não capturada — avalie escalar a verba se o custo/resultado estiver saudável).`);
+    }
+    if (c.searchImprShare != null && c.searchImprShare > 0 && c.searchImprShare < 60) {
+      sinaisGoogle.push(`"${c.name}": parcela de impressões de só ${c.searchImprShare.toFixed(0)}% (espaço pra ganhar presença via orçamento, lance ou qualidade do anúncio).`);
+    }
+  }
+  if (sinaisGoogle.length > 0) {
+    observacoes.push(`SINAIS GOOGLE ADS: ${sinaisGoogle.join(' ')}`);
   }
 
   const payload: OptimizerPayloadV2 = {
     cliente_id: client.id,
     cliente_nome: client.name,
-    nicho: segmentToOptimizerNiche(client.segment ?? undefined),
+    nicho,
     modo_operacao: client.modo_operacao,
     semana_analise: semana,
     acoes_pre_aprovadas: client.acoes_pre_aprovadas ?? [],
     metas: {
       objetivo_principal: (planning?.objetivo as OptimizerObjective) ?? null,
-      cpl_ideal: planning?.cpl_meta ?? null,
-      cpl_maximo: planning?.cpl_maximo ?? null,
+      cpl_ideal: cplIdeal,
+      cpl_maximo: cplMaximo,
       roas_minimo: planning?.roas_minimo ?? null,
       orcamento_diario_total: planning?.orcamento_diario ?? null,
       orcamento_mensal_total: planning?.orcamento_mensal ?? null,
