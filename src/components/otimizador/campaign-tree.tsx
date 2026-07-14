@@ -216,6 +216,15 @@ function ObjetivoBoard({ objetivo, nodes, open, onToggleGroup, ...rowProps }: {
         </div>
         <span style={{ padding: '3px 10px', borderRadius: 20, background: `${sevColor}1f`, color: sevColor, fontSize: 12, fontWeight: 600, flex: 'none' }}>{sevLabel}</span>
       </button>
+      {open && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '7px 16px', borderBottom: `1px solid ${PREMIUM.borderSoft}`, fontSize: 10, letterSpacing: '0.04em', textTransform: 'uppercase', color: PREMIUM.txt3 }}>
+          <span style={{ width: 12, flex: 'none' }} />
+          <span style={{ flex: 1, minWidth: 0 }}>Campanha · conjunto · criativo</span>
+          <span style={{ width: 52, textAlign: 'right', flex: 'none' }}>{rotulos.resultado}</span>
+          <span style={{ width: 72, textAlign: 'right', flex: 'none' }}>{rotulos.custo}</span>
+          <span style={{ width: 84, textAlign: 'right', flex: 'none' }}>Ação</span>
+        </div>
+      )}
       {open && nodes.map((n) => (
         <TreeRow key={n.rec_id} node={n} depth={0} {...rowProps} />
       ))}

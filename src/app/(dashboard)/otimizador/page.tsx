@@ -17,6 +17,7 @@ import {
   Presentation,
   Search,
   Settings2,
+  Users,
   WandSparkles,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -289,6 +290,37 @@ export default function OtimizadorPage() {
     }
   }
 
+  // Analisa TODOS os clientes de uma vez (ignora o rodízio por dia). O servidor processa em
+  // paralelo dentro do orçamento de tempo; se não couber todo mundo numa chamada, roda de novo.
+  async function runAnalysisAll() {
+    if (!window.confirm('Analisar TODOS os clientes agora? Pode levar alguns minutos e consumir IA de cada conta. Não feche a página.')) return;
+    setRunLoading(true);
+    setDiagResult(null);
+    setRunMessage('Analisando todos os clientes… isso pode levar alguns minutos. Não feche a página.');
+    try {
+      const params = new URLSearchParams({ period: manualPeriod, forceAi: '1', all: '1' });
+      const res = await fetch(`/api/otimizador/weekly?${params.toString()}`, {
+        method: 'POST', headers: { ...callerHeaders(), 'Content-Type': 'application/json' },
+      });
+      const data = await res.json().catch(() => ({})) as { results?: Array<{ status: string }>; error?: string };
+      if (!res.ok) {
+        setRunMessage(`Erro ao analisar todos: ${data.error || res.statusText || `HTTP ${res.status}`}`);
+        return;
+      }
+      const results = data.results ?? [];
+      const ok = results.filter((r) => r.status === 'ok').length;
+      const semCamp = results.filter((r) => r.status === 'sem_campanhas_ativas').length;
+      const semConexao = results.filter((r) => r.status === 'sem_conexao_meta').length;
+      const erros = results.filter((r) => r.status === 'erro').length;
+      setRunMessage(`Concluído: ${ok} analisada(s) · ${semCamp} sem campanha · ${semConexao} sem conexão · ${erros} com erro (de ${results.length}). Se faltou alguém, rode de novo.`);
+      await Promise.all([loadOverview(), loadTree(contaFiltro)]);
+    } catch (err) {
+      setRunMessage(`Erro ao analisar todos: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setRunLoading(false);
+    }
+  }
+
   async function runAnalysisNow() {
     if (!contaFiltro) return;
     setRunLoading(true);
@@ -424,6 +456,11 @@ export default function OtimizadorPage() {
           <Button onClick={runAnalysisNow} disabled={runLoading || diagLoading || !contaFiltro} size="sm" className="h-10 px-2.5 text-xs">
             {runLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
             {temAnalise ? 'Atualizar análise' : 'Fazer análise'}
+          </Button>
+          <Button variant="outline" onClick={runAnalysisAll} disabled={runLoading || diagLoading} size="sm" className="h-10 px-2.5 text-xs"
+            title="Rodar a análise de todos os clientes de uma vez (ignora o rodízio por dia)">
+            {runLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Users className="h-4 w-4" />}
+            Analisar todos
           </Button>
           {temAnalise && contaAtual && contaAtual.pendencias > 0 && (
             <Link

@@ -170,11 +170,33 @@ type ConnectionRow = {
   token_expiry: string | null;
 };
 
-async function loadClientsForToday(forcedDow?: number, forceClientId?: string): Promise<ClientRow[]> {
+const CLIENT_SELECT = `SELECT c.id, c.name, c.segment,
+        COALESCE(occ.analise_dia_semana, 1) AS analise_dia_semana,
+        COALESCE(occ.modo_operacao, 'RECOMENDACAO_COM_APROVACAO') AS modo_operacao,
+        COALESCE(occ.acoes_pre_aprovadas, '{}') AS acoes_pre_aprovadas,
+        occ.orcamento_diario_maximo, occ.cpr_emergencia,
+        COALESCE(occ.min_conjuntos_ativos, 1) AS min_conjuntos_ativos,
+        COALESCE(occ.max_conjuntos_ativos, 20) AS max_conjuntos_ativos,
+        COALESCE(occ.min_dias_aprendizado, 7) AS min_dias_aprendizado,
+        occ.observacoes_fixas
+   FROM public.clients c
+   LEFT JOIN public.optimizer_client_config occ ON occ.client_id = c.id`;
+
+async function loadClientsForToday(forcedDow?: number, forceClientId?: string, all?: boolean): Promise<ClientRow[]> {
   const dow = forcedDow ?? todayDow();
   const pool = makeServerPool();
   try {
     await ensureOptimizerClientConfigTable(pool);
+    // "Analisar todos": carrega TODOS os clientes ativos, ignorando o rodízio por dia da semana.
+    if (all && !forceClientId) {
+      const { rows } = await pool.query<ClientRow>(
+        `${CLIENT_SELECT}
+          WHERE c.status NOT IN ('Arquivado', 'Inativo')
+            AND COALESCE(occ.ativo, true) = true
+          ORDER BY c.name ASC`,
+      );
+      return rows;
+    }
     if (forceClientId) {
       const { rows } = await pool.query<ClientRow>(
         `SELECT c.id, c.name, c.segment,
@@ -1065,6 +1087,7 @@ type RunOptions = {
   origin: string;
   forceClientId?: string;
   forceAi: boolean;
+  all: boolean;
   period: AnalysisPeriod;
 };
 
@@ -1073,6 +1096,7 @@ function parseRunOptions(request: NextRequest): RunOptions {
     origin: new URL(request.url).origin,
     forceClientId: request.nextUrl.searchParams.get('clientId') ?? undefined,
     forceAi: request.nextUrl.searchParams.get('forceAi') === '1',
+    all: request.nextUrl.searchParams.get('all') === '1',
     period: analysisPeriodFromRequest(request),
   };
 }
@@ -1086,10 +1110,10 @@ async function loadBenchmarksMap(): Promise<Record<OptimizerNiche, NicheBenchmar
   }
 }
 
-async function executeWeekly({ origin, forceClientId, forceAi, period }: RunOptions) {
+async function executeWeekly({ origin, forceClientId, forceAi, all, period }: RunOptions) {
   const startedAt = Date.now();
 
-  const clients = await loadClientsForToday(undefined, forceClientId);
+  const clients = await loadClientsForToday(undefined, forceClientId, all);
   const clientIds = clients.map((c) => c.id);
   const [planningMap, connectionsMap, googleConnMap, benchmarks] = await Promise.all([
     loadPlanning(clientIds),
@@ -1257,7 +1281,7 @@ async function fetchMetaCampaignsRaw(accountId: string, token: string, since: st
 }
 
 async function diagnoseClients(opts: RunOptions): Promise<ClientDiagnostic[]> {
-  const clients = await loadClientsForToday(undefined, opts.forceClientId);
+  const clients = await loadClientsForToday(undefined, opts.forceClientId, opts.all);
   const clientIds = clients.map((c) => c.id);
   const [planningMap, connectionsMap] = await Promise.all([
     loadPlanning(clientIds),
