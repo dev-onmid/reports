@@ -13,10 +13,11 @@ import {
   type OptimizerCampaignV2,
   type OptimizerObjective,
   type OptimizerModo,
+  type OptimizerNiche,
   type OptimizerPeriodKey,
 } from '@/lib/optimizer';
 import { optimizerDateRangeForDays, optimizerDateRangeForPeriod } from '@/lib/optimizer-period-range';
-import { benchmarkParaNicho } from '@/lib/optimizer-benchmarks';
+import { benchmarkParaNicho, loadNicheBenchmarks, type NicheBenchmark } from '@/lib/optimizer-benchmarks';
 
 // 300s (mesmo teto do reports/run-once) — a análise manual síncrona soma busca de campanhas
 // (até 24s com fallback 30d) + conjuntos/anúncios (15s) + IA (até 90s); em 60s dava HTTP 504.
@@ -608,6 +609,7 @@ async function buildPayloadForClient(
   origin: string,
   period: AnalysisPeriod,
   fetchConjuntos: boolean,
+  benchmarks: Record<OptimizerNiche, NicheBenchmark>,
 ): Promise<OptimizerPayloadV2 | null> {
   const semana = currentWeekLabel();
 
@@ -680,7 +682,7 @@ async function buildPayloadForClient(
   // Régua de custo: meta do cliente SEMPRE tem prioridade; sem meta, cai no benchmark do nicho.
   const nicho = segmentToOptimizerNiche(client.segment ?? undefined);
   const temMetaCpl = planning?.cpl_meta != null || planning?.cpl_maximo != null;
-  const bench = temMetaCpl ? null : benchmarkParaNicho(nicho);
+  const bench = temMetaCpl ? null : (benchmarks[nicho] ?? benchmarkParaNicho(nicho));
   const cplIdeal = planning?.cpl_meta ?? bench?.cpl_ideal ?? null;
   const cplMaximo = planning?.cpl_maximo ?? bench?.cpl_maximo ?? null;
 
@@ -932,6 +934,7 @@ async function buildGooglePayloadForClient(
   origin: string,
   period: AnalysisPeriod,
   fetchConjuntos: boolean,
+  benchmarks: Record<OptimizerNiche, NicheBenchmark>,
 ): Promise<{ payload: OptimizerPayloadV2 | null; loginCustomerId?: string }> {
   const semana = currentWeekLabel();
   const FALLBACK_DAYS = 30;
@@ -988,7 +991,7 @@ async function buildGooglePayloadForClient(
   const totalGasto = campanhas.reduce((sum, c) => sum + c.gasto, 0);
   const nicho = segmentToOptimizerNiche(client.segment ?? undefined);
   const temMetaCpl = planning?.cpl_meta != null || planning?.cpl_maximo != null;
-  const bench = temMetaCpl ? null : benchmarkParaNicho(nicho);
+  const bench = temMetaCpl ? null : (benchmarks[nicho] ?? benchmarkParaNicho(nicho));
   const cplIdeal = planning?.cpl_meta ?? bench?.cpl_ideal ?? null;
   const cplMaximo = planning?.cpl_maximo ?? bench?.cpl_maximo ?? null;
 
@@ -1074,15 +1077,25 @@ function parseRunOptions(request: NextRequest): RunOptions {
   };
 }
 
+async function loadBenchmarksMap(): Promise<Record<OptimizerNiche, NicheBenchmark>> {
+  const pool = makeServerPool();
+  try {
+    return await loadNicheBenchmarks(pool);
+  } finally {
+    await pool.end().catch(() => {});
+  }
+}
+
 async function executeWeekly({ origin, forceClientId, forceAi, period }: RunOptions) {
   const startedAt = Date.now();
 
   const clients = await loadClientsForToday(undefined, forceClientId);
   const clientIds = clients.map((c) => c.id);
-  const [planningMap, connectionsMap, googleConnMap] = await Promise.all([
+  const [planningMap, connectionsMap, googleConnMap, benchmarks] = await Promise.all([
     loadPlanning(clientIds),
     loadConnections(clientIds),
     loadGoogleConnections(clientIds),
+    loadBenchmarksMap(),
   ]);
 
   const results: Array<{ clientId: string; clientName: string; status: string; error?: string }> = [];
@@ -1124,7 +1137,7 @@ async function executeWeekly({ origin, forceClientId, forceAi, period }: RunOpti
       try {
         const token = await resolveToken(metaConn.id).catch(() => null);
         const payload = await buildPayloadForClient(
-          client, planningMap[client.id] ?? null, token ?? '', metaConn.account_id, origin, period, fetchConjuntos,
+          client, planningMap[client.id] ?? null, token ?? '', metaConn.account_id, origin, period, fetchConjuntos, benchmarks,
         );
         if (!payload) {
           results.push({ clientId: client.id, clientName: client.name, status: 'sem_campanhas_ativas' });
@@ -1145,7 +1158,7 @@ async function executeWeekly({ origin, forceClientId, forceAi, period }: RunOpti
           results.push({ clientId: client.id, clientName: client.name, status: 'erro', error: '[google] token não resolvido' });
         } else {
           const { payload, loginCustomerId } = await buildGooglePayloadForClient(
-            client, planningMap[client.id] ?? null, gToken, gConn, origin, period, fetchConjuntos,
+            client, planningMap[client.id] ?? null, gToken, gConn, origin, period, fetchConjuntos, benchmarks,
           );
           if (!payload) {
             // Só reporta "sem campanhas" se a Meta também não cobriu (senão o resultado Meta já vale).

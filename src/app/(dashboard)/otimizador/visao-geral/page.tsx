@@ -4,9 +4,11 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, ArrowRight, CheckCircle2, ListChecks, Loader2, ShieldAlert, WandSparkles } from 'lucide-react';
+import { AlertTriangle, ArrowRight, CheckCircle2, ListChecks, Loader2, ShieldAlert, SlidersHorizontal, WandSparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { getAuthSession } from '@/lib/auth-store';
 import type { Client } from '@/lib/mock-data';
+import { BenchmarksModal } from '@/components/otimizador/benchmarks-modal';
 import { SEV, type FilaConta, type Severidade } from '@/lib/optimizer-ui';
 
 // ─── Sala de guerra ─────────────────────────────────────────────────────────
@@ -49,6 +51,8 @@ export default function VisaoGeralPage() {
   const [contas, setContas] = useState<FilaConta[]>([]);
   const [semAnalise, setSemAnalise] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [showBenchmarks, setShowBenchmarks] = useState(false);
+  const isAdmin = getAuthSession()?.role === 'Administrador';
 
   useEffect(() => {
     let alive = true;
@@ -115,6 +119,15 @@ export default function VisaoGeralPage() {
             <p className="text-lg font-bold leading-none text-foreground">{totalPendencias}</p>
             <p className="text-[11px] text-muted-foreground">decisões</p>
           </div>
+          {isAdmin && (
+            <button
+              onClick={() => setShowBenchmarks(true)}
+              className="inline-flex items-center gap-1.5 self-stretch rounded-[var(--radius)] border border-border bg-card px-3 text-sm font-medium text-foreground hover:border-primary/40"
+              title="Editar os benchmarks de custo por nicho (régua quando o cliente não tem meta)"
+            >
+              <SlidersHorizontal className="h-4 w-4" /> Benchmarks
+            </button>
+          )}
           {totalPendencias > 0 && (
             <Link
               href="/otimizador/briefing"
@@ -125,6 +138,8 @@ export default function VisaoGeralPage() {
           )}
         </div>
       </header>
+
+      {showBenchmarks && <BenchmarksModal onClose={() => setShowBenchmarks(false)} />}
 
       {loading ? (
         <div className="flex h-48 items-center justify-center text-sm text-muted-foreground">
