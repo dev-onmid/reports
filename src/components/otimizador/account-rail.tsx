@@ -1,14 +1,10 @@
 "use client";
 
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState, type CSSProperties } from 'react';
 import { ChevronLeft, ChevronRight, Search } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { SEV, type AccountOption } from '@/lib/optimizer-ui';
+import { PREMIUM, SEV_HEX, type AccountOption } from '@/lib/optimizer-ui';
 
-// Rail de contas — troca instantânea. Em vez de um dropdown que o gestor precisa abrir a cada
-// cliente, as contas ficam sempre visíveis em chips com dot de saúde (varre o roster inteiro num
-// olhar) e trocam com 1 clique. Contas com pendência/análise vêm primeiro (ordenação já feita em
-// accountOptions). Busca estreita a lista quando há muitos clientes; o rail rola na horizontal.
+// Rail de contas — troca instantânea (chips sempre visíveis com dot de saúde + busca + scroll).
 export function AccountRail({ contas, value, onChange }: {
   contas: AccountOption[];
   value: string;
@@ -19,62 +15,63 @@ export function AccountRail({ contas, value, onChange }: {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return contas;
-    return contas.filter((c) => c.cliente_nome.toLowerCase().includes(q));
+    return q ? contas.filter((c) => c.cliente_nome.toLowerCase().includes(q)) : contas;
   }, [contas, query]);
 
-  function scrollBy(dir: -1 | 1) {
-    scrollRef.current?.scrollBy({ left: dir * 320, behavior: 'smooth' });
-  }
+  const scrollBy = (dir: -1 | 1) => scrollRef.current?.scrollBy({ left: dir * 320, behavior: 'smooth' });
+
+  const arrow: CSSProperties = {
+    display: 'flex', width: 34, height: 40, flex: 'none', alignItems: 'center', justifyContent: 'center',
+    borderRadius: 10, border: `1px solid ${PREMIUM.border}`, color: PREMIUM.txt3, background: PREMIUM.surf,
+  };
 
   return (
     <div className="flex items-center gap-2">
       <div className="relative w-52 shrink-0">
-        <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+        <Search size={14} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: PREMIUM.txt3 }} />
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Buscar cliente..."
-          className="h-10 w-full rounded-[var(--radius)] border border-border bg-background pl-8 pr-3 text-sm text-foreground outline-none focus:border-primary"
+          style={{
+            height: 40, width: '100%', paddingLeft: 33, paddingRight: 12, fontSize: 13,
+            background: PREMIUM.surf, border: `1px solid ${PREMIUM.border}`, borderRadius: 10, color: PREMIUM.txt, outline: 'none',
+          }}
         />
       </div>
-      <button onClick={() => scrollBy(-1)} className="hidden h-10 w-8 shrink-0 items-center justify-center rounded-[var(--radius)] border border-border text-muted-foreground hover:text-foreground sm:flex" aria-label="Rolar contas para a esquerda">
-        <ChevronLeft className="h-4 w-4" />
-      </button>
+      <button onClick={() => scrollBy(-1)} className="hidden sm:flex" style={arrow} aria-label="Rolar contas para a esquerda"><ChevronLeft size={16} /></button>
       <div ref={scrollRef} className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto pb-1">
         {filtered.map((c) => {
           const active = c.cliente_id === value;
-          const dot = c.tem_analise ? SEV[c.pior_severidade].dot : 'bg-muted-foreground/50';
+          const dot = c.tem_analise ? SEV_HEX[c.pior_severidade] : PREMIUM.txt3;
           return (
             <button
               key={c.cliente_id}
               onClick={() => onChange(c.cliente_id)}
               title={c.cliente_nome}
-              className={cn(
-                'flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full border px-3 py-2 text-sm transition-colors',
-                active
-                  ? 'border-primary bg-primary/10 text-primary'
-                  : 'border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground',
-              )}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8, flex: 'none', whiteSpace: 'nowrap',
+                padding: '8px 13px', borderRadius: 999, fontSize: 13,
+                background: active ? 'rgba(85,245,47,0.12)' : PREMIUM.surf,
+                border: `1px solid ${active ? 'rgba(85,245,47,0.4)' : PREMIUM.border}`,
+                color: active ? PREMIUM.green : PREMIUM.txt2,
+                fontWeight: active ? 600 : 400,
+              }}
             >
-              <span className={cn('h-2 w-2 shrink-0 rounded-full', dot)} />
-              <span className="max-w-[180px] truncate">{c.cliente_nome}</span>
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: dot, flex: 'none', boxShadow: c.tem_analise && c.pior_severidade !== 'ok' ? `0 0 6px ${dot}` : 'none' }} />
+              <span style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.cliente_nome}</span>
               {c.tem_analise && c.pendencias > 0 && (
-                <span className={cn('shrink-0 rounded-full px-1.5 text-[10px] font-semibold', active ? 'bg-primary/20 text-primary' : 'bg-background text-muted-foreground')}>
+                <span style={{ padding: '1px 7px', borderRadius: 999, fontSize: 11, fontWeight: 600, background: active ? 'rgba(85,245,47,0.2)' : 'rgba(255,255,255,0.06)', color: active ? PREMIUM.green : PREMIUM.txt3 }}>
                   {c.pendencias}
                 </span>
               )}
-              {!c.tem_analise && (
-                <span className="shrink-0 rounded-full border border-border bg-background px-1.5 text-[10px] text-muted-foreground">novo</span>
-              )}
+              {!c.tem_analise && <span style={{ fontSize: 10, color: PREMIUM.txt3, border: `1px solid ${PREMIUM.border}`, borderRadius: 999, padding: '0 6px' }}>novo</span>}
             </button>
           );
         })}
-        {filtered.length === 0 && <span className="px-2 text-xs text-muted-foreground">Nenhum cliente encontrado.</span>}
+        {filtered.length === 0 && <span style={{ padding: '0 8px', fontSize: 12, color: PREMIUM.txt3 }}>Nenhum cliente encontrado.</span>}
       </div>
-      <button onClick={() => scrollBy(1)} className="hidden h-10 w-8 shrink-0 items-center justify-center rounded-[var(--radius)] border border-border text-muted-foreground hover:text-foreground sm:flex" aria-label="Rolar contas para a direita">
-        <ChevronRight className="h-4 w-4" />
-      </button>
+      <button onClick={() => scrollBy(1)} className="hidden sm:flex" style={arrow} aria-label="Rolar contas para a direita"><ChevronRight size={16} /></button>
     </div>
   );
 }
