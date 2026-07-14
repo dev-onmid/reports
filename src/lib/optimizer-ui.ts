@@ -74,7 +74,33 @@ export const OTIMIZADOR_VARS: Record<string, string> = {
   '--bg-danger': 'rgba(248,113,113,0.12)',
   '--bg-pro': 'rgba(183,148,255,0.14)',
   '--border-success': 'rgba(52,211,153,0.4)',
+  // Identidade de canal — cor só diz "de onde vem essa campanha", não é estado/severidade, por
+  // isso não reaproveita danger/warning/success/accent (que já significam outra coisa). `-bg` já
+  // vem translúcido pronto — não dá pra montar isso concatenando alpha num var(--...) em runtime.
+  '--channel-google': '#2dd4bf',
+  '--channel-google-bg': 'rgba(45,212,191,0.14)',
+  '--channel-meta': '#60a5fa',
+  '--channel-meta-bg': 'rgba(96,165,250,0.14)',
 };
+
+// Rótulo/cor de cada canal — conta mista (Meta + Google) mostra as duas listas juntas, agrupadas.
+export const CANAL_META: Record<'meta' | 'google', { label: string; color: string; bg: string }> = {
+  google: { label: 'Google Ads', color: 'var(--channel-google)', bg: 'var(--channel-google-bg)' },
+  meta: { label: 'Meta Ads', color: 'var(--channel-meta)', bg: 'var(--channel-meta-bg)' },
+};
+
+// Agrupa a árvore por canal (Meta/Google) — cada grupo depois passa por agruparPorObjetivo.
+// Conta com um canal só devolve 1 grupo (a UI omite o cabeçalho de canal nesse caso).
+export function agruparPorCanal(nodes: TreeNode[]): Array<{ canal: 'meta' | 'google'; nodes: TreeNode[] }> {
+  const groups = new Map<'meta' | 'google', TreeNode[]>();
+  for (const n of nodes) {
+    const canal = n.canal === 'google' ? 'google' : 'meta';
+    const list = groups.get(canal);
+    if (list) list.push(n); else groups.set(canal, [n]);
+  }
+  // Google primeiro só por convenção de leitura estável — não há hierarquia de importância aqui.
+  return (['google', 'meta'] as const).filter((c) => groups.has(c)).map((canal) => ({ canal, nodes: groups.get(canal)! }));
+}
 
 // ─── Tipos de tela ─────────────────────────────────────────────────────────
 

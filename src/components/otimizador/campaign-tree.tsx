@@ -14,7 +14,9 @@ import {
 } from 'lucide-react';
 import { CreativeThumb } from '@/components/otimizador/creative-thumb';
 import {
+  CANAL_META,
   SEV_HEX,
+  agruparPorCanal,
   agruparPorObjetivo,
   categoriaDoNode,
   collectAllIds,
@@ -280,14 +282,19 @@ export function CampaignTable({ nodes, selectedId, onSelect, onQuickPause, filtr
     if (next.has(id)) next.delete(id); else next.add(id);
     return next;
   });
-  const toggleGroup = (objetivo: string) => setClosedGroups((prev) => {
+  // Chave composta canal+objetivo — sem isso, "Geração de leads" do Google e da Meta
+  // compartilhariam a mesma chave de collapse (colapsar um recolhia o outro também).
+  const toggleGroup = (key: string) => setClosedGroups((prev) => {
     const next = new Set(prev);
-    if (next.has(objetivo)) next.delete(objetivo); else next.add(objetivo);
+    if (next.has(key)) next.delete(key); else next.add(key);
     try { window.localStorage.setItem(CLOSED_GROUPS_KEY, JSON.stringify([...next])); } catch { /* ignore */ }
     return next;
   });
 
-  const grupos = useMemo(() => agruparPorObjetivo(nodes), [nodes]);
+  // Conta mista (Meta+Google) mostra os dois canais juntos, cada um em sua seção — sem toggle,
+  // sem precisar trocar de tela pra ver o outro canal.
+  const canaisGrupos = useMemo(() => agruparPorCanal(nodes), [nodes]);
+  const multiCanal = canaisGrupos.length > 1;
 
   return (
     <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -295,25 +302,39 @@ export function CampaignTable({ nodes, selectedId, onSelect, onQuickPause, filtr
         <button onClick={() => setOpenIds(new Set(collectAllIds(nodes)))} style={{ color: 'var(--text-muted)' }}>Expandir tudo</button>
         <button onClick={() => setOpenIds(new Set())} style={{ color: 'var(--text-muted)' }}>Recolher tudo</button>
       </div>
-      {grupos.map((g) => (
-        <ObjetivoBoard
-          key={g.objetivo}
-          objetivo={g.objetivo}
-          nodes={g.nodes}
-          open={!closedGroups.has(g.objetivo)}
-          onToggleGroup={() => toggleGroup(g.objetivo)}
-          selectedId={selectedId}
-          onSelect={onSelect}
-          onQuickPause={onQuickPause}
-          filtroNivel={filtroNivel}
-          filtroCategoria={filtroCategoria}
-          apenasComAcao={apenasComAcao}
-          openIds={openIds}
-          onToggle={toggleOne}
-          cplIdeal={cplIdeal}
-          cplMaximo={cplMaximo}
-        />
-      ))}
+      {canaisGrupos.map(({ canal, nodes: canalNodes }) => {
+        const canalMeta = CANAL_META[canal];
+        const grupos = agruparPorObjetivo(canalNodes);
+        return (
+          <div key={canal} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {multiCanal && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 4px', fontSize: 10, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: canalMeta.color }}>
+                <span style={{ width: 7, height: 7, borderRadius: '50%', background: canalMeta.color, flex: 'none' }} />
+                {canalMeta.label} · {canalNodes.length} campanha{canalNodes.length === 1 ? '' : 's'}
+              </div>
+            )}
+            {grupos.map((g) => (
+              <ObjetivoBoard
+                key={`${canal}:${g.objetivo}`}
+                objetivo={g.objetivo}
+                nodes={g.nodes}
+                open={!closedGroups.has(`${canal}:${g.objetivo}`)}
+                onToggleGroup={() => toggleGroup(`${canal}:${g.objetivo}`)}
+                selectedId={selectedId}
+                onSelect={onSelect}
+                onQuickPause={onQuickPause}
+                filtroNivel={filtroNivel}
+                filtroCategoria={filtroCategoria}
+                apenasComAcao={apenasComAcao}
+                openIds={openIds}
+                onToggle={toggleOne}
+                cplIdeal={cplIdeal}
+                cplMaximo={cplMaximo}
+              />
+            ))}
+          </div>
+        );
+      })}
       {nodes.length === 0 && <p style={{ padding: 16, fontSize: 12, color: 'var(--text-muted)' }}>Nenhuma campanha nesta análise.</p>}
     </div>
   );

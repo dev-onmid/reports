@@ -1,7 +1,6 @@
 "use client";
 
 import type { CSSProperties } from 'react';
-import { ChevronRight, Eye } from 'lucide-react';
 import { categoriaDoNode, type Categoria, type NivelFiltro, type TreeNode } from '@/lib/optimizer-ui';
 
 const CARD: Record<'pausar' | 'revisar' | 'manter' | 'escalar', { label: string; fg: string; bg: string }> = {
@@ -22,47 +21,26 @@ export function QuickDecisionCards({ nodes, active, onSelect }: {
   const grid: Array<'pausar' | 'revisar' | 'manter' | 'escalar'> = ['pausar', 'revisar', 'manter', 'escalar'];
 
   return (
-    <div className="space-y-2">
-      <div className="grid grid-cols-4 gap-[6px]">
-        {grid.map((cat) => {
-          const meta = CARD[cat];
-          const isActive = active === cat;
-          return (
-            <button
-              key={cat}
-              onClick={() => onSelect(isActive ? null : cat)}
-              style={{
-                textAlign: 'center', padding: '7px 8px',
-                background: isActive ? meta.bg : 'var(--surface-2)',
-                border: `0.5px solid ${isActive ? meta.fg : 'var(--border)'}`,
-                borderRadius: 8, transition: 'all .15s',
-              }}
-            >
-              <span style={{ display: 'block', fontSize: 18, fontWeight: 500, lineHeight: 1, color: meta.fg }}>{counts[cat]}</span>
-              <span style={{ display: 'block', fontSize: 10, color: 'var(--text-secondary)', marginTop: 1 }}>{meta.label}</span>
-            </button>
-          );
-        })}
-      </div>
-      {counts.investigar > 0 && (
-        <button
-          onClick={() => onSelect(active === 'investigar' ? null : 'investigar')}
-          style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, width: '100%', padding: '10px 14px',
-            background: active === 'investigar' ? 'var(--bg-pro)' : 'var(--surface-1)',
-            border: `0.5px solid ${active === 'investigar' ? 'var(--text-pro)' : 'var(--border)'}`,
-            borderRadius: 10, fontSize: 12, color: 'var(--text-secondary)',
-          }}
-        >
-          <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-            <Eye size={14} style={{ color: 'var(--text-pro)', flex: 'none' }} />
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              <b style={{ color: 'var(--text-primary)' }}>{counts.investigar}</b> item(ns) para investigar antes de decidir
-            </span>
-          </span>
-          <ChevronRight size={14} style={{ flex: 'none' }} />
-        </button>
-      )}
+    <div className="grid grid-cols-4 gap-[6px]">
+      {grid.map((cat) => {
+        const meta = CARD[cat];
+        const isActive = active === cat;
+        return (
+          <button
+            key={cat}
+            onClick={() => onSelect(isActive ? null : cat)}
+            style={{
+              textAlign: 'center', padding: '7px 8px',
+              background: isActive ? meta.bg : 'var(--surface-2)',
+              border: `0.5px solid ${isActive ? meta.fg : 'var(--border)'}`,
+              borderRadius: 8, transition: 'all .15s',
+            }}
+          >
+            <span style={{ display: 'block', fontSize: 18, fontWeight: 500, lineHeight: 1, color: meta.fg }}>{counts[cat]}</span>
+            <span style={{ display: 'block', fontSize: 10, color: 'var(--text-secondary)', marginTop: 1 }}>{meta.label}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }

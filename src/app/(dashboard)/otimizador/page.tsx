@@ -21,7 +21,6 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { callerHeaders, getAuthSession } from '@/lib/auth-store';
-import { cn } from '@/lib/utils';
 import type { Client } from '@/lib/mock-data';
 import { OPTIMIZER_PERIODS } from '@/lib/optimizer';
 import type { OptimizerPeriodKey } from '@/lib/optimizer';
@@ -67,9 +66,9 @@ export default function OtimizadorPage() {
   const [categoriaFiltro, setCategoriaFiltro] = useState<Categoria | null>(null);
   const [nivelFiltro, setNivelFiltro] = useState<NivelFiltro>('todos');
   const [apenasComAcao, setApenasComAcao] = useState(false);
-  // Canal exibido (conta mista Meta+Google tem análise separada por plataforma). `canais` = quais
-  // têm análise recente; o toggle só aparece quando há os dois.
-  const [canal, setCanal] = useState<'meta' | 'google' | null>(null);
+  // Conta mista (Meta + Google) tem análise separada por plataforma — a rota /arvore já devolve
+  // os dois canais juntos (cada nó vem com `canal`), a lista agrupa por canal em vez de precisar
+  // de um toggle pra trocar de visão. `canais` só informa quais estão disponíveis.
   const [canais, setCanais] = useState<string[]>([]);
 
   // Admin: análise manual
@@ -119,23 +118,21 @@ export default function OtimizadorPage() {
 
   useEffect(() => { void loadOverview(); }, []);
 
-  async function loadTree(clientId: string, canalArg?: 'meta' | 'google' | null) {
+  async function loadTree(clientId: string) {
     if (!clientId) { setTreeNodes([]); setResumo(null); setGeneratedAt(null); setCanais([]); return; }
     setTreeLoading(true);
     setTreeError(null);
     try {
-      const canalQs = canalArg ? `&canal=${canalArg}` : '';
-      const res = await fetch(`/api/otimizador/arvore?clientId=${encodeURIComponent(clientId)}&hours=200${canalQs}`);
+      const res = await fetch(`/api/otimizador/arvore?clientId=${encodeURIComponent(clientId)}&hours=200`);
       if (!res.ok) {
         setTreeError(`Não foi possível carregar a árvore (HTTP ${res.status}).`);
         return;
       }
-      const data = await res.json() as { campanhas: TreeNode[]; resumo: ArvoreResumo | null; generated_at: string | null; canal?: 'meta' | 'google' | null; canais?: string[] };
+      const data = await res.json() as { campanhas: TreeNode[]; resumo: ArvoreResumo | null; generated_at: string | null; canais?: string[] };
       setTreeNodes(data.campanhas ?? []);
       setResumo(data.resumo);
       setGeneratedAt(data.generated_at);
       setCanais(data.canais ?? []);
-      if (data.canal === 'meta' || data.canal === 'google') setCanal(data.canal);
       setSelectedId(null);
     } catch {
       setTreeError('Falha de rede ao carregar a árvore.');
@@ -144,14 +141,7 @@ export default function OtimizadorPage() {
     }
   }
 
-  // Troca de conta reseta o canal (pega a análise mais recente de qualquer plataforma).
-  useEffect(() => { setCanal(null); void loadTree(contaFiltro, null); }, [contaFiltro]);
-
-  function switchCanal(c: 'meta' | 'google') {
-    if (c === canal) return;
-    setCanal(c);
-    void loadTree(contaFiltro, c);
-  }
+  useEffect(() => { void loadTree(contaFiltro); }, [contaFiltro]);
 
   const flatNodes = useMemo(() => flattenTree(treeNodes), [treeNodes]);
   const selectedNode = useMemo(() => flatNodes.find((n) => n.rec_id === selectedId) ?? null, [flatNodes, selectedId]);
@@ -578,27 +568,9 @@ export default function OtimizadorPage() {
                     style={{ padding: '8px 12px', borderBottom: '0.5px solid var(--border)' }}
                   >
                     <span style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500 }}>
-                      Campanhas{canal ? ` · ${canal === 'meta' ? 'Meta Ads' : 'Google Ads'}` : ''}
+                      Campanhas{canais.length > 1 ? ' · Meta + Google' : ''}
                     </span>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <FilterChips nivel={nivelFiltro} onNivel={setNivelFiltro} apenasComAcao={apenasComAcao} onApenasComAcao={setApenasComAcao} />
-                      {canais.length > 1 && (
-                        <div className="flex items-center gap-0.5 rounded-full border border-border p-0.5" title="Este cliente tem análise de Meta e Google — alterne entre elas">
-                          {(['meta', 'google'] as const).map((c) => (
-                            <button
-                              key={c}
-                              onClick={() => switchCanal(c)}
-                              className={cn(
-                                'rounded-full px-3 py-1 text-xs font-semibold transition-colors',
-                                canal === c ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground',
-                              )}
-                            >
-                              {c === 'meta' ? 'Meta Ads' : 'Google Ads'}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+                    <FilterChips nivel={nivelFiltro} onNivel={setNivelFiltro} apenasComAcao={apenasComAcao} onApenasComAcao={setApenasComAcao} />
                   </div>
                   <CampaignTable
                     nodes={treeNodes}

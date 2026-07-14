@@ -16,6 +16,7 @@ import {
 import { cn } from '@/lib/utils';
 import { CreativeThumb } from '@/components/otimizador/creative-thumb';
 import {
+  CANAL_META,
   NIVEL_BADGE,
   NIVEL_LABEL,
   adManagerUrl,
@@ -98,6 +99,10 @@ export function DecisionPanel({ node, busy, onApply, onJump }: {
         <div className="min-w-0 flex-1">
           <p style={{ fontSize: 12, fontWeight: 500, lineHeight: 1.4, color: 'var(--text-primary)' }}>{tituloGuiado}</p>
           <div className="flex flex-wrap items-center gap-1" style={{ marginTop: 4 }}>
+            <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 10, background: CANAL_META[node.canal].bg, color: CANAL_META[node.canal].color, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+              <span style={{ width: 5, height: 5, borderRadius: '50%', background: CANAL_META[node.canal].color }} />
+              {CANAL_META[node.canal].label}
+            </span>
             <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 10, background: toneToBadgeVars(prioridade.tone).bg, color: toneToBadgeVars(prioridade.tone).fg }}>Prioridade {prioridade.label.toLowerCase()}</span>
             <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 10, background: toneToBadgeVars(risco.tone).bg, color: toneToBadgeVars(risco.tone).fg }}>Risco {risco.label.toLowerCase()}</span>
             <span className={cn('rounded px-1.5 py-0.5 text-[9px] font-semibold', NIVEL_BADGE[node.nivel])}>{NIVEL_LABEL[node.nivel]} · {entrega.label}</span>
