@@ -74,7 +74,9 @@ export type ClientConfig = {
   analise_dia_semana: number;
   acoes_pre_aprovadas: string[];
   min_dias_aprendizado: number;
-  orcamento_diario_maximo_conta: number | null;
+  // Mesmo nome da coluna no banco e do campo lido/gravado pela rota config/[clientId]
+  // (antes era orcamento_diario_maximo_conta na UI, que nunca casava → orçamento não salvava).
+  orcamento_diario_maximo: number | null;
   observacoes_fixas: string | null;
 };
 
@@ -100,10 +102,16 @@ export const MODO_DESC: Record<OptimizerModo, string> = {
   AUTOMATICO_TOTAL: 'Executa todas as ações recomendadas automaticamente.',
 };
 
+// Vocabulário canônico das ações pré-aprovadas. Tem que bater EXATAMENTE com o que a checagem
+// de auto-execução espera em sanitizeOptimizerOutputV2 (optimizer.ts): ela faz
+// `a.acao.toLowerCase().replace('ajustar_orcamento','ajustar_orcamento_reduzir')`, ou seja,
+// procura por 'pausar', 'ativar' ou 'ajustar_orcamento_reduzir' na lista. Qualquer outro valor
+// (ex: 'PAUSAR' ou 'pausar_conjunto') nunca casa → a ação nunca executa sozinha. "Ajustar
+// orçamento" cobre subir E reduzir (o replace mapeia todo AJUSTAR_ORCAMENTO pra '..._reduzir').
 export const ACOES_PRE_APROVADAS_OPCOES = [
-  { value: 'PAUSAR', label: 'Pausar conjuntos/anúncios' },
-  { value: 'ATIVAR', label: 'Ativar conjuntos/anúncios' },
-  { value: 'AJUSTAR_ORCAMENTO', label: 'Ajustar orçamento' },
+  { value: 'pausar', label: 'Pausar conjuntos/anúncios' },
+  { value: 'ativar', label: 'Ativar conjuntos/anúncios' },
+  { value: 'ajustar_orcamento_reduzir', label: 'Ajustar orçamento' },
 ];
 
 // ─── Severidade / categorias / níveis ────────────────────────────────────────

@@ -1,3 +1,4 @@
+import type { Pool } from 'pg';
 import type { OptimizerNiche } from '@/lib/optimizer';
 
 // ─── Benchmarks de custo por nicho ──────────────────────────────────────────
@@ -29,4 +30,42 @@ export const NICHE_BENCHMARKS: Record<OptimizerNiche, NicheBenchmark> = {
 
 export function benchmarkParaNicho(nicho: OptimizerNiche): NicheBenchmark {
   return NICHE_BENCHMARKS[nicho] ?? NICHE_BENCHMARKS.outro;
+}
+
+// ─── Override editável via banco ─────────────────────────────────────────────
+// A agência pode afinar os benchmarks pela tela (rota /api/otimizador/benchmarks). Os valores do
+// banco sobrescrevem os defaults do arquivo; nicho sem override cai no default. Se a tabela não
+// existir ou a query falhar, tudo cai nos defaults — nunca quebra a análise.
+
+export async function ensureNicheBenchmarksTable(pool: Pool): Promise<void> {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS public.optimizer_niche_benchmarks (
+      nicho       TEXT PRIMARY KEY,
+      cpl_ideal   NUMERIC NOT NULL,
+      cpl_maximo  NUMERIC NOT NULL,
+      updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_by  TEXT
+    );
+  `).catch(() => {});
+}
+
+// Benchmarks efetivos: defaults do arquivo com os overrides do banco por cima.
+export async function loadNicheBenchmarks(pool: Pool): Promise<Record<OptimizerNiche, NicheBenchmark>> {
+  const merged: Record<OptimizerNiche, NicheBenchmark> = { ...NICHE_BENCHMARKS };
+  try {
+    await ensureNicheBenchmarksTable(pool);
+    const { rows } = await pool.query<{ nicho: string; cpl_ideal: string; cpl_maximo: string }>(
+      `SELECT nicho, cpl_ideal, cpl_maximo FROM public.optimizer_niche_benchmarks`,
+    );
+    for (const r of rows) {
+      const ideal = Number(r.cpl_ideal);
+      const maximo = Number(r.cpl_maximo);
+      if (r.nicho in merged && Number.isFinite(ideal) && Number.isFinite(maximo)) {
+        merged[r.nicho as OptimizerNiche] = { cpl_ideal: ideal, cpl_maximo: maximo };
+      }
+    }
+  } catch {
+    // fallback silencioso nos defaults
+  }
+  return merged;
 }

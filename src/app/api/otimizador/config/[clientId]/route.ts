@@ -18,7 +18,11 @@ export type OptimizerClientConfig = {
 };
 
 const MODOS_VALIDOS = ['DIAGNOSTICO_APENAS', 'RECOMENDACAO_COM_APROVACAO', 'AUTOMATICO_PARCIAL', 'AUTOMATICO_TOTAL'];
-const ACOES_VALIDAS = ['pausar_conjunto', 'pausar_anuncio', 'ativar_conjunto', 'ativar_anuncio', 'ajustar_orcamento_reduzir', 'ajustar_orcamento_aumentar'];
+// Vocabulário canônico das ações pré-aprovadas — tem que bater com a checagem de auto-execução
+// em sanitizeOptimizerOutputV2 (procura 'pausar' | 'ativar' | 'ajustar_orcamento_reduzir') e com
+// ACOES_PRE_APROVADAS_OPCOES na UI. Antes esta lista usava 'pausar_conjunto' etc., que a UI nunca
+// enviava → o filtro descartava tudo e nenhuma ação pré-aprovada era salva.
+const ACOES_VALIDAS = ['pausar', 'ativar', 'ajustar_orcamento_reduzir'];
 
 async function autoAssignDay(pool: ReturnType<typeof makeServerPool>): Promise<number> {
   const { rows } = await pool.query<{ analise_dia_semana: number; total: string }>(
