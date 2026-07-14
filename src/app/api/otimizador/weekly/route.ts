@@ -1182,7 +1182,7 @@ async function executeWeekly({ origin, forceClientId, forceAi, all, period }: Ru
       try {
         const gToken = await resolveGoogleToken(gConn.connectionId).catch(() => null);
         if (!gToken) {
-          outcomes.push({ canal: 'google', status: 'erro', error: '[google] token não resolvido' });
+          outcomes.push({ canal: 'google', status: 'erro', error: 'autenticação falhou — reconecte o Google Ads deste cliente em Integrações (a conexão pode ter expirado)' });
         } else {
           const { payload, loginCustomerId } = await buildGooglePayloadForClient(
             client, planningMap[client.id] ?? null, gToken, gConn, origin, period, fetchConjuntos, benchmarks,
@@ -1206,12 +1206,18 @@ async function executeWeekly({ origin, forceClientId, forceAi, all, period }: Ru
       results.push({ clientId: client.id, clientName: client.name, status: 'ok', canais_ok: okCanais });
       return;
     }
-    const erro = outcomes.find((o) => o.status === 'erro');
-    if (erro) {
-      results.push({ clientId: client.id, clientName: client.name, status: 'erro', error: erro.error });
+    // Um canal só: preserva o status limpo (sem_campanhas / erro) pra mensagem amigável.
+    if (outcomes.length === 1) {
+      results.push({ clientId: client.id, clientName: client.name, status: outcomes[0].status, error: outcomes[0].error });
       return;
     }
-    results.push({ clientId: client.id, clientName: client.name, status: 'sem_campanhas_ativas' });
+    // Dois canais, nenhum deu certo: mostra o desfecho de CADA um (senão um esconde o outro).
+    const resumo = outcomes.map((o) => {
+      const nome = o.canal === 'meta' ? 'Meta' : 'Google';
+      const txt = o.status === 'sem_campanhas_ativas' ? 'sem campanhas ativas no período' : (o.error ?? 'erro');
+      return `${nome}: ${txt}`;
+    }).join(' · ');
+    results.push({ clientId: client.id, clientName: client.name, status: 'erro', error: resumo });
   }
 
   // Processa em lotes paralelos, respeitando o orçamento de tempo
