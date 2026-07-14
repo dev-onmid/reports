@@ -11,7 +11,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { getAuthSession } from '@/lib/auth-store';
-import { effectiveField, normalizeContact } from '@/lib/leadlovers-fields';
+import { effectiveField, normalizeContact, looksLikeHeaderRow, inferContactsFromRows } from '@/lib/leadlovers-fields';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -132,7 +132,7 @@ function nthBusinessDay(startISO: string, nBusinessDays: number): string {
   return toISODate(cur);
 }
 
-function parseSheet(file: File): Promise<{ rows: ContactRow[]; headers: string[] }> {
+function parseSheet(file: File): Promise<{ rows: ContactRow[]; headers: string[]; headerless: boolean }> {
   // .csv precisa ser lido como texto (readAsText), não como bytes binários: lido
   // como ArrayBuffer o SheetJS não decodifica UTF-8 corretamente (acentos viram
   // mojibake, "João" -> "JoÃ£o") e em alguns casos nem separa as colunas direito.
@@ -143,20 +143,32 @@ function parseSheet(file: File): Promise<{ rows: ContactRow[]; headers: string[]
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
-        let json: Record<string, unknown>[];
-        if (isCsv) {
-          const text = (e.target!.result as string).replace(/^﻿/, ''); // remove BOM
-          const wb = XLSX.read(text, { type: 'string' });
-          const ws = wb.Sheets[wb.SheetNames[0]];
-          json = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: '' });
-        } else {
-          const data = new Uint8Array(e.target!.result as ArrayBuffer);
-          const wb = XLSX.read(data, { type: 'array' });
-          const ws = wb.Sheets[wb.SheetNames[0]];
-          json = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: '' });
-        }
+        const ws = isCsv
+          ? (() => {
+              const text = (e.target!.result as string).replace(/^﻿/, ''); // remove BOM
+              const wb = XLSX.read(text, { type: 'string' });
+              return wb.Sheets[wb.SheetNames[0]];
+            })()
+          : (() => {
+              const data = new Uint8Array(e.target!.result as ArrayBuffer);
+              const wb = XLSX.read(data, { type: 'array' });
+              return wb.Sheets[wb.SheetNames[0]];
+            })();
+
+        let json = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: '' });
         if (json.length === 0) { reject(new Error('Planilha vazia ou sem linhas válidas')); return; }
-        resolve({ rows: json as ContactRow[], headers: Object.keys(json[0]) });
+
+        // Muitas listas exportadas não têm linha de cabeçalho (a 1ª linha já é
+        // dado). Se nenhuma coluna bate com nome/email/telefone/empresa conhecidos,
+        // reparse tratando a linha 1 como dado também e infere as colunas pelo
+        // conteúdo (e-mail = tem @, telefone = só dígitos, resto = nome).
+        const headerless = !looksLikeHeaderRow(Object.keys(json[0]));
+        if (headerless) {
+          const aoa = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: '' });
+          json = inferContactsFromRows(aoa);
+        }
+
+        resolve({ rows: json as ContactRow[], headers: Object.keys(json[0]), headerless });
       } catch {
         reject(new Error('Não foi possível ler o arquivo. Verifique se é .xlsx, .xls ou .csv'));
       }
@@ -199,6 +211,7 @@ function NewCampaignWizard({
 
   // Passo 2 — contatos
   const [rows, setRows] = useState<ContactRow[]>([]);
+  const [headerless, setHeaderless] = useState(false);
   const [dragging, setDragging] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -225,8 +238,8 @@ function NewCampaignWizard({
 
   async function loadFile(file: File) {
     try {
-      const { rows: r } = await parseSheet(file);
-      setRows(r); setError('');
+      const { rows: r, headerless: hl } = await parseSheet(file);
+      setRows(r); setHeaderless(hl); setError('');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Erro ao ler planilha');
     }
@@ -399,6 +412,13 @@ function NewCampaignWizard({
             <p className="mt-2 text-xs text-muted-foreground">Colunas: <span className="text-foreground">Nome, Email, Telefone, Empresa</span> (outros campos aceitos)</p>
             <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) loadFile(f); }} />
           </div>
+
+          {rows.length > 0 && headerless && (
+            <div className="flex items-center gap-2 rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-400">
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              Essa planilha não tem cabeçalho — identificamos a coluna com &quot;@&quot; como Email e a outra como Nome automaticamente. Confira o preview abaixo.
+            </div>
+          )}
 
           {rows.length > 0 && (
             <div className="overflow-x-auto rounded-xl border border-border">
