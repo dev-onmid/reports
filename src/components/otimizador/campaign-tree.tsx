@@ -25,11 +25,18 @@ import {
   hookBarTone,
   rotulosDoGrupo,
   videoRetencaoResumo,
+  vsMetaLabel,
   type Categoria,
   type NivelFiltro,
   type Severidade,
   type TreeNode,
 } from '@/lib/optimizer-ui';
+
+const VS_META_TONE: Record<'success' | 'danger' | 'neutral', string> = {
+  success: PREMIUM.emerald,
+  danger: PREMIUM.red,
+  neutral: PREMIUM.txt3,
+};
 
 const NIVEL_TAG: Record<string, { label: string; color: string; bg: string }> = {
   campaign: { label: 'CAMPANHA', color: PREMIUM.purple, bg: 'rgba(123,44,255,0.15)' },
@@ -91,7 +98,7 @@ function acaoDoNode(node: TreeNode): { label: string; kind: 'pausar' | 'escalar'
   return null;
 }
 
-function TreeRow({ node, depth, selectedId, onSelect, onQuickPause, filtroNivel, filtroCategoria, apenasComAcao, openIds, onToggle }: {
+function TreeRow({ node, depth, selectedId, onSelect, onQuickPause, filtroNivel, filtroCategoria, apenasComAcao, openIds, onToggle, cplIdeal, cplMaximo }: {
   node: TreeNode;
   depth: number;
   selectedId: string | null;
@@ -102,6 +109,8 @@ function TreeRow({ node, depth, selectedId, onSelect, onQuickPause, filtroNivel,
   apenasComAcao: boolean;
   openIds: Set<string>;
   onToggle: (id: string) => void;
+  cplIdeal: number | null;
+  cplMaximo: number | null;
 }) {
   function subtreeMatches(n: TreeNode): boolean {
     const own = (filtroNivel === 'todos' || n.nivel === filtroNivel)
@@ -125,15 +134,16 @@ function TreeRow({ node, depth, selectedId, onSelect, onQuickPause, filtroNivel,
   const metricaCusto = node.metricas_chave.find((m) => /custo|cpl|cpa/i.test(m.rotulo));
   const metricaResultado = node.metricas_chave.find((m) => m.rotulo !== 'Gasto' && m !== metricaCusto);
   const custoColor = node.severidade === 'urgente' ? PREMIUM.red : node.severidade === 'ok' ? PREMIUM.emerald : PREMIUM.txt;
+  const vsMeta = vsMetaLabel(metricaCusto?.valor, cplIdeal, cplMaximo);
 
   return (
     <>
       <div
         onClick={() => onSelect(node)}
         style={{
-          display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer',
-          padding: `11px 16px 11px ${16 + depth * 18}px`,
-          borderBottom: `1px solid ${PREMIUM.borderSoft}`,
+          display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',
+          padding: `10px 16px 10px ${16 + depth * 18}px`,
+          borderBottom: `0.5px solid ${PREMIUM.borderSoft}`,
           background: selected ? 'rgba(85,245,47,0.06)' : cat === 'pausar' ? 'rgba(248,113,113,0.04)' : 'transparent',
           opacity: inativo ? 0.45 : 1,
         }}
@@ -161,6 +171,7 @@ function TreeRow({ node, depth, selectedId, onSelect, onQuickPause, filtroNivel,
 
         <div style={{ width: 52, textAlign: 'right', fontSize: 13, color: PREMIUM.txt, flex: 'none' }}>{metricaResultado?.valor ?? '—'}</div>
         <div style={{ width: 72, textAlign: 'right', fontSize: 13, fontWeight: 500, color: custoColor, flex: 'none' }}>{metricaCusto?.valor ?? '—'}</div>
+        <div style={{ width: 80, textAlign: 'right', fontSize: 11, color: vsMeta ? VS_META_TONE[vsMeta.tone] : PREMIUM.txt3, flex: 'none' }}>{vsMeta?.text ?? '—'}</div>
         <div style={{ width: 84, textAlign: 'right', flex: 'none' }}>
           {acao?.kind === 'pausar' ? (
             <button
@@ -177,7 +188,8 @@ function TreeRow({ node, depth, selectedId, onSelect, onQuickPause, filtroNivel,
 
       {open && hasChildren && (node.filhos as TreeNode[]).map((child) => (
         <TreeRow key={child.rec_id} node={child} depth={depth + 1} selectedId={selectedId} onSelect={onSelect} onQuickPause={onQuickPause}
-          filtroNivel={filtroNivel} filtroCategoria={filtroCategoria} apenasComAcao={apenasComAcao} openIds={openIds} onToggle={onToggle} />
+          filtroNivel={filtroNivel} filtroCategoria={filtroCategoria} apenasComAcao={apenasComAcao} openIds={openIds} onToggle={onToggle}
+          cplIdeal={cplIdeal} cplMaximo={cplMaximo} />
       ))}
     </>
   );
@@ -196,6 +208,8 @@ function ObjetivoBoard({ objetivo, nodes, open, onToggleGroup, ...rowProps }: {
   apenasComAcao: boolean;
   openIds: Set<string>;
   onToggle: (id: string) => void;
+  cplIdeal: number | null;
+  cplMaximo: number | null;
 }) {
   const rotulos = rotulosDoGrupo(nodes);
   const pior = piorSeveridade(nodes);
@@ -222,6 +236,7 @@ function ObjetivoBoard({ objetivo, nodes, open, onToggleGroup, ...rowProps }: {
           <span style={{ flex: 1, minWidth: 0 }}>Campanha · conjunto · criativo</span>
           <span style={{ width: 52, textAlign: 'right', flex: 'none' }}>{rotulos.resultado}</span>
           <span style={{ width: 72, textAlign: 'right', flex: 'none' }}>{rotulos.custo}</span>
+          <span style={{ width: 80, textAlign: 'right', flex: 'none' }}>vs. meta</span>
           <span style={{ width: 84, textAlign: 'right', flex: 'none' }}>Ação</span>
         </div>
       )}
@@ -241,7 +256,7 @@ function loadClosedGroups(): Set<string> {
   } catch { return new Set(); }
 }
 
-export function CampaignTable({ nodes, selectedId, onSelect, onQuickPause, filtroNivel, filtroCategoria, apenasComAcao }: {
+export function CampaignTable({ nodes, selectedId, onSelect, onQuickPause, filtroNivel, filtroCategoria, apenasComAcao, cplIdeal = null, cplMaximo = null }: {
   nodes: TreeNode[];
   selectedId: string | null;
   onSelect: (n: TreeNode) => void;
@@ -249,6 +264,8 @@ export function CampaignTable({ nodes, selectedId, onSelect, onQuickPause, filtr
   filtroNivel: NivelFiltro;
   filtroCategoria: Categoria | null;
   apenasComAcao: boolean;
+  cplIdeal?: number | null;
+  cplMaximo?: number | null;
 }) {
   const [openIds, setOpenIds] = useState<Set<string>>(() => new Set(nodes.map((n) => n.rec_id)));
   const [closedGroups, setClosedGroups] = useState<Set<string>>(loadClosedGroups);
@@ -298,6 +315,8 @@ export function CampaignTable({ nodes, selectedId, onSelect, onQuickPause, filtr
           apenasComAcao={apenasComAcao}
           openIds={openIds}
           onToggle={toggleOne}
+          cplIdeal={cplIdeal}
+          cplMaximo={cplMaximo}
         />
       ))}
       {nodes.length === 0 && <p style={{ padding: 16, fontSize: 14, color: PREMIUM.txt3 }}>Nenhuma campanha nesta análise.</p>}

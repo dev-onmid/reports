@@ -90,7 +90,7 @@ export function DecisionPanel({ node, busy, onApply, onJump }: {
   ];
 
   return (
-    <div className="sticky top-3 max-h-[calc(100vh-96px)] overflow-auto rounded-[var(--radius)] border border-border bg-card/95">
+    <div className="rounded-[var(--radius)] border border-border bg-card/95">
       {/* Cabeçalho da recomendação principal */}
       <div className={cn('relative overflow-hidden rounded-t-[var(--radius)] border-b p-3', critico ? 'border-red-400/30 bg-red-500/5' : 'border-border')}>
         <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5" style={{ backgroundColor: node.severidade === 'urgente' ? '#f87171' : node.severidade === 'atencao' ? '#fbbf24' : '#34d399' }} />

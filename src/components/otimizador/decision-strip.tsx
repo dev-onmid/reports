@@ -1,18 +1,17 @@
 "use client";
 
 import type { CSSProperties } from 'react';
-import { ChevronRight, Eye, MinusCircle, PauseCircle, Rocket, Search } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
+import { ChevronRight, Eye } from 'lucide-react';
 import { PREMIUM, categoriaDoNode, type Categoria, type NivelFiltro, type TreeNode } from '@/lib/optimizer-ui';
 
-const CARD: Record<'pausar' | 'revisar' | 'manter' | 'escalar', { label: string; icon: LucideIcon; color: string }> = {
-  pausar: { label: 'Pausar agora', icon: PauseCircle, color: PREMIUM.red },
-  revisar: { label: 'Revisar', icon: Search, color: PREMIUM.amber },
-  manter: { label: 'Manter', icon: MinusCircle, color: PREMIUM.emerald },
-  escalar: { label: 'Escalar', icon: Rocket, color: PREMIUM.green },
+const CARD: Record<'pausar' | 'revisar' | 'manter' | 'escalar', { label: string; color: string }> = {
+  pausar: { label: 'Pausar agora', color: PREMIUM.red },
+  revisar: { label: 'Revisar', color: PREMIUM.amber },
+  manter: { label: 'Manter', color: PREMIUM.emerald },
+  escalar: { label: 'Escalar', color: PREMIUM.green },
 };
 
-// Cards de decisão rápida — contadores clicáveis que filtram a árvore.
+// Chips de decisão rápida — contadores clicáveis (número + label) que filtram a árvore.
 export function QuickDecisionCards({ nodes, active, onSelect }: {
   nodes: TreeNode[];
   active: Categoria | null;
@@ -24,29 +23,23 @@ export function QuickDecisionCards({ nodes, active, onSelect }: {
 
   return (
     <div className="space-y-2">
-      <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
+      <div className="grid grid-cols-4 gap-2">
         {grid.map((cat) => {
           const meta = CARD[cat];
-          const Icon = meta.icon;
           const isActive = active === cat;
           return (
             <button
               key={cat}
               onClick={() => onSelect(isActive ? null : cat)}
               style={{
-                display: 'flex', alignItems: 'center', gap: 12, padding: '13px 16px', textAlign: 'left',
-                background: isActive ? `${meta.color}14` : PREMIUM.surf,
+                textAlign: 'center', padding: '8px 10px',
+                background: isActive ? `${meta.color}14` : PREMIUM.surf2,
                 border: `1px solid ${isActive ? `${meta.color}66` : PREMIUM.border}`,
-                borderRadius: 12, transition: 'all .15s',
+                borderRadius: 8, transition: 'all .15s',
               }}
             >
-              <span style={{ display: 'flex', width: 34, height: 34, borderRadius: 9, background: `${meta.color}1f`, color: meta.color, alignItems: 'center', justifyContent: 'center', flex: 'none' }}>
-                <Icon size={17} />
-              </span>
-              <span style={{ minWidth: 0 }}>
-                <span style={{ display: 'block', fontSize: 22, fontWeight: 700, lineHeight: 1, color: PREMIUM.txt }}>{counts[cat]}</span>
-                <span style={{ display: 'block', fontSize: 12, color: PREMIUM.txt2, marginTop: 3 }}>{meta.label}</span>
-              </span>
+              <span style={{ display: 'block', fontSize: 20, fontWeight: 500, lineHeight: 1, color: meta.color }}>{counts[cat]}</span>
+              <span style={{ display: 'block', fontSize: 11, color: PREMIUM.txt2, marginTop: 2 }}>{meta.label}</span>
             </button>
           );
         })}

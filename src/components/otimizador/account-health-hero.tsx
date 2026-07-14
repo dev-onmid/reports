@@ -1,5 +1,6 @@
 "use client";
 
+import type { CSSProperties } from 'react';
 import { formatCurrencyBRL } from '@/lib/utils';
 import {
   ESTADO_LABEL,
@@ -19,22 +20,21 @@ const TXT = '#fafafa';
 const TXT_2 = '#a1a1aa';
 const TXT_3 = '#71717a';
 
-// Anel de score refinado, com glow sutil na cor do estado.
+// Anel de score compacto (54px), com glow sutil na cor do estado.
 function ScoreGauge({ score, ring }: { score: number; ring: string }) {
-  const r = 40;
+  const r = 22;
   const circ = 2 * Math.PI * r;
   const offset = circ * (1 - score / 100);
   return (
-    <svg width="96" height="96" viewBox="0 0 96 96" style={{ flex: 'none' }}>
-      <circle cx="48" cy="48" r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="7" />
+    <svg width="54" height="54" viewBox="0 0 54 54" style={{ flex: 'none' }}>
+      <circle cx="27" cy="27" r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="5" />
       <circle
-        cx="48" cy="48" r={r} fill="none" stroke={ring} strokeWidth="7" strokeLinecap="round"
+        cx="27" cy="27" r={r} fill="none" stroke={ring} strokeWidth="5" strokeLinecap="round"
         strokeDasharray={circ} strokeDashoffset={offset}
-        transform="rotate(-90 48 48)"
-        style={{ transition: 'stroke-dashoffset 0.5s ease', filter: `drop-shadow(0 0 5px ${ring}66)` }}
+        transform="rotate(-90 27 27)"
+        style={{ transition: 'stroke-dashoffset 0.5s ease', filter: `drop-shadow(0 0 4px ${ring}66)` }}
       />
-      <text x="48" y="46" textAnchor="middle" fontSize="27" fontWeight="700" fill={TXT}>{score}</text>
-      <text x="48" y="62" textAnchor="middle" fontSize="10" fill={TXT_3} letterSpacing="0.08em">SCORE</text>
+      <text x="27" y="32" textAnchor="middle" fontSize="18" fontWeight="500" fill={TXT}>{score}</text>
     </svg>
   );
 }
@@ -42,8 +42,8 @@ function ScoreGauge({ score, ring }: { score: number; ring: string }) {
 function Kpi({ label, value, accent }: { label: string; value: string; accent?: string }) {
   return (
     <div>
-      <div style={{ fontSize: 11, color: TXT_3, letterSpacing: '0.05em', textTransform: 'uppercase' }}>{label}</div>
-      <div style={{ fontSize: 24, fontWeight: 600, marginTop: 4, color: accent ?? TXT, whiteSpace: 'nowrap' }}>{value}</div>
+      <div style={{ fontSize: 11, color: TXT_3, letterSpacing: '0.04em', textTransform: 'uppercase' }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 500, marginTop: 4, lineHeight: 1, color: accent ?? TXT, whiteSpace: 'nowrap' }}>{value}</div>
     </div>
   );
 }
@@ -65,52 +65,55 @@ export function AccountHealthHero({ resumo, nodes, generatedAt, proximaAnalise }
       style={{
         background: `linear-gradient(180deg, ${SURF}, ${SURF_2})`,
         border: `1px solid ${BORDER}`,
-        borderRadius: 14,
-        padding: 20,
+        borderRadius: 12,
+        padding: '14px 18px',
       }}
     >
-      {/* Topo: score + estado + resumo */}
-      <div className="flex flex-wrap items-center gap-5">
+      {/* Score header: [ring] [status + resumo] [última análise] */}
+      <div
+        className="grid items-center gap-3"
+        style={{ gridTemplateColumns: '54px minmax(0,1fr) auto' }}
+      >
         <ScoreGauge score={score} ring={estado.ring} />
-        <div className="min-w-0 flex-1" style={{ minWidth: 240 }}>
+        <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <span
-              className="inline-flex items-center gap-1.5"
-              style={{ padding: '3px 11px', borderRadius: 20, background: `${estado.ring}1f`, color: estado.ring, fontSize: 12, fontWeight: 600 }}
-            >
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: estado.ring, boxShadow: `0 0 8px ${estado.ring}` }} />
-              {estado.label}
-            </span>
-            {resumo.semana_analise && <span style={{ fontSize: 12, color: TXT_3 }}>semana {resumo.semana_analise}</span>}
+            <span style={{ fontSize: 11, fontWeight: 500, color: estado.ring }}>{estado.label}</span>
+            {resumo.semana_analise && <span style={{ fontSize: 11, color: TXT_3 }}>· semana {resumo.semana_analise}</span>}
           </div>
           {resumo.resumo_executivo && (
-            <p className="line-clamp-3" style={{ margin: '10px 0 0', fontSize: 14, lineHeight: 1.55, color: '#d4d4d8' }}>
+            <p className="line-clamp-3" style={{ margin: '2px 0 0', fontSize: 12, lineHeight: 1.5, color: TXT_2 }}>
               {resumo.resumo_executivo}
             </p>
           )}
         </div>
+        <div style={{ textAlign: 'right', flex: 'none' }}>
+          <div style={{ fontSize: 11, color: TXT_3 }}>Última análise</div>
+          <div style={{ fontSize: 13, fontWeight: 500, color: TXT, whiteSpace: 'nowrap' }}>{formatDateTime(generatedAt)}</div>
+          {proximaAnalise && <div style={{ fontSize: 11, color: TXT_3 }}>próxima {proximaAnalise}</div>}
+        </div>
       </div>
 
-      {/* KPIs */}
+      {/* Rodapé: estrutura da conta */}
       <div
-        className="mt-5 grid grid-cols-2 gap-4 pt-5 sm:grid-cols-3"
-        style={{ borderTop: `1px solid ${BORDER}` }}
+        className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 pt-3"
+        style={{ fontSize: 11, color: TXT_3, borderTop: `1px solid ${BORDER}` }}
       >
-        <Kpi label="Verba gasta" value={formatCurrencyBRL(cm?.gasto_total ?? 0)} />
-        <Kpi label="Resultados" value={String(cm?.volume_conversoes_atual ?? 0)} accent="#55f52f" />
-        <Kpi label="Custo por result." value={cm?.cpl_atual != null ? formatCurrencyBRL(cm.cpl_atual) : '—'} />
-      </div>
-
-      {/* Rodapé: estrutura + última análise */}
-      <div
-        className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1"
-        style={{ fontSize: 12, color: TXT_3 }}
-      >
-        <span>{resumo.campanhas} campanhas · {resumo.conjuntos} conjuntos · {resumo.criativos} criativos</span>
-        <span style={{ color: TXT_2 }}>·</span>
-        <span>{resumo.diagnosticos} diagnósticos</span>
-        <span style={{ marginLeft: 'auto' }}>Última análise: {formatDateTime(generatedAt)}{proximaAnalise ? ` · próxima ${proximaAnalise}` : ''}</span>
+        <span>{resumo.campanhas} campanhas · {resumo.conjuntos} conjuntos · {resumo.criativos} criativos · {resumo.diagnosticos} diagnósticos</span>
       </div>
     </section>
+  );
+}
+
+// KPI row separado do card de score — 3 colunas, cards próprios (spec de layout).
+export function AccountKpiRow({ resumo }: { resumo: ArvoreResumo | null }) {
+  if (!resumo) return null;
+  const cm = resumo.cruzamento_com_metas;
+  const kpiCard: CSSProperties = { background: SURF, border: `1px solid ${BORDER}`, borderRadius: 12, padding: '12px 14px' };
+  return (
+    <div className="grid grid-cols-3 gap-[10px]">
+      <div style={kpiCard}><Kpi label="Verba gasta" value={formatCurrencyBRL(cm?.gasto_total ?? 0)} /></div>
+      <div style={kpiCard}><Kpi label="Resultados" value={String(cm?.volume_conversoes_atual ?? 0)} accent="#55f52f" /></div>
+      <div style={kpiCard}><Kpi label="Custo por result." value={cm?.cpl_atual != null ? formatCurrencyBRL(cm.cpl_atual) : '—'} /></div>
+    </div>
   );
 }

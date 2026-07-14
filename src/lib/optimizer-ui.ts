@@ -72,6 +72,8 @@ export type ArvoreResumo = {
   modo_operacao: string | null;
   cruzamento_com_metas: {
     cpl_atual: number | null;
+    cpl_ideal?: number | null;
+    cpl_maximo?: number | null;
     gasto_total: number;
     volume_conversoes_atual: number;
     orcamento_periodo: number | null;
@@ -425,6 +427,25 @@ export function rotulosDoGrupo(nodes: TreeNode[]): { resultado: string; custo: s
 export function parseNumeroBR(raw: string | null | undefined): number {
   if (!raw) return 0;
   return Number(String(raw).replace(/[^\d,.-]/g, '').replace(/\./g, '').replace(',', '.')) || 0;
+}
+
+// Compara o custo do nó (string "R$ x,xx") contra a meta da CONTA (cpl_ideal/cpl_maximo em
+// cruzamento_com_metas) — não existe meta por campanha no modelo de dados hoje, então usamos a
+// meta da conta como régua pra toda linha (mesma régua que a IA já usa pra julgar leads/vendas).
+export function vsMetaLabel(custoValor: string | undefined, cplIdeal: number | null | undefined, cplMaximo: number | null | undefined): { text: string; tone: 'success' | 'danger' | 'neutral' } | null {
+  if (!custoValor || !cplIdeal || cplIdeal <= 0) return null;
+  const custo = parseNumeroBR(custoValor);
+  if (custo <= 0) return null;
+  if (custo <= cplIdeal) {
+    const pct = Math.round((1 - custo / cplIdeal) * 100);
+    return { text: `−${pct}% abaixo`, tone: 'success' };
+  }
+  if (cplMaximo && custo > cplMaximo) {
+    const mult = custo / cplIdeal;
+    return { text: `+${mult.toFixed(1).replace('.', ',')}× acima`, tone: 'danger' };
+  }
+  const pct = Math.round((custo / cplIdeal - 1) * 100);
+  return { text: `+${pct}% acima`, tone: 'danger' };
 }
 
 // Agrega um grupo de objetivo (campanhas de nível raiz) para o modo apresentação: verba total,

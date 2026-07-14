@@ -12,7 +12,6 @@ import {
   LayoutGrid,
   ListChecks,
   Loader2,
-  MousePointerClick,
   Play,
   Presentation,
   Search,
@@ -40,7 +39,7 @@ import {
   type TreeNode,
 } from '@/lib/optimizer-ui';
 import { AccountRail } from '@/components/otimizador/account-rail';
-import { AccountHealthHero } from '@/components/otimizador/account-health-hero';
+import { AccountHealthHero, AccountKpiRow } from '@/components/otimizador/account-health-hero';
 import { CampaignTable } from '@/components/otimizador/campaign-tree';
 import { ConfigModal } from '@/components/otimizador/config-modal';
 import { ConfirmToast } from '@/components/otimizador/confirm-toast';
@@ -418,7 +417,7 @@ export default function OtimizadorPage() {
   const temAnalise = !loading && !!contaFiltro && (treeNodes.length > 0 || !!resumo);
 
   return (
-    <div className="mx-auto flex w-full max-w-[1800px] flex-col gap-3 p-3 sm:p-4 xl:p-5">
+    <div className="mx-auto flex w-full max-w-[1800px] flex-col gap-3 py-4">
       {configClientId && configClient && (
         <ConfigModal clientId={configClientId} clientName={configClient.name} onClose={() => setConfigClientId(null)} />
       )}
@@ -547,6 +546,7 @@ export default function OtimizadorPage() {
       ) : (
         <>
           <AccountHealthHero resumo={resumo} nodes={flatNodes} generatedAt={generatedAt} proximaAnalise={null} />
+          <AccountKpiRow resumo={resumo} />
 
           {treeLoading ? (
             <div className="flex h-48 items-center justify-center text-sm text-muted-foreground">
@@ -566,44 +566,39 @@ export default function OtimizadorPage() {
           ) : (
             <>
               <QuickDecisionCards nodes={flatNodes} active={categoriaFiltro} onSelect={setCategoriaFiltro} />
-              <div className="grid items-start gap-3 xl:grid-cols-[minmax(0,1fr)_420px] 2xl:grid-cols-[minmax(0,1fr)_460px]">
-                <div className="min-w-0 space-y-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <FilterChips nivel={nivelFiltro} onNivel={setNivelFiltro} apenasComAcao={apenasComAcao} onApenasComAcao={setApenasComAcao} />
-                    {canais.length > 1 && (
-                      <div className="flex items-center gap-0.5 rounded-full border border-border p-0.5" title="Este cliente tem análise de Meta e Google — alterne entre elas">
-                        {(['meta', 'google'] as const).map((c) => (
-                          <button
-                            key={c}
-                            onClick={() => switchCanal(c)}
-                            className={cn(
-                              'rounded-full px-3 py-1 text-xs font-semibold transition-colors',
-                              canal === c ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground',
-                            )}
-                          >
-                            {c === 'meta' ? 'Meta Ads' : 'Google Ads'}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <CampaignTable
-                    nodes={treeNodes}
-                    selectedId={selectedId}
-                    onSelect={(n) => setSelectedId(n.rec_id)}
-                    onQuickPause={handleQuickPause}
-                    filtroNivel={nivelFiltro}
-                    filtroCategoria={categoriaFiltro}
-                    apenasComAcao={apenasComAcao}
-                  />
+              <div className="min-w-0 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <FilterChips nivel={nivelFiltro} onNivel={setNivelFiltro} apenasComAcao={apenasComAcao} onApenasComAcao={setApenasComAcao} />
+                  {canais.length > 1 && (
+                    <div className="flex items-center gap-0.5 rounded-full border border-border p-0.5" title="Este cliente tem análise de Meta e Google — alterne entre elas">
+                      {(['meta', 'google'] as const).map((c) => (
+                        <button
+                          key={c}
+                          onClick={() => switchCanal(c)}
+                          className={cn(
+                            'rounded-full px-3 py-1 text-xs font-semibold transition-colors',
+                            canal === c ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground',
+                          )}
+                        >
+                          {c === 'meta' ? 'Meta Ads' : 'Google Ads'}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                {selectedNode ? (
+                <CampaignTable
+                  nodes={treeNodes}
+                  selectedId={selectedId}
+                  onSelect={(n) => setSelectedId(n.rec_id)}
+                  onQuickPause={handleQuickPause}
+                  filtroNivel={nivelFiltro}
+                  filtroCategoria={categoriaFiltro}
+                  apenasComAcao={apenasComAcao}
+                  cplIdeal={resumo?.cruzamento_com_metas?.cpl_ideal ?? null}
+                  cplMaximo={resumo?.cruzamento_com_metas?.cpl_maximo ?? null}
+                />
+                {selectedNode && (
                   <DecisionPanel node={selectedNode} busy={busy} onApply={doApply} onJump={jumpTo} />
-                ) : (
-                  <div className="flex min-h-72 flex-col items-center justify-center gap-2 rounded-[var(--radius)] border border-dashed border-border bg-card/70 p-6 text-center">
-                    <MousePointerClick className="h-6 w-6 text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">Clique em uma campanha, conjunto ou criativo na árvore para ver o diagnóstico completo.</p>
-                  </div>
                 )}
               </div>
             </>
