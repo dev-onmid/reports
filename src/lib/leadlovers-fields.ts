@@ -36,6 +36,57 @@ export function normalizeContact(row: Record<string, unknown>): {
   return { nome, email, telefone, empresa, extra };
 }
 
+const ALL_KNOWN_KEYS = [...NAME_KEYS, ...EMAIL_KEYS, ...PHONE_KEYS, ...COMPANY_KEYS];
+
+/**
+ * Algumas listas (comum em exportações de CRM/planilhas simples) não têm linha de
+ * cabeçalho — a primeira linha já é dado. Se nenhuma das colunas bate com um nome
+ * de campo conhecido, é sinal de que não tem cabeçalho (o SheetJS, por padrão,
+ * sempre trata a 1ª linha como cabeçalho e perderia essa linha como dado).
+ */
+export function looksLikeHeaderRow(headers: string[]): boolean {
+  return headers.some(h => ALL_KNOWN_KEYS.includes(h.trim().toLowerCase()));
+}
+
+/**
+ * Planilha sem cabeçalho: infere as colunas pelo conteúdo em vez de pelo nome —
+ * a coluna com "@" é email, a coluna majoritariamente numérica (8-15 dígitos) é
+ * telefone, e a primeira coluna sobrando vira nome (funciona bem pra listas do
+ * tipo "Empresa,Email" bem comuns em bases de contato exportadas sem cabeçalho).
+ */
+export function inferContactsFromRows(rows: unknown[][]): Record<string, unknown>[] {
+  const colCount = rows.reduce((m, r) => Math.max(m, r.length), 0);
+  let emailCol = -1, phoneCol = -1;
+  for (const row of rows.slice(0, 50)) {
+    for (let c = 0; c < colCount; c++) {
+      const v = clean(row[c]);
+      if (!v) continue;
+      if (emailCol === -1 && v.includes('@')) { emailCol = c; continue; }
+      if (phoneCol === -1 && c !== emailCol) {
+        const digits = v.replace(/\D/g, '');
+        if (digits.length >= 8 && digits.length <= 15 && /^[\d\s()+\-./]+$/.test(v)) phoneCol = c;
+      }
+    }
+    if (emailCol !== -1 && phoneCol !== -1) break;
+  }
+  const used = new Set([emailCol, phoneCol].filter(c => c >= 0));
+  let nameCol = -1;
+  for (let c = 0; c < colCount; c++) { if (!used.has(c)) { nameCol = c; break; } }
+
+  return rows.map(row => {
+    const obj: Record<string, unknown> = {};
+    if (nameCol >= 0)  obj['Nome']     = row[nameCol]  ?? '';
+    if (emailCol >= 0) obj['Email']    = row[emailCol] ?? '';
+    if (phoneCol >= 0) obj['Telefone'] = row[phoneCol] ?? '';
+    for (let c = 0; c < colCount; c++) {
+      if (c === nameCol || c === emailCol || c === phoneCol) continue;
+      const v = row[c];
+      if (v !== undefined && v !== '') obj[`Coluna ${c + 1}`] = v;
+    }
+    return obj;
+  });
+}
+
 type ContactLike = {
   nome?: unknown; email?: unknown; telefone?: unknown; empresa?: unknown;
   extra_data?: unknown; [key: string]: unknown;
