@@ -1,5 +1,4 @@
 import type { NextRequest } from 'next/server';
-import { google } from 'googleapis';
 import { makeServerPool } from '@/lib/server-db';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import { countMetaResults } from '@/lib/meta-results';
@@ -796,22 +795,60 @@ async function gadsSearch(
   return res.json() as Promise<{ results?: Record<string, unknown>[] }>;
 }
 
+// Renova um access_token via refresh_token no endpoint OAuth cru (mesmo caminho do
+// report-builder, que FUNCIONA). Trocado do `oauth2.refreshAccessToken()` da googleapis —
+// esse método é depreciado e falhava silenciosamente ("token não resolvido") em contas Google
+// do Otimizador enquanto a dashboard/relatórios (que usam este fetch) puxavam normal.
+async function refreshGoogleAccessToken(row: { access_token: string; refresh_token: string; token_expiry: string | null }): Promise<string | null> {
+  if (row.token_expiry && new Date(row.token_expiry).getTime() > Date.now() + 60_000) {
+    return row.access_token;
+  }
+  const res = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: process.env.GOOGLE_CLIENT_ID ?? '',
+      client_secret: process.env.GOOGLE_CLIENT_SECRET ?? '',
+      refresh_token: row.refresh_token,
+      grant_type: 'refresh_token',
+    }).toString(),
+  }).catch(() => null);
+  if (res?.ok) {
+    const data = await res.json().catch(() => null) as { access_token?: string } | null;
+    return data?.access_token ?? row.access_token ?? null;
+  }
+  // Refresh falhou mas ainda temos um access_token não-expirado no banco → usa ele.
+  return row.access_token ?? null;
+}
+
 async function resolveGoogleToken(connectionId: string): Promise<string | null> {
   const pool = makeServerPool();
   try {
+    // 1) Conexão vinculada ao cliente.
     const { rows } = await pool.query<{ access_token: string; refresh_token: string; token_expiry: string | null }>(
       `SELECT access_token, refresh_token, token_expiry FROM public.google_connections WHERE id = $1`,
       [connectionId],
     );
-    const conn = rows[0];
-    if (!conn) return null;
-    if (conn.token_expiry && new Date(conn.token_expiry).getTime() > Date.now() + 5 * 60 * 1000) {
-      return conn.access_token;
+    if (rows[0]) {
+      const tok = await refreshGoogleAccessToken(rows[0]);
+      if (tok) return tok;
     }
-    const oauth2 = new google.auth.OAuth2(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET);
-    oauth2.setCredentials({ refresh_token: conn.refresh_token });
-    const { credentials } = await oauth2.refreshAccessToken();
-    return credentials.access_token ?? null;
+    // 2) Fallback: qualquer conexão Google Ads conectada (o connection_id salvo em
+    // client_account_links pode estar defasado/apontar pra uma linha revogada). Mesma
+    // estratégia de fallback do report-builder — por isso relatórios funcionam e o Otimizador não.
+    const { rows: candidates } = await pool.query<{ access_token: string; refresh_token: string; token_expiry: string | null }>(
+      `SELECT access_token, refresh_token, token_expiry
+         FROM public.google_connections
+        WHERE status = 'connected'
+          AND (account_type = 'google_ads' OR scope ILIKE '%adwords%')
+        ORDER BY connected_at DESC
+        LIMIT 3`,
+    ).catch(() => ({ rows: [] as { access_token: string; refresh_token: string; token_expiry: string | null }[] }));
+    for (const c of candidates) {
+      const tok = await refreshGoogleAccessToken(c);
+      if (tok) return tok;
+    }
+    return null;
   } catch {
     return null;
   } finally {
