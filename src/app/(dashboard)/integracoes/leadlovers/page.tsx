@@ -11,7 +11,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { getAuthSession } from '@/lib/auth-store';
-import { effectiveField } from '@/lib/leadlovers-fields';
+import { effectiveField, normalizeContact } from '@/lib/leadlovers-fields';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -133,14 +133,28 @@ function nthBusinessDay(startISO: string, nBusinessDays: number): string {
 }
 
 function parseSheet(file: File): Promise<{ rows: ContactRow[]; headers: string[] }> {
+  // .csv precisa ser lido como texto (readAsText), não como bytes binários: lido
+  // como ArrayBuffer o SheetJS não decodifica UTF-8 corretamente (acentos viram
+  // mojibake, "João" -> "JoÃ£o") e em alguns casos nem separa as colunas direito.
+  // Como texto, o SheetJS detecta automaticamente o separador (vírgula ou ; —
+  // Excel BR salva CSV com ponto-e-vírgula) e o encoding fica certo.
+  const isCsv = /\.csv$/i.test(file.name) || file.type === 'text/csv';
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
-        const data = new Uint8Array(e.target!.result as ArrayBuffer);
-        const wb = XLSX.read(data, { type: 'array' });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const json = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: '' });
+        let json: Record<string, unknown>[];
+        if (isCsv) {
+          const text = (e.target!.result as string).replace(/^﻿/, ''); // remove BOM
+          const wb = XLSX.read(text, { type: 'string' });
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          json = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: '' });
+        } else {
+          const data = new Uint8Array(e.target!.result as ArrayBuffer);
+          const wb = XLSX.read(data, { type: 'array' });
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          json = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: '' });
+        }
         if (json.length === 0) { reject(new Error('Planilha vazia ou sem linhas válidas')); return; }
         resolve({ rows: json as ContactRow[], headers: Object.keys(json[0]) });
       } catch {
@@ -148,7 +162,8 @@ function parseSheet(file: File): Promise<{ rows: ContactRow[]; headers: string[]
       }
     };
     reader.onerror = () => reject(new Error('Erro ao ler o arquivo'));
-    reader.readAsArrayBuffer(file);
+    if (isCsv) reader.readAsText(file, 'utf-8');
+    else reader.readAsArrayBuffer(file);
   });
 }
 
@@ -397,10 +412,7 @@ function NewCampaignWizard({
                 </thead>
                 <tbody>
                   {rows.slice(0, 8).map((row, i) => {
-                    const nome = String(row.nome ?? row.Nome ?? row.NOME ?? '');
-                    const email = String(row.email ?? row.Email ?? row.EMAIL ?? '');
-                    const telefone = String(row.telefone ?? row.Telefone ?? row.TELEFONE ?? row.phone ?? '');
-                    const empresa = String(row.empresa ?? row.Empresa ?? row.EMPRESA ?? '');
+                    const { nome, email, telefone, empresa } = normalizeContact(row);
                     return (
                       <tr key={i} className="border-b border-border/50">
                         <td className="px-4 py-1.5">{nome || <span className="text-muted-foreground">—</span>}</td>
