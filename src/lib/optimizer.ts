@@ -997,6 +997,18 @@ O QUE O BLOCO "metas" (PLANEJAMENTO MENSAL) SIGNIFICA — E O QUE ELE NAO SIGNIF
   trafego e NUNCA deve virar motivo, veredito ou acao.
 - So cobre venda direta (CPA/ROAS) de campanha cujo PROPRIO objetivo e vendas/conversao.
 
+SAUDE DA CONTA = ENTREGA ATIVA (nao invente crise):
+- Objeto PAUSADO nao gasta agora — nao esta em crise nem em atencao. Arquivar/deletar um criativo
+  pausado (ex: sazonal vencido) e HOUSEKEEPING, classifique SAUDAVEL. NUNCA marque pausado como
+  URGENTE nem deixe pausados definirem "estado_da_conta". Sugerir reativar um bom pausado e uma
+  OPORTUNIDADE (acao ATIVAR), nao um problema.
+- Campanha/conjunto/criativo ATIVO cujo custo esta DENTRO ou ABAIXO da meta (ou, em trafego, com
+  CPC/CTR saudaveis) e SAUDAVEL. NAO rebaixe pra ATENCAO so pra sugerir "testar novos criativos" —
+  testar criativo bom e OPORTUNIDADE (escalar/testar), a conta continua saudavel. Reserve ATENCAO/
+  URGENTE pra quem realmente gasta acima da meta, sem entrega, ou com peca comprovadamente ruim.
+- "estado_da_conta" reflete o pior ponto REAL da ENTREGA ATIVA. Conta com entrega ativa boa e so
+  housekeeping de pausados = SAUDAVEL.
+
 ORDEM DE ANALISE DO GESTOR (siga esta ordem dentro de cada campanha):
 1º CRIATIVO (anuncios): qualidade da peca, CTR, rankings, fadiga.
 2º SEGMENTACAO (conjuntos): publico, frequencia, saturacao, orcamento.
@@ -1572,6 +1584,21 @@ function limitarSeveridadePorCplBom(
   return cpl <= cplRef ? 'ATENCAO' : classificacao;
 }
 
+// Objeto PAUSADO não está em entrega ativa — não drena verba agora, logo não é urgência nem
+// coloca a conta em crise. Arquivar/revisar um criativo pausado (ex: sazonal vencido) é
+// housekeeping, não decisão urgente. Rebaixa a severidade pra SAUDAVEL pra não pintar o grupo de
+// "Crítico" nem arrastar a saúde da conta (feedback Cão Véio: conta de tráfego excelente marcada
+// como crítica por 5 criativos pausados). Ações de crescimento (reativar) sobrevivem — a trava da
+// fila deixa passar item SAUDÁVEL que carrega ATIVAR/AJUSTAR_ORCAMENTO.
+const STATUS_ENTREGA_ATIVO = ['ACTIVE', 'ENABLED', 'IN_PROCESS', 'WITH_ISSUES'];
+function estaPausado(status: string | null | undefined): boolean {
+  const s = String(status ?? '').toUpperCase();
+  return s !== '' && !STATUS_ENTREGA_ATIVO.includes(s);
+}
+function capSeveridadePausado(classificacao: OptimizerVerdict, status: string | null | undefined): OptimizerVerdict {
+  return estaPausado(status) ? 'SAUDAVEL' : classificacao;
+}
+
 // Monta a árvore campanha→conjunto→anúncio: métricas do PAYLOAD (verdade), veredito da IA.
 function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown): OptimizerAnaliseCampanha[] {
   const verdicts = collectIaVerdicts(iaCampanhas);
@@ -1582,9 +1609,13 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
   const vOf = (id: string) => verdicts.get(id) ?? fallback;
   const cplMaximo = payload.metas?.cpl_maximo ?? null;
   const cplIdeal = payload.metas?.cpl_ideal ?? null;
+  // CPC do nó: usa o do payload se veio (weekly já injeta p/ tráfego); senão calcula gasto/cliques.
+  // Garante que "Custo por clique" apareça mesmo se o payload não passou por comMetricaDeClique.
+  const cpcDe = (cpc: number | null | undefined, gasto: number, cliques: number | undefined) =>
+    cpc != null ? cpc : (cliques && cliques > 0 ? (Number(gasto) || 0) / cliques : null);
   return (payload.campanhas ?? []).map((camp) => {
     const cv = vOf(camp.id);
-    const campClassificacao = limitarSeveridadePorCplBom(cv.classificacao, camp.cpl, Number(camp.conversoes) || 0, Number(camp.gasto) || 0, cplIdeal, cplMaximo);
+    const campClassificacao = capSeveridadePausado(limitarSeveridadePorCplBom(cv.classificacao, camp.cpl, Number(camp.conversoes) || 0, Number(camp.gasto) || 0, cplIdeal, cplMaximo), camp.status);
     return {
       id: camp.id,
       nome: camp.nome,
@@ -1594,7 +1625,7 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
       conversoes: Number(camp.conversoes) || 0,
       cpl: camp.cpl,
       cliques: Number(camp.cliques) || 0,
-      cpc: camp.cpc ?? null,
+      cpc: cpcDe(camp.cpc, camp.gasto, camp.cliques),
       ctr: Number(camp.ctr) || 0,
       orcamento_diario: camp.orcamento_diario,
       classificacao: campClassificacao,
@@ -1608,7 +1639,7 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
       motivos: cv.motivos,
       conjuntos: (camp.conjuntos ?? []).map((cj) => {
         const jv = vOf(cj.id);
-        const cjClassificacao = limitarSeveridadePorCplBom(jv.classificacao, cj.cpl, Number(cj.conversoes) || 0, Number(cj.gasto) || 0, cplIdeal, cplMaximo);
+        const cjClassificacao = capSeveridadePausado(limitarSeveridadePorCplBom(jv.classificacao, cj.cpl, Number(cj.conversoes) || 0, Number(cj.gasto) || 0, cplIdeal, cplMaximo), cj.status);
         return {
           id: cj.id,
           nome: cj.nome,
@@ -1617,7 +1648,7 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
           conversoes: Number(cj.conversoes) || 0,
           cpl: cj.cpl,
           cliques: Number(cj.cliques) || 0,
-          cpc: cj.cpc ?? null,
+          cpc: cpcDe(cj.cpc, cj.gasto, cj.cliques),
           ctr: Number(cj.ctr) || 0,
           orcamento_diario: cj.orcamento_diario,
           dias_ativo: cj.dias_ativo,
@@ -1632,7 +1663,7 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
           motivos: jv.motivos,
           anuncios: (cj.anuncios ?? []).map((ad) => {
             const av = vOf(ad.id);
-            const adClassificacao = limitarSeveridadePorCplBom(av.classificacao, ad.cpl, Number(ad.conversoes) || 0, Number(ad.gasto) || 0, cplIdeal, cplMaximo);
+            const adClassificacao = capSeveridadePausado(limitarSeveridadePorCplBom(av.classificacao, ad.cpl, Number(ad.conversoes) || 0, Number(ad.gasto) || 0, cplIdeal, cplMaximo), ad.status);
             return aplicarPisoHookRate({
               id: ad.id,
               nome: ad.nome,
@@ -1641,7 +1672,7 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
               conversoes: Number(ad.conversoes) || 0,
               cpl: ad.cpl,
               cliques: Number(ad.cliques) || 0,
-              cpc: ad.cpc ?? null,
+              cpc: cpcDe(ad.cpc, ad.gasto, ad.cliques),
               ctr: Number(ad.ctr) || 0,
               quality_ranking: ad.quality_ranking,
               engagement_ranking: ad.engagement_ranking,
@@ -1672,7 +1703,7 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
 export function sanitizeOptimizerOutputV2(input: unknown, payload: OptimizerPayloadV2): OptimizerOutputV2 {
   const obj = (input && typeof input === 'object') ? input as Record<string, unknown> : {};
 
-  const estado = (['SAUDAVEL', 'ATENCAO', 'CRISE'] as const).includes(obj.estado_da_conta as OptimizerEstadoConta)
+  const estadoIa = (['SAUDAVEL', 'ATENCAO', 'CRISE'] as const).includes(obj.estado_da_conta as OptimizerEstadoConta)
     ? obj.estado_da_conta as OptimizerEstadoConta
     : 'ATENCAO';
 
@@ -1720,12 +1751,6 @@ export function sanitizeOptimizerOutputV2(input: unknown, payload: OptimizerPayl
       })
     : [];
 
-  const resumoFallback = estado === 'CRISE'
-    ? 'Conta em estado crítico — verifique os dados imediatamente e tome ação.'
-    : estado === 'ATENCAO'
-      ? 'Conta requer atenção. Revise as campanhas ativas e os dados do período para identificar o problema.'
-      : 'Conta saudável. Acompanhe as métricas e mantenha o ritmo atual.';
-
   // Totais REAIS calculados a partir do payload (campanhas). Servem de fallback quando a IA
   // omite/trunca os números — sem isto, uma resposta da IA cortada zera o gasto/CPL na tela
   // mesmo com dados reais no payload (causa raiz do "R$ 0,00").
@@ -1767,10 +1792,45 @@ export function sanitizeOptimizerOutputV2(input: unknown, payload: OptimizerPayl
           ? 'ATENCAO'
           : 'CRITICO';
 
+  const statusVolumeFinal = (['NO_RITMO', 'ABAIXO', 'CRITICO', 'NAO_APLICAVEL'] as const).includes(cruzamento.status_volume as never)
+    ? cruzamento.status_volume as 'NO_RITMO' | 'ABAIXO' | 'CRITICO' | 'NAO_APLICAVEL'
+    : 'NAO_APLICAVEL';
+
+  // Estado da conta é DETERMINÍSTICO (não ecoado da IA, que exagerava — ver feedback Cão Véio:
+  // conta de tráfego com CPC −93% abaixo da meta marcada como "crítica" por causa de criativos
+  // pausados). Deriva da pior severidade da árvore (pausados já rebaixados a SAUDAVEL em
+  // capSeveridadePausado) cruzada com as réguas de custo/volume da conta. Assim o estado bate com
+  // o que a árvore mostra: se nada que entrega está em atenção/urgência e as réguas não acusam
+  // problema, a conta está SAUDÁVEL.
+  const analiseCampanhas = buildAnaliseCampanhas(payload, obj.analise_campanhas);
+  const rankSev = (c: OptimizerVerdict) => (c === 'URGENTE' ? 0 : c === 'ATENCAO' ? 1 : 2);
+  let piorNaArvore: OptimizerVerdict = 'SAUDAVEL';
+  for (const camp of analiseCampanhas) {
+    const nós: OptimizerVerdict[] = [camp.classificacao];
+    for (const cj of camp.conjuntos ?? []) {
+      nós.push(cj.classificacao);
+      for (const ad of cj.anuncios ?? []) nós.push(ad.classificacao);
+    }
+    for (const c of nós) if (rankSev(c) < rankSev(piorNaArvore)) piorNaArvore = c;
+  }
+  const estado: OptimizerEstadoConta =
+    (piorNaArvore === 'URGENTE' || statusCplFinal === 'CRITICO' || statusVolumeFinal === 'CRITICO')
+      ? 'CRISE'
+      : (piorNaArvore === 'ATENCAO' || statusCplFinal === 'ATENCAO' || statusVolumeFinal === 'ABAIXO')
+        ? 'ATENCAO'
+        : 'SAUDAVEL';
+  void estadoIa; // estado agora é derivado dos sinais; a leitura da IA fica só no resumo_executivo
+
+  const resumoFallback = estado === 'CRISE'
+    ? 'Conta em estado crítico — verifique os dados imediatamente e tome ação.'
+    : estado === 'ATENCAO'
+      ? 'Conta requer atenção. Revise as campanhas ativas e os dados do período para identificar o problema.'
+      : 'Conta saudável. Acompanhe as métricas e mantenha o ritmo atual.';
+
   return {
     estado_da_conta: estado,
     resumo_executivo: (obj.resumo_executivo && String(obj.resumo_executivo).trim()) ? String(obj.resumo_executivo) : resumoFallback,
-    analise_campanhas: buildAnaliseCampanhas(payload, obj.analise_campanhas),
+    analise_campanhas: analiseCampanhas,
     cruzamento_com_metas: {
       // Gasto, conversões e CPL são FATOS já presentes no payload (soma das campanhas).
       // Priorizamos SEMPRE o valor real calculado — a IA recebe um template com "0" nesses
@@ -1784,9 +1844,7 @@ export function sanitizeOptimizerOutputV2(input: unknown, payload: OptimizerPayl
         ? cliquesReal
         : (convReal > 0 ? convReal : (cruzamento.volume_conversoes_atual != null ? Number(cruzamento.volume_conversoes_atual) : 0)),
       volume_meta_projetada: cruzamento.volume_meta_projetada != null ? Number(cruzamento.volume_meta_projetada) : (metas?.volume_leads_meta_mensal ?? null),
-      status_volume: (['NO_RITMO', 'ABAIXO', 'CRITICO', 'NAO_APLICAVEL'] as const).includes(cruzamento.status_volume as never)
-        ? cruzamento.status_volume as 'NO_RITMO' | 'ABAIXO' | 'CRITICO' | 'NAO_APLICAVEL'
-        : 'NAO_APLICAVEL',
+      status_volume: statusVolumeFinal,
       gasto_total: gastoReal > 0 ? gastoReal : (cruzamento.gasto_total != null ? Number(cruzamento.gasto_total) : 0),
       orcamento_periodo: cruzamento.orcamento_periodo != null ? Number(cruzamento.orcamento_periodo) : (metas?.orcamento_mensal_total ?? null),
       status_orcamento: (['OK', 'ESTOURANDO', 'SUBENTREGANDO'] as const).includes(cruzamento.status_orcamento as never)
