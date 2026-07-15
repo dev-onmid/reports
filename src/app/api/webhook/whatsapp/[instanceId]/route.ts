@@ -1,54 +1,21 @@
-import { createHash } from 'crypto';
 import { makeServerPool } from '@/lib/server-db';
 import { normalizeWebhookPayload, type WhatsAppProvider } from '@/lib/whatsapp-provider';
 import { markLeadResponded } from '@/lib/followup-send';
 import { analisarConversa } from '@/lib/crm-ai-analysis';
-import { enviarEventoMeta, enviarEventoGoogle } from '@/lib/conversions';
+import { enviarEventoMeta, enviarEventoGoogle, hasSuccessfulConversion } from '@/lib/conversions';
 import { upsertLeadFromConversation, ensureCrmMessagesSchema } from '@/lib/crm-conversation-sync';
 import { fetchEvolutionMediaBase64, uploadBase64ToStorage } from '@/lib/evolution-media';
 import { logMissingAdTracking } from '@/lib/crm-tracking-debug';
 import { resolveMetaAdHierarchy } from '@/lib/meta-ad-resolver';
+import {
+  extractTrackingFromText, extractClickCode, matchClickByCode, mergeTracking,
+  applyLeadAttribution, linkClickToLead, recordTrackingEvent, originFromTracking,
+  type MergedTracking,
+} from '@/lib/lead-tracking';
+import { regiaoFromPhone } from '@/lib/ddd-regioes';
 import type { NextRequest } from 'next/server';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
-
-function extractUtm(text: string): {
-  utm_source?: string;
-  utm_medium?: string;
-  utm_campaign?: string;
-  utm_content?: string;
-  utm_term?: string;
-  source_url?: string;
-} {
-  const urls = text.match(/https?:\/\/[^\s]+/g) ?? [];
-  for (const url of urls) {
-    try {
-      const u = new URL(url);
-      const utm_source = u.searchParams.get('utm_source') ?? undefined;
-      if (utm_source) {
-        return {
-          utm_source,
-          utm_medium: u.searchParams.get('utm_medium') ?? undefined,
-          utm_campaign: u.searchParams.get('utm_campaign') ?? undefined,
-          utm_content: u.searchParams.get('utm_content') ?? undefined,
-          utm_term: u.searchParams.get('utm_term') ?? undefined,
-          source_url: url,
-        };
-      }
-    } catch { /* invalid URL, skip */ }
-  }
-  const srcMatch = text.match(/utm_source=([^\s&]+)/i);
-  if (srcMatch) {
-    return {
-      utm_source: srcMatch[1],
-      utm_medium: text.match(/utm_medium=([^\s&]+)/i)?.[1],
-      utm_campaign: text.match(/utm_campaign=([^\s&]+)/i)?.[1],
-      utm_content: text.match(/utm_content=([^\s&]+)/i)?.[1],
-      utm_term: text.match(/utm_term=([^\s&]+)/i)?.[1],
-    };
-  }
-  return {};
-}
 
 function originToCanal(origin: string): string {
   const map: Record<string, string> = {
@@ -73,25 +40,13 @@ function detectOriginFromContext(text: string): string | null {
 
 function detectOrigin(
   ctwaClid: string | undefined,
-  utmSource: string | undefined,
+  tracking: MergedTracking,
   text: string,
   fromMe: boolean,
 ): string {
   if (ctwaClid) return 'meta';
   if (fromMe) return 'cliente';
-  if (utmSource) {
-    const src = utmSource.toLowerCase();
-    if (src.includes('google')) return 'google';
-    if (src.includes('instagram')) return 'instagram';
-    if (src.includes('facebook') || src.includes('fb')) return 'meta';
-    if (src.includes('tiktok')) return 'tiktok';
-    return utmSource;
-  }
-  return detectOriginFromContext(text) ?? 'organic';
-}
-
-function hashPhone(phone: string): string {
-  return createHash('sha256').update(phone).digest('hex');
+  return originFromTracking(tracking) ?? detectOriginFromContext(text) ?? 'organic';
 }
 
 function parseProviderTimestamp(value: unknown): string {
@@ -189,45 +144,12 @@ function normalizeEvolutionJidDigits(raw: unknown): string {
   return String(raw ?? '').split('@')[0].replace(/\D/g, '');
 }
 
-async function sendMetaEvent({
-  pixelId, accessToken, eventName, phone, ctwaClid, value,
-}: {
-  pixelId: string; accessToken: string;
-  eventName: 'Lead' | 'Purchase';
-  phone: string; ctwaClid?: string | null; value?: number;
-}): Promise<{ success: boolean; error?: string }> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const userData: Record<string, any> = { ph: [hashPhone(phone)] };
-  if (ctwaClid) userData.ctwa_clid = ctwaClid;
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const eventData: Record<string, any> = {
-    event_name: eventName,
-    event_time: Math.floor(Date.now() / 1000),
-    action_source: 'other',
-    user_data: userData,
-  };
-  if (eventName === 'Purchase' && value !== undefined) {
-    eventData.custom_data = { currency: 'BRL', value };
-  }
-
-  try {
-    const res = await fetch(`https://graph.facebook.com/v18.0/${pixelId}/events`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ data: [eventData], access_token: accessToken }),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      return { success: false, error: JSON.stringify(err) };
-    }
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: String(err) };
-  }
-}
-
 // ── Handler ──────────────────────────────────────────────────────────────────
+// Nota (Fase 4): o sendMetaEvent legado (action_source: 'other', sem page_id,
+// sem event_id) foi removido — ele duplicava o Purchase com o CAPI novo e a Meta
+// não atribuía os eventos dele. Todo envio agora passa por enviarEventoMeta
+// (business_messaging + dedup), que faz fallback pra config legada
+// (client_tracking_config) quando o cliente não tem client_conversion_config.
 
 export async function POST(
   req: NextRequest,
@@ -356,8 +278,15 @@ export async function POST(
     }
 
     // ── CRM: upsert lead + save message (always, regardless of pixel config) ──
-    const utmData = extractUtm(rawMessageText);
-    const origin = detectOrigin(ctwaClid, utmData.utm_source, rawMessageText, fromMe);
+    // 1) Fallback legado: UTMs/click-ids de URLs coladas no texto da mensagem.
+    // 2) Caminho robusto: código curto ("Cód: A7X2K9") injetado pelo /r/[slug] —
+    //    casa com o clique gravado server-side e herda a atribuição COMPLETA
+    //    (utm, gclid, keyword, placement, device, geo), imune a edição do texto.
+    const textTracking = extractTrackingFromText(rawMessageText);
+    const clickCode = fromMe ? null : extractClickCode(rawMessageText);
+    const clickMatch = clickCode ? await matchClickByCode(pool, clickCode).catch(() => null) : null;
+    const tracking = mergeTracking(textTracking, clickMatch);
+    const origin = detectOrigin(ctwaClid, tracking, rawMessageText, fromMe);
 
     // When fromMe=true the pushName is the instance owner's name, not the contact's.
     // Only set nome from pushName on incoming messages (fromMe=false).
@@ -371,7 +300,11 @@ export async function POST(
     // fact, whether the provider actually forwarded the ad-tracking context for this message —
     // there's no other record of it once this request ends.
     const AD_ORIGINS = ['meta', 'instagram', 'google', 'tiktok', 'youtube'];
-    const hasAnyTracking = Boolean(ctwaClid || sourceId || utmData.utm_source || utmData.utm_campaign);
+    const hasAnyTracking = Boolean(
+      ctwaClid || sourceId || clickMatch
+      || tracking.utm_source || tracking.utm_campaign
+      || tracking.gclid || tracking.wbraid || tracking.gbraid || tracking.fbclid || tracking.ttclid,
+    );
     if (!fromMe && AD_ORIGINS.includes(origin) && !hasAnyTracking) {
       await logMissingAdTracking(pool, { clientId, phone, canal, rawPayload: body });
     }
@@ -406,18 +339,39 @@ export async function POST(
       origin,
       ctwaClid: ctwaClid ?? null,
       sourceId: sourceId ?? null,
-      sourceUrl: sourceUrl ?? utmData.source_url ?? null,
-      utmSource: utmData.utm_source ?? null,
-      utmMedium: utmData.utm_medium ?? null,
-      utmCampaign: utmData.utm_campaign ?? null,
-      utmContent: utmData.utm_content ?? null,
-      utmTerm: utmData.utm_term ?? null,
+      sourceUrl: sourceUrl ?? tracking.source_url ?? null,
+      utmSource: tracking.utm_source ?? null,
+      utmMedium: tracking.utm_medium ?? null,
+      utmCampaign: tracking.utm_campaign ?? null,
+      utmContent: tracking.utm_content ?? null,
+      utmTerm: tracking.utm_term ?? null,
       campaignName: resolvedCampaignName,
       adsetName: resolvedAdsetName,
       adName: resolvedAdName,
       creativeName: creativeName ?? null,
       instanceId: evolutionInstanceName ?? instanceId,
     });
+
+    // ── Atribuição estendida + região (first-touch: nunca sobrescreve) ────────
+    // Região: prioriza a geolocalização do clique (localização real via headers
+    // da Vercel); sem clique, deriva do DDD do telefone (sempre disponível p/ BR).
+    const dddInfo = regiaoFromPhone(phone);
+    const regiao = (clickMatch?.geo_region || clickMatch?.geo_city)
+      ? { uf: clickMatch?.geo_region ?? null, cidade: clickMatch?.geo_city ?? null, fonte: 'ip' as const }
+      : dddInfo
+        ? { uf: dddInfo.uf, cidade: dddInfo.regiao, fonte: 'ddd' as const }
+        : null;
+    await applyLeadAttribution(pool, leadId, {
+      // Em mensagens fromMe o texto é do atendente — não vale como atribuição.
+      tracking: fromMe ? {} : tracking,
+      ddd: dddInfo?.ddd ?? null,
+      regiaoUf: regiao?.uf ?? null,
+      regiaoCidade: regiao?.cidade ?? null,
+      regiaoFonte: regiao?.fonte ?? null,
+      hasClickMatch: Boolean(clickMatch),
+    });
+    // Elo permanente clique ↔ lead (o clique deixa de ser anônimo)
+    if (clickMatch) await linkClickToLead(pool, clickMatch.id, leadId);
 
     const { rows: [crmLead] } = await pool.query<{ id: string; time_interno: boolean }>(
       `SELECT id, time_interno FROM public.crm_leads WHERE id = $1`,
@@ -471,6 +425,41 @@ export async function POST(
         await markLeadResponded(pool, crmLead.id).catch(() => null);
       }
     }
+    // ── Histórico imutável de toques (lead_tracking_events) ───────────────────
+    // Grava: (a) o primeiro contato do lead (sempre, com o snapshot completo da
+    // atribuição) e (b) qualquer mensagem posterior que traga identificador novo
+    // de rastreio (ctwa/código/utm). Mensagens orgânicas do meio da conversa não
+    // geram evento — o histórico é de TOQUES DE ATRIBUIÇÃO, não de mensagens.
+    if (crmLead && !fromMe) {
+      const eventType = ctwaClid ? 'ctwa'
+        : clickMatch ? 'link_click'
+        : (textTracking.utm_source || textTracking.gclid || textTracking.fbclid || textTracking.ttclid) ? 'utm_texto'
+        : origin !== 'organic' && origin !== 'cliente' ? 'contexto'
+        : 'organico';
+      const carriesIdentifier = eventType === 'ctwa' || eventType === 'link_click' || eventType === 'utm_texto';
+      if (isFirstInbound || carriesIdentifier) {
+        await recordTrackingEvent(pool, {
+          leadId: crmLead.id,
+          clientId,
+          eventType,
+          origin,
+          canal,
+          externalId: externalId ?? null,
+          ctwaClid: ctwaClid ?? null,
+          sourceId: sourceId ?? null,
+          sourceUrl: sourceUrl ?? tracking.source_url ?? null,
+          tracking,
+          campaignName: resolvedCampaignName,
+          adsetName: resolvedAdsetName,
+          adName: resolvedAdName,
+          creativeName: creativeName ?? null,
+          ddd: dddInfo?.ddd ?? null,
+          regiaoUf: regiao?.uf ?? null,
+          regiaoCidade: regiao?.cidade ?? null,
+        });
+      }
+    }
+
     if (crmLead?.time_interno === true) {
       return Response.json({ ok: true, message: 'Contato interno salvo sem automações.' });
     }
@@ -539,10 +528,14 @@ export async function POST(
         return Response.json({ ok: true, message: 'lead já registrado para este cliente' });
       }
 
-      const metaResult = await sendMetaEvent({
-        pixelId: cfg.pixel_id, accessToken: cfg.meta_token,
-        eventName: 'Lead', phone, ctwaClid,
-      });
+      // O evento Lead já foi disparado pelo CAPI novo no primeiro inbound (acima).
+      // Aqui só registramos o lead na whatsapp_leads (bookkeeping do fluxo de
+      // Purchase) com o status real do envio, lido do conversion_log.
+      const leadSent = crmLead
+        ? await hasSuccessfulConversion(pool, {
+            clientId, leadId: crmLead.id, plataforma: 'meta', eventName: 'Lead',
+          }).catch(() => false)
+        : false;
 
       await pool.query(`
         INSERT INTO public.whatsapp_leads
@@ -550,12 +543,9 @@ export async function POST(
            evento_lead_enviado, client_id, zapi_instance_id)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
       `, [phone, ctwaClid ?? null, sourceId ?? null, cfg.pixel_id,
-          metaResult.success, clientId, instanceId]);
+          leadSent, clientId, instanceId]);
 
-      return Response.json({
-        ok: true, action: 'lead_created',
-        meta_sent: metaResult.success, meta_error: metaResult.error ?? null,
-      });
+      return Response.json({ ok: true, action: 'lead_created', meta_sent: leadSent });
     }
 
     // ── FLOW 2: Purchase (sent by attendant) ─────────────────────────────────
@@ -592,31 +582,30 @@ export async function POST(
         return Response.json({ ok: true, message: 'evento de compra já enviado anteriormente' });
       }
 
-      const metaResult = await sendMetaEvent({
-        pixelId: cfg.pixel_id, accessToken: cfg.meta_token,
-        eventName: 'Purchase', phone, ctwaClid: lead.ctwa_clid, value: valor,
-      });
+      // Envio ÚNICO pelo CAPI novo (antes disparava DUAS vezes: sendMetaEvent
+      // legado com action_source 'other' + este — o legado foi removido).
+      const leadDataForCapi = { id: crmLead?.id as string | undefined, phone, ctwaClid: lead.ctwa_clid };
+      await enviarEventoMeta(pool, clientId, 'Purchase', leadDataForCapi, valor).catch(() => null);
+      const purchaseSent = crmLead
+        ? await hasSuccessfulConversion(pool, {
+            clientId, leadId: crmLead.id, plataforma: 'meta', eventName: 'Purchase',
+          }).catch(() => false)
+        : false;
 
       await pool.query(
         `UPDATE public.whatsapp_leads
          SET evento_compra_enviado = $1, valor_compra = $2
          WHERE id = $3`,
-        [metaResult.success, valor, lead.id],
+        [purchaseSent, valor, lead.id],
       );
 
-      // Also fire through new CAPI system (logs separately, non-blocking)
-      const leadDataForCapi = { id: crmLead?.id as string | undefined, phone, ctwaClid: lead.ctwa_clid };
-      await enviarEventoMeta(pool, clientId, 'Purchase', leadDataForCapi, valor).catch(() => null);
       const { rows: [convCfgP] } = await pool.query(
         `SELECT google_conversion_label_purchase FROM public.client_conversion_config WHERE client_id = $1`,
         [clientId],
       ).catch(() => ({ rows: [] as Array<{ google_conversion_label_purchase: string | null }> }));
       await enviarEventoGoogle(pool, clientId, convCfgP?.google_conversion_label_purchase, leadDataForCapi, valor).catch(() => null);
 
-      return Response.json({
-        ok: true, action: 'purchase_sent', valor,
-        meta_sent: metaResult.success, meta_error: metaResult.error ?? null,
-      });
+      return Response.json({ ok: true, action: 'purchase_sent', valor, meta_sent: purchaseSent });
     }
 
     return Response.json({ ok: true, message: 'mensagem ignorada' });

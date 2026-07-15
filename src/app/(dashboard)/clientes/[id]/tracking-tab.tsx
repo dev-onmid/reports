@@ -30,16 +30,28 @@ type Instance = {
   created_at: string;
 };
 
+// Lead com atribuição rica (crm_leads via /api/tracking/leads) — substitui a
+// leitura da tabela legada whatsapp_leads (que só tinha Source ID). O status de
+// envio de conversão (Lead/Purchase) vive na sub-aba Log (conversion_log).
 type WaLead = {
   id: string;
-  telefone: string;
-  ctwa_clid: string | null;
-  source_id: string | null;
-  campanha: string | null;
-  pixel_id: string | null;
-  evento_lead_enviado: boolean;
-  evento_compra_enviado: boolean;
-  valor_compra: number | null;
+  nome: string | null;
+  numero: string | null;
+  origin: string | null;
+  canal: string | null;
+  campaign_name: string | null;
+  adset_name: string | null;
+  ad_name: string | null;
+  utm_campaign: string | null;
+  utm_content: string | null;
+  keyword: string | null;
+  placement: string | null;
+  regiao_uf: string | null;
+  regiao_cidade: string | null;
+  regiao_fonte: string | null;
+  has_ctwa: boolean;
+  has_gclid: boolean;
+  click_code: string | null;
   created_at: string;
 };
 
@@ -274,9 +286,9 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
   // ── Initial load ───────────────────────────────────────────────────────
 
   const loadLeads = useCallback((p: LeadPeriod) => {
-    fetch(`/api/clients/${clientId}/tracking/leads?days=${periodDays[p]}`)
-      .then(r => r.ok ? r.json() as Promise<WaLead[]> : [])
-      .then(setLeads).catch(() => setLeads([]));
+    fetch(`/api/tracking/leads?clientId=${encodeURIComponent(clientId)}&days=${periodDays[p]}`)
+      .then(r => r.ok ? r.json() as Promise<{ leads: WaLead[] }> : null)
+      .then(d => setLeads(d?.leads ?? [])).catch(() => setLeads([]));
   }, [clientId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -284,7 +296,9 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
     Promise.all([
       fetch(`/api/clients/${clientId}/tracking`).then(r => r.ok ? r.json() as Promise<TrackingConfig> : null),
       fetch(`/api/clients/${clientId}/tracking/instances`).then(r => r.ok ? r.json() as Promise<Instance[]> : []),
-      fetch(`/api/clients/${clientId}/tracking/leads?days=30`).then(r => r.ok ? r.json() as Promise<WaLead[]> : []),
+      fetch(`/api/tracking/leads?clientId=${encodeURIComponent(clientId)}&days=30`)
+        .then(r => r.ok ? r.json() as Promise<{ leads: WaLead[] }> : null)
+        .then(d => d?.leads ?? []),
       fetch(`/api/clients/${clientId}/conversions`).then(r => r.ok ? r.json() as Promise<Partial<ConversionConfig>> : null),
       fetch(`/api/clients/${clientId}/conversions/eventos-custom`).then(r => r.ok ? r.json() as Promise<EventoCustom[]> : []),
       fetch(`/api/clients/${clientId}/conversions/log?days=30&limit=100`).then(r => r.ok ? r.json() as Promise<ConversionLog[]> : []),
@@ -421,7 +435,7 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
 
   // ── Stats ──────────────────────────────────────────────────────────────
   const totalLeads = leads.length;
-  const totalConv  = leads.filter(l => l.evento_compra_enviado).length;
+  const totalConv  = leads.filter(l => l.has_ctwa || l.has_gclid || l.campaign_name || l.click_code).length;
   const taxaConv   = totalLeads > 0 ? `${Math.round((totalConv / totalLeads) * 100)}%` : '—';
 
   // ── Loading ────────────────────────────────────────────────────────────
@@ -522,8 +536,8 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
             <div className="grid gap-3 sm:grid-cols-3">
               {[
                 { label: 'Leads capturados', value: totalLeads, icon: MessageCircle, color: '#55F52F' },
-                { label: 'Compras enviadas',  value: totalConv,  icon: ShoppingCart,  color: '#3b82f6' },
-                { label: 'Taxa de conversão', value: taxaConv,   icon: TrendingUp,    color: '#a855f7' },
+                { label: 'Com atribuição',   value: totalConv,  icon: ShoppingCart,  color: '#3b82f6' },
+                { label: 'Taxa de rastreio', value: taxaConv,   icon: TrendingUp,    color: '#a855f7' },
               ].map(({ label, value, icon: Icon, color }) => (
                 <div key={label} className="relative overflow-hidden rounded-xl border bg-card p-4" style={{ borderColor: `${color}44` }}>
                   <div className="pointer-events-none absolute inset-0" style={{ background: `radial-gradient(circle at 85% 15%, ${color}22, transparent 50%)` }} />
@@ -557,26 +571,44 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="border-b border-border">
-                        {['Telefone', 'Source ID', 'Lead', 'Compra', 'Valor', 'Data'].map(h => (
+                        {['Lead', 'Origem', 'Campanha › Conjunto › Anúncio', 'Keyword / Posição', 'Região', 'Data'].map(h => (
                           <th key={h} className="px-3 py-2 text-left font-semibold text-muted-foreground uppercase tracking-wider text-[10px] last:text-right">{h}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {leads.map((lead, i) => (
-                        <tr key={lead.id} className={cn('border-b border-border/40 last:border-0', i % 2 === 1 ? 'bg-muted/10' : '')}>
-                          <td className="px-3 py-2 font-mono font-medium">{maskPhone(lead.telefone)}</td>
-                          <td className="px-3 py-2 font-mono text-muted-foreground text-[10px] max-w-[100px] truncate">{lead.source_id ?? '—'}</td>
-                          <td className="px-3 py-2">
-                            {lead.evento_lead_enviado ? <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-400">✓ Enviado</span> : <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">Pendente</span>}
-                          </td>
-                          <td className="px-3 py-2">
-                            {lead.evento_compra_enviado ? <span className="rounded-full bg-blue-500/15 px-2 py-0.5 text-[10px] font-bold text-blue-400">✓ Enviado</span> : <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">—</span>}
-                          </td>
-                          <td className="px-3 py-2 font-bold tabular-nums">{lead.valor_compra != null ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(lead.valor_compra) : '—'}</td>
-                          <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">{new Date(lead.created_at).toLocaleDateString('pt-BR')}</td>
-                        </tr>
-                      ))}
+                      {leads.map((lead, i) => {
+                        const hierarchy = [lead.campaign_name, lead.adset_name, lead.ad_name].filter(Boolean).join(' › ')
+                          || [lead.utm_campaign, lead.utm_content].filter(Boolean).join(' › ');
+                        const kw = lead.keyword ?? lead.placement ?? null;
+                        const regiao = lead.regiao_cidade
+                          ? `${lead.regiao_cidade}${lead.regiao_uf ? ` · ${lead.regiao_uf}` : ''}`
+                          : lead.regiao_uf ?? null;
+                        return (
+                          <tr key={lead.id} className={cn('border-b border-border/40 last:border-0', i % 2 === 1 ? 'bg-muted/10' : '')}>
+                            <td className="px-3 py-2 max-w-[150px]">
+                              <p className="truncate font-medium">{lead.nome ?? '—'}</p>
+                              {lead.numero && <p className="font-mono text-[10px] text-muted-foreground">{maskPhone(lead.numero)}</p>}
+                            </td>
+                            <td className="px-3 py-2">
+                              <div className="flex items-center gap-1 flex-wrap">
+                                <span className="rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[10px] font-bold">{lead.origin ?? '—'}</span>
+                                {lead.has_ctwa && <span className="rounded-full bg-blue-500/15 px-1.5 py-0.5 text-[9px] font-bold text-blue-400" title="Click-to-WhatsApp Ad">CTWA</span>}
+                                {lead.has_gclid && <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-bold text-amber-400" title="Google click id">gclid</span>}
+                                {lead.click_code && <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-bold text-emerald-400" title={`Clique casado pelo código ${lead.click_code}`}>link</span>}
+                              </div>
+                            </td>
+                            <td className="px-3 py-2 max-w-[220px]">
+                              {hierarchy
+                                ? <span className="text-[11px] leading-tight" title={hierarchy}>{hierarchy.length > 60 ? `${hierarchy.slice(0, 60)}…` : hierarchy}</span>
+                                : <span className="text-muted-foreground/50">—</span>}
+                            </td>
+                            <td className="px-3 py-2 max-w-[130px] truncate text-muted-foreground" title={kw ?? undefined}>{kw ?? '—'}</td>
+                            <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{regiao ?? '—'}</td>
+                            <td className="px-3 py-2 text-right text-muted-foreground tabular-nums whitespace-nowrap">{new Date(lead.created_at).toLocaleDateString('pt-BR')}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -696,40 +728,47 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
           <div className="rounded-xl border border-border bg-card p-5 space-y-4">
             <SectionHeader
               icon={Globe} color="text-yellow-400"
-              title="Google Enhanced Conversions"
-              subtitle="Envia conversões para Google Ads via Measurement Protocol com hash SHA-256 do telefone."
+              title="Google — Conversões"
+              subtitle="Lead com gclid capturado → conversão OFFLINE direto no Google Ads (atribui campanha e palavra-chave, alimenta o Smart Bidding). Sem gclid → fallback GA4 Measurement Protocol."
             />
-            <Toggle value={convConfig.google_ativo} onChange={v => setConvConfig(p => ({ ...p, google_ativo: v }))} label="Ativar Google Enhanced Conversions" />
+            <Toggle value={convConfig.google_ativo} onChange={v => setConvConfig(p => ({ ...p, google_ativo: v }))} label="Ativar conversões Google" />
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <label className="mb-1 flex items-center text-xs font-semibold text-muted-foreground">
-                  Measurement ID <HelpBtn text={'1. analytics.google.com\n2. Administrador → Fluxos de dados\n3. Clique no fluxo web\n4. ID começa com G- (ex: G-XXXXXXXXXX)'} />
+                  Customer ID (opcional) <HelpBtn text={'ID da conta Google Ads (ex: 123-456-7890). Se vazio, usa a conta vinculada ao cliente em Contas de Anúncio.'} />
+                </label>
+                <input value={convConfig.google_customer_id} onChange={e => setConvConfig(p => ({ ...p, google_customer_id: e.target.value }))} placeholder="123-456-7890" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
+              </div>
+              <div />
+              <div>
+                <label className="mb-1 flex items-center text-xs font-semibold text-muted-foreground">
+                  Ação de conversão — Lead <HelpBtn text={'NOME ou ID da ação de conversão (Google Ads → Metas → Conversões). Usado no upload offline via gclid. Ex: "Lead WhatsApp" ou 987654321'} />
+                </label>
+                <input value={convConfig.google_conversion_label_lead} onChange={e => setConvConfig(p => ({ ...p, google_conversion_label_lead: e.target.value }))} placeholder="Lead WhatsApp" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
+              </div>
+              <div>
+                <label className="mb-1 flex items-center text-xs font-semibold text-muted-foreground">
+                  Ação de conversão — Engajamento <HelpBtn text={'NOME ou ID da ação de conversão de engajamento/contato no Google Ads.'} />
+                </label>
+                <input value={convConfig.google_conversion_label_contact} onChange={e => setConvConfig(p => ({ ...p, google_conversion_label_contact: e.target.value }))} placeholder="Contato WhatsApp" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
+              </div>
+              <div>
+                <label className="mb-1 flex items-center text-xs font-semibold text-muted-foreground">
+                  Ação de conversão — Purchase <HelpBtn text={'NOME ou ID da ação de conversão de compra no Google Ads.'} />
+                </label>
+                <input value={convConfig.google_conversion_label_purchase} onChange={e => setConvConfig(p => ({ ...p, google_conversion_label_purchase: e.target.value }))} placeholder="Compra WhatsApp" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
+              </div>
+              <div>
+                <label className="mb-1 flex items-center text-xs font-semibold text-muted-foreground">
+                  Measurement ID (fallback GA4) <HelpBtn text={'Opcional — só pro fallback GA4 de leads SEM gclid.\n1. analytics.google.com\n2. Administrador → Fluxos de dados\n3. ID começa com G-'} />
                 </label>
                 <input value={convConfig.google_measurement_id} onChange={e => setConvConfig(p => ({ ...p, google_measurement_id: e.target.value }))} placeholder="G-XXXXXXXXXX" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
               </div>
               <div>
                 <label className="mb-1 flex items-center text-xs font-semibold text-muted-foreground">
-                  API Secret <HelpBtn text={'1. Analytics → Administrador → Fluxos de dados\n2. Clique no fluxo\n3. "Measurement Protocol API secrets"\n4. Criar → copie o valor'} />
+                  API Secret (fallback GA4) <HelpBtn text={'Opcional — Analytics → Administrador → Fluxos de dados → "Measurement Protocol API secrets" → Criar'} />
                 </label>
                 <SecretInput value={convConfig.google_api_secret} onChange={v => setConvConfig(p => ({ ...p, google_api_secret: v }))} placeholder="API Secret" />
-              </div>
-              <div>
-                <label className="mb-1 flex items-center text-xs font-semibold text-muted-foreground">
-                  Conversion Label — Lead <HelpBtn text={'Google Ads → Metas → Conversões → clique na conversão → Configurações → Conversion Label'} />
-                </label>
-                <input value={convConfig.google_conversion_label_lead} onChange={e => setConvConfig(p => ({ ...p, google_conversion_label_lead: e.target.value }))} placeholder="XXXXXXXXXXXXXX" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
-              </div>
-              <div>
-                <label className="mb-1 flex items-center text-xs font-semibold text-muted-foreground">
-                  Conversion Label — Engajamento <HelpBtn text={'Conversion Label da meta de engajamento/contato no Google Ads.'} />
-                </label>
-                <input value={convConfig.google_conversion_label_contact} onChange={e => setConvConfig(p => ({ ...p, google_conversion_label_contact: e.target.value }))} placeholder="XXXXXXXXXXXXXX" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
-              </div>
-              <div>
-                <label className="mb-1 flex items-center text-xs font-semibold text-muted-foreground">
-                  Conversion Label — Purchase <HelpBtn text={'Conversion Label da meta de compra/purchase no Google Ads.'} />
-                </label>
-                <input value={convConfig.google_conversion_label_purchase} onChange={e => setConvConfig(p => ({ ...p, google_conversion_label_purchase: e.target.value }))} placeholder="XXXXXXXXXXXXXX" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
               </div>
               <div className="flex items-end">
                 <button onClick={() => testConversion('google')} disabled={testingGoogle} className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-yellow-400/30 bg-yellow-500/10 px-4 py-2 text-xs font-bold text-yellow-400 hover:bg-yellow-500/20 disabled:opacity-50 transition-colors">

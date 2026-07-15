@@ -8,6 +8,11 @@ import {
   normalizeCrmPhone,
   upsertLeadFromConversation,
 } from '@/lib/crm-conversation-sync';
+import {
+  extractTrackingFromText, originFromTracking, applyLeadAttribution, recordTrackingEvent,
+  type MergedTracking,
+} from '@/lib/lead-tracking';
+import { regiaoFromPhone } from '@/lib/ddd-regioes';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -108,34 +113,107 @@ async function handleLeadCreate(pool: ReturnType<typeof makeServerPool>, data: a
   const canal  = data.canal  ?? data.source ?? data.origem    ?? null;
   const obs    = data.observacao ?? data.obs ?? data.notes ?? data.mensagem ?? null;
 
+  // ── Rastreio: UTMs/click-ids explícitos no payload + parse da URL da página ──
+  // Landing/Typeform/Make mandam os hidden fields direto OU só a URL da página
+  // (que carrega utm_*/gclid/fbclid) — aceitamos os dois caminhos.
+  const pageUrl = data.source_url ?? data.page_url ?? data.url ?? null;
+  const fromUrl = pageUrl ? extractTrackingFromText(String(pageUrl)) : {};
+  const tracking: MergedTracking = {
+    utm_source: data.utm_source ?? fromUrl.utm_source,
+    utm_medium: data.utm_medium ?? fromUrl.utm_medium,
+    utm_campaign: data.utm_campaign ?? fromUrl.utm_campaign,
+    utm_content: data.utm_content ?? fromUrl.utm_content,
+    utm_term: data.utm_term ?? fromUrl.utm_term,
+    gclid: data.gclid ?? fromUrl.gclid,
+    wbraid: data.wbraid ?? fromUrl.wbraid,
+    gbraid: data.gbraid ?? fromUrl.gbraid,
+    fbclid: data.fbclid ?? fromUrl.fbclid,
+    ttclid: data.ttclid ?? fromUrl.ttclid,
+    source_url: (pageUrl ? String(pageUrl) : undefined) ?? fromUrl.source_url,
+    keyword: data.keyword ?? data.palavra_chave ?? undefined,
+    matchtype: data.matchtype ?? undefined,
+    device: data.device ?? undefined,
+    network: data.network ?? undefined,
+    placement: data.placement ?? undefined,
+  };
+  const email  = data.email ?? data.e_mail ?? null;
+  const cidade = data.cidade ?? data.city ?? null;
+  const estado = data.estado ?? data.uf ?? data.state ?? null;
+  const origin = originFromTracking(tracking) ?? canal ?? 'formulario';
+
   const now    = new Date();
   const mes    = data.mes ?? `${now.toLocaleString('pt-BR', { month: 'short' })}/${now.getFullYear()}`;
   const dataLead = data.data ?? data.date ?? now.toISOString().slice(0, 10);
 
   const funnelId = await ensureDefaultFunnel(pool, clientId);
   const fallbackStatus = await getFirstFunnelStageLabel(pool, funnelId);
+
+  let leadId: string;
   if (normalizeCrmPhone(numero)) {
     const lead = await upsertLeadFromConversation(pool, {
       clientId,
       phone: numero,
       name: nome,
       canal,
-      origin: canal,
+      origin,
       status: data.status ?? null,
       observacao: obs,
+      sourceUrl: tracking.source_url ?? null,
+      utmSource: tracking.utm_source ?? null,
+      utmMedium: tracking.utm_medium ?? null,
+      utmCampaign: tracking.utm_campaign ?? null,
+      utmContent: tracking.utm_content ?? null,
+      utmTerm: tracking.utm_term ?? null,
     });
-    return { action: 'lead.create', id: lead.id, client_id: clientId, nome, numero };
+    leadId = lead.id;
+  } else {
+    const { rows } = await pool.query(
+      `INSERT INTO public.crm_leads
+         (client_id, mes, data, nome, numero, canal, origin, observacao, status, funnel_id,
+          source_url, utm_source, utm_medium, utm_campaign, utm_content, utm_term)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+       RETURNING id`,
+      [clientId, mes, dataLead, nome, numero, canal, origin, obs, data.status ?? fallbackStatus, funnelId,
+       tracking.source_url ?? null, tracking.utm_source ?? null, tracking.utm_medium ?? null,
+       tracking.utm_campaign ?? null, tracking.utm_content ?? null, tracking.utm_term ?? null],
+    );
+    leadId = rows[0].id;
   }
 
-  const { rows } = await pool.query(
-    `INSERT INTO public.crm_leads
-       (client_id, mes, data, nome, numero, canal, observacao, status, funnel_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-     RETURNING id`,
-    [clientId, mes, dataLead, nome, numero, canal, obs, data.status ?? fallbackStatus, funnelId],
-  );
+  // Atribuição estendida + região (cidade/UF do form > DDD do telefone)
+  const dddInfo = regiaoFromPhone(numero);
+  const regiao = (cidade || estado)
+    ? { uf: estado, cidade, fonte: 'form' as const }
+    : dddInfo
+      ? { uf: dddInfo.uf, cidade: dddInfo.regiao, fonte: 'ddd' as const }
+      : null;
+  await applyLeadAttribution(pool, leadId, {
+    tracking,
+    ddd: dddInfo?.ddd ?? null,
+    regiaoUf: regiao?.uf ?? null,
+    regiaoCidade: regiao?.cidade ?? null,
+    regiaoFonte: regiao?.fonte ?? null,
+    email,
+    hasClickMatch: false,
+  });
 
-  return { action: 'lead.create', id: rows[0].id, client_id: clientId, nome, numero };
+  // Toque imutável no histórico de atribuição
+  await recordTrackingEvent(pool, {
+    leadId,
+    clientId,
+    eventType: 'formulario',
+    origin,
+    canal,
+    externalId: data.external_id ?? data.lead_id ?? null,
+    sourceUrl: tracking.source_url ?? null,
+    tracking,
+    ddd: dddInfo?.ddd ?? null,
+    regiaoUf: regiao?.uf ?? null,
+    regiaoCidade: regiao?.cidade ?? null,
+    raw: data,
+  });
+
+  return { action: 'lead.create', id: leadId, client_id: clientId, nome, numero, origin };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

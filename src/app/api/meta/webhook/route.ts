@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { getFreshMetaToken } from '@/lib/meta-token';
+import { processLeadgenEvent, type LeadgenChangeValue } from '@/lib/meta-leadgen';
 
 // ── DB bootstrap ──────────────────────────────────────────────────────────────
 
@@ -396,6 +397,29 @@ export async function POST(request: NextRequest) {
       // ── Facebook Page events ──
       if (body.object === 'page') {
         for (const change of (entry.changes ?? [])) {
+          // Meta Lead Ads: formulário nativo preenchido → lead completo no CRM
+          // com campanha/conjunto/anúncio + respostas (email, cidade, idade…).
+          if (change.field === 'leadgen') {
+            const v = (change.value ?? {}) as LeadgenChangeValue;
+            const pageId = String(v.page_id ?? entryId);
+            const pageToken = await getPageToken(userToken, pageId);
+            const result = await processLeadgenEvent(pool, { ...v, page_id: pageId }, userToken, pageToken)
+              .catch(err => ({ ok: false as const, reason: err instanceof Error ? err.message : String(err) }));
+            await pool.query(
+              `INSERT INTO public.meta_automation_logs
+                 (automation_id, platform, event_type, account_id, sender_id, trigger_text, action_taken, status, error_msg)
+               VALUES (NULL,'facebook','leadgen',$1,$2,$3,$4,$5,$6)`,
+              [
+                pageId,
+                String(v.leadgen_id ?? ''),
+                `form=${v.form_id ?? '?'} ad=${v.ad_id ?? '?'}`,
+                result.ok ? 'lead_created' : 'failed',
+                result.ok ? 'success' : 'error',
+                result.ok ? null : (result.reason ?? 'erro desconhecido'),
+              ],
+            ).catch(() => null);
+            continue;
+          }
           if (change.field === 'feed' && change.value?.item === 'comment') {
             const v = change.value;
             await pool.query(

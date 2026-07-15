@@ -33,8 +33,21 @@ type WebhookConfig = {
 type SourceKind = 'whatsapp' | 'landing' | 'meta_form' | 'api';
 
 const DEFAULT_MESSAGE = 'Olá, vim pelo anúncio!';
-const META_UTM = 'utm_source=facebookads&utm_medium={{adset.id}}&utm_campaign={{campaign.id}}&utm_content={{ad.id}}&placement={{placement}}';
-const GOOGLE_UTM = 'utm_campaign={campaignid}&utm_source=adwords&utm_medium={adgroupid}&utm_term={keyword}&matchtype={matchtype}&device={device}&network={network}&loc={loc_physical_ms}&placement={placement}';
+// Macros da Meta: nomes legíveis nos utm_* (campanha/conjunto/anúncio aparecem
+// pelo nome no CRM) + ids crus e posicionamento como parâmetros extras.
+const META_UTM = 'utm_source=facebookads&utm_medium={{site_source_name}}&utm_campaign={{campaign.name}}&utm_content={{ad.name}}&utm_term={{adset.name}}&placement={{placement}}&campaign_id={{campaign.id}}&adset_id={{adset.id}}&ad_id={{ad.id}}';
+// ValueTrack do Google: palavra-chave, correspondência, dispositivo, rede e
+// posicionamento. O gclid é anexado automaticamente pelo auto-tagging do Google
+// e capturado junto — não precisa incluir na URL.
+const GOOGLE_UTM = 'utm_source=google&utm_medium=cpc&utm_campaign={campaignid}&utm_term={keyword}&utm_content={creative}&keyword={keyword}&matchtype={matchtype}&device={device}&network={network}&placement={placement}&loc={loc_physical_ms}';
+// Snippet para landing pages: repassa os parâmetros da URL da página (utm, gclid…)
+// para todos os botões/links que apontam para o /r/ — sem isso, o clique que
+// chega na LP perde a atribuição antes de virar conversa no WhatsApp.
+const LP_SNIPPET = `<script>
+(function(){var q=location.search.replace(/^\\?/,'');if(!q)return;
+document.querySelectorAll('a[href*="/r/"]').forEach(function(a){
+a.href+=(a.href.indexOf('?')>-1?'&':'?')+q;});})();
+</script>`;
 
 function publicBase() {
   return typeof window === 'undefined' ? '' : window.location.origin;
@@ -132,9 +145,21 @@ function SetupResult({ webhook, sourceName, sourceKind, clientId }: { webhook: W
       client_id: clientId,
       name: '{{nome_do_lead}}',
       phone: '{{telefone_do_lead}}',
+      email: '{{email_do_lead}}',
       source: sourceLabel,
       mensagem: sourceName ? `Lead vindo de ${sourceName}` : 'Lead vindo da fonte de captura',
       status: 'Em Atendimento',
+      page_url: '{{url_da_pagina_com_utm_e_gclid}}',
+      utm_source: '{{utm_source}}',
+      utm_medium: '{{utm_medium}}',
+      utm_campaign: '{{utm_campaign}}',
+      utm_content: '{{utm_content}}',
+      utm_term: '{{utm_term}}',
+      gclid: '{{gclid}}',
+      fbclid: '{{fbclid}}',
+      keyword: '{{palavra_chave}}',
+      cidade: '{{cidade}}',
+      estado: '{{uf}}',
     },
   }, null, 2);
 
@@ -148,6 +173,8 @@ function SetupResult({ webhook, sourceName, sourceKind, clientId }: { webhook: W
           <p className="text-sm font-bold text-foreground">Fonte pronta para receber leads</p>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
             Copie o webhook abaixo para o formulário, Make, Zapier, Elementor, Webflow ou ferramenta da landing page.
+            Os campos de rastreio (utm, gclid, keyword…) são opcionais — envie o que a ferramenta tiver, ou apenas
+            <code className="mx-1 rounded bg-muted px-1">page_url</code> com a URL completa da página (extraímos tudo dela).
           </p>
         </div>
       </div>
@@ -233,6 +260,10 @@ function UseInstructions({ link, onClose }: { link: RedirectLink; onClose: () =>
             </p>
             <CodeLine text={metaLink} />
             <p className="text-sm font-bold text-foreground">Google Ads</p>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Use como URL final do anúncio. O Google preenche palavra-chave, correspondência, dispositivo e rede —
+              e o gclid do auto-tagging é capturado automaticamente junto.
+            </p>
             <CodeLine text={googleLink} />
           </div>
         )}
@@ -252,6 +283,15 @@ function UseInstructions({ link, onClose }: { link: RedirectLink; onClose: () =>
                 <p className="mb-2 text-xs font-bold text-foreground">UTM Google Ads</p>
                 <CodeLine text={`?${GOOGLE_UTM}`} />
               </div>
+            </div>
+            <div className="rounded-xl border border-primary/30 bg-primary/5 p-3">
+              <p className="mb-1 text-xs font-bold text-foreground">Importante: cole este snippet na landing page</p>
+              <p className="mb-2 text-xs leading-relaxed text-muted-foreground">
+                Quando o anúncio leva primeiro para a landing e só depois para o WhatsApp, os parâmetros de rastreio
+                (UTM, gclid do Google, palavra-chave) ficam na URL da página — este código repassa tudo automaticamente
+                para os botões de WhatsApp. Sem ele, o lead chega sem origem.
+              </p>
+              <CodeLine text={LP_SNIPPET} />
             </div>
           </div>
         )}

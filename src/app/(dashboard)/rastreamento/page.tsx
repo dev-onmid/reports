@@ -4,8 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import {
   Copy, Check, Trash2, Plus, ExternalLink, RefreshCw,
   Link2, MousePointerClick, ChevronDown, ChevronUp, X, Pencil,
-  BarChart2, TrendingUp, Filter, MessageCircle, ShoppingCart,
-  Settings, Zap, Eye, EyeOff,
+  BarChart2, TrendingUp, Filter, MessageCircle,
 } from 'lucide-react';
 import {
   AreaChart, Area, BarChart, Bar,
@@ -60,22 +59,72 @@ const BAR_COLORS = ['#55F52F','#3b82f6','#a855f7','#f59e0b','#ef4444','#10b981',
 
 const BASE = typeof window !== 'undefined' ? window.location.origin : '';
 
-// ── WhatsApp Tracking types ──────────────────────────────────────────────────
+// ── Leads rastreados (atribuição rica de crm_leads) ─────────────────────────
 
-type WaLead = {
+type TrackedLead = {
   id: string;
-  telefone: string;
-  ctwa_clid: string | null;
-  source_id: string | null;
-  campanha: string | null;
-  pixel_id: string | null;
-  evento_lead_enviado: boolean;
-  evento_compra_enviado: boolean;
-  valor_compra: number | null;
-  created_at: string;
   client_id: string | null;
   client_name: string | null;
+  nome: string | null;
+  numero: string | null;
+  email: string | null;
+  origin: string | null;
+  canal: string | null;
+  status: string | null;
+  campaign_name: string | null;
+  adset_name: string | null;
+  ad_name: string | null;
+  creative_name: string | null;
+  utm_source: string | null;
+  utm_campaign: string | null;
+  utm_content: string | null;
+  keyword: string | null;
+  placement: string | null;
+  device: string | null;
+  has_ctwa: boolean;
+  has_gclid: boolean;
+  click_code: string | null;
+  ddd: string | null;
+  regiao_uf: string | null;
+  regiao_cidade: string | null;
+  regiao_fonte: string | null;
+  created_at: string;
 };
+
+type CountItem = { label: string; count: number };
+
+type TrackingSummary = {
+  total: number;
+  comAtribuicao: number;
+  comRegiao: number;
+  porOrigem: CountItem[];
+  porCampanha: CountItem[];
+  porRegiao: CountItem[];
+  porKeyword: CountItem[];
+  porPlacement: CountItem[];
+};
+
+type DemoBucket = { label: string; impressions: number; clicks: number; spend: number; leads: number };
+type Demografia = {
+  meta: { idadeGenero: Array<DemoBucket & { genero: string }>; regiao: DemoBucket[] } | null;
+  google: { idade: DemoBucket[]; genero: DemoBucket[]; regiao: DemoBucket[] } | null;
+  periodo: string;
+};
+
+const EMPTY_SUMMARY: TrackingSummary = {
+  total: 0, comAtribuicao: 0, comRegiao: 0,
+  porOrigem: [], porCampanha: [], porRegiao: [], porKeyword: [], porPlacement: [],
+};
+
+const ORIGIN_LABELS: Record<string, string> = {
+  meta: 'Meta Ads', google: 'Google', instagram: 'Instagram', tiktok: 'TikTok',
+  youtube: 'YouTube', indicacao: 'Indicação', anuncio: 'Anúncio', organic: 'Orgânico',
+  cliente: 'Cliente', formulario: 'Formulário',
+};
+function originLabel(origin: string | null): string {
+  if (!origin) return '—';
+  return ORIGIN_LABELS[origin] ?? origin;
+}
 
 function maskPhone(phone: string): string {
   if (phone.length >= 10) {
@@ -167,11 +216,16 @@ export default function RastreamentoPage() {
     clientId: '', name: '', slug: '', whatsapp: '', message: 'Olá, vim pelo anúncio!',
   });
 
-  // WhatsApp tracking — consolidated admin view
-  const [waLeads, setWaLeads]         = useState<WaLead[]>([]);
+  // Leads rastreados — visão consolidada (crm_leads com atribuição rica)
+  const [waLeads, setWaLeads]         = useState<TrackedLead[]>([]);
+  const [waSummary, setWaSummary]     = useState<TrackingSummary>(EMPTY_SUMMARY);
   const [waLoading, setWaLoading]     = useState(true);
   const [waClientFilter, setWaClientFilter] = useState('');
   const [waDays, setWaDays]           = useState(30);
+
+  // Demografia agregada das campanhas (só com cliente selecionado)
+  const [demografia, setDemografia]   = useState<Demografia | null>(null);
+  const [demoLoading, setDemoLoading] = useState(false);
 
   function loadLinks() {
     setLoading(true);
@@ -248,36 +302,52 @@ export default function RastreamentoPage() {
     }
   }
 
-  // WhatsApp consolidated load
+  // Leads rastreados — carrega lista + agregados do /api/tracking/leads
   const loadWaLeads = useCallback(() => {
     setWaLoading(true);
     const params = new URLSearchParams({ days: String(waDays) });
     if (waClientFilter) params.set('clientId', waClientFilter);
-    fetch(`/api/whatsapp-leads?${params}`)
-      .then(r => r.ok ? r.json() as Promise<WaLead[]> : [])
-      .then(setWaLeads)
-      .catch(() => setWaLeads([]))
+    fetch(`/api/tracking/leads?${params}`)
+      .then(r => r.ok ? r.json() as Promise<{ leads: TrackedLead[]; summary: TrackingSummary }> : null)
+      .then(data => {
+        setWaLeads(data?.leads ?? []);
+        setWaSummary(data?.summary ?? EMPTY_SUMMARY);
+      })
+      .catch(() => { setWaLeads([]); setWaSummary(EMPTY_SUMMARY); })
       .finally(() => setWaLoading(false));
   }, [waDays, waClientFilter]);
 
   useEffect(() => { loadWaLeads(); }, [loadWaLeads]);
 
-  // Per-client aggregates derived from waLeads
+  // Demografia agregada: só faz sentido por cliente (precisa da conta de anúncio)
+  useEffect(() => {
+    if (!waClientFilter) { setDemografia(null); return; }
+    let active = true;
+    setDemoLoading(true);
+    fetch(`/api/tracking/demografia?clientId=${encodeURIComponent(waClientFilter)}`)
+      .then(r => r.ok ? r.json() as Promise<Demografia> : null)
+      .then(d => { if (active) setDemografia(d); })
+      .catch(() => { if (active) setDemografia(null); })
+      .finally(() => { if (active) setDemoLoading(false); });
+    return () => { active = false; };
+  }, [waClientFilter]);
+
+  // Per-client aggregates derived from tracked leads
   const waByClient = (() => {
-    const map = new Map<string, { name: string; leads: number; conv: number }>();
+    const map = new Map<string, { name: string; leads: number; atrib: number }>();
     for (const l of waLeads) {
       const key = l.client_id ?? '__none__';
       const name = l.client_name ?? 'Sem cliente';
-      const cur = map.get(key) ?? { name, leads: 0, conv: 0 };
+      const cur = map.get(key) ?? { name, leads: 0, atrib: 0 };
       cur.leads += 1;
-      if (l.evento_compra_enviado) cur.conv += 1;
+      if (l.has_ctwa || l.has_gclid || l.campaign_name || l.utm_source || l.click_code) cur.atrib += 1;
       map.set(key, cur);
     }
     return Array.from(map.values()).sort((a, b) => b.leads - a.leads);
   })();
 
-  const waLeadTotal = waLeads.length;
-  const waConvTotal = waLeads.filter(l => l.evento_compra_enviado).length;
+  const waLeadTotal = waSummary.total;
+  const waAtribTotal = waSummary.comAtribuicao;
 
   const { from: periodFrom, to: periodTo } = periodToDates(period, customFrom, customTo);
   const totalLinksFiltered = links.length;
@@ -640,7 +710,7 @@ export default function RastreamentoPage() {
         )}
       </div>
 
-      {/* ── WhatsApp Tracking — Consolidated ───────────────────────────── */}
+      {/* ── Leads Rastreados — atribuição completa ─────────────────────── */}
       <div className="mt-8 border-t border-border pt-8 space-y-6">
 
         {/* Section header + filters */}
@@ -648,10 +718,10 @@ export default function RastreamentoPage() {
           <div>
             <h2 className="flex items-center gap-2 text-xl font-bold">
               <MessageCircle className="h-5 w-5 text-primary" />
-              Rastreio WhatsApp → Meta Ads
+              Leads Rastreados
             </h2>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Visão consolidada de todos os clientes. Configure por cliente na aba Clientes → Rastreio WA.
+              De onde cada lead veio: canal, campanha, criativo, palavra-chave e região. Todos os clientes, em tempo real.
             </p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -683,8 +753,8 @@ export default function RastreamentoPage() {
         <div className="grid gap-3 sm:grid-cols-3">
           {[
             { label: 'Total de leads', value: waLeadTotal, icon: MessageCircle, color: '#55F52F' },
-            { label: 'Total compras',  value: waConvTotal, icon: ShoppingCart,  color: '#3b82f6' },
-            { label: 'Taxa de conversão', value: waLeadTotal > 0 ? `${Math.round((waConvTotal / waLeadTotal) * 100)}%` : '—', icon: TrendingUp, color: '#a855f7' },
+            { label: 'Com atribuição', value: waLeadTotal > 0 ? `${waAtribTotal} (${Math.round((waAtribTotal / waLeadTotal) * 100)}%)` : '—', icon: TrendingUp, color: '#3b82f6' },
+            { label: 'Com região', value: waLeadTotal > 0 ? `${waSummary.comRegiao} (${Math.round((waSummary.comRegiao / waLeadTotal) * 100)}%)` : '—', icon: BarChart2, color: '#a855f7' },
           ].map(({ label, value, icon: Icon, color }) => (
             <div key={label} className="relative overflow-hidden rounded-xl border bg-card p-4" style={{ borderColor: `${color}44` }}>
               <div className="pointer-events-none absolute inset-0" style={{ background: `radial-gradient(circle at 85% 15%, ${color}22, transparent 50%)` }} />
@@ -699,11 +769,92 @@ export default function RastreamentoPage() {
           ))}
         </div>
 
+        {/* Breakdown de atribuição */}
+        {!waLoading && waLeadTotal > 0 && (
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {[
+              { title: 'Por origem', items: waSummary.porOrigem.map(i => ({ ...i, label: originLabel(i.label) })) },
+              { title: 'Por campanha', items: waSummary.porCampanha },
+              { title: 'Por região (UF)', items: waSummary.porRegiao },
+              {
+                title: waSummary.porKeyword.length > 0 ? 'Por palavra-chave' : 'Por posicionamento',
+                items: waSummary.porKeyword.length > 0 ? waSummary.porKeyword : waSummary.porPlacement,
+              },
+            ].map(({ title, items }) => (
+              <div key={title} className="rounded-xl border border-border bg-card p-4">
+                <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{title}</p>
+                {items.length === 0 ? (
+                  <p className="text-xs text-muted-foreground/60 italic">Sem dados ainda</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {items.slice(0, 6).map((item, i) => {
+                      const max = items[0]?.count || 1;
+                      return (
+                        <div key={`${item.label}-${i}`} className="flex items-center gap-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="truncate text-xs font-semibold">{item.label}</span>
+                              <span className="shrink-0 text-xs font-bold tabular-nums" style={{ color: BAR_COLORS[i % BAR_COLORS.length] }}>{item.count}</span>
+                            </div>
+                            <div className="mt-0.5 h-1 w-full overflow-hidden rounded-full bg-muted/40">
+                              <div className="h-full rounded-full" style={{ width: `${Math.round((item.count / max) * 100)}%`, background: BAR_COLORS[i % BAR_COLORS.length] }} />
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Demografia agregada das campanhas (por cliente) */}
+        {waClientFilter && (
+          <div className="rounded-[var(--radius)] border border-border bg-card p-5 space-y-4">
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
+                Público das campanhas — agregado das plataformas ({demografia?.periodo ?? 'últimos 30 dias'})
+              </p>
+              <p className="mt-0.5 text-[11px] text-muted-foreground/70">
+                Idade, gênero e região de quem as campanhas alcançaram e converteram — dado agregado da Meta/Google, não por lead.
+              </p>
+            </div>
+            {demoLoading ? (
+              <div className="grid gap-3 sm:grid-cols-3">{[1, 2, 3].map(i => <div key={i} className="h-32 animate-pulse rounded-lg bg-muted/30" />)}</div>
+            ) : !demografia?.meta && !demografia?.google ? (
+              <p className="text-xs text-muted-foreground">Sem dados — o cliente precisa ter conta de anúncio vinculada (Meta ou Google) com veiculação nos últimos 30 dias.</p>
+            ) : (
+              <div className="grid gap-4 lg:grid-cols-2">
+                {demografia?.meta && (
+                  <div className="space-y-3">
+                    <p className="text-xs font-bold text-foreground">Meta Ads</p>
+                    <DemoBars
+                      title="Conversões por idade e gênero"
+                      items={aggregateMetaAge(demografia.meta.idadeGenero)}
+                    />
+                    <DemoBars title="Top regiões" items={demografia.meta.regiao.slice(0, 6).map(b => ({ label: b.label, value: b.leads > 0 ? b.leads : b.clicks }))} />
+                  </div>
+                )}
+                {demografia?.google && (
+                  <div className="space-y-3">
+                    <p className="text-xs font-bold text-foreground">Google Ads</p>
+                    <DemoBars title="Conversões por idade" items={demografia.google.idade.map(b => ({ label: b.label, value: b.leads > 0 ? b.leads : b.clicks }))} />
+                    <DemoBars title="Por gênero" items={demografia.google.genero.map(b => ({ label: b.label, value: b.leads > 0 ? b.leads : b.clicks }))} />
+                    <DemoBars title="Top regiões" items={demografia.google.regiao.slice(0, 6).map(b => ({ label: b.label, value: b.leads > 0 ? b.leads : b.clicks }))} />
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Per-client cards */}
-        {!waLoading && waByClient.length > 0 && (
+        {!waLoading && !waClientFilter && waByClient.length > 0 && (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {waByClient.map(c => {
-              const taxa = c.leads > 0 ? `${Math.round((c.conv / c.leads) * 100)}%` : '—';
+              const taxa = c.leads > 0 ? `${Math.round((c.atrib / c.leads) * 100)}%` : '—';
               return (
                 <div key={c.name} className="rounded-xl border border-border bg-card p-4 space-y-2">
                   <p className="text-sm font-semibold truncate">{c.name}</p>
@@ -713,8 +864,8 @@ export default function RastreamentoPage() {
                       <p className="text-base font-bold text-primary tabular-nums">{c.leads}</p>
                     </div>
                     <div>
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Compras</p>
-                      <p className="text-base font-bold text-blue-400 tabular-nums">{c.conv}</p>
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Rastreados</p>
+                      <p className="text-base font-bold text-blue-400 tabular-nums">{c.atrib}</p>
                     </div>
                     <div>
                       <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Taxa</p>
@@ -739,49 +890,95 @@ export default function RastreamentoPage() {
             <div className="rounded-xl border border-dashed border-border p-10 text-center">
               <MessageCircle className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" />
               <p className="font-semibold text-muted-foreground">Nenhum lead no período.</p>
-              <p className="mt-1 text-xs text-muted-foreground/60">Configure as instâncias Z-API em cada cliente na aba Rastreio WA.</p>
+              <p className="mt-1 text-xs text-muted-foreground/60">Leads chegam pelo WhatsApp, formulários e links de captura.</p>
             </div>
           ) : (
             <div className="overflow-x-auto rounded-[var(--radius)] border border-border bg-card">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-border bg-muted/30">
-                    {['Cliente', 'Telefone', 'Source ID', 'Lead', 'Compra', 'Valor', 'Data'].map(h => (
+                    {['Cliente', 'Lead', 'Origem', 'Campanha › Conjunto › Anúncio', 'Keyword / Posição', 'Região', 'Data'].map(h => (
                       <th key={h} className="px-4 py-2.5 text-left font-semibold text-muted-foreground uppercase tracking-wider text-[10px] last:text-right">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {waLeads.map((lead, i) => (
-                    <tr key={lead.id} className={cn('border-b border-border/50 last:border-0', i % 2 === 0 ? '' : 'bg-muted/10')}>
-                      <td className="px-4 py-2.5 font-medium max-w-[120px] truncate">{lead.client_name ?? '—'}</td>
-                      <td className="px-4 py-2.5 font-mono font-medium">{maskPhone(lead.telefone)}</td>
-                      <td className="px-4 py-2.5 text-muted-foreground font-mono text-[10px] max-w-[100px] truncate">{lead.source_id ?? '—'}</td>
-                      <td className="px-4 py-2.5">
-                        {lead.evento_lead_enviado
-                          ? <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-400">✓ Enviado</span>
-                          : <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">Pendente</span>}
-                      </td>
-                      <td className="px-4 py-2.5">
-                        {lead.evento_compra_enviado
-                          ? <span className="rounded-full bg-blue-500/15 px-2 py-0.5 text-[10px] font-bold text-blue-400">✓ Enviado</span>
-                          : <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">—</span>}
-                      </td>
-                      <td className="px-4 py-2.5 font-bold tabular-nums">
-                        {lead.valor_compra != null
-                          ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(lead.valor_compra)
-                          : '—'}
-                      </td>
-                      <td className="px-4 py-2.5 text-right text-muted-foreground tabular-nums">
-                        {new Date(lead.created_at).toLocaleDateString('pt-BR')}
-                      </td>
-                    </tr>
-                  ))}
+                  {waLeads.map((lead, i) => {
+                    const hierarchy = [lead.campaign_name, lead.adset_name, lead.ad_name].filter(Boolean).join(' › ')
+                      || [lead.utm_campaign, lead.utm_content].filter(Boolean).join(' › ');
+                    const kw = lead.keyword ?? lead.placement ?? lead.device ?? null;
+                    const regiao = lead.regiao_cidade
+                      ? `${lead.regiao_cidade}${lead.regiao_uf ? ` · ${lead.regiao_uf}` : ''}`
+                      : lead.regiao_uf ?? null;
+                    return (
+                      <tr key={lead.id} className={cn('border-b border-border/50 last:border-0', i % 2 === 0 ? '' : 'bg-muted/10')}>
+                        <td className="px-4 py-2.5 font-medium max-w-[120px] truncate">{lead.client_name ?? '—'}</td>
+                        <td className="px-4 py-2.5 max-w-[160px]">
+                          <p className="truncate font-medium">{lead.nome ?? '—'}</p>
+                          {lead.numero && <p className="font-mono text-[10px] text-muted-foreground">{maskPhone(lead.numero)}</p>}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <div className="flex items-center gap-1 flex-wrap">
+                            <span className="rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[10px] font-bold">{originLabel(lead.origin)}</span>
+                            {lead.has_ctwa && <span className="rounded-full bg-blue-500/15 px-1.5 py-0.5 text-[9px] font-bold text-blue-400" title="Click-to-WhatsApp Ad">CTWA</span>}
+                            {lead.has_gclid && <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-bold text-amber-400" title="Google click id capturado">gclid</span>}
+                            {lead.click_code && <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-bold text-emerald-400" title={`Clique casado pelo código ${lead.click_code}`}>link</span>}
+                          </div>
+                        </td>
+                        <td className="px-4 py-2.5 max-w-[240px]">
+                          {hierarchy
+                            ? <span className="text-[11px] leading-tight" title={hierarchy}>{hierarchy.length > 70 ? `${hierarchy.slice(0, 70)}…` : hierarchy}</span>
+                            : <span className="text-muted-foreground/50">—</span>}
+                        </td>
+                        <td className="px-4 py-2.5 max-w-[140px] truncate text-muted-foreground" title={kw ?? undefined}>{kw ?? '—'}</td>
+                        <td className="px-4 py-2.5 text-muted-foreground whitespace-nowrap">
+                          {regiao ?? '—'}
+                          {regiao && lead.regiao_fonte && <span className="ml-1 text-[9px] text-muted-foreground/50">({lead.regiao_fonte})</span>}
+                        </td>
+                        <td className="px-4 py-2.5 text-right text-muted-foreground tabular-nums whitespace-nowrap">
+                          {new Date(lead.created_at).toLocaleDateString('pt-BR')}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Demografia: barras simples ───────────────────────────────────────────────
+
+function aggregateMetaAge(items: Array<DemoBucket & { genero: string }>): { label: string; value: number }[] {
+  const map = new Map<string, number>();
+  for (const b of items) {
+    const key = `${b.label} · ${b.genero}`;
+    map.set(key, (map.get(key) ?? 0) + (b.leads > 0 ? b.leads : b.clicks));
+  }
+  return [...map.entries()].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value).slice(0, 8);
+}
+
+function DemoBars({ title, items }: { title: string; items: { label: string; value: number }[] }) {
+  const filtered = items.filter(i => i.value > 0);
+  if (filtered.length === 0) return null;
+  const max = filtered[0]?.value || 1;
+  return (
+    <div className="rounded-lg border border-border bg-background/40 p-3">
+      <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{title}</p>
+      <div className="space-y-1.5">
+        {filtered.map((item, i) => (
+          <div key={`${item.label}-${i}`} className="flex items-center gap-2">
+            <span className="w-28 shrink-0 truncate text-[11px] text-muted-foreground" title={item.label}>{item.label}</span>
+            <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted/40">
+              <div className="h-full rounded-full" style={{ width: `${Math.max(4, Math.round((item.value / max) * 100))}%`, background: BAR_COLORS[i % BAR_COLORS.length] }} />
+            </div>
+            <span className="w-10 shrink-0 text-right text-[11px] font-bold tabular-nums">{Math.round(item.value)}</span>
+          </div>
+        ))}
       </div>
     </div>
   );

@@ -1,5 +1,9 @@
 import { createHash, randomUUID } from 'crypto';
 import type { Pool } from 'pg';
+import {
+  resolveGoogleAdsAccess, resolveConversionAction, uploadClickConversion,
+  type ClickIds,
+} from '@/lib/google-offline-conversions';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -15,6 +19,7 @@ type ConversionConfig = {
   meta_test_event_code: string | null;
   meta_page_id: string | null;
   meta_ativo: boolean;
+  google_customer_id: string | null;
   google_conversion_label_lead: string | null;
   google_conversion_label_contact: string | null;
   google_conversion_label_purchase: string | null;
@@ -131,7 +136,7 @@ async function logConversion(pool: Pool, data: {
   ).catch(() => null);
 }
 
-async function hasSuccessfulConversion(pool: Pool, data: {
+export async function hasSuccessfulConversion(pool: Pool, data: {
   clientId: string;
   leadId?: string | null;
   plataforma: 'meta' | 'google';
@@ -163,8 +168,27 @@ export async function enviarEventoMeta(
 ): Promise<void> {
   try {
     await ensureConversionSchema(pool);
-    const cfg = await loadConfig(pool, clientId);
-    if (!cfg?.meta_ativo || !cfg.meta_pixel_id || !cfg.meta_access_token) return;
+    let cfg = await loadConfig(pool, clientId);
+    if (!cfg?.meta_ativo || !cfg.meta_pixel_id || !cfg.meta_access_token) {
+      // Fallback: config legada (client_tracking_config, do rastreio por Pixel v1).
+      // Unificação da Fase 4 — clientes que só configuraram o sistema antigo
+      // continuam enviando eventos, agora pelo caminho novo (business_messaging
+      // + event_id + dedup), em vez do sendMetaEvent legado (action_source:
+      // 'other', que a Meta não atribuía).
+      const { rows: [legacy] } = await pool.query<{ pixel_id: string | null; meta_token: string | null }>(
+        `SELECT pixel_id, meta_token FROM public.client_tracking_config WHERE client_id = $1`,
+        [clientId],
+      ).catch(() => ({ rows: [] as Array<{ pixel_id: string | null; meta_token: string | null }> }));
+      if (!legacy?.pixel_id || !legacy?.meta_token) return;
+      cfg = {
+        ...(cfg ?? {} as ConversionConfig),
+        meta_ativo: true,
+        meta_pixel_id: legacy.pixel_id,
+        meta_access_token: legacy.meta_token,
+        meta_test_event_code: cfg?.meta_test_event_code ?? null,
+        meta_page_id: cfg?.meta_page_id ?? null,
+      };
+    }
 
     const eventId = randomUUID();
     const normalizedPhone = normalizePhoneE164(leadData.phone);
@@ -227,7 +251,36 @@ export async function enviarEventoMeta(
   }
 }
 
-// ── Google Enhanced Conversions ───────────────────────────────────────────────
+// ── Google: conversão de volta pro Google Ads ─────────────────────────────────
+//
+// Dois caminhos, na ordem:
+// 1. OFFLINE CLICK CONVERSION (o caminho real de atribuição): se o lead tem
+//    gclid/wbraid/gbraid capturado (Fase 1), sobe via uploadClickConversions —
+//    o Google credita a campanha/palavra-chave exata e alimenta o Smart Bidding.
+//    O campo de config (google_conversion_label_*) é o NOME ou ID da ação de
+//    conversão no Google Ads.
+// 2. GA4 Measurement Protocol (fallback, lead sem click id): evento vai pro GA4
+//    com client_id sintético DETERMINÍSTICO no formato do cookie _ga
+//    ("{int32}.{int32}" derivado do hash do telefone — o mesmo lead vira sempre
+//    o mesmo "usuário" no GA4). Sem o cookie real do device não há atribuição
+//    de sessão/campanha no GA4 — serve como contagem, não como atribuição
+//    (o hash cru de antes nem era aceito como client_id válido).
+
+/** client_id sintético no formato do cookie _ga, determinístico por telefone. */
+function syntheticGa4ClientId(phoneHash: string): string {
+  const a = parseInt(phoneHash.slice(0, 8), 16) >>> 0;
+  const b = parseInt(phoneHash.slice(8, 16), 16) >>> 0;
+  return `${a}.${b}`;
+}
+
+async function loadLeadClickIds(pool: Pool, leadId: string | null | undefined): Promise<ClickIds> {
+  if (!leadId) return {};
+  const { rows: [row] } = await pool.query<ClickIds>(
+    `SELECT gclid, wbraid, gbraid FROM public.crm_leads WHERE id = $1`,
+    [leadId],
+  ).catch(() => ({ rows: [] as ClickIds[] }));
+  return row ?? {};
+}
 
 export async function enviarEventoGoogle(
   pool: Pool,
@@ -240,7 +293,7 @@ export async function enviarEventoGoogle(
     if (!conversionLabel) return;
     await ensureConversionSchema(pool);
     const cfg = await loadConfig(pool, clientId);
-    if (!cfg?.google_ativo || !cfg.google_api_secret || !cfg.google_measurement_id) return;
+    if (!cfg?.google_ativo) return;
 
     const eventId = randomUUID();
     const normalizedPhone = `+${normalizePhoneE164(leadData.phone)}`;
@@ -257,8 +310,39 @@ export async function enviarEventoGoogle(
       return;
     }
 
+    // ── Caminho 1: offline click conversion (gclid capturado na Fase 1) ──
+    const clickIds = await loadLeadClickIds(pool, leadData.id);
+    if (clickIds.gclid || clickIds.wbraid || clickIds.gbraid) {
+      const access = await resolveGoogleAdsAccess(pool, clientId, cfg.google_customer_id);
+      if (access) {
+        const action = await resolveConversionAction(access, conversionLabel).catch(() => null);
+        if (action) {
+          const result = await uploadClickConversion(access, action, clickIds, valor);
+          await logConversion(pool, {
+            clientId, leadId: leadData.id, plataforma: 'google', eventName: conversionLabel,
+            eventId, telefoneHash: phoneHash, valor: valor ?? null,
+            statusResposta: result.status ?? 0,
+            respostaBody: `[offline_click_conversion] ${result.body ?? ''}`,
+            sucesso: result.success,
+          });
+          if (result.success) return;
+          // Upload falhou (ex: gclid expirado, ação errada) → cai pro GA4 abaixo
+        } else {
+          await logConversion(pool, {
+            clientId, leadId: leadData.id, plataforma: 'google', eventName: conversionLabel,
+            eventId: randomUUID(), telefoneHash: phoneHash, valor: valor ?? null,
+            statusResposta: 0,
+            respostaBody: `[offline_click_conversion] ação de conversão "${conversionLabel}" não encontrada na conta ${access.customerId} — use o NOME ou ID da ação (Google Ads → Metas → Conversões)`,
+            sucesso: false,
+          });
+        }
+      }
+    }
+
+    // ── Caminho 2: GA4 Measurement Protocol (fallback) ──
+    if (!cfg.google_api_secret || !cfg.google_measurement_id) return;
     const payload = {
-      client_id: phoneHash,
+      client_id: syntheticGa4ClientId(phoneHash),
       user_data: { phone_number: phoneHash },
       events: [{
         name: 'conversion',
@@ -281,7 +365,7 @@ export async function enviarEventoGoogle(
     await logConversion(pool, {
       clientId, leadId: leadData.id, plataforma: 'google', eventName: conversionLabel,
       eventId, telefoneHash: phoneHash, valor: valor ?? null,
-      statusResposta: res.status, respostaBody: resText, sucesso: res.ok,
+      statusResposta: res.status, respostaBody: `[ga4_mp] ${resText}`, sucesso: res.ok,
     });
   } catch (err) {
     console.error('[enviarEventoGoogle]', err);

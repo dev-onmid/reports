@@ -276,6 +276,73 @@ Módulo de análise automática de performance — arquivos principais:
 
 ---
 
+## Rastreio de Leads — Fase 1: fundação de captura (2026-07-15)
+
+Objetivo do módulo (4 fases): saber de TODO lead o canal, campanha, conjunto, criativo, posicionamento, palavra-chave e região — em tempo real e permanente (só some se o lead for deletado), para alimentar relatórios/análises de campanha com IA. Fase 1 entregue; Fases 2 (formulários: Meta Lead Ads nativo + landing + terceiros), 3 (demografia agregada por campanha + UI rica lendo `crm_leads`/eventos em vez da legada `whatsapp_leads`) e 4 (Google offline conversions com o gclid capturado + conserto do GA4 client_id + unificação do CAPI Meta duplicado) pendentes.
+
+| Arquivo | Papel |
+|---|---|
+| `src/lib/lead-tracking.ts` | Núcleo: schema (ALTERs + `lead_tracking_events`), `generateClickCode`/`extractClickCode`, `extractTrackingFromText` (fallback URL no texto), `matchClickByCode`, `mergeTracking`, `applyLeadAttribution`, `linkClickToLead`, `recordTrackingEvent`, `geoFromHeaders` |
+| `src/lib/ddd-regioes.ts` | Mapa estático DDD→UF/região + `regiaoFromPhone` (sem API externa) |
+| `src/app/r/[slug]/route.ts` | Captura completa no clique: utm_*, gclid/wbraid/gbraid/fbclid/ttclid/msclkid, ValueTrack (keyword/matchtype/device/network/placement/loc), geo via headers `x-vercel-ip-*`, params desconhecidos em `extra_params` JSONB; gera `click_code` |
+| `src/app/api/webhook/whatsapp/[instanceId]/route.ts` | Casa `Cód: XXXXXX` com o clique, herda atribuição server-side, deriva região (IP do clique > DDD), grava evento imutável |
+| `capture-links-tab.tsx` | Templates de UTM atualizados (Meta: macros por NOME + placement + site_source_name; Google: ValueTrack completo) + snippet JS pra landing repassar params ao botão `/r/` |
+
+### Decisões arquiteturais
+
+- **Ponte clique↔lead por código curto, não por URL no texto.** O `/r/[slug]` grava o clique com TODOS os parâmetros server-side e injeta `Cód: A7X2K9` (6 chars, alfabeto sem 0/O/1/I/L) na mensagem — substituiu a linha `Origem: <URL>` (spam visual e frágil). O webhook extrai o código (`extractClickCode`, regex `c[óo]d(igo)?[.:]`), casa via `matchClickByCode` (janela 90 dias) e a atribuição do clique **vence** a do texto (`mergeTracking`). `extractTrackingFromText` continua como fallback para links antigos/URLs coladas. Depois do casamento, `linkClickToLead` grava `lead_id`/`matched_at` no clique — clique e lead deixam de ser mundos separados.
+- **`lead_tracking_events` = histórico IMUTÁVEL de toques** (não de mensagens): grava o primeiro contato (snapshot completo) + qualquer mensagem posterior com identificador novo (ctwa/link_click/utm_texto). `event_type`: `ctwa | link_click | utm_texto | contexto | organico` (Fase 2 adiciona `formulario`). FK `ON DELETE CASCADE` p/ `crm_leads` (some só com o lead). Dedup de retry por índice único parcial `(lead_id, external_id)` + `ON CONFLICT DO NOTHING`.
+- **First-touch protegido em `crm_leads`**: colunas novas (gclid/wbraid/gbraid/fbclid/ttclid, keyword/matchtype/device/network/placement, click_code, ddd/regiao_uf/regiao_cidade/regiao_fonte) preenchidas via `applyLeadAttribution` com `COALESCE(NULLIF(col,''), novo)` — UPDATE separado do upsert gigante de `crm-conversation-sync.ts` (de propósito: não mexer nos 26 params posicionais).
+- **Região sem API externa**: geo do clique via headers `x-vercel-ip-country/-region/-city` (prioridade, localização real) com fallback DDD do telefone (`regiao_fonte='ip'|'ddd'`). Idade/gênero por lead NÃO existe via WhatsApp — virá de formulário (Fase 2) ou agregado da campanha (Fase 3).
+- **`detectOrigin` agora entende click IDs**: gclid/wbraid/gbraid → google (ANTES do utm_source), fbclid → meta, ttclid → tiktok; `adwords` também mapeia p/ google. Antes, lead do Google com auto-tagging puro caía como `organic`.
+- **keyword NUNCA cai de `utm_term`**: o template Meta usa `utm_term={{adset.name}}` — fallback keyword←utm_term poluiria a coluna com nome de conjunto. O template Google envia `keyword={keyword}` explícito.
+- **Schema via `ensureLeadTrackingSchema`** (memoizada por processo, padrão CREATE/ALTER IF NOT EXISTS inline do projeto — não tem .sql). FK da events table via DO $$ block (Postgres não tem ADD CONSTRAINT IF NOT EXISTS).
+- ⚠️ Não verificável no preview local (sem DB/instância Evolution) — funções puras validadas por teste transpilado (27 asserts: round-trip do código, extração de texto, merge, DDD). Validar em produção: clicar num `/r/` com `?utm_source=google&gclid=X&keyword=Y`, mandar a mensagem com o código e conferir `crm_leads` + `lead_tracking_events`.
+
+### Fase 2: formulários (2026-07-15)
+
+| Arquivo | Papel |
+|---|---|
+| `src/lib/meta-leadgen.ts` | `processLeadgenEvent`: busca o lead na Graph (`/{leadgen_id}` — o nó Lead já traz `campaign_name`/`adset_name`/`ad_name` direto), resolve o cliente, upsert no CRM + evento `formulario`. `parseLeadgenFields` normaliza field_data (full_name/first+last, phone/whatsapp, email, city/state, date_of_birth; custom → extras) |
+| `src/app/api/meta/webhook/route.ts` | Branch `object=page, field=leadgen` → `processLeadgenEvent` (page token via `getPageToken`), log em `meta_automation_logs` (event_type `leadgen`) |
+| `src/app/api/webhooks/[token]/route.ts` | `lead.create` aceita utm_*/gclid/wbraid/gbraid/fbclid/ttclid/keyword/matchtype/device/network/placement/email/cidade/estado OU só `page_url` (extrai tudo da URL via `extractTrackingFromText`); grava atribuição + evento `formulario` |
+
+- **Resolução página→cliente** (leadgen): 1º `meta_leadgen_page_map` (page_id→client_id, criada em `meta-leadgen.ts`; cadastrar manualmente p/ leads orgânicos de form); 2º via `ad_id` → `GET /{ad_id}?fields=account_id` → `client_account_links` (platform meta_ads/meta, aceita `act_` prefixado ou não) — e memoriza no mapa. Não resolvido → log de erro em `meta_automation_logs` com a page_id.
+- **Dedup leadgen**: `external_id = 'leadgen:{id}'` em `lead_tracking_events` — checado ANTES de buscar na Graph (Meta reenvia webhooks).
+- **Lead sem telefone** (form só-email): INSERT direto em `crm_leads` (upsert exige phone/lid). Com telefone: upsert — junta com a conversa futura do mesmo número no WhatsApp.
+- **`crm_leads.email`** (coluna nova) + `regiao_fonte='form'`: cidade/UF declaradas no formulário têm prioridade sobre DDD. Respostas custom viram `observacao` legível + raw completo no evento (é a única fonte de demografia POR LEAD — idade/cidade declaradas).
+- **`originFromTracking`** (lead-tracking.ts): helper único de origem por identificadores (gclid→google, fbclid→meta, ttclid→tiktok, utm_source mapeado) — usado pelo webhook WhatsApp (via `detectOrigin`), leadgen e webhook genérico.
+- ⚠️ Setup necessário no app Meta p/ Lead Ads nativo: permissão `leads_retrieval` + subscrever o campo `leadgen` no webhook do app + página assinada (`/{page_id}/subscribed_apps`). Sem isso a Meta não manda o evento.
+- ⚠️ Validado por teste transpilado (19 asserts: parseLeadgenFields + originFromTracking); fluxo completo precisa de produção (Graph API + DB). Testar com o Lead Ads Testing Tool da Meta (developers.facebook.com/tools/lead-ads-testing).
+
+### Fase 3: demografia agregada + UI rica (2026-07-15)
+
+| Arquivo | Papel |
+|---|---|
+| `src/app/api/tracking/leads/route.ts` | GET consolidado (`clientId?`, `days`, `limit`) — lê a atribuição REAL de `crm_leads` (origem, campanha/conjunto/anúncio, keyword, placement, região, flags has_ctwa/has_gclid/click_code) + summary (porOrigem/porCampanha/porRegiao/porKeyword/porPlacement, % com atribuição/região). Substitui a leitura da legada `whatsapp_leads` nas telas |
+| `src/app/api/tracking/demografia/route.ts` | GET `clientId` — breakdowns agregados últimos 30d: Meta insights `breakdowns=age,gender` + `region` (level=account, mesmos action_types do metrics — nunca somar famílias); Google GAQL `age_range_view`/`gender_view` + `geographic_view` com resolução de nomes via `geo_target_constant` em lote. Cache 4h (reusa `mccmap:{connId}` do metrics). Tudo best-effort: resultado parcial > 500 |
+| `rastreamento/page.tsx` | Seção "Rastreio WhatsApp → Meta Ads" virou **"Leads Rastreados"**: KPIs (total/% atribuição/% região), 4 cards de breakdown, painel de demografia (só com cliente selecionado — precisa da conta de anúncio), tabela rica (Lead, Origem+badges CTWA/gclid/link, Campanha›Conjunto›Anúncio, Keyword/Posição, Região c/ fonte) |
+| `clientes/[id]/tracking-tab.tsx` | Tabela de leads da sub-aba WhatsApp agora lê `/api/tracking/leads?clientId=` com as mesmas colunas ricas; status de envio de conversão continua na sub-aba Log (`conversion_log`) |
+
+- **Demografia é AGREGADO, não por lead** — o painel deixa isso explícito no texto. Idade por lead só via formulário (Fase 2).
+- **Rotas legadas (`/api/whatsapp-leads`, `/api/clients/[id]/tracking/leads`) não foram removidas** — a tabela `whatsapp_leads` ainda alimenta a dedup do CAPI legado no webhook. Só as TELAS migraram de fonte.
+- ✅ Verificado no preview com `window.fetch` mockado (screenshots: KPIs, breakdowns, badges, tabela, hierarquia de campanha, região com fonte ddd/ip) + degradação graciosa confirmada (API 500 → estado vazio, sem crash). SQL real e chamadas Meta/Google não verificáveis localmente (sem DB) — validar em produção.
+
+### Fase 4: feedback loop pra Meta/Google (2026-07-15)
+
+| Arquivo | Papel |
+|---|---|
+| `src/lib/google-offline-conversions.ts` | `resolveGoogleAdsAccess` (config `google_customer_id` > `client_account_links`; token cru via OAuth fetch com fallback — espelha report-builder, NUNCA googleapis refreshAccessToken), `resolveConversionAction` (aceita resource name, ID numérico ou NOME da ação — resolve via GAQL c/ cache 4h), `uploadClickConversion` (`:uploadClickConversions`, só UM click id por conversão, `partialFailure:true` — 200 c/ `partialFailureError` conta como falha) |
+| `src/lib/conversions.ts` | `enviarEventoGoogle` reescrito: caminho 1 = **offline click conversion** (lead com gclid/wbraid/gbraid da Fase 1 → credita campanha/keyword exata, alimenta Smart Bidding); caminho 2 = fallback GA4 MP com `client_id` sintético determinístico no formato `_ga` (`{int32}.{int32}` do hash do telefone — o hash cru de antes nem era client_id válido; GA4 = contagem, não atribuição). `enviarEventoMeta` ganhou fallback pra `client_tracking_config` (pixel/token legados) quando não há `client_conversion_config`. `hasSuccessfulConversion` exportado |
+| `webhook/whatsapp/[instanceId]/route.ts` | **CAPI legado removido** (`sendMetaEvent` com `action_source:'other'` — duplicava Purchase e a Meta não atribuía). FLOW 1 não reenvia Lead (o CAPI novo já mandou no 1º inbound; `whatsapp_leads.evento_lead_enviado` lido do `conversion_log`); FLOW 2 envia Purchase UMA vez pelo caminho novo |
+| `tracking-tab.tsx` | Card Google renomeado ("Google — Conversões"): campo Customer ID (opcional), campos de ação de conversão agora pedem NOME ou ID (não mais o gtag label), Measurement ID/API Secret rebaixados a "fallback GA4" |
+
+- **Config semântica mudou**: `google_conversion_label_*` deixou de ser o gtag label e passou a ser NOME ou ID da ação de conversão do Google Ads (necessário pro upload via API). Configs antigas com label gtag caem no log com "ação não encontrada" + fallback GA4 — reconfigurar pelos nomes.
+- **Dedup**: continua nos callers (`dispararEventos*`/`dispararEventoFechamento` via `hasSuccessfulConversion`; webhook gate por 1º/2º inbound e `evento_compra_enviado`).
+- ⚠️ Validado por teste transpilado (19 asserts: endpoint/headers/payload do upload, precedência gclid>wbraid>gbraid, formato conversionDateTime, partialFailureError, resolução de ação por nome/ID/cache). Chamada real ao Google Ads exige produção — testar com lead real com gclid e conferir `conversion_log` (`[offline_click_conversion]`) + Google Ads → Metas → Conversões (aparece em ~3h).
+
+---
+
 ## Integração Leadlovers
 
 Módulo de envio de contatos para o Leadlovers via webhook com cronograma inteligente — arquivos principais:

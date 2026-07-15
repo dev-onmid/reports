@@ -1,7 +1,16 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
+import { ensureLeadTrackingSchema, generateClickCode, geoFromHeaders } from '@/lib/lead-tracking';
 
 export const dynamic = 'force-dynamic';
+
+// Parâmetros com coluna própria em link_redirect_clicks. Qualquer outro
+// parâmetro da URL vai para extra_params (JSONB) — nada se perde.
+const KNOWN_PARAMS = new Set([
+  'utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term',
+  'gclid', 'wbraid', 'gbraid', 'fbclid', 'ttclid', 'msclkid',
+  'keyword', 'matchtype', 'device', 'network', 'placement', 'loc',
+]);
 
 export async function GET(
   req: NextRequest,
@@ -36,6 +45,7 @@ export async function GET(
         created_at  TIMESTAMPTZ DEFAULT NOW()
       );
     `);
+    await ensureLeadTrackingSchema(pool);
 
     const { rows: [link] } = await pool.query(
       `SELECT id, whatsapp, message FROM public.link_redirects WHERE slug = $1`,
@@ -43,21 +53,58 @@ export async function GET(
     );
 
     if (!link) {
+      await pool.end().catch(() => null);
       return new Response('Link não encontrado', { status: 404 });
     }
+
+    // Extras: qualquer parâmetro sem coluna própria (macros custom, ids crus…)
+    const extras: Record<string, string> = {};
+    for (const [key, value] of sp.entries()) {
+      if (!KNOWN_PARAMS.has(key) && value) extras[key] = value;
+    }
+
+    // Geo do clique via headers da Vercel (sem API externa)
+    const geo = geoFromHeaders(req.headers);
+
+    // Código curto que liga este clique ao lead quando ele mandar a mensagem.
+    // Vai embutido no texto do WhatsApp; o webhook casa o código com esta linha.
+    const clickCode = generateClickCode();
 
     // Log click (fire and forget pattern — don't block redirect)
     pool.query(
       `INSERT INTO public.link_redirect_clicks
-        (redirect_id, utm_source, utm_medium, utm_campaign, utm_content, utm_term, ip, user_agent, referer)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        (redirect_id, click_code, url,
+         utm_source, utm_medium, utm_campaign, utm_content, utm_term,
+         gclid, wbraid, gbraid, fbclid, ttclid, msclkid,
+         keyword, matchtype, device, network, placement, loc_physical,
+         geo_country, geo_region, geo_city, extra_params,
+         ip, user_agent, referer)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)`,
       [
         link.id as string,
+        clickCode,
+        req.nextUrl.toString(),
         sp.get('utm_source'),
         sp.get('utm_medium'),
         sp.get('utm_campaign'),
         sp.get('utm_content'),
         sp.get('utm_term'),
+        sp.get('gclid'),
+        sp.get('wbraid'),
+        sp.get('gbraid'),
+        sp.get('fbclid'),
+        sp.get('ttclid'),
+        sp.get('msclkid'),
+        sp.get('keyword'),
+        sp.get('matchtype'),
+        sp.get('device'),
+        sp.get('network'),
+        sp.get('placement'),
+        sp.get('loc'),
+        geo.country,
+        geo.region,
+        geo.city,
+        Object.keys(extras).length > 0 ? JSON.stringify(extras) : null,
         req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? null,
         req.headers.get('user-agent'),
         req.headers.get('referer'),
@@ -65,8 +112,10 @@ export async function GET(
     ).catch(() => null).finally(() => pool.end());
 
     const waNumber = (link.whatsapp as string).replace(/\D/g, '');
-    const trackingUrl = req.nextUrl.toString();
-    const messageWithTracking = `${link.message as string}\n\nOrigem: ${trackingUrl}`;
+    // O código substitui a URL crua de antes: mais curto, menos "spam" e a
+    // atribuição completa fica gravada server-side no clique — mesmo que o lead
+    // edite o resto da mensagem, basta a linha do código sobreviver.
+    const messageWithTracking = `${link.message as string}\n\nCód: ${clickCode}`;
     const waText = encodeURIComponent(messageWithTracking);
     const waUrl = `https://wa.me/${waNumber}?text=${waText}`;
 
