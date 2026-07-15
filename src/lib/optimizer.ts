@@ -108,6 +108,10 @@ export type OptimizerAdV2 = {
   ctr: number;
   cpl: number | null;
   conversoes: number;
+  // Objetivos de tráfego medem-se por CLIQUE: resultado = cliques, custo = cpc (gasto/cliques).
+  // Preenchidos só quando fazem sentido; para leads/conversas ficam ausentes (usa conversoes/cpl).
+  cliques?: number;
+  cpc?: number | null;
   dias_ativo: number | null;
   quality_ranking: string | null;
   engagement_ranking: string | null;
@@ -139,6 +143,9 @@ export type OptimizerAdsetV2 = {
   ctr: number;
   cpl: number | null;
   conversoes: number;
+  // Ver OptimizerAdV2: tráfego mede-se por clique (cliques/cpc), não conversão/cpl.
+  cliques?: number;
+  cpc?: number | null;
   ctr_tendencia_4d: 'SUBINDO' | 'CAINDO' | 'ESTAVEL' | null;
   dias_ativo: number | null;
   anuncios: OptimizerAdV2[];
@@ -156,6 +163,9 @@ export type OptimizerCampaignV2 = {
   ctr: number;
   cpl: number | null;
   conversoes: number;
+  // Custo por clique (gasto/cliques). Para tráfego é o custo por resultado real; para os demais
+  // objetivos é informativo. Ver OptimizerAdV2.
+  cpc?: number | null;
   roas: number | null;
   dias_rodando: number | null;
   conjuntos: OptimizerAdsetV2[];
@@ -224,6 +234,9 @@ export type OptimizerAnaliseAnuncio = {
   gasto: number;
   conversoes: number;
   cpl: number | null;
+  // Métrica de clique (tráfego): resultado exibido = cliques, custo = cpc. Ver OptimizerAdV2.
+  cliques: number;
+  cpc: number | null;
   ctr: number;
   quality_ranking: string | null;
   engagement_ranking: string | null;
@@ -257,6 +270,8 @@ export type OptimizerAnaliseConjunto = {
   gasto: number;
   conversoes: number;
   cpl: number | null;
+  cliques: number;
+  cpc: number | null;
   ctr: number;
   orcamento_diario: number | null;
   dias_ativo: number | null;
@@ -280,6 +295,8 @@ export type OptimizerAnaliseCampanha = {
   gasto: number;
   conversoes: number;
   cpl: number | null;
+  cliques: number;
+  cpc: number | null;
   ctr: number;
   orcamento_diario: number | null;
   classificacao: OptimizerVerdict;
@@ -427,6 +444,14 @@ function objetivoInfo(raw: string | null | undefined): ObjetivoInfo | null {
   if (/awareness|reconhec|alcance|reach|brand/.test(t)) return { label: 'Reconhecimento de marca', curto: 'alcance', metrica: 'Alcance', custo: 'CPM' };
   if (/app|install/.test(t)) return { label: 'Instalações do app', curto: 'instalações', metrica: 'Instalações', custo: 'Custo por instalação' };
   return { label: (raw ?? '').slice(0, 40), curto: 'resultado', metrica: 'Conversões', custo: 'CPL' };
+}
+
+// TRÁFEGO mede-se por CLIQUE no link — o resultado é `cliques` e o custo por resultado é o CPC
+// (gasto/cliques), NUNCA conversões/CPL (que num tráfego saem de conversas incidentais e produzem
+// número sem sentido, ex: "Custo por clique R$351" = gasto ÷ 2 conversas no bug do Cão Véio).
+// Fonte única de verdade pra decidir o eixo de medição — usada no payload (weekly) e na árvore.
+export function objetivoMedidoPorClique(raw: string | null | undefined): boolean {
+  return objetivoInfo(raw)?.metrica === 'Cliques';
 }
 
 // Título do card em linguagem natural, SEMPRE ancorado no resultado do objetivo — qualquer
@@ -579,22 +604,26 @@ export function buildRecomendacoes(
     const obj = objetivoInfo(camp.objetivo);
     const mConv = obj?.metrica ?? 'Conversões';
     const mCusto = obj?.custo ?? 'CPL';
+    // Tráfego: resultado exibido = cliques, custo = cpc (nunca conversões/cpl). Ver objetivoMedidoPorClique.
+    const usaClq = obj?.metrica === 'Cliques';
+    const resDe = (n: { conversoes: number; cliques: number }) => usaClq ? n.cliques : n.conversoes;
+    const custoDe = (n: { cpl: number | null; cpc: number | null }) => usaClq ? n.cpc : n.cpl;
     push({
       objeto_tipo: 'campaign', objeto_id: camp.id, objeto_nome: camp.nome, status_entrega: camp.status_entrega ?? null, campanha_nome: camp.nome,
       conjunto_nome: null,
-      objetivo: obj, gasto: Number(camp.gasto) || 0, conversoes: Number(camp.conversoes) || 0,
+      objetivo: obj, gasto: Number(camp.gasto) || 0, conversoes: resDe(camp),
       classificacao: camp.classificacao, veredito: camp.veredito, acao: camp.acao,
       acao_tipo: camp.acao_tipo, acao_parametros: camp.acao_parametros, confianca_item: camp.confianca_item,
       depende_de: camp.depende_de, padrao: camp.padrao, motivos: camp.motivos,
       metricas_chave: [
         { rotulo: 'Gasto', valor: money(camp.gasto) },
-        { rotulo: mConv, valor: num(camp.conversoes) },
-        { rotulo: mCusto, valor: money(camp.cpl) },
+        { rotulo: mConv, valor: num(resDe(camp)) },
+        { rotulo: mCusto, valor: money(custoDe(camp)) },
       ],
       fatos: [
         { rotulo: 'Gasto', valor: money(camp.gasto) },
-        { rotulo: mConv, valor: num(camp.conversoes) },
-        { rotulo: mCusto, valor: money(camp.cpl) },
+        { rotulo: mConv, valor: num(resDe(camp)) },
+        { rotulo: mCusto, valor: money(custoDe(camp)) },
         { rotulo: 'CTR', valor: pct(camp.ctr) },
         { rotulo: 'Orçamento diário', valor: money(camp.orcamento_diario) },
       ],
@@ -603,19 +632,19 @@ export function buildRecomendacoes(
       push({
         objeto_tipo: 'adset', objeto_id: conj.id, objeto_nome: conj.nome, status_entrega: conj.status_entrega ?? null, campanha_nome: camp.nome,
         conjunto_nome: conj.nome,
-        objetivo: obj, gasto: Number(conj.gasto) || 0, conversoes: Number(conj.conversoes) || 0,
+        objetivo: obj, gasto: Number(conj.gasto) || 0, conversoes: resDe(conj),
         classificacao: conj.classificacao, veredito: conj.veredito, acao: conj.acao,
         acao_tipo: conj.acao_tipo, acao_parametros: conj.acao_parametros, confianca_item: conj.confianca_item,
         depende_de: conj.depende_de, padrao: conj.padrao, motivos: conj.motivos,
         metricas_chave: [
           { rotulo: 'Gasto', valor: money(conj.gasto) },
-          { rotulo: mConv, valor: num(conj.conversoes) },
-          { rotulo: mCusto, valor: money(conj.cpl) },
+          { rotulo: mConv, valor: num(resDe(conj)) },
+          { rotulo: mCusto, valor: money(custoDe(conj)) },
         ],
         fatos: [
           { rotulo: 'Gasto', valor: money(conj.gasto) },
-          { rotulo: mConv, valor: num(conj.conversoes) },
-          { rotulo: mCusto, valor: money(conj.cpl) },
+          { rotulo: mConv, valor: num(resDe(conj)) },
+          { rotulo: mCusto, valor: money(custoDe(conj)) },
           { rotulo: 'CTR', valor: pct(conj.ctr) },
           { rotulo: 'Orçamento diário', valor: money(conj.orcamento_diario) },
           { rotulo: 'Dias ativo', valor: conj.dias_ativo != null ? String(conj.dias_ativo) : '—' },
@@ -625,19 +654,19 @@ export function buildRecomendacoes(
         push({
           objeto_tipo: 'ad', objeto_id: ad.id, objeto_nome: ad.nome, status_entrega: ad.status_entrega ?? null, campanha_nome: camp.nome,
           conjunto_nome: conj.nome,
-          objetivo: obj, gasto: Number(ad.gasto) || 0, conversoes: Number(ad.conversoes) || 0,
+          objetivo: obj, gasto: Number(ad.gasto) || 0, conversoes: resDe(ad),
           classificacao: ad.classificacao, veredito: ad.veredito, acao: ad.acao,
           acao_tipo: ad.acao_tipo, acao_parametros: ad.acao_parametros, confianca_item: ad.confianca_item,
           depende_de: ad.depende_de, padrao: ad.padrao, motivos: ad.motivos,
           metricas_chave: [
             { rotulo: 'Gasto', valor: money(ad.gasto) },
-            { rotulo: mConv, valor: num(ad.conversoes) },
-            { rotulo: mCusto, valor: money(ad.cpl) },
+            { rotulo: mConv, valor: num(resDe(ad)) },
+            { rotulo: mCusto, valor: money(custoDe(ad)) },
           ],
           fatos: [
             { rotulo: 'Gasto', valor: money(ad.gasto) },
-            { rotulo: mConv, valor: num(ad.conversoes) },
-            { rotulo: mCusto, valor: money(ad.cpl) },
+            { rotulo: mConv, valor: num(resDe(ad)) },
+            { rotulo: mCusto, valor: money(custoDe(ad)) },
             { rotulo: 'CTR', valor: pct(ad.ctr) },
             { rotulo: 'Ranking de qualidade', valor: ad.quality_ranking ?? '—' },
             { rotulo: 'Ranking de engajamento', valor: ad.engagement_ranking ?? '—' },
@@ -770,25 +799,29 @@ export function buildCampaignTree(
     const obj = objetivoInfo(camp.objetivo);
     const mConv = obj?.metrica ?? 'Conversões';
     const mCusto = obj?.custo ?? 'CPL';
+    // Tráfego: resultado exibido = cliques, custo = cpc (nunca conversões/cpl). Ver objetivoMedidoPorClique.
+    const usaClq = obj?.metrica === 'Cliques';
+    const resDe = (n: { conversoes: number; cliques: number }) => usaClq ? n.cliques : n.conversoes;
+    const custoDe = (n: { cpl: number | null; cpc: number | null }) => usaClq ? n.cpc : n.cpl;
 
     const conjuntosNodes: OptimizerTreeNode[] = (camp.conjuntos ?? []).map((conj) => {
       const anunciosNodes: OptimizerTreeNode[] = (conj.anuncios ?? []).map((ad) => {
         const adNode = buildNode({
           objeto_tipo: 'ad', objeto_id: ad.id, objeto_nome: ad.nome, status_entrega: ad.status_entrega ?? null, campanha_nome: camp.nome,
           conjunto_nome: conj.nome,
-          objetivo: obj, gasto: Number(ad.gasto) || 0, conversoes: Number(ad.conversoes) || 0,
+          objetivo: obj, gasto: Number(ad.gasto) || 0, conversoes: resDe(ad),
           classificacao: ad.classificacao, veredito: ad.veredito, acao: ad.acao,
           acao_tipo: ad.acao_tipo, acao_parametros: ad.acao_parametros, confianca_item: ad.confianca_item,
           depende_de: ad.depende_de, padrao: ad.padrao, motivos: ad.motivos,
           metricas_chave: [
             { rotulo: 'Gasto', valor: fmtMoney(ad.gasto) },
-            { rotulo: mConv, valor: fmtNum(ad.conversoes) },
-            { rotulo: mCusto, valor: fmtMoney(ad.cpl) },
+            { rotulo: mConv, valor: fmtNum(resDe(ad)) },
+            { rotulo: mCusto, valor: fmtMoney(custoDe(ad)) },
           ],
           fatos: [
             { rotulo: 'Gasto', valor: fmtMoney(ad.gasto) },
-            { rotulo: mConv, valor: fmtNum(ad.conversoes) },
-            { rotulo: mCusto, valor: fmtMoney(ad.cpl) },
+            { rotulo: mConv, valor: fmtNum(resDe(ad)) },
+            { rotulo: mCusto, valor: fmtMoney(custoDe(ad)) },
             { rotulo: 'CTR', valor: fmtPct(ad.ctr) },
             { rotulo: 'Ranking de qualidade', valor: ad.quality_ranking ?? '—' },
             { rotulo: 'Ranking de engajamento', valor: ad.engagement_ranking ?? '—' },
@@ -811,19 +844,19 @@ export function buildCampaignTree(
       const conjNode = buildNode({
         objeto_tipo: 'adset', objeto_id: conj.id, objeto_nome: conj.nome, status_entrega: conj.status_entrega ?? null, campanha_nome: camp.nome,
         conjunto_nome: conj.nome,
-        objetivo: obj, gasto: Number(conj.gasto) || 0, conversoes: Number(conj.conversoes) || 0,
+        objetivo: obj, gasto: Number(conj.gasto) || 0, conversoes: resDe(conj),
         classificacao: conj.classificacao, veredito: conj.veredito, acao: conj.acao,
         acao_tipo: conj.acao_tipo, acao_parametros: conj.acao_parametros, confianca_item: conj.confianca_item,
         depende_de: conj.depende_de, padrao: conj.padrao, motivos: conj.motivos,
         metricas_chave: [
           { rotulo: 'Gasto', valor: fmtMoney(conj.gasto) },
-          { rotulo: mConv, valor: fmtNum(conj.conversoes) },
-          { rotulo: mCusto, valor: fmtMoney(conj.cpl) },
+          { rotulo: mConv, valor: fmtNum(resDe(conj)) },
+          { rotulo: mCusto, valor: fmtMoney(custoDe(conj)) },
         ],
         fatos: [
           { rotulo: 'Gasto', valor: fmtMoney(conj.gasto) },
-          { rotulo: mConv, valor: fmtNum(conj.conversoes) },
-          { rotulo: mCusto, valor: fmtMoney(conj.cpl) },
+          { rotulo: mConv, valor: fmtNum(resDe(conj)) },
+          { rotulo: mCusto, valor: fmtMoney(custoDe(conj)) },
           { rotulo: 'CTR', valor: fmtPct(conj.ctr) },
           { rotulo: 'Orçamento diário', valor: fmtMoney(conj.orcamento_diario) },
           { rotulo: 'Dias ativo', valor: conj.dias_ativo != null ? String(conj.dias_ativo) : '—' },
@@ -837,19 +870,19 @@ export function buildCampaignTree(
     const campNode = buildNode({
       objeto_tipo: 'campaign', objeto_id: camp.id, objeto_nome: camp.nome, status_entrega: camp.status_entrega ?? null, campanha_nome: camp.nome,
       conjunto_nome: null,
-      objetivo: obj, gasto: Number(camp.gasto) || 0, conversoes: Number(camp.conversoes) || 0,
+      objetivo: obj, gasto: Number(camp.gasto) || 0, conversoes: resDe(camp),
       classificacao: camp.classificacao, veredito: camp.veredito, acao: camp.acao,
       acao_tipo: camp.acao_tipo, acao_parametros: camp.acao_parametros, confianca_item: camp.confianca_item,
       depende_de: camp.depende_de, padrao: camp.padrao, motivos: camp.motivos,
       metricas_chave: [
         { rotulo: 'Gasto', valor: fmtMoney(camp.gasto) },
-        { rotulo: mConv, valor: fmtNum(camp.conversoes) },
-        { rotulo: mCusto, valor: fmtMoney(camp.cpl) },
+        { rotulo: mConv, valor: fmtNum(resDe(camp)) },
+        { rotulo: mCusto, valor: fmtMoney(custoDe(camp)) },
       ],
       fatos: [
         { rotulo: 'Gasto', valor: fmtMoney(camp.gasto) },
-        { rotulo: mConv, valor: fmtNum(camp.conversoes) },
-        { rotulo: mCusto, valor: fmtMoney(camp.cpl) },
+        { rotulo: mConv, valor: fmtNum(resDe(camp)) },
+        { rotulo: mCusto, valor: fmtMoney(custoDe(camp)) },
         { rotulo: 'CTR', valor: fmtPct(camp.ctr) },
         { rotulo: 'Orçamento diário', valor: fmtMoney(camp.orcamento_diario) },
       ],
@@ -1560,6 +1593,8 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
       gasto: Number(camp.gasto) || 0,
       conversoes: Number(camp.conversoes) || 0,
       cpl: camp.cpl,
+      cliques: Number(camp.cliques) || 0,
+      cpc: camp.cpc ?? null,
       ctr: Number(camp.ctr) || 0,
       orcamento_diario: camp.orcamento_diario,
       classificacao: campClassificacao,
@@ -1581,6 +1616,8 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
           gasto: Number(cj.gasto) || 0,
           conversoes: Number(cj.conversoes) || 0,
           cpl: cj.cpl,
+          cliques: Number(cj.cliques) || 0,
+          cpc: cj.cpc ?? null,
           ctr: Number(cj.ctr) || 0,
           orcamento_diario: cj.orcamento_diario,
           dias_ativo: cj.dias_ativo,
@@ -1603,6 +1640,8 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
               gasto: Number(ad.gasto) || 0,
               conversoes: Number(ad.conversoes) || 0,
               cpl: ad.cpl,
+              cliques: Number(ad.cliques) || 0,
+              cpc: ad.cpc ?? null,
               ctr: Number(ad.ctr) || 0,
               quality_ranking: ad.quality_ranking,
               engagement_ranking: ad.engagement_ranking,
@@ -1692,20 +1731,35 @@ export function sanitizeOptimizerOutputV2(input: unknown, payload: OptimizerPayl
   // mesmo com dados reais no payload (causa raiz do "R$ 0,00").
   const campanhas = payload.campanhas ?? [];
   const gastoReal = campanhas.reduce((s, c) => s + (Number(c.gasto) || 0), 0);
-  const convReal = campanhas.reduce((s, c) => s + (Number(c.conversoes) || 0), 0);
-  const cplReal = gastoReal > 0 && convReal > 0 ? gastoReal / convReal : null;
+  // A régua de CPL/volume da conta soma SÓ campanhas cujo resultado é lead/conversa (regra do
+  // prompt) — tráfego mede-se por clique e NÃO entra aqui, senão o volume de cliques domina a soma
+  // e mascara o CPL real das campanhas de conversão. Numa conta 100% tráfego a régua de CPL não se
+  // aplica: mostramos o resultado real do tráfego (cliques + CPC) no lugar de "0 / R$0,00" (ou do
+  // R$351 sem sentido que saía de gasto ÷ conversas incidentais — bug Cão Véio).
+  const convCampanhas = campanhas.filter((c) => !objetivoMedidoPorClique(c.objetivo));
+  const convGasto = convCampanhas.reduce((s, c) => s + (Number(c.gasto) || 0), 0);
+  const convReal = convCampanhas.reduce((s, c) => s + (Number(c.conversoes) || 0), 0);
+  const cplReal = convGasto > 0 && convReal > 0 ? convGasto / convReal : null;
+  const soTrafego = convCampanhas.length === 0 && campanhas.length > 0;
+  const cliquesReal = campanhas.reduce((s, c) => s + (Number(c.cliques) || 0), 0);
+  const cpcReal = gastoReal > 0 && cliquesReal > 0 ? gastoReal / cliquesReal : null;
   const metas = payload.metas;
 
   // status_cpl é SEMPRE calculado aqui, nunca ecoado da IA — regra fixa "quanto menor o custo,
   // melhor": cpl_atual dentro do cpl_ideal é DENTRO, acima do ideal mas até o máximo é ATENCAO,
   // acima do máximo é CRITICO. Antes confiava em `cruzamento.status_cpl` (texto livre da IA), que
   // podia dizer "CRITICO" com um cpl_atual/cpl_maximo do lado mostrando exatamente o contrário.
-  const cplAtualFinal = cplReal != null ? cplReal : (cruzamento.cpl_atual != null ? Number(cruzamento.cpl_atual) : null);
+  // Conta só-tráfego: o "custo por resultado" exibido é o CPC (gasto/cliques), não um CPL.
+  const cplAtualFinal = soTrafego
+    ? cpcReal
+    : (cplReal != null ? cplReal : (cruzamento.cpl_atual != null ? Number(cruzamento.cpl_atual) : null));
   const cplIdealFinal = cruzamento.cpl_ideal != null ? Number(cruzamento.cpl_ideal) : (metas?.cpl_ideal ?? null);
   const cplMaximoFinal = cruzamento.cpl_maximo != null ? Number(cruzamento.cpl_maximo) : (metas?.cpl_maximo ?? null);
   const cplTetoFinal = cplMaximoFinal ?? cplIdealFinal;
+  // Tráfego não se compara à meta de CPL (lead) — o CPC tem outra ordem de grandeza. Marca
+  // NAO_APLICAVEL pra não pintar a régua de verde/vermelho comparando coisas diferentes.
   const statusCplFinal: 'DENTRO' | 'ATENCAO' | 'CRITICO' | 'NAO_APLICAVEL' =
-    cplAtualFinal == null || cplTetoFinal == null || cplTetoFinal <= 0
+    soTrafego || cplAtualFinal == null || cplTetoFinal == null || cplTetoFinal <= 0
       ? 'NAO_APLICAVEL'
       : cplAtualFinal <= (cplIdealFinal ?? cplTetoFinal)
         ? 'DENTRO'
@@ -1726,7 +1780,9 @@ export function sanitizeOptimizerOutputV2(input: unknown, payload: OptimizerPayl
       cpl_ideal: cplIdealFinal,
       cpl_maximo: cplMaximoFinal,
       status_cpl: statusCplFinal,
-      volume_conversoes_atual: convReal > 0 ? convReal : (cruzamento.volume_conversoes_atual != null ? Number(cruzamento.volume_conversoes_atual) : 0),
+      volume_conversoes_atual: soTrafego
+        ? cliquesReal
+        : (convReal > 0 ? convReal : (cruzamento.volume_conversoes_atual != null ? Number(cruzamento.volume_conversoes_atual) : 0)),
       volume_meta_projetada: cruzamento.volume_meta_projetada != null ? Number(cruzamento.volume_meta_projetada) : (metas?.volume_leads_meta_mensal ?? null),
       status_volume: (['NO_RITMO', 'ABAIXO', 'CRITICO', 'NAO_APLICAVEL'] as const).includes(cruzamento.status_volume as never)
         ? cruzamento.status_volume as 'NO_RITMO' | 'ABAIXO' | 'CRITICO' | 'NAO_APLICAVEL'

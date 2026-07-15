@@ -6,6 +6,7 @@ import {
   OPTIMIZER_PERIODS,
   currentWeekLabel,
   segmentToOptimizerNiche,
+  objetivoMedidoPorClique,
   ensureOptimizerClientConfigTable,
   ensureOptimizerManualNotesTable,
   type OptimizerPayloadV2,
@@ -582,6 +583,7 @@ async function fetchConjuntosForCampaign(
             ctr: Number(ai.ctr ?? (adImp > 0 ? (adClicks / adImp) * 100 : 0)),
             cpl: adGasto > 0 && adConv > 0 ? adGasto / adConv : null,
             conversoes: adConv,
+            cliques: adClicks,
             dias_ativo: null,
             quality_ranking: ad.quality_ranking ? String(ad.quality_ranking) : null,
             engagement_ranking: ad.engagement_rate_ranking ? String(ad.engagement_rate_ranking) : null,
@@ -611,6 +613,7 @@ async function fetchConjuntosForCampaign(
       ctr,
       cpl: gasto > 0 && conversoes > 0 ? gasto / conversoes : null,
       conversoes,
+      cliques,
       ctr_tendencia_4d: null,
       dias_ativo: diasAtivo,
       anuncios,
@@ -618,6 +621,30 @@ async function fetchConjuntosForCampaign(
   }));
 
   return conjuntos;
+}
+
+// Campanha de TRÁFEGO mede-se por CLIQUE: o custo por resultado é o CPC (gasto/cliques), não o
+// CPL. Num tráfego o CPL sai de conversas incidentais e vira número sem sentido (bug Cão Véio:
+// "Custo por clique R$351" = R$702,95 ÷ 2 conversas, quando o real é R$0,28 ÷ 2.674 cliques).
+// Antes de mandar pra IA e montar a árvore, zera o CPL enganoso e injeta o CPC verdadeiro em toda
+// a subárvore; para os demais objetivos só acrescenta o CPC como informação (mantém conversoes/cpl).
+function comMetricaDeClique(camp: OptimizerCampaignV2): OptimizerCampaignV2 {
+  const cpc = (gasto: number, cliques: number | undefined | null) =>
+    cliques && cliques > 0 ? gasto / cliques : null;
+  if (!objetivoMedidoPorClique(camp.objetivo)) {
+    return { ...camp, cpc: cpc(camp.gasto, camp.cliques) };
+  }
+  return {
+    ...camp,
+    cpl: null,
+    cpc: cpc(camp.gasto, camp.cliques),
+    conjuntos: (camp.conjuntos ?? []).map((cj) => ({
+      ...cj,
+      cpl: null,
+      cpc: cpc(cj.gasto, cj.cliques),
+      anuncios: (cj.anuncios ?? []).map((ad) => ({ ...ad, cpl: null, cpc: cpc(ad.gasto, ad.cliques) })),
+    })),
+  };
 }
 
 // ─── Main builder ─────────────────────────────────────────────────────────────
@@ -677,7 +704,7 @@ async function buildPayloadForClient(
     ),
   );
 
-  const campanhas: OptimizerCampaignV2[] = topCampaigns.map((camp, i) => ({
+  const campanhas: OptimizerCampaignV2[] = topCampaigns.map((camp, i) => comMetricaDeClique({
     id: camp.id,
     nome: camp.name,
     objetivo: camp.objective ?? '',
@@ -950,6 +977,7 @@ async function fetchGoogleAdGroups(
           ctr: adImp > 0 ? (adClk / adImp) * 100 : 0,
           cpl: adGasto > 0 && adConv > 0 ? adGasto / adConv : null,
           conversoes: adConv,
+          cliques: adClk,
           dias_ativo: null,
           quality_ranking: null,
           engagement_ranking: null,
@@ -978,6 +1006,7 @@ async function fetchGoogleAdGroups(
       ctr,
       cpl: gasto > 0 && conversoes > 0 ? gasto / conversoes : null,
       conversoes,
+      cliques,
       ctr_tendencia_4d: null,
       dias_ativo: null,
       anuncios,
@@ -1028,7 +1057,7 @@ async function buildGooglePayloadForClient(
     ),
   );
 
-  const campanhas: OptimizerCampaignV2[] = topCampaigns.map((camp, i) => ({
+  const campanhas: OptimizerCampaignV2[] = topCampaigns.map((camp, i) => comMetricaDeClique({
     id: camp.id,
     nome: camp.name,
     objetivo: camp.objective ?? '',
