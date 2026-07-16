@@ -14,10 +14,16 @@ export async function POST(request: NextRequest) {
       csvFiles?: { name: string; content: string }[];
       coverId?: string;
       metaLevel?: MetaBreakdownLevel;
+      sections?: string[];
     };
 
     const { clientId, from, to, agencyContext, template, coverId, metaLevel } = body;
     const csvFiles = body.csvFiles ?? [];
+    // Páginas habilitadas (checkboxes "Personalizar páginas" na UI).
+    // Ausente/não-array → null = comportamento padrão (todas as páginas).
+    const sections = Array.isArray(body.sections)
+      ? body.sections.filter((s): s is string => typeof s === 'string')
+      : null;
     if (!clientId || !from || !to) {
       return Response.json({ error: 'clientId, from e to são obrigatórios' }, { status: 400 });
     }
@@ -62,6 +68,7 @@ export async function POST(request: NextRequest) {
         accountIds: metaAccountIds,
         coverId,
         metaLevel,
+        sections,
       });
       const { token, reportId } = await saveDeliveryReport({ clientId, clientName, from, to, data: { html: reportData.html } });
       return Response.json({ ok: true, id: reportId, public_token: token, avisos: reportData.avisos });
@@ -76,6 +83,7 @@ export async function POST(request: NextRequest) {
         connectionId: metaConnectionId,
         accountIds: metaAccountIds,
         coverId,
+        sections,
       });
       const { token, reportId } = await saveSocialReport({ clientId, clientName, from, to, data: reportData });
       return Response.json({ ok: true, id: reportId, public_token: token });
@@ -93,6 +101,7 @@ export async function POST(request: NextRequest) {
       periodTo: to,
       coverId,
       metaLevel,
+      sections,
     });
 
     const { id, public_token } = await saveOmniReport({

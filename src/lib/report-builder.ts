@@ -6,10 +6,12 @@ import {
   sCapa, sVisaoGeral, sRegioes, sPaidTrafficResumo, sMetaAdsResumo, sMetaAdsCampanhas, sCriativos,
   sGoogleAdsResumo, sGoogleAdsCampanhas, sGoogleAdsPalavrasChave,
   sInstagram, sInstagramCalendar, sInstagramPosts, sInstagramSpotlight,
+  sInstagramTodosConteudos, ordenarPostsPorData, TODOS_CONTEUDOS_POR_PAGINA,
   monthsBetweenInclusive, FONT_LINK, CANVAS, INTER,
   resolveReportCover, fetchReportRotationSeed,
   type ParsedData, type DiagJson, type GoogleAdsFull, type CampanhaGoogleDetalhada, type PalavraChaveGoogle, type MetaBreakdownLevel,
 } from './delivery-report-builder';
+import { sectionEnabled } from './report-sections';
 
 // ── Persist ───────────────────────────────────────────────────────────────────
 
@@ -607,8 +609,10 @@ export async function buildOmniReport(input: {
   periodTo: string;
   coverId?: string | null;
   metaLevel?: MetaBreakdownLevel;
+  // Páginas habilitadas (keys de src/lib/report-sections.ts). null/undefined = todas.
+  sections?: string[] | null;
 }): Promise<{ html: string }> {
-  const { clientId, clientName, connectionId, accountIds, googleConnectionId, googleAccountIds, periodFrom, periodTo, coverId, metaLevel = 'campaign' } = input;
+  const { clientId, clientName, connectionId, accountIds, googleConnectionId, googleAccountIds, periodFrom, periodTo, coverId, metaLevel = 'campaign', sections = null } = input;
 
   const prev = calcPrevPeriod(periodFrom, periodTo);
   const fromDate = new Date(periodFrom + 'T12:00:00');
@@ -647,20 +651,28 @@ export async function buildOmniReport(input: {
   // the delivery report — so there's no need to spend an AI call producing one here.
   const diag: DiagJson = { insight_campanha_conversa: '', insight_campanha_conversao: '' };
 
-  const hasVisao              = data.faturamento > 0 || data.pedidos_ativos > 0;
-  const hasRegiao             = bairros.length > 0;
-  const hasMeta               = meta !== null;
-  const hasGoogle             = googleDetailed !== null;
-  const hasPaidTraffic        = hasMeta || hasGoogle;
-  const hasInstagram          = instagram !== null;
+  // Cada página só entra se tem dados E se a seção está habilitada na geração
+  // (checkboxes "Personalizar páginas"; sections=null mantém o padrão: todas).
+  const en = (key: string) => sectionEnabled(sections, key);
+
+  const hasVisao              = (data.faturamento > 0 || data.pedidos_ativos > 0) && en('visao_geral');
+  const hasRegiao             = bairros.length > 0 && en('regioes');
+  const hasMeta               = meta !== null && en('meta_resumo');
+  const hasGoogle             = googleDetailed !== null && en('google_resumo');
+  const hasPaidTraffic        = (meta !== null || googleDetailed !== null) && en('trafego_resumo');
+  const hasInstagram          = instagram !== null && en('instagram_resumo');
   const hasInstagramPosts     = igPosts.length > 0;
-  const hasInstagramSpotlight = hasInstagramPosts;
-  const hasDestaques          = hasMeta && meta!.campanhas.length > 0;
-  const hasGoogleDestaques    = hasGoogle && googleDetailed!.campanhas.length > 0;
-  const hasGooglePalavras     = hasGoogle && googleDetailed!.palavrasChave.length > 0;
-  const hasCriativos          = creatives.length > 0;
+  const hasTodosConteudos     = hasInstagramPosts && en('todos_conteudos');
+  const hasCalendario         = hasInstagramPosts && en('calendario');
+  const hasTopConteudos       = hasInstagramPosts && en('top_conteudos');
+  const hasInstagramSpotlight = hasInstagramPosts && en('melhor_conteudo');
+  const hasDestaques          = meta !== null && meta.campanhas.length > 0 && en('meta_campanhas');
+  const hasGoogleDestaques    = googleDetailed !== null && googleDetailed.campanhas.length > 0 && en('google_campanhas');
+  const hasGooglePalavras     = googleDetailed !== null && googleDetailed.palavrasChave.length > 0 && en('google_keywords');
+  const hasCriativos          = creatives.length > 0 && en('criativos');
   const destaquePages         = hasDestaques ? Math.ceil(meta!.campanhas.length / 4) : 0;
   const googleDestaquePages   = hasGoogleDestaques ? Math.ceil(googleDetailed!.campanhas.length / 4) : 0;
+  const todosConteudosPages   = hasTodosConteudos ? Math.ceil(igPosts.length / TODOS_CONTEUDOS_POR_PAGINA) : 0;
 
   const total = 1
     + (hasVisao      ? 1 : 0)
@@ -669,8 +681,9 @@ export async function buildOmniReport(input: {
     + (hasMeta       ? 1 : 0)
     + (hasGoogle     ? 1 : 0)
     + (hasInstagram  ? 1 : 0)
-    + (hasInstagramPosts ? instagramCalendarMonths.length : 0)
-    + (hasInstagramPosts ? 1 : 0)
+    + todosConteudosPages
+    + (hasCalendario ? instagramCalendarMonths.length : 0)
+    + (hasTopConteudos ? 1 : 0)
     + (hasInstagramSpotlight ? 1 : 0)
     + destaquePages
     + googleDestaquePages
@@ -704,12 +717,18 @@ export async function buildOmniReport(input: {
   if (hasGooglePalavras) slides.push(sGoogleAdsPalavrasChave(googleDetailed!, ++i, total, periodo));
 
   if (hasInstagram)   slides.push(sInstagram(instagram!, ++i, total, periodo));
-  if (hasInstagramPosts) {
+  if (hasCalendario) {
     for (const monthDate of instagramCalendarMonths) {
       slides.push(sInstagramCalendar(igPosts, ++i, total, monthDate));
     }
   }
-  if (hasInstagramPosts)     slides.push(sInstagramPosts(igPosts, ++i, total));
+  if (hasTodosConteudos) {
+    const ordered = ordenarPostsPorData(igPosts);
+    for (let start = 0, page = 1; start < ordered.length; start += TODOS_CONTEUDOS_POR_PAGINA, page++) {
+      slides.push(sInstagramTodosConteudos(ordered.slice(start, start + TODOS_CONTEUDOS_POR_PAGINA), ++i, total, page, todosConteudosPages));
+    }
+  }
+  if (hasTopConteudos)       slides.push(sInstagramPosts(igPosts, ++i, total));
   if (hasInstagramSpotlight) slides.push(sInstagramSpotlight(igPosts, ++i, total));
 
   return { html: `${FONT_LINK}<div class="onmid-report" style="background:${CANVAS};padding:28px;font-family:${INTER}">${slides.join('')}</div>` };

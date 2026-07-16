@@ -16,6 +16,7 @@ import { useClients } from '@/lib/client-store';
 import { callerHeaders } from '@/lib/auth-store';
 import { cn } from '@/lib/utils';
 import { exportReportToPdf } from '@/lib/export-report-pdf';
+import { REPORT_SECTIONS } from '@/lib/report-sections';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -94,6 +95,9 @@ export default function RelatoriosPage() {
   const [genCsvFiles, setGenCsvFiles] = useState<{ name: string; content: string }[]>([]);
   const [genCoverId, setGenCoverId] = useState<string | null>(null);
   const [genMetaLevel, setGenMetaLevel] = useState<'campaign' | 'adset'>('campaign');
+  // Personalização de páginas: keys DESMARCADAS (vazio = relatório completo, padrão)
+  const [genHiddenSections, setGenHiddenSections] = useState<string[]>([]);
+  const [showCustomizePages, setShowCustomizePages] = useState(false);
   const [clientLinks, setClientLinks] = useState<ClientLink[]>([]);
   const [generating, setGenerating] = useState(false);
 
@@ -180,6 +184,8 @@ export default function RelatoriosPage() {
     setGenCsvFiles([]);
     setGenCoverId(null);
     setGenMetaLevel('campaign');
+    setGenHiddenSections([]);
+    setShowCustomizePages(false);
     setClientLinks([]);
     setShowGenModal(true);
   }
@@ -221,6 +227,12 @@ export default function RelatoriosPage() {
       if (genTemplate === 'delivery') payload.csvFiles = genCsvFiles;
       if (genCoverId) payload.coverId = genCoverId;
       if (genMetaLevel === 'adset') payload.metaLevel = genMetaLevel;
+      // Só envia `sections` se o usuário desmarcou algo — ausente = relatório completo
+      if (genHiddenSections.length > 0) {
+        payload.sections = REPORT_SECTIONS[genTemplate]
+          .map(s => s.key)
+          .filter(key => !genHiddenSections.includes(key));
+      }
 
       const res = await fetch('/api/reports/run-once', {
         method: 'POST',
@@ -1221,7 +1233,7 @@ export default function RelatoriosPage() {
       {/* ── GENERATE MODAL ── */}
       {showGenModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-lg space-y-5 shadow-2xl">
+          <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-lg space-y-5 shadow-2xl max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-xl bg-violet-500/20 border border-violet-500/30 flex items-center justify-center">
@@ -1273,7 +1285,7 @@ export default function RelatoriosPage() {
                   return (
                     <button
                       key={tpl.key}
-                      onClick={() => setGenTemplate(tpl.key)}
+                      onClick={() => { setGenTemplate(tpl.key); setGenHiddenSections([]); }}
                       className={cn(
                         'flex flex-col gap-2 p-4 rounded-xl border-2 text-left transition-all',
                         active ? colorClasses[tpl.color].border : 'border-border bg-background hover:border-border/80',
@@ -1427,6 +1439,71 @@ export default function RelatoriosPage() {
                     />
                   ))}
                 </div>
+              </div>
+
+              {/* Customização de páginas — checkboxes por seção do template */}
+              <div className="space-y-1.5">
+                <button
+                  type="button"
+                  onClick={() => setShowCustomizePages(v => !v)}
+                  className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg border border-border bg-background hover:border-violet-500/40 transition-colors"
+                >
+                  <span className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                    <Settings2 className="w-3.5 h-3.5" />
+                    Personalizar páginas
+                    {genHiddenSections.length > 0 && (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-violet-500/15 text-violet-300 border border-violet-400/30">
+                        {genHiddenSections.length} oculta{genHiddenSections.length > 1 ? 's' : ''}
+                      </span>
+                    )}
+                  </span>
+                  <ChevronDown className={cn('w-3.5 h-3.5 text-muted-foreground transition-transform', showCustomizePages && 'rotate-180')} />
+                </button>
+                {showCustomizePages && (
+                  <div className="space-y-2 p-3 rounded-lg border border-border bg-background">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[10px] text-muted-foreground/60 leading-relaxed">
+                        Desmarque as páginas que não quer no relatório. Páginas sem dados continuam ocultas automaticamente.
+                      </p>
+                      {genHiddenSections.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setGenHiddenSections([])}
+                          className="text-[10px] text-violet-400 hover:underline shrink-0 ml-2"
+                        >
+                          Marcar todas
+                        </button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {REPORT_SECTIONS[genTemplate].map(section => {
+                        const checked = !genHiddenSections.includes(section.key);
+                        return (
+                          <label
+                            key={section.key}
+                            className={cn(
+                              'flex items-start gap-2 px-2.5 py-2 rounded-md border cursor-pointer transition-colors',
+                              checked ? 'border-border bg-card hover:border-violet-500/30' : 'border-border/50 bg-background opacity-55 hover:opacity-80',
+                            )}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => setGenHiddenSections(prev =>
+                                checked ? [...prev, section.key] : prev.filter(k => k !== section.key),
+                              )}
+                              className="mt-0.5 accent-violet-500 shrink-0"
+                            />
+                            <span className="min-w-0">
+                              <span className="block text-[11px] font-semibold text-foreground leading-tight">{section.label}</span>
+                              <span className="block text-[10px] text-muted-foreground leading-tight mt-0.5">{section.desc}</span>
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Meta Ads breakdown level — campaign vs ad set (not applicable to Social) */}

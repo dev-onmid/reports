@@ -165,6 +165,14 @@ Monitora o status de todas as instâncias na VPS Evolution e alerta quando algum
 - **Secret necessário no GitHub**: `REPORTS_CRON_URL` (repo Settings → Secrets → Actions) — URL completa incluindo `?secret=CRON_SECRET`, mesmo padrão de `OPTIMIZER_WEEKLY_URL` e `LEADLOVERS_WORKER_URL`.
 - A rota `src/app/api/reports/cron-monthly/route.ts` já filtra corretamente por `send_day = EXTRACT(DAY FROM NOW())` — só faltava ser chamada todo dia em vez de só no dia 1.
 
+### Slide "Todos os conteúdos" + personalização de páginas (2026-07-16)
+
+- **Slide novo `sInstagramTodosConteudos`** (`delivery-report-builder.ts`): detalhamento post a post de TODOS os posts do período (mesma linguagem visual do "Top conteúdos": badge de formato, thumb, 6 pills de métrica — Alcance/Curtidas/Coment./Salvos/Interações/Engaj.%). Cards compactos 2 col × 3 linhas, **6 posts por slide** (`TODOS_CONTEUDOS_POR_PAGINA`), paginado ("página X de Y"), ordem cronológica (`ordenarPostsPorData`). Grid usa `grid-template-rows:repeat(3,1fr)` fixo — página parcial (ex: 1 post) mantém a proporção do card em vez de esticar. Ordem do bloco Instagram nos 3 templates (pedida pelo Matheus): `sInstagram` → **calendário** → **todos os conteúdos** → top conteúdos → melhor conteúdo.
+- **Personalização de páginas na geração**: catálogo em `src/lib/report-sections.ts` (`REPORT_SECTIONS` por template + `sectionEnabled`). Os 3 builders aceitam `sections?: string[] | null` (null = todas, comportamento antigo) e cada flag `has*` virou `dados && en('key')` — o `total` da paginação se ajusta sozinho. A capa nunca é selecionável. Marcado ≠ garantido: página sem dados continua oculta (data-driven como sempre).
+- **UI**: modal "Gerar Relatório" ganhou bloco colapsável "Personalizar páginas" (checkboxes 2 colunas com label+descrição, badge "N oculta(s)", link "Marcar todas"; reset ao trocar template/abrir modal). O payload só inclui `sections` se o usuário desmarcou algo. `run-once/route.ts` valida (`Array.isArray` + só strings) e repassa aos 3 builders. Automações (`run/[configId]`) NÃO passam sections — relatório automático continua completo, de propósito.
+- ⚠️ O gating separa flags de dados das de seção: `hasDestaques` (meta_campanhas) depende de `meta !== null`, NÃO de `hasMeta` (que agora carrega `en('meta_resumo')`) — desmarcar o resumo não pode derrubar as campanhas. Mesma lógica no Google.
+- ✅ Verificado no preview: slide renderizado com 7 posts mock via bundle esbuild (página cheia + página parcial, screenshots ok) e modal com checkboxes funcionando (desmarcar → badge "1 oculta" → Marcar todas). Relatório real com dados de produção não foi gerado.
+
 ### Slide "Top palavras-chave" (Google Ads)
 
 - O relatório de performance (`buildOmniReport` em `src/lib/report-builder.ts`) monta os slides de Google a partir de `fetchGoogleAdsDetailed`, que agora traz também `palavrasChave: PalavraChaveGoogle[]` (tipo em `delivery-report-builder.ts`).

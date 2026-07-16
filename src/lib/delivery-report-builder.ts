@@ -4,6 +4,7 @@ import { makeServerPool } from '@/lib/server-db';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import { randomUUID } from 'crypto';
 import { logAiUsage } from '@/lib/ai-usage-logger';
+import { sectionEnabled } from '@/lib/report-sections';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -3629,6 +3630,90 @@ export function sInstagramPosts(posts: InstagramPost[], idx: number, total: numb
   return auditSlide(body, 'sInstagramPosts');
 }
 
+// ── Instagram — detalhamento de TODOS os conteúdos do período ─────────────────
+// Mesma linguagem visual do "Top conteúdos do mês" (badge de formato, thumb,
+// pills de métrica), em cards compactos de 6 por slide, ordem cronológica.
+// Paginado pelo builder em fatias de TODOS_CONTEUDOS_POR_PAGINA.
+
+export const TODOS_CONTEUDOS_POR_PAGINA = 6;
+
+export function ordenarPostsPorData(posts: InstagramPost[]): InstagramPost[] {
+  return [...posts].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+}
+
+export function sInstagramTodosConteudos(pagePosts: InstagramPost[], idx: number, total: number, pageNum: number, pageCount: number): string {
+  const truncateCaption = (text: string, max: number) => {
+    const clean = text.replace(/\s+/g, ' ').trim();
+    return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
+  };
+
+  const metricPill = (iconPath: string, label: string, value: string, highlight = false) =>
+    `<div style="height:28px;border:1px solid ${highlight ? '#DDF6D8' : '#E8EDF4'};border-radius:8px;background:${highlight ? 'linear-gradient(135deg,#F0FDEC,#FFFFFF)' : 'rgba(255,255,255,.92)'};display:flex;align-items:center;gap:5px;padding:0 7px;box-sizing:border-box;overflow:hidden">
+      ${igIconSvg(iconPath, PRIMARY_TEXT, 11)}
+      <div style="min-width:0;display:flex;align-items:baseline;gap:4px;overflow:hidden">
+        <p style="font-family:${INTER};font-size:8.5px;font-weight:850;color:#64748B;margin:0;line-height:1;white-space:nowrap">${label}</p>
+        <p style="font-family:${INTER};font-size:11.5px;font-weight:950;color:${highlight ? PRIMARY_TEXT : '#111827'};margin:0;line-height:1;letter-spacing:-0.02em;white-space:nowrap">${value}</p>
+      </div>
+    </div>`;
+
+  const postCard = (p: InstagramPost) => {
+    const kind = igMediaKind(p.mediaType);
+    const interactions = p.likes + p.comments + p.saves;
+    const engagement = p.reach > 0 ? (interactions / p.reach) * 100 : 0;
+    const engagementText = p.reach > 0 ? `${engagement.toFixed(1).replace('.', ',')}%` : '—';
+    const thumb = p.thumbnailUrl
+      ? `<img src="${p.thumbnailUrl}" alt="" style="width:100%;height:100%;object-fit:cover;display:block" />`
+      : `<div style="width:100%;height:100%;background:linear-gradient(135deg,#EAFDE6,#F8FAFC);display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="${PRIMARY_TEXT}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${ICO_LAYERS}</svg></div>`;
+
+    return `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:13px;box-shadow:0 10px 24px rgba(15,23,42,.05);display:flex;gap:13px;padding:10px;box-sizing:border-box;overflow:hidden;min-height:0">
+      <div style="position:relative;width:126px;border-radius:9px;background:${ROW};overflow:hidden;flex-shrink:0">
+        ${thumb}
+        ${igMediaOverlay(p.mediaType)}
+      </div>
+
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:7px;justify-content:center">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-shrink:0">
+          <div style="height:21px;border-radius:6px;background:${kind.bg};color:${kind.color};display:inline-flex;align-items:center;gap:4px;padding:0 8px;font-family:${INTER};font-size:9.5px;font-weight:900;line-height:1;flex-shrink:0">
+            ${igIconSvg(kind.icon, kind.color, 11)}
+            ${kind.label}
+          </div>
+          <p style="font-family:${INTER};font-size:10px;font-weight:800;color:#64748B;margin:0;text-transform:capitalize;white-space:nowrap;flex-shrink:0">${formatPostDate(p.timestamp)}</p>
+        </div>
+
+        <p style="font-family:${INTER};font-size:10.5px;font-weight:650;color:#475569;line-height:1.3;margin:0;flex-shrink:0;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden">${truncateCaption(p.caption, 92) || 'sem legenda'}</p>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px">
+          ${metricPill(ICO_REACH, 'Alcance', igCompact(p.reach))}
+          ${metricPill(ICO_HEART, 'Curtidas', igCompact(p.likes))}
+          ${metricPill(ICO_COMMENT, 'Coment.', igCompact(p.comments))}
+          ${metricPill(ICO_SAVE, 'Salvos', igCompact(p.saves))}
+          ${metricPill(ICO_SHARE, 'Interações', igCompact(interactions))}
+          ${metricPill(ICO_TREND, 'Engaj.', engagementText, true)}
+        </div>
+      </div>
+    </div>`;
+  };
+
+  const pageLabel = pageCount > 1 ? ` · página ${pageNum} de ${pageCount}` : '';
+
+  const body = `<div data-slide-index="${idx}" data-slide-total="${total}" style="width:1440px;min-height:810px;background:${BG};border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
+  <div style="position:absolute;right:-90px;top:-180px;width:620px;height:560px;border-radius:50%;background:linear-gradient(135deg,rgba(241,245,249,.72),rgba(255,255,255,.1));opacity:.78;pointer-events:none"></div>
+
+  <div style="position:relative;z-index:1;flex:1;padding:38px 44px 28px;box-sizing:border-box;display:flex;flex-direction:column">
+    <div style="flex-shrink:0;margin:0 0 16px">
+      <h1 style="font-family:${INTER};font-size:46px;font-weight:950;color:#050816;line-height:.95;margin:0 0 11px;letter-spacing:-0.055em">${reportTitle('Todos os conteúdos')}</h1>
+      <p style="font-size:16px;font-weight:500;color:#6B7280;font-family:${INTER};margin:0;letter-spacing:-0.015em">Detalhamento post a post — engajamento e entrega de tudo que foi publicado no período${pageLabel}</p>
+      <div style="width:36px;height:3px;border-radius:999px;background:${PRIMARY};margin-top:11px"></div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(3,1fr);gap:13px 22px;flex:1;min-height:0">
+      ${pagePosts.map(postCard).join('')}
+    </div>
+  </div>
+</div>`;
+  return auditSlide(body, 'sInstagramTodosConteudos');
+}
+
 // ── Instagram — spotlight on the best-performing post ─────────────────────────
 
 export function sInstagramSpotlight(posts: InstagramPost[], idx: number, total: number): string {
@@ -4593,8 +4678,10 @@ export async function buildDeliveryReport(opts: {
   accountIds?:    string[];
   coverId?:       string | null;
   metaLevel?:     MetaBreakdownLevel;
+  // Páginas habilitadas (keys de src/lib/report-sections.ts). null/undefined = todas.
+  sections?:      string[] | null;
 }): Promise<{ html: string; avisos?: string[] }> {
-  const { clientId, clientName, from, to, csvFiles = [], agencyContext = '', connectionId, accountIds = [], coverId, metaLevel = 'campaign' } = opts;
+  const { clientId, clientName, from, to, csvFiles = [], agencyContext = '', connectionId, accountIds = [], coverId, metaLevel = 'campaign', sections = null } = opts;
 
   const fromDate = new Date(from + 'T12:00:00');
   const toDate   = new Date(to   + 'T12:00:00');
@@ -4639,18 +4726,26 @@ export async function buildDeliveryReport(opts: {
 
   const diag = await fetchDiagnosis(data, prevData, meta, bairros, clientName, periodo, agencyContext);
 
-  const hasVisao             = data.faturamento > 0 || data.pedidos_ativos > 0;
-  const hasDia               = data.por_dia.length > 0;
-  const hasBase              = data.ativos > 0 || data.inativos > 0;
-  const hasInat              = data.inativos_faixas.length > 0;
-  const hasRegiao            = bairros.length > 0;
-  const hasMeta              = meta !== null;
-  const hasInstagram         = instagram !== null;
+  // Cada página só entra se tem dados E se a seção está habilitada na geração
+  // (checkboxes "Personalizar páginas"; sections=null mantém o padrão: todas).
+  const en = (key: string) => sectionEnabled(sections, key);
+
+  const hasVisao             = (data.faturamento > 0 || data.pedidos_ativos > 0) && en('visao_geral');
+  const hasDia               = data.por_dia.length > 0 && en('por_dia');
+  const hasBase              = (data.ativos > 0 || data.inativos > 0) && en('base_clientes');
+  const hasInat              = data.inativos_faixas.length > 0 && en('clientes_inativos');
+  const hasRegiao            = bairros.length > 0 && en('regioes');
+  const hasMeta              = meta !== null && en('meta_resumo');
+  const hasInstagram         = instagram !== null && en('instagram_resumo');
   const hasInstagramPosts    = igPosts.length > 0;
-  const hasInstagramSpotlight = hasInstagramPosts;
-  const hasDestaques         = hasMeta && meta!.campanhas.length > 0;
-  const hasCriativos         = creatives.length > 0;
+  const hasTodosConteudos    = hasInstagramPosts && en('todos_conteudos');
+  const hasCalendario        = hasInstagramPosts && en('calendario');
+  const hasTopConteudos      = hasInstagramPosts && en('top_conteudos');
+  const hasInstagramSpotlight = hasInstagramPosts && en('melhor_conteudo');
+  const hasDestaques         = meta !== null && meta.campanhas.length > 0 && en('meta_campanhas');
+  const hasCriativos         = creatives.length > 0 && en('criativos');
   const destaquePages        = hasDestaques ? Math.ceil(meta!.campanhas.length / 4) : 0;
+  const todosConteudosPages  = hasTodosConteudos ? Math.ceil(igPosts.length / TODOS_CONTEUDOS_POR_PAGINA) : 0;
 
   const total = 1
     + (hasVisao      ? 1 : 0)
@@ -4660,8 +4755,9 @@ export async function buildDeliveryReport(opts: {
     + (hasInat       ? 1 : 0)
     + (hasMeta       ? 1 : 0)
     + (hasInstagram  ? 1 : 0)
-    + (hasInstagramPosts ? instagramCalendarMonths.length : 0)
-    + (hasInstagramPosts ? 1 : 0)
+    + todosConteudosPages
+    + (hasCalendario ? instagramCalendarMonths.length : 0)
+    + (hasTopConteudos ? 1 : 0)
     + (hasInstagramSpotlight ? 1 : 0)
     + destaquePages
     + (hasCriativos   ? 1 : 0);
@@ -4692,12 +4788,18 @@ export async function buildDeliveryReport(opts: {
 
   // ── Bloco: Instagram ───────────────────────────────────────────────────────
   if (hasInstagram)   slides.push(sInstagram(instagram!, ++i, total, instagramPeriodLabel));
-  if (hasInstagramPosts) {
+  if (hasCalendario) {
     for (const monthDate of instagramCalendarMonths) {
       slides.push(sInstagramCalendar(igPosts, ++i, total, monthDate));
     }
   }
-  if (hasInstagramPosts)     slides.push(sInstagramPosts(igPosts, ++i, total));
+  if (hasTodosConteudos) {
+    const ordered = ordenarPostsPorData(igPosts);
+    for (let start = 0, page = 1; start < ordered.length; start += TODOS_CONTEUDOS_POR_PAGINA, page++) {
+      slides.push(sInstagramTodosConteudos(ordered.slice(start, start + TODOS_CONTEUDOS_POR_PAGINA), ++i, total, page, todosConteudosPages));
+    }
+  }
+  if (hasTopConteudos)       slides.push(sInstagramPosts(igPosts, ++i, total));
   if (hasInstagramSpotlight) slides.push(sInstagramSpotlight(igPosts, ++i, total));
 
   return {

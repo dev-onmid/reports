@@ -3,10 +3,12 @@ import { makeServerPool } from '@/lib/server-db';
 import {
   fetchInstagramData,
   sCapa, sInstagram, sInstagramCalendar, sInstagramPosts, sInstagramSpotlight,
+  sInstagramTodosConteudos, ordenarPostsPorData, TODOS_CONTEUDOS_POR_PAGINA,
   monthsBetweenInclusive, FONT_LINK, CANVAS, INTER,
   resolveReportCover, fetchReportRotationSeed,
   type DiagJson, type ParsedData,
 } from './delivery-report-builder';
+import { sectionEnabled } from './report-sections';
 
 // ── Persist ───────────────────────────────────────────────────────────────────
 
@@ -51,8 +53,10 @@ export async function buildSocialReport(input: {
   periodFrom: string;
   periodTo: string;
   coverId?: string | null;
+  // Páginas habilitadas (keys de src/lib/report-sections.ts). null/undefined = todas.
+  sections?: string[] | null;
 }): Promise<{ html: string }> {
-  const { clientId, clientName, connectionId, accountIds, periodFrom, periodTo, coverId } = input;
+  const { clientId, clientName, connectionId, accountIds, periodFrom, periodTo, coverId, sections = null } = input;
 
   const fromDate = new Date(periodFrom + 'T12:00:00');
   const toDate   = new Date(periodTo   + 'T12:00:00');
@@ -77,14 +81,23 @@ export async function buildSocialReport(input: {
   // sCapa accepts a DiagJson but never renders its text — no need for an AI call here.
   const diag: DiagJson = { insight_campanha_conversa: '', insight_campanha_conversao: '' };
 
-  const hasInstagram          = instagram !== null;
+  // Cada página só entra se tem dados E se a seção está habilitada na geração
+  // (checkboxes "Personalizar páginas"; sections=null mantém o padrão: todas).
+  const en = (key: string) => sectionEnabled(sections, key);
+
+  const hasInstagram          = instagram !== null && en('instagram_resumo');
   const hasInstagramPosts     = igPosts.length > 0;
-  const hasInstagramSpotlight = hasInstagramPosts;
+  const hasTodosConteudos     = hasInstagramPosts && en('todos_conteudos');
+  const hasCalendario         = hasInstagramPosts && en('calendario');
+  const hasTopConteudos       = hasInstagramPosts && en('top_conteudos');
+  const hasInstagramSpotlight = hasInstagramPosts && en('melhor_conteudo');
+  const todosConteudosPages   = hasTodosConteudos ? Math.ceil(igPosts.length / TODOS_CONTEUDOS_POR_PAGINA) : 0;
 
   const total = 1
     + (hasInstagram      ? 1 : 0)
-    + (hasInstagramPosts ? instagramCalendarMonths.length : 0)
-    + (hasInstagramPosts ? 1 : 0)
+    + todosConteudosPages
+    + (hasCalendario ? instagramCalendarMonths.length : 0)
+    + (hasTopConteudos ? 1 : 0)
     + (hasInstagramSpotlight ? 1 : 0);
 
   const slides: string[] = [];
@@ -97,12 +110,18 @@ export async function buildSocialReport(input: {
   ));
 
   if (hasInstagram) slides.push(sInstagram(instagram!, ++i, total, periodo));
-  if (hasInstagramPosts) {
+  if (hasCalendario) {
     for (const monthDate of instagramCalendarMonths) {
       slides.push(sInstagramCalendar(igPosts, ++i, total, monthDate));
     }
   }
-  if (hasInstagramPosts)     slides.push(sInstagramPosts(igPosts, ++i, total));
+  if (hasTodosConteudos) {
+    const ordered = ordenarPostsPorData(igPosts);
+    for (let start = 0, page = 1; start < ordered.length; start += TODOS_CONTEUDOS_POR_PAGINA, page++) {
+      slides.push(sInstagramTodosConteudos(ordered.slice(start, start + TODOS_CONTEUDOS_POR_PAGINA), ++i, total, page, todosConteudosPages));
+    }
+  }
+  if (hasTopConteudos)       slides.push(sInstagramPosts(igPosts, ++i, total));
   if (hasInstagramSpotlight) slides.push(sInstagramSpotlight(igPosts, ++i, total));
 
   return { html: `${FONT_LINK}<div class="onmid-report" style="background:${CANVAS};padding:28px;font-family:${INTER}">${slides.join('')}</div>` };
