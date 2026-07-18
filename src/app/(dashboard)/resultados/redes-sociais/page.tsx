@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  AlertTriangle, AtSign, Camera, ExternalLink, Eye, EyeOff, Heart, MessageCircle,
-  RefreshCw, Search, Users, WifiOff,
+  AlertTriangle, AtSign, Bell, Camera, ExternalLink, Eye, EyeOff, Heart, MessageCircle,
+  RefreshCw, Search, Users, WifiOff, X,
 } from 'lucide-react';
+import { callerHeaders } from '@/lib/auth-store';
 import { useClients } from '@/lib/client-store';
 import { ClientAvatar } from '@/components/client-avatar';
 import { ResultsTabs } from '@/components/results-tabs';
@@ -81,6 +82,16 @@ function daysBadgeText(days: number | null): string {
 
 type SortKey = 'dias' | 'posts' | 'seguidores' | 'alcance' | 'engajamento';
 
+type AlertConfig = {
+  ativo: boolean;
+  zapiClientId: string | null;
+  groupId: string | null;
+  groupName: string | null;
+  minDays: number;
+};
+
+type ZapiGroup = { phone: string; name: string };
+
 export default function RedesSociaisPage() {
   const { clients } = useClients();
   const [snapshots, setSnapshots] = useState<Record<string, Snapshot>>({});
@@ -94,6 +105,16 @@ export default function RedesSociaisPage() {
   const [catFilter, setCatFilter] = useState('todas');
   const [sortBy, setSortBy] = useState<SortKey>('dias');
   const [showHidden, setShowHidden] = useState(false);
+
+  // ── Aviso WhatsApp (Z-API) ──
+  const [alertOpen, setAlertOpen] = useState(false);
+  const [alertCfg, setAlertCfg] = useState<AlertConfig>({ ativo: false, zapiClientId: null, groupId: null, groupName: null, minDays: 2 });
+  const [alertInstances, setAlertInstances] = useState<Array<{ id: string; name: string }>>([]);
+  const [alertGroups, setAlertGroups] = useState<ZapiGroup[]>([]);
+  const [groupSearch, setGroupSearch] = useState('');
+  const [loadingGroups, setLoadingGroups] = useState(false);
+  const [savingAlert, setSavingAlert] = useState(false);
+  const [alertFeedback, setAlertFeedback] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -167,6 +188,60 @@ export default function RedesSociaisPage() {
     }).catch(() => {});
   }
 
+  async function openAlertModal() {
+    setAlertOpen(true);
+    setAlertFeedback(null);
+    try {
+      const res = await fetch('/api/social-monitor/alert-config');
+      if (!res.ok) return;
+      const data = await res.json() as { config: AlertConfig; instances: Array<{ id: string; name: string }> };
+      setAlertCfg(data.config);
+      setAlertInstances(data.instances);
+      if (data.config.zapiClientId) void loadGroups(data.config.zapiClientId);
+    } catch { /* modal abre com defaults */ }
+  }
+
+  async function loadGroups(zapiClientId: string) {
+    setLoadingGroups(true);
+    setAlertGroups([]);
+    try {
+      const res = await fetch(`/api/disparos/extract/chats?clientId=${encodeURIComponent(zapiClientId)}&type=groups`, { headers: callerHeaders() });
+      if (!res.ok) { setAlertFeedback('Não foi possível listar os grupos dessa instância.'); return; }
+      const data = await res.json() as { chats?: ZapiGroup[] } | ZapiGroup[];
+      const list = Array.isArray(data) ? data : (data.chats ?? []);
+      setAlertGroups(list.map(g => ({ phone: String(g.phone), name: g.name || String(g.phone) })));
+    } catch {
+      setAlertFeedback('Erro ao buscar grupos.');
+    } finally {
+      setLoadingGroups(false);
+    }
+  }
+
+  async function saveAlert(test: boolean) {
+    setSavingAlert(true);
+    setAlertFeedback(null);
+    try {
+      const res = await fetch('/api/social-monitor/alert-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...callerHeaders() },
+        body: JSON.stringify({ ...alertCfg, action: test ? 'test' : undefined }),
+      });
+      const data = await res.json() as { ok?: boolean; error?: string; test?: { sent: boolean; reason?: string; clientes?: number } };
+      if (!res.ok || !data.ok) { setAlertFeedback(data.error ?? 'Erro ao salvar.'); return; }
+      if (test) {
+        setAlertFeedback(data.test?.sent
+          ? `✅ Teste enviado no grupo (${data.test.clientes ?? 0} conta(s) no aviso).`
+          : `⚠️ Não enviou: ${data.test?.reason ?? 'erro desconhecido'}`);
+      } else {
+        setAlertFeedback('✅ Configuração salva.');
+      }
+    } catch {
+      setAlertFeedback('Erro ao salvar.');
+    } finally {
+      setSavingAlert(false);
+    }
+  }
+
   const rows = useMemo(() => clients.map(client => {
     const snap = snapshots[client.id];
     const { sev, days } = severityOf(snap);
@@ -231,6 +306,14 @@ export default function RedesSociaisPage() {
           {lastRunAt && (
             <span className="text-sm font-semibold text-muted-foreground">Atualizado {relTime(lastRunAt)}</span>
           )}
+          <button
+            onClick={() => void openAlertModal()}
+            className="flex h-11 items-center gap-2 rounded-[var(--radius)] border border-border bg-card px-5 text-sm font-bold text-foreground transition-colors hover:border-primary/50"
+            title="Configurar aviso diário no WhatsApp"
+          >
+            <Bell className="h-4 w-4" />
+            Aviso WhatsApp
+          </button>
           <button
             onClick={() => void refreshAll()}
             disabled={refreshingAll}
@@ -473,6 +556,128 @@ export default function RedesSociaisPage() {
                 })}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Aviso WhatsApp ── */}
+      {alertOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setAlertOpen(false)}>
+          <div
+            className="w-full max-w-lg rounded-[var(--radius)] border border-border bg-card p-6 shadow-xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="font-heading text-lg uppercase tracking-wide text-foreground">Aviso diário no WhatsApp</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Todo dia, após a coleta automática (06h), envia no grupo escolhido as contas <b>visíveis no radar</b> que
+                  passaram do limite de dias sem post — com os insights de cada uma. Contas ocultas não entram.
+                </p>
+              </div>
+              <button onClick={() => setAlertOpen(false)} className="text-muted-foreground hover:text-foreground">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="mt-5 space-y-4">
+              <label className="flex items-center gap-3 text-sm font-bold">
+                <input
+                  type="checkbox"
+                  checked={alertCfg.ativo}
+                  onChange={e => setAlertCfg(c => ({ ...c, ativo: e.target.checked }))}
+                  className="h-4 w-4 accent-[#55f52f]"
+                />
+                Aviso ativo
+              </label>
+
+              <div>
+                <p className="mb-1 text-xs font-bold uppercase tracking-widest text-muted-foreground">Instância Z-API</p>
+                <select
+                  value={alertCfg.zapiClientId ?? ''}
+                  onChange={e => {
+                    const id = e.target.value || null;
+                    setAlertCfg(c => ({ ...c, zapiClientId: id, groupId: null, groupName: null }));
+                    if (id) void loadGroups(id);
+                  }}
+                  className="h-10 w-full rounded-[var(--radius)] border border-border bg-background px-3 text-sm font-semibold outline-none focus:border-primary/60"
+                >
+                  <option value="">Selecione a instância…</option>
+                  {alertInstances.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <p className="mb-1 text-xs font-bold uppercase tracking-widest text-muted-foreground">
+                  Grupo de destino {loadingGroups && '(carregando…)'}
+                </p>
+                {alertCfg.groupId && (
+                  <p className="mb-2 text-sm font-semibold text-emerald-300">
+                    Selecionado: {alertCfg.groupName ?? alertCfg.groupId}
+                  </p>
+                )}
+                <input
+                  value={groupSearch}
+                  onChange={e => setGroupSearch(e.target.value)}
+                  placeholder="Buscar grupo…"
+                  disabled={!alertGroups.length}
+                  className="mb-2 h-9 w-full rounded-[var(--radius)] border border-border bg-background px-3 text-sm outline-none placeholder:text-muted-foreground/50 focus:border-primary/60 disabled:opacity-50"
+                />
+                <div className="max-h-44 overflow-y-auto rounded-[var(--radius)] border border-border">
+                  {!alertGroups.length && !loadingGroups && (
+                    <p className="px-3 py-3 text-sm text-muted-foreground">
+                      {alertCfg.zapiClientId ? 'Nenhum grupo encontrado.' : 'Escolha a instância para listar os grupos.'}
+                    </p>
+                  )}
+                  {alertGroups
+                    .filter(g => g.name.toLowerCase().includes(groupSearch.trim().toLowerCase()))
+                    .slice(0, 60)
+                    .map(g => (
+                      <button
+                        key={g.phone}
+                        onClick={() => setAlertCfg(c => ({ ...c, groupId: g.phone, groupName: g.name }))}
+                        className={cn(
+                          'block w-full px-3 py-2 text-left text-sm font-semibold transition-colors hover:bg-muted/30',
+                          alertCfg.groupId === g.phone ? 'bg-primary/10 text-foreground' : 'text-muted-foreground',
+                        )}
+                      >
+                        {g.name}
+                      </button>
+                    ))}
+                </div>
+              </div>
+
+              <div>
+                <p className="mb-1 text-xs font-bold uppercase tracking-widest text-muted-foreground">Avisar a partir de (dias sem post)</p>
+                <input
+                  type="number" min={1} max={90}
+                  value={alertCfg.minDays}
+                  onChange={e => setAlertCfg(c => ({ ...c, minDays: Number(e.target.value) }))}
+                  className="h-10 w-24 rounded-[var(--radius)] border border-border bg-background px-3 text-center text-sm font-bold outline-none focus:border-primary/60"
+                />
+              </div>
+
+              {alertFeedback && (
+                <p className="text-sm font-semibold text-foreground">{alertFeedback}</p>
+              )}
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  onClick={() => void saveAlert(true)}
+                  disabled={savingAlert || !alertCfg.zapiClientId || !alertCfg.groupId}
+                  className="h-10 rounded-[var(--radius)] border border-border bg-card px-4 text-sm font-bold text-foreground transition-colors hover:border-primary/50 disabled:opacity-50"
+                >
+                  {savingAlert ? 'Enviando…' : 'Salvar e enviar teste'}
+                </button>
+                <button
+                  onClick={() => void saveAlert(false)}
+                  disabled={savingAlert}
+                  className="h-10 rounded-[var(--radius)] bg-primary px-5 text-sm font-bold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                >
+                  Salvar
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

@@ -5,6 +5,7 @@ import {
   ensureSocialMonitorSchema, fetchClientSnapshot, upsertSnapshot,
   type ConnRow, type SocialSnapshot,
 } from '@/lib/instagram-monitor';
+import { sendSocialMonitorAlert, type AlertSendResult } from '@/lib/social-monitor-alert';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -111,14 +112,27 @@ async function runRefresh(clientIds: string[] | null) {
   }
 }
 
-// Cron (GitHub Actions): GET secret-guarded — atualiza todos os clientes ativos.
+// Cron (GitHub Actions): GET secret-guarded — atualiza todos os clientes ativos
+// e, com os dados frescos, dispara o aviso WhatsApp (se configurado/ativo).
 export async function GET(req: NextRequest) {
   const secret = req.nextUrl.searchParams.get('secret');
   if (secret !== process.env.CRON_SECRET) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
   const result = await runRefresh(null);
-  return Response.json(result);
+
+  let alert: AlertSendResult;
+  const pool = makeServerPool();
+  try {
+    alert = await sendSocialMonitorAlert(pool);
+  } catch (e) {
+    // Aviso é best-effort: falha no WhatsApp não pode marcar o cron como erro.
+    alert = { sent: false, reason: e instanceof Error ? e.message : 'Erro no envio' };
+  } finally {
+    await pool.end();
+  }
+
+  return Response.json({ ...result, alert });
 }
 
 // UI: POST { clientIds?: string[] } — sem body/lista = todos; com lista = só esses.
