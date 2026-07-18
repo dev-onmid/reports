@@ -182,6 +182,27 @@ Monitora o status de todas as instâncias na VPS Evolution e alerta quando algum
 
 ---
 
+## Monitor de Redes Sociais (2026-07-18)
+
+Aba dentro do Radar (`/resultados/redes-sociais`, tab-nav "Radar | Redes Sociais" via `src/components/results-tabs.tsx`) que lista TODOS os clientes com **dias sem post no Instagram** (régua de alerta configurável por cliente) + insights (seguidores, posts 30d, alcance 28d, engajamento médio/post). Padrão "sala de guerra": cron diário grava snapshot no banco; a tela lê tudo numa query só.
+
+| Arquivo | Papel |
+|---|---|
+| `src/lib/instagram-monitor.ts` | Lib canônica de resolução cliente→conta IG (`getIgAccount`/`resolvePageIdFromAds`/`pageToIgResult`, movidas do ig-posts + suporte a link direto `platform='instagram'` via `directIgId`) + `ensureSocialMonitorSchema` (tabela `social_monitor_snapshots`, 1 linha por cliente) + `fetchClientSnapshot` (nunca lança; erro vira campo `error`) + `upsertSnapshot` (NÃO toca `red_after_days`) |
+| `src/app/api/meta/ig-posts/route.ts` | Refatorado para importar a resolução da lib (zero mudança de comportamento; `followers_count` extra no fields) |
+| `src/app/api/social-monitor/route.ts` | GET (snapshots + lastRunAt; join com nome/categoria é client-side via `useClients`) e PATCH `{clientId, redAfterDays}` (1–90; INSERT ON CONFLICT — funciona antes da 1ª coleta) |
+| `src/app/api/social-monitor/refresh/route.ts` | GET secret-guarded (cron, todos os ativos) + POST `{clientIds?}` (UI, 1 ou todos). `maxDuration=300`, deadline 280s, concorrência 4, dedupe por chave `connId\|accountId\|directIgId` (clientes que compartilham conta não repetem chamadas Graph), token renovado 1x por conexão |
+| `src/app/(dashboard)/resultados/redes-sociais/page.tsx` | Tela: cards de resumo, filtros (busca/severidade/categoria/sort), lista com badge de dias sem post, input inline da régua (PATCH no blur), thumb do último post, refresh por linha, empty state "Rodar primeira coleta" |
+| `.github/workflows/social-monitor-daily.yml` | Cron diário `0 9 * * *` (06h BRT) + `workflow_dispatch` |
+
+- **Severidade** (calculada na UI de `last_post_at` × `red_after_days` da linha): vermelho ≥ `red_after_days` (default **2**), amarelo = 1 dia antes do vermelho, verde abaixo; cinza = sem conta IG/erro/nunca coletado (linha nunca some — clientes ativos sem snapshot aparecem como "Nunca coletado"). Default pedido pelo Matheus: 1 dia sem post = amarelo, 2+ = vermelho.
+- **Custo por cliente**: ~3 chamadas Graph (resolução de página, `{ig_id}/media?since=30d&limit=50`, `{ig_id}/insights?metric=reach&period=day` 28d). Se 0 posts em 30d, busca `media?limit=1` sem `since` para achar o último post histórico. Cortados da v1 (existem no delivery-report-builder p/ drill-down): insights por post, profile_views, website_clicks, accounts_engaged.
+- **Permissão**: herda a flag `radar` pelo match por prefixo do auth-guard — nenhuma flag nova criada.
+- **Secret necessário no GitHub**: `SOCIAL_MONITOR_URL` (URL completa `/api/social-monitor/refresh?secret=CRON_SECRET`, mesmo padrão dos demais).
+- ⚠️ Não verificável no preview local (sem DATABASE_URL) — UI validada com `window.fetch` mockado (faixas/régua/filtros/refresh, screenshots ok) e `tsc` limpo; rota real retornou 500 gracioso sem DB. Validar em produção: refresh de 1 cliente, "Atualizar todos" com a carteira (medir `tookMs`), `workflow_dispatch` manual.
+
+---
+
 ## Regras e convenções
 
 1. **Limite de 10 s nas rotas API** (Vercel Hobby) — não fazer fan-out pesado em uma única rota.

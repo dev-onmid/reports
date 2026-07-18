@@ -10,6 +10,7 @@ import { useInvestmentPayments } from '@/lib/payment-store';
 import { clientResults, type ClientFunnel } from '@/lib/client-results-store';
 import { useClients } from '@/lib/client-store';
 import { ClientAvatar } from '@/components/client-avatar';
+import { ResultsTabs } from '@/components/results-tabs';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 
 type ApiMetrics = {
@@ -342,6 +343,7 @@ export default function ResultadosPage() {
 
   return (
     <div className="space-y-6 pb-8">
+      <ResultsTabs />
 
       {/* ── Header ── */}
       <div className="flex items-start justify-between gap-4 flex-wrap">

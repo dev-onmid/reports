@@ -1,0 +1,39 @@
+name: Monitor de Redes Sociais
+
+# Atualiza diariamente o snapshot do Instagram de todos os clientes ativos
+# (dias sem post + insights) lido pela aba /resultados/redes-sociais.
+# Usa UM único secret SOCIAL_MONITOR_URL com a URL COMPLETA já incluindo o secret:
+#   https://SEU-DOMINIO/api/social-monitor/refresh?secret=SEU_CRON_SECRET
+# (mesmo padrão do OPTIMIZER_WEEKLY_URL / REPORTS_CRON_URL, que já funcionam)
+
+on:
+  schedule:
+    # Todo dia às 06h BRT (09h UTC)
+    - cron: '0 9 * * *'
+  workflow_dispatch: {}
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Atualizar snapshots do Instagram
+        run: |
+          echo "Disparando monitor em $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+
+          URL="${{ secrets.SOCIAL_MONITOR_URL }}"
+          if [ -z "$URL" ]; then
+            echo "::error::Secret SOCIAL_MONITOR_URL não configurado no repositório."
+            exit 1
+          fi
+
+          HTTP_CODE=$(curl -s -o /tmp/response.json -w "%{http_code}" -X GET "$URL")
+          echo "HTTP $HTTP_CODE"
+          echo "=== Resposta ==="
+          cat /tmp/response.json 2>/dev/null && echo "" || echo "(vazio)"
+          echo "================"
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::Monitor retornou HTTP $HTTP_CODE"
+            exit 1
+          fi
