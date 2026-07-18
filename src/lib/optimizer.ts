@@ -78,7 +78,7 @@ export const OPTIMIZER_MODEL = 'claude-sonnet-4-6';
 // classificação e barateia. A tarefa é extração/classificação guiada por regras — cabe no Haiku.
 export const OPTIMIZER_MODEL_V2 = 'claude-haiku-4-5-20251001';
 export const OPTIMIZER_PROMPT_VERSION = 'otimizador-v1.0';
-export const OPTIMIZER_PROMPT_VERSION_V2 = 'otimizador-v3.0';
+export const OPTIMIZER_PROMPT_VERSION_V2 = 'otimizador-v3.1';
 
 // ─── v2 types ────────────────────────────────────────────────────────────────
 
@@ -98,6 +98,30 @@ export type OptimizerStatusExecucao = 'EXECUTAR_AGORA' | 'AGUARDAR_APROVACAO';
 // botão Aplicar). NENHUMA = nó sem ação (saudável).
 export type OptimizerNodeAcaoTipo =
   | 'PAUSAR' | 'ATIVAR' | 'AJUSTAR_ORCAMENTO' | 'TROCAR_CRIATIVO' | 'VERIFICAR_MANUAL' | 'NENHUMA';
+
+// ─── Panorama multi-janela (30/14/7/3 dias) ─────────────────────────────────
+// Cada nó do payload pode carregar o MESMO objeto medido em 4 janelas que terminam ontem,
+// pra IA ler a TRAJETÓRIA (recuperando/piorando) em vez de julgar por uma foto única.
+// A janela primária (periodo_analise) continua preenchendo os campos de topo do nó.
+
+export type OptimizerWindowKey = 'd30' | 'd14' | 'd7' | 'd3';
+
+// Subset compacto por janela — só o necessário pra ler trajetória. Mesma regra do bug
+// Cão Véio: em nós de TRÁFEGO, cpl vem null e cpc preenchido TAMBÉM dentro de cada janela.
+export type OptimizerWindowMetrics = {
+  gasto: number;
+  conversoes: number;
+  cpl: number | null;
+  cliques: number;
+  cpc: number | null;
+  ctr: number | null;
+};
+
+export type OptimizerJanelas = Partial<Record<OptimizerWindowKey, OptimizerWindowMetrics>>;
+
+// Leitura determinística da trajetória (calculada em código, nunca pela IA) — âncora
+// anti-alucinação, mesma filosofia do capSeveridadePausado.
+export type OptimizerTendencia = 'RECUPERANDO' | 'PIORANDO' | 'ESTAVEL' | 'DADO_INSUFICIENTE';
 
 export type OptimizerAdV2 = {
   id: string;
@@ -127,6 +151,10 @@ export type OptimizerAdV2 = {
   // Thumbnail do criativo (image_url ou thumbnail_url do anúncio na Meta) — usado só pra
   // preview visual na árvore, nunca entra no payload enviado à IA.
   imagem_url: string | null;
+  // Panorama multi-janela (30/14/7/3d) + leitura determinística. Opcionais: payloads antigos
+  // e nós cuja busca de janela falhou seguem válidos (a IA analisa só pela janela primária).
+  janelas?: OptimizerJanelas | null;
+  tendencia?: OptimizerTendencia | null;
 };
 
 export type OptimizerAdsetV2 = {
@@ -148,6 +176,9 @@ export type OptimizerAdsetV2 = {
   cpc?: number | null;
   ctr_tendencia_4d: 'SUBINDO' | 'CAINDO' | 'ESTAVEL' | null;
   dias_ativo: number | null;
+  // Ver OptimizerAdV2.janelas.
+  janelas?: OptimizerJanelas | null;
+  tendencia?: OptimizerTendencia | null;
   anuncios: OptimizerAdV2[];
 };
 
@@ -168,6 +199,9 @@ export type OptimizerCampaignV2 = {
   cpc?: number | null;
   roas: number | null;
   dias_rodando: number | null;
+  // Ver OptimizerAdV2.janelas.
+  janelas?: OptimizerJanelas | null;
+  tendencia?: OptimizerTendencia | null;
   conjuntos: OptimizerAdsetV2[];
 };
 
@@ -201,6 +235,9 @@ export type OptimizerPayloadV2 = {
     dias: number;
     label?: string;
   };
+  // Datas exatas de cada janela do panorama (d30/d14/d7/d3) — UMA vez na raiz, em vez de
+  // repetidas por nó (economia de tokens). Presente quando algum nó carrega "janelas".
+  janelas_referencia?: Partial<Record<OptimizerWindowKey, { data_inicio: string; data_fim: string }>> | null;
   opportunity_score: {
     score: number | null;
     recomendacoes: Array<{ tipo: string; ganho_score: number; descricao: string }>;
@@ -261,6 +298,9 @@ export type OptimizerAnaliseAnuncio = {
   // Motivos em tópicos, já interpretados (fato + comparação), para exibir direto no card
   // principal — sem precisar abrir painel. Ex: "Custava R$9,20 por conversa — a meta é R$20".
   motivos: string[];
+  // Panorama multi-janela — vem do payload (verdade), nunca da IA. Ver OptimizerAdV2.janelas.
+  janelas?: OptimizerJanelas | null;
+  tendencia?: OptimizerTendencia | null;
 };
 
 export type OptimizerAnaliseConjunto = {
@@ -284,6 +324,8 @@ export type OptimizerAnaliseConjunto = {
   depende_de: string | null;
   padrao: string | null;
   motivos: string[];
+  janelas?: OptimizerJanelas | null;
+  tendencia?: OptimizerTendencia | null;
   anuncios: OptimizerAnaliseAnuncio[];
 };
 
@@ -308,6 +350,8 @@ export type OptimizerAnaliseCampanha = {
   depende_de: string | null;
   padrao: string | null;
   motivos: string[];
+  janelas?: OptimizerJanelas | null;
+  tendencia?: OptimizerTendencia | null;
   conjuntos: OptimizerAnaliseConjunto[];
 };
 
@@ -1281,6 +1325,56 @@ Antes de recomendar ATIVAR ou "reativar" qualquer campanha/conjunto/anuncio paus
    so e sinal de problema real se "status" for ACTIVE.
 
 ==================================================
+PASSO 3.6 — PANORAMA MULTI-JANELA (30/14/7/3 DIAS): LEIA O FILME, NAO A FOTO
+==================================================
+Cada campanha/conjunto/anuncio pode trazer dois campos extras:
+- "janelas": o MESMO objeto medido em 4 janelas que terminam ontem — d30, d14, d7, d3 —
+  cada uma com gasto, conversoes, cpl, cliques, cpc, ctr. As datas exatas de cada janela
+  estao em "janelas_referencia" na raiz do payload.
+- "tendencia": leitura calculada pelo sistema comparando o custo por resultado de d3 contra
+  d30 — "RECUPERANDO" | "PIORANDO" | "ESTAVEL" | "DADO_INSUFICIENTE".
+Os campos de topo do no (gasto, cpl, ctr...) continuam sendo a janela principal
+(periodo_analise) — as reguas e comparacoes com meta usam ELES. As janelas existem pra voce
+enxergar a TRAJETORIA antes de decidir, como um gestor senior que olha o mes inteiro antes
+de mexer no que aconteceu essa semana. Uma foto de 7 dias pode condenar uma campanha que
+performou o mes inteiro — ou esconder uma que acabou de virar.
+
+COMO RACIOCINAR (padroes obrigatorios):
+1. d30 RUIM + d3 BOM = RECUPERANDO. O ajuste recente esta funcionando — NUNCA mande pausar
+   pela media do mes. Acao: manter/observar e citar a virada nos motivos (ex: "CPL R$48 na
+   media de 30 dias, mas R$14 nos ultimos 3 — recuperando, manter e reavaliar em 3 dias").
+2. d30 BOM + d3 RUIM = TURBULENCIA RECENTE. 3 dias ruins nao condenam um mes bom — pode ser
+   leilao, fim de semana, oscilacao normal. NAO pause de imediato: recomende observar 2-3
+   dias ou reduzir orcamento; so escale para PAUSAR se d7 TAMBEM ja estiver ruim (a piora
+   deixou de ser pontual).
+3. Piora consistente d30 -> d14 -> d7 -> d3 (custo por resultado subindo ou resultado caindo
+   janela apos janela) = DETERIORACAO REAL. Aqui a acao dura (pausar, trocar criativo) se
+   justifica — cite a sequencia nos motivos (ex: "CPL R$18 -> R$24 -> R$31 -> R$44: piora
+   consistente, nao e oscilacao").
+4. Melhora consistente + custo dentro/abaixo da meta = candidato a ESCALAR (situacao (a) do
+   PASSO 3).
+
+REGRAS RIGIDAS (anti-alucinacao):
+- So cite numeros que EXISTEM em "janelas". NUNCA estime, interpole ou invente valor de
+  janela que nao esta no payload.
+- Janela com gasto abaixo de R$1 (ou ausente) NAO sustenta conclusao nenhuma — e ausencia
+  de dado, nao queda de performance. Se tendencia = "DADO_INSUFICIENTE", nao invente leitura
+  de trajetoria: julgue so pela janela principal.
+- "tendencia" e calculada deterministicamente pelo sistema. Se a sua leitura das janelas
+  discordar, explique a divergencia citando os numeros — nunca contradiga sem numero.
+- Em campanha de TRAFEGO as janelas trazem cpc preenchido e cpl null DE PROPOSITO — leia a
+  trajetoria por cpc/cliques. NUNCA invente CPL de janela (a regra do PASSO 1 vale aqui
+  dentro tambem).
+- Objeto sem "janelas": analise normal pela janela principal, sem mencionar tendencia.
+- As janelas se SOBREPOEM (d3 esta dentro de d7, que esta dentro de d14 e d30) — nao some
+  janelas entre si nem trate como periodos consecutivos.
+
+TRAVA FINAL: antes de marcar acao_tipo "PAUSAR" em objeto ATIVO com gasto relevante, olhe as
+janelas. Se d3/d7 mostram recuperacao clara, rebaixe para observar/reduzir e diga por que.
+Antes de descartar um objeto pausado com d30 excelente, avalie se a pausa nao matou algo que
+estava entregando (candidato a ATIVAR — respeitando as condicoes do PASSO 3.5).
+
+==================================================
 PASSO 6 — ACOES AUTOMATICAS
 ==================================================
 Respeite o PASSO 0. Se modo = DIAGNOSTICO_APENAS ou RECOMENDACAO_COM_APROVACAO: retorne [].
@@ -1637,6 +1731,8 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
       depende_de: cv.depende_de,
       padrao: cv.padrao,
       motivos: cv.motivos,
+      janelas: camp.janelas ?? null,
+      tendencia: camp.tendencia ?? null,
       conjuntos: (camp.conjuntos ?? []).map((cj) => {
         const jv = vOf(cj.id);
         const cjClassificacao = capSeveridadePausado(limitarSeveridadePorCplBom(jv.classificacao, cj.cpl, Number(cj.conversoes) || 0, Number(cj.gasto) || 0, cplIdeal, cplMaximo), cj.status);
@@ -1661,6 +1757,8 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
           depende_de: jv.depende_de,
           padrao: jv.padrao,
           motivos: jv.motivos,
+          janelas: cj.janelas ?? null,
+          tendencia: cj.tendencia ?? null,
           anuncios: (cj.anuncios ?? []).map((ad) => {
             const av = vOf(ad.id);
             const adClassificacao = capSeveridadePausado(limitarSeveridadePorCplBom(av.classificacao, ad.cpl, Number(ad.conversoes) || 0, Number(ad.gasto) || 0, cplIdeal, cplMaximo), ad.status);
@@ -1692,6 +1790,8 @@ function buildAnaliseCampanhas(payload: OptimizerPayloadV2, iaCampanhas: unknown
               depende_de: av.depende_de,
               padrao: av.padrao,
               motivos: av.motivos,
+              janelas: ad.janelas ?? null,
+              tendencia: ad.tendencia ?? null,
             }, cplMaximo);
           }),
         };

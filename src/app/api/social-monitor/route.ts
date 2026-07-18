@@ -19,6 +19,7 @@ type SnapshotRow = {
   avg_comments: string | null;
   reach_28d: string | null;   // BIGINT chega como string no pg
   red_after_days: number;
+  monitored: boolean;
   error: string | null;
   fetched_at: string;
 };
@@ -43,6 +44,7 @@ export async function GET() {
       avgComments: r.avg_comments !== null ? Number(r.avg_comments) : null,
       reach28d: r.reach_28d !== null ? Number(r.reach_28d) : null,
       redAfterDays: r.red_after_days,
+      monitored: r.monitored,
       error: r.error,
       fetchedAt: r.fetched_at,
     }));
@@ -57,28 +59,43 @@ export async function GET() {
   }
 }
 
-// Salva a régua de alerta por cliente (dias sem post para ficar vermelho).
+// Salva config por cliente: régua de alerta (dias sem post para ficar vermelho)
+// e/ou `monitored` (false = cliente só tráfego, some do radar e do cron).
 // Funciona antes mesmo da 1ª coleta: o INSERT cria a linha só com a config.
 export async function PATCH(req: NextRequest) {
-  const body = await req.json().catch(() => null) as { clientId?: string; redAfterDays?: number } | null;
+  const body = await req.json().catch(() => null) as
+    { clientId?: string; redAfterDays?: number; monitored?: boolean } | null;
   const clientId = String(body?.clientId ?? '').trim();
+  const hasRuler = body?.redAfterDays !== undefined;
+  const hasMonitored = typeof body?.monitored === 'boolean';
   const redAfterDays = Number(body?.redAfterDays);
-  if (!clientId || !Number.isInteger(redAfterDays) || redAfterDays < 1 || redAfterDays > 90) {
-    return Response.json({ error: 'clientId e redAfterDays (inteiro 1–90) são obrigatórios' }, { status: 400 });
+  if (!clientId || (!hasRuler && !hasMonitored)
+    || (hasRuler && (!Number.isInteger(redAfterDays) || redAfterDays < 1 || redAfterDays > 90))) {
+    return Response.json({ error: 'clientId e redAfterDays (inteiro 1–90) e/ou monitored (boolean) são obrigatórios' }, { status: 400 });
   }
 
   const pool = makeServerPool();
   try {
     await ensureSocialMonitorSchema(pool);
-    await pool.query(
-      `INSERT INTO public.social_monitor_snapshots (client_id, red_after_days)
-       VALUES ($1, $2)
-       ON CONFLICT (client_id) DO UPDATE SET red_after_days = EXCLUDED.red_after_days`,
-      [clientId, redAfterDays],
-    );
+    if (hasRuler) {
+      await pool.query(
+        `INSERT INTO public.social_monitor_snapshots (client_id, red_after_days)
+         VALUES ($1, $2)
+         ON CONFLICT (client_id) DO UPDATE SET red_after_days = EXCLUDED.red_after_days`,
+        [clientId, redAfterDays],
+      );
+    }
+    if (hasMonitored) {
+      await pool.query(
+        `INSERT INTO public.social_monitor_snapshots (client_id, monitored)
+         VALUES ($1, $2)
+         ON CONFLICT (client_id) DO UPDATE SET monitored = EXCLUDED.monitored`,
+        [clientId, body!.monitored],
+      );
+    }
     return Response.json({ ok: true });
   } catch (e) {
-    return Response.json({ error: e instanceof Error ? e.message : 'Erro ao salvar régua' }, { status: 500 });
+    return Response.json({ error: e instanceof Error ? e.message : 'Erro ao salvar config' }, { status: 500 });
   } finally {
     await pool.end();
   }

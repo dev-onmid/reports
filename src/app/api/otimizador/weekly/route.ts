@@ -18,6 +18,18 @@ import {
 } from '@/lib/optimizer';
 import { optimizerDateRangeForDays, optimizerDateRangeForPeriod } from '@/lib/optimizer-period-range';
 import { benchmarkParaNicho, loadNicheBenchmarks, type NicheBenchmark } from '@/lib/optimizer-benchmarks';
+import {
+  optimizerMultiWindowRanges,
+  janelasReferencia,
+  buildMetaWindowFields,
+  parseMetaWindowInsights,
+  aggregateGoogleDailyRows,
+  janelasComMetricaDeClique,
+  calcularTendencia,
+  type OptimizerWindowRanges,
+  type GoogleDailyRow,
+} from '@/lib/optimizer-windows';
+import type { OptimizerJanelas } from '@/lib/optimizer';
 
 // 300s (mesmo teto do reports/run-once) — a análise manual síncrona soma busca de campanhas
 // (até 24s com fallback 30d) + conjuntos/anúncios (15s) + IA (até 90s); em 60s dava HTTP 504.
@@ -462,6 +474,34 @@ function resolveCreativeImageUrl(
   return thumbnailUrl ?? null;
 }
 
+// Busca as janelas do panorama (30/14/7/3d) das campanhas selecionadas em UMA chamada batch
+// (?ids=...) com field expansion aliased. Best-effort: falha/timeout → Map vazio, a análise
+// segue sem panorama no nível campanha (nunca lança).
+async function fetchMetaCampaignWindows(
+  campaignIds: string[],
+  token: string,
+  ranges: OptimizerWindowRanges,
+): Promise<Map<string, OptimizerJanelas>> {
+  const result = new Map<string, OptimizerJanelas>();
+  if (campaignIds.length === 0 || !token) return result;
+  try {
+    const url = new URL('https://graph.facebook.com/v21.0/');
+    url.searchParams.set('ids', campaignIds.join(','));
+    url.searchParams.set('fields', buildMetaWindowFields(ranges));
+    url.searchParams.set('access_token', token);
+    const res = await fetchWithTimeout(url.toString(), 8_000);
+    if (!res?.ok) return result;
+    const data = await res.json() as Record<string, Record<string, unknown>>;
+    for (const id of campaignIds) {
+      const janelas = data?.[id] ? parseMetaWindowInsights(data[id]) : undefined;
+      if (janelas) result.set(id, janelas);
+    }
+    return result;
+  } catch {
+    return result;
+  }
+}
+
 // Busca conjuntos + anúncios de uma campanha direto na Meta (best-effort, com deadline)
 async function fetchConjuntosForCampaign(
   campaignId: string,
@@ -469,15 +509,30 @@ async function fetchConjuntosForCampaign(
   dateFrom: string,
   dateTo: string,
   deadline: number,
+  windowRanges: OptimizerWindowRanges,
 ): Promise<OptimizerCampaignV2['conjuntos']> {
   if (Date.now() > deadline) return [];
   const insightFields = `insights.time_range(${JSON.stringify({ since: dateFrom, until: dateTo })}){spend,impressions,reach,frequency,clicks,actions,ctr}`;
+  const windowFields = buildMetaWindowFields(windowRanges);
+  const baseAdsetFields = `id,name,status,effective_status,optimization_goal,daily_budget,created_time,${insightFields}`;
   const url = new URL(`https://graph.facebook.com/v21.0/${campaignId}/adsets`);
-  url.searchParams.set('fields', `id,name,status,effective_status,optimization_goal,daily_budget,created_time,${insightFields}`);
+  url.searchParams.set('fields', `${baseAdsetFields},${windowFields}`);
   url.searchParams.set('limit', '10');
   url.searchParams.set('access_token', token);
 
-  const res = await fetchWithTimeout(url.toString(), 8_000);
+  let res = await fetchWithTimeout(url.toString(), 8_000);
+  // Se os aliases das janelas derrubarem o request (conta/versão da API que rejeite as
+  // expansões extras), refaz UMA vez sem eles — os conjuntos não podem sumir da árvore por
+  // causa do panorama (mesmo padrão do fallback de vídeo dos /ads abaixo).
+  if (!res?.ok) {
+    const errBody = await res?.text().catch(() => '');
+    console.error('[otimizador/weekly] /adsets falhou com janelas, tentando fallback', campaignId, res?.status, errBody?.slice(0, 300));
+    const fallbackUrl = new URL(`https://graph.facebook.com/v21.0/${campaignId}/adsets`);
+    fallbackUrl.searchParams.set('fields', baseAdsetFields);
+    fallbackUrl.searchParams.set('limit', '10');
+    fallbackUrl.searchParams.set('access_token', token);
+    res = await fetchWithTimeout(fallbackUrl.toString(), 8_000);
+  }
   if (!res?.ok) return [];
   const data = await res.json() as { data?: Record<string, unknown>[] };
 
@@ -509,18 +564,19 @@ async function fetchConjuntosForCampaign(
       const insightsComVideo = `${insightsBase},video_3_sec_watched_actions,video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions`;
 
       const adsUrl = new URL(`https://graph.facebook.com/v21.0/${String(raw.id)}/ads`);
-      adsUrl.searchParams.set('fields', `${baseAdsFields},insights.time_range(${JSON.stringify({ since: dateFrom, until: dateTo })}){${insightsComVideo}}`);
+      adsUrl.searchParams.set('fields', `${baseAdsFields},insights.time_range(${JSON.stringify({ since: dateFrom, until: dateTo })}){${insightsComVideo}},${windowFields}`);
       adsUrl.searchParams.set('limit', '8');
       adsUrl.searchParams.set('access_token', token);
       let adsRes = await fetchWithTimeout(adsUrl.toString(), 8_000);
 
-      // Se os campos de retenção de vídeo derrubarem o request inteiro (conta/versão da API
-      // que não aceita), os criativos NÃO PODEM sumir da árvore por causa disso — refaz sem
-      // os campos de vídeo antes de desistir. Sem este fallback, um 400 aqui zera "Criativos"
-      // e some com a árvore inteira (visto em produção com o payload de vídeo).
+      // Se os campos de retenção de vídeo (ou os aliases das janelas) derrubarem o request
+      // inteiro (conta/versão da API que não aceita), os criativos NÃO PODEM sumir da árvore
+      // por causa disso — refaz sem vídeo e sem janelas antes de desistir (não cabe um 3º
+      // fetch no deadline). Sem este fallback, um 400 aqui zera "Criativos" e some com a
+      // árvore inteira (visto em produção com o payload de vídeo).
       if (!adsRes?.ok) {
         const errBody = await adsRes?.text().catch(() => '');
-        console.error('[otimizador/weekly] /ads falhou com campos de video, tentando fallback', raw.id, adsRes?.status, errBody?.slice(0, 300));
+        console.error('[otimizador/weekly] /ads falhou com campos de video/janelas, tentando fallback', raw.id, adsRes?.status, errBody?.slice(0, 300));
         const fallbackUrl = new URL(`https://graph.facebook.com/v21.0/${String(raw.id)}/ads`);
         fallbackUrl.searchParams.set('fields', `${baseAdsFields},insights.time_range(${JSON.stringify({ since: dateFrom, until: dateTo })}){${insightsBase}}`);
         fallbackUrl.searchParams.set('limit', '8');
@@ -594,6 +650,7 @@ async function fetchConjuntosForCampaign(
             video_p50_rate: videoRate(p50),
             video_p75_rate: videoRate(p75),
             imagem_url: imagemUrl,
+            janelas: parseMetaWindowInsights(ad),
           };
         });
       }
@@ -616,6 +673,7 @@ async function fetchConjuntosForCampaign(
       cliques,
       ctr_tendencia_4d: null,
       dias_ativo: diasAtivo,
+      janelas: parseMetaWindowInsights(raw),
       anuncios,
     };
   }));
@@ -638,11 +696,38 @@ function comMetricaDeClique(camp: OptimizerCampaignV2): OptimizerCampaignV2 {
     ...camp,
     cpl: null,
     cpc: cpc(camp.gasto, camp.cliques),
+    // Mesma regra dentro do panorama: cpl das janelas de tráfego é enganoso do mesmo jeito.
+    janelas: janelasComMetricaDeClique(camp.janelas),
     conjuntos: (camp.conjuntos ?? []).map((cj) => ({
       ...cj,
       cpl: null,
       cpc: cpc(cj.gasto, cj.cliques),
-      anuncios: (cj.anuncios ?? []).map((ad) => ({ ...ad, cpl: null, cpc: cpc(ad.gasto, ad.cliques) })),
+      janelas: janelasComMetricaDeClique(cj.janelas),
+      anuncios: (cj.anuncios ?? []).map((ad) => ({
+        ...ad,
+        cpl: null,
+        cpc: cpc(ad.gasto, ad.cliques),
+        janelas: janelasComMetricaDeClique(ad.janelas),
+      })),
+    })),
+  };
+}
+
+// Calcula a tendência determinística (RECUPERANDO/PIORANDO/ESTAVEL/DADO_INSUFICIENTE) de cada
+// nó a partir das janelas, no eixo de medição do objetivo da CAMPANHA (cpc pra tráfego, cpl
+// pros demais). Aplicar SEMPRE depois de comMetricaDeClique (que já normalizou cpl/cpc).
+function comJanelasETendencia(camp: OptimizerCampaignV2): OptimizerCampaignV2 {
+  const usaCpc = objetivoMedidoPorClique(camp.objetivo);
+  return {
+    ...camp,
+    tendencia: calcularTendencia(camp.janelas, usaCpc),
+    conjuntos: (camp.conjuntos ?? []).map((cj) => ({
+      ...cj,
+      tendencia: calcularTendencia(cj.janelas, usaCpc),
+      anuncios: (cj.anuncios ?? []).map((ad) => ({
+        ...ad,
+        tendencia: calcularTendencia(ad.janelas, usaCpc),
+      })),
     })),
   };
 }
@@ -693,18 +778,25 @@ async function buildPayloadForClient(
 
   const topCampaigns = activeCampaigns.slice(0, 5);
 
+  // Panorama multi-janela (30/14/7/3d): as datas independem da janela primária.
+  const windowRanges = optimizerMultiWindowRanges();
+
   // Conjuntos + anúncios das campanhas que gastaram. Busca em PARALELO (uma promise por
   // campanha), com deadline compartilhado — evita a soma sequencial que estourava os 60s.
+  // As janelas do nível campanha vão numa chamada batch única, em paralelo com os conjuntos.
   const conjuntosDeadline = Date.now() + 15_000;
-  const conjuntosPorCampanha = await Promise.all(
-    topCampaigns.map((camp) =>
-      (fetchConjuntos && token && camp.spend > 0)
-        ? fetchConjuntosForCampaign(camp.id, token, dateFrom, dateTo, conjuntosDeadline).catch(() => [])
-        : Promise.resolve([] as OptimizerCampaignV2['conjuntos']),
+  const [campWindows, conjuntosPorCampanha] = await Promise.all([
+    fetchMetaCampaignWindows(topCampaigns.map((c) => c.id), token, windowRanges),
+    Promise.all(
+      topCampaigns.map((camp) =>
+        (fetchConjuntos && token && camp.spend > 0)
+          ? fetchConjuntosForCampaign(camp.id, token, dateFrom, dateTo, conjuntosDeadline, windowRanges).catch(() => [])
+          : Promise.resolve([] as OptimizerCampaignV2['conjuntos']),
+      ),
     ),
-  );
+  ]);
 
-  const campanhas: OptimizerCampaignV2[] = topCampaigns.map((camp, i) => comMetricaDeClique({
+  const campanhas: OptimizerCampaignV2[] = topCampaigns.map((camp, i) => comJanelasETendencia(comMetricaDeClique({
     id: camp.id,
     nome: camp.name,
     objetivo: camp.objective ?? '',
@@ -718,8 +810,9 @@ async function buildPayloadForClient(
     conversoes: camp.leads,
     roas: null,
     dias_rodando: null,
+    janelas: campWindows.get(camp.id) ?? null,
     conjuntos: conjuntosPorCampanha[i],
-  }));
+  })));
 
   void accountId; // reservado para opportunity score futuro
 
@@ -774,6 +867,7 @@ async function buildPayloadForClient(
       dias: isoDateDiffDays(dateFrom, dateTo),
       label: usedPeriod.label,
     },
+    janelas_referencia: janelasReferencia(windowRanges),
     opportunity_score: null,
     campanhas,
     historico_decisoes: historico,
@@ -911,6 +1005,54 @@ function gadsNum(metrics: Record<string, unknown>, key: string): number {
   return Number(metrics[key] ?? 0);
 }
 
+// Busca linhas DIÁRIAS (segments.date no SELECT) dos objetos já selecionados e agrega nas 4
+// janelas do panorama (30/14/7/3d). A seleção top-N continua na query agregada (sem segmentação)
+// — aqui só entram ids já escolhidos, por isso não há LIMIT. FROM campaign/ad_group/ad_group_ad
+// (nunca customer) e sem métricas de IS na query segmentada (regras do projeto).
+// Premissa: ≤ ~40 objetos × 31 dias ≈ 1.240 linhas — bem abaixo da página default (10k) do
+// googleAds:search, então gadsSearch sem paginação continua suficiente.
+async function fetchGoogleDailyWindows(
+  customerId: string,
+  entity: 'campaign' | 'ad_group' | 'ad_group_ad',
+  idExpr: string,
+  whereClause: string,
+  token: string,
+  loginCustomerId: string | undefined,
+  ranges: OptimizerWindowRanges,
+): Promise<Map<string, OptimizerJanelas>> {
+  const { dateFrom, dateTo } = ranges.d30;
+  const data = await gadsSearch(
+    customerId,
+    `SELECT ${idExpr}, segments.date,
+            metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions
+       FROM ${entity}
+      WHERE ${whereClause} AND segments.date BETWEEN '${dateFrom}' AND '${dateTo}'`,
+    token, loginCustomerId, 8_000,
+  );
+  const rows: GoogleDailyRow[] = (data?.results ?? []).map((r) => {
+    const m = (r.metrics as Record<string, unknown>) ?? {};
+    const seg = (r.segments as Record<string, unknown>) ?? {};
+    let id = '';
+    if (entity === 'campaign') {
+      id = String(((r.campaign as Record<string, unknown>) ?? {}).id ?? '');
+    } else if (entity === 'ad_group') {
+      id = String(((r.adGroup as Record<string, unknown>) ?? {}).id ?? '');
+    } else {
+      const wrap = (r.adGroupAd as Record<string, unknown>) ?? {};
+      id = String(((wrap.ad as Record<string, unknown>) ?? {}).id ?? '');
+    }
+    return {
+      id,
+      date: String(seg.date ?? ''),
+      costMicros: gadsNum(m, 'costMicros'),
+      impressions: gadsNum(m, 'impressions'),
+      clicks: gadsNum(m, 'clicks'),
+      conversions: gadsNum(m, 'conversions'),
+    };
+  });
+  return aggregateGoogleDailyRows(rows, ranges);
+}
+
 // Busca ad groups + ads de uma campanha Google via GAQL. `segments.date` só no WHERE (não no
 // SELECT) → o Google agrega as métricas no intervalo em UMA linha por objeto (sem linhas por dia).
 async function fetchGoogleAdGroups(
@@ -921,6 +1063,7 @@ async function fetchGoogleAdGroups(
   dateFrom: string,
   dateTo: string,
   deadline: number,
+  windowRanges: OptimizerWindowRanges,
 ): Promise<OptimizerCampaignV2['conjuntos']> {
   if (Date.now() > deadline) return [];
   const dateFilter = `segments.date BETWEEN '${dateFrom}' AND '${dateTo}'`;
@@ -937,6 +1080,19 @@ async function fetchGoogleAdGroups(
   );
   const agRows = agData?.results ?? [];
 
+  // Janelas do panorama dos ad groups selecionados — 1 query pra campanha inteira, em paralelo
+  // com a busca de anúncios abaixo. Best-effort: falha → Map vazio, nós ficam sem janelas.
+  const agIds = agRows
+    .map((row) => String(((row.adGroup as Record<string, unknown>) ?? {}).id ?? ''))
+    .filter(Boolean);
+  const agWindowsPromise = (agIds.length > 0 && Date.now() < deadline)
+    ? fetchGoogleDailyWindows(
+        customerId, 'ad_group', 'ad_group.id',
+        `campaign.id = ${campaignId} AND ad_group.id IN (${agIds.join(',')})`,
+        token, loginCustomerId, windowRanges,
+      ).catch(() => new Map<string, OptimizerJanelas>())
+    : Promise.resolve(new Map<string, OptimizerJanelas>());
+
   return Promise.all(agRows.map(async (row): Promise<OptimizerCampaignV2['conjuntos'][number]> => {
     const ag = (row.adGroup as Record<string, unknown>) ?? {};
     const m = (row.metrics as Record<string, unknown>) ?? {};
@@ -949,17 +1105,25 @@ async function fetchGoogleAdGroups(
 
     let anuncios: OptimizerCampaignV2['conjuntos'][number]['anuncios'] = [];
     if (Date.now() < deadline && agId) {
-      const adData = await gadsSearch(
-        customerId,
-        `SELECT ad_group_ad.ad.id, ad_group_ad.ad.name, ad_group_ad.status,
-                metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions
-           FROM ad_group_ad
-          WHERE ad_group.id = ${agId} AND ${dateFilter}
-            AND ad_group_ad.status != 'REMOVED'
-          ORDER BY metrics.cost_micros DESC
-          LIMIT 8`,
-        token, loginCustomerId, 8_000,
-      );
+      // Query agregada (seleção top-8) em paralelo com as janelas diárias dos anúncios do grupo.
+      const [adData, adWindows] = await Promise.all([
+        gadsSearch(
+          customerId,
+          `SELECT ad_group_ad.ad.id, ad_group_ad.ad.name, ad_group_ad.status,
+                  metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions
+             FROM ad_group_ad
+            WHERE ad_group.id = ${agId} AND ${dateFilter}
+              AND ad_group_ad.status != 'REMOVED'
+            ORDER BY metrics.cost_micros DESC
+            LIMIT 8`,
+          token, loginCustomerId, 8_000,
+        ),
+        fetchGoogleDailyWindows(
+          customerId, 'ad_group_ad', 'ad_group_ad.ad.id',
+          `ad_group.id = ${agId} AND ad_group_ad.status != 'REMOVED'`,
+          token, loginCustomerId, windowRanges,
+        ).catch(() => new Map<string, OptimizerJanelas>()),
+      ]);
       anuncios = (adData?.results ?? []).map((r) => {
         const adWrap = (r.adGroupAd as Record<string, unknown>) ?? {};
         const ad = (adWrap.ad as Record<string, unknown>) ?? {};
@@ -968,8 +1132,9 @@ async function fetchGoogleAdGroups(
         const adImp = gadsNum(am, 'impressions');
         const adClk = gadsNum(am, 'clicks');
         const adConv = Math.round(gadsNum(am, 'conversions'));
+        const adId = String(ad.id ?? '');
         return {
-          id: String(ad.id ?? ''),
+          id: adId,
           nome: String(ad.name ?? ad.id ?? 'Anúncio'),
           status: String(adWrap.status ?? ''),
           gasto: adGasto,
@@ -988,6 +1153,7 @@ async function fetchGoogleAdGroups(
           video_p50_rate: null,
           video_p75_rate: null,
           imagem_url: null,
+          janelas: adWindows.get(adId) ?? null,
         };
       });
     }
@@ -1009,6 +1175,7 @@ async function fetchGoogleAdGroups(
       cliques,
       ctr_tendencia_4d: null,
       dias_ativo: null,
+      janelas: (await agWindowsPromise).get(agId) ?? null,
       anuncios,
     };
   }));
@@ -1048,16 +1215,26 @@ async function buildGooglePayloadForClient(
   const loginCustomerId = topCampaigns.find((c) => c.loginCustomerId)?.loginCustomerId;
   const customerId = gConn.accountId;
 
-  const conjuntosDeadline = Date.now() + 15_000;
-  const conjuntosPorCampanha = await Promise.all(
-    topCampaigns.map((camp) =>
-      (fetchConjuntos && token && camp.spend > 0)
-        ? fetchGoogleAdGroups(customerId, camp.id, token, loginCustomerId, dateFrom, dateTo, conjuntosDeadline).catch(() => [])
-        : Promise.resolve([] as OptimizerCampaignV2['conjuntos']),
-    ),
-  );
+  // Panorama multi-janela (30/14/7/3d) — mesmo esquema do path Meta.
+  const windowRanges = optimizerMultiWindowRanges();
 
-  const campanhas: OptimizerCampaignV2[] = topCampaigns.map((camp, i) => comMetricaDeClique({
+  const conjuntosDeadline = Date.now() + 15_000;
+  const [campWindows, conjuntosPorCampanha] = await Promise.all([
+    fetchGoogleDailyWindows(
+      customerId, 'campaign', 'campaign.id',
+      `campaign.id IN (${topCampaigns.map((c) => c.id).join(',')})`,
+      token, loginCustomerId, windowRanges,
+    ).catch(() => new Map<string, OptimizerJanelas>()),
+    Promise.all(
+      topCampaigns.map((camp) =>
+        (fetchConjuntos && token && camp.spend > 0)
+          ? fetchGoogleAdGroups(customerId, camp.id, token, loginCustomerId, dateFrom, dateTo, conjuntosDeadline, windowRanges).catch(() => [])
+          : Promise.resolve([] as OptimizerCampaignV2['conjuntos']),
+      ),
+    ),
+  ]);
+
+  const campanhas: OptimizerCampaignV2[] = topCampaigns.map((camp, i) => comJanelasETendencia(comMetricaDeClique({
     id: camp.id,
     nome: camp.name,
     objetivo: camp.objective ?? '',
@@ -1071,8 +1248,9 @@ async function buildGooglePayloadForClient(
     conversoes: camp.leads,
     roas: null,
     dias_rodando: null,
+    janelas: campWindows.get(camp.id) ?? null,
     conjuntos: conjuntosPorCampanha[i],
-  }));
+  })));
 
   const historico = await loadDecisionHistory(client.id);
   const notasManuais = await loadManualNotesContext(client.id);
@@ -1137,6 +1315,7 @@ async function buildGooglePayloadForClient(
       dias: isoDateDiffDays(dateFrom, dateTo),
       label: usedPeriod.label,
     },
+    janelas_referencia: janelasReferencia(windowRanges),
     opportunity_score: null,
     campanhas,
     historico_decisoes: historico,

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  AlertTriangle, AtSign, Camera, ExternalLink, Heart, MessageCircle,
+  AlertTriangle, AtSign, Camera, ExternalLink, Eye, EyeOff, Heart, MessageCircle,
   RefreshCw, Search, Users, WifiOff,
 } from 'lucide-react';
 import { useClients } from '@/lib/client-store';
@@ -25,6 +25,7 @@ type Snapshot = {
   avgComments: number | null;
   reach28d: number | null;
   redAfterDays: number;
+  monitored: boolean;
   error: string | null;
   fetchedAt: string;
 };
@@ -92,6 +93,7 @@ export default function RedesSociaisPage() {
   const [sevFilter, setSevFilter] = useState<'todos' | Severity>('todos');
   const [catFilter, setCatFilter] = useState('todas');
   const [sortBy, setSortBy] = useState<SortKey>('dias');
+  const [showHidden, setShowHidden] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -148,6 +150,23 @@ export default function RedesSociaisPage() {
     }).catch(() => {});
   }
 
+  // Oculta/reexibe um cliente do monitor (cliente só tráfego — post não é nosso).
+  async function saveMonitored(clientId: string, monitored: boolean) {
+    setSnapshots(prev => {
+      const existing = prev[clientId] ?? {
+        clientId, igId: null, igUsername: null, profilePicture: null, followers: null,
+        lastPostAt: null, lastPostPermalink: null, lastPostThumbnail: null, lastPostCaption: null,
+        posts30d: null, avgLikes: null, avgComments: null, reach28d: null,
+        redAfterDays: 2, monitored: true, error: null, fetchedAt: new Date().toISOString(),
+      };
+      return { ...prev, [clientId]: { ...existing, monitored } };
+    });
+    await fetch('/api/social-monitor', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clientId, monitored }),
+    }).catch(() => {});
+  }
+
   const rows = useMemo(() => clients.map(client => {
     const snap = snapshots[client.id];
     const { sev, days } = severityOf(snap);
@@ -155,7 +174,7 @@ export default function RedesSociaisPage() {
       ? (snap.avgLikes ?? 0) + (snap.avgComments ?? 0)
       : null;
     const engajPct = engaj !== null && snap?.followers ? (engaj / snap.followers) * 100 : null;
-    return { client, snap, sev, days, engaj, engajPct };
+    return { client, snap, sev, days, engaj, engajPct, monitored: snap?.monitored ?? true };
   }), [clients, snapshots]);
 
   const categories = useMemo(
@@ -166,6 +185,7 @@ export default function RedesSociaisPage() {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     const list = rows.filter(r => {
+      if (r.monitored === showHidden) return false;
       if (q && !r.client.name.toLowerCase().includes(q) && !(r.snap?.igUsername ?? '').toLowerCase().includes(q)) return false;
       if (sevFilter !== 'todos' && r.sev !== sevFilter) return false;
       if (catFilter !== 'todas' && r.client.category_name !== catFilter) return false;
@@ -181,11 +201,14 @@ export default function RedesSociaisPage() {
       return nul(b.days) - nul(a.days);
     });
     return list;
-  }, [rows, search, sevFilter, catFilter, sortBy]);
+  }, [rows, search, sevFilter, catFilter, sortBy, showHidden]);
 
-  const monitored = rows.filter(r => r.sev !== 'sem');
-  const reds = rows.filter(r => r.sev === 'vermelho');
-  const noAccount = rows.filter(r => r.sev === 'sem');
+  // Cards e contagens só consideram clientes visíveis no monitor (não ocultos)
+  const activeRows = rows.filter(r => r.monitored);
+  const hiddenCount = rows.length - activeRows.length;
+  const monitored = activeRows.filter(r => r.sev !== 'sem');
+  const reds = activeRows.filter(r => r.sev === 'vermelho');
+  const noAccount = activeRows.filter(r => r.sev === 'sem');
   const daysList = monitored.map(r => r.days).filter((d): d is number => d !== null);
   const avgDays = daysList.length ? Math.round(daysList.reduce((s, d) => s + d, 0) / daysList.length * 10) / 10 : null;
 
@@ -268,7 +291,28 @@ export default function RedesSociaisPage() {
           <option value="alcance">Maior alcance (28d)</option>
           <option value="engajamento">Maior engajamento</option>
         </select>
+        {(hiddenCount > 0 || showHidden) && (
+          <button
+            onClick={() => setShowHidden(v => !v)}
+            className={cn(
+              'flex h-10 items-center gap-2 rounded-[var(--radius)] border px-4 text-sm font-bold transition-colors',
+              showHidden
+                ? 'border-primary/60 bg-primary/10 text-foreground'
+                : 'border-border bg-card text-muted-foreground hover:text-foreground',
+            )}
+            title="Clientes ocultos do monitor (só tráfego pago — postagem não é nossa)"
+          >
+            <EyeOff className="h-4 w-4" />
+            {showHidden ? 'Voltar ao monitor' : `Ocultos (${hiddenCount})`}
+          </button>
+        )}
       </div>
+
+      {showHidden && (
+        <p className="text-sm font-semibold text-muted-foreground">
+          Clientes ocultos do monitor — só tráfego pago, a postagem não é responsabilidade da agência. Clique no olho para voltar a monitorar.
+        </p>
+      )}
 
       {/* ── Empty state / erro ── */}
       {!loading && !hasAnySnapshot && (
@@ -314,7 +358,9 @@ export default function RedesSociaisPage() {
                   <tr><td colSpan={9} className="px-4 py-10 text-center text-sm text-muted-foreground">Carregando…</td></tr>
                 )}
                 {!loading && filtered.length === 0 && (
-                  <tr><td colSpan={9} className="px-4 py-10 text-center text-sm text-muted-foreground">Nenhum cliente encontrado com esses filtros.</td></tr>
+                  <tr><td colSpan={9} className="px-4 py-10 text-center text-sm text-muted-foreground">
+                    {showHidden ? 'Nenhum cliente oculto.' : 'Nenhum cliente encontrado com esses filtros.'}
+                  </td></tr>
                 )}
                 {!loading && filtered.map(({ client, snap, sev, days, engaj, engajPct }) => {
                   const style = SEV_STYLE[sev];
@@ -402,14 +448,25 @@ export default function RedesSociaisPage() {
                         ) : <span className="text-sm text-muted-foreground/40">—</span>}
                       </td>
                       <td className="px-2 py-3">
-                        <button
-                          onClick={() => void refreshOne(client.id)}
-                          disabled={refreshing || refreshingAll}
-                          title="Atualizar este cliente agora"
-                          className="flex h-8 w-8 items-center justify-center rounded-[var(--radius)] border border-border text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground disabled:opacity-50"
-                        >
-                          <RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />
-                        </button>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => void refreshOne(client.id)}
+                            disabled={refreshing || refreshingAll}
+                            title="Atualizar este cliente agora"
+                            className="flex h-8 w-8 items-center justify-center rounded-[var(--radius)] border border-border text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground disabled:opacity-50"
+                          >
+                            <RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />
+                          </button>
+                          <button
+                            onClick={() => void saveMonitored(client.id, showHidden)}
+                            title={showHidden
+                              ? 'Voltar a monitorar este cliente'
+                              : 'Ocultar do monitor (só tráfego pago — postagem não é nossa)'}
+                            className="flex h-8 w-8 items-center justify-center rounded-[var(--radius)] border border-border text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
+                          >
+                            {showHidden ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );

@@ -21,9 +21,18 @@ async function runRefresh(clientIds: string[] | null) {
   try {
     await ensureSocialMonitorSchema(pool);
 
+    // Sem lista explícita (cron/"atualizar todos"): pula clientes ocultos do monitor
+    // (monitored = FALSE — só tráfego pago) para não gastar chamadas na Graph à toa.
     const { rows: clients } = clientIds?.length
       ? await pool.query(`SELECT id FROM public.clients WHERE id = ANY($1)`, [clientIds])
-      : await pool.query(`SELECT id FROM public.clients WHERE status NOT IN ('Arquivado','Inativo')`);
+      : await pool.query(
+          `SELECT c.id FROM public.clients c
+            WHERE c.status NOT IN ('Arquivado','Inativo')
+              AND NOT EXISTS (
+                SELECT 1 FROM public.social_monitor_snapshots s
+                 WHERE s.client_id = c.id AND s.monitored = FALSE
+              )`,
+        );
     const ids = (clients as { id: string }[]).map(c => c.id);
     if (!ids.length) return { ok: true, updated: 0, errors: 0, skipped: 0, tookMs: Date.now() - started };
 

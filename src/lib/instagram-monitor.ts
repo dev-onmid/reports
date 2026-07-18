@@ -119,9 +119,13 @@ export async function ensureSocialMonitorSchema(pool: Pool) {
        avg_comments        NUMERIC,
        reach_28d           BIGINT,
        red_after_days      INTEGER NOT NULL DEFAULT 2,
+       monitored           BOOLEAN NOT NULL DEFAULT TRUE,
        error               TEXT,
        fetched_at          TIMESTAMPTZ NOT NULL DEFAULT now()
      )`,
+    // Tabela pode já existir sem a coluna (deploy anterior)
+    `ALTER TABLE public.social_monitor_snapshots
+       ADD COLUMN IF NOT EXISTS monitored BOOLEAN NOT NULL DEFAULT TRUE`,
     `CREATE INDEX IF NOT EXISTS social_monitor_last_post_idx
        ON public.social_monitor_snapshots (last_post_at)`,
   ];
