@@ -3,11 +3,15 @@ import { makeServerPool } from '@/lib/server-db';
 import { getClientInstance, sendFollowupMessage, interpolate } from '@/lib/followup-send';
 import type { FollowupVars } from '@/lib/followup-send';
 
-// Vercel Cron: runs every 5 minutes
-// vercel.json: { "path": "/api/crm/followup/worker?secret=${CRON_SECRET}", "schedule": "*/5 * * * *" }
+// Chamado pelo cron do GitHub Actions (.github/workflows/crm-followup-worker.yml)
+// a cada 5 min. Aceita o CRON_SECRET global OU o CRM_CRON_SECRET dedicado —
+// o CRON_SECRET da Vercel é "Sensitive" (write-only, ninguém consegue ler o
+// valor de volta), então este worker novo usa um secret próprio conhecido,
+// sem precisar rotacionar o global (o que quebraria os outros 6 crons).
 export async function GET(request: NextRequest) {
   const secret = request.nextUrl.searchParams.get('secret');
-  if (secret !== process.env.CRON_SECRET) {
+  const expected = [process.env.CRON_SECRET, process.env.CRM_CRON_SECRET].filter(Boolean);
+  if (!secret || !expected.includes(secret)) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
