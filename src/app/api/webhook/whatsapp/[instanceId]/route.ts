@@ -15,6 +15,11 @@ import {
 import { regiaoFromPhone } from '@/lib/ddd-regioes';
 import type { NextRequest } from 'next/server';
 
+// O download de mídia recebida (getBase64FromMediaMessage, timeout 15s) + upload pro
+// storage não cabem no orçamento default de 10s do Hobby — sem isso, fotos/áudios
+// grandes falhavam silenciosamente e viravam placeholder.
+export const maxDuration = 60;
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 function originToCanal(origin: string): string {
@@ -260,19 +265,34 @@ export async function POST(
     } = msg;
     const messageCreatedAt = parseProviderTimestamp(timestamp);
 
-    // Evolution's webhook text for audio messages is just a "[Áudio]" placeholder — the
-    // real bytes are end-to-end encrypted and not in the payload. Fetch+decode them via
-    // getBase64FromMediaMessage and persist as a public URL so the chat can actually play
-    // it back (MessageBubble renders an <audio> player for tipo 'audio').
+    // Evolution's webhook text for media messages is just a placeholder ("[Áudio]",
+    // "[Imagem]"…) — the real bytes are end-to-end encrypted and not in the payload.
+    // Fetch+decode them via getBase64FromMediaMessage and persist as a public URL so
+    // the chat can actually render (MessageBubble handles tipo audio/imagem/video/
+    // documento). Before 2026-07-16 only audio was fetched — incoming photos/videos/
+    // documents showed up as the literal text "[Imagem]"/"[Vídeo]"/"[Doc]".
     let messageTipo: string = 'texto';
     let resolvedMessageText: string = rawMessageText;
-    if (provider === 'evolution' && body?.data?.message?.audioMessage && body?.data?.key) {
+    let mediaCaption: string | null = null;
+    const evoMsg = provider === 'evolution' ? body?.data?.message : null;
+    const mediaKind: string | null = evoMsg?.audioMessage ? 'audio'
+      : evoMsg?.imageMessage ? 'imagem'
+      : evoMsg?.stickerMessage ? 'imagem'
+      : evoMsg?.videoMessage ? 'video'
+      : evoMsg?.documentMessage ? 'documento'
+      : null;
+    if (mediaKind && body?.data?.key) {
       const media = await fetchEvolutionMediaBase64(evolutionInstanceName, body.data.key);
       if (media) {
-        const audioUrl = await uploadBase64ToStorage(media.base64, media.mimetype);
-        if (audioUrl) {
-          resolvedMessageText = audioUrl;
-          messageTipo = 'audio';
+        const mediaUrl = await uploadBase64ToStorage(media.base64, media.mimetype);
+        if (mediaUrl) {
+          resolvedMessageText = mediaUrl;
+          messageTipo = mediaKind;
+          // Legenda de imagem/vídeo vira uma segunda mensagem de texto (o bolha de
+          // mídia usa o campo text como URL — anexar a legenda quebraria o src).
+          mediaCaption = String(
+            evoMsg?.imageMessage?.caption ?? evoMsg?.videoMessage?.caption ?? '',
+          ).trim() || null;
         }
       }
     }
@@ -413,6 +433,18 @@ export async function POST(
         }
       } catch (err) {
         console.error('[webhook crm_messages insert]', err);
+      }
+      // Legenda da mídia (caption de imagem/vídeo) vira mensagem de texto própria,
+      // 1s depois da mídia pra manter a ordem no chat. Dedup por external_id:caption.
+      if (mediaCaption) {
+        await pool.query(
+          `INSERT INTO public.crm_messages
+             (lead_id, client_id, direction, text, tipo, external_id, created_at, whatsapp_status)
+           VALUES ($1, $2, $3, $4, 'texto', $5, $6::timestamptz + interval '1 second', $7)
+           ON CONFLICT DO NOTHING`,
+          [crmLead.id, clientId, fromMe ? 'out' : 'in', mediaCaption,
+           externalId ? `${externalId}:caption` : null, messageCreatedAt, fromMe ? 'sent' : null],
+        ).catch(() => null);
       }
       if (!fromMe) {
         // Detect first inbound message (now count = 1 after insert above)

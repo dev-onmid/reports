@@ -1,0 +1,33 @@
+name: CRM Follow-up Worker
+
+# Processa follow-ups agendados do CRM: envia mensagens com delay, avança
+# sequências (proxima_mensagem) e expira execuções sem resposta (mover_status).
+# Sem este cron, follow-ups com delay > 0 só saem pelo botão manual
+# "Processar agora" na tela — o worker existia mas nada o chamava (auditoria
+# 2026-07-16). Mesmo padrão dos demais crons via GitHub Actions.
+
+on:
+  schedule:
+    # A cada 5 min, das 10h às 23h UTC (07h às 20h BRT), todos os dias.
+    # Fora dessa janela nada envia (follow-up de madrugada é má prática);
+    # o que vencer à noite sai na primeira rodada das 07h BRT.
+    - cron: '*/5 10-23 * * *'
+  workflow_dispatch: {}   # permite rodar manualmente pelo botão "Run workflow"
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Chamar worker de follow-up do CRM
+        run: |
+          echo "Disparando worker em $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          HTTP_CODE=$(curl -s -o /tmp/resp.json -w "%{http_code}" \
+            "${{ secrets.CRM_FOLLOWUP_URL }}")
+          echo "HTTP $HTTP_CODE"
+          echo "=== Resposta ==="
+          cat /tmp/resp.json 2>/dev/null && echo "" || echo "(vazio)"
+          echo "================"
+          if [ "$HTTP_CODE" -ge 400 ]; then
+            echo "::error::Worker retornou HTTP $HTTP_CODE"
+            exit 1
+          fi

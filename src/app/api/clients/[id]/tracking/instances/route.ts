@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
-import { createEvolutionInstance, setEvolutionWebhook } from '@/lib/evolution-api';
+import { createEvolutionInstance, setEvolutionWebhook, webhookOrigin } from '@/lib/evolution-api';
 
 export async function GET(
   _req: NextRequest,
@@ -73,7 +73,7 @@ export async function POST(
     `, [id, body.nome, instanceId, token, provider]);
 
     if (provider === 'evolution') {
-      const appUrl = new URL(req.url).origin;
+      const appUrl = webhookOrigin(req.url);
       await setEvolutionWebhook(instanceId, `${appUrl}/api/webhook/whatsapp/${row.id}`);
     }
 

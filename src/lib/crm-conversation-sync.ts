@@ -72,7 +72,8 @@ export async function ensureCrmConversationSchema(pool: Pool) {
       ADD COLUMN IF NOT EXISTS ad_name TEXT,
       ADD COLUMN IF NOT EXISTS creative_name TEXT,
       ADD COLUMN IF NOT EXISTS first_origin_at TIMESTAMPTZ,
-      ADD COLUMN IF NOT EXISTS instance_id TEXT;
+      ADD COLUMN IF NOT EXISTS instance_id TEXT,
+      ADD COLUMN IF NOT EXISTS chat_read_at TIMESTAMPTZ;
     CREATE INDEX IF NOT EXISTS crm_leads_client_id_idx ON public.crm_leads(client_id);
     CREATE INDEX IF NOT EXISTS crm_leads_funnel_id_idx ON public.crm_leads(funnel_id);
     CREATE INDEX IF NOT EXISTS crm_leads_normalized_phone_idx

@@ -205,6 +205,26 @@ Aba dentro do Radar (`/resultados/redes-sociais`, tab-nav "Radar | Redes Sociais
 
 ---
 
+## CRM — Fase A de correções (2026-07-16)
+
+Auditoria completa do CRM (4 varreduras paralelas: núcleo, chat, instâncias, auxiliares+acesso) encontrou 8 P0; Fase A corrigiu todos os aplicáveis. **Regra de arquitetura: instância de CRM de cliente é SEMPRE Evolution; Z-API é só uso interno da agência** — gaps Z-API (webhook manual, sem alerta proativo, mídia→texto) são baixa prioridade por decisão do Matheus.
+
+| Correção | Onde |
+|---|---|
+| **Cron do follow-up worker** (worker existia, nada o chamava — follow-up com delay/sequência/expiração só saía pelo botão manual) | `.github/workflows/crm-followup-worker.yml` (`*/5 10-23 * * *` = 07h-20h BRT; secret GitHub `CRM_FOLLOWUP_URL` = URL completa com `?secret=CRON_SECRET`) |
+| **Mídia recebida renderiza** (antes só áudio era baixado; foto/vídeo/doc viravam texto "[Imagem]") | webhook `[instanceId]`: `mediaKind` audio/imagem/video/documento (sticker→imagem), caption vira 2ª mensagem `external_id:caption` +1s; `maxDuration=60` na rota; `extFromMimetype` ganhou pdf/docx/xlsx/webp/zip |
+| **Rename/delete de etapa migra leads** (status é TEXTO; antes renomear coluna orfanava leads → sumiam do Kanban) | `crm/stages/[id]/route.ts` PUT/DELETE reescritos: UPDATE `crm_leads.status` antigo→novo no funil; delete move pra primeira etapa restante |
+| **PUT de lead restrito ao id** (match extra por telefone cascateava edição/drag pra leads homônimos de OUTROS funis) | `crm/[id]/route.ts` — WHERE client_id+id apenas |
+| **Lead manual não some mais** (filtro `numero ~ '^[0-9]{10,15}$'` cru escondia número formatado/vazio) | `crm/route.ts`: POST normaliza número (só dígitos→NULL se vazio); GET aceita sem número OU normalizado 8-15 dígitos |
+| **Não-lidas de verdade** (era COUNT(*) histórico de 'in', nunca zerava) | coluna `crm_leads.chat_read_at` (ensureCrmConversationSchema); GET de messages marca lido (conversa na tela); inbox conta só `created_at > chat_read_at` |
+| **Luna lê o CRM** (query usava colunas inexistentes name/phone/email → falha silenciosa desde sempre) | `agent/chat/route.ts` get_crm_data: `nome AS name, numero AS phone, email, origin, campaign_name, regiao_uf` + fallback sem colunas de rastreio |
+| **Webhook canônico** (URL usava origin da request — acesso via preview/localhost re-apontava o webhook e matava o inbound) | `webhookOrigin()` em `evolution-api.ts` (env `APP_URL` ou `NEXT_PUBLIC_APP_URL`, fallback origin) aplicado nos 6 call sites de `setEvolutionWebhook`/`linkInstanceToClient`. **Configurar `APP_URL=https://reports.onmid.app` na Vercel** |
+| **IA que muda status dispara conversões** (antes só o PUT manual chamava dispararEventosPorStatus — gap de atribuição) | `crm-ai-analysis.ts` após mover status: busca ctwa/valor e chama `dispararEventosPorStatus` (dedup interno evita duplicado) |
+
+Pendências conhecidas (Fases B/C/D futuras): rotas do CRM sem validação server-side (34 rotas — bloqueia dar login pro cliente; caminho recomendado = portal read-only por token, padrão `/relatorio/[token]`); escala (DDL+full-scan de `ensureCrmMessagesSchema` em todo GET/poll de 8s, GET de leads sem paginação, pool novo por request); limite diário de IA é só aviso; código morto (`crm_contacts`+rotas, `ClientCrmTab` nunca montado, `crm/tags/[id]/assign`, branch `?since=`); polling 5s/8s e conversas >3d sem poll.
+
+---
+
 ## Regras e convenções
 
 1. **Limite de 10 s nas rotas API** (Vercel Hobby) — não fazer fan-out pesado em uma única rota.

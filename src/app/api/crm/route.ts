@@ -119,8 +119,14 @@ export async function GET(req: NextRequest) {
         FROM public.crm_leads
         WHERE client_id = $1
           AND ($2::uuid IS NULL OR funnel_id = $2::uuid)
-          AND numero ~ '^[0-9]{10,15}$'
-          AND numero NOT LIKE '%--%'
+          -- Mostra: sem número (lead manual) OU número que, normalizado, tem 8-15
+          -- dígitos. O filtro antigo (numero cru ~ 10-15 dígitos) escondia leads
+          -- criados à mão com número formatado "(43) 99999-8888" ou vazio — eles
+          -- entravam no banco e "sumiam" da lista no poll seguinte.
+          AND (
+            NULLIF(regexp_replace(COALESCE(numero, ''), '\\D', '', 'g'), '') IS NULL
+            OR regexp_replace(numero, '\\D', '', 'g') ~ '^[0-9]{8,15}$'
+          )
       )
       SELECT ranked.*,
              COALESCE(ranked.whatsapp_last_message_at, lm.last_contact_at, ranked.updated_at, ranked.created_at) AS last_contact_at
@@ -149,6 +155,10 @@ export async function POST(req: NextRequest) {
     await ensureTable(pool);
     const fallbackFunnelId = await ensureDefaultFunnel(pool, clientId);
     const fallbackStatus = await getFirstFunnelStageLabel(pool, String(f.funnel_id ?? fallbackFunnelId));
+    // Normaliza o número na ENTRADA (só dígitos; vazio → NULL) — o webhook e o GET
+    // já trabalham com número normalizado; sem isso, número digitado formatado
+    // criava lead invisível pra listagem/dedup.
+    const numeroNormalizado = String(f.numero ?? '').replace(/\D/g, '') || null;
     const { rows: [lead] } = await pool.query(
       `INSERT INTO public.crm_leads
         (client_id,mes,data,link_criativo,nome,numero,canal,emoji,
@@ -160,7 +170,7 @@ export async function POST(req: NextRequest) {
        RETURNING *`,
       [
         clientId, f.mes??null, f.data||null, f.link_criativo??null,
-        f.nome??null, f.numero??null, f.canal??null, f.emoji??null,
+        f.nome??null, numeroNormalizado, f.canal??null, f.emoji??null,
         f.dia1??false, f.dia2??false, f.dia3??false, f.dia4??false,
         f.status??fallbackStatus, f.data_agendada||null,
         f.video_dra??false, f.compareceu??false, f.observacao??null,

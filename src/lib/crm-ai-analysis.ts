@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { Pool } from 'pg';
 import { queueFollowupIfExists } from '@/lib/followup-send';
+import { dispararEventosPorStatus } from '@/lib/conversions';
 import { logAiUsage } from '@/lib/ai-usage-logger';
 
 const MODEL = 'claude-haiku-4-5-20251001';
@@ -460,6 +461,21 @@ Retorne exatamente este JSON:
         [leadId, clientId, lead.status ?? null, nextStatus],
       ).catch(() => null);
       await queueFollowupIfExists(pool, leadId, clientId, nextStatus).catch(() => null);
+      // Mudança de status pela IA também dispara os eventos de conversão custom
+      // (Meta CAPI / Google) — antes só o PUT manual disparava, então lead avançado
+      // automaticamente no funil não gerava evento (gap de atribuição). O dedup em
+      // dispararEventosPorStatus (hasSuccessfulConversion) evita envio duplicado.
+      if (lead.numero) {
+        const { rows: [convData] } = await pool.query<{ ctwa_clid: string | null; valor_rs: number | null }>(
+          `SELECT ctwa_clid, valor_rs FROM public.crm_leads WHERE id = $1`,
+          [leadId],
+        ).catch(() => ({ rows: [] as Array<{ ctwa_clid: string | null; valor_rs: number | null }> }));
+        await dispararEventosPorStatus(
+          pool, clientId, nextStatus,
+          { id: leadId, phone: String(lead.numero), ctwaClid: convData?.ctwa_clid ?? null },
+          Number(convData?.valor_rs ?? 0) || null,
+        ).catch(() => null);
+      }
       appliedStatus = nextStatus;
     }
 

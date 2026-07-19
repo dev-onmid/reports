@@ -99,6 +99,14 @@ export async function GET(
       rows = result.rows;
     }
 
+    // Conversa na tela = lida. Este GET só é chamado com a conversa aberta (load
+    // inicial + poll de 5s), então marcar aqui zera o contador de não-lidas do
+    // inbox — que antes era o total histórico de mensagens e nunca zerava.
+    await pool.query(
+      `UPDATE public.crm_leads SET chat_read_at = NOW() WHERE id = $1`,
+      [id],
+    ).catch(() => null);
+
     return Response.json({ messages: rows });
   } catch (err) {
     console.error('[messages GET]', err);

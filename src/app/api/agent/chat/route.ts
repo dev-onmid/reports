@@ -443,9 +443,25 @@ async function execSystemTool(
     if (name === 'get_crm_data') {
       const limit = Number(input.limit) || 20;
       const clientId = input.client_id as string | undefined;
-      const { rows } = clientId
-        ? await pool.query('SELECT name, phone, email, status, created_at FROM public.crm_leads WHERE client_id = $1 ORDER BY created_at DESC LIMIT $2', [clientId, limit])
-        : await pool.query('SELECT name, phone, email, status, client_id, created_at FROM public.crm_leads ORDER BY created_at DESC LIMIT $1', [limit]);
+      // Colunas REAIS de crm_leads são nome/numero (a query antiga usava name/phone/
+      // email e estourava "column does not exist" — a Luna nunca conseguia ler o CRM).
+      // Aliases mantêm o shape que o prompt espera; origem/campanha vêm do rastreio.
+      const cols = `nome AS name, numero AS phone, email, status, origin,
+                    campaign_name, regiao_uf, created_at`;
+      const colsFallback = `nome AS name, numero AS phone, status, created_at`;
+      let rows: unknown[] = [];
+      try {
+        const r = clientId
+          ? await pool.query(`SELECT ${cols} FROM public.crm_leads WHERE client_id = $1 ORDER BY created_at DESC LIMIT $2`, [clientId, limit])
+          : await pool.query(`SELECT ${cols}, client_id FROM public.crm_leads ORDER BY created_at DESC LIMIT $1`, [limit]);
+        rows = r.rows;
+      } catch {
+        // Colunas do rastreio podem não existir em instalação antiga — cai pro básico
+        const r = clientId
+          ? await pool.query(`SELECT ${colsFallback} FROM public.crm_leads WHERE client_id = $1 ORDER BY created_at DESC LIMIT $2`, [clientId, limit])
+          : await pool.query(`SELECT ${colsFallback}, client_id FROM public.crm_leads ORDER BY created_at DESC LIMIT $1`, [limit]);
+        rows = r.rows;
+      }
       if (rows.length === 0) return 'Nenhum lead encontrado.';
       return JSON.stringify(rows);
     }

@@ -130,6 +130,21 @@ export async function checkEvolutionStatus(instanceName: string): Promise<boolea
   }
 }
 
+// Origem CANÔNICA para URLs de webhook apontadas na Evolution. Antes cada call
+// site usava `new URL(req.url).origin` — se um admin acessasse o painel por
+// preview/localhost/IP, o webhook da instância era re-apontado pra esse host e o
+// inbound de produção morria em silêncio. Env APP_URL (ou NEXT_PUBLIC_APP_URL)
+// trava o destino; o origin da request fica só como fallback.
+export function webhookOrigin(requestUrl: string): string {
+  const canonical = (process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? '').trim().replace(/\/$/, '');
+  if (canonical) return canonical;
+  try {
+    return new URL(requestUrl).origin;
+  } catch {
+    return '';
+  }
+}
+
 export async function setEvolutionWebhook(
   instanceName: string,
   webhookUrl: string,

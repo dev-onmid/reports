@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
-import { getEvolutionState, setEvolutionWebhook } from '@/lib/evolution-api';
+import { getEvolutionState, setEvolutionWebhook, webhookOrigin } from '@/lib/evolution-api';
 
 export async function GET(
   req: NextRequest,
@@ -21,7 +21,7 @@ export async function GET(
       return Response.json({ state: 'n/a' });
     }
     const data = await getEvolutionState(inst.instance_id);
-    const webhookUrl = `${new URL(req.url).origin}/api/webhook/whatsapp/${instanceId}`;
+    const webhookUrl = `${webhookOrigin(req.url)}/api/webhook/whatsapp/${instanceId}`;
     const webhook = await setEvolutionWebhook(inst.instance_id, webhookUrl);
     return Response.json({ ...data, webhook_synced: webhook.ok, webhook_error: webhook.error ?? null });
   } catch (err) {

@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { linkInstanceToClient } from '@/lib/instance-link';
+import { webhookOrigin } from '@/lib/evolution-api';
 
 // Attach an existing Disparos instance (by its zapi_clients row id) to THIS client,
 // so the same WhatsApp connection feeds this client's CRM/AI.
@@ -26,7 +27,7 @@ export async function POST(
       provider: src.provider === 'evolution' ? 'evolution' : 'zapi',
       nome: src.name,
       clientId,
-      appOrigin: new URL(req.url).origin,
+      appOrigin: webhookOrigin(req.url),
     });
 
     const { rows: [row] } = await pool.query(

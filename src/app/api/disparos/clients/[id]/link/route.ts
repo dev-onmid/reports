@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { getCallerScope } from '@/lib/disparos-access';
 import { getInstanceClientLink, linkInstanceToClient, unlinkInstanceFromClient } from '@/lib/instance-link';
+import { webhookOrigin } from '@/lib/evolution-api';
 
 // Resolves the disparos instance (zapi_clients) and enforces the partner scope,
 // returning its Evolution instance fields when the caller may touch it.
@@ -51,7 +52,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       provider: inst.provider === 'evolution' ? 'evolution' : 'zapi',
       nome: inst.name,
       clientId: body.clientId,
-      appOrigin: new URL(req.url).origin,
+      appOrigin: webhookOrigin(req.url),
     });
     const link = await getInstanceClientLink(pool, inst.instance_id);
     return Response.json({ ok: true, link });

@@ -310,12 +310,17 @@ export async function GET(req: NextRequest) {
     } catch { /* not critical */ }
 
     try {
-      // Unread count per lead
+      // Não-lidas de verdade: só mensagens recebidas DEPOIS da última vez que a
+      // conversa foi aberta (crm_leads.chat_read_at, setado no GET de mensagens).
+      // Antes era COUNT(*) histórico de todas as 'in' — badge que nunca zerava.
       const { rows: unreads } = await pool.query<{ lead_id: string; total: number }>(
-        `SELECT lead_id, COUNT(*)::int AS total
-         FROM public.crm_messages
-         WHERE lead_id = ANY($1::uuid[]) AND direction = 'in'
-         GROUP BY lead_id`,
+        `SELECT m.lead_id, COUNT(*)::int AS total
+         FROM public.crm_messages m
+         JOIN public.crm_leads l ON l.id = m.lead_id
+         WHERE m.lead_id = ANY($1::uuid[])
+           AND m.direction = 'in'
+           AND m.created_at > COALESCE(l.chat_read_at, '-infinity'::timestamptz)
+         GROUP BY m.lead_id`,
         [ids],
       );
       unreadCounts = Object.fromEntries(unreads.map(u => [u.lead_id, u.total]));

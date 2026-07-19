@@ -38,6 +38,15 @@ function extFromMimetype(mimetype: string): string {
   if (mimetype.includes('wav')) return 'wav';
   if (mimetype.includes('png')) return 'png';
   if (mimetype.includes('jpeg') || mimetype.includes('jpg')) return 'jpg';
+  if (mimetype.includes('webp')) return 'webp';
+  if (mimetype.includes('gif')) return 'gif';
+  if (mimetype.includes('pdf')) return 'pdf';
+  if (mimetype.includes('msword')) return 'doc';
+  if (mimetype.includes('wordprocessingml')) return 'docx';
+  if (mimetype.includes('spreadsheetml')) return 'xlsx';
+  if (mimetype.includes('ms-excel')) return 'xls';
+  if (mimetype.includes('zip')) return 'zip';
+  if (mimetype.includes('3gpp')) return '3gp';
   return 'bin';
 }
 

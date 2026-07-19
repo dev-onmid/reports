@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
-import { createEvolutionInstance, setEvolutionWebhook } from '@/lib/evolution-api';
+import { createEvolutionInstance, setEvolutionWebhook, webhookOrigin } from '@/lib/evolution-api';
 import { getCallerScope } from '@/lib/disparos-access';
 
 async function ensureTables(pool: ReturnType<typeof makeServerPool>) {
@@ -108,7 +108,7 @@ export async function POST(request: NextRequest) {
       [name, instanceId, token, scope.userId],
     );
 
-    const appUrl = new URL(request.url).origin;
+    const appUrl = webhookOrigin(request.url);
     await setEvolutionWebhook(instanceId, `${appUrl}/api/webhook/whatsapp/${rows[0].id}`);
 
     return Response.json(rows[0], { status: 201 });

@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
-import { deleteEvolutionInstance, setEvolutionWebhook } from '@/lib/evolution-api';
+import { deleteEvolutionInstance, setEvolutionWebhook, webhookOrigin } from '@/lib/evolution-api';
 
 export async function PATCH(
   req: NextRequest,
@@ -25,7 +25,7 @@ export async function PATCH(
     let webhookSynced: boolean | null = null;
     let webhookError: string | null = null;
     if ((body.ativo ?? true) && inst?.provider === 'evolution') {
-      const webhookUrl = `${new URL(req.url).origin}/api/webhook/whatsapp/${instanceId}`;
+      const webhookUrl = `${webhookOrigin(req.url)}/api/webhook/whatsapp/${instanceId}`;
       const webhook = await setEvolutionWebhook(inst.instance_id, webhookUrl);
       webhookSynced = webhook.ok;
       webhookError = webhook.error ?? null;
