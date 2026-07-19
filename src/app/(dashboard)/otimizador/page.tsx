@@ -12,6 +12,7 @@ import {
   LayoutGrid,
   ListChecks,
   Loader2,
+  MoreHorizontal,
   Play,
   Presentation,
   Search,
@@ -20,10 +21,14 @@ import {
   WandSparkles,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { callerHeaders, getAuthSession } from '@/lib/auth-store';
 import type { Client } from '@/lib/mock-data';
-import { OPTIMIZER_PERIODS } from '@/lib/optimizer';
-import type { OptimizerPeriodKey } from '@/lib/optimizer';
 import {
   OTIMIZADOR_VARS,
   categoriaDoNode,
@@ -76,7 +81,6 @@ export default function OtimizadorPage() {
   const [runMessage, setRunMessage] = useState<string | null>(null);
   const [diagLoading, setDiagLoading] = useState(false);
   const [diagResult, setDiagResult] = useState<ClientDiagnostic[] | null>(null);
-  const [manualPeriod, setManualPeriod] = useState<OptimizerPeriodKey>('last_7d');
   const [configClientId, setConfigClientId] = useState<string | null>(null);
 
   const session = getAuthSession();
@@ -288,7 +292,9 @@ export default function OtimizadorPage() {
     setDiagResult(null);
     setRunMessage('Analisando todos os clientes… isso pode levar alguns minutos. Não feche a página.');
     try {
-      const params = new URLSearchParams({ period: manualPeriod, forceAi: '1', all: '1' });
+      // Sem `period`: o servidor usa a janela padrão (últimos 7 dias) como primária — a IA
+      // recebe SEMPRE o panorama 30/14/7/3 junto, então não há mais escolha de período na UI.
+      const params = new URLSearchParams({ forceAi: '1', all: '1' });
       const res = await fetch(`/api/otimizador/weekly?${params.toString()}`, {
         method: 'POST', headers: { ...callerHeaders(), 'Content-Type': 'application/json' },
       });
@@ -318,7 +324,7 @@ export default function OtimizadorPage() {
     const priorTime = generatedAt ? new Date(generatedAt).getTime() : 0;
     const clientName = contas.find((c) => c.cliente_id === contaFiltro)?.cliente_nome ?? 'esta conta';
     try {
-      const params = new URLSearchParams({ period: manualPeriod, forceAi: '1', clientId: contaFiltro });
+      const params = new URLSearchParams({ forceAi: '1', clientId: contaFiltro });
       setRunMessage(`Analisando ${clientName}… isso pode levar até 2 minutos. Não feche a página.`);
       const res = await fetch(`/api/otimizador/weekly?${params.toString()}`, {
         method: 'POST',
@@ -385,7 +391,7 @@ export default function OtimizadorPage() {
     setDiagResult(null);
     setRunMessage(null);
     try {
-      const params = new URLSearchParams({ period: manualPeriod, dryRun: '1', clientId: contaFiltro });
+      const params = new URLSearchParams({ dryRun: '1', clientId: contaFiltro });
       const res = await fetch(`/api/otimizador/weekly?${params.toString()}`, {
         method: 'POST',
         headers: { ...callerHeaders(), 'Content-Type': 'application/json' },
@@ -432,63 +438,65 @@ export default function OtimizadorPage() {
         </Link>
       </header>
 
-      {/* Rail de contas + Período + ação principal */}
+      {/* Rail de contas + ação principal. UM CTA verde só (regra do design system); Briefing/
+          Apresentação são NAVEGAÇÃO (links discretos); ações raras de supervisão/admin vivem no
+          menu "⋯". O seletor de período saiu: a IA sempre recebe o panorama 30/14/7/3 dias e a
+          tela mostra a janela padrão (7 dias) — escolher período só gerava re-análise confusa. */}
       <section className="space-y-3 rounded-[var(--radius)] border border-primary/25 bg-primary/5 p-3">
         <AccountRail contas={accountOptions} value={contaFiltro} onChange={setContaFiltro} />
-        <div className="flex flex-wrap items-end gap-2">
-          <label className="space-y-1.5">
-            <span className="text-xs font-semibold text-muted-foreground">Período</span>
-            <select value={manualPeriod} onChange={(e) => setManualPeriod(e.target.value as OptimizerPeriodKey)} disabled={runLoading}
-              className="h-10 w-44 rounded-[var(--radius)] border border-border bg-background px-3 text-sm text-foreground outline-none focus:border-primary">
-              {OPTIMIZER_PERIODS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
-            </select>
-          </label>
-          <Button onClick={runAnalysisNow} disabled={runLoading || diagLoading || !contaFiltro} size="sm" className="h-10 px-2.5 text-xs">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button onClick={runAnalysisNow} disabled={runLoading || diagLoading || !contaFiltro} size="sm" className="h-10 px-3 text-xs">
             {runLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
             {temAnalise ? 'Atualizar análise' : 'Fazer análise'}
           </Button>
-          <Button variant="outline" onClick={runAnalysisAll} disabled={runLoading || diagLoading} size="sm" className="h-10 px-2.5 text-xs"
-            title="Rodar a análise de todos os clientes de uma vez (ignora o rodízio por dia)">
-            {runLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Users className="h-4 w-4" />}
-            Analisar todos
-          </Button>
-          {temAnalise && contaAtual && contaAtual.pendencias > 0 && (
-            <Link
-              href={`/otimizador/briefing?clientId=${encodeURIComponent(contaFiltro)}`}
-              className="inline-flex h-10 items-center gap-1.5 rounded-[var(--radius)] bg-primary px-2.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90"
-              title="Rodar o briefing guiado desta conta — decisão por decisão"
-            >
-              <ListChecks className="h-4 w-4" /> Briefing
-            </Link>
-          )}
-          {temAnalise && (
-            <Link
-              href={`/otimizador/apresentacao?clientId=${encodeURIComponent(contaFiltro)}`}
-              className="inline-flex h-10 items-center gap-1.5 rounded-[var(--radius)] border border-border bg-background px-2.5 text-xs font-medium text-foreground hover:border-primary/40"
-              title="Abrir a visão limpa de apresentação (pra mostrar ao cliente)"
-            >
-              <Presentation className="h-4 w-4" /> Apresentação
-            </Link>
-          )}
-          {contaAtual && contaAtual.pendencias > 0 && (
-            <Button variant="outline" size="sm" onClick={reviewAllPending} disabled={runLoading || diagLoading} className="h-10 px-2.5 text-xs"
-              title="Marca todas as pendências desta conta como revisadas — voltam só na próxima análise semanal">
-              {runLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-              Marcar tudo como revisado
-            </Button>
-          )}
-          {isAdmin && (
-            <>
-              <Button variant="outline" size="sm" onClick={() => setConfigClientId(contaFiltro || null)} disabled={!contaFiltro} className="h-10 px-2.5 text-xs">
-                <Settings2 className="h-4 w-4" /> Configurar
+          <span className="text-[11px] text-muted-foreground" title="Números da tela: últimos 7 dias. A IA compara as 4 janelas antes de recomendar qualquer ação.">
+            semana em foco · IA vê 30/14/7/3 dias
+          </span>
+
+          <div className="ml-auto flex items-center gap-1">
+            {temAnalise && contaAtual && contaAtual.pendencias > 0 && (
+              <Link
+                href={`/otimizador/briefing?clientId=${encodeURIComponent(contaFiltro)}`}
+                className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius)] px-2.5 text-xs font-medium text-foreground hover:bg-background"
+                title="Rodar o briefing guiado desta conta — decisão por decisão"
+              >
+                <ListChecks className="h-4 w-4" /> Briefing
+              </Link>
+            )}
+            {temAnalise && (
+              <Link
+                href={`/otimizador/apresentacao?clientId=${encodeURIComponent(contaFiltro)}`}
+                className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius)] px-2.5 text-xs font-medium text-foreground hover:bg-background"
+                title="Abrir a visão limpa de apresentação (pra mostrar ao cliente)"
+              >
+                <Presentation className="h-4 w-4" /> Apresentação
+              </Link>
+            )}
+            {isAdmin && (
+              <Button variant="ghost" size="sm" onClick={() => setConfigClientId(contaFiltro || null)} disabled={!contaFiltro}
+                className="h-9 w-9 p-0" title="Configurar este cliente (modo, limites, WhatsApp)">
+                <Settings2 className="h-4 w-4" />
               </Button>
-              <Button variant="outline" size="sm" onClick={runDiagnostic} disabled={runLoading || diagLoading || !contaFiltro} className="h-10 px-2.5 text-xs"
-                title="Mostra de onde vêm os dados desta conta — sem gastar tokens de IA">
-                {diagLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-                Diagnosticar
-              </Button>
-            </>
-          )}
+            )}
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                className="inline-flex h-9 w-9 items-center justify-center rounded-[var(--radius)] text-foreground hover:bg-background disabled:opacity-50"
+                title="Mais ações"
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => void runAnalysisAll()} disabled={runLoading || diagLoading}>
+                  <Users className="h-4 w-4" /> Analisar todos os clientes
+                </DropdownMenuItem>
+                {isAdmin && (
+                  <DropdownMenuItem onClick={() => void runDiagnostic()} disabled={runLoading || diagLoading || !contaFiltro}>
+                    <Search className="h-4 w-4" /> Diagnosticar dados (sem IA)
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
         {runMessage && <p className="text-xs font-medium text-primary">{runMessage}</p>}
         {diagResult && (
@@ -570,7 +578,21 @@ export default function OtimizadorPage() {
                     <span style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500 }}>
                       Campanhas{canais.length > 1 ? ' · Meta + Google' : ''}
                     </span>
-                    <FilterChips nivel={nivelFiltro} onNivel={setNivelFiltro} apenasComAcao={apenasComAcao} onApenasComAcao={setApenasComAcao} />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <FilterChips nivel={nivelFiltro} onNivel={setNivelFiltro} apenasComAcao={apenasComAcao} onApenasComAcao={setApenasComAcao} />
+                      {/* Ação em lote mora AO LADO da fila que ela encerra — não na barra global. */}
+                      {contaAtual && contaAtual.pendencias > 0 && (
+                        <button
+                          onClick={() => void reviewAllPending()}
+                          disabled={runLoading || diagLoading}
+                          className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
+                          title="Marca todas as pendências desta conta como revisadas — voltam só na próxima análise semanal"
+                        >
+                          {runLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                          Marcar tudo como revisado
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <CampaignTable
                     nodes={treeNodes}
