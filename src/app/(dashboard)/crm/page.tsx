@@ -14,8 +14,10 @@ import {
   ChevronLeft, ChevronRight, ChevronDown, SlidersHorizontal,
   AlignJustify, Trash2, Pencil, Sparkles, Clock3, LayoutGrid, List, ArrowUpDown,
   BarChart3, Plug, UserRound, MessageCircle, X, Send, GripVertical, Layers, WifiOff, Link2,
+  Globe2,
 } from 'lucide-react';
 import { ChatView } from './chat-view';
+import { PortalLinkModal } from './portal-link-modal';
 import { FollowupTab, useActiveFollowups, FollowupBadge } from './followup-tab';
 import { DisparosTab } from './disparos-tab';
 import { CaptureLinksTab } from '../clientes/[id]/capture-links-tab';
@@ -2111,6 +2113,7 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
   const [selectedFunnelId, setSelectedFunnelId] = useState('');
   const [stages, setStages] = useState<CrmStage[]>([]);
   const [showFunnelEditor, setShowFunnelEditor] = useState(false);
+  const [showPortalModal, setShowPortalModal] = useState(false);
   const [showAiCriteria, setShowAiCriteria] = useState(false);
 
   const [leads, setLeads]           = useState<CrmLead[]>([]);
@@ -2908,6 +2911,15 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
             >
               <Pencil className="h-3.5 w-3.5" />
               Editar funil
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowPortalModal(true)}
+              title="Link somente-leitura pro cliente acompanhar o funil"
+              className="flex h-9 items-center gap-1.5 rounded-lg border border-border px-3 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            >
+              <Globe2 className="h-3.5 w-3.5" />
+              Portal do cliente
             </button>
           </div>
         )}
@@ -3732,6 +3744,14 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
           onClose={() => setShowFunnelEditor(false)}
           onDeleteFunnel={handleDeleteFunnel}
           onNewFunnel={handleNewFunnel}
+        />
+      )}
+
+      {showPortalModal && clientId && (
+        <PortalLinkModal
+          clientId={clientId}
+          clientName={activeClients.find(c => c.id === clientId)?.name ?? 'Cliente'}
+          onClose={() => setShowPortalModal(false)}
         />
       )}
 

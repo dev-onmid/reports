@@ -221,7 +221,23 @@ Auditoria completa do CRM (4 varreduras paralelas: núcleo, chat, instâncias, a
 | **Webhook canônico** (URL usava origin da request — acesso via preview/localhost re-apontava o webhook e matava o inbound) | `webhookOrigin()` em `evolution-api.ts` (env `APP_URL` ou `NEXT_PUBLIC_APP_URL`, fallback origin) aplicado nos 6 call sites de `setEvolutionWebhook`/`linkInstanceToClient`. **Configurar `APP_URL=https://reports.onmid.app` na Vercel** |
 | **IA que muda status dispara conversões** (antes só o PUT manual chamava dispararEventosPorStatus — gap de atribuição) | `crm-ai-analysis.ts` após mover status: busca ctwa/valor e chama `dispararEventosPorStatus` (dedup interno evita duplicado) |
 
-Pendências conhecidas (Fases B/C/D futuras): rotas do CRM sem validação server-side (34 rotas — bloqueia dar login pro cliente; caminho recomendado = portal read-only por token, padrão `/relatorio/[token]`); escala (DDL+full-scan de `ensureCrmMessagesSchema` em todo GET/poll de 8s, GET de leads sem paginação, pool novo por request); limite diário de IA é só aviso; código morto (`crm_contacts`+rotas, `ClientCrmTab` nunca montado, `crm/tags/[id]/assign`, branch `?since=`); polling 5s/8s e conversas >3d sem poll.
+Pendências conhecidas (Fases B/C futuras): rotas do CRM sem validação server-side (34 rotas — por isso o acesso do cliente é via portal por token, NUNCA login Visualizador); escala (DDL+full-scan de `ensureCrmMessagesSchema` em todo GET/poll de 8s, GET de leads sem paginação, pool novo por request); limite diário de IA é só aviso; código morto (`crm_contacts`+rotas, `ClientCrmTab` nunca montado, `crm/tags/[id]/assign`, branch `?since=`); polling 5s/8s e conversas >3d sem poll.
+
+### Fase D: Portal read-only do cliente (2026-07-16)
+
+Link público por token pro cliente final acompanhar o próprio funil — padrão `/relatorio/[token]` (a decisão de NÃO dar login no app vem da auditoria: permissão é só client-side).
+
+| Arquivo | Papel |
+|---|---|
+| `src/lib/crm-portal.ts` | `crm_portal_tokens` (token→client_id, enabled, last_access_at), `getOrCreatePortalToken` (reusa ativo), `revokePortalTokens` (mata todos), `resolvePortalToken` (marca last_access) |
+| `src/app/api/portal/[token]/route.ts` | GET público: KPIs (total/fechados/valor/% com origem), funil (etapas×contagem, agrupado por label como o Kanban), leads (300, `?days=`) — **sem `observacao`, sem `time_interno`**, SELECT-only |
+| `src/app/api/portal/[token]/messages/[leadId]/route.ts` | Conversa read-only; lead precisa pertencer ao client_id do token (404 senão) |
+| `src/app/api/clients/[id]/portal/route.ts` | Interno: GET (token atual+last_access), POST (gera/retorna), DELETE (revoga) |
+| `src/app/portal/[token]/page.tsx` | Página pública dark ONMID, mobile-first: KPIs, funil em barras, cards de lead (status/origem/fechado+valor/região/campanha), conversa fullscreen somente-leitura |
+| `crm/portal-link-modal.tsx` + botão "Portal do cliente" em `crm/page.tsx` (ao lado de "Editar funil") | Gerar/copiar/“ver como o cliente”/revogar; mostra último acesso |
+
+- ✅ Verificado no preview com fetch mockado (desktop+mobile: KPIs, funil, badges, conversa read-only). SQL real exige produção.
+- ⚠️ Nota: ao testar navegação SPA pra rota nova no dev, o mock de `window.fetch` se perde (Next faz MPA navigation em rota fora do router cache) — reinjetar após a página carregar.
 
 ---
 
