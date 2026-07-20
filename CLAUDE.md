@@ -237,6 +237,16 @@ Os dois maiores incômodos históricos do CRM, corrigidos juntos:
 
 Pendências conhecidas (Fases B/C futuras): rotas do CRM sem validação server-side (34 rotas — por isso o acesso do cliente é via portal por token, NUNCA login Visualizador); escala (DDL+full-scan de `ensureCrmMessagesSchema` em todo GET/poll de 8s, GET de leads sem paginação, pool novo por request); limite diário de IA é só aviso; código morto (`crm_contacts`+rotas, `ClientCrmTab` nunca montado, `crm/tags/[id]/assign`, branch `?since=`); polling 5s/8s e conversas >3d sem poll.
 
+### Histórico mensal de custo de IA (2026-07-19)
+
+Aba "Uso IA" em Configurações reformada pra virar histórico navegável por mês — feita pra REPASSAR o custo ao cliente (pedido do Matheus: "ver até de meses anteriores").
+
+- **Fonte de dados inalterada**: `GET /api/crm/ai/usage` já devolvia TODOS os meses de `ia_uso_mensal` (client_id, mes_ano 'YYYY-MM', chamadas, tokens, custo USD) — o problema era só a UI, que somava tudo misturado e não mostrava R$.
+- **UI nova** (bloco IIFE dentro da aba `'ia'` em `configuracoes/page.tsx`; estado `aiMonth`, '' = mês mais recente): card "Evolução mensal" com barras clicáveis por mês (valor em R$ embaixo de cada barra), 3 KPIs do mês selecionado (chamadas / tokens / custo em **R$** com US$ entre parênteses), tabela "Custo por cliente · mês" ordenada por custo desc com colunas Custo US$ + **Custo R$** e linha "Total do mês", seletor `<select>` de mês, botão **Exportar CSV** (client-side blob, separador `;`, BOM UTF-8, decimal com vírgula — abre direto no Excel BR, nome `custo-ia-YYYY-MM.csv`).
+- Conversão pelo `USD_TO_BRL` de `@/lib/ai-usage-config` (módulo puro, importável no client). Câmbio de referência exibido no card.
+- Card "Saldo e alertas das IAs" (billing) ficou intocado acima do histórico.
+- ✅ Verificado no preview com fetch mockado multi-mês (mai/jun/jul): barras com totais certos, troca de mês pelo select e pela barra, cliente que só existe num mês aparece só nele, totais batem. Obs: a área de conteúdo do shell rola num container interno (`div.flex-1.min-h-0`), não no window — scripts de scroll no preview precisam mirar esse elemento.
+
 ### Fase D: Portal read-only do cliente (2026-07-16)
 
 Link público por token pro cliente final acompanhar o próprio funil — padrão `/relatorio/[token]` (a decisão de NÃO dar login no app vem da auditoria: permissão é só client-side).
