@@ -237,6 +237,17 @@ Os dois maiores incômodos históricos do CRM, corrigidos juntos:
 
 Pendências conhecidas (Fases B/C futuras): rotas do CRM sem validação server-side (34 rotas — por isso o acesso do cliente é via portal por token, NUNCA login Visualizador); escala (DDL+full-scan de `ensureCrmMessagesSchema` em todo GET/poll de 8s, GET de leads sem paginação, pool novo por request); limite diário de IA é só aviso; código morto (`crm_contacts`+rotas, `ClientCrmTab` nunca montado, `crm/tags/[id]/assign`, branch `?since=`); polling 5s/8s e conversas >3d sem poll.
 
+### Modal do QR Code de conexão (2026-07-20)
+
+Reforma do modal "Conectar WhatsApp" em Disparos → Instâncias (`disparos/page.tsx`) — antes o QR ficava aberto pra sempre sem detectar a leitura ("fica confuso e não sei", Matheus):
+
+- **Detecção de conexão**: enquanto o QR está na tela, poll de 3s em `POST /api/disparos/clients/test` (rota já existia, nunca era consultada pelo modal). Conectou → fase `success` (check verde + "CONECTADO!" + nome da instância), atualiza `testResult` da lista (linha vira Online sem refresh) e **fecha sozinho em 2,5s**.
+- **Erro** (QR não veio da Evolution): fase `error` com a mensagem real da API, botão "Tentar de novo" e fechamento automático em 5s.
+- **Renovação automática**: countdown de 40s visível ("renova em Xs"); ao zerar, busca QR novo sozinho (QR da Evolution expira ~45s — antes exigia clique manual em "Atualizar QR", que foi removido).
+- **Visual no design system**: faixa verde no topo, título Bebas uppercase, QR em moldura branca com 4 cantoneiras verdes angulares, dot pulsante "Aguardando leitura", passo a passo numerado (1-2-3) e nota "a tela fecha sozinha".
+- Máquina de fases: `qrPhase: 'loading'|'qr'|'success'|'error'` + `qrSeconds`; um único `useEffect([qrClient, qrPhase])` gerencia poll/countdown/auto-close com cleanup. `qrLoading` foi removido.
+- ✅ Verificado no preview com fetch mockado (3 fases + lista atualizando pra Online). A tela de sucesso dura 2,5s — screenshot remoto não pega; capturada via MutationObserver + reabertura com poll já conectado.
+
 ### Kanban denso + visão padrão (2026-07-19)
 
 Reforma de densidade do funil (reclamação do Matheus: "box grandes demais, pouco espaço para ver o lead") em `crm/page.tsx`:
