@@ -12,10 +12,14 @@ async function migrateCrmMessages(pool: ReturnType<typeof makeServerPool>) {
 }
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+  // Busca incremental: ?after=<ISO> retorna só mensagens mais novas — o poll de
+  // 3s do chat deixa de rebaixar a conversa inteira (até 500 linhas) a cada tick.
+  const afterRaw = req.nextUrl.searchParams.get('after');
+  const after = afterRaw && !Number.isNaN(new Date(afterRaw).getTime()) ? afterRaw : null;
   const pool = makeServerPool();
   try {
     await migrateCrmMessages(pool);
@@ -64,15 +68,19 @@ export async function GET(
               AND NULLIF(regexp_replace(COALESCE(t.numero, ''), '\\D', '', 'g'), '') IS NOT NULL
             )
       )`;
+    const AFTER_CLAUSE = after ? `AND m.created_at > $2::timestamptz` : '';
     const WHERE_WITH_CONTACTS = `
-      WHERE m.lead_id IN (SELECT id FROM lead_matches)
-         OR m.contact_id IN (SELECT id FROM contact_matches)
+      WHERE (m.lead_id IN (SELECT id FROM lead_matches)
+         OR m.contact_id IN (SELECT id FROM contact_matches))
+        ${AFTER_CLAUSE}
       ORDER BY m.created_at ASC, m.id ASC
       LIMIT 500`;
     const WHERE_WITHOUT_CONTACTS = `
       WHERE m.lead_id IN (SELECT id FROM lead_matches)
+        ${AFTER_CLAUSE}
       ORDER BY m.created_at ASC, m.id ASC
       LIMIT 500`;
+    const queryParams = after ? [id, after] : [id];
 
     // Try with tipo column first; fall back to 'texto' literal if column missing
     let rows: unknown[] = [];
@@ -82,7 +90,7 @@ export async function GET(
          SELECT m.id, m.direction, m.text, COALESCE(m.tipo, 'texto') AS tipo, m.created_at,
                 m.whatsapp_status, m.whatsapp_error
          FROM public.crm_messages m ${WHERE_WITH_CONTACTS}`,
-        [id],
+        queryParams,
       );
       rows = result.rows;
     } catch (withContactsErr) {
@@ -91,7 +99,7 @@ export async function GET(
          SELECT m.id, m.direction, m.text, 'texto' AS tipo, m.created_at,
                 m.whatsapp_status, m.whatsapp_error
          FROM public.crm_messages m ${WHERE_WITHOUT_CONTACTS}`,
-        [id],
+        queryParams,
       ).catch(async () => {
         if (withContactsErr) throw withContactsErr;
         throw new Error('Falha ao carregar mensagens');

@@ -168,7 +168,10 @@ function normalizeStatus(status: string | undefined | null, statusOptions: strin
 
   const normalized = normalizeStatusText(status);
   const mapped = STATUS_MAP[normalized] ?? STATUS_MAP[status] ?? status;
-  return statusOptions.find(option => normalizeStatusText(option) === normalizeStatusText(mapped)) ?? mapped;
+  // Sem fallback cru: se a resposta da IA não casa com NENHUMA etapa do funil,
+  // retorna null e o status atual é mantido. O `?? mapped` antigo aplicava
+  // qualquer texto alucinado — lead ganhava status órfão e sumia do Kanban.
+  return statusOptions.find(option => normalizeStatusText(option) === normalizeStatusText(mapped)) ?? null;
 }
 
 function findStatus(statusOptions: string[], wanted: string) {
@@ -189,8 +192,11 @@ function daysSince(iso: string | null) {
   return (Date.now() - time) / 86_400_000;
 }
 
-function leadIdentityValues(lead: { id: string; client_id: string; numero?: string | null }) {
-  return [String(lead.client_id), String(lead.id), lead.numero ?? null];
+// Identidade do lead nos UPDATEs da IA: client_id + id APENAS. O match extra
+// por telefone (removido 2026-07-17) arrastava leads homônimos de OUTROS funis
+// pra etapas que nem existiam lá — mesmo bug do PUT manual corrigido na Fase A.
+function leadIdentityValues(lead: { id: string; client_id: string }) {
+  return [String(lead.client_id), String(lead.id)];
 }
 
 function monthKey(date = new Date()) {
@@ -235,10 +241,13 @@ async function loadStatusOptions(pool: Pool, lead: { client_id: string; funnel_i
     params,
   ).catch(() => ({ rows: [] as Array<{ label: string }> }));
 
+  // SOMENTE etapas reais do funil (+ o status atual do lead, que pode ser legado).
+  // A lista antiga injetava etapas inventadas ('Novo', 'Proposta', 'Negociação',
+  // 'Perdido') — a IA escolhia uma delas, o lead ficava com status sem coluna
+  // correspondente e SUMIA do Kanban (que agrupa por rótulo de etapa).
   const labels = rows.map(row => row.label).filter(Boolean);
-  const extras = ['Novo', 'Proposta', 'Negociação', 'Perdido'];
   const current = lead.status ? [lead.status] : [];
-  return Array.from(new Set([...labels, ...current, ...extras]));
+  return Array.from(new Set([...labels, ...current]));
 }
 
 async function loadConversationSignals(pool: Pool, leadId: string): Promise<ConversationSignals> {
@@ -444,15 +453,7 @@ Retorne exatamente este JSON:
       await pool.query(
         `UPDATE public.crm_leads
             SET status = $1, updated_at = NOW()
-          WHERE client_id = $2
-            AND (
-              id = $3::uuid
-              OR (
-                NULLIF(regexp_replace(COALESCE(numero, ''), '\\D', '', 'g'), '') =
-                NULLIF(regexp_replace(COALESCE($4::text, ''), '\\D', '', 'g'), '')
-                AND NULLIF(regexp_replace(COALESCE($4::text, ''), '\\D', '', 'g'), '') IS NOT NULL
-              )
-            )`,
+          WHERE client_id = $2 AND id = $3::uuid`,
         [nextStatus, ...leadIdentityValues(lead)],
       );
       await pool.query(
@@ -487,15 +488,7 @@ Retorne exatamente este JSON:
       await pool.query(
         `UPDATE public.crm_leads
             SET temperatura = $1, temperatura_atualizada_em = NOW()
-          WHERE client_id = $2
-            AND (
-              id = $3::uuid
-              OR (
-                NULLIF(regexp_replace(COALESCE(numero, ''), '\\D', '', 'g'), '') =
-                NULLIF(regexp_replace(COALESCE($4::text, ''), '\\D', '', 'g'), '')
-                AND NULLIF(regexp_replace(COALESCE($4::text, ''), '\\D', '', 'g'), '') IS NOT NULL
-              )
-            )`,
+          WHERE client_id = $2 AND id = $3::uuid`,
         [nextTemp, ...leadIdentityValues(lead)],
       );
       appliedTemp = nextTemp;
@@ -505,15 +498,7 @@ Retorne exatamente este JSON:
       `UPDATE public.crm_leads
           SET ia_ultimo_analise = NOW(),
               ia_confianca_ultimo = $1
-        WHERE client_id = $2
-          AND (
-            id = $3::uuid
-            OR (
-              NULLIF(regexp_replace(COALESCE(numero, ''), '\\D', '', 'g'), '') =
-              NULLIF(regexp_replace(COALESCE($4::text, ''), '\\D', '', 'g'), '')
-              AND NULLIF(regexp_replace(COALESCE($4::text, ''), '\\D', '', 'g'), '') IS NOT NULL
-            )
-          )`,
+        WHERE client_id = $2 AND id = $3::uuid`,
       [Math.round(confidence), ...leadIdentityValues(lead)],
     );
 

@@ -564,6 +564,8 @@ export function ChatView({
 
   const messagesAreaRef  = useRef<HTMLDivElement>(null);
   const pollRef          = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastMsgTsRef     = useRef<string | null>(null);
+  const pollCountRef     = useRef(0);
   const textareaRef      = useRef<HTMLTextAreaElement>(null);
   const autoSyncedRef    = useRef<Set<string>>(new Set());
   const autoRecentHistoryLeadIdsRef = useRef<Set<string>>(new Set());
@@ -727,15 +729,41 @@ export function ChatView({
     }
   }
 
-  const loadMessages = useCallback((leadId: string, initial = false) => {
+  const loadMessages = useCallback((leadId: string, initial = false, opts?: { incremental?: boolean }) => {
     if (initial) setMsgLoading(true);
     const atBottom = isNearBottom();
-    fetch(`/api/crm/${leadId}/messages`)
+    // Incremental: só mensagens novas desde a última vista (?after=) — o poll de
+    // 3s fica barato mesmo em conversa longa. Full: substitui tudo (abrir a
+    // conversa, pós-envio e a cada ~30s pra atualizar os checks de entrega).
+    const incremental = Boolean(opts?.incremental && lastMsgTsRef.current);
+    const url = incremental
+      ? `/api/crm/${leadId}/messages?after=${encodeURIComponent(lastMsgTsRef.current as string)}`
+      : `/api/crm/${leadId}/messages`;
+    fetch(url)
       .then(r => r.json())
       .then((d: { messages: CrmMessage[] }) => {
-        setMessages(d.messages ?? []);
+        const incoming = d.messages ?? [];
+        if (incremental) {
+          if (incoming.length > 0) {
+            setMessages(prev => {
+              const seen = new Set(prev.map(m => m.id));
+              const fresh = incoming.filter(m => !seen.has(m.id));
+              if (fresh.length === 0) return prev;
+              // Remove bolhas otimistas que a mensagem real acabou de substituir
+              const base = prev.filter(m => !(
+                String(m.id).startsWith('temp-')
+                && fresh.some(f => f.direction === 'out' && f.text === m.text)
+              ));
+              return [...base, ...fresh];
+            });
+          }
+        } else {
+          setMessages(incoming);
+        }
+        const last = incoming[incoming.length - 1];
+        if (last?.created_at) lastMsgTsRef.current = last.created_at;
         setMsgLoading(false);
-        if (atBottom || initial) {
+        if ((atBottom || initial) && (!incremental || incoming.length > 0)) {
           requestAnimationFrame(() => scrollToBottom(initial ? 'instant' : 'smooth'));
         }
       })
@@ -826,25 +854,30 @@ export function ChatView({
   }, [clientId]);
 
   // ── Messages auto-refresh ───────────────────────────────────────────────────
-  const isRecentLead = selectedLead
-    ? selectedLead.last_message_at !== null
-      && (Date.now() - new Date(selectedLead.last_message_at).getTime()) < 3 * 86_400_000
-    : false;
-
+  // TODA conversa aberta atualiza sozinha, a cada 3s (antes: 5s e SÓ leads com
+  // mensagem nos últimos 3 dias — conversa antiga abria uma vez e congelava; se
+  // o lead respondesse com ela na tela, a mensagem nunca aparecia). O poll usa
+  // busca incremental; a cada 10 ticks (~30s) faz um refresh completo pra
+  // atualizar os checks de entrega (✓✓) das mensagens já exibidas.
   useEffect(() => {
     if (!selectedId) {
       queueMicrotask(() => setMessages([]));
       return;
     }
+    lastMsgTsRef.current = null;
+    pollCountRef.current = 0;
     const loadTimer = window.setTimeout(() => loadMessages(selectedId, true), 0);
-    if (!isRecentLead) return () => window.clearTimeout(loadTimer);
     if (pollRef.current) clearInterval(pollRef.current);
-    pollRef.current = setInterval(() => loadMessages(selectedId), 5_000);
+    pollRef.current = setInterval(() => {
+      pollCountRef.current += 1;
+      const full = pollCountRef.current % 10 === 0;
+      loadMessages(selectedId, false, { incremental: !full });
+    }, 3_000);
     return () => {
       window.clearTimeout(loadTimer);
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [selectedId, loadMessages, isRecentLead]);
+  }, [selectedId, loadMessages]);
 
   // ── Auto-sync history when conversation has no messages ────────────────────
   useEffect(() => {
@@ -979,6 +1012,20 @@ export function ChatView({
     if (!selectedId) return;
     setSending(true);
     setSendStatus(null);
+    // Envio otimista: a bolha aparece NA HORA com o reloginho (pending); o
+    // reload completo pós-resposta troca pela mensagem real com o check.
+    const tempId = `temp-${Date.now()}`;
+    const optimistic: CrmMessage = {
+      id: tempId,
+      direction: 'out',
+      text: String(payload.text ?? payload.url ?? ''),
+      tipo: String(payload.tipo ?? 'texto'),
+      created_at: new Date().toISOString(),
+      whatsapp_status: 'pending',
+      whatsapp_error: null,
+    };
+    setMessages(prev => [...prev, optimistic]);
+    requestAnimationFrame(() => scrollToBottom());
     try {
       const res = await fetch(`/api/crm/${selectedId}/messages`, {
         method: 'POST',
@@ -990,17 +1037,21 @@ export function ChatView({
       try { data = JSON.parse(rawText) as typeof data; } catch { /* non-JSON */ }
 
       if (!res.ok) {
+        setMessages(prev => prev.filter(m => m.id !== tempId));
         setSendStatus('err');
         setSendError(data.error ?? `Erro ${res.status}`);
       } else {
         setSendStatus(data.wa_sent ? 'ok' : 'err');
         if (!data.wa_sent && data.wa_error) setSendError(data.wa_error);
+        // Reload COMPLETO (não incremental): remove a bolha temporária e traz a
+        // mensagem real já com o status de entrega
         loadMessages(selectedId);
         loadInbox();
         requestAnimationFrame(() => scrollToBottom());
       }
       setTimeout(() => { setSendStatus(null); setSendError(null); }, 6000);
     } catch (err) {
+      setMessages(prev => prev.filter(m => m.id !== tempId));
       setSendStatus('err');
       setSendError(String(err));
       setTimeout(() => { setSendStatus(null); setSendError(null); }, 6000);
@@ -1490,16 +1541,12 @@ export function ChatView({
                   {selectedLead.fechou && (
                     <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-primary/15 text-primary">Fechou</span>
                   )}
-                  {isRecentLead ? (
-                    <span className="flex items-center gap-1 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
-                      <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
-                      Ao vivo
-                    </span>
-                  ) : (
-                    <span className="text-[10px] font-semibold text-muted-foreground px-2 py-1 rounded-full bg-muted/40 border border-border">
-                      Arquivado
-                    </span>
-                  )}
+                  {/* Toda conversa aberta atualiza em tempo real agora — o badge
+                      "Arquivado" (conversas >3d sem poll) deixou de existir */}
+                  <span className="flex items-center gap-1 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
+                    <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+                    Ao vivo
+                  </span>
                   <button
                     onClick={() => void syncHistory()}
                     disabled={syncing}

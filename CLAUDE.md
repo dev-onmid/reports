@@ -221,6 +221,20 @@ Auditoria completa do CRM (4 varreduras paralelas: núcleo, chat, instâncias, a
 | **Webhook canônico** (URL usava origin da request — acesso via preview/localhost re-apontava o webhook e matava o inbound) | `webhookOrigin()` em `evolution-api.ts` (env `APP_URL` ou `NEXT_PUBLIC_APP_URL`, fallback origin) aplicado nos 6 call sites de `setEvolutionWebhook`/`linkInstanceToClient`. **Configurar `APP_URL=https://reports.onmid.app` na Vercel** |
 | **IA que muda status dispara conversões** (antes só o PUT manual chamava dispararEventosPorStatus — gap de atribuição) | `crm-ai-analysis.ts` após mover status: busca ctwa/valor e chama `dispararEventosPorStatus` (dedup interno evita duplicado) |
 
+### IA do Kanban + chat "tempo real" (2026-07-17)
+
+Os dois maiores incômodos históricos do CRM, corrigidos juntos:
+
+| Correção | Onde |
+|---|---|
+| **IA não move mais lead pra etapa inexistente** (a lista oferecida à IA injetava etapas inventadas 'Novo'/'Proposta'/'Negociação'/'Perdido', e `normalizeStatus` tinha fallback `?? mapped` que aplicava QUALQUER texto alucinado → lead ganhava status órfão e sumia do Kanban) | `crm-ai-analysis.ts`: `loadStatusOptions` só etapas reais do funil + status atual; `normalizeStatus` retorna `null` se não casar (status atual mantido) |
+| **UPDATEs da IA restritos ao id** (mesmo bug de match por telefone da Fase A, que sobrou no caminho da IA — contaminava leads homônimos de outros funis) | `crm-ai-analysis.ts`: 3 UPDATEs com `WHERE client_id AND id` apenas; `leadIdentityValues` sem numero |
+| **Toda conversa aberta atualiza (3s)** — fim do corte de 3 dias (conversa antiga abria e congelava; lead respondia e a mensagem nunca aparecia) | `chat-view.tsx`: poll sempre ativo, 3s; badge "Arquivado" removido (tudo é "Ao vivo") |
+| **Busca incremental** — poll usa `?after=<created_at da última>` e só traz mensagens novas; a cada 10 ticks (~30s) um refresh completo atualiza os checks ✓✓ das já exibidas (status muda em linha existente, o incremental não vê) | `messages/route.ts` GET aceita `after`; `loadMessages(leadId, initial, {incremental})` com merge dedup por id |
+| **Envio otimista** — bolha aparece na hora com reloginho (pending); reload completo pós-resposta troca pela real; falha remove a bolha e mostra o erro | `chat-view.tsx` `doSend` |
+
+- ⚠️ Sem preview local (chat exige DB+instância). Validado por tsc+build; a lógica de merge remove bolhas `temp-` quando a real chega pelo incremental (dedup por texto+direction). Validar em produção: abrir conversa antiga (>3d) e ver chegar mensagem sozinha; enviar e ver bolha instantânea.
+
 Pendências conhecidas (Fases B/C futuras): rotas do CRM sem validação server-side (34 rotas — por isso o acesso do cliente é via portal por token, NUNCA login Visualizador); escala (DDL+full-scan de `ensureCrmMessagesSchema` em todo GET/poll de 8s, GET de leads sem paginação, pool novo por request); limite diário de IA é só aviso; código morto (`crm_contacts`+rotas, `ClientCrmTab` nunca montado, `crm/tags/[id]/assign`, branch `?since=`); polling 5s/8s e conversas >3d sem poll.
 
 ### Fase D: Portal read-only do cliente (2026-07-16)
