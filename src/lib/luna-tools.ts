@@ -112,7 +112,9 @@ const gLoginCache = new Map<string, string | null | undefined>(); // customerId 
 export async function lunaGoogleSearch(customerId: string, query: string): Promise<{ results: any[]; login: string | null } | null> {
   const token = await resolveGoogleToken('');
   if (!token) return null;
-  const DEV_TOKEN = process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? '';
+  // Mesmo fallback embutido do Radar/Otimizador — com `?? ''` a Luna mandava
+  // developer-token vazio quando a env não existe na Vercel e o Google recusava tudo.
+  const DEV_TOKEN = process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? '1vR8GhAk4UMZoPaqo7Qq8Q';
   const attempt = async (login: string | null) => {
     const headers: Record<string, string> = { Authorization: `Bearer ${token}`, 'developer-token': DEV_TOKEN, 'Content-Type': 'application/json' };
     if (login) headers['login-customer-id'] = login;
