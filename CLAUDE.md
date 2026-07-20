@@ -237,6 +237,16 @@ Os dois maiores incômodos históricos do CRM, corrigidos juntos:
 
 Pendências conhecidas (Fases B/C futuras): rotas do CRM sem validação server-side (34 rotas — por isso o acesso do cliente é via portal por token, NUNCA login Visualizador); escala (DDL+full-scan de `ensureCrmMessagesSchema` em todo GET/poll de 8s, GET de leads sem paginação, pool novo por request); limite diário de IA é só aviso; código morto (`crm_contacts`+rotas, `ClientCrmTab` nunca montado, `crm/tags/[id]/assign`, branch `?since=`); polling 5s/8s e conversas >3d sem poll.
 
+### Luna IA — histórico mês a mês + datas custom (2026-07-20)
+
+A Luna não conseguia responder "investimento/leads/CPL mês a mês de janeiro a julho" (as ferramentas só tinham presets de período; ela chamava 7x o mesmo tool e recebia o acumulado 7 vezes). Reforma em `agent/chat/route.ts`:
+
+- **`get_monthly_history` (tool novo)**: `client_id + date_from + date_to` → UMA chamada devolve POR MÊS: Meta (investimento/leads/CPL/impressões/cliques via `time_increment=monthly` no insights level=account — 1 chamada Graph por conta pro intervalo inteiro), Google (GAQL `segments.month FROM customer`), e `crm_leads_novos` (COUNT de crm_leads por `date_trunc('month', created_at)`). Merge por mês com `investimento_total`/`cpl_geral` + campo `avisos` quando alguma fonte falha (best-effort, nunca 500).
+- **`get_meta_campaigns`/`get_google_campaigns`**: ganharam `period='custom'` + `date_from`/`date_to` (os resolvers de `period-utils.ts` JÁ suportavam custom — só não era exposto no schema do tool).
+- **Contagem de leads corrigida**: a Luna ainda usava a lista antiga `META_LEAD_ACTIONS` que SOMA aliases da mesma família (inflava leads 2-3x e derrubava o CPL — mesmo bug do countMetaResults já corrigido no resto do app). Trocada por `countMetaResults` (canônico: formulário + conversa iniciada, 1 por família).
+- **Prompt de sistema**: bloco "Períodos e histórico mês a mês" (nunca dizer que não dá pra separar por mês; usar get_monthly_history; data de hoje em America/Sao_Paulo injetada pra interpretar meses relativos).
+- ⚠️ Não verificável no preview local (sem DB/OAuth/Anthropic) — tsc+build ok. Validar em produção repetindo a pergunta da Monique First (Jan–Jul 2026 mês a mês).
+
 ### Modal do QR Code de conexão (2026-07-20)
 
 ⚠️ **Existem DOIS modais de QR no app** — reformar um não reforma o outro (o Matheus escaneou pelo segundo e viu o layout antigo sem confirmação):

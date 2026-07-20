@@ -8,6 +8,7 @@ import { sendText, sendDocument } from '@/lib/zapi';
 import { generateReportPdf } from '@/lib/report-pdf';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import { resolveMetaPeriod, resolveGaqlPeriod, applyMetaDateToUrl } from '@/lib/period-utils';
+import { countMetaResults } from '@/lib/meta-results';
 import { ensureOptimizerClientConfigTable } from '@/lib/optimizer';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -78,12 +79,14 @@ const systemTools: Anthropic.Tool[] = [
   },
   {
     name: 'get_meta_campaigns',
-    description: 'Busca campanhas e métricas do Meta Ads para um cliente. Inclui gasto, impressões, cliques, CTR, leads e CPL. Também retorna o ID das campanhas para operações de pause/ativar.',
+    description: 'Busca campanhas e métricas do Meta Ads para um cliente. Inclui gasto, impressões, cliques, CTR, leads e CPL. Também retorna o ID das campanhas para operações de pause/ativar. Aceita período custom com date_from/date_to para qualquer intervalo de datas (ex: um mês específico do passado).',
     input_schema: {
       type: 'object' as const,
       properties: {
         client_id: { type: 'string', description: 'ID do cliente' },
-        period: { type: 'string', description: 'Período: this_month, last_7d, last_30d, last_month (padrão: this_month)' },
+        period: { type: 'string', description: 'Período: this_month, last_7d, last_30d, last_month, custom (padrão: this_month). Use custom com date_from/date_to para qualquer intervalo de datas.' },
+        date_from: { type: 'string', description: 'Data inicial YYYY-MM-DD (obrigatória se period=custom)' },
+        date_to: { type: 'string', description: 'Data final YYYY-MM-DD (obrigatória se period=custom)' },
       },
       required: ['client_id'],
     },
@@ -95,9 +98,24 @@ const systemTools: Anthropic.Tool[] = [
       type: 'object' as const,
       properties: {
         client_id: { type: 'string', description: 'ID do cliente' },
-        period: { type: 'string', description: 'Período: this_month, last_7d, last_30d, last_month (padrão: this_month)' },
+        period: { type: 'string', description: 'Período: this_month, last_7d, last_30d, last_month, custom (padrão: this_month). Use custom com date_from/date_to para qualquer intervalo de datas.' },
+        date_from: { type: 'string', description: 'Data inicial YYYY-MM-DD (obrigatória se period=custom)' },
+        date_to: { type: 'string', description: 'Data final YYYY-MM-DD (obrigatória se period=custom)' },
       },
       required: ['client_id'],
+    },
+  },
+  {
+    name: 'get_monthly_history',
+    description: 'Histórico MÊS A MÊS de um cliente num intervalo de datas: investimento, leads (formulário + conversa iniciada, contagem canônica sem duplicar), CPL, impressões e cliques — Meta Ads + Google Ads + leads registrados no CRM, tudo separado por mês numa chamada só. USE SEMPRE que o usuário pedir dados separados por mês ou evolução mensal (ex: "de janeiro a julho, mês a mês"). NÃO chame get_meta_campaigns várias vezes para isso.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        client_id: { type: 'string', description: 'ID do cliente' },
+        date_from: { type: 'string', description: 'Data inicial YYYY-MM-DD (ex: 2026-01-01)' },
+        date_to: { type: 'string', description: 'Data final YYYY-MM-DD (ex: 2026-07-31)' },
+      },
+      required: ['client_id', 'date_from', 'date_to'],
     },
   },
   {
@@ -469,7 +487,7 @@ async function execSystemTool(
     if (name === 'get_meta_campaigns' || (name === 'generate_client_report' && input._platform === 'meta')) {
       const clientId = input.client_id as string;
       const period = (input.period as string) || 'this_month';
-      const metaPeriod = resolveMetaPeriod(period);
+      const metaPeriod = resolveMetaPeriod(period, (input.date_from as string) ?? '', (input.date_to as string) ?? '');
 
       // Get client's Meta account links
       const { rows: links } = await pool.query(
@@ -489,8 +507,6 @@ async function execSystemTool(
       if (globalConn[0]?.access_token) metaConns.push({ id: 'legacy-global', access_token: globalConn[0].access_token, app_id: null, token_expiry: null });
 
       if (metaConns.length === 0) return 'Nenhuma conexão Meta Ads ativa.';
-
-      const META_LEAD_ACTIONS = ['lead','onsite_conversion.lead_grouped','offsite_conversion.fb_pixel_lead','onsite_conversion.lead','onsite_web_lead','messaging_conversation_started_7d','total_messaging_connection'];
 
       const campaigns: Record<string, unknown>[] = [];
 
@@ -548,9 +564,8 @@ async function execSystemTool(
             if (spend <= 0) continue;
             const impressions = parseInt(row.impressions || '0', 10);
             const clicks = parseInt(row.clicks || '0', 10);
-            const leads = ((row.actions ?? []) as { action_type: string; value: string }[])
-              .filter(a => META_LEAD_ACTIONS.includes(a.action_type))
-              .reduce((s, a) => s + parseInt(a.value || '0', 10), 0);
+            // Contagem canônica (1 por família de resultado) — somar os aliases inflava 2-3x
+            const leads = countMetaResults(row.actions ?? []);
             campaigns.push({
               id: row.campaign_id, name: row.campaign_name, platform: 'meta',
               accountName: account.name, status: statusMap[row.campaign_id] ?? 'ACTIVE',
@@ -570,7 +585,7 @@ async function execSystemTool(
     if (name === 'get_google_campaigns') {
       const clientId = input.client_id as string;
       const period = (input.period as string) || 'this_month';
-      const gaqlPeriod = resolveGaqlPeriod(period);
+      const gaqlPeriod = resolveGaqlPeriod(period, (input.date_from as string) ?? '', (input.date_to as string) ?? '');
       const DEV_TOKEN = process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? '';
 
       const { rows: links } = await pool.query(
@@ -643,6 +658,157 @@ async function execSystemTool(
 
       if (campaigns.length === 0) return 'Nenhuma campanha Google encontrada para esse período.';
       return JSON.stringify(campaigns.slice(0, 30));
+    }
+
+    if (name === 'get_monthly_history') {
+      const clientId = input.client_id as string;
+      const dateFrom = String(input.date_from ?? '');
+      const dateTo = String(input.date_to ?? '');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dateFrom) || !/^\d{4}-\d{2}-\d{2}$/.test(dateTo)) {
+        return 'Informe date_from e date_to no formato YYYY-MM-DD.';
+      }
+
+      type MonthAgg = { invest: number; leads: number; impressions: number; clicks: number };
+      const emptyAgg = (): MonthAgg => ({ invest: 0, leads: 0, impressions: 0, clicks: 0 });
+      const metaByMonth = new Map<string, MonthAgg>();
+      const googleByMonth = new Map<string, MonthAgg>();
+      const crmByMonth = new Map<string, number>();
+      const notes: string[] = [];
+
+      // ── Meta Ads: 1 chamada por conta com time_increment=monthly ──
+      const { rows: metaLinks } = await pool.query(
+        "SELECT connection_id, account_id FROM public.client_account_links WHERE client_id = $1 AND platform = 'meta_ads'",
+        [clientId]
+      );
+      const { rows: metaConns } = await pool.query("SELECT * FROM public.meta_connections WHERE status = 'connected'");
+      const { rows: globalConn } = await pool.query("SELECT * FROM public.meta_integration WHERE id = 'global' AND status = 'connected'").catch(() => ({ rows: [] }));
+      if (globalConn[0]?.access_token) metaConns.push({ id: 'legacy-global', access_token: globalConn[0].access_token, app_id: null, token_expiry: null });
+
+      const metaAccountsSeen = new Set<string>();
+      await Promise.allSettled(metaConns.map(async (conn) => {
+        const allowed = metaLinks.filter(l => !l.connection_id || l.connection_id === conn.id || conn.id === 'legacy-global').map(l => l.account_id);
+        if (allowed.length === 0) return;
+        const token = await getFreshMetaToken(conn);
+        await Promise.allSettled(allowed.map(async (accountId: string) => {
+          const acctNode = accountId.startsWith('act_') ? accountId : `act_${accountId}`;
+          if (metaAccountsSeen.has(acctNode)) return;
+          const url = new URL(`https://graph.facebook.com/v21.0/${acctNode}/insights`);
+          url.searchParams.set('level', 'account');
+          url.searchParams.set('fields', 'spend,impressions,clicks,actions');
+          url.searchParams.set('time_range', JSON.stringify({ since: dateFrom, until: dateTo }));
+          url.searchParams.set('time_increment', 'monthly');
+          url.searchParams.set('limit', '60');
+          url.searchParams.set('access_token', token);
+          const res = await fetch(url.toString());
+          if (!res.ok) return;
+          metaAccountsSeen.add(acctNode);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const data = await res.json() as { data?: any[] };
+          for (const row of data.data ?? []) {
+            const mes = String(row.date_start ?? '').slice(0, 7); // YYYY-MM
+            if (!mes) continue;
+            const agg = metaByMonth.get(mes) ?? emptyAgg();
+            agg.invest += parseFloat(row.spend || '0');
+            agg.impressions += parseInt(row.impressions || '0', 10);
+            agg.clicks += parseInt(row.clicks || '0', 10);
+            agg.leads += countMetaResults(row.actions ?? []);
+            metaByMonth.set(mes, agg);
+          }
+        }));
+      }));
+      if (metaLinks.length > 0 && metaAccountsSeen.size === 0) {
+        notes.push('Meta Ads: nenhuma conta respondeu (token/permissão) — valores Meta podem estar faltando.');
+      }
+
+      // ── Google Ads: GAQL com segments.month ──
+      const { rows: gLinks } = await pool.query(
+        "SELECT account_id FROM public.client_account_links WHERE client_id = $1 AND platform = 'google_ads'",
+        [clientId]
+      );
+      if (gLinks.length > 0) {
+        const DEV_TOKEN = process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? '';
+        const { rows: googleConns } = await pool.query("SELECT * FROM public.google_connections WHERE status = 'connected'");
+        const gAccountIds = [...new Set(gLinks.map((l) => l.account_id.replace(/\D/g, '')).filter(Boolean))];
+        const gSeen = new Set<string>();
+        await Promise.allSettled(googleConns.map(async (conn) => {
+          const oauth2 = new googleapis.auth.OAuth2(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET);
+          oauth2.setCredentials({ refresh_token: conn.refresh_token });
+          let accessToken = conn.access_token;
+          try {
+            if (!conn.token_expiry || new Date(conn.token_expiry).getTime() < Date.now() + 5 * 60 * 1000) {
+              const { credentials } = await oauth2.refreshAccessToken();
+              accessToken = credentials.access_token ?? accessToken;
+            }
+          } catch { /* usa o existente */ }
+          await Promise.allSettled(gAccountIds.map(async (accountId) => {
+            if (gSeen.has(accountId)) return;
+            const res = await fetch(`https://googleads.googleapis.com/v24/customers/${accountId}/googleAds:search`, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${accessToken}`, 'developer-token': DEV_TOKEN, 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                query: `SELECT segments.month, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions
+                        FROM customer
+                        WHERE segments.date BETWEEN '${dateFrom}' AND '${dateTo}'`,
+              }),
+            });
+            if (!res.ok) return;
+            gSeen.add(accountId);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const data = await res.json() as { results?: any[] };
+            for (const row of data.results ?? []) {
+              const mes = String(row.segments?.month ?? '').slice(0, 7);
+              if (!mes) continue;
+              const m = row.metrics ?? {};
+              const agg = googleByMonth.get(mes) ?? emptyAgg();
+              agg.invest += Number(m.costMicros ?? 0) / 1_000_000;
+              agg.impressions += Number(m.impressions ?? 0);
+              agg.clicks += Number(m.clicks ?? 0);
+              agg.leads += Number(m.conversions ?? 0);
+              googleByMonth.set(mes, agg);
+            }
+          }));
+        }));
+        if (gSeen.size === 0) notes.push('Google Ads: nenhuma conta respondeu — valores Google podem estar faltando.');
+      }
+
+      // ── CRM: leads que ENTRARAM no funil, por mês ──
+      try {
+        const { rows } = await pool.query(
+          `SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS mes, COUNT(*)::int AS total
+           FROM public.crm_leads
+           WHERE client_id = $1 AND created_at >= $2::date AND created_at < ($3::date + INTERVAL '1 day')
+           GROUP BY 1 ORDER BY 1`,
+          [clientId, dateFrom, dateTo]
+        );
+        for (const r of rows) crmByMonth.set(r.mes, r.total);
+      } catch { notes.push('CRM: não foi possível contar leads por mês.'); }
+
+      // ── Merge ──
+      const months = [...new Set([...metaByMonth.keys(), ...googleByMonth.keys(), ...crmByMonth.keys()])].sort();
+      if (months.length === 0) return 'Nenhum dado encontrado nesse intervalo (Meta, Google ou CRM).';
+      const round2 = (n: number) => Math.round(n * 100) / 100;
+      const result = months.map(mes => {
+        const meta = metaByMonth.get(mes);
+        const goog = googleByMonth.get(mes);
+        const investTotal = (meta?.invest ?? 0) + (goog?.invest ?? 0);
+        const leadsAds = (meta?.leads ?? 0) + (goog?.leads ?? 0);
+        return {
+          mes,
+          meta: meta ? { investimento: round2(meta.invest), leads: meta.leads, cpl: meta.leads > 0 ? round2(meta.invest / meta.leads) : null, impressoes: meta.impressions, cliques: meta.clicks } : null,
+          google: goog ? { investimento: round2(goog.invest), leads: goog.leads, cpl: goog.leads > 0 ? round2(goog.invest / goog.leads) : null, impressoes: goog.impressions, cliques: goog.clicks } : null,
+          crm_leads_novos: crmByMonth.get(mes) ?? 0,
+          investimento_total: round2(investTotal),
+          leads_ads_total: leadsAds,
+          cpl_geral: leadsAds > 0 ? round2(investTotal / leadsAds) : null,
+        };
+      });
+      return JSON.stringify({
+        cliente: clientId,
+        intervalo: { de: dateFrom, ate: dateTo },
+        observacao: 'Leads Meta = formulário + conversa iniciada (contagem canônica do Gerenciador, sem duplicar aliases). crm_leads_novos = leads que entraram no CRM no mês (WhatsApp/formulários rastreados).',
+        avisos: notes,
+        meses: result,
+      });
     }
 
     if (name === 'get_account_balances') {
@@ -1496,7 +1662,14 @@ As ferramentas add_client_vault_credential, reschedule_client_payment, set_clien
 1. NUNCA as chame na mesma resposta em que o usuário pediu a ação. Primeiro responda em texto (sem tool_use) descrevendo exatamente o que você vai fazer — cliente, valores, datas — e pergunte "confirma?". NUNCA reescreva a senha em texto na sua confirmação.
 2. Se o usuário pedir para mudar "a data de pagamento" sem dizer se é só uma vez ou definitivo, pergunte explicitamente: "é só para este pagamento (ajuste pontual) ou quer mudar o dia fixo de vencimento pra sempre?" antes de decidir entre reschedule_client_payment e set_client_payment_due_day.
 3. Só chame a ferramenta depois que o usuário confirmar explicitamente ("sim", "confirma", "pode") em uma mensagem separada.
-4. Ferramentas de leitura e configure_optimizer_client/generate_report_pdf/send_report_pdf_whatsapp/update_meta_campaign_status NÃO precisam desta confirmação — execute direto como já faz hoje.`;
+4. Ferramentas de leitura e configure_optimizer_client/generate_report_pdf/send_report_pdf_whatsapp/update_meta_campaign_status NÃO precisam desta confirmação — execute direto como já faz hoje.
+
+## Períodos e histórico mês a mês
+- Você TEM acesso a qualquer intervalo de datas: get_meta_campaigns e get_google_campaigns aceitam period='custom' com date_from/date_to (YYYY-MM-DD).
+- Para pedidos de evolução mensal ("mês a mês", "de janeiro a julho", "histórico do ano"), use get_monthly_history — UMA chamada devolve todos os meses do intervalo com investimento, leads (formulário + conversa iniciada) e CPL de Meta + Google + CRM. NUNCA diga que não é possível separar por mês.
+- Hoje é {{HOJE}}. Interprete meses relativos a partir desta data.`;
+
+  systemText = systemText.replace('{{HOJE}}', new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' }));
 
   // Build dynamic external tools
   const dynTools: Anthropic.Tool[] = externalTools.map((t) => {
