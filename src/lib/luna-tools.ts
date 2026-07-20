@@ -11,7 +11,7 @@ import { getFreshMetaToken } from '@/lib/meta-token';
 import { resolveMetaPeriod, resolveGaqlPeriod, applyMetaDateToUrl } from '@/lib/period-utils';
 import { countMetaResults } from '@/lib/meta-results';
 import { ensureOptimizerClientConfigTable } from '@/lib/optimizer';
-import { executeOptimizerAction, resolveGoogleToken } from '@/lib/optimizer-execucao';
+import { executeOptimizerAction } from '@/lib/optimizer-execucao';
 import { dispararEventosPorStatus } from '@/lib/conversions';
 import type { OptimizerAcaoTipo, OptimizerObjetoTipo } from '@/lib/optimizer';
 
@@ -108,46 +108,84 @@ function fmtBrt(d: Date | string | null | undefined): string {
 // sob MCC e retornam PERMISSION_DENIED sem esse header).
 const gLoginCache = new Map<string, string | null | undefined>(); // customerId → login que funcionou
 
+// Mesmo fallback embutido do Radar/Otimizador — com env ausente na Vercel,
+// developer-token vazio faz o Google recusar tudo.
+const GOOGLE_DEV_TOKEN = process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? '1vR8GhAk4UMZoPaqo7Qq8Q';
+
+async function refreshGoogleTokenRaw(row: { access_token: string | null; refresh_token: string | null; token_expiry: string | null }): Promise<string | null> {
+  if (row.token_expiry && new Date(row.token_expiry).getTime() > Date.now() + 5 * 60_000 && row.access_token) {
+    return row.access_token;
+  }
+  if (!row.refresh_token) return row.access_token ?? null;
+  const res = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: process.env.GOOGLE_CLIENT_ID ?? '',
+      client_secret: process.env.GOOGLE_CLIENT_SECRET ?? '',
+      refresh_token: row.refresh_token,
+      grant_type: 'refresh_token',
+    }).toString(),
+  }).catch(() => null);
+  if (res?.ok) {
+    const data = await res.json().catch(() => null) as { access_token?: string } | null;
+    return data?.access_token ?? row.access_token ?? null;
+  }
+  return row.access_token ?? null;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function lunaGoogleSearch(customerId: string, query: string): Promise<{ results: any[]; login: string | null } | null> {
-  const token = await resolveGoogleToken('');
-  if (!token) return null;
-  // Mesmo fallback embutido do Radar/Otimizador — com `?? ''` a Luna mandava
-  // developer-token vazio quando a env não existe na Vercel e o Google recusava tudo.
-  const DEV_TOKEN = process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? '1vR8GhAk4UMZoPaqo7Qq8Q';
-  const attempt = async (login: string | null) => {
-    const headers: Record<string, string> = { Authorization: `Bearer ${token}`, 'developer-token': DEV_TOKEN, 'Content-Type': 'application/json' };
-    if (login) headers['login-customer-id'] = login;
-    const r = await fetch(`https://googleads.googleapis.com/v24/customers/${customerId}/googleAds:search`, {
-      method: 'POST', headers, body: JSON.stringify({ query }),
-    }).catch(() => null);
-    if (!r?.ok) return null;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const d = await r.json().catch(() => null) as { results?: any[] } | null;
-    return d ? (d.results ?? []) : null;
-  };
+  // Igual ao Radar (comprovado em produção): TODAS as conexões conectadas, sem
+  // filtro de account_type/scope — o fallback do optimizer-execucao filtra por
+  // esses campos e não casa com as linhas reais do banco (token voltava nulo).
+  const pool = makeServerPool();
+  let conns: Array<{ access_token: string | null; refresh_token: string | null; token_expiry: string | null }> = [];
+  try {
+    const { rows } = await pool.query(
+      `SELECT access_token, refresh_token, token_expiry FROM public.google_connections
+        WHERE status = 'connected' ORDER BY connected_at DESC NULLS LAST LIMIT 5`
+    );
+    conns = rows;
+  } catch { /* sem conexões */ } finally { await pool.end(); }
+  if (conns.length === 0) return null;
 
-  // 1) login memorizado desta execução do processo
-  const cached = gLoginCache.get(customerId);
-  if (cached !== undefined) {
-    const out = await attempt(cached);
-    if (out) return { results: out, login: cached };
-  }
-  // 2) direto e com a própria conta como login
-  for (const login of [null, customerId]) {
-    const out = await attempt(login);
-    if (out) { gLoginCache.set(customerId, login); return { results: out, login }; }
-  }
-  // 3) cada conta acessível como possível MCC
-  const listRes = await fetch('https://googleads.googleapis.com/v24/customers:listAccessibleCustomers', {
-    headers: { Authorization: `Bearer ${token}`, 'developer-token': DEV_TOKEN },
-  }).catch(() => null);
-  const rns = listRes?.ok ? ((await listRes.json().catch(() => ({}))) as { resourceNames?: string[] }).resourceNames ?? [] : [];
-  for (const rn of rns.slice(0, 10)) {
-    const cand = rn.replace('customers/', '').replace(/\D/g, '');
-    if (cand === customerId) continue;
-    const out = await attempt(cand);
-    if (out) { gLoginCache.set(customerId, cand); return { results: out, login: cand }; }
+  for (const conn of conns) {
+    const token = await refreshGoogleTokenRaw(conn);
+    if (!token) continue;
+
+    const attempt = async (login: string | null) => {
+      const headers: Record<string, string> = { Authorization: `Bearer ${token}`, 'developer-token': GOOGLE_DEV_TOKEN, 'Content-Type': 'application/json' };
+      if (login) headers['login-customer-id'] = login;
+      const r = await fetch(`https://googleads.googleapis.com/v24/customers/${customerId}/googleAds:search`, {
+        method: 'POST', headers, body: JSON.stringify({ query }),
+      }).catch(() => null);
+      if (!r?.ok) return null;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const d = await r.json().catch(() => null) as { results?: any[] } | null;
+      return d ? (d.results ?? []) : null;
+    };
+
+    // 1) login memorizado; 2) direto e a própria conta; 3) cada conta acessível como MCC
+    const cached = gLoginCache.get(customerId);
+    if (cached !== undefined) {
+      const out = await attempt(cached);
+      if (out) return { results: out, login: cached };
+    }
+    for (const login of [null, customerId]) {
+      const out = await attempt(login);
+      if (out) { gLoginCache.set(customerId, login); return { results: out, login }; }
+    }
+    const listRes = await fetch('https://googleads.googleapis.com/v24/customers:listAccessibleCustomers', {
+      headers: { Authorization: `Bearer ${token}`, 'developer-token': GOOGLE_DEV_TOKEN },
+    }).catch(() => null);
+    const rns = listRes?.ok ? ((await listRes.json().catch(() => ({}))) as { resourceNames?: string[] }).resourceNames ?? [] : [];
+    for (const rn of rns.slice(0, 10)) {
+      const cand = rn.replace('customers/', '').replace(/\D/g, '');
+      if (cand === customerId) continue;
+      const out = await attempt(cand);
+      if (out) { gLoginCache.set(customerId, cand); return { results: out, login: cand }; }
+    }
   }
   return null;
 }
