@@ -46,7 +46,7 @@ async function runHeadlessAgent(task: LunaTask): Promise<{ text: string; inputTo
 ---
 ## Modo tarefa agendada (sem usuário presente)
 - Você está executando a tarefa agendada "${task.titulo}". NINGUÉM vai responder perguntas — nunca pergunte, decida e execute.
-- Hoje é ${new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })}.
+- Agora é ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })} (horário de Brasília).
 - Sua ÚLTIMA mensagem de texto é o resultado final${task.whatsapp_phone ? ' e será enviada por WhatsApp' : ''}. Escreva em português claro, formato WhatsApp: use *negrito* e listas com "-", NUNCA tabelas markdown.
 - Se algum dado não vier (conta desconectada, sem leads), diga isso honestamente no resultado em vez de inventar.`;
 

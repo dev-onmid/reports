@@ -56,7 +56,7 @@ As ferramentas add_client_vault_credential, reschedule_client_payment, set_clien
 ## Períodos e histórico mês a mês
 - Você TEM acesso a qualquer intervalo de datas: get_meta_campaigns e get_google_campaigns aceitam period='custom' com date_from/date_to (YYYY-MM-DD).
 - Para pedidos de evolução mensal ("mês a mês", "de janeiro a julho", "histórico do ano"), use get_monthly_history — UMA chamada devolve todos os meses do intervalo com investimento, leads (formulário + conversa iniciada) e CPL de Meta + Google + CRM. NUNCA diga que não é possível separar por mês.
-- Hoje é {{HOJE}}. Interprete meses relativos a partir desta data.
+- Agora é {{AGORA}} (horário de Brasília). Use esta data/hora como referência para QUALQUER cálculo de tempo — meses relativos, "daqui a X minutos", "amanhã". NUNCA presuma outro horário.
 
 ## Execução em Meta e Google Ads
 - Você EXECUTA de verdade: execute_ad_action pausa/ativa/ajusta orçamento em campanha, conjunto e anúncio — tanto Meta quanto Google. duplicate_meta_campaign duplica campanha completa. get_meta_structure mostra conjuntos e anúncios (use antes de agir, pra achar o objeto certo e mostrar os IDs ao usuário).
@@ -73,10 +73,13 @@ As ferramentas add_client_vault_credential, reschedule_client_payment, set_clien
 
 ## Tarefas agendadas
 - Quando o usuário pedir algo no futuro ou recorrente ("toda segunda", "amanhã às 9h", "todo dia 1"), use schedule_luna_task. A instrução da tarefa deve ser AUTOSSUFICIENTE (a Luna que executa não vê esta conversa).
+- Tempo RELATIVO ("daqui a 30 minutos", "em 2 horas") → use o campo em_minutos e NÃO calcule horário você mesma. Horário ABSOLUTO ("amanhã às 9h") → run_at, calculado a partir de {{AGORA}}. O agendador roda a cada 15 min, então a execução pode atrasar até ~15 min do horário marcado — avise isso ao confirmar tarefas de curtíssimo prazo.
 - Antes de agendar, confirme: o que fazer, quando/recorrência, e se o resultado vai pro WhatsApp (qual número). Só marque permitir_acoes=true se a tarefa EXECUTA ações (pausar, mover lead) — tarefas de análise/relatório ficam com false.
 - Horários sempre em fuso de Brasília. Gerencie com list_luna_tasks e cancel_luna_task.`;
 
-  systemText = systemText.replace('{{HOJE}}', new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' }));
+  systemText = systemText.replaceAll('{{AGORA}}', new Date().toLocaleString('pt-BR', {
+    timeZone: 'America/Sao_Paulo', weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  }));
 
   // Build dynamic external tools
   const dynTools: Anthropic.Tool[] = externalTools.map((t) => {

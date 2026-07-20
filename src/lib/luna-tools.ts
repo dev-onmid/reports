@@ -658,7 +658,8 @@ A ferramenta busca automaticamente os IDs de cidades e interesses na API Meta, v
         titulo: { type: 'string', description: 'Nome curto da tarefa (ex: "Resumo semanal da carteira")' },
         instrucao: { type: 'string', description: 'Instrução COMPLETA e autossuficiente do que fazer (a Luna futura não verá esta conversa — inclua cliente, período, formato)' },
         tipo: { type: 'string', enum: ['once', 'daily', 'weekly', 'monthly'], description: 'once=uma vez, daily=todo dia, weekly=toda semana, monthly=todo mês' },
-        run_at: { type: 'string', description: 'Para once: data/hora YYYY-MM-DD HH:MM (Brasília)' },
+        em_minutos: { type: 'number', description: 'Para once RELATIVO ("daqui a 30 minutos", "em 2 horas"): quantos minutos a partir de AGORA. O servidor calcula o horário exato — SEMPRE prefira este campo a run_at quando o usuário falar em tempo relativo.' },
+        run_at: { type: 'string', description: 'Para once com horário ABSOLUTO ("amanhã às 9h"): data/hora YYYY-MM-DD HH:MM (Brasília). Não use se em_minutos foi informado.' },
         hora: { type: 'string', description: 'Para recorrente: horário HH:MM (Brasília, padrão 09:00)' },
         dia_semana: { type: 'number', description: 'Para weekly: 0=domingo, 1=segunda ... 6=sábado' },
         dia_mes: { type: 'number', description: 'Para monthly: dia do mês 1-28' },
@@ -2250,13 +2251,16 @@ export async function execSystemTool(
 
     // ── Pacote D: agendamento ───────────────────────────────────────────────
     if (name === 'schedule_luna_task') {
-      const { titulo, instrucao, tipo, run_at, hora, dia_semana, dia_mes, whatsapp_phone, zapi_client_id, permitir_acoes } = input as {
-        titulo: string; instrucao: string; tipo: string; run_at?: string; hora?: string;
+      const { titulo, instrucao, tipo, run_at, em_minutos, hora, dia_semana, dia_mes, whatsapp_phone, zapi_client_id, permitir_acoes } = input as {
+        titulo: string; instrucao: string; tipo: string; run_at?: string; em_minutos?: number; hora?: string;
         dia_semana?: number; dia_mes?: number; whatsapp_phone?: string; zapi_client_id?: string; permitir_acoes?: boolean;
       };
       if (!['once', 'daily', 'weekly', 'monthly'].includes(tipo)) return 'tipo deve ser once, daily, weekly ou monthly.';
-      const nextRun = computeNextRun(tipo, { run_at, hora, dia_semana, dia_mes });
-      if (!nextRun) return tipo === 'once' ? 'Para tarefa única, informe run_at no formato YYYY-MM-DD HH:MM (horário de Brasília).' : 'Não consegui calcular a próxima execução — confira hora/dia_semana/dia_mes.';
+      // Tempo relativo ("daqui a 30 min"): o SERVIDOR calcula — imune a erro de fuso/relógio da IA.
+      const nextRun = tipo === 'once' && Number(em_minutos) > 0
+        ? new Date(Date.now() + Math.min(60 * 24 * 30, Number(em_minutos)) * 60_000)
+        : computeNextRun(tipo, { run_at, hora, dia_semana, dia_mes });
+      if (!nextRun) return tipo === 'once' ? 'Para tarefa única, informe em_minutos (relativo) ou run_at no formato YYYY-MM-DD HH:MM (horário de Brasília).' : 'Não consegui calcular a próxima execução — confira hora/dia_semana/dia_mes.';
       if (nextRun.getTime() < Date.now() - 60_000) return `run_at está no passado (${fmtBrt(nextRun)}). Informe uma data futura.`;
       await ensureLunaTasksTable(pool);
       const { rows } = await pool.query(
