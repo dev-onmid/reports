@@ -77,7 +77,8 @@ async function refreshGoogleAccessToken(row: { access_token: string; refresh_tok
   return row.access_token ?? null;
 }
 
-async function resolveGoogleToken(connectionId: string): Promise<string | null> {
+// Exportada para a Luna (execute_ad_action) reusar a mesma resolução de token.
+export async function resolveGoogleToken(connectionId: string): Promise<string | null> {
   const pool = makeServerPool();
   try {
     const { rows } = await pool.query<{ access_token: string; refresh_token: string; token_expiry: string | null }>(

@@ -1,0 +1,25 @@
+name: Luna Scheduler
+
+# Executa as tarefas agendadas da Luna (public.luna_tasks) a cada 15 minutos.
+# Secret necessário no GitHub: LUNA_SCHEDULER_URL
+#   = https://reports.onmid.app/api/agent/scheduler?secret=<valor de REPORTS_CRON_SECRET>
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch: {}
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Chamar o agendador da Luna
+        run: |
+          if [ -z "${{ secrets.LUNA_SCHEDULER_URL }}" ]; then
+            echo "Secret LUNA_SCHEDULER_URL não configurado"; exit 1
+          fi
+          status=$(curl -s -o resp.json -w "%{http_code}" --max-time 90 "${{ secrets.LUNA_SCHEDULER_URL }}")
+          cat resp.json
+          if [ "$status" != "200" ]; then
+            echo "HTTP $status"; exit 1
+          fi
