@@ -211,7 +211,7 @@ Auditoria completa do CRM (4 varreduras paralelas: núcleo, chat, instâncias, a
 
 | Correção | Onde |
 |---|---|
-| **Cron do follow-up worker** (worker existia, nada o chamava — follow-up com delay/sequência/expiração só saía pelo botão manual) | `.github/workflows/crm-followup-worker.yml` (`*/5 10-23 * * *` = 07h-20h BRT; secret GitHub `CRM_FOLLOWUP_URL` = URL completa com `?secret=CRON_SECRET`) |
+| **Cron do follow-up worker** (worker existia, nada o chamava — follow-up com delay/sequência/expiração só saía pelo botão manual) | `.github/workflows/crm-followup-worker.yml` (`*/5 10-23 * * *` = 07h-20h BRT; secret GitHub `CRM_FOLLOWUP_URL` = URL completa com `?secret=<valor de REPORTS_CRON_SECRET>`). ⚠️ O `CRON_SECRET` da Vercel é *Sensitive* (write-only, ninguém lê o valor de volta) — por isso a rota aceita também `REPORTS_CRON_SECRET`/`CRM_CRON_SECRET` (legíveis). Validado em produção 2026-07-17: HTTP 200 `{"ok":true}` |
 | **Mídia recebida renderiza** (antes só áudio era baixado; foto/vídeo/doc viravam texto "[Imagem]") | webhook `[instanceId]`: `mediaKind` audio/imagem/video/documento (sticker→imagem), caption vira 2ª mensagem `external_id:caption` +1s; `maxDuration=60` na rota; `extFromMimetype` ganhou pdf/docx/xlsx/webp/zip |
 | **Rename/delete de etapa migra leads** (status é TEXTO; antes renomear coluna orfanava leads → sumiam do Kanban) | `crm/stages/[id]/route.ts` PUT/DELETE reescritos: UPDATE `crm_leads.status` antigo→novo no funil; delete move pra primeira etapa restante |
 | **PUT de lead restrito ao id** (match extra por telefone cascateava edição/drag pra leads homônimos de OUTROS funis) | `crm/[id]/route.ts` — WHERE client_id+id apenas |
