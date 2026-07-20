@@ -3,7 +3,6 @@
 // Toda ferramenta nova da Luna deve ser adicionada AQUI (schema em systemTools +
 // executor em execSystemTool), nunca de volta na rota.
 import Anthropic from '@anthropic-ai/sdk';
-import { google as googleapis } from 'googleapis';
 import { deflateSync } from 'zlib';
 import { makeServerPool } from '@/lib/server-db';
 import { sendText, sendDocument } from '@/lib/zapi';
@@ -100,6 +99,55 @@ function fmtBrt(d: Date | string | null | undefined): string {
   if (!d) return '—';
   const date = typeof d === 'string' ? new Date(d) : d;
   return date.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+// ─── Google Ads (busca robusta) ──────────────────────────────────────────────
+// Espelha o padrão comprovado do Radar/Otimizador: token via fetch cru com
+// fallback (resolveGoogleToken — NUNCA googleapis.refreshAccessToken, que falha
+// silenciosamente) e tentativa de login-customer-id (contas de agência ficam
+// sob MCC e retornam PERMISSION_DENIED sem esse header).
+const gLoginCache = new Map<string, string | null | undefined>(); // customerId → login que funcionou
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function lunaGoogleSearch(customerId: string, query: string): Promise<{ results: any[]; login: string | null } | null> {
+  const token = await resolveGoogleToken('');
+  if (!token) return null;
+  const DEV_TOKEN = process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? '';
+  const attempt = async (login: string | null) => {
+    const headers: Record<string, string> = { Authorization: `Bearer ${token}`, 'developer-token': DEV_TOKEN, 'Content-Type': 'application/json' };
+    if (login) headers['login-customer-id'] = login;
+    const r = await fetch(`https://googleads.googleapis.com/v24/customers/${customerId}/googleAds:search`, {
+      method: 'POST', headers, body: JSON.stringify({ query }),
+    }).catch(() => null);
+    if (!r?.ok) return null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const d = await r.json().catch(() => null) as { results?: any[] } | null;
+    return d ? (d.results ?? []) : null;
+  };
+
+  // 1) login memorizado desta execução do processo
+  const cached = gLoginCache.get(customerId);
+  if (cached !== undefined) {
+    const out = await attempt(cached);
+    if (out) return { results: out, login: cached };
+  }
+  // 2) direto e com a própria conta como login
+  for (const login of [null, customerId]) {
+    const out = await attempt(login);
+    if (out) { gLoginCache.set(customerId, login); return { results: out, login }; }
+  }
+  // 3) cada conta acessível como possível MCC
+  const listRes = await fetch('https://googleads.googleapis.com/v24/customers:listAccessibleCustomers', {
+    headers: { Authorization: `Bearer ${token}`, 'developer-token': DEV_TOKEN },
+  }).catch(() => null);
+  const rns = listRes?.ok ? ((await listRes.json().catch(() => ({}))) as { resourceNames?: string[] }).resourceNames ?? [] : [];
+  for (const rn of rns.slice(0, 10)) {
+    const cand = rn.replace('customers/', '').replace(/\D/g, '');
+    if (cand === customerId) continue;
+    const out = await attempt(cand);
+    if (out) { gLoginCache.set(customerId, cand); return { results: out, login: cand }; }
+  }
+  return null;
 }
 
 export const DEFAULT_INSTRUCTIONS = `Você é Luna, assistente inteligente da Onmid Marketing.`;
@@ -870,77 +918,49 @@ export async function execSystemTool(
       const clientId = input.client_id as string;
       const period = (input.period as string) || 'this_month';
       const gaqlPeriod = resolveGaqlPeriod(period, (input.date_from as string) ?? '', (input.date_to as string) ?? '');
-      const DEV_TOKEN = process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? '';
 
       const { rows: links } = await pool.query(
-        "SELECT account_id FROM public.client_account_links WHERE client_id = $1 AND platform = 'google_ads'",
+        "SELECT account_id FROM public.client_account_links WHERE client_id = $1 AND platform IN ('google_ads','google')",
         [clientId]
       );
       if (links.length === 0) return 'Nenhuma conta Google Ads vinculada a esse cliente.';
 
-      const { rows: googleConns } = await pool.query("SELECT * FROM public.google_connections WHERE status = 'connected'");
-      if (googleConns.length === 0) return 'Nenhuma conexão Google Ads ativa.';
-
       const accountIds = [...new Set(links.map((l) => l.account_id.replace(/\D/g, '')).filter(Boolean))];
       const campaigns: Record<string, unknown>[] = [];
-      const seen = new Set<string>();
+      const failures: string[] = [];
 
-      await Promise.allSettled(googleConns.map(async (conn) => {
-        // Refresh token
-        const oauth2 = new googleapis.auth.OAuth2(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET);
-        oauth2.setCredentials({ refresh_token: conn.refresh_token });
-        let accessToken = conn.access_token;
-        try {
-          if (!conn.token_expiry || new Date(conn.token_expiry).getTime() < Date.now() + 5 * 60 * 1000) {
-            const { credentials } = await oauth2.refreshAccessToken();
-            accessToken = credentials.access_token ?? accessToken;
-          }
-        } catch { /* use existing */ }
-
-        await Promise.allSettled(accountIds.map(async (accountId) => {
-          const headers: Record<string, string> = {
-            Authorization: `Bearer ${accessToken}`,
-            'developer-token': DEV_TOKEN,
-            'Content-Type': 'application/json',
-          };
-          const res = await fetch(`https://googleads.googleapis.com/v24/customers/${accountId}/googleAds:search`, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({
-              query: `SELECT campaign.id, campaign.name, campaign.status,
-                        metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions
-                      FROM campaign
-                      WHERE ${gaqlPeriod}
-                        AND campaign.status IN ('ENABLED', 'PAUSED')
-                        AND metrics.cost_micros > 0
-                      ORDER BY metrics.cost_micros DESC LIMIT 30`,
-            }),
+      await Promise.allSettled(accountIds.map(async (accountId) => {
+        const found = await lunaGoogleSearch(accountId,
+          `SELECT campaign.id, campaign.name, campaign.status,
+                  metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions
+                FROM campaign
+                WHERE ${gaqlPeriod}
+                  AND campaign.status IN ('ENABLED', 'PAUSED')
+                  AND metrics.cost_micros > 0
+                ORDER BY metrics.cost_micros DESC LIMIT 30`);
+        if (!found) { failures.push(accountId); return; }
+        for (const row of found.results) {
+          const campaign = row.campaign ?? {};
+          const metrics = row.metrics ?? {};
+          const spend = Number(metrics.costMicros ?? 0) / 1_000_000;
+          if (spend <= 0) continue;
+          const clicks = Number(metrics.clicks ?? 0);
+          const impressions = Number(metrics.impressions ?? 0);
+          const leads = Number(metrics.conversions ?? 0);
+          campaigns.push({
+            id: String(campaign.id), name: campaign.name, platform: 'google',
+            accountId, status: campaign.status ?? 'ENABLED', spend, impressions, clicks, leads,
+            ctr: impressions > 0 ? ((clicks / impressions) * 100).toFixed(2) : '0',
+            cpl: leads > 0 ? (spend / leads).toFixed(2) : '0',
           });
-          if (!res.ok) return;
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const data = await res.json() as { results?: any[] };
-          for (const row of data.results ?? []) {
-            const campaign = row.campaign ?? {};
-            const metrics = row.metrics ?? {};
-            const spend = Number(metrics.costMicros ?? 0) / 1_000_000;
-            if (spend <= 0) continue;
-            const key = `${accountId}:${campaign.id}`;
-            if (seen.has(key)) continue;
-            seen.add(key);
-            const clicks = Number(metrics.clicks ?? 0);
-            const impressions = Number(metrics.impressions ?? 0);
-            const leads = Number(metrics.conversions ?? 0);
-            campaigns.push({
-              id: String(campaign.id), name: campaign.name, platform: 'google',
-              accountId, status: campaign.status ?? 'ENABLED', spend, impressions, clicks, leads,
-              ctr: impressions > 0 ? ((clicks / impressions) * 100).toFixed(2) : '0',
-              cpl: leads > 0 ? (spend / leads).toFixed(2) : '0',
-            });
-          }
-        }));
+        }
       }));
 
-      if (campaigns.length === 0) return 'Nenhuma campanha Google encontrada para esse período.';
+      if (campaigns.length === 0) {
+        return failures.length > 0
+          ? `Não consegui acessar a(s) conta(s) Google ${failures.join(', ')} (token/permissão MCC). Verifique a conexão Google em Integrações.`
+          : 'Nenhuma campanha Google com gasto nesse período.';
+      }
       return JSON.stringify(campaigns.slice(0, 30));
     }
 
@@ -1006,53 +1026,32 @@ export async function execSystemTool(
 
       // ── Google Ads: GAQL com segments.month ──
       const { rows: gLinks } = await pool.query(
-        "SELECT account_id FROM public.client_account_links WHERE client_id = $1 AND platform = 'google_ads'",
+        "SELECT account_id FROM public.client_account_links WHERE client_id = $1 AND platform IN ('google_ads','google')",
         [clientId]
       );
       if (gLinks.length > 0) {
-        const DEV_TOKEN = process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? '';
-        const { rows: googleConns } = await pool.query("SELECT * FROM public.google_connections WHERE status = 'connected'");
         const gAccountIds = [...new Set(gLinks.map((l) => l.account_id.replace(/\D/g, '')).filter(Boolean))];
-        const gSeen = new Set<string>();
-        await Promise.allSettled(googleConns.map(async (conn) => {
-          const oauth2 = new googleapis.auth.OAuth2(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET);
-          oauth2.setCredentials({ refresh_token: conn.refresh_token });
-          let accessToken = conn.access_token;
-          try {
-            if (!conn.token_expiry || new Date(conn.token_expiry).getTime() < Date.now() + 5 * 60 * 1000) {
-              const { credentials } = await oauth2.refreshAccessToken();
-              accessToken = credentials.access_token ?? accessToken;
-            }
-          } catch { /* usa o existente */ }
-          await Promise.allSettled(gAccountIds.map(async (accountId) => {
-            if (gSeen.has(accountId)) return;
-            const res = await fetch(`https://googleads.googleapis.com/v24/customers/${accountId}/googleAds:search`, {
-              method: 'POST',
-              headers: { Authorization: `Bearer ${accessToken}`, 'developer-token': DEV_TOKEN, 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                query: `SELECT segments.month, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions
-                        FROM customer
-                        WHERE segments.date BETWEEN '${dateFrom}' AND '${dateTo}'`,
-              }),
-            });
-            if (!res.ok) return;
-            gSeen.add(accountId);
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const data = await res.json() as { results?: any[] };
-            for (const row of data.results ?? []) {
-              const mes = String(row.segments?.month ?? '').slice(0, 7);
-              if (!mes) continue;
-              const m = row.metrics ?? {};
-              const agg = googleByMonth.get(mes) ?? emptyAgg();
-              agg.invest += Number(m.costMicros ?? 0) / 1_000_000;
-              agg.impressions += Number(m.impressions ?? 0);
-              agg.clicks += Number(m.clicks ?? 0);
-              agg.leads += Number(m.conversions ?? 0);
-              googleByMonth.set(mes, agg);
-            }
-          }));
+        let gOk = 0;
+        await Promise.allSettled(gAccountIds.map(async (accountId) => {
+          const found = await lunaGoogleSearch(accountId,
+            `SELECT segments.month, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions
+             FROM customer
+             WHERE segments.date BETWEEN '${dateFrom}' AND '${dateTo}'`);
+          if (!found) return;
+          gOk++;
+          for (const row of found.results) {
+            const mes = String(row.segments?.month ?? '').slice(0, 7);
+            if (!mes) continue;
+            const m = row.metrics ?? {};
+            const agg = googleByMonth.get(mes) ?? emptyAgg();
+            agg.invest += Number(m.costMicros ?? 0) / 1_000_000;
+            agg.impressions += Number(m.impressions ?? 0);
+            agg.clicks += Number(m.clicks ?? 0);
+            agg.leads += Number(m.conversions ?? 0);
+            googleByMonth.set(mes, agg);
+          }
         }));
-        if (gSeen.size === 0) notes.push('Google Ads: nenhuma conta respondeu — valores Google podem estar faltando.');
+        if (gOk === 0) notes.push('Google Ads: nenhuma conta respondeu (token/permissão MCC) — valores Google podem estar faltando.');
       }
 
       // ── CRM: leads que ENTRARAM no funil, por mês ──
@@ -1961,35 +1960,12 @@ export async function execSystemTool(
       let loginCustomerId: string | null = null;
       const customerId = canal === 'google' ? String(links[0].account_id ?? '').replace(/\D/g, '') : null;
       if (canal === 'google') {
-        const token = await resolveGoogleToken(links[0].connection_id ?? '');
-        if (!token) return 'Token Google Ads não encontrado.';
-        const DEV_TOKEN = process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? '';
-        // Descobre MCC (login-customer-id): tenta direto; senão testa acessíveis.
-        const tryQuery = async (login: string | null, query: string) => {
-          const headers: Record<string, string> = { Authorization: `Bearer ${token}`, 'developer-token': DEV_TOKEN, 'Content-Type': 'application/json' };
-          if (login) headers['login-customer-id'] = login;
-          const r = await fetch(`https://googleads.googleapis.com/v24/customers/${customerId}/googleAds:search`, {
-            method: 'POST', headers, body: JSON.stringify({ query }),
-          });
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          return r.ok ? await r.json() as { results?: any[] } : null;
-        };
         const probeQuery = acao === 'AJUSTAR_ORCAMENTO'
           ? `SELECT campaign.id, campaign.campaign_budget FROM campaign WHERE campaign.id = ${objetoId.replace(/\D/g, '')}`
           : 'SELECT customer.id FROM customer LIMIT 1';
-        let probe = await tryQuery(null, probeQuery);
-        if (!probe) {
-          const accRes = await fetch('https://googleads.googleapis.com/v24/customers:listAccessibleCustomers', {
-            headers: { Authorization: `Bearer ${token}`, 'developer-token': DEV_TOKEN },
-          }).catch(() => null);
-          const accData = accRes?.ok ? await accRes.json() as { resourceNames?: string[] } : null;
-          for (const rn of (accData?.resourceNames ?? []).slice(0, 6)) {
-            const cand = rn.replace('customers/', '');
-            probe = await tryQuery(cand, probeQuery);
-            if (probe) { loginCustomerId = cand; break; }
-          }
-        }
-        if (!probe) return '❌ Não consegui acessar essa conta Google (MCC/permissão). Verifique a conexão em Integrações.';
+        const probe = await lunaGoogleSearch(customerId!, probeQuery);
+        if (!probe) return '❌ Não consegui acessar essa conta Google (token/permissão MCC). Verifique a conexão em Integrações.';
+        loginCustomerId = probe.login;
         if (acao === 'AJUSTAR_ORCAMENTO') {
           budgetResourceName = probe.results?.[0]?.campaign?.campaignBudget;
           if (!budgetResourceName) return '❌ Campanha não encontrada nessa conta Google (confira o objeto_id).';
