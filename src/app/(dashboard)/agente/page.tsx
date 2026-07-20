@@ -8,7 +8,7 @@ import {
   Wrench, Mic, MicOff, Plus, Trash2, FileText, Link2, Type,
   Webhook, MessageSquare, BookOpen, Zap, Upload, Globe, CheckCircle,
   ToggleLeft, ToggleRight, Play, Pause, Download,
-  Sparkles, ShieldCheck, Users,
+  Sparkles, ShieldCheck, Users, CalendarClock, RotateCcw, ChevronRight,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -200,6 +200,193 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
           <User className="h-[18px] w-[18px] text-slate-300" />
         </div>
       )}
+    </div>
+  );
+}
+
+// ---- Tasks (Agendamentos) Modal ----
+
+type LunaTaskRow = {
+  id: string; titulo: string; instrucao: string; tipo: string;
+  hora: string | null; dia_semana: number | null; dia_mes: number | null;
+  whatsapp_phone: string | null; permitir_acoes: boolean; enabled: boolean;
+  next_run_at: string | null; last_run_at: string | null; last_result: string | null; created_at: string;
+};
+type LunaTaskRun = { task_id: string; ran_at: string; ok: boolean; result: string };
+
+const WEEKDAYS_PT = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
+
+function fmtBrtShort(iso: string | null): string {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+function recurrenceLabel(t: LunaTaskRow): string {
+  if (t.tipo === 'once') return 'Uma vez';
+  if (t.tipo === 'daily') return `Todo dia às ${t.hora ?? '09:00'}`;
+  if (t.tipo === 'weekly') return `Toda ${WEEKDAYS_PT[t.dia_semana ?? 1]} às ${t.hora ?? '09:00'}`;
+  if (t.tipo === 'monthly') return `Todo dia ${t.dia_mes ?? 1} às ${t.hora ?? '09:00'}`;
+  return t.tipo;
+}
+
+function TasksModal({ onClose }: { onClose: () => void }) {
+  const [tasks, setTasks] = useState<LunaTaskRow[]>([]);
+  const [runs, setRuns] = useState<LunaTaskRun[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    fetch('/api/agent/tasks')
+      .then(r => r.ok ? r.json() as Promise<{ tasks: LunaTaskRow[]; runs: LunaTaskRun[] }> : { tasks: [], runs: [] })
+      .then(d => { setTasks(d.tasks ?? []); setRuns(d.runs ?? []); })
+      .catch(() => { setTasks([]); setRuns([]); })
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function act(id: string, action: 'cancel' | 'reactivate' | 'delete') {
+    if (action === 'delete' && !confirm('Apagar esta tarefa e todo o histórico dela?')) return;
+    setBusy(id);
+    try {
+      if (action === 'delete') await fetch(`/api/agent/tasks?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      else await fetch('/api/agent/tasks', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, action }) });
+      load();
+    } finally { setBusy(null); }
+  }
+
+  function statusChip(t: LunaTaskRow) {
+    if (t.enabled) return <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-bold text-primary">Ativa</span>;
+    if (t.tipo === 'once' && t.last_run_at) return <span className="rounded-full bg-blue-500/15 px-2 py-0.5 text-[10px] font-bold text-blue-300">Concluída</span>;
+    return <span className="rounded-full bg-zinc-500/20 px-2 py-0.5 text-[10px] font-bold text-zinc-400">Cancelada</span>;
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="flex w-full max-w-3xl max-h-[88vh] flex-col rounded-2xl border border-border bg-background shadow-2xl" onClick={e => e.stopPropagation()}>
+        <div className="flex shrink-0 items-center justify-between border-b border-border px-6 py-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
+              <CalendarClock className="h-5 w-5 text-primary" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold">Agendamentos da Luna</h3>
+              <p className="text-xs text-muted-foreground">Tarefas que a Luna executa sozinha — cancele, reative ou veja o histórico.</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          {loading ? (
+            <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Carregando...
+            </div>
+          ) : tasks.length === 0 ? (
+            <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
+              <CalendarClock className="h-10 w-10 text-muted-foreground/30" />
+              <p className="text-sm font-semibold">Nenhum agendamento ainda</p>
+              <p className="max-w-sm text-xs text-muted-foreground">
+                Peça no chat: &quot;Luna, toda segunda às 8h me manda o resumo da carteira no WhatsApp&quot;.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {tasks.map(t => {
+                const taskRuns = runs.filter(r => r.task_id === t.id);
+                const isOpen = expanded === t.id;
+                return (
+                  <div key={t.id} className={cn('rounded-xl border bg-card transition-colors', t.enabled ? 'border-border' : 'border-border/50 opacity-80')}>
+                    <div
+                      role="button" tabIndex={0}
+                      onClick={() => setExpanded(isOpen ? null : t.id)}
+                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(isOpen ? null : t.id); } }}
+                      className="flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left"
+                    >
+                      <ChevronRight className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform', isOpen && 'rotate-90')} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="truncate text-sm font-bold">{t.titulo}</span>
+                          {statusChip(t)}
+                          {t.permitir_acoes && (
+                            <span className="rounded-full bg-orange-500/15 px-2 py-0.5 text-[10px] font-bold text-orange-300" title="Esta tarefa pode executar ações (pausar campanha, mover lead)">Executa ações</span>
+                          )}
+                        </div>
+                        <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                          {recurrenceLabel(t)}
+                          {t.enabled && t.next_run_at ? <> · próxima: <span className="font-semibold text-foreground">{fmtBrtShort(t.next_run_at)}</span></> : null}
+                          {t.whatsapp_phone ? <> · WhatsApp {t.whatsapp_phone}</> : null}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1.5" onClick={e => e.stopPropagation()}>
+                        {t.enabled ? (
+                          <button
+                            type="button" disabled={busy === t.id}
+                            onClick={() => void act(t.id, 'cancel')}
+                            className="rounded-lg border border-border px-2.5 py-1.5 text-[11px] font-semibold text-muted-foreground hover:border-red-400/40 hover:text-red-400 disabled:opacity-50 transition-colors"
+                          >
+                            Cancelar
+                          </button>
+                        ) : t.tipo !== 'once' ? (
+                          <button
+                            type="button" disabled={busy === t.id}
+                            onClick={() => void act(t.id, 'reactivate')}
+                            className="flex items-center gap-1 rounded-lg border border-border px-2.5 py-1.5 text-[11px] font-semibold text-muted-foreground hover:border-primary/40 hover:text-primary disabled:opacity-50 transition-colors"
+                          >
+                            <RotateCcw className="h-3 w-3" /> Reativar
+                          </button>
+                        ) : null}
+                        <button
+                          type="button" disabled={busy === t.id}
+                          onClick={() => void act(t.id, 'delete')}
+                          title="Apagar tarefa e histórico"
+                          className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-red-500/10 hover:text-red-400 disabled:opacity-50 transition-colors"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {isOpen && (
+                      <div className="border-t border-border/60 px-4 py-3 space-y-3">
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Instrução</p>
+                          <p className="mt-1 whitespace-pre-wrap text-xs text-foreground/90">{t.instrucao}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                            Histórico de execuções {taskRuns.length > 0 && `(${taskRuns.length})`}
+                          </p>
+                          {taskRuns.length === 0 ? (
+                            <p className="mt-1 text-xs text-muted-foreground italic">
+                              {t.last_run_at ? `Última execução: ${fmtBrtShort(t.last_run_at)}` : 'Ainda não executou.'}
+                            </p>
+                          ) : (
+                            <div className="mt-1.5 space-y-1.5">
+                              {taskRuns.slice(0, 10).map((r, i) => (
+                                <details key={i} className="rounded-lg border border-border/60 bg-muted/10 px-3 py-2">
+                                  <summary className="flex cursor-pointer items-center gap-2 text-xs">
+                                    <span className={cn('h-1.5 w-1.5 rounded-full', r.ok ? 'bg-primary' : 'bg-red-400')} />
+                                    <span className="font-semibold">{fmtBrtShort(r.ran_at)}</span>
+                                    <span className="text-muted-foreground">{r.ok ? 'executada' : 'com erro'}</span>
+                                  </summary>
+                                  <p className="mt-2 whitespace-pre-wrap text-xs text-foreground/85">{r.result || '(sem texto)'}</p>
+                                </details>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -623,6 +810,7 @@ export default function AgentePage() {
   const [loading, setLoading] = useState(false);
   const [activeTools, setActiveTools] = useState<string[]>([]);
   const [showTraining, setShowTraining] = useState(false);
+  const [showTasks, setShowTasks] = useState(false);
   const [instructions, setInstructions] = useState('');
   const [scrolledUp, setScrolledUp] = useState(false);
   const [showMoreSuggestions, setShowMoreSuggestions] = useState(false);
@@ -786,6 +974,9 @@ export default function AgentePage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setShowTasks(true)} className="h-12 gap-2 rounded-xl border-white/15 bg-transparent px-5 text-sm font-bold text-white hover:bg-white/5 hover:text-primary">
+            <CalendarClock className="w-4 h-4" />Agendamentos
+          </Button>
           {isAdmin && (
             <Button variant="outline" size="sm" onClick={() => setShowTraining(true)} className="h-12 gap-2 rounded-xl border-primary/35 bg-transparent px-7 text-sm font-bold text-white hover:bg-primary/10 hover:text-primary">
               <Settings2 className="w-4 h-4" />Treinar Luna
@@ -1009,6 +1200,7 @@ export default function AgentePage() {
         Luna pode cometer erros. Sempre confira as informações importantes.
       </p>
 
+      {showTasks && <TasksModal onClose={() => setShowTasks(false)} />}
       {showTraining && isAdmin && (
         <TrainingModal
           onClose={() => setShowTraining(false)}

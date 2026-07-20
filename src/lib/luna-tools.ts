@@ -38,6 +38,17 @@ export async function ensureLunaTasksTable(pool: ReturnType<typeof makeServerPoo
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `).catch(() => {});
+  // Histórico de execuções (1 linha por rodada — o last_result da tarefa só guarda a última)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS public.luna_task_runs (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      task_id UUID NOT NULL REFERENCES public.luna_tasks(id) ON DELETE CASCADE,
+      ran_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      ok BOOLEAN NOT NULL DEFAULT TRUE,
+      result TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_luna_task_runs_task ON public.luna_task_runs (task_id, ran_at DESC);
+  `).catch(() => {});
 }
 
 // Brasil não tem horário de verão desde 2019 — BRT é UTC-3 fixo.

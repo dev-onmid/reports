@@ -132,6 +132,10 @@ export async function GET(req: NextRequest) {
             WHERE id = $4`,
           [resultNote.slice(0, 6000), next != null, next?.toISOString() ?? null, task.id]
         );
+        await pool.query(
+          `INSERT INTO public.luna_task_runs (task_id, ok, result) VALUES ($1, $2, $3)`,
+          [task.id, !deliveryError, resultNote.slice(0, 6000)]
+        ).catch(() => {});
         void logAiUsage({ source: 'luna_scheduler', model: 'claude-sonnet-4-6', inputTokens, outputTokens });
         ran.push({ id: task.id, titulo: task.titulo, ok: !deliveryError, erro: deliveryError ?? undefined });
       } catch (err) {
@@ -142,6 +146,10 @@ export async function GET(req: NextRequest) {
                   enabled = (tipo <> 'once')
             WHERE id = $2`,
           [`ERRO: ${String(err)}`.slice(0, 2000), task.id]
+        ).catch(() => {});
+        await pool.query(
+          `INSERT INTO public.luna_task_runs (task_id, ok, result) VALUES ($1, FALSE, $2)`,
+          [task.id, `ERRO: ${String(err)}`.slice(0, 2000)]
         ).catch(() => {});
         ran.push({ id: task.id, titulo: task.titulo, ok: false, erro: String(err) });
       }
