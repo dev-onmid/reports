@@ -239,6 +239,10 @@ Pendências conhecidas (Fases B/C futuras): rotas do CRM sem validação server-
 
 ### Modal do QR Code de conexão (2026-07-20)
 
+⚠️ **Existem DOIS modais de QR no app** — reformar um não reforma o outro (o Matheus escaneou pelo segundo e viu o layout antigo sem confirmação):
+1. **Disparos → Instâncias** (`disparos/page.tsx`) — status via `POST /api/disparos/clients/test` `{clientId}` → `{connected}`.
+2. **Clientes → [id] → aba Rastreamento** (`clientes/[id]/tracking-tab.tsx`) — status via `GET /api/clients/[id]/tracking/instances/[instId]/status` → `{state}` (`'open'` = conectado; poll também atualiza `statuses` da lista). É o caminho apontado pelo chat do CRM quando a instância cai. Reformado em 2026-07-20 com o MESMO padrão (fases/poll 3s/countdown 40s/auto-close); caso extra: instância já conectada → connect não devolve base64 → cai direto na fase `success` se `statuses[inst.id]==='open'`.
+
 Reforma do modal "Conectar WhatsApp" em Disparos → Instâncias (`disparos/page.tsx`) — antes o QR ficava aberto pra sempre sem detectar a leitura ("fica confuso e não sei", Matheus):
 
 - **Detecção de conexão**: enquanto o QR está na tela, poll de 3s em `POST /api/disparos/clients/test` (rota já existia, nunca era consultada pelo modal). Conectou → fase `success` (check verde + "CONECTADO!" + nome da instância), atualiza `testResult` da lista (linha vira Online sem refresh) e **fecha sozinho em 2,5s**.

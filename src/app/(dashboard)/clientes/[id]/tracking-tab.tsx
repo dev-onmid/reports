@@ -236,7 +236,9 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
   // ── QR ─────────────────────────────────────────────────────────────────
   const [qrInst, setQrInst]   = useState<Instance | null>(null);
   const [qrData, setQrData]   = useState<{ base64?: string; code?: string } | null>(null);
-  const [qrLoading, setQrLoading] = useState(false);
+  // Fases do modal: aguardando leitura → sucesso/erro (fechamento automático)
+  const [qrPhase, setQrPhase] = useState<'loading' | 'qr' | 'success' | 'error'>('loading');
+  const [qrSeconds, setQrSeconds] = useState(40);
 
   // ── Leads ──────────────────────────────────────────────────────────────
   const [leads, setLeads]   = useState<WaLead[]>([]);
@@ -421,17 +423,69 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
     setInstances(prev => prev.map(i => i.id === inst.id ? { ...i, ativo: !i.ativo } : i));
   }
 
-  async function openQr(inst: Instance) {
-    setQrInst(inst); setQrData(null); setQrLoading(true);
-    try { const res = await fetch(`/api/clients/${clientId}/tracking/instances/${inst.id}/connect`); if (res.ok) setQrData(await res.json() as { base64?: string; code?: string }); }
-    finally { setQrLoading(false); }
+  async function fetchQr(inst: Instance) {
+    setQrPhase('loading'); setQrData(null);
+    try {
+      const res = await fetch(`/api/clients/${clientId}/tracking/instances/${inst.id}/connect`);
+      const data = res.ok ? await res.json() as { base64?: string; code?: string } : null;
+      setQrData(data);
+      if (data?.base64) { setQrSeconds(40); setQrPhase('qr'); }
+      else if (statuses[inst.id] === 'open') setQrPhase('success');
+      else setQrPhase('error');
+    } catch {
+      setQrPhase('error');
+    }
   }
 
-  async function refreshQr() {
-    if (!qrInst) return; setQrLoading(true); setQrData(null);
-    try { const res = await fetch(`/api/clients/${clientId}/tracking/instances/${qrInst.id}/connect`); if (res.ok) setQrData(await res.json() as { base64?: string; code?: string }); }
-    finally { setQrLoading(false); }
+  function openQr(inst: Instance) {
+    setQrInst(inst);
+    void fetchQr(inst);
   }
+
+  function refreshQr() {
+    if (qrInst) void fetchQr(qrInst);
+  }
+
+  function closeQr() {
+    setQrInst(null); setQrData(null); setQrPhase('loading');
+  }
+
+  // Enquanto o QR está na tela: poll de status a cada 3s (detecta a leitura),
+  // countdown que renova o QR antes de expirar; sucesso/erro fecham sozinhos.
+  useEffect(() => {
+    if (!qrInst) return;
+
+    if (qrPhase === 'qr') {
+      const instId = qrInst.id;
+      const poll = setInterval(() => {
+        fetch(`/api/clients/${clientId}/tracking/instances/${instId}/status`)
+          .then(r => r.ok ? r.json() as Promise<{ state: string }> : null)
+          .then(d => {
+            if (d?.state) setStatuses(prev => ({ ...prev, [instId]: d.state as ConnState }));
+            if (d?.state === 'open') setQrPhase('success');
+          })
+          .catch(() => { /* rede instável não derruba o modal */ });
+      }, 3000);
+      const tick = setInterval(() => {
+        setQrSeconds(s => {
+          if (s <= 1) { refreshQr(); return 40; }
+          return s - 1;
+        });
+      }, 1000);
+      return () => { clearInterval(poll); clearInterval(tick); };
+    }
+
+    if (qrPhase === 'success') {
+      const t = setTimeout(closeQr, 2500);
+      return () => clearTimeout(t);
+    }
+
+    if (qrPhase === 'error') {
+      const t = setTimeout(closeQr, 5000);
+      return () => clearTimeout(t);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qrInst, qrPhase]);
 
   // ── Stats ──────────────────────────────────────────────────────────────
   const totalLeads = leads.length;
@@ -1058,35 +1112,113 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
 
       {/* ── QR Code Modal ────────────────────────────────────────────────── */}
       {qrInst && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="font-bold text-base">Conectar WhatsApp</h3>
-                <p className="text-xs text-muted-foreground">{qrInst.nome} · {qrInst.instance_id}</p>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4" onClick={closeQr}>
+          <div
+            className="w-full max-w-sm overflow-hidden rounded-[var(--radius)] border border-border bg-card shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Header — faixa verde do design system */}
+            <div className="relative border-b border-border px-5 py-4">
+              <div className="absolute inset-x-0 top-0 h-[3px] bg-primary" />
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius)] bg-primary/15">
+                    <QrCode className="h-4 w-4 text-primary" />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="font-heading font-normal text-2xl uppercase leading-none tracking-wide text-foreground">Conectar WhatsApp</h3>
+                    <p className="text-[11px] text-muted-foreground mt-1 truncate">{qrInst.nome} · {qrInst.instance_id}</p>
+                  </div>
+                </div>
+                <button onClick={closeQr} className="shrink-0 text-muted-foreground transition-colors hover:text-foreground">
+                  <X className="h-5 w-5" />
+                </button>
               </div>
-              <button onClick={() => { setQrInst(null); setQrData(null); }} className="text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>
             </div>
-            <div className="flex flex-col items-center gap-3">
-              {qrLoading ? (
-                <div className="flex h-48 w-48 items-center justify-center rounded-xl border border-border bg-muted/20"><RefreshCw className="h-8 w-8 animate-spin text-muted-foreground/40" /></div>
-              ) : qrData?.base64 ? (
-                <img src={qrData.base64} alt="QR Code WhatsApp" className="h-48 w-48 rounded-xl border border-border object-contain" />
+
+            <div className="px-5 py-5">
+              {qrPhase === 'success' ? (
+                /* ── Sucesso: confirmação + fechamento automático ── */
+                <div className="flex flex-col items-center gap-3 py-10 text-center">
+                  <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/15 ring-4 ring-primary/20">
+                    <Wifi className="h-8 w-8 text-primary" />
+                  </div>
+                  <p className="font-heading text-3xl uppercase leading-none tracking-wide text-foreground">Conectado!</p>
+                  <p className="text-xs text-muted-foreground max-w-[240px]">
+                    O WhatsApp de <span className="font-semibold text-foreground">{qrInst.nome}</span> está pronto pra uso.
+                  </p>
+                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground/60 mt-2">Fechando automaticamente…</p>
+                </div>
+              ) : qrPhase === 'error' ? (
+                /* ── Erro: mensagem clara + fechamento automático ── */
+                <div className="flex flex-col items-center gap-3 py-10 text-center">
+                  <div className="flex h-16 w-16 items-center justify-center rounded-full bg-red-500/15 ring-4 ring-red-500/20">
+                    <WifiOff className="h-8 w-8 text-red-400" />
+                  </div>
+                  <p className="font-heading text-3xl uppercase leading-none tracking-wide text-foreground">Não foi possível</p>
+                  <p className="text-xs text-muted-foreground max-w-[260px]">
+                    O QR Code não veio da Evolution. Verifique se a VPS está no ar e tente de novo.
+                  </p>
+                  <button
+                    onClick={refreshQr}
+                    className="mt-2 flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:border-primary/40"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" /> Tentar de novo
+                  </button>
+                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground/60">Fechando automaticamente…</p>
+                </div>
               ) : (
-                <div className="flex h-48 w-48 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border">
-                  {statuses[qrInst.id] === 'open' ? (
-                    <><Wifi className="h-8 w-8 text-emerald-400" /><p className="text-xs font-bold text-emerald-400">Conectado!</p></>
-                  ) : (
-                    <><WifiOff className="h-8 w-8 text-muted-foreground/40" /><p className="text-xs text-muted-foreground text-center">QR não disponível</p></>
-                  )}
+                /* ── QR na tela (ou carregando) ── */
+                <div className="flex flex-col items-center gap-4">
+                  <div className="relative p-3">
+                    <span className="absolute left-0 top-0 h-6 w-6 border-l-2 border-t-2 border-primary" />
+                    <span className="absolute right-0 top-0 h-6 w-6 border-r-2 border-t-2 border-primary" />
+                    <span className="absolute bottom-0 left-0 h-6 w-6 border-b-2 border-l-2 border-primary" />
+                    <span className="absolute bottom-0 right-0 h-6 w-6 border-b-2 border-r-2 border-primary" />
+                    {qrPhase === 'loading' ? (
+                      <div className="flex h-[228px] w-[228px] items-center justify-center bg-muted/20">
+                        <RefreshCw className="h-9 w-9 animate-spin text-primary/50" />
+                      </div>
+                    ) : (
+                      <div className="bg-white p-2.5">
+                        <img src={qrData?.base64} alt="QR Code WhatsApp" className="h-[208px] w-[208px] object-contain" />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Status ao vivo */}
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    {qrPhase === 'loading' ? (
+                      <span>Gerando QR Code…</span>
+                    ) : (
+                      <>
+                        <span className="relative flex h-2 w-2">
+                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-60" />
+                          <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
+                        </span>
+                        <span>Aguardando leitura · renova em <span className="font-semibold tabular-nums text-foreground">{qrSeconds}s</span></span>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Passo a passo */}
+                  <div className="w-full space-y-1.5 rounded-[var(--radius)] border border-border bg-muted/10 px-4 py-3">
+                    {[
+                      <>Abra o <span className="font-semibold text-foreground">WhatsApp</span> no celular</>,
+                      <>Toque em <span className="font-semibold text-foreground">Aparelhos conectados</span></>,
+                      <>Toque em <span className="font-semibold text-foreground">Conectar aparelho</span> e aponte pra tela</>,
+                    ].map((step, i) => (
+                      <div key={i} className="flex items-center gap-2.5 text-xs text-muted-foreground">
+                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-bold text-primary">{i + 1}</span>
+                        <span>{step}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <p className="text-[10px] text-muted-foreground/60">A tela fecha sozinha assim que a conexão for confirmada.</p>
                 </div>
               )}
-              {qrData?.base64 && <p className="text-center text-xs text-muted-foreground">Abra o WhatsApp → Menu → Dispositivos conectados → Conectar dispositivo</p>}
             </div>
-            <button onClick={refreshQr} disabled={qrLoading} className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-border py-2 text-sm font-semibold hover:bg-muted/50 disabled:opacity-50 transition-colors">
-              <RefreshCw className={cn('h-3.5 w-3.5', qrLoading && 'animate-spin')} />
-              Atualizar QR
-            </button>
           </div>
         </div>
       )}
