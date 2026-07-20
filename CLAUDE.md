@@ -287,6 +287,18 @@ Link público por token pro cliente final acompanhar o próprio funil — padrã
 
 ---
 
+## Radar — tabela com cabeçalho fixo (2026-07-20)
+
+Tabela principal de `/resultados` (`resultados/page.tsx`) ganhou header fixo (pedido do Matheus: em prints da tela, o nome das colunas sumia ao rolar e as métricas ficavam soltas).
+
+- **Scroll interno único** (`max-h-[65vh] overflow-auto` num só div) em vez do antigo `overflow-x-auto` isolado envolvendo a tabela. **Motivo**: por spec do CSS, `overflow-x:auto` força `overflow-y` a computar como `auto` também mesmo sem declarar — isso faz esse div virar seu próprio scroll container vertical (mesmo nunca precisando rolar, já que sua altura é intrínseca ao conteúdo), e o `position:sticky` do thead passa a resolver contra ESSE container (que nunca rola de fato) em vez do scroll real da página → o header "sticky" simplesmente não gruda em nada. Unificar x+y num único `overflow-auto` com altura limitada elimina a ambiguidade: o mesmo div é o scroll container de verdade, então o sticky funciona.
+- **`sticky top-0 z-10 bg-card`** em cada `<th>` (não no `<thead>` — sticky em `thead`/`tr` como grupo tem suporte inconsistente entre navegadores; em `<th>` individual é universal). Fundo **opaco** (`bg-card`, mesma cor do container) é obrigatório — um fundo translúcido tipo `bg-muted/20` deixaria as linhas por baixo "vazando" por trás do header ao rolar.
+- Borda inferior do header via pseudo-elemento `after:absolute after:inset-x-0 after:bottom-0 after:border-b` (sticky conta como "positioned" pro CSS, então o `after:absolute` resolve contra o próprio `<th>` sem precisar de `relative` extra).
+- Tabela agora tem scroll interno limitado a 65% da viewport em vez de esticar a página inteira — nada abaixo dela (não há paginação/rodapé na tabela), então não escondeu nada.
+- ✅ Verificado no preview com 25 clientes mockados: rolando o container interno, o header (CLIENTE/META/RESULTADO/...) permanece fixo no topo enquanto as linhas (ex: "Jato Moto", "Kali Estúdio") passam por baixo.
+
+---
+
 ## Regras e convenções
 
 1. **Limite de 10 s nas rotas API** (Vercel Hobby) — não fazer fan-out pesado em uma única rota.

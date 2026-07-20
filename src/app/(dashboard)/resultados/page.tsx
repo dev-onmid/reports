@@ -398,12 +398,16 @@ export default function ResultadosPage() {
         </span>
       </div>
 
-      {/* ── Table ── */}
+      {/* ── Table ──
+          Cabeçalho fixo: um único container com overflow-auto (x+y) faz o scroll
+          interno da tabela — evitar overflow-x-auto isolado, que por spec do CSS
+          força overflow-y:auto também e quebra o sticky do thead contra o scroll
+          da página (o header "gruda" num scroll-container que nunca rola de fato). */}
       <div className="bg-card border border-border rounded-[var(--radius)] overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="max-h-[65vh] overflow-auto">
           <table className="min-w-[1100px] w-full">
             <thead>
-              <tr className="border-b border-border bg-muted/20">
+              <tr className="border-b border-border">
                 {[
                   { label: 'CLIENTE', info: false },
                   { label: 'META', info: false },
@@ -416,7 +420,7 @@ export default function ResultadosPage() {
                   { label: 'INVESTIMENTO', info: true },
                   { label: '', info: false },
                 ].map((col) => (
-                  <th key={col.label} className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-muted-foreground whitespace-nowrap">
+                  <th key={col.label} className="sticky top-0 z-10 bg-card px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-muted-foreground whitespace-nowrap after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-border">
                     {col.info ? (
                       <span className="flex items-center gap-1">{col.label} <Info className="w-3 h-3 opacity-50" /></span>
                     ) : col.label}
