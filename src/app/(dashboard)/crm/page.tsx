@@ -910,112 +910,102 @@ function KanbanCard({
   }, [menuOpen]);
 
   const style = transform ? { transform: CSS.Translate.toString(transform) } : undefined;
+  // Temperatura vira a borda esquerda do card (sinal visual sem gastar espaço com pill)
+  const tempColor = lead.temperatura ? ({ frio: '#60a5fa', morno: '#f59e0b', quente: '#f87171' } as const)[lead.temperatura] : undefined;
+  const trackingShort = trackingStatus.label === 'Meta Click-to-WhatsApp' ? 'Meta'
+    : trackingStatus.label === 'Link rastreável' ? 'UTM'
+    : trackingStatus.label;
 
   return (
     <div
       ref={isDragOverlay ? undefined : setNodeRef}
-      style={isDragOverlay ? undefined : style}
+      style={{
+        ...(isDragOverlay ? {} : style),
+        ...(tempColor ? { borderLeft: `3px solid ${tempColor}` } : {}),
+      }}
       {...(isDragOverlay ? {} : { ...attributes, ...listeners })}
       onClick={() => !isDragging && onEdit(lead)}
+      title={lead.temperatura ? `Temperatura: ${TEMPERATURE_LABEL[lead.temperatura]}` : undefined}
       className={cn(
-        "group relative rounded-lg border border-border bg-card p-3 shadow-sm hover:border-primary/40 hover:shadow-md transition-all cursor-grab select-none",
+        "group relative rounded-md border border-border bg-card px-2.5 py-2 hover:border-primary/40 hover:shadow-md transition-all cursor-grab select-none",
         isDragging && "opacity-30",
         isDragOverlay && "cursor-grabbing shadow-2xl ring-2 ring-primary/40",
       )}
     >
-      <div className="flex items-start gap-2">
-        <div className="min-w-0 flex-1">
-          <p className="text-xs font-semibold text-foreground truncate">{lead.nome ?? '—'}</p>
-          {lead.numero && <p className="text-[10px] text-muted-foreground mt-0.5">{lead.numero}</p>}
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
+      {/* Ações (aparecem no hover, sobrepostas — não gastam altura) */}
+      <div className="absolute right-1 top-1 z-10 flex items-center gap-0.5 rounded-md bg-card/95 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button
+          type="button"
+          title={lead.time_interno ? 'Remover de time interno' : 'Marcar como time interno'}
+          onPointerDown={e => e.stopPropagation()}
+          onClick={e => { e.stopPropagation(); onToggleInternal(lead); }}
+          className={cn(
+            'flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors',
+            lead.time_interno && 'text-zinc-200',
+          )}
+        >
+          <UserRound className="h-3 w-3" />
+        </button>
+        <div className="relative" ref={menuRef}>
           <button
-            type="button"
-            title={lead.time_interno ? 'Remover de time interno' : 'Marcar como time interno'}
             onPointerDown={e => e.stopPropagation()}
-            onClick={e => { e.stopPropagation(); onToggleInternal(lead); }}
-            className={cn(
-              'flex h-6 w-6 items-center justify-center rounded-md border transition-all',
-              lead.time_interno
-                ? 'border-zinc-400/30 bg-zinc-500/20 text-zinc-200'
-                : 'border-transparent text-muted-foreground opacity-0 hover:border-border hover:bg-muted hover:text-foreground group-hover:opacity-100',
-            )}
+            onClick={e => { e.stopPropagation(); setMenuOpen(v => !v); }}
+            className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
           >
-            <UserRound className="h-3.5 w-3.5" />
+            <MoreVertical className="h-3 w-3" />
           </button>
-          <div className="relative" ref={menuRef}>
-            <button
-              onPointerDown={e => e.stopPropagation()}
-              onClick={e => { e.stopPropagation(); setMenuOpen(v => !v); }}
-              className="opacity-0 group-hover:opacity-100 h-5 w-5 flex items-center justify-center rounded text-muted-foreground hover:text-foreground transition-all"
-            >
-              <MoreVertical className="h-3.5 w-3.5" />
-            </button>
-            {menuOpen && (
-              <div className="absolute right-0 top-6 z-50 min-w-[130px] rounded-lg border border-border bg-popover shadow-xl py-1">
-                <button onClick={e => { e.stopPropagation(); setMenuOpen(false); onEdit(lead); }}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-xs hover:bg-muted transition-colors">
-                  <Pencil className="h-3.5 w-3.5" /> Editar
-                </button>
-                <button onClick={e => { e.stopPropagation(); setMenuOpen(false); onDelete(lead.id); }}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 transition-colors">
-                  <Trash2 className="h-3.5 w-3.5" /> Excluir
-                </button>
-              </div>
-            )}
-          </div>
+          {menuOpen && (
+            <div className="absolute right-0 top-6 z-50 min-w-[130px] rounded-lg border border-border bg-popover shadow-xl py-1">
+              <button onClick={e => { e.stopPropagation(); setMenuOpen(false); onEdit(lead); }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-xs hover:bg-muted transition-colors">
+                <Pencil className="h-3.5 w-3.5" /> Editar
+              </button>
+              <button onClick={e => { e.stopPropagation(); setMenuOpen(false); onDelete(lead.id); }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 transition-colors">
+                <Trash2 className="h-3.5 w-3.5" /> Excluir
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
-      <div className="flex items-center gap-1.5 mt-2.5">
-        {channels.slice(0, 3).map(ch => (
-          <span key={ch.id} className={cn('inline-flex h-5 w-5 items-center justify-center rounded-full text-white ring-1 ring-white/10', ch.bg)}>
+      {/* Linha 1: nome + valor */}
+      <div className="flex items-center gap-1.5">
+        <p className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">{lead.nome ?? lead.numero ?? '—'}</p>
+        {value > 0 && <span className="shrink-0 text-[10px] font-bold text-primary">{fmtN(lead.valor_rs)}</span>}
+      </div>
+
+      {/* Linha 2: número + data */}
+      <div className="mt-0.5 flex items-center justify-between gap-2">
+        <p className="min-w-0 truncate text-[10px] text-muted-foreground">{lead.numero ?? '—'}</p>
+        <span className="shrink-0 text-[9px] text-muted-foreground/70">{fmtD(lead.data ?? lead.created_at)}</span>
+      </div>
+
+      {/* Linha 3: canal + pills essenciais (uma linha só, truncada) */}
+      <div className="mt-1.5 flex items-center gap-1 overflow-hidden">
+        {channels.slice(0, 2).map(ch => (
+          <span key={ch.id} className={cn('inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-white ring-1 ring-white/10 [&_svg]:h-2.5 [&_svg]:w-2.5', ch.bg)} title={origin.label}>
             {ch.icon}
           </span>
         ))}
-        <div className="ml-auto flex items-center gap-1.5">
+        <span
+          className={cn('inline-flex shrink-0 rounded px-1 py-px text-[8px] font-bold leading-tight', trackingStatus.className)}
+          title={`${trackingStatus.label}: ${trackingStatus.detail}`}
+        >
+          {trackingShort}
+        </span>
+        <span className="inline-flex min-w-0 items-center gap-0.5 truncate rounded bg-primary/10 px-1 py-px text-[8px] font-semibold leading-tight text-primary" title={aiTag}>
+          <Sparkles className="h-2 w-2 shrink-0" />
+          <span className="truncate">{aiTag}</span>
+        </span>
+        <div className="ml-auto flex shrink-0 items-center gap-1">
           {lead.time_interno && (
-            <span className="rounded-full bg-zinc-500/15 px-1.5 py-0.5 text-[9px] font-bold text-zinc-300">Time Interno</span>
-          )}
-          {lead.temperatura && (
-            <span className={cn('rounded-full border px-1.5 py-0.5 text-[9px] font-bold', temperatureBadgeClass(lead.temperatura))}>
-              {TEMPERATURE_LABEL[lead.temperatura]}
-            </span>
+            <span className="rounded bg-zinc-500/15 px-1 py-px text-[8px] font-bold leading-tight text-zinc-300">Interno</span>
           )}
           <FollowupBadge active={!!hasActiveFollowup} />
           {lead.fechou && (
-            <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-bold text-emerald-400">Fechou</span>
+            <span className="rounded bg-emerald-500/15 px-1 py-px text-[8px] font-bold leading-tight text-emerald-400">Fechou</span>
           )}
-          {value > 0 && (
-            <span className="text-[10px] font-bold text-primary">{fmtN(lead.valor_rs)}</span>
-          )}
-        </div>
-      </div>
-
-      <div className="flex items-center justify-between mt-2 pt-2 border-t border-border/30">
-        <span className="text-[10px] text-muted-foreground">{fmtD(lead.data ?? lead.created_at)}</span>
-        <div className="ml-2 flex min-w-0 flex-wrap items-center justify-end gap-1">
-          <span
-            className="inline-flex max-w-[110px] items-center gap-1 truncate rounded-full border border-border bg-muted/30 px-1.5 py-0.5 text-[9px] font-semibold text-muted-foreground"
-            title={origin.label}
-          >
-            {origin.channels[0] && (
-              <span className={cn('inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full text-white', origin.channels[0].bg)}>
-                {origin.channels[0].icon}
-              </span>
-            )}
-            <span className="truncate">{origin.label}</span>
-          </span>
-          <span
-            className={cn('inline-flex max-w-[90px] truncate rounded-full border px-1.5 py-0.5 text-[9px] font-semibold', trackingStatus.className)}
-            title={`${trackingStatus.label}: ${trackingStatus.detail}`}
-          >
-            {trackingStatus.label === 'Meta Click-to-WhatsApp' ? 'Meta' : trackingStatus.label === 'Link rastreável' ? 'UTM' : trackingStatus.label}
-          </span>
-          <span className="inline-flex max-w-[115px] items-center gap-1 truncate rounded-full border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[9px] font-semibold text-primary" title={aiTag}>
-            <Sparkles className="h-2.5 w-2.5 shrink-0" />
-            <span className="truncate">{aiTag}</span>
-          </span>
         </div>
       </div>
     </div>
@@ -1039,23 +1029,22 @@ function KanbanColumn({
   const total = leads.reduce((s, l) => s + toMoneyNumber(l.valor_rs), 0);
 
   return (
-    <div className="flex flex-col w-[255px] shrink-0">
-      <div className="rounded-t-xl border border-b-0 border-border bg-card px-3 py-2.5" style={{ borderTop: `3px solid ${color}` }}>
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-[11px] font-bold text-foreground leading-tight">{status}</span>
-          <span className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold leading-none" style={{ background: `${color}25`, color }}>
+    <div className="flex max-h-full w-[232px] shrink-0 flex-col">
+      <div className="shrink-0 rounded-t-lg border border-b-0 border-border bg-card px-2.5 py-1.5" style={{ borderTop: `3px solid ${color}` }}>
+        <div className="flex items-center gap-1.5">
+          <span className="min-w-0 truncate text-[11px] font-bold text-foreground leading-tight" title={status}>{status}</span>
+          <span className="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none" style={{ background: `${color}25`, color }}>
             {leads.length}
           </span>
+          <span className="ml-auto shrink-0 text-[9px] font-semibold text-muted-foreground">{total > 0 ? formatCurrencyBRL(total) : ''}</span>
         </div>
-        <p className="text-[10px] text-muted-foreground mt-0.5">{total > 0 ? formatCurrencyBRL(total) : 'R$ 0'}</p>
       </div>
       <div
         ref={setNodeRef}
         className={cn(
-          "flex flex-col gap-2 rounded-b-xl border border-t-0 border-border bg-muted/10 p-2 overflow-y-auto transition-colors",
+          "flex flex-1 min-h-[90px] flex-col gap-1.5 rounded-b-lg border border-t-0 border-border bg-muted/10 p-1.5 overflow-y-auto transition-colors",
           isOver && "bg-primary/5 border-primary/30",
         )}
-        style={{ maxHeight: 'calc(100vh - 400px)', minHeight: 100 }}
       >
         {leads.map(lead => (
           <KanbanCard
@@ -1123,7 +1112,7 @@ function KanbanView({
 
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-      <div className="flex gap-3 overflow-x-auto pb-4 min-h-0 flex-1" style={{ alignItems: 'flex-start' }}>
+      <div className="flex h-full min-h-0 flex-1 items-stretch gap-2.5 overflow-x-auto pb-1">
         {stages.map(stage => (
           <KanbanColumn
             key={stage.label}
@@ -2140,10 +2129,9 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
   const menuRef = useRef<HTMLDivElement>(null);
   const dateMenuRef = useRef<HTMLDivElement>(null);
   const [chatFocusLeadId, setChatFocusLeadId] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'list' | 'kanban'>(() => {
-    if (typeof window === 'undefined') return 'kanban';
-    return (localStorage.getItem('crm:view-mode') as 'list' | 'kanban' | null) ?? 'kanban';
-  });
+  // Kanban é SEMPRE a visão padrão ao entrar no CRM (pedido do Matheus) —
+  // o toggle pra lista vale só durante a sessão, sem persistir.
+  const [viewMode, setViewMode] = useState<'list' | 'kanban'>('kanban');
   const [crmView, setCrmView] = useState<CrmTab>(() => {
     if (typeof window === 'undefined') return 'leads';
     const v = localStorage.getItem('crm:tab');
@@ -2262,10 +2250,6 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
       // Browser storage can be unavailable in private mode.
     }
   }, [clientId, visibleColumnKeys]);
-
-  useEffect(() => {
-    try { localStorage.setItem('crm:view-mode', viewMode); } catch { /* ignore */ }
-  }, [viewMode]);
 
   useEffect(() => {
     try { if (clientId) localStorage.setItem('crm:last-client', clientId); } catch { /* ignore */ }
@@ -3099,51 +3083,35 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
       </div>
       )}
 
-      {/* ── STATS ───────────────────────────────────────────────────── */}
+      {/* ── STATS (faixa única compacta — o espaço vertical é do funil) ── */}
       {clientId && !loading && leads.length > 0 && crmView === 'leads' && (
-        <div className="shrink-0 space-y-4">
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-            {([
-              { label: 'TOTAL', sub: 'leads no funil', value: stats.total.toLocaleString('pt-BR'), Icon: Users, color: '#8b5cf6' },
-              { label: 'COMPROU', sub: 'novo fechamento', value: stats.fechamentos.toLocaleString('pt-BR'), Icon: HeartHandshake, color: '#10b981' },
-              { label: 'FATURAMENTO', sub: 'valor em comprou', value: formatCurrencyBRL(stats.faturamento), Icon: CircleDollarSign, color: '#7c3aed' },
-            ] as const).map(({ label, sub, value, Icon, color }) => (
-              <div
-                key={label}
-                className="flex min-h-[92px] items-center gap-4 rounded-xl border bg-card px-5 py-5"
-                style={{ borderColor: `${color}45` }}
-              >
-                <div
-                  className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl"
-                  style={{ background: `${color}20` }}
-                >
-                  <Icon className="h-6 w-6" style={{ color }} />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
-                  <p className="font-heading text-3xl leading-none">{value}</p>
-                  <p className="text-xs text-muted-foreground">{sub}</p>
-                </div>
+        <div className="shrink-0 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-border bg-card px-4 py-2.5">
+          {([
+            { label: 'leads no funil', value: stats.total.toLocaleString('pt-BR'), Icon: Users, color: '#8b5cf6' },
+            { label: 'comprou', value: stats.fechamentos.toLocaleString('pt-BR'), Icon: HeartHandshake, color: '#10b981' },
+            { label: 'faturamento', value: formatCurrencyBRL(stats.faturamento), Icon: CircleDollarSign, color: '#7c3aed' },
+          ] as const).map(({ label, value, Icon, color }) => (
+            <div key={label} className="flex items-center gap-2">
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg" style={{ background: `${color}20` }}>
+                <Icon className="h-4 w-4" style={{ color }} />
               </div>
-            ))}
-          </div>
-
-          <div className="grid grid-cols-3 gap-3">
+              <div className="flex items-baseline gap-1.5">
+                <span className="font-heading text-xl leading-none">{value}</span>
+                <span className="text-[11px] text-muted-foreground">{label}</span>
+              </div>
+            </div>
+          ))}
+          <div className="hidden h-6 w-px bg-border sm:block" />
+          <div className="flex items-center gap-4">
             {([
-              { label: 'Frio', value: stats.frios, color: '#60a5fa', sub: 'baixa resposta' },
-              { label: 'Morno', value: stats.mornos, color: '#f59e0b', sub: 'interesse ativo' },
-              { label: 'Quente', value: stats.quentes, color: '#f87171', sub: 'alta intenção' },
+              { label: 'Frio', value: stats.frios, color: '#60a5fa' },
+              { label: 'Morno', value: stats.mornos, color: '#f59e0b' },
+              { label: 'Quente', value: stats.quentes, color: '#f87171' },
             ] as const).map(item => (
-              <div
-                key={item.label}
-                className="rounded-xl border bg-card px-4 py-3"
-                style={{ borderColor: `${item.color}45` }}
-              >
-                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{item.label}</p>
-                <p className="font-heading text-2xl leading-none" style={{ color: item.color }}>
-                  {item.value.toLocaleString('pt-BR')}
-                </p>
-                <p className="text-[11px] text-muted-foreground">{item.sub}</p>
+              <div key={item.label} className="flex items-baseline gap-1.5" title={item.label}>
+                <span className="h-2 w-2 shrink-0 self-center rounded-full" style={{ background: item.color }} />
+                <span className="font-heading text-xl leading-none" style={{ color: item.color }}>{item.value.toLocaleString('pt-BR')}</span>
+                <span className="text-[11px] text-muted-foreground">{item.label.toLowerCase()}</span>
               </div>
             ))}
           </div>
@@ -3314,9 +3282,9 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
             </div>
           )}
 
-          {/* Kanban view */}
+          {/* Kanban view — as colunas ocupam toda a altura; o scroll vertical é POR coluna */}
           {viewMode === 'kanban' && (
-            <div className="overflow-auto flex-1 min-h-0 p-3">
+            <div className="flex flex-1 min-h-0 flex-col overflow-hidden p-2.5">
               <KanbanView
                 leads={kanbanLeads}
                 stages={stages}

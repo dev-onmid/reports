@@ -237,6 +237,17 @@ Os dois maiores incômodos históricos do CRM, corrigidos juntos:
 
 Pendências conhecidas (Fases B/C futuras): rotas do CRM sem validação server-side (34 rotas — por isso o acesso do cliente é via portal por token, NUNCA login Visualizador); escala (DDL+full-scan de `ensureCrmMessagesSchema` em todo GET/poll de 8s, GET de leads sem paginação, pool novo por request); limite diário de IA é só aviso; código morto (`crm_contacts`+rotas, `ClientCrmTab` nunca montado, `crm/tags/[id]/assign`, branch `?since=`); polling 5s/8s e conversas >3d sem poll.
 
+### Kanban denso + visão padrão (2026-07-19)
+
+Reforma de densidade do funil (reclamação do Matheus: "box grandes demais, pouco espaço para ver o lead") em `crm/page.tsx`:
+
+- **Kanban é SEMPRE a visão padrão** ao entrar no CRM: `viewMode` inicia `'kanban'` fixo; a persistência em `localStorage('crm:view-mode')` foi removida (toggle pra Lista vale só na sessão).
+- **Stats viraram uma faixa única** (leads no funil / comprou / faturamento + frio/morno/quente com dots coloridos, ~48px) no lugar dos DOIS grids de cards de 92px — o espaço vertical é do funil.
+- **Card compacto (~73px, era ~150px)**: linha 1 nome+valor, linha 2 número+data, linha 3 pills mínimas (canal, rastreio Meta/UTM, tag IA, Interno/follow-up/Fechou em text-[8px]). **Temperatura = borda esquerda colorida de 3px** (frio azul/morno âmbar/quente vermelho, title no hover) em vez de pill. Ações (time interno + menu ⋮) viraram overlay absoluto que só aparece no hover — não gastam altura.
+- **Colunas 232px** (era 255px) com cabeçalho de UMA linha (label+count+R$ total inline) e corpo `flex-1` com scroll interno: o wrapper do Kanban é `overflow-hidden` e o `KanbanView` `h-full items-stretch` — as colunas esticam até o fim da viewport (antes: `maxHeight: calc(100vh-400px)` fixo). Scroll vertical é POR COLUNA; horizontal no board.
+- DnD (dnd-kit) intocado — só classes/estrutura visual.
+- ✅ Verificado no preview com fetch mockado (24 leads, 6 etapas): densidade ~2x, colunas cheias, lista intacta, stats corretos. ⚠️ No preview, mock de `window.fetch` no mundo isolado quebra o fetch RSC do Next (`input.url` undefined → "Falling back to browser navigation") — navegação SPA vira MPA e derruba o mock; validar sempre re-injetando após o load e disparando `window.dispatchEvent(new Event('clients-updated'))` pra recarregar clientes sem remount.
+
 ### Histórico mensal de custo de IA (2026-07-19)
 
 Aba "Uso IA" em Configurações reformada pra virar histórico navegável por mês — feita pra REPASSAR o custo ao cliente (pedido do Matheus: "ver até de meses anteriores").
