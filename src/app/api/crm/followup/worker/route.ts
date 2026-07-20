@@ -4,13 +4,17 @@ import { getClientInstance, sendFollowupMessage, interpolate } from '@/lib/follo
 import type { FollowupVars } from '@/lib/followup-send';
 
 // Chamado pelo cron do GitHub Actions (.github/workflows/crm-followup-worker.yml)
-// a cada 5 min. Aceita o CRON_SECRET global OU o CRM_CRON_SECRET dedicado —
+// a cada 5 min. Aceita o CRON_SECRET global OU os secrets alternativos legíveis —
 // o CRON_SECRET da Vercel é "Sensitive" (write-only, ninguém consegue ler o
-// valor de volta), então este worker novo usa um secret próprio conhecido,
-// sem precisar rotacionar o global (o que quebraria os outros 6 crons).
+// valor de volta), então crons novos usam um secret conhecido, sem rotacionar
+// o global. REPORTS_CRON_SECRET já existe pro mesmo fim (cron-monthly usa).
 export async function GET(request: NextRequest) {
   const secret = request.nextUrl.searchParams.get('secret');
-  const expected = [process.env.CRON_SECRET, process.env.CRM_CRON_SECRET].filter(Boolean);
+  const expected = [
+    process.env.CRON_SECRET,
+    process.env.CRM_CRON_SECRET,
+    process.env.REPORTS_CRON_SECRET,
+  ].filter(Boolean);
   if (!secret || !expected.includes(secret)) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
