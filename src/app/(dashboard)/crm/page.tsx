@@ -3085,7 +3085,7 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
 
       {/* ── STATS (faixa única compacta — o espaço vertical é do funil) ── */}
       {clientId && !loading && leads.length > 0 && crmView === 'leads' && (
-        <div className="shrink-0 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-border bg-card px-4 py-2.5">
+        <div className="shrink-0 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 rounded-xl border border-border bg-card px-6 py-2.5">
           {([
             { label: 'leads no funil', value: stats.total.toLocaleString('pt-BR'), Icon: Users, color: '#8b5cf6' },
             { label: 'comprou', value: stats.fechamentos.toLocaleString('pt-BR'), Icon: HeartHandshake, color: '#10b981' },
@@ -3101,20 +3101,17 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
               </div>
             </div>
           ))}
-          <div className="hidden h-6 w-px bg-border sm:block" />
-          <div className="flex items-center gap-4">
-            {([
-              { label: 'Frio', value: stats.frios, color: '#60a5fa' },
-              { label: 'Morno', value: stats.mornos, color: '#f59e0b' },
-              { label: 'Quente', value: stats.quentes, color: '#f87171' },
-            ] as const).map(item => (
-              <div key={item.label} className="flex items-baseline gap-1.5" title={item.label}>
-                <span className="h-2 w-2 shrink-0 self-center rounded-full" style={{ background: item.color }} />
-                <span className="font-heading text-xl leading-none" style={{ color: item.color }}>{item.value.toLocaleString('pt-BR')}</span>
-                <span className="text-[11px] text-muted-foreground">{item.label.toLowerCase()}</span>
-              </div>
-            ))}
-          </div>
+          {([
+            { label: 'frio', value: stats.frios, color: '#60a5fa' },
+            { label: 'morno', value: stats.mornos, color: '#f59e0b' },
+            { label: 'quente', value: stats.quentes, color: '#f87171' },
+          ] as const).map(item => (
+            <div key={item.label} className="flex items-baseline gap-1.5" title={item.label}>
+              <span className="h-2 w-2 shrink-0 self-center rounded-full" style={{ background: item.color }} />
+              <span className="font-heading text-xl leading-none" style={{ color: item.color }}>{item.value.toLocaleString('pt-BR')}</span>
+              <span className="text-[11px] text-muted-foreground">{item.label}</span>
+            </div>
+          ))}
         </div>
       )}
 
