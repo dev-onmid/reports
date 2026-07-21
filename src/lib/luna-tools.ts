@@ -101,6 +101,34 @@ function fmtBrt(d: Date | string | null | undefined): string {
   return date.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+// ─── Instância de envio FIXA da Luna ─────────────────────────────────────────
+// A Luna NUNCA escolhe por onde enviar WhatsApp: usa exclusivamente a instância
+// configurada em system_settings['luna_zapi_client_id'] (delegável pela UI de
+// Agendamentos). Sem config, cai na instância de TESTE (name com "test"). Se
+// nada existir, NÃO envia — jamais usa outra instância como fallback.
+export type LunaSendInstance = { id: string; name: string; instance_id: string; token: string; security_token: string | null };
+
+export async function getLunaSendInstance(pool: ReturnType<typeof makeServerPool>): Promise<LunaSendInstance | null> {
+  await pool.query(`CREATE TABLE IF NOT EXISTS public.system_settings (
+    key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_by TEXT
+  )`).catch(() => {});
+  const { rows: cfg } = await pool.query(`SELECT value FROM public.system_settings WHERE key = 'luna_zapi_client_id'`).catch(() => ({ rows: [] as { value: string }[] }));
+  const configuredId = cfg[0]?.value?.trim();
+  if (configuredId) {
+    const { rows } = await pool.query(
+      `SELECT id, name, instance_id, token, security_token FROM public.zapi_clients WHERE id = $1 AND active = TRUE`,
+      [configuredId]
+    ).catch(() => ({ rows: [] as LunaSendInstance[] }));
+    return rows[0] ?? null; // configurada mas inativa/apagada → não envia (engessado)
+  }
+  const { rows } = await pool.query(
+    `SELECT id, name, instance_id, token, security_token FROM public.zapi_clients
+      WHERE active = TRUE AND COALESCE(provider,'zapi') <> 'evolution' AND name ILIKE '%test%'
+      ORDER BY created_at ASC LIMIT 1`
+  ).catch(() => ({ rows: [] as LunaSendInstance[] }));
+  return rows[0] ?? null;
+}
+
 // ─── Google Ads (busca robusta) ──────────────────────────────────────────────
 // Espelha o padrão comprovado do Radar/Otimizador: token via fetch cru com
 // fallback (resolveGoogleToken — NUNCA googleapis.refreshAccessToken, que falha
@@ -751,8 +779,7 @@ A ferramenta busca automaticamente os IDs de cidades e interesses na API Meta, v
         hora: { type: 'string', description: 'Para recorrente: horário HH:MM (Brasília, padrão 09:00)' },
         dia_semana: { type: 'number', description: 'Para weekly: 0=domingo, 1=segunda ... 6=sábado' },
         dia_mes: { type: 'number', description: 'Para monthly: dia do mês 1-28' },
-        whatsapp_phone: { type: 'string', description: 'Número WhatsApp com DDI para receber o resultado (opcional)' },
-        zapi_client_id: { type: 'string', description: 'Conexão Z-API para envio (use list_zapi_clients; opcional se só uma ativa)' },
+        whatsapp_phone: { type: 'string', description: 'Número WhatsApp com DDI para receber o resultado (opcional). O ENVIO sai sempre pela instância fixa configurada pelo administrador — você não escolhe a instância.' },
         permitir_acoes: { type: 'boolean', description: 'true APENAS se a tarefa executa ações (pausar campanha, mover lead). false para tarefas de análise/relatório (padrão)' },
       },
       required: ['titulo', 'instrucao', 'tipo'],
@@ -2267,9 +2294,9 @@ export async function execSystemTool(
 
     // ── Pacote D: agendamento ───────────────────────────────────────────────
     if (name === 'schedule_luna_task') {
-      const { titulo, instrucao, tipo, run_at, em_minutos, hora, dia_semana, dia_mes, whatsapp_phone, zapi_client_id, permitir_acoes } = input as {
+      const { titulo, instrucao, tipo, run_at, em_minutos, hora, dia_semana, dia_mes, whatsapp_phone, permitir_acoes } = input as {
         titulo: string; instrucao: string; tipo: string; run_at?: string; em_minutos?: number; hora?: string;
-        dia_semana?: number; dia_mes?: number; whatsapp_phone?: string; zapi_client_id?: string; permitir_acoes?: boolean;
+        dia_semana?: number; dia_mes?: number; whatsapp_phone?: string; permitir_acoes?: boolean;
       };
       if (!['once', 'daily', 'weekly', 'monthly'].includes(tipo)) return 'tipo deve ser once, daily, weekly ou monthly.';
       // Tempo relativo ("daqui a 30 min"): o SERVIDOR calcula — imune a erro de fuso/relógio da IA.
@@ -2279,13 +2306,17 @@ export async function execSystemTool(
       if (!nextRun) return tipo === 'once' ? 'Para tarefa única, informe em_minutos (relativo) ou run_at no formato YYYY-MM-DD HH:MM (horário de Brasília).' : 'Não consegui calcular a próxima execução — confira hora/dia_semana/dia_mes.';
       if (nextRun.getTime() < Date.now() - 60_000) return `run_at está no passado (${fmtBrt(nextRun)}). Informe uma data futura.`;
       await ensureLunaTasksTable(pool);
+      const sendInst = whatsapp_phone ? await getLunaSendInstance(pool) : null;
+      if (whatsapp_phone && !sendInst) {
+        return '❌ Não agendei: nenhuma instância de envio configurada pra Luna (o administrador precisa definir em Luna → Agendamentos → Instância de envio). Sem ela, o WhatsApp não seria entregue.';
+      }
       const { rows } = await pool.query(
         `INSERT INTO public.luna_tasks (titulo, instrucao, tipo, hora, dia_semana, dia_mes, whatsapp_phone, zapi_client_id, permitir_acoes, next_run_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
-        [titulo, instrucao, tipo, hora ?? null, dia_semana ?? null, dia_mes ?? null, whatsapp_phone ?? null, zapi_client_id ?? null, permitir_acoes === true, nextRun.toISOString()]
+        [titulo, instrucao, tipo, hora ?? null, dia_semana ?? null, dia_mes ?? null, whatsapp_phone ?? null, null, permitir_acoes === true, nextRun.toISOString()]
       );
       const recorrencia = tipo === 'once' ? 'única' : tipo === 'daily' ? 'diária' : tipo === 'weekly' ? 'semanal' : 'mensal';
-      return `✅ Tarefa agendada!\nTítulo: ${titulo}\nRecorrência: ${recorrencia}\nPróxima execução: ${fmtBrt(nextRun)} (Brasília)\n${whatsapp_phone ? `Resultado será enviado no WhatsApp ${whatsapp_phone}` : 'Resultado ficará salvo (veja com list_luna_tasks)'}\nID: ${rows[0].id}`;
+      return `✅ Tarefa agendada!\nTítulo: ${titulo}\nRecorrência: ${recorrencia}\nPróxima execução: ${fmtBrt(nextRun)} (Brasília)\n${whatsapp_phone ? `Resultado será enviado no WhatsApp ${whatsapp_phone} pela instância "${sendInst!.name}"` : 'Resultado ficará salvo (veja com list_luna_tasks)'}\nID: ${rows[0].id}`;
     }
 
     if (name === 'list_luna_tasks') {

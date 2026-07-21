@@ -5,7 +5,7 @@ import { sendText } from '@/lib/zapi';
 import { logAiUsage } from '@/lib/ai-usage-logger';
 import {
   getInstructions, systemTools, execSystemTool,
-  ensureLunaTasksTable, computeNextRun,
+  ensureLunaTasksTable, computeNextRun, getLunaSendInstance,
 } from '@/lib/luna-tools';
 
 // Agendador da Luna — executa tarefas de public.luna_tasks sem usuário presente.
@@ -85,11 +85,11 @@ async function runHeadlessAgent(task: LunaTask): Promise<{ text: string; inputTo
 
 async function deliverWhatsApp(pool: ReturnType<typeof makeServerPool>, task: LunaTask, text: string): Promise<string | null> {
   if (!task.whatsapp_phone) return null;
-  const { rows } = task.zapi_client_id
-    ? await pool.query(`SELECT instance_id, token, security_token FROM public.zapi_clients WHERE id = $1`, [task.zapi_client_id])
-    : await pool.query(`SELECT instance_id, token, security_token FROM public.zapi_clients WHERE active = TRUE AND COALESCE(provider,'zapi') <> 'evolution' ORDER BY created_at ASC LIMIT 1`);
-  const inst = rows[0] as { instance_id: string; token: string; security_token: string | null } | undefined;
-  if (!inst) return 'sem conexão Z-API disponível';
+  // ENGESSADO: sempre a instância fixa da Luna (config em system_settings, padrão
+  // instância de teste). O zapi_client_id da tarefa é ignorado de propósito —
+  // nunca enviar pelo número de outra instância.
+  const inst = await getLunaSendInstance(pool);
+  if (!inst) return 'nenhuma instância de envio configurada pra Luna (defina em Luna → Agendamentos)';
   const r = await sendText(
     { instanceId: inst.instance_id, token: inst.token, clientToken: inst.security_token ?? undefined },
     task.whatsapp_phone,

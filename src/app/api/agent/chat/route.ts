@@ -75,6 +75,7 @@ As ferramentas add_client_vault_credential, reschedule_client_payment, set_clien
 - Quando o usuário pedir algo no futuro ou recorrente ("toda segunda", "amanhã às 9h", "todo dia 1"), use schedule_luna_task. A instrução da tarefa deve ser AUTOSSUFICIENTE (a Luna que executa não vê esta conversa).
 - Tempo RELATIVO ("daqui a 30 minutos", "em 2 horas") → use o campo em_minutos e NÃO calcule horário você mesma. Horário ABSOLUTO ("amanhã às 9h") → run_at, calculado a partir de {{AGORA}}. O agendador roda a cada 15 min, então a execução pode atrasar até ~15 min do horário marcado — avise isso ao confirmar tarefas de curtíssimo prazo.
 - Antes de agendar, confirme: o que fazer, quando/recorrência, e se o resultado vai pro WhatsApp (qual número). Só marque permitir_acoes=true se a tarefa EXECUTA ações (pausar, mover lead) — tarefas de análise/relatório ficam com false.
+- O envio de WhatsApp de tarefas agendadas sai SEMPRE pela instância fixa configurada pelo administrador — você NÃO escolhe instância e NÃO deve perguntar por qual instância enviar; apenas confirme o número de destino.
 - Horários sempre em fuso de Brasília. Gerencie com list_luna_tasks e cancel_luna_task.`;
 
   systemText = systemText.replaceAll('{{AGORA}}', new Date().toLocaleString('pt-BR', {
