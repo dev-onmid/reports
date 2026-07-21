@@ -238,6 +238,30 @@ export type InstagramPeriodMetrics = {
 //   {from,to} → intervalo explícito (ano passado, personalizado, etc.)
 export type CompareOverride = { from: string; to: string } | null | undefined;
 
+// Período anterior AUTOMÁTICO. Se [from,to] for exatamente um mês-calendário cheio
+// (ex.: 01/07 a 31/07), o anterior é o mês-calendário anterior COMPLETO (junho) —
+// e não uma janela de N dias corridos, que para meses de 31 dias cairia em maio e
+// rotularia o comparativo errado. Fora de mês cheio (ex.: "últimos 30 dias"),
+// mantém a janela imediatamente anterior de mesma duração.
+export function autoPreviousPeriod(from: string, to: string): { from: string; to: string } {
+  const fmt = (d: Date) => d.toISOString().split('T')[0];
+  const d1 = new Date(from + 'T00:00:00Z');
+  const d2 = new Date(to + 'T00:00:00Z');
+  const isFirst = d1.getUTCDate() === 1;
+  const lastDayOfEndMonth = new Date(Date.UTC(d2.getUTCFullYear(), d2.getUTCMonth() + 1, 0)).getUTCDate();
+  const isLast = d2.getUTCDate() === lastDayOfEndMonth;
+  const sameMonth = d1.getUTCFullYear() === d2.getUTCFullYear() && d1.getUTCMonth() === d2.getUTCMonth();
+  if (isFirst && isLast && sameMonth) {
+    const prevFirst = new Date(Date.UTC(d1.getUTCFullYear(), d1.getUTCMonth() - 1, 1));
+    const prevLast  = new Date(Date.UTC(d1.getUTCFullYear(), d1.getUTCMonth(), 0));
+    return { from: fmt(prevFirst), to: fmt(prevLast) };
+  }
+  const durationMs = d2.getTime() - d1.getTime() + 86400000;
+  const prevTo = new Date(d1.getTime() - 86400000);
+  const prevFrom = new Date(prevTo.getTime() - durationMs + 86400000);
+  return { from: fmt(prevFrom), to: fmt(prevTo) };
+}
+
 export type ParsedData = {
   ativos:          number;
   inativos:        number;
@@ -1792,16 +1816,9 @@ export async function fetchInstagramData(
   // combo is invalid. In v21, reach works with period=day without metric_type, while
   // the other profile metrics use metric_type=total_value. "impressions" is deprecated
   // for many IG accounts; "views" is the current replacement.
-  const dateOnly = (date: Date) => date.toISOString().slice(0, 10);
-  const rangeStart = new Date(from + 'T00:00:00Z');
-  const selectedDays = Math.max(1, Math.round((new Date(to + 'T00:00:00Z').getTime() - rangeStart.getTime()) / 86400000) + 1);
-  const previousEnd = new Date(rangeStart);
-  previousEnd.setUTCDate(previousEnd.getUTCDate() - 1);
-  const previousStart = new Date(previousEnd);
-  previousStart.setUTCDate(previousStart.getUTCDate() - selectedDays + 1);
-
   // Janela de comparação: override explícito vence; null desliga o comparativo;
-  // undefined mantém a janela automática (mesma duração imediatamente anterior).
+  // undefined mantém a janela automática (mês-calendário anterior quando o período
+  // é um mês cheio; senão, mesma duração imediatamente anterior).
   let compareFrom: string | null;
   let compareTo: string | null;
   if (compare === null) {
@@ -1809,7 +1826,8 @@ export async function fetchInstagramData(
   } else if (compare) {
     compareFrom = compare.from; compareTo = compare.to;
   } else {
-    compareFrom = dateOnly(previousStart); compareTo = dateOnly(previousEnd);
+    const auto = autoPreviousPeriod(from, to);
+    compareFrom = auto.from; compareTo = auto.to;
   }
 
   function makePeriodChunks(periodFrom: string, periodTo: string): Array<{ since: number; until: number }> {

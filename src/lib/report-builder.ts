@@ -2,7 +2,7 @@ import { makeServerPool } from '@/lib/server-db';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import { RESULT_ACTIONS, NEW_CONTACT_ACTIONS, PURCHASE_ACTIONS, sumActions } from './report-runner';
 import {
-  fetchBairros, fetchMetaData, fetchInstagramData,
+  fetchBairros, fetchMetaData, fetchInstagramData, autoPreviousPeriod,
   sCapa, sVisaoGeral, sRegioes, sPaidTrafficResumo, sMetaAdsResumo, sMetaAdsCampanhas, sCriativos,
   sGoogleAdsResumo, sGoogleAdsCampanhas, sGoogleAdsPalavrasChave,
   sInstagram, sInstagramCalendar, sInstagramPosts, sInstagramSpotlight,
@@ -68,15 +68,11 @@ export function fmtMonth(isoDate: string): string {
 }
 
 // ── Previous period helper ────────────────────────────────────────────────────
-
+// Delega ao helper canônico calendar-aware (mês cheio → mês anterior; senão janela
+// de mesma duração). Evita o bug do rótulo "Maio" ao analisar Julho (31 dias corridos
+// recuavam para 31/mai). Fonte única em delivery-report-builder.
 function calcPrevPeriod(from: string, to: string): { from: string; to: string } {
-  const d1 = new Date(from + 'T00:00:00Z');
-  const d2 = new Date(to + 'T00:00:00Z');
-  const durationMs = d2.getTime() - d1.getTime() + 86400000;
-  const prevTo = new Date(d1.getTime() - 86400000);
-  const prevFrom = new Date(prevTo.getTime() - durationMs + 86400000);
-  const fmt = (d: Date) => d.toISOString().split('T')[0];
-  return { from: fmt(prevFrom), to: fmt(prevTo) };
+  return autoPreviousPeriod(from, to);
 }
 
 // ── Google Ads fetch (used by the lead-funnel-by-city dashboard, not by this report) ─
