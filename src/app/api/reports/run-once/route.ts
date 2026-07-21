@@ -1,10 +1,35 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { buildOmniReport, saveOmniReport } from '@/lib/report-builder';
-import { buildDeliveryReport, saveDeliveryReport, type MetaBreakdownLevel } from '@/lib/delivery-report-builder';
+import { buildDeliveryReport, saveDeliveryReport, type MetaBreakdownLevel, type CompareOverride } from '@/lib/delivery-report-builder';
 import { buildSocialReport, saveSocialReport } from '@/lib/social-report-builder';
 
 export const maxDuration = 300;
+
+// Desloca uma data ISO (YYYY-MM-DD) em N anos, mantendo mês/dia.
+function shiftYears(iso: string, delta: number): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(Date.UTC(y + delta, m - 1, d)).toISOString().slice(0, 10);
+}
+
+// Resolve o período de comparação escolhido na UI para o override dos builders:
+//   'previous_period' / ausente → undefined (janela automática de mesma duração)
+//   'previous_year'             → mesmo período do ano anterior
+//   'custom'                    → intervalo informado (compareFrom/compareTo)
+//   'none'                      → null (não comparar)
+function resolveCompare(
+  from: string, to: string,
+  mode?: string, compareFrom?: string, compareTo?: string,
+): CompareOverride {
+  switch (mode) {
+    case 'none':          return null;
+    case 'previous_year': return { from: shiftYears(from, -1), to: shiftYears(to, -1) };
+    case 'custom':
+      if (compareFrom && compareTo) return { from: compareFrom, to: compareTo };
+      return undefined;
+    default:              return undefined; // 'previous_period' / não informado
+  }
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -15,6 +40,9 @@ export async function POST(request: NextRequest) {
       coverId?: string;
       metaLevel?: MetaBreakdownLevel;
       sections?: string[];
+      compareMode?: string;
+      compareFrom?: string;
+      compareTo?: string;
     };
 
     const { clientId, from, to, agencyContext, template, coverId, metaLevel } = body;
@@ -27,6 +55,8 @@ export async function POST(request: NextRequest) {
     if (!clientId || !from || !to) {
       return Response.json({ error: 'clientId, from e to são obrigatórios' }, { status: 400 });
     }
+
+    const compare = resolveCompare(from, to, body.compareMode, body.compareFrom, body.compareTo);
 
     // Resolve client name
     const pool = makeServerPool();
@@ -69,6 +99,7 @@ export async function POST(request: NextRequest) {
         coverId,
         metaLevel,
         sections,
+        compare,
       });
       const { token, reportId } = await saveDeliveryReport({ clientId, clientName, from, to, data: { html: reportData.html } });
       return Response.json({ ok: true, id: reportId, public_token: token, avisos: reportData.avisos });
@@ -84,6 +115,7 @@ export async function POST(request: NextRequest) {
         accountIds: metaAccountIds,
         coverId,
         sections,
+        compare,
       });
       const { token, reportId } = await saveSocialReport({ clientId, clientName, from, to, data: reportData });
       return Response.json({ ok: true, id: reportId, public_token: token });
@@ -102,6 +134,7 @@ export async function POST(request: NextRequest) {
       coverId,
       metaLevel,
       sections,
+      compare,
     });
 
     const { id, public_token } = await saveOmniReport({

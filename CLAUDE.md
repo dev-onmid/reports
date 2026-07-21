@@ -173,6 +173,15 @@ Monitora o status de todas as instâncias na VPS Evolution e alerta quando algum
 - ⚠️ O gating separa flags de dados das de seção: `hasDestaques` (meta_campanhas) depende de `meta !== null`, NÃO de `hasMeta` (que agora carrega `en('meta_resumo')`) — desmarcar o resumo não pode derrubar as campanhas. Mesma lógica no Google.
 - ✅ Verificado no preview: slide renderizado com 7 posts mock via bundle esbuild (página cheia + página parcial, screenshots ok) e modal com checkboxes funcionando (desmarcar → badge "1 oculta" → Marcar todas). Relatório real com dados de produção não foi gerado.
 
+### Período de comparação escolhível + seguidores do período + UX de datas (2026-07-21)
+
+Três melhorias no modal "Gerar Relatório" e nos builders (pedidos do Matheus):
+
+- **Período de comparação escolhível na geração** (antes: 100% derivado no backend = janela imediatamente anterior de mesma duração, o que virava "comparativo de maio" ao gerar junho). Tipo canônico novo `CompareOverride = { from; to } | null | undefined` em `delivery-report-builder.ts`: `undefined` = automático (comportamento antigo), `null` = **não comparar**, `{from,to}` = intervalo explícito. Threadeado por `fetchInstagramData` (6º param) e pelos 3 builders (`buildDeliveryReport`/`buildSocialReport`/`buildOmniReport` ganharam `compare?`). No omni, `prev` vira `compare===null ? null : (compare ?? calcPrevPeriod(...))` e o CRM anterior não é buscado quando `null`. `run-once/route.ts` resolve `compareMode` (`previous_period`|`previous_year`|`custom`|`none`) → `resolveCompare()` → override; automações NÃO passam `compare` (continuam automáticas, de propósito). UI: bloco "Comparar com" (4 chips) + campos "Comparar de/até" só no modo custom (pré-preenchidos com a janela anterior automática ao ativar) + nota explicativa por modo. Payload só inclui `compareMode` quando ≠ `previous_period`.
+- **Seguidores do período sempre visíveis** (antes: card mostrava total snapshot 18.714 e a linha de apoio colapsava em "sem comparativo anterior" quando o período anterior do metric `follower_count` era 0). `metricCard` ganhou 8º param `customCompare?` que bypassa o `compareLine`. Card de Seguidores agora usa `followersLine`: sempre "+X no período" (do `ig.followers_period` = soma do metric `follower_count`), com "· ±Y% vs anterior" anexado quando há período anterior > 0; sem ganho → "sem novos seguidores no período". ⚠️ Comparativo do **total** de seguidores histórico ainda não existe (a `social_monitor_snapshots` é 1 linha/cliente, sobrescrita — não é série temporal); só o ganho do período é mostrado.
+- **UX do seletor de datas**: chips de **meses recentes** (últimos 6 meses, ex: `jun/26`) que selecionam o mês inteiro com 1 clique sem tocar no calendário nativo + **resumo legível** do período ("01/06/2026 até 30/06/2026 · 30 dias") abaixo dos inputs De/Até. Presets antigos (Mês passado/Este mês/etc.) mantidos.
+- ✅ Verificado no preview (auth fail-open): modal renderiza chips de meses, resumo de dias, seletor "Comparar com" e — ao clicar "Personalizado" — pré-preenche os campos com `2026-05-02..2026-05-31` (janela de 30d anterior a junho, igual ao `calcPrevPeriod`). tsc limpo, sem erros de console. Followers card e fluxo real de dados (Graph API) exigem produção.
+
 ### Slide "Top palavras-chave" (Google Ads)
 
 - O relatório de performance (`buildOmniReport` em `src/lib/report-builder.ts`) monta os slides de Google a partir de `fetchGoogleAdsDetailed`, que agora traz também `palavrasChave: PalavraChaveGoogle[]` (tipo em `delivery-report-builder.ts`).
@@ -278,6 +287,20 @@ Reforma do modal "Conectar WhatsApp" em Disparos → Instâncias (`disparos/page
 - **Visual no design system**: faixa verde no topo, título Bebas uppercase, QR em moldura branca com 4 cantoneiras verdes angulares, dot pulsante "Aguardando leitura", passo a passo numerado (1-2-3) e nota "a tela fecha sozinha".
 - Máquina de fases: `qrPhase: 'loading'|'qr'|'success'|'error'` + `qrSeconds`; um único `useEffect([qrClient, qrPhase])` gerencia poll/countdown/auto-close com cleanup. `qrLoading` foi removido.
 - ✅ Verificado no preview com fetch mockado (3 fases + lista atualizando pra Online). A tela de sucesso dura 2,5s — screenshot remoto não pega; capturada via MutationObserver + reabertura com poll já conectado.
+
+### Chat "cara de WhatsApp" — Fase 1 (2026-07-21)
+
+Pedido do Matheus: replicar a experiência do WhatsApp no chat do CRM (contatos apareciam como número cru, sem foto, prévias vazando código PIX). Fase 1 entregue; Fases 2 (resposta citada, lightbox, player refinado — o check azul de lida JÁ existia) e 3 (digitando/online via presença, reações, fixar, busca na conversa) pendentes.
+
+| Arquivo | Papel |
+|---|---|
+| `src/lib/evolution-api.ts` | `fetchEvolutionContacts` (POST `/chat/findContacts/{inst}` `{where:{}}` → number/pushName/profilePicUrl, grupos `@g.us` filtrados) + `fetchEvolutionProfilePic` (POST `/chat/fetchProfilePictureUrl`) |
+| `src/app/api/crm/avatars/route.ts` | POST `{clientId}`: resolve instâncias Evolution do cliente (`client_zapi_instances`), puxa contatos e aplica nos leads — **nome só quando o lead está SEM nome real** (null/vazio/igual ao número; nunca sobrescreve nome digitado), **foto sempre atualiza** (URL da Meta expira; refresh a cada abertura = cache). Match por dígitos exatos + fallback sufixo de 8 (9º dígito BR). Retorna mapa `avatars` |
+| `src/app/api/crm/inbox/route.ts` | Última mensagem agora traz `tipo` (`last_tipo` na resposta; fallback sem a coluna) pra prévia estilo WhatsApp |
+| `chat-view.tsx` | `timeFmt` WhatsApp (hoje=HH:MM, "Ontem", dia da semana <7d, data), `formatPhoneBR` (+55 (43) 99177-9645 — usado como nome quando não há nome e no header), `inboxPreview` (📷 Foto/🎥/🎤 Mensagem de voz/📄 arquivo/📍/💳 Código PIX — regex `br.gov.bcb.pix` ou ≥25 dígitos), cartão de documento na bolha (ícone PDF + nome + ext; placeholder `[Doc] x.pdf` sem arquivo = "indisponível", com URL = clicável c/ Download), backfill automático no mount (POST `/api/crm/avatars` → merge avatares + reload do inbox se renomeou) |
+
+- Separadores de data (Hoje/Ontem/data) e check azul de lida JÁ existiam — não recriar.
+- ✅ Verificado no preview com fetch mockado: prévias, telefones formatados, horários, cartões de doc (com e sem arquivo), separadores, backfill disparando no mount. findContacts real exige produção — validar abrindo o chat de um cliente e conferindo nomes/fotos preenchidos.
 
 ### Kanban denso + visão padrão (2026-07-19)
 

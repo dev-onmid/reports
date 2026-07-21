@@ -9,7 +9,7 @@ import {
   sInstagramTodosConteudos, ordenarPostsPorData, TODOS_CONTEUDOS_POR_PAGINA,
   monthsBetweenInclusive, FONT_LINK, CANVAS, INTER,
   resolveReportCover, fetchReportRotationSeed,
-  type ParsedData, type DiagJson, type GoogleAdsFull, type CampanhaGoogleDetalhada, type PalavraChaveGoogle, type MetaBreakdownLevel,
+  type ParsedData, type DiagJson, type GoogleAdsFull, type CampanhaGoogleDetalhada, type PalavraChaveGoogle, type MetaBreakdownLevel, type CompareOverride,
 } from './delivery-report-builder';
 import { sectionEnabled } from './report-sections';
 
@@ -611,20 +611,23 @@ export async function buildOmniReport(input: {
   metaLevel?: MetaBreakdownLevel;
   // Páginas habilitadas (keys de src/lib/report-sections.ts). null/undefined = todas.
   sections?: string[] | null;
+  // Período de comparação escolhido na geração (undefined = automático; null = não comparar).
+  compare?: CompareOverride;
 }): Promise<{ html: string }> {
-  const { clientId, clientName, connectionId, accountIds, googleConnectionId, googleAccountIds, periodFrom, periodTo, coverId, metaLevel = 'campaign', sections = null } = input;
+  const { clientId, clientName, connectionId, accountIds, googleConnectionId, googleAccountIds, periodFrom, periodTo, coverId, metaLevel = 'campaign', sections = null, compare } = input;
 
-  const prev = calcPrevPeriod(periodFrom, periodTo);
+  // Janela de comparação: override explícito vence; null desliga; undefined = automática.
+  const prev = compare === null ? null : (compare ?? calcPrevPeriod(periodFrom, periodTo));
   const fromDate = new Date(periodFrom + 'T12:00:00');
   const toDate   = new Date(periodTo   + 'T12:00:00');
   const MONTHS   = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
   const periodo     = `${MONTHS[fromDate.getMonth()]}/${fromDate.getFullYear()}`;
-  const prevFromDate = new Date(prev.from + 'T12:00:00');
-  const prevPeriodo  = `${MONTHS[prevFromDate.getMonth()]}/${prevFromDate.getFullYear()}`;
+  const prevFromDate = prev ? new Date(prev.from + 'T12:00:00') : null;
+  const prevPeriodo  = prevFromDate ? `${MONTHS[prevFromDate.getMonth()]}/${prevFromDate.getFullYear()}` : '';
 
   const [monthlyCrm, prevMonthlyCrm, metaDetailed, googleDetailed, instagramFull, bairros, rotationSeed] = await Promise.all([
     fetchMonthlyCrm(clientId, periodFrom, periodTo),
-    fetchMonthlyCrm(clientId, prev.from, prev.to),
+    prev ? fetchMonthlyCrm(clientId, prev.from, prev.to) : Promise.resolve([]),
     connectionId && accountIds?.length
       ? fetchMetaData(connectionId, accountIds, periodFrom, periodTo, metaLevel)
       : Promise.resolve({ meta: null, creatives: [] }),
@@ -632,7 +635,7 @@ export async function buildOmniReport(input: {
     // Called unconditionally — fetchInstagramData resolves a directly-linked Instagram
     // account (client_account_links platform='instagram') on its own even without a
     // Meta Ads connection/account for this client.
-    fetchInstagramData(clientId, connectionId ?? null, accountIds ?? [], periodFrom, periodTo),
+    fetchInstagramData(clientId, connectionId ?? null, accountIds ?? [], periodFrom, periodTo, compare),
     fetchBairros(clientId, periodFrom, periodTo),
     fetchReportRotationSeed(),
   ]);

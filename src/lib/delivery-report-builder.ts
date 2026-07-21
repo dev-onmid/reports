@@ -232,6 +232,12 @@ export type InstagramPeriodMetrics = {
   accounts_engaged: number;
 };
 
+// Período de comparação escolhido na geração do relatório.
+//   undefined → automático (janela imediatamente anterior de mesma duração)
+//   null      → não comparar (nenhum comparativo é buscado/exibido)
+//   {from,to} → intervalo explícito (ano passado, personalizado, etc.)
+export type CompareOverride = { from: string; to: string } | null | undefined;
+
 export type ParsedData = {
   ativos:          number;
   inativos:        number;
@@ -1697,6 +1703,7 @@ export async function fetchInstagramData(
   connectionId: string | null | undefined,
   accountIds: string[],
   from: string, to: string,
+  compare?: CompareOverride,
 ): Promise<InstagramFull | null> {
   const pool = makeServerPool();
   let conn: { id: string; app_id: string; access_token: string; token_expiry: string | null } | null = null;
@@ -1793,6 +1800,18 @@ export async function fetchInstagramData(
   const previousStart = new Date(previousEnd);
   previousStart.setUTCDate(previousStart.getUTCDate() - selectedDays + 1);
 
+  // Janela de comparação: override explícito vence; null desliga o comparativo;
+  // undefined mantém a janela automática (mesma duração imediatamente anterior).
+  let compareFrom: string | null;
+  let compareTo: string | null;
+  if (compare === null) {
+    compareFrom = null; compareTo = null;
+  } else if (compare) {
+    compareFrom = compare.from; compareTo = compare.to;
+  } else {
+    compareFrom = dateOnly(previousStart); compareTo = dateOnly(previousEnd);
+  }
+
   function makePeriodChunks(periodFrom: string, periodTo: string): Array<{ since: number; until: number }> {
     const start = new Date(periodFrom + 'T00:00:00Z');
     const endRaw = new Date(periodTo + 'T23:59:59Z');
@@ -1867,7 +1886,9 @@ export async function fetchInstagramData(
 
   const [currentMetrics, previousMetrics] = await Promise.all([
     fetchIgPeriodMetrics(from, to),
-    fetchIgPeriodMetrics(dateOnly(previousStart), dateOnly(previousEnd)),
+    compareFrom && compareTo
+      ? fetchIgPeriodMetrics(compareFrom, compareTo)
+      : Promise.resolve<InstagramPeriodMetrics | undefined>(undefined),
   ]);
   const { reach, impressions, profile_views, website_clicks, accounts_engaged } = currentMetrics;
 
@@ -3216,8 +3237,9 @@ export function sInstagram(ig: InstagramData, idx: number, total: number, period
     currentCompare: number,
     previousCompare?: number,
     compareLabel = 'vs período anterior',
+    customCompare?: { text: string; color: string; mark: string },
   ) => {
-    const compare = compareLine(currentCompare, previousCompare, compareLabel);
+    const compare = customCompare ?? compareLine(currentCompare, previousCompare, compareLabel);
     return (
     `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:16px;box-shadow:0 10px 26px rgba(15,23,42,.06);padding:20px 22px;display:flex;flex-direction:column;gap:14px">
       <div style="display:flex;align-items:center;gap:14px">
@@ -3235,6 +3257,25 @@ export function sInstagram(ig: InstagramData, idx: number, total: number, period
       </div>
     </div>`);
   };
+
+  // Seguidores: o número grande é o total atual (snapshot). Aqui a linha de apoio
+  // sempre mostra QUANTOS seguidores entraram no período (metric follower_count),
+  // em vez de colapsar para "sem comparativo anterior" quando o período anterior é 0.
+  const followersGain = ig.followers_period ?? 0;
+  const prevFollowersGain = ig.previous?.followers_period;
+  const followersLine = (() => {
+    if (followersGain <= 0) {
+      return { text: 'sem novos seguidores no período', color: MUTED, mark: BORDER };
+    }
+    let text = `+${num(followersGain)} no período`;
+    if (prevFollowersGain && prevFollowersGain > 0) {
+      const diff = followersGain - prevFollowersGain;
+      const pct = (diff / prevFollowersGain) * 100;
+      const sign = diff >= 0 ? '+' : '';
+      text += ` · ${sign}${pct.toFixed(1).replace('.', ',')}% vs anterior`;
+    }
+    return { text, color: PRIMARY_TEXT, mark: PRIMARY };
+  })();
 
   const insightText = ig.accounts_engaged > 0
     ? `${numOrDash(ig.accounts_engaged)} contas engajaram com o perfil @${ig.username} (${engRate.toFixed(1)}% do alcance). Audiência orgânica aquecida converte melhor em campanhas pagas.`
@@ -3274,7 +3315,7 @@ export function sInstagram(ig: InstagramData, idx: number, total: number, period
     </div>
 
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-bottom:20px">
-      ${metricCard('Seguidores', 'followers', numOrDash(ig.followers), ICO_USERS_IG, ig.followers_period ?? 0, ig.previous?.followers_period, 'novos vs período anterior')}
+      ${metricCard('Seguidores', 'followers', numOrDash(ig.followers), ICO_USERS_IG, ig.followers_period ?? 0, ig.previous?.followers_period, 'novos vs período anterior', followersLine)}
       ${metricCard('Alcance', 'reach', numOrDash(ig.reach), ICO_SIGNAL, ig.reach, ig.previous?.reach)}
       ${metricCard('Visualizações', 'views', numOrDash(ig.impressions), ICO_EYE_IG, ig.impressions, ig.previous?.impressions)}
       ${metricCard('Visitas ao perfil', 'profile_views', numOrDash(ig.profile_views), ICO_USER_IG, ig.profile_views, ig.previous?.profile_views)}
@@ -4680,8 +4721,10 @@ export async function buildDeliveryReport(opts: {
   metaLevel?:     MetaBreakdownLevel;
   // Páginas habilitadas (keys de src/lib/report-sections.ts). null/undefined = todas.
   sections?:      string[] | null;
+  // Período de comparação do Instagram escolhido na geração (undefined = automático).
+  compare?:       CompareOverride;
 }): Promise<{ html: string; avisos?: string[] }> {
-  const { clientId, clientName, from, to, csvFiles = [], agencyContext = '', connectionId, accountIds = [], coverId, metaLevel = 'campaign', sections = null } = opts;
+  const { clientId, clientName, from, to, csvFiles = [], agencyContext = '', connectionId, accountIds = [], coverId, metaLevel = 'campaign', sections = null, compare } = opts;
 
   const fromDate = new Date(from + 'T12:00:00');
   const toDate   = new Date(to   + 'T12:00:00');
@@ -4714,7 +4757,7 @@ export async function buildDeliveryReport(opts: {
   const [bairros, { meta, creatives }, instagramFull, rotationSeed] = await Promise.all([
     fetchBairros(clientId, from, to),
     fetchMetaData(connectionId, accountIds, from, to, metaLevel),
-    fetchInstagramData(clientId, connectionId, accountIds, from, to),
+    fetchInstagramData(clientId, connectionId, accountIds, from, to, compare),
     fetchReportRotationSeed(),
   ]);
   const instagram = instagramFull?.insights ?? null;

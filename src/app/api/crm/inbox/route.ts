@@ -291,23 +291,37 @@ export async function GET(req: NextRequest) {
 
     // Step 3: enrich with last message (best-effort, skip on error)
     const ids = unique.map(l => l.id);
-    let lastMsgs: Record<string, { text: string; direction: string; created_at: string }> = {};
+    let lastMsgs: Record<string, { text: string; direction: string; created_at: string; tipo?: string | null }> = {};
     let unreadCounts: Record<string, number> = {};
     let avatarMap: Record<string, string | null> = {};
 
     try {
-      // Last message per lead
+      // Last message per lead (tipo alimenta a prévia estilo WhatsApp: 📷 Foto, 🎤 Áudio…)
       const { rows: msgs } = await pool.query<{
-        lead_id: string; text: string; direction: string; created_at: string;
+        lead_id: string; text: string; direction: string; created_at: string; tipo: string | null;
       }>(
-        `SELECT DISTINCT ON (lead_id) lead_id, text, direction, created_at
+        `SELECT DISTINCT ON (lead_id) lead_id, text, direction, created_at, COALESCE(tipo, 'texto') AS tipo
          FROM public.crm_messages
          WHERE lead_id = ANY($1::uuid[])
          ORDER BY lead_id, created_at DESC`,
         [ids],
       );
       lastMsgs = Object.fromEntries(msgs.map(m => [m.lead_id, m]));
-    } catch { /* not critical */ }
+    } catch {
+      // Coluna tipo pode não existir em instalação antiga — cai pro básico
+      try {
+        const { rows: msgs } = await pool.query<{
+          lead_id: string; text: string; direction: string; created_at: string;
+        }>(
+          `SELECT DISTINCT ON (lead_id) lead_id, text, direction, created_at
+           FROM public.crm_messages
+           WHERE lead_id = ANY($1::uuid[])
+           ORDER BY lead_id, created_at DESC`,
+          [ids],
+        );
+        lastMsgs = Object.fromEntries(msgs.map(m => [m.lead_id, m]));
+      } catch { /* not critical */ }
+    }
 
     try {
       // Não-lidas de verdade: só mensagens recebidas DEPOIS da última vez que a
@@ -370,6 +384,7 @@ export async function GET(req: NextRequest) {
         created_at:      l.created_at,
         last_message:    msg?.text    ?? wa?.text ?? null,
         last_direction:  msg?.direction ?? wa?.dir ?? null,
+        last_tipo:       msg?.tipo ?? null,
         last_message_at: msg?.created_at ?? wa?.at ?? l.updated_at ?? l.created_at,
         unread_count:    unreadCounts[l.id] ?? 0,
       };

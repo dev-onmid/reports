@@ -90,7 +90,7 @@ export default function RelatoriosPage() {
 
   // Geração avulsa
   const [showGenModal, setShowGenModal] = useState(false);
-  const [genForm, setGenForm] = useState({ clientId: '', from: '', to: '', agencyContext: '' });
+  const [genForm, setGenForm] = useState({ clientId: '', from: '', to: '', agencyContext: '', compareMode: 'previous_period', compareFrom: '', compareTo: '' });
   const [genTemplate, setGenTemplate] = useState<'performance' | 'delivery' | 'social'>('performance');
   const [genCsvFiles, setGenCsvFiles] = useState<{ name: string; content: string }[]>([]);
   const [genCoverId, setGenCoverId] = useState<string | null>(null);
@@ -179,7 +179,7 @@ export default function RelatoriosPage() {
   // Default dates when modal opens
   function openGenModal() {
     const { from, to } = defaultDateRange();
-    setGenForm({ clientId: '', from, to, agencyContext: '' });
+    setGenForm({ clientId: '', from, to, agencyContext: '', compareMode: 'previous_period', compareFrom: '', compareTo: '' });
     setGenTemplate('performance');
     setGenCsvFiles([]);
     setGenCoverId(null);
@@ -227,6 +227,14 @@ export default function RelatoriosPage() {
       if (genTemplate === 'delivery') payload.csvFiles = genCsvFiles;
       if (genCoverId) payload.coverId = genCoverId;
       if (genMetaLevel === 'adset') payload.metaLevel = genMetaLevel;
+      // Comparativo: só envia quando difere do automático (período anterior)
+      if (genForm.compareMode && genForm.compareMode !== 'previous_period') {
+        payload.compareMode = genForm.compareMode;
+        if (genForm.compareMode === 'custom') {
+          payload.compareFrom = genForm.compareFrom;
+          payload.compareTo = genForm.compareTo;
+        }
+      }
       // Só envia `sections` se o usuário desmarcou algo — ausente = relatório completo
       if (genHiddenSections.length > 0) {
         payload.sections = REPORT_SECTIONS[genTemplate]
@@ -1370,6 +1378,35 @@ export default function RelatoriosPage() {
                     });
                   })()}
                 </div>
+                {/* Meses recentes — 1 clique seleciona o mês inteiro, sem precisar do calendário */}
+                <div className="flex flex-wrap gap-1.5 pt-0.5">
+                  {(() => {
+                    const fmt = (d: Date) => d.toISOString().split('T')[0];
+                    const MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+                    const now = new Date();
+                    return Array.from({ length: 6 }).map((_, idx) => {
+                      const d = new Date(now.getFullYear(), now.getMonth() - idx, 1);
+                      const from = fmt(new Date(d.getFullYear(), d.getMonth(), 1));
+                      const to = fmt(new Date(d.getFullYear(), d.getMonth() + 1, 0));
+                      const active = genForm.from === from && genForm.to === to;
+                      return (
+                        <button
+                          key={from}
+                          type="button"
+                          onClick={() => setGenForm(f => ({ ...f, from, to }))}
+                          className={cn(
+                            'px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors',
+                            active
+                              ? 'bg-violet-600 border-violet-500 text-white'
+                              : 'bg-background border-border text-muted-foreground hover:border-violet-500/50 hover:text-foreground',
+                          )}
+                        >
+                          {MESES[d.getMonth()]}/{String(d.getFullYear()).slice(2)}
+                        </button>
+                      );
+                    });
+                  })()}
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
@@ -1390,6 +1427,90 @@ export default function RelatoriosPage() {
                     className="w-full px-3 py-2.5 text-sm bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50"
                   />
                 </div>
+              </div>
+              {/* Resumo legível do período selecionado */}
+              {genForm.from && genForm.to && (() => {
+                const d1 = new Date(genForm.from + 'T12:00:00');
+                const d2 = new Date(genForm.to + 'T12:00:00');
+                if (isNaN(d1.getTime()) || isNaN(d2.getTime())) return null;
+                const dias = Math.max(1, Math.round((d2.getTime() - d1.getTime()) / 86400000) + 1);
+                const fmtBR = (d: Date) => d.toLocaleDateString('pt-BR');
+                return (
+                  <p className="text-[11px] text-muted-foreground -mt-1">
+                    <span className="text-foreground font-semibold">{fmtBR(d1)}</span> até <span className="text-foreground font-semibold">{fmtBR(d2)}</span>
+                    <span className="text-muted-foreground/60"> · {dias} {dias === 1 ? 'dia' : 'dias'}</span>
+                  </p>
+                );
+              })()}
+              {/* Comparativo — o usuário escolhe com qual período comparar */}
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground font-medium">Comparar com</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {([
+                    { key: 'previous_period', label: 'Período anterior' },
+                    { key: 'previous_year', label: 'Mesmo período (ano passado)' },
+                    { key: 'custom', label: 'Personalizado' },
+                    { key: 'none', label: 'Não comparar' },
+                  ] as const).map(opt => {
+                    const active = genForm.compareMode === opt.key;
+                    return (
+                      <button
+                        key={opt.key}
+                        type="button"
+                        onClick={() => setGenForm(f => {
+                          // Ao escolher "Personalizado" com campos vazios, pré-preenche com a
+                          // janela imediatamente anterior de mesma duração (mesmo cálculo do backend).
+                          if (opt.key === 'custom' && (!f.compareFrom || !f.compareTo) && f.from && f.to) {
+                            const d1 = new Date(f.from + 'T00:00:00Z');
+                            const d2 = new Date(f.to + 'T00:00:00Z');
+                            const durMs = d2.getTime() - d1.getTime() + 86400000;
+                            const prevTo = new Date(d1.getTime() - 86400000);
+                            const prevFrom = new Date(prevTo.getTime() - durMs + 86400000);
+                            const iso = (d: Date) => d.toISOString().split('T')[0];
+                            return { ...f, compareMode: opt.key, compareFrom: iso(prevFrom), compareTo: iso(prevTo) };
+                          }
+                          return { ...f, compareMode: opt.key };
+                        })}
+                        className={cn(
+                          'px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors',
+                          active
+                            ? 'bg-violet-600 border-violet-500 text-white'
+                            : 'bg-background border-border text-muted-foreground hover:border-violet-500/50 hover:text-foreground',
+                        )}
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                {genForm.compareMode === 'custom' && (
+                  <div className="grid grid-cols-2 gap-3 pt-1">
+                    <div className="space-y-1">
+                      <label className="text-[11px] text-muted-foreground font-medium">Comparar de</label>
+                      <input
+                        type="date"
+                        value={genForm.compareFrom}
+                        onChange={e => setGenForm(f => ({ ...f, compareFrom: e.target.value }))}
+                        className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[11px] text-muted-foreground font-medium">Comparar até</label>
+                      <input
+                        type="date"
+                        value={genForm.compareTo}
+                        onChange={e => setGenForm(f => ({ ...f, compareTo: e.target.value }))}
+                        className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50"
+                      />
+                    </div>
+                  </div>
+                )}
+                <p className="text-[10px] text-muted-foreground/50">
+                  {genForm.compareMode === 'previous_period' && 'As variações (alcance, seguidores, etc.) comparam com o período imediatamente anterior de mesma duração.'}
+                  {genForm.compareMode === 'previous_year' && 'Compara com o mesmo intervalo de datas do ano anterior.'}
+                  {genForm.compareMode === 'custom' && 'Compara com o intervalo de datas escolhido acima.'}
+                  {genForm.compareMode === 'none' && 'O relatório não exibe variações comparativas.'}
+                </p>
               </div>
 
               {/* Agency context — optional for both templates */}

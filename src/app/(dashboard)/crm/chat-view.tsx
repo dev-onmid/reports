@@ -9,7 +9,7 @@ import {
   AlertCircle, History, Filter, MoreHorizontal, Smile,
   CheckSquare2, Square, Trash2, Ban, UserX,
   Wifi, WifiOff, AlertTriangle, Check, CheckCheck, Clock3,
-  Play, Pause,
+  Play, Pause, Download,
 } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -24,6 +24,7 @@ type InboxLead = {
   fechou: boolean;
   last_message: string | null;
   last_direction: 'in' | 'out' | null;
+  last_tipo?: string | null;
   last_message_at: string | null;
   unread_count: number;
   avatar_url?: string | null;
@@ -71,24 +72,64 @@ const CANAL_COLORS: Record<string, string> = {
   Whatsapp: 'bg-emerald-500', WhatsApp: 'bg-emerald-500',
 };
 
+// Horário do inbox no padrão WhatsApp: hoje = HH:MM, ontem = "Ontem",
+// última semana = dia da semana, resto = data.
 function timeFmt(iso: string | null) {
   if (!iso) return '';
   const d = new Date(iso);
   const now = new Date();
-  const diff = now.getTime() - d.getTime();
-  if (diff < 60_000) return 'agora';
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m`;
-  if (diff < 86_400_000) return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (d.toDateString() === now.toDateString()) {
+    return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  }
+  if (d.toDateString() === yesterday.toDateString()) return 'Ontem';
+  if (now.getTime() - d.getTime() < 7 * 86_400_000) {
+    return d.toLocaleDateString('pt-BR', { weekday: 'long' }).replace('-feira', '');
+  }
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
 }
 
 function msgTimeFmt(iso: string) {
   return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 }
 
+// +55 (43) 99177-9645 — como o WhatsApp exibe números sem nome salvo.
+function formatPhoneBR(raw: string | null | undefined): string {
+  const d = (raw ?? '').replace(/\D/g, '');
+  if (!d) return '';
+  const local = d.startsWith('55') && d.length >= 12 ? d.slice(2) : d;
+  const ddi = d.startsWith('55') && d.length >= 12 ? '+55 ' : '';
+  if (local.length === 11) return `${ddi}(${local.slice(0, 2)}) ${local.slice(2, 7)}-${local.slice(7)}`;
+  if (local.length === 10) return `${ddi}(${local.slice(0, 2)}) ${local.slice(2, 6)}-${local.slice(6)}`;
+  return raw ?? '';
+}
+
 function leadName(lead: InboxLead | null) {
   if (!lead) return '—';
-  return lead.nome ?? lead.numero ?? '—';
+  const nome = (lead.nome ?? '').trim();
+  // Nome que é só o próprio número não é nome — mostra o telefone formatado.
+  if (nome && nome.replace(/\D/g, '') !== (lead.numero ?? '').replace(/\D/g, '')) return nome;
+  return formatPhoneBR(lead.numero) || nome || '—';
+}
+
+// Prévia da última mensagem no padrão WhatsApp: mídia vira rótulo com ícone,
+// código PIX/links gigantes não vazam na lista.
+function inboxPreview(lead: InboxLead): string {
+  const text = (lead.last_message ?? '').trim();
+  const tipo = lead.last_tipo ?? 'texto';
+  if (tipo === 'imagem' || (text.startsWith('http') && isImageUrl(text)) || text === '[Imagem]') return '📷 Foto';
+  if (tipo === 'video' || (text.startsWith('http') && isVideoUrl(text)) || text === '[Vídeo]') return '🎥 Vídeo';
+  if (tipo === 'audio' || (text.startsWith('http') && isAudioUrl(text)) || text === '[Áudio]') return '🎤 Mensagem de voz';
+  if (tipo === 'localizacao') return '📍 Localização';
+  if (text === '[Sticker]' || text === '[Figurinha]') return '🩵 Figurinha';
+  if (tipo === 'documento' || /^\[doc\]/i.test(text) || (text.startsWith('http') && /\.(pdf|docx?|xlsx?|pptx?|zip)(\?.*)?$/i.test(text))) {
+    const nomeArq = text.replace(/^\[doc\]\s*/i, '').split('/').pop()?.split('?')[0];
+    return `📄 ${nomeArq || 'Documento'}`;
+  }
+  if (/br\.gov\.bcb\.pix/i.test(text) || (/^\d{25,}$/.test(text.replace(/\s/g, '')))) return '💳 Código PIX';
+  if (!text) return 'Nenhuma mensagem';
+  return text;
 }
 
 function leadAvatarUrl(lead: InboxLead | null) {
@@ -220,14 +261,36 @@ function MessageBubble({ msg }: { msg: CrmMessage }) {
     if (t === 'video' || (t === 'texto' && isVideoUrl(text))) {
       return <video controls src={text} className="max-w-full max-h-52 rounded-lg" />;
     }
-    if (t === 'documento') {
-      return (
-        <a href={text} target="_blank" rel="noopener noreferrer"
-          className="flex items-center gap-2 rounded-lg bg-black/20 px-3 py-2 text-xs hover:bg-black/30 transition-colors">
-          <FileText className="h-4 w-4 shrink-0" />
-          <span className="truncate">{text.split('/').pop() ?? 'Documento'}</span>
-        </a>
+    // Documento vira cartão estilo WhatsApp — tanto com arquivo baixável (URL)
+    // quanto o placeholder "[Doc] nome.pdf" de mensagens cujo arquivo não foi salvo.
+    const isDocUrl = text.startsWith('http') && /\.(pdf|docx?|xlsx?|pptx?|zip|csv|txt)(\?.*)?$/i.test(text);
+    const isDocPlaceholder = /^\[doc\]/i.test(text.trim());
+    if (t === 'documento' || isDocUrl || isDocPlaceholder) {
+      const fileName = (isDocPlaceholder
+        ? text.trim().replace(/^\[doc\]\s*/i, '')
+        : decodeURIComponent(text.split('/').pop()?.split('?')[0] ?? '')) || 'Documento';
+      const ext = (fileName.split('.').pop() ?? '').toUpperCase();
+      const hasFile = text.startsWith('http');
+      const card = (
+        <div className={cn(
+          'flex min-w-[220px] max-w-full items-center gap-3 rounded-lg px-3 py-2.5',
+          isOut ? 'bg-black/15' : 'bg-muted/40',
+        )}>
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-500/15">
+            <FileText className="h-5 w-5 text-red-400" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[13px] font-semibold leading-tight">{fileName}</p>
+            <p className="mt-0.5 text-[10px] uppercase text-muted-foreground">
+              {ext && ext.length <= 5 ? ext : 'Arquivo'}{hasFile ? '' : ' · indisponível'}
+            </p>
+          </div>
+          {hasFile && <Download className="h-4 w-4 shrink-0 text-muted-foreground" />}
+        </div>
       );
+      return hasFile
+        ? <a href={text} target="_blank" rel="noopener noreferrer" className="block hover:opacity-90 transition-opacity">{card}</a>
+        : card;
     }
     return <p className="text-[13.5px] leading-[1.45] whitespace-pre-wrap break-words">{text}</p>;
   })();
@@ -848,9 +911,32 @@ export function ChatView({
           const phone = normalizeNumber(row.phone);
           if (phone && row.profilePicUrl) next[phone] = row.profilePicUrl;
         });
-        setChatAvatars(next);
+        setChatAvatars(prev => ({ ...next, ...prev }));
       })
       .catch(() => {});
+  }, [clientId]);
+
+  // Backfill "cara de WhatsApp": puxa nome + foto dos contatos da instância
+  // Evolution e aplica nos leads (nome só quando o lead está sem nome real).
+  // Depois recarrega o inbox pra lista já mostrar os nomes novos.
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/crm/avatars', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clientId }),
+    })
+      .then(r => r.ok ? r.json() as Promise<{ avatars?: Record<string, string>; updatedNames?: number }> : null)
+      .then(data => {
+        if (cancelled || !data) return;
+        if (data.avatars && Object.keys(data.avatars).length > 0) {
+          setChatAvatars(prev => ({ ...prev, ...data.avatars }));
+        }
+        if ((data.updatedNames ?? 0) > 0) loadInbox();
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId]);
 
   // ── Messages auto-refresh ───────────────────────────────────────────────────
@@ -1416,7 +1502,7 @@ export function ChatView({
                   </div>
                   <p className="text-[11px] text-muted-foreground truncate mt-0.5">
                     {lead.last_direction === 'out' && <span className="text-primary/70">Você: </span>}
-                    {lead.last_message ?? 'Nenhuma mensagem'}
+                    {inboxPreview(lead)}
                   </p>
                   <div className="flex items-center gap-1.5 mt-1">
                     {lead.status && <span className="text-[10px] text-muted-foreground">{lead.status}</span>}
@@ -1518,7 +1604,7 @@ export function ChatView({
                       <Ban className="h-3.5 w-3.5 text-red-400 shrink-0" />
                     )}
                   </div>
-                  <p className="text-xs text-muted-foreground">{selectedLead.numero ?? 'Sem número'}</p>
+                  <p className="text-xs text-muted-foreground">{formatPhoneBR(selectedLead.numero) || 'Sem número'}</p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <div className="relative">

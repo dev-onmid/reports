@@ -59,6 +59,51 @@ export async function getEvolutionState(instanceName: string): Promise<Evolution
   return { state: data.instance?.state ?? data.state ?? 'unknown' };
 }
 
+// Contatos sincronizados da instância (nome do WhatsApp + foto de perfil).
+// Usado pelo backfill do chat do CRM pra dar "cara de WhatsApp" (nome/avatar).
+export interface EvolutionContact {
+  number: string;            // só dígitos
+  name: string | null;       // pushName do contato
+  pictureUrl: string | null; // URL da foto (expira — tratar como cache)
+}
+
+export async function fetchEvolutionContacts(instanceName: string): Promise<EvolutionContact[]> {
+  const res = await fetch(`${base()}/chat/findContacts/${encodeURIComponent(instanceName)}`, {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify({ where: {} }),
+  }).catch(() => null);
+  if (!res?.ok) return [];
+  const data = await res.json().catch(() => null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const arr: any[] = Array.isArray(data) ? data : (data?.contacts ?? data?.data ?? []);
+  const out: EvolutionContact[] = [];
+  for (const c of arr) {
+    const jid: string = c?.remoteJid ?? c?.id ?? '';
+    if (typeof jid !== 'string' || !jid || jid.includes('@g.us')) continue; // grupos fora
+    const number = jid.split('@')[0].replace(/\D/g, '');
+    if (number.length < 8) continue;
+    out.push({
+      number,
+      name: c?.pushName ?? c?.name ?? null,
+      pictureUrl: c?.profilePicUrl ?? c?.profilePictureUrl ?? null,
+    });
+  }
+  return out;
+}
+
+// Foto de perfil de UM número (fallback quando o findContacts não trouxe).
+export async function fetchEvolutionProfilePic(instanceName: string, number: string): Promise<string | null> {
+  const res = await fetch(`${base()}/chat/fetchProfilePictureUrl/${encodeURIComponent(instanceName)}`, {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify({ number }),
+  }).catch(() => null);
+  if (!res?.ok) return null;
+  const data = await res.json().catch(() => null) as { profilePictureUrl?: string; profilePicUrl?: string } | null;
+  return data?.profilePictureUrl ?? data?.profilePicUrl ?? null;
+}
+
 export async function deleteEvolutionInstance(instanceName: string): Promise<void> {
   await fetch(`${base()}/instance/delete/${encodeURIComponent(instanceName)}`, {
     method: 'DELETE',

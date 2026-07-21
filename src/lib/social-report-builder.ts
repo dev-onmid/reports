@@ -6,7 +6,7 @@ import {
   sInstagramTodosConteudos, ordenarPostsPorData, TODOS_CONTEUDOS_POR_PAGINA,
   monthsBetweenInclusive, FONT_LINK, CANVAS, INTER,
   resolveReportCover, fetchReportRotationSeed,
-  type DiagJson, type ParsedData,
+  type DiagJson, type ParsedData, type CompareOverride,
 } from './delivery-report-builder';
 import { sectionEnabled } from './report-sections';
 
@@ -55,21 +55,24 @@ export async function buildSocialReport(input: {
   coverId?: string | null;
   // Páginas habilitadas (keys de src/lib/report-sections.ts). null/undefined = todas.
   sections?: string[] | null;
+  // Período de comparação do Instagram escolhido na geração (undefined = automático).
+  compare?: CompareOverride;
 }): Promise<{ html: string }> {
-  const { clientId, clientName, connectionId, accountIds, periodFrom, periodTo, coverId, sections = null } = input;
+  const { clientId, clientName, connectionId, accountIds, periodFrom, periodTo, coverId, sections = null, compare } = input;
 
   const fromDate = new Date(periodFrom + 'T12:00:00');
   const toDate   = new Date(periodTo   + 'T12:00:00');
   const MONTHS   = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
   const periodo     = `${MONTHS[fromDate.getMonth()]}/${fromDate.getFullYear()}`;
-  const prevFromDate = new Date(fromDate.getFullYear(), fromDate.getMonth() - 1, 1);
-  const prevPeriodo  = `${MONTHS[prevFromDate.getMonth()]}/${prevFromDate.getFullYear()}`;
+  // Label do período anterior: usa o override explícito quando houver, senão o mês-calendário anterior.
+  const prevFromDate = compare ? new Date(compare.from + 'T12:00:00') : new Date(fromDate.getFullYear(), fromDate.getMonth() - 1, 1);
+  const prevPeriodo  = compare === null ? '' : `${MONTHS[prevFromDate.getMonth()]}/${prevFromDate.getFullYear()}`;
 
   const [instagramFull, rotationSeed] = await Promise.all([
     // Called unconditionally — fetchInstagramData resolves a directly-linked Instagram
     // account (client_account_links platform='instagram') on its own even without a
     // Meta Ads connection/account for this client.
-    fetchInstagramData(clientId, connectionId ?? null, accountIds ?? [], periodFrom, periodTo),
+    fetchInstagramData(clientId, connectionId ?? null, accountIds ?? [], periodFrom, periodTo, compare),
     fetchReportRotationSeed(),
   ]);
   const cover = resolveReportCover(coverId, rotationSeed);
