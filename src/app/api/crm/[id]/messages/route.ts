@@ -88,7 +88,7 @@ export async function GET(
       const result = await pool.query(
         `${BASE_WITH_CONTACTS}
          SELECT m.id, m.direction, m.text, COALESCE(m.tipo, 'texto') AS tipo, m.created_at,
-                m.whatsapp_status, m.whatsapp_error
+                m.whatsapp_status, m.whatsapp_error, m.reply_to_text
          FROM public.crm_messages m ${WHERE_WITH_CONTACTS}`,
         queryParams,
       );

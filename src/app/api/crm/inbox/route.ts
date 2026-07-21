@@ -291,16 +291,17 @@ export async function GET(req: NextRequest) {
 
     // Step 3: enrich with last message (best-effort, skip on error)
     const ids = unique.map(l => l.id);
-    let lastMsgs: Record<string, { text: string; direction: string; created_at: string; tipo?: string | null }> = {};
+    let lastMsgs: Record<string, { text: string; direction: string; created_at: string; tipo?: string | null; whatsapp_status?: string | null }> = {};
     let unreadCounts: Record<string, number> = {};
     let avatarMap: Record<string, string | null> = {};
 
     try {
-      // Last message per lead (tipo alimenta a prévia estilo WhatsApp: 📷 Foto, 🎤 Áudio…)
+      // Last message per lead (tipo alimenta a prévia estilo WhatsApp: 📷 Foto, 🎤 Áudio…;
+      // whatsapp_status pinta o ✓✓ da prévia quando a última é sua)
       const { rows: msgs } = await pool.query<{
-        lead_id: string; text: string; direction: string; created_at: string; tipo: string | null;
+        lead_id: string; text: string; direction: string; created_at: string; tipo: string | null; whatsapp_status: string | null;
       }>(
-        `SELECT DISTINCT ON (lead_id) lead_id, text, direction, created_at, COALESCE(tipo, 'texto') AS tipo
+        `SELECT DISTINCT ON (lead_id) lead_id, text, direction, created_at, COALESCE(tipo, 'texto') AS tipo, whatsapp_status
          FROM public.crm_messages
          WHERE lead_id = ANY($1::uuid[])
          ORDER BY lead_id, created_at DESC`,
@@ -385,6 +386,7 @@ export async function GET(req: NextRequest) {
         last_message:    msg?.text    ?? wa?.text ?? null,
         last_direction:  msg?.direction ?? wa?.dir ?? null,
         last_tipo:       msg?.tipo ?? null,
+        last_status:     msg?.whatsapp_status ?? null,
         last_message_at: msg?.created_at ?? wa?.at ?? l.updated_at ?? l.created_at,
         unread_count:    unreadCounts[l.id] ?? 0,
       };

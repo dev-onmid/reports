@@ -18,6 +18,7 @@ export type NormalizedMessage = {
   creativeName: string | undefined;
   pushName: string | undefined;
   profilePictureUrl: string | undefined;
+  quotedText: string | undefined; // trecho da mensagem citada (resposta), quando houver
 };
 
 function normalizePhone(raw: string): string {
@@ -44,6 +45,7 @@ function normalizeZapiPayload(body: any): NormalizedMessage | null {
     creativeName: body.creativeName ?? body.creative_name ?? body.criativo ?? undefined,
     pushName: body.senderName ?? body.pushName ?? undefined,
     profilePictureUrl: body.profilePicUrl ?? body.profilePictureUrl ?? body.photo ?? undefined,
+    quotedText: body.referenceMessage?.message ?? body.quotedMsg?.body ?? undefined,
   };
 }
 
@@ -92,10 +94,28 @@ function normalizeEvolutionPayload(body: any): NormalizedMessage | null {
 
   const text = extractEvolutionText(data.message ?? {});
 
+  // contextInfo mora dentro do tipo de mensagem (extendedTextMessage, imageMessage…)
+  // ou na raiz do data — procura no primeiro lugar em que aparecer.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const msgObj: Record<string, any> = data.message ?? {};
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let contextInfo: any = data.contextInfo ?? null;
+  if (!contextInfo) {
+    for (const key of Object.keys(msgObj)) {
+      if (msgObj[key]?.contextInfo) { contextInfo = msgObj[key].contextInfo; break; }
+    }
+  }
+
   // CTWA click ID lives in contextInfo.externalAdReply on Evolution API
   const adReply =
     data.message?.extendedTextMessage?.contextInfo?.externalAdReply ??
+    contextInfo?.externalAdReply ??
     data.contextInfo?.externalAdReply;
+
+  // Resposta citada: o quotedMessage tem o mesmo shape de uma mensagem — reusa o
+  // extrator de texto pra virar um trecho legível ("[Imagem]", texto, etc.).
+  const quotedRaw = contextInfo?.quotedMessage;
+  const quotedText = quotedRaw ? (extractEvolutionText(quotedRaw) || undefined) : undefined;
 
   return {
     phone,
@@ -113,6 +133,7 @@ function normalizeEvolutionPayload(body: any): NormalizedMessage | null {
     creativeName: adReply?.body ?? undefined,
     pushName: data.pushName ?? undefined,
     profilePictureUrl: data.profilePicUrl ?? data.profilePictureUrl ?? data.picture ?? undefined,
+    quotedText,
   };
 }
 

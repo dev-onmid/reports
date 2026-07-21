@@ -408,6 +408,7 @@ export async function POST(
       // A failure here must NEVER 500 the webhook (Evolution would retry forever and
       // the lead's last-message preview would already be committed). Persist best-effort.
       try {
+        const replyTo = msg.quotedText?.slice(0, 500) ?? null;
         if (externalId) {
           // Deduplicate by external_id to prevent double-inserts from retried webhooks.
           // NOTE: the unique index on (lead_id, external_id) is PARTIAL, so a bare
@@ -415,20 +416,20 @@ export async function POST(
           // `ON CONFLICT DO NOTHING`, which considers every usable unique index.
           await pool.query(
             `INSERT INTO public.crm_messages
-              (lead_id, client_id, direction, text, tipo, external_id, created_at, whatsapp_status)
-             VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz, $8)
+              (lead_id, client_id, direction, text, tipo, external_id, created_at, whatsapp_status, reply_to_text)
+             VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz, $8, $9)
              ON CONFLICT DO NOTHING`,
-            [crmLead.id, clientId, fromMe ? 'out' : 'in', messageText, messageTipo, externalId, messageCreatedAt, fromMe ? 'sent' : null],
+            [crmLead.id, clientId, fromMe ? 'out' : 'in', messageText, messageTipo, externalId, messageCreatedAt, fromMe ? 'sent' : null, replyTo],
           );
         } else {
           await pool.query(
-            `INSERT INTO public.crm_messages (lead_id, client_id, direction, text, tipo, created_at, whatsapp_status)
-             SELECT $1, $2, $3, $4, $5, $6::timestamptz, $7
+            `INSERT INTO public.crm_messages (lead_id, client_id, direction, text, tipo, created_at, whatsapp_status, reply_to_text)
+             SELECT $1, $2, $3, $4, $5, $6::timestamptz, $7, $8
              WHERE NOT EXISTS (
                SELECT 1 FROM public.crm_messages
                WHERE lead_id = $1 AND text = $4 AND created_at = $6::timestamptz
              )`,
-            [crmLead.id, clientId, fromMe ? 'out' : 'in', messageText, messageTipo, messageCreatedAt, fromMe ? 'sent' : null],
+            [crmLead.id, clientId, fromMe ? 'out' : 'in', messageText, messageTipo, messageCreatedAt, fromMe ? 'sent' : null, replyTo],
           );
         }
       } catch (err) {

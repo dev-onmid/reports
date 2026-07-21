@@ -25,6 +25,7 @@ type InboxLead = {
   last_message: string | null;
   last_direction: 'in' | 'out' | null;
   last_tipo?: string | null;
+  last_status?: string | null;
   last_message_at: string | null;
   unread_count: number;
   avatar_url?: string | null;
@@ -43,6 +44,7 @@ type CrmMessage = {
   created_at: string;
   whatsapp_status?: 'pending' | 'sent' | 'delivered' | 'read' | 'failed' | string | null;
   whatsapp_error?: string | null;
+  reply_to_text?: string | null;
 };
 
 type MediaType = 'imagem' | 'audio' | 'video' | 'documento' | 'localizacao';
@@ -231,7 +233,7 @@ function DateSeparator({ label }: { label: string }) {
   );
 }
 
-function MessageBubble({ msg }: { msg: CrmMessage }) {
+function MessageBubble({ msg, onImageClick }: { msg: CrmMessage; onImageClick?: (src: string) => void }) {
   const isOut = msg.direction === 'out';
   const t = msg.tipo ?? 'texto';
   const text = msg.text;
@@ -250,7 +252,9 @@ function MessageBubble({ msg }: { msg: CrmMessage }) {
     if (t === 'imagem' || (t === 'texto' && isImageUrl(text))) {
       return (
         <div className="space-y-1">
-          <img src={text} alt="Imagem" className="max-w-full rounded-lg object-cover max-h-60"
+          <img src={text} alt="Imagem"
+            className="max-w-full rounded-lg object-cover max-h-60 cursor-zoom-in hover:opacity-90 transition-opacity"
+            onClick={() => onImageClick?.(text)}
             onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
         </div>
       );
@@ -305,6 +309,14 @@ function MessageBubble({ msg }: { msg: CrmMessage }) {
           ? 'bg-primary/25 text-foreground border border-primary/20'
           : 'bg-card text-foreground border border-border',
       )}>
+        {msg.reply_to_text && (
+          <div className={cn(
+            'mb-1.5 rounded-md border-l-[3px] border-primary/70 px-2.5 py-1.5 text-xs text-muted-foreground',
+            isOut ? 'bg-black/15' : 'bg-muted/40',
+          )}>
+            <p className="line-clamp-2 whitespace-pre-wrap break-words">{msg.reply_to_text}</p>
+          </div>
+        )}
         {content}
         <div className="flex items-center justify-end gap-1 mt-0.5">
           <span className={cn('text-[11px] select-none', isOut ? 'text-[#9BB5A8]' : 'text-[#8696A0]')}>
@@ -582,6 +594,7 @@ export function ChatView({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [messages,   setMessages]   = useState<CrmMessage[]>([]);
   const [msgLoading, setMsgLoading] = useState(false);
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [replyText,  setReplyText]  = useState('');
   const [sending,    setSending]    = useState(false);
   const [sendStatus, setSendStatus] = useState<'ok' | 'err' | null>(null);
@@ -1500,9 +1513,11 @@ export function ChatView({
                     </div>
                     <span className="text-[10px] text-muted-foreground shrink-0">{timeFmt(lead.last_message_at)}</span>
                   </div>
-                  <p className="text-[11px] text-muted-foreground truncate mt-0.5">
-                    {lead.last_direction === 'out' && <span className="text-primary/70">Você: </span>}
-                    {inboxPreview(lead)}
+                  <p className="flex items-center gap-1 text-[11px] text-muted-foreground truncate mt-0.5">
+                    {lead.last_direction === 'out' && (
+                      <CheckCheck className={cn('h-3.5 w-3.5 shrink-0', lead.last_status === 'read' ? 'text-[#53BDEB]' : 'text-muted-foreground/60')} />
+                    )}
+                    <span className="truncate">{inboxPreview(lead)}</span>
                   </p>
                   <div className="flex items-center gap-1.5 mt-1">
                     {lead.status && <span className="text-[10px] text-muted-foreground">{lead.status}</span>}
@@ -1763,7 +1778,7 @@ export function ChatView({
                     return (
                       <Fragment key={m.id}>
                         {showDate && <DateSeparator label={dateSeparatorLabel(m.created_at)} />}
-                        <MessageBubble msg={m} />
+                        <MessageBubble msg={m} onImageClick={setLightboxSrc} />
                       </Fragment>
                     );
                   })
@@ -1909,6 +1924,40 @@ export function ChatView({
       )}
 
       {/* Confirm dialog */}
+      {/* Lightbox de imagem — clique na foto amplia, clique fora/X fecha */}
+      {lightboxSrc && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 p-6 backdrop-blur-sm"
+          onClick={() => setLightboxSrc(null)}
+        >
+          <button
+            type="button"
+            onClick={() => setLightboxSrc(null)}
+            className="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 transition-colors"
+            aria-label="Fechar"
+          >
+            <X className="h-5 w-5" />
+          </button>
+          <a
+            href={lightboxSrc}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={e => e.stopPropagation()}
+            className="absolute right-16 top-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 transition-colors"
+            aria-label="Abrir original"
+            title="Abrir original"
+          >
+            <Download className="h-5 w-5" />
+          </a>
+          <img
+            src={lightboxSrc}
+            alt="Imagem ampliada"
+            className="max-h-[88vh] max-w-[92vw] rounded-lg object-contain shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          />
+        </div>
+      )}
+
       {confirmDialog && (
         <ConfirmDialog
           title={confirmDialog.title}

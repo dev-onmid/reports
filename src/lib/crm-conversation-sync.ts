@@ -118,6 +118,8 @@ export async function ensureCrmMessagesSchema(pool: Pool) {
     `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS external_id TEXT`,
     `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS whatsapp_status TEXT`,
     `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS whatsapp_error TEXT`,
+    // Resposta citada (trecho da mensagem respondida) — exibido acima da bolha
+    `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS reply_to_text TEXT`,
     // ── Legacy-schema repair ──────────────────────────────────────────────────
     // The original migration (migration_crm.sql) created crm_messages with
     // `contact_id UUID NOT NULL REFERENCES crm_contacts(id)` and a direction CHECK.

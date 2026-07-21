@@ -302,6 +302,12 @@ Pedido do Matheus: replicar a experiência do WhatsApp no chat do CRM (contatos 
 - Separadores de data (Hoje/Ontem/data) e check azul de lida JÁ existiam — não recriar.
 - ✅ Verificado no preview com fetch mockado: prévias, telefones formatados, horários, cartões de doc (com e sem arquivo), separadores, backfill disparando no mount. findContacts real exige produção — validar abrindo o chat de um cliente e conferindo nomes/fotos preenchidos.
 
+**Fase 2 (2026-07-21) — resposta citada, lightbox, ✓✓ na prévia:**
+- **Resposta citada**: `NormalizedMessage` ganhou `quotedText` — Evolution extrai de `contextInfo.quotedMessage` (o contextInfo mora DENTRO do tipo de mensagem — extendedTextMessage/imageMessage/… — ou na raiz; busca no primeiro que tiver; o quotedMessage tem o shape de mensagem normal, então reusa `extractEvolutionText` → "[Imagem]" etc.); Z-API lê `referenceMessage.message`. Coluna `crm_messages.reply_to_text` (ensure schema; webhook grava `.slice(0,500)` nos dois INSERTs), GET de messages retorna no tier principal (fallback sem a coluna fica sem citação, gracioso). Bolha renderiza bloco com borda esquerda primary acima do conteúdo. Só RECEBIMENTO — enviar citando fica pra depois.
+- **Lightbox**: clique em imagem da conversa abre overlay fullscreen (z-[60], fechar no X/backdrop, botão de abrir original). `MessageBubble` ganhou prop `onImageClick`.
+- **✓✓ na prévia do inbox**: rota inbox devolve `last_status` (whatsapp_status da última mensagem) e a lista mostra CheckCheck antes da prévia quando a última é `out` (azul #53BDEB se read, cinza senão) — substituiu o prefixo "Você:".
+- ✅ Verificado no preview mockado: citação nos dois lados, lightbox abre/fecha, checks azul/cinza na lista. Citação REAL depende do webhook em produção (mandar uma resposta citada no WhatsApp e conferir o bloco).
+
 ### Kanban denso + visão padrão (2026-07-19)
 
 Reforma de densidade do funil (reclamação do Matheus: "box grandes demais, pouco espaço para ver o lead") em `crm/page.tsx`:
