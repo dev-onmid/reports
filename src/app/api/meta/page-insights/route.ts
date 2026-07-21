@@ -93,6 +93,49 @@ async function fetchOneMetric(
   } catch { return { total: 0, daily: [] }; }
 }
 
+// Split [since, until] (unix seconds) into ≤28-day windows. Meta's IG account-level
+// insights reject ranges longer than ~30 days, so a monthly (or previous-month)
+// period must be requested in pieces and summed — otherwise the call returns 0.
+function chunkRange(since: number, until: number): Array<{ since: number; until: number }> {
+  const chunks: Array<{ since: number; until: number }> = [];
+  const STEP = 28 * 86400; // seconds
+  for (let cursor = since; cursor <= until; ) {
+    const end = Math.min(cursor + STEP - 1, until);
+    chunks.push({ since: cursor, until: end });
+    cursor = end + 1;
+  }
+  return chunks.length ? chunks : [{ since, until }];
+}
+
+// Chunked account-metric fetch. Sums the metric across ≤28-day windows and, when
+// metric_type=total_value comes back empty (some accounts/older windows reject it
+// even though the per-day series exists), retries without it and sums the daily
+// values — so the previous period isn't silently zeroed. Mirrors the delivery
+// report builder, the proven path for period-over-period IG comparisons.
+async function fetchIgMetricChunked(
+  igId: string,
+  metric: string,
+  since: number,
+  until: number,
+  token: string,
+  metricType?: string,
+): Promise<{ total: number; daily: number[] }> {
+  const chunks = chunkRange(since, until);
+  const parts = await Promise.all(
+    chunks.map(c => fetchOneMetric(igId, metric, 'day', c.since, c.until, token, metricType)),
+  );
+  let total = parts.reduce((s, p) => s + p.total, 0);
+  const daily = parts.flatMap(p => p.daily);
+  if (metricType && total === 0) {
+    const fb = await Promise.all(
+      chunks.map(c => fetchOneMetric(igId, metric, 'day', c.since, c.until, token)),
+    );
+    total = fb.reduce((s, p) => s + p.total, 0);
+    if (daily.length === 0) return { total, daily: fb.flatMap(p => p.daily) };
+  }
+  return { total, daily };
+}
+
 // One-shot batch fetch for IG daily series — uses period=day WITHOUT metric_type=total_value
 // so each metric returns its per-day `values` array (trends accurate; totals may differ
 // from deduped metric_type calls but are only used for sparklines, not for display numbers).
@@ -104,16 +147,26 @@ async function fetchIgDailySeries(
 ): Promise<Record<string, number[]>> {
   try {
     const metrics = 'reach,views,profile_views,website_clicks,accounts_engaged,total_interactions,likes,saves';
-    const res = await fetch(
-      `https://graph.facebook.com/v21.0/${igId}/insights` +
-      `?metric=${metrics}&period=day&since=${since}&until=${until}&access_token=${token}`,
-    );
-    if (!res.ok) return {};
-    const d = await res.json() as { data?: { name: string; values?: { value: number }[] }[]; error?: unknown };
-    if (d.error || !d.data) return {};
+    // Chunk so ranges longer than ~30 days (e.g. a full month) still return a series
+    // instead of an empty payload; concatenate each metric's per-day values in order.
+    const chunks = chunkRange(since, until);
+    const perChunk = await Promise.all(chunks.map(async (c) => {
+      const res = await fetch(
+        `https://graph.facebook.com/v21.0/${igId}/insights` +
+        `?metric=${metrics}&period=day&since=${c.since}&until=${c.until}&access_token=${token}`,
+      );
+      if (!res.ok) return {};
+      const d = await res.json() as { data?: { name: string; values?: { value: number }[] }[]; error?: unknown };
+      if (d.error || !d.data) return {};
+      const r: Record<string, number[]> = {};
+      for (const m of d.data) if (m.values?.length) r[m.name] = m.values.map(v => v.value);
+      return r;
+    }));
     const result: Record<string, number[]> = {};
-    for (const m of d.data) {
-      if (m.values?.length) result[m.name] = m.values.map(v => v.value);
+    for (const chunkResult of perChunk) {
+      for (const [name, values] of Object.entries(chunkResult)) {
+        result[name] = (result[name] ?? []).concat(values);
+      }
     }
     return result;
   } catch { return {}; }
@@ -191,14 +244,14 @@ async function fetchIgPage(
       dailyMap,
     ] = await Promise.all([
       fetch(`https://graph.facebook.com/v21.0/${ig.id}?fields=followers_count&access_token=${pageToken}`),
-      fetchOneMetric(ig.id, 'reach',              'day', since, until, pageToken),
-      fetchOneMetric(ig.id, 'views',              'day', since, until, pageToken, 'total_value'),
-      fetchOneMetric(ig.id, 'profile_views',      'day', since, until, pageToken, 'total_value'),
-      fetchOneMetric(ig.id, 'website_clicks',     'day', since, until, pageToken, 'total_value'),
-      fetchOneMetric(ig.id, 'accounts_engaged',   'day', since, until, pageToken, 'total_value'),
-      fetchOneMetric(ig.id, 'total_interactions', 'day', since, until, pageToken, 'total_value'),
-      fetchOneMetric(ig.id, 'likes',              'day', since, until, pageToken, 'total_value'),
-      fetchOneMetric(ig.id, 'saves',              'day', since, until, pageToken, 'total_value'),
+      fetchIgMetricChunked(ig.id, 'reach',              since, until, pageToken),
+      fetchIgMetricChunked(ig.id, 'views',              since, until, pageToken, 'total_value'),
+      fetchIgMetricChunked(ig.id, 'profile_views',      since, until, pageToken, 'total_value'),
+      fetchIgMetricChunked(ig.id, 'website_clicks',     since, until, pageToken, 'total_value'),
+      fetchIgMetricChunked(ig.id, 'accounts_engaged',   since, until, pageToken, 'total_value'),
+      fetchIgMetricChunked(ig.id, 'total_interactions', since, until, pageToken, 'total_value'),
+      fetchIgMetricChunked(ig.id, 'likes',              since, until, pageToken, 'total_value'),
+      fetchIgMetricChunked(ig.id, 'saves',              since, until, pageToken, 'total_value'),
       // One extra call without metric_type to get daily breakdowns for all metrics at once.
       // The totals from this call may differ (no cross-day deduplication) so they're only
       // used for sparklines; display numbers come from the metric_type=total_value calls above.

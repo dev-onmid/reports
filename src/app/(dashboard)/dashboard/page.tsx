@@ -5283,8 +5283,6 @@ export default function GeneralDashboard() {
       fetch(`/api/meta/page-insights?${params}`).then(r => r.ok ? r.json() as Promise<PageInsightsResult[]> : []),
       fetch(`/api/meta/page-insights?${prevParams}`).then(r => r.ok ? r.json() as Promise<PageInsightsResult[]> : []),
     ]).then(([cur, prev]) => {
-      console.log('[page-insights] current', cur);
-      console.log('[page-insights] prev', prev);
       if (!cancelled) { setPageInsights(cur); setPrevPageInsights(prev); }
     }).catch(() => {
       if (!cancelled) { setPageInsights([]); setPrevPageInsights([]); }
@@ -5898,7 +5896,6 @@ export default function GeneralDashboard() {
               const igInteract = sum(allIg, 'totalInteractions');
               const igSaves    = sum(allIg, 'saves');
               const igPViews   = sum(allIg, 'profileViews');
-              const prevFollow   = sum(prevIg, 'followers');
               const prevReach    = sum(prevIg, 'reach');
               const prevClicks   = sum(prevIg, 'websiteClicks');
               const prevEngaged  = sum(prevIg, 'accountsEngaged');
@@ -5919,7 +5916,8 @@ export default function GeneralDashboard() {
                   </div>
                   <div className="px-4 pb-4">
                     <div className="grid gap-2 sm:grid-cols-4 lg:grid-cols-8">
-                      <MiniPlatformMetric label="Seguidores" value={pageInsightsLoading ? '…' : igFollow > 0 ? premiumValue(igFollow) : '—'} icon={Users} change={chg(igFollow, prevFollow)} />
+                      {/* Seguidores é um snapshot do total atual (followers_count), não uma métrica de período — comparar com o "anterior" daria sempre 0%, então não mostramos variação. */}
+                      <MiniPlatformMetric label="Seguidores" value={pageInsightsLoading ? '…' : igFollow > 0 ? premiumValue(igFollow) : '—'} icon={Users} />
                       <MiniPlatformMetric label="Alcance" value={pageInsightsLoading ? '…' : igReach > 0 ? premiumValue(igReach) : '—'} icon={Eye} change={chg(igReach, prevReach)} />
                       <MiniPlatformMetric label="Cliques Bio" value={pageInsightsLoading ? '…' : igClicks > 0 ? premiumValue(igClicks) : '—'} icon={ExternalLink} change={chg(igClicks, prevClicks)} />
                       <MiniPlatformMetric label="Engajamento" value={pageInsightsLoading ? '…' : igEngaged > 0 ? premiumValue(igEngaged) : '—'} icon={Heart} change={chg(igEngaged, prevEngaged)} />
@@ -6725,7 +6723,6 @@ export default function GeneralDashboard() {
         const prevFbImpr    = prevFbData.reduce((s, d) => s + d.impressions, 0);
         const prevFbEngage  = prevFbData.reduce((s, d) => s + d.engagements, 0);
         const prevFbViews   = prevFbData.reduce((s, d) => s + d.pageViews, 0);
-        const prevIgFollow  = prevIgData.reduce((s, d) => s + d.followers, 0);
         const prevIgReach   = prevIgData.reduce((s, d) => s + d.reach, 0);
         const prevIgViews   = prevIgData.reduce((s, d) => s + d.views, 0);
         const prevIgPViews  = prevIgData.reduce((s, d) => s + d.profileViews, 0);
@@ -6757,7 +6754,7 @@ export default function GeneralDashboard() {
           'social-fb-impressions':     <KpiCard title="Impressões FB"     value={fbImpr}    prevValue={prevFbImpr}    format="number" icon={BarChart3}     iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-fb-impressions']?.chart ?? 'sparkline'} series={socialSeriesOrSlope(fbImprSeries, prevFbImpr, fbImpr)} />,
           'social-fb-engagements':     <KpiCard title="Engajamentos FB"   value={fbEngage}  prevValue={prevFbEngage}  format="number" icon={Heart}         iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-fb-engagements']?.chart ?? 'sparkline'} series={socialSeriesOrSlope(fbEngageSeries, prevFbEngage, fbEngage)} />,
           'social-fb-views':           <KpiCard title="Visitas à página"  value={fbViews}   prevValue={prevFbViews}   format="number" icon={Monitor}       iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-fb-views']?.chart ?? 'sparkline'}      series={socialSeriesOrSlope(fbViewsSeries, prevFbViews, fbViews)} />,
-          'social-ig-followers':       <KpiCard title="Seguidores IG"     value={igFollow}  prevValue={prevIgFollow}  format="number" icon={Users}         iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-ig-followers']?.chart ?? 'sparkline'}   series={socialSeriesOrSlope([], prevIgFollow, igFollow)} />,
+          'social-ig-followers':       <KpiCard title="Seguidores IG"     value={igFollow}                            format="number" icon={Users}         iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-ig-followers']?.chart ?? 'sparkline'}   series={socialSeriesOrSlope([], igFollow, igFollow)} />,
           'social-ig-reach':           <KpiCard title="Alcance IG"        value={igReach}   prevValue={prevIgReach}   format="number" icon={Eye}           iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-ig-reach']?.chart ?? 'sparkline'}        series={socialSeriesOrSlope(igReachSeries, prevIgReach, igReach)} />,
           'social-ig-views':           <KpiCard title="Visualizações IG"  value={igViews}   prevValue={prevIgViews}   format="number" icon={BarChart3}     iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-ig-views']?.chart ?? 'sparkline'}        series={socialSeriesOrSlope(igViewsSeries, prevIgViews, igViews)} />,
           'social-ig-profile-views':   <KpiCard title="Visitas ao perfil" value={igPViews}  prevValue={prevIgPViews}  format="number" icon={Monitor}       iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-ig-profile-views']?.chart ?? 'sparkline'}  series={socialSeriesOrSlope(igPViewsSeries, prevIgPViews, igPViews)} />,
