@@ -21,7 +21,7 @@ import {
   Power, PowerOff, Search, BookMarked, ExternalLink, RefreshCw, ChevronRight,
   PiggyBank, Wallet, Info, Lightbulb, UserPlus, Brain, Save, MousePointer2,
   Maximize2, Minimize2, ZoomIn, ZoomOut, ImageIcon, Unlink, History, Copy, Sparkles,
-  Store,
+  Store, Settings,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -50,6 +50,7 @@ import { HistoricoTab } from '@/components/historico-tab';
 import { VaultTab } from '@/components/vault-tab';
 import CrmWorkspace from '@/app/(dashboard)/crm/page';
 import { ClientTrackingTab } from './tracking-tab';
+import { LandingPagesTab } from './landing-pages-tab';
 
 // ── Funnel types & logic ───────────────────────────────────────────────────────
 type FunnelStage = { id: string; name: string; conversion: number };
@@ -1951,6 +1952,18 @@ function InvestmentPaymentsTab({ clientId, clientName }: { clientId: string; cli
   } = useInvestmentPayments();
   const [statusFilter, setStatusFilter] = useState<PaymentStatus | 'Todos'>('Todos');
   const [channelFilter, setChannelFilter] = useState<PaymentChannel | 'Todos'>('Todos');
+  // Só LEITURA — a forma de cobrança é editada no modal "Configurar" (fonte única de verdade).
+  const [billingMode, setBillingMode] = useState<'prepaid' | 'card'>('prepaid');
+  useEffect(() => {
+    const stored = localStorage.getItem(`${CLIENT_BILLING_MODE_PREFIX}${clientId}`);
+    if (stored === 'card' || stored === 'prepaid') setBillingMode(stored);
+    let cancelled = false;
+    fetch(`/api/clients/${clientId}/billing-mode`)
+      .then(r => r.json())
+      .then((data: { mode: 'prepaid' | 'card' }) => { if (!cancelled) setBillingMode(data.mode); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [clientId]);
   const [newPayment, setNewPayment] = useState<Omit<InvestmentPayment, 'id'>>({
     clientId,
     clientName,
@@ -1984,6 +1997,24 @@ function InvestmentPaymentsTab({ clientId, clientName }: { clientId: string; cli
 
   return (
     <div className="space-y-5 pt-1">
+      <div className="flex items-center justify-between gap-3 flex-wrap rounded-xl border border-border bg-card/50 px-4 py-2.5">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <WalletCards className="w-4 h-4 text-primary" />
+          <span>Forma de cobrança dos anúncios:</span>
+          <span className={cn(
+            'rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider',
+            billingMode === 'card'
+              ? 'border-secondary/40 bg-secondary/10 text-secondary'
+              : 'border-primary/30 bg-primary/10 text-primary',
+          )}>
+            {billingMode === 'card' ? 'Cartão / faturado' : 'Pré-pago / saldo'}
+          </span>
+        </div>
+        <span className="flex items-center gap-1 text-[10px] text-muted-foreground/80">
+          <Settings className="w-3 h-3" /> Editar em Configurar
+        </span>
+      </div>
+
       <div className="grid gap-3 md:grid-cols-5">
         {[
           { label: 'Total programado', value: total, icon: WalletCards, tone: 'text-foreground' },
@@ -4090,8 +4121,8 @@ function ClientIntegrationsTab({ clientId, clientName }: { clientId: string; cli
     <>
       <Card className="mb-4 border-border bg-card">
         <CardHeader>
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex items-start gap-3">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="flex min-w-0 items-start gap-3">
               <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border bg-background">
                 <WalletCards className="h-5 w-5 text-primary" />
               </div>
@@ -4102,7 +4133,7 @@ function ClientIntegrationsTab({ clientId, clientName }: { clientId: string; cli
                 </CardDescription>
               </div>
             </div>
-            <div className="flex shrink-0 rounded-xl border border-border bg-background p-1">
+            <div className="flex shrink-0 self-start rounded-xl border border-border bg-background p-1">
               {([
                 { value: 'prepaid' as const, label: 'Pré-pago / saldo' },
                 { value: 'card' as const, label: 'Cartão / faturado' },
@@ -4345,6 +4376,43 @@ function ClientIntegrationsTab({ clientId, clientName }: { clientId: string; cli
         clientName={clientName}
       />
     </>
+  );
+}
+
+// Modal único de configuração do cliente — junta tudo que é setup (conexões, cobrança,
+// Anota Aí e Links & Senhas) que antes ficava espalhado nas abas Integrações e Links.
+function ClientConfigModal({ open, onClose, clientId, clientName }: {
+  open: boolean;
+  onClose: () => void;
+  clientId: string;
+  clientName: string;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="w-[95vw] sm:max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Settings className="h-5 w-5 text-primary" />
+            Configurar cliente
+          </DialogTitle>
+          <p className="text-sm text-muted-foreground">
+            {clientName} — conexões, forma de cobrança, Anota Aí e senhas. Tudo o que é setup deste cliente fica aqui.
+          </p>
+        </DialogHeader>
+        {open && (
+          <div className="space-y-6 pt-2">
+            <ClientIntegrationsTab clientId={clientId} clientName={clientName} />
+            <div>
+              <div className="mb-3 flex items-center gap-2">
+                <BookMarked className="h-4 w-4 text-primary" />
+                <h3 className="text-sm font-bold uppercase tracking-wider text-foreground">Links &amp; Senhas</h3>
+              </div>
+              <VaultTab clientId={clientId} />
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -4595,8 +4663,11 @@ function SheetsResultsTab({ clientId }: { clientId: string }) {
 }
 
 // ── Page ───────────────────────────────────────────────────────────────────────
-const TABS = ['dashboard', 'planejamento', 'mapa', 'historico', 'integracoes', 'rastreio', 'links', 'pagamentos', 'dna', 'crm'] as const;
+const TABS = ['dashboard', 'planejamento', 'crm', 'rastreio', 'pagamentos', 'lps', 'dna', 'historico', 'mapa'] as const;
 type Tab = typeof TABS[number];
+// Abas operacionais sempre visíveis na barra; o resto (referência) vai pro menu "Mais".
+const PRIMARY_TABS: Tab[] = ['dashboard', 'planejamento', 'crm', 'rastreio', 'pagamentos'];
+const MORE_TABS: Tab[] = ['lps', 'dna', 'historico', 'mapa'];
 
 function readSavedDashboardBlocks(clientId: string): ClientDashboardWidget[] {
   if (typeof window === 'undefined') return [];
@@ -4663,6 +4734,8 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
   const isAdmin = getAuthSession()?.role === 'Administrador';
 
   const [tab, setTab] = useState<Tab>('planejamento');
+  const [configOpen, setConfigOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
   const [statusDialogOpen, setStatusDialogOpen] = useState(false);
   const [pendingStatus, setPendingStatus] = useState<ClientStatus | null>(null);
@@ -4811,9 +4884,8 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
     planejamento: 'Planejamento',
     mapa:         'Mapa Mental',
     historico:    'Histórico',
-    integracoes:  'Integrações',
     rastreio:     'Rastreio',
-    links:        'Links & Senhas',
+    lps:          'Landing Pages',
     pagamentos:   'Pagamentos',
     dna:          'DNA do Cliente',
     crm:          'CRM',
@@ -4904,6 +4976,14 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
             <Link2 className="w-4 h-4 text-primary" />
             Vincular Contas
           </Button>
+          <Button
+            variant="outline"
+            className="border-border h-9 text-xs font-bold uppercase tracking-wider gap-2"
+            onClick={() => setConfigOpen(true)}
+          >
+            <Settings className="w-4 h-4 text-primary" />
+            Configurar
+          </Button>
         </div>
       </div>
 
@@ -4944,7 +5024,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
 
       {/* Tabs nav */}
       <div className="flex gap-1 bg-card border border-border p-1 rounded-xl w-fit flex-wrap">
-        {TABS.map((t) => (
+        {PRIMARY_TABS.map((t) => (
           <button key={t} onClick={() => setTab(t)}
             className={cn(
               'px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors',
@@ -4955,6 +5035,39 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
             {tabLabel[t]}
           </button>
         ))}
+
+        {/* Overflow "Mais" — abas de referência */}
+        <div className="relative">
+          <button
+            onClick={() => setMoreOpen(o => !o)}
+            className={cn(
+              'flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors',
+              MORE_TABS.includes(tab)
+                ? 'bg-primary/20 text-primary shadow-[0_0_10px_rgba(85,245,47,0.15)]'
+                : 'text-muted-foreground hover:text-foreground'
+            )}>
+            {MORE_TABS.includes(tab) ? tabLabel[tab] : 'Mais'}
+            <ChevronDown className={cn('w-3.5 h-3.5 transition-transform', moreOpen && 'rotate-180')} />
+          </button>
+          {moreOpen && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setMoreOpen(false)} />
+              <div className="absolute left-0 top-full z-50 mt-1 w-48 rounded-xl border border-border bg-card p-1 shadow-xl">
+                {MORE_TABS.map((t) => (
+                  <button key={t} onClick={() => { setTab(t); setMoreOpen(false); }}
+                    className={cn(
+                      'w-full text-left px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors',
+                      tab === t
+                        ? 'bg-primary/20 text-primary'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-background'
+                    )}>
+                    {tabLabel[t]}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Tab content */}
@@ -4982,17 +5095,22 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
 
       {tab === 'historico' && <HistoricoTab clientId={id} />}
 
-      {tab === 'integracoes' && <ClientIntegrationsTab clientId={id} clientName={client.name} />}
-
       {tab === 'rastreio' && <ClientTrackingTab clientId={id} />}
 
-      {tab === 'links' && <VaultTab clientId={id} />}
+      {tab === 'lps' && <LandingPagesTab clientId={id} />}
 
       {tab === 'dna' && <ClientDnaTab clientId={id} clientName={client.name} />}
 
       {tab === 'pagamentos' && <InvestmentPaymentsTab clientId={id} clientName={client.name} />}
 
       {tab === 'crm' && <CrmWorkspace lockedClientId={id} embedded />}
+
+      <ClientConfigModal
+        open={configOpen}
+        onClose={() => setConfigOpen(false)}
+        clientId={id}
+        clientName={client.name}
+      />
 
 
       <Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>

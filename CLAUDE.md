@@ -1,5 +1,15 @@
 @AGENTS.md
 
+## Tela do cliente — abas enxutas + modal de configuração (2026-07-22)
+
+Reforma de densidade da tela `clientes/[id]` (pedido do Matheus: "ao clicar em clientes aparecia tudo de uma vez"). Reorganização 100% de apresentação — nenhuma rota/backend mudou.
+
+- **Aba Integrações eliminada** e **Links & Senhas deixou de ser aba**. Todo o setup virou um botão **⚙️ Configurar** no header (ao lado de Vincular Contas) → `ClientConfigModal` (novo, em `page.tsx`) com 4 seções: Forma de cobrança, Anota Aí, Conexões (Meta/Google/GMN/Sheets — reusa `ClientIntegrationsTab` inteiro como corpo) e Links & Senhas (reusa `VaultTab`). O corpo do modal só monta com `open` (Radix desmonta content fechado) → refetcha a cada abertura.
+- **Barra de abas 11 → 5 + "Mais ▾"**: `PRIMARY_TABS = [dashboard, planejamento, crm, rastreio, pagamentos]` sempre visíveis; `MORE_TABS = [lps, dna, historico, mapa]` num dropdown de overflow (fecha via backdrop `fixed inset-0`, botão fica destacado quando a aba ativa está lá dentro). `TABS`/`tabLabel` perderam `integracoes` e `links` (os render blocks `tab === 'integracoes'|'links'` foram removidos — senão viram erro de tipo, pois saíram do union `Tab`).
+- **Cobrança = fonte única de verdade**: editável só no modal; a aba **Pagamentos** (`InvestmentPaymentsTab`) ganhou selinho **read-only** no topo (`Forma de cobrança: Pré-pago/Cartão` + hint "Editar em Configurar"), lendo `/api/clients/[id]/billing-mode` com cache em `CLIENT_BILLING_MODE_PREFIX` (localStorage). Não duplica o controle.
+- ⚠️ **Lição do modal**: o `DialogContent` do projeto tem default `sm:max-w-sm` (responsivo) que VENCE um `max-w-5xl` base via twMerge (prefixos `sm:` não deduplicam com base) — para alargar o modal use o MESMO prefixo (`sm:max-w-4xl`). Também: a linha do header da "Forma de cobrança" precisou de `flex-wrap` + `self-start` no toggle pra não cortar "Cartão / faturado" na largura menor do modal.
+- ✅ Verificado no preview (dev server de outra sessão na :3000, mesmo folder = HMR pegou as edições): botão Configurar, 5 abas + Mais (dropdown com as 4 de referência), modal com as 4 seções renderizando (conexões + Links & Senhas no fim), selinho de cobrança na aba Pagamentos, largura corrigida (896px). tsc limpo.
+
 # ONMID Reports — Guia de Contexto
 
 ## O que é este projeto
