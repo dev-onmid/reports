@@ -190,6 +190,18 @@ export function webhookOrigin(requestUrl: string): string {
   }
 }
 
+// Webhook atualmente configurado na instância (pra detectar URL antiga/preview e curar).
+export async function getEvolutionWebhook(instanceName: string): Promise<{ url: string | null; enabled: boolean }> {
+  const res = await fetch(`${base()}/webhook/find/${encodeURIComponent(instanceName)}`, {
+    headers: headers(),
+  }).catch(() => null);
+  if (!res?.ok) return { url: null, enabled: false };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const data = await res.json().catch(() => null) as any;
+  const wh = data?.webhook ?? data;
+  return { url: wh?.url ?? null, enabled: wh?.enabled === true };
+}
+
 export async function setEvolutionWebhook(
   instanceName: string,
   webhookUrl: string,

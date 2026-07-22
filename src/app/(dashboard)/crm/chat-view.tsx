@@ -929,6 +929,50 @@ export function ChatView({
       .catch(() => {});
   }, [clientId]);
 
+  // Cura do webhook ao abrir o chat: instâncias antigas podem estar com o
+  // webhook apontado pra URL de preview/localhost — o inbound nunca chega e o
+  // chat congela. A rota confere na Evolution e reaponta pra URL canônica.
+  useEffect(() => {
+    fetch('/api/crm/webhook-heal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clientId }),
+    })
+      .then(r => r.ok ? r.json() as Promise<{ healed?: number }> : null)
+      .then(data => {
+        if ((data?.healed ?? 0) > 0) {
+          console.info(`[chat] webhook reapontado em ${data!.healed} instância(s) — mensagens voltam a chegar em tempo real`);
+        }
+      })
+      .catch(() => {});
+  }, [clientId]);
+
+  // Sincronização de RESERVA: mesmo com webhook ok, a cada 60s (aba visível)
+  // puxa da Evolution as conversas recentes e recarrega o inbox — garante que a
+  // lista anda sozinha até se o webhook cair de novo entre curas.
+  useEffect(() => {
+    let running = false;
+    const tick = () => {
+      if (running || document.visibilityState !== 'visible') return;
+      running = true;
+      fetch(`/api/crm/inbox?clientId=${clientId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ limit: 60 }),
+      })
+        .then(r => (r.ok ? r.json() : null))
+        .then(() => loadInbox())
+        .catch(() => {})
+        .finally(() => { running = false; });
+    };
+    const first = setTimeout(tick, 5_000); // primeira sincronização logo ao abrir
+    const id = setInterval(tick, 60_000);
+    // Voltou pra aba depois de um tempo fora → sincroniza na hora
+    const onVisible = () => { if (document.visibilityState === 'visible') tick(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { clearTimeout(first); clearInterval(id); document.removeEventListener('visibilitychange', onVisible); };
+  }, [clientId, loadInbox]);
+
   // Backfill "cara de WhatsApp": puxa nome + foto dos contatos da instância
   // Evolution e aplica nos leads (nome só quando o lead está sem nome real).
   // Depois recarrega o inbox pra lista já mostrar os nomes novos.
