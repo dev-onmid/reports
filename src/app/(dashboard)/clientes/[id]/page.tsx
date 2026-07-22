@@ -4663,10 +4663,10 @@ function SheetsResultsTab({ clientId }: { clientId: string }) {
 }
 
 // ── Page ───────────────────────────────────────────────────────────────────────
-const TABS = ['dashboard', 'planejamento', 'crm', 'rastreio', 'pagamentos', 'lps', 'dna', 'historico', 'mapa'] as const;
+const TABS = ['planejamento', 'crm', 'rastreio', 'pagamentos', 'lps', 'dna', 'historico', 'mapa'] as const;
 type Tab = typeof TABS[number];
 // Abas operacionais sempre visíveis na barra; o resto (referência) vai pro menu "Mais".
-const PRIMARY_TABS: Tab[] = ['dashboard', 'planejamento', 'crm', 'rastreio', 'pagamentos'];
+const PRIMARY_TABS: Tab[] = ['planejamento', 'crm', 'rastreio', 'pagamentos'];
 const MORE_TABS: Tab[] = ['lps', 'dna', 'historico', 'mapa'];
 
 function readSavedDashboardBlocks(clientId: string): ClientDashboardWidget[] {
@@ -4880,7 +4880,6 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
   }
 
   const tabLabel: Record<Tab, string> = {
-    dashboard:    'Dashboard',
     planejamento: 'Planejamento',
     mapa:         'Mapa Mental',
     historico:    'Histórico',
@@ -5071,19 +5070,6 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
       </div>
 
       {/* Tab content */}
-      {tab === 'dashboard' && (
-        <ClientDashboardTab
-          editable={dashboardEditable}
-          goalConfig={clientGoal}
-          dashboardData={dashboardData}
-          todayProgress={todayProgress}
-          customBlocks={customBlocks}
-          onAddCustomBlock={addCustomBlock}
-          onRemoveCustomBlock={removeCustomBlock}
-          onEditToggle={() => setDashboardEditable(prev => !prev)}
-        />
-      )}
-
       {tab === 'planejamento' && (
         <div className="space-y-5">
           <ClientGoalSettings goal={clientGoal} onChange={setClientGoal} />
