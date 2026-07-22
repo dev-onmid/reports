@@ -168,6 +168,16 @@ Monitora o status de todas as instâncias na VPS Evolution e alerta quando algum
 - **Banner**: aparece em qualquer página do dashboard. Botão de refresh manual + fechar temporariamente.
 - **Secret necessário no GitHub**: `EVOLUTION_ALERT_URL` (URL completa: `/api/alerts/evolution-cron?secret=CRON_SECRET`).
 
+## Instâncias Evolution — popup de alerta + central de gestão (2026-07-22)
+
+Pedido do Matheus: o banner fixo vermelho de instâncias desconectadas incomodava ("não ficar aquilo o tempo todo") + queria um lugar pra ADM gerenciar instâncias.
+
+- **Popup em vez de banner**: `evolution-alert-banner.tsx` reescrito como card flutuante (fixed bottom-right, z-50, top bar vermelha). Dismiss por **assinatura** (`name:status` ordenado em sessionStorage `onmid-evolution-alert-dismissed-sig`) — fechou, só REAPARECE se o conjunto de problemas mudar (instância nova caiu/status mudou); situação normalizada esconde sozinho. Botão "Gerenciar instâncias" → `/configuracoes?tab=instancias`. Poll 5min mantido; só Administrador vê.
+- **Aba "Instâncias" em Configurações** (`InstancesTab` em `configuracoes/page.tsx`; deep-link `?tab=` no init do `activeTab`): tabela de TODAS as instâncias da VPS Evolution (nome/status com dot/número/vínculo/toggle ativa) + ações Conectar (modal QR com o MESMO padrão fases/poll 3s/countdown 40s — 3ª cópia do padrão) e Excluir (confirm; apaga da VPS via `deleteEvolutionInstance` e DESATIVA os registros no banco — conversas preservadas).
+- **API `/api/admin/instances`**: GET (fetchInstances da VPS + joins `zapi_clients`/`client_zapi_instances` → vínculos "Disparos · Cliente"/"CRM · Cliente", `active` null = órfã sem registro), POST `{instanceName, action:'connect'|'status'}` (QR/estado pro modal), PATCH activate/deactivate (seta `active`/`ativo` nas DUAS tabelas por instance_id), DELETE `?name=`.
+- **Desativar = silenciar**: `filterMutedInstances()` em `evolution-instance-alerts.ts` exclui instâncias com registro inativo no banco — aplicado na rota `/api/alerts/evolution-status` (popup) E dentro de `sendInstanceAlerts` (cron WhatsApp/email). Instância morta de propósito não alerta mais em lugar nenhum.
+- ✅ Verificado no preview (dev server da outra sessão na :3000; o meu caiu por conflito de porta): aba lista instâncias REAIS da VPS, popup flutuante com dismiss, deep-link funcionando, modal QR abrindo com countdown (QR mockado). Toggle ativa/vínculos precisam de DB (produção) — no dev sem DATABASE_URL tudo aparece como "órfã", degradação correta.
+
 ## Relatórios automáticos mensais
 
 - **Cron via GitHub Actions** (`.github/workflows/reports-cron-monthly.yml`), não Vercel — roda **todo dia** às 11h UTC (08h BRT) e chama `GET /api/reports/cron-monthly?secret=...`.

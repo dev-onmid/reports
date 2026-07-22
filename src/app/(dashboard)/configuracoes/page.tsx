@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Plus, Trash2, ExternalLink, Users2, Shield, User, Mail,
   Edit2, Search, Filter, Download, Eye, ChevronLeft, ChevronRight,
   Sparkles, Bell, DollarSign, MessageCircle,
   LayoutDashboard, Users, TableProperties, FileText, BarChart3,
   WalletCards, Bot, ShieldCheck, Zap, Plug, ClipboardList, WandSparkles,
+  Wifi, WifiOff, QrCode, RefreshCw, Power, X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -131,13 +132,326 @@ function persistPermission(userId: string, permission: Permission) {
   }).catch((e) => console.error('Erro ao salvar permissão:', e));
 }
 
+// ── Central de instâncias WhatsApp (Evolution) ───────────────────────────────
+
+type AdminInstance = {
+  name: string;
+  status: string;
+  profileName: string | null;
+  phone: string | null;
+  vinculos: string[];
+  active: boolean | null; // null = órfã (sem registro no banco)
+};
+
+function InstancesTab() {
+  const [instances, setInstances] = useState<AdminInstance[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  // Modal de QR (mesmo padrão de fases dos outros dois modais de QR do app)
+  const [qrInstance, setQrInstance] = useState<AdminInstance | null>(null);
+  const [qrData, setQrData] = useState<{ base64?: string; error?: string } | null>(null);
+  const [qrPhase, setQrPhase] = useState<'loading' | 'qr' | 'success' | 'error'>('loading');
+  const [qrSeconds, setQrSeconds] = useState(40);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    setError('');
+    fetch('/api/admin/instances')
+      .then(r => r.json() as Promise<{ ok: boolean; instances: AdminInstance[]; error?: string }>)
+      .then(d => {
+        if (d.ok) setInstances(d.instances ?? []);
+        else setError(d.error ?? 'Falha ao listar instâncias');
+      })
+      .catch(() => setError('Falha ao falar com a Evolution'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function toggleActive(inst: AdminInstance) {
+    setBusy(inst.name);
+    try {
+      const res = await fetch('/api/admin/instances', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instanceName: inst.name, action: inst.active ? 'deactivate' : 'activate' }),
+      });
+      const d = await res.json() as { ok?: boolean; error?: string };
+      if (!d.ok) alert(d.error ?? 'Não foi possível alterar');
+      load();
+    } finally { setBusy(null); }
+  }
+
+  async function removeInstance(inst: AdminInstance) {
+    if (!confirm(`Excluir a instância "${inst.profileName ?? inst.name}" da VPS Evolution?\n\nO WhatsApp será desconectado e a instância apagada do servidor. Os registros e conversas no sistema ficam guardados (desativados).`)) return;
+    setBusy(inst.name);
+    try {
+      await fetch(`/api/admin/instances?name=${encodeURIComponent(inst.name)}`, { method: 'DELETE' });
+      load();
+    } finally { setBusy(null); }
+  }
+
+  async function fetchQr(inst: AdminInstance) {
+    setQrPhase('loading'); setQrData(null);
+    try {
+      const res = await fetch('/api/admin/instances', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instanceName: inst.name, action: 'connect' }),
+      });
+      const data = await res.json() as { base64?: string; error?: string };
+      setQrData(data);
+      if (data.base64) { setQrSeconds(40); setQrPhase('qr'); }
+      else if (inst.status === 'open') setQrPhase('success');
+      else setQrPhase('error');
+    } catch { setQrPhase('error'); }
+  }
+
+  function openQr(inst: AdminInstance) {
+    setQrInstance(inst);
+    void fetchQr(inst);
+  }
+  function closeQr() {
+    setQrInstance(null); setQrData(null); setQrPhase('loading');
+    load();
+  }
+
+  useEffect(() => {
+    if (!qrInstance) return;
+    if (qrPhase === 'qr') {
+      const name = qrInstance.name;
+      const poll = setInterval(() => {
+        fetch('/api/admin/instances', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ instanceName: name, action: 'status' }),
+        })
+          .then(r => r.json() as Promise<{ state?: string }>)
+          .then(d => { if (d.state === 'open') setQrPhase('success'); })
+          .catch(() => {});
+      }, 3000);
+      const tick = setInterval(() => {
+        setQrSeconds(s => {
+          if (s <= 1) { void fetchQr(qrInstance); return 40; }
+          return s - 1;
+        });
+      }, 1000);
+      return () => { clearInterval(poll); clearInterval(tick); };
+    }
+    if (qrPhase === 'success') { const t = setTimeout(closeQr, 2500); return () => clearTimeout(t); }
+    if (qrPhase === 'error') { const t = setTimeout(closeQr, 5000); return () => clearTimeout(t); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qrInstance, qrPhase]);
+
+  function statusInfo(s: string) {
+    if (s === 'open') return { label: 'Conectada', dot: 'bg-primary', text: 'text-primary' };
+    if (s === 'connecting') return { label: 'Reconectando', dot: 'bg-yellow-400', text: 'text-yellow-400' };
+    return { label: 'Desconectada', dot: 'bg-red-400', text: 'text-red-400' };
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-card border border-border rounded-[var(--radius)] overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-border">
+          <div>
+            <p className="text-sm font-bold">Instâncias WhatsApp (Evolution)</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Todas as instâncias da VPS. Desativar = o sistema ignora a instância e o alerta de desconexão silencia.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={load}
+            disabled={loading}
+            className="flex items-center gap-1.5 h-8 px-3 text-xs text-muted-foreground bg-background border border-border rounded-lg hover:text-foreground disabled:opacity-50 transition-colors"
+          >
+            <RefreshCw className={loading ? 'h-3.5 w-3.5 animate-spin' : 'h-3.5 w-3.5'} /> Atualizar
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="px-6 py-10 text-center text-sm text-muted-foreground">Consultando a VPS Evolution…</div>
+        ) : error ? (
+          <div className="px-6 py-10 text-center text-sm text-red-400">{error}</div>
+        ) : instances.length === 0 ? (
+          <div className="px-6 py-10 text-center text-sm text-muted-foreground">Nenhuma instância na VPS.</div>
+        ) : (
+          <table className="w-full text-sm text-left">
+            <thead>
+              <tr className="border-b border-border">
+                {['Instância', 'Status', 'Número', 'Vínculo', 'Ativa', ''].map(h => (
+                  <th key={h} className="px-6 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {instances.map(inst => {
+                const si = statusInfo(inst.status);
+                const isBusy = busy === inst.name;
+                return (
+                  <tr key={inst.name} className={cn('hover:bg-muted/30 transition-colors', inst.active === false && 'opacity-50')}>
+                    <td className="px-6 py-3.5">
+                      <p className="font-semibold">{inst.profileName ?? inst.name}</p>
+                      <p className="text-[11px] text-muted-foreground">{inst.name}</p>
+                    </td>
+                    <td className="px-6 py-3.5">
+                      <span className={cn('flex items-center gap-1.5 text-xs font-bold', si.text)}>
+                        <span className={cn('h-2 w-2 rounded-full', si.dot, inst.status === 'open' && 'animate-pulse')} />
+                        {si.label}
+                      </span>
+                    </td>
+                    <td className="px-6 py-3.5 text-xs text-muted-foreground">{inst.phone ?? '—'}</td>
+                    <td className="px-6 py-3.5">
+                      {inst.vinculos.length === 0
+                        ? <span className="text-[11px] italic text-muted-foreground/60">sem vínculo</span>
+                        : inst.vinculos.map(v => (
+                            <span key={v} className="mr-1 inline-block rounded bg-muted/40 px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">{v}</span>
+                          ))}
+                    </td>
+                    <td className="px-6 py-3.5">
+                      {inst.active === null ? (
+                        <span className="text-[11px] italic text-muted-foreground/60">órfã</span>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() => void toggleActive(inst)}
+                          title={inst.active ? 'Desativar (sistema ignora e alerta silencia)' : 'Reativar'}
+                          className={cn(
+                            'relative h-5 w-9 rounded-full transition-colors disabled:opacity-50',
+                            inst.active ? 'bg-primary' : 'bg-muted-foreground/30',
+                          )}
+                        >
+                          <span className={cn(
+                            'absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all',
+                            inst.active ? 'left-[18px]' : 'left-0.5',
+                          )} />
+                        </button>
+                      )}
+                    </td>
+                    <td className="px-6 py-3.5">
+                      <div className="flex items-center justify-end gap-1.5">
+                        {inst.status !== 'open' && (
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => openQr(inst)}
+                            className="flex items-center gap-1 rounded-lg border border-primary/30 px-2 py-1.5 text-[11px] font-semibold text-primary hover:bg-primary/10 disabled:opacity-50 transition-colors"
+                          >
+                            <QrCode className="h-3.5 w-3.5" /> Conectar
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() => void removeInstance(inst)}
+                          title="Excluir da VPS"
+                          className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-red-500/10 hover:text-red-400 disabled:opacity-50 transition-colors"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Modal de QR — mesmo padrão dos modais de Disparos/Rastreamento */}
+      {qrInstance && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 backdrop-blur-sm" onClick={closeQr}>
+          <div className="w-full max-w-sm overflow-hidden rounded-[var(--radius)] border border-border bg-card shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="relative border-b border-border px-5 py-4">
+              <div className="absolute inset-x-0 top-0 h-[3px] bg-primary" />
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius)] bg-primary/15">
+                    <QrCode className="h-4 w-4 text-primary" />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="font-heading font-normal text-2xl uppercase leading-none tracking-wide text-foreground">Conectar WhatsApp</h3>
+                    <p className="text-[11px] text-muted-foreground mt-1 truncate">{qrInstance.profileName ?? qrInstance.name}</p>
+                  </div>
+                </div>
+                <button onClick={closeQr} className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"><X className="h-5 w-5" /></button>
+              </div>
+            </div>
+            <div className="px-5 py-5">
+              {qrPhase === 'success' ? (
+                <div className="flex flex-col items-center gap-3 py-10 text-center">
+                  <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/15 ring-4 ring-primary/20">
+                    <Wifi className="h-8 w-8 text-primary" />
+                  </div>
+                  <p className="font-heading text-3xl uppercase leading-none tracking-wide text-foreground">Conectado!</p>
+                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground/60 mt-2">Fechando automaticamente…</p>
+                </div>
+              ) : qrPhase === 'error' ? (
+                <div className="flex flex-col items-center gap-3 py-10 text-center">
+                  <div className="flex h-16 w-16 items-center justify-center rounded-full bg-red-500/15 ring-4 ring-red-500/20">
+                    <WifiOff className="h-8 w-8 text-red-400" />
+                  </div>
+                  <p className="font-heading text-3xl uppercase leading-none tracking-wide text-foreground">Não foi possível</p>
+                  <p className="text-xs text-muted-foreground max-w-[260px] break-words">{qrData?.error ?? 'O QR Code não veio da Evolution. Tente de novo em instantes.'}</p>
+                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground/60">Fechando automaticamente…</p>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center gap-4">
+                  <div className="relative p-3">
+                    <span className="absolute left-0 top-0 h-6 w-6 border-l-2 border-t-2 border-primary" />
+                    <span className="absolute right-0 top-0 h-6 w-6 border-r-2 border-t-2 border-primary" />
+                    <span className="absolute bottom-0 left-0 h-6 w-6 border-b-2 border-l-2 border-primary" />
+                    <span className="absolute bottom-0 right-0 h-6 w-6 border-b-2 border-r-2 border-primary" />
+                    {qrPhase === 'loading' ? (
+                      <div className="flex h-[228px] w-[228px] items-center justify-center bg-muted/20">
+                        <RefreshCw className="h-9 w-9 animate-spin text-primary/50" />
+                      </div>
+                    ) : (
+                      <div className="bg-white p-2.5">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={qrData?.base64} alt="QR Code WhatsApp" className="h-[208px] w-[208px] object-contain" />
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    {qrPhase === 'loading' ? <span>Gerando QR Code…</span> : (
+                      <>
+                        <span className="relative flex h-2 w-2">
+                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-60" />
+                          <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
+                        </span>
+                        <span>Aguardando leitura · renova em <span className="font-semibold tabular-nums text-foreground">{qrSeconds}s</span></span>
+                      </>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground/60">WhatsApp → Aparelhos conectados → Conectar aparelho. A tela fecha sozinha.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ConfiguracoesPage() {
   const [users, setUsers] = useState<UserType[]>([]);
   const [permissions, setPermissions] = useState<Record<string, Permission>>(initialPermissions);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'usuarios' | 'permissoes' | 'ia' | 'otimizador' | 'legal'>('usuarios');
+  const [activeTab, setActiveTab] = useState<'usuarios' | 'permissoes' | 'ia' | 'instancias' | 'otimizador' | 'legal'>(() => {
+    // Deep-link ?tab= (o popup de instâncias desconectadas aponta pra cá)
+    if (typeof window !== 'undefined') {
+      const t = new URLSearchParams(window.location.search).get('tab');
+      if (t === 'instancias' || t === 'ia' || t === 'otimizador' || t === 'permissoes' || t === 'legal') return t;
+    }
+    return 'usuarios';
+  });
 
   // Otimizador WhatsApp config
   type OtimizadorWaConfig = {
@@ -330,6 +644,7 @@ export default function ConfiguracoesPage() {
     { key: 'usuarios' as const, label: 'Usuários' },
     { key: 'permissoes' as const, label: 'Permissões' },
     { key: 'ia' as const, label: 'Uso IA' },
+    { key: 'instancias' as const, label: 'Instâncias' },
     { key: 'otimizador' as const, label: 'Otimizador' },
     { key: 'legal' as const, label: 'Legal' },
   ];
@@ -999,6 +1314,9 @@ export default function ConfiguracoesPage() {
       {/* ══════════════════════════════════
           TAB: OTIMIZADOR
       ══════════════════════════════════ */}
+      {/* ── INSTÂNCIAS (Evolution) ── */}
+      {activeTab === 'instancias' && <InstancesTab />}
+
       {activeTab === 'otimizador' && (
         <div className="space-y-6">
           <div className="rounded-[var(--radius)] border border-border bg-card p-5 space-y-5">

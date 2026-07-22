@@ -66,6 +66,27 @@ export async function fetchDisconnectedInstances(): Promise<DisconnectedAlert[]>
     }));
 }
 
+// Instâncias marcadas como INATIVAS no banco (zapi_clients.active=false ou
+// client_zapi_instances.ativo=false) saem dos alertas — desativar na tela de
+// Instâncias é o jeito oficial de silenciar uma instância morta de propósito.
+export async function filterMutedInstances(
+  pool: ReturnType<typeof makeServerPool>,
+  alerts: DisconnectedAlert[],
+): Promise<DisconnectedAlert[]> {
+  if (alerts.length === 0) return alerts;
+  try {
+    const { rows } = await pool.query<{ instance_id: string }>(
+      `SELECT instance_id FROM public.zapi_clients WHERE active = FALSE
+       UNION
+       SELECT instance_id FROM public.client_zapi_instances WHERE ativo = FALSE`
+    );
+    const muted = new Set(rows.map(r => r.instance_id));
+    return alerts.filter(a => !muted.has(a.name));
+  } catch {
+    return alerts;
+  }
+}
+
 export async function ensureAlertLogTable(pool: ReturnType<typeof makeServerPool>) {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS public.evolution_alert_log (
@@ -165,6 +186,9 @@ export async function sendInstanceAlerts(
   const pool = makeServerPool();
   try {
     await ensureAlertLogTable(pool);
+    alerts = await filterMutedInstances(pool, alerts);
+    result.totalDisconnected = alerts.length;
+    if (alerts.length === 0) return result;
 
     // dedup: only send for new (instance, status) pairs today
     const newAlerts: DisconnectedAlert[] = [];
