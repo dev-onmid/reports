@@ -3624,12 +3624,14 @@ export function sInstagramPosts(posts: InstagramPost[], idx: number, total: numb
   };
 
   // Compact pill: icon + label + value on one line. `highlight` styles the Engajamento cell.
+  // white-space:nowrap nos wrappers com overflow:hidden casa com o passe de "descorte" do
+  // export-report-pdf (impede o html2canvas de cortar o valor); line-height:1.4 dá folga vertical.
   const metricPill = (iconPath: string, label: string, value: string, highlight = false) =>
-    `<div style="height:30px;border:1px solid ${highlight ? '#DDF6D8' : '#E8EDF4'};border-radius:8px;background:${highlight ? 'linear-gradient(135deg,#F0FDEC,#FFFFFF)' : 'rgba(255,255,255,.92)'};display:flex;align-items:center;gap:5px;padding:0 7px;box-sizing:border-box;overflow:hidden">
+    `<div style="height:30px;border:1px solid ${highlight ? '#DDF6D8' : '#E8EDF4'};border-radius:8px;background:${highlight ? 'linear-gradient(135deg,#F0FDEC,#FFFFFF)' : 'rgba(255,255,255,.92)'};display:flex;align-items:center;gap:5px;padding:0 7px;box-sizing:border-box;overflow:hidden;white-space:nowrap">
       ${igIconSvg(iconPath, PRIMARY_TEXT, 11)}
-      <div style="min-width:0;display:flex;align-items:baseline;gap:4px;overflow:hidden">
-        <p style="font-family:${INTER};font-size:8.5px;font-weight:850;color:#64748B;margin:0;line-height:1;white-space:nowrap">${label}</p>
-        <p style="font-family:${INTER};font-size:12px;font-weight:950;color:${highlight ? PRIMARY_TEXT : '#111827'};margin:0;line-height:1;letter-spacing:-0.02em;white-space:nowrap">${value}</p>
+      <div style="min-width:0;display:flex;align-items:baseline;gap:4px;overflow:hidden;white-space:nowrap">
+        <p style="font-family:${INTER};font-size:8.5px;font-weight:850;color:#64748B;margin:0;line-height:1.4;white-space:nowrap">${label}</p>
+        <p style="font-family:${INTER};font-size:12px;font-weight:950;color:${highlight ? PRIMARY_TEXT : '#111827'};margin:0;line-height:1.4;letter-spacing:-0.02em;white-space:nowrap">${value}</p>
       </div>
     </div>`;
 
@@ -3706,12 +3708,16 @@ export function sInstagramTodosConteudos(pagePosts: InstagramPost[], idx: number
     return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
   };
 
+  // white-space:nowrap nos wrappers com overflow:hidden é PROPOSITAL: casa com o passe
+  // de "descorte" do export-report-pdf (que libera overflow só de elementos nowrap+hidden),
+  // evitando que o html2canvas corte o valor da métrica na metade. line-height:1.4 dá folga
+  // vertical ao glifo dentro do pill de 30px.
   const metricPill = (iconPath: string, label: string, value: string, highlight = false) =>
-    `<div style="height:28px;border:1px solid ${highlight ? '#DDF6D8' : '#E8EDF4'};border-radius:8px;background:${highlight ? 'linear-gradient(135deg,#F0FDEC,#FFFFFF)' : 'rgba(255,255,255,.92)'};display:flex;align-items:center;gap:5px;padding:0 7px;box-sizing:border-box;overflow:hidden">
+    `<div style="height:30px;border:1px solid ${highlight ? '#DDF6D8' : '#E8EDF4'};border-radius:8px;background:${highlight ? 'linear-gradient(135deg,#F0FDEC,#FFFFFF)' : 'rgba(255,255,255,.92)'};display:flex;align-items:center;gap:5px;padding:0 7px;box-sizing:border-box;overflow:hidden;white-space:nowrap">
       ${igIconSvg(iconPath, PRIMARY_TEXT, 11)}
-      <div style="min-width:0;display:flex;align-items:baseline;gap:4px;overflow:hidden">
-        <p style="font-family:${INTER};font-size:8.5px;font-weight:850;color:#64748B;margin:0;line-height:1;white-space:nowrap">${label}</p>
-        <p style="font-family:${INTER};font-size:11.5px;font-weight:950;color:${highlight ? PRIMARY_TEXT : '#111827'};margin:0;line-height:1;letter-spacing:-0.02em;white-space:nowrap">${value}</p>
+      <div style="min-width:0;display:flex;align-items:baseline;gap:4px;overflow:hidden;white-space:nowrap">
+        <p style="font-family:${INTER};font-size:8.5px;font-weight:850;color:#64748B;margin:0;line-height:1.4;white-space:nowrap">${label}</p>
+        <p style="font-family:${INTER};font-size:11.5px;font-weight:950;color:${highlight ? PRIMARY_TEXT : '#111827'};margin:0;line-height:1.4;letter-spacing:-0.02em;white-space:nowrap">${value}</p>
       </div>
     </div>`;
 
@@ -3724,13 +3730,13 @@ export function sInstagramTodosConteudos(pagePosts: InstagramPost[], idx: number
       ? `<img src="${p.thumbnailUrl}" alt="" style="width:100%;height:100%;object-fit:cover;display:block" />`
       : `<div style="width:100%;height:100%;background:linear-gradient(135deg,#EAFDE6,#F8FAFC);display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="${PRIMARY_TEXT}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${ICO_LAYERS}</svg></div>`;
 
-    return `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:13px;box-shadow:0 10px 24px rgba(15,23,42,.05);display:flex;gap:13px;padding:10px;box-sizing:border-box;overflow:hidden;min-height:0">
+    return `<div style="height:198px;background:${CARD};border:1px solid #E7ECF3;border-radius:13px;box-shadow:0 10px 24px rgba(15,23,42,.05);display:flex;gap:13px;padding:10px;box-sizing:border-box;overflow:hidden">
       <div style="position:relative;width:126px;border-radius:9px;background:${ROW};overflow:hidden;flex-shrink:0">
         ${thumb}
         ${igMediaOverlay(p.mediaType)}
       </div>
 
-      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:7px;justify-content:center">
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;justify-content:center">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-shrink:0">
           <div style="height:21px;border-radius:6px;background:${kind.bg};color:${kind.color};display:inline-flex;align-items:center;gap:4px;padding:0 8px;font-family:${INTER};font-size:9.5px;font-weight:900;line-height:1;flex-shrink:0">
             ${igIconSvg(kind.icon, kind.color, 11)}
@@ -3739,7 +3745,7 @@ export function sInstagramTodosConteudos(pagePosts: InstagramPost[], idx: number
           <p style="font-family:${INTER};font-size:10px;font-weight:800;color:#64748B;margin:0;text-transform:capitalize;white-space:nowrap;flex-shrink:0">${formatPostDate(p.timestamp)}</p>
         </div>
 
-        <p style="font-family:${INTER};font-size:10.5px;font-weight:650;color:#475569;line-height:1.3;margin:0;flex-shrink:0;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden">${truncateCaption(p.caption, 92) || 'sem legenda'}</p>
+        <p style="font-family:${INTER};font-size:10.5px;font-weight:650;color:#475569;line-height:1.4;margin:0;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${truncateCaption(p.caption, 72) || 'sem legenda'}</p>
 
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px">
           ${metricPill(ICO_REACH, 'Alcance', igCompact(p.reach))}
@@ -3765,7 +3771,7 @@ export function sInstagramTodosConteudos(pagePosts: InstagramPost[], idx: number
       <div style="width:36px;height:3px;border-radius:999px;background:${PRIMARY};margin-top:11px"></div>
     </div>
 
-    <div style="display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(3,1fr);gap:13px 22px;flex:1;min-height:0">
+    <div style="display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:198px;gap:13px 22px;align-content:start;flex:1;min-height:0">
       ${pagePosts.map(postCard).join('')}
     </div>
   </div>

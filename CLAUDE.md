@@ -183,12 +183,43 @@ Três melhorias no modal "Gerar Relatório" e nos builders (pedidos do Matheus):
 - **UX do seletor de datas**: chips de **meses recentes** (últimos 6 meses, ex: `jun/26`) que selecionam o mês inteiro com 1 clique sem tocar no calendário nativo + **resumo legível** do período ("01/06/2026 até 30/06/2026 · 30 dias") abaixo dos inputs De/Até. Presets antigos (Mês passado/Este mês/etc.) mantidos.
 - ✅ Verificado no preview (auth fail-open): modal renderiza chips de meses, resumo de dias, seletor "Comparar com" e — ao clicar "Personalizado" — pré-preenche os campos com `2026-05-02..2026-05-31` (janela de 30d anterior a junho, igual ao `calcPrevPeriod`). tsc limpo, sem erros de console. Followers card e fluxo real de dados (Graph API) exigem produção.
 
+### PDF do relatório — métricas cortadas + peso + cards inconsistentes (2026-07-22)
+
+Correções no export PDF (html2canvas → jsPDF em `export-report-pdf.ts`) e no slide "Todos os conteúdos" (`sInstagramTodosConteudos`), reportado pelo Matheus (PDF do Cinfel: pills de métrica cortados na metade, páginas parecendo tamanhos diferentes, arquivo 7.5 MB):
+
+- **Métricas/caption cortados** (bug do html2canvas com `overflow:hidden` + `line-height:1`): o export já tinha um passe que libera `overflow` só de elementos com `white-space:nowrap` + `overflow:hidden` (os valores de KPI do slide principal). Os pills de "Todos os conteúdos" e "Top conteúdos" tinham `overflow:hidden` nos wrappers mas SEM `nowrap` no MESMO elemento → o passe não os pegava e o html2canvas cortava o glifo. Correção: adicionado `white-space:nowrap` aos dois wrappers com `overflow:hidden` de CADA `metricPill` (Top + Todos) + `line-height:1` → `1.4` nos textos. O caption de 1 linha do "Todos" virou `white-space:nowrap;overflow:hidden;text-overflow:ellipsis` (em vez de `-webkit-line-clamp:1`) pra também ser pego pelo passe; `truncateCaption` 92 → 72 chars pra caber na coluna. ✅ Verificado no preview: o passe de descorte casa 104 elementos (antes casava 0 pills) e o layout não quebra com `overflow:visible`.
+- **Cards inconsistentes / páginas "de tamanhos diferentes"** (todas as páginas do PDF têm o MESMO MediaBox 1920×1080 — confirmado; a sensação vinha do grid): "Todos os conteúdos" usava `grid-template-rows:repeat(3,1fr)` (altura do card = 1/3 da área, variável e espremida) enquanto "Top conteúdos" (que não cortava) usa card de **altura fixa**. Trocado para `grid-auto-rows:198px` + `align-content:start` e card com `height:198px` fixo (mesmo padrão do Top). ✅ Verificado: cards a 198px consistentes tanto na página cheia (6) quanto na parcial (2 cards da última página).
+- **Peso do arquivo**: html2canvas `scale` 2 → **1.6** e JPEG `0.92` → **0.85** — derruba ~40% (7-8 MB → ~4-5 MB) mantendo nitidez em tela/impressão. Ajuste global do export.
+- ⚠️ O corte é específico do html2canvas — não reproduzível em render normal de browser (só o passe de descorte foi validado no preview). Regerar o PDF do Cinfel em produção pra confirmar pills inteiros.
+
 ### Slide "Top palavras-chave" (Google Ads)
 
 - O relatório de performance (`buildOmniReport` em `src/lib/report-builder.ts`) monta os slides de Google a partir de `fetchGoogleAdsDetailed`, que agora traz também `palavrasChave: PalavraChaveGoogle[]` (tipo em `delivery-report-builder.ts`).
 - **Fonte**: GAQL `keyword_view` (palavras-chave compradas, não `search_term_view`). `segments.date` só no `WHERE` para agregar o período; agregação por `texto+match_type` no código (a mesma keyword aparece em vários grupos). Top 10 ordenado por **conversões** (desempate: cliques → investimento).
 - **Slide** `sGoogleAdsPalavrasChave` (tabela: palavra-chave + badge de correspondência, impressões, cliques, **CPC**, **conversões**, custo/conv.) renderizado após `sGoogleAdsCampanhas`. Só aparece se `googleDetailed.palavrasChave.length > 0` (contas só-PMax/Display/Shopping não têm keyword → slide some sem quebrar).
 - ⚠️ Não verificável no preview local (sem DB/OAuth Google) — validar com cliente Google de Pesquisa real.
+
+---
+
+## Radar de LP — analytics de comportamento por landing page (2026-07-22)
+
+Camada PRÓPRIA e leve de "mapa de calor" (Etapa 1: números agregados): cadastro de LPs por cliente + script embarcável que coleta cliques/scroll/tempo da MASSA de visitantes (decisão do Matheus: sem visão individual por lead; Clarity não integra — Data Export só agrega 3d, sem heatmap via API).
+
+| Arquivo | Papel |
+|---|---|
+| `src/lib/lp-analytics.ts` | `ensureLpAnalyticsSchema` (`client_landing_pages` + `lp_sessions`, padrão memoizado), `generateLpTrackingKey` (10 chars minúsculos sem ambíguos), `TRACKING_KEY_REGEX`, tipo `LpClick` |
+| `src/app/api/lp/tag.js/route.ts` | **Primeiro endpoint JS do repo** — serve o IIFE (~2.5KB, zero deps, tudo em try/catch) com `Content-Type: application/javascript` + cache 1h. Snippet: `<script src="{base}/api/lp/tag.js?k=KEY" defer>` |
+| `src/app/api/lp/collect/route.ts` | POST público de ingestão — body text/plain via sendBeacon (**zero preflight; o repo segue sem nenhum handler OPTIONS**), TODA saída 204 (sem oracle de keys), sanitização campo a campo, upsert fire-and-forget |
+| `src/app/api/clients/[id]/landing-pages/route.ts` | GET (lista + sessions_30d + last_session_at + `base` via `webhookOrigin`), POST (retry 3x no 23505), DELETE `?lpId=` |
+| `.../landing-pages/[lpId]/stats/route.ts` | Promise.all: totais + funil de scroll (COUNT FILTER ≥25/50/75/100) + top cliques (`jsonb_array_elements`) + device/campanha/origem + série diária; days clamp 1-90 |
+| `clientes/[id]/landing-pages-tab.tsx` | Aba "Landing Pages" (`TABS` id `'lps'`): lista com status de coleta (<24h = verde), modal Nova LP, snippet com copiar, painel com KPIs + **funil de scroll** (herói) + ranking "onde mais clicam" + device/campanha/série |
+
+- **Anti-firehose (Vercel Hobby)**: 1 LINHA POR SESSÃO em `lp_sessions` — o script acumula no browser e manda snapshot (primeiro ~3s, flush 20s com dedupe, visibilitychange/pagehide); collect faz `ON CONFLICT (lp_id, session_key) DO UPDATE` com `GREATEST` em scroll/duration (beacons fora de ordem) e substitui `clicks` (snapshot é superconjunto). Cap 50 cliques/32KB.
+- **Descritor de elemento** (agrupamento estável entre sessões): sobe ≤3 níveis até ancestral interativo (clique no `<span>` agrupa com o botão) → `tag#id` > `tag.classeEstável` (regex filtra hash/utility) > `tag`. **LGPD**: input/textarea/select nunca carregam texto; só cliques+scroll, nada digitado sai da página.
+- **Etapa 2 destravada** (overlay visual de heatmap, não construída): coords absolutas E normalizadas (`xp`/`yp`) + viewport/doc_height já persistidos em `clicks` JSONB.
+- **Lições do tag**: (1) medir scroll também DENTRO do `send()` — scroll programático nem sempre dispara evento; (2) viewport lida na hora do envio com memoização da última medida não-zero (`vwNow`/`vhNow` — aba em background lê `innerWidth=0` e derrubava o device pra "mobile"); (3) forçar 100% a ≤2px do fundo (arredondamento nunca fechava a faixa).
+- **`.env.local` ganhou placeholders** `NEXT_PUBLIC_SUPABASE_URL/ANON_KEY` — sem eles a página `/clientes/[id]` nem renderiza no dev local (supabase.ts exige a env; crash pré-existente que bloqueava qualquer verificação de preview das abas).
+- ✅ Verificado no preview: tag.js real numa página de origem diferente (localhost:8787→3000) — beacons POST 204 **sem OPTIONS**, payload conferido interceptando sendBeacon (agrupamento, LGPD, UTMs, sp=100, device desktop); UI com fetch mockado (lista, status, snippet com base canônica, funil, ranking, modal). ⚠️ Persistência real (upsert/stats com DB) só em produção: cadastrar LP de teste, instalar snippet e conferir stats.
 
 ---
 

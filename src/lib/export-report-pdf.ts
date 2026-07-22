@@ -89,7 +89,10 @@ export async function exportReportToPdf(token: string, filename: string): Promis
       const rgb = (bg.match(/\d+/g) ?? ['255', '255', '255']).map(Number);
 
       const canvas = await html2canvas(slides[i], {
-        scale: 2,
+        // scale 1.6 (era 2) + JPEG 0.85 (era 0.92): ~2880px continua nítido em tela/impressão
+        // e derruba o tamanho do arquivo ~40% (relatórios com muitas fotos de IG ficavam 7-8 MB,
+        // "pesados de mexer"). Ajuste global de export.
+        scale: 1.6,
         useCORS: true,
         backgroundColor: bg && bg !== 'rgba(0, 0, 0, 0)' ? bg : '#FFFFFF',
         width: SLIDE_W,
@@ -97,7 +100,7 @@ export async function exportReportToPdf(token: string, filename: string): Promis
         windowWidth: SLIDE_W,
         windowHeight: realH,
       });
-      const imgData = canvas.toDataURL('image/jpeg', 0.92);
+      const imgData = canvas.toDataURL('image/jpeg', 0.85);
 
       if (i > 0) pdf.addPage([SLIDE_W, SLIDE_H], 'landscape');
 
