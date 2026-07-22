@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import {
-  Activity, Check, Copy, ExternalLink, Globe2, Monitor, MousePointerClick,
+  Activity, Check, Copy, ExternalLink, Flame, Globe2, Monitor, MousePointerClick,
   Plus, RefreshCw, Smartphone, Tablet, Trash2, X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -391,6 +391,15 @@ export function LandingPagesTab({ clientId }: { clientId: string }) {
               Comportamento · {selected.name}
             </h4>
             <div className="flex items-center gap-1.5">
+              <a
+                href={`${selected.url}${selected.url.includes('?') ? '&' : '?'}onmid_hm=1&onmid_days=${days}`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-primary/50 bg-primary/10 px-2.5 py-1.5 text-xs font-bold text-foreground transition-colors hover:bg-primary/20"
+                title="Abre a página real com as manchas de calor desenhadas em cima (precisa do snippet instalado)"
+              >
+                <Flame className="h-3.5 w-3.5 text-primary" /> Ver mapa de calor
+              </a>
               {[7, 30, 90].map(d => (
                 <button
                   key={d}
