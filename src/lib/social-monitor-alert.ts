@@ -79,12 +79,6 @@ type AlertRow = {
   name: string;
   username: string;
   days: number;
-  redAfterDays: number;
-  followers: number | null;
-  posts30d: number | null;
-  reach28d: number | null;
-  avgLikes: number | null;
-  avgComments: number | null;
 };
 
 // Só contas VISÍVEIS no radar (monitored=TRUE), com conta IG resolvida e último
@@ -92,8 +86,7 @@ type AlertRow = {
 // Clientes ocultos (só tráfego) ficam de fora por definição.
 async function buildAlertRows(pool: Pool): Promise<AlertRow[]> {
   const { rows } = await pool.query(
-    `SELECT c.name, s.ig_username, s.last_post_at, s.red_after_days, s.followers,
-            s.posts_30d, s.reach_28d, s.avg_likes, s.avg_comments
+    `SELECT c.name, s.ig_username, s.last_post_at, s.red_after_days
        FROM public.social_monitor_snapshots s
        JOIN public.clients c ON c.id = s.client_id
       WHERE c.status NOT IN ('Arquivado','Inativo')
@@ -108,43 +101,25 @@ async function buildAlertRows(pool: Pool): Promise<AlertRow[]> {
     const days = Math.max(0, Math.floor((Date.now() - ts) / 86400000));
     const redAfterDays = Math.max(1, Number(r.red_after_days) || 2);
     if (days < redAfterDays) continue; // só quem está vermelho pela régua do cliente
-    out.push({
-      name: String(r.name),
-      username: String(r.ig_username),
-      days,
-      redAfterDays,
-      followers: r.followers !== null ? Number(r.followers) : null,
-      posts30d: r.posts_30d !== null ? Number(r.posts_30d) : null,
-      reach28d: r.reach_28d !== null ? Number(r.reach_28d) : null,
-      avgLikes: r.avg_likes !== null ? Number(r.avg_likes) : null,
-      avgComments: r.avg_comments !== null ? Number(r.avg_comments) : null,
-    });
+    out.push({ name: String(r.name), username: String(r.ig_username), days });
   }
   out.sort((a, b) => b.days - a.days);
   return out;
 }
-
-const nf = new Intl.NumberFormat('pt-BR', { notation: 'compact', maximumFractionDigits: 1 });
-const num = (n: number | null) => (n === null ? '—' : nf.format(n));
 
 export function buildAlertMessage(alertRows: AlertRow[]): string {
   const hoje = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
   if (alertRows.length === 0) {
     return `✅ *Monitor de Redes Sociais* — ${hoje}\n\nTodas as contas visíveis no radar estão dentro da régua de postagem. Tudo em dia!`;
   }
-  const linhas = alertRows.map(r => {
-    const insights = `${num(r.followers)} seguidores · ${r.posts30d ?? 0} posts/30d · alcance ${num(r.reach28d)} (28d)` +
-      (r.avgLikes !== null ? ` · ${num(r.avgLikes)} curtidas/post` : '');
-    return `🔴 *${r.name}* (@${r.username}) — *${r.days} ${r.days === 1 ? 'dia' : 'dias'} sem post*\n   ${insights}`;
-  });
+  const linhas = alertRows.map(
+    r => `🔴 *${r.name}* (@${r.username}) — ${r.days} ${r.days === 1 ? 'dia' : 'dias'} sem post`,
+  );
   return [
     `🚨 *Monitor de Redes Sociais* — ${hoje}`,
-    '',
     `${alertRows.length} ${alertRows.length === 1 ? 'conta passou' : 'contas passaram'} da régua de dias sem post no Instagram:`,
     '',
-    linhas.join('\n\n'),
-    '',
-    '_Aviso automático do ONMID Reports (contas ocultas do radar não entram)._',
+    linhas.join('\n'),
   ].join('\n');
 }
 
