@@ -87,7 +87,6 @@ type AlertConfig = {
   zapiClientId: string | null;
   groupId: string | null;
   groupName: string | null;
-  minDays: number;
 };
 
 type ZapiGroup = { phone: string; name: string };
@@ -108,7 +107,7 @@ export default function RedesSociaisPage() {
 
   // ── Aviso WhatsApp (Z-API) ──
   const [alertOpen, setAlertOpen] = useState(false);
-  const [alertCfg, setAlertCfg] = useState<AlertConfig>({ ativo: false, zapiClientId: null, groupId: null, groupName: null, minDays: 2 });
+  const [alertCfg, setAlertCfg] = useState<AlertConfig>({ ativo: false, zapiClientId: null, groupId: null, groupName: null });
   const [alertInstances, setAlertInstances] = useState<Array<{ id: string; name: string }>>([]);
   const [alertGroups, setAlertGroups] = useState<ZapiGroup[]>([]);
   const [groupSearch, setGroupSearch] = useState('');
@@ -571,8 +570,9 @@ export default function RedesSociaisPage() {
               <div>
                 <h2 className="font-heading text-lg uppercase tracking-wide text-foreground">Aviso diário no WhatsApp</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Todo dia, após a coleta automática (06h), envia no grupo escolhido as contas <b>visíveis no radar</b> que
-                  passaram do limite de dias sem post — com os insights de cada uma. Contas ocultas não entram.
+                  Após a coleta automática (06h, 12h e 18h), envia <b>uma vez por dia</b> no grupo escolhido as contas
+                  <b> visíveis no radar</b> que estão vermelhas — cada uma pela <b>régua de dias configurada no próprio cliente</b> —
+                  com os insights de cada uma. Contas ocultas não entram.
                 </p>
               </div>
               <button onClick={() => setAlertOpen(false)} className="text-muted-foreground hover:text-foreground">
@@ -645,16 +645,6 @@ export default function RedesSociaisPage() {
                       </button>
                     ))}
                 </div>
-              </div>
-
-              <div>
-                <p className="mb-1 text-xs font-bold uppercase tracking-widest text-muted-foreground">Avisar a partir de (dias sem post)</p>
-                <input
-                  type="number" min={1} max={90}
-                  value={alertCfg.minDays}
-                  onChange={e => setAlertCfg(c => ({ ...c, minDays: Number(e.target.value) }))}
-                  className="h-10 w-24 rounded-[var(--radius)] border border-border bg-background px-3 text-center text-sm font-bold outline-none focus:border-primary/60"
-                />
               </div>
 
               {alertFeedback && (

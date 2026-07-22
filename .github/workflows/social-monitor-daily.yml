@@ -8,8 +8,11 @@ name: Monitor de Redes Sociais
 
 on:
   schedule:
-    # Todo dia às 06h BRT (09h UTC)
+    # 3x ao dia — 06h, 12h e 18h BRT (09h, 15h, 21h UTC). O aviso WhatsApp só
+    # dispara na 1ª coleta com contas vermelhas do dia (trava por data em system_settings).
     - cron: '0 9 * * *'
+    - cron: '0 15 * * *'
+    - cron: '0 21 * * *'
   workflow_dispatch: {}
 
 jobs:

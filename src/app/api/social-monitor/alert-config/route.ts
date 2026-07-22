@@ -44,14 +44,8 @@ export async function POST(req: NextRequest) {
     zapiClientId?: string | null;
     groupId?: string | null;
     groupName?: string | null;
-    minDays?: number;
   } | null;
   if (!body) return Response.json({ error: 'Body inválido' }, { status: 400 });
-
-  const minDays = Number(body.minDays ?? 2);
-  if (!Number.isInteger(minDays) || minDays < 1 || minDays > 90) {
-    return Response.json({ error: 'minDays deve ser inteiro 1–90' }, { status: 400 });
-  }
 
   const pool = makeServerPool();
   try {
@@ -61,7 +55,6 @@ export async function POST(req: NextRequest) {
       zapiClientId: body.zapiClientId?.trim() || null,
       groupId: body.groupId?.trim() || null,
       groupName: body.groupName?.trim() || null,
-      minDays,
     }, userId);
 
     if (body.action === 'test') {

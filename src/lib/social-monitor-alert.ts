@@ -3,14 +3,14 @@ import { sendText } from '@/lib/zapi';
 
 // Aviso diário do Monitor de Redes Sociais via Z-API: depois da coleta do cron,
 // manda no grupo escolhido a lista de contas VISÍVEIS no radar (monitored=TRUE)
-// com >= minDays dias sem post no Instagram + insights de cada uma.
+// que estão VERMELHAS — ou seja, dias sem post >= a régua (red_after_days) que
+// cada cliente tem configurada na própria tela — com os insights de cada uma.
 
 export type SocialAlertConfig = {
   ativo: boolean;
   zapiClientId: string | null;
   groupId: string | null;
   groupName: string | null;
-  minDays: number;
 };
 
 const K = {
@@ -18,7 +18,7 @@ const K = {
   zapiClientId: 'social_alert_zapi_client_id',
   groupId: 'social_alert_group_id',
   groupName: 'social_alert_group_name',
-  minDays: 'social_alert_min_days',
+  lastSent: 'social_alert_last_sent', // data (BRT) do último envio — trava 1x/dia
 } as const;
 
 async function ensureSettingsTable(pool: Pool) {
@@ -30,20 +30,37 @@ async function ensureSettingsTable(pool: Pool) {
   ).catch(() => {});
 }
 
+async function getSetting(pool: Pool, key: string): Promise<string | null> {
+  const { rows } = await pool.query(`SELECT value FROM public.system_settings WHERE key = $1`, [key]);
+  return rows[0]?.value ?? null;
+}
+
+async function setSetting(pool: Pool, key: string, value: string, userId?: string) {
+  await pool.query(
+    `INSERT INTO public.system_settings (key, value, updated_at, updated_by)
+     VALUES ($1,$2,NOW(),$3)
+     ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW(), updated_by=EXCLUDED.updated_by`,
+    [key, value, userId ?? null],
+  );
+}
+
+function todayBRT(): string {
+  // 'YYYY-MM-DD' no fuso de São Paulo (en-CA formata nesse padrão)
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+}
+
 export async function loadSocialAlertConfig(pool: Pool): Promise<SocialAlertConfig> {
   await ensureSettingsTable(pool);
   const { rows } = await pool.query(
     `SELECT key, value FROM public.system_settings WHERE key = ANY($1)`,
-    [Object.values(K)],
+    [[K.ativo, K.zapiClientId, K.groupId, K.groupName]],
   );
   const map = Object.fromEntries((rows as { key: string; value: string }[]).map(r => [r.key, r.value]));
-  const minDays = parseInt(map[K.minDays] ?? '2', 10);
   return {
     ativo: map[K.ativo] === 'true',
     zapiClientId: map[K.zapiClientId] || null,
     groupId: map[K.groupId] || null,
     groupName: map[K.groupName] || null,
-    minDays: Number.isInteger(minDays) && minDays >= 1 ? minDays : 2,
   };
 }
 
@@ -54,22 +71,15 @@ export async function saveSocialAlertConfig(pool: Pool, cfg: SocialAlertConfig, 
     [K.zapiClientId, cfg.zapiClientId ?? ''],
     [K.groupId, cfg.groupId ?? ''],
     [K.groupName, cfg.groupName ?? ''],
-    [K.minDays, String(cfg.minDays)],
   ];
-  for (const [key, value] of entries) {
-    await pool.query(
-      `INSERT INTO public.system_settings (key, value, updated_at, updated_by)
-       VALUES ($1,$2,NOW(),$3)
-       ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW(), updated_by=EXCLUDED.updated_by`,
-      [key, value, userId ?? null],
-    );
-  }
+  for (const [key, value] of entries) await setSetting(pool, key, value, userId);
 }
 
 type AlertRow = {
   name: string;
   username: string;
   days: number;
+  redAfterDays: number;
   followers: number | null;
   posts30d: number | null;
   reach28d: number | null;
@@ -78,11 +88,12 @@ type AlertRow = {
 };
 
 // Só contas VISÍVEIS no radar (monitored=TRUE), com conta IG resolvida e último
-// post conhecido. Clientes ocultos (só tráfego) ficam de fora por definição.
-async function buildAlertRows(pool: Pool, minDays: number): Promise<AlertRow[]> {
+// post conhecido, que estão VERMELHAS pela régua do próprio cliente (red_after_days).
+// Clientes ocultos (só tráfego) ficam de fora por definição.
+async function buildAlertRows(pool: Pool): Promise<AlertRow[]> {
   const { rows } = await pool.query(
-    `SELECT c.name, s.ig_username, s.last_post_at, s.followers, s.posts_30d,
-            s.reach_28d, s.avg_likes, s.avg_comments
+    `SELECT c.name, s.ig_username, s.last_post_at, s.red_after_days, s.followers,
+            s.posts_30d, s.reach_28d, s.avg_likes, s.avg_comments
        FROM public.social_monitor_snapshots s
        JOIN public.clients c ON c.id = s.client_id
       WHERE c.status NOT IN ('Arquivado','Inativo')
@@ -95,11 +106,13 @@ async function buildAlertRows(pool: Pool, minDays: number): Promise<AlertRow[]> 
     const ts = new Date(String(r.last_post_at)).getTime();
     if (!Number.isFinite(ts)) continue;
     const days = Math.max(0, Math.floor((Date.now() - ts) / 86400000));
-    if (days < minDays) continue;
+    const redAfterDays = Math.max(1, Number(r.red_after_days) || 2);
+    if (days < redAfterDays) continue; // só quem está vermelho pela régua do cliente
     out.push({
       name: String(r.name),
       username: String(r.ig_username),
       days,
+      redAfterDays,
       followers: r.followers !== null ? Number(r.followers) : null,
       posts30d: r.posts_30d !== null ? Number(r.posts_30d) : null,
       reach28d: r.reach_28d !== null ? Number(r.reach_28d) : null,
@@ -114,10 +127,10 @@ async function buildAlertRows(pool: Pool, minDays: number): Promise<AlertRow[]> 
 const nf = new Intl.NumberFormat('pt-BR', { notation: 'compact', maximumFractionDigits: 1 });
 const num = (n: number | null) => (n === null ? '—' : nf.format(n));
 
-export function buildAlertMessage(alertRows: AlertRow[], minDays: number): string {
+export function buildAlertMessage(alertRows: AlertRow[]): string {
   const hoje = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
   if (alertRows.length === 0) {
-    return `✅ *Monitor de Redes Sociais* — ${hoje}\n\nTodas as contas visíveis no radar postaram nos últimos ${minDays} dias. Tudo em dia!`;
+    return `✅ *Monitor de Redes Sociais* — ${hoje}\n\nTodas as contas visíveis no radar estão dentro da régua de postagem. Tudo em dia!`;
   }
   const linhas = alertRows.map(r => {
     const insights = `${num(r.followers)} seguidores · ${r.posts30d ?? 0} posts/30d · alcance ${num(r.reach28d)} (28d)` +
@@ -127,7 +140,7 @@ export function buildAlertMessage(alertRows: AlertRow[], minDays: number): strin
   return [
     `🚨 *Monitor de Redes Sociais* — ${hoje}`,
     '',
-    `${alertRows.length} ${alertRows.length === 1 ? 'conta está' : 'contas estão'} há ${minDays}+ dias sem postar no Instagram:`,
+    `${alertRows.length} ${alertRows.length === 1 ? 'conta passou' : 'contas passaram'} da régua de dias sem post no Instagram:`,
     '',
     linhas.join('\n\n'),
     '',
@@ -142,17 +155,24 @@ export type AlertSendResult = {
 };
 
 /**
- * Monta e envia o aviso no grupo configurado. `force=true` (teste manual) envia
- * mesmo desativado e mesmo sem ofensores (manda o "tudo em dia" pra validar o canal).
- * No cron, sem ofensores = não envia (grupo não recebe ruído diário).
+ * Monta e envia o aviso no grupo configurado.
+ * - `force=true` (teste manual): envia mesmo desativado, sem ofensores e ignorando
+ *   a trava diária (manda o "tudo em dia" pra validar o canal).
+ * - Cron: só envia 1x por dia (trava por data BRT em system_settings) e não manda
+ *   nada quando não há conta vermelha (grupo não recebe ruído).
  */
 export async function sendSocialMonitorAlert(pool: Pool, opts: { force?: boolean } = {}): Promise<AlertSendResult> {
   const cfg = await loadSocialAlertConfig(pool);
   if (!opts.force && !cfg.ativo) return { sent: false, reason: 'Aviso desativado' };
   if (!cfg.zapiClientId || !cfg.groupId) return { sent: false, reason: 'Instância/grupo não configurados' };
 
-  const alertRows = await buildAlertRows(pool, cfg.minDays);
-  if (alertRows.length === 0 && !opts.force) return { sent: false, reason: 'Nenhuma conta acima do limite', clientes: 0 };
+  const today = todayBRT();
+  if (!opts.force && (await getSetting(pool, K.lastSent)) === today) {
+    return { sent: false, reason: 'Aviso já enviado hoje' };
+  }
+
+  const alertRows = await buildAlertRows(pool);
+  if (alertRows.length === 0 && !opts.force) return { sent: false, reason: 'Nenhuma conta vermelha', clientes: 0 };
 
   const { rows } = await pool.query(
     `SELECT instance_id, token, security_token FROM public.zapi_clients WHERE id = $1 AND active = TRUE`,
@@ -161,12 +181,15 @@ export async function sendSocialMonitorAlert(pool: Pool, opts: { force?: boolean
   const inst = rows[0] as { instance_id: string; token: string; security_token: string | null } | undefined;
   if (!inst) return { sent: false, reason: 'Instância Z-API não encontrada ou inativa' };
 
-  const message = buildAlertMessage(alertRows, cfg.minDays);
+  const message = buildAlertMessage(alertRows);
   const result = await sendText(
     { instanceId: inst.instance_id, token: inst.token, clientToken: inst.security_token ?? undefined },
     cfg.groupId,
     message,
   );
   if (!result.ok) return { sent: false, reason: result.error ?? 'Falha no envio Z-API', clientes: alertRows.length };
+
+  // Marca a data só no fluxo do cron — o teste manual pode reenviar quantas vezes quiser.
+  if (!opts.force) await setSetting(pool, K.lastSent, today);
   return { sent: true, clientes: alertRows.length };
 }
