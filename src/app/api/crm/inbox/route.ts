@@ -263,20 +263,44 @@ export async function GET(req: NextRequest) {
   try {
     await ensureDefaultFunnel(pool, clientId);
 
-    // Step 1: fetch leads (simple, no optional columns)
-    const { rows: leads } = await pool.query<{
+    // Step 1: fetch leads. Ordenação por ATIVIDADE DE MENSAGEM (não updated_at
+    // cru): em cliente com 200+ leads, a janela do LIMIT precisa priorizar quem
+    // conversou por último — senão mensagem nova de lead "antigo" cai fora da
+    // janela e o inbox parece congelado.
+    type LeadRow = {
       id: string; nome: string | null; numero: string | null; canal: string | null;
       origin: string | null; status: string | null; fechou: boolean;
       valor_rs: string | null; created_at: string; updated_at: string | null;
-    }>(
-      `SELECT id, nome, numero, canal, origin, status, fechou, valor_rs, created_at, updated_at
-       FROM public.crm_leads
-       WHERE client_id = $1
-         AND (numero IS NULL OR (numero ~ '^[0-9]{8,15}$' AND numero NOT LIKE '%--%'))
-       ORDER BY COALESCE(updated_at, created_at) DESC
-       LIMIT 200`,
-      [clientId],
-    );
+    };
+    let leads: LeadRow[] = [];
+    try {
+      const { rows } = await pool.query<LeadRow>(
+        `SELECT id, nome, numero, canal, origin, status, fechou, valor_rs, created_at, updated_at
+         FROM public.crm_leads
+         WHERE client_id = $1
+           AND (numero IS NULL OR (numero ~ '^[0-9]{8,15}$' AND numero NOT LIKE '%--%'))
+         ORDER BY GREATEST(
+           COALESCE(whatsapp_last_message_at, 'epoch'::timestamptz),
+           COALESCE(updated_at, 'epoch'::timestamptz),
+           COALESCE(created_at, 'epoch'::timestamptz)
+         ) DESC
+         LIMIT 200`,
+        [clientId],
+      );
+      leads = rows;
+    } catch {
+      // Instalação sem whatsapp_last_message_at — ordenação antiga
+      const { rows } = await pool.query<LeadRow>(
+        `SELECT id, nome, numero, canal, origin, status, fechou, valor_rs, created_at, updated_at
+         FROM public.crm_leads
+         WHERE client_id = $1
+           AND (numero IS NULL OR (numero ~ '^[0-9]{8,15}$' AND numero NOT LIKE '%--%'))
+         ORDER BY COALESCE(updated_at, created_at) DESC
+         LIMIT 200`,
+        [clientId],
+      );
+      leads = rows;
+    }
 
     if (leads.length === 0) return Response.json([]);
 

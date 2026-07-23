@@ -595,6 +595,8 @@ export function ChatView({
   const [messages,   setMessages]   = useState<CrmMessage[]>([]);
   const [msgLoading, setMsgLoading] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+  const [syncingInbox, setSyncingInbox] = useState(false);
+  const [lastSyncAt, setLastSyncAt] = useState<number | null>(null);
   const [replyText,  setReplyText]  = useState('');
   const [sending,    setSending]    = useState(false);
   const [sendStatus, setSendStatus] = useState<'ok' | 'err' | null>(null);
@@ -909,9 +911,10 @@ export function ChatView({
   }, [clientId, loadInbox, loadMessages, loading, recentLeadIds, selectedId]);
 
   // ── Inbox auto-refresh ─────────────────────────────────────────────────────
+  // 4s: a lista reflete o banco quase em tempo real (webhook grava → aparece).
   useEffect(() => {
     loadInbox();
-    const id = setInterval(loadInbox, 8_000);
+    const id = setInterval(loadInbox, 4_000);
     return () => clearInterval(id);
   }, [loadInbox]);
 
@@ -947,26 +950,27 @@ export function ChatView({
       .catch(() => {});
   }, [clientId]);
 
-  // Sincronização de RESERVA: mesmo com webhook ok, a cada 60s (aba visível)
-  // puxa da Evolution as conversas recentes e recarrega o inbox — garante que a
-  // lista anda sozinha até se o webhook cair de novo entre curas.
+  // Sincronização de RESERVA: mesmo com webhook ok, a cada 30s (aba visível)
+  // puxa da Evolution as conversas recentes e recarrega o inbox — pega
+  // conversas NOVAS que ainda não viraram lead e cobre webhook caído.
   useEffect(() => {
     let running = false;
     const tick = () => {
       if (running || document.visibilityState !== 'visible') return;
       running = true;
+      setSyncingInbox(true);
       fetch(`/api/crm/inbox?clientId=${clientId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ limit: 60 }),
+        body: JSON.stringify({ limit: 100 }),
       })
         .then(r => (r.ok ? r.json() : null))
-        .then(() => loadInbox())
+        .then(() => { loadInbox(); setLastSyncAt(Date.now()); })
         .catch(() => {})
-        .finally(() => { running = false; });
+        .finally(() => { running = false; setSyncingInbox(false); });
     };
-    const first = setTimeout(tick, 5_000); // primeira sincronização logo ao abrir
-    const id = setInterval(tick, 60_000);
+    const first = setTimeout(tick, 3_000); // primeira sincronização logo ao abrir
+    const id = setInterval(tick, 30_000);
     // Voltou pra aba depois de um tempo fora → sincroniza na hora
     const onVisible = () => { if (document.visibilityState === 'visible') tick(); };
     document.addEventListener('visibilitychange', onVisible);
@@ -1432,6 +1436,17 @@ export function ChatView({
                       <><Wifi className="h-3 w-3 text-amber-400" /><span className="text-amber-400">?</span></>
                     )}
                   </button>
+                  {/* Indicador de sincronização automática */}
+                  <span
+                    className="flex items-center gap-1 text-[9px] text-muted-foreground/70"
+                    title="A lista atualiza sozinha: a cada 4s pelo banco e a cada 30s puxando direto do WhatsApp"
+                  >
+                    {syncingInbox
+                      ? <><RefreshCw className="h-2.5 w-2.5 animate-spin text-primary/70" /><span>sincronizando…</span></>
+                      : lastSyncAt
+                        ? <><span className="relative flex h-1.5 w-1.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-50" /><span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary" /></span><span>ao vivo</span></>
+                        : null}
+                  </span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <button onClick={loadInbox} className="flex h-8 w-8 items-center justify-center rounded-[var(--radius)] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors" title="Atualizar">

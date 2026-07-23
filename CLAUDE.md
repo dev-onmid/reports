@@ -401,6 +401,13 @@ Pedido do Matheus: replicar a experiência do WhatsApp no chat do CRM (contatos 
 - **Sync de RESERVA no chat-view**: com a aba visível, a cada 60s (primeira em 5s + ao voltar pra aba via `visibilitychange`) faz `POST /api/crm/inbox {limit:60}` (import silencioso da Evolution) + `loadInbox()` — o inbox anda sozinho MESMO se o webhook cair de novo entre curas. Guard `document.visibilityState === 'visible'` (⚠️ no preview o browser pane reporta `hidden` — forçar com `Object.defineProperty(document,'visibilityState',{get:()=>'visible'})` pra testar).
 - ✅ Verificado no preview mockado: heal dispara no mount, sync dispara e a mensagem nova aparece sozinha na lista. Em produção, abrir o chat do cliente afetado já deve reapontar o webhook (conferir log `[chat] webhook reapontado`).
 
+**Tempo real de verdade (2026-07-22, 2ª rodada):**
+- Diagnóstico direto na VPS (curl com env local): TODOS os webhooks já apontavam pra URL canônica e habilitados — a entrega não era o problema. Causa real: o inbox GET ordenava por `updated_at` com `LIMIT 200` — em cliente com 200+ leads, mensagem nova competia com a janela e conversa que ainda não virou lead só entrava via import manual.
+- **Ordenação por atividade**: inbox GET ordena por `GREATEST(whatsapp_last_message_at, updated_at, created_at)` (try/catch com fallback pra instalação sem a coluna).
+- **Ciclos**: poll do inbox 8s→4s; sync de reserva 60s→30s (primeira em 3s, limit 60→100).
+- **Indicador "ao vivo"** no header do Inbox (dot pulsante + "sincronizando…" durante o POST) — o usuário VÊ que anda sozinho.
+- ✅ Verificado no preview (mock + visibilidade forçada): conversa nova que nem era lead apareceu sozinha via sync de reserva, 3 ciclos executados, indicador visível.
+
 **Fase 2 (2026-07-21) — resposta citada, lightbox, ✓✓ na prévia:**
 - **Resposta citada**: `NormalizedMessage` ganhou `quotedText` — Evolution extrai de `contextInfo.quotedMessage` (o contextInfo mora DENTRO do tipo de mensagem — extendedTextMessage/imageMessage/… — ou na raiz; busca no primeiro que tiver; o quotedMessage tem o shape de mensagem normal, então reusa `extractEvolutionText` → "[Imagem]" etc.); Z-API lê `referenceMessage.message`. Coluna `crm_messages.reply_to_text` (ensure schema; webhook grava `.slice(0,500)` nos dois INSERTs), GET de messages retorna no tier principal (fallback sem a coluna fica sem citação, gracioso). Bolha renderiza bloco com borda esquerda primary acima do conteúdo. Só RECEBIMENTO — enviar citando fica pra depois.
 - **Lightbox**: clique em imagem da conversa abre overlay fullscreen (z-[60], fechar no X/backdrop, botão de abrir original). `MessageBubble` ganhou prop `onImageClick`.
